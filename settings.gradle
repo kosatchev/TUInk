@@ -1,0 +1,18 @@
+plugins {
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.8.0'
+}
+
+rootProject.name = 'tuink'
+
+// Physical ownership groups are independent of the stable Gradle project paths.
+// Preserve the existing Gradle project paths and commands.
+def projectDirectories = [
+    ':tui': 'apps/tuink/terminal-ui',
+    ':render': 'apps/tuink/terminal-rendering',
+    ':core': 'libs/editor/engine',
+    ':highlight-regex': 'libs/editor/highlight-regex'
+]
+projectDirectories.each { projectPath, directory ->
+    include projectPath
+    project(projectPath).projectDir = file(directory)
+}

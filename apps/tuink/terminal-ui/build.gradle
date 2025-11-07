@@ -1,0 +1,14 @@
+plugins {
+    id 'application'
+}
+
+dependencies {
+    implementation project(':core')
+    implementation project(':render')
+    implementation project(':highlight-regex')
+    implementation 'org.jline:jline:3.26.1'
+}
+
+application {
+    mainClass = 'dev.tuink.tui.TerminalEditorApp'
+}

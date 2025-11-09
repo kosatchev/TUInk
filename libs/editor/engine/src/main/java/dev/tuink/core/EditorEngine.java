@@ -124,12 +124,13 @@ public class EditorEngine {
 
     public void deleteForward() {
         Position before = state.getCursor();
+        int beforeLineCount = model.lineCount();
+        String beforeLineText = model.getLine(before.line());
         Position after = model.deleteForward(before);
-        if (!after.equals(before) || model.lineCount() == 1) {
-            String beforeText = model.getLine(after.line());
-            if (!beforeText.isEmpty() || before.col() != after.col()) {
-                state.setDirty(true);
-            }
+        int afterLineCount = model.lineCount();
+        String afterLineText = model.getLine(after.line());
+        if (beforeLineCount != afterLineCount || !beforeLineText.equals(afterLineText) || !after.equals(before)) {
+            state.setDirty(true);
         }
         state.setCursor(after);
     }

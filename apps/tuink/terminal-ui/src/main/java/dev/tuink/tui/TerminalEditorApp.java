@@ -11,6 +11,7 @@ import dev.tuink.render.RenderPlan;
 import dev.tuink.render.RenderPlanBuilder;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.jline.terminal.Attributes;
@@ -47,33 +48,60 @@ public class TerminalEditorApp {
             }
         }
 
-        try (Terminal terminal = TerminalBuilder.builder().system(true).build()) {
+        try (Terminal terminal = TerminalBuilder.builder().system(true).encoding(StandardCharsets.UTF_8).build()) {
+            if ("dumb".equalsIgnoreCase(terminal.getType())) {
+                throw new IOException(
+                    "Interactive terminal is not available (dumb terminal). " +
+                    "Run in a real TTY, for example: ./gradlew --console=plain :tui:run --args=\"file.txt\""
+                );
+            }
             PrintWriter writer = terminal.writer();
             Attributes original = terminal.enterRawMode();
             NonBlockingReader input = terminal.reader();
             AtomicBoolean resized = new AtomicBoolean(false);
+            AtomicBoolean stopRequested = new AtomicBoolean(false);
+            AtomicBoolean cleanedUp = new AtomicBoolean(false);
             terminal.handle(Terminal.Signal.WINCH, sig -> resized.set(true));
+            terminal.handle(Terminal.Signal.INT, sig -> stopRequested.set(true));
 
             CellBuffer previous = null;
+            int lastCursorRow = -1;
+            int lastCursorCol = -1;
+            Runnable cleanup = () -> {
+                if (cleanedUp.compareAndSet(false, true)) {
+                    writer.print("\u001B[0m\u001B[?25h\u001B[?1049l\u001B[2J\u001B[H");
+                    writer.flush();
+                    terminal.setAttributes(original);
+                }
+            };
+            Thread shutdownHook = new Thread(cleanup, "tuink-terminal-cleanup");
+            Runtime.getRuntime().addShutdownHook(shutdownHook);
             try {
-                writer.print("\u001B[?1049h\u001B[?25l\u001B[2J");
+                writer.print("\u001B[?1049h\u001B[?25h\u001B[2J");
                 writer.flush();
 
                 KeyDecoder decoder = new KeyDecoder(input);
                 boolean running = true;
-                while (running) {
+                while (running && !stopRequested.get()) {
                     int rows = Math.max(2, terminal.getHeight());
-                    int cols = Math.max(20, terminal.getWidth());
-                    int contentRows = rows - 1;
+                    int cols = Math.max(1, terminal.getWidth());
+                    int contentRows = Math.max(0, rows - 2);
                     engine.ensureCursorVisible(contentRows);
 
-                    String status = buildStatusLine(state, statusMessage, cols);
-                    RenderPlan plan = renderPlanBuilder.build(model, state, rows, cols, status);
+                    String topBar = buildTopBar(state, cols);
+                    String bottomBar = buildBottomBar(state, statusMessage, cols);
+                    RenderPlan plan = renderPlanBuilder.build(model, state, rows, cols, topBar, bottomBar);
                     CellBuffer current = renderer.toCellBuffer(plan, rows, cols);
 
-                    writer.print(AnsiDiff.diff(previous, current));
-                    writer.print("\u001B[" + (plan.cursorRow() + 1) + ";" + (plan.cursorCol() + 1) + "H");
-                    writer.flush();
+                    String frameDiff = AnsiDiff.diff(previous, current);
+                    boolean cursorMoved = plan.cursorRow() != lastCursorRow || plan.cursorCol() != lastCursorCol;
+                    if (!frameDiff.isEmpty() || cursorMoved) {
+                        writer.print(frameDiff);
+                        writer.print("\u001B[" + (plan.cursorRow() + 2) + ";" + (plan.cursorCol() + 1) + "H");
+                        writer.flush();
+                        lastCursorRow = plan.cursorRow();
+                        lastCursorCol = plan.cursorCol();
+                    }
                     previous = current;
 
                     KeyEvent key = decoder.readKey(100);
@@ -132,18 +160,29 @@ public class TerminalEditorApp {
                     }
                 }
             } finally {
-                writer.print("\u001B[0m\u001B[2J\u001B[H\u001B[?25h\u001B[?1049l");
-                writer.flush();
-                terminal.setAttributes(original);
+                cleanup.run();
+                try {
+                    Runtime.getRuntime().removeShutdownHook(shutdownHook);
+                } catch (IllegalStateException ignored) {
+                    // JVM is already shutting down.
+                }
             }
         }
     }
 
-    private String buildStatusLine(EditorState state, String message, int cols) {
-        Position p = state.getCursor();
+    private String buildTopBar(EditorState state, int cols) {
         String file = state.getCurrentFile() == null ? "[No Name]" : state.getCurrentFile().toString();
         String dirty = state.isDirty() ? " [+]" : "";
-        String base = file + dirty + "  Ln " + (p.line() + 1) + ", Col " + (p.col() + 1);
+        String top = file + dirty;
+        if (top.length() > cols) {
+            return top.substring(0, cols);
+        }
+        return top + " ".repeat(cols - top.length());
+    }
+
+    private String buildBottomBar(EditorState state, String message, int cols) {
+        Position p = state.getCursor();
+        String base = "Ln " + (p.line() + 1) + ", Col " + (p.col() + 1);
         String status = message == null || message.isBlank() ? base : base + "  |  " + message;
 
         if (status.length() > cols) {

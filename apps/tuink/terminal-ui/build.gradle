@@ -12,3 +12,7 @@ dependencies {
 application {
     mainClass = 'dev.tuink.tui.TerminalEditorApp'
 }
+
+tasks.named('run', JavaExec) {
+    standardInput = System.in
+}

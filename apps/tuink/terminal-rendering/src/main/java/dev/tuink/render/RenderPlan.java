@@ -7,11 +7,15 @@ import java.util.List;
  */
 public record RenderPlan(
     List<LineVisual> lines,
-    String statusText,
+    String topBarText,
+    String bottomBarText,
     int cursorRow,
     int cursorCol,
     int contentRows,
+    int topLine,
+    int totalLines,
     int cols,
-    int gutterWidth
+    int gutterWidth,
+    int scrollbarWidth
 ) {
 }

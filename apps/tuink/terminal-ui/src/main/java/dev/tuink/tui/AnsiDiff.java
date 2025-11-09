@@ -13,6 +13,7 @@ public final class AnsiDiff {
     public static String diff(CellBuffer previous, CellBuffer current) {
         StringBuilder out = new StringBuilder();
         Style activeStyle = Style.DEFAULT;
+        boolean wroteAnyCell = false;
 
         if (previous == null || previous.rows() != current.rows() || previous.cols() != current.cols()) {
             out.append("\u001B[H");
@@ -25,9 +26,12 @@ public final class AnsiDiff {
                         activeStyle = cell.style();
                     }
                     out.append(cell.grapheme());
+                    wroteAnyCell = true;
                 }
             }
-            out.append("\u001B[0m");
+            if (wroteAnyCell) {
+                out.append("\u001B[0m");
+            }
             return out.toString();
         }
 
@@ -45,10 +49,13 @@ public final class AnsiDiff {
                     activeStyle = next.style();
                 }
                 out.append(next.grapheme());
+                wroteAnyCell = true;
             }
         }
 
-        out.append("\u001B[0m");
+        if (wroteAnyCell) {
+            out.append("\u001B[0m");
+        }
         return out.toString();
     }
 

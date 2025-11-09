@@ -16,12 +16,20 @@ public class RenderPlanBuilder {
         this.highlighter = highlighter;
     }
 
-    public RenderPlan build(TextModel model, EditorState state, int rows, int cols, String statusText) {
+    public RenderPlan build(
+        TextModel model,
+        EditorState state,
+        int rows,
+        int cols,
+        String topBarText,
+        String bottomBarText
+    ) {
         int safeRows = Math.max(rows, 1);
         int safeCols = Math.max(cols, 1);
-        int contentRows = Math.max(0, safeRows - 1);
+        int contentRows = Math.max(0, safeRows - 2);
+        int scrollbarWidth = safeCols >= 8 ? 1 : 0;
         int gutterWidth = Math.max(3, String.valueOf(Math.max(model.lineCount(), 1)).length() + 1);
-        int textWidth = Math.max(0, safeCols - gutterWidth);
+        int textWidth = Math.max(0, safeCols - gutterWidth - scrollbarWidth);
 
         List<LineVisual> lines = new ArrayList<>(contentRows);
         for (int row = 0; row < contentRows; row++) {
@@ -40,10 +48,23 @@ public class RenderPlanBuilder {
         Position cursor = model.clamp(state.getCursor());
         int cursorRow = cursor.line() - state.getTopLine();
         int cursorCol = gutterWidth + Math.max(0, cursor.col() - state.getLeftColumn());
+        int maxCursorCol = Math.max(gutterWidth, safeCols - 1 - scrollbarWidth);
         cursorRow = Math.max(0, Math.min(cursorRow, Math.max(contentRows - 1, 0)));
-        cursorCol = Math.max(gutterWidth, Math.min(cursorCol, Math.max(safeCols - 1, gutterWidth)));
+        cursorCol = Math.max(gutterWidth, Math.min(cursorCol, maxCursorCol));
 
-        return new RenderPlan(lines, statusText, cursorRow, cursorCol, contentRows, safeCols, gutterWidth);
+        return new RenderPlan(
+            lines,
+            topBarText,
+            bottomBarText,
+            cursorRow,
+            cursorCol,
+            contentRows,
+            state.getTopLine(),
+            model.lineCount(),
+            safeCols,
+            gutterWidth,
+            scrollbarWidth
+        );
     }
 
     private static String clip(String line, int leftColumn, int maxWidth) {

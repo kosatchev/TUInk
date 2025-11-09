@@ -8,6 +8,7 @@ import java.io.IOException;
  */
 public class KeyDecoder {
     private final NonBlockingReader reader;
+    private boolean lastWasCarriageReturn;
 
     public KeyDecoder(NonBlockingReader reader) {
         this.reader = reader;
@@ -24,14 +25,26 @@ public class KeyDecoder {
         }
 
         return switch (ch) {
+            case 3 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_Q);
             case 17 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_Q);
             case 19 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_S);
             case 6 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_F);
             case 7 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_G);
             case 127, 8 -> new KeyEvent.ActionEvent(KeyEvent.Action.BACKSPACE);
-            case 10, 13 -> new KeyEvent.ActionEvent(KeyEvent.Action.ENTER);
+            case 13 -> {
+                lastWasCarriageReturn = true;
+                yield new KeyEvent.ActionEvent(KeyEvent.Action.ENTER);
+            }
+            case 10 -> {
+                if (lastWasCarriageReturn) {
+                    lastWasCarriageReturn = false;
+                    yield null;
+                }
+                yield new KeyEvent.ActionEvent(KeyEvent.Action.ENTER);
+            }
             default -> {
-                if (ch >= 32 && ch <= 126) {
+                lastWasCarriageReturn = false;
+                if (isPrintable(ch)) {
                     yield new KeyEvent.CharInput((char) ch);
                 }
                 yield new KeyEvent.ActionEvent(KeyEvent.Action.UNKNOWN);
@@ -39,43 +52,67 @@ public class KeyDecoder {
         };
     }
 
+    private boolean isPrintable(int ch) {
+        return ch >= 0 && !Character.isISOControl(ch);
+    }
+
     private KeyEvent decodeEscapeSequence() throws IOException {
         int second = reader.read(5);
         if (second != '[') {
             return new KeyEvent.ActionEvent(KeyEvent.Action.UNKNOWN);
         }
+        StringBuilder seq = new StringBuilder();
+        while (true) {
+            int next = reader.read(5);
+            if (next == NonBlockingReader.READ_EXPIRED || next < 0) {
+                break;
+            }
+            char c = (char) next;
+            seq.append(c);
+            if ((c >= 'A' && c <= 'Z') || c == '~') {
+                break;
+            }
+            if (seq.length() > 16) {
+                break;
+            }
+        }
+        return mapCsi(seq.toString());
+    }
 
-        int third = reader.read(5);
-        return switch (third) {
-            case 'A' -> new KeyEvent.ActionEvent(KeyEvent.Action.ARROW_UP);
-            case 'B' -> new KeyEvent.ActionEvent(KeyEvent.Action.ARROW_DOWN);
-            case 'C' -> new KeyEvent.ActionEvent(KeyEvent.Action.ARROW_RIGHT);
-            case 'D' -> new KeyEvent.ActionEvent(KeyEvent.Action.ARROW_LEFT);
-            case 'H' -> new KeyEvent.ActionEvent(KeyEvent.Action.HOME);
-            case 'F' -> new KeyEvent.ActionEvent(KeyEvent.Action.END);
-            case '1', '3', '4', '5', '6', '7', '8' -> decodeTildeSequence((char) third);
-            default -> new KeyEvent.ActionEvent(KeyEvent.Action.UNKNOWN);
+    private KeyEvent mapCsi(String seq) {
+        return switch (seq) {
+            case "A" -> new KeyEvent.ActionEvent(KeyEvent.Action.ARROW_UP);
+            case "B" -> new KeyEvent.ActionEvent(KeyEvent.Action.ARROW_DOWN);
+            case "C" -> new KeyEvent.ActionEvent(KeyEvent.Action.ARROW_RIGHT);
+            case "D" -> new KeyEvent.ActionEvent(KeyEvent.Action.ARROW_LEFT);
+            case "H", "1~", "7~" -> new KeyEvent.ActionEvent(KeyEvent.Action.HOME);
+            case "F", "4~", "8~" -> new KeyEvent.ActionEvent(KeyEvent.Action.END);
+            case "3~" -> new KeyEvent.ActionEvent(KeyEvent.Action.DELETE);
+            case "5~" -> new KeyEvent.ActionEvent(KeyEvent.Action.PAGE_UP);
+            case "6~" -> new KeyEvent.ActionEvent(KeyEvent.Action.PAGE_DOWN);
+            default -> mapModifiedArrows(seq);
         };
     }
 
-    private KeyEvent decodeTildeSequence(char first) throws IOException {
-        char code = first;
-        int next = reader.read(5);
-        if (Character.isDigit(next)) {
-            code = (char) next;
-            next = reader.read(5);
+    private KeyEvent mapModifiedArrows(String seq) {
+        if (seq.endsWith("A")) {
+            return new KeyEvent.ActionEvent(KeyEvent.Action.ARROW_UP);
         }
-        if (next != '~') {
-            return new KeyEvent.ActionEvent(KeyEvent.Action.UNKNOWN);
+        if (seq.endsWith("B")) {
+            return new KeyEvent.ActionEvent(KeyEvent.Action.ARROW_DOWN);
         }
-
-        return switch (code) {
-            case '1', '7' -> new KeyEvent.ActionEvent(KeyEvent.Action.HOME);
-            case '4', '8' -> new KeyEvent.ActionEvent(KeyEvent.Action.END);
-            case '3' -> new KeyEvent.ActionEvent(KeyEvent.Action.DELETE);
-            case '5' -> new KeyEvent.ActionEvent(KeyEvent.Action.PAGE_UP);
-            case '6' -> new KeyEvent.ActionEvent(KeyEvent.Action.PAGE_DOWN);
-            default -> new KeyEvent.ActionEvent(KeyEvent.Action.UNKNOWN);
-        };
+        if (seq.endsWith("C")) {
+            return new KeyEvent.ActionEvent(KeyEvent.Action.ARROW_RIGHT);
+        }
+        if (seq.endsWith("D")) {
+            return new KeyEvent.ActionEvent(KeyEvent.Action.ARROW_LEFT);
+        }
+        if (seq.endsWith("H")) {
+            return new KeyEvent.ActionEvent(KeyEvent.Action.HOME);
+        }
+        if (seq.endsWith("F")) {
+            return new KeyEvent.ActionEvent(KeyEvent.Action.END);
+        }
+        return new KeyEvent.ActionEvent(KeyEvent.Action.UNKNOWN);
     }
 }

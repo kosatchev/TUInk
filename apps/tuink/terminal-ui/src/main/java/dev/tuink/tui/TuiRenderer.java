@@ -12,22 +12,58 @@ import java.util.List;
  */
 public class TuiRenderer {
     private static final Style GUTTER_STYLE = new Style(Color.BRIGHT_BLACK, Color.DEFAULT, false, false);
+    private static final Style FILEBAR_STYLE = new Style(Color.BLACK, Color.BRIGHT_CYAN, true, false);
     private static final Style STATUS_STYLE = new Style(Color.BLACK, Color.BRIGHT_WHITE, false, false);
+    private static final Style SCROLL_TRACK_STYLE = new Style(Color.BRIGHT_BLACK, Color.DEFAULT, false, false);
+    private static final Style SCROLL_THUMB_STYLE = new Style(Color.BRIGHT_WHITE, Color.DEFAULT, false, false);
 
     public CellBuffer toCellBuffer(RenderPlan plan, int rows, int cols) {
         CellBuffer buffer = new CellBuffer(rows, cols);
+        int contentCols = Math.max(1, cols - plan.scrollbarWidth());
 
-        for (int row = 0; row < Math.min(plan.lines().size(), plan.contentRows()); row++) {
+        for (int row = 0; row < Math.min(plan.lines().size(), plan.contentRows()) && row + 1 < rows; row++) {
             LineVisual line = plan.lines().get(row);
-            drawText(buffer, row, 0, line.gutter(), GUTTER_STYLE, cols);
-            drawHighlightedText(buffer, row, plan.gutterWidth(), line.text(), line.spans(), cols);
+            int screenRow = row + 1;
+            drawText(buffer, screenRow, 0, line.gutter(), GUTTER_STYLE, contentCols);
+            drawHighlightedText(buffer, screenRow, plan.gutterWidth(), line.text(), line.spans(), contentCols);
         }
 
-        int statusRow = Math.max(0, rows - 1);
-        String status = truncateOrPad(plan.statusText(), cols);
-        drawText(buffer, statusRow, 0, status, STATUS_STYLE, cols);
+        drawText(buffer, 0, 0, truncateOrPad(plan.topBarText(), cols), FILEBAR_STYLE, cols);
+        drawText(buffer, Math.max(0, rows - 1), 0, truncateOrPad(plan.bottomBarText(), cols), STATUS_STYLE, cols);
+        drawScrollbar(buffer, plan, rows, cols);
 
         return buffer;
+    }
+
+    private void drawScrollbar(CellBuffer buffer, RenderPlan plan, int rows, int cols) {
+        if (plan.scrollbarWidth() == 0 || cols <= 0 || rows <= 2) {
+            return;
+        }
+
+        int barCol = cols - 1;
+        int trackTop = 1;
+        int trackHeight = Math.min(plan.contentRows(), Math.max(0, rows - 2));
+        if (trackHeight <= 0) {
+            return;
+        }
+
+        for (int i = 0; i < trackHeight; i++) {
+            buffer.set(trackTop + i, barCol, "│", SCROLL_TRACK_STYLE);
+        }
+
+        int totalLines = Math.max(1, plan.totalLines());
+        int visibleLines = Math.max(1, plan.contentRows());
+        int thumbSize = Math.max(1, (int) Math.round((visibleLines / (double) totalLines) * trackHeight));
+        thumbSize = Math.min(trackHeight, thumbSize);
+
+        int thumbTravel = Math.max(0, trackHeight - thumbSize);
+        int maxTopLine = Math.max(1, totalLines - visibleLines);
+        int topLine = Math.max(0, plan.topLine());
+        int thumbOffset = thumbTravel == 0 ? 0 : (int) Math.round((topLine / (double) maxTopLine) * thumbTravel);
+
+        for (int i = 0; i < thumbSize; i++) {
+            buffer.set(trackTop + thumbOffset + i, barCol, "█", SCROLL_THUMB_STYLE);
+        }
     }
 
     private void drawHighlightedText(CellBuffer buffer, int row, int startCol, String text, List<StyleSpan> spans, int cols) {

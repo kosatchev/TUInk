@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.jline.terminal.Attributes;
+import org.jline.terminal.Attributes.LocalFlag;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
 import org.jline.utils.NonBlockingReader;
@@ -23,6 +24,9 @@ import org.jline.utils.NonBlockingReader;
  * JLine terminal application wiring core + render + highlighter.
  */
 public class TerminalEditorApp {
+    private static final String DEFAULT_FILE_NAME = "untitled.txt";
+    private static final String KEY_HINTS = "Shift+Arrows Select  Ctrl+C/X/V  Ctrl+Z/Y  Ctrl+Q";
+
     public static void main(String[] args) throws Exception {
         new TerminalEditorApp().run(args);
     }
@@ -37,6 +41,8 @@ public class TerminalEditorApp {
 
         String statusMessage = "Ctrl+S save | Ctrl+Q quit";
         boolean confirmQuit = false;
+        boolean saveAsMode = false;
+        StringBuilder saveAsInput = new StringBuilder();
 
         if (args.length > 0) {
             Path file = Path.of(args[0]);
@@ -46,6 +52,8 @@ public class TerminalEditorApp {
             } catch (IOException e) {
                 statusMessage = "Open failed: " + e.getMessage();
             }
+        } else {
+            statusMessage = "Ctrl+S save as " + DEFAULT_FILE_NAME + " | Ctrl+Q quit";
         }
 
         try (Terminal terminal = TerminalBuilder.builder().system(true).encoding(StandardCharsets.UTF_8).build()) {
@@ -57,6 +65,9 @@ public class TerminalEditorApp {
             }
             PrintWriter writer = terminal.writer();
             Attributes original = terminal.enterRawMode();
+            Attributes raw = terminal.getAttributes();
+            raw.setLocalFlag(LocalFlag.ISIG, false);
+            terminal.setAttributes(raw);
             NonBlockingReader input = terminal.reader();
             AtomicBoolean resized = new AtomicBoolean(false);
             AtomicBoolean stopRequested = new AtomicBoolean(false);
@@ -93,14 +104,22 @@ public class TerminalEditorApp {
                     RenderPlan plan = renderPlanBuilder.build(model, state, rows, cols, topBar, bottomBar);
                     CellBuffer current = renderer.toCellBuffer(plan, rows, cols);
 
+                    int desiredCursorRow = plan.cursorRow() + 2;
+                    int desiredCursorCol = plan.cursorCol() + 1;
+                    if (saveAsMode) {
+                        String prompt = buildSaveAsPrompt(saveAsInput);
+                        desiredCursorRow = rows;
+                        desiredCursorCol = Math.min(cols, prompt.length() + 1);
+                    }
+
                     String frameDiff = AnsiDiff.diff(previous, current);
-                    boolean cursorMoved = plan.cursorRow() != lastCursorRow || plan.cursorCol() != lastCursorCol;
+                    boolean cursorMoved = desiredCursorRow != lastCursorRow || desiredCursorCol != lastCursorCol;
                     if (!frameDiff.isEmpty() || cursorMoved) {
                         writer.print(frameDiff);
-                        writer.print("\u001B[" + (plan.cursorRow() + 2) + ";" + (plan.cursorCol() + 1) + "H");
+                        writer.print("\u001B[" + desiredCursorRow + ";" + desiredCursorCol + "H");
                         writer.flush();
-                        lastCursorRow = plan.cursorRow();
-                        lastCursorCol = plan.cursorCol();
+                        lastCursorRow = desiredCursorRow;
+                        lastCursorCol = desiredCursorCol;
                     }
                     previous = current;
 
@@ -115,6 +134,48 @@ public class TerminalEditorApp {
                     if (!(key instanceof KeyEvent.ActionEvent actionEvent
                         && actionEvent.action() == KeyEvent.Action.CTRL_Q)) {
                         confirmQuit = false;
+                    }
+
+                    if (saveAsMode) {
+                        if (key instanceof KeyEvent.CharInput charInput) {
+                            saveAsInput.append(charInput.ch());
+                            statusMessage = buildSaveAsPrompt(saveAsInput);
+                            continue;
+                        }
+
+                        KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
+                        switch (action) {
+                            case BACKSPACE -> {
+                                if (!saveAsInput.isEmpty()) {
+                                    saveAsInput.deleteCharAt(saveAsInput.length() - 1);
+                                }
+                                statusMessage = buildSaveAsPrompt(saveAsInput);
+                            }
+                            case ENTER -> {
+                                String target = saveAsInput.toString().trim();
+                                if (target.isEmpty()) {
+                                    statusMessage = "Save As cancelled";
+                                } else {
+                                    try {
+                                        engine.saveAs(Path.of(target));
+                                        statusMessage = "Saved as " + state.getCurrentFile();
+                                    } catch (IOException e) {
+                                        statusMessage = "Save As failed: " + e.getMessage();
+                                    }
+                                }
+                                saveAsMode = false;
+                                saveAsInput.setLength(0);
+                            }
+                            case ESCAPE, CTRL_Q -> {
+                                saveAsMode = false;
+                                saveAsInput.setLength(0);
+                                statusMessage = "Save As cancelled";
+                            }
+                            default -> {
+                                // Ignore unsupported keys while Save As prompt is active.
+                            }
+                        }
+                        continue;
                     }
 
                     if (key instanceof KeyEvent.CharInput charInput) {
@@ -135,18 +196,43 @@ public class TerminalEditorApp {
                         }
                         case CTRL_S -> {
                             try {
-                                engine.save();
-                                statusMessage = "Saved " + state.getCurrentFile();
+                                if (state.getCurrentFile() == null) {
+                                    engine.saveAs(Path.of(DEFAULT_FILE_NAME));
+                                    statusMessage = "Saved as " + state.getCurrentFile();
+                                } else {
+                                    engine.save();
+                                    statusMessage = "Saved " + state.getCurrentFile();
+                                }
                             } catch (IOException e) {
                                 statusMessage = "Save failed: " + e.getMessage();
                             }
                         }
+                        case CTRL_C -> statusMessage = engine.copySelection() ? "Copied selection" : "Nothing selected";
+                        case CTRL_X -> statusMessage = engine.cutSelection() ? "Cut selection" : "Nothing selected";
+                        case CTRL_V -> statusMessage = engine.pasteClipboard() ? "Pasted" : "Clipboard empty";
+                        case CTRL_Z -> statusMessage = engine.undo() ? "Undo" : "Nothing to undo";
+                        case CTRL_Y -> statusMessage = engine.redo() ? "Redo" : "Nothing to redo";
+                        case CTRL_W, CTRL_O, F2 -> {
+                            saveAsMode = true;
+                            saveAsInput.setLength(0);
+                            if (state.getCurrentFile() != null) {
+                                saveAsInput.append(state.getCurrentFile());
+                            }
+                            statusMessage = buildSaveAsPrompt(saveAsInput);
+                        }
                         case CTRL_F -> statusMessage = "Search not implemented";
                         case CTRL_G -> statusMessage = "Goto line not implemented";
+                        case ESCAPE -> {
+                            // No-op outside prompt mode.
+                        }
                         case ARROW_UP -> engine.moveUp();
                         case ARROW_DOWN -> engine.moveDown();
                         case ARROW_LEFT -> engine.moveLeft();
                         case ARROW_RIGHT -> engine.moveRight();
+                        case SHIFT_ARROW_UP -> engine.moveUp(true);
+                        case SHIFT_ARROW_DOWN -> engine.moveDown(true);
+                        case SHIFT_ARROW_LEFT -> engine.moveLeft(true);
+                        case SHIFT_ARROW_RIGHT -> engine.moveRight(true);
                         case PAGE_UP -> engine.pageUp(contentRows);
                         case PAGE_DOWN -> engine.pageDown(contentRows);
                         case HOME -> engine.moveHome();
@@ -181,13 +267,37 @@ public class TerminalEditorApp {
     }
 
     private String buildBottomBar(EditorState state, String message, int cols) {
-        Position p = state.getCursor();
-        String base = "Ln " + (p.line() + 1) + ", Col " + (p.col() + 1);
-        String status = message == null || message.isBlank() ? base : base + "  |  " + message;
-
-        if (status.length() > cols) {
-            return status.substring(0, cols);
+        if (message != null && message.startsWith("Save As:")) {
+            if (message.length() > cols) {
+                return message.substring(message.length() - cols);
+            }
+            return message + " ".repeat(cols - message.length());
         }
-        return status + " ".repeat(cols - status.length());
+
+        Position p = state.getCursor();
+        String left = "Ln " + (p.line() + 1) + ", Col " + (p.col() + 1);
+        if (message != null && !message.isBlank()) {
+            left = left + "  |  " + message;
+        }
+
+        if (left.length() >= cols) {
+            return left.substring(0, cols);
+        }
+
+        int free = cols - left.length();
+        if (free <= 2) {
+            return left + " ".repeat(free);
+        }
+
+        String hints = KEY_HINTS;
+        if (hints.length() + 2 > free) {
+            hints = hints.substring(0, free - 2);
+        }
+
+        return left + " ".repeat(free - hints.length()) + hints;
+    }
+
+    private String buildSaveAsPrompt(StringBuilder saveAsInput) {
+        return "Save As: " + saveAsInput;
     }
 }

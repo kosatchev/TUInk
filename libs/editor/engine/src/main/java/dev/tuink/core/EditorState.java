@@ -1,5 +1,7 @@
 package dev.tuink.core;
 
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 
 /**
@@ -11,6 +13,8 @@ public class EditorState {
     private int leftColumn;
     private boolean dirty;
     private Path currentFile;
+    private Charset fileEncoding = StandardCharsets.UTF_8;
+    private Position selectionAnchor;
 
     public Position getCursor() {
         return cursor;
@@ -50,5 +54,29 @@ public class EditorState {
 
     public void setCurrentFile(Path currentFile) {
         this.currentFile = currentFile;
+    }
+
+    public Charset getFileEncoding() {
+        return fileEncoding;
+    }
+
+    public void setFileEncoding(Charset fileEncoding) {
+        this.fileEncoding = fileEncoding == null ? StandardCharsets.UTF_8 : fileEncoding;
+    }
+
+    public Position getSelectionAnchor() {
+        return selectionAnchor;
+    }
+
+    public void setSelectionAnchor(Position selectionAnchor) {
+        this.selectionAnchor = selectionAnchor;
+    }
+
+    public void clearSelection() {
+        this.selectionAnchor = null;
+    }
+
+    public boolean hasSelection() {
+        return selectionAnchor != null && !selectionAnchor.equals(cursor);
     }
 }

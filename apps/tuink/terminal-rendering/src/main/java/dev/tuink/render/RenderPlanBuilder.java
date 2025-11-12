@@ -11,6 +11,7 @@ import java.util.List;
  */
 public class RenderPlanBuilder {
     private final LineHighlighter highlighter;
+    private static final Style SELECTION_STYLE = new Style(Color.BLACK, Color.BRIGHT_WHITE, false, false);
 
     public RenderPlanBuilder(LineHighlighter highlighter) {
         this.highlighter = highlighter;
@@ -37,7 +38,13 @@ public class RenderPlanBuilder {
             if (lineIndex < model.lineCount()) {
                 String line = model.getLine(lineIndex);
                 String visibleText = clip(line, state.getLeftColumn(), textWidth);
-                List<StyleSpan> spans = clipSpans(highlighter.highlight(line), state.getLeftColumn(), visibleText.length());
+                List<StyleSpan> spans = new ArrayList<>(
+                    clipSpans(highlighter.highlight(line), state.getLeftColumn(), visibleText.length())
+                );
+                StyleSpan selection = selectionSpanForLine(state, model, lineIndex, state.getLeftColumn(), visibleText.length());
+                if (selection != null) {
+                    spans.add(selection);
+                }
                 String gutter = String.format("%" + (gutterWidth - 1) + "d ", lineIndex + 1);
                 lines.add(new LineVisual(gutter, visibleText, spans));
             } else {
@@ -100,5 +107,41 @@ public class RenderPlanBuilder {
             return text.substring(0, width);
         }
         return text + " ".repeat(width - text.length());
+    }
+
+    private StyleSpan selectionSpanForLine(EditorState state, TextModel model, int lineIndex, int leftColumn, int visibleLength) {
+        if (!state.hasSelection() || visibleLength <= 0) {
+            return null;
+        }
+        Position a = state.getSelectionAnchor();
+        Position b = state.getCursor();
+        if (a.line() > b.line() || (a.line() == b.line() && a.col() > b.col())) {
+            Position t = a;
+            a = b;
+            b = t;
+        }
+        if (lineIndex < a.line() || lineIndex > b.line()) {
+            return null;
+        }
+
+        int lineLen = model.getLine(lineIndex).length();
+        int start = 0;
+        int end = lineLen;
+        if (lineIndex == a.line()) {
+            start = a.col();
+        }
+        if (lineIndex == b.line()) {
+            end = b.col();
+        }
+        if (end <= start) {
+            return null;
+        }
+
+        int visStart = Math.max(start - leftColumn, 0);
+        int visEnd = Math.min(end - leftColumn, visibleLength);
+        if (visEnd <= visStart) {
+            return null;
+        }
+        return new StyleSpan(visStart, visEnd, SELECTION_STYLE);
     }
 }

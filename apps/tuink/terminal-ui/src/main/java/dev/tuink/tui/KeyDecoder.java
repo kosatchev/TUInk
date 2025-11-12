@@ -25,9 +25,15 @@ public class KeyDecoder {
         }
 
         return switch (ch) {
-            case 3 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_Q);
+            case 3 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_C);
             case 17 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_Q);
             case 19 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_S);
+            case 26 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_Z);
+            case 25 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_Y);
+            case 24 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_X);
+            case 22 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_V);
+            case 23 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_W);
+            case 15 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_O);
             case 6 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_F);
             case 7 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_G);
             case 127, 8 -> new KeyEvent.ActionEvent(KeyEvent.Action.BACKSPACE);
@@ -58,8 +64,18 @@ public class KeyDecoder {
 
     private KeyEvent decodeEscapeSequence() throws IOException {
         int second = reader.read(5);
-        if (second != '[') {
+        if (second == NonBlockingReader.READ_EXPIRED || second < 0) {
+            return new KeyEvent.ActionEvent(KeyEvent.Action.ESCAPE);
+        }
+        if (second == 'O') {
+            int third = reader.read(5);
+            if (third == 'Q') {
+                return new KeyEvent.ActionEvent(KeyEvent.Action.F2);
+            }
             return new KeyEvent.ActionEvent(KeyEvent.Action.UNKNOWN);
+        }
+        if (second != '[') {
+            return new KeyEvent.ActionEvent(KeyEvent.Action.ESCAPE);
         }
         StringBuilder seq = new StringBuilder();
         while (true) {
@@ -90,22 +106,24 @@ public class KeyDecoder {
             case "3~" -> new KeyEvent.ActionEvent(KeyEvent.Action.DELETE);
             case "5~" -> new KeyEvent.ActionEvent(KeyEvent.Action.PAGE_UP);
             case "6~" -> new KeyEvent.ActionEvent(KeyEvent.Action.PAGE_DOWN);
+            case "12~" -> new KeyEvent.ActionEvent(KeyEvent.Action.F2);
             default -> mapModifiedArrows(seq);
         };
     }
 
     private KeyEvent mapModifiedArrows(String seq) {
+        boolean shift = seq.contains(";2");
         if (seq.endsWith("A")) {
-            return new KeyEvent.ActionEvent(KeyEvent.Action.ARROW_UP);
+            return new KeyEvent.ActionEvent(shift ? KeyEvent.Action.SHIFT_ARROW_UP : KeyEvent.Action.ARROW_UP);
         }
         if (seq.endsWith("B")) {
-            return new KeyEvent.ActionEvent(KeyEvent.Action.ARROW_DOWN);
+            return new KeyEvent.ActionEvent(shift ? KeyEvent.Action.SHIFT_ARROW_DOWN : KeyEvent.Action.ARROW_DOWN);
         }
         if (seq.endsWith("C")) {
-            return new KeyEvent.ActionEvent(KeyEvent.Action.ARROW_RIGHT);
+            return new KeyEvent.ActionEvent(shift ? KeyEvent.Action.SHIFT_ARROW_RIGHT : KeyEvent.Action.ARROW_RIGHT);
         }
         if (seq.endsWith("D")) {
-            return new KeyEvent.ActionEvent(KeyEvent.Action.ARROW_LEFT);
+            return new KeyEvent.ActionEvent(shift ? KeyEvent.Action.SHIFT_ARROW_LEFT : KeyEvent.Action.ARROW_LEFT);
         }
         if (seq.endsWith("H")) {
             return new KeyEvent.ActionEvent(KeyEvent.Action.HOME);

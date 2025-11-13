@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.render.Cell;
+import dev.tuink.render.CellBuffer;
 import dev.tuink.render.Color;
 import dev.tuink.render.Style;
 

@@ -1,23 +1,18 @@
-package dev.tuink.tui;
+package dev.tuink.render;
 
-import dev.tuink.render.Color;
-import dev.tuink.render.LineVisual;
-import dev.tuink.render.RenderPlan;
-import dev.tuink.render.Style;
-import dev.tuink.render.StyleSpan;
 import java.util.List;
 
 /**
- * Converts a render plan into a terminal cell buffer.
+ * Converts an abstract render plan into a cell buffer.
  */
-public class TuiRenderer {
+public class RenderRasterizer {
     private static final Style GUTTER_STYLE = new Style(Color.BRIGHT_BLACK, Color.DEFAULT, false, false);
     private static final Style FILEBAR_STYLE = new Style(Color.BLACK, Color.BRIGHT_CYAN, true, false);
     private static final Style STATUS_STYLE = new Style(Color.BLACK, Color.BRIGHT_WHITE, false, false);
     private static final Style SCROLL_TRACK_STYLE = new Style(Color.BRIGHT_BLACK, Color.DEFAULT, false, false);
     private static final Style SCROLL_THUMB_STYLE = new Style(Color.BRIGHT_WHITE, Color.DEFAULT, false, false);
 
-    public CellBuffer toCellBuffer(RenderPlan plan, int rows, int cols) {
+    public CellBuffer rasterize(RenderPlan plan, int rows, int cols) {
         CellBuffer buffer = new CellBuffer(rows, cols);
         int contentCols = Math.max(1, cols - plan.scrollbarWidth());
 
@@ -66,7 +61,14 @@ public class TuiRenderer {
         }
     }
 
-    private void drawHighlightedText(CellBuffer buffer, int row, int startCol, String text, List<StyleSpan> spans, int cols) {
+    private void drawHighlightedText(
+        CellBuffer buffer,
+        int row,
+        int startCol,
+        String text,
+        List<StyleSpan> spans,
+        int cols
+    ) {
         Style[] styles = new Style[text.length()];
         for (int i = 0; i < styles.length; i++) {
             styles[i] = Style.DEFAULT;

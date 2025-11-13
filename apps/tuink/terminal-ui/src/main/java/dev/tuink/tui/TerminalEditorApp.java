@@ -6,9 +6,11 @@ import dev.tuink.core.Position;
 import dev.tuink.core.SimpleLineBuffer;
 import dev.tuink.core.TextModel;
 import dev.tuink.highlight.regex.RegexHighlighter;
+import dev.tuink.render.CellBuffer;
 import dev.tuink.render.LineHighlighter;
 import dev.tuink.render.RenderPlan;
 import dev.tuink.render.RenderPlanBuilder;
+import dev.tuink.render.RenderRasterizer;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
@@ -37,7 +39,7 @@ public class TerminalEditorApp {
         EditorEngine engine = new EditorEngine(model, state);
         LineHighlighter highlighter = RegexHighlighter.withDefaults();
         RenderPlanBuilder renderPlanBuilder = new RenderPlanBuilder(highlighter);
-        TuiRenderer renderer = new TuiRenderer();
+        RenderRasterizer renderer = new RenderRasterizer();
 
         String statusMessage = "Ctrl+S save | Ctrl+Q quit";
         boolean confirmQuit = false;
@@ -100,9 +102,9 @@ public class TerminalEditorApp {
                     engine.ensureCursorVisible(contentRows);
 
                     String topBar = buildTopBar(state, cols);
-                    String bottomBar = buildBottomBar(state, statusMessage, cols);
+                    String bottomBar = buildBottomBar(state, model, statusMessage, cols);
                     RenderPlan plan = renderPlanBuilder.build(model, state, rows, cols, topBar, bottomBar);
-                    CellBuffer current = renderer.toCellBuffer(plan, rows, cols);
+                    CellBuffer current = renderer.rasterize(plan, rows, cols);
 
                     int desiredCursorRow = plan.cursorRow() + 2;
                     int desiredCursorCol = plan.cursorCol() + 1;
@@ -266,7 +268,7 @@ public class TerminalEditorApp {
         return top + " ".repeat(cols - top.length());
     }
 
-    private String buildBottomBar(EditorState state, String message, int cols) {
+    private String buildBottomBar(EditorState state, TextModel model, String message, int cols) {
         if (message != null && message.startsWith("Save As:")) {
             if (message.length() > cols) {
                 return message.substring(message.length() - cols);
@@ -275,7 +277,10 @@ public class TerminalEditorApp {
         }
 
         Position p = state.getCursor();
-        String left = "Ln " + (p.line() + 1) + ", Col " + (p.col() + 1);
+        int totalLines = model.lineCount();
+        int lineCols = model.getLine(p.line()).length();
+        String left = "Ln " + (p.line() + 1) + "/" + totalLines
+            + ", Col " + (p.col() + 1) + "/" + lineCols;
         if (message != null && !message.isBlank()) {
             left = left + "  |  " + message;
         }

@@ -1,9 +1,7 @@
-package dev.tuink.tui;
-
-import dev.tuink.render.Style;
+package dev.tuink.render;
 
 /**
- * 2D frame buffer used by the terminal renderer.
+ * 2D frame buffer used by UI adapters (terminal, GUI, web).
  */
 public class CellBuffer {
     private final int rows;

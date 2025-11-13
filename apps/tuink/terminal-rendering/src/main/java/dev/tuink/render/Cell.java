@@ -1,9 +1,7 @@
-package dev.tuink.tui;
-
-import dev.tuink.render.Style;
+package dev.tuink.render;
 
 /**
- * Single terminal cell.
+ * Single rendered cell independent from concrete UI toolkit.
  */
 public record Cell(String grapheme, Style style) {
     public static final Cell EMPTY = new Cell(" ", Style.DEFAULT);

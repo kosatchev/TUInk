@@ -37,8 +37,7 @@ public class TerminalEditorApp {
         TextModel model = new TextModel(new SimpleLineBuffer());
         EditorState state = new EditorState();
         EditorEngine engine = new EditorEngine(model, state);
-        LineHighlighter highlighter = RegexHighlighter.withDefaults();
-        RenderPlanBuilder renderPlanBuilder = new RenderPlanBuilder(highlighter);
+        RenderPlanBuilder renderPlanBuilder = new RenderPlanBuilder(RegexHighlighter.withDefaults());
         RenderRasterizer renderer = new RenderRasterizer();
 
         String statusMessage = "Ctrl+S save | Ctrl+Q quit";
@@ -50,6 +49,7 @@ public class TerminalEditorApp {
             Path file = Path.of(args[0]);
             try {
                 engine.open(file);
+                renderPlanBuilder = new RenderPlanBuilder(resolveHighlighter(file));
                 statusMessage = "Opened " + file;
             } catch (IOException e) {
                 statusMessage = "Open failed: " + e.getMessage();
@@ -160,6 +160,7 @@ public class TerminalEditorApp {
                                 } else {
                                     try {
                                         engine.saveAs(Path.of(target));
+                                        renderPlanBuilder = new RenderPlanBuilder(resolveHighlighter(state.getCurrentFile()));
                                         statusMessage = "Saved as " + state.getCurrentFile();
                                     } catch (IOException e) {
                                         statusMessage = "Save As failed: " + e.getMessage();
@@ -200,6 +201,7 @@ public class TerminalEditorApp {
                             try {
                                 if (state.getCurrentFile() == null) {
                                     engine.saveAs(Path.of(DEFAULT_FILE_NAME));
+                                    renderPlanBuilder = new RenderPlanBuilder(resolveHighlighter(state.getCurrentFile()));
                                     statusMessage = "Saved as " + state.getCurrentFile();
                                 } else {
                                     engine.save();
@@ -304,5 +306,9 @@ public class TerminalEditorApp {
 
     private String buildSaveAsPrompt(StringBuilder saveAsInput) {
         return "Save As: " + saveAsInput;
+    }
+
+    private LineHighlighter resolveHighlighter(Path file) {
+        return file == null ? RegexHighlighter.withDefaults() : RegexHighlighter.forFileName(file.getFileName().toString());
     }
 }

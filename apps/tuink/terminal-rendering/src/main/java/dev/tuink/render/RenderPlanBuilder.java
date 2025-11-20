@@ -25,9 +25,22 @@ public class RenderPlanBuilder {
         String topBarText,
         String bottomBarText
     ) {
+        return build(model, state, rows, cols, topBarText, bottomBarText, null);
+    }
+
+    public RenderPlan build(
+        TextModel model,
+        EditorState state,
+        int rows,
+        int cols,
+        String topBarText,
+        String bottomBarText,
+        String extraBottomBarText
+    ) {
         int safeRows = Math.max(rows, 1);
         int safeCols = Math.max(cols, 1);
-        int contentRows = Math.max(0, safeRows - 2);
+        int extraBottomRows = extraBottomBarText == null ? 0 : 1;
+        int contentRows = Math.max(0, safeRows - 2 - extraBottomRows);
         int scrollbarWidth = safeCols >= 8 ? 1 : 0;
         int gutterWidth = Math.max(3, String.valueOf(Math.max(model.lineCount(), 1)).length() + 1);
         int textWidth = Math.max(0, safeCols - gutterWidth - scrollbarWidth);
@@ -63,6 +76,7 @@ public class RenderPlanBuilder {
             lines,
             topBarText,
             bottomBarText,
+            extraBottomBarText,
             cursorRow,
             cursorCol,
             contentRows,

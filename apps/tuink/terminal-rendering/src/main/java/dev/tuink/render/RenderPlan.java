@@ -9,6 +9,7 @@ public record RenderPlan(
     List<LineVisual> lines,
     String topBarText,
     String bottomBarText,
+    String extraBottomBarText,
     int cursorRow,
     int cursorCol,
     int contentRows,

@@ -9,7 +9,8 @@ public class RenderRasterizer {
     private static final Style GUTTER_STYLE = new Style(Color.BRIGHT_BLACK, Color.DEFAULT, false, false);
     private static final Style FILEBAR_STYLE = new Style(Color.BLACK, Color.BRIGHT_CYAN, true, false);
     private static final Style STATUS_STYLE = new Style(Color.BLACK, Color.BRIGHT_WHITE, false, false);
-    private static final Style SEARCH_STYLE = new Style(Color.BLACK, Color.BRIGHT_YELLOW, false, false);
+    private static final Style INTERACTIVE_STYLE = new Style(Color.BLACK, Color.BRIGHT_YELLOW, false, false);
+    private static final Style NOTIFICATION_STYLE = new Style(Color.BLACK, Color.BRIGHT_GREEN, false, false);
     private static final Style SCROLL_TRACK_STYLE = new Style(Color.BRIGHT_BLACK, Color.DEFAULT, false, false);
     private static final Style SCROLL_THUMB_STYLE = new Style(Color.BRIGHT_WHITE, Color.DEFAULT, false, false);
 
@@ -28,15 +29,23 @@ public class RenderRasterizer {
 
         drawText(buffer, 0, 0, truncateOrPad(plan.topBarText(), cols), FILEBAR_STYLE, cols);
         drawText(buffer, statusRow, 0, truncateOrPad(plan.bottomBarText(), cols), STATUS_STYLE, cols);
-        if (plan.extraBottomBarText() != null) {
+        int overlayBottomRow = rows - 2;
+        int overlayTopRow = overlayBottomRow;
+        if (plan.interactiveBarText() != null && overlayBottomRow >= 0) {
+            Style style = plan.interactiveBarStyle() == null ? INTERACTIVE_STYLE : plan.interactiveBarStyle();
             drawText(
                 buffer,
-                Math.max(0, rows - 2),
+                overlayBottomRow,
                 0,
-                truncateOrPad(plan.extraBottomBarText(), cols),
-                SEARCH_STYLE,
+                truncateOrPad(plan.interactiveBarText(), cols),
+                style,
                 cols
             );
+            overlayTopRow = overlayBottomRow - 1;
+        }
+        if (plan.notificationBarText() != null && overlayTopRow >= 0) {
+            Style style = plan.notificationBarStyle() == null ? NOTIFICATION_STYLE : plan.notificationBarStyle();
+            drawText(buffer, overlayTopRow, 0, truncateOrPad(plan.notificationBarText(), cols), style, cols);
         }
         drawScrollbar(buffer, plan, rows, cols);
 

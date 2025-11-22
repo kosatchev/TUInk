@@ -9,12 +9,15 @@ import dev.tuink.core.TextModel;
 import dev.tuink.highlight.regex.RegexHighlighter;
 import dev.tuink.render.CellBuffer;
 import dev.tuink.render.LineHighlighter;
+import dev.tuink.render.Color;
 import dev.tuink.render.RenderPlan;
 import dev.tuink.render.RenderPlanBuilder;
 import dev.tuink.render.RenderRasterizer;
+import dev.tuink.render.Style;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.jline.terminal.Attributes;
@@ -30,6 +33,11 @@ public class TerminalEditorApp {
     private static final String DEFAULT_FILE_NAME = "untitled.txt";
     private static final String KEY_HINTS = "Ctrl+F Search  Ctrl+C/X/V  Ctrl+Z/Y  Ctrl+Q";
     private static final String SEARCH_HELP = "Tab focus  Space toggle  Enter next  Ctrl+G prev  Ctrl+R replace  Ctrl+A all  Esc";
+    private static final String SAVE_AS_PROMPT = "Save As: ";
+    private static final Style SAVE_PROMPT_STYLE = new Style(Color.BRIGHT_WHITE, Color.RED, false, false);
+    private static final Style NOTIFY_SUCCESS_STYLE = new Style(Color.BLACK, Color.BRIGHT_GREEN, false, false);
+    private static final Style NOTIFY_ERROR_STYLE = new Style(Color.BRIGHT_WHITE, Color.RED, false, false);
+    private static final long NOTIFY_DURATION_NANOS = 3_000_000_000L;
 
     public static void main(String[] args) throws Exception {
         new TerminalEditorApp().run(args);
@@ -43,8 +51,11 @@ public class TerminalEditorApp {
         RenderRasterizer renderer = new RenderRasterizer();
 
         String statusMessage = "Ctrl+S save | Ctrl+Q quit";
+        NotificationState notification = new NotificationState();
         boolean confirmQuit = false;
         boolean saveAsMode = false;
+        boolean saveOverwriteConfirmMode = false;
+        Path pendingOverwritePath = null;
         StringBuilder saveAsInput = new StringBuilder();
         boolean searchMode = false;
         SearchFocus searchFocus = SearchFocus.FIND;
@@ -103,15 +114,20 @@ public class TerminalEditorApp {
                 KeyDecoder decoder = new KeyDecoder(input);
                 boolean running = true;
                 while (running && !stopRequested.get()) {
+                    notification.expireIfNeeded();
                     int rows = Math.max(2, terminal.getHeight());
                     int cols = Math.max(1, terminal.getWidth());
-                    int overlayRows = searchMode ? 1 : 0;
+                    boolean hasInteractiveBar = searchMode || saveAsMode || saveOverwriteConfirmMode;
+                    boolean hasNotificationBar = notification.visible();
+                    int overlayRows = (hasInteractiveBar ? 1 : 0) + (hasNotificationBar ? 1 : 0);
                     int editorRows = Math.max(2, rows - overlayRows);
                     int contentRows = Math.max(0, editorRows - 2);
                     engine.ensureCursorVisible(contentRows);
 
                     String topBar = buildTopBar(state, cols);
                     String bottomBar = buildBottomBar(state, model, statusMessage, cols);
+                    String interactiveBarText = null;
+                    Style interactiveBarStyle = null;
                     SearchBarView searchBar = searchMode
                         ? buildSearchBar(
                             searchQueryInput.toString(),
@@ -121,6 +137,15 @@ public class TerminalEditorApp {
                             searchOptions
                         )
                         : null;
+                    if (saveAsMode) {
+                        interactiveBarText = buildSaveAsPrompt(saveAsInput);
+                        interactiveBarStyle = SAVE_PROMPT_STYLE;
+                    } else if (saveOverwriteConfirmMode) {
+                        interactiveBarText = buildOverwritePrompt(pendingOverwritePath);
+                        interactiveBarStyle = SAVE_PROMPT_STYLE;
+                    } else if (searchBar != null) {
+                        interactiveBarText = searchBar.text();
+                    }
                     RenderPlan plan = renderPlanBuilder.build(
                         model,
                         state,
@@ -128,18 +153,25 @@ public class TerminalEditorApp {
                         cols,
                         topBar,
                         bottomBar,
-                        searchBar == null ? null : searchBar.text()
+                        interactiveBarText,
+                        interactiveBarStyle,
+                        notification.message,
+                        notification.style
                     );
                     CellBuffer current = renderer.rasterize(plan, rows, cols);
 
                     int desiredCursorRow = plan.cursorRow() + 2;
                     int desiredCursorCol = plan.cursorCol() + 1;
+                    int interactiveCursorRow = Math.max(1, rows - 1);
                     if (saveAsMode) {
-                        String prompt = buildSaveAsPrompt(saveAsInput);
-                        desiredCursorRow = rows;
+                        desiredCursorRow = interactiveCursorRow;
+                        desiredCursorCol = Math.min(cols, SAVE_AS_PROMPT.length() + saveAsInput.length() + 1);
+                    } else if (saveOverwriteConfirmMode) {
+                        String prompt = buildOverwritePrompt(pendingOverwritePath);
+                        desiredCursorRow = interactiveCursorRow;
                         desiredCursorCol = Math.min(cols, prompt.length() + 1);
                     } else if (searchBar != null) {
-                        desiredCursorRow = Math.max(1, rows - 1);
+                        desiredCursorRow = interactiveCursorRow;
                         desiredCursorCol = searchBar.cursorCol();
                     }
 
@@ -169,30 +201,49 @@ public class TerminalEditorApp {
 
                     if (saveAsMode) {
                         if (key instanceof KeyEvent.CharInput charInput) {
+                            notification.clear();
                             saveAsInput.append(charInput.ch());
-                            statusMessage = buildSaveAsPrompt(saveAsInput);
                             continue;
                         }
 
                         KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
                         switch (action) {
                             case BACKSPACE -> {
+                                notification.clear();
                                 if (!saveAsInput.isEmpty()) {
                                     saveAsInput.deleteCharAt(saveAsInput.length() - 1);
                                 }
-                                statusMessage = buildSaveAsPrompt(saveAsInput);
                             }
                             case ENTER -> {
                                 String target = saveAsInput.toString().trim();
                                 if (target.isEmpty()) {
-                                    statusMessage = "Save As cancelled";
+                                    notification.clear();
                                 } else {
+                                    Path path = Path.of(target);
+                                    String validation = validateSaveTarget(path);
+                                    if (validation != null) {
+                                        notification.error(validation);
+                                        continue;
+                                    }
+                                    if (isReadOnlyFile(path)) {
+                                        saveAsInput.setLength(0);
+                                        saveAsInput.append(suggestWritableName(path));
+                                        notification.error("Save failed: target is read-only: " + path + ". Choose another name.");
+                                        continue;
+                                    }
+                                    if (Files.exists(path) && !isSameFilePath(path, state.getCurrentFile())) {
+                                        pendingOverwritePath = path;
+                                        saveOverwriteConfirmMode = true;
+                                        saveAsMode = false;
+                                        notification.clear();
+                                        continue;
+                                    }
                                     try {
-                                        engine.saveAs(Path.of(target));
+                                        engine.saveAs(path);
                                         renderPlanBuilder = new RenderPlanBuilder(resolveHighlighter(state.getCurrentFile()));
-                                        statusMessage = "Saved as " + state.getCurrentFile();
+                                        notification.success(savedMessage(state));
                                     } catch (IOException e) {
-                                        statusMessage = "Save As failed: " + e.getMessage();
+                                        notification.error(saveErrorMessage(e));
                                     }
                                 }
                                 saveAsMode = false;
@@ -201,10 +252,47 @@ public class TerminalEditorApp {
                             case ESCAPE, CTRL_Q -> {
                                 saveAsMode = false;
                                 saveAsInput.setLength(0);
-                                statusMessage = "Save As cancelled";
+                                notification.clear();
                             }
                             default -> {
                                 // Ignore unsupported keys while Save As prompt is active.
+                            }
+                        }
+                        continue;
+                    }
+
+                    if (saveOverwriteConfirmMode) {
+                        if (key instanceof KeyEvent.CharInput charInput) {
+                            char ch = charInput.ch();
+                            if (ch == 'y' || ch == 'Y') {
+                                try {
+                                    engine.saveAs(pendingOverwritePath);
+                                    renderPlanBuilder = new RenderPlanBuilder(resolveHighlighter(state.getCurrentFile()));
+                                    notification.success(savedMessage(state));
+                                } catch (IOException e) {
+                                    notification.error(saveErrorMessage(e));
+                                }
+                                saveOverwriteConfirmMode = false;
+                                pendingOverwritePath = null;
+                            } else if (ch == 'n' || ch == 'N') {
+                                saveOverwriteConfirmMode = false;
+                                pendingOverwritePath = null;
+                                saveAsMode = true;
+                                notification.clear();
+                            }
+                            continue;
+                        }
+
+                        KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
+                        switch (action) {
+                            case ESCAPE, CTRL_Q, ENTER -> {
+                                saveOverwriteConfirmMode = false;
+                                pendingOverwritePath = null;
+                                saveAsMode = true;
+                                notification.clear();
+                            }
+                            default -> {
+                                // Ignore unsupported keys in overwrite confirmation.
                             }
                         }
                         continue;
@@ -278,17 +366,28 @@ public class TerminalEditorApp {
                                 }
                             }
                             case CTRL_S -> {
-                                try {
-                                    if (state.getCurrentFile() == null) {
-                                        engine.saveAs(Path.of(DEFAULT_FILE_NAME));
-                                        renderPlanBuilder = new RenderPlanBuilder(resolveHighlighter(state.getCurrentFile()));
-                                        statusMessage = "Saved as " + state.getCurrentFile();
-                                    } else {
+                                if (state.getCurrentFile() == null) {
+                                    searchMode = false;
+                                    searchFocus = SearchFocus.FIND;
+                                    saveAsMode = true;
+                                    saveAsInput.setLength(0);
+                                    saveAsInput.append(DEFAULT_FILE_NAME);
+                                    notification.clear();
+                                } else if (isReadOnlyFile(state.getCurrentFile())) {
+                                    searchMode = false;
+                                    searchFocus = SearchFocus.FIND;
+                                    saveAsMode = true;
+                                    saveAsInput.setLength(0);
+                                    saveAsInput.append(suggestWritableName(state.getCurrentFile()));
+                                    notification.error("Save failed: current file is read-only: "
+                                        + state.getCurrentFile() + ". Save As mode.");
+                                } else {
+                                    try {
                                         engine.save();
-                                        statusMessage = "Saved " + state.getCurrentFile();
+                                        notification.success(savedMessage(state));
+                                    } catch (IOException e) {
+                                        notification.error(saveErrorMessage(e));
                                     }
-                                } catch (IOException e) {
-                                    statusMessage = "Save failed: " + e.getMessage();
                                 }
                             }
                             case CTRL_C -> statusMessage = engine.copySelection() ? "Copied selection" : "Nothing selected";
@@ -296,15 +395,17 @@ public class TerminalEditorApp {
                             case CTRL_V -> statusMessage = engine.pasteClipboard() ? "Pasted" : "Clipboard empty";
                             case CTRL_Z -> statusMessage = engine.undo() ? "Undo" : "Nothing to undo";
                             case CTRL_Y -> statusMessage = engine.redo() ? "Redo" : "Nothing to redo";
-                            case CTRL_W, CTRL_O, F2 -> {
+                            case CTRL_K, CTRL_W, CTRL_O, F2, CTRL_SHIFT_S -> {
                                 searchMode = false;
                                 searchFocus = SearchFocus.FIND;
                                 saveAsMode = true;
                                 saveAsInput.setLength(0);
                                 if (state.getCurrentFile() != null) {
                                     saveAsInput.append(state.getCurrentFile());
+                                } else {
+                                    saveAsInput.append(DEFAULT_FILE_NAME);
                                 }
-                                statusMessage = buildSaveAsPrompt(saveAsInput);
+                                notification.clear();
                             }
                             case ARROW_UP -> engine.moveUp();
                             case ARROW_DOWN -> engine.moveDown();
@@ -343,17 +444,24 @@ public class TerminalEditorApp {
                             }
                         }
                         case CTRL_S -> {
-                            try {
-                                if (state.getCurrentFile() == null) {
-                                    engine.saveAs(Path.of(DEFAULT_FILE_NAME));
-                                    renderPlanBuilder = new RenderPlanBuilder(resolveHighlighter(state.getCurrentFile()));
-                                    statusMessage = "Saved as " + state.getCurrentFile();
-                                } else {
+                            if (state.getCurrentFile() == null) {
+                                saveAsMode = true;
+                                saveAsInput.setLength(0);
+                                saveAsInput.append(DEFAULT_FILE_NAME);
+                                notification.clear();
+                            } else if (isReadOnlyFile(state.getCurrentFile())) {
+                                saveAsMode = true;
+                                saveAsInput.setLength(0);
+                                saveAsInput.append(suggestWritableName(state.getCurrentFile()));
+                                notification.error("Save failed: current file is read-only: "
+                                    + state.getCurrentFile() + ". Save As mode.");
+                            } else {
+                                try {
                                     engine.save();
-                                    statusMessage = "Saved " + state.getCurrentFile();
+                                    notification.success(savedMessage(state));
+                                } catch (IOException e) {
+                                    notification.error(saveErrorMessage(e));
                                 }
-                            } catch (IOException e) {
-                                statusMessage = "Save failed: " + e.getMessage();
                             }
                         }
                         case CTRL_C -> statusMessage = engine.copySelection() ? "Copied selection" : "Nothing selected";
@@ -361,13 +469,15 @@ public class TerminalEditorApp {
                         case CTRL_V -> statusMessage = engine.pasteClipboard() ? "Pasted" : "Clipboard empty";
                         case CTRL_Z -> statusMessage = engine.undo() ? "Undo" : "Nothing to undo";
                         case CTRL_Y -> statusMessage = engine.redo() ? "Redo" : "Nothing to redo";
-                        case CTRL_W, CTRL_O, F2 -> {
+                        case CTRL_K, CTRL_W, CTRL_O, F2, CTRL_SHIFT_S -> {
                             saveAsMode = true;
                             saveAsInput.setLength(0);
                             if (state.getCurrentFile() != null) {
                                 saveAsInput.append(state.getCurrentFile());
+                            } else {
+                                saveAsInput.append(DEFAULT_FILE_NAME);
                             }
-                            statusMessage = buildSaveAsPrompt(saveAsInput);
+                            notification.clear();
                         }
                         case CTRL_F -> {
                             searchMode = true;
@@ -420,13 +530,6 @@ public class TerminalEditorApp {
     }
 
     private String buildBottomBar(EditorState state, TextModel model, String message, int cols) {
-        if (message != null && message.startsWith("Save As:")) {
-            if (message.length() > cols) {
-                return message.substring(message.length() - cols);
-            }
-            return message + " ".repeat(cols - message.length());
-        }
-
         Position p = state.getCursor();
         int totalLines = model.lineCount();
         int lineCols = model.getLine(p.line()).length();
@@ -454,7 +557,79 @@ public class TerminalEditorApp {
     }
 
     private String buildSaveAsPrompt(StringBuilder saveAsInput) {
-        return "Save As: " + saveAsInput;
+        return SAVE_AS_PROMPT + saveAsInput;
+    }
+
+    private String buildOverwritePrompt(Path path) {
+        return "Overwrite: " + path + " ? (y/N)";
+    }
+
+    private String savedMessage(EditorState state) {
+        return "Saved " + state.getCurrentFile() + " [" + state.getFileEncoding().displayName() + "]";
+    }
+
+    private String saveErrorMessage(IOException e) {
+        String msg = e.getMessage() == null ? "Unknown I/O error" : e.getMessage();
+        String lower = msg.toLowerCase();
+        if (lower.contains("permission denied") || lower.contains("access denied")) {
+            return "Save failed: permission denied";
+        }
+        if (lower.contains("no space") || lower.contains("not enough space")) {
+            return "Save failed: no space left on device";
+        }
+        if (lower.contains("is a directory")) {
+            return "Save failed: target is a directory";
+        }
+        return "Save failed: " + msg;
+    }
+
+    private String validateSaveTarget(Path path) {
+        Path normalized = path.toAbsolutePath().normalize();
+        Path parent = normalized.getParent();
+        if (parent != null) {
+            if (!Files.exists(parent)) {
+                return "Save failed: directory does not exist: " + parent;
+            }
+            if (!Files.isDirectory(parent)) {
+                return "Save failed: parent path is not a directory: " + parent;
+            }
+            if (!Files.isWritable(parent)) {
+                return "Save failed: no write access to directory: " + parent;
+            }
+        }
+        if (Files.isDirectory(normalized)) {
+            return "Save failed: target is a directory: " + normalized;
+        }
+        return null;
+    }
+
+    private boolean isReadOnlyFile(Path path) {
+        try {
+            return Files.exists(path) && !Files.isWritable(path);
+        } catch (SecurityException e) {
+            return true;
+        }
+    }
+
+    private String suggestWritableName(Path path) {
+        String fileName = path.getFileName() == null ? DEFAULT_FILE_NAME : path.getFileName().toString();
+        int dot = fileName.lastIndexOf('.');
+        String base = dot > 0 ? fileName.substring(0, dot) : fileName;
+        String ext = dot > 0 ? fileName.substring(dot) : "";
+        String candidate = base + "-copy" + ext;
+        Path parent = path.getParent();
+        return parent == null ? candidate : parent.resolve(candidate).toString();
+    }
+
+    private boolean isSameFilePath(Path a, Path b) {
+        if (a == null || b == null) {
+            return false;
+        }
+        try {
+            return a.toAbsolutePath().normalize().equals(b.toAbsolutePath().normalize());
+        } catch (Exception e) {
+            return a.equals(b);
+        }
     }
 
     private SearchBarView buildSearchBar(
@@ -571,6 +746,40 @@ public class TerminalEditorApp {
         CASE,
         WORD,
         WILDCARD
+    }
+
+    private static final class NotificationState {
+        private String message;
+        private Style style;
+        private long expiresAtNanos;
+
+        private boolean visible() {
+            return message != null;
+        }
+
+        private void success(String message) {
+            this.message = message;
+            this.style = NOTIFY_SUCCESS_STYLE;
+            this.expiresAtNanos = System.nanoTime() + NOTIFY_DURATION_NANOS;
+        }
+
+        private void error(String message) {
+            this.message = message;
+            this.style = NOTIFY_ERROR_STYLE;
+            this.expiresAtNanos = System.nanoTime() + NOTIFY_DURATION_NANOS;
+        }
+
+        private void clear() {
+            this.message = null;
+            this.style = null;
+            this.expiresAtNanos = 0L;
+        }
+
+        private void expireIfNeeded() {
+            if (message != null && System.nanoTime() >= expiresAtNanos) {
+                clear();
+            }
+        }
     }
 
     private LineHighlighter resolveHighlighter(Path file) {

@@ -32,14 +32,12 @@ public class KeyDecoder {
             case 25 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_Y);
             case 24 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_X);
             case 22 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_V);
+            case 11 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_K);
             case 23 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_W);
             case 15 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_O);
             case 6 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_F);
             case 18 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_R);
             case 1 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_A);
-            case 20 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_T);
-            case 5 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_E);
-            case 16 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_P);
             case 7 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_G);
             case 9 -> new KeyEvent.ActionEvent(KeyEvent.Action.TAB);
             case 127, 8 -> new KeyEvent.ActionEvent(KeyEvent.Action.BACKSPACE);
@@ -113,6 +111,7 @@ public class KeyDecoder {
             case "5~" -> new KeyEvent.ActionEvent(KeyEvent.Action.PAGE_UP);
             case "6~" -> new KeyEvent.ActionEvent(KeyEvent.Action.PAGE_DOWN);
             case "12~" -> new KeyEvent.ActionEvent(KeyEvent.Action.F2);
+            case "1;6S", "83;6u", "27;6;83~" -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_SHIFT_S);
             default -> mapModifiedArrows(seq);
         };
     }

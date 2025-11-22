@@ -25,7 +25,7 @@ public class RenderPlanBuilder {
         String topBarText,
         String bottomBarText
     ) {
-        return build(model, state, rows, cols, topBarText, bottomBarText, null);
+        return build(model, state, rows, cols, topBarText, bottomBarText, null, null, null, null);
     }
 
     public RenderPlan build(
@@ -35,11 +35,27 @@ public class RenderPlanBuilder {
         int cols,
         String topBarText,
         String bottomBarText,
-        String extraBottomBarText
+        String interactiveBarText,
+        Style interactiveBarStyle
+    ) {
+        return build(model, state, rows, cols, topBarText, bottomBarText, interactiveBarText, interactiveBarStyle, null, null);
+    }
+
+    public RenderPlan build(
+        TextModel model,
+        EditorState state,
+        int rows,
+        int cols,
+        String topBarText,
+        String bottomBarText,
+        String interactiveBarText,
+        Style interactiveBarStyle,
+        String notificationBarText,
+        Style notificationBarStyle
     ) {
         int safeRows = Math.max(rows, 1);
         int safeCols = Math.max(cols, 1);
-        int extraBottomRows = extraBottomBarText == null ? 0 : 1;
+        int extraBottomRows = (interactiveBarText == null ? 0 : 1) + (notificationBarText == null ? 0 : 1);
         int contentRows = Math.max(0, safeRows - 2 - extraBottomRows);
         int scrollbarWidth = safeCols >= 8 ? 1 : 0;
         int gutterWidth = Math.max(3, String.valueOf(Math.max(model.lineCount(), 1)).length() + 1);
@@ -76,7 +92,10 @@ public class RenderPlanBuilder {
             lines,
             topBarText,
             bottomBarText,
-            extraBottomBarText,
+            interactiveBarText,
+            interactiveBarStyle,
+            notificationBarText,
+            notificationBarStyle,
             cursorRow,
             cursorCol,
             contentRows,

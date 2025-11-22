@@ -7,8 +7,10 @@ import java.nio.charset.Charset;
 import java.nio.charset.CharsetDecoder;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.List;
 
 /**
@@ -195,7 +197,31 @@ public class TextModel {
 
     public void save(Path path, Charset charset) throws IOException {
         String content = String.join("\n", snapshotLines());
-        Files.writeString(path, content, charset);
+        Path target = path.toAbsolutePath().normalize();
+        Path parent = target.getParent();
+        Path tempDir = parent != null ? parent : Path.of(".").toAbsolutePath().normalize();
+        String fileName = target.getFileName() == null ? "tuink" : target.getFileName().toString();
+        String prefix = "." + sanitizePrefix(fileName) + ".";
+        if (prefix.length() < 3) {
+            prefix = ".tuink.";
+        }
+
+        Path tempFile = Files.createTempFile(tempDir, prefix, ".tmp");
+        try {
+            Files.writeString(tempFile, content, charset);
+            try {
+                Files.move(
+                    tempFile,
+                    target,
+                    StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE
+                );
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(tempFile, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(tempFile);
+        }
     }
 
     public List<String> snapshotLines() {
@@ -277,5 +303,19 @@ public class TextModel {
 
     private static boolean comesAfter(Position a, Position b) {
         return a.line() > b.line() || (a.line() == b.line() && a.col() > b.col());
+    }
+
+    private static String sanitizePrefix(String name) {
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < name.length(); i++) {
+            char ch = name.charAt(i);
+            if (Character.isLetterOrDigit(ch) || ch == '_' || ch == '-') {
+                out.append(ch);
+            }
+        }
+        if (out.length() < 3) {
+            out.append("tuink");
+        }
+        return out.substring(0, Math.max(3, Math.min(out.length(), 32)));
     }
 }

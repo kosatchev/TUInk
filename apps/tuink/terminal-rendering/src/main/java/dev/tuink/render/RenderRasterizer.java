@@ -11,6 +11,7 @@ public class RenderRasterizer {
     private static final Style STATUS_STYLE = new Style(Color.BLACK, Color.BRIGHT_WHITE, false, false);
     private static final Style INTERACTIVE_STYLE = new Style(Color.BLACK, Color.BRIGHT_YELLOW, false, false);
     private static final Style NOTIFICATION_STYLE = new Style(Color.BLACK, Color.BRIGHT_GREEN, false, false);
+    private static final Style LEADING_WHITESPACE_STYLE = new Style(Color.BRIGHT_BLACK, Color.DEFAULT, false, false);
     private static final Style SCROLL_TRACK_STYLE = new Style(Color.BRIGHT_BLACK, Color.DEFAULT, false, false);
     private static final Style SCROLL_THUMB_STYLE = new Style(Color.BRIGHT_WHITE, Color.DEFAULT, false, false);
 
@@ -92,8 +93,10 @@ public class RenderRasterizer {
         int cols
     ) {
         Style[] styles = new Style[text.length()];
+        String[] graphemes = new String[text.length()];
         for (int i = 0; i < styles.length; i++) {
             styles[i] = Style.DEFAULT;
+            graphemes[i] = String.valueOf(text.charAt(i));
         }
         for (StyleSpan span : spans) {
             int from = Math.max(0, span.start());
@@ -103,8 +106,24 @@ public class RenderRasterizer {
             }
         }
 
+        // Render leading indentation markers: space -> '·', tab -> '»'
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == ' ') {
+                graphemes[i] = "·";
+                styles[i] = LEADING_WHITESPACE_STYLE;
+                continue;
+            }
+            if (ch == '\t') {
+                graphemes[i] = "»";
+                styles[i] = LEADING_WHITESPACE_STYLE;
+                continue;
+            }
+            break;
+        }
+
         for (int i = 0; i < text.length() && startCol + i < cols; i++) {
-            buffer.set(row, startCol + i, String.valueOf(text.charAt(i)), styles[i]);
+            buffer.set(row, startCol + i, graphemes[i], styles[i]);
         }
     }
 

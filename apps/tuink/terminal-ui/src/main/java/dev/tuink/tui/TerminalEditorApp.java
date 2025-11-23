@@ -19,7 +19,12 @@ import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.jline.terminal.Attributes;
 import org.jline.terminal.Attributes.LocalFlag;
 import org.jline.terminal.Terminal;
@@ -61,7 +66,7 @@ public class TerminalEditorApp {
         SearchFocus searchFocus = SearchFocus.FIND;
         StringBuilder searchQueryInput = new StringBuilder();
         StringBuilder searchReplaceInput = new StringBuilder();
-        SearchOptions searchOptions = SearchOptions.DEFAULT;
+        SearchUiOptions searchUi = SearchUiOptions.DEFAULT;
 
         if (args.length > 0) {
             Path file = Path.of(args[0]);
@@ -134,7 +139,12 @@ public class TerminalEditorApp {
                             searchReplaceInput.toString(),
                             searchFocus,
                             cols,
-                            searchOptions
+                            searchUi,
+                            countSearchMatches(
+                                model,
+                                searchQueryInput.toString(),
+                                toSearchOptions(searchUi)
+                            )
                         )
                         : null;
                     if (saveAsMode) {
@@ -153,6 +163,8 @@ public class TerminalEditorApp {
                         cols,
                         topBar,
                         bottomBar,
+                        searchMode ? searchQueryInput.toString() : null,
+                        toSearchOptions(searchUi),
                         interactiveBarText,
                         interactiveBarStyle,
                         notification.message,
@@ -302,9 +314,9 @@ public class TerminalEditorApp {
                         if (key instanceof KeyEvent.CharInput charInput) {
                             char ch = charInput.ch();
                             if (ch == ' ' && isToggleFocus(searchFocus)) {
-                                SearchOptions before = searchOptions;
-                                searchOptions = toggleFocusedSearchOption(searchOptions, searchFocus);
-                                if (!searchOptions.equals(before)) {
+                                SearchUiOptions before = searchUi;
+                                searchUi = toggleFocusedSearchOption(searchUi, searchFocus);
+                                if (!searchUi.equals(before)) {
                                     statusMessage = "Search options updated";
                                 }
                             } else if (searchFocus == SearchFocus.REPLACE) {
@@ -332,18 +344,24 @@ public class TerminalEditorApp {
                                 }
                             }
                             case ENTER, CTRL_F -> {
-                                boolean found = engine.findNext(searchQueryInput.toString(), searchOptions);
+                                boolean found = engine.findNext(
+                                    searchQueryInput.toString(),
+                                    toSearchOptions(searchUi)
+                                );
                                 statusMessage = found ? "Found next match" : "Not found";
                             }
                             case CTRL_G -> {
-                                boolean found = engine.findPrevious(searchQueryInput.toString(), searchOptions);
+                                boolean found = engine.findPrevious(
+                                    searchQueryInput.toString(),
+                                    toSearchOptions(searchUi)
+                                );
                                 statusMessage = found ? "Found previous match" : "Not found";
                             }
                             case CTRL_R -> {
                                 boolean replaced = engine.replaceCurrentOrNext(
                                     searchQueryInput.toString(),
                                     searchReplaceInput.toString(),
-                                    searchOptions
+                                    toSearchOptions(searchUi)
                                 );
                                 statusMessage = replaced ? "Replaced match" : "Nothing to replace";
                             }
@@ -351,7 +369,7 @@ public class TerminalEditorApp {
                                 int replaced = engine.replaceAll(
                                     searchQueryInput.toString(),
                                     searchReplaceInput.toString(),
-                                    searchOptions
+                                    toSearchOptions(searchUi)
                                 );
                                 statusMessage = replaced > 0
                                     ? "Replaced " + replaced + " occurrence(s)"
@@ -484,6 +502,9 @@ public class TerminalEditorApp {
                             searchFocus = SearchFocus.FIND;
                             statusMessage = SEARCH_HELP;
                         }
+                        case CTRL_A, CTRL_R, TAB -> {
+                            // Reserved for search mode. No-op in normal mode.
+                        }
                         case CTRL_G -> statusMessage = "Goto line not implemented";
                         case ESCAPE -> {
                             // No-op outside prompt mode.
@@ -533,8 +554,10 @@ public class TerminalEditorApp {
         Position p = state.getCursor();
         int totalLines = model.lineCount();
         int lineCols = model.getLine(p.line()).length();
+        String indicators = buildStateIndicators(state);
         String left = "Ln " + (p.line() + 1) + "/" + totalLines
-            + ", Col " + (p.col() + 1) + "/" + lineCols;
+            + ", Col " + (p.col() + 1) + "/" + lineCols
+            + "  |  " + indicators;
         if (message != null && !message.isBlank()) {
             left = left + "  |  " + message;
         }
@@ -544,16 +567,34 @@ public class TerminalEditorApp {
         }
 
         int free = cols - left.length();
-        if (free <= 2) {
+        if (free <= 1) {
             return left + " ".repeat(free);
         }
 
-        String hints = KEY_HINTS;
-        if (hints.length() + 2 > free) {
-            hints = hints.substring(0, free - 2);
+        String right = "";
+
+        int remaining = free;
+        if (remaining >= 3) {
+            int hintSpace = remaining - 2;
+            String hints = KEY_HINTS;
+            if (hints.length() > hintSpace) {
+                hints = hints.substring(0, hintSpace);
+            }
+            if (!hints.isEmpty()) {
+                right = hints;
+            }
         }
 
-        return left + " ".repeat(free - hints.length()) + hints;
+        if (right.length() > free) {
+            right = right.substring(0, free);
+        }
+        return left + " ".repeat(free - right.length()) + right;
+    }
+
+    private String buildStateIndicators(EditorState state) {
+        String ro = isReadOnlyFile(state.getCurrentFile()) ? "RO" : "RW";
+        String enc = state.getFileEncoding() == null ? "UTF-8" : state.getFileEncoding().name();
+        return ro + " ENC:" + enc + " INS";
     }
 
     private String buildSaveAsPrompt(StringBuilder saveAsInput) {
@@ -637,20 +678,22 @@ public class TerminalEditorApp {
         String replacement,
         SearchFocus focus,
         int cols,
-        SearchOptions searchOptions
+        SearchUiOptions searchUi,
+        int matchCount
     ) {
         String safeQuery = query == null ? "" : query;
         String safeReplacement = replacement == null ? "" : replacement;
         String findField = formatField("Find", safeQuery);
         String replaceField = formatField("Replace", safeReplacement);
-        String iToggle = formatToggle("i", searchOptions.caseInsensitive());
-        String wToggle = formatToggle("word", searchOptions.matchMode() == SearchOptions.MatchMode.WHOLE_WORD);
-        String starToggle = formatToggle("*", searchOptions.matchMode() == SearchOptions.MatchMode.WILDCARD);
+        String csToggle = formatToggle("Аа", searchUi.caseSensitive());
+        String wToggle = formatToggle("word", searchUi.matchMode() == SearchOptions.MatchMode.WHOLE_WORD);
+        String starToggle = formatToggle("*", searchUi.matchMode() == SearchOptions.MatchMode.WILDCARD);
+        String countToken = "[N:" + matchCount + "]";
         String prompt = findField + "  " + replaceField
-            + "  " + iToggle + " " + wToggle + " " + starToggle
+            + "  " + csToggle + " " + wToggle + " " + starToggle + " " + countToken
             + "  " + SEARCH_HELP;
 
-        int cursorIndex = cursorForFocus(findField, replaceField, iToggle, wToggle, starToggle, safeQuery, safeReplacement, focus);
+        int cursorIndex = cursorForFocus(findField, replaceField, csToggle, wToggle, starToggle, safeQuery, safeReplacement, focus);
 
         if (prompt.length() <= cols) {
             return new SearchBarView(prompt + " ".repeat(cols - prompt.length()), Math.min(cols, cursorIndex + 1));
@@ -707,23 +750,28 @@ public class TerminalEditorApp {
         return togglesStart + iToggle.length() + 1 + wToggle.length() + 1 + starCheckOffset;
     }
 
-    private SearchOptions toggleFocusedSearchOption(SearchOptions options, SearchFocus focus) {
+    private SearchUiOptions toggleFocusedSearchOption(SearchUiOptions options, SearchFocus focus) {
         return switch (focus) {
-            case CASE -> new SearchOptions(!options.caseInsensitive(), options.matchMode());
-            case WORD -> new SearchOptions(
-                options.caseInsensitive(),
+            case CASE -> new SearchUiOptions(!options.caseSensitive(), options.matchMode());
+            case WORD -> new SearchUiOptions(
+                options.caseSensitive(),
                 options.matchMode() == SearchOptions.MatchMode.WHOLE_WORD
                     ? SearchOptions.MatchMode.SUBSTRING
                     : SearchOptions.MatchMode.WHOLE_WORD
             );
-            case WILDCARD -> new SearchOptions(
-                options.caseInsensitive(),
+            case WILDCARD -> new SearchUiOptions(
+                options.caseSensitive(),
                 options.matchMode() == SearchOptions.MatchMode.WILDCARD
                     ? SearchOptions.MatchMode.SUBSTRING
                     : SearchOptions.MatchMode.WILDCARD
             );
             default -> options;
         };
+    }
+
+    private SearchOptions toSearchOptions(SearchUiOptions ui) {
+        SearchUiOptions safe = ui == null ? SearchUiOptions.DEFAULT : ui;
+        return new SearchOptions(!safe.caseSensitive(), safe.matchMode());
     }
 
     private boolean isToggleFocus(SearchFocus focus) {
@@ -738,6 +786,89 @@ public class TerminalEditorApp {
             case WORD -> SearchFocus.WILDCARD;
             case WILDCARD -> SearchFocus.FIND;
         };
+    }
+
+    private int countSearchMatches(TextModel model, String query, SearchOptions options) {
+        if (query == null || query.isEmpty()) {
+            return 0;
+        }
+        SearchOptions safe = options == null ? SearchOptions.DEFAULT : options;
+        int total = 0;
+        for (int i = 0; i < model.lineCount(); i++) {
+            total += findMatchesInLine(model.getLine(i), query, safe).size();
+        }
+        return total;
+    }
+
+    private static List<LineMatch> findMatchesInLine(String line, String query, SearchOptions options) {
+        String haystack = options.caseInsensitive() ? line.toLowerCase(Locale.ROOT) : line;
+        String needle = options.caseInsensitive() ? query.toLowerCase(Locale.ROOT) : query;
+        return switch (options.matchMode()) {
+            case SUBSTRING -> findLiteralMatches(haystack, needle, false);
+            case WHOLE_WORD -> findLiteralMatches(haystack, needle, true);
+            case WILDCARD -> findWildcardMatches(haystack, needle);
+        };
+    }
+
+    private static List<LineMatch> findLiteralMatches(String text, String needle, boolean wholeWord) {
+        if (needle.isEmpty()) {
+            return List.of();
+        }
+        List<LineMatch> matches = new ArrayList<>();
+        int at = 0;
+        while (at <= text.length() - needle.length()) {
+            int idx = text.indexOf(needle, at);
+            if (idx < 0) {
+                break;
+            }
+            int end = idx + needle.length();
+            if (!wholeWord || isWholeWord(text, idx, end)) {
+                matches.add(new LineMatch(idx, end));
+            }
+            at = end;
+        }
+        return matches;
+    }
+
+    private static List<LineMatch> findWildcardMatches(String text, String wildcard) {
+        List<LineMatch> matches = new ArrayList<>();
+        Pattern pattern = wildcardPattern(wildcard);
+        Matcher matcher = pattern.matcher(text);
+        while (matcher.find()) {
+            if (matcher.start() == matcher.end()) {
+                break;
+            }
+            matches.add(new LineMatch(matcher.start(), matcher.end()));
+        }
+        return matches;
+    }
+
+    private static Pattern wildcardPattern(String wildcard) {
+        StringBuilder regex = new StringBuilder("(?s)");
+        for (int i = 0; i < wildcard.length(); i++) {
+            char ch = wildcard.charAt(i);
+            if (ch == '*') {
+                regex.append(".*");
+            } else if (ch == '?') {
+                regex.append('.');
+            } else {
+                regex.append(Pattern.quote(String.valueOf(ch)));
+            }
+        }
+        return Pattern.compile(regex.toString());
+    }
+
+    private static boolean isWholeWord(String text, int start, int end) {
+        boolean leftOk = start == 0 || !isWordChar(text.charAt(start - 1));
+        boolean rightOk = end == text.length() || !isWordChar(text.charAt(end));
+        return leftOk && rightOk;
+    }
+
+    private static boolean isWordChar(char ch) {
+        return Character.isLetterOrDigit(ch) || ch == '_';
+    }
+
+    private record LineMatch(int start, int end) {
     }
 
     private enum SearchFocus {
@@ -780,6 +911,10 @@ public class TerminalEditorApp {
                 clear();
             }
         }
+    }
+
+    private record SearchUiOptions(boolean caseSensitive, SearchOptions.MatchMode matchMode) {
+        private static final SearchUiOptions DEFAULT = new SearchUiOptions(false, SearchOptions.MatchMode.SUBSTRING);
     }
 
     private LineHighlighter resolveHighlighter(Path file) {

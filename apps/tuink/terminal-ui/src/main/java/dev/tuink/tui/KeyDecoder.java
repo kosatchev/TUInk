@@ -26,6 +26,7 @@ public class KeyDecoder {
 
         return switch (ch) {
             case 3 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_C);
+            case 5 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_E);
             case 17 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_Q);
             case 19 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_S);
             case 26 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_Z);
@@ -89,10 +90,10 @@ public class KeyDecoder {
             }
             char c = (char) next;
             seq.append(c);
-            if ((c >= 'A' && c <= 'Z') || c == '~') {
+            if ((c >= 'A' && c <= 'Z') || c == '~' || c == 'm') {
                 break;
             }
-            if (seq.length() > 16) {
+            if (seq.length() > 32) {
                 break;
             }
         }
@@ -100,6 +101,12 @@ public class KeyDecoder {
     }
 
     private KeyEvent mapCsi(String seq) {
+        if (seq.startsWith("<")) {
+            KeyEvent mouse = parseSgrMouse(seq);
+            if (mouse != null) {
+                return mouse;
+            }
+        }
         return switch (seq) {
             case "A" -> new KeyEvent.ActionEvent(KeyEvent.Action.ARROW_UP);
             case "B" -> new KeyEvent.ActionEvent(KeyEvent.Action.ARROW_DOWN);
@@ -110,10 +117,65 @@ public class KeyDecoder {
             case "3~" -> new KeyEvent.ActionEvent(KeyEvent.Action.DELETE);
             case "5~" -> new KeyEvent.ActionEvent(KeyEvent.Action.PAGE_UP);
             case "6~" -> new KeyEvent.ActionEvent(KeyEvent.Action.PAGE_DOWN);
+            case "21~" -> new KeyEvent.ActionEvent(KeyEvent.Action.F10);
             case "12~" -> new KeyEvent.ActionEvent(KeyEvent.Action.F2);
             case "1;6S", "83;6u", "27;6;83~" -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_SHIFT_S);
             default -> mapModifiedArrows(seq);
         };
+    }
+
+    private KeyEvent parseSgrMouse(String seq) {
+        // CSI <Cb;Cx;Cy(M|m)
+        if (seq.length() < 4) {
+            return null;
+        }
+        char suffix = seq.charAt(seq.length() - 1);
+        if (suffix != 'M' && suffix != 'm') {
+            return null;
+        }
+        String payload = seq.substring(1, seq.length() - 1);
+        String[] parts = payload.split(";");
+        if (parts.length != 3) {
+            return null;
+        }
+        try {
+            int cb = Integer.parseInt(parts[0]);
+            int col = Integer.parseInt(parts[1]) - 1;
+            int row = Integer.parseInt(parts[2]) - 1;
+            if (row < 0 || col < 0) {
+                return null;
+            }
+            return mapMouse(cb, row, col, suffix);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private KeyEvent mapMouse(int cb, int row, int col, char suffix) {
+        boolean wheel = (cb & 64) != 0;
+        boolean drag = (cb & 32) != 0;
+        int base = cb & 3;
+
+        if (wheel) {
+            return new KeyEvent.MouseEvent(
+                row,
+                col,
+                base == 0 ? KeyEvent.MouseKind.SCROLL_UP : KeyEvent.MouseKind.SCROLL_DOWN,
+                KeyEvent.MouseButton.NONE
+            );
+        }
+
+        KeyEvent.MouseButton button = switch (base) {
+            case 0 -> KeyEvent.MouseButton.LEFT;
+            case 1 -> KeyEvent.MouseButton.MIDDLE;
+            case 2 -> KeyEvent.MouseButton.RIGHT;
+            default -> KeyEvent.MouseButton.NONE;
+        };
+        KeyEvent.MouseKind kind = switch (suffix) {
+            case 'm' -> KeyEvent.MouseKind.RELEASE;
+            default -> drag ? KeyEvent.MouseKind.DRAG : KeyEvent.MouseKind.PRESS;
+        };
+        return new KeyEvent.MouseEvent(row, col, kind, button);
     }
 
     private KeyEvent mapModifiedArrows(String seq) {

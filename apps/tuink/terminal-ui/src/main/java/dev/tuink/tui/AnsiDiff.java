@@ -13,8 +13,13 @@ public final class AnsiDiff {
     }
 
     public static String diff(CellBuffer previous, CellBuffer current) {
+        return diff(previous, current, true);
+    }
+
+    public static String diff(CellBuffer previous, CellBuffer current, boolean colorEnabled) {
         StringBuilder out = new StringBuilder();
         Style activeStyle = Style.DEFAULT;
+        boolean reverseActive = false;
         boolean wroteAnyCell = false;
 
         if (previous == null || previous.rows() != current.rows() || previous.cols() != current.cols()) {
@@ -23,9 +28,17 @@ public final class AnsiDiff {
                 moveTo(out, r, 0);
                 for (int c = 0; c < current.cols(); c++) {
                     Cell cell = current.get(r, c);
-                    if (!activeStyle.equals(cell.style())) {
-                        out.append(toAnsi(cell.style()));
-                        activeStyle = cell.style();
+                    if (colorEnabled) {
+                        if (!activeStyle.equals(cell.style())) {
+                            out.append(toAnsi(cell.style()));
+                            activeStyle = cell.style();
+                        }
+                    } else {
+                        boolean reverse = shouldReverseInMonochrome(cell.style());
+                        if (reverse != reverseActive) {
+                            out.append(reverse ? "\u001B[7m" : "\u001B[27m");
+                            reverseActive = reverse;
+                        }
                     }
                     out.append(cell.grapheme());
                     wroteAnyCell = true;
@@ -46,9 +59,17 @@ public final class AnsiDiff {
                 }
 
                 moveTo(out, r, c);
-                if (!activeStyle.equals(next.style())) {
-                    out.append(toAnsi(next.style()));
-                    activeStyle = next.style();
+                if (colorEnabled) {
+                    if (!activeStyle.equals(next.style())) {
+                        out.append(toAnsi(next.style()));
+                        activeStyle = next.style();
+                    }
+                } else {
+                    boolean reverse = shouldReverseInMonochrome(next.style());
+                    if (reverse != reverseActive) {
+                        out.append(reverse ? "\u001B[7m" : "\u001B[27m");
+                        reverseActive = reverse;
+                    }
                 }
                 out.append(next.grapheme());
                 wroteAnyCell = true;
@@ -59,6 +80,10 @@ public final class AnsiDiff {
             out.append("\u001B[0m");
         }
         return out.toString();
+    }
+
+    private static boolean shouldReverseInMonochrome(Style style) {
+        return style.bg() != Color.DEFAULT;
     }
 
     private static void moveTo(StringBuilder out, int row, int col) {

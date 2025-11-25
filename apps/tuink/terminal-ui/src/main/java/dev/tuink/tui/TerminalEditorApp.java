@@ -36,19 +36,38 @@ import org.jline.utils.NonBlockingReader;
  */
 public class TerminalEditorApp {
     private static final String DEFAULT_FILE_NAME = "untitled.txt";
-    private static final String KEY_HINTS = "Ctrl+F Search  Ctrl+C/X/V  Ctrl+Z/Y  Ctrl+Q";
+    private static final String KEY_HINTS = "Ctrl+E Menu  Ctrl+F Search  Ctrl+C/X/V  Ctrl+Z/Y  Ctrl+Q";
     private static final String SEARCH_HELP = "Tab focus  Space toggle  Enter next  Ctrl+G prev  Ctrl+R replace  Ctrl+A all  Esc";
     private static final String SAVE_AS_PROMPT = "Save As: ";
     private static final Style SAVE_PROMPT_STYLE = new Style(Color.BRIGHT_WHITE, Color.RED, false, false);
+    private static final Style MENU_POPUP_STYLE = new Style(Color.BLACK, Color.BRIGHT_WHITE, false, false);
+    private static final Style MENU_SELECTED_STYLE = new Style(Color.BLACK, Color.BRIGHT_YELLOW, true, false);
     private static final Style NOTIFY_SUCCESS_STYLE = new Style(Color.BLACK, Color.BRIGHT_GREEN, false, false);
     private static final Style NOTIFY_ERROR_STYLE = new Style(Color.BRIGHT_WHITE, Color.RED, false, false);
     private static final long NOTIFY_DURATION_NANOS = 3_000_000_000L;
+    private static final String[] FILE_MENU_ITEMS = {"Open...", "Save", "Save As...", "Quit"};
+    private static final String[] EDIT_MENU_ITEMS = {"Undo", "Redo", "Cut", "Copy", "Paste"};
+    private static final String ENABLE_MOUSE_TRACKING = "\u001B[?1000h\u001B[?1002h\u001B[?1006h";
+    private static final String DISABLE_MOUSE_TRACKING = "\u001B[?1000l\u001B[?1002l\u001B[?1006l";
 
     public static void main(String[] args) throws Exception {
         new TerminalEditorApp().run(args);
     }
 
     private void run(String[] args) throws Exception {
+        CliOptions cli;
+        try {
+            cli = parseArgs(args);
+        } catch (IllegalArgumentException e) {
+            System.err.println(e.getMessage());
+            printUsage();
+            return;
+        }
+        if (cli.showHelp()) {
+            printUsage();
+            return;
+        }
+
         TextModel model = new TextModel(new SimpleLineBuffer());
         EditorState state = new EditorState();
         EditorEngine engine = new EditorEngine(model, state);
@@ -67,9 +86,13 @@ public class TerminalEditorApp {
         StringBuilder searchQueryInput = new StringBuilder();
         StringBuilder searchReplaceInput = new StringBuilder();
         SearchUiOptions searchUi = SearchUiOptions.DEFAULT;
+        boolean mainMenuOpen = false;
+        MainMenu activeMenu = MainMenu.EDIT;
+        int mainMenuIndex = 0;
+        boolean mouseSelecting = false;
 
-        if (args.length > 0) {
-            Path file = Path.of(args[0]);
+        if (cli.file() != null) {
+            Path file = cli.file();
             try {
                 engine.open(file);
                 renderPlanBuilder = new RenderPlanBuilder(resolveHighlighter(file));
@@ -105,7 +128,16 @@ public class TerminalEditorApp {
             int lastCursorCol = -1;
             Runnable cleanup = () -> {
                 if (cleanedUp.compareAndSet(false, true)) {
-                    writer.print("\u001B[0m\u001B[?25h\u001B[?1049l\u001B[2J\u001B[H");
+                    StringBuilder out = new StringBuilder("\u001B[0m");
+                    if (cli.mouseEnabled()) {
+                        out.append(DISABLE_MOUSE_TRACKING);
+                    }
+                    out.append("\u001B[?25h");
+                    if (cli.altScreenEnabled()) {
+                        out.append("\u001B[?1049l");
+                    }
+                    out.append("\u001B[2J\u001B[H");
+                    writer.print(out);
                     writer.flush();
                     terminal.setAttributes(original);
                 }
@@ -113,7 +145,15 @@ public class TerminalEditorApp {
             Thread shutdownHook = new Thread(cleanup, "tuink-terminal-cleanup");
             Runtime.getRuntime().addShutdownHook(shutdownHook);
             try {
-                writer.print("\u001B[?1049h\u001B[?25h\u001B[2J");
+                StringBuilder init = new StringBuilder();
+                if (cli.altScreenEnabled()) {
+                    init.append("\u001B[?1049h");
+                }
+                init.append("\u001B[?25h\u001B[2J");
+                if (cli.mouseEnabled()) {
+                    init.append(ENABLE_MOUSE_TRACKING);
+                }
+                writer.print(init);
                 writer.flush();
 
                 KeyDecoder decoder = new KeyDecoder(input);
@@ -129,7 +169,7 @@ public class TerminalEditorApp {
                     int contentRows = Math.max(0, editorRows - 2);
                     engine.ensureCursorVisible(contentRows);
 
-                    String topBar = buildTopBar(state, cols);
+                    String topBar = buildTopBar(state, cols, mainMenuOpen, activeMenu);
                     String bottomBar = buildBottomBar(state, model, statusMessage, cols);
                     String interactiveBarText = null;
                     Style interactiveBarStyle = null;
@@ -171,6 +211,7 @@ public class TerminalEditorApp {
                         notification.style
                     );
                     CellBuffer current = renderer.rasterize(plan, rows, cols);
+                    drawMainMenuOverlay(current, cols, mainMenuOpen, activeMenu, mainMenuIndex);
 
                     int desiredCursorRow = plan.cursorRow() + 2;
                     int desiredCursorCol = plan.cursorCol() + 1;
@@ -185,9 +226,12 @@ public class TerminalEditorApp {
                     } else if (searchBar != null) {
                         desiredCursorRow = interactiveCursorRow;
                         desiredCursorCol = searchBar.cursorCol();
+                    } else if (mainMenuOpen) {
+                        desiredCursorRow = Math.min(rows, 3 + mainMenuIndex);
+                        desiredCursorCol = Math.min(cols, 3);
                     }
 
-                    String frameDiff = AnsiDiff.diff(previous, current);
+                    String frameDiff = AnsiDiff.diff(previous, current, cli.colorEnabled());
                     boolean cursorMoved = desiredCursorRow != lastCursorRow || desiredCursorCol != lastCursorCol;
                     if (!frameDiff.isEmpty() || cursorMoved) {
                         writer.print(frameDiff);
@@ -209,6 +253,125 @@ public class TerminalEditorApp {
                     if (!(key instanceof KeyEvent.ActionEvent actionEvent
                         && actionEvent.action() == KeyEvent.Action.CTRL_Q)) {
                         confirmQuit = false;
+                    }
+
+                    if (key instanceof KeyEvent.MouseEvent mouse) {
+                        if (!cli.mouseEnabled()) {
+                            continue;
+                        }
+                        KeyEvent remappedMouseKey = null;
+                        switch (mouse.kind()) {
+                            case SCROLL_UP -> {
+                                if (!saveAsMode && !saveOverwriteConfirmMode && !searchMode) {
+                                    engine.pageUp(Math.max(1, contentRows / 2));
+                                }
+                            }
+                            case SCROLL_DOWN -> {
+                                if (!saveAsMode && !saveOverwriteConfirmMode && !searchMode) {
+                                    engine.pageDown(Math.max(1, contentRows / 2));
+                                }
+                            }
+                            case PRESS -> {
+                                if (mouse.button() == KeyEvent.MouseButton.LEFT) {
+                                    if (mouse.row() == 0) {
+                                        if (mouse.col() >= 0 && mouse.col() < 6) {
+                                            boolean sameMenuOpen = mainMenuOpen && activeMenu == MainMenu.FILE;
+                                            activeMenu = MainMenu.FILE;
+                                            mainMenuOpen = !sameMenuOpen;
+                                            mainMenuIndex = 0;
+                                            mouseSelecting = false;
+                                            continue;
+                                        }
+                                        if (mouse.col() >= 7 && mouse.col() < 13) {
+                                            boolean sameMenuOpen = mainMenuOpen && activeMenu == MainMenu.EDIT;
+                                            activeMenu = MainMenu.EDIT;
+                                            mainMenuOpen = !sameMenuOpen;
+                                            mainMenuIndex = 0;
+                                            mouseSelecting = false;
+                                            continue;
+                                        }
+                                    }
+                                    if (mainMenuOpen) {
+                                        String[] items = menuItems(activeMenu);
+                                        int popupStartCol = activeMenu == MainMenu.FILE ? 0 : 7;
+                                        int popupWidth = menuPopupWidth(cols, activeMenu);
+                                        if (mouse.col() >= popupStartCol && mouse.col() < popupStartCol + popupWidth
+                                            && mouse.row() >= 2 && mouse.row() < 2 + items.length) {
+                                            mainMenuIndex = mouse.row() - 2;
+                                            KeyEvent.Action mapped = mapMenuSelection(activeMenu, mainMenuIndex);
+                                            if (mapped == null) {
+                                                statusMessage = activeMenu == MainMenu.FILE
+                                                    ? "Open not implemented"
+                                                    : "";
+                                            } else {
+                                                remappedMouseKey = new KeyEvent.ActionEvent(mapped);
+                                            }
+                                        }
+                                        mainMenuOpen = false;
+                                        mouseSelecting = false;
+                                        break;
+                                    }
+                                    if (searchMode && searchBar != null) {
+                                        int searchBarRow = interactiveCursorRow - 1;
+                                        if (mouse.row() == searchBarRow) {
+                                            SearchFocus clickedFocus = searchFocusAtMouse(searchBar, mouse.col());
+                                            if (clickedFocus != null) {
+                                                searchFocus = clickedFocus;
+                                                if (isToggleFocus(clickedFocus)) {
+                                                    SearchUiOptions before = searchUi;
+                                                    searchUi = toggleFocusedSearchOption(searchUi, clickedFocus);
+                                                    if (!searchUi.equals(before)) {
+                                                        statusMessage = "Search options updated";
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        mouseSelecting = false;
+                                        continue;
+                                    }
+                                    if (!saveAsMode && !saveOverwriteConfirmMode && !searchMode) {
+                                        Position hit = mouseToTextPosition(mouse, model, state, plan, contentRows);
+                                        if (hit != null) {
+                                            mouseSelecting = true;
+                                            state.setSelectionAnchor(hit);
+                                            state.setCursor(hit);
+                                        } else {
+                                            mouseSelecting = false;
+                                        }
+                                        engine.ensureCursorVisible(contentRows);
+                                    }
+                                }
+                            }
+                            case DRAG -> {
+                                if (mouseSelecting && mouse.button() == KeyEvent.MouseButton.LEFT
+                                    && !saveAsMode && !saveOverwriteConfirmMode && !searchMode) {
+                                    Position hit = mouseToTextPosition(mouse, model, state, plan, contentRows);
+                                    if (hit != null) {
+                                        if (state.getSelectionAnchor() == null) {
+                                            state.setSelectionAnchor(state.getCursor());
+                                        }
+                                        state.setCursor(hit);
+                                        engine.ensureCursorVisible(contentRows);
+                                    }
+                                }
+                            }
+                            case RELEASE -> {
+                                if (mouseSelecting) {
+                                    mouseSelecting = false;
+                                    if (state.getSelectionAnchor() != null
+                                        && state.getSelectionAnchor().equals(state.getCursor())) {
+                                        state.clearSelection();
+                                    }
+                                }
+                            }
+                            default -> {
+                                // Ignore drag and release mouse events.
+                            }
+                        }
+                        if (remappedMouseKey == null) {
+                            continue;
+                        }
+                        key = remappedMouseKey;
                     }
 
                     if (saveAsMode) {
@@ -308,6 +471,55 @@ public class TerminalEditorApp {
                             }
                         }
                         continue;
+                    }
+
+                    if (mainMenuOpen) {
+                        if (key instanceof KeyEvent.CharInput) {
+                            continue;
+                        }
+                        KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
+                        switch (action) {
+                            case ESCAPE -> mainMenuOpen = false;
+                            case CTRL_E -> {
+                                activeMenu = MainMenu.EDIT;
+                                mainMenuIndex = 0;
+                            }
+                            case F10 -> {
+                                activeMenu = MainMenu.FILE;
+                                mainMenuIndex = 0;
+                            }
+                            case ARROW_LEFT -> {
+                                activeMenu = previousMenu(activeMenu);
+                                mainMenuIndex = Math.min(mainMenuIndex, menuItems(activeMenu).length - 1);
+                            }
+                            case ARROW_RIGHT -> {
+                                activeMenu = nextMenu(activeMenu);
+                                mainMenuIndex = Math.min(mainMenuIndex, menuItems(activeMenu).length - 1);
+                            }
+                            case ARROW_UP -> {
+                                String[] items = menuItems(activeMenu);
+                                mainMenuIndex = (mainMenuIndex + items.length - 1) % items.length;
+                            }
+                            case ARROW_DOWN -> {
+                                String[] items = menuItems(activeMenu);
+                                mainMenuIndex = (mainMenuIndex + 1) % items.length;
+                            }
+                            case ENTER -> {
+                                KeyEvent.Action mapped = mapMenuSelection(activeMenu, mainMenuIndex);
+                                mainMenuOpen = false;
+                                if (mapped == null) {
+                                    statusMessage = activeMenu == MainMenu.FILE ? "Open not implemented" : "";
+                                    continue;
+                                }
+                                key = new KeyEvent.ActionEvent(mapped);
+                            }
+                            default -> {
+                                // Keep focus in menu until explicit close/action.
+                            }
+                        }
+                        if (mainMenuOpen) {
+                            continue;
+                        }
                     }
 
                     if (searchMode) {
@@ -453,6 +665,16 @@ public class TerminalEditorApp {
 
                     KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
                     switch (action) {
+                        case CTRL_E -> {
+                            activeMenu = MainMenu.EDIT;
+                            mainMenuOpen = true;
+                            mainMenuIndex = 0;
+                        }
+                        case F10 -> {
+                            activeMenu = MainMenu.FILE;
+                            mainMenuOpen = true;
+                            mainMenuIndex = 0;
+                        }
                         case CTRL_Q -> {
                             if (state.isDirty() && !confirmQuit) {
                                 confirmQuit = true;
@@ -540,14 +762,108 @@ public class TerminalEditorApp {
         }
     }
 
-    private String buildTopBar(EditorState state, int cols) {
+    private String buildTopBar(EditorState state, int cols, boolean mainMenuOpen, MainMenu activeMenu) {
+        String fileMenu = (mainMenuOpen && activeMenu == MainMenu.FILE) ? "[File]" : " File ";
+        String editMenu = (mainMenuOpen && activeMenu == MainMenu.EDIT) ? "[Edit]" : " Edit ";
         String file = state.getCurrentFile() == null ? "[No Name]" : state.getCurrentFile().toString();
         String dirty = state.isDirty() ? " [+]" : "";
-        String top = file + dirty;
+        String top = fileMenu + " " + editMenu + " " + file + dirty;
         if (top.length() > cols) {
             return top.substring(0, cols);
         }
         return top + " ".repeat(cols - top.length());
+    }
+
+    private Position mouseToTextPosition(
+        KeyEvent.MouseEvent mouse,
+        TextModel model,
+        EditorState state,
+        RenderPlan plan,
+        int contentRows
+    ) {
+        if (mouse.row() < 1 || mouse.row() > contentRows) {
+            return null;
+        }
+        int line = state.getTopLine() + (mouse.row() - 1);
+        line = Math.max(0, Math.min(line, model.lineCount() - 1));
+        int col = mouse.col() < plan.gutterWidth()
+            ? 0
+            : state.getLeftColumn() + (mouse.col() - plan.gutterWidth());
+        return model.clamp(new Position(line, Math.max(0, col)));
+    }
+
+    private void drawMainMenuOverlay(CellBuffer buffer, int cols, boolean visible, MainMenu menu, int selectedIndex) {
+        if (!visible || buffer.rows() < 4 || cols < 8) {
+            return;
+        }
+        String[] items = menuItems(menu);
+        int popupWidth = menuPopupWidth(cols, menu);
+        int popupHeight = Math.min(buffer.rows() - 1, items.length + 2);
+        if (popupHeight < 3) {
+            return;
+        }
+        int startCol = menu == MainMenu.FILE ? 0 : 7;
+        drawMenuLine(buffer, 1, startCol, "┌" + "─".repeat(Math.max(0, popupWidth - 2)) + "┐", MENU_POPUP_STYLE, cols);
+        for (int i = 0; i < popupHeight - 2; i++) {
+            String label = i < items.length ? items[i] : "";
+            String content = padRight(" " + label, Math.max(0, popupWidth - 2));
+            Style style = i == selectedIndex ? MENU_SELECTED_STYLE : MENU_POPUP_STYLE;
+            drawMenuLine(buffer, 2 + i, startCol, "│" + content + "│", style, cols);
+        }
+        drawMenuLine(buffer, popupHeight, startCol, "└" + "─".repeat(Math.max(0, popupWidth - 2)) + "┘", MENU_POPUP_STYLE, cols);
+    }
+
+    private int menuPopupWidth(int cols, MainMenu menu) {
+        int popupWidth = 16;
+        for (String item : menuItems(menu)) {
+            popupWidth = Math.max(popupWidth, item.length() + 4);
+        }
+        return Math.min(cols, popupWidth);
+    }
+
+    private void drawMenuLine(CellBuffer buffer, int row, int startCol, String text, Style style, int cols) {
+        for (int i = 0; i < text.length() && startCol + i < cols; i++) {
+            buffer.set(row, startCol + i, String.valueOf(text.charAt(i)), style);
+        }
+    }
+
+    private String padRight(String text, int width) {
+        if (text.length() >= width) {
+            return text.substring(0, width);
+        }
+        return text + " ".repeat(width - text.length());
+    }
+
+    private String[] menuItems(MainMenu menu) {
+        return menu == MainMenu.FILE ? FILE_MENU_ITEMS : EDIT_MENU_ITEMS;
+    }
+
+    private KeyEvent.Action mapMenuSelection(MainMenu menu, int itemIndex) {
+        if (menu == MainMenu.FILE) {
+            return switch (itemIndex) {
+                case 0 -> null;
+                case 1 -> KeyEvent.Action.CTRL_S;
+                case 2 -> KeyEvent.Action.CTRL_K;
+                case 3 -> KeyEvent.Action.CTRL_Q;
+                default -> null;
+            };
+        }
+        return switch (itemIndex) {
+            case 0 -> KeyEvent.Action.CTRL_Z;
+            case 1 -> KeyEvent.Action.CTRL_Y;
+            case 2 -> KeyEvent.Action.CTRL_X;
+            case 3 -> KeyEvent.Action.CTRL_C;
+            case 4 -> KeyEvent.Action.CTRL_V;
+            default -> null;
+        };
+    }
+
+    private MainMenu nextMenu(MainMenu menu) {
+        return menu == MainMenu.FILE ? MainMenu.EDIT : MainMenu.FILE;
+    }
+
+    private MainMenu previousMenu(MainMenu menu) {
+        return nextMenu(menu);
     }
 
     private String buildBottomBar(EditorState state, TextModel model, String message, int cols) {
@@ -689,6 +1005,16 @@ public class TerminalEditorApp {
         String wToggle = formatToggle("word", searchUi.matchMode() == SearchOptions.MatchMode.WHOLE_WORD);
         String starToggle = formatToggle("*", searchUi.matchMode() == SearchOptions.MatchMode.WILDCARD);
         String countToken = "[N:" + matchCount + "]";
+        int findStart = 0;
+        int findEnd = findStart + findField.length();
+        int replaceStart = findEnd + 2;
+        int replaceEnd = replaceStart + replaceField.length();
+        int caseStart = replaceEnd + 2;
+        int caseEnd = caseStart + csToggle.length();
+        int wordStart = caseEnd + 1;
+        int wordEnd = wordStart + wToggle.length();
+        int wildcardStart = wordEnd + 1;
+        int wildcardEnd = wildcardStart + starToggle.length();
         String prompt = findField + "  " + replaceField
             + "  " + csToggle + " " + wToggle + " " + starToggle + " " + countToken
             + "  " + SEARCH_HELP;
@@ -696,7 +1022,21 @@ public class TerminalEditorApp {
         int cursorIndex = cursorForFocus(findField, replaceField, csToggle, wToggle, starToggle, safeQuery, safeReplacement, focus);
 
         if (prompt.length() <= cols) {
-            return new SearchBarView(prompt + " ".repeat(cols - prompt.length()), Math.min(cols, cursorIndex + 1));
+            return new SearchBarView(
+                prompt + " ".repeat(cols - prompt.length()),
+                Math.min(cols, cursorIndex + 1),
+                0,
+                findStart,
+                findEnd,
+                replaceStart,
+                replaceEnd,
+                caseStart,
+                caseEnd,
+                wordStart,
+                wordEnd,
+                wildcardStart,
+                wildcardEnd
+            );
         }
 
         int start = Math.max(0, cursorIndex - cols + 1);
@@ -706,10 +1046,61 @@ public class TerminalEditorApp {
             clipped = clipped + " ".repeat(cols - clipped.length());
         }
         int cursorCol = Math.max(1, Math.min(cols, cursorIndex - start + 1));
-        return new SearchBarView(clipped, cursorCol);
+        return new SearchBarView(
+            clipped,
+            cursorCol,
+            start,
+            findStart,
+            findEnd,
+            replaceStart,
+            replaceEnd,
+            caseStart,
+            caseEnd,
+            wordStart,
+            wordEnd,
+            wildcardStart,
+            wildcardEnd
+        );
     }
 
-    private record SearchBarView(String text, int cursorCol) {
+    private SearchFocus searchFocusAtMouse(SearchBarView searchBar, int mouseCol) {
+        if (searchBar == null || mouseCol < 0) {
+            return null;
+        }
+        int promptIndex = searchBar.promptStart() + mouseCol;
+        if (promptIndex >= searchBar.findStart() && promptIndex < searchBar.findEnd()) {
+            return SearchFocus.FIND;
+        }
+        if (promptIndex >= searchBar.replaceStart() && promptIndex < searchBar.replaceEnd()) {
+            return SearchFocus.REPLACE;
+        }
+        if (promptIndex >= searchBar.caseStart() && promptIndex < searchBar.caseEnd()) {
+            return SearchFocus.CASE;
+        }
+        if (promptIndex >= searchBar.wordStart() && promptIndex < searchBar.wordEnd()) {
+            return SearchFocus.WORD;
+        }
+        if (promptIndex >= searchBar.wildcardStart() && promptIndex < searchBar.wildcardEnd()) {
+            return SearchFocus.WILDCARD;
+        }
+        return null;
+    }
+
+    private record SearchBarView(
+        String text,
+        int cursorCol,
+        int promptStart,
+        int findStart,
+        int findEnd,
+        int replaceStart,
+        int replaceEnd,
+        int caseStart,
+        int caseEnd,
+        int wordStart,
+        int wordEnd,
+        int wildcardStart,
+        int wildcardEnd
+    ) {
     }
 
     private static String formatField(String label, String value) {
@@ -871,6 +1262,11 @@ public class TerminalEditorApp {
     private record LineMatch(int start, int end) {
     }
 
+    private enum MainMenu {
+        FILE,
+        EDIT
+    }
+
     private enum SearchFocus {
         FIND,
         REPLACE,
@@ -919,5 +1315,50 @@ public class TerminalEditorApp {
 
     private LineHighlighter resolveHighlighter(Path file) {
         return file == null ? RegexHighlighter.withDefaults() : RegexHighlighter.forFileName(file.getFileName().toString());
+    }
+
+    private CliOptions parseArgs(String[] args) {
+        boolean mouseEnabled = true;
+        boolean altScreenEnabled = true;
+        boolean colorEnabled = true;
+        boolean showHelp = false;
+        Path file = null;
+
+        for (String arg : args) {
+            switch (arg) {
+                case "--no-mouse" -> mouseEnabled = false;
+                case "--no-alt-screen" -> altScreenEnabled = false;
+                case "--no-color" -> colorEnabled = false;
+                case "--help", "-h" -> showHelp = true;
+                default -> {
+                    if (arg.startsWith("--")) {
+                        throw new IllegalArgumentException("Unknown option: " + arg);
+                    }
+                    if (file != null) {
+                        throw new IllegalArgumentException("Only one file path is supported.");
+                    }
+                    file = Path.of(arg);
+                }
+            }
+        }
+        return new CliOptions(file, mouseEnabled, altScreenEnabled, colorEnabled, showHelp);
+    }
+
+    private void printUsage() {
+        System.out.println("Usage: :tui:run --args=\"[options] [file]\"");
+        System.out.println("Options:");
+        System.out.println("  --no-mouse       Disable mouse tracking and mouse interactions");
+        System.out.println("  --no-alt-screen  Do not use alternate screen buffer");
+        System.out.println("  --no-color       Render without ANSI colors/styles");
+        System.out.println("  --help, -h       Show this help");
+    }
+
+    private record CliOptions(
+        Path file,
+        boolean mouseEnabled,
+        boolean altScreenEnabled,
+        boolean colorEnabled,
+        boolean showHelp
+    ) {
     }
 }

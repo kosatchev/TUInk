@@ -3,8 +3,24 @@ package dev.tuink.tui;
 /**
  * Decoded key events from terminal input.
  */
-public sealed interface KeyEvent permits KeyEvent.ActionEvent, KeyEvent.CharInput {
+public sealed interface KeyEvent permits KeyEvent.ActionEvent, KeyEvent.CharInput, KeyEvent.MouseEvent {
+    enum MouseButton {
+        LEFT,
+        MIDDLE,
+        RIGHT,
+        NONE
+    }
+
+    enum MouseKind {
+        PRESS,
+        RELEASE,
+        DRAG,
+        SCROLL_UP,
+        SCROLL_DOWN
+    }
+
     enum Action {
+        CTRL_E,
         CTRL_Q,
         CTRL_S,
         CTRL_SHIFT_S,
@@ -17,6 +33,7 @@ public sealed interface KeyEvent permits KeyEvent.ActionEvent, KeyEvent.CharInpu
         CTRL_W,
         CTRL_O,
         F2,
+        F10,
         CTRL_F,
         CTRL_R,
         CTRL_A,
@@ -45,5 +62,8 @@ public sealed interface KeyEvent permits KeyEvent.ActionEvent, KeyEvent.CharInpu
     }
 
     record CharInput(char ch) implements KeyEvent {
+    }
+
+    record MouseEvent(int row, int col, MouseKind kind, MouseButton button) implements KeyEvent {
     }
 }

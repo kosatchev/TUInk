@@ -7,7 +7,7 @@ import java.util.List;
  */
 public class RenderRasterizer {
     private static final Style GUTTER_STYLE = new Style(Color.BRIGHT_BLACK, Color.DEFAULT, false, false);
-    private static final Style FILEBAR_STYLE = new Style(Color.BLACK, Color.BRIGHT_CYAN, true, false);
+    private static final Style FILEBAR_STYLE = new Style(Color.BRIGHT_WHITE, Color.BLUE, true, false);
     private static final Style STATUS_STYLE = new Style(Color.BLACK, Color.BRIGHT_WHITE, false, false);
     private static final Style INTERACTIVE_STYLE = new Style(Color.BLACK, Color.BRIGHT_YELLOW, false, false);
     private static final Style NOTIFICATION_STYLE = new Style(Color.BLACK, Color.BRIGHT_GREEN, false, false);

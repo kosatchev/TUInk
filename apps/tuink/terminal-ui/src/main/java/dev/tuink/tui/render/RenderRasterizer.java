@@ -1,13 +1,19 @@
-package dev.tuink.render;
+package dev.tuink.tui.render;
 
+import dev.tuink.render.Color;
+import dev.tuink.render.LineVisual;
+import dev.tuink.render.RenderPlan;
+import dev.tuink.render.Style;
+import dev.tuink.render.StyleSpan;
 import java.util.List;
 
 /**
  * Converts an abstract render plan into a cell buffer.
  */
 public class RenderRasterizer {
-    private static final Style GUTTER_STYLE = new Style(Color.BRIGHT_BLACK, Color.DEFAULT, false, false);
-    private static final Style FILEBAR_STYLE = new Style(Color.BRIGHT_WHITE, Color.BLUE, true, false);
+    private static final int TAB_WIDTH = 4;
+    private static final Style GUTTER_STYLE = new Style(Color.BRIGHT_BLACK, Color.BLACK, false, false);
+    private static final Style FILEBAR_STYLE = new Style(Color.BRIGHT_WHITE, Color.BLUE, false, false);
     private static final Style STATUS_STYLE = new Style(Color.BLACK, Color.BRIGHT_WHITE, false, false);
     private static final Style INTERACTIVE_STYLE = new Style(Color.BLACK, Color.BRIGHT_YELLOW, false, false);
     private static final Style NOTIFICATION_STYLE = new Style(Color.BLACK, Color.BRIGHT_GREEN, false, false);
@@ -64,24 +70,18 @@ public class RenderRasterizer {
         if (trackHeight <= 0) {
             return;
         }
-
-        for (int i = 0; i < trackHeight; i++) {
-            buffer.set(trackTop + i, barCol, "│", SCROLL_TRACK_STYLE);
-        }
-
-        int totalLines = Math.max(1, plan.totalLines());
-        int visibleLines = Math.max(1, plan.contentRows());
-        int thumbSize = Math.max(1, (int) Math.round((visibleLines / (double) totalLines) * trackHeight));
-        thumbSize = Math.min(trackHeight, thumbSize);
-
-        int thumbTravel = Math.max(0, trackHeight - thumbSize);
-        int maxTopLine = Math.max(1, totalLines - visibleLines);
-        int topLine = Math.max(0, plan.topLine());
-        int thumbOffset = thumbTravel == 0 ? 0 : (int) Math.round((topLine / (double) maxTopLine) * thumbTravel);
-
-        for (int i = 0; i < thumbSize; i++) {
-            buffer.set(trackTop + thumbOffset + i, barCol, "█", SCROLL_THUMB_STYLE);
-        }
+        VerticalScrollbar.draw(
+            buffer,
+            trackTop,
+            barCol,
+            trackHeight,
+            Math.max(1, plan.totalLines()),
+            Math.max(0, plan.topLine()),
+            "│",
+            SCROLL_TRACK_STYLE,
+            "█",
+            SCROLL_THUMB_STYLE
+        );
     }
 
     private void drawHighlightedText(
@@ -122,8 +122,29 @@ public class RenderRasterizer {
             break;
         }
 
-        for (int i = 0; i < text.length() && startCol + i < cols; i++) {
-            buffer.set(row, startCol + i, graphemes[i], styles[i]);
+        int outCol = startCol;
+        for (int i = 0; i < text.length() && outCol < cols; i++) {
+            char ch = text.charAt(i);
+            if (ch == '\t') {
+                int relativeCol = Math.max(0, outCol - startCol);
+                int tabAdvance = TAB_WIDTH - (relativeCol % TAB_WIDTH);
+                if ("»".equals(graphemes[i])) {
+                    buffer.set(row, outCol, "»", styles[i]);
+                    outCol++;
+                    for (int j = 1; j < tabAdvance && outCol < cols; j++) {
+                        buffer.set(row, outCol, " ", styles[i]);
+                        outCol++;
+                    }
+                } else {
+                    for (int j = 0; j < tabAdvance && outCol < cols; j++) {
+                        buffer.set(row, outCol, " ", styles[i]);
+                        outCol++;
+                    }
+                }
+                continue;
+            }
+            buffer.set(row, outCol, graphemes[i], styles[i]);
+            outCol++;
         }
     }
 

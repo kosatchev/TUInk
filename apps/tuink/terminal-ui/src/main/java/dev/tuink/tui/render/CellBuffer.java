@@ -1,4 +1,6 @@
-package dev.tuink.render;
+package dev.tuink.tui.render;
+
+import dev.tuink.render.Style;
 
 /**
  * 2D frame buffer used by UI adapters (terminal, GUI, web).

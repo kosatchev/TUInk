@@ -15,6 +15,7 @@ import java.util.regex.Pattern;
  */
 public class RenderPlanBuilder {
     private final LineHighlighter highlighter;
+    private static final int TAB_WIDTH = 4;
     private static final Style SELECTION_STYLE = new Style(Color.BLACK, Color.BRIGHT_WHITE, false, false);
     private static final Style SEARCH_MATCH_STYLE = SELECTION_STYLE;
     private static final Style CURRENT_SEARCH_MATCH_STYLE = new Style(Color.BLACK, Color.BRIGHT_YELLOW, false, false);
@@ -149,7 +150,7 @@ public class RenderPlanBuilder {
 
         Position cursor = model.clamp(state.getCursor());
         int cursorRow = cursor.line() - state.getTopLine();
-        int cursorCol = gutterWidth + Math.max(0, cursor.col() - state.getLeftColumn());
+        int cursorCol = gutterWidth + visualColumn(model.getLine(cursor.line()), state.getLeftColumn(), cursor.col());
         int maxCursorCol = Math.max(gutterWidth, safeCols - 1 - scrollbarWidth);
         cursorRow = Math.max(0, Math.min(cursorRow, Math.max(contentRows - 1, 0)));
         cursorCol = Math.max(gutterWidth, Math.min(cursorCol, maxCursorCol));
@@ -199,6 +200,22 @@ public class RenderPlanBuilder {
             }
         }
         return clipped;
+    }
+
+    private static int visualColumn(String line, int leftColumn, int col) {
+        int start = Math.max(0, Math.min(leftColumn, line.length()));
+        int end = Math.max(start, Math.min(col, line.length()));
+        int visual = 0;
+        for (int i = start; i < end; i++) {
+            char ch = line.charAt(i);
+            if (ch == '\t') {
+                int tabAdvance = TAB_WIDTH - (visual % TAB_WIDTH);
+                visual += tabAdvance;
+            } else {
+                visual++;
+            }
+        }
+        return visual;
     }
 
     private static String pad(String text, int width) {

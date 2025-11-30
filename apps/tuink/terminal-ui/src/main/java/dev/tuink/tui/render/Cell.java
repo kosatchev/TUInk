@@ -1,4 +1,6 @@
-package dev.tuink.render;
+package dev.tuink.tui.render;
+
+import dev.tuink.render.Style;
 
 /**
  * Single rendered cell independent from concrete UI toolkit.

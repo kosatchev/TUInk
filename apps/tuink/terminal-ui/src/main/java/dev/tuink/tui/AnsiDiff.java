@@ -1,7 +1,7 @@
 package dev.tuink.tui;
 
-import dev.tuink.render.Cell;
-import dev.tuink.render.CellBuffer;
+import dev.tuink.tui.render.Cell;
+import dev.tuink.tui.render.CellBuffer;
 import dev.tuink.render.Color;
 import dev.tuink.render.Style;
 
@@ -18,8 +18,7 @@ public final class AnsiDiff {
 
     public static String diff(CellBuffer previous, CellBuffer current, boolean colorEnabled) {
         StringBuilder out = new StringBuilder();
-        Style activeStyle = Style.DEFAULT;
-        boolean reverseActive = false;
+        String activeStyleAnsi = null;
         boolean wroteAnyCell = false;
 
         if (previous == null || previous.rows() != current.rows() || previous.cols() != current.cols()) {
@@ -28,17 +27,10 @@ public final class AnsiDiff {
                 moveTo(out, r, 0);
                 for (int c = 0; c < current.cols(); c++) {
                     Cell cell = current.get(r, c);
-                    if (colorEnabled) {
-                        if (!activeStyle.equals(cell.style())) {
-                            out.append(toAnsi(cell.style()));
-                            activeStyle = cell.style();
-                        }
-                    } else {
-                        boolean reverse = shouldReverseInMonochrome(cell.style());
-                        if (reverse != reverseActive) {
-                            out.append(reverse ? "\u001B[7m" : "\u001B[27m");
-                            reverseActive = reverse;
-                        }
+                    String styleAnsi = colorEnabled ? toAnsi(cell.style()) : toMonochromeAnsi(cell.style());
+                    if (!styleAnsi.equals(activeStyleAnsi)) {
+                        out.append(styleAnsi);
+                        activeStyleAnsi = styleAnsi;
                     }
                     out.append(cell.grapheme());
                     wroteAnyCell = true;
@@ -59,17 +51,10 @@ public final class AnsiDiff {
                 }
 
                 moveTo(out, r, c);
-                if (colorEnabled) {
-                    if (!activeStyle.equals(next.style())) {
-                        out.append(toAnsi(next.style()));
-                        activeStyle = next.style();
-                    }
-                } else {
-                    boolean reverse = shouldReverseInMonochrome(next.style());
-                    if (reverse != reverseActive) {
-                        out.append(reverse ? "\u001B[7m" : "\u001B[27m");
-                        reverseActive = reverse;
-                    }
+                String styleAnsi = colorEnabled ? toAnsi(next.style()) : toMonochromeAnsi(next.style());
+                if (!styleAnsi.equals(activeStyleAnsi)) {
+                    out.append(styleAnsi);
+                    activeStyleAnsi = styleAnsi;
                 }
                 out.append(next.grapheme());
                 wroteAnyCell = true;
@@ -82,10 +67,6 @@ public final class AnsiDiff {
         return out.toString();
     }
 
-    private static boolean shouldReverseInMonochrome(Style style) {
-        return style.bg() != Color.DEFAULT;
-    }
-
     private static void moveTo(StringBuilder out, int row, int col) {
         out.append("\u001B[").append(row + 1).append(';').append(col + 1).append('H');
     }
@@ -96,6 +77,14 @@ public final class AnsiDiff {
             + bgCode(style.bg()) + ';'
             + (style.bold() ? "1" : "22") + ';'
             + (style.underline() ? "4" : "24") + 'm';
+    }
+
+    private static String toMonochromeAnsi(Style style) {
+        return "\u001B["
+            + "39;49;"
+            + (style.bold() ? "1" : "22") + ';'
+            + (style.underline() ? "4" : "24") + ';'
+            + (style.bg() != Color.DEFAULT ? "7" : "27") + 'm';
     }
 
     private static int fgCode(Color color) {

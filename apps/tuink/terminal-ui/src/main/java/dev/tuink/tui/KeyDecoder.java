@@ -40,6 +40,8 @@ public class KeyDecoder {
             case 18 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_R);
             case 1 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_A);
             case 7 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_G);
+            case 14 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_N);
+            case 20 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_T);
             case 9 -> new KeyEvent.ActionEvent(KeyEvent.Action.TAB);
             case 127, 8 -> new KeyEvent.ActionEvent(KeyEvent.Action.BACKSPACE);
             case 13 -> {
@@ -117,6 +119,9 @@ public class KeyDecoder {
             case "3~" -> new KeyEvent.ActionEvent(KeyEvent.Action.DELETE);
             case "5~" -> new KeyEvent.ActionEvent(KeyEvent.Action.PAGE_UP);
             case "6~" -> new KeyEvent.ActionEvent(KeyEvent.Action.PAGE_DOWN);
+            case "5;5~" -> new KeyEvent.ActionEvent(KeyEvent.Action.TAB_PREVIOUS);
+            case "6;5~" -> new KeyEvent.ActionEvent(KeyEvent.Action.TAB_NEXT);
+            case "1;5I", "1;9I" -> new KeyEvent.ActionEvent(KeyEvent.Action.TAB_NEXT);
             case "21~" -> new KeyEvent.ActionEvent(KeyEvent.Action.F10);
             case "12~" -> new KeyEvent.ActionEvent(KeyEvent.Action.F2);
             case "1;6S", "83;6u", "27;6;83~" -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_SHIFT_S);

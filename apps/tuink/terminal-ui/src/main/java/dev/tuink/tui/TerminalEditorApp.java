@@ -42,7 +42,7 @@ import org.jline.utils.NonBlockingReader;
  */
 public class TerminalEditorApp {
     private static final String DEFAULT_FILE_NAME = "untitled.txt";
-    private static final String KEY_HINTS = "Ctrl+O Open  Ctrl+E Menu  Ctrl+F Search  Ctrl+C/X/V  Ctrl+Q";
+    private static final String KEY_HINTS = "Ctrl+O Open  Ctrl+N New Tab  Ctrl+T Tab Menu  Ctrl+F Search  Ctrl+Q";
     private static final String SEARCH_HELP = "Tab focus  Space toggle  Enter next  Ctrl+G prev  Ctrl+R replace  Ctrl+A all  Esc";
     private static final String SAVE_AS_PROMPT = "Save As: ";
     private static final Style SAVE_PROMPT_STYLE = new Style(Color.BRIGHT_WHITE, Color.RED, false, false);
@@ -81,10 +81,13 @@ public class TerminalEditorApp {
             return;
         }
 
-        TextModel model = new TextModel(new SimpleLineBuffer());
-        EditorState state = new EditorState();
-        EditorEngine engine = new EditorEngine(model, state);
-        RenderPlanBuilder renderPlanBuilder = new RenderPlanBuilder(RegexHighlighter.withDefaults());
+        List<EditorTab> tabs = new ArrayList<>();
+        tabs.add(newEditorTab());
+        int activeTabIndex = 0;
+        TextModel model = tabs.get(activeTabIndex).model();
+        EditorState state = tabs.get(activeTabIndex).state();
+        EditorEngine engine = tabs.get(activeTabIndex).engine();
+        RenderPlanBuilder renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
         RenderRasterizer renderer = new RenderRasterizer();
         EditorView editorView = new EditorView();
 
@@ -110,6 +113,7 @@ public class TerminalEditorApp {
             try {
                 engine.open(file);
                 renderPlanBuilder = new RenderPlanBuilder(resolveHighlighter(file));
+                tabs.set(activeTabIndex, tabs.get(activeTabIndex).withRenderPlanBuilder(renderPlanBuilder));
                 statusMessage = "Opened " + file;
             } catch (IOException e) {
                 statusMessage = "Open failed: " + e.getMessage();
@@ -183,7 +187,13 @@ public class TerminalEditorApp {
                     int contentRows = Math.max(0, editorRows - 2);
                     engine.ensureCursorVisible(contentRows);
 
-                    String topBar = topMenu.buildTopBar(state.getCurrentFile(), state.isDirty(), cols);
+                    String topBar = topMenu.buildTopBar(
+                        state.getCurrentFile(),
+                        state.isDirty(),
+                        activeTabIndex,
+                        tabs.size(),
+                        cols
+                    );
                     String bottomBar = buildBottomBar(state, model, statusMessage, cols);
                     String interactiveBarText = null;
                     Style interactiveBarStyle = null;
@@ -226,7 +236,7 @@ public class TerminalEditorApp {
                     );
                     CellBuffer current = renderer.rasterize(plan, rows, cols);
                     topMenu.draw(current, cols, cli.colorEnabled());
-                    drawTopFileNameBold(current, cols, state);
+                    drawTopFileNameBold(current, cols, state, topMenu.fileNameStartCol());
                     drawOpenFileOverlay(
                         current,
                         rows,
@@ -253,7 +263,7 @@ public class TerminalEditorApp {
                         desiredCursorCol = searchBar.cursorCol();
                     } else if (topMenu.isOpen()) {
                         desiredCursorRow = Math.min(rows, 3 + topMenu.selectedIndex());
-                        desiredCursorCol = Math.min(cols, 3);
+                        desiredCursorCol = Math.min(cols, topMenu.popupCursorCol());
                     } else if (openFileMode) {
                         OpenDialogLayout layout = openDialogLayout(rows, cols);
                         if (openFileFocus == OpenDialogFocus.LIST) {
@@ -350,11 +360,17 @@ public class TerminalEditorApp {
                                                 if (selected != null && (selected.parentLink() || selected.directory())) {
                                                     openFileTree.toggleSelectedAndRefresh();
                                                 } else {
-                                                    OpenFileActionResult result = activateOpenFileSelection(selected, engine);
+                                                    OpenFileActionResult result = activateOpenFileSelection(
+                                                        selected,
+                                                        tabs,
+                                                        activeTabIndex
+                                                    );
                                                     openFileMode = result.keepDialogOpen();
-                                                    if (result.openedFile() != null) {
-                                                        renderPlanBuilder = new RenderPlanBuilder(resolveHighlighter(result.openedFile()));
-                                                    }
+                                                    activeTabIndex = result.activeTabIndex();
+                                                    model = tabs.get(activeTabIndex).model();
+                                                    state = tabs.get(activeTabIndex).state();
+                                                    engine = tabs.get(activeTabIndex).engine();
+                                                    renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
                                                     if (result.statusMessage() != null && !result.statusMessage().isBlank()) {
                                                         statusMessage = result.statusMessage();
                                                     }
@@ -363,11 +379,17 @@ public class TerminalEditorApp {
                                             }
                                         } else if (buttons.ok().hit(mouse.row(), mouse.col())) {
                                             openFileFocus = OpenDialogFocus.OK;
-                                            OpenFileActionResult result = activateOpenFileSelection(openFileTree.selectedItem(), engine);
+                                            OpenFileActionResult result = activateOpenFileSelection(
+                                                openFileTree.selectedItem(),
+                                                tabs,
+                                                activeTabIndex
+                                            );
                                             openFileMode = result.keepDialogOpen();
-                                            if (result.openedFile() != null) {
-                                                renderPlanBuilder = new RenderPlanBuilder(resolveHighlighter(result.openedFile()));
-                                            }
+                                            activeTabIndex = result.activeTabIndex();
+                                            model = tabs.get(activeTabIndex).model();
+                                            state = tabs.get(activeTabIndex).state();
+                                            engine = tabs.get(activeTabIndex).engine();
+                                            renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
                                             if (result.statusMessage() != null && !result.statusMessage().isBlank()) {
                                                 statusMessage = result.statusMessage();
                                             }
@@ -472,11 +494,17 @@ public class TerminalEditorApp {
                                 if (openFileFocus == OpenDialogFocus.CANCEL) {
                                     openFileMode = false;
                                 } else if (openFileFocus == OpenDialogFocus.OK) {
-                                    OpenFileActionResult result = activateOpenFileSelection(openFileTree.selectedItem(), engine);
+                                    OpenFileActionResult result = activateOpenFileSelection(
+                                        openFileTree.selectedItem(),
+                                        tabs,
+                                        activeTabIndex
+                                    );
                                     openFileMode = result.keepDialogOpen();
-                                    if (result.openedFile() != null) {
-                                        renderPlanBuilder = new RenderPlanBuilder(resolveHighlighter(result.openedFile()));
-                                    }
+                                    activeTabIndex = result.activeTabIndex();
+                                    model = tabs.get(activeTabIndex).model();
+                                    state = tabs.get(activeTabIndex).state();
+                                    engine = tabs.get(activeTabIndex).engine();
+                                    renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
                                     if (result.statusMessage() != null && !result.statusMessage().isBlank()) {
                                         statusMessage = result.statusMessage();
                                     }
@@ -559,6 +587,7 @@ public class TerminalEditorApp {
                                     try {
                                         engine.saveAs(path);
                                         renderPlanBuilder = new RenderPlanBuilder(resolveHighlighter(state.getCurrentFile()));
+                                        tabs.set(activeTabIndex, tabs.get(activeTabIndex).withRenderPlanBuilder(renderPlanBuilder));
                                         notification.success(savedMessage(state));
                                     } catch (IOException e) {
                                         notification.error(saveErrorMessage(e));
@@ -591,6 +620,7 @@ public class TerminalEditorApp {
                                 try {
                                     engine.saveAs(pendingOverwritePath);
                                     renderPlanBuilder = new RenderPlanBuilder(resolveHighlighter(state.getCurrentFile()));
+                                    tabs.set(activeTabIndex, tabs.get(activeTabIndex).withRenderPlanBuilder(renderPlanBuilder));
                                     notification.success(savedMessage(state));
                                 } catch (IOException e) {
                                     notification.error(saveErrorMessage(e));
@@ -783,6 +813,47 @@ public class TerminalEditorApp {
                                 openFileFocus = OpenDialogFocus.LIST;
                                 statusMessage = "Open file";
                             }
+                            case CTRL_N, TAB_NEW -> {
+                                tabs.add(newEditorTab());
+                                activeTabIndex = tabs.size() - 1;
+                                model = tabs.get(activeTabIndex).model();
+                                state = tabs.get(activeTabIndex).state();
+                                engine = tabs.get(activeTabIndex).engine();
+                                renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
+                                searchMode = false;
+                                statusMessage = "New tab";
+                            }
+                            case TAB_NEXT -> {
+                                activeTabIndex = switchTab(tabs, activeTabIndex, 1);
+                                model = tabs.get(activeTabIndex).model();
+                                state = tabs.get(activeTabIndex).state();
+                                engine = tabs.get(activeTabIndex).engine();
+                                renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
+                                searchMode = false;
+                                statusMessage = "Tab " + (activeTabIndex + 1) + "/" + tabs.size();
+                            }
+                            case TAB_PREVIOUS -> {
+                                activeTabIndex = switchTab(tabs, activeTabIndex, -1);
+                                model = tabs.get(activeTabIndex).model();
+                                state = tabs.get(activeTabIndex).state();
+                                engine = tabs.get(activeTabIndex).engine();
+                                renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
+                                searchMode = false;
+                                statusMessage = "Tab " + (activeTabIndex + 1) + "/" + tabs.size();
+                            }
+                            case TAB_CLOSE -> {
+                                if (state.isDirty()) {
+                                    statusMessage = "Current tab has unsaved changes";
+                                } else {
+                                    activeTabIndex = closeCurrentTab(tabs, activeTabIndex);
+                                    model = tabs.get(activeTabIndex).model();
+                                    state = tabs.get(activeTabIndex).state();
+                                    engine = tabs.get(activeTabIndex).engine();
+                                    renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
+                                    searchMode = false;
+                                    statusMessage = "Closed tab";
+                                }
+                            }
                             case CTRL_K, CTRL_W, F2, CTRL_SHIFT_S -> {
                                 searchMode = false;
                                 searchFocus = SearchFocus.FIND;
@@ -819,6 +890,7 @@ public class TerminalEditorApp {
                     KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
                     switch (action) {
                         case CTRL_E -> topMenu.openEdit();
+                        case CTRL_T -> topMenu.openTab();
                         case F10 -> topMenu.openFile();
                         case CTRL_Q -> {
                             if (state.isDirty() && !confirmQuit) {
@@ -858,6 +930,43 @@ public class TerminalEditorApp {
                             openFileTree.setRoot(initialOpenRoot(state));
                             openFileFocus = OpenDialogFocus.LIST;
                             statusMessage = "Open file";
+                        }
+                        case CTRL_N, TAB_NEW -> {
+                            tabs.add(newEditorTab());
+                            activeTabIndex = tabs.size() - 1;
+                            model = tabs.get(activeTabIndex).model();
+                            state = tabs.get(activeTabIndex).state();
+                            engine = tabs.get(activeTabIndex).engine();
+                            renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
+                            statusMessage = "New tab";
+                        }
+                        case TAB_NEXT -> {
+                            activeTabIndex = switchTab(tabs, activeTabIndex, 1);
+                            model = tabs.get(activeTabIndex).model();
+                            state = tabs.get(activeTabIndex).state();
+                            engine = tabs.get(activeTabIndex).engine();
+                            renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
+                            statusMessage = "Tab " + (activeTabIndex + 1) + "/" + tabs.size();
+                        }
+                        case TAB_PREVIOUS -> {
+                            activeTabIndex = switchTab(tabs, activeTabIndex, -1);
+                            model = tabs.get(activeTabIndex).model();
+                            state = tabs.get(activeTabIndex).state();
+                            engine = tabs.get(activeTabIndex).engine();
+                            renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
+                            statusMessage = "Tab " + (activeTabIndex + 1) + "/" + tabs.size();
+                        }
+                        case TAB_CLOSE -> {
+                            if (state.isDirty()) {
+                                statusMessage = "Current tab has unsaved changes";
+                            } else {
+                                activeTabIndex = closeCurrentTab(tabs, activeTabIndex);
+                                model = tabs.get(activeTabIndex).model();
+                                state = tabs.get(activeTabIndex).state();
+                                engine = tabs.get(activeTabIndex).engine();
+                                renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
+                                statusMessage = "Closed tab";
+                            }
                         }
                         case CTRL_K, CTRL_W, F2, CTRL_SHIFT_S -> {
                             saveAsMode = true;
@@ -916,12 +1025,11 @@ public class TerminalEditorApp {
         }
     }
 
-    private void drawTopFileNameBold(CellBuffer buffer, int cols, EditorState state) {
-        if (buffer.rows() < 1 || cols <= 14) {
+    private void drawTopFileNameBold(CellBuffer buffer, int cols, EditorState state, int startCol) {
+        if (buffer.rows() < 1 || cols <= startCol || startCol < 0) {
             return;
         }
         String file = state.getCurrentFile() == null ? "[No Name]" : state.getCurrentFile().toString();
-        int startCol = 14;
         int endCol = Math.min(cols, startCol + file.length());
         for (int col = startCol; col < endCol; col++) {
             String grapheme = buffer.get(0, col).grapheme();
@@ -1042,19 +1150,27 @@ public class TerminalEditorApp {
         );
     }
 
-    private OpenFileActionResult activateOpenFileSelection(TreeView.Item entry, EditorEngine engine) {
+    private OpenFileActionResult activateOpenFileSelection(
+        TreeView.Item entry,
+        List<EditorTab> tabs,
+        int activeTabIndex
+    ) {
         if (entry == null) {
-            return new OpenFileActionResult(true, null, "Select a file");
+            return new OpenFileActionResult(true, activeTabIndex, "Select a file");
         }
         if (entry.parentLink() || entry.directory()) {
-            return new OpenFileActionResult(true, null, "Select a file");
+            return new OpenFileActionResult(true, activeTabIndex, "Select a file");
         }
         Path target = entry.path();
         try {
-            engine.open(target);
-            return new OpenFileActionResult(false, target, "Opened " + target);
+            EditorTab tab = newEditorTab();
+            tab.engine().open(target);
+            tab = tab.withRenderPlanBuilder(new RenderPlanBuilder(resolveHighlighter(target)));
+            tabs.add(tab);
+            int newIndex = tabs.size() - 1;
+            return new OpenFileActionResult(false, newIndex, "Opened " + target);
         } catch (IOException e) {
-            return new OpenFileActionResult(true, null, "Open failed: " + e.getMessage());
+            return new OpenFileActionResult(true, activeTabIndex, "Open failed: " + e.getMessage());
         }
     }
 
@@ -1161,6 +1277,9 @@ public class TerminalEditorApp {
     }
 
     private boolean isReadOnlyFile(Path path) {
+        if (path == null) {
+            return false;
+        }
         try {
             return Files.exists(path) && !Files.isWritable(path);
         } catch (SecurityException e) {
@@ -1492,15 +1611,51 @@ public class TerminalEditorApp {
 
     private record OpenFileActionResult(
         boolean keepDialogOpen,
-        Path openedFile,
+        int activeTabIndex,
         String statusMessage
     ) {
+    }
+
+    private EditorTab newEditorTab() {
+        TextModel model = new TextModel(new SimpleLineBuffer());
+        EditorState state = new EditorState();
+        EditorEngine engine = new EditorEngine(model, state);
+        RenderPlanBuilder builder = new RenderPlanBuilder(RegexHighlighter.withDefaults());
+        return new EditorTab(model, state, engine, builder);
+    }
+
+    private int switchTab(List<EditorTab> tabs, int currentIndex, int delta) {
+        if (tabs.isEmpty()) {
+            return 0;
+        }
+        int size = tabs.size();
+        return Math.floorMod(currentIndex + delta, size);
+    }
+
+    private int closeCurrentTab(List<EditorTab> tabs, int activeTabIndex) {
+        if (tabs.size() <= 1) {
+            tabs.set(0, newEditorTab());
+            return 0;
+        }
+        tabs.remove(activeTabIndex);
+        return Math.max(0, Math.min(activeTabIndex, tabs.size() - 1));
     }
 
     private enum OpenDialogFocus {
         LIST,
         OK,
         CANCEL
+    }
+
+    private record EditorTab(
+        TextModel model,
+        EditorState state,
+        EditorEngine engine,
+        RenderPlanBuilder renderPlanBuilder
+    ) {
+        private EditorTab withRenderPlanBuilder(RenderPlanBuilder nextBuilder) {
+            return new EditorTab(model, state, engine, nextBuilder);
+        }
     }
 
     private enum SearchFocus {

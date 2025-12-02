@@ -1,8 +1,8 @@
 package dev.tuink.tui.ui;
 
-import dev.tuink.tui.render.CellBuffer;
 import dev.tuink.render.Style;
 import dev.tuink.tui.KeyEvent;
+import dev.tuink.tui.render.CellBuffer;
 import java.nio.file.Path;
 
 /**
@@ -20,18 +20,29 @@ public final class MenuBar {
         this.selectedMonoStyle = selectedMonoStyle;
     }
 
-    public String buildTopBar(Path currentFile, boolean dirty, int cols) {
-        return controller.buildTopBar(currentFile, dirty, cols);
+    public String buildTopBar(Path currentFile, boolean dirty, int activeTabIndex, int totalTabs, int cols) {
+        return controller.buildTopBar(currentFile, dirty, activeTabIndex, totalTabs, cols);
+    }
+
+    public int fileNameStartCol() {
+        return controller.fileNameStartCol();
+    }
+
+    public int popupCursorCol() {
+        return switch (controller.active()) {
+            case FILE -> 3;
+            case EDIT -> 10;
+            case TAB -> 17;
+        };
     }
 
     public void draw(CellBuffer buffer, int cols, boolean colorEnabled) {
         String[] activeItems = controller.activeItems();
-        boolean fileMenu = controller.active() == MenuId.FILE;
         View.drawPopup(
             buffer,
             cols,
             controller.isOpen(),
-            fileMenu,
+            controller.active(),
             controller.selectedIndex(),
             activeItems,
             colorEnabled,
@@ -43,7 +54,7 @@ public final class MenuBar {
             buffer,
             cols,
             controller.isOpen(),
-            fileMenu,
+            controller.active(),
             colorEnabled,
             selectedStyle,
             selectedMonoStyle
@@ -66,6 +77,10 @@ public final class MenuBar {
         controller.open(MenuId.FILE);
     }
 
+    public void openTab() {
+        controller.open(MenuId.TAB);
+    }
+
     public void close() {
         controller.close();
     }
@@ -78,12 +93,16 @@ public final class MenuBar {
         if (row != 0) {
             return false;
         }
-        if (View.isFileMenuLabelHit(col)) {
+        if (View.isMenuLabelHit(MenuId.FILE, col)) {
             controller.toggle(MenuId.FILE);
             return true;
         }
-        if (View.isEditMenuLabelHit(col)) {
+        if (View.isMenuLabelHit(MenuId.EDIT, col)) {
             controller.toggle(MenuId.EDIT);
+            return true;
+        }
+        if (View.isMenuLabelHit(MenuId.TAB, col)) {
+            controller.toggle(MenuId.TAB);
             return true;
         }
         return false;
@@ -97,7 +116,7 @@ public final class MenuBar {
             row,
             col,
             cols,
-            controller.active() == MenuId.FILE,
+            controller.active(),
             controller.activeItems()
         );
         if (hit.insideItemContent()) {
@@ -116,16 +135,19 @@ public final class MenuBar {
 
     private enum MenuId {
         FILE,
-        EDIT
+        EDIT,
+        TAB
     }
 
     private static final class Controller {
         private static final String[] FILE_MENU_ITEMS = {"Open...", "Save", "Save As...", "Quit"};
         private static final String[] EDIT_MENU_ITEMS = {"Undo", "Redo", "Cut", "Copy", "Paste"};
+        private static final String[] TAB_MENU_ITEMS = {"New Tab", "Close Tab", "Next Tab", "Previous Tab"};
 
         private boolean open;
         private MenuId active = MenuId.EDIT;
         private int index;
+        private int fileNameStartCol;
 
         private boolean isOpen() {
             return open;
@@ -137,6 +159,10 @@ public final class MenuBar {
 
         private int selectedIndex() {
             return index;
+        }
+
+        private int fileNameStartCol() {
+            return fileNameStartCol;
         }
 
         private String[] activeItems() {
@@ -177,6 +203,10 @@ public final class MenuBar {
                     active = MenuId.FILE;
                     index = 0;
                 }
+                case CTRL_T -> {
+                    active = MenuId.TAB;
+                    index = 0;
+                }
                 case ARROW_LEFT -> {
                     active = previousMenu(active);
                     index = Math.min(index, itemsFor(active).length - 1);
@@ -205,12 +235,16 @@ public final class MenuBar {
             return null;
         }
 
-        private String buildTopBar(Path currentFile, boolean dirty, int cols) {
+        private String buildTopBar(Path currentFile, boolean dirty, int activeTabIndex, int totalTabs, int cols) {
             String fileMenu = (open && active == MenuId.FILE) ? "[File]" : " File ";
             String editMenu = (open && active == MenuId.EDIT) ? "[Edit]" : " Edit ";
+            String tabMenu = (open && active == MenuId.TAB) ? "[Tab]" : " Tab ";
+            String tabMarker = "[" + (activeTabIndex + 1) + "/" + Math.max(1, totalTabs) + "]";
             String file = currentFile == null ? "[No Name]" : currentFile.toString();
             String dirtyMarker = dirty ? " [+]" : "";
-            String top = fileMenu + " " + editMenu + " " + file + dirtyMarker;
+            String left = fileMenu + " " + editMenu + " " + tabMenu + " " + tabMarker + " ";
+            fileNameStartCol = left.length();
+            String top = left + file + dirtyMarker;
             if (top.length() > cols) {
                 return top.substring(0, cols);
             }
@@ -218,7 +252,11 @@ public final class MenuBar {
         }
 
         private static String[] itemsFor(MenuId menu) {
-            return menu == MenuId.FILE ? FILE_MENU_ITEMS : EDIT_MENU_ITEMS;
+            return switch (menu) {
+                case FILE -> FILE_MENU_ITEMS;
+                case EDIT -> EDIT_MENU_ITEMS;
+                case TAB -> TAB_MENU_ITEMS;
+            };
         }
 
         private static KeyEvent.Action mapSelection(MenuId menu, int itemIndex) {
@@ -231,46 +269,62 @@ public final class MenuBar {
                     default -> null;
                 };
             }
+            if (menu == MenuId.EDIT) {
+                return switch (itemIndex) {
+                    case 0 -> KeyEvent.Action.CTRL_Z;
+                    case 1 -> KeyEvent.Action.CTRL_Y;
+                    case 2 -> KeyEvent.Action.CTRL_X;
+                    case 3 -> KeyEvent.Action.CTRL_C;
+                    case 4 -> KeyEvent.Action.CTRL_V;
+                    default -> null;
+                };
+            }
             return switch (itemIndex) {
-                case 0 -> KeyEvent.Action.CTRL_Z;
-                case 1 -> KeyEvent.Action.CTRL_Y;
-                case 2 -> KeyEvent.Action.CTRL_X;
-                case 3 -> KeyEvent.Action.CTRL_C;
-                case 4 -> KeyEvent.Action.CTRL_V;
+                case 0 -> KeyEvent.Action.TAB_NEW;
+                case 1 -> KeyEvent.Action.TAB_CLOSE;
+                case 2 -> KeyEvent.Action.TAB_NEXT;
+                case 3 -> KeyEvent.Action.TAB_PREVIOUS;
                 default -> null;
             };
         }
 
         private static MenuId nextMenu(MenuId menu) {
-            return menu == MenuId.FILE ? MenuId.EDIT : MenuId.FILE;
+            return switch (menu) {
+                case FILE -> MenuId.EDIT;
+                case EDIT -> MenuId.TAB;
+                case TAB -> MenuId.FILE;
+            };
         }
 
         private static MenuId previousMenu(MenuId menu) {
-            return nextMenu(menu);
+            return switch (menu) {
+                case FILE -> MenuId.TAB;
+                case EDIT -> MenuId.FILE;
+                case TAB -> MenuId.EDIT;
+            };
         }
     }
 
     private static final class View {
         private static final int FILE_START_COL = 0;
         private static final int EDIT_START_COL = 7;
+        private static final int TAB_START_COL = 14;
         private static final int FILE_LABEL_WIDTH = 6;
         private static final int EDIT_LABEL_WIDTH = 6;
+        private static final int TAB_LABEL_WIDTH = 5;
         private static final int POPUP_TOP_ROW = 1;
 
         private View() {
         }
 
-        private static boolean isFileMenuLabelHit(int col) {
-            return col >= FILE_START_COL && col < FILE_START_COL + FILE_LABEL_WIDTH;
+        private static boolean isMenuLabelHit(MenuId menu, int col) {
+            int start = startCol(menu);
+            int width = labelWidth(menu);
+            return col >= start && col < start + width;
         }
 
-        private static boolean isEditMenuLabelHit(int col) {
-            return col >= EDIT_START_COL && col < EDIT_START_COL + EDIT_LABEL_WIDTH;
-        }
-
-        private static PopupHit hitPopup(int row, int col, int cols, boolean fileMenu, String[] items) {
-            int startCol = fileMenu ? FILE_START_COL : EDIT_START_COL;
-            ContextMenu.Hit hit = ContextMenu.hit(row, col, cols, startCol, POPUP_TOP_ROW, items);
+        private static PopupHit hitPopup(int row, int col, int cols, MenuId menu, String[] items) {
+            ContextMenu.Hit hit = ContextMenu.hit(row, col, cols, startCol(menu), POPUP_TOP_ROW, items);
             return new PopupHit(hit.insidePopup(), hit.insideItemContent(), hit.itemIndex());
         }
 
@@ -278,7 +332,7 @@ public final class MenuBar {
             CellBuffer buffer,
             int cols,
             boolean visible,
-            boolean fileMenu,
+            MenuId menu,
             int selectedIndex,
             String[] items,
             boolean colorEnabled,
@@ -286,12 +340,11 @@ public final class MenuBar {
             Style selectedStyle,
             Style selectedMonoStyle
         ) {
-            int startCol = fileMenu ? FILE_START_COL : EDIT_START_COL;
             ContextMenu.draw(
                 buffer,
                 cols,
                 visible,
-                startCol,
+                startCol(menu),
                 POPUP_TOP_ROW,
                 selectedIndex,
                 items,
@@ -306,7 +359,7 @@ public final class MenuBar {
             CellBuffer buffer,
             int cols,
             boolean menuOpen,
-            boolean fileMenu,
+            MenuId active,
             boolean colorEnabled,
             Style selectedStyle,
             Style selectedMonoStyle
@@ -315,11 +368,28 @@ public final class MenuBar {
                 return;
             }
             Style style = colorEnabled ? selectedStyle : selectedMonoStyle;
-            if (fileMenu) {
-                drawLine(buffer, 0, FILE_START_COL, " File ", style, cols);
-            } else {
-                drawLine(buffer, 0, EDIT_START_COL, " Edit ", style, cols);
-            }
+            String label = switch (active) {
+                case FILE -> " File ";
+                case EDIT -> " Edit ";
+                case TAB -> " Tab ";
+            };
+            drawLine(buffer, 0, startCol(active), label, style, cols);
+        }
+
+        private static int startCol(MenuId menu) {
+            return switch (menu) {
+                case FILE -> FILE_START_COL;
+                case EDIT -> EDIT_START_COL;
+                case TAB -> TAB_START_COL;
+            };
+        }
+
+        private static int labelWidth(MenuId menu) {
+            return switch (menu) {
+                case FILE -> FILE_LABEL_WIDTH;
+                case EDIT -> EDIT_LABEL_WIDTH;
+                case TAB -> TAB_LABEL_WIDTH;
+            };
         }
 
         private static void drawLine(CellBuffer buffer, int row, int startCol, String text, Style style, int cols) {

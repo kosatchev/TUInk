@@ -44,6 +44,7 @@ public sealed interface KeyEvent permits KeyEvent.ActionEvent, KeyEvent.CharInpu
         TAB_PREVIOUS,
         TAB_NEW,
         TAB_CLOSE,
+        TOGGLE_TAB_BAR,
         ESCAPE,
         TAB,
         ARROW_UP,

@@ -11,10 +11,24 @@ import dev.tuink.tui.KeyEvent;
  * UI helper for the main editor text area.
  */
 public final class EditorView {
+    private final int contentTopRow;
     private boolean mouseSelecting;
 
+    public EditorView() {
+        this(1);
+    }
+
+    public EditorView(int contentTopRow) {
+        this.contentTopRow = Math.max(1, contentTopRow);
+    }
+
     public CursorPosition cursorFromPlan(RenderPlan plan) {
-        return new CursorPosition(plan.cursorRow() + 2, plan.cursorCol() + 1);
+        return new CursorPosition(plan.cursorRow() + contentTopRow + 1, plan.cursorCol() + 1);
+    }
+
+    public CursorPosition cursorFromPlan(RenderPlan plan, int contentTopRow) {
+        int top = Math.max(1, contentTopRow);
+        return new CursorPosition(plan.cursorRow() + top + 1, plan.cursorCol() + 1);
     }
 
     public void cancelMouseSelection() {
@@ -29,7 +43,19 @@ public final class EditorView {
         int contentRows,
         EditorEngine engine
     ) {
-        Position hit = mouseToTextPosition(mouse, model, state, plan, contentRows);
+        handleMousePress(mouse, model, state, plan, contentRows, engine, contentTopRow);
+    }
+
+    public void handleMousePress(
+        KeyEvent.MouseEvent mouse,
+        TextModel model,
+        EditorState state,
+        RenderPlan plan,
+        int contentRows,
+        EditorEngine engine,
+        int contentTopRow
+    ) {
+        Position hit = mouseToTextPosition(mouse, model, state, plan, contentRows, contentTopRow);
         if (hit != null) {
             mouseSelecting = true;
             state.setSelectionAnchor(hit);
@@ -48,10 +74,22 @@ public final class EditorView {
         int contentRows,
         EditorEngine engine
     ) {
+        handleMouseDrag(mouse, model, state, plan, contentRows, engine, contentTopRow);
+    }
+
+    public void handleMouseDrag(
+        KeyEvent.MouseEvent mouse,
+        TextModel model,
+        EditorState state,
+        RenderPlan plan,
+        int contentRows,
+        EditorEngine engine,
+        int contentTopRow
+    ) {
         if (!mouseSelecting || mouse.button() != KeyEvent.MouseButton.LEFT) {
             return;
         }
-        Position hit = mouseToTextPosition(mouse, model, state, plan, contentRows);
+        Position hit = mouseToTextPosition(mouse, model, state, plan, contentRows, contentTopRow);
         if (hit != null) {
             if (state.getSelectionAnchor() == null) {
                 state.setSelectionAnchor(state.getCursor());
@@ -78,10 +116,22 @@ public final class EditorView {
         RenderPlan plan,
         int contentRows
     ) {
-        if (mouse.row() < 1 || mouse.row() > contentRows) {
+        return mouseToTextPosition(mouse, model, state, plan, contentRows, contentTopRow);
+    }
+
+    public Position mouseToTextPosition(
+        KeyEvent.MouseEvent mouse,
+        TextModel model,
+        EditorState state,
+        RenderPlan plan,
+        int contentRows,
+        int contentTopRow
+    ) {
+        int top = Math.max(1, contentTopRow);
+        if (mouse.row() < top || mouse.row() >= top + contentRows) {
             return null;
         }
-        int line = state.getTopLine() + (mouse.row() - 1);
+        int line = state.getTopLine() + (mouse.row() - top);
         line = Math.max(0, Math.min(line, model.lineCount() - 1));
         int col = mouse.col() < plan.gutterWidth()
             ? 0

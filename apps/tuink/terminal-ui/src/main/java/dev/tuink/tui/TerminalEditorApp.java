@@ -4,7 +4,9 @@ import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.Position;
 import dev.tuink.core.SearchOptions;
-import dev.tuink.core.SimpleLineBuffer;
+import dev.tuink.core.TabSession;
+import dev.tuink.core.TabSearch;
+import dev.tuink.core.TabSessions;
 import dev.tuink.core.TextModel;
 import dev.tuink.highlight.regex.RegexHighlighter;
 import dev.tuink.tui.render.CellBuffer;
@@ -18,6 +20,7 @@ import dev.tuink.tui.ui.Button;
 import dev.tuink.tui.ui.EditorView;
 import dev.tuink.tui.ui.MenuBar;
 import dev.tuink.tui.ui.Modal;
+import dev.tuink.tui.ui.TabBar;
 import dev.tuink.tui.ui.TextField;
 import dev.tuink.tui.ui.TreeView;
 import java.io.IOException;
@@ -27,10 +30,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import org.jline.terminal.Attributes;
 import org.jline.terminal.Attributes.LocalFlag;
 import org.jline.terminal.Terminal;
@@ -50,6 +50,10 @@ public class TerminalEditorApp {
     private static final Style MENU_POPUP_STYLE = new Style(Color.BLACK, Color.BRIGHT_WHITE, false, false);
     private static final Style MENU_SELECTED_STYLE = new Style(Color.BLACK, Color.BRIGHT_YELLOW, false, false);
     private static final Style MENU_SELECTED_MONO_STYLE = new Style(Color.DEFAULT, Color.DEFAULT, false, false);
+    private static final Style TABBAR_STYLE = new Style(Color.BLACK, Color.BRIGHT_WHITE, false, false);
+    private static final Style TABBAR_MONO_STYLE = new Style(Color.DEFAULT, Color.BRIGHT_WHITE, false, false);
+    private static final Style TABBAR_ACTIVE_STYLE = new Style(Color.BRIGHT_YELLOW, Color.DEFAULT, false, false);
+    private static final Style TABBAR_ACTIVE_MONO_STYLE = new Style(Color.DEFAULT, Color.DEFAULT, false, false);
     private static final Style FILE_DIALOG_STYLE = new Style(Color.BLACK, Color.BRIGHT_WHITE, false, false);
     private static final Style FILE_DIALOG_BORDER_STYLE = new Style(Color.BLACK, Color.BRIGHT_WHITE, true, false);
     private static final Style FILE_DIALOG_TITLE_STYLE = new Style(Color.BRIGHT_WHITE, Color.BLUE, true, false);
@@ -93,7 +97,9 @@ public class TerminalEditorApp {
 
         String statusMessage = "Ctrl+S save | Ctrl+Q quit";
         NotificationState notification = new NotificationState();
-        boolean confirmQuit = false;
+        boolean quitConfirmMode = false;
+        boolean closeTabConfirmMode = false;
+        int pendingCloseTabIndex = -1;
         boolean saveAsMode = false;
         boolean saveOverwriteConfirmMode = false;
         Path pendingOverwritePath = null;
@@ -104,6 +110,8 @@ public class TerminalEditorApp {
         TextField searchReplaceInput = new TextField();
         SearchUiOptions searchUi = SearchUiOptions.DEFAULT;
         MenuBar topMenu = new MenuBar(MENU_POPUP_STYLE, MENU_SELECTED_STYLE, MENU_SELECTED_MONO_STYLE);
+        TabBar tabBar = new TabBar(TABBAR_STYLE, TABBAR_MONO_STYLE, TABBAR_ACTIVE_STYLE, TABBAR_ACTIVE_MONO_STYLE);
+        boolean showTabBarSetting = true;
         boolean openFileMode = false;
         TreeView openFileTree = new TreeView(initialOpenRoot(state));
         OpenDialogFocus openFileFocus = OpenDialogFocus.LIST;
@@ -180,12 +188,22 @@ public class TerminalEditorApp {
                     notification.expireIfNeeded();
                     int rows = Math.max(2, terminal.getHeight());
                     int cols = Math.max(1, terminal.getWidth());
-                    boolean hasInteractiveBar = searchMode || saveAsMode || saveOverwriteConfirmMode;
+                    boolean hasInteractiveBar = searchMode || saveAsMode || saveOverwriteConfirmMode
+                        || quitConfirmMode || closeTabConfirmMode;
                     boolean hasNotificationBar = notification.visible();
+                    boolean showTabBar = showTabBarSetting && tabs.size() > 1;
                     int overlayRows = (hasInteractiveBar ? 1 : 0) + (hasNotificationBar ? 1 : 0);
-                    int editorRows = Math.max(2, rows - overlayRows);
-                    int contentRows = Math.max(0, editorRows - 2);
+                    int contentTopRow = showTabBar ? 2 : 1;
+                    int contentRows = Math.max(0, rows - overlayRows - contentTopRow - 1);
                     engine.ensureCursorVisible(contentRows);
+                    boolean[] tabMatchFlags = findTabsWithMatches(
+                        tabs,
+                        searchQueryInput.text(),
+                        toSearchOptions(searchUi)
+                    );
+                    List<TabBar.TabItem> tabItems = toTabItems(tabs, tabMatchFlags);
+                    topMenu.setOpenTabs(toMenuTabs(tabs, tabMatchFlags), activeTabIndex);
+                    topMenu.setShowTabBarEnabled(showTabBarSetting);
 
                     String topBar = topMenu.buildTopBar(
                         state.getCurrentFile(),
@@ -205,7 +223,8 @@ public class TerminalEditorApp {
                             cols,
                             searchUi,
                             countSearchMatches(
-                                model,
+                                searchUi.allTabs() ? null : model,
+                                searchUi.allTabs() ? tabs : null,
                                 searchQueryInput.text(),
                                 toSearchOptions(searchUi)
                             )
@@ -217,13 +236,20 @@ public class TerminalEditorApp {
                     } else if (saveOverwriteConfirmMode) {
                         interactiveBarText = buildOverwritePrompt(pendingOverwritePath);
                         interactiveBarStyle = SAVE_PROMPT_STYLE;
+                    } else if (quitConfirmMode) {
+                        interactiveBarText = buildQuitPrompt(countDirtyTabs(tabs));
+                        interactiveBarStyle = SAVE_PROMPT_STYLE;
+                    } else if (closeTabConfirmMode) {
+                        interactiveBarText = buildCloseTabPrompt(tabs, pendingCloseTabIndex);
+                        interactiveBarStyle = SAVE_PROMPT_STYLE;
                     } else if (searchBar != null) {
                         interactiveBarText = searchBar.text();
                     }
+                    int planRows = Math.max(1, showTabBar ? rows - 1 : rows);
                     RenderPlan plan = renderPlanBuilder.build(
                         model,
                         state,
-                        rows,
+                        planRows,
                         cols,
                         topBar,
                         bottomBar,
@@ -234,7 +260,10 @@ public class TerminalEditorApp {
                         notification.message,
                         notification.style
                     );
-                    CellBuffer current = renderer.rasterize(plan, rows, cols);
+                    CellBuffer current = renderer.rasterize(plan, rows, cols, contentTopRow);
+                    if (showTabBar) {
+                        tabBar.draw(current, cols, tabItems, activeTabIndex, cli.colorEnabled());
+                    }
                     topMenu.draw(current, cols, cli.colorEnabled());
                     drawTopFileNameBold(current, cols, state, topMenu.fileNameStartCol());
                     drawOpenFileOverlay(
@@ -247,7 +276,7 @@ public class TerminalEditorApp {
                         cli.colorEnabled()
                     );
 
-                    EditorView.CursorPosition editorCursor = editorView.cursorFromPlan(plan);
+                    EditorView.CursorPosition editorCursor = editorView.cursorFromPlan(plan, contentTopRow);
                     int desiredCursorRow = editorCursor.row();
                     int desiredCursorCol = editorCursor.col();
                     int interactiveCursorRow = Math.max(1, rows - 1);
@@ -256,6 +285,14 @@ public class TerminalEditorApp {
                         desiredCursorCol = Math.min(cols, SAVE_AS_PROMPT.length() + saveAsInput.cursor() + 1);
                     } else if (saveOverwriteConfirmMode) {
                         String prompt = buildOverwritePrompt(pendingOverwritePath);
+                        desiredCursorRow = interactiveCursorRow;
+                        desiredCursorCol = Math.min(cols, prompt.length() + 1);
+                    } else if (quitConfirmMode) {
+                        String prompt = buildQuitPrompt(countDirtyTabs(tabs));
+                        desiredCursorRow = interactiveCursorRow;
+                        desiredCursorCol = Math.min(cols, prompt.length() + 1);
+                    } else if (closeTabConfirmMode) {
+                        String prompt = buildCloseTabPrompt(tabs, pendingCloseTabIndex);
                         desiredCursorRow = interactiveCursorRow;
                         desiredCursorCol = Math.min(cols, prompt.length() + 1);
                     } else if (searchBar != null) {
@@ -298,11 +335,6 @@ public class TerminalEditorApp {
                         continue;
                     }
 
-                    if (!(key instanceof KeyEvent.ActionEvent actionEvent
-                        && actionEvent.action() == KeyEvent.Action.CTRL_Q)) {
-                        confirmQuit = false;
-                    }
-
                     if (key instanceof KeyEvent.MouseEvent mouse) {
                         if (!cli.mouseEnabled()) {
                             continue;
@@ -315,7 +347,12 @@ public class TerminalEditorApp {
                                     openFileTree.scrollUp(listRows);
                                     break;
                                 }
-                                if (!saveAsMode && !saveOverwriteConfirmMode && !searchMode) {
+                                if (showTabBar && mouse.row() <= 1 && !topMenu.isOpen()) {
+                                    tabBar.scrollLeft();
+                                    break;
+                                }
+                                if (!saveAsMode && !saveOverwriteConfirmMode
+                                    && !quitConfirmMode && !closeTabConfirmMode && !searchMode) {
                                     engine.pageUp(Math.max(1, contentRows / 2));
                                 }
                             }
@@ -325,7 +362,12 @@ public class TerminalEditorApp {
                                     openFileTree.scrollDown(listRows);
                                     break;
                                 }
-                                if (!saveAsMode && !saveOverwriteConfirmMode && !searchMode) {
+                                if (showTabBar && mouse.row() <= 1 && !topMenu.isOpen()) {
+                                    tabBar.scrollRight(tabItems);
+                                    break;
+                                }
+                                if (!saveAsMode && !saveOverwriteConfirmMode
+                                    && !quitConfirmMode && !closeTabConfirmMode && !searchMode) {
                                     engine.pageDown(Math.max(1, contentRows / 2));
                                 }
                             }
@@ -403,8 +445,94 @@ public class TerminalEditorApp {
                                         editorView.cancelMouseSelection();
                                         continue;
                                     }
+                                    TabBar.Hit tabHit = showTabBar
+                                        ? tabBar.hit(mouse.row(), mouse.col())
+                                        : new TabBar.Hit(false, -1, false, false, false);
+                                    if (closeTabConfirmMode && tabHit.consumed()) {
+                                        if (tabHit.scrollLeft()) {
+                                            tabBar.scrollLeft();
+                                            editorView.cancelMouseSelection();
+                                            continue;
+                                        }
+                                        if (tabHit.scrollRight()) {
+                                            tabBar.scrollRight(tabItems);
+                                            editorView.cancelMouseSelection();
+                                            continue;
+                                        }
+                                        int clickedTabIndex = tabHit.tabIndex();
+                                        if (tabHit.closeButton() && clickedTabIndex >= 0 && clickedTabIndex < tabs.size()) {
+                                            if (clickedTabIndex == pendingCloseTabIndex) {
+                                                activeTabIndex = closeTab(tabs, activeTabIndex, pendingCloseTabIndex);
+                                                model = tabs.get(activeTabIndex).model();
+                                                state = tabs.get(activeTabIndex).state();
+                                                engine = tabs.get(activeTabIndex).engine();
+                                                renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
+                                                closeTabConfirmMode = false;
+                                                pendingCloseTabIndex = -1;
+                                                statusMessage = "Closed tab";
+                                            } else if (tabs.get(clickedTabIndex).state().isDirty()) {
+                                                pendingCloseTabIndex = clickedTabIndex;
+                                            } else {
+                                                activeTabIndex = closeTab(tabs, activeTabIndex, clickedTabIndex);
+                                                model = tabs.get(activeTabIndex).model();
+                                                state = tabs.get(activeTabIndex).state();
+                                                engine = tabs.get(activeTabIndex).engine();
+                                                renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
+                                                closeTabConfirmMode = false;
+                                                pendingCloseTabIndex = -1;
+                                                statusMessage = "Closed tab";
+                                            }
+                                        }
+                                        editorView.cancelMouseSelection();
+                                        continue;
+                                    }
+                                    if (tabHit.consumed() && !saveAsMode && !saveOverwriteConfirmMode
+                                        && !quitConfirmMode && !closeTabConfirmMode && !searchMode) {
+                                        if (tabHit.scrollLeft()) {
+                                            tabBar.scrollLeft();
+                                            editorView.cancelMouseSelection();
+                                            continue;
+                                        }
+                                        if (tabHit.scrollRight()) {
+                                            tabBar.scrollRight(tabItems);
+                                            editorView.cancelMouseSelection();
+                                            continue;
+                                        }
+                                        int clickedTabIndex = tabHit.tabIndex();
+                                        if (clickedTabIndex >= 0 && clickedTabIndex < tabs.size()) {
+                                            if (tabHit.closeButton()) {
+                                                if (tabs.get(clickedTabIndex).state().isDirty()) {
+                                                    closeTabConfirmMode = true;
+                                                    pendingCloseTabIndex = clickedTabIndex;
+                                                } else {
+                                                    activeTabIndex = closeTab(tabs, activeTabIndex, clickedTabIndex);
+                                                    statusMessage = "Closed tab";
+                                                }
+                                            } else {
+                                                activeTabIndex = clickedTabIndex;
+                                            }
+                                            model = tabs.get(activeTabIndex).model();
+                                            state = tabs.get(activeTabIndex).state();
+                                            engine = tabs.get(activeTabIndex).engine();
+                                            renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
+                                            topMenu.close();
+                                        }
+                                        editorView.cancelMouseSelection();
+                                        continue;
+                                    }
                                     MenuBar.PopupMouseResult menuMouse = topMenu.handlePopupClick(mouse.row(), mouse.col(), cols);
                                     if (menuMouse.consumed()) {
+                                        Integer tabActivation = topMenu.consumeTabActivationRequest();
+                                        if (tabActivation != null && tabActivation >= 0 && tabActivation < tabs.size()) {
+                                            activeTabIndex = tabActivation;
+                                            model = tabs.get(activeTabIndex).model();
+                                            state = tabs.get(activeTabIndex).state();
+                                            engine = tabs.get(activeTabIndex).engine();
+                                            renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
+                                            statusMessage = "Tab " + (activeTabIndex + 1) + "/" + tabs.size();
+                                            editorView.cancelMouseSelection();
+                                            continue;
+                                        }
                                         if (menuMouse.mappedAction() != null) {
                                             remappedMouseKey = new KeyEvent.ActionEvent(menuMouse.mappedAction());
                                             editorView.cancelMouseSelection();
@@ -431,14 +559,32 @@ public class TerminalEditorApp {
                                         editorView.cancelMouseSelection();
                                         continue;
                                     }
-                                    if (!saveAsMode && !saveOverwriteConfirmMode && !searchMode) {
-                                        editorView.handleMousePress(mouse, model, state, plan, contentRows, engine);
+                                    if (!saveAsMode && !saveOverwriteConfirmMode
+                                        && !quitConfirmMode && !closeTabConfirmMode && !searchMode) {
+                                        editorView.handleMousePress(
+                                            mouse,
+                                            model,
+                                            state,
+                                            plan,
+                                            contentRows,
+                                            engine,
+                                            contentTopRow
+                                        );
                                     }
                                 }
                             }
                             case DRAG -> {
-                                if (!saveAsMode && !saveOverwriteConfirmMode && !searchMode) {
-                                    editorView.handleMouseDrag(mouse, model, state, plan, contentRows, engine);
+                                if (!saveAsMode && !saveOverwriteConfirmMode
+                                    && !quitConfirmMode && !closeTabConfirmMode && !searchMode) {
+                                    editorView.handleMouseDrag(
+                                        mouse,
+                                        model,
+                                        state,
+                                        plan,
+                                        contentRows,
+                                        engine,
+                                        contentTopRow
+                                    );
                                 }
                             }
                             case RELEASE -> editorView.handleMouseRelease(state);
@@ -651,12 +797,90 @@ public class TerminalEditorApp {
                         continue;
                     }
 
+                    if (quitConfirmMode) {
+                        if (key instanceof KeyEvent.CharInput charInput) {
+                            char ch = charInput.ch();
+                            if (ch == 'y' || ch == 'Y') {
+                                running = false;
+                            } else if (ch == 'n' || ch == 'N') {
+                                quitConfirmMode = false;
+                            }
+                            continue;
+                        }
+
+                        KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
+                        switch (action) {
+                            case CTRL_Q -> running = false;
+                            case ESCAPE, ENTER -> quitConfirmMode = false;
+                            default -> {
+                                // Ignore unsupported keys in quit confirmation.
+                            }
+                        }
+                        continue;
+                    }
+
+                    if (closeTabConfirmMode) {
+                        if (pendingCloseTabIndex < 0 || pendingCloseTabIndex >= tabs.size()) {
+                            closeTabConfirmMode = false;
+                            pendingCloseTabIndex = -1;
+                            continue;
+                        }
+                        if (key instanceof KeyEvent.CharInput charInput) {
+                            char ch = charInput.ch();
+                            if (ch == 'y' || ch == 'Y') {
+                                activeTabIndex = closeTab(tabs, activeTabIndex, pendingCloseTabIndex);
+                                model = tabs.get(activeTabIndex).model();
+                                state = tabs.get(activeTabIndex).state();
+                                engine = tabs.get(activeTabIndex).engine();
+                                renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
+                                closeTabConfirmMode = false;
+                                pendingCloseTabIndex = -1;
+                                statusMessage = "Closed tab";
+                            } else if (ch == 'n' || ch == 'N') {
+                                closeTabConfirmMode = false;
+                                pendingCloseTabIndex = -1;
+                            }
+                            continue;
+                        }
+
+                        KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
+                        switch (action) {
+                            case TAB_CLOSE -> {
+                                activeTabIndex = closeTab(tabs, activeTabIndex, pendingCloseTabIndex);
+                                model = tabs.get(activeTabIndex).model();
+                                state = tabs.get(activeTabIndex).state();
+                                engine = tabs.get(activeTabIndex).engine();
+                                renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
+                                closeTabConfirmMode = false;
+                                pendingCloseTabIndex = -1;
+                                statusMessage = "Closed tab";
+                            }
+                            case ESCAPE, ENTER -> {
+                                closeTabConfirmMode = false;
+                                pendingCloseTabIndex = -1;
+                            }
+                            default -> {
+                                // Ignore unsupported keys in close-tab confirmation.
+                            }
+                        }
+                        continue;
+                    }
+
                     if (topMenu.isOpen()) {
                         if (key instanceof KeyEvent.CharInput) {
                             continue;
                         }
                         KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
                         KeyEvent.Action mapped = topMenu.handleKey(action);
+                        Integer tabActivation = topMenu.consumeTabActivationRequest();
+                        if (tabActivation != null && tabActivation >= 0 && tabActivation < tabs.size()) {
+                            activeTabIndex = tabActivation;
+                            model = tabs.get(activeTabIndex).model();
+                            state = tabs.get(activeTabIndex).state();
+                            engine = tabs.get(activeTabIndex).engine();
+                            renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
+                            statusMessage = "Tab " + (activeTabIndex + 1) + "/" + tabs.size();
+                        }
                         if (mapped != null) {
                             key = new KeyEvent.ActionEvent(mapped);
                         }
@@ -737,17 +961,53 @@ public class TerminalEditorApp {
                                 }
                             }
                             case ENTER, CTRL_F -> {
-                                boolean found = engine.findNext(
-                                    searchQueryInput.text(),
-                                    toSearchOptions(searchUi)
-                                );
+                                boolean found;
+                                if (searchUi.allTabs()) {
+                                    int foundTab = findNextAcrossTabs(
+                                        tabs,
+                                        activeTabIndex,
+                                        searchQueryInput.text(),
+                                        toSearchOptions(searchUi)
+                                    );
+                                    found = foundTab >= 0;
+                                    if (found) {
+                                        activeTabIndex = foundTab;
+                                        model = tabs.get(activeTabIndex).model();
+                                        state = tabs.get(activeTabIndex).state();
+                                        engine = tabs.get(activeTabIndex).engine();
+                                        renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
+                                    }
+                                } else {
+                                    found = engine.findNext(
+                                        searchQueryInput.text(),
+                                        toSearchOptions(searchUi)
+                                    );
+                                }
                                 statusMessage = found ? "Found next match" : "Not found";
                             }
                             case CTRL_G -> {
-                                boolean found = engine.findPrevious(
-                                    searchQueryInput.text(),
-                                    toSearchOptions(searchUi)
-                                );
+                                boolean found;
+                                if (searchUi.allTabs()) {
+                                    int foundTab = findPreviousAcrossTabs(
+                                        tabs,
+                                        activeTabIndex,
+                                        searchQueryInput.text(),
+                                        toSearchOptions(searchUi)
+                                    );
+                                    found = foundTab >= 0;
+                                    if (found) {
+                                        activeTabIndex = foundTab;
+                                        model = tabs.get(activeTabIndex).model();
+                                        state = tabs.get(activeTabIndex).state();
+                                        engine = tabs.get(activeTabIndex).engine();
+                                        renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
+                                    }
+                                } else {
+                                    found = engine.findPrevious(
+                                        searchQueryInput.text(),
+                                        toSearchOptions(searchUi)
+                                    );
+                                }
                                 statusMessage = found ? "Found previous match" : "Not found";
                             }
                             case CTRL_R -> {
@@ -769,9 +1029,10 @@ public class TerminalEditorApp {
                                     : "Nothing to replace";
                             }
                             case CTRL_Q -> {
-                                if (state.isDirty() && !confirmQuit) {
-                                    confirmQuit = true;
-                                    statusMessage = "Unsaved changes. Press Ctrl+Q again to quit.";
+                                if (hasDirtyTabs(tabs)) {
+                                    searchMode = false;
+                                    searchFocus = SearchFocus.FIND;
+                                    quitConfirmMode = true;
                                 } else {
                                     running = false;
                                 }
@@ -813,6 +1074,10 @@ public class TerminalEditorApp {
                                 openFileFocus = OpenDialogFocus.LIST;
                                 statusMessage = "Open file";
                             }
+                            case TOGGLE_TAB_BAR -> {
+                                showTabBarSetting = !showTabBarSetting;
+                                statusMessage = showTabBarSetting ? "Tab bar shown" : "Tab bar hidden";
+                            }
                             case CTRL_N, TAB_NEW -> {
                                 tabs.add(newEditorTab());
                                 activeTabIndex = tabs.size() - 1;
@@ -843,7 +1108,8 @@ public class TerminalEditorApp {
                             }
                             case TAB_CLOSE -> {
                                 if (state.isDirty()) {
-                                    statusMessage = "Current tab has unsaved changes";
+                                    closeTabConfirmMode = true;
+                                    pendingCloseTabIndex = activeTabIndex;
                                 } else {
                                     activeTabIndex = closeCurrentTab(tabs, activeTabIndex);
                                     model = tabs.get(activeTabIndex).model();
@@ -893,9 +1159,8 @@ public class TerminalEditorApp {
                         case CTRL_T -> topMenu.openTab();
                         case F10 -> topMenu.openFile();
                         case CTRL_Q -> {
-                            if (state.isDirty() && !confirmQuit) {
-                                confirmQuit = true;
-                                statusMessage = "Unsaved changes. Press Ctrl+Q again to quit.";
+                            if (hasDirtyTabs(tabs)) {
+                                quitConfirmMode = true;
                             } else {
                                 running = false;
                             }
@@ -931,6 +1196,10 @@ public class TerminalEditorApp {
                             openFileFocus = OpenDialogFocus.LIST;
                             statusMessage = "Open file";
                         }
+                        case TOGGLE_TAB_BAR -> {
+                            showTabBarSetting = !showTabBarSetting;
+                            statusMessage = showTabBarSetting ? "Tab bar shown" : "Tab bar hidden";
+                        }
                         case CTRL_N, TAB_NEW -> {
                             tabs.add(newEditorTab());
                             activeTabIndex = tabs.size() - 1;
@@ -958,7 +1227,8 @@ public class TerminalEditorApp {
                         }
                         case TAB_CLOSE -> {
                             if (state.isDirty()) {
-                                statusMessage = "Current tab has unsaved changes";
+                                closeTabConfirmMode = true;
+                                pendingCloseTabIndex = activeTabIndex;
                             } else {
                                 activeTabIndex = closeCurrentTab(tabs, activeTabIndex);
                                 model = tabs.get(activeTabIndex).model();
@@ -1029,7 +1299,7 @@ public class TerminalEditorApp {
         if (buffer.rows() < 1 || cols <= startCol || startCol < 0) {
             return;
         }
-        String file = state.getCurrentFile() == null ? "[No Name]" : state.getCurrentFile().toString();
+        String file = state.getCurrentFile() == null ? "--no name--" : state.getCurrentFile().toString();
         int endCol = Math.min(cols, startCol + file.length());
         for (int col = startCol; col < endCol; col++) {
             String grapheme = buffer.get(0, col).grapheme();
@@ -1237,6 +1507,19 @@ public class TerminalEditorApp {
         return "Overwrite: " + path + " ? (y/N)";
     }
 
+    private String buildQuitPrompt(int dirtyTabs) {
+        return "Unsaved tabs: " + dirtyTabs + ". Quit anyway? (y/N)";
+    }
+
+    private String buildCloseTabPrompt(List<EditorTab> tabs, int closeTabIndex) {
+        if (closeTabIndex < 0 || closeTabIndex >= tabs.size()) {
+            return "Close modified tab? (y/N)";
+        }
+        Path path = tabs.get(closeTabIndex).state().getCurrentFile();
+        String name = path == null ? "--no name--" : path.toString();
+        return "Close modified tab: " + name + " ? (y/N)";
+    }
+
     private String savedMessage(EditorState state) {
         return "Saved " + state.getCurrentFile() + " [" + state.getFileEncoding().displayName() + "]";
     }
@@ -1287,6 +1570,14 @@ public class TerminalEditorApp {
         }
     }
 
+    private boolean hasDirtyTabs(List<EditorTab> tabs) {
+        return TabSessions.hasDirtyTabs(toTabSessions(tabs));
+    }
+
+    private int countDirtyTabs(List<EditorTab> tabs) {
+        return TabSessions.countDirtyTabs(toTabSessions(tabs));
+    }
+
     private String suggestWritableName(Path path) {
         String fileName = path.getFileName() == null ? DEFAULT_FILE_NAME : path.getFileName().toString();
         int dot = fileName.lastIndexOf('.');
@@ -1325,6 +1616,7 @@ public class TerminalEditorApp {
         String csToggle = formatToggle("Аа", searchUi.caseSensitive());
         String wToggle = formatToggle("word", searchUi.matchMode() == SearchOptions.MatchMode.WHOLE_WORD);
         String starToggle = formatToggle("*", searchUi.matchMode() == SearchOptions.MatchMode.WILDCARD);
+        String allToggle = formatToggle("All", searchUi.allTabs());
         String countToken = "[N:" + matchCount + "]";
         int findStart = 0;
         int findEnd = findStart + findField.length();
@@ -1336,8 +1628,10 @@ public class TerminalEditorApp {
         int wordEnd = wordStart + wToggle.length();
         int wildcardStart = wordEnd + 1;
         int wildcardEnd = wildcardStart + starToggle.length();
+        int allStart = wildcardEnd + 1;
+        int allEnd = allStart + allToggle.length();
         String prompt = findField + "  " + replaceField
-            + "  " + csToggle + " " + wToggle + " " + starToggle + " " + countToken
+            + "  " + csToggle + " " + wToggle + " " + starToggle + " " + allToggle + " " + countToken
             + "  " + SEARCH_HELP;
 
         int cursorIndex = cursorForFocus(
@@ -1346,6 +1640,7 @@ public class TerminalEditorApp {
             csToggle,
             wToggle,
             starToggle,
+            allToggle,
             safeQuery,
             safeReplacement,
             queryCursor,
@@ -1367,7 +1662,9 @@ public class TerminalEditorApp {
                 wordStart,
                 wordEnd,
                 wildcardStart,
-                wildcardEnd
+                wildcardEnd,
+                allStart,
+                allEnd
             );
         }
 
@@ -1391,7 +1688,9 @@ public class TerminalEditorApp {
             wordStart,
             wordEnd,
             wildcardStart,
-            wildcardEnd
+            wildcardEnd,
+            allStart,
+            allEnd
         );
     }
 
@@ -1415,6 +1714,9 @@ public class TerminalEditorApp {
         if (promptIndex >= searchBar.wildcardStart() && promptIndex < searchBar.wildcardEnd()) {
             return SearchFocus.WILDCARD;
         }
+        if (promptIndex >= searchBar.allStart() && promptIndex < searchBar.allEnd()) {
+            return SearchFocus.ALL;
+        }
         return null;
     }
 
@@ -1431,7 +1733,9 @@ public class TerminalEditorApp {
         int wordStart,
         int wordEnd,
         int wildcardStart,
-        int wildcardEnd
+        int wildcardEnd,
+        int allStart,
+        int allEnd
     ) {
     }
 
@@ -1449,6 +1753,7 @@ public class TerminalEditorApp {
         String iToggle,
         String wToggle,
         String starToggle,
+        String allToggle,
         String query,
         String replacement,
         int queryCursor,
@@ -1472,23 +1777,36 @@ public class TerminalEditorApp {
         if (focus == SearchFocus.WORD) {
             return togglesStart + iToggle.length() + 1 + wCheckOffset;
         }
-        return togglesStart + iToggle.length() + 1 + wToggle.length() + 1 + starCheckOffset;
+        int starStart = togglesStart + iToggle.length() + 1 + wToggle.length() + 1;
+        if (focus == SearchFocus.WILDCARD) {
+            return starStart + starCheckOffset;
+        }
+        int allStart = starStart + starToggle.length() + 1;
+        int allCheckOffset = allToggle.indexOf(':') + 1;
+        return allStart + allCheckOffset;
     }
 
     private SearchUiOptions toggleFocusedSearchOption(SearchUiOptions options, SearchFocus focus) {
         return switch (focus) {
-            case CASE -> new SearchUiOptions(!options.caseSensitive(), options.matchMode());
+            case CASE -> new SearchUiOptions(!options.caseSensitive(), options.matchMode(), options.allTabs());
             case WORD -> new SearchUiOptions(
                 options.caseSensitive(),
                 options.matchMode() == SearchOptions.MatchMode.WHOLE_WORD
                     ? SearchOptions.MatchMode.SUBSTRING
-                    : SearchOptions.MatchMode.WHOLE_WORD
+                    : SearchOptions.MatchMode.WHOLE_WORD,
+                options.allTabs()
             );
             case WILDCARD -> new SearchUiOptions(
                 options.caseSensitive(),
                 options.matchMode() == SearchOptions.MatchMode.WILDCARD
                     ? SearchOptions.MatchMode.SUBSTRING
-                    : SearchOptions.MatchMode.WILDCARD
+                    : SearchOptions.MatchMode.WILDCARD,
+                options.allTabs()
+            );
+            case ALL -> new SearchUiOptions(
+                options.caseSensitive(),
+                options.matchMode(),
+                !options.allTabs()
             );
             default -> options;
         };
@@ -1500,7 +1818,8 @@ public class TerminalEditorApp {
     }
 
     private boolean isToggleFocus(SearchFocus focus) {
-        return focus == SearchFocus.CASE || focus == SearchFocus.WORD || focus == SearchFocus.WILDCARD;
+        return focus == SearchFocus.CASE || focus == SearchFocus.WORD
+            || focus == SearchFocus.WILDCARD || focus == SearchFocus.ALL;
     }
 
     private SearchFocus nextSearchFocus(SearchFocus focus) {
@@ -1509,91 +1828,65 @@ public class TerminalEditorApp {
             case REPLACE -> SearchFocus.CASE;
             case CASE -> SearchFocus.WORD;
             case WORD -> SearchFocus.WILDCARD;
-            case WILDCARD -> SearchFocus.FIND;
+            case WILDCARD -> SearchFocus.ALL;
+            case ALL -> SearchFocus.FIND;
         };
     }
 
-    private int countSearchMatches(TextModel model, String query, SearchOptions options) {
+    private int countSearchMatches(TextModel model, List<EditorTab> tabs, String query, SearchOptions options) {
         if (query == null || query.isEmpty()) {
             return 0;
         }
         SearchOptions safe = options == null ? SearchOptions.DEFAULT : options;
-        int total = 0;
-        for (int i = 0; i < model.lineCount(); i++) {
-            total += findMatchesInLine(model.getLine(i), query, safe).size();
+        if (tabs != null) {
+            return TabSearch.countMatches(toTabSessions(tabs), query, safe);
         }
-        return total;
+        if (model == null) {
+            return 0;
+        }
+        return TabSearch.countMatchesInModel(model, query, safe);
     }
 
-    private static List<LineMatch> findMatchesInLine(String line, String query, SearchOptions options) {
-        String haystack = options.caseInsensitive() ? line.toLowerCase(Locale.ROOT) : line;
-        String needle = options.caseInsensitive() ? query.toLowerCase(Locale.ROOT) : query;
-        return switch (options.matchMode()) {
-            case SUBSTRING -> findLiteralMatches(haystack, needle, false);
-            case WHOLE_WORD -> findLiteralMatches(haystack, needle, true);
-            case WILDCARD -> findWildcardMatches(haystack, needle);
-        };
-    }
-
-    private static List<LineMatch> findLiteralMatches(String text, String needle, boolean wholeWord) {
-        if (needle.isEmpty()) {
-            return List.of();
+    private int findNextAcrossTabs(List<EditorTab> tabs, int activeTabIndex, String query, SearchOptions options) {
+        if (tabs == null || tabs.isEmpty()) {
+            return -1;
         }
-        List<LineMatch> matches = new ArrayList<>();
-        int at = 0;
-        while (at <= text.length() - needle.length()) {
-            int idx = text.indexOf(needle, at);
-            if (idx < 0) {
-                break;
-            }
-            int end = idx + needle.length();
-            if (!wholeWord || isWholeWord(text, idx, end)) {
-                matches.add(new LineMatch(idx, end));
-            }
-            at = end;
+        int safeActive = Math.max(0, Math.min(activeTabIndex, tabs.size() - 1));
+        if (tabs.get(safeActive).engine().findNext(query, options)) {
+            return safeActive;
         }
-        return matches;
-    }
-
-    private static List<LineMatch> findWildcardMatches(String text, String wildcard) {
-        List<LineMatch> matches = new ArrayList<>();
-        Pattern pattern = wildcardPattern(wildcard);
-        Matcher matcher = pattern.matcher(text);
-        while (matcher.find()) {
-            if (matcher.start() == matcher.end()) {
-                break;
-            }
-            matches.add(new LineMatch(matcher.start(), matcher.end()));
-        }
-        return matches;
-    }
-
-    private static Pattern wildcardPattern(String wildcard) {
-        StringBuilder regex = new StringBuilder("(?s)");
-        for (int i = 0; i < wildcard.length(); i++) {
-            char ch = wildcard.charAt(i);
-            if (ch == '*') {
-                regex.append(".*");
-            } else if (ch == '?') {
-                regex.append('.');
-            } else {
-                regex.append(Pattern.quote(String.valueOf(ch)));
+        for (int step = 1; step < tabs.size(); step++) {
+            int idx = Math.floorMod(safeActive + step, tabs.size());
+            EditorTab tab = tabs.get(idx);
+            tab.state().setCursor(new Position(0, 0));
+            tab.state().clearSelection();
+            if (tab.engine().findNext(query, options)) {
+                return idx;
             }
         }
-        return Pattern.compile(regex.toString());
+        return -1;
     }
 
-    private static boolean isWholeWord(String text, int start, int end) {
-        boolean leftOk = start == 0 || !isWordChar(text.charAt(start - 1));
-        boolean rightOk = end == text.length() || !isWordChar(text.charAt(end));
-        return leftOk && rightOk;
-    }
-
-    private static boolean isWordChar(char ch) {
-        return Character.isLetterOrDigit(ch) || ch == '_';
-    }
-
-    private record LineMatch(int start, int end) {
+    private int findPreviousAcrossTabs(List<EditorTab> tabs, int activeTabIndex, String query, SearchOptions options) {
+        if (tabs == null || tabs.isEmpty()) {
+            return -1;
+        }
+        int safeActive = Math.max(0, Math.min(activeTabIndex, tabs.size() - 1));
+        if (tabs.get(safeActive).engine().findPrevious(query, options)) {
+            return safeActive;
+        }
+        for (int step = 1; step < tabs.size(); step++) {
+            int idx = Math.floorMod(safeActive - step, tabs.size());
+            EditorTab tab = tabs.get(idx);
+            int lastLine = Math.max(0, tab.model().lineCount() - 1);
+            int lastCol = tab.model().getLine(lastLine).length();
+            tab.state().setCursor(new Position(lastLine, lastCol));
+            tab.state().clearSelection();
+            if (tab.engine().findPrevious(query, options)) {
+                return idx;
+            }
+        }
+        return -1;
     }
 
     private record OpenDialogLayout(int top, int left, int width, int height, int listStartRow, int listRows) {
@@ -1617,28 +1910,70 @@ public class TerminalEditorApp {
     }
 
     private EditorTab newEditorTab() {
-        TextModel model = new TextModel(new SimpleLineBuffer());
-        EditorState state = new EditorState();
-        EditorEngine engine = new EditorEngine(model, state);
+        TabSession session = TabSession.createEmpty();
         RenderPlanBuilder builder = new RenderPlanBuilder(RegexHighlighter.withDefaults());
-        return new EditorTab(model, state, engine, builder);
+        return new EditorTab(session, builder);
     }
 
     private int switchTab(List<EditorTab> tabs, int currentIndex, int delta) {
-        if (tabs.isEmpty()) {
-            return 0;
-        }
-        int size = tabs.size();
-        return Math.floorMod(currentIndex + delta, size);
+        return TabSessions.switchByDelta(tabs.size(), currentIndex, delta);
     }
 
     private int closeCurrentTab(List<EditorTab> tabs, int activeTabIndex) {
+        int size = tabs.size();
         if (tabs.size() <= 1) {
             tabs.set(0, newEditorTab());
             return 0;
         }
         tabs.remove(activeTabIndex);
-        return Math.max(0, Math.min(activeTabIndex, tabs.size() - 1));
+        return TabSessions.closeIndex(size, activeTabIndex, activeTabIndex);
+    }
+
+    private int closeTab(List<EditorTab> tabs, int activeTabIndex, int closeTabIndex) {
+        int size = tabs.size();
+        if (tabs.size() <= 1) {
+            tabs.set(0, newEditorTab());
+            return 0;
+        }
+        tabs.remove(closeTabIndex);
+        return TabSessions.closeIndex(size, activeTabIndex, closeTabIndex);
+    }
+
+    private List<TabSession> toTabSessions(List<EditorTab> tabs) {
+        List<TabSession> sessions = new ArrayList<>(tabs.size());
+        for (EditorTab tab : tabs) {
+            sessions.add(tab.tabSession());
+        }
+        return sessions;
+    }
+
+    private List<TabBar.TabItem> toTabItems(List<EditorTab> tabs, boolean[] matchFlags) {
+        List<TabBar.TabItem> out = new ArrayList<>(tabs.size());
+        for (int i = 0; i < tabs.size(); i++) {
+            EditorTab tab = tabs.get(i);
+            boolean hasMatch = matchFlags != null && i < matchFlags.length && matchFlags[i];
+            out.add(new TabBar.TabItem(tab.state().getCurrentFile(), tab.state().isDirty(), hasMatch));
+        }
+        return out;
+    }
+
+    private boolean[] findTabsWithMatches(List<EditorTab> tabs, String query, SearchOptions options) {
+        boolean[] flags = new boolean[tabs.size()];
+        int[] match = TabSearch.findMatchTabs(toTabSessions(tabs), query, options);
+        for (int i = 0; i < flags.length && i < match.length; i++) {
+            flags[i] = match[i] != 0;
+        }
+        return flags;
+    }
+
+    private List<MenuBar.OpenTab> toMenuTabs(List<EditorTab> tabs, boolean[] matchFlags) {
+        List<MenuBar.OpenTab> out = new ArrayList<>(tabs.size());
+        for (int i = 0; i < tabs.size(); i++) {
+            EditorTab tab = tabs.get(i);
+            boolean hasMatch = matchFlags != null && i < matchFlags.length && matchFlags[i];
+            out.add(new MenuBar.OpenTab(tab.state().getCurrentFile(), tab.state().isDirty(), hasMatch));
+        }
+        return out;
     }
 
     private enum OpenDialogFocus {
@@ -1648,13 +1983,23 @@ public class TerminalEditorApp {
     }
 
     private record EditorTab(
-        TextModel model,
-        EditorState state,
-        EditorEngine engine,
+        TabSession tabSession,
         RenderPlanBuilder renderPlanBuilder
     ) {
+        private TextModel model() {
+            return tabSession.model();
+        }
+
+        private EditorState state() {
+            return tabSession.state();
+        }
+
+        private EditorEngine engine() {
+            return tabSession.engine();
+        }
+
         private EditorTab withRenderPlanBuilder(RenderPlanBuilder nextBuilder) {
-            return new EditorTab(model, state, engine, nextBuilder);
+            return new EditorTab(tabSession, nextBuilder);
         }
     }
 
@@ -1663,7 +2008,8 @@ public class TerminalEditorApp {
         REPLACE,
         CASE,
         WORD,
-        WILDCARD
+        WILDCARD,
+        ALL
     }
 
     private static final class NotificationState {
@@ -1700,8 +2046,8 @@ public class TerminalEditorApp {
         }
     }
 
-    private record SearchUiOptions(boolean caseSensitive, SearchOptions.MatchMode matchMode) {
-        private static final SearchUiOptions DEFAULT = new SearchUiOptions(false, SearchOptions.MatchMode.SUBSTRING);
+    private record SearchUiOptions(boolean caseSensitive, SearchOptions.MatchMode matchMode, boolean allTabs) {
+        private static final SearchUiOptions DEFAULT = new SearchUiOptions(false, SearchOptions.MatchMode.SUBSTRING, false);
     }
 
     private LineHighlighter resolveHighlighter(Path file) {

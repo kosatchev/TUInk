@@ -20,14 +20,31 @@ public class RenderRasterizer {
     private static final Style LEADING_WHITESPACE_STYLE = new Style(Color.BRIGHT_BLACK, Color.DEFAULT, false, false);
     private static final Style SCROLL_TRACK_STYLE = new Style(Color.BRIGHT_BLACK, Color.DEFAULT, false, false);
     private static final Style SCROLL_THUMB_STYLE = new Style(Color.BRIGHT_WHITE, Color.DEFAULT, false, false);
+    private final int contentTopRow;
+
+    public RenderRasterizer() {
+        this(1);
+    }
+
+    public RenderRasterizer(int contentTopRow) {
+        this.contentTopRow = Math.max(1, contentTopRow);
+    }
 
     public CellBuffer rasterize(RenderPlan plan, int rows, int cols) {
+        return rasterize(plan, rows, cols, contentTopRow);
+    }
+
+    public CellBuffer rasterize(RenderPlan plan, int rows, int cols, int contentTopRow) {
         CellBuffer buffer = new CellBuffer(rows, cols);
         int contentCols = Math.max(1, cols - plan.scrollbarWidth());
+        int topRow = Math.max(1, contentTopRow);
 
-        for (int row = 0; row < Math.min(plan.lines().size(), plan.contentRows()) && row + 1 < rows; row++) {
+        for (int row = 0; row < Math.min(plan.lines().size(), plan.contentRows()); row++) {
             LineVisual line = plan.lines().get(row);
-            int screenRow = row + 1;
+            int screenRow = row + topRow;
+            if (screenRow >= rows) {
+                break;
+            }
             drawText(buffer, screenRow, 0, line.gutter(), GUTTER_STYLE, contentCols);
             drawHighlightedText(buffer, screenRow, plan.gutterWidth(), line.text(), line.spans(), contentCols);
         }
@@ -54,19 +71,19 @@ public class RenderRasterizer {
             Style style = plan.notificationBarStyle() == null ? NOTIFICATION_STYLE : plan.notificationBarStyle();
             drawText(buffer, overlayTopRow, 0, truncateOrPad(plan.notificationBarText(), cols), style, cols);
         }
-        drawScrollbar(buffer, plan, rows, cols);
+        drawScrollbar(buffer, plan, rows, cols, topRow);
 
         return buffer;
     }
 
-    private void drawScrollbar(CellBuffer buffer, RenderPlan plan, int rows, int cols) {
+    private void drawScrollbar(CellBuffer buffer, RenderPlan plan, int rows, int cols, int contentTopRow) {
         if (plan.scrollbarWidth() == 0 || cols <= 0 || rows <= 2) {
             return;
         }
 
         int barCol = cols - 1;
-        int trackTop = 1;
-        int trackHeight = Math.min(plan.contentRows(), Math.max(0, rows - 2));
+        int trackTop = contentTopRow;
+        int trackHeight = Math.min(plan.contentRows(), Math.max(0, rows - contentTopRow - 1));
         if (trackHeight <= 0) {
             return;
         }

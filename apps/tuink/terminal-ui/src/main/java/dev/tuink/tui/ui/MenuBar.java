@@ -4,6 +4,8 @@ import dev.tuink.render.Style;
 import dev.tuink.tui.KeyEvent;
 import dev.tuink.tui.render.CellBuffer;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * UI element for the top menu bar and its dropdown popup.
@@ -20,6 +22,18 @@ public final class MenuBar {
         this.selectedMonoStyle = selectedMonoStyle;
     }
 
+    public void setOpenTabs(List<OpenTab> openTabs, int activeTabIndex) {
+        controller.setOpenTabs(openTabs, activeTabIndex);
+    }
+
+    public void setShowTabBarEnabled(boolean enabled) {
+        controller.setShowTabBarEnabled(enabled);
+    }
+
+    public Integer consumeTabActivationRequest() {
+        return controller.consumePendingTabActivation();
+    }
+
     public String buildTopBar(Path currentFile, boolean dirty, int activeTabIndex, int totalTabs, int cols) {
         return controller.buildTopBar(currentFile, dirty, activeTabIndex, totalTabs, cols);
     }
@@ -33,6 +47,7 @@ public final class MenuBar {
             case FILE -> 3;
             case EDIT -> 10;
             case TAB -> 17;
+            case SETTINGS -> 24;
         };
     }
 
@@ -81,6 +96,10 @@ public final class MenuBar {
         controller.open(MenuId.TAB);
     }
 
+    public void openSettings() {
+        controller.open(MenuId.SETTINGS);
+    }
+
     public void close() {
         controller.close();
     }
@@ -103,6 +122,10 @@ public final class MenuBar {
         }
         if (View.isMenuLabelHit(MenuId.TAB, col)) {
             controller.toggle(MenuId.TAB);
+            return true;
+        }
+        if (View.isMenuLabelHit(MenuId.SETTINGS, col)) {
+            controller.toggle(MenuId.SETTINGS);
             return true;
         }
         return false;
@@ -133,21 +156,59 @@ public final class MenuBar {
     public record PopupMouseResult(boolean consumed, KeyEvent.Action mappedAction) {
     }
 
+    public record OpenTab(Path file, boolean dirty, boolean hasMatch) {
+    }
+
     private enum MenuId {
         FILE,
         EDIT,
-        TAB
+        TAB,
+        SETTINGS
     }
 
     private static final class Controller {
-        private static final String[] FILE_MENU_ITEMS = {"Open...", "Save", "Save As...", "Quit"};
-        private static final String[] EDIT_MENU_ITEMS = {"Undo", "Redo", "Cut", "Copy", "Paste"};
-        private static final String[] TAB_MENU_ITEMS = {"New Tab", "Close Tab", "Next Tab", "Previous Tab"};
+        private static final String NO_NAME_LABEL = "--no name--";
+        private static final String SEPARATOR = "----------------";
+        private static final int TAB_SEPARATOR_INDEX = 4;
+        private static final int TAB_DYNAMIC_START_INDEX = 5;
+
+        private static final String[] FILE_MENU_ITEMS = {"New", "Open...", "Save", "Save As...", "Quit"};
+        private static final String[] EDIT_MENU_ITEMS = {"Undo", "Redo", "Cut", "Copy", "Paste", "Find"};
+        private static final String[] TAB_MENU_BASE_ITEMS = {"New Tab", "Close Tab", "Next Tab", "Previous Tab", SEPARATOR};
+        private static final String[] SETTINGS_MENU_ITEMS_ON = {"[x] Show Tab Bar"};
+        private static final String[] SETTINGS_MENU_ITEMS_OFF = {"[ ] Show Tab Bar"};
 
         private boolean open;
         private MenuId active = MenuId.EDIT;
         private int index;
         private int fileNameStartCol;
+        private List<OpenTab> openTabs = List.of();
+        private int activeTabIndex;
+        private Integer pendingTabActivation;
+        private boolean showTabBarEnabled = true;
+
+        private void setOpenTabs(List<OpenTab> tabs, int activeTabIndex) {
+            if (tabs == null || tabs.isEmpty()) {
+                this.openTabs = List.of();
+            } else {
+                this.openTabs = new ArrayList<>(tabs);
+            }
+            if (this.openTabs.isEmpty()) {
+                this.activeTabIndex = 0;
+            } else {
+                this.activeTabIndex = Math.max(0, Math.min(activeTabIndex, this.openTabs.size() - 1));
+            }
+        }
+
+        private void setShowTabBarEnabled(boolean enabled) {
+            this.showTabBarEnabled = enabled;
+        }
+
+        private Integer consumePendingTabActivation() {
+            Integer value = pendingTabActivation;
+            pendingTabActivation = null;
+            return value;
+        }
 
         private boolean isOpen() {
             return open;
@@ -174,14 +235,14 @@ public final class MenuBar {
             active = menu;
             open = !sameMenuOpen;
             if (open) {
-                index = 0;
+                index = firstSelectableIndex(active);
             }
         }
 
         private void open(MenuId menu) {
             active = menu;
             open = true;
-            index = 0;
+            index = firstSelectableIndex(active);
         }
 
         private void close() {
@@ -189,7 +250,12 @@ public final class MenuBar {
         }
 
         private void setIndex(int idx) {
-            index = Math.max(0, Math.min(idx, activeItems().length - 1));
+            String[] items = activeItems();
+            if (items.length == 0) {
+                index = 0;
+                return;
+            }
+            index = Math.max(0, Math.min(idx, items.length - 1));
         }
 
         private KeyEvent.Action handleMenuKey(KeyEvent.Action action) {
@@ -197,33 +263,34 @@ public final class MenuBar {
                 case ESCAPE -> open = false;
                 case CTRL_E -> {
                     active = MenuId.EDIT;
-                    index = 0;
+                    index = firstSelectableIndex(active);
                 }
                 case F10 -> {
                     active = MenuId.FILE;
-                    index = 0;
+                    index = firstSelectableIndex(active);
                 }
                 case CTRL_T -> {
                     active = MenuId.TAB;
-                    index = 0;
+                    index = firstSelectableIndex(active);
+                }
+                case F2 -> {
+                    active = MenuId.SETTINGS;
+                    index = firstSelectableIndex(active);
                 }
                 case ARROW_LEFT -> {
                     active = previousMenu(active);
-                    index = Math.min(index, itemsFor(active).length - 1);
+                    index = firstSelectableIndex(active);
                 }
                 case ARROW_RIGHT -> {
                     active = nextMenu(active);
-                    index = Math.min(index, itemsFor(active).length - 1);
+                    index = firstSelectableIndex(active);
                 }
-                case ARROW_UP -> {
-                    String[] items = itemsFor(active);
-                    index = (index + items.length - 1) % items.length;
-                }
-                case ARROW_DOWN -> {
-                    String[] items = itemsFor(active);
-                    index = (index + 1) % items.length;
-                }
+                case ARROW_UP -> index = moveSelection(-1);
+                case ARROW_DOWN -> index = moveSelection(1);
                 case ENTER -> {
+                    if (!isSelectable(active, index)) {
+                        return null;
+                    }
                     KeyEvent.Action mapped = mapSelection(active, index);
                     open = false;
                     return mapped;
@@ -235,14 +302,30 @@ public final class MenuBar {
             return null;
         }
 
+        private int moveSelection(int delta) {
+            String[] items = activeItems();
+            if (items.length == 0) {
+                return 0;
+            }
+            int next = index;
+            for (int i = 0; i < items.length; i++) {
+                next = Math.floorMod(next + delta, items.length);
+                if (isSelectable(active, next)) {
+                    return next;
+                }
+            }
+            return index;
+        }
+
         private String buildTopBar(Path currentFile, boolean dirty, int activeTabIndex, int totalTabs, int cols) {
             String fileMenu = (open && active == MenuId.FILE) ? "[File]" : " File ";
             String editMenu = (open && active == MenuId.EDIT) ? "[Edit]" : " Edit ";
             String tabMenu = (open && active == MenuId.TAB) ? "[Tab]" : " Tab ";
+            String settingsMenu = (open && active == MenuId.SETTINGS) ? "[Settings]" : " Settings ";
             String tabMarker = "[" + (activeTabIndex + 1) + "/" + Math.max(1, totalTabs) + "]";
-            String file = currentFile == null ? "[No Name]" : currentFile.toString();
-            String dirtyMarker = dirty ? " [+]" : "";
-            String left = fileMenu + " " + editMenu + " " + tabMenu + " " + tabMarker + " ";
+            String file = currentFile == null ? NO_NAME_LABEL : currentFile.toString();
+            String dirtyMarker = dirty ? " *" : "";
+            String left = fileMenu + " " + editMenu + " " + tabMenu + " " + settingsMenu + " " + tabMarker + " ";
             fileNameStartCol = left.length();
             String top = left + file + dirtyMarker;
             if (top.length() > cols) {
@@ -251,21 +334,49 @@ public final class MenuBar {
             return top + " ".repeat(cols - top.length());
         }
 
-        private static String[] itemsFor(MenuId menu) {
-            return switch (menu) {
-                case FILE -> FILE_MENU_ITEMS;
-                case EDIT -> EDIT_MENU_ITEMS;
-                case TAB -> TAB_MENU_ITEMS;
-            };
+        private String[] itemsFor(MenuId menu) {
+            if (menu == MenuId.FILE) {
+                return FILE_MENU_ITEMS;
+            }
+            if (menu == MenuId.EDIT) {
+                return EDIT_MENU_ITEMS;
+            }
+            if (menu == MenuId.SETTINGS) {
+                return showTabBarEnabled ? SETTINGS_MENU_ITEMS_ON : SETTINGS_MENU_ITEMS_OFF;
+            }
+            List<String> items = new ArrayList<>();
+            items.addAll(List.of(TAB_MENU_BASE_ITEMS));
+            for (OpenTab tab : openTabs) {
+                items.add(tabLabel(tab));
+            }
+            return items.toArray(String[]::new);
         }
 
-        private static KeyEvent.Action mapSelection(MenuId menu, int itemIndex) {
+        private boolean isSelectable(MenuId menu, int itemIndex) {
+            if (menu != MenuId.TAB) {
+                return true;
+            }
+            return itemIndex != TAB_SEPARATOR_INDEX;
+        }
+
+        private int firstSelectableIndex(MenuId menu) {
+            String[] items = itemsFor(menu);
+            for (int i = 0; i < items.length; i++) {
+                if (isSelectable(menu, i)) {
+                    return i;
+                }
+            }
+            return 0;
+        }
+
+        private KeyEvent.Action mapSelection(MenuId menu, int itemIndex) {
             if (menu == MenuId.FILE) {
                 return switch (itemIndex) {
-                    case 0 -> KeyEvent.Action.CTRL_O;
-                    case 1 -> KeyEvent.Action.CTRL_S;
-                    case 2 -> KeyEvent.Action.CTRL_K;
-                    case 3 -> KeyEvent.Action.CTRL_Q;
+                    case 0 -> KeyEvent.Action.TAB_NEW;
+                    case 1 -> KeyEvent.Action.CTRL_O;
+                    case 2 -> KeyEvent.Action.CTRL_S;
+                    case 3 -> KeyEvent.Action.CTRL_K;
+                    case 4 -> KeyEvent.Action.CTRL_Q;
                     default -> null;
                 };
             }
@@ -276,31 +387,56 @@ public final class MenuBar {
                     case 2 -> KeyEvent.Action.CTRL_X;
                     case 3 -> KeyEvent.Action.CTRL_C;
                     case 4 -> KeyEvent.Action.CTRL_V;
+                    case 5 -> KeyEvent.Action.CTRL_F;
                     default -> null;
                 };
             }
+            if (menu == MenuId.SETTINGS) {
+                return itemIndex == 0 ? KeyEvent.Action.TOGGLE_TAB_BAR : null;
+            }
+            return mapTabSelection(itemIndex);
+        }
+
+        private KeyEvent.Action mapTabSelection(int itemIndex) {
             return switch (itemIndex) {
                 case 0 -> KeyEvent.Action.TAB_NEW;
                 case 1 -> KeyEvent.Action.TAB_CLOSE;
                 case 2 -> KeyEvent.Action.TAB_NEXT;
                 case 3 -> KeyEvent.Action.TAB_PREVIOUS;
-                default -> null;
+                default -> {
+                    if (itemIndex >= TAB_DYNAMIC_START_INDEX) {
+                        int tabIndex = itemIndex - TAB_DYNAMIC_START_INDEX;
+                        if (tabIndex >= 0 && tabIndex < openTabs.size()) {
+                            pendingTabActivation = tabIndex;
+                        }
+                    }
+                    yield null;
+                }
             };
+        }
+
+        private String tabLabel(OpenTab tab) {
+            if (tab == null) {
+                return NO_NAME_LABEL;
+            }
+            return TabBar.formatTabTitle(tab.file(), tab.dirty(), tab.hasMatch());
         }
 
         private static MenuId nextMenu(MenuId menu) {
             return switch (menu) {
                 case FILE -> MenuId.EDIT;
                 case EDIT -> MenuId.TAB;
-                case TAB -> MenuId.FILE;
+                case TAB -> MenuId.SETTINGS;
+                case SETTINGS -> MenuId.FILE;
             };
         }
 
         private static MenuId previousMenu(MenuId menu) {
             return switch (menu) {
-                case FILE -> MenuId.TAB;
+                case FILE -> MenuId.SETTINGS;
                 case EDIT -> MenuId.FILE;
                 case TAB -> MenuId.EDIT;
+                case SETTINGS -> MenuId.TAB;
             };
         }
     }
@@ -309,9 +445,11 @@ public final class MenuBar {
         private static final int FILE_START_COL = 0;
         private static final int EDIT_START_COL = 7;
         private static final int TAB_START_COL = 14;
+        private static final int SETTINGS_START_COL = 20;
         private static final int FILE_LABEL_WIDTH = 6;
         private static final int EDIT_LABEL_WIDTH = 6;
         private static final int TAB_LABEL_WIDTH = 5;
+        private static final int SETTINGS_LABEL_WIDTH = 10;
         private static final int POPUP_TOP_ROW = 1;
 
         private View() {
@@ -372,6 +510,7 @@ public final class MenuBar {
                 case FILE -> " File ";
                 case EDIT -> " Edit ";
                 case TAB -> " Tab ";
+                case SETTINGS -> " Settings ";
             };
             drawLine(buffer, 0, startCol(active), label, style, cols);
         }
@@ -381,6 +520,7 @@ public final class MenuBar {
                 case FILE -> FILE_START_COL;
                 case EDIT -> EDIT_START_COL;
                 case TAB -> TAB_START_COL;
+                case SETTINGS -> SETTINGS_START_COL;
             };
         }
 
@@ -389,6 +529,7 @@ public final class MenuBar {
                 case FILE -> FILE_LABEL_WIDTH;
                 case EDIT -> EDIT_LABEL_WIDTH;
                 case TAB -> TAB_LABEL_WIDTH;
+                case SETTINGS -> SETTINGS_LABEL_WIDTH;
             };
         }
 

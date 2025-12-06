@@ -2,6 +2,7 @@ package dev.tuink.tui.ui;
 
 import dev.tuink.tui.render.CellBuffer;
 import dev.tuink.render.Style;
+import dev.tuink.tui.render.HorizontalScrollbar;
 import dev.tuink.tui.render.VerticalScrollbar;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -22,6 +23,7 @@ public final class TreeView {
     private List<Item> items = List.of();
     private int selectedIndex;
     private int scroll;
+    private int hScroll;
     private int lastClickIndex = -1;
     private long lastClickAtNanos;
 
@@ -55,6 +57,7 @@ public final class TreeView {
         rebuild();
         selectedIndex = 0;
         scroll = 0;
+        hScroll = 0;
         resetClickTracking();
     }
 
@@ -110,6 +113,125 @@ public final class TreeView {
     public void scrollDown(int listRows) {
         selectedIndex = Math.min(Math.max(0, items.size() - 1), selectedIndex + 1);
         ensureVisible(listRows);
+    }
+
+    public void scrollLeft() {
+        hScroll = Math.max(0, hScroll - 2);
+    }
+
+    public void scrollRight(int visibleTextWidth) {
+        int max = maxHorizontalScroll(visibleTextWidth);
+        if (max <= 0) {
+            hScroll = 0;
+            return;
+        }
+        hScroll = Math.min(max, hScroll + 2);
+    }
+
+    public int visibleTextWidth(int left, int right, int listRows) {
+        return computeLayout(left, right, listRows).textWidth();
+    }
+
+    public ScrollPointerResult handleScrollbarPointer(
+        int mouseRow,
+        int mouseCol,
+        int left,
+        int right,
+        int listStartRow,
+        int listRows
+    ) {
+        DrawLayout layout = computeLayout(left, right, listRows);
+        int textRows = layout.textRows();
+        int textWidth = layout.textWidth();
+        if (layout.showHScrollbar()) {
+            int row = listStartRow + textRows;
+            int startCol = left + 1;
+            int total = Math.max(textWidth, maxLabelLength());
+            HorizontalScrollbar.Hit hit = HorizontalScrollbar.hit(
+                mouseRow,
+                mouseCol,
+                row,
+                startCol,
+                textWidth,
+                total,
+                hScroll
+            );
+            if (hit == HorizontalScrollbar.Hit.THUMB) {
+                hScroll = HorizontalScrollbar.scrollFromPointer(
+                    mouseCol,
+                    startCol,
+                    textWidth,
+                    total
+                );
+                return new ScrollPointerResult(true, ScrollAxis.HORIZONTAL, true);
+            }
+            if (hit == HorizontalScrollbar.Hit.TRACK) {
+                hScroll = HorizontalScrollbar.pageScrollFromTrackClick(
+                    hScroll,
+                    mouseCol,
+                    startCol,
+                    textWidth,
+                    total
+                );
+                return new ScrollPointerResult(true, ScrollAxis.HORIZONTAL, false);
+            }
+        }
+        if (layout.showVScrollbar()) {
+            int col = right - 1;
+            int top = listStartRow;
+            VerticalScrollbar.Hit hit = VerticalScrollbar.hit(
+                mouseRow,
+                mouseCol,
+                top,
+                col,
+                textRows,
+                items.size(),
+                scroll
+            );
+            if (hit == VerticalScrollbar.Hit.THUMB) {
+                scroll = VerticalScrollbar.scrollFromPointer(mouseRow, top, textRows, items.size());
+                scroll = Math.max(0, Math.min(scroll, Math.max(0, items.size() - textRows)));
+                return new ScrollPointerResult(true, ScrollAxis.VERTICAL, true);
+            }
+            if (hit == VerticalScrollbar.Hit.TRACK) {
+                scroll = VerticalScrollbar.pageScrollFromTrackClick(scroll, mouseRow, top, textRows, items.size());
+                return new ScrollPointerResult(true, ScrollAxis.VERTICAL, false);
+            }
+        }
+        return new ScrollPointerResult(false, ScrollAxis.NONE, false);
+    }
+
+    public void dragScrollbarPointer(
+        int mouseRow,
+        int mouseCol,
+        int left,
+        int right,
+        int listStartRow,
+        int listRows,
+        ScrollAxis axis
+    ) {
+        if (axis == ScrollAxis.NONE) {
+            return;
+        }
+        DrawLayout layout = computeLayout(left, right, listRows);
+        if (axis == ScrollAxis.HORIZONTAL && layout.showHScrollbar()) {
+            int textRows = layout.textRows();
+            int textWidth = layout.textWidth();
+            int startCol = left + 1;
+            hScroll = HorizontalScrollbar.scrollFromPointer(
+                mouseCol,
+                startCol,
+                textWidth,
+                Math.max(textWidth, maxLabelLength())
+            );
+            return;
+        }
+        if (axis == ScrollAxis.VERTICAL && layout.showVScrollbar()) {
+            int textRows = layout.textRows();
+            int top = listStartRow;
+            scroll = VerticalScrollbar.scrollFromPointer(mouseRow, top, textRows, items.size());
+            scroll = Math.max(0, Math.min(scroll, Math.max(0, items.size() - textRows)));
+        }
     }
 
     public void moveToParentDirectory() {
@@ -175,9 +297,14 @@ public final class TreeView {
         long nowNanos,
         long doubleClickWindowNanos
     ) {
+        DrawLayout layout = computeLayout(left, right, listRows);
         int listBottom = listStartRow + listRows - 1;
         if (mouseCol < left + 1 || mouseCol > right - 1 || mouseRow < listStartRow || mouseRow > listBottom) {
             return new ClickResult(false, false, false, null);
+        }
+        ScrollPointerResult scrollPointer = handleScrollbarPointer(mouseRow, mouseCol, left, right, listStartRow, listRows);
+        if (scrollPointer.consumed()) {
+            return new ClickResult(true, false, false, null);
         }
         int clicked = scroll + (mouseRow - listStartRow);
         if (clicked < 0 || clicked >= items.size()) {
@@ -185,11 +312,12 @@ public final class TreeView {
         }
 
         selectedIndex = clicked;
-        ensureVisible(listRows);
+        ensureVisible(layout.textRows());
         Item selected = items.get(selectedIndex);
 
-        int arrowCol = left + 2 + Math.max(0, selected.depth()) * 2;
-        boolean arrowClick = selected.directory() && mouseCol == arrowCol;
+        int arrowCol = left + 2 + Math.max(0, selected.depth()) * 2 - hScroll;
+        boolean arrowVisible = arrowCol >= left + 1 && arrowCol < left + 1 + layout.textWidth();
+        boolean arrowClick = selected.directory() && arrowVisible && mouseCol == arrowCol;
         boolean doubleClick = clicked == lastClickIndex && nowNanos - lastClickAtNanos <= doubleClickWindowNanos;
         lastClickIndex = clicked;
         lastClickAtNanos = nowNanos;
@@ -216,28 +344,45 @@ public final class TreeView {
         Style scrollTrackStyle,
         Style scrollThumbStyle
     ) {
-        ensureVisible(listRows);
-        int areaWidth = Math.max(0, right - left);
-        boolean showScrollbar = areaWidth >= 26;
-        int textWidth = Math.max(0, areaWidth - (showScrollbar ? 1 : 0));
-        for (int i = 0; i < listRows; i++) {
+        DrawLayout layout = computeLayout(left, right, listRows);
+        ensureVisible(layout.textRows());
+        int textWidth = layout.textWidth();
+        int textRows = layout.textRows();
+        int maxHScroll = Math.max(0, maxLabelLength() - textWidth);
+        hScroll = Math.max(0, Math.min(hScroll, maxHScroll));
+        for (int i = 0; i < textRows; i++) {
             int itemIndex = scroll + i;
             int row = listStartRow + i;
-            String label = itemIndex < items.size() ? items.get(itemIndex).label() : "";
+            String rawLabel = itemIndex < items.size() ? items.get(itemIndex).label() : "";
+            String label = clipHorizontal(rawLabel, hScroll, textWidth);
             Style style = itemIndex == selectedIndex
                 ? (colorEnabled ? selectedColorStyle : selectedMonoStyle)
                 : normalStyle;
             drawLine(buffer, row, left + 1, padRight(" " + label, textWidth), style, cols);
         }
-        if (showScrollbar && !items.isEmpty()) {
+        if (layout.showVScrollbar() && !items.isEmpty()) {
             VerticalScrollbar.draw(
                 buffer,
                 listStartRow,
                 right - 1,
-                listRows,
+                textRows,
                 items.size(),
                 scroll,
                 "│",
+                scrollTrackStyle,
+                "█",
+                scrollThumbStyle
+            );
+        }
+        if (layout.showHScrollbar()) {
+            HorizontalScrollbar.draw(
+                buffer,
+                listStartRow + textRows,
+                left + 1,
+                textWidth,
+                Math.max(textWidth, maxLabelLength()),
+                hScroll,
+                "─",
                 scrollTrackStyle,
                 "█",
                 scrollThumbStyle
@@ -256,6 +401,45 @@ public final class TreeView {
             scroll = selectedIndex - rows + 1;
         }
         scroll = Math.max(0, Math.min(scroll, maxScroll));
+    }
+
+    private int maxHorizontalScroll(int visibleTextWidth) {
+        return Math.max(0, maxLabelLength() - Math.max(0, visibleTextWidth));
+    }
+
+    private DrawLayout computeLayout(int left, int right, int listRows) {
+        int innerWidth = Math.max(0, right - left - 1);
+        boolean canShowVScrollbar = innerWidth >= 4;
+        int labelMax = maxLabelLength();
+        boolean showVScrollbar = false;
+        boolean showHScrollbar;
+        int textRows;
+        int textWidth;
+
+        for (int i = 0; i < 3; i++) {
+            textWidth = Math.max(0, innerWidth - (showVScrollbar ? 1 : 0));
+            showHScrollbar = listRows >= 2 && labelMax > textWidth;
+            textRows = Math.max(1, listRows - (showHScrollbar ? 1 : 0));
+            boolean needVScrollbar = items.size() > textRows;
+            boolean nextShowVScrollbar = canShowVScrollbar && needVScrollbar;
+            if (nextShowVScrollbar == showVScrollbar) {
+                return new DrawLayout(showVScrollbar, showHScrollbar, textRows, textWidth);
+            }
+            showVScrollbar = nextShowVScrollbar;
+        }
+
+        textWidth = Math.max(0, innerWidth - (showVScrollbar ? 1 : 0));
+        showHScrollbar = listRows >= 2 && labelMax > textWidth;
+        textRows = Math.max(1, listRows - (showHScrollbar ? 1 : 0));
+        return new DrawLayout(showVScrollbar, showHScrollbar, textRows, textWidth);
+    }
+
+    private int maxLabelLength() {
+        int max = 0;
+        for (Item item : items) {
+            max = Math.max(max, item.label().length() + 1);
+        }
+        return max;
     }
 
     private void rebuild() {
@@ -332,9 +516,30 @@ public final class TreeView {
         return text + " ".repeat(width - text.length());
     }
 
+    private static String clipHorizontal(String text, int offset, int width) {
+        if (text.isEmpty() || width <= 0) {
+            return "";
+        }
+        int start = Math.max(0, Math.min(offset, text.length()));
+        int end = Math.min(text.length(), start + width);
+        return text.substring(start, end);
+    }
+
+    private record DrawLayout(boolean showVScrollbar, boolean showHScrollbar, int textRows, int textWidth) {
+    }
+
     public record Item(Path path, String label, boolean directory, boolean expanded, boolean parentLink, int depth) {
     }
 
     public record ClickResult(boolean consumed, boolean arrowClick, boolean doubleClick, Item item) {
+    }
+
+    public record ScrollPointerResult(boolean consumed, ScrollAxis axis, boolean drag) {
+    }
+
+    public enum ScrollAxis {
+        NONE,
+        VERTICAL,
+        HORIZONTAL
     }
 }

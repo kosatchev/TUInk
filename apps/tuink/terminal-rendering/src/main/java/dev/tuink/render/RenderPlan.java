@@ -18,6 +18,8 @@ public record RenderPlan(
     int contentRows,
     int topLine,
     int totalLines,
+    int leftColumn,
+    int totalColumns,
     int cols,
     int gutterWidth,
     int scrollbarWidth

@@ -72,6 +72,7 @@ public class RenderRasterizer {
             drawText(buffer, overlayTopRow, 0, truncateOrPad(plan.notificationBarText(), cols), style, cols);
         }
         drawScrollbar(buffer, plan, rows, cols, topRow);
+        drawHorizontalScrollbar(buffer, plan, rows, cols, topRow);
 
         return buffer;
     }
@@ -95,6 +96,35 @@ public class RenderRasterizer {
             Math.max(1, plan.totalLines()),
             Math.max(0, plan.topLine()),
             "│",
+            SCROLL_TRACK_STYLE,
+            "█",
+            SCROLL_THUMB_STYLE
+        );
+    }
+
+    private void drawHorizontalScrollbar(CellBuffer buffer, RenderPlan plan, int rows, int cols, int contentTopRow) {
+        if (rows <= 2 || cols <= 0) {
+            return;
+        }
+        int visibleCols = Math.max(0, cols - plan.gutterWidth() - plan.scrollbarWidth());
+        if (visibleCols <= 0) {
+            return;
+        }
+        if (plan.totalColumns() <= visibleCols && plan.leftColumn() <= 0) {
+            return;
+        }
+        int row = contentTopRow + plan.contentRows();
+        if (row < contentTopRow || row >= rows - 1) {
+            return;
+        }
+        HorizontalScrollbar.draw(
+            buffer,
+            row,
+            plan.gutterWidth(),
+            visibleCols,
+            Math.max(visibleCols, plan.totalColumns()),
+            Math.max(0, plan.leftColumn()),
+            "─",
             SCROLL_TRACK_STYLE,
             "█",
             SCROLL_THUMB_STYLE
@@ -128,12 +158,16 @@ public class RenderRasterizer {
             char ch = text.charAt(i);
             if (ch == ' ') {
                 graphemes[i] = "·";
-                styles[i] = LEADING_WHITESPACE_STYLE;
+                if (styles[i].equals(Style.DEFAULT)) {
+                    styles[i] = LEADING_WHITESPACE_STYLE;
+                }
                 continue;
             }
             if (ch == '\t') {
                 graphemes[i] = "»";
-                styles[i] = LEADING_WHITESPACE_STYLE;
+                if (styles[i].equals(Style.DEFAULT)) {
+                    styles[i] = LEADING_WHITESPACE_STYLE;
+                }
                 continue;
             }
             break;

@@ -105,9 +105,14 @@ public class RenderPlanBuilder {
         int safeCols = Math.max(cols, 1);
         int extraBottomRows = (interactiveBarText == null ? 0 : 1) + (notificationBarText == null ? 0 : 1);
         int contentRows = Math.max(0, safeRows - 2 - extraBottomRows);
-        int scrollbarWidth = safeCols >= 8 ? 1 : 0;
+        boolean needVerticalScrollbar = state.getTopLine() > 0 || model.lineCount() > contentRows;
+        int scrollbarWidth = safeCols >= 8 && needVerticalScrollbar ? 1 : 0;
         int gutterWidth = Math.max(3, String.valueOf(Math.max(model.lineCount(), 1)).length() + 1);
         int textWidth = Math.max(0, safeCols - gutterWidth - scrollbarWidth);
+        int totalColumns = 0;
+        for (int i = 0; i < model.lineCount(); i++) {
+            totalColumns = Math.max(totalColumns, model.getLine(i).length());
+        }
 
         List<LineVisual> lines = new ArrayList<>(contentRows);
         for (int row = 0; row < contentRows; row++) {
@@ -168,6 +173,8 @@ public class RenderPlanBuilder {
             contentRows,
             state.getTopLine(),
             model.lineCount(),
+            state.getLeftColumn(),
+            totalColumns,
             safeCols,
             gutterWidth,
             scrollbarWidth

@@ -14,8 +14,8 @@ import dev.tuink.render.LineHighlighter;
 import dev.tuink.render.Color;
 import dev.tuink.render.RenderPlan;
 import dev.tuink.render.RenderPlanBuilder;
-import dev.tuink.tui.render.RenderRasterizer;
 import dev.tuink.render.Style;
+import dev.tuink.tui.render.RenderRasterizer;
 import dev.tuink.tui.ui.Button;
 import dev.tuink.tui.ui.EditorView;
 import dev.tuink.tui.ui.MenuBar;
@@ -115,6 +115,7 @@ public class TerminalEditorApp {
         boolean openFileMode = false;
         TreeView openFileTree = new TreeView(initialOpenRoot(state));
         OpenDialogFocus openFileFocus = OpenDialogFocus.LIST;
+        TreeView.ScrollAxis openFileScrollDrag = TreeView.ScrollAxis.NONE;
 
         if (cli.file() != null) {
             Path file = cli.file();
@@ -194,8 +195,27 @@ public class TerminalEditorApp {
                     boolean showTabBar = showTabBarSetting && tabs.size() > 1;
                     int overlayRows = (hasInteractiveBar ? 1 : 0) + (hasNotificationBar ? 1 : 0);
                     int contentTopRow = showTabBar ? 2 : 1;
-                    int contentRows = Math.max(0, rows - overlayRows - contentTopRow - 1);
-                    engine.ensureCursorVisible(contentRows);
+                    int baseContentRows = Math.max(0, rows - overlayRows - contentTopRow - 1);
+                    int gutterWidth = Math.max(3, String.valueOf(Math.max(model.lineCount(), 1)).length() + 1);
+                    int maxLineLength = maxLineLength(model);
+                    boolean canShowVScrollbar = cols >= 8;
+                    int contentRows = baseContentRows;
+                    int contentCols = Math.max(0, cols - gutterWidth);
+                    boolean needHorizontalScrollbar = false;
+                    for (int i = 0; i < 3; i++) {
+                        boolean needVerticalScrollbar = canShowVScrollbar
+                            && (state.getTopLine() > 0 || model.lineCount() > contentRows);
+                        int scrollbarWidth = needVerticalScrollbar ? 1 : 0;
+                        contentCols = Math.max(0, cols - gutterWidth - scrollbarWidth);
+                        needHorizontalScrollbar = contentCols > 0
+                            && (state.getLeftColumn() > 0 || maxLineLength > contentCols);
+                        int newContentRows = Math.max(0, baseContentRows - (needHorizontalScrollbar ? 1 : 0));
+                        if (newContentRows == contentRows) {
+                            break;
+                        }
+                        contentRows = newContentRows;
+                    }
+                    engine.ensureCursorVisible(contentRows, contentCols);
                     boolean[] tabMatchFlags = findTabsWithMatches(
                         tabs,
                         searchQueryInput.text(),
@@ -245,7 +265,7 @@ public class TerminalEditorApp {
                     } else if (searchBar != null) {
                         interactiveBarText = searchBar.text();
                     }
-                    int planRows = Math.max(1, showTabBar ? rows - 1 : rows);
+                    int planRows = Math.max(1, (showTabBar ? rows - 1 : rows) - (needHorizontalScrollbar ? 1 : 0));
                     RenderPlan plan = renderPlanBuilder.build(
                         model,
                         state,
@@ -373,6 +393,7 @@ public class TerminalEditorApp {
                             }
                             case PRESS -> {
                                 if (mouse.button() == KeyEvent.MouseButton.LEFT) {
+                                    openFileScrollDrag = TreeView.ScrollAxis.NONE;
                                     if (openFileMode) {
                                         OpenDialogLayout layout = openDialogLayout(rows, cols);
                                         Modal frame = openFileFrame(layout);
@@ -380,6 +401,21 @@ public class TerminalEditorApp {
                                         if (frame.closeButton().hit(mouse.row(), mouse.col())) {
                                             openFileMode = false;
                                             openFileTree.resetClickTracking();
+                                            continue;
+                                        }
+                                        TreeView.ScrollPointerResult scrollPointer = openFileTree.handleScrollbarPointer(
+                                            mouse.row(),
+                                            mouse.col(),
+                                            layout.left(),
+                                            layout.right(),
+                                            layout.listStartRow(),
+                                            layout.listRows()
+                                        );
+                                        if (scrollPointer.consumed()) {
+                                            openFileScrollDrag = scrollPointer.drag()
+                                                ? scrollPointer.axis()
+                                                : TreeView.ScrollAxis.NONE;
+                                            openFileFocus = OpenDialogFocus.LIST;
                                             continue;
                                         }
                                         TreeView.ClickResult treeClick = openFileTree.clickList(
@@ -574,6 +610,20 @@ public class TerminalEditorApp {
                                 }
                             }
                             case DRAG -> {
+                                if (openFileMode && mouse.button() == KeyEvent.MouseButton.LEFT
+                                    && openFileScrollDrag != TreeView.ScrollAxis.NONE) {
+                                    OpenDialogLayout layout = openDialogLayout(rows, cols);
+                                    openFileTree.dragScrollbarPointer(
+                                        mouse.row(),
+                                        mouse.col(),
+                                        layout.left(),
+                                        layout.right(),
+                                        layout.listStartRow(),
+                                        layout.listRows(),
+                                        openFileScrollDrag
+                                    );
+                                    continue;
+                                }
                                 if (!saveAsMode && !saveOverwriteConfirmMode
                                     && !quitConfirmMode && !closeTabConfirmMode && !searchMode) {
                                     editorView.handleMouseDrag(
@@ -587,7 +637,10 @@ public class TerminalEditorApp {
                                     );
                                 }
                             }
-                            case RELEASE -> editorView.handleMouseRelease(state);
+                            case RELEASE -> {
+                                openFileScrollDrag = TreeView.ScrollAxis.NONE;
+                                editorView.handleMouseRelease(state);
+                            }
                             default -> {
                                 // Ignore drag and release mouse events.
                             }
@@ -668,6 +721,14 @@ public class TerminalEditorApp {
                                     }
                                 }
                             }
+                            case SHIFT_ARROW_RIGHT -> {
+                                if (openFileFocus == OpenDialogFocus.LIST) {
+                                    OpenDialogLayout layout = openDialogLayout(rows, cols);
+                                    openFileTree.scrollRight(
+                                        openFileTree.visibleTextWidth(layout.left(), layout.right(), layout.listRows())
+                                    );
+                                }
+                            }
                             case ARROW_LEFT -> {
                                 if (openFileFocus == OpenDialogFocus.CANCEL) {
                                     openFileFocus = OpenDialogFocus.OK;
@@ -680,6 +741,11 @@ public class TerminalEditorApp {
                                     } else {
                                         openFileTree.moveToParentDepth(openDialogLayout(rows, cols).listRows());
                                     }
+                                }
+                            }
+                            case SHIFT_ARROW_LEFT -> {
+                                if (openFileFocus == OpenDialogFocus.LIST) {
+                                    openFileTree.scrollLeft();
                                 }
                             }
                             case BACKSPACE -> {
@@ -1917,6 +1983,14 @@ public class TerminalEditorApp {
 
     private int switchTab(List<EditorTab> tabs, int currentIndex, int delta) {
         return TabSessions.switchByDelta(tabs.size(), currentIndex, delta);
+    }
+
+    private int maxLineLength(TextModel model) {
+        int max = 0;
+        for (int i = 0; i < model.lineCount(); i++) {
+            max = Math.max(max, model.getLine(i).length());
+        }
+        return max;
     }
 
     private int closeCurrentTab(List<EditorTab> tabs, int activeTabIndex) {

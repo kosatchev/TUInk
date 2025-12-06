@@ -371,6 +371,10 @@ public class EditorEngine {
     }
 
     public void ensureCursorVisible(int contentRows) {
+        ensureCursorVisible(contentRows, -1);
+    }
+
+    public void ensureCursorVisible(int contentRows, int contentCols) {
         if (contentRows <= 0) {
             return;
         }
@@ -382,6 +386,16 @@ public class EditorEngine {
             state.setTopLine(p.line());
         } else if (p.line() >= state.getTopLine() + contentRows) {
             state.setTopLine(p.line() - contentRows + 1);
+        }
+
+        if (contentCols <= 0) {
+            return;
+        }
+        int left = state.getLeftColumn();
+        if (p.col() < left) {
+            state.setLeftColumn(p.col());
+        } else if (p.col() >= left + contentCols) {
+            state.setLeftColumn(p.col() - contentCols + 1);
         }
     }
 

@@ -111,7 +111,8 @@ public class RenderPlanBuilder {
         int textWidth = Math.max(0, safeCols - gutterWidth - scrollbarWidth);
         int totalColumns = 0;
         for (int i = 0; i < model.lineCount(); i++) {
-            totalColumns = Math.max(totalColumns, model.getLine(i).length());
+            String line = model.getLine(i);
+            totalColumns = Math.max(totalColumns, visualColumn(line, 0, line.length()));
         }
 
         List<LineVisual> lines = new ArrayList<>(contentRows);
@@ -155,6 +156,7 @@ public class RenderPlanBuilder {
 
         Position cursor = model.clamp(state.getCursor());
         int cursorRow = cursor.line() - state.getTopLine();
+        int leftVisualColumn = visualColumn(model.getLine(cursor.line()), 0, state.getLeftColumn());
         int cursorCol = gutterWidth + visualColumn(model.getLine(cursor.line()), state.getLeftColumn(), cursor.col());
         int maxCursorCol = Math.max(gutterWidth, safeCols - 1 - scrollbarWidth);
         cursorRow = Math.max(0, Math.min(cursorRow, Math.max(contentRows - 1, 0)));
@@ -174,6 +176,7 @@ public class RenderPlanBuilder {
             state.getTopLine(),
             model.lineCount(),
             state.getLeftColumn(),
+            leftVisualColumn,
             totalColumns,
             safeCols,
             gutterWidth,

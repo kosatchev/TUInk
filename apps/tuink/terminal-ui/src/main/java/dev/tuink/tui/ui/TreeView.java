@@ -1,6 +1,7 @@
 package dev.tuink.tui.ui;
 
 import dev.tuink.tui.render.CellBuffer;
+import dev.tuink.render.ScrollInteraction;
 import dev.tuink.render.Style;
 import dev.tuink.tui.render.HorizontalScrollbar;
 import dev.tuink.tui.render.VerticalScrollbar;
@@ -147,7 +148,7 @@ public final class TreeView {
             int row = listStartRow + textRows;
             int startCol = left + 1;
             int total = Math.max(textWidth, maxLabelLength());
-            HorizontalScrollbar.Hit hit = HorizontalScrollbar.hit(
+            ScrollInteraction.Hit hit = HorizontalScrollbar.hit(
                 mouseRow,
                 mouseCol,
                 row,
@@ -156,7 +157,7 @@ public final class TreeView {
                 total,
                 hScroll
             );
-            if (hit == HorizontalScrollbar.Hit.THUMB) {
+            if (hit == ScrollInteraction.Hit.THUMB) {
                 hScroll = HorizontalScrollbar.scrollFromPointer(
                     mouseCol,
                     startCol,
@@ -165,7 +166,7 @@ public final class TreeView {
                 );
                 return new ScrollPointerResult(true, ScrollAxis.HORIZONTAL, true);
             }
-            if (hit == HorizontalScrollbar.Hit.TRACK) {
+            if (hit == ScrollInteraction.Hit.TRACK) {
                 hScroll = HorizontalScrollbar.pageScrollFromTrackClick(
                     hScroll,
                     mouseCol,
@@ -179,7 +180,7 @@ public final class TreeView {
         if (layout.showVScrollbar()) {
             int col = right - 1;
             int top = listStartRow;
-            VerticalScrollbar.Hit hit = VerticalScrollbar.hit(
+            ScrollInteraction.Hit hit = VerticalScrollbar.hit(
                 mouseRow,
                 mouseCol,
                 top,
@@ -188,12 +189,12 @@ public final class TreeView {
                 items.size(),
                 scroll
             );
-            if (hit == VerticalScrollbar.Hit.THUMB) {
+            if (hit == ScrollInteraction.Hit.THUMB) {
                 scroll = VerticalScrollbar.scrollFromPointer(mouseRow, top, textRows, items.size());
                 scroll = Math.max(0, Math.min(scroll, Math.max(0, items.size() - textRows)));
                 return new ScrollPointerResult(true, ScrollAxis.VERTICAL, true);
             }
-            if (hit == VerticalScrollbar.Hit.TRACK) {
+            if (hit == ScrollInteraction.Hit.TRACK) {
                 scroll = VerticalScrollbar.pageScrollFromTrackClick(scroll, mouseRow, top, textRows, items.size());
                 return new ScrollPointerResult(true, ScrollAxis.VERTICAL, false);
             }

@@ -18,6 +18,7 @@ import java.util.regex.Pattern;
 public class EditorEngine {
     private static final int MAX_HISTORY = 500;
     private static final long COALESCE_WINDOW_NANOS = 700_000_000L;
+    private static final int TAB_WIDTH = 4;
     private final TextModel model;
     private final EditorState state;
     private final Deque<Snapshot> undoStack = new ArrayDeque<>();
@@ -394,9 +395,33 @@ public class EditorEngine {
         int left = state.getLeftColumn();
         if (p.col() < left) {
             state.setLeftColumn(p.col());
-        } else if (p.col() >= left + contentCols) {
-            state.setLeftColumn(p.col() - contentCols + 1);
+            return;
         }
+
+        String line = model.getLine(p.line());
+        int visual = visualColumn(line, left, p.col());
+        if (visual >= contentCols) {
+            int nextLeft = left;
+            while (nextLeft < p.col() && visualColumn(line, nextLeft, p.col()) >= contentCols) {
+                nextLeft++;
+            }
+            state.setLeftColumn(nextLeft);
+        }
+    }
+
+    private static int visualColumn(String line, int startCol, int endCol) {
+        int start = Math.max(0, Math.min(startCol, line.length()));
+        int end = Math.max(start, Math.min(endCol, line.length()));
+        int visual = 0;
+        for (int i = start; i < end; i++) {
+            char ch = line.charAt(i);
+            if (ch == '\t') {
+                visual += TAB_WIDTH - (visual % TAB_WIDTH);
+            } else {
+                visual++;
+            }
+        }
+        return visual;
     }
 
     private void applyEdit(EditKind kind, Runnable editOperation) {

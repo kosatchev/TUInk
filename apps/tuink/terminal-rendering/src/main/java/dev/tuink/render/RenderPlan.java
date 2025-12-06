@@ -19,6 +19,7 @@ public record RenderPlan(
     int topLine,
     int totalLines,
     int leftColumn,
+    int leftVisualColumn,
     int totalColumns,
     int cols,
     int gutterWidth,

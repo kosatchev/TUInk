@@ -61,6 +61,50 @@ public final class TabSearch {
         return flags;
     }
 
+    public static int findNextAcrossTabs(List<TabSession> tabs, int activeTabIndex, String query, SearchOptions options) {
+        if (tabs == null || tabs.isEmpty()) {
+            return -1;
+        }
+        int safeActive = Math.max(0, Math.min(activeTabIndex, tabs.size() - 1));
+        SearchOptions safe = options == null ? SearchOptions.DEFAULT : options;
+        if (tabs.get(safeActive).engine().findNext(query, safe)) {
+            return safeActive;
+        }
+        for (int step = 1; step < tabs.size(); step++) {
+            int idx = Math.floorMod(safeActive + step, tabs.size());
+            TabSession tab = tabs.get(idx);
+            tab.state().setCursor(new Position(0, 0));
+            tab.state().clearSelection();
+            if (tab.engine().findNext(query, safe)) {
+                return idx;
+            }
+        }
+        return -1;
+    }
+
+    public static int findPreviousAcrossTabs(List<TabSession> tabs, int activeTabIndex, String query, SearchOptions options) {
+        if (tabs == null || tabs.isEmpty()) {
+            return -1;
+        }
+        int safeActive = Math.max(0, Math.min(activeTabIndex, tabs.size() - 1));
+        SearchOptions safe = options == null ? SearchOptions.DEFAULT : options;
+        if (tabs.get(safeActive).engine().findPrevious(query, safe)) {
+            return safeActive;
+        }
+        for (int step = 1; step < tabs.size(); step++) {
+            int idx = Math.floorMod(safeActive - step, tabs.size());
+            TabSession tab = tabs.get(idx);
+            int lastLine = Math.max(0, tab.model().lineCount() - 1);
+            int lastCol = tab.model().getLine(lastLine).length();
+            tab.state().setCursor(new Position(lastLine, lastCol));
+            tab.state().clearSelection();
+            if (tab.engine().findPrevious(query, safe)) {
+                return idx;
+            }
+        }
+        return -1;
+    }
+
     private static List<LineMatch> findMatchesInLine(String line, String query, SearchOptions options) {
         String haystack = options.caseInsensitive() ? line.toLowerCase(Locale.ROOT) : line;
         String needle = options.caseInsensitive() ? query.toLowerCase(Locale.ROOT) : query;

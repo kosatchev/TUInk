@@ -230,6 +230,33 @@ public class TextModel {
             .toList();
     }
 
+    public int maxLineLength() {
+        int max = 0;
+        for (int i = 0; i < lineCount(); i++) {
+            max = Math.max(max, getLine(i).length());
+        }
+        return max;
+    }
+
+    public int maxVisualLineWidth(int tabWidth) {
+        int safeTabWidth = Math.max(1, tabWidth);
+        int max = 0;
+        for (int i = 0; i < lineCount(); i++) {
+            String line = getLine(i);
+            int visual = 0;
+            for (int j = 0; j < line.length(); j++) {
+                char ch = line.charAt(j);
+                if (ch == '\t') {
+                    visual += safeTabWidth - (visual % safeTabWidth);
+                } else {
+                    visual++;
+                }
+            }
+            max = Math.max(max, visual);
+        }
+        return max;
+    }
+
     public void replaceLines(List<String> lines) {
         buffer.clear();
         if (lines == null || lines.isEmpty()) {

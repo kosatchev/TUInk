@@ -2,15 +2,27 @@ package dev.tuink.tui.ui;
 
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
+import dev.tuink.core.EditorViewportBehavior;
 import dev.tuink.core.Position;
 import dev.tuink.core.TextModel;
 import dev.tuink.render.RenderPlan;
+import dev.tuink.render.ScrollInteraction;
 import dev.tuink.tui.KeyEvent;
+import dev.tuink.tui.render.HorizontalScrollbar;
+import dev.tuink.tui.render.VerticalScrollbar;
 
 /**
  * UI helper for the main editor text area.
  */
 public final class EditorView {
+    private static final int TAB_WIDTH = 4;
+
+    public enum ScrollAxis {
+        NONE,
+        VERTICAL,
+        HORIZONTAL
+    }
+
     private final int contentTopRow;
     private boolean mouseSelecting;
 
@@ -127,18 +139,116 @@ public final class EditorView {
         int contentRows,
         int contentTopRow
     ) {
-        int top = Math.max(1, contentTopRow);
-        if (mouse.row() < top || mouse.row() >= top + contentRows) {
-            return null;
+        return EditorViewportBehavior.pointerToTextPosition(
+            model,
+            state,
+            contentTopRow,
+            contentRows,
+            mouse.row(),
+            mouse.col(),
+            plan.gutterWidth(),
+            TAB_WIDTH
+        );
+    }
+
+    public ScrollPointerResult handleScrollbarPointer(
+        int mouseRow,
+        int mouseCol,
+        int rows,
+        int cols,
+        int contentTopRow,
+        RenderPlan plan,
+        TextModel model,
+        EditorState state
+    ) {
+        return handleScrollbarPointer(mouseRow, mouseCol, rows, cols, contentTopRow, plan, model, state, ScrollAxis.NONE);
+    }
+
+    public ScrollPointerResult handleScrollbarPointer(
+        int mouseRow,
+        int mouseCol,
+        int rows,
+        int cols,
+        int contentTopRow,
+        RenderPlan plan,
+        TextModel model,
+        EditorState state,
+        ScrollAxis axis
+    ) {
+        if (axis != ScrollAxis.HORIZONTAL && plan.scrollbarWidth() > 0 && cols > 0 && rows > 2) {
+            int barCol = cols - 1;
+            int trackTop = contentTopRow;
+            int trackHeight = Math.min(plan.contentRows(), Math.max(0, rows - contentTopRow - 1));
+            boolean draggingVertical = axis == ScrollAxis.VERTICAL;
+            ScrollInteraction.Hit verticalHit = draggingVertical
+                ? ScrollInteraction.Hit.THUMB
+                : VerticalScrollbar.hit(
+                    mouseRow,
+                    mouseCol,
+                    trackTop,
+                    barCol,
+                    trackHeight,
+                    plan.totalLines(),
+                    state.getTopLine()
+                );
+            if (trackHeight > 0 && verticalHit != ScrollInteraction.Hit.NONE) {
+                int targetTop = verticalHit == ScrollInteraction.Hit.TRACK
+                    ? VerticalScrollbar.pageScrollFromTrackClick(
+                        state.getTopLine(),
+                        mouseRow,
+                        trackTop,
+                        trackHeight,
+                        plan.totalLines()
+                    )
+                    : VerticalScrollbar.scrollFromPointer(mouseRow, trackTop, trackHeight, plan.totalLines());
+                EditorViewportBehavior.applyVerticalScroll(state, model, targetTop);
+                return new ScrollPointerResult(true, verticalHit == ScrollInteraction.Hit.THUMB ? ScrollAxis.VERTICAL : ScrollAxis.NONE);
+            }
         }
-        int line = state.getTopLine() + (mouse.row() - top);
-        line = Math.max(0, Math.min(line, model.lineCount() - 1));
-        int col = mouse.col() < plan.gutterWidth()
-            ? 0
-            : state.getLeftColumn() + (mouse.col() - plan.gutterWidth());
-        return model.clamp(new Position(line, Math.max(0, col)));
+
+        if (axis != ScrollAxis.VERTICAL && rows > 2 && cols > 0) {
+            int visibleCols = Math.max(0, cols - plan.gutterWidth() - plan.scrollbarWidth());
+            int row = contentTopRow + plan.contentRows();
+            boolean hasHorizontal = visibleCols > 0 && (plan.leftVisualColumn() > 0 || plan.totalColumns() > visibleCols);
+            boolean draggingHorizontal = axis == ScrollAxis.HORIZONTAL;
+            ScrollInteraction.Hit horizontalHit = !hasHorizontal ? ScrollInteraction.Hit.NONE
+                : (draggingHorizontal
+                    ? ScrollInteraction.Hit.THUMB
+                    : HorizontalScrollbar.hit(
+                        mouseRow,
+                        mouseCol,
+                        row,
+                        plan.gutterWidth(),
+                        visibleCols,
+                        Math.max(visibleCols, plan.totalColumns()),
+                        plan.leftVisualColumn()
+                    ));
+            if (hasHorizontal && row >= contentTopRow && row < rows - 1 && horizontalHit != ScrollInteraction.Hit.NONE) {
+                int targetLeft = horizontalHit == ScrollInteraction.Hit.TRACK
+                    ? HorizontalScrollbar.pageScrollFromTrackClick(
+                        plan.leftVisualColumn(),
+                        mouseCol,
+                        plan.gutterWidth(),
+                        visibleCols,
+                        Math.max(visibleCols, plan.totalColumns())
+                    )
+                    : HorizontalScrollbar.scrollFromPointer(
+                        mouseCol,
+                        plan.gutterWidth(),
+                        visibleCols,
+                        Math.max(visibleCols, plan.totalColumns())
+                    );
+                EditorViewportBehavior.applyHorizontalScrollVisual(state, model, targetLeft);
+                return new ScrollPointerResult(true, horizontalHit == ScrollInteraction.Hit.THUMB ? ScrollAxis.HORIZONTAL : ScrollAxis.NONE);
+            }
+        }
+
+        return new ScrollPointerResult(false, ScrollAxis.NONE);
     }
 
     public record CursorPosition(int row, int col) {
+    }
+
+    public record ScrollPointerResult(boolean consumed, ScrollAxis dragAxis) {
     }
 }

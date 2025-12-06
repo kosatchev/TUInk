@@ -115,6 +115,7 @@ public class TerminalEditorApp {
         boolean openFileMode = false;
         TreeView openFileTree = new TreeView(initialOpenRoot(state));
         OpenDialogFocus openFileFocus = OpenDialogFocus.LIST;
+        EditorView.ScrollAxis editorScrollDrag = EditorView.ScrollAxis.NONE;
         TreeView.ScrollAxis openFileScrollDrag = TreeView.ScrollAxis.NONE;
 
         if (cli.file() != null) {
@@ -197,7 +198,7 @@ public class TerminalEditorApp {
                     int contentTopRow = showTabBar ? 2 : 1;
                     int baseContentRows = Math.max(0, rows - overlayRows - contentTopRow - 1);
                     int gutterWidth = Math.max(3, String.valueOf(Math.max(model.lineCount(), 1)).length() + 1);
-                    int maxLineLength = maxLineLength(model);
+                    int maxLineLength = model.maxVisualLineWidth(4);
                     boolean canShowVScrollbar = cols >= 8;
                     int contentRows = baseContentRows;
                     int contentCols = Math.max(0, cols - gutterWidth);
@@ -393,6 +394,7 @@ public class TerminalEditorApp {
                             }
                             case PRESS -> {
                                 if (mouse.button() == KeyEvent.MouseButton.LEFT) {
+                                    editorScrollDrag = EditorView.ScrollAxis.NONE;
                                     openFileScrollDrag = TreeView.ScrollAxis.NONE;
                                     if (openFileMode) {
                                         OpenDialogLayout layout = openDialogLayout(rows, cols);
@@ -597,6 +599,21 @@ public class TerminalEditorApp {
                                     }
                                     if (!saveAsMode && !saveOverwriteConfirmMode
                                         && !quitConfirmMode && !closeTabConfirmMode && !searchMode) {
+                                        EditorView.ScrollPointerResult scrollPointer = editorView.handleScrollbarPointer(
+                                            mouse.row(),
+                                            mouse.col(),
+                                            rows,
+                                            cols,
+                                            contentTopRow,
+                                            plan,
+                                            model,
+                                            state
+                                        );
+                                        if (scrollPointer.consumed()) {
+                                            editorScrollDrag = scrollPointer.dragAxis();
+                                            editorView.cancelMouseSelection();
+                                            continue;
+                                        }
                                         editorView.handleMousePress(
                                             mouse,
                                             model,
@@ -626,6 +643,21 @@ public class TerminalEditorApp {
                                 }
                                 if (!saveAsMode && !saveOverwriteConfirmMode
                                     && !quitConfirmMode && !closeTabConfirmMode && !searchMode) {
+                                    if (mouse.button() == KeyEvent.MouseButton.LEFT
+                                        && editorScrollDrag != EditorView.ScrollAxis.NONE) {
+                                        editorView.handleScrollbarPointer(
+                                            mouse.row(),
+                                            mouse.col(),
+                                            rows,
+                                            cols,
+                                            contentTopRow,
+                                            plan,
+                                            model,
+                                            state,
+                                            editorScrollDrag
+                                        );
+                                        continue;
+                                    }
                                     editorView.handleMouseDrag(
                                         mouse,
                                         model,
@@ -638,6 +670,7 @@ public class TerminalEditorApp {
                                 }
                             }
                             case RELEASE -> {
+                                editorScrollDrag = EditorView.ScrollAxis.NONE;
                                 openFileScrollDrag = TreeView.ScrollAxis.NONE;
                                 editorView.handleMouseRelease(state);
                             }
@@ -1029,8 +1062,8 @@ public class TerminalEditorApp {
                             case ENTER, CTRL_F -> {
                                 boolean found;
                                 if (searchUi.allTabs()) {
-                                    int foundTab = findNextAcrossTabs(
-                                        tabs,
+                                    int foundTab = TabSearch.findNextAcrossTabs(
+                                        toTabSessions(tabs),
                                         activeTabIndex,
                                         searchQueryInput.text(),
                                         toSearchOptions(searchUi)
@@ -1054,8 +1087,8 @@ public class TerminalEditorApp {
                             case CTRL_G -> {
                                 boolean found;
                                 if (searchUi.allTabs()) {
-                                    int foundTab = findPreviousAcrossTabs(
-                                        tabs,
+                                    int foundTab = TabSearch.findPreviousAcrossTabs(
+                                        toTabSessions(tabs),
                                         activeTabIndex,
                                         searchQueryInput.text(),
                                         toSearchOptions(searchUi)
@@ -1913,48 +1946,6 @@ public class TerminalEditorApp {
         return TabSearch.countMatchesInModel(model, query, safe);
     }
 
-    private int findNextAcrossTabs(List<EditorTab> tabs, int activeTabIndex, String query, SearchOptions options) {
-        if (tabs == null || tabs.isEmpty()) {
-            return -1;
-        }
-        int safeActive = Math.max(0, Math.min(activeTabIndex, tabs.size() - 1));
-        if (tabs.get(safeActive).engine().findNext(query, options)) {
-            return safeActive;
-        }
-        for (int step = 1; step < tabs.size(); step++) {
-            int idx = Math.floorMod(safeActive + step, tabs.size());
-            EditorTab tab = tabs.get(idx);
-            tab.state().setCursor(new Position(0, 0));
-            tab.state().clearSelection();
-            if (tab.engine().findNext(query, options)) {
-                return idx;
-            }
-        }
-        return -1;
-    }
-
-    private int findPreviousAcrossTabs(List<EditorTab> tabs, int activeTabIndex, String query, SearchOptions options) {
-        if (tabs == null || tabs.isEmpty()) {
-            return -1;
-        }
-        int safeActive = Math.max(0, Math.min(activeTabIndex, tabs.size() - 1));
-        if (tabs.get(safeActive).engine().findPrevious(query, options)) {
-            return safeActive;
-        }
-        for (int step = 1; step < tabs.size(); step++) {
-            int idx = Math.floorMod(safeActive - step, tabs.size());
-            EditorTab tab = tabs.get(idx);
-            int lastLine = Math.max(0, tab.model().lineCount() - 1);
-            int lastCol = tab.model().getLine(lastLine).length();
-            tab.state().setCursor(new Position(lastLine, lastCol));
-            tab.state().clearSelection();
-            if (tab.engine().findPrevious(query, options)) {
-                return idx;
-            }
-        }
-        return -1;
-    }
-
     private record OpenDialogLayout(int top, int left, int width, int height, int listStartRow, int listRows) {
         private int right() {
             return left + width - 1;
@@ -1983,14 +1974,6 @@ public class TerminalEditorApp {
 
     private int switchTab(List<EditorTab> tabs, int currentIndex, int delta) {
         return TabSessions.switchByDelta(tabs.size(), currentIndex, delta);
-    }
-
-    private int maxLineLength(TextModel model) {
-        int max = 0;
-        for (int i = 0; i < model.lineCount(); i++) {
-            max = Math.max(max, model.getLine(i).length());
-        }
-        return max;
     }
 
     private int closeCurrentTab(List<EditorTab> tabs, int activeTabIndex) {

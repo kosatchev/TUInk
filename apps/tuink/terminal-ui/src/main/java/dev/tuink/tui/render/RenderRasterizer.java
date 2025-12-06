@@ -110,7 +110,7 @@ public class RenderRasterizer {
         if (visibleCols <= 0) {
             return;
         }
-        if (plan.totalColumns() <= visibleCols && plan.leftColumn() <= 0) {
+        if (plan.totalColumns() <= visibleCols && plan.leftVisualColumn() <= 0) {
             return;
         }
         int row = contentTopRow + plan.contentRows();
@@ -123,7 +123,7 @@ public class RenderRasterizer {
             plan.gutterWidth(),
             visibleCols,
             Math.max(visibleCols, plan.totalColumns()),
-            Math.max(0, plan.leftColumn()),
+            Math.max(0, plan.leftVisualColumn()),
             "─",
             SCROLL_TRACK_STYLE,
             "█",

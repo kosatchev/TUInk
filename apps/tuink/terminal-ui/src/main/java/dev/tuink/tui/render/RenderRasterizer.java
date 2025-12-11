@@ -103,6 +103,9 @@ public class RenderRasterizer {
     }
 
     private void drawHorizontalScrollbar(CellBuffer buffer, RenderPlan plan, int rows, int cols, int contentTopRow) {
+        if (plan.wrapLines()) {
+            return;
+        }
         if (rows <= 2 || cols <= 0) {
             return;
         }

@@ -112,6 +112,8 @@ public class TerminalEditorApp {
         MenuBar topMenu = new MenuBar(MENU_POPUP_STYLE, MENU_SELECTED_STYLE, MENU_SELECTED_MONO_STYLE);
         TabBar tabBar = new TabBar(TABBAR_STYLE, TABBAR_MONO_STYLE, TABBAR_ACTIVE_STYLE, TABBAR_ACTIVE_MONO_STYLE);
         boolean showTabBarSetting = true;
+        boolean wrapLinesSetting = false;
+        boolean wrapWordsSetting = true;
         boolean openFileMode = false;
         TreeView openFileTree = new TreeView(initialOpenRoot(state));
         OpenDialogFocus openFileFocus = OpenDialogFocus.LIST;
@@ -197,7 +199,7 @@ public class TerminalEditorApp {
                     int overlayRows = (hasInteractiveBar ? 1 : 0) + (hasNotificationBar ? 1 : 0);
                     int contentTopRow = showTabBar ? 2 : 1;
                     int baseContentRows = Math.max(0, rows - overlayRows - contentTopRow - 1);
-                    int gutterWidth = Math.max(3, String.valueOf(Math.max(model.lineCount(), 1)).length() + 1);
+                    int gutterWidth = Math.max(1, String.valueOf(Math.max(model.lineCount(), 1)).length()) + 1;
                     int maxLineLength = model.maxVisualLineWidth(4);
                     boolean canShowVScrollbar = cols >= 8;
                     int contentRows = baseContentRows;
@@ -208,7 +210,7 @@ public class TerminalEditorApp {
                             && (state.getTopLine() > 0 || model.lineCount() > contentRows);
                         int scrollbarWidth = needVerticalScrollbar ? 1 : 0;
                         contentCols = Math.max(0, cols - gutterWidth - scrollbarWidth);
-                        needHorizontalScrollbar = contentCols > 0
+                        needHorizontalScrollbar = !wrapLinesSetting && contentCols > 0
                             && (state.getLeftColumn() > 0 || maxLineLength > contentCols);
                         int newContentRows = Math.max(0, baseContentRows - (needHorizontalScrollbar ? 1 : 0));
                         if (newContentRows == contentRows) {
@@ -225,6 +227,8 @@ public class TerminalEditorApp {
                     List<TabBar.TabItem> tabItems = toTabItems(tabs, tabMatchFlags);
                     topMenu.setOpenTabs(toMenuTabs(tabs, tabMatchFlags), activeTabIndex);
                     topMenu.setShowTabBarEnabled(showTabBarSetting);
+                    topMenu.setWrapLinesEnabled(wrapLinesSetting);
+                    topMenu.setWrapWordsEnabled(wrapWordsSetting);
 
                     String topBar = topMenu.buildTopBar(
                         state.getCurrentFile(),
@@ -279,7 +283,9 @@ public class TerminalEditorApp {
                         interactiveBarText,
                         interactiveBarStyle,
                         notification.message,
-                        notification.style
+                        notification.style,
+                        wrapLinesSetting,
+                        wrapWordsSetting
                     );
                     CellBuffer current = renderer.rasterize(plan, rows, cols, contentTopRow);
                     if (showTabBar) {
@@ -1177,6 +1183,17 @@ public class TerminalEditorApp {
                                 showTabBarSetting = !showTabBarSetting;
                                 statusMessage = showTabBarSetting ? "Tab bar shown" : "Tab bar hidden";
                             }
+                            case TOGGLE_WRAP_LINES -> {
+                                wrapLinesSetting = !wrapLinesSetting;
+                                if (wrapLinesSetting) {
+                                    state.setLeftColumn(0);
+                                }
+                                statusMessage = wrapLinesSetting ? "Wrap lines enabled" : "Wrap lines disabled";
+                            }
+                            case TOGGLE_WORD_WRAP -> {
+                                wrapWordsSetting = !wrapWordsSetting;
+                                statusMessage = wrapWordsSetting ? "Word wrap enabled" : "Word wrap disabled";
+                            }
                             case CTRL_N, TAB_NEW -> {
                                 tabs.add(newEditorTab());
                                 activeTabIndex = tabs.size() - 1;
@@ -1298,6 +1315,17 @@ public class TerminalEditorApp {
                         case TOGGLE_TAB_BAR -> {
                             showTabBarSetting = !showTabBarSetting;
                             statusMessage = showTabBarSetting ? "Tab bar shown" : "Tab bar hidden";
+                        }
+                        case TOGGLE_WRAP_LINES -> {
+                            wrapLinesSetting = !wrapLinesSetting;
+                            if (wrapLinesSetting) {
+                                state.setLeftColumn(0);
+                            }
+                            statusMessage = wrapLinesSetting ? "Wrap lines enabled" : "Wrap lines disabled";
+                        }
+                        case TOGGLE_WORD_WRAP -> {
+                            wrapWordsSetting = !wrapWordsSetting;
+                            statusMessage = wrapWordsSetting ? "Word wrap enabled" : "Word wrap disabled";
                         }
                         case CTRL_N, TAB_NEW -> {
                             tabs.add(newEditorTab());

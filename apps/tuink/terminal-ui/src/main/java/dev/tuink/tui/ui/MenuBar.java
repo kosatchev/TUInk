@@ -30,6 +30,14 @@ public final class MenuBar {
         controller.setShowTabBarEnabled(enabled);
     }
 
+    public void setWrapLinesEnabled(boolean enabled) {
+        controller.setWrapLinesEnabled(enabled);
+    }
+
+    public void setWrapWordsEnabled(boolean enabled) {
+        controller.setWrapWordsEnabled(enabled);
+    }
+
     public Integer consumeTabActivationRequest() {
         return controller.consumePendingTabActivation();
     }
@@ -52,7 +60,7 @@ public final class MenuBar {
     }
 
     public void draw(CellBuffer buffer, int cols, boolean colorEnabled) {
-        String[] activeItems = controller.activeItems();
+        MenuItem[] activeItems = controller.activeItems();
         View.drawPopup(
             buffer,
             cols,
@@ -143,6 +151,9 @@ public final class MenuBar {
             controller.activeItems()
         );
         if (hit.insideItemContent()) {
+            if (!controller.isSelectable(hit.itemIndex())) {
+                return new PopupMouseResult(true, null);
+            }
             controller.setIndex(hit.itemIndex());
             return new PopupMouseResult(true, controller.handleMenuKey(KeyEvent.Action.ENTER));
         }
@@ -175,9 +186,6 @@ public final class MenuBar {
         private static final String[] FILE_MENU_ITEMS = {"New", "Open...", "Save", "Save As...", "Quit"};
         private static final String[] EDIT_MENU_ITEMS = {"Undo", "Redo", "Cut", "Copy", "Paste", "Find"};
         private static final String[] TAB_MENU_BASE_ITEMS = {"New Tab", "Close Tab", "Next Tab", "Previous Tab", SEPARATOR};
-        private static final String[] SETTINGS_MENU_ITEMS_ON = {"[x] Show Tab Bar"};
-        private static final String[] SETTINGS_MENU_ITEMS_OFF = {"[ ] Show Tab Bar"};
-
         private boolean open;
         private MenuId active = MenuId.EDIT;
         private int index;
@@ -186,6 +194,8 @@ public final class MenuBar {
         private int activeTabIndex;
         private Integer pendingTabActivation;
         private boolean showTabBarEnabled = true;
+        private boolean wrapLinesEnabled;
+        private boolean wrapWordsEnabled;
 
         private void setOpenTabs(List<OpenTab> tabs, int activeTabIndex) {
             if (tabs == null || tabs.isEmpty()) {
@@ -204,6 +214,14 @@ public final class MenuBar {
             this.showTabBarEnabled = enabled;
         }
 
+        private void setWrapLinesEnabled(boolean enabled) {
+            this.wrapLinesEnabled = enabled;
+        }
+
+        private void setWrapWordsEnabled(boolean enabled) {
+            this.wrapWordsEnabled = enabled;
+        }
+
         private Integer consumePendingTabActivation() {
             Integer value = pendingTabActivation;
             pendingTabActivation = null;
@@ -212,6 +230,10 @@ public final class MenuBar {
 
         private boolean isOpen() {
             return open;
+        }
+
+        private boolean isSelectable(int itemIndex) {
+            return isSelectable(active, itemIndex);
         }
 
         private MenuId active() {
@@ -226,7 +248,7 @@ public final class MenuBar {
             return fileNameStartCol;
         }
 
-        private String[] activeItems() {
+        private MenuItem[] activeItems() {
             return itemsFor(active);
         }
 
@@ -250,12 +272,15 @@ public final class MenuBar {
         }
 
         private void setIndex(int idx) {
-            String[] items = activeItems();
+            MenuItem[] items = activeItems();
             if (items.length == 0) {
                 index = 0;
                 return;
             }
-            index = Math.max(0, Math.min(idx, items.length - 1));
+            int clamped = Math.max(0, Math.min(idx, items.length - 1));
+            if (isSelectable(active, clamped)) {
+                index = clamped;
+            }
         }
 
         private KeyEvent.Action handleMenuKey(KeyEvent.Action action) {
@@ -303,7 +328,7 @@ public final class MenuBar {
         }
 
         private int moveSelection(int delta) {
-            String[] items = activeItems();
+            MenuItem[] items = activeItems();
             if (items.length == 0) {
                 return 0;
             }
@@ -334,39 +359,59 @@ public final class MenuBar {
             return top + " ".repeat(cols - top.length());
         }
 
-        private String[] itemsFor(MenuId menu) {
+        private MenuItem[] itemsFor(MenuId menu) {
             if (menu == MenuId.FILE) {
-                return FILE_MENU_ITEMS;
+                return toMenuItems(FILE_MENU_ITEMS);
             }
             if (menu == MenuId.EDIT) {
-                return EDIT_MENU_ITEMS;
+                return toMenuItems(EDIT_MENU_ITEMS);
             }
             if (menu == MenuId.SETTINGS) {
-                return showTabBarEnabled ? SETTINGS_MENU_ITEMS_ON : SETTINGS_MENU_ITEMS_OFF;
+                String wrapWordsLabel = "[" + (wrapWordsEnabled ? "x" : " ") + "] Wrap by words";
+                if (!wrapLinesEnabled) {
+                    wrapWordsLabel += " (disabled)";
+                }
+                return new MenuItem[] {
+                    new MenuItem("[" + (showTabBarEnabled ? "x" : " ") + "] Show Tab Bar", true),
+                    new MenuItem("[" + (wrapLinesEnabled ? "x" : " ") + "] Wrap Lines", true),
+                    new MenuItem(wrapWordsLabel, wrapLinesEnabled)
+                };
             }
-            List<String> items = new ArrayList<>();
-            items.addAll(List.of(TAB_MENU_BASE_ITEMS));
+            List<MenuItem> items = new ArrayList<>();
+            for (String base : TAB_MENU_BASE_ITEMS) {
+                boolean selectable = !SEPARATOR.equals(base);
+                items.add(new MenuItem(base, selectable));
+            }
             for (OpenTab tab : openTabs) {
-                items.add(tabLabel(tab));
+                items.add(new MenuItem(tabLabel(tab), true));
             }
-            return items.toArray(String[]::new);
+            return items.toArray(MenuItem[]::new);
         }
 
         private boolean isSelectable(MenuId menu, int itemIndex) {
-            if (menu != MenuId.TAB) {
-                return true;
+            MenuItem[] items = itemsFor(menu);
+            if (itemIndex < 0 || itemIndex >= items.length) {
+                return false;
             }
-            return itemIndex != TAB_SEPARATOR_INDEX;
+            return items[itemIndex].selectable();
         }
 
         private int firstSelectableIndex(MenuId menu) {
-            String[] items = itemsFor(menu);
+            MenuItem[] items = itemsFor(menu);
             for (int i = 0; i < items.length; i++) {
                 if (isSelectable(menu, i)) {
                     return i;
                 }
             }
             return 0;
+        }
+
+        private static MenuItem[] toMenuItems(String[] labels) {
+            MenuItem[] items = new MenuItem[labels.length];
+            for (int i = 0; i < labels.length; i++) {
+                items[i] = new MenuItem(labels[i], true);
+            }
+            return items;
         }
 
         private KeyEvent.Action mapSelection(MenuId menu, int itemIndex) {
@@ -392,7 +437,12 @@ public final class MenuBar {
                 };
             }
             if (menu == MenuId.SETTINGS) {
-                return itemIndex == 0 ? KeyEvent.Action.TOGGLE_TAB_BAR : null;
+                return switch (itemIndex) {
+                    case 0 -> KeyEvent.Action.TOGGLE_TAB_BAR;
+                    case 1 -> KeyEvent.Action.TOGGLE_WRAP_LINES;
+                    case 2 -> KeyEvent.Action.TOGGLE_WORD_WRAP;
+                    default -> null;
+                };
             }
             return mapTabSelection(itemIndex);
         }
@@ -461,7 +511,7 @@ public final class MenuBar {
             return col >= start && col < start + width;
         }
 
-        private static PopupHit hitPopup(int row, int col, int cols, MenuId menu, String[] items) {
+        private static PopupHit hitPopup(int row, int col, int cols, MenuId menu, MenuItem[] items) {
             ContextMenu.Hit hit = ContextMenu.hit(row, col, cols, startCol(menu), POPUP_TOP_ROW, items);
             return new PopupHit(hit.insidePopup(), hit.insideItemContent(), hit.itemIndex());
         }
@@ -472,7 +522,7 @@ public final class MenuBar {
             boolean visible,
             MenuId menu,
             int selectedIndex,
-            String[] items,
+            MenuItem[] items,
             boolean colorEnabled,
             Style popupStyle,
             Style selectedStyle,

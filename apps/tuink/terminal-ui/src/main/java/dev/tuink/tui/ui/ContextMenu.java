@@ -1,6 +1,7 @@
 package dev.tuink.tui.ui;
 
 import dev.tuink.tui.render.CellBuffer;
+import dev.tuink.render.Color;
 import dev.tuink.render.Style;
 
 /**
@@ -8,14 +9,15 @@ import dev.tuink.render.Style;
  */
 final class ContextMenu {
     private static final int MIN_WIDTH = 16;
+    private static final Style DISABLED_ITEM_STYLE = new Style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE, false, false);
 
     private ContextMenu() {
     }
 
-    static int widthForItems(int cols, String[] items) {
+    static int widthForItems(int cols, MenuItem[] items) {
         int width = MIN_WIDTH;
-        for (String item : items) {
-            width = Math.max(width, item.length() + 4);
+        for (MenuItem item : items) {
+            width = Math.max(width, item.text().length() + 4);
         }
         return Math.min(cols, width);
     }
@@ -27,7 +29,7 @@ final class ContextMenu {
         int startCol,
         int topRow,
         int selectedIndex,
-        String[] items,
+        MenuItem[] items,
         boolean colorEnabled,
         Style popupStyle,
         Style selectedStyle,
@@ -45,11 +47,17 @@ final class ContextMenu {
 
         drawLine(buffer, topRow, startCol, "┌" + "─".repeat(Math.max(0, width - 2)) + "┐", popupStyle, cols);
         for (int i = 0; i < height - 2; i++) {
-            String label = i < items.length ? items[i] : "";
+            String label = i < items.length ? items[i].text() : "";
             String content = padRight(" " + label, Math.max(0, width - 2));
-            Style itemStyle = i == selectedIndex
-                ? (colorEnabled ? selectedStyle : selectedMonoStyle)
-                : popupStyle;
+            boolean selectable = i < items.length && items[i].selectable();
+            Style itemStyle;
+            if (!selectable) {
+                itemStyle = colorEnabled ? DISABLED_ITEM_STYLE : popupStyle;
+            } else {
+                itemStyle = i == selectedIndex
+                    ? (colorEnabled ? selectedStyle : selectedMonoStyle)
+                    : popupStyle;
+            }
             int row = topRow + 1 + i;
             drawLine(buffer, row, startCol, "│", popupStyle, cols);
             drawLine(buffer, row, startCol + 1, content, itemStyle, cols);
@@ -65,7 +73,7 @@ final class ContextMenu {
         );
     }
 
-    static Hit hit(int row, int col, int cols, int startCol, int topRow, String[] items) {
+    static Hit hit(int row, int col, int cols, int startCol, int topRow, MenuItem[] items) {
         int width = widthForItems(cols, items);
         int popupTopRow = topRow;
         int popupBottomRow = topRow + items.length + 1;

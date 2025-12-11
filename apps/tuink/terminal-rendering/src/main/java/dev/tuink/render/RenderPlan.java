@@ -15,6 +15,7 @@ public record RenderPlan(
     Style notificationBarStyle,
     int cursorRow,
     int cursorCol,
+    boolean wrapLines,
     int contentRows,
     int topLine,
     int totalLines,

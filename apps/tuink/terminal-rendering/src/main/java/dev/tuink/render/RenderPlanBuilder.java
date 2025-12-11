@@ -32,7 +32,7 @@ public class RenderPlanBuilder {
         String topBarText,
         String bottomBarText
     ) {
-        return build(model, state, rows, cols, topBarText, bottomBarText, null, SearchOptions.DEFAULT, null, null, null, null);
+        return build(model, state, rows, cols, topBarText, bottomBarText, null, SearchOptions.DEFAULT, null, null, null, null, false);
     }
 
     public RenderPlan build(
@@ -57,7 +57,8 @@ public class RenderPlanBuilder {
             null,
             null,
             null,
-            null
+            null,
+            false
         );
     }
 
@@ -83,7 +84,8 @@ public class RenderPlanBuilder {
             interactiveBarText,
             interactiveBarStyle,
             null,
-            null
+            null,
+            false
         );
     }
 
@@ -101,13 +103,81 @@ public class RenderPlanBuilder {
         String notificationBarText,
         Style notificationBarStyle
     ) {
+        return build(
+            model,
+            state,
+            rows,
+            cols,
+            topBarText,
+            bottomBarText,
+            searchQuery,
+            searchOptions,
+            interactiveBarText,
+            interactiveBarStyle,
+            notificationBarText,
+            notificationBarStyle,
+            false,
+            false
+        );
+    }
+
+    public RenderPlan build(
+        TextModel model,
+        EditorState state,
+        int rows,
+        int cols,
+        String topBarText,
+        String bottomBarText,
+        String searchQuery,
+        SearchOptions searchOptions,
+        String interactiveBarText,
+        Style interactiveBarStyle,
+        String notificationBarText,
+        Style notificationBarStyle,
+        boolean wrapLines
+    ) {
+        return build(
+            model,
+            state,
+            rows,
+            cols,
+            topBarText,
+            bottomBarText,
+            searchQuery,
+            searchOptions,
+            interactiveBarText,
+            interactiveBarStyle,
+            notificationBarText,
+            notificationBarStyle,
+            wrapLines,
+            false
+        );
+    }
+
+    public RenderPlan build(
+        TextModel model,
+        EditorState state,
+        int rows,
+        int cols,
+        String topBarText,
+        String bottomBarText,
+        String searchQuery,
+        SearchOptions searchOptions,
+        String interactiveBarText,
+        Style interactiveBarStyle,
+        String notificationBarText,
+        Style notificationBarStyle,
+        boolean wrapLines,
+        boolean wrapByWords
+    ) {
         int safeRows = Math.max(rows, 1);
         int safeCols = Math.max(cols, 1);
         int extraBottomRows = (interactiveBarText == null ? 0 : 1) + (notificationBarText == null ? 0 : 1);
         int contentRows = Math.max(0, safeRows - 2 - extraBottomRows);
         boolean needVerticalScrollbar = state.getTopLine() > 0 || model.lineCount() > contentRows;
         int scrollbarWidth = safeCols >= 8 && needVerticalScrollbar ? 1 : 0;
-        int gutterWidth = Math.max(3, String.valueOf(Math.max(model.lineCount(), 1)).length() + 1);
+        int gutterDigits = Math.max(1, String.valueOf(Math.max(model.lineCount(), 1)).length());
+        int gutterWidth = gutterDigits + 1;
         int textWidth = Math.max(0, safeCols - gutterWidth - scrollbarWidth);
         int totalColumns = 0;
         for (int i = 0; i < model.lineCount(); i++) {
@@ -116,48 +186,119 @@ public class RenderPlanBuilder {
         }
 
         List<LineVisual> lines = new ArrayList<>(contentRows);
-        for (int row = 0; row < contentRows; row++) {
-            int lineIndex = state.getTopLine() + row;
-            if (lineIndex < model.lineCount()) {
-                String line = model.getLine(lineIndex);
-                String visibleText = clip(line, state.getLeftColumn(), textWidth);
-                List<StyleSpan> spans = new ArrayList<>(
-                    clipSpans(highlighter.highlight(line), state.getLeftColumn(), visibleText.length())
-                );
-                spans.addAll(
-                    clipSpans(
-                        searchMatchSpans(line, searchQuery, searchOptions, SEARCH_MATCH_STYLE),
+        if (!wrapLines) {
+            for (int row = 0; row < contentRows; row++) {
+                int lineIndex = state.getTopLine() + row;
+                if (lineIndex < model.lineCount()) {
+                    String line = model.getLine(lineIndex);
+                    String visibleText = clip(line, state.getLeftColumn(), textWidth);
+                    List<StyleSpan> spans = new ArrayList<>(
+                        clipSpans(highlighter.highlight(line), state.getLeftColumn(), visibleText.length())
+                    );
+                    spans.addAll(
+                        clipSpans(
+                            searchMatchSpans(line, searchQuery, searchOptions, SEARCH_MATCH_STYLE),
+                            state.getLeftColumn(),
+                            visibleText.length()
+                        )
+                    );
+                    StyleSpan selection = selectionSpanForLine(state, model, lineIndex, state.getLeftColumn(), visibleText.length());
+                    if (selection != null) {
+                        spans.add(selection);
+                    }
+                    StyleSpan currentMatch = currentMatchSpanForLine(
+                        state,
+                        model,
+                        lineIndex,
                         state.getLeftColumn(),
-                        visibleText.length()
-                    )
-                );
-                StyleSpan selection = selectionSpanForLine(state, model, lineIndex, state.getLeftColumn(), visibleText.length());
+                        visibleText.length(),
+                        searchQuery,
+                        searchOptions
+                    );
+                    if (currentMatch != null) {
+                        spans.add(currentMatch);
+                    }
+                    String gutter = lineNumberGutter(lineIndex + 1, gutterWidth);
+                    lines.add(new LineVisual(gutter, visibleText, spans));
+                } else {
+                    lines.add(new LineVisual(tildeGutter(gutterWidth), "", List.of()));
+                }
+            }
+        } else {
+            int lineIndex = state.getTopLine();
+            while (lines.size() < contentRows) {
+                if (lineIndex >= model.lineCount()) {
+                    lines.add(new LineVisual(tildeGutter(gutterWidth), "", List.of()));
+                    continue;
+                }
+                String line = model.getLine(lineIndex);
+                List<StyleSpan> lineSpans = new ArrayList<>(highlighter.highlight(line));
+                lineSpans.addAll(searchMatchSpans(line, searchQuery, searchOptions, SEARCH_MATCH_STYLE));
+                StyleSpan selection = selectionSpanForLine(state, model, lineIndex, 0, line.length());
                 if (selection != null) {
-                    spans.add(selection);
+                    lineSpans.add(selection);
                 }
                 StyleSpan currentMatch = currentMatchSpanForLine(
                     state,
                     model,
                     lineIndex,
-                    state.getLeftColumn(),
-                    visibleText.length(),
+                    0,
+                    line.length(),
                     searchQuery,
                     searchOptions
                 );
                 if (currentMatch != null) {
-                    spans.add(currentMatch);
+                    lineSpans.add(currentMatch);
                 }
-                String gutter = String.format("%" + (gutterWidth - 1) + "d ", lineIndex + 1);
-                lines.add(new LineVisual(gutter, visibleText, spans));
-            } else {
-                lines.add(new LineVisual(pad("~", gutterWidth), "", List.of()));
+
+                List<Integer> starts = wrapStarts(line, textWidth, wrapByWords);
+                for (int seg = 0; seg < starts.size() && lines.size() < contentRows; seg++) {
+                    int start = starts.get(seg);
+                    int end = seg + 1 < starts.size() ? starts.get(seg + 1) : line.length();
+                    String part = line.substring(start, end);
+                    List<StyleSpan> partSpans = clipSpans(lineSpans, start, part.length());
+                    String gutter = seg == 0
+                        ? lineNumberGutter(lineIndex + 1, gutterWidth)
+                        : " ".repeat(gutterWidth);
+                    lines.add(new LineVisual(gutter, part, partSpans));
+                }
+                lineIndex++;
             }
         }
 
         Position cursor = model.clamp(state.getCursor());
-        int cursorRow = cursor.line() - state.getTopLine();
+        int cursorRow;
         int leftVisualColumn = visualColumn(model.getLine(cursor.line()), 0, state.getLeftColumn());
-        int cursorCol = gutterWidth + visualColumn(model.getLine(cursor.line()), state.getLeftColumn(), cursor.col());
+        int cursorCol;
+        if (!wrapLines) {
+            cursorRow = cursor.line() - state.getTopLine();
+            cursorCol = gutterWidth + visualColumn(model.getLine(cursor.line()), state.getLeftColumn(), cursor.col());
+        } else {
+            cursorRow = 0;
+            for (int i = state.getTopLine(); i < cursor.line(); i++) {
+                cursorRow += wrapStarts(model.getLine(i), textWidth, wrapByWords).size();
+            }
+            String cursorLine = model.getLine(cursor.line());
+            List<Integer> starts = wrapStarts(cursorLine, textWidth, wrapByWords);
+            int segIndex = 0;
+            int segStart = 0;
+            for (int i = 0; i < starts.size(); i++) {
+                int s = starts.get(i);
+                int e = i + 1 < starts.size() ? starts.get(i + 1) : cursorLine.length();
+                if (cursor.col() < e || (cursor.col() == e && i + 1 == starts.size())) {
+                    segIndex = i;
+                    segStart = s;
+                    break;
+                }
+                if (cursor.col() == e && i + 1 < starts.size()) {
+                    segIndex = i + 1;
+                    segStart = starts.get(i + 1);
+                    break;
+                }
+            }
+            cursorRow += segIndex;
+            cursorCol = gutterWidth + visualColumn(cursorLine, segStart, cursor.col());
+        }
         int maxCursorCol = Math.max(gutterWidth, safeCols - 1 - scrollbarWidth);
         cursorRow = Math.max(0, Math.min(cursorRow, Math.max(contentRows - 1, 0)));
         cursorCol = Math.max(gutterWidth, Math.min(cursorCol, maxCursorCol));
@@ -172,6 +313,7 @@ public class RenderPlanBuilder {
             notificationBarStyle,
             cursorRow,
             cursorCol,
+            wrapLines,
             contentRows,
             state.getTopLine(),
             model.lineCount(),
@@ -182,6 +324,71 @@ public class RenderPlanBuilder {
             gutterWidth,
             scrollbarWidth
         );
+    }
+
+    private static List<Integer> wrapStarts(String line, int maxVisualWidth, boolean wrapByWords) {
+        if (line.isEmpty()) {
+            return List.of(0);
+        }
+        if (maxVisualWidth <= 0) {
+            return List.of(0);
+        }
+        List<Integer> starts = new ArrayList<>();
+        int start = 0;
+        starts.add(0);
+        while (start < line.length()) {
+            int end = wrapByWords
+                ? advanceByWordWrap(line, start, maxVisualWidth)
+                : advanceByVisualWidth(line, start, maxVisualWidth);
+            if (end <= start) {
+                end = Math.min(line.length(), start + 1);
+            }
+            if (end < line.length()) {
+                starts.add(end);
+            }
+            start = end;
+        }
+        return starts;
+    }
+
+    private static int advanceByVisualWidth(String line, int start, int maxVisualWidth) {
+        int visual = 0;
+        int i = Math.max(0, Math.min(start, line.length()));
+        while (i < line.length()) {
+            char ch = line.charAt(i);
+            int adv = ch == '\t' ? TAB_WIDTH - (visual % TAB_WIDTH) : 1;
+            if (visual + adv > maxVisualWidth) {
+                break;
+            }
+            visual += adv;
+            i++;
+        }
+        return i;
+    }
+
+    private static int advanceByWordWrap(String line, int start, int maxVisualWidth) {
+        int visual = 0;
+        int i = Math.max(0, Math.min(start, line.length()));
+        int lastBreakAfterWhitespace = -1;
+        while (i < line.length()) {
+            char ch = line.charAt(i);
+            int adv = ch == '\t' ? TAB_WIDTH - (visual % TAB_WIDTH) : 1;
+            if (visual + adv > maxVisualWidth) {
+                break;
+            }
+            visual += adv;
+            i++;
+            if (Character.isWhitespace(ch)) {
+                lastBreakAfterWhitespace = i;
+            }
+        }
+        if (i >= line.length()) {
+            return i;
+        }
+        if (lastBreakAfterWhitespace > start) {
+            return lastBreakAfterWhitespace;
+        }
+        return i;
     }
 
     private static String clip(String line, int leftColumn, int maxWidth) {
@@ -228,11 +435,12 @@ public class RenderPlanBuilder {
         return visual;
     }
 
-    private static String pad(String text, int width) {
-        if (text.length() >= width) {
-            return text.substring(0, width);
-        }
-        return text + " ".repeat(width - text.length());
+    private static String lineNumberGutter(int lineNumber, int gutterWidth) {
+        return String.format("%" + (gutterWidth - 1) + "d ", lineNumber);
+    }
+
+    private static String tildeGutter(int gutterWidth) {
+        return String.format("%" + (gutterWidth - 1) + "s ", "~");
     }
 
     private List<StyleSpan> searchMatchSpans(String line, String query, SearchOptions options, Style style) {

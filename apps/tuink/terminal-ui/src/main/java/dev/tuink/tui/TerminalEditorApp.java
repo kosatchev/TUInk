@@ -114,6 +114,8 @@ public class TerminalEditorApp {
         boolean showTabBarSetting = true;
         boolean wrapLinesSetting = false;
         boolean wrapWordsSetting = true;
+        boolean confirmOnCloseSetting = true;
+        boolean mouseModeSetting = cli.mouseEnabled();
         boolean openFileMode = false;
         TreeView openFileTree = new TreeView(initialOpenRoot(state));
         OpenDialogFocus openFileFocus = OpenDialogFocus.LIST;
@@ -159,9 +161,7 @@ public class TerminalEditorApp {
             Runnable cleanup = () -> {
                 if (cleanedUp.compareAndSet(false, true)) {
                     StringBuilder out = new StringBuilder("\u001B[0m");
-                    if (cli.mouseEnabled()) {
-                        out.append(DISABLE_MOUSE_TRACKING);
-                    }
+                    out.append(DISABLE_MOUSE_TRACKING);
                     out.append("\u001B[?25h");
                     if (cli.altScreenEnabled()) {
                         out.append("\u001B[?1049l");
@@ -180,7 +180,7 @@ public class TerminalEditorApp {
                     init.append("\u001B[?1049h");
                 }
                 init.append("\u001B[?25h\u001B[2J");
-                if (cli.mouseEnabled()) {
+                if (mouseModeSetting) {
                     init.append(ENABLE_MOUSE_TRACKING);
                 }
                 writer.print(init);
@@ -229,6 +229,8 @@ public class TerminalEditorApp {
                     topMenu.setShowTabBarEnabled(showTabBarSetting);
                     topMenu.setWrapLinesEnabled(wrapLinesSetting);
                     topMenu.setWrapWordsEnabled(wrapWordsSetting);
+                    topMenu.setConfirmOnCloseEnabled(confirmOnCloseSetting);
+                    topMenu.setMouseModeEnabled(mouseModeSetting);
 
                     String topBar = topMenu.buildTopBar(
                         state.getCurrentFile(),
@@ -363,7 +365,7 @@ public class TerminalEditorApp {
                     }
 
                     if (key instanceof KeyEvent.MouseEvent mouse) {
-                        if (!cli.mouseEnabled()) {
+                        if (!mouseModeSetting) {
                             continue;
                         }
                         KeyEvent remappedMouseKey = null;
@@ -546,8 +548,13 @@ public class TerminalEditorApp {
                                         if (clickedTabIndex >= 0 && clickedTabIndex < tabs.size()) {
                                             if (tabHit.closeButton()) {
                                                 if (tabs.get(clickedTabIndex).state().isDirty()) {
-                                                    closeTabConfirmMode = true;
-                                                    pendingCloseTabIndex = clickedTabIndex;
+                                                    if (confirmOnCloseSetting) {
+                                                        closeTabConfirmMode = true;
+                                                        pendingCloseTabIndex = clickedTabIndex;
+                                                    } else {
+                                                        activeTabIndex = closeTab(tabs, activeTabIndex, clickedTabIndex);
+                                                        statusMessage = "Closed tab";
+                                                    }
                                                 } else {
                                                     activeTabIndex = closeTab(tabs, activeTabIndex, clickedTabIndex);
                                                     statusMessage = "Closed tab";
@@ -972,25 +979,41 @@ public class TerminalEditorApp {
                     }
 
                     if (topMenu.isOpen()) {
-                        if (key instanceof KeyEvent.CharInput) {
-                            continue;
-                        }
-                        KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
-                        KeyEvent.Action mapped = topMenu.handleKey(action);
-                        Integer tabActivation = topMenu.consumeTabActivationRequest();
-                        if (tabActivation != null && tabActivation >= 0 && tabActivation < tabs.size()) {
-                            activeTabIndex = tabActivation;
-                            model = tabs.get(activeTabIndex).model();
-                            state = tabs.get(activeTabIndex).state();
-                            engine = tabs.get(activeTabIndex).engine();
-                            renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
-                            statusMessage = "Tab " + (activeTabIndex + 1) + "/" + tabs.size();
-                        }
-                        if (mapped != null) {
-                            key = new KeyEvent.ActionEvent(mapped);
-                        }
-                        if (topMenu.isOpen()) {
-                            continue;
+                        if (key instanceof KeyEvent.CharInput charInput) {
+                            KeyEvent.Action mapped = topMenu.handleChar(charInput.ch());
+                            Integer tabActivation = topMenu.consumeTabActivationRequest();
+                            if (tabActivation != null && tabActivation >= 0 && tabActivation < tabs.size()) {
+                                activeTabIndex = tabActivation;
+                                model = tabs.get(activeTabIndex).model();
+                                state = tabs.get(activeTabIndex).state();
+                                engine = tabs.get(activeTabIndex).engine();
+                                renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
+                                statusMessage = "Tab " + (activeTabIndex + 1) + "/" + tabs.size();
+                            }
+                            if (mapped != null) {
+                                key = new KeyEvent.ActionEvent(mapped);
+                            }
+                            if (topMenu.isOpen()) {
+                                continue;
+                            }
+                        } else {
+                            KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
+                            KeyEvent.Action mapped = topMenu.handleKey(action);
+                            Integer tabActivation = topMenu.consumeTabActivationRequest();
+                            if (tabActivation != null && tabActivation >= 0 && tabActivation < tabs.size()) {
+                                activeTabIndex = tabActivation;
+                                model = tabs.get(activeTabIndex).model();
+                                state = tabs.get(activeTabIndex).state();
+                                engine = tabs.get(activeTabIndex).engine();
+                                renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
+                                statusMessage = "Tab " + (activeTabIndex + 1) + "/" + tabs.size();
+                            }
+                            if (mapped != null) {
+                                key = new KeyEvent.ActionEvent(mapped);
+                            }
+                            if (topMenu.isOpen()) {
+                                continue;
+                            }
                         }
                     }
 
@@ -1134,7 +1157,7 @@ public class TerminalEditorApp {
                                     : "Nothing to replace";
                             }
                             case CTRL_Q -> {
-                                if (hasDirtyTabs(tabs)) {
+                                if (confirmOnCloseSetting && hasDirtyTabs(tabs)) {
                                     searchMode = false;
                                     searchFocus = SearchFocus.FIND;
                                     quitConfirmMode = true;
@@ -1194,6 +1217,18 @@ public class TerminalEditorApp {
                                 wrapWordsSetting = !wrapWordsSetting;
                                 statusMessage = wrapWordsSetting ? "Word wrap enabled" : "Word wrap disabled";
                             }
+                            case TOGGLE_CONFIRM_ON_CLOSE -> {
+                                confirmOnCloseSetting = !confirmOnCloseSetting;
+                                statusMessage = confirmOnCloseSetting
+                                    ? "Confirm on close enabled"
+                                    : "Confirm on close disabled";
+                            }
+                            case TOGGLE_MOUSE_MODE -> {
+                                mouseModeSetting = !mouseModeSetting;
+                                writer.print(mouseModeSetting ? ENABLE_MOUSE_TRACKING : DISABLE_MOUSE_TRACKING);
+                                writer.flush();
+                                statusMessage = mouseModeSetting ? "Mouse mode enabled" : "Mouse mode disabled";
+                            }
                             case CTRL_N, TAB_NEW -> {
                                 tabs.add(newEditorTab());
                                 activeTabIndex = tabs.size() - 1;
@@ -1223,7 +1258,7 @@ public class TerminalEditorApp {
                                 statusMessage = "Tab " + (activeTabIndex + 1) + "/" + tabs.size();
                             }
                             case TAB_CLOSE -> {
-                                if (state.isDirty()) {
+                                if (state.isDirty() && confirmOnCloseSetting) {
                                     closeTabConfirmMode = true;
                                     pendingCloseTabIndex = activeTabIndex;
                                 } else {
@@ -1236,7 +1271,7 @@ public class TerminalEditorApp {
                                     statusMessage = "Closed tab";
                                 }
                             }
-                            case CTRL_K, CTRL_W, F2, CTRL_SHIFT_S -> {
+                            case CTRL_K, CTRL_W, CTRL_SHIFT_S -> {
                                 searchMode = false;
                                 searchFocus = SearchFocus.FIND;
                                 saveAsMode = true;
@@ -1273,9 +1308,11 @@ public class TerminalEditorApp {
                     switch (action) {
                         case CTRL_E -> topMenu.openEdit();
                         case CTRL_T -> topMenu.openTab();
+                        case OPEN_VIEW_MENU -> topMenu.openView();
                         case F10 -> topMenu.openFile();
+                        case F2 -> topMenu.openSettings();
                         case CTRL_Q -> {
-                            if (hasDirtyTabs(tabs)) {
+                            if (confirmOnCloseSetting && hasDirtyTabs(tabs)) {
                                 quitConfirmMode = true;
                             } else {
                                 running = false;
@@ -1327,6 +1364,18 @@ public class TerminalEditorApp {
                             wrapWordsSetting = !wrapWordsSetting;
                             statusMessage = wrapWordsSetting ? "Word wrap enabled" : "Word wrap disabled";
                         }
+                        case TOGGLE_CONFIRM_ON_CLOSE -> {
+                            confirmOnCloseSetting = !confirmOnCloseSetting;
+                            statusMessage = confirmOnCloseSetting
+                                ? "Confirm on close enabled"
+                                : "Confirm on close disabled";
+                        }
+                        case TOGGLE_MOUSE_MODE -> {
+                            mouseModeSetting = !mouseModeSetting;
+                            writer.print(mouseModeSetting ? ENABLE_MOUSE_TRACKING : DISABLE_MOUSE_TRACKING);
+                            writer.flush();
+                            statusMessage = mouseModeSetting ? "Mouse mode enabled" : "Mouse mode disabled";
+                        }
                         case CTRL_N, TAB_NEW -> {
                             tabs.add(newEditorTab());
                             activeTabIndex = tabs.size() - 1;
@@ -1353,7 +1402,7 @@ public class TerminalEditorApp {
                             statusMessage = "Tab " + (activeTabIndex + 1) + "/" + tabs.size();
                         }
                         case TAB_CLOSE -> {
-                            if (state.isDirty()) {
+                            if (state.isDirty() && confirmOnCloseSetting) {
                                 closeTabConfirmMode = true;
                                 pendingCloseTabIndex = activeTabIndex;
                             } else {
@@ -1365,7 +1414,7 @@ public class TerminalEditorApp {
                                 statusMessage = "Closed tab";
                             }
                         }
-                        case CTRL_K, CTRL_W, F2, CTRL_SHIFT_S -> {
+                        case CTRL_K, CTRL_W, CTRL_SHIFT_S -> {
                             saveAsMode = true;
                             saveAsInput.clear();
                             if (state.getCurrentFile() != null) {

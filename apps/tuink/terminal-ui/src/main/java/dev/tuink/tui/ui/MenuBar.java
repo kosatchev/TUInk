@@ -5,7 +5,9 @@ import dev.tuink.tui.KeyEvent;
 import dev.tuink.tui.render.CellBuffer;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * UI element for the top menu bar and its dropdown popup.
@@ -38,6 +40,14 @@ public final class MenuBar {
         controller.setWrapWordsEnabled(enabled);
     }
 
+    public void setConfirmOnCloseEnabled(boolean enabled) {
+        controller.setConfirmOnCloseEnabled(enabled);
+    }
+
+    public void setMouseModeEnabled(boolean enabled) {
+        controller.setMouseModeEnabled(enabled);
+    }
+
     public Integer consumeTabActivationRequest() {
         return controller.consumePendingTabActivation();
     }
@@ -51,12 +61,7 @@ public final class MenuBar {
     }
 
     public int popupCursorCol() {
-        return switch (controller.active()) {
-            case FILE -> 3;
-            case EDIT -> 10;
-            case TAB -> 17;
-            case SETTINGS -> 24;
-        };
+        return View.popupContentCol(controller.active()) + controller.selectedMnemonicIndex();
     }
 
     public void draw(CellBuffer buffer, int cols, boolean colorEnabled) {
@@ -104,6 +109,10 @@ public final class MenuBar {
         controller.open(MenuId.TAB);
     }
 
+    public void openView() {
+        controller.open(MenuId.VIEW);
+    }
+
     public void openSettings() {
         controller.open(MenuId.SETTINGS);
     }
@@ -114,6 +123,10 @@ public final class MenuBar {
 
     public KeyEvent.Action handleKey(KeyEvent.Action action) {
         return controller.handleMenuKey(action);
+    }
+
+    public KeyEvent.Action handleChar(char ch) {
+        return controller.handleMenuChar(ch);
     }
 
     public boolean handleTopBarClick(int row, int col) {
@@ -130,6 +143,10 @@ public final class MenuBar {
         }
         if (View.isMenuLabelHit(MenuId.TAB, col)) {
             controller.toggle(MenuId.TAB);
+            return true;
+        }
+        if (View.isMenuLabelHit(MenuId.VIEW, col)) {
+            controller.toggle(MenuId.VIEW);
             return true;
         }
         if (View.isMenuLabelHit(MenuId.SETTINGS, col)) {
@@ -174,6 +191,7 @@ public final class MenuBar {
         FILE,
         EDIT,
         TAB,
+        VIEW,
         SETTINGS
     }
 
@@ -196,6 +214,9 @@ public final class MenuBar {
         private boolean showTabBarEnabled = true;
         private boolean wrapLinesEnabled;
         private boolean wrapWordsEnabled;
+        private boolean confirmOnCloseEnabled = true;
+        private boolean mouseModeEnabled = true;
+        private int[] activeMnemonics = new int[0];
 
         private void setOpenTabs(List<OpenTab> tabs, int activeTabIndex) {
             if (tabs == null || tabs.isEmpty()) {
@@ -208,18 +229,44 @@ public final class MenuBar {
             } else {
                 this.activeTabIndex = Math.max(0, Math.min(activeTabIndex, this.openTabs.size() - 1));
             }
+            if (open && active == MenuId.TAB) {
+                rebuildMnemonics();
+            }
         }
 
         private void setShowTabBarEnabled(boolean enabled) {
             this.showTabBarEnabled = enabled;
+            if (open && active == MenuId.VIEW) {
+                rebuildMnemonics();
+            }
         }
 
         private void setWrapLinesEnabled(boolean enabled) {
             this.wrapLinesEnabled = enabled;
+            if (open && active == MenuId.VIEW) {
+                rebuildMnemonics();
+            }
         }
 
         private void setWrapWordsEnabled(boolean enabled) {
             this.wrapWordsEnabled = enabled;
+            if (open && active == MenuId.VIEW) {
+                rebuildMnemonics();
+            }
+        }
+
+        private void setConfirmOnCloseEnabled(boolean enabled) {
+            this.confirmOnCloseEnabled = enabled;
+            if (open && active == MenuId.SETTINGS) {
+                rebuildMnemonics();
+            }
+        }
+
+        private void setMouseModeEnabled(boolean enabled) {
+            this.mouseModeEnabled = enabled;
+            if (open && active == MenuId.SETTINGS) {
+                rebuildMnemonics();
+            }
         }
 
         private Integer consumePendingTabActivation() {
@@ -258,6 +305,9 @@ public final class MenuBar {
             open = !sameMenuOpen;
             if (open) {
                 index = firstSelectableIndex(active);
+                rebuildMnemonics();
+            } else {
+                activeMnemonics = new int[0];
             }
         }
 
@@ -265,10 +315,12 @@ public final class MenuBar {
             active = menu;
             open = true;
             index = firstSelectableIndex(active);
+            rebuildMnemonics();
         }
 
         private void close() {
             open = false;
+            activeMnemonics = new int[0];
         }
 
         private void setIndex(int idx) {
@@ -289,26 +341,37 @@ public final class MenuBar {
                 case CTRL_E -> {
                     active = MenuId.EDIT;
                     index = firstSelectableIndex(active);
+                    rebuildMnemonics();
                 }
                 case F10 -> {
                     active = MenuId.FILE;
                     index = firstSelectableIndex(active);
+                    rebuildMnemonics();
                 }
                 case CTRL_T -> {
                     active = MenuId.TAB;
                     index = firstSelectableIndex(active);
+                    rebuildMnemonics();
+                }
+                case OPEN_VIEW_MENU -> {
+                    active = MenuId.VIEW;
+                    index = firstSelectableIndex(active);
+                    rebuildMnemonics();
                 }
                 case F2 -> {
                     active = MenuId.SETTINGS;
                     index = firstSelectableIndex(active);
+                    rebuildMnemonics();
                 }
                 case ARROW_LEFT -> {
                     active = previousMenu(active);
                     index = firstSelectableIndex(active);
+                    rebuildMnemonics();
                 }
                 case ARROW_RIGHT -> {
                     active = nextMenu(active);
                     index = firstSelectableIndex(active);
+                    rebuildMnemonics();
                 }
                 case ARROW_UP -> index = moveSelection(-1);
                 case ARROW_DOWN -> index = moveSelection(1);
@@ -327,6 +390,52 @@ public final class MenuBar {
             return null;
         }
 
+        private KeyEvent.Action handleMenuChar(char ch) {
+            if (!open) {
+                return null;
+            }
+            if (ch >= '1' && ch <= '9') {
+                int target = ch - '0';
+                int selectableIndex = findSelectableByOrdinal(target);
+                if (selectableIndex >= 0) {
+                    index = selectableIndex;
+                    return handleMenuKey(KeyEvent.Action.ENTER);
+                }
+                return null;
+            }
+            MenuItem[] items = activeItems();
+            char target = Character.toLowerCase(ch);
+            for (int i = 0; i < items.length; i++) {
+                if (!isSelectable(active, i) || mnemonicAt(i) < 0) {
+                    continue;
+                }
+                char key = Character.toLowerCase(items[i].text().charAt(mnemonicAt(i)));
+                if (key == target) {
+                    index = i;
+                    return handleMenuKey(KeyEvent.Action.ENTER);
+                }
+            }
+            return null;
+        }
+
+        private int findSelectableByOrdinal(int ordinal) {
+            if (ordinal <= 0) {
+                return -1;
+            }
+            MenuItem[] items = activeItems();
+            int count = 0;
+            for (int i = 0; i < items.length; i++) {
+                if (!isSelectable(active, i)) {
+                    continue;
+                }
+                count++;
+                if (count == ordinal) {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
         private int moveSelection(int delta) {
             MenuItem[] items = activeItems();
             if (items.length == 0) {
@@ -342,15 +451,89 @@ public final class MenuBar {
             return index;
         }
 
+        private int selectedMnemonicIndex() {
+            if (index < 0) {
+                return 1;
+            }
+            int mnemonic = mnemonicAt(index);
+            return mnemonic >= 0 ? mnemonic : 1;
+        }
+
+        private int mnemonicAt(int itemIndex) {
+            if (itemIndex < 0 || itemIndex >= activeMnemonics.length) {
+                return -1;
+            }
+            return activeMnemonics[itemIndex];
+        }
+
+        private void rebuildMnemonics() {
+            activeMnemonics = mnemonicIndexes(activeItems());
+        }
+
+        private int[] mnemonicIndexes(MenuItem[] items) {
+            int[] result = new int[items.length];
+            Set<Character> used = new HashSet<>();
+            for (int i = 0; i < items.length; i++) {
+                result[i] = findMnemonicIndex(items[i], used);
+            }
+            return result;
+        }
+
+        private static int findMnemonicIndex(MenuItem item, Set<Character> used) {
+            if (item == null || !item.selectable()) {
+                return -1;
+            }
+            String text = item.text();
+            int start = textStartIndex(text);
+            List<Integer> candidates = new ArrayList<>();
+            for (int i = start; i < text.length(); i++) {
+                char ch = text.charAt(i);
+                if (!Character.isLetter(ch)) {
+                    continue;
+                }
+                if (i == start || !Character.isLetter(text.charAt(i - 1))) {
+                    candidates.add(i);
+                }
+            }
+            for (int i = start; i < text.length(); i++) {
+                char ch = text.charAt(i);
+                if (Character.isLetter(ch)) {
+                    candidates.add(i);
+                }
+            }
+            for (int pos : candidates) {
+                char key = Character.toLowerCase(text.charAt(pos));
+                if (used.add(key)) {
+                    return pos;
+                }
+            }
+            return -1;
+        }
+
+        private static int textStartIndex(String text) {
+            if (text == null || text.isEmpty()) {
+                return 0;
+            }
+            if (text.startsWith("[")) {
+                int close = text.indexOf("] ");
+                if (close >= 0 && close + 2 < text.length()) {
+                    return close + 2;
+                }
+            }
+            return 0;
+        }
+
         private String buildTopBar(Path currentFile, boolean dirty, int activeTabIndex, int totalTabs, int cols) {
             String fileMenu = (open && active == MenuId.FILE) ? "[File]" : " File ";
             String editMenu = (open && active == MenuId.EDIT) ? "[Edit]" : " Edit ";
             String tabMenu = (open && active == MenuId.TAB) ? "[Tab]" : " Tab ";
+            String viewMenu = (open && active == MenuId.VIEW) ? "[View]" : " View ";
             String settingsMenu = (open && active == MenuId.SETTINGS) ? "[Settings]" : " Settings ";
             String tabMarker = "[" + (activeTabIndex + 1) + "/" + Math.max(1, totalTabs) + "]";
             String file = currentFile == null ? NO_NAME_LABEL : currentFile.toString();
             String dirtyMarker = dirty ? " *" : "";
-            String left = fileMenu + " " + editMenu + " " + tabMenu + " " + settingsMenu + " " + tabMarker + " ";
+            String left = fileMenu + " " + editMenu + " " + tabMenu + " " + viewMenu + " "
+                + settingsMenu + " " + tabMarker + " ";
             fileNameStartCol = left.length();
             String top = left + file + dirtyMarker;
             if (top.length() > cols) {
@@ -366,7 +549,7 @@ public final class MenuBar {
             if (menu == MenuId.EDIT) {
                 return toMenuItems(EDIT_MENU_ITEMS);
             }
-            if (menu == MenuId.SETTINGS) {
+            if (menu == MenuId.VIEW) {
                 String wrapWordsLabel = "[" + (wrapWordsEnabled ? "x" : " ") + "] Wrap by words";
                 if (!wrapLinesEnabled) {
                     wrapWordsLabel += " (disabled)";
@@ -375,6 +558,12 @@ public final class MenuBar {
                     new MenuItem("[" + (showTabBarEnabled ? "x" : " ") + "] Show Tab Bar", true),
                     new MenuItem("[" + (wrapLinesEnabled ? "x" : " ") + "] Wrap Lines", true),
                     new MenuItem(wrapWordsLabel, wrapLinesEnabled)
+                };
+            }
+            if (menu == MenuId.SETTINGS) {
+                return new MenuItem[] {
+                    new MenuItem("[" + (confirmOnCloseEnabled ? "x" : " ") + "] Confirm on close", true),
+                    new MenuItem("[" + (mouseModeEnabled ? "x" : " ") + "] Mouse mode", true)
                 };
             }
             List<MenuItem> items = new ArrayList<>();
@@ -436,11 +625,18 @@ public final class MenuBar {
                     default -> null;
                 };
             }
-            if (menu == MenuId.SETTINGS) {
+            if (menu == MenuId.VIEW) {
                 return switch (itemIndex) {
                     case 0 -> KeyEvent.Action.TOGGLE_TAB_BAR;
                     case 1 -> KeyEvent.Action.TOGGLE_WRAP_LINES;
                     case 2 -> KeyEvent.Action.TOGGLE_WORD_WRAP;
+                    default -> null;
+                };
+            }
+            if (menu == MenuId.SETTINGS) {
+                return switch (itemIndex) {
+                    case 0 -> KeyEvent.Action.TOGGLE_CONFIRM_ON_CLOSE;
+                    case 1 -> KeyEvent.Action.TOGGLE_MOUSE_MODE;
                     default -> null;
                 };
             }
@@ -476,7 +672,8 @@ public final class MenuBar {
             return switch (menu) {
                 case FILE -> MenuId.EDIT;
                 case EDIT -> MenuId.TAB;
-                case TAB -> MenuId.SETTINGS;
+                case TAB -> MenuId.VIEW;
+                case VIEW -> MenuId.SETTINGS;
                 case SETTINGS -> MenuId.FILE;
             };
         }
@@ -486,7 +683,8 @@ public final class MenuBar {
                 case FILE -> MenuId.SETTINGS;
                 case EDIT -> MenuId.FILE;
                 case TAB -> MenuId.EDIT;
-                case SETTINGS -> MenuId.TAB;
+                case VIEW -> MenuId.TAB;
+                case SETTINGS -> MenuId.VIEW;
             };
         }
     }
@@ -495,10 +693,12 @@ public final class MenuBar {
         private static final int FILE_START_COL = 0;
         private static final int EDIT_START_COL = 7;
         private static final int TAB_START_COL = 14;
-        private static final int SETTINGS_START_COL = 20;
+        private static final int VIEW_START_COL = 20;
+        private static final int SETTINGS_START_COL = 27;
         private static final int FILE_LABEL_WIDTH = 6;
         private static final int EDIT_LABEL_WIDTH = 6;
         private static final int TAB_LABEL_WIDTH = 5;
+        private static final int VIEW_LABEL_WIDTH = 6;
         private static final int SETTINGS_LABEL_WIDTH = 10;
         private static final int POPUP_TOP_ROW = 1;
 
@@ -560,6 +760,7 @@ public final class MenuBar {
                 case FILE -> " File ";
                 case EDIT -> " Edit ";
                 case TAB -> " Tab ";
+                case VIEW -> " View ";
                 case SETTINGS -> " Settings ";
             };
             drawLine(buffer, 0, startCol(active), label, style, cols);
@@ -570,8 +771,14 @@ public final class MenuBar {
                 case FILE -> FILE_START_COL;
                 case EDIT -> EDIT_START_COL;
                 case TAB -> TAB_START_COL;
+                case VIEW -> VIEW_START_COL;
                 case SETTINGS -> SETTINGS_START_COL;
             };
+        }
+
+        private static int popupContentCol(MenuId menu) {
+            // Cursor addressing is 1-based; content text starts at buffer col (start + 2).
+            return startCol(menu) + 3;
         }
 
         private static int labelWidth(MenuId menu) {
@@ -579,6 +786,7 @@ public final class MenuBar {
                 case FILE -> FILE_LABEL_WIDTH;
                 case EDIT -> EDIT_LABEL_WIDTH;
                 case TAB -> TAB_LABEL_WIDTH;
+                case VIEW -> VIEW_LABEL_WIDTH;
                 case SETTINGS -> SETTINGS_LABEL_WIDTH;
             };
         }

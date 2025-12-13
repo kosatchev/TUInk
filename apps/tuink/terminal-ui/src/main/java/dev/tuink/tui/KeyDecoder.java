@@ -82,6 +82,10 @@ public class KeyDecoder {
             return new KeyEvent.ActionEvent(KeyEvent.Action.UNKNOWN);
         }
         if (second != '[') {
+            KeyEvent alt = mapAltKey(second);
+            if (alt != null) {
+                return alt;
+            }
             return new KeyEvent.ActionEvent(KeyEvent.Action.ESCAPE);
         }
         StringBuilder seq = new StringBuilder();
@@ -100,6 +104,18 @@ public class KeyDecoder {
             }
         }
         return mapCsi(seq.toString());
+    }
+
+    private KeyEvent mapAltKey(int ch) {
+        char key = Character.toLowerCase((char) ch);
+        return switch (key) {
+            case 'f' -> new KeyEvent.ActionEvent(KeyEvent.Action.F10);
+            case 'e' -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_E);
+            case 't' -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_T);
+            case 'v' -> new KeyEvent.ActionEvent(KeyEvent.Action.OPEN_VIEW_MENU);
+            case 's' -> new KeyEvent.ActionEvent(KeyEvent.Action.F2);
+            default -> null;
+        };
     }
 
     private KeyEvent mapCsi(String seq) {

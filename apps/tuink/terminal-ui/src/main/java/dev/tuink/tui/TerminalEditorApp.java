@@ -43,6 +43,7 @@ import org.jline.utils.NonBlockingReader;
 public class TerminalEditorApp {
     private static final String DEFAULT_FILE_NAME = "untitled.txt";
     private static final String KEY_HINTS = "Ctrl+O Open  Ctrl+N New Tab  Ctrl+T Tab Menu  Ctrl+F Search  Ctrl+Q";
+    private static final String KEY_HINTS_READING = "Arrows/PgUp/PgDn Navigate  Ctrl+F Search  Ctrl+Q Quit";
     private static final String SEARCH_HELP = "Tab focus  Space toggle  Enter next  Ctrl+G prev  Ctrl+R replace  Ctrl+A all  Esc";
     private static final String SAVE_AS_PROMPT = "Save As: ";
     private static final Style SAVE_PROMPT_STYLE = new Style(Color.BRIGHT_WHITE, Color.RED, false, false);
@@ -114,6 +115,7 @@ public class TerminalEditorApp {
         boolean showTabBarSetting = true;
         boolean wrapLinesSetting = false;
         boolean wrapWordsSetting = true;
+        boolean readingModeSetting = cli.readMode();
         boolean confirmOnCloseSetting = true;
         boolean mouseModeSetting = cli.mouseEnabled();
         boolean openFileMode = false;
@@ -229,6 +231,7 @@ public class TerminalEditorApp {
                     topMenu.setShowTabBarEnabled(showTabBarSetting);
                     topMenu.setWrapLinesEnabled(wrapLinesSetting);
                     topMenu.setWrapWordsEnabled(wrapWordsSetting);
+                    topMenu.setReadingModeEnabled(readingModeSetting);
                     topMenu.setConfirmOnCloseEnabled(confirmOnCloseSetting);
                     topMenu.setMouseModeEnabled(mouseModeSetting);
 
@@ -237,9 +240,10 @@ public class TerminalEditorApp {
                         state.isDirty(),
                         activeTabIndex,
                         tabs.size(),
-                        cols
+                        cols,
+                        readingModeSetting
                     );
-                    String bottomBar = buildBottomBar(state, model, statusMessage, cols);
+                    String bottomBar = buildBottomBar(state, model, statusMessage, cols, readingModeSetting);
                     String interactiveBarText = null;
                     Style interactiveBarStyle = null;
                     SearchBarView searchBar = searchMode
@@ -1139,6 +1143,10 @@ public class TerminalEditorApp {
                                 statusMessage = found ? "Found previous match" : "Not found";
                             }
                             case CTRL_R -> {
+                                if (readingModeSetting) {
+                                    statusMessage = "Reading mode: replace is disabled";
+                                    continue;
+                                }
                                 boolean replaced = engine.replaceCurrentOrNext(
                                     searchQueryInput.text(),
                                     searchReplaceInput.text(),
@@ -1147,6 +1155,10 @@ public class TerminalEditorApp {
                                 statusMessage = replaced ? "Replaced match" : "Nothing to replace";
                             }
                             case CTRL_A -> {
+                                if (readingModeSetting) {
+                                    statusMessage = "Reading mode: replace is disabled";
+                                    continue;
+                                }
                                 int replaced = engine.replaceAll(
                                     searchQueryInput.text(),
                                     searchReplaceInput.text(),
@@ -1189,8 +1201,20 @@ public class TerminalEditorApp {
                                 }
                             }
                             case CTRL_C -> statusMessage = engine.copySelection() ? "Copied selection" : "Nothing selected";
-                            case CTRL_X -> statusMessage = engine.cutSelection() ? "Cut selection" : "Nothing selected";
-                            case CTRL_V -> statusMessage = engine.pasteClipboard() ? "Pasted" : "Clipboard empty";
+                            case CTRL_X -> {
+                                if (readingModeSetting) {
+                                    statusMessage = "Reading mode: editing is disabled";
+                                } else {
+                                    statusMessage = engine.cutSelection() ? "Cut selection" : "Nothing selected";
+                                }
+                            }
+                            case CTRL_V -> {
+                                if (readingModeSetting) {
+                                    statusMessage = "Reading mode: editing is disabled";
+                                } else {
+                                    statusMessage = engine.pasteClipboard() ? "Pasted" : "Clipboard empty";
+                                }
+                            }
                             case CTRL_Z -> statusMessage = engine.undo() ? "Undo" : "Nothing to undo";
                             case CTRL_Y -> statusMessage = engine.redo() ? "Redo" : "Nothing to redo";
                             case CTRL_O -> {
@@ -1216,6 +1240,10 @@ public class TerminalEditorApp {
                             case TOGGLE_WORD_WRAP -> {
                                 wrapWordsSetting = !wrapWordsSetting;
                                 statusMessage = wrapWordsSetting ? "Word wrap enabled" : "Word wrap disabled";
+                            }
+                            case TOGGLE_READING_MODE -> {
+                                readingModeSetting = !readingModeSetting;
+                                statusMessage = readingModeSetting ? "Reading mode enabled" : "Reading mode disabled";
                             }
                             case TOGGLE_CONFIRM_ON_CLOSE -> {
                                 confirmOnCloseSetting = !confirmOnCloseSetting;
@@ -1299,8 +1327,12 @@ public class TerminalEditorApp {
                     }
 
                     if (key instanceof KeyEvent.CharInput charInput) {
-                        engine.insertChar(charInput.ch());
-                        statusMessage = "";
+                        if (readingModeSetting) {
+                            statusMessage = "Reading mode: editing is disabled";
+                        } else {
+                            engine.insertChar(charInput.ch());
+                            statusMessage = "";
+                        }
                         continue;
                     }
 
@@ -1338,8 +1370,20 @@ public class TerminalEditorApp {
                             }
                         }
                         case CTRL_C -> statusMessage = engine.copySelection() ? "Copied selection" : "Nothing selected";
-                        case CTRL_X -> statusMessage = engine.cutSelection() ? "Cut selection" : "Nothing selected";
-                        case CTRL_V -> statusMessage = engine.pasteClipboard() ? "Pasted" : "Clipboard empty";
+                        case CTRL_X -> {
+                            if (readingModeSetting) {
+                                statusMessage = "Reading mode: editing is disabled";
+                            } else {
+                                statusMessage = engine.cutSelection() ? "Cut selection" : "Nothing selected";
+                            }
+                        }
+                        case CTRL_V -> {
+                            if (readingModeSetting) {
+                                statusMessage = "Reading mode: editing is disabled";
+                            } else {
+                                statusMessage = engine.pasteClipboard() ? "Pasted" : "Clipboard empty";
+                            }
+                        }
                         case CTRL_Z -> statusMessage = engine.undo() ? "Undo" : "Nothing to undo";
                         case CTRL_Y -> statusMessage = engine.redo() ? "Redo" : "Nothing to redo";
                         case CTRL_O -> {
@@ -1363,6 +1407,10 @@ public class TerminalEditorApp {
                         case TOGGLE_WORD_WRAP -> {
                             wrapWordsSetting = !wrapWordsSetting;
                             statusMessage = wrapWordsSetting ? "Word wrap enabled" : "Word wrap disabled";
+                        }
+                        case TOGGLE_READING_MODE -> {
+                            readingModeSetting = !readingModeSetting;
+                            statusMessage = readingModeSetting ? "Reading mode enabled" : "Reading mode disabled";
                         }
                         case TOGGLE_CONFIRM_ON_CLOSE -> {
                             confirmOnCloseSetting = !confirmOnCloseSetting;
@@ -1433,8 +1481,12 @@ public class TerminalEditorApp {
                             // Reserved for search mode. No-op in normal mode.
                         }
                         case TAB -> {
-                            engine.insertChar('\t');
-                            statusMessage = "";
+                            if (readingModeSetting) {
+                                statusMessage = "Reading mode: editing is disabled";
+                            } else {
+                                engine.insertChar('\t');
+                                statusMessage = "";
+                            }
                         }
                         case CTRL_G -> statusMessage = "Goto line not implemented";
                         case ESCAPE -> {
@@ -1452,9 +1504,27 @@ public class TerminalEditorApp {
                         case PAGE_DOWN -> engine.pageDown(contentRows);
                         case HOME -> engine.moveHome();
                         case END -> engine.moveEnd();
-                        case BACKSPACE -> engine.backspace();
-                        case DELETE -> engine.deleteForward();
-                        case ENTER -> engine.insertNewline();
+                        case BACKSPACE -> {
+                            if (readingModeSetting) {
+                                statusMessage = "Reading mode: editing is disabled";
+                            } else {
+                                engine.backspace();
+                            }
+                        }
+                        case DELETE -> {
+                            if (readingModeSetting) {
+                                statusMessage = "Reading mode: editing is disabled";
+                            } else {
+                                engine.deleteForward();
+                            }
+                        }
+                        case ENTER -> {
+                            if (readingModeSetting) {
+                                statusMessage = "Reading mode: editing is disabled";
+                            } else {
+                                engine.insertNewline();
+                            }
+                        }
                         case UNKNOWN -> {
                             // Ignore unrecognized input.
                         }
@@ -1628,11 +1698,11 @@ public class TerminalEditorApp {
         };
     }
 
-    private String buildBottomBar(EditorState state, TextModel model, String message, int cols) {
+    private String buildBottomBar(EditorState state, TextModel model, String message, int cols, boolean readingMode) {
         Position p = state.getCursor();
         int totalLines = model.lineCount();
         int lineCols = model.getLine(p.line()).length();
-        String indicators = buildStateIndicators(state);
+        String indicators = buildStateIndicators(state, readingMode);
         String left = "Ln " + (p.line() + 1) + "/" + totalLines
             + ", Col " + (p.col() + 1) + "/" + lineCols
             + "  |  " + indicators;
@@ -1654,7 +1724,7 @@ public class TerminalEditorApp {
         int remaining = free;
         if (remaining >= 3) {
             int hintSpace = remaining - 2;
-            String hints = KEY_HINTS;
+            String hints = readingMode ? KEY_HINTS_READING : KEY_HINTS;
             if (hints.length() > hintSpace) {
                 hints = hints.substring(0, hintSpace);
             }
@@ -1669,10 +1739,10 @@ public class TerminalEditorApp {
         return left + " ".repeat(free - right.length()) + right;
     }
 
-    private String buildStateIndicators(EditorState state) {
+    private String buildStateIndicators(EditorState state, boolean readingMode) {
         String ro = isReadOnlyFile(state.getCurrentFile()) ? "RO" : "RW";
         String enc = state.getFileEncoding() == null ? "UTF-8" : state.getFileEncoding().name();
-        return ro + " ENC:" + enc + " INS";
+        return ro + " ENC:" + enc + (readingMode ? " READ" : " INS");
     }
 
     private String buildSaveAsPrompt(TextField saveAsInput) {
@@ -2192,6 +2262,7 @@ public class TerminalEditorApp {
         boolean mouseEnabled = true;
         boolean altScreenEnabled = true;
         boolean colorEnabled = true;
+        boolean readMode = false;
         boolean showHelp = false;
         Path file = null;
 
@@ -2200,6 +2271,7 @@ public class TerminalEditorApp {
                 case "--no-mouse" -> mouseEnabled = false;
                 case "--no-alt-screen" -> altScreenEnabled = false;
                 case "--no-color" -> colorEnabled = false;
+                case "--read" -> readMode = true;
                 case "--help", "-h" -> showHelp = true;
                 default -> {
                     if (arg.startsWith("--")) {
@@ -2212,7 +2284,7 @@ public class TerminalEditorApp {
                 }
             }
         }
-        return new CliOptions(file, mouseEnabled, altScreenEnabled, colorEnabled, showHelp);
+        return new CliOptions(file, mouseEnabled, altScreenEnabled, colorEnabled, readMode, showHelp);
     }
 
     private void printUsage() {
@@ -2221,6 +2293,7 @@ public class TerminalEditorApp {
         System.out.println("  --no-mouse       Disable mouse tracking and mouse interactions");
         System.out.println("  --no-alt-screen  Do not use alternate screen buffer");
         System.out.println("  --no-color       Render in monochrome (no ANSI colors, keep text attributes)");
+        System.out.println("  --read           Start in reading mode (editing disabled)");
         System.out.println("  --help, -h       Show this help");
     }
 
@@ -2229,6 +2302,7 @@ public class TerminalEditorApp {
         boolean mouseEnabled,
         boolean altScreenEnabled,
         boolean colorEnabled,
+        boolean readMode,
         boolean showHelp
     ) {
     }

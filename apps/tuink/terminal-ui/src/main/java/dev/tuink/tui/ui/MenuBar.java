@@ -40,6 +40,10 @@ public final class MenuBar {
         controller.setWrapWordsEnabled(enabled);
     }
 
+    public void setReadingModeEnabled(boolean enabled) {
+        controller.setReadingModeEnabled(enabled);
+    }
+
     public void setConfirmOnCloseEnabled(boolean enabled) {
         controller.setConfirmOnCloseEnabled(enabled);
     }
@@ -52,8 +56,8 @@ public final class MenuBar {
         return controller.consumePendingTabActivation();
     }
 
-    public String buildTopBar(Path currentFile, boolean dirty, int activeTabIndex, int totalTabs, int cols) {
-        return controller.buildTopBar(currentFile, dirty, activeTabIndex, totalTabs, cols);
+    public String buildTopBar(Path currentFile, boolean dirty, int activeTabIndex, int totalTabs, int cols, boolean readingMode) {
+        return controller.buildTopBar(currentFile, dirty, activeTabIndex, totalTabs, cols, readingMode);
     }
 
     public int fileNameStartCol() {
@@ -214,6 +218,7 @@ public final class MenuBar {
         private boolean showTabBarEnabled = true;
         private boolean wrapLinesEnabled;
         private boolean wrapWordsEnabled;
+        private boolean readingModeEnabled;
         private boolean confirmOnCloseEnabled = true;
         private boolean mouseModeEnabled = true;
         private int[] activeMnemonics = new int[0];
@@ -250,6 +255,13 @@ public final class MenuBar {
 
         private void setWrapWordsEnabled(boolean enabled) {
             this.wrapWordsEnabled = enabled;
+            if (open && active == MenuId.VIEW) {
+                rebuildMnemonics();
+            }
+        }
+
+        private void setReadingModeEnabled(boolean enabled) {
+            this.readingModeEnabled = enabled;
             if (open && active == MenuId.VIEW) {
                 rebuildMnemonics();
             }
@@ -523,7 +535,7 @@ public final class MenuBar {
             return 0;
         }
 
-        private String buildTopBar(Path currentFile, boolean dirty, int activeTabIndex, int totalTabs, int cols) {
+        private String buildTopBar(Path currentFile, boolean dirty, int activeTabIndex, int totalTabs, int cols, boolean readingMode) {
             String fileMenu = (open && active == MenuId.FILE) ? "[File]" : " File ";
             String editMenu = (open && active == MenuId.EDIT) ? "[Edit]" : " Edit ";
             String tabMenu = (open && active == MenuId.TAB) ? "[Tab]" : " Tab ";
@@ -535,11 +547,23 @@ public final class MenuBar {
             String left = fileMenu + " " + editMenu + " " + tabMenu + " " + viewMenu + " "
                 + settingsMenu + " " + tabMarker + " ";
             fileNameStartCol = left.length();
-            String top = left + file + dirtyMarker;
-            if (top.length() > cols) {
-                return top.substring(0, cols);
+            String base = left + file + dirtyMarker;
+            String right = readingMode ? " READ " : "";
+            if (right.isEmpty()) {
+                if (base.length() > cols) {
+                    return base.substring(0, cols);
+                }
+                return base + " ".repeat(cols - base.length());
             }
-            return top + " ".repeat(cols - top.length());
+
+            int rightLen = right.length();
+            if (cols <= rightLen) {
+                return right.substring(rightLen - cols);
+            }
+
+            int leftSpace = cols - rightLen;
+            String leftPart = base.length() > leftSpace ? base.substring(0, leftSpace) : base + " ".repeat(leftSpace - base.length());
+            return leftPart + right;
         }
 
         private MenuItem[] itemsFor(MenuId menu) {
@@ -557,7 +581,8 @@ public final class MenuBar {
                 return new MenuItem[] {
                     new MenuItem("[" + (showTabBarEnabled ? "x" : " ") + "] Show Tab Bar", true),
                     new MenuItem("[" + (wrapLinesEnabled ? "x" : " ") + "] Wrap Lines", true),
-                    new MenuItem(wrapWordsLabel, wrapLinesEnabled)
+                    new MenuItem(wrapWordsLabel, wrapLinesEnabled),
+                    new MenuItem("[" + (readingModeEnabled ? "x" : " ") + "] Reading mode", true)
                 };
             }
             if (menu == MenuId.SETTINGS) {
@@ -630,6 +655,7 @@ public final class MenuBar {
                     case 0 -> KeyEvent.Action.TOGGLE_TAB_BAR;
                     case 1 -> KeyEvent.Action.TOGGLE_WRAP_LINES;
                     case 2 -> KeyEvent.Action.TOGGLE_WORD_WRAP;
+                    case 3 -> KeyEvent.Action.TOGGLE_READING_MODE;
                     default -> null;
                 };
             }

@@ -121,6 +121,10 @@ public final class MenuBar {
         controller.open(MenuId.SETTINGS);
     }
 
+    public void openHelp() {
+        controller.open(MenuId.HELP);
+    }
+
     public void close() {
         controller.close();
     }
@@ -155,6 +159,10 @@ public final class MenuBar {
         }
         if (View.isMenuLabelHit(MenuId.SETTINGS, col)) {
             controller.toggle(MenuId.SETTINGS);
+            return true;
+        }
+        if (View.isMenuLabelHit(MenuId.HELP, col)) {
+            controller.toggle(MenuId.HELP);
             return true;
         }
         return false;
@@ -196,7 +204,8 @@ public final class MenuBar {
         EDIT,
         TAB,
         VIEW,
-        SETTINGS
+        SETTINGS,
+        HELP
     }
 
     private static final class Controller {
@@ -206,8 +215,9 @@ public final class MenuBar {
         private static final int TAB_DYNAMIC_START_INDEX = 5;
 
         private static final String[] FILE_MENU_ITEMS = {"New", "Open...", "Save", "Save As...", "Quit"};
-        private static final String[] EDIT_MENU_ITEMS = {"Undo", "Redo", "Cut", "Copy", "Paste", "Find"};
+        private static final String[] EDIT_MENU_ITEMS = {"Undo", "Redo", "Cut", "Copy", "Paste", "Select All", "Find"};
         private static final String[] TAB_MENU_BASE_ITEMS = {"New Tab", "Close Tab", "Next Tab", "Previous Tab", SEPARATOR};
+        private static final String[] HELP_MENU_ITEMS = {"Keyboard hints"};
         private boolean open;
         private MenuId active = MenuId.EDIT;
         private int index;
@@ -372,6 +382,11 @@ public final class MenuBar {
                 }
                 case F2 -> {
                     active = MenuId.SETTINGS;
+                    index = firstSelectableIndex(active);
+                    rebuildMnemonics();
+                }
+                case OPEN_HELP_MENU -> {
+                    active = MenuId.HELP;
                     index = firstSelectableIndex(active);
                     rebuildMnemonics();
                 }
@@ -541,11 +556,12 @@ public final class MenuBar {
             String tabMenu = (open && active == MenuId.TAB) ? "[Tab]" : " Tab ";
             String viewMenu = (open && active == MenuId.VIEW) ? "[View]" : " View ";
             String settingsMenu = (open && active == MenuId.SETTINGS) ? "[Settings]" : " Settings ";
+            String helpMenu = (open && active == MenuId.HELP) ? "[Help]" : " Help ";
             String tabMarker = "[" + (activeTabIndex + 1) + "/" + Math.max(1, totalTabs) + "]";
             String file = currentFile == null ? NO_NAME_LABEL : currentFile.toString();
             String dirtyMarker = dirty ? " *" : "";
             String left = fileMenu + " " + editMenu + " " + tabMenu + " " + viewMenu + " "
-                + settingsMenu + " " + tabMarker + " ";
+                + settingsMenu + " " + helpMenu + " " + tabMarker + " ";
             fileNameStartCol = left.length();
             String base = left + file + dirtyMarker;
             String right = readingMode ? " READ " : "";
@@ -590,6 +606,9 @@ public final class MenuBar {
                     new MenuItem("[" + (confirmOnCloseEnabled ? "x" : " ") + "] Confirm on close", true),
                     new MenuItem("[" + (mouseModeEnabled ? "x" : " ") + "] Mouse mode", true)
                 };
+            }
+            if (menu == MenuId.HELP) {
+                return toMenuItems(HELP_MENU_ITEMS);
             }
             List<MenuItem> items = new ArrayList<>();
             for (String base : TAB_MENU_BASE_ITEMS) {
@@ -646,7 +665,8 @@ public final class MenuBar {
                     case 2 -> KeyEvent.Action.CTRL_X;
                     case 3 -> KeyEvent.Action.CTRL_C;
                     case 4 -> KeyEvent.Action.CTRL_V;
-                    case 5 -> KeyEvent.Action.CTRL_F;
+                    case 5 -> KeyEvent.Action.CTRL_A;
+                    case 6 -> KeyEvent.Action.CTRL_F;
                     default -> null;
                 };
             }
@@ -663,6 +683,12 @@ public final class MenuBar {
                 return switch (itemIndex) {
                     case 0 -> KeyEvent.Action.TOGGLE_CONFIRM_ON_CLOSE;
                     case 1 -> KeyEvent.Action.TOGGLE_MOUSE_MODE;
+                    default -> null;
+                };
+            }
+            if (menu == MenuId.HELP) {
+                return switch (itemIndex) {
+                    case 0 -> KeyEvent.Action.SHOW_KEY_HINTS;
                     default -> null;
                 };
             }
@@ -700,7 +726,8 @@ public final class MenuBar {
                 case EDIT -> MenuId.TAB;
                 case TAB -> MenuId.VIEW;
                 case VIEW -> MenuId.SETTINGS;
-                case SETTINGS -> MenuId.FILE;
+                case SETTINGS -> MenuId.HELP;
+                case HELP -> MenuId.FILE;
             };
         }
 
@@ -711,6 +738,7 @@ public final class MenuBar {
                 case TAB -> MenuId.EDIT;
                 case VIEW -> MenuId.TAB;
                 case SETTINGS -> MenuId.VIEW;
+                case HELP -> MenuId.SETTINGS;
             };
         }
     }
@@ -721,11 +749,13 @@ public final class MenuBar {
         private static final int TAB_START_COL = 14;
         private static final int VIEW_START_COL = 20;
         private static final int SETTINGS_START_COL = 27;
+        private static final int HELP_START_COL = 38;
         private static final int FILE_LABEL_WIDTH = 6;
         private static final int EDIT_LABEL_WIDTH = 6;
         private static final int TAB_LABEL_WIDTH = 5;
         private static final int VIEW_LABEL_WIDTH = 6;
         private static final int SETTINGS_LABEL_WIDTH = 10;
+        private static final int HELP_LABEL_WIDTH = 6;
         private static final int POPUP_TOP_ROW = 1;
 
         private View() {
@@ -788,6 +818,7 @@ public final class MenuBar {
                 case TAB -> " Tab ";
                 case VIEW -> " View ";
                 case SETTINGS -> " Settings ";
+                case HELP -> " Help ";
             };
             drawLine(buffer, 0, startCol(active), label, style, cols);
         }
@@ -799,6 +830,7 @@ public final class MenuBar {
                 case TAB -> TAB_START_COL;
                 case VIEW -> VIEW_START_COL;
                 case SETTINGS -> SETTINGS_START_COL;
+                case HELP -> HELP_START_COL;
             };
         }
 
@@ -814,6 +846,7 @@ public final class MenuBar {
                 case TAB -> TAB_LABEL_WIDTH;
                 case VIEW -> VIEW_LABEL_WIDTH;
                 case SETTINGS -> SETTINGS_LABEL_WIDTH;
+                case HELP -> HELP_LABEL_WIDTH;
             };
         }
 

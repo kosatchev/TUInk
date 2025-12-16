@@ -41,6 +41,8 @@ public sealed interface KeyEvent permits KeyEvent.ActionEvent, KeyEvent.CharInpu
         CTRL_N,
         CTRL_T,
         OPEN_VIEW_MENU,
+        OPEN_HELP_MENU,
+        SHOW_KEY_HINTS,
         TAB_NEXT,
         TAB_PREVIOUS,
         TAB_NEW,

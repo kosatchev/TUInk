@@ -76,6 +76,9 @@ public class KeyDecoder {
         }
         if (second == 'O') {
             int third = reader.read(5);
+            if (third == 'P') {
+                return new KeyEvent.ActionEvent(KeyEvent.Action.OPEN_HELP_MENU);
+            }
             if (third == 'Q') {
                 return new KeyEvent.ActionEvent(KeyEvent.Action.F2);
             }
@@ -113,6 +116,7 @@ public class KeyDecoder {
             case 'e' -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_E);
             case 't' -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_T);
             case 'v' -> new KeyEvent.ActionEvent(KeyEvent.Action.OPEN_VIEW_MENU);
+            case 'h' -> new KeyEvent.ActionEvent(KeyEvent.Action.OPEN_HELP_MENU);
             case 's' -> new KeyEvent.ActionEvent(KeyEvent.Action.F2);
             default -> null;
         };

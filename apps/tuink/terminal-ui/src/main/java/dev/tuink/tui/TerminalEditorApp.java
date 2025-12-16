@@ -67,6 +67,27 @@ public class TerminalEditorApp {
     private static final long OPEN_DIALOG_DOUBLE_CLICK_NANOS = 450_000_000L;
     private static final String ENABLE_MOUSE_TRACKING = "\u001B[?1000h\u001B[?1002h\u001B[?1006h";
     private static final String DISABLE_MOUSE_TRACKING = "\u001B[?1000l\u001B[?1002l\u001B[?1006l";
+    private static final String[] HELP_HINT_ROWS = {
+        "Key                  Action",
+        "-------------------- ----------------------------------",
+        "F10 or Alt+F         Open File menu",
+        "F2 or Alt+S          Open Settings menu",
+        "F1 or Alt+H          Open Help menu",
+        "Ctrl+E               Open Edit menu",
+        "Ctrl+T               Open Tab menu",
+        "Alt+V                Open View menu",
+        "Ctrl+O               Open file dialog",
+        "Ctrl+N               New tab",
+        "Ctrl+S               Save",
+        "Ctrl+K               Save As",
+        "Ctrl+F               Find / Next in search mode",
+        "Ctrl+G               Find previous",
+        "Ctrl+R               Replace current/next",
+        "Ctrl+A               Replace all",
+        "Ctrl+Q               Quit",
+        "",
+        "In menu: Arrows, Enter, letters, 1-9"
+    };
 
     public static void main(String[] args) throws Exception {
         new TerminalEditorApp().run(args);
@@ -119,6 +140,7 @@ public class TerminalEditorApp {
         boolean confirmOnCloseSetting = true;
         boolean mouseModeSetting = cli.mouseEnabled();
         boolean openFileMode = false;
+        boolean helpHintsMode = false;
         TreeView openFileTree = new TreeView(initialOpenRoot(state));
         OpenDialogFocus openFileFocus = OpenDialogFocus.LIST;
         EditorView.ScrollAxis editorScrollDrag = EditorView.ScrollAxis.NONE;
@@ -308,6 +330,7 @@ public class TerminalEditorApp {
                         openFileFocus,
                         cli.colorEnabled()
                     );
+                    drawHelpOverlay(current, rows, cols, helpHintsMode, cli.colorEnabled());
 
                     EditorView.CursorPosition editorCursor = editorView.cursorFromPlan(plan, contentTopRow);
                     int desiredCursorRow = editorCursor.row();
@@ -347,6 +370,11 @@ public class TerminalEditorApp {
                                 ? buttons.ok().cursorCol()
                                 : buttons.cancel().cursorCol();
                         }
+                    } else if (helpHintsMode) {
+                        HelpDialogLayout layout = helpDialogLayout(rows, cols);
+                        Button close = helpCloseButton(layout);
+                        desiredCursorRow = Math.min(rows, close.row() + 1);
+                        desiredCursorCol = Math.min(cols, close.cursorCol() + 1);
                     }
 
                     String frameDiff = AnsiDiff.diff(previous, current, cli.colorEnabled());
@@ -370,6 +398,19 @@ public class TerminalEditorApp {
 
                     if (key instanceof KeyEvent.MouseEvent mouse) {
                         if (!mouseModeSetting) {
+                            continue;
+                        }
+                        if (helpHintsMode) {
+                            if (mouse.kind() == KeyEvent.MouseKind.PRESS
+                                && mouse.button() == KeyEvent.MouseButton.LEFT) {
+                                HelpDialogLayout layout = helpDialogLayout(rows, cols);
+                                Modal frame = helpDialogFrame(layout);
+                                Button close = helpCloseButton(layout);
+                                if (frame.closeButton().hit(mouse.row(), mouse.col())
+                                    || close.hit(mouse.row(), mouse.col())) {
+                                    helpHintsMode = false;
+                                }
+                            }
                             continue;
                         }
                         KeyEvent remappedMouseKey = null;
@@ -805,6 +846,20 @@ public class TerminalEditorApp {
                             }
                             default -> {
                                 // Ignore other keys while open dialog is active.
+                            }
+                        }
+                        continue;
+                    }
+
+                    if (helpHintsMode) {
+                        if (key instanceof KeyEvent.CharInput) {
+                            continue;
+                        }
+                        KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
+                        switch (action) {
+                            case ESCAPE, ENTER, SHOW_KEY_HINTS -> helpHintsMode = false;
+                            default -> {
+                                // Ignore other keys in help modal.
                             }
                         }
                         continue;
@@ -1257,6 +1312,11 @@ public class TerminalEditorApp {
                                 writer.flush();
                                 statusMessage = mouseModeSetting ? "Mouse mode enabled" : "Mouse mode disabled";
                             }
+                            case OPEN_HELP_MENU -> topMenu.openHelp();
+                            case SHOW_KEY_HINTS -> {
+                                helpHintsMode = true;
+                                statusMessage = "Keyboard hints";
+                            }
                             case CTRL_N, TAB_NEW -> {
                                 tabs.add(newEditorTab());
                                 activeTabIndex = tabs.size() - 1;
@@ -1341,6 +1401,7 @@ public class TerminalEditorApp {
                         case CTRL_E -> topMenu.openEdit();
                         case CTRL_T -> topMenu.openTab();
                         case OPEN_VIEW_MENU -> topMenu.openView();
+                        case OPEN_HELP_MENU -> topMenu.openHelp();
                         case F10 -> topMenu.openFile();
                         case F2 -> topMenu.openSettings();
                         case CTRL_Q -> {
@@ -1424,6 +1485,10 @@ public class TerminalEditorApp {
                             writer.flush();
                             statusMessage = mouseModeSetting ? "Mouse mode enabled" : "Mouse mode disabled";
                         }
+                        case SHOW_KEY_HINTS -> {
+                            helpHintsMode = true;
+                            statusMessage = "Keyboard hints";
+                        }
                         case CTRL_N, TAB_NEW -> {
                             tabs.add(newEditorTab());
                             activeTabIndex = tabs.size() - 1;
@@ -1477,7 +1542,8 @@ public class TerminalEditorApp {
                             searchFocus = SearchFocus.FIND;
                             statusMessage = SEARCH_HELP;
                         }
-                        case CTRL_A, CTRL_R -> {
+                        case CTRL_A -> statusMessage = engine.selectAll() ? "Selected all" : "Nothing to select";
+                        case CTRL_R -> {
                             // Reserved for search mode. No-op in normal mode.
                         }
                         case TAB -> {
@@ -1664,6 +1730,72 @@ public class TerminalEditorApp {
             FILE_DIALOG_BORDER_STYLE,
             FILE_DIALOG_TITLE_STYLE
         );
+    }
+
+    private HelpDialogLayout helpDialogLayout(int rows, int cols) {
+        int preferredWidth = 68;
+        int preferredHeight = HELP_HINT_ROWS.length + 3;
+        int width = Math.max(24, Math.min(preferredWidth, cols - 4));
+        int height = Math.max(8, Math.min(preferredHeight, rows - 4));
+        int left = Math.max(0, (cols - width) / 2);
+        int top = Math.max(0, (rows - height) / 2);
+        return new HelpDialogLayout(top, left, width, height);
+    }
+
+    private Modal helpDialogFrame(HelpDialogLayout layout) {
+        return new Modal(
+            layout.top(),
+            layout.left(),
+            layout.width(),
+            layout.height(),
+            " Keyboard Hints ",
+            FILE_DIALOG_STYLE,
+            FILE_DIALOG_BORDER_STYLE,
+            FILE_DIALOG_TITLE_STYLE
+        );
+    }
+
+    private Button helpCloseButton(HelpDialogLayout layout) {
+        String closeText = " Close ";
+        int col = layout.left() + Math.max(1, (layout.width() - (closeText.length() + 2)) / 2);
+        int row = layout.top() + layout.height() - 1;
+        return new Button(row, col, closeText);
+    }
+
+    private void drawHelpOverlay(CellBuffer buffer, int rows, int cols, boolean visible, boolean colorEnabled) {
+        if (!visible || rows < 8 || cols < 24) {
+            return;
+        }
+        HelpDialogLayout layout = helpDialogLayout(rows, cols);
+        Modal frame = helpDialogFrame(layout);
+        frame.draw(buffer, rows, cols);
+        int textRow = layout.top() + 1;
+        int textCol = layout.left() + 2;
+        int textWidth = Math.max(0, layout.width() - 4);
+        int maxRows = Math.max(0, layout.height() - 2);
+        for (int i = 0; i < HELP_HINT_ROWS.length && i < maxRows; i++) {
+            drawMenuLine(
+                buffer,
+                textRow + i,
+                textCol,
+                clipText(HELP_HINT_ROWS[i], textWidth),
+                FILE_DIALOG_STYLE,
+                cols
+            );
+        }
+        Button close = helpCloseButton(layout);
+        close.draw(
+            buffer,
+            cols,
+            colorEnabled ? MENU_SELECTED_STYLE : FILE_DIALOG_SELECTED_MONO_STYLE
+        );
+    }
+
+    private String clipText(String text, int width) {
+        if (text == null || width <= 0) {
+            return "";
+        }
+        return text.length() <= width ? text : text.substring(0, width);
     }
 
     private OpenFileActionResult activateOpenFileSelection(
@@ -2104,6 +2236,9 @@ public class TerminalEditorApp {
     }
 
     private record OpenDialogButtons(Button ok, Button cancel) {
+    }
+
+    private record HelpDialogLayout(int top, int left, int width, int height) {
     }
 
     private record OpenFileActionResult(

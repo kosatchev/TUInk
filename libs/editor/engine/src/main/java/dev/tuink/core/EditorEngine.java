@@ -236,6 +236,25 @@ public class EditorEngine {
         return true;
     }
 
+    public boolean selectAll() {
+        int lines = model.lineCount();
+        if (lines <= 0) {
+            return false;
+        }
+        Position start = new Position(0, 0);
+        int lastLine = lines - 1;
+        Position end = new Position(lastLine, model.getLine(lastLine).length());
+        if (start.equals(end)) {
+            state.clearSelection();
+            state.setCursor(start);
+            return false;
+        }
+        breakCoalescing();
+        state.setSelectionAnchor(start);
+        state.setCursor(end);
+        return true;
+    }
+
     public boolean undo() {
         if (undoStack.isEmpty()) {
             return false;

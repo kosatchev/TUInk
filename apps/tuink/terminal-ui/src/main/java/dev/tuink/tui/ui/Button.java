@@ -40,6 +40,13 @@ public final class Button {
     }
 
     public int cursorCol() {
+        String rendered = renderedText();
+        for (int i = 0; i < rendered.length(); i++) {
+            char ch = rendered.charAt(i);
+            if (Character.isLetterOrDigit(ch)) {
+                return col + i;
+            }
+        }
         return col + (framed ? 1 : 0);
     }
 

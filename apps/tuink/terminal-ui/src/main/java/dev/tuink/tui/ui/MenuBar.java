@@ -557,11 +557,10 @@ public final class MenuBar {
             String viewMenu = (open && active == MenuId.VIEW) ? "[View]" : " View ";
             String settingsMenu = (open && active == MenuId.SETTINGS) ? "[Settings]" : " Settings ";
             String helpMenu = (open && active == MenuId.HELP) ? "[Help]" : " Help ";
-            String tabMarker = "[" + (activeTabIndex + 1) + "/" + Math.max(1, totalTabs) + "]";
             String file = currentFile == null ? NO_NAME_LABEL : currentFile.toString();
             String dirtyMarker = dirty ? " *" : "";
             String left = fileMenu + " " + editMenu + " " + tabMenu + " " + viewMenu + " "
-                + settingsMenu + " " + helpMenu + " " + tabMarker + " ";
+                + settingsMenu + " " + helpMenu + " ";
             fileNameStartCol = left.length();
             String base = left + file + dirtyMarker;
             String right = readingMode ? " READ " : "";

@@ -18,8 +18,10 @@ import dev.tuink.render.Style;
 import dev.tuink.tui.render.RenderRasterizer;
 import dev.tuink.tui.ui.Button;
 import dev.tuink.tui.ui.EditorView;
+import dev.tuink.tui.ui.InlinePromptBar;
 import dev.tuink.tui.ui.MenuBar;
 import dev.tuink.tui.ui.Modal;
+import dev.tuink.tui.ui.NotificationBar;
 import dev.tuink.tui.ui.TabBar;
 import dev.tuink.tui.ui.TextField;
 import dev.tuink.tui.ui.TreeView;
@@ -42,8 +44,6 @@ import org.jline.utils.NonBlockingReader;
  */
 public class TerminalEditorApp {
     private static final String DEFAULT_FILE_NAME = "untitled.txt";
-    private static final String KEY_HINTS = "Ctrl+O Open  Ctrl+N New Tab  Ctrl+T Tab Menu  Ctrl+F Search  Ctrl+Q";
-    private static final String KEY_HINTS_READING = "Arrows/PgUp/PgDn Navigate  Ctrl+F Search  Ctrl+Q Quit";
     private static final String SEARCH_HELP = "Tab focus  Space toggle  Enter next  Ctrl+G prev  Ctrl+R replace  Ctrl+A all  Esc";
     private static final String SAVE_AS_PROMPT = "Save As: ";
     private static final Style SAVE_PROMPT_STYLE = new Style(Color.BRIGHT_WHITE, Color.RED, false, false);
@@ -70,23 +70,38 @@ public class TerminalEditorApp {
     private static final String[] HELP_HINT_ROWS = {
         "Key                  Action",
         "-------------------- ----------------------------------",
-        "F10 or Alt+F         Open File menu",
-        "F2 or Alt+S          Open Settings menu",
-        "F1 or Alt+H          Open Help menu",
-        "Ctrl+E               Open Edit menu",
-        "Ctrl+T               Open Tab menu",
-        "Alt+V                Open View menu",
+        "",
+        "              GLOBAL",
         "Ctrl+O               Open file dialog",
         "Ctrl+N               New tab",
         "Ctrl+S               Save",
         "Ctrl+K               Save As",
-        "Ctrl+F               Find / Next in search mode",
-        "Ctrl+G               Find previous",
+        "Ctrl+Q               Quit",
+        "Ctrl+F               Open find bar",
+        "Ctrl+A               Select all",
+        "Arrows/Home/End      Move cursor",
+        "PgUp/PgDn            Scroll page",
+        "",
+        "               MENU",
+        "F10 or Alt+F         Open File menu",
+        "Ctrl+E or Alt+E      Open Edit menu",
+        "Ctrl+T or Alt+T      Open Tab menu",
+        "Alt+V                Open View menu",
+        "F2 or Alt+S          Open Settings menu",
+        "F1 or Alt+H          Open Help menu",
+        "Arrows               Move selection",
+        "Enter                Activate item",
+        "Letters / 1-9        Mnemonic selection",
+        "Esc                  Close menu",
+        "",
+        "              SEARCH",
+        "Tab                  Next search field/toggle",
+        "Space                Toggle option",
+        "Enter or Ctrl+F      Next match",
+        "Ctrl+G               Previous match",
         "Ctrl+R               Replace current/next",
         "Ctrl+A               Replace all",
-        "Ctrl+Q               Quit",
-        "",
-        "In menu: Arrows, Enter, letters, 1-9"
+        "Esc                  Close search bar"
     };
 
     public static void main(String[] args) throws Exception {
@@ -216,11 +231,43 @@ public class TerminalEditorApp {
                     notification.expireIfNeeded();
                     int rows = Math.max(2, terminal.getHeight());
                     int cols = Math.max(1, terminal.getWidth());
-                    boolean hasInteractiveBar = searchMode || saveAsMode || saveOverwriteConfirmMode
-                        || quitConfirmMode || closeTabConfirmMode;
-                    boolean hasNotificationBar = notification.visible();
+                    SearchBarView searchBar = searchMode
+                        ? buildSearchBar(
+                            searchQueryInput,
+                            searchReplaceInput,
+                            searchFocus,
+                            cols,
+                            searchUi,
+                            countSearchMatches(
+                                searchUi.allTabs() ? null : model,
+                                searchUi.allTabs() ? tabs : null,
+                                searchQueryInput.text(),
+                                toSearchOptions(searchUi)
+                            )
+                        )
+                        : null;
+                    InlinePromptBar inlinePromptBar = InlinePromptBar.hidden();
+                    if (saveAsMode) {
+                        inlinePromptBar = InlinePromptBar.of(
+                            buildSaveAsPrompt(saveAsInput),
+                            SAVE_PROMPT_STYLE,
+                            SAVE_AS_PROMPT.length() + saveAsInput.cursor() + 1
+                        );
+                    } else if (saveOverwriteConfirmMode) {
+                        String prompt = buildOverwritePrompt(pendingOverwritePath);
+                        inlinePromptBar = InlinePromptBar.of(prompt, SAVE_PROMPT_STYLE, prompt.length() + 1);
+                    } else if (quitConfirmMode) {
+                        String prompt = buildQuitPrompt(countDirtyTabs(tabs));
+                        inlinePromptBar = InlinePromptBar.of(prompt, SAVE_PROMPT_STYLE, prompt.length() + 1);
+                    } else if (closeTabConfirmMode) {
+                        String prompt = buildCloseTabPrompt(tabs, pendingCloseTabIndex);
+                        inlinePromptBar = InlinePromptBar.of(prompt, SAVE_PROMPT_STYLE, prompt.length() + 1);
+                    } else if (searchBar != null) {
+                        inlinePromptBar = InlinePromptBar.of(searchBar.text(), null, searchBar.cursorCol());
+                    }
+                    NotificationBar notificationBar = NotificationBar.of(notification.message, notification.style);
                     boolean showTabBar = showTabBarSetting && tabs.size() > 1;
-                    int overlayRows = (hasInteractiveBar ? 1 : 0) + (hasNotificationBar ? 1 : 0);
+                    int overlayRows = inlinePromptBar.height() + notificationBar.height();
                     int contentTopRow = showTabBar ? 2 : 1;
                     int baseContentRows = Math.max(0, rows - overlayRows - contentTopRow - 1);
                     int gutterWidth = Math.max(1, String.valueOf(Math.max(model.lineCount(), 1)).length()) + 1;
@@ -265,39 +312,16 @@ public class TerminalEditorApp {
                         cols,
                         readingModeSetting
                     );
-                    String bottomBar = buildBottomBar(state, model, statusMessage, cols, readingModeSetting);
-                    String interactiveBarText = null;
-                    Style interactiveBarStyle = null;
-                    SearchBarView searchBar = searchMode
-                        ? buildSearchBar(
-                            searchQueryInput,
-                            searchReplaceInput,
-                            searchFocus,
-                            cols,
-                            searchUi,
-                            countSearchMatches(
-                                searchUi.allTabs() ? null : model,
-                                searchUi.allTabs() ? tabs : null,
-                                searchQueryInput.text(),
-                                toSearchOptions(searchUi)
-                            )
-                        )
-                        : null;
-                    if (saveAsMode) {
-                        interactiveBarText = buildSaveAsPrompt(saveAsInput);
-                        interactiveBarStyle = SAVE_PROMPT_STYLE;
-                    } else if (saveOverwriteConfirmMode) {
-                        interactiveBarText = buildOverwritePrompt(pendingOverwritePath);
-                        interactiveBarStyle = SAVE_PROMPT_STYLE;
-                    } else if (quitConfirmMode) {
-                        interactiveBarText = buildQuitPrompt(countDirtyTabs(tabs));
-                        interactiveBarStyle = SAVE_PROMPT_STYLE;
-                    } else if (closeTabConfirmMode) {
-                        interactiveBarText = buildCloseTabPrompt(tabs, pendingCloseTabIndex);
-                        interactiveBarStyle = SAVE_PROMPT_STYLE;
-                    } else if (searchBar != null) {
-                        interactiveBarText = searchBar.text();
-                    }
+                    String bottomBar = buildBottomBar(
+                        state,
+                        model,
+                        cols,
+                        readingModeSetting,
+                        activeTabIndex,
+                        tabs.size()
+                    );
+                    String interactiveBarText = inlinePromptBar.text();
+                    Style interactiveBarStyle = inlinePromptBar.style();
                     int planRows = Math.max(1, (showTabBar ? rows - 1 : rows) - (needHorizontalScrollbar ? 1 : 0));
                     RenderPlan plan = renderPlanBuilder.build(
                         model,
@@ -310,8 +334,8 @@ public class TerminalEditorApp {
                         toSearchOptions(searchUi),
                         interactiveBarText,
                         interactiveBarStyle,
-                        notification.message,
-                        notification.style,
+                        notificationBar.text(),
+                        notificationBar.style(),
                         wrapLinesSetting,
                         wrapWordsSetting
                     );
@@ -1830,45 +1854,41 @@ public class TerminalEditorApp {
         };
     }
 
-    private String buildBottomBar(EditorState state, TextModel model, String message, int cols, boolean readingMode) {
+    private String buildBottomBar(
+        EditorState state,
+        TextModel model,
+        int cols,
+        boolean readingMode,
+        int activeTabIndex,
+        int totalTabs
+    ) {
+        final int leftMargin = 1;
+        final int rightMargin = 1;
         Position p = state.getCursor();
         int totalLines = model.lineCount();
         int lineCols = model.getLine(p.line()).length();
         String indicators = buildStateIndicators(state, readingMode);
-        String left = "Ln " + (p.line() + 1) + "/" + totalLines
-            + ", Col " + (p.col() + 1) + "/" + lineCols
-            + "  |  " + indicators;
-        if (message != null && !message.isBlank()) {
-            left = left + "  |  " + message;
+        String left = " ".repeat(Math.max(0, leftMargin))
+            + "Ln " + (p.line() + 1) + "/" + totalLines
+            + ", Col " + (p.col() + 1) + "/" + lineCols;
+        if (totalTabs > 1) {
+            left = left + "  Tab " + (activeTabIndex + 1) + "/" + totalTabs;
         }
-
+        if (cols <= 0) {
+            return "";
+        }
         if (left.length() >= cols) {
             return left.substring(0, cols);
         }
-
+        String rightBlock = indicators + " ".repeat(Math.max(0, rightMargin));
+        if (rightBlock.length() >= cols) {
+            return rightBlock.substring(0, cols);
+        }
         int free = cols - left.length();
-        if (free <= 1) {
-            return left + " ".repeat(free);
+        if (free <= rightBlock.length()) {
+            return left.substring(0, cols);
         }
-
-        String right = "";
-
-        int remaining = free;
-        if (remaining >= 3) {
-            int hintSpace = remaining - 2;
-            String hints = readingMode ? KEY_HINTS_READING : KEY_HINTS;
-            if (hints.length() > hintSpace) {
-                hints = hints.substring(0, hintSpace);
-            }
-            if (!hints.isEmpty()) {
-                right = hints;
-            }
-        }
-
-        if (right.length() > free) {
-            right = right.substring(0, free);
-        }
-        return left + " ".repeat(free - right.length()) + right;
+        return left + " ".repeat(free - rightBlock.length()) + rightBlock;
     }
 
     private String buildStateIndicators(EditorState state, boolean readingMode) {
@@ -2009,8 +2029,7 @@ public class TerminalEditorApp {
         int allStart = wildcardEnd + 1;
         int allEnd = allStart + allToggle.length();
         String prompt = findField + "  " + replaceField
-            + "  " + csToggle + " " + wToggle + " " + starToggle + " " + allToggle + " " + countToken
-            + "  " + SEARCH_HELP;
+            + "  " + csToggle + " " + wToggle + " " + starToggle + " " + allToggle + " " + countToken;
 
         int cursorIndex = cursorForFocus(
             findField,

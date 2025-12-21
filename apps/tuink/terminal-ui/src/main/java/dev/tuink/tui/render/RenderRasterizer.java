@@ -57,19 +57,26 @@ public class RenderRasterizer {
         int overlayTopRow = overlayBottomRow;
         if (plan.interactiveBarText() != null && overlayBottomRow >= 0) {
             Style style = plan.interactiveBarStyle() == null ? INTERACTIVE_STYLE : plan.interactiveBarStyle();
-            drawText(
-                buffer,
-                overlayBottomRow,
-                0,
-                truncateOrPad(plan.interactiveBarText(), cols),
-                style,
-                cols
-            );
-            overlayTopRow = overlayBottomRow - 1;
+            String[] lines = splitLines(plan.interactiveBarText());
+            for (int i = lines.length - 1; i >= 0; i--) {
+                int row = overlayBottomRow - (lines.length - 1 - i);
+                if (row < 0) {
+                    continue;
+                }
+                drawText(buffer, row, 0, truncateOrPad(lines[i], cols), style, cols);
+            }
+            overlayTopRow = overlayBottomRow - lines.length;
         }
         if (plan.notificationBarText() != null && overlayTopRow >= 0) {
             Style style = plan.notificationBarStyle() == null ? NOTIFICATION_STYLE : plan.notificationBarStyle();
-            drawText(buffer, overlayTopRow, 0, truncateOrPad(plan.notificationBarText(), cols), style, cols);
+            String[] lines = splitLines(plan.notificationBarText());
+            for (int i = lines.length - 1; i >= 0; i--) {
+                int row = overlayTopRow - (lines.length - 1 - i);
+                if (row < 0) {
+                    continue;
+                }
+                drawText(buffer, row, 0, truncateOrPad(lines[i], cols), style, cols);
+            }
         }
         drawScrollbar(buffer, plan, rows, cols, topRow);
         drawHorizontalScrollbar(buffer, plan, rows, cols, topRow);
@@ -213,5 +220,12 @@ public class RenderRasterizer {
             return text.substring(0, width);
         }
         return text + " ".repeat(width - text.length());
+    }
+
+    private String[] splitLines(String text) {
+        if (text == null) {
+            return new String[0];
+        }
+        return text.split("\\n", -1);
     }
 }

@@ -61,7 +61,10 @@ public class TerminalEditorApp {
     private static final Style FILE_DIALOG_SELECTED_MONO_STYLE = new Style(Color.DEFAULT, Color.DEFAULT, false, false);
     private static final Style FILE_DIALOG_SCROLL_TRACK_STYLE = new Style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE, false, false);
     private static final Style FILE_DIALOG_SCROLL_THUMB_STYLE = new Style(Color.BLACK, Color.BRIGHT_YELLOW, false, false);
+    private static final Style SEARCH_BAR_STYLE = new Style(Color.BRIGHT_WHITE, Color.BLUE, false, false);
     private static final Style NOTIFY_SUCCESS_STYLE = new Style(Color.BLACK, Color.BRIGHT_GREEN, false, false);
+    private static final Style NOTIFY_INFO_STYLE = new Style(Color.BRIGHT_WHITE, Color.BLUE, false, false);
+    private static final Style NOTIFY_WARNING_STYLE = new Style(Color.BLACK, Color.BRIGHT_YELLOW, false, false);
     private static final Style NOTIFY_ERROR_STYLE = new Style(Color.BRIGHT_WHITE, Color.RED, false, false);
     private static final long NOTIFY_DURATION_NANOS = 3_000_000_000L;
     private static final long OPEN_DIALOG_DOUBLE_CLICK_NANOS = 450_000_000L;
@@ -231,6 +234,12 @@ public class TerminalEditorApp {
                     notification.expireIfNeeded();
                     int rows = Math.max(2, terminal.getHeight());
                     int cols = Math.max(1, terminal.getWidth());
+                    int searchMatchCount = countSearchMatches(
+                        searchUi.allTabs() ? null : model,
+                        searchUi.allTabs() ? tabs : null,
+                        searchQueryInput.text(),
+                        toSearchOptions(searchUi)
+                    );
                     SearchBarView searchBar = searchMode
                         ? buildSearchBar(
                             searchQueryInput,
@@ -238,14 +247,16 @@ public class TerminalEditorApp {
                             searchFocus,
                             cols,
                             searchUi,
-                            countSearchMatches(
-                                searchUi.allTabs() ? null : model,
-                                searchUi.allTabs() ? tabs : null,
-                                searchQueryInput.text(),
-                                toSearchOptions(searchUi)
-                            )
+                            searchMatchCount
                         )
                         : null;
+                    String searchSummary = buildSearchSummary(
+                        searchMode,
+                        searchQueryInput.text(),
+                        searchUi,
+                        searchMatchCount,
+                        tabs.size()
+                    );
                     InlinePromptBar inlinePromptBar = InlinePromptBar.hidden();
                     if (saveAsMode) {
                         inlinePromptBar = InlinePromptBar.of(
@@ -263,7 +274,12 @@ public class TerminalEditorApp {
                         String prompt = buildCloseTabPrompt(tabs, pendingCloseTabIndex);
                         inlinePromptBar = InlinePromptBar.of(prompt, SAVE_PROMPT_STYLE, prompt.length() + 1);
                     } else if (searchBar != null) {
-                        inlinePromptBar = InlinePromptBar.of(searchBar.text(), null, searchBar.cursorCol());
+                        inlinePromptBar = InlinePromptBar.of(
+                            searchBar.text(),
+                            SEARCH_BAR_STYLE,
+                            searchBar.cursorRow(),
+                            searchBar.cursorCol()
+                        );
                     }
                     NotificationBar notificationBar = NotificationBar.of(notification.message, notification.style);
                     boolean showTabBar = showTabBarSetting && tabs.size() > 1;
@@ -318,7 +334,8 @@ public class TerminalEditorApp {
                         cols,
                         readingModeSetting,
                         activeTabIndex,
-                        tabs.size()
+                        tabs.size(),
+                        searchSummary
                     );
                     String interactiveBarText = inlinePromptBar.text();
                     Style interactiveBarStyle = inlinePromptBar.style();
@@ -359,24 +376,25 @@ public class TerminalEditorApp {
                     EditorView.CursorPosition editorCursor = editorView.cursorFromPlan(plan, contentTopRow);
                     int desiredCursorRow = editorCursor.row();
                     int desiredCursorCol = editorCursor.col();
-                    int interactiveCursorRow = Math.max(1, rows - 1);
+                    int interactiveBottomCursorRow = Math.max(1, rows - 1);
+                    int interactiveTopCursorRow = interactiveBottomCursorRow - inlinePromptBar.height() + 1;
                     if (saveAsMode) {
-                        desiredCursorRow = interactiveCursorRow;
+                        desiredCursorRow = interactiveBottomCursorRow;
                         desiredCursorCol = Math.min(cols, SAVE_AS_PROMPT.length() + saveAsInput.cursor() + 1);
                     } else if (saveOverwriteConfirmMode) {
                         String prompt = buildOverwritePrompt(pendingOverwritePath);
-                        desiredCursorRow = interactiveCursorRow;
+                        desiredCursorRow = interactiveBottomCursorRow;
                         desiredCursorCol = Math.min(cols, prompt.length() + 1);
                     } else if (quitConfirmMode) {
                         String prompt = buildQuitPrompt(countDirtyTabs(tabs));
-                        desiredCursorRow = interactiveCursorRow;
+                        desiredCursorRow = interactiveBottomCursorRow;
                         desiredCursorCol = Math.min(cols, prompt.length() + 1);
                     } else if (closeTabConfirmMode) {
                         String prompt = buildCloseTabPrompt(tabs, pendingCloseTabIndex);
-                        desiredCursorRow = interactiveCursorRow;
+                        desiredCursorRow = interactiveBottomCursorRow;
                         desiredCursorCol = Math.min(cols, prompt.length() + 1);
                     } else if (searchBar != null) {
-                        desiredCursorRow = interactiveCursorRow;
+                        desiredCursorRow = interactiveTopCursorRow + searchBar.cursorRow() - 1;
                         desiredCursorCol = searchBar.cursorCol();
                     } else if (topMenu.isOpen()) {
                         desiredCursorRow = Math.min(rows, 3 + topMenu.selectedIndex());
@@ -662,18 +680,39 @@ public class TerminalEditorApp {
                                         continue;
                                     }
                                     if (searchMode && searchBar != null) {
-                                        int searchBarRow = interactiveCursorRow - 1;
-                                        if (mouse.row() == searchBarRow) {
-                                            SearchFocus clickedFocus = searchFocusAtMouse(searchBar, mouse.col());
-                                            if (clickedFocus != null) {
-                                                searchFocus = clickedFocus;
-                                                if (isToggleFocus(clickedFocus)) {
-                                                    SearchUiOptions before = searchUi;
-                                                    searchUi = toggleFocusedSearchOption(searchUi, clickedFocus);
-                                                    if (!searchUi.equals(before)) {
-                                                        statusMessage = "Search options updated";
-                                                    }
+                                        int searchBarTopRow = rows - 1 - inlinePromptBar.height();
+                                        SearchFocus clickedFocus = searchFocusAtMouse(
+                                            searchBar,
+                                            mouse.row(),
+                                            mouse.col(),
+                                            searchBarTopRow
+                                        );
+                                        if (clickedFocus != null) {
+                                            searchFocus = clickedFocus;
+                                            if (isSearchActionFocus(clickedFocus)) {
+                                                KeyEvent.Action mappedAction = actionForSearchFocus(clickedFocus);
+                                                if (mappedAction != null) {
+                                                    remappedMouseKey = new KeyEvent.ActionEvent(mappedAction);
+                                                    break;
                                                 }
+                                            }
+                                            if (isToggleFocus(clickedFocus)) {
+                                                SearchUiOptions before = searchUi;
+                                                searchUi = toggleFocusedSearchOption(searchUi, clickedFocus);
+                                                if (!searchUi.equals(before)) {
+                                                    statusMessage = "Search options updated";
+                                                }
+                                            }
+                                        } else {
+                                            KeyEvent.Action clickAction = searchActionAtMouse(
+                                                searchBar,
+                                                mouse.row(),
+                                                mouse.col(),
+                                                searchBarTopRow
+                                            );
+                                            if (clickAction != null) {
+                                                remappedMouseKey = new KeyEvent.ActionEvent(clickAction);
+                                                break;
                                             }
                                         }
                                         editorView.cancelMouseSelection();
@@ -1137,22 +1176,40 @@ public class TerminalEditorApp {
                             }
                             case ARROW_LEFT -> {
                                 if (searchFocus == SearchFocus.FIND) {
-                                    searchQueryInput.moveLeft();
+                                    if (searchQueryInput.cursor() > 0) {
+                                        searchQueryInput.moveLeft();
+                                    } else {
+                                        searchFocus = previousSearchFocusHorizontal(searchFocus);
+                                    }
                                 } else if (searchFocus == SearchFocus.REPLACE) {
-                                    searchReplaceInput.moveLeft();
+                                    if (searchReplaceInput.cursor() > 0) {
+                                        searchReplaceInput.moveLeft();
+                                    } else {
+                                        searchFocus = previousSearchFocusHorizontal(searchFocus);
+                                    }
                                 } else {
-                                    engine.moveLeft();
+                                    searchFocus = previousSearchFocusHorizontal(searchFocus);
                                 }
                             }
                             case ARROW_RIGHT -> {
                                 if (searchFocus == SearchFocus.FIND) {
-                                    searchQueryInput.moveRight();
+                                    if (searchQueryInput.cursor() < searchQueryInput.text().length()) {
+                                        searchQueryInput.moveRight();
+                                    } else {
+                                        searchFocus = nextSearchFocusHorizontal(searchFocus);
+                                    }
                                 } else if (searchFocus == SearchFocus.REPLACE) {
-                                    searchReplaceInput.moveRight();
+                                    if (searchReplaceInput.cursor() < searchReplaceInput.text().length()) {
+                                        searchReplaceInput.moveRight();
+                                    } else {
+                                        searchFocus = nextSearchFocusHorizontal(searchFocus);
+                                    }
                                 } else {
-                                    engine.moveRight();
+                                    searchFocus = nextSearchFocusHorizontal(searchFocus);
                                 }
                             }
+                            case ARROW_UP -> searchFocus = verticalSearchFocus(searchFocus, true);
+                            case ARROW_DOWN -> searchFocus = verticalSearchFocus(searchFocus, false);
                             case HOME -> {
                                 if (searchFocus == SearchFocus.FIND) {
                                     searchQueryInput.moveHome();
@@ -1171,7 +1228,89 @@ public class TerminalEditorApp {
                                     engine.moveEnd();
                                 }
                             }
-                            case ENTER, CTRL_F -> {
+                            case ENTER -> {
+                                KeyEvent.Action enterAction = isSearchActionFocus(searchFocus)
+                                    ? actionForSearchFocus(searchFocus)
+                                    : KeyEvent.Action.CTRL_F;
+                                if (enterAction == KeyEvent.Action.CTRL_G) {
+                                    boolean found;
+                                    if (searchUi.allTabs()) {
+                                        int foundTab = TabSearch.findPreviousAcrossTabs(
+                                            toTabSessions(tabs),
+                                            activeTabIndex,
+                                            searchQueryInput.text(),
+                                            toSearchOptions(searchUi)
+                                        );
+                                        found = foundTab >= 0;
+                                        if (found) {
+                                            activeTabIndex = foundTab;
+                                            model = tabs.get(activeTabIndex).model();
+                                            state = tabs.get(activeTabIndex).state();
+                                            engine = tabs.get(activeTabIndex).engine();
+                                            renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
+                                        }
+                                    } else {
+                                        found = engine.findPrevious(
+                                            searchQueryInput.text(),
+                                            toSearchOptions(searchUi)
+                                        );
+                                    }
+                                    statusMessage = found ? "Found previous match" : "Not found";
+                                } else if (enterAction == KeyEvent.Action.CTRL_R) {
+                                    if (readingModeSetting) {
+                                        statusMessage = "Reading mode: replace is disabled";
+                                        continue;
+                                    }
+                                    boolean replaced = engine.replaceCurrentOrNext(
+                                        searchQueryInput.text(),
+                                        searchReplaceInput.text(),
+                                        toSearchOptions(searchUi)
+                                    );
+                                    statusMessage = replaced ? "Replaced match" : "Nothing to replace";
+                                } else if (enterAction == KeyEvent.Action.CTRL_A) {
+                                    if (readingModeSetting) {
+                                        statusMessage = "Reading mode: replace is disabled";
+                                        continue;
+                                    }
+                                    int replaced = engine.replaceAll(
+                                        searchQueryInput.text(),
+                                        searchReplaceInput.text(),
+                                        toSearchOptions(searchUi)
+                                    );
+                                    notification.warning("Replace all: " + replaced);
+                                    statusMessage = replaced > 0
+                                        ? "Replaced " + replaced + " occurrence(s)"
+                                        : "Nothing to replace";
+                                } else {
+                                    boolean found;
+                                    if (searchUi.allTabs()) {
+                                        int foundTab = TabSearch.findNextAcrossTabs(
+                                            toTabSessions(tabs),
+                                            activeTabIndex,
+                                            searchQueryInput.text(),
+                                            toSearchOptions(searchUi)
+                                        );
+                                        found = foundTab >= 0;
+                                        if (found) {
+                                            activeTabIndex = foundTab;
+                                            model = tabs.get(activeTabIndex).model();
+                                            state = tabs.get(activeTabIndex).state();
+                                            engine = tabs.get(activeTabIndex).engine();
+                                            renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
+                                        }
+                                    } else {
+                                        found = engine.findNext(
+                                            searchQueryInput.text(),
+                                            toSearchOptions(searchUi)
+                                        );
+                                    }
+                                    statusMessage = found ? "Found next match" : "Not found";
+                                }
+                            }
+                            case CTRL_F -> {
+                                if (!isSearchFieldFocus(searchFocus)) {
+                                    searchFocus = SearchFocus.NEXT_BUTTON;
+                                }
                                 boolean found;
                                 if (searchUi.allTabs()) {
                                     int foundTab = TabSearch.findNextAcrossTabs(
@@ -1197,6 +1336,9 @@ public class TerminalEditorApp {
                                 statusMessage = found ? "Found next match" : "Not found";
                             }
                             case CTRL_G -> {
+                                if (!isSearchFieldFocus(searchFocus)) {
+                                    searchFocus = SearchFocus.PREV_BUTTON;
+                                }
                                 boolean found;
                                 if (searchUi.allTabs()) {
                                     int foundTab = TabSearch.findPreviousAcrossTabs(
@@ -1222,6 +1364,9 @@ public class TerminalEditorApp {
                                 statusMessage = found ? "Found previous match" : "Not found";
                             }
                             case CTRL_R -> {
+                                if (!isSearchFieldFocus(searchFocus)) {
+                                    searchFocus = SearchFocus.REPLACE_BUTTON;
+                                }
                                 if (readingModeSetting) {
                                     statusMessage = "Reading mode: replace is disabled";
                                     continue;
@@ -1234,6 +1379,9 @@ public class TerminalEditorApp {
                                 statusMessage = replaced ? "Replaced match" : "Nothing to replace";
                             }
                             case CTRL_A -> {
+                                if (!isSearchFieldFocus(searchFocus)) {
+                                    searchFocus = SearchFocus.ALL_BUTTON;
+                                }
                                 if (readingModeSetting) {
                                     statusMessage = "Reading mode: replace is disabled";
                                     continue;
@@ -1243,6 +1391,7 @@ public class TerminalEditorApp {
                                     searchReplaceInput.text(),
                                     toSearchOptions(searchUi)
                                 );
+                                notification.warning("Replace all: " + replaced);
                                 statusMessage = replaced > 0
                                     ? "Replaced " + replaced + " occurrence(s)"
                                     : "Nothing to replace";
@@ -1395,8 +1544,6 @@ public class TerminalEditorApp {
                                 }
                                 notification.clear();
                             }
-                            case ARROW_UP -> engine.moveUp();
-                            case ARROW_DOWN -> engine.moveDown();
                             case SHIFT_ARROW_UP -> engine.moveUp(true);
                             case SHIFT_ARROW_DOWN -> engine.moveDown(true);
                             case SHIFT_ARROW_LEFT -> engine.moveLeft(true);
@@ -1860,7 +2007,8 @@ public class TerminalEditorApp {
         int cols,
         boolean readingMode,
         int activeTabIndex,
-        int totalTabs
+        int totalTabs,
+        String searchSummary
     ) {
         final int leftMargin = 1;
         final int rightMargin = 1;
@@ -1873,6 +2021,9 @@ public class TerminalEditorApp {
             + ", Col " + (p.col() + 1) + "/" + lineCols;
         if (totalTabs > 1) {
             left = left + "  Tab " + (activeTabIndex + 1) + "/" + totalTabs;
+        }
+        if (searchSummary != null && !searchSummary.isBlank()) {
+            left = left + "  " + searchSummary;
         }
         if (cols <= 0) {
             return "";
@@ -1889,6 +2040,22 @@ public class TerminalEditorApp {
             return left.substring(0, cols);
         }
         return left + " ".repeat(free - rightBlock.length()) + rightBlock;
+    }
+
+    private String buildSearchSummary(
+        boolean searchMode,
+        String query,
+        SearchUiOptions searchUi,
+        int matchCount,
+        int totalTabs
+    ) {
+        if (!searchMode || query == null || query.isBlank()) {
+            return "";
+        }
+        if (searchUi != null && searchUi.allTabs() && totalTabs > 1) {
+            return "Find " + matchCount + " in " + totalTabs + " tabs";
+        }
+        return "Find " + matchCount;
     }
 
     private String buildStateIndicators(EditorState state, boolean readingMode) {
@@ -2015,12 +2182,20 @@ public class TerminalEditorApp {
         String wToggle = formatToggle("word", searchUi.matchMode() == SearchOptions.MatchMode.WHOLE_WORD);
         String starToggle = formatToggle("*", searchUi.matchMode() == SearchOptions.MatchMode.WILDCARD);
         String allToggle = formatToggle("All", searchUi.allTabs());
-        String countToken = "[N:" + matchCount + "]";
+        String optionsCluster = csToggle + " " + wToggle + " " + starToggle + " " + allToggle;
+        String row1 = alignLeftRight(findField, optionsCluster, cols, 1);
+        String nextButton = "[Next]";
+        String prevButton = "[Prev]";
+        String replaceButton = "[Replace]";
+        String allButton = "[All]";
+        String actionsCluster = nextButton + " " + prevButton + " " + replaceButton + " " + allButton;
+        String row2 = alignLeftRight(replaceField, actionsCluster, cols, 1);
+
+        int optionsStart = rightClusterStart(row1, optionsCluster);
+        int actionsStart = rightClusterStart(row2, actionsCluster);
         int findStart = 0;
-        int findEnd = findStart + findField.length();
-        int replaceStart = findEnd + 2;
-        int replaceEnd = replaceStart + replaceField.length();
-        int caseStart = replaceEnd + 2;
+        int findEnd = findField.length();
+        int caseStart = optionsStart;
         int caseEnd = caseStart + csToggle.length();
         int wordStart = caseEnd + 1;
         int wordEnd = wordStart + wToggle.length();
@@ -2028,10 +2203,18 @@ public class TerminalEditorApp {
         int wildcardEnd = wildcardStart + starToggle.length();
         int allStart = wildcardEnd + 1;
         int allEnd = allStart + allToggle.length();
-        String prompt = findField + "  " + replaceField
-            + "  " + csToggle + " " + wToggle + " " + starToggle + " " + allToggle + " " + countToken;
+        int replaceStart = 0;
+        int replaceEnd = replaceField.length();
+        int nextStart = actionsStart;
+        int nextEnd = nextStart + nextButton.length();
+        int prevStart = nextEnd + 1;
+        int prevEnd = prevStart + prevButton.length();
+        int replaceActionStart = prevEnd + 1;
+        int replaceActionEnd = replaceActionStart + replaceButton.length();
+        int allActionStart = replaceActionEnd + 1;
+        int allActionEnd = allActionStart + allButton.length();
 
-        int cursorIndex = cursorForFocus(
+        SearchCursor cursor = cursorForFocus(
             findField,
             replaceField,
             csToggle,
@@ -2042,40 +2225,21 @@ public class TerminalEditorApp {
             safeReplacement,
             queryCursor,
             replacementCursor,
-            focus
+            focus,
+            caseStart,
+            wordStart,
+            wildcardStart,
+            allStart,
+            nextStart,
+            prevStart,
+            replaceActionStart,
+            allActionStart
         );
-
-        if (prompt.length() <= cols) {
-            return new SearchBarView(
-                prompt + " ".repeat(cols - prompt.length()),
-                Math.min(cols, cursorIndex + 1),
-                0,
-                findStart,
-                findEnd,
-                replaceStart,
-                replaceEnd,
-                caseStart,
-                caseEnd,
-                wordStart,
-                wordEnd,
-                wildcardStart,
-                wildcardEnd,
-                allStart,
-                allEnd
-            );
-        }
-
-        int start = Math.max(0, cursorIndex - cols + 1);
-        int end = Math.min(prompt.length(), start + cols);
-        String clipped = prompt.substring(start, end);
-        if (clipped.length() < cols) {
-            clipped = clipped + " ".repeat(cols - clipped.length());
-        }
-        int cursorCol = Math.max(1, Math.min(cols, cursorIndex - start + 1));
         return new SearchBarView(
-            clipped,
-            cursorCol,
-            start,
+            row1,
+            row2,
+            Math.max(1, Math.min(2, cursor.row())),
+            Math.max(1, Math.min(cols, cursor.col() + 1)),
             findStart,
             findEnd,
             replaceStart,
@@ -2087,40 +2251,81 @@ public class TerminalEditorApp {
             wildcardStart,
             wildcardEnd,
             allStart,
-            allEnd
+            allEnd,
+            nextStart,
+            nextEnd,
+            prevStart,
+            prevEnd,
+            replaceActionStart,
+            replaceActionEnd,
+            allActionStart,
+            allActionEnd
         );
     }
 
-    private SearchFocus searchFocusAtMouse(SearchBarView searchBar, int mouseCol) {
+    private SearchFocus searchFocusAtMouse(SearchBarView searchBar, int mouseRow, int mouseCol, int topRow) {
         if (searchBar == null || mouseCol < 0) {
             return null;
         }
-        int promptIndex = searchBar.promptStart() + mouseCol;
-        if (promptIndex >= searchBar.findStart() && promptIndex < searchBar.findEnd()) {
+        if (mouseRow == topRow && mouseCol >= searchBar.findStart() && mouseCol < searchBar.findEnd()) {
             return SearchFocus.FIND;
         }
-        if (promptIndex >= searchBar.replaceStart() && promptIndex < searchBar.replaceEnd()) {
+        if (mouseRow == topRow + 1 && mouseCol >= searchBar.replaceStart() && mouseCol < searchBar.replaceEnd()) {
             return SearchFocus.REPLACE;
         }
-        if (promptIndex >= searchBar.caseStart() && promptIndex < searchBar.caseEnd()) {
+        if (mouseRow == topRow + 1 && mouseCol >= searchBar.nextStart() && mouseCol < searchBar.nextEnd()) {
+            return SearchFocus.NEXT_BUTTON;
+        }
+        if (mouseRow == topRow + 1 && mouseCol >= searchBar.prevStart() && mouseCol < searchBar.prevEnd()) {
+            return SearchFocus.PREV_BUTTON;
+        }
+        if (mouseRow == topRow + 1
+            && mouseCol >= searchBar.replaceActionStart() && mouseCol < searchBar.replaceActionEnd()) {
+            return SearchFocus.REPLACE_BUTTON;
+        }
+        if (mouseRow == topRow + 1
+            && mouseCol >= searchBar.allActionStart() && mouseCol < searchBar.allActionEnd()) {
+            return SearchFocus.ALL_BUTTON;
+        }
+        if (mouseRow == topRow && mouseCol >= searchBar.caseStart() && mouseCol < searchBar.caseEnd()) {
             return SearchFocus.CASE;
         }
-        if (promptIndex >= searchBar.wordStart() && promptIndex < searchBar.wordEnd()) {
+        if (mouseRow == topRow && mouseCol >= searchBar.wordStart() && mouseCol < searchBar.wordEnd()) {
             return SearchFocus.WORD;
         }
-        if (promptIndex >= searchBar.wildcardStart() && promptIndex < searchBar.wildcardEnd()) {
+        if (mouseRow == topRow && mouseCol >= searchBar.wildcardStart() && mouseCol < searchBar.wildcardEnd()) {
             return SearchFocus.WILDCARD;
         }
-        if (promptIndex >= searchBar.allStart() && promptIndex < searchBar.allEnd()) {
+        if (mouseRow == topRow && mouseCol >= searchBar.allStart() && mouseCol < searchBar.allEnd()) {
             return SearchFocus.ALL;
         }
         return null;
     }
 
+    private KeyEvent.Action searchActionAtMouse(SearchBarView searchBar, int mouseRow, int mouseCol, int topRow) {
+        if (searchBar == null || mouseCol < 0 || mouseRow != topRow + 1) {
+            return null;
+        }
+        if (mouseCol >= searchBar.nextStart() && mouseCol < searchBar.nextEnd()) {
+            return KeyEvent.Action.CTRL_F;
+        }
+        if (mouseCol >= searchBar.prevStart() && mouseCol < searchBar.prevEnd()) {
+            return KeyEvent.Action.CTRL_G;
+        }
+        if (mouseCol >= searchBar.replaceActionStart() && mouseCol < searchBar.replaceActionEnd()) {
+            return KeyEvent.Action.CTRL_R;
+        }
+        if (mouseCol >= searchBar.allActionStart() && mouseCol < searchBar.allActionEnd()) {
+            return KeyEvent.Action.CTRL_A;
+        }
+        return null;
+    }
+
     private record SearchBarView(
-        String text,
+        String row1,
+        String row2,
+        int cursorRow,
         int cursorCol,
-        int promptStart,
         int findStart,
         int findEnd,
         int replaceStart,
@@ -2132,8 +2337,19 @@ public class TerminalEditorApp {
         int wildcardStart,
         int wildcardEnd,
         int allStart,
-        int allEnd
+        int allEnd,
+        int nextStart,
+        int nextEnd,
+        int prevStart,
+        int prevEnd,
+        int replaceActionStart,
+        int replaceActionEnd,
+        int allActionStart,
+        int allActionEnd
     ) {
+        private String text() {
+            return row1 + "\n" + row2;
+        }
     }
 
     private static String formatField(String label, String value) {
@@ -2144,7 +2360,7 @@ public class TerminalEditorApp {
         return "[" + label + ":" + (checked ? "x" : " ") + "]";
     }
 
-    private static int cursorForFocus(
+    private static SearchCursor cursorForFocus(
         String findField,
         String replaceField,
         String iToggle,
@@ -2155,32 +2371,89 @@ public class TerminalEditorApp {
         String replacement,
         int queryCursor,
         int replacementCursor,
-        SearchFocus focus
+        SearchFocus focus,
+        int caseStart,
+        int wordStart,
+        int wildcardStart,
+        int allStart,
+        int nextStart,
+        int prevStart,
+        int replaceActionStart,
+        int allActionStart
     ) {
         if (focus == SearchFocus.FIND) {
-            return "Find: ".length() + Math.max(0, Math.min(queryCursor, query.length()));
+            return new SearchCursor(1, "Find: ".length() + Math.max(0, Math.min(queryCursor, query.length())));
         }
-        int replaceStart = findField.length() + 2;
         if (focus == SearchFocus.REPLACE) {
-            return replaceStart + "Replace: ".length() + Math.max(0, Math.min(replacementCursor, replacement.length()));
+            return new SearchCursor(2, "Replace: ".length() + Math.max(0, Math.min(replacementCursor, replacement.length())));
         }
-        int togglesStart = replaceStart + replaceField.length() + 2;
+        if (focus == SearchFocus.NEXT_BUTTON) {
+            return new SearchCursor(2, nextStart + 1);
+        }
+        if (focus == SearchFocus.PREV_BUTTON) {
+            return new SearchCursor(2, prevStart + 1);
+        }
+        if (focus == SearchFocus.REPLACE_BUTTON) {
+            return new SearchCursor(2, replaceActionStart + 1);
+        }
+        if (focus == SearchFocus.ALL_BUTTON) {
+            return new SearchCursor(2, allActionStart + 1);
+        }
         int iCheckOffset = iToggle.indexOf(':') + 1;
         int wCheckOffset = wToggle.indexOf(':') + 1;
         int starCheckOffset = starToggle.indexOf(':') + 1;
         if (focus == SearchFocus.CASE) {
-            return togglesStart + iCheckOffset;
+            return new SearchCursor(1, caseStart + iCheckOffset);
         }
         if (focus == SearchFocus.WORD) {
-            return togglesStart + iToggle.length() + 1 + wCheckOffset;
+            return new SearchCursor(1, wordStart + wCheckOffset);
         }
-        int starStart = togglesStart + iToggle.length() + 1 + wToggle.length() + 1;
         if (focus == SearchFocus.WILDCARD) {
-            return starStart + starCheckOffset;
+            return new SearchCursor(1, wildcardStart + starCheckOffset);
         }
-        int allStart = starStart + starToggle.length() + 1;
         int allCheckOffset = allToggle.indexOf(':') + 1;
-        return allStart + allCheckOffset;
+        return new SearchCursor(1, allStart + allCheckOffset);
+    }
+
+    private static String clipPad(String text, int cols) {
+        if (cols <= 0) {
+            return "";
+        }
+        if (text.length() >= cols) {
+            return text.substring(0, cols);
+        }
+        return text + " ".repeat(cols - text.length());
+    }
+
+    private static String alignLeftRight(String left, String right, int cols, int rightMargin) {
+        if (cols <= 0) {
+            return "";
+        }
+        String safeLeft = left == null ? "" : left;
+        String safeRight = right == null ? "" : right;
+        int margin = Math.max(0, rightMargin);
+        int rightBlock = safeRight.length() + margin;
+        if (safeRight.isEmpty()) {
+            return clipPad(safeLeft, cols);
+        }
+        if (rightBlock >= cols) {
+            return clipPad(safeRight, cols);
+        }
+        int leftWidth = cols - rightBlock;
+        String leftPart = safeLeft.length() > leftWidth
+            ? safeLeft.substring(0, leftWidth)
+            : safeLeft + " ".repeat(leftWidth - safeLeft.length());
+        return leftPart + safeRight + " ".repeat(margin);
+    }
+
+    private static int rightClusterStart(String row, String cluster) {
+        if (row == null || cluster == null || cluster.isEmpty()) {
+            return -1;
+        }
+        return row.indexOf(cluster);
+    }
+
+    private record SearchCursor(int row, int col) {
     }
 
     private SearchUiOptions toggleFocusedSearchOption(SearchUiOptions options, SearchFocus focus) {
@@ -2219,14 +2492,84 @@ public class TerminalEditorApp {
             || focus == SearchFocus.WILDCARD || focus == SearchFocus.ALL;
     }
 
+    private boolean isSearchActionFocus(SearchFocus focus) {
+        return focus == SearchFocus.NEXT_BUTTON
+            || focus == SearchFocus.PREV_BUTTON
+            || focus == SearchFocus.REPLACE_BUTTON
+            || focus == SearchFocus.ALL_BUTTON;
+    }
+
+    private boolean isSearchFieldFocus(SearchFocus focus) {
+        return focus == SearchFocus.FIND || focus == SearchFocus.REPLACE;
+    }
+
+    private KeyEvent.Action actionForSearchFocus(SearchFocus focus) {
+        return switch (focus) {
+            case NEXT_BUTTON -> KeyEvent.Action.CTRL_F;
+            case PREV_BUTTON -> KeyEvent.Action.CTRL_G;
+            case REPLACE_BUTTON -> KeyEvent.Action.CTRL_R;
+            case ALL_BUTTON -> KeyEvent.Action.CTRL_A;
+            default -> null;
+        };
+    }
+
     private SearchFocus nextSearchFocus(SearchFocus focus) {
         return switch (focus) {
-            case FIND -> SearchFocus.REPLACE;
-            case REPLACE -> SearchFocus.CASE;
+            case FIND -> SearchFocus.CASE;
             case CASE -> SearchFocus.WORD;
             case WORD -> SearchFocus.WILDCARD;
             case WILDCARD -> SearchFocus.ALL;
-            case ALL -> SearchFocus.FIND;
+            case ALL -> SearchFocus.REPLACE;
+            case REPLACE -> SearchFocus.NEXT_BUTTON;
+            case NEXT_BUTTON -> SearchFocus.PREV_BUTTON;
+            case PREV_BUTTON -> SearchFocus.REPLACE_BUTTON;
+            case REPLACE_BUTTON -> SearchFocus.ALL_BUTTON;
+            case ALL_BUTTON -> SearchFocus.FIND;
+        };
+    }
+
+    private SearchFocus nextSearchFocusHorizontal(SearchFocus focus) {
+        return switch (focus) {
+            case FIND -> SearchFocus.CASE;
+            case CASE -> SearchFocus.WORD;
+            case WORD -> SearchFocus.WILDCARD;
+            case WILDCARD -> SearchFocus.ALL;
+            case ALL -> SearchFocus.REPLACE;
+            case REPLACE -> SearchFocus.NEXT_BUTTON;
+            case NEXT_BUTTON -> SearchFocus.PREV_BUTTON;
+            case PREV_BUTTON -> SearchFocus.REPLACE_BUTTON;
+            case REPLACE_BUTTON -> SearchFocus.ALL_BUTTON;
+            case ALL_BUTTON -> SearchFocus.FIND;
+        };
+    }
+
+    private SearchFocus previousSearchFocusHorizontal(SearchFocus focus) {
+        return switch (focus) {
+            case FIND -> SearchFocus.ALL_BUTTON;
+            case CASE -> SearchFocus.FIND;
+            case WORD -> SearchFocus.CASE;
+            case WILDCARD -> SearchFocus.WORD;
+            case ALL -> SearchFocus.WILDCARD;
+            case REPLACE -> SearchFocus.ALL;
+            case NEXT_BUTTON -> SearchFocus.REPLACE;
+            case PREV_BUTTON -> SearchFocus.NEXT_BUTTON;
+            case REPLACE_BUTTON -> SearchFocus.PREV_BUTTON;
+            case ALL_BUTTON -> SearchFocus.REPLACE_BUTTON;
+        };
+    }
+
+    private SearchFocus verticalSearchFocus(SearchFocus focus, boolean up) {
+        return switch (focus) {
+            case FIND -> up ? SearchFocus.REPLACE : SearchFocus.REPLACE;
+            case CASE -> up ? SearchFocus.NEXT_BUTTON : SearchFocus.NEXT_BUTTON;
+            case WORD -> up ? SearchFocus.PREV_BUTTON : SearchFocus.PREV_BUTTON;
+            case WILDCARD -> up ? SearchFocus.REPLACE_BUTTON : SearchFocus.REPLACE_BUTTON;
+            case ALL -> up ? SearchFocus.ALL_BUTTON : SearchFocus.ALL_BUTTON;
+            case REPLACE -> up ? SearchFocus.FIND : SearchFocus.FIND;
+            case NEXT_BUTTON -> up ? SearchFocus.CASE : SearchFocus.CASE;
+            case PREV_BUTTON -> up ? SearchFocus.WORD : SearchFocus.WORD;
+            case REPLACE_BUTTON -> up ? SearchFocus.WILDCARD : SearchFocus.WILDCARD;
+            case ALL_BUTTON -> up ? SearchFocus.ALL : SearchFocus.ALL;
         };
     }
 
@@ -2367,7 +2710,11 @@ public class TerminalEditorApp {
         CASE,
         WORD,
         WILDCARD,
-        ALL
+        ALL,
+        NEXT_BUTTON,
+        PREV_BUTTON,
+        REPLACE_BUTTON,
+        ALL_BUTTON
     }
 
     private static final class NotificationState {
@@ -2382,6 +2729,18 @@ public class TerminalEditorApp {
         private void success(String message) {
             this.message = message;
             this.style = NOTIFY_SUCCESS_STYLE;
+            this.expiresAtNanos = System.nanoTime() + NOTIFY_DURATION_NANOS;
+        }
+
+        private void info(String message) {
+            this.message = message;
+            this.style = NOTIFY_INFO_STYLE;
+            this.expiresAtNanos = System.nanoTime() + NOTIFY_DURATION_NANOS;
+        }
+
+        private void warning(String message) {
+            this.message = message;
+            this.style = NOTIFY_WARNING_STYLE;
             this.expiresAtNanos = System.nanoTime() + NOTIFY_DURATION_NANOS;
         }
 

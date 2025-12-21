@@ -172,7 +172,7 @@ public class RenderPlanBuilder {
     ) {
         int safeRows = Math.max(rows, 1);
         int safeCols = Math.max(cols, 1);
-        int extraBottomRows = (interactiveBarText == null ? 0 : 1) + (notificationBarText == null ? 0 : 1);
+        int extraBottomRows = lineCount(interactiveBarText) + lineCount(notificationBarText);
         int contentRows = Math.max(0, safeRows - 2 - extraBottomRows);
         boolean needVerticalScrollbar = state.getTopLine() > 0 || model.lineCount() > contentRows;
         int scrollbarWidth = safeCols >= 8 && needVerticalScrollbar ? 1 : 0;
@@ -324,6 +324,19 @@ public class RenderPlanBuilder {
             gutterWidth,
             scrollbarWidth
         );
+    }
+
+    private static int lineCount(String text) {
+        if (text == null || text.isEmpty()) {
+            return 0;
+        }
+        int lines = 1;
+        for (int i = 0; i < text.length(); i++) {
+            if (text.charAt(i) == '\n') {
+                lines++;
+            }
+        }
+        return lines;
     }
 
     private static List<Integer> wrapStarts(String line, int maxVisualWidth, boolean wrapByWords) {

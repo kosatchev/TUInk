@@ -11,7 +11,6 @@ import dev.tuink.core.TextModel;
 import dev.tuink.highlight.regex.RegexHighlighter;
 import dev.tuink.tui.render.CellBuffer;
 import dev.tuink.render.LineHighlighter;
-import dev.tuink.render.Color;
 import dev.tuink.render.RenderPlan;
 import dev.tuink.render.RenderPlanBuilder;
 import dev.tuink.render.Style;
@@ -46,26 +45,6 @@ public class TerminalEditorApp {
     private static final String DEFAULT_FILE_NAME = "untitled.txt";
     private static final String SEARCH_HELP = "Tab focus  Space toggle  Enter next  Ctrl+G prev  Ctrl+R replace  Ctrl+A all  Esc";
     private static final String SAVE_AS_PROMPT = "Save As: ";
-    private static final Style SAVE_PROMPT_STYLE = new Style(Color.BRIGHT_WHITE, Color.RED, false, false);
-    private static final Style TOPBAR_FILENAME_STYLE = new Style(Color.BRIGHT_WHITE, Color.BLUE, true, false);
-    private static final Style MENU_POPUP_STYLE = new Style(Color.BLACK, Color.BRIGHT_WHITE, false, false);
-    private static final Style MENU_SELECTED_STYLE = new Style(Color.BLACK, Color.BRIGHT_YELLOW, false, false);
-    private static final Style MENU_SELECTED_MONO_STYLE = new Style(Color.DEFAULT, Color.DEFAULT, false, false);
-    private static final Style TABBAR_STYLE = new Style(Color.BLACK, Color.BRIGHT_WHITE, false, false);
-    private static final Style TABBAR_MONO_STYLE = new Style(Color.DEFAULT, Color.BRIGHT_WHITE, false, false);
-    private static final Style TABBAR_ACTIVE_STYLE = new Style(Color.BRIGHT_YELLOW, Color.DEFAULT, false, false);
-    private static final Style TABBAR_ACTIVE_MONO_STYLE = new Style(Color.DEFAULT, Color.DEFAULT, false, false);
-    private static final Style FILE_DIALOG_STYLE = new Style(Color.BLACK, Color.BRIGHT_WHITE, false, false);
-    private static final Style FILE_DIALOG_BORDER_STYLE = new Style(Color.BLACK, Color.BRIGHT_WHITE, true, false);
-    private static final Style FILE_DIALOG_TITLE_STYLE = new Style(Color.BRIGHT_WHITE, Color.BLUE, true, false);
-    private static final Style FILE_DIALOG_SELECTED_MONO_STYLE = new Style(Color.DEFAULT, Color.DEFAULT, false, false);
-    private static final Style FILE_DIALOG_SCROLL_TRACK_STYLE = new Style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE, false, false);
-    private static final Style FILE_DIALOG_SCROLL_THUMB_STYLE = new Style(Color.BLACK, Color.BRIGHT_YELLOW, false, false);
-    private static final Style SEARCH_BAR_STYLE = new Style(Color.BRIGHT_WHITE, Color.BLUE, false, false);
-    private static final Style NOTIFY_SUCCESS_STYLE = new Style(Color.BLACK, Color.BRIGHT_GREEN, false, false);
-    private static final Style NOTIFY_INFO_STYLE = new Style(Color.BRIGHT_WHITE, Color.BLUE, false, false);
-    private static final Style NOTIFY_WARNING_STYLE = new Style(Color.BLACK, Color.BRIGHT_YELLOW, false, false);
-    private static final Style NOTIFY_ERROR_STYLE = new Style(Color.BRIGHT_WHITE, Color.RED, false, false);
     private static final long NOTIFY_DURATION_NANOS = 3_000_000_000L;
     private static final long OPEN_DIALOG_DOUBLE_CLICK_NANOS = 450_000_000L;
     private static final String ENABLE_MOUSE_TRACKING = "\u001B[?1000h\u001B[?1002h\u001B[?1006h";
@@ -106,6 +85,8 @@ public class TerminalEditorApp {
         "Ctrl+A               Replace all",
         "Esc                  Close search bar"
     };
+    private UiStyles.Theme theme = UiStyles.Theme.CLASSIC;
+    private UiStyles.Palette styles = UiStyles.forTheme(theme);
 
     public static void main(String[] args) throws Exception {
         new TerminalEditorApp().run(args);
@@ -125,6 +106,7 @@ public class TerminalEditorApp {
             return;
         }
 
+        applyTheme(cli.theme());
         List<EditorTab> tabs = new ArrayList<>();
         tabs.add(newEditorTab());
         int activeTabIndex = 0;
@@ -132,7 +114,7 @@ public class TerminalEditorApp {
         EditorState state = tabs.get(activeTabIndex).state();
         EditorEngine engine = tabs.get(activeTabIndex).engine();
         RenderPlanBuilder renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
-        RenderRasterizer renderer = new RenderRasterizer();
+        RenderRasterizer renderer = new RenderRasterizer(1, theme);
         EditorView editorView = new EditorView();
 
         String statusMessage = "Ctrl+S save | Ctrl+Q quit";
@@ -149,8 +131,19 @@ public class TerminalEditorApp {
         TextField searchQueryInput = new TextField();
         TextField searchReplaceInput = new TextField();
         SearchUiOptions searchUi = SearchUiOptions.DEFAULT;
-        MenuBar topMenu = new MenuBar(MENU_POPUP_STYLE, MENU_SELECTED_STYLE, MENU_SELECTED_MONO_STYLE);
-        TabBar tabBar = new TabBar(TABBAR_STYLE, TABBAR_MONO_STYLE, TABBAR_ACTIVE_STYLE, TABBAR_ACTIVE_MONO_STYLE);
+        MenuBar topMenu = new MenuBar(
+            styles.menuPopup(),
+            styles.menuSelected(),
+            styles.menuTopSelected(),
+            styles.menuSelectedMono()
+        );
+        topMenu.setThemeLabel(theme.label());
+        TabBar tabBar = new TabBar(
+            styles.tabbar(),
+            styles.tabbarMono(),
+            styles.tabbarActive(),
+            styles.tabbarActiveMono()
+        );
         boolean showTabBarSetting = true;
         boolean wrapLinesSetting = false;
         boolean wrapWordsSetting = true;
@@ -261,27 +254,27 @@ public class TerminalEditorApp {
                     if (saveAsMode) {
                         inlinePromptBar = InlinePromptBar.of(
                             buildSaveAsPrompt(saveAsInput),
-                            SAVE_PROMPT_STYLE,
+                            styles.promptAlert(),
                             SAVE_AS_PROMPT.length() + saveAsInput.cursor() + 1
                         );
                     } else if (saveOverwriteConfirmMode) {
                         String prompt = buildOverwritePrompt(pendingOverwritePath);
-                        inlinePromptBar = InlinePromptBar.of(prompt, SAVE_PROMPT_STYLE, prompt.length() + 1);
+                        inlinePromptBar = InlinePromptBar.of(prompt, styles.promptAlert(), prompt.length() + 1);
                     } else if (quitConfirmMode) {
                         String prompt = buildQuitPrompt(countDirtyTabs(tabs));
-                        inlinePromptBar = InlinePromptBar.of(prompt, SAVE_PROMPT_STYLE, prompt.length() + 1);
+                        inlinePromptBar = InlinePromptBar.of(prompt, styles.promptAlert(), prompt.length() + 1);
                     } else if (closeTabConfirmMode) {
                         String prompt = buildCloseTabPrompt(tabs, pendingCloseTabIndex);
-                        inlinePromptBar = InlinePromptBar.of(prompt, SAVE_PROMPT_STYLE, prompt.length() + 1);
+                        inlinePromptBar = InlinePromptBar.of(prompt, styles.promptAlert(), prompt.length() + 1);
                     } else if (searchBar != null) {
                         inlinePromptBar = InlinePromptBar.of(
                             searchBar.text(),
-                            SEARCH_BAR_STYLE,
+                            styles.searchBar(),
                             searchBar.cursorRow(),
                             searchBar.cursorCol()
                         );
                     }
-                    NotificationBar notificationBar = NotificationBar.of(notification.message, notification.style);
+                    NotificationBar notificationBar = NotificationBar.of(notification.message, notification.style());
                     boolean showTabBar = showTabBarSetting && tabs.size() > 1;
                     int overlayRows = inlinePromptBar.height() + notificationBar.height();
                     int contentTopRow = showTabBar ? 2 : 1;
@@ -1485,6 +1478,24 @@ public class TerminalEditorApp {
                                 writer.flush();
                                 statusMessage = mouseModeSetting ? "Mouse mode enabled" : "Mouse mode disabled";
                             }
+                            case TOGGLE_THEME -> {
+                                applyTheme(theme.next());
+                                renderer.setTheme(theme);
+                                topMenu.setStyles(
+                                    styles.menuPopup(),
+                                    styles.menuSelected(),
+                                    styles.menuTopSelected(),
+                                    styles.menuSelectedMono()
+                                );
+                                topMenu.setThemeLabel(theme.label());
+                                tabBar.setStyles(
+                                    styles.tabbar(),
+                                    styles.tabbarMono(),
+                                    styles.tabbarActive(),
+                                    styles.tabbarActiveMono()
+                                );
+                                statusMessage = "Theme: " + theme.label();
+                            }
                             case OPEN_HELP_MENU -> topMenu.openHelp();
                             case SHOW_KEY_HINTS -> {
                                 helpHintsMode = true;
@@ -1656,6 +1667,24 @@ public class TerminalEditorApp {
                             writer.flush();
                             statusMessage = mouseModeSetting ? "Mouse mode enabled" : "Mouse mode disabled";
                         }
+                        case TOGGLE_THEME -> {
+                            applyTheme(theme.next());
+                            renderer.setTheme(theme);
+                            topMenu.setStyles(
+                                styles.menuPopup(),
+                                styles.menuSelected(),
+                                styles.menuTopSelected(),
+                                styles.menuSelectedMono()
+                            );
+                            topMenu.setThemeLabel(theme.label());
+                            tabBar.setStyles(
+                                styles.tabbar(),
+                                styles.tabbarMono(),
+                                styles.tabbarActive(),
+                                styles.tabbarActiveMono()
+                            );
+                            statusMessage = "Theme: " + theme.label();
+                        }
                         case SHOW_KEY_HINTS -> {
                             helpHintsMode = true;
                             statusMessage = "Keyboard hints";
@@ -1786,7 +1815,7 @@ public class TerminalEditorApp {
         int endCol = Math.min(cols, startCol + file.length());
         for (int col = startCol; col < endCol; col++) {
             String grapheme = buffer.get(0, col).grapheme();
-            buffer.set(0, col, grapheme, TOPBAR_FILENAME_STYLE);
+            buffer.set(0, col, grapheme, styles.topbarFilenameHighlight());
         }
     }
 
@@ -1835,7 +1864,7 @@ public class TerminalEditorApp {
             layout.top() + 1,
             layout.left() + 1,
             padRight(pathLine, Math.max(0, layout.width() - 2)),
-            FILE_DIALOG_STYLE,
+            styles.dialog(),
             cols
         );
         tree.draw(
@@ -1846,11 +1875,11 @@ public class TerminalEditorApp {
             layout.listStartRow(),
             layout.listRows(),
             colorEnabled,
-            FILE_DIALOG_STYLE,
-            MENU_SELECTED_STYLE,
-            FILE_DIALOG_SELECTED_MONO_STYLE,
-            FILE_DIALOG_SCROLL_TRACK_STYLE,
-            FILE_DIALOG_SCROLL_THUMB_STYLE
+            styles.dialog(),
+            styles.menuSelected(),
+            styles.dialogSelectedMono(),
+            styles.dialogScrollTrack(),
+            styles.dialogScrollThumb()
         );
 
         OpenDialogButtons buttons = openDialogButtons(layout);
@@ -1858,15 +1887,15 @@ public class TerminalEditorApp {
             buffer,
             cols,
             focus == OpenDialogFocus.OK
-                ? (colorEnabled ? MENU_SELECTED_STYLE : FILE_DIALOG_SELECTED_MONO_STYLE)
-                : FILE_DIALOG_STYLE
+                ? (colorEnabled ? styles.menuSelected() : styles.dialogSelectedMono())
+                : styles.dialog()
         );
         buttons.cancel().draw(
             buffer,
             cols,
             focus == OpenDialogFocus.CANCEL
-                ? (colorEnabled ? MENU_SELECTED_STYLE : FILE_DIALOG_SELECTED_MONO_STYLE)
-                : FILE_DIALOG_STYLE
+                ? (colorEnabled ? styles.menuSelected() : styles.dialogSelectedMono())
+                : styles.dialog()
         );
     }
 
@@ -1897,9 +1926,9 @@ public class TerminalEditorApp {
             layout.width(),
             layout.height(),
             " Open File ",
-            FILE_DIALOG_STYLE,
-            FILE_DIALOG_BORDER_STYLE,
-            FILE_DIALOG_TITLE_STYLE
+            styles.dialog(),
+            styles.dialogBorder(),
+            styles.dialogTitle()
         );
     }
 
@@ -1920,9 +1949,9 @@ public class TerminalEditorApp {
             layout.width(),
             layout.height(),
             " Keyboard Hints ",
-            FILE_DIALOG_STYLE,
-            FILE_DIALOG_BORDER_STYLE,
-            FILE_DIALOG_TITLE_STYLE
+            styles.dialog(),
+            styles.dialogBorder(),
+            styles.dialogTitle()
         );
     }
 
@@ -1950,7 +1979,7 @@ public class TerminalEditorApp {
                 textRow + i,
                 textCol,
                 clipText(HELP_HINT_ROWS[i], textWidth),
-                FILE_DIALOG_STYLE,
+                styles.dialog(),
                 cols
             );
         }
@@ -1958,7 +1987,7 @@ public class TerminalEditorApp {
         close.draw(
             buffer,
             cols,
-            colorEnabled ? MENU_SELECTED_STYLE : FILE_DIALOG_SELECTED_MONO_STYLE
+            colorEnabled ? styles.menuSelected() : styles.dialogSelectedMono()
         );
     }
 
@@ -2717,9 +2746,16 @@ public class TerminalEditorApp {
         ALL_BUTTON
     }
 
-    private static final class NotificationState {
+    private final class NotificationState {
+        private enum Kind {
+            SUCCESS,
+            INFO,
+            WARNING,
+            ERROR
+        }
+
         private String message;
-        private Style style;
+        private Kind kind;
         private long expiresAtNanos;
 
         private boolean visible() {
@@ -2728,32 +2764,44 @@ public class TerminalEditorApp {
 
         private void success(String message) {
             this.message = message;
-            this.style = NOTIFY_SUCCESS_STYLE;
+            this.kind = Kind.SUCCESS;
             this.expiresAtNanos = System.nanoTime() + NOTIFY_DURATION_NANOS;
         }
 
         private void info(String message) {
             this.message = message;
-            this.style = NOTIFY_INFO_STYLE;
+            this.kind = Kind.INFO;
             this.expiresAtNanos = System.nanoTime() + NOTIFY_DURATION_NANOS;
         }
 
         private void warning(String message) {
             this.message = message;
-            this.style = NOTIFY_WARNING_STYLE;
+            this.kind = Kind.WARNING;
             this.expiresAtNanos = System.nanoTime() + NOTIFY_DURATION_NANOS;
         }
 
         private void error(String message) {
             this.message = message;
-            this.style = NOTIFY_ERROR_STYLE;
+            this.kind = Kind.ERROR;
             this.expiresAtNanos = System.nanoTime() + NOTIFY_DURATION_NANOS;
         }
 
         private void clear() {
             this.message = null;
-            this.style = null;
+            this.kind = null;
             this.expiresAtNanos = 0L;
+        }
+
+        private Style style() {
+            if (kind == null) {
+                return null;
+            }
+            return switch (kind) {
+                case SUCCESS -> styles.notifySuccess();
+                case INFO -> styles.notifyInfo();
+                case WARNING -> styles.notifyWarning();
+                case ERROR -> styles.notifyError();
+            };
         }
 
         private void expireIfNeeded() {
@@ -2771,12 +2819,18 @@ public class TerminalEditorApp {
         return file == null ? RegexHighlighter.withDefaults() : RegexHighlighter.forFileName(file.getFileName().toString());
     }
 
+    private void applyTheme(UiStyles.Theme theme) {
+        this.theme = theme == null ? UiStyles.Theme.CLASSIC : theme;
+        this.styles = UiStyles.forTheme(this.theme);
+    }
+
     private CliOptions parseArgs(String[] args) {
         boolean mouseEnabled = true;
         boolean altScreenEnabled = true;
         boolean colorEnabled = true;
         boolean readMode = false;
         boolean showHelp = false;
+        UiStyles.Theme theme = UiStyles.Theme.CLASSIC;
         Path file = null;
 
         for (String arg : args) {
@@ -2787,6 +2841,10 @@ public class TerminalEditorApp {
                 case "--read" -> readMode = true;
                 case "--help", "-h" -> showHelp = true;
                 default -> {
+                    if (arg.startsWith("--theme=")) {
+                        theme = UiStyles.Theme.parse(arg.substring("--theme=".length()));
+                        continue;
+                    }
                     if (arg.startsWith("--")) {
                         throw new IllegalArgumentException("Unknown option: " + arg);
                     }
@@ -2797,7 +2855,7 @@ public class TerminalEditorApp {
                 }
             }
         }
-        return new CliOptions(file, mouseEnabled, altScreenEnabled, colorEnabled, readMode, showHelp);
+        return new CliOptions(file, mouseEnabled, altScreenEnabled, colorEnabled, readMode, showHelp, theme);
     }
 
     private void printUsage() {
@@ -2806,6 +2864,7 @@ public class TerminalEditorApp {
         System.out.println("  --no-mouse       Disable mouse tracking and mouse interactions");
         System.out.println("  --no-alt-screen  Do not use alternate screen buffer");
         System.out.println("  --no-color       Render in monochrome (no ANSI colors, keep text attributes)");
+        System.out.println("  --theme=<name>   UI palette: classic (default), light");
         System.out.println("  --read           Start in reading mode (editing disabled)");
         System.out.println("  --help, -h       Show this help");
     }
@@ -2816,7 +2875,8 @@ public class TerminalEditorApp {
         boolean altScreenEnabled,
         boolean colorEnabled,
         boolean readMode,
-        boolean showHelp
+        boolean showHelp,
+        UiStyles.Theme theme
     ) {
     }
 }

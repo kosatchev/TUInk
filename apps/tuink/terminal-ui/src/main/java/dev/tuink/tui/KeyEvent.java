@@ -53,6 +53,7 @@ public sealed interface KeyEvent permits KeyEvent.ActionEvent, KeyEvent.CharInpu
         TOGGLE_READING_MODE,
         TOGGLE_CONFIRM_ON_CLOSE,
         TOGGLE_MOUSE_MODE,
+        TOGGLE_THEME,
         ESCAPE,
         TAB,
         ARROW_UP,

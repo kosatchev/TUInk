@@ -1,15 +1,16 @@
 package dev.tuink.tui.ui;
 
-import dev.tuink.tui.render.CellBuffer;
-import dev.tuink.render.Color;
 import dev.tuink.render.Style;
+import dev.tuink.tui.UiStyles;
+import dev.tuink.tui.render.CellBuffer;
 
 /**
  * Reusable dropdown menu element with frame, item highlighting and hit-testing.
  */
 final class ContextMenu {
     private static final int MIN_WIDTH = 16;
-    private static final Style DISABLED_ITEM_STYLE = new Style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE, false, false);
+    private static final Style DISABLED_ITEM_STYLE =
+        UiStyles.forTheme(UiStyles.Theme.CLASSIC).contextMenuDisabledItem();
 
     private ContextMenu() {
     }
@@ -30,6 +31,7 @@ final class ContextMenu {
         int topRow,
         int selectedIndex,
         MenuItem[] items,
+        int[] mnemonicIndexes,
         boolean colorEnabled,
         Style popupStyle,
         Style selectedStyle,
@@ -60,7 +62,16 @@ final class ContextMenu {
             }
             int row = topRow + 1 + i;
             drawLine(buffer, row, startCol, "│", popupStyle, cols);
-            drawLine(buffer, row, startCol + 1, content, itemStyle, cols);
+            drawLineWithMnemonic(
+                buffer,
+                row,
+                startCol + 1,
+                content,
+                itemStyle,
+                mnemonicAt(mnemonicIndexes, i),
+                selectable,
+                cols
+            );
             drawLine(buffer, row, startCol + width - 1, "│", popupStyle, cols);
         }
         drawLine(
@@ -94,6 +105,31 @@ final class ContextMenu {
         for (int i = 0; i < text.length() && startCol + i < cols; i++) {
             buffer.set(row, startCol + i, String.valueOf(text.charAt(i)), style);
         }
+    }
+
+    private static void drawLineWithMnemonic(
+        CellBuffer buffer,
+        int row,
+        int startCol,
+        String text,
+        Style style,
+        int mnemonicInLabel,
+        boolean selectable,
+        int cols
+    ) {
+        int mnemonicInContent = mnemonicInLabel >= 0 ? mnemonicInLabel + 1 : -1;
+        Style mnemonicStyle = new Style(style.fg(), style.bg(), style.bold(), true);
+        for (int i = 0; i < text.length() && startCol + i < cols; i++) {
+            Style charStyle = selectable && i == mnemonicInContent ? mnemonicStyle : style;
+            buffer.set(row, startCol + i, String.valueOf(text.charAt(i)), charStyle);
+        }
+    }
+
+    private static int mnemonicAt(int[] mnemonicIndexes, int itemIndex) {
+        if (mnemonicIndexes == null || itemIndex < 0 || itemIndex >= mnemonicIndexes.length) {
+            return -1;
+        }
+        return mnemonicIndexes[itemIndex];
     }
 
     private static String padRight(String text, int width) {

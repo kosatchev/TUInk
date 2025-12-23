@@ -1,10 +1,11 @@
 package dev.tuink.tui.render;
 
-import dev.tuink.render.Color;
 import dev.tuink.render.LineVisual;
 import dev.tuink.render.RenderPlan;
 import dev.tuink.render.Style;
 import dev.tuink.render.StyleSpan;
+import dev.tuink.tui.UiStyles;
+import dev.tuink.tui.UiStyles.Palette;
 import java.util.List;
 
 /**
@@ -12,22 +13,24 @@ import java.util.List;
  */
 public class RenderRasterizer {
     private static final int TAB_WIDTH = 4;
-    private static final Style GUTTER_STYLE = new Style(Color.BRIGHT_BLACK, Color.BLACK, false, false);
-    private static final Style FILEBAR_STYLE = new Style(Color.BRIGHT_WHITE, Color.BLUE, false, false);
-    private static final Style STATUS_STYLE = new Style(Color.BLACK, Color.BRIGHT_WHITE, false, false);
-    private static final Style INTERACTIVE_STYLE = new Style(Color.BLACK, Color.BRIGHT_YELLOW, false, false);
-    private static final Style NOTIFICATION_STYLE = new Style(Color.BLACK, Color.BRIGHT_GREEN, false, false);
-    private static final Style LEADING_WHITESPACE_STYLE = new Style(Color.BRIGHT_BLACK, Color.DEFAULT, false, false);
-    private static final Style SCROLL_TRACK_STYLE = new Style(Color.BRIGHT_BLACK, Color.DEFAULT, false, false);
-    private static final Style SCROLL_THUMB_STYLE = new Style(Color.BRIGHT_WHITE, Color.DEFAULT, false, false);
+    private Palette styles;
     private final int contentTopRow;
 
     public RenderRasterizer() {
-        this(1);
+        this(1, UiStyles.Theme.CLASSIC);
     }
 
     public RenderRasterizer(int contentTopRow) {
+        this(contentTopRow, UiStyles.Theme.CLASSIC);
+    }
+
+    public RenderRasterizer(int contentTopRow, UiStyles.Theme theme) {
         this.contentTopRow = Math.max(1, contentTopRow);
+        this.styles = UiStyles.forTheme(theme);
+    }
+
+    public void setTheme(UiStyles.Theme theme) {
+        this.styles = UiStyles.forTheme(theme);
     }
 
     public CellBuffer rasterize(RenderPlan plan, int rows, int cols) {
@@ -45,18 +48,18 @@ public class RenderRasterizer {
             if (screenRow >= rows) {
                 break;
             }
-            drawText(buffer, screenRow, 0, line.gutter(), GUTTER_STYLE, contentCols);
+            drawText(buffer, screenRow, 0, line.gutter(), styles.renderGutter(), contentCols);
             drawHighlightedText(buffer, screenRow, plan.gutterWidth(), line.text(), line.spans(), contentCols);
         }
 
         int statusRow = Math.max(0, rows - 1);
 
-        drawText(buffer, 0, 0, truncateOrPad(plan.topBarText(), cols), FILEBAR_STYLE, cols);
-        drawText(buffer, statusRow, 0, truncateOrPad(plan.bottomBarText(), cols), STATUS_STYLE, cols);
+        drawText(buffer, 0, 0, truncateOrPad(plan.topBarText(), cols), styles.renderTopbar(), cols);
+        drawText(buffer, statusRow, 0, truncateOrPad(plan.bottomBarText(), cols), styles.renderStatus(), cols);
         int overlayBottomRow = rows - 2;
         int overlayTopRow = overlayBottomRow;
         if (plan.interactiveBarText() != null && overlayBottomRow >= 0) {
-            Style style = plan.interactiveBarStyle() == null ? INTERACTIVE_STYLE : plan.interactiveBarStyle();
+            Style style = plan.interactiveBarStyle() == null ? styles.renderInteractive() : plan.interactiveBarStyle();
             String[] lines = splitLines(plan.interactiveBarText());
             for (int i = lines.length - 1; i >= 0; i--) {
                 int row = overlayBottomRow - (lines.length - 1 - i);
@@ -68,7 +71,7 @@ public class RenderRasterizer {
             overlayTopRow = overlayBottomRow - lines.length;
         }
         if (plan.notificationBarText() != null && overlayTopRow >= 0) {
-            Style style = plan.notificationBarStyle() == null ? NOTIFICATION_STYLE : plan.notificationBarStyle();
+            Style style = plan.notificationBarStyle() == null ? styles.renderNotification() : plan.notificationBarStyle();
             String[] lines = splitLines(plan.notificationBarText());
             for (int i = lines.length - 1; i >= 0; i--) {
                 int row = overlayTopRow - (lines.length - 1 - i);
@@ -103,9 +106,9 @@ public class RenderRasterizer {
             Math.max(1, plan.totalLines()),
             Math.max(0, plan.topLine()),
             "│",
-            SCROLL_TRACK_STYLE,
+            styles.renderScrollTrack(),
             "█",
-            SCROLL_THUMB_STYLE
+            styles.renderScrollThumb()
         );
     }
 
@@ -135,9 +138,9 @@ public class RenderRasterizer {
             Math.max(visibleCols, plan.totalColumns()),
             Math.max(0, plan.leftVisualColumn()),
             "─",
-            SCROLL_TRACK_STYLE,
+            styles.renderScrollTrack(),
             "█",
-            SCROLL_THUMB_STYLE
+            styles.renderScrollThumb()
         );
     }
 
@@ -149,17 +152,17 @@ public class RenderRasterizer {
         List<StyleSpan> spans,
         int cols
     ) {
-        Style[] styles = new Style[text.length()];
+        Style[] charStyles = new Style[text.length()];
         String[] graphemes = new String[text.length()];
-        for (int i = 0; i < styles.length; i++) {
-            styles[i] = Style.DEFAULT;
+        for (int i = 0; i < charStyles.length; i++) {
+            charStyles[i] = Style.DEFAULT;
             graphemes[i] = String.valueOf(text.charAt(i));
         }
         for (StyleSpan span : spans) {
             int from = Math.max(0, span.start());
             int to = Math.min(text.length(), span.end());
             for (int i = from; i < to; i++) {
-                styles[i] = span.style();
+                charStyles[i] = span.style();
             }
         }
 
@@ -168,15 +171,15 @@ public class RenderRasterizer {
             char ch = text.charAt(i);
             if (ch == ' ') {
                 graphemes[i] = "·";
-                if (styles[i].equals(Style.DEFAULT)) {
-                    styles[i] = LEADING_WHITESPACE_STYLE;
+                if (charStyles[i].equals(Style.DEFAULT)) {
+                    charStyles[i] = styles.renderLeadingWhitespace();
                 }
                 continue;
             }
             if (ch == '\t') {
                 graphemes[i] = "»";
-                if (styles[i].equals(Style.DEFAULT)) {
-                    styles[i] = LEADING_WHITESPACE_STYLE;
+                if (charStyles[i].equals(Style.DEFAULT)) {
+                    charStyles[i] = styles.renderLeadingWhitespace();
                 }
                 continue;
             }
@@ -190,21 +193,21 @@ public class RenderRasterizer {
                 int relativeCol = Math.max(0, outCol - startCol);
                 int tabAdvance = TAB_WIDTH - (relativeCol % TAB_WIDTH);
                 if ("»".equals(graphemes[i])) {
-                    buffer.set(row, outCol, "»", styles[i]);
+                    buffer.set(row, outCol, "»", charStyles[i]);
                     outCol++;
                     for (int j = 1; j < tabAdvance && outCol < cols; j++) {
-                        buffer.set(row, outCol, " ", styles[i]);
+                        buffer.set(row, outCol, " ", charStyles[i]);
                         outCol++;
                     }
                 } else {
                     for (int j = 0; j < tabAdvance && outCol < cols; j++) {
-                        buffer.set(row, outCol, " ", styles[i]);
+                        buffer.set(row, outCol, " ", charStyles[i]);
                         outCol++;
                     }
                 }
                 continue;
             }
-            buffer.set(row, outCol, graphemes[i], styles[i]);
+            buffer.set(row, outCol, graphemes[i], charStyles[i]);
             outCol++;
         }
     }

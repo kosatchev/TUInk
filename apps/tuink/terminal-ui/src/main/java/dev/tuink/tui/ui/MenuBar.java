@@ -14,14 +14,27 @@ import java.util.Set;
  */
 public final class MenuBar {
     private final Controller controller = new Controller();
-    private final Style popupStyle;
-    private final Style selectedStyle;
-    private final Style selectedMonoStyle;
+    private Style popupStyle;
+    private Style popupSelectedStyle;
+    private Style topSelectedStyle;
+    private Style selectedMonoStyle;
 
-    public MenuBar(Style popupStyle, Style selectedStyle, Style selectedMonoStyle) {
+    public MenuBar(Style popupStyle, Style popupSelectedStyle, Style topSelectedStyle, Style selectedMonoStyle) {
         this.popupStyle = popupStyle;
-        this.selectedStyle = selectedStyle;
+        this.popupSelectedStyle = popupSelectedStyle;
+        this.topSelectedStyle = topSelectedStyle;
         this.selectedMonoStyle = selectedMonoStyle;
+    }
+
+    public void setStyles(Style popupStyle, Style popupSelectedStyle, Style topSelectedStyle, Style selectedMonoStyle) {
+        this.popupStyle = popupStyle;
+        this.popupSelectedStyle = popupSelectedStyle;
+        this.topSelectedStyle = topSelectedStyle;
+        this.selectedMonoStyle = selectedMonoStyle;
+    }
+
+    public void setThemeLabel(String label) {
+        controller.setThemeLabel(label);
     }
 
     public void setOpenTabs(List<OpenTab> openTabs, int activeTabIndex) {
@@ -77,9 +90,10 @@ public final class MenuBar {
             controller.active(),
             controller.selectedIndex(),
             activeItems,
+            controller.activeMnemonics(),
             colorEnabled,
             popupStyle,
-            selectedStyle,
+            popupSelectedStyle,
             selectedMonoStyle
         );
         View.drawTopSelection(
@@ -88,7 +102,7 @@ public final class MenuBar {
             controller.isOpen(),
             controller.active(),
             colorEnabled,
-            selectedStyle,
+            topSelectedStyle,
             selectedMonoStyle
         );
     }
@@ -231,6 +245,7 @@ public final class MenuBar {
         private boolean readingModeEnabled;
         private boolean confirmOnCloseEnabled = true;
         private boolean mouseModeEnabled = true;
+        private String themeLabel = "Classic";
         private int[] activeMnemonics = new int[0];
 
         private void setOpenTabs(List<OpenTab> tabs, int activeTabIndex) {
@@ -286,6 +301,13 @@ public final class MenuBar {
 
         private void setMouseModeEnabled(boolean enabled) {
             this.mouseModeEnabled = enabled;
+            if (open && active == MenuId.SETTINGS) {
+                rebuildMnemonics();
+            }
+        }
+
+        private void setThemeLabel(String label) {
+            this.themeLabel = label == null || label.isBlank() ? "Classic" : label;
             if (open && active == MenuId.SETTINGS) {
                 rebuildMnemonics();
             }
@@ -486,6 +508,10 @@ public final class MenuBar {
             return mnemonic >= 0 ? mnemonic : 1;
         }
 
+        private int[] activeMnemonics() {
+            return activeMnemonics.clone();
+        }
+
         private int mnemonicAt(int itemIndex) {
             if (itemIndex < 0 || itemIndex >= activeMnemonics.length) {
                 return -1;
@@ -603,7 +629,8 @@ public final class MenuBar {
             if (menu == MenuId.SETTINGS) {
                 return new MenuItem[] {
                     new MenuItem("[" + (confirmOnCloseEnabled ? "x" : " ") + "] Confirm on close", true),
-                    new MenuItem("[" + (mouseModeEnabled ? "x" : " ") + "] Mouse mode", true)
+                    new MenuItem("[" + (mouseModeEnabled ? "x" : " ") + "] Mouse mode", true),
+                    new MenuItem("[>] Theme: " + themeLabel, true)
                 };
             }
             if (menu == MenuId.HELP) {
@@ -682,6 +709,7 @@ public final class MenuBar {
                 return switch (itemIndex) {
                     case 0 -> KeyEvent.Action.TOGGLE_CONFIRM_ON_CLOSE;
                     case 1 -> KeyEvent.Action.TOGGLE_MOUSE_MODE;
+                    case 2 -> KeyEvent.Action.TOGGLE_THEME;
                     default -> null;
                 };
             }
@@ -778,6 +806,7 @@ public final class MenuBar {
             MenuId menu,
             int selectedIndex,
             MenuItem[] items,
+            int[] mnemonicIndexes,
             boolean colorEnabled,
             Style popupStyle,
             Style selectedStyle,
@@ -791,6 +820,7 @@ public final class MenuBar {
                 POPUP_TOP_ROW,
                 selectedIndex,
                 items,
+                mnemonicIndexes,
                 colorEnabled,
                 popupStyle,
                 selectedStyle,

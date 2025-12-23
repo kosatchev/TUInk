@@ -10,10 +10,10 @@ import java.util.List;
  * UI element that renders open editor tabs on a single row.
  */
 public final class TabBar {
-    private final Style baseStyle;
-    private final Style baseMonoStyle;
-    private final Style activeStyle;
-    private final Style activeMonoStyle;
+    private Style baseStyle;
+    private Style baseMonoStyle;
+    private Style activeStyle;
+    private Style activeMonoStyle;
     private final List<TabHit> lastHits = new ArrayList<>();
     private int firstVisibleIndex;
     private boolean lastCanScrollLeft;
@@ -21,6 +21,13 @@ public final class TabBar {
     private int lastCols;
 
     public TabBar(Style baseStyle, Style baseMonoStyle, Style activeStyle, Style activeMonoStyle) {
+        this.baseStyle = baseStyle;
+        this.baseMonoStyle = baseMonoStyle;
+        this.activeStyle = activeStyle;
+        this.activeMonoStyle = activeMonoStyle;
+    }
+
+    public void setStyles(Style baseStyle, Style baseMonoStyle, Style activeStyle, Style activeMonoStyle) {
         this.baseStyle = baseStyle;
         this.baseMonoStyle = baseMonoStyle;
         this.activeStyle = activeStyle;

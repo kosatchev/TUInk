@@ -23,7 +23,7 @@ Notes:
 ## 2) JLine
 
 Artifact:
-- `org.jline:jline:3.26.1`
+- `org.jline:jline:3.30.6`
 
 License:
 - BSD 3-Clause License

@@ -12,15 +12,15 @@ public final class UiStyles {
 
     public static Palette forTheme(Theme theme) {
         return switch (theme) {
-            case CLASSIC -> classicPalette();
-            case BLUE -> bluePalette();
+            case CLASSIC -> bluePalette();
+            case CYAN -> cyanPalette();
             case LIGHT -> lightPalette();
         };
     }
 
     public enum Theme {
-        CLASSIC("Classic"),
-        BLUE("Blue"),
+        CLASSIC("Blue"),
+        CYAN("Cyan"),
         LIGHT("Light");
 
         private final String label;
@@ -35,8 +35,8 @@ public final class UiStyles {
 
         public Theme next() {
             return switch (this) {
-                case CLASSIC -> BLUE;
-                case BLUE -> LIGHT;
+                case CLASSIC -> CYAN;
+                case CYAN -> LIGHT;
                 case LIGHT -> CLASSIC;
             };
         }
@@ -87,32 +87,32 @@ public final class UiStyles {
     ) {
     }
 
-    private static Palette classicPalette() {
+    private static Palette bluePalette() {
         return new Palette(
             style(Color.BRIGHT_WHITE, Color.RED),
-            style(Color.BRIGHT_WHITE, Color.BRIGHT_CYAN, true, false),
+            style(Color.BRIGHT_WHITE, Color.BLUE, true, false),
             style(Color.BLACK, Color.BRIGHT_WHITE),
-            style(Color.BRIGHT_WHITE, Color.BRIGHT_CYAN),
-            style(Color.BRIGHT_CYAN, Color.BRIGHT_WHITE),
+            style(Color.BRIGHT_WHITE, Color.BLUE),
+            style(Color.BLUE, Color.BRIGHT_WHITE),
             style(Color.DEFAULT, Color.DEFAULT),
             style(Color.BLACK, Color.BRIGHT_WHITE),
             style(Color.DEFAULT, Color.BRIGHT_WHITE),
-            style(Color.BRIGHT_CYAN, Color.DEFAULT),
+            style(Color.BLUE, Color.DEFAULT),
             style(Color.DEFAULT, Color.DEFAULT),
             style(Color.BLACK, Color.BRIGHT_WHITE),
             style(Color.BLACK, Color.BRIGHT_WHITE, true, false),
-            style(Color.BRIGHT_WHITE, Color.BRIGHT_CYAN, true, false),
+            style(Color.BRIGHT_WHITE, Color.BLUE, true, false),
             style(Color.DEFAULT, Color.DEFAULT),
             style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE),
             style(Color.BLACK, Color.BRIGHT_YELLOW),
-            style(Color.BRIGHT_WHITE, Color.BRIGHT_CYAN),
+            style(Color.BRIGHT_WHITE, Color.BLUE),
             style(Color.BLACK, Color.BRIGHT_GREEN),
-            style(Color.BRIGHT_WHITE, Color.BRIGHT_CYAN),
+            style(Color.BRIGHT_WHITE, Color.BLUE),
             style(Color.BLACK, Color.BRIGHT_YELLOW),
             style(Color.BRIGHT_WHITE, Color.RED),
             style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE),
             style(Color.BRIGHT_BLACK, Color.BLACK),
-            style(Color.BRIGHT_WHITE, Color.BRIGHT_CYAN),
+            style(Color.BRIGHT_WHITE, Color.BLUE),
             style(Color.BLACK, Color.BRIGHT_WHITE),
             style(Color.BLACK, Color.BRIGHT_YELLOW),
             style(Color.BLACK, Color.BRIGHT_GREEN),
@@ -122,32 +122,32 @@ public final class UiStyles {
         );
     }
 
-    private static Palette bluePalette() {
+    private static Palette cyanPalette() {
         return new Palette(
             style(Color.BRIGHT_WHITE, Color.RED),
-            style(Color.BRIGHT_WHITE, Color.BRIGHT_BLUE, true, false),
+            style(Color.BRIGHT_WHITE, Color.CYAN, true, false),
             style(Color.BLACK, Color.BRIGHT_WHITE),
-            style(Color.BRIGHT_WHITE, Color.BRIGHT_BLUE),
-            style(Color.BRIGHT_BLUE, Color.BRIGHT_WHITE),
+            style(Color.BRIGHT_WHITE, Color.CYAN),
+            style(Color.CYAN, Color.BRIGHT_WHITE),
             style(Color.DEFAULT, Color.DEFAULT),
             style(Color.BLACK, Color.BRIGHT_WHITE),
             style(Color.DEFAULT, Color.BRIGHT_WHITE),
-            style(Color.BRIGHT_BLUE, Color.DEFAULT),
+            style(Color.CYAN, Color.DEFAULT),
             style(Color.DEFAULT, Color.DEFAULT),
             style(Color.BLACK, Color.BRIGHT_WHITE),
             style(Color.BLACK, Color.BRIGHT_WHITE, true, false),
-            style(Color.BRIGHT_WHITE, Color.BRIGHT_BLUE, true, false),
+            style(Color.BRIGHT_WHITE, Color.CYAN, true, false),
             style(Color.DEFAULT, Color.DEFAULT),
             style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE),
             style(Color.BLACK, Color.BRIGHT_YELLOW),
-            style(Color.BRIGHT_WHITE, Color.BRIGHT_BLUE),
+            style(Color.BRIGHT_WHITE, Color.CYAN),
             style(Color.BLACK, Color.BRIGHT_GREEN),
-            style(Color.BRIGHT_WHITE, Color.BRIGHT_BLUE),
+            style(Color.BRIGHT_WHITE, Color.CYAN),
             style(Color.BLACK, Color.BRIGHT_YELLOW),
             style(Color.BRIGHT_WHITE, Color.RED),
             style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE),
             style(Color.BRIGHT_BLACK, Color.BLACK),
-            style(Color.BRIGHT_WHITE, Color.BRIGHT_BLUE),
+            style(Color.BRIGHT_WHITE, Color.CYAN),
             style(Color.BLACK, Color.BRIGHT_WHITE),
             style(Color.BLACK, Color.BRIGHT_YELLOW),
             style(Color.BLACK, Color.BRIGHT_GREEN),

@@ -1,8 +1,10 @@
 package dev.tuink.tui;
 
+import dev.tuink.tui.flow.SearchFocus;
+
 final class UiSessionState {
     boolean searchMode;
-    TerminalEditorApp.SearchFocus searchFocus;
+    SearchFocus searchFocus;
     boolean showTabBarSetting;
     boolean wrapLinesSetting;
     boolean wrapWordsSetting;
@@ -13,7 +15,7 @@ final class UiSessionState {
 
     static UiSessionState from(
         boolean searchMode,
-        TerminalEditorApp.SearchFocus searchFocus,
+        SearchFocus searchFocus,
         boolean showTabBarSetting,
         boolean wrapLinesSetting,
         boolean wrapWordsSetting,

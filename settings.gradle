@@ -5,8 +5,9 @@ plugins {
 rootProject.name = 'tuink'
 
 // Physical ownership groups are independent of the stable Gradle project paths.
-// Preserve the existing Gradle project paths and commands.
+// Keep commands such as :app:run and :core:test compatible with existing clients.
 def projectDirectories = [
+    ':app': 'apps/tuink/launcher',
     ':tui': 'apps/tuink/terminal-ui',
     ':render': 'apps/tuink/terminal-rendering',
     ':core': 'libs/editor/engine',

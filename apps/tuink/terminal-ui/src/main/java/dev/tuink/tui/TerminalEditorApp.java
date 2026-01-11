@@ -9,6 +9,8 @@ import dev.tuink.core.TabSearch;
 import dev.tuink.core.TabSessions;
 import dev.tuink.core.TextModel;
 import dev.tuink.highlight.regex.RegexHighlighter;
+import dev.tuink.tui.flow.SearchFocus;
+import dev.tuink.tui.flow.UiModalState;
 import dev.tuink.tui.render.CellBuffer;
 import dev.tuink.render.LineHighlighter;
 import dev.tuink.render.RenderPlan;
@@ -114,22 +116,18 @@ public class TerminalEditorApp {
         applyTheme(cli.theme());
         List<EditorTab> tabs = new ArrayList<>();
         tabs.add(newEditorTab());
-        int activeTabIndex = 0;
-        TextModel model = tabs.get(activeTabIndex).model();
-        EditorState state = tabs.get(activeTabIndex).state();
-        EditorEngine engine = tabs.get(activeTabIndex).engine();
-        RenderPlanBuilder renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
+        SessionContext sessionContext = new SessionContext(tabs, 0);
+        int activeTabIndex = sessionContext.activeTabIndex();
+        TextModel model = sessionContext.model();
+        EditorState state = sessionContext.state();
+        EditorEngine engine = sessionContext.engine();
+        RenderPlanBuilder renderPlanBuilder = sessionContext.renderPlanBuilder();
         RenderRasterizer renderer = new RenderRasterizer(1, theme);
         EditorView editorView = new EditorView();
 
         String statusMessage = "Ctrl+S save | Ctrl+Q quit";
         NotificationState notification = new NotificationState();
-        boolean quitConfirmMode = false;
-        boolean closeTabConfirmMode = false;
-        int pendingCloseTabIndex = -1;
-        boolean saveAsMode = false;
-        boolean saveOverwriteConfirmMode = false;
-        Path pendingOverwritePath = null;
+        UiModalState modalState = UiModalState.none();
         TextField saveAsInput = new TextField();
         UiSessionState uiSessionState = UiSessionState.from(
             false,
@@ -169,7 +167,7 @@ public class TerminalEditorApp {
             try {
                 engine.open(file);
                 renderPlanBuilder = new RenderPlanBuilder(resolveHighlighter(file));
-                tabs.set(activeTabIndex, tabs.get(activeTabIndex).withRenderPlanBuilder(renderPlanBuilder));
+                sessionContext.replaceActiveRenderPlanBuilder(renderPlanBuilder);
                 statusMessage = "Opened " + file;
             } catch (IOException e) {
                 statusMessage = "Open failed: " + e.getMessage();
@@ -242,6 +240,11 @@ public class TerminalEditorApp {
                 boolean running = true;
                 boolean needsRender = true;
                 while (running && !stopRequested.get()) {
+                    activeTabIndex = sessionContext.activeTabIndex();
+                    model = sessionContext.model();
+                    state = sessionContext.state();
+                    engine = sessionContext.engine();
+                    renderPlanBuilder = sessionContext.renderPlanBuilder();
                     if (notification.expireIfNeeded()) {
                         needsRender = true;
                     }
@@ -270,6 +273,13 @@ public class TerminalEditorApp {
                         searchMatchCount,
                         tabs.size()
                     );
+                    boolean saveAsMode = modalState.isSaveAs();
+                    boolean saveOverwriteConfirmMode = modalState.isSaveOverwriteConfirm();
+                    boolean quitConfirmMode = modalState.isQuitConfirm();
+                    boolean closeTabConfirmMode = modalState.isCloseTabConfirm();
+                    boolean helpHintsMode = modalState.isHelpHints();
+                    Path pendingOverwritePath = modalState.pendingOverwritePath();
+                    int pendingCloseTabIndex = modalState.pendingCloseTabIndex();
                     InlinePromptBar inlinePromptBar = InlinePromptBar.hidden();
                     if (saveAsMode) {
                         inlinePromptBar = InlinePromptBar.of(
@@ -388,7 +398,7 @@ public class TerminalEditorApp {
                         openFileMode,
                         openFileTree,
                         openFileFocus,
-                        uiSessionState.helpHintsMode,
+                        helpHintsMode,
                         previous,
                         plan,
                         lastCursorRow,
@@ -417,7 +427,7 @@ public class TerminalEditorApp {
                         if (!uiSessionState.mouseModeSetting) {
                             continue;
                         }
-                        if (uiSessionState.helpHintsMode) {
+                        if (helpHintsMode) {
                             if (mouse.kind() == KeyEvent.MouseKind.PRESS
                                 && mouse.button() == KeyEvent.MouseButton.LEFT) {
                                 HelpDialogLayout layout = helpDialogLayout(rows, cols);
@@ -425,7 +435,7 @@ public class TerminalEditorApp {
                                 Button close = helpCloseButton(layout);
                                 if (frame.closeButton().hit(mouse.row(), mouse.col())
                                     || close.hit(mouse.row(), mouse.col())) {
-                                    uiSessionState.helpHintsMode = false;
+                                    modalState = UiModalState.none();
                                 }
                             }
                             continue;
@@ -441,8 +451,7 @@ public class TerminalEditorApp {
                                     tabBar.scrollLeft();
                                     break;
                                 }
-                                if (!saveAsMode && !saveOverwriteConfirmMode
-                                    && !quitConfirmMode && !closeTabConfirmMode && !uiSessionState.searchMode) {
+                                if (modalState.isNone() && !uiSessionState.searchMode) {
                                     engine.pageUp(Math.max(1, contentRows / 2));
                                 }
                             }
@@ -455,8 +464,7 @@ public class TerminalEditorApp {
                                     tabBar.scrollRight(tabItems);
                                     break;
                                 }
-                                if (!saveAsMode && !saveOverwriteConfirmMode
-                                    && !quitConfirmMode && !closeTabConfirmMode && !uiSessionState.searchMode) {
+                                if (modalState.isNone() && !uiSessionState.searchMode) {
                                     engine.pageDown(Math.max(1, contentRows / 2));
                                 }
                             }
@@ -504,11 +512,7 @@ public class TerminalEditorApp {
                                             openFileFocus = mouseResult.focus();
                                             openFileScrollDrag = mouseResult.dragAxis();
                                             if (mouseResult.activeTabIndex() != activeTabIndex) {
-                                                activeTabIndex = mouseResult.activeTabIndex();
-                                                model = tabs.get(activeTabIndex).model();
-                                                state = tabs.get(activeTabIndex).state();
-                                                engine = tabs.get(activeTabIndex).engine();
-                                                renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
+                                                sessionContext.activate(mouseResult.activeTabIndex());
                                             }
                                             if (mouseResult.statusMessage() != null && !mouseResult.statusMessage().isBlank()) {
                                                 statusMessage = mouseResult.statusMessage();
@@ -524,7 +528,7 @@ public class TerminalEditorApp {
                                     TabBar.Hit tabHit = showTabBar
                                         ? tabBar.hit(mouse.row(), mouse.col())
                                         : new TabBar.Hit(false, -1, false, false, false);
-                                    if (closeTabConfirmMode && tabHit.consumed()) {
+                                    if (modalState.isCloseTabConfirm() && tabHit.consumed()) {
                                         if (tabHit.scrollLeft()) {
                                             tabBar.scrollLeft();
                                             editorView.cancelMouseSelection();
@@ -537,33 +541,22 @@ public class TerminalEditorApp {
                                         }
                                         int clickedTabIndex = tabHit.tabIndex();
                                         if (tabHit.closeButton() && clickedTabIndex >= 0 && clickedTabIndex < tabs.size()) {
-                                            if (clickedTabIndex == pendingCloseTabIndex) {
-                                                activeTabIndex = closeTab(tabs, activeTabIndex, pendingCloseTabIndex);
-                                                model = tabs.get(activeTabIndex).model();
-                                                state = tabs.get(activeTabIndex).state();
-                                                engine = tabs.get(activeTabIndex).engine();
-                                                renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
-                                                closeTabConfirmMode = false;
-                                                pendingCloseTabIndex = -1;
+                                            if (clickedTabIndex == modalState.pendingCloseTabIndex()) {
+                                                sessionContext.activate(closeTab(tabs, activeTabIndex, modalState.pendingCloseTabIndex()));
+                                                modalState = UiModalState.none();
                                                 statusMessage = "Closed tab";
                                             } else if (tabs.get(clickedTabIndex).state().isDirty()) {
-                                                pendingCloseTabIndex = clickedTabIndex;
+                                                modalState = UiModalState.closeTabConfirm(clickedTabIndex);
                                             } else {
-                                                activeTabIndex = closeTab(tabs, activeTabIndex, clickedTabIndex);
-                                                model = tabs.get(activeTabIndex).model();
-                                                state = tabs.get(activeTabIndex).state();
-                                                engine = tabs.get(activeTabIndex).engine();
-                                                renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
-                                                closeTabConfirmMode = false;
-                                                pendingCloseTabIndex = -1;
+                                                sessionContext.activate(closeTab(tabs, activeTabIndex, clickedTabIndex));
+                                                modalState = UiModalState.none();
                                                 statusMessage = "Closed tab";
                                             }
                                         }
                                         editorView.cancelMouseSelection();
                                         continue;
                                     }
-                                    if (tabHit.consumed() && !saveAsMode && !saveOverwriteConfirmMode
-                                        && !quitConfirmMode && !closeTabConfirmMode && !uiSessionState.searchMode) {
+                                    if (tabHit.consumed() && modalState.isNone() && !uiSessionState.searchMode) {
                                         if (tabHit.scrollLeft()) {
                                             tabBar.scrollLeft();
                                             editorView.cancelMouseSelection();
@@ -579,23 +572,18 @@ public class TerminalEditorApp {
                                             if (tabHit.closeButton()) {
                                                 if (tabs.get(clickedTabIndex).state().isDirty()) {
                                                     if (uiSessionState.confirmOnCloseSetting) {
-                                                        closeTabConfirmMode = true;
-                                                        pendingCloseTabIndex = clickedTabIndex;
+                                                        modalState = UiModalState.closeTabConfirm(clickedTabIndex);
                                                     } else {
-                                                        activeTabIndex = closeTab(tabs, activeTabIndex, clickedTabIndex);
+                                                        sessionContext.activate(closeTab(tabs, activeTabIndex, clickedTabIndex));
                                                         statusMessage = "Closed tab";
                                                     }
                                                 } else {
-                                                    activeTabIndex = closeTab(tabs, activeTabIndex, clickedTabIndex);
+                                                    sessionContext.activate(closeTab(tabs, activeTabIndex, clickedTabIndex));
                                                     statusMessage = "Closed tab";
                                                 }
                                             } else {
-                                                activeTabIndex = clickedTabIndex;
+                                                sessionContext.activate(clickedTabIndex);
                                             }
-                                            model = tabs.get(activeTabIndex).model();
-                                            state = tabs.get(activeTabIndex).state();
-                                            engine = tabs.get(activeTabIndex).engine();
-                                            renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
                                             topMenu.close();
                                         }
                                         editorView.cancelMouseSelection();
@@ -605,12 +593,8 @@ public class TerminalEditorApp {
                                     if (menuMouse.consumed()) {
                                         Integer tabActivation = topMenu.consumeTabActivationRequest();
                                         if (tabActivation != null && tabActivation >= 0 && tabActivation < tabs.size()) {
-                                            activeTabIndex = tabActivation;
-                                            model = tabs.get(activeTabIndex).model();
-                                            state = tabs.get(activeTabIndex).state();
-                                            engine = tabs.get(activeTabIndex).engine();
-                                            renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
-                                            statusMessage = "Tab " + (activeTabIndex + 1) + "/" + tabs.size();
+                                            sessionContext.activate(tabActivation);
+                                            statusMessage = "Tab " + (tabActivation + 1) + "/" + tabs.size();
                                             editorView.cancelMouseSelection();
                                             continue;
                                         }
@@ -661,8 +645,7 @@ public class TerminalEditorApp {
                                         editorView.cancelMouseSelection();
                                         continue;
                                     }
-                                    if (!saveAsMode && !saveOverwriteConfirmMode
-                                        && !quitConfirmMode && !closeTabConfirmMode && !uiSessionState.searchMode) {
+                                    if (modalState.isNone() && !uiSessionState.searchMode) {
                                         EditorView.ScrollPointerResult scrollPointer = editorView.handleScrollbarPointer(
                                             mouse.row(),
                                             mouse.col(),
@@ -709,8 +692,7 @@ public class TerminalEditorApp {
                                         continue;
                                     }
                                 }
-                                if (!saveAsMode && !saveOverwriteConfirmMode
-                                    && !quitConfirmMode && !closeTabConfirmMode && !uiSessionState.searchMode) {
+                                if (modalState.isNone() && !uiSessionState.searchMode) {
                                     if (mouse.button() == KeyEvent.MouseButton.LEFT
                                         && editorScrollDrag != EditorView.ScrollAxis.NONE) {
                                         editorView.handleScrollbarPointer(
@@ -775,11 +757,7 @@ public class TerminalEditorApp {
                         openFileMode = openFileResult.openFileMode();
                         openFileFocus = openFileResult.focus();
                         if (openFileResult.activeTabIndex() != activeTabIndex) {
-                            activeTabIndex = openFileResult.activeTabIndex();
-                            model = tabs.get(activeTabIndex).model();
-                            state = tabs.get(activeTabIndex).state();
-                            engine = tabs.get(activeTabIndex).engine();
-                            renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
+                            sessionContext.activate(openFileResult.activeTabIndex());
                         }
                         if (openFileResult.statusMessage() != null && !openFileResult.statusMessage().isBlank()) {
                             statusMessage = openFileResult.statusMessage();
@@ -787,228 +765,127 @@ public class TerminalEditorApp {
                         continue;
                     }
 
-                    if (uiSessionState.helpHintsMode) {
-                        if (key instanceof KeyEvent.CharInput) {
+                    if (modalState.isHelpHints()) {
+                        HelpHintsController.Result helpHintsResult = HelpHintsController.handle(
+                            key,
+                            true
+                        );
+                        if (helpHintsResult.consumed()) {
+                            modalState = helpHintsResult.helpHintsMode() ? UiModalState.helpHints() : UiModalState.none();
                             continue;
                         }
-                        KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
-                        switch (action) {
-                            case ESCAPE, ENTER, SHOW_KEY_HINTS -> uiSessionState.helpHintsMode = false;
-                            default -> {
-                                // Ignore other keys in help modal.
-                            }
-                        }
-                        continue;
                     }
 
-                    if (saveAsMode) {
-                        if (key instanceof KeyEvent.CharInput charInput) {
-                            notification.clear();
-                            saveAsInput.insert(charInput.ch());
-                            continue;
-                        }
-
-                        KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
-                        switch (action) {
-                            case BACKSPACE -> {
-                                notification.clear();
-                                saveAsInput.backspace();
-                            }
-                            case ENTER -> {
-                                String target = saveAsInput.text().trim();
-                                if (target.isEmpty()) {
-                                    notification.clear();
-                                } else {
-                                    Path path = Path.of(target);
-                                    String validation = validateSaveTarget(path);
-                                    if (validation != null) {
-                                        notification.error(validation);
-                                        continue;
-                                    }
-                                    if (isReadOnlyFile(path)) {
-                                        saveAsInput.set(suggestWritableName(path));
-                                        notification.error("Save failed: target is read-only: " + path + ". Choose another name.");
-                                        continue;
-                                    }
-                                    if (Files.exists(path) && !isSameFilePath(path, state.getCurrentFile())) {
-                                        pendingOverwritePath = path;
-                                        saveOverwriteConfirmMode = true;
-                                        saveAsMode = false;
-                                        notification.clear();
-                                        continue;
-                                    }
-                                    try {
-                                        engine.saveAs(path);
-                                        renderPlanBuilder = new RenderPlanBuilder(resolveHighlighter(state.getCurrentFile()));
-                                        tabs.set(activeTabIndex, tabs.get(activeTabIndex).withRenderPlanBuilder(renderPlanBuilder));
-                                        notification.success(savedMessage(state));
-                                    } catch (IOException e) {
-                                        notification.error(saveErrorMessage(e));
-                                    }
-                                }
-                                saveAsMode = false;
-                                saveAsInput.clear();
-                            }
-                            case ESCAPE, CTRL_Q -> {
-                                saveAsMode = false;
-                                saveAsInput.clear();
+                    if (modalState.isSaveAs()) {
+                        SaveFlowController.SaveAsResult saveAsResult = SaveFlowController.handleSaveAsInput(
+                            key,
+                            true,
+                            saveAsInput.text(),
+                            false,
+                            modalState.pendingOverwritePath(),
+                            state.getCurrentFile(),
+                            this::validateSaveTarget,
+                            path -> Files.exists(path),
+                            this::isReadOnlyFile,
+                            this::isSameFilePath,
+                            this::suggestWritableName
+                        );
+                        if (saveAsResult.consumed()) {
+                            modalState = modalFromSaveAsResult(saveAsResult);
+                            if (saveAsResult.clearNotification()) {
                                 notification.clear();
                             }
-                            case ARROW_LEFT -> saveAsInput.moveLeft();
-                            case ARROW_RIGHT -> saveAsInput.moveRight();
-                            case HOME -> saveAsInput.moveHome();
-                            case END -> saveAsInput.moveEnd();
-                            case DELETE -> saveAsInput.deleteForward();
-                            default -> {
-                                // Ignore unsupported keys while Save As prompt is active.
+                            if (saveAsResult.errorMessage() != null) {
+                                notification.error(saveAsResult.errorMessage());
                             }
-                        }
-                        continue;
-                    }
-
-                    if (saveOverwriteConfirmMode) {
-                        if (key instanceof KeyEvent.CharInput charInput) {
-                            char ch = charInput.ch();
-                            if (ch == 'y' || ch == 'Y') {
+                            applySaveAsTextInputEffect(saveAsInput, saveAsResult.textInputEffect());
+                            if (saveAsResult.saveNowPath() != null) {
                                 try {
-                                    engine.saveAs(pendingOverwritePath);
+                                    engine.saveAs(saveAsResult.saveNowPath());
                                     renderPlanBuilder = new RenderPlanBuilder(resolveHighlighter(state.getCurrentFile()));
-                                    tabs.set(activeTabIndex, tabs.get(activeTabIndex).withRenderPlanBuilder(renderPlanBuilder));
+                                    sessionContext.replaceActiveRenderPlanBuilder(renderPlanBuilder);
                                     notification.success(savedMessage(state));
                                 } catch (IOException e) {
                                     notification.error(saveErrorMessage(e));
                                 }
-                                saveOverwriteConfirmMode = false;
-                                pendingOverwritePath = null;
-                            } else if (ch == 'n' || ch == 'N') {
-                                saveOverwriteConfirmMode = false;
-                                pendingOverwritePath = null;
-                                saveAsMode = true;
-                                notification.clear();
                             }
                             continue;
                         }
+                    }
 
-                        KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
-                        switch (action) {
-                            case ESCAPE, CTRL_Q, ENTER -> {
-                                saveOverwriteConfirmMode = false;
-                                pendingOverwritePath = null;
-                                saveAsMode = true;
+                    if (modalState.isSaveOverwriteConfirm()) {
+                        SaveFlowController.SaveOverwriteResult saveOverwriteResult = SaveFlowController.handleOverwriteConfirm(
+                            key,
+                            true,
+                            modalState.pendingOverwritePath()
+                        );
+                        if (saveOverwriteResult.consumed()) {
+                            modalState = modalFromSaveOverwriteResult(saveOverwriteResult);
+                            if (saveOverwriteResult.clearNotification()) {
                                 notification.clear();
                             }
-                            default -> {
-                                // Ignore unsupported keys in overwrite confirmation.
+                            if (saveOverwriteResult.saveNowPath() != null) {
+                                try {
+                                    engine.saveAs(saveOverwriteResult.saveNowPath());
+                                    renderPlanBuilder = new RenderPlanBuilder(resolveHighlighter(state.getCurrentFile()));
+                                    sessionContext.replaceActiveRenderPlanBuilder(renderPlanBuilder);
+                                    notification.success(savedMessage(state));
+                                } catch (IOException e) {
+                                    notification.error(saveErrorMessage(e));
+                                }
                             }
+                            continue;
                         }
+                    }
+
+                    if (modalState.isQuitConfirm()) {
+                        ConfirmFlowController.QuitResult quitResult = ConfirmFlowController.handleQuitConfirm(
+                            true,
+                            running,
+                            key
+                        );
+                        modalState = quitResult.quitConfirmMode() ? UiModalState.quitConfirm() : UiModalState.none();
+                        running = quitResult.running();
                         continue;
                     }
 
-                    if (quitConfirmMode) {
-                        if (key instanceof KeyEvent.CharInput charInput) {
-                            char ch = charInput.ch();
-                            if (ch == 'y' || ch == 'Y') {
-                                running = false;
-                            } else if (ch == 'n' || ch == 'N') {
-                                quitConfirmMode = false;
-                            }
-                            continue;
+                    if (modalState.isCloseTabConfirm()) {
+                        int closeIndex = modalState.pendingCloseTabIndex();
+                        int activeIndexSnapshot = activeTabIndex;
+                        ConfirmFlowController.CloseTabResult closeTabResult = ConfirmFlowController.handleCloseTabConfirm(
+                            true,
+                            modalState.pendingCloseTabIndex(),
+                            tabs.size(),
+                            key,
+                            () -> closeTab(tabs, activeIndexSnapshot, closeIndex)
+                        );
+                        modalState = closeTabResult.closeTabConfirmMode()
+                            ? UiModalState.closeTabConfirm(closeTabResult.pendingCloseTabIndex())
+                            : UiModalState.none();
+                        if (closeTabResult.activeTabChanged()) {
+                            sessionContext.activate(closeTabResult.activeTabIndex());
                         }
-
-                        KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
-                        switch (action) {
-                            case CTRL_Q -> running = false;
-                            case ESCAPE, ENTER -> quitConfirmMode = false;
-                            default -> {
-                                // Ignore unsupported keys in quit confirmation.
-                            }
-                        }
-                        continue;
-                    }
-
-                    if (closeTabConfirmMode) {
-                        if (pendingCloseTabIndex < 0 || pendingCloseTabIndex >= tabs.size()) {
-                            closeTabConfirmMode = false;
-                            pendingCloseTabIndex = -1;
-                            continue;
-                        }
-                        if (key instanceof KeyEvent.CharInput charInput) {
-                            char ch = charInput.ch();
-                            if (ch == 'y' || ch == 'Y') {
-                                activeTabIndex = closeTab(tabs, activeTabIndex, pendingCloseTabIndex);
-                                model = tabs.get(activeTabIndex).model();
-                                state = tabs.get(activeTabIndex).state();
-                                engine = tabs.get(activeTabIndex).engine();
-                                renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
-                                closeTabConfirmMode = false;
-                                pendingCloseTabIndex = -1;
-                                statusMessage = "Closed tab";
-                            } else if (ch == 'n' || ch == 'N') {
-                                closeTabConfirmMode = false;
-                                pendingCloseTabIndex = -1;
-                            }
-                            continue;
-                        }
-
-                        KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
-                        switch (action) {
-                            case TAB_CLOSE -> {
-                                activeTabIndex = closeTab(tabs, activeTabIndex, pendingCloseTabIndex);
-                                model = tabs.get(activeTabIndex).model();
-                                state = tabs.get(activeTabIndex).state();
-                                engine = tabs.get(activeTabIndex).engine();
-                                renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
-                                closeTabConfirmMode = false;
-                                pendingCloseTabIndex = -1;
-                                statusMessage = "Closed tab";
-                            }
-                            case ESCAPE, ENTER -> {
-                                closeTabConfirmMode = false;
-                                pendingCloseTabIndex = -1;
-                            }
-                            default -> {
-                                // Ignore unsupported keys in close-tab confirmation.
-                            }
+                        if (closeTabResult.statusMessage() != null) {
+                            statusMessage = closeTabResult.statusMessage();
                         }
                         continue;
                     }
 
                     if (topMenu.isOpen()) {
-                        if (key instanceof KeyEvent.CharInput charInput) {
-                            KeyEvent.Action mapped = topMenu.handleChar(charInput.ch());
-                            Integer tabActivation = topMenu.consumeTabActivationRequest();
-                            if (tabActivation != null && tabActivation >= 0 && tabActivation < tabs.size()) {
-                                activeTabIndex = tabActivation;
-                                model = tabs.get(activeTabIndex).model();
-                                state = tabs.get(activeTabIndex).state();
-                                engine = tabs.get(activeTabIndex).engine();
-                                renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
-                                statusMessage = "Tab " + (activeTabIndex + 1) + "/" + tabs.size();
-                            }
-                            if (mapped != null) {
-                                key = new KeyEvent.ActionEvent(mapped);
-                            }
-                            if (topMenu.isOpen()) {
-                                continue;
-                            }
-                        } else {
-                            KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
-                            KeyEvent.Action mapped = topMenu.handleKey(action);
-                            Integer tabActivation = topMenu.consumeTabActivationRequest();
-                            if (tabActivation != null && tabActivation >= 0 && tabActivation < tabs.size()) {
-                                activeTabIndex = tabActivation;
-                                model = tabs.get(activeTabIndex).model();
-                                state = tabs.get(activeTabIndex).state();
-                                engine = tabs.get(activeTabIndex).engine();
-                                renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
-                                statusMessage = "Tab " + (activeTabIndex + 1) + "/" + tabs.size();
-                            }
-                            if (mapped != null) {
-                                key = new KeyEvent.ActionEvent(mapped);
-                            }
-                            if (topMenu.isOpen()) {
-                                continue;
-                            }
+                        TopMenuInputController.HandleResult topMenuResult = TopMenuInputController.handleWhenOpen(topMenu, key);
+                        Integer tabActivation = topMenuResult.tabActivation();
+                        if (tabActivation != null && tabActivation >= 0 && tabActivation < tabs.size()) {
+                            sessionContext.activate(tabActivation);
+                            activeTabIndex = sessionContext.activeTabIndex();
+                            model = sessionContext.model();
+                            state = sessionContext.state();
+                            engine = sessionContext.engine();
+                            renderPlanBuilder = sessionContext.renderPlanBuilder();
+                            statusMessage = "Tab " + (tabActivation + 1) + "/" + tabs.size();
+                        }
+                        key = topMenuResult.nextKey();
+                        if (topMenuResult.keepMenuOpen()) {
+                            continue;
                         }
                     }
 
@@ -1027,10 +904,10 @@ public class TerminalEditorApp {
                             renderPlanBuilder,
                             contentRows,
                             running,
-                            quitConfirmMode,
-                            closeTabConfirmMode,
-                            pendingCloseTabIndex,
-                            saveAsMode,
+                            modalState.isQuitConfirm(),
+                            modalState.isCloseTabConfirm(),
+                            modalState.pendingCloseTabIndex(),
+                            modalState.isSaveAs(),
                             saveAsInput,
                             notification,
                             openFileMode,
@@ -1043,16 +920,18 @@ public class TerminalEditorApp {
                         );
                         if (searchModeResult.consumed()) {
                             searchUi = searchModeResult.searchUi();
-                            activeTabIndex = searchModeResult.activeTabIndex();
-                            model = searchModeResult.model();
-                            state = searchModeResult.state();
-                            engine = searchModeResult.engine();
-                            renderPlanBuilder = searchModeResult.renderPlanBuilder();
+                            if (searchModeResult.activeTabIndex() != activeTabIndex) {
+                                sessionContext.activate(searchModeResult.activeTabIndex());
+                            }
                             running = searchModeResult.running();
-                            quitConfirmMode = searchModeResult.quitConfirmMode();
-                            closeTabConfirmMode = searchModeResult.closeTabConfirmMode();
-                            pendingCloseTabIndex = searchModeResult.pendingCloseTabIndex();
-                            saveAsMode = searchModeResult.saveAsMode();
+                            modalState = modalFromLegacyFlags(
+                                searchModeResult.saveAsMode(),
+                                false,
+                                null,
+                                searchModeResult.quitConfirmMode(),
+                                searchModeResult.closeTabConfirmMode(),
+                                searchModeResult.pendingCloseTabIndex()
+                            );
                             openFileMode = searchModeResult.openFileMode();
                             openFileFocus = searchModeResult.openFileFocus();
                             if (searchModeResult.statusMessage() != null) {
@@ -1088,126 +967,58 @@ public class TerminalEditorApp {
                         )
                     );
                     if (dispatchResult.handled()) {
+                        if (uiSessionState.helpHintsMode) {
+                            modalState = UiModalState.helpHints();
+                            uiSessionState.helpHintsMode = false;
+                        }
                         if (dispatchResult.statusMessage() != null) {
                             statusMessage = dispatchResult.statusMessage();
                         }
                         continue;
                     }
-                    switch (action) {
-                        case CTRL_Q -> {
-                            if (uiSessionState.confirmOnCloseSetting && hasDirtyTabs(tabs)) {
-                                quitConfirmMode = true;
-                            } else {
-                                running = false;
-                            }
-                        }
-                        case CTRL_S -> {
-                            if (state.getCurrentFile() == null) {
-                                saveAsMode = true;
-                                saveAsInput.set(DEFAULT_FILE_NAME);
-                                notification.clear();
-                            } else if (isReadOnlyFile(state.getCurrentFile())) {
-                                saveAsMode = true;
-                                saveAsInput.set(suggestWritableName(state.getCurrentFile()));
-                                notification.error("Save failed: current file is read-only: "
-                                    + state.getCurrentFile() + ". Save As mode.");
-                            } else {
-                                try {
-                                    engine.save();
-                                    notification.success(savedMessage(state));
-                                } catch (IOException e) {
-                                    notification.error(saveErrorMessage(e));
-                                }
-                            }
-                        }
-                        case CTRL_O -> {
-                            topMenu.close();
-                            openFileMode = true;
-                            openFileTree.setRoot(initialOpenRoot(state));
-                            openFileFocus = OpenFileDialogController.Focus.LIST;
-                            statusMessage = "Open file";
-                        }
-                        case TOGGLE_THEME -> {
-                            applyTheme(theme.next());
-                            renderer.setTheme(theme);
-                            topMenu.setStyles(
-                                styles.menuPopup(),
-                                styles.menuSelected(),
-                                styles.menuTopSelected(),
-                                styles.menuSelectedMono()
-                            );
-                            topMenu.setThemeLabel(theme.label());
-                            tabBar.setStyles(
-                                styles.tabbar(),
-                                styles.tabbarMono(),
-                                styles.tabbarActive(),
-                                styles.tabbarActiveMono()
-                            );
-                            statusMessage = "Theme: " + theme.label();
-                        }
-                        case CTRL_N, TAB_NEW -> {
-                            tabs.add(newEditorTab());
-                            activeTabIndex = tabs.size() - 1;
-                            model = tabs.get(activeTabIndex).model();
-                            state = tabs.get(activeTabIndex).state();
-                            engine = tabs.get(activeTabIndex).engine();
-                            renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
-                            statusMessage = "New tab";
-                        }
-                        case TAB_NEXT -> {
-                            activeTabIndex = switchTab(tabs, activeTabIndex, 1);
-                            model = tabs.get(activeTabIndex).model();
-                            state = tabs.get(activeTabIndex).state();
-                            engine = tabs.get(activeTabIndex).engine();
-                            renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
-                            statusMessage = "Tab " + (activeTabIndex + 1) + "/" + tabs.size();
-                        }
-                        case TAB_PREVIOUS -> {
-                            activeTabIndex = switchTab(tabs, activeTabIndex, -1);
-                            model = tabs.get(activeTabIndex).model();
-                            state = tabs.get(activeTabIndex).state();
-                            engine = tabs.get(activeTabIndex).engine();
-                            renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
-                            statusMessage = "Tab " + (activeTabIndex + 1) + "/" + tabs.size();
-                        }
-                        case TAB_CLOSE -> {
-                            if (state.isDirty() && uiSessionState.confirmOnCloseSetting) {
-                                closeTabConfirmMode = true;
-                                pendingCloseTabIndex = activeTabIndex;
-                            } else {
-                                activeTabIndex = closeCurrentTab(tabs, activeTabIndex);
-                                model = tabs.get(activeTabIndex).model();
-                                state = tabs.get(activeTabIndex).state();
-                                engine = tabs.get(activeTabIndex).engine();
-                                renderPlanBuilder = tabs.get(activeTabIndex).renderPlanBuilder();
-                                statusMessage = "Closed tab";
-                            }
-                        }
-                        case CTRL_K, CTRL_W, CTRL_SHIFT_S -> {
-                            saveAsMode = true;
-                            saveAsInput.clear();
-                            if (state.getCurrentFile() != null) {
-                                saveAsInput.set(state.getCurrentFile().toString());
-                            } else {
-                                saveAsInput.set(DEFAULT_FILE_NAME);
-                            }
-                            notification.clear();
-                        }
-                        case CTRL_E, CTRL_T, OPEN_VIEW_MENU, OPEN_HELP_MENU, F10, F2,
-                            CTRL_C, CTRL_X, CTRL_V, CTRL_Z, CTRL_Y,
-                            TOGGLE_TAB_BAR, TOGGLE_WRAP_LINES, TOGGLE_WORD_WRAP,
-                            TOGGLE_READING_MODE, TOGGLE_CONFIRM_ON_CLOSE, TOGGLE_MOUSE_MODE, SHOW_KEY_HINTS,
-                            CTRL_F, CTRL_A, CTRL_R, TAB, CTRL_G, ESCAPE,
-                            ARROW_UP, ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT,
-                            SHIFT_ARROW_UP, SHIFT_ARROW_DOWN, SHIFT_ARROW_LEFT, SHIFT_ARROW_RIGHT,
-                            PAGE_UP, PAGE_DOWN, HOME, END, BACKSPACE, DELETE, ENTER,
-                            UNKNOWN -> {
-                            // Already handled by InputActionDispatcher.
-                        }
-                        default -> {
-                            // Ignore unrecognized input.
-                        }
-                    }
+                    EditorActionController.Result editorAction = EditorActionController.decide(
+                        action,
+                        running,
+                        modalState.isQuitConfirm(),
+                        modalState.isCloseTabConfirm(),
+                        modalState.pendingCloseTabIndex(),
+                        modalState.isSaveAs(),
+                        uiSessionState.confirmOnCloseSetting,
+                        hasDirtyTabs(tabs),
+                        state.isDirty(),
+                        activeTabIndex,
+                        state.getCurrentFile(),
+                        state.getCurrentFile() != null && isReadOnlyFile(state.getCurrentFile())
+                    );
+                    EditorActionApplyResult editorActionApplyResult = applyEditorActionResult(
+                        editorAction,
+                        sessionContext,
+                        tabs,
+                        activeTabIndex,
+                        state,
+                        engine,
+                        notification,
+                        topMenu,
+                        openFileTree,
+                        openFileMode,
+                        openFileFocus,
+                        saveAsInput,
+                        renderer,
+                        tabBar,
+                        statusMessage
+                    );
+                    running = editorActionApplyResult.running();
+                    modalState = modalFromLegacyFlags(
+                        editorActionApplyResult.saveAsMode(),
+                        false,
+                        null,
+                        editorActionApplyResult.quitConfirmMode(),
+                        editorActionApplyResult.closeTabConfirmMode(),
+                        editorActionApplyResult.pendingCloseTabIndex()
+                    );
+                    openFileMode = editorActionApplyResult.openFileMode();
+                    openFileFocus = editorActionApplyResult.openFileFocus();
+                    statusMessage = editorActionApplyResult.statusMessage();
                 }
             } finally {
                 cleanup.run();
@@ -1218,6 +1029,183 @@ public class TerminalEditorApp {
                 }
             }
         }
+    }
+
+    private EditorActionApplyResult applyEditorActionResult(
+        EditorActionController.Result editorAction,
+        SessionContext sessionContext,
+        List<EditorTab> tabs,
+        int activeTabIndex,
+        EditorState state,
+        EditorEngine engine,
+        NotificationState notification,
+        MenuBar topMenu,
+        TreeView openFileTree,
+        boolean openFileMode,
+        OpenFileDialogController.Focus openFileFocus,
+        TextField saveAsInput,
+        RenderRasterizer renderer,
+        TabBar tabBar,
+        String statusMessage
+    ) {
+        boolean running = editorAction.running();
+        boolean quitConfirmMode = editorAction.quitConfirmMode();
+        boolean closeTabConfirmMode = editorAction.closeTabConfirmMode();
+        int pendingCloseTabIndex = editorAction.pendingCloseTabIndex();
+        boolean saveAsMode = editorAction.saveAsMode();
+        boolean nextOpenFileMode = openFileMode;
+        OpenFileDialogController.Focus nextOpenFileFocus = openFileFocus;
+        String nextStatusMessage = statusMessage;
+
+        if (editorAction.clearNotification()) {
+            notification.clear();
+        }
+        if (editorAction.notificationError() != null) {
+            notification.error(editorAction.notificationError());
+        }
+        if (editorAction.requestSaveCurrent()) {
+            try {
+                engine.save();
+                notification.success(savedMessage(state));
+            } catch (IOException e) {
+                notification.error(saveErrorMessage(e));
+            }
+        }
+        if (editorAction.requestOpenFile()) {
+            topMenu.close();
+            nextOpenFileMode = true;
+            openFileTree.setRoot(initialOpenRoot(state));
+            nextOpenFileFocus = OpenFileDialogController.Focus.LIST;
+        }
+        if (editorAction.requestToggleTheme()) {
+            applyTheme(theme.next());
+            renderer.setTheme(theme);
+            topMenu.setStyles(
+                styles.menuPopup(),
+                styles.menuSelected(),
+                styles.menuTopSelected(),
+                styles.menuSelectedMono()
+            );
+            topMenu.setThemeLabel(theme.label());
+            tabBar.setStyles(
+                styles.tabbar(),
+                styles.tabbarMono(),
+                styles.tabbarActive(),
+                styles.tabbarActiveMono()
+            );
+            nextStatusMessage = "Theme: " + theme.label();
+        }
+
+        switch (editorAction.saveAsPreset()) {
+            case NONE -> {
+            }
+            case DEFAULT_FILE_NAME -> saveAsInput.set(DEFAULT_FILE_NAME);
+            case FROM_CURRENT_OR_DEFAULT -> {
+                saveAsInput.clear();
+                if (state.getCurrentFile() != null) {
+                    saveAsInput.set(state.getCurrentFile().toString());
+                } else {
+                    saveAsInput.set(DEFAULT_FILE_NAME);
+                }
+            }
+            case SUGGESTED_FROM_CURRENT -> saveAsInput.set(suggestWritableName(state.getCurrentFile()));
+        }
+
+        switch (editorAction.tabCommand()) {
+            case NONE -> {
+            }
+            case NEW_TAB -> sessionContext.addNewTabAndActivate(newEditorTab());
+            case NEXT_TAB -> {
+                int nextIndex = switchTab(tabs, activeTabIndex, 1);
+                sessionContext.activate(nextIndex);
+                nextStatusMessage = "Tab " + (nextIndex + 1) + "/" + tabs.size();
+            }
+            case PREV_TAB -> {
+                int nextIndex = switchTab(tabs, activeTabIndex, -1);
+                sessionContext.activate(nextIndex);
+                nextStatusMessage = "Tab " + (nextIndex + 1) + "/" + tabs.size();
+            }
+            case CLOSE_TAB -> sessionContext.activate(closeCurrentTab(tabs, activeTabIndex));
+        }
+
+        if (editorAction.statusMessage() != null) {
+            nextStatusMessage = editorAction.statusMessage();
+        }
+
+        return new EditorActionApplyResult(
+            running,
+            quitConfirmMode,
+            closeTabConfirmMode,
+            pendingCloseTabIndex,
+            saveAsMode,
+            nextOpenFileMode,
+            nextOpenFileFocus,
+            nextStatusMessage
+        );
+    }
+
+    private void applySaveAsTextInputEffect(TextField saveAsInput, SaveFlowController.TextInputEffect effect) {
+        if (effect == null) {
+            return;
+        }
+        switch (effect.kind()) {
+            case NONE -> {
+            }
+            case INSERT -> saveAsInput.insert(effect.ch());
+            case SET_TEXT -> saveAsInput.set(effect.text());
+            case BACKSPACE -> saveAsInput.backspace();
+            case MOVE_LEFT -> saveAsInput.moveLeft();
+            case MOVE_RIGHT -> saveAsInput.moveRight();
+            case MOVE_HOME -> saveAsInput.moveHome();
+            case MOVE_END -> saveAsInput.moveEnd();
+            case DELETE_FORWARD -> saveAsInput.deleteForward();
+            case CLEAR -> saveAsInput.clear();
+        }
+    }
+
+    private UiModalState modalFromSaveAsResult(SaveFlowController.SaveAsResult result) {
+        return modalFromLegacyFlags(
+            result.saveAsMode(),
+            result.saveOverwriteConfirmMode(),
+            result.pendingOverwritePath(),
+            false,
+            false,
+            -1
+        );
+    }
+
+    private UiModalState modalFromSaveOverwriteResult(SaveFlowController.SaveOverwriteResult result) {
+        return modalFromLegacyFlags(
+            result.saveAsMode(),
+            result.saveOverwriteConfirmMode(),
+            result.pendingOverwritePath(),
+            false,
+            false,
+            -1
+        );
+    }
+
+    private UiModalState modalFromLegacyFlags(
+        boolean saveAsMode,
+        boolean saveOverwriteConfirmMode,
+        Path pendingOverwritePath,
+        boolean quitConfirmMode,
+        boolean closeTabConfirmMode,
+        int pendingCloseTabIndex
+    ) {
+        if (saveAsMode) {
+            return UiModalState.saveAs();
+        }
+        if (saveOverwriteConfirmMode) {
+            return UiModalState.saveOverwriteConfirm(pendingOverwritePath);
+        }
+        if (quitConfirmMode) {
+            return UiModalState.quitConfirm();
+        }
+        if (closeTabConfirmMode) {
+            return UiModalState.closeTabConfirm(pendingCloseTabIndex);
+        }
+        return UiModalState.none();
     }
 
     private SearchModeResult handleSearchModeInput(
@@ -1704,6 +1692,18 @@ public class TerminalEditorApp {
         boolean saveAsMode,
         boolean openFileMode,
         OpenFileDialogController.Focus openFileFocus
+    ) {
+    }
+
+    private record EditorActionApplyResult(
+        boolean running,
+        boolean quitConfirmMode,
+        boolean closeTabConfirmMode,
+        int pendingCloseTabIndex,
+        boolean saveAsMode,
+        boolean openFileMode,
+        OpenFileDialogController.Focus openFileFocus,
+        String statusMessage
     ) {
     }
 
@@ -2769,17 +2769,57 @@ public class TerminalEditorApp {
         }
     }
 
-    enum SearchFocus {
-        FIND,
-        REPLACE,
-        CASE,
-        WORD,
-        WILDCARD,
-        ALL,
-        NEXT_BUTTON,
-        PREV_BUTTON,
-        REPLACE_BUTTON,
-        ALL_BUTTON
+    private static final class SessionContext {
+        private final List<EditorTab> tabs;
+        private int activeTabIndex;
+        private TextModel model;
+        private EditorState state;
+        private EditorEngine engine;
+        private RenderPlanBuilder renderPlanBuilder;
+
+        private SessionContext(List<EditorTab> tabs, int activeTabIndex) {
+            this.tabs = tabs;
+            activate(activeTabIndex);
+        }
+
+        private void activate(int nextActiveTabIndex) {
+            this.activeTabIndex = Math.max(0, Math.min(nextActiveTabIndex, tabs.size() - 1));
+            EditorTab active = tabs.get(this.activeTabIndex);
+            this.model = active.model();
+            this.state = active.state();
+            this.engine = active.engine();
+            this.renderPlanBuilder = active.renderPlanBuilder();
+        }
+
+        private void addNewTabAndActivate(EditorTab tab) {
+            tabs.add(tab);
+            activate(tabs.size() - 1);
+        }
+
+        private void replaceActiveRenderPlanBuilder(RenderPlanBuilder nextRenderPlanBuilder) {
+            tabs.set(activeTabIndex, tabs.get(activeTabIndex).withRenderPlanBuilder(nextRenderPlanBuilder));
+            this.renderPlanBuilder = nextRenderPlanBuilder;
+        }
+
+        private int activeTabIndex() {
+            return activeTabIndex;
+        }
+
+        private TextModel model() {
+            return model;
+        }
+
+        private EditorState state() {
+            return state;
+        }
+
+        private EditorEngine engine() {
+            return engine;
+        }
+
+        private RenderPlanBuilder renderPlanBuilder() {
+            return renderPlanBuilder;
+        }
     }
 
     private final class NotificationState {

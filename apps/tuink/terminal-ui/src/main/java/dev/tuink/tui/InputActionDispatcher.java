@@ -2,6 +2,7 @@ package dev.tuink.tui;
 
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
+import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.ui.MenuBar;
 import java.io.PrintWriter;
 
@@ -80,7 +81,7 @@ final class InputActionDispatcher {
             }
             case CTRL_F -> {
                 ui.searchMode = true;
-                ui.searchFocus = TerminalEditorApp.SearchFocus.FIND;
+                ui.searchFocus = SearchFocus.FIND;
                 return DispatchResult.handled(ctx.searchHelpMessage());
             }
             case CTRL_C -> {

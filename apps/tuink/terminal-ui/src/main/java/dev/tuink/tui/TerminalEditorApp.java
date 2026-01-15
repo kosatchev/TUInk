@@ -9,6 +9,8 @@ import dev.tuink.core.TabSearch;
 import dev.tuink.core.TabSessions;
 import dev.tuink.core.TextModel;
 import dev.tuink.highlight.regex.RegexHighlighter;
+import dev.tuink.tui.flow.AppSettings;
+import dev.tuink.tui.flow.AppSettingsStore;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.flow.UiModalState;
 import dev.tuink.tui.render.CellBuffer;
@@ -113,7 +115,15 @@ public class TerminalEditorApp {
             return;
         }
 
-        applyTheme(cli.theme());
+        AppSettings loadedSettings = AppSettings.defaults();
+        try {
+            loadedSettings = AppSettingsStore.load();
+        } catch (IOException e) {
+            System.err.println("Warning: failed to load settings from " + AppSettingsStore.path() + ": " + e.getMessage());
+        }
+
+        UiStyles.Theme initialTheme = cli.themeOverride() != null ? cli.themeOverride() : loadedSettings.theme();
+        applyTheme(initialTheme);
         List<EditorTab> tabs = new ArrayList<>();
         tabs.add(newEditorTab());
         SessionContext sessionContext = new SessionContext(tabs, 0);
@@ -132,12 +142,12 @@ public class TerminalEditorApp {
         UiSessionState uiSessionState = UiSessionState.from(
             false,
             SearchFocus.FIND,
-            true,
-            false,
-            true,
-            cli.readMode(),
-            true,
-            cli.mouseEnabled(),
+            loadedSettings.showTabBar(),
+            loadedSettings.wrapLines(),
+            loadedSettings.wrapWords(),
+            cli.readModeOverride() != null ? cli.readModeOverride() : loadedSettings.readingMode(),
+            loadedSettings.confirmOnClose(),
+            cli.mouseEnabledOverride() != null ? cli.mouseEnabledOverride() : loadedSettings.mouseMode(),
             false
         );
         TextField searchQueryInput = new TextField();
@@ -1027,6 +1037,23 @@ public class TerminalEditorApp {
                 } catch (IllegalStateException ignored) {
                     // JVM is already shutting down.
                 }
+            }
+        }
+
+        AppSettings effectiveSettings = new AppSettings(
+            uiSessionState.showTabBarSetting,
+            uiSessionState.wrapLinesSetting,
+            uiSessionState.wrapWordsSetting,
+            uiSessionState.readingModeSetting,
+            uiSessionState.confirmOnCloseSetting,
+            uiSessionState.mouseModeSetting,
+            theme
+        );
+        if (!effectiveSettings.equals(loadedSettings)) {
+            try {
+                AppSettingsStore.save(effectiveSettings);
+            } catch (IOException e) {
+                System.err.println("Warning: failed to save settings to " + AppSettingsStore.path() + ": " + e.getMessage());
             }
         }
     }
@@ -2906,24 +2933,24 @@ public class TerminalEditorApp {
     }
 
     private CliOptions parseArgs(String[] args) {
-        boolean mouseEnabled = true;
+        Boolean mouseEnabledOverride = null;
         boolean altScreenEnabled = true;
         boolean colorEnabled = true;
-        boolean readMode = false;
+        Boolean readModeOverride = null;
         boolean showHelp = false;
-        UiStyles.Theme theme = UiStyles.Theme.CLASSIC;
+        UiStyles.Theme themeOverride = null;
         Path file = null;
 
         for (String arg : args) {
             switch (arg) {
-                case "--no-mouse" -> mouseEnabled = false;
+                case "--no-mouse" -> mouseEnabledOverride = false;
                 case "--no-alt-screen" -> altScreenEnabled = false;
                 case "--no-color" -> colorEnabled = false;
-                case "--read" -> readMode = true;
+                case "--read" -> readModeOverride = true;
                 case "--help", "-h" -> showHelp = true;
                 default -> {
                     if (arg.startsWith("--theme=")) {
-                        theme = UiStyles.Theme.parse(arg.substring("--theme=".length()));
+                        themeOverride = UiStyles.Theme.parse(arg.substring("--theme=".length()));
                         continue;
                     }
                     if (arg.startsWith("--")) {
@@ -2936,7 +2963,7 @@ public class TerminalEditorApp {
                 }
             }
         }
-        return new CliOptions(file, mouseEnabled, altScreenEnabled, colorEnabled, readMode, showHelp, theme);
+        return new CliOptions(file, mouseEnabledOverride, altScreenEnabled, colorEnabled, readModeOverride, showHelp, themeOverride);
     }
 
     private void printUsage() {
@@ -2952,12 +2979,12 @@ public class TerminalEditorApp {
 
     private record CliOptions(
         Path file,
-        boolean mouseEnabled,
+        Boolean mouseEnabledOverride,
         boolean altScreenEnabled,
         boolean colorEnabled,
-        boolean readMode,
+        Boolean readModeOverride,
         boolean showHelp,
-        UiStyles.Theme theme
+        UiStyles.Theme themeOverride
     ) {
     }
 }

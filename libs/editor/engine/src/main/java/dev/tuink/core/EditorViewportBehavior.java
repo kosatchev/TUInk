@@ -4,8 +4,6 @@ package dev.tuink.core;
  * UI-agnostic behavior for mapping viewport coordinates and applying viewport scroll.
  */
 public final class EditorViewportBehavior {
-    private static final int DEFAULT_TAB_WIDTH = 4;
-
     private EditorViewportBehavior() {
     }
 
@@ -78,15 +76,44 @@ public final class EditorViewportBehavior {
         state.setCursor(new Position(line, targetCol));
     }
 
-    public static void applyHorizontalScrollVisual(EditorState state, TextModel model, int targetLeftVisualColumn) {
+    public static void applyHorizontalScrollVisual(
+        EditorState state,
+        TextModel model,
+        int targetLeftVisualColumn,
+        int tabWidth
+    ) {
+        int safeTabWidth = tabWidth <= 2 ? 2 : 4;
         int line = Math.max(0, Math.min(state.getCursor().line(), model.lineCount() - 1));
         String lineText = model.getLine(line);
+        int currentLeftColumn = Math.max(0, Math.min(state.getLeftColumn(), lineText.length()));
+        int cursorColumn = Math.max(0, Math.min(state.getCursor().col(), lineText.length()));
+        int relativeVisual = visualColumn(lineText, currentLeftColumn, cursorColumn, safeTabWidth);
         int targetLeftColumn = visualToTextColumn(
             lineText,
             0,
             Math.max(0, targetLeftVisualColumn),
-            DEFAULT_TAB_WIDTH
+            safeTabWidth
         );
-        applyHorizontalScroll(state, model, targetLeftColumn);
+        int targetCursorCol = visualToTextColumn(
+            lineText,
+            targetLeftColumn,
+            Math.max(0, relativeVisual),
+            safeTabWidth
+        );
+        state.setLeftColumn(Math.max(0, targetLeftColumn));
+        state.setCursor(new Position(line, targetCursorCol));
+    }
+
+    private static int visualColumn(String line, int startCol, int endCol, int tabWidth) {
+        int safeTabWidth = Math.max(1, tabWidth);
+        int start = Math.max(0, Math.min(startCol, line.length()));
+        int end = Math.max(start, Math.min(endCol, line.length()));
+        int visual = 0;
+        for (int i = start; i < end; i++) {
+            char ch = line.charAt(i);
+            int advance = ch == '\t' ? safeTabWidth - (visual % safeTabWidth) : 1;
+            visual += advance;
+        }
+        return visual;
     }
 }

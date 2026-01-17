@@ -11,6 +11,10 @@ final class UiSessionState {
     boolean readingModeSetting;
     boolean confirmOnCloseSetting;
     boolean mouseModeSetting;
+    boolean highlightActiveGutterSetting;
+    boolean smartHomeEndSetting;
+    boolean visibleWhitespaceSetting;
+    int tabWidthSetting;
     boolean helpHintsMode;
 
     static UiSessionState from(
@@ -22,6 +26,10 @@ final class UiSessionState {
         boolean readingModeSetting,
         boolean confirmOnCloseSetting,
         boolean mouseModeSetting,
+        boolean highlightActiveGutterSetting,
+        boolean smartHomeEndSetting,
+        boolean visibleWhitespaceSetting,
+        int tabWidthSetting,
         boolean helpHintsMode
     ) {
         UiSessionState state = new UiSessionState();
@@ -33,6 +41,10 @@ final class UiSessionState {
         state.readingModeSetting = readingModeSetting;
         state.confirmOnCloseSetting = confirmOnCloseSetting;
         state.mouseModeSetting = mouseModeSetting;
+        state.highlightActiveGutterSetting = highlightActiveGutterSetting;
+        state.smartHomeEndSetting = smartHomeEndSetting;
+        state.visibleWhitespaceSetting = visibleWhitespaceSetting;
+        state.tabWidthSetting = tabWidthSetting <= 2 ? 2 : 4;
         state.helpHintsMode = helpHintsMode;
         return state;
     }

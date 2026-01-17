@@ -15,8 +15,6 @@ import dev.tuink.tui.render.VerticalScrollbar;
  * UI helper for the main editor text area.
  */
 public final class EditorView {
-    private static final int TAB_WIDTH = 4;
-
     public enum ScrollAxis {
         NONE,
         VERTICAL,
@@ -25,6 +23,7 @@ public final class EditorView {
 
     private final int contentTopRow;
     private boolean mouseSelecting;
+    private int tabWidth = 4;
 
     public EditorView() {
         this(1);
@@ -45,6 +44,10 @@ public final class EditorView {
 
     public void cancelMouseSelection() {
         mouseSelecting = false;
+    }
+
+    public void setTabWidth(int tabWidth) {
+        this.tabWidth = tabWidth <= 2 ? 2 : 4;
     }
 
     public void handleMousePress(
@@ -147,7 +150,7 @@ public final class EditorView {
             mouse.row(),
             mouse.col(),
             plan.gutterWidth(),
-            TAB_WIDTH
+            tabWidth
         );
     }
 
@@ -238,7 +241,7 @@ public final class EditorView {
                         visibleCols,
                         Math.max(visibleCols, plan.totalColumns())
                     );
-                EditorViewportBehavior.applyHorizontalScrollVisual(state, model, targetLeft);
+                EditorViewportBehavior.applyHorizontalScrollVisual(state, model, targetLeft, tabWidth);
                 return new ScrollPointerResult(true, horizontalHit == ScrollInteraction.Hit.THUMB ? ScrollAxis.HORIZONTAL : ScrollAxis.NONE);
             }
         }

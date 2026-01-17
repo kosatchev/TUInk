@@ -18,7 +18,6 @@ import java.util.regex.Pattern;
 public class EditorEngine {
     private static final int MAX_HISTORY = 500;
     private static final long COALESCE_WINDOW_NANOS = 700_000_000L;
-    private static final int TAB_WIDTH = 4;
     private final TextModel model;
     private final EditorState state;
     private final Deque<Snapshot> undoStack = new ArrayDeque<>();
@@ -27,6 +26,9 @@ public class EditorEngine {
     private EditKind lastEditKind = EditKind.NONE;
     private long lastEditAtNanos;
     private Position lastEditCursorAfter;
+    private int preferredVisualColumn = -1;
+    private static final int H_SCROLL_MARGIN = 12;
+    private int tabWidth = 4;
 
     public EditorEngine(TextModel model, EditorState state) {
         this.model = model;
@@ -39,6 +41,10 @@ public class EditorEngine {
 
     public EditorState state() {
         return state;
+    }
+
+    public void setTabWidth(int tabWidth) {
+        this.tabWidth = tabWidth <= 2 ? 2 : 4;
     }
 
     public void open(Path path) throws IOException {
@@ -77,6 +83,7 @@ public class EditorEngine {
     }
 
     public void moveLeft(boolean selecting) {
+        preferredVisualColumn = -1;
         Position p = state.getCursor();
         if (p.col() > 0) {
             moveCursor(new Position(p.line(), p.col() - 1), selecting, p);
@@ -91,6 +98,7 @@ public class EditorEngine {
     }
 
     public void moveRight(boolean selecting) {
+        preferredVisualColumn = -1;
         Position p = state.getCursor();
         int len = model.getLine(p.line()).length();
         if (p.col() < len) {
@@ -98,6 +106,70 @@ public class EditorEngine {
         } else if (p.line() < model.lineCount() - 1) {
             moveCursor(new Position(p.line() + 1, 0), selecting, p);
         }
+    }
+
+    public void moveWordLeft() {
+        preferredVisualColumn = -1;
+        Position previous = state.getCursor();
+        Position p = model.clamp(previous);
+        int line = p.line();
+        int col = p.col();
+        if (line == 0 && col == 0) {
+            return;
+        }
+        if (col == 0 && line > 0) {
+            line--;
+            col = model.getLine(line).length();
+        }
+        String text = model.getLine(line);
+        int target = col;
+        while (target > 0 && Character.isWhitespace(text.charAt(target - 1))) {
+            target--;
+        }
+        if (target > 0) {
+            boolean word = isWordChar(text.charAt(target - 1));
+            while (target > 0) {
+                char ch = text.charAt(target - 1);
+                if (Character.isWhitespace(ch) || isWordChar(ch) != word) {
+                    break;
+                }
+                target--;
+            }
+        }
+        moveCursor(new Position(line, target), false, previous);
+    }
+
+    public void moveWordRight() {
+        preferredVisualColumn = -1;
+        Position previous = state.getCursor();
+        Position p = model.clamp(previous);
+        int line = p.line();
+        int col = p.col();
+        int lastLine = model.lineCount() - 1;
+        if (line == lastLine && col >= model.getLine(line).length()) {
+            return;
+        }
+        String text = model.getLine(line);
+        if (col >= text.length() && line < lastLine) {
+            line++;
+            col = 0;
+            text = model.getLine(line);
+        }
+        int target = col;
+        while (target < text.length() && Character.isWhitespace(text.charAt(target))) {
+            target++;
+        }
+        if (target < text.length()) {
+            boolean word = isWordChar(text.charAt(target));
+            while (target < text.length()) {
+                char ch = text.charAt(target);
+                if (Character.isWhitespace(ch) || isWordChar(ch) != word) {
+                    break;
+                }
+                target++;
+            }
+        }
+        moveCursor(new Position(line, target), false, previous);
     }
 
     public void moveUp() {
@@ -109,8 +181,11 @@ public class EditorEngine {
         if (p.line() == 0) {
             return;
         }
+        if (preferredVisualColumn < 0) {
+            preferredVisualColumn = visualColumn(model.getLine(p.line()), 0, p.col());
+        }
         int targetLine = p.line() - 1;
-        int col = Math.min(p.col(), model.getLine(targetLine).length());
+        int col = columnForVisualColumn(model.getLine(targetLine), preferredVisualColumn);
         moveCursor(new Position(targetLine, col), selecting, p);
     }
 
@@ -123,25 +198,54 @@ public class EditorEngine {
         if (p.line() >= model.lineCount() - 1) {
             return;
         }
+        if (preferredVisualColumn < 0) {
+            preferredVisualColumn = visualColumn(model.getLine(p.line()), 0, p.col());
+        }
         int targetLine = p.line() + 1;
-        int col = Math.min(p.col(), model.getLine(targetLine).length());
+        int col = columnForVisualColumn(model.getLine(targetLine), preferredVisualColumn);
         moveCursor(new Position(targetLine, col), selecting, p);
     }
 
     public void moveHome() {
+        preferredVisualColumn = -1;
         breakCoalescing();
         state.clearSelection();
         state.setCursor(new Position(state.getCursor().line(), 0));
     }
 
     public void moveEnd() {
+        preferredVisualColumn = -1;
         Position p = state.getCursor();
         breakCoalescing();
         state.clearSelection();
         state.setCursor(new Position(p.line(), model.getLine(p.line()).length()));
     }
 
+    public void moveHomeSmart() {
+        preferredVisualColumn = -1;
+        breakCoalescing();
+        state.clearSelection();
+        Position p = state.getCursor();
+        String line = model.getLine(p.line());
+        int firstContentCol = firstNonWhitespaceColumn(line);
+        int target = p.col() == firstContentCol ? 0 : firstContentCol;
+        state.setCursor(new Position(p.line(), target));
+    }
+
+    public void moveEndSmart() {
+        preferredVisualColumn = -1;
+        breakCoalescing();
+        state.clearSelection();
+        Position p = state.getCursor();
+        String line = model.getLine(p.line());
+        int trimmedEnd = trailingTrimEndColumn(line);
+        int absoluteEnd = line.length();
+        int target = p.col() == trimmedEnd ? absoluteEnd : trimmedEnd;
+        state.setCursor(new Position(p.line(), target));
+    }
+
     public void pageUp(int pageRows) {
+        preferredVisualColumn = -1;
         Position p = state.getCursor();
         int targetLine = Math.max(0, p.line() - Math.max(pageRows, 1));
         int col = Math.min(p.col(), model.getLine(targetLine).length());
@@ -152,6 +256,7 @@ public class EditorEngine {
     }
 
     public void pageDown(int pageRows) {
+        preferredVisualColumn = -1;
         Position p = state.getCursor();
         int targetLine = Math.min(model.lineCount() - 1, p.line() + Math.max(pageRows, 1));
         int col = Math.min(p.col(), model.getLine(targetLine).length());
@@ -162,6 +267,7 @@ public class EditorEngine {
     }
 
     public void insertChar(char ch) {
+        preferredVisualColumn = -1;
         boolean hadSelection = state.hasSelection();
         applyEdit(hadSelection ? EditKind.NONE : EditKind.INSERT_CHAR, () -> {
             deleteSelectionIfAny();
@@ -171,6 +277,7 @@ public class EditorEngine {
     }
 
     public void backspace() {
+        preferredVisualColumn = -1;
         boolean hadSelection = state.hasSelection();
         applyEdit(hadSelection ? EditKind.NONE : EditKind.BACKSPACE, () -> {
             if (state.hasSelection()) {
@@ -183,6 +290,7 @@ public class EditorEngine {
     }
 
     public void deleteForward() {
+        preferredVisualColumn = -1;
         boolean hadSelection = state.hasSelection();
         applyEdit(hadSelection ? EditKind.NONE : EditKind.DELETE_FORWARD, () -> {
             if (state.hasSelection()) {
@@ -195,6 +303,7 @@ public class EditorEngine {
     }
 
     public void insertNewline() {
+        preferredVisualColumn = -1;
         applyEdit(EditKind.NONE, () -> {
             deleteSelectionIfAny();
             state.setCursor(model.insertNewline(state.getCursor()));
@@ -211,7 +320,25 @@ public class EditorEngine {
         return !clipboard.isEmpty();
     }
 
+    public boolean copyCurrentLine() {
+        Position cursor = model.clamp(state.getCursor());
+        int line = cursor.line();
+        if (line < 0 || line >= model.lineCount()) {
+            return false;
+        }
+        Position start = new Position(line, 0);
+        Position end;
+        if (line < model.lineCount() - 1) {
+            end = new Position(line + 1, 0);
+        } else {
+            end = new Position(line, model.getLine(line).length());
+        }
+        clipboard = model.getTextRange(start, end);
+        return !clipboard.isEmpty();
+    }
+
     public boolean cutSelection() {
+        preferredVisualColumn = -1;
         SelectionRange range = currentSelection();
         if (range == null) {
             return false;
@@ -224,7 +351,31 @@ public class EditorEngine {
         return true;
     }
 
+    public boolean cutCurrentLine() {
+        preferredVisualColumn = -1;
+        Position cursor = model.clamp(state.getCursor());
+        int line = cursor.line();
+        if (line < 0 || line >= model.lineCount()) {
+            return false;
+        }
+        Position start = new Position(line, 0);
+        Position end;
+        if (line < model.lineCount() - 1) {
+            // Include trailing newline by cutting until start of next line.
+            end = new Position(line + 1, 0);
+        } else {
+            end = new Position(line, model.getLine(line).length());
+        }
+        clipboard = model.getTextRange(start, end);
+        applyEdit(EditKind.NONE, () -> {
+            state.setCursor(model.deleteRange(start, end));
+            state.clearSelection();
+        });
+        return true;
+    }
+
     public boolean pasteClipboard() {
+        preferredVisualColumn = -1;
         if (clipboard == null || clipboard.isEmpty()) {
             return false;
         }
@@ -237,6 +388,7 @@ public class EditorEngine {
     }
 
     public boolean selectAll() {
+        preferredVisualColumn = -1;
         int lines = model.lineCount();
         if (lines <= 0) {
             return false;
@@ -256,6 +408,7 @@ public class EditorEngine {
     }
 
     public boolean undo() {
+        preferredVisualColumn = -1;
         if (undoStack.isEmpty()) {
             return false;
         }
@@ -268,6 +421,7 @@ public class EditorEngine {
     }
 
     public boolean redo() {
+        preferredVisualColumn = -1;
         if (redoStack.isEmpty()) {
             return false;
         }
@@ -411,36 +565,82 @@ public class EditorEngine {
         if (contentCols <= 0) {
             return;
         }
+        String line = model.getLine(p.line());
         int left = state.getLeftColumn();
-        if (p.col() < left) {
-            state.setLeftColumn(p.col());
+        int safeMargin = Math.max(0, Math.min(H_SCROLL_MARGIN, Math.max(0, contentCols / 3)));
+        int cursorVisual = visualColumn(line, 0, p.col());
+        int longestVisualWidth = model.maxVisualLineWidth(tabWidth);
+        int maxLeftVisual = Math.max(0, longestVisualWidth - Math.max(1, contentCols));
+        int currentLeftVisual = visualColumn(line, 0, left);
+        int leftVisual = Math.min(currentLeftVisual, maxLeftVisual);
+        if (leftVisual != currentLeftVisual) {
+            state.setLeftColumn(columnForVisualColumn(line, leftVisual));
+            left = state.getLeftColumn();
+        }
+
+        int leftVisibleBound = leftVisual + safeMargin;
+        if (cursorVisual < leftVisibleBound) {
+            int targetLeftVisual = Math.max(0, cursorVisual - safeMargin);
+            targetLeftVisual = Math.min(targetLeftVisual, maxLeftVisual);
+            state.setLeftColumn(columnForVisualColumn(line, targetLeftVisual));
             return;
         }
 
-        String line = model.getLine(p.line());
-        int visual = visualColumn(line, left, p.col());
-        if (visual >= contentCols) {
-            int nextLeft = left;
-            while (nextLeft < p.col() && visualColumn(line, nextLeft, p.col()) >= contentCols) {
-                nextLeft++;
-            }
-            state.setLeftColumn(nextLeft);
+        int rightVisibleBound = leftVisual + Math.max(0, contentCols - 1 - safeMargin);
+        if (cursorVisual > rightVisibleBound) {
+            int targetLeftVisual = Math.max(0, cursorVisual - Math.max(0, contentCols - 1 - safeMargin));
+            targetLeftVisual = Math.min(targetLeftVisual, maxLeftVisual);
+            state.setLeftColumn(columnForVisualColumn(line, targetLeftVisual));
         }
     }
 
-    private static int visualColumn(String line, int startCol, int endCol) {
+    private int visualColumn(String line, int startCol, int endCol) {
         int start = Math.max(0, Math.min(startCol, line.length()));
         int end = Math.max(start, Math.min(endCol, line.length()));
         int visual = 0;
         for (int i = start; i < end; i++) {
             char ch = line.charAt(i);
             if (ch == '\t') {
-                visual += TAB_WIDTH - (visual % TAB_WIDTH);
+                visual += tabWidth - (visual % tabWidth);
             } else {
                 visual++;
             }
         }
         return visual;
+    }
+
+    private int columnForVisualColumn(String line, int targetVisual) {
+        if (targetVisual <= 0) {
+            return 0;
+        }
+        int visual = 0;
+        for (int i = 0; i < line.length(); i++) {
+            int advance = line.charAt(i) == '\t'
+                ? tabWidth - (visual % tabWidth)
+                : 1;
+            if (visual + advance > targetVisual) {
+                return i;
+            }
+            visual += advance;
+        }
+        return line.length();
+    }
+
+    private static int firstNonWhitespaceColumn(String line) {
+        for (int i = 0; i < line.length(); i++) {
+            if (!Character.isWhitespace(line.charAt(i))) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    private static int trailingTrimEndColumn(String line) {
+        int end = line.length();
+        while (end > 0 && Character.isWhitespace(line.charAt(end - 1))) {
+            end--;
+        }
+        return end;
     }
 
     private void applyEdit(EditKind kind, Runnable editOperation) {

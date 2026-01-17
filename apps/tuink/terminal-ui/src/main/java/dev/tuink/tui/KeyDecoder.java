@@ -42,6 +42,7 @@ public class KeyDecoder {
             case 7 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_G);
             case 14 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_N);
             case 20 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_T);
+            case 31 -> new KeyEvent.ActionEvent(KeyEvent.Action.SHOW_KEY_HINTS);
             case 9 -> new KeyEvent.ActionEvent(KeyEvent.Action.TAB);
             case 127, 8 -> new KeyEvent.ActionEvent(KeyEvent.Action.BACKSPACE);
             case 13 -> {
@@ -112,7 +113,8 @@ public class KeyDecoder {
     private KeyEvent mapAltKey(int ch) {
         char key = Character.toLowerCase((char) ch);
         return switch (key) {
-            case 'f' -> new KeyEvent.ActionEvent(KeyEvent.Action.F10);
+            case 'b' -> new KeyEvent.ActionEvent(KeyEvent.Action.WORD_LEFT);
+            case 'f' -> new KeyEvent.ActionEvent(KeyEvent.Action.WORD_RIGHT);
             case 'e' -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_E);
             case 't' -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_T);
             case 'v' -> new KeyEvent.ActionEvent(KeyEvent.Action.OPEN_VIEW_MENU);
@@ -205,6 +207,7 @@ public class KeyDecoder {
 
     private KeyEvent mapModifiedArrows(String seq) {
         boolean shift = seq.contains(";2");
+        boolean ctrl = seq.contains(";5");
         if (seq.endsWith("A")) {
             return new KeyEvent.ActionEvent(shift ? KeyEvent.Action.SHIFT_ARROW_UP : KeyEvent.Action.ARROW_UP);
         }
@@ -212,9 +215,15 @@ public class KeyDecoder {
             return new KeyEvent.ActionEvent(shift ? KeyEvent.Action.SHIFT_ARROW_DOWN : KeyEvent.Action.ARROW_DOWN);
         }
         if (seq.endsWith("C")) {
+            if (ctrl) {
+                return new KeyEvent.ActionEvent(KeyEvent.Action.WORD_RIGHT);
+            }
             return new KeyEvent.ActionEvent(shift ? KeyEvent.Action.SHIFT_ARROW_RIGHT : KeyEvent.Action.ARROW_RIGHT);
         }
         if (seq.endsWith("D")) {
+            if (ctrl) {
+                return new KeyEvent.ActionEvent(KeyEvent.Action.WORD_LEFT);
+            }
             return new KeyEvent.ActionEvent(shift ? KeyEvent.Action.SHIFT_ARROW_LEFT : KeyEvent.Action.ARROW_LEFT);
         }
         if (seq.endsWith("H")) {

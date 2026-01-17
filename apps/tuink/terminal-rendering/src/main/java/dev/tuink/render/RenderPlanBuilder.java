@@ -15,13 +15,17 @@ import java.util.regex.Pattern;
  */
 public class RenderPlanBuilder {
     private final LineHighlighter highlighter;
-    private static final int TAB_WIDTH = 4;
+    private int tabWidth = 4;
     private static final Style SELECTION_STYLE = new Style(Color.BLACK, Color.BRIGHT_WHITE, false, false);
     private static final Style SEARCH_MATCH_STYLE = SELECTION_STYLE;
     private static final Style CURRENT_SEARCH_MATCH_STYLE = new Style(Color.BLACK, Color.BRIGHT_YELLOW, false, false);
 
     public RenderPlanBuilder(LineHighlighter highlighter) {
         this.highlighter = highlighter;
+    }
+
+    public void setTabWidth(int tabWidth) {
+        this.tabWidth = tabWidth <= 2 ? 2 : 4;
     }
 
     public RenderPlan build(
@@ -191,7 +195,7 @@ public class RenderPlanBuilder {
                 int lineIndex = state.getTopLine() + row;
                 if (lineIndex < model.lineCount()) {
                     String line = model.getLine(lineIndex);
-                    String visibleText = clip(line, state.getLeftColumn(), textWidth);
+                    String visibleText = clipByVisualWidth(line, state.getLeftColumn(), textWidth);
                     List<StyleSpan> spans = new ArrayList<>(
                         clipSpans(highlighter.highlight(line), state.getLeftColumn(), visibleText.length())
                     );
@@ -268,7 +272,8 @@ public class RenderPlanBuilder {
 
         Position cursor = model.clamp(state.getCursor());
         int cursorRow;
-        int leftVisualColumn = visualColumn(model.getLine(cursor.line()), 0, state.getLeftColumn());
+        int anchorLine = Math.max(0, Math.min(state.getTopLine(), model.lineCount() - 1));
+        int leftVisualColumn = visualColumn(model.getLine(anchorLine), 0, state.getLeftColumn());
         int cursorCol;
         if (!wrapLines) {
             cursorRow = cursor.line() - state.getTopLine();
@@ -339,7 +344,7 @@ public class RenderPlanBuilder {
         return lines;
     }
 
-    private static List<Integer> wrapStarts(String line, int maxVisualWidth, boolean wrapByWords) {
+    private List<Integer> wrapStarts(String line, int maxVisualWidth, boolean wrapByWords) {
         if (line.isEmpty()) {
             return List.of(0);
         }
@@ -364,12 +369,12 @@ public class RenderPlanBuilder {
         return starts;
     }
 
-    private static int advanceByVisualWidth(String line, int start, int maxVisualWidth) {
+    private int advanceByVisualWidth(String line, int start, int maxVisualWidth) {
         int visual = 0;
         int i = Math.max(0, Math.min(start, line.length()));
         while (i < line.length()) {
             char ch = line.charAt(i);
-            int adv = ch == '\t' ? TAB_WIDTH - (visual % TAB_WIDTH) : 1;
+            int adv = ch == '\t' ? tabWidth - (visual % tabWidth) : 1;
             if (visual + adv > maxVisualWidth) {
                 break;
             }
@@ -379,13 +384,13 @@ public class RenderPlanBuilder {
         return i;
     }
 
-    private static int advanceByWordWrap(String line, int start, int maxVisualWidth) {
+    private int advanceByWordWrap(String line, int start, int maxVisualWidth) {
         int visual = 0;
         int i = Math.max(0, Math.min(start, line.length()));
         int lastBreakAfterWhitespace = -1;
         while (i < line.length()) {
             char ch = line.charAt(i);
-            int adv = ch == '\t' ? TAB_WIDTH - (visual % TAB_WIDTH) : 1;
+            int adv = ch == '\t' ? tabWidth - (visual % tabWidth) : 1;
             if (visual + adv > maxVisualWidth) {
                 break;
             }
@@ -404,12 +409,22 @@ public class RenderPlanBuilder {
         return i;
     }
 
-    private static String clip(String line, int leftColumn, int maxWidth) {
+    private String clipByVisualWidth(String line, int leftColumn, int maxWidth) {
         if (maxWidth <= 0 || leftColumn >= line.length()) {
             return "";
         }
         int start = Math.max(0, leftColumn);
-        int end = Math.min(line.length(), start + maxWidth);
+        int end = start;
+        int visual = 0;
+        while (end < line.length()) {
+            char ch = line.charAt(end);
+            int advance = ch == '\t' ? tabWidth - (visual % tabWidth) : 1;
+            if (visual + advance > maxWidth) {
+                break;
+            }
+            visual += advance;
+            end++;
+        }
         return line.substring(start, end);
     }
 
@@ -432,14 +447,14 @@ public class RenderPlanBuilder {
         return clipped;
     }
 
-    private static int visualColumn(String line, int leftColumn, int col) {
+    private int visualColumn(String line, int leftColumn, int col) {
         int start = Math.max(0, Math.min(leftColumn, line.length()));
         int end = Math.max(start, Math.min(col, line.length()));
         int visual = 0;
         for (int i = start; i < end; i++) {
             char ch = line.charAt(i);
             if (ch == '\t') {
-                int tabAdvance = TAB_WIDTH - (visual % TAB_WIDTH);
+                int tabAdvance = tabWidth - (visual % tabWidth);
                 visual += tabAdvance;
             } else {
                 visual++;

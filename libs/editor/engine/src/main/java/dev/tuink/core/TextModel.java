@@ -19,6 +19,9 @@ import java.util.List;
 public class TextModel {
     private final TextBuffer buffer;
     private static final Charset FALLBACK_CHARSET = Charset.forName("windows-1251");
+    private int cachedVisualWidthTabWidth = -1;
+    private int cachedMaxVisualLineWidth = 0;
+    private boolean maxVisualWidthDirty = true;
 
     public TextModel(TextBuffer buffer) {
         this.buffer = buffer;
@@ -37,6 +40,7 @@ public class TextModel {
         int col = Math.min(position.col(), line.length());
         String updated = line.substring(0, col) + ch + line.substring(col);
         buffer.setLine(position.line(), updated);
+        invalidateVisualWidthCache();
         return new Position(position.line(), col + 1);
     }
 
@@ -47,6 +51,7 @@ public class TextModel {
         String right = line.substring(col);
         buffer.setLine(position.line(), left);
         buffer.insertLine(position.line() + 1, right);
+        invalidateVisualWidthCache();
         return new Position(position.line() + 1, 0);
     }
 
@@ -56,6 +61,7 @@ public class TextModel {
             int col = Math.min(position.col(), line.length());
             String updated = line.substring(0, col - 1) + line.substring(col);
             buffer.setLine(position.line(), updated);
+            invalidateVisualWidthCache();
             return new Position(position.line(), col - 1);
         }
 
@@ -67,6 +73,7 @@ public class TextModel {
         int prevLineIndex = position.line() - 1;
         String prev = buffer.getLine(prevLineIndex);
         buffer.setLine(prevLineIndex, prev + current);
+        invalidateVisualWidthCache();
         return new Position(prevLineIndex, prev.length());
     }
 
@@ -77,6 +84,7 @@ public class TextModel {
         if (col < line.length()) {
             String updated = line.substring(0, col) + line.substring(col + 1);
             buffer.setLine(position.line(), updated);
+            invalidateVisualWidthCache();
             return new Position(position.line(), col);
         }
 
@@ -86,6 +94,7 @@ public class TextModel {
 
         String next = buffer.removeLine(position.line() + 1);
         buffer.setLine(position.line(), line + next);
+        invalidateVisualWidthCache();
         return new Position(position.line(), col);
     }
 
@@ -130,6 +139,7 @@ public class TextModel {
         if (a.line() == b.line()) {
             String line = buffer.getLine(a.line());
             buffer.setLine(a.line(), line.substring(0, a.col()) + line.substring(b.col()));
+            invalidateVisualWidthCache();
             return a;
         }
 
@@ -139,6 +149,7 @@ public class TextModel {
         for (int i = b.line(); i > a.line(); i--) {
             buffer.removeLine(i);
         }
+        invalidateVisualWidthCache();
         return a;
     }
 
@@ -157,6 +168,7 @@ public class TextModel {
 
         if (parts.length == 1) {
             buffer.setLine(at.line(), left + parts[0] + right);
+            invalidateVisualWidthCache();
             return new Position(at.line(), col + parts[0].length());
         }
 
@@ -166,6 +178,7 @@ public class TextModel {
         }
         String last = parts[parts.length - 1];
         buffer.insertLine(at.line() + parts.length - 1, last + right);
+        invalidateVisualWidthCache();
         return new Position(at.line() + parts.length - 1, last.length());
     }
 
@@ -188,6 +201,7 @@ public class TextModel {
         for (int i = 1; i < lines.size(); i++) {
             buffer.insertLine(i, lines.get(i));
         }
+        invalidateVisualWidthCache();
         return decoded.charset();
     }
 
@@ -240,6 +254,9 @@ public class TextModel {
 
     public int maxVisualLineWidth(int tabWidth) {
         int safeTabWidth = Math.max(1, tabWidth);
+        if (!maxVisualWidthDirty && cachedVisualWidthTabWidth == safeTabWidth) {
+            return cachedMaxVisualLineWidth;
+        }
         int max = 0;
         for (int i = 0; i < lineCount(); i++) {
             String line = getLine(i);
@@ -254,6 +271,9 @@ public class TextModel {
             }
             max = Math.max(max, visual);
         }
+        cachedVisualWidthTabWidth = safeTabWidth;
+        cachedMaxVisualLineWidth = max;
+        maxVisualWidthDirty = false;
         return max;
     }
 
@@ -261,12 +281,18 @@ public class TextModel {
         buffer.clear();
         if (lines == null || lines.isEmpty()) {
             buffer.setLine(0, "");
+            invalidateVisualWidthCache();
             return;
         }
         buffer.setLine(0, lines.get(0));
         for (int i = 1; i < lines.size(); i++) {
             buffer.insertLine(i, lines.get(i));
         }
+        invalidateVisualWidthCache();
+    }
+
+    private void invalidateVisualWidthCache() {
+        maxVisualWidthDirty = true;
     }
 
     private DecodedContent decodeWithDetectedCharset(byte[] data) {

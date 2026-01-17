@@ -17,6 +17,10 @@ public final class AppSettingsStore {
     private static final String KEY_READING_MODE = "ui.readingMode";
     private static final String KEY_CONFIRM_ON_CLOSE = "ui.confirmOnClose";
     private static final String KEY_MOUSE_MODE = "ui.mouseMode";
+    private static final String KEY_HIGHLIGHT_ACTIVE_GUTTER = "ui.highlightActiveLineNumber";
+    private static final String KEY_SMART_HOME_END = "ui.smartHomeEnd";
+    private static final String KEY_VISIBLE_WHITESPACE = "ui.visibleWhitespace";
+    private static final String KEY_TAB_WIDTH = "ui.tabWidth";
     private static final String KEY_THEME = "ui.theme";
 
     private AppSettingsStore() {
@@ -44,6 +48,10 @@ public final class AppSettingsStore {
             parseBoolean(p.getProperty(KEY_READING_MODE), defaults.readingMode()),
             parseBoolean(p.getProperty(KEY_CONFIRM_ON_CLOSE), defaults.confirmOnClose()),
             parseBoolean(p.getProperty(KEY_MOUSE_MODE), defaults.mouseMode()),
+            parseBoolean(p.getProperty(KEY_HIGHLIGHT_ACTIVE_GUTTER), defaults.highlightActiveGutter()),
+            parseBoolean(p.getProperty(KEY_SMART_HOME_END), defaults.smartHomeEnd()),
+            parseBoolean(p.getProperty(KEY_VISIBLE_WHITESPACE), defaults.visibleWhitespace()),
+            parseTabWidth(p.getProperty(KEY_TAB_WIDTH), defaults.tabWidth()),
             parseTheme(p.getProperty(KEY_THEME), defaults.theme())
         );
     }
@@ -61,6 +69,10 @@ public final class AppSettingsStore {
         p.setProperty(KEY_READING_MODE, Boolean.toString(settings.readingMode()));
         p.setProperty(KEY_CONFIRM_ON_CLOSE, Boolean.toString(settings.confirmOnClose()));
         p.setProperty(KEY_MOUSE_MODE, Boolean.toString(settings.mouseMode()));
+        p.setProperty(KEY_HIGHLIGHT_ACTIVE_GUTTER, Boolean.toString(settings.highlightActiveGutter()));
+        p.setProperty(KEY_SMART_HOME_END, Boolean.toString(settings.smartHomeEnd()));
+        p.setProperty(KEY_VISIBLE_WHITESPACE, Boolean.toString(settings.visibleWhitespace()));
+        p.setProperty(KEY_TAB_WIDTH, Integer.toString(settings.tabWidth()));
         p.setProperty(KEY_THEME, settings.theme().name().toLowerCase());
 
         Path tmp = path.resolveSibling(path.getFileName() + ".tmp");
@@ -91,5 +103,18 @@ public final class AppSettingsStore {
             case "light" -> UiStyles.Theme.LIGHT;
             default -> fallback;
         };
+    }
+
+    private static int parseTabWidth(String raw, int fallback) {
+        int safeFallback = fallback <= 2 ? 2 : 4;
+        if (raw == null || raw.isBlank()) {
+            return safeFallback;
+        }
+        try {
+            int value = Integer.parseInt(raw.trim());
+            return value <= 2 ? 2 : 4;
+        } catch (NumberFormatException e) {
+            return safeFallback;
+        }
     }
 }

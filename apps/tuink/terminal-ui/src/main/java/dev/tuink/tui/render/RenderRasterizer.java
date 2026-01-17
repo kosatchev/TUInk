@@ -12,9 +12,11 @@ import java.util.List;
  * Converts an abstract render plan into a cell buffer.
  */
 public class RenderRasterizer {
-    private static final int TAB_WIDTH = 4;
     private Palette styles;
     private final int contentTopRow;
+    private boolean highlightActiveGutter = true;
+    private boolean visibleWhitespace = true;
+    private int tabWidth = 4;
 
     public RenderRasterizer() {
         this(1, UiStyles.Theme.CLASSIC);
@@ -33,6 +35,18 @@ public class RenderRasterizer {
         this.styles = UiStyles.forTheme(theme);
     }
 
+    public void setHighlightActiveGutter(boolean enabled) {
+        this.highlightActiveGutter = enabled;
+    }
+
+    public void setVisibleWhitespace(boolean enabled) {
+        this.visibleWhitespace = enabled;
+    }
+
+    public void setTabWidth(int tabWidth) {
+        this.tabWidth = tabWidth <= 2 ? 2 : 4;
+    }
+
     public CellBuffer rasterize(RenderPlan plan, int rows, int cols) {
         return rasterize(plan, rows, cols, contentTopRow);
     }
@@ -41,6 +55,7 @@ public class RenderRasterizer {
         CellBuffer buffer = new CellBuffer(rows, cols);
         int contentCols = Math.max(1, cols - plan.scrollbarWidth());
         int topRow = Math.max(1, contentTopRow);
+        int activeGutterRow = resolveActiveGutterRow(plan);
 
         for (int row = 0; row < Math.min(plan.lines().size(), plan.contentRows()); row++) {
             LineVisual line = plan.lines().get(row);
@@ -48,8 +63,20 @@ public class RenderRasterizer {
             if (screenRow >= rows) {
                 break;
             }
-            drawText(buffer, screenRow, 0, line.gutter(), styles.renderGutter(), contentCols);
-            drawHighlightedText(buffer, screenRow, plan.gutterWidth(), line.text(), line.spans(), contentCols);
+            Style gutterStyle = highlightActiveGutter && row == activeGutterRow
+                ? styles.renderGutterActive()
+                : styles.renderGutter();
+            drawText(buffer, screenRow, 0, line.gutter(), gutterStyle, contentCols);
+            boolean markLeadingWhitespace = shouldMarkLeadingWhitespace(plan, line);
+            drawHighlightedText(
+                buffer,
+                screenRow,
+                plan.gutterWidth(),
+                line.text(),
+                line.spans(),
+                contentCols,
+                markLeadingWhitespace
+            );
         }
 
         int statusRow = Math.max(0, rows - 1);
@@ -150,7 +177,8 @@ public class RenderRasterizer {
         int startCol,
         String text,
         List<StyleSpan> spans,
-        int cols
+        int cols,
+        boolean markLeadingWhitespace
     ) {
         Style[] charStyles = new Style[text.length()];
         String[] graphemes = new String[text.length()];
@@ -166,24 +194,48 @@ public class RenderRasterizer {
             }
         }
 
-        // Render leading indentation markers: space -> '·', tab -> '»'
-        for (int i = 0; i < text.length(); i++) {
-            char ch = text.charAt(i);
-            if (ch == ' ') {
-                graphemes[i] = "·";
-                if (charStyles[i].equals(Style.DEFAULT)) {
-                    charStyles[i] = styles.renderLeadingWhitespace();
+        if (visibleWhitespace && markLeadingWhitespace) {
+            // Render leading indentation markers: space -> '·', tab -> '»'
+            for (int i = 0; i < text.length(); i++) {
+                char ch = text.charAt(i);
+                if (ch == ' ') {
+                    graphemes[i] = "·";
+                    if (charStyles[i].equals(Style.DEFAULT)) {
+                        charStyles[i] = styles.renderLeadingWhitespace();
+                    }
+                    continue;
                 }
-                continue;
-            }
-            if (ch == '\t') {
-                graphemes[i] = "»";
-                if (charStyles[i].equals(Style.DEFAULT)) {
-                    charStyles[i] = styles.renderLeadingWhitespace();
+                if (ch == '\t') {
+                    graphemes[i] = "»";
+                    if (charStyles[i].equals(Style.DEFAULT)) {
+                        charStyles[i] = styles.renderLeadingWhitespace();
+                    }
+                    continue;
                 }
-                continue;
+                break;
             }
-            break;
+        }
+
+        if (visibleWhitespace) {
+            // Render trailing whitespace markers so hanging spaces are visible.
+            for (int i = text.length() - 1; i >= 0; i--) {
+                char ch = text.charAt(i);
+                if (ch == ' ') {
+                    graphemes[i] = "·";
+                    if (charStyles[i].equals(Style.DEFAULT)) {
+                        charStyles[i] = styles.renderLeadingWhitespace();
+                    }
+                    continue;
+                }
+                if (ch == '\t') {
+                    graphemes[i] = "»";
+                    if (charStyles[i].equals(Style.DEFAULT)) {
+                        charStyles[i] = styles.renderLeadingWhitespace();
+                    }
+                    continue;
+                }
+                break;
+            }
         }
 
         int outCol = startCol;
@@ -191,8 +243,8 @@ public class RenderRasterizer {
             char ch = text.charAt(i);
             if (ch == '\t') {
                 int relativeCol = Math.max(0, outCol - startCol);
-                int tabAdvance = TAB_WIDTH - (relativeCol % TAB_WIDTH);
-                if ("»".equals(graphemes[i])) {
+                int tabAdvance = tabWidth - (relativeCol % tabWidth);
+                if (visibleWhitespace && "»".equals(graphemes[i])) {
                     buffer.set(row, outCol, "»", charStyles[i]);
                     outCol++;
                     for (int j = 1; j < tabAdvance && outCol < cols; j++) {
@@ -230,5 +282,36 @@ public class RenderRasterizer {
             return new String[0];
         }
         return text.split("\\n", -1);
+    }
+
+    private int resolveActiveGutterRow(RenderPlan plan) {
+        int cursorRow = Math.max(0, Math.min(plan.cursorRow(), Math.max(0, plan.lines().size() - 1)));
+        if (plan.lines().isEmpty()) {
+            return cursorRow;
+        }
+        if (hasLineNumberGutter(plan.lines().get(cursorRow).gutter())) {
+            return cursorRow;
+        }
+        for (int row = cursorRow - 1; row >= 0; row--) {
+            if (hasLineNumberGutter(plan.lines().get(row).gutter())) {
+                return row;
+            }
+        }
+        return cursorRow;
+    }
+
+    private boolean hasLineNumberGutter(String gutter) {
+        if (gutter == null || gutter.isBlank()) {
+            return false;
+        }
+        String trimmed = gutter.trim();
+        return !trimmed.isEmpty() && !"~".equals(trimmed);
+    }
+
+    private boolean shouldMarkLeadingWhitespace(RenderPlan plan, LineVisual line) {
+        if (!plan.wrapLines()) {
+            return plan.leftColumn() == 0;
+        }
+        return hasLineNumberGutter(line.gutter());
     }
 }

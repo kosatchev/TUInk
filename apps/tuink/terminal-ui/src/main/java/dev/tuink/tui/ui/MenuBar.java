@@ -65,6 +65,22 @@ public final class MenuBar {
         controller.setMouseModeEnabled(enabled);
     }
 
+    public void setActiveGutterHighlightEnabled(boolean enabled) {
+        controller.setActiveGutterHighlightEnabled(enabled);
+    }
+
+    public void setSmartHomeEndEnabled(boolean enabled) {
+        controller.setSmartHomeEndEnabled(enabled);
+    }
+
+    public void setVisibleWhitespaceEnabled(boolean enabled) {
+        controller.setVisibleWhitespaceEnabled(enabled);
+    }
+
+    public void setTabWidth(int tabWidth) {
+        controller.setTabWidth(tabWidth);
+    }
+
     public Integer consumeTabActivationRequest() {
         return controller.consumePendingTabActivation();
     }
@@ -163,12 +179,12 @@ public final class MenuBar {
             controller.toggle(MenuId.EDIT);
             return true;
         }
-        if (View.isMenuLabelHit(MenuId.TAB, col)) {
-            controller.toggle(MenuId.TAB);
-            return true;
-        }
         if (View.isMenuLabelHit(MenuId.VIEW, col)) {
             controller.toggle(MenuId.VIEW);
+            return true;
+        }
+        if (View.isMenuLabelHit(MenuId.TAB, col)) {
+            controller.toggle(MenuId.TAB);
             return true;
         }
         if (View.isMenuLabelHit(MenuId.SETTINGS, col)) {
@@ -245,6 +261,10 @@ public final class MenuBar {
         private boolean readingModeEnabled;
         private boolean confirmOnCloseEnabled = true;
         private boolean mouseModeEnabled = true;
+        private boolean activeGutterHighlightEnabled = true;
+        private boolean smartHomeEndEnabled = true;
+        private boolean visibleWhitespaceEnabled = true;
+        private int tabWidth = 4;
         private String themeLabel = "Classic";
         private int[] activeMnemonics = new int[0];
 
@@ -287,7 +307,7 @@ public final class MenuBar {
 
         private void setReadingModeEnabled(boolean enabled) {
             this.readingModeEnabled = enabled;
-            if (open && active == MenuId.VIEW) {
+            if (open && active == MenuId.SETTINGS) {
                 rebuildMnemonics();
             }
         }
@@ -306,9 +326,37 @@ public final class MenuBar {
             }
         }
 
+        private void setActiveGutterHighlightEnabled(boolean enabled) {
+            this.activeGutterHighlightEnabled = enabled;
+            if (open && active == MenuId.VIEW) {
+                rebuildMnemonics();
+            }
+        }
+
+        private void setSmartHomeEndEnabled(boolean enabled) {
+            this.smartHomeEndEnabled = enabled;
+            if (open && active == MenuId.SETTINGS) {
+                rebuildMnemonics();
+            }
+        }
+
+        private void setVisibleWhitespaceEnabled(boolean enabled) {
+            this.visibleWhitespaceEnabled = enabled;
+            if (open && active == MenuId.VIEW) {
+                rebuildMnemonics();
+            }
+        }
+
+        private void setTabWidth(int tabWidth) {
+            this.tabWidth = tabWidth <= 2 ? 2 : 4;
+            if (open && active == MenuId.VIEW) {
+                rebuildMnemonics();
+            }
+        }
+
         private void setThemeLabel(String label) {
             this.themeLabel = label == null || label.isBlank() ? "Classic" : label;
-            if (open && active == MenuId.SETTINGS) {
+            if (open && active == MenuId.VIEW) {
                 rebuildMnemonics();
             }
         }
@@ -579,13 +627,13 @@ public final class MenuBar {
         private String buildTopBar(Path currentFile, boolean dirty, int activeTabIndex, int totalTabs, int cols, boolean readingMode) {
             String fileMenu = (open && active == MenuId.FILE) ? "[File]" : " File ";
             String editMenu = (open && active == MenuId.EDIT) ? "[Edit]" : " Edit ";
-            String tabMenu = (open && active == MenuId.TAB) ? "[Tab]" : " Tab ";
             String viewMenu = (open && active == MenuId.VIEW) ? "[View]" : " View ";
+            String tabMenu = (open && active == MenuId.TAB) ? "[Tab]" : " Tab ";
             String settingsMenu = (open && active == MenuId.SETTINGS) ? "[Settings]" : " Settings ";
             String helpMenu = (open && active == MenuId.HELP) ? "[Help]" : " Help ";
             String file = currentFile == null ? NO_NAME_LABEL : currentFile.toString();
             String dirtyMarker = dirty ? " *" : "";
-            String left = fileMenu + " " + editMenu + " " + tabMenu + " " + viewMenu + " "
+            String left = fileMenu + " " + editMenu + " " + viewMenu + " " + tabMenu + " "
                 + settingsMenu + " " + helpMenu + " ";
             fileNameStartCol = left.length();
             String base = left + file + dirtyMarker;
@@ -623,14 +671,18 @@ public final class MenuBar {
                     new MenuItem("[" + (showTabBarEnabled ? "x" : " ") + "] Show Tab Bar", true),
                     new MenuItem("[" + (wrapLinesEnabled ? "x" : " ") + "] Wrap Lines", true),
                     new MenuItem(wrapWordsLabel, wrapLinesEnabled),
-                    new MenuItem("[" + (readingModeEnabled ? "x" : " ") + "] Reading mode", true)
+                    new MenuItem("[" + (tabWidth <= 2 ? "x" : " ") + "] Thin tabs (2)", true),
+                    new MenuItem("[" + (visibleWhitespaceEnabled ? "x" : " ") + "] Visible tabs/spaces", true),
+                    new MenuItem("[" + (activeGutterHighlightEnabled ? "x" : " ") + "] Highlight current line number", true),
+                    new MenuItem("[>] Theme: " + themeLabel, true)
                 };
             }
             if (menu == MenuId.SETTINGS) {
                 return new MenuItem[] {
-                    new MenuItem("[" + (confirmOnCloseEnabled ? "x" : " ") + "] Confirm on close", true),
+                    new MenuItem("[" + (readingModeEnabled ? "x" : " ") + "] Reading mode", true),
+                    new MenuItem("[" + (smartHomeEndEnabled ? "x" : " ") + "] Smart Home/End", true),
                     new MenuItem("[" + (mouseModeEnabled ? "x" : " ") + "] Mouse mode", true),
-                    new MenuItem("[>] Theme: " + themeLabel, true)
+                    new MenuItem("[" + (confirmOnCloseEnabled ? "x" : " ") + "] Confirm on close", true),
                 };
             }
             if (menu == MenuId.HELP) {
@@ -701,15 +753,19 @@ public final class MenuBar {
                     case 0 -> KeyEvent.Action.TOGGLE_TAB_BAR;
                     case 1 -> KeyEvent.Action.TOGGLE_WRAP_LINES;
                     case 2 -> KeyEvent.Action.TOGGLE_WORD_WRAP;
-                    case 3 -> KeyEvent.Action.TOGGLE_READING_MODE;
+                    case 3 -> KeyEvent.Action.TOGGLE_TAB_WIDTH;
+                    case 4 -> KeyEvent.Action.TOGGLE_VISIBLE_WHITESPACE;
+                    case 5 -> KeyEvent.Action.TOGGLE_ACTIVE_GUTTER_HIGHLIGHT;
+                    case 6 -> KeyEvent.Action.TOGGLE_THEME;
                     default -> null;
                 };
             }
             if (menu == MenuId.SETTINGS) {
                 return switch (itemIndex) {
-                    case 0 -> KeyEvent.Action.TOGGLE_CONFIRM_ON_CLOSE;
-                    case 1 -> KeyEvent.Action.TOGGLE_MOUSE_MODE;
-                    case 2 -> KeyEvent.Action.TOGGLE_THEME;
+                    case 0 -> KeyEvent.Action.TOGGLE_READING_MODE;
+                    case 1 -> KeyEvent.Action.TOGGLE_SMART_HOME_END;
+                    case 2 -> KeyEvent.Action.TOGGLE_MOUSE_MODE;
+                    case 3 -> KeyEvent.Action.TOGGLE_CONFIRM_ON_CLOSE;
                     default -> null;
                 };
             }
@@ -750,9 +806,9 @@ public final class MenuBar {
         private static MenuId nextMenu(MenuId menu) {
             return switch (menu) {
                 case FILE -> MenuId.EDIT;
-                case EDIT -> MenuId.TAB;
-                case TAB -> MenuId.VIEW;
-                case VIEW -> MenuId.SETTINGS;
+                case EDIT -> MenuId.VIEW;
+                case VIEW -> MenuId.TAB;
+                case TAB -> MenuId.SETTINGS;
                 case SETTINGS -> MenuId.HELP;
                 case HELP -> MenuId.FILE;
             };
@@ -760,11 +816,11 @@ public final class MenuBar {
 
         private static MenuId previousMenu(MenuId menu) {
             return switch (menu) {
-                case FILE -> MenuId.SETTINGS;
+                case FILE -> MenuId.HELP;
                 case EDIT -> MenuId.FILE;
-                case TAB -> MenuId.EDIT;
-                case VIEW -> MenuId.TAB;
-                case SETTINGS -> MenuId.VIEW;
+                case VIEW -> MenuId.EDIT;
+                case TAB -> MenuId.VIEW;
+                case SETTINGS -> MenuId.TAB;
                 case HELP -> MenuId.SETTINGS;
             };
         }
@@ -773,8 +829,8 @@ public final class MenuBar {
     private static final class View {
         private static final int FILE_START_COL = 0;
         private static final int EDIT_START_COL = 7;
-        private static final int TAB_START_COL = 14;
-        private static final int VIEW_START_COL = 20;
+        private static final int VIEW_START_COL = 14;
+        private static final int TAB_START_COL = 21;
         private static final int SETTINGS_START_COL = 27;
         private static final int HELP_START_COL = 38;
         private static final int FILE_LABEL_WIDTH = 6;
@@ -844,8 +900,8 @@ public final class MenuBar {
             String label = switch (active) {
                 case FILE -> " File ";
                 case EDIT -> " Edit ";
-                case TAB -> " Tab ";
                 case VIEW -> " View ";
+                case TAB -> " Tab ";
                 case SETTINGS -> " Settings ";
                 case HELP -> " Help ";
             };

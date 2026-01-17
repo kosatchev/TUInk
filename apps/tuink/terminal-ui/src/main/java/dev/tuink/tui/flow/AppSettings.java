@@ -9,6 +9,10 @@ public record AppSettings(
     boolean readingMode,
     boolean confirmOnClose,
     boolean mouseMode,
+    boolean highlightActiveGutter,
+    boolean smartHomeEnd,
+    boolean visibleWhitespace,
+    int tabWidth,
     UiStyles.Theme theme
 ) {
     public static AppSettings defaults() {
@@ -19,6 +23,10 @@ public record AppSettings(
             false,
             true,
             true,
+            true,
+            true,
+            true,
+            4,
             UiStyles.Theme.CLASSIC
         );
     }

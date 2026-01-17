@@ -69,15 +69,18 @@ public class TerminalEditorApp {
         "Ctrl+K               Save As",
         "Ctrl+Q               Quit",
         "Ctrl+F               Open find bar",
+        "Ctrl+/               Keyboard hints",
         "Ctrl+A               Select all",
         "Arrows/Home/End      Move cursor",
+        "Ctrl+Left/Right      Move by word",
+        "Alt+B / Alt+F        Move by word (fallback)",
         "PgUp/PgDn            Scroll page",
         "",
         "               MENU",
-        "F10 or Alt+F         Open File menu",
+        "F10                  Open File menu",
         "Ctrl+E or Alt+E      Open Edit menu",
-        "Ctrl+T or Alt+T      Open Tab menu",
         "Alt+V                Open View menu",
+        "Ctrl+T or Alt+T      Open Tab menu",
         "F2 or Alt+S          Open Settings menu",
         "F1 or Alt+H          Open Help menu",
         "Arrows               Move selection",
@@ -148,6 +151,10 @@ public class TerminalEditorApp {
             cli.readModeOverride() != null ? cli.readModeOverride() : loadedSettings.readingMode(),
             loadedSettings.confirmOnClose(),
             cli.mouseEnabledOverride() != null ? cli.mouseEnabledOverride() : loadedSettings.mouseMode(),
+            loadedSettings.highlightActiveGutter(),
+            loadedSettings.smartHomeEnd(),
+            loadedSettings.visibleWhitespace(),
+            loadedSettings.tabWidth(),
             false
         );
         TextField searchQueryInput = new TextField();
@@ -320,7 +327,7 @@ public class TerminalEditorApp {
                     int contentTopRow = showTabBar ? 2 : 1;
                     int baseContentRows = Math.max(0, rows - overlayRows - contentTopRow - 1);
                     int gutterWidth = Math.max(1, String.valueOf(Math.max(model.lineCount(), 1)).length()) + 1;
-                    int maxLineLength = model.maxVisualLineWidth(4);
+                    int maxLineLength = model.maxVisualLineWidth(uiSessionState.tabWidthSetting);
                     boolean canShowVScrollbar = cols >= 8;
                     int contentRows = baseContentRows;
                     int contentCols = Math.max(0, cols - gutterWidth);
@@ -352,6 +359,16 @@ public class TerminalEditorApp {
                     topMenu.setReadingModeEnabled(uiSessionState.readingModeSetting);
                     topMenu.setConfirmOnCloseEnabled(uiSessionState.confirmOnCloseSetting);
                     topMenu.setMouseModeEnabled(uiSessionState.mouseModeSetting);
+                    topMenu.setActiveGutterHighlightEnabled(uiSessionState.highlightActiveGutterSetting);
+                    topMenu.setSmartHomeEndEnabled(uiSessionState.smartHomeEndSetting);
+                    topMenu.setVisibleWhitespaceEnabled(uiSessionState.visibleWhitespaceSetting);
+                    topMenu.setTabWidth(uiSessionState.tabWidthSetting);
+                    renderer.setHighlightActiveGutter(uiSessionState.highlightActiveGutterSetting);
+                    renderer.setVisibleWhitespace(uiSessionState.visibleWhitespaceSetting);
+                    renderer.setTabWidth(uiSessionState.tabWidthSetting);
+                    renderPlanBuilder.setTabWidth(uiSessionState.tabWidthSetting);
+                    editorView.setTabWidth(uiSessionState.tabWidthSetting);
+                    engine.setTabWidth(uiSessionState.tabWidthSetting);
 
                     String topBar = topMenu.buildTopBar(
                         state.getCurrentFile(),
@@ -1047,6 +1064,10 @@ public class TerminalEditorApp {
             uiSessionState.readingModeSetting,
             uiSessionState.confirmOnCloseSetting,
             uiSessionState.mouseModeSetting,
+            uiSessionState.highlightActiveGutterSetting,
+            uiSessionState.smartHomeEndSetting,
+            uiSessionState.visibleWhitespaceSetting,
+            uiSessionState.tabWidthSetting,
             theme
         );
         if (!effectiveSettings.equals(loadedSettings)) {
@@ -1370,7 +1391,11 @@ public class TerminalEditorApp {
                 } else if (uiSessionState.searchFocus == SearchFocus.REPLACE) {
                     searchReplaceInput.moveHome();
                 } else {
-                    nextEngine.moveHome();
+                    if (uiSessionState.smartHomeEndSetting) {
+                        nextEngine.moveHomeSmart();
+                    } else {
+                        nextEngine.moveHome();
+                    }
                 }
             }
             case END -> {
@@ -1379,7 +1404,11 @@ public class TerminalEditorApp {
                 } else if (uiSessionState.searchFocus == SearchFocus.REPLACE) {
                     searchReplaceInput.moveEnd();
                 } else {
-                    nextEngine.moveEnd();
+                    if (uiSessionState.smartHomeEndSetting) {
+                        nextEngine.moveEndSmart();
+                    } else {
+                        nextEngine.moveEnd();
+                    }
                 }
             }
             case ENTER -> {

@@ -75,6 +75,34 @@ final class InputActionDispatcher {
                 statusMessage = ui.mouseModeSetting ? "Mouse mode enabled" : "Mouse mode disabled";
                 return DispatchResult.handled(statusMessage);
             }
+            case TOGGLE_ACTIVE_GUTTER_HIGHLIGHT -> {
+                ui.highlightActiveGutterSetting = !ui.highlightActiveGutterSetting;
+                statusMessage = ui.highlightActiveGutterSetting
+                    ? "Current line number highlight enabled"
+                    : "Current line number highlight disabled";
+                return DispatchResult.handled(statusMessage);
+            }
+            case TOGGLE_SMART_HOME_END -> {
+                ui.smartHomeEndSetting = !ui.smartHomeEndSetting;
+                statusMessage = ui.smartHomeEndSetting
+                    ? "Smart Home/End enabled"
+                    : "Smart Home/End disabled";
+                return DispatchResult.handled(statusMessage);
+            }
+            case TOGGLE_VISIBLE_WHITESPACE -> {
+                ui.visibleWhitespaceSetting = !ui.visibleWhitespaceSetting;
+                statusMessage = ui.visibleWhitespaceSetting
+                    ? "Visible whitespace enabled"
+                    : "Visible whitespace disabled";
+                return DispatchResult.handled(statusMessage);
+            }
+            case TOGGLE_TAB_WIDTH -> {
+                ui.tabWidthSetting = ui.tabWidthSetting <= 2 ? 4 : 2;
+                statusMessage = ui.tabWidthSetting <= 2
+                    ? "Thin tabs enabled (2)"
+                    : "Thin tabs disabled (4)";
+                return DispatchResult.handled(statusMessage);
+            }
             case SHOW_KEY_HINTS -> {
                 ui.helpHintsMode = true;
                 return DispatchResult.handled("Keyboard hints");
@@ -85,14 +113,22 @@ final class InputActionDispatcher {
                 return DispatchResult.handled(ctx.searchHelpMessage());
             }
             case CTRL_C -> {
-                statusMessage = ctx.engine().copySelection() ? "Copied selection" : "Nothing selected";
+                if (ctx.engine().hasSelection()) {
+                    statusMessage = ctx.engine().copySelection() ? "Copied selection" : "Nothing selected";
+                } else {
+                    statusMessage = ctx.engine().copyCurrentLine() ? "Copied line" : "Nothing to copy";
+                }
                 return DispatchResult.handled(statusMessage);
             }
             case CTRL_X -> {
                 if (ui.readingModeSetting) {
                     statusMessage = "Reading mode: editing is disabled";
                 } else {
-                    statusMessage = ctx.engine().cutSelection() ? "Cut selection" : "Nothing selected";
+                    if (ctx.engine().hasSelection()) {
+                        statusMessage = ctx.engine().cutSelection() ? "Cut selection" : "Nothing selected";
+                    } else {
+                        statusMessage = ctx.engine().cutCurrentLine() ? "Cut line" : "Nothing to cut";
+                    }
                 }
                 return DispatchResult.handled(statusMessage);
             }
@@ -160,6 +196,14 @@ final class InputActionDispatcher {
                 ctx.engine().moveRight(true);
                 return DispatchResult.handled(null);
             }
+            case WORD_LEFT -> {
+                ctx.engine().moveWordLeft();
+                return DispatchResult.handled(null);
+            }
+            case WORD_RIGHT -> {
+                ctx.engine().moveWordRight();
+                return DispatchResult.handled(null);
+            }
             case PAGE_UP -> {
                 ctx.engine().pageUp(ctx.contentRows());
                 return DispatchResult.handled(null);
@@ -169,11 +213,19 @@ final class InputActionDispatcher {
                 return DispatchResult.handled(null);
             }
             case HOME -> {
-                ctx.engine().moveHome();
+                if (ui.smartHomeEndSetting) {
+                    ctx.engine().moveHomeSmart();
+                } else {
+                    ctx.engine().moveHome();
+                }
                 return DispatchResult.handled(null);
             }
             case END -> {
-                ctx.engine().moveEnd();
+                if (ui.smartHomeEndSetting) {
+                    ctx.engine().moveEndSmart();
+                } else {
+                    ctx.engine().moveEnd();
+                }
                 return DispatchResult.handled(null);
             }
             case BACKSPACE -> {

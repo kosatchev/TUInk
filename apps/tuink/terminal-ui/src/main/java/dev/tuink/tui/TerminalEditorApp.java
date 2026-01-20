@@ -11,6 +11,8 @@ import dev.tuink.core.TextModel;
 import dev.tuink.highlight.regex.RegexHighlighter;
 import dev.tuink.tui.flow.AppSettings;
 import dev.tuink.tui.flow.AppSettingsStore;
+import dev.tuink.tui.flow.ConfirmChoice;
+import dev.tuink.tui.flow.SaveAsSuggestionStore;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.flow.UiModalState;
 import dev.tuink.tui.render.CellBuffer;
@@ -20,6 +22,8 @@ import dev.tuink.render.RenderPlanBuilder;
 import dev.tuink.render.Style;
 import dev.tuink.tui.render.RenderRasterizer;
 import dev.tuink.tui.ui.Button;
+import dev.tuink.tui.ui.ConfirmBarController;
+import dev.tuink.tui.ui.ConfirmBarView;
 import dev.tuink.tui.ui.EditorView;
 import dev.tuink.tui.ui.InlinePromptBar;
 import dev.tuink.tui.ui.MenuBar;
@@ -28,6 +32,8 @@ import dev.tuink.tui.ui.NotificationBar;
 import dev.tuink.tui.ui.OpenFileDialogController.OpenDialogButtons;
 import dev.tuink.tui.ui.OpenFileDialogController.OpenDialogLayout;
 import dev.tuink.tui.ui.OpenFileDialogController;
+import dev.tuink.tui.ui.CursorPolicy;
+import dev.tuink.tui.ui.TerminalCursorController;
 import dev.tuink.tui.ui.TabBar;
 import dev.tuink.tui.ui.TextField;
 import dev.tuink.tui.ui.TreeView;
@@ -50,7 +56,6 @@ import org.jline.utils.NonBlockingReader;
  */
 public class TerminalEditorApp {
     private static final String DEFAULT_FILE_NAME = "untitled.txt";
-    private static final String SEARCH_HELP = "Tab focus  Space toggle  Enter next  Ctrl+G prev  Ctrl+R replace  Ctrl+A all  Esc";
     private static final String SAVE_AS_PROMPT = "Save As: ";
     private static final long NOTIFY_DURATION_NANOS = 3_000_000_000L;
     private static final long OPEN_DIALOG_DOUBLE_CLICK_NANOS = 450_000_000L;
@@ -138,10 +143,10 @@ public class TerminalEditorApp {
         RenderRasterizer renderer = new RenderRasterizer(1, theme);
         EditorView editorView = new EditorView();
 
-        String statusMessage = "Ctrl+S save | Ctrl+Q quit";
         NotificationState notification = new NotificationState();
         UiModalState modalState = UiModalState.none();
         TextField saveAsInput = new TextField();
+        SaveAsSuggestionStore saveAsSuggestions = new SaveAsSuggestionStore();
         UiSessionState uiSessionState = UiSessionState.from(
             false,
             SearchFocus.FIND,
@@ -185,12 +190,9 @@ public class TerminalEditorApp {
                 engine.open(file);
                 renderPlanBuilder = new RenderPlanBuilder(resolveHighlighter(file));
                 sessionContext.replaceActiveRenderPlanBuilder(renderPlanBuilder);
-                statusMessage = "Opened " + file;
             } catch (IOException e) {
-                statusMessage = "Open failed: " + e.getMessage();
+                notification.error("Open failed: " + e.getMessage());
             }
-        } else {
-            statusMessage = "Ctrl+S save as " + DEFAULT_FILE_NAME + " | Ctrl+Q quit";
         }
 
         try (Terminal terminal = TerminalBuilder.builder().system(true).encoding(StandardCharsets.UTF_8).build()) {
@@ -216,6 +218,8 @@ public class TerminalEditorApp {
             RenderPlan plan = null;
             int lastCursorRow = -1;
             int lastCursorCol = -1;
+            boolean lastCursorVisible = true;
+            TerminalCursorController cursorController = new TerminalCursorController();
             Runnable cleanup = () -> {
                 if (cleanedUp.compareAndSet(false, true)) {
                     StringBuilder out = new StringBuilder("\u001B[0m");
@@ -251,7 +255,8 @@ public class TerminalEditorApp {
                     editorView,
                     tabBar,
                     topMenu,
-                    cli.colorEnabled()
+                    cli.colorEnabled(),
+                    cursorController
                 );
                 InputEventPump inputEventPump = new InputEventPump(decoder, notification, resized);
                 boolean running = true;
@@ -297,6 +302,7 @@ public class TerminalEditorApp {
                     boolean helpHintsMode = modalState.isHelpHints();
                     Path pendingOverwritePath = modalState.pendingOverwritePath();
                     int pendingCloseTabIndex = modalState.pendingCloseTabIndex();
+                    ConfirmBarView confirmBar = null;
                     InlinePromptBar inlinePromptBar = InlinePromptBar.hidden();
                     if (saveAsMode) {
                         inlinePromptBar = InlinePromptBar.of(
@@ -305,14 +311,26 @@ public class TerminalEditorApp {
                             SAVE_AS_PROMPT.length() + saveAsInput.cursor() + 1
                         );
                     } else if (saveOverwriteConfirmMode) {
-                        String prompt = buildOverwritePrompt(pendingOverwritePath);
-                        inlinePromptBar = InlinePromptBar.of(prompt, styles.promptAlert(), prompt.length() + 1);
+                        confirmBar = ConfirmBarView.build(
+                            buildOverwritePrompt(pendingOverwritePath),
+                            modalState.confirmChoice(),
+                            cols
+                        );
+                        inlinePromptBar = InlinePromptBar.of(confirmBar.row(), styles.promptAlert(), 1, confirmBar.cursorCol() + 1);
                     } else if (quitConfirmMode) {
-                        String prompt = buildQuitPrompt(countDirtyTabs(tabs));
-                        inlinePromptBar = InlinePromptBar.of(prompt, styles.promptAlert(), prompt.length() + 1);
+                        confirmBar = ConfirmBarView.build(
+                            buildQuitPrompt(countDirtyTabs(tabs)),
+                            modalState.confirmChoice(),
+                            cols
+                        );
+                        inlinePromptBar = InlinePromptBar.of(confirmBar.row(), styles.promptAlert(), 1, confirmBar.cursorCol() + 1);
                     } else if (closeTabConfirmMode) {
-                        String prompt = buildCloseTabPrompt(tabs, pendingCloseTabIndex);
-                        inlinePromptBar = InlinePromptBar.of(prompt, styles.promptAlert(), prompt.length() + 1);
+                        confirmBar = ConfirmBarView.build(
+                            buildCloseTabPrompt(tabs, pendingCloseTabIndex),
+                            modalState.confirmChoice(),
+                            cols
+                        );
+                        inlinePromptBar = InlinePromptBar.of(confirmBar.row(), styles.promptAlert(), 1, confirmBar.cursorCol() + 1);
                     } else if (searchBar != null) {
                         inlinePromptBar = InlinePromptBar.of(
                             searchBar.text(),
@@ -323,7 +341,7 @@ public class TerminalEditorApp {
                     }
                     NotificationBar notificationBar = NotificationBar.of(notification.message, notification.style());
                     boolean showTabBar = uiSessionState.showTabBarSetting && tabs.size() > 1;
-                    int overlayRows = inlinePromptBar.height() + notificationBar.height();
+                    int overlayRows = inlinePromptBar.height();
                     int contentTopRow = showTabBar ? 2 : 1;
                     int baseContentRows = Math.max(0, rows - overlayRows - contentTopRow - 1);
                     int gutterWidth = Math.max(1, String.valueOf(Math.max(model.lineCount(), 1)).length()) + 1;
@@ -408,6 +426,7 @@ public class TerminalEditorApp {
                         uiSessionState.searchMode,
                         searchQueryInput.text(),
                         searchUi,
+                        uiSessionState.searchFocus,
                         interactiveBarText,
                         interactiveBarStyle,
                         notificationBar,
@@ -422,6 +441,7 @@ public class TerminalEditorApp {
                         closeTabConfirmMode,
                         pendingCloseTabIndex,
                         searchBar,
+                        confirmBar,
                         openFileMode,
                         openFileTree,
                         openFileFocus,
@@ -429,12 +449,14 @@ public class TerminalEditorApp {
                         previous,
                         plan,
                         lastCursorRow,
-                        lastCursorCol
+                        lastCursorCol,
+                        lastCursorVisible
                     );
                     previous = frameResult.previous();
                     plan = frameResult.plan();
                     lastCursorRow = frameResult.lastCursorRow();
                     lastCursorCol = frameResult.lastCursorCol();
+                    lastCursorVisible = frameResult.lastCursorVisible();
                     if (frameResult.rendered()) {
                         needsRender = false;
                     }
@@ -448,6 +470,7 @@ public class TerminalEditorApp {
                     if (key == null) {
                         continue;
                     }
+                    notification.clearErrorOnUserAction();
                     needsRender = true;
 
                     if (key instanceof KeyEvent.MouseEvent mouse) {
@@ -522,15 +545,11 @@ public class TerminalEditorApp {
                                                 System.nanoTime(),
                                                 OPEN_DIALOG_DOUBLE_CLICK_NANOS,
                                                 selected -> {
-                                                    OpenFileActionResult result = activateOpenFileSelection(
+                                                    return activateOpenFileSelection(
                                                         selected,
                                                         tabs,
-                                                        openFileActiveTabIndex
-                                                    );
-                                                    return new OpenFileDialogController.ActivationResult(
-                                                        result.keepDialogOpen(),
-                                                        result.activeTabIndex(),
-                                                        result.statusMessage()
+                                                        openFileActiveTabIndex,
+                                                        notification
                                                     );
                                                 }
                                             );
@@ -540,9 +559,6 @@ public class TerminalEditorApp {
                                             openFileScrollDrag = mouseResult.dragAxis();
                                             if (mouseResult.activeTabIndex() != activeTabIndex) {
                                                 sessionContext.activate(mouseResult.activeTabIndex());
-                                            }
-                                            if (mouseResult.statusMessage() != null && !mouseResult.statusMessage().isBlank()) {
-                                                statusMessage = mouseResult.statusMessage();
                                             }
                                             continue;
                                         }
@@ -569,15 +585,15 @@ public class TerminalEditorApp {
                                         int clickedTabIndex = tabHit.tabIndex();
                                         if (tabHit.closeButton() && clickedTabIndex >= 0 && clickedTabIndex < tabs.size()) {
                                             if (clickedTabIndex == modalState.pendingCloseTabIndex()) {
-                                                sessionContext.activate(closeTab(tabs, activeTabIndex, modalState.pendingCloseTabIndex()));
+                                                sessionContext.activate(
+                                                    closeTab(tabs, activeTabIndex, modalState.pendingCloseTabIndex(), saveAsSuggestions)
+                                                );
                                                 modalState = UiModalState.none();
-                                                statusMessage = "Closed tab";
                                             } else if (tabs.get(clickedTabIndex).state().isDirty()) {
                                                 modalState = UiModalState.closeTabConfirm(clickedTabIndex);
                                             } else {
-                                                sessionContext.activate(closeTab(tabs, activeTabIndex, clickedTabIndex));
+                                                sessionContext.activate(closeTab(tabs, activeTabIndex, clickedTabIndex, saveAsSuggestions));
                                                 modalState = UiModalState.none();
-                                                statusMessage = "Closed tab";
                                             }
                                         }
                                         editorView.cancelMouseSelection();
@@ -601,12 +617,12 @@ public class TerminalEditorApp {
                                                     if (uiSessionState.confirmOnCloseSetting) {
                                                         modalState = UiModalState.closeTabConfirm(clickedTabIndex);
                                                     } else {
-                                                        sessionContext.activate(closeTab(tabs, activeTabIndex, clickedTabIndex));
-                                                        statusMessage = "Closed tab";
+                                                        sessionContext.activate(
+                                                            closeTab(tabs, activeTabIndex, clickedTabIndex, saveAsSuggestions)
+                                                        );
                                                     }
                                                 } else {
-                                                    sessionContext.activate(closeTab(tabs, activeTabIndex, clickedTabIndex));
-                                                    statusMessage = "Closed tab";
+                                                    sessionContext.activate(closeTab(tabs, activeTabIndex, clickedTabIndex, saveAsSuggestions));
                                                 }
                                             } else {
                                                 sessionContext.activate(clickedTabIndex);
@@ -621,7 +637,6 @@ public class TerminalEditorApp {
                                         Integer tabActivation = topMenu.consumeTabActivationRequest();
                                         if (tabActivation != null && tabActivation >= 0 && tabActivation < tabs.size()) {
                                             sessionContext.activate(tabActivation);
-                                            statusMessage = "Tab " + (tabActivation + 1) + "/" + tabs.size();
                                             editorView.cancelMouseSelection();
                                             continue;
                                         }
@@ -632,6 +647,22 @@ public class TerminalEditorApp {
                                         }
                                         editorView.cancelMouseSelection();
                                         continue;
+                                    }
+                                    if (confirmBar != null) {
+                                        int confirmBarTopRow = rows - 1 - inlinePromptBar.height();
+                                        ConfirmBarController.InputResult confirmMouseResult =
+                                            ConfirmBarController.handleMousePress(
+                                                confirmBar,
+                                                mouse.row(),
+                                                mouse.col(),
+                                                confirmBarTopRow
+                                            );
+                                        if (confirmMouseResult.consumed()) {
+                                            modalState = modalState.withConfirmChoice(confirmMouseResult.confirmChoice());
+                                            remappedMouseKey = new KeyEvent.ActionEvent(KeyEvent.Action.ENTER);
+                                            editorView.cancelMouseSelection();
+                                            break;
+                                        }
                                     }
                                     if (uiSessionState.searchMode && searchBar != null) {
                                         int searchBarTopRow = rows - 1 - inlinePromptBar.height();
@@ -654,7 +685,7 @@ public class TerminalEditorApp {
                                                 SearchController.SearchUiOptions before = searchUi;
                                                 searchUi = SearchController.toggleFocusedSearchOption(searchUi, clickedFocus);
                                                 if (!searchUi.equals(before)) {
-                                                    statusMessage = "Search options updated";
+                                                    // Toggle is reflected directly in the search bar.
                                                 }
                                             }
                                         } else {
@@ -772,22 +803,17 @@ public class TerminalEditorApp {
                             openFileActiveTabIndex,
                             layout.listRows(),
                             openFileTree.visibleTextWidth(layout.left(), layout.right(), layout.listRows()),
-                            selected -> {
-                                OpenFileActionResult result = activateOpenFileSelection(selected, tabs, openFileActiveTabIndex);
-                                return new OpenFileDialogController.ActivationResult(
-                                    result.keepDialogOpen(),
-                                    result.activeTabIndex(),
-                                    result.statusMessage()
-                                );
-                            }
+                            selected -> activateOpenFileSelection(
+                                selected,
+                                tabs,
+                                openFileActiveTabIndex,
+                                notification
+                            )
                         );
                         openFileMode = openFileResult.openFileMode();
                         openFileFocus = openFileResult.focus();
                         if (openFileResult.activeTabIndex() != activeTabIndex) {
                             sessionContext.activate(openFileResult.activeTabIndex());
-                        }
-                        if (openFileResult.statusMessage() != null && !openFileResult.statusMessage().isBlank()) {
-                            statusMessage = openFileResult.statusMessage();
                         }
                         continue;
                     }
@@ -804,6 +830,7 @@ public class TerminalEditorApp {
                     }
 
                     if (modalState.isSaveAs()) {
+                        String saveAsDraftBefore = saveAsInput.text();
                         SaveFlowController.SaveAsResult saveAsResult = SaveFlowController.handleSaveAsInput(
                             key,
                             true,
@@ -826,11 +853,17 @@ public class TerminalEditorApp {
                                 notification.error(saveAsResult.errorMessage());
                             }
                             applySaveAsTextInputEffect(saveAsInput, saveAsResult.textInputEffect());
+                            if (saveAsResult.saveAsMode()) {
+                                saveAsSuggestions.rememberDraft(tabs.get(activeTabIndex).tabSession(), saveAsInput.text());
+                            } else {
+                                saveAsSuggestions.rememberDraft(tabs.get(activeTabIndex).tabSession(), saveAsDraftBefore);
+                            }
                             if (saveAsResult.saveNowPath() != null) {
                                 try {
                                     engine.saveAs(saveAsResult.saveNowPath());
                                     renderPlanBuilder = new RenderPlanBuilder(resolveHighlighter(state.getCurrentFile()));
                                     sessionContext.replaceActiveRenderPlanBuilder(renderPlanBuilder);
+                                    saveAsSuggestions.rememberSavedPath(tabs.get(activeTabIndex).tabSession(), state.getCurrentFile());
                                     notification.success(savedMessage(state));
                                 } catch (IOException e) {
                                     notification.error(saveErrorMessage(e));
@@ -841,61 +874,95 @@ public class TerminalEditorApp {
                     }
 
                     if (modalState.isSaveOverwriteConfirm()) {
-                        SaveFlowController.SaveOverwriteResult saveOverwriteResult = SaveFlowController.handleOverwriteConfirm(
+                        ConfirmBarController.InputResult confirmInput = ConfirmBarController.handleKey(
                             key,
-                            true,
-                            modalState.pendingOverwritePath()
+                            modalState.confirmChoice(),
+                            ConfirmChoice.SAVE
                         );
-                        if (saveOverwriteResult.consumed()) {
-                            modalState = modalFromSaveOverwriteResult(saveOverwriteResult);
-                            if (saveOverwriteResult.clearNotification()) {
-                                notification.clear();
-                            }
-                            if (saveOverwriteResult.saveNowPath() != null) {
+                        if (confirmInput.consumed()) {
+                            if (confirmInput.decision() == null) {
+                                modalState = modalState.withConfirmChoice(confirmInput.confirmChoice());
+                            } else if (confirmInput.decision() == ConfirmChoice.SAVE) {
                                 try {
-                                    engine.saveAs(saveOverwriteResult.saveNowPath());
+                                    engine.saveAs(modalState.pendingOverwritePath());
                                     renderPlanBuilder = new RenderPlanBuilder(resolveHighlighter(state.getCurrentFile()));
                                     sessionContext.replaceActiveRenderPlanBuilder(renderPlanBuilder);
+                                    saveAsSuggestions.rememberSavedPath(tabs.get(activeTabIndex).tabSession(), state.getCurrentFile());
                                     notification.success(savedMessage(state));
+                                    modalState = UiModalState.none();
                                 } catch (IOException e) {
                                     notification.error(saveErrorMessage(e));
                                 }
+                            } else if (confirmInput.decision() == ConfirmChoice.DISCARD) {
+                                modalState = UiModalState.saveAs();
+                                notification.clear();
+                            } else {
+                                modalState = UiModalState.none();
+                                notification.clear();
                             }
                             continue;
                         }
                     }
 
                     if (modalState.isQuitConfirm()) {
-                        ConfirmFlowController.QuitResult quitResult = ConfirmFlowController.handleQuitConfirm(
-                            true,
-                            running,
-                            key
+                        if (isAction(key, KeyEvent.Action.CTRL_Q)) {
+                            running = false;
+                            modalState = UiModalState.none();
+                            continue;
+                        }
+                        ConfirmBarController.InputResult confirmInput = ConfirmBarController.handleKey(
+                            key,
+                            modalState.confirmChoice(),
+                            ConfirmChoice.DISCARD
                         );
-                        modalState = quitResult.quitConfirmMode() ? UiModalState.quitConfirm() : UiModalState.none();
-                        running = quitResult.running();
-                        continue;
+                        if (confirmInput.consumed()) {
+                            if (confirmInput.decision() == null) {
+                                modalState = modalState.withConfirmChoice(confirmInput.confirmChoice());
+                            } else if (confirmInput.decision() == ConfirmChoice.SAVE) {
+                                if (saveDirtyTabs(tabs, notification)) {
+                                    running = false;
+                                    modalState = UiModalState.none();
+                                }
+                            } else if (confirmInput.decision() == ConfirmChoice.DISCARD) {
+                                running = false;
+                                modalState = UiModalState.none();
+                            } else {
+                                modalState = UiModalState.none();
+                            }
+                            continue;
+                        }
                     }
 
                     if (modalState.isCloseTabConfirm()) {
-                        int closeIndex = modalState.pendingCloseTabIndex();
-                        int activeIndexSnapshot = activeTabIndex;
-                        ConfirmFlowController.CloseTabResult closeTabResult = ConfirmFlowController.handleCloseTabConfirm(
-                            true,
-                            modalState.pendingCloseTabIndex(),
-                            tabs.size(),
+                        ConfirmBarController.InputResult confirmInput = ConfirmBarController.handleKey(
                             key,
-                            () -> closeTab(tabs, activeIndexSnapshot, closeIndex)
+                            modalState.confirmChoice(),
+                            ConfirmChoice.DISCARD
                         );
-                        modalState = closeTabResult.closeTabConfirmMode()
-                            ? UiModalState.closeTabConfirm(closeTabResult.pendingCloseTabIndex())
-                            : UiModalState.none();
-                        if (closeTabResult.activeTabChanged()) {
-                            sessionContext.activate(closeTabResult.activeTabIndex());
+                        if (confirmInput.consumed()) {
+                            if (confirmInput.decision() == null) {
+                                modalState = modalState.withConfirmChoice(confirmInput.confirmChoice());
+                                continue;
+                            }
+                            int closeIndex = modalState.pendingCloseTabIndex();
+                            if (closeIndex < 0 || closeIndex >= tabs.size()) {
+                                modalState = UiModalState.none();
+                                continue;
+                            }
+                            if (confirmInput.decision() == ConfirmChoice.SAVE) {
+                                EditorTab pendingTab = tabs.get(closeIndex);
+                                if (saveDirtyTab(pendingTab, notification)) {
+                                    sessionContext.activate(closeTab(tabs, activeTabIndex, closeIndex, saveAsSuggestions));
+                                    modalState = UiModalState.none();
+                                }
+                            } else if (confirmInput.decision() == ConfirmChoice.DISCARD) {
+                                sessionContext.activate(closeTab(tabs, activeTabIndex, closeIndex, saveAsSuggestions));
+                                modalState = UiModalState.none();
+                            } else {
+                                modalState = UiModalState.none();
+                            }
+                            continue;
                         }
-                        if (closeTabResult.statusMessage() != null) {
-                            statusMessage = closeTabResult.statusMessage();
-                        }
-                        continue;
                     }
 
                     if (topMenu.isOpen()) {
@@ -908,7 +975,6 @@ public class TerminalEditorApp {
                             state = sessionContext.state();
                             engine = sessionContext.engine();
                             renderPlanBuilder = sessionContext.renderPlanBuilder();
-                            statusMessage = "Tab " + (tabActivation + 1) + "/" + tabs.size();
                         }
                         key = topMenuResult.nextKey();
                         if (topMenuResult.keepMenuOpen()) {
@@ -936,6 +1002,7 @@ public class TerminalEditorApp {
                             modalState.pendingCloseTabIndex(),
                             modalState.isSaveAs(),
                             saveAsInput,
+                            saveAsSuggestions,
                             notification,
                             openFileMode,
                             openFileTree,
@@ -961,19 +1028,15 @@ public class TerminalEditorApp {
                             );
                             openFileMode = searchModeResult.openFileMode();
                             openFileFocus = searchModeResult.openFileFocus();
-                            if (searchModeResult.statusMessage() != null) {
-                                statusMessage = searchModeResult.statusMessage();
-                            }
                             continue;
                         }
                     }
 
                     if (key instanceof KeyEvent.CharInput charInput) {
                         if (uiSessionState.readingModeSetting) {
-                            statusMessage = "Reading mode: editing is disabled";
+                            notification.warning("Reading mode: editing is disabled");
                         } else {
                             engine.insertChar(charInput.ch());
-                            statusMessage = "";
                         }
                         continue;
                     }
@@ -989,8 +1052,7 @@ public class TerminalEditorApp {
                             writer,
                             ENABLE_MOUSE_TRACKING,
                             DISABLE_MOUSE_TRACKING,
-                            contentRows,
-                            SEARCH_HELP
+                            contentRows
                         )
                     );
                     if (dispatchResult.handled()) {
@@ -998,8 +1060,8 @@ public class TerminalEditorApp {
                             modalState = UiModalState.helpHints();
                             uiSessionState.helpHintsMode = false;
                         }
-                        if (dispatchResult.statusMessage() != null) {
-                            statusMessage = dispatchResult.statusMessage();
+                        if (dispatchResult.statusMessage() != null && !dispatchResult.statusMessage().isBlank()) {
+                            notification.info(dispatchResult.statusMessage());
                         }
                         continue;
                     }
@@ -1030,9 +1092,9 @@ public class TerminalEditorApp {
                         openFileMode,
                         openFileFocus,
                         saveAsInput,
+                        saveAsSuggestions,
                         renderer,
-                        tabBar,
-                        statusMessage
+                        tabBar
                     );
                     running = editorActionApplyResult.running();
                     modalState = modalFromLegacyFlags(
@@ -1045,7 +1107,6 @@ public class TerminalEditorApp {
                     );
                     openFileMode = editorActionApplyResult.openFileMode();
                     openFileFocus = editorActionApplyResult.openFileFocus();
-                    statusMessage = editorActionApplyResult.statusMessage();
                 }
             } finally {
                 cleanup.run();
@@ -1092,9 +1153,9 @@ public class TerminalEditorApp {
         boolean openFileMode,
         OpenFileDialogController.Focus openFileFocus,
         TextField saveAsInput,
+        SaveAsSuggestionStore saveAsSuggestions,
         RenderRasterizer renderer,
-        TabBar tabBar,
-        String statusMessage
+        TabBar tabBar
     ) {
         boolean running = editorAction.running();
         boolean quitConfirmMode = editorAction.quitConfirmMode();
@@ -1103,7 +1164,6 @@ public class TerminalEditorApp {
         boolean saveAsMode = editorAction.saveAsMode();
         boolean nextOpenFileMode = openFileMode;
         OpenFileDialogController.Focus nextOpenFileFocus = openFileFocus;
-        String nextStatusMessage = statusMessage;
 
         if (editorAction.clearNotification()) {
             notification.clear();
@@ -1114,6 +1174,7 @@ public class TerminalEditorApp {
         if (editorAction.requestSaveCurrent()) {
             try {
                 engine.save();
+                saveAsSuggestions.rememberSavedPath(tabs.get(activeTabIndex).tabSession(), state.getCurrentFile());
                 notification.success(savedMessage(state));
             } catch (IOException e) {
                 notification.error(saveErrorMessage(e));
@@ -1141,22 +1202,33 @@ public class TerminalEditorApp {
                 styles.tabbarActive(),
                 styles.tabbarActiveMono()
             );
-            nextStatusMessage = "Theme: " + theme.label();
+            notification.info("Theme: " + theme.label());
         }
 
         switch (editorAction.saveAsPreset()) {
             case NONE -> {
             }
-            case DEFAULT_FILE_NAME -> saveAsInput.set(DEFAULT_FILE_NAME);
+            case DEFAULT_FILE_NAME -> saveAsInput.set(
+                saveAsSuggestions.suggestionFor(
+                    tabs.get(activeTabIndex).tabSession(),
+                    state.getCurrentFile(),
+                    DEFAULT_FILE_NAME
+                )
+            );
             case FROM_CURRENT_OR_DEFAULT -> {
-                saveAsInput.clear();
-                if (state.getCurrentFile() != null) {
-                    saveAsInput.set(state.getCurrentFile().toString());
-                } else {
-                    saveAsInput.set(DEFAULT_FILE_NAME);
-                }
+                saveAsInput.set(
+                    saveAsSuggestions.suggestionFor(
+                        tabs.get(activeTabIndex).tabSession(),
+                        state.getCurrentFile(),
+                        DEFAULT_FILE_NAME
+                    )
+                );
             }
-            case SUGGESTED_FROM_CURRENT -> saveAsInput.set(suggestWritableName(state.getCurrentFile()));
+            case SUGGESTED_FROM_CURRENT -> {
+                String suggestion = suggestWritableName(state.getCurrentFile());
+                saveAsInput.set(suggestion);
+                saveAsSuggestions.rememberDraft(tabs.get(activeTabIndex).tabSession(), suggestion);
+            }
         }
 
         switch (editorAction.tabCommand()) {
@@ -1166,18 +1238,12 @@ public class TerminalEditorApp {
             case NEXT_TAB -> {
                 int nextIndex = switchTab(tabs, activeTabIndex, 1);
                 sessionContext.activate(nextIndex);
-                nextStatusMessage = "Tab " + (nextIndex + 1) + "/" + tabs.size();
             }
             case PREV_TAB -> {
                 int nextIndex = switchTab(tabs, activeTabIndex, -1);
                 sessionContext.activate(nextIndex);
-                nextStatusMessage = "Tab " + (nextIndex + 1) + "/" + tabs.size();
             }
-            case CLOSE_TAB -> sessionContext.activate(closeCurrentTab(tabs, activeTabIndex));
-        }
-
-        if (editorAction.statusMessage() != null) {
-            nextStatusMessage = editorAction.statusMessage();
+            case CLOSE_TAB -> sessionContext.activate(closeCurrentTab(tabs, activeTabIndex, saveAsSuggestions));
         }
 
         return new EditorActionApplyResult(
@@ -1187,8 +1253,7 @@ public class TerminalEditorApp {
             pendingCloseTabIndex,
             saveAsMode,
             nextOpenFileMode,
-            nextOpenFileFocus,
-            nextStatusMessage
+            nextOpenFileFocus
         );
     }
 
@@ -1275,6 +1340,7 @@ public class TerminalEditorApp {
         int pendingCloseTabIndex,
         boolean saveAsMode,
         TextField saveAsInput,
+        SaveAsSuggestionStore saveAsSuggestions,
         NotificationState notification,
         boolean openFileMode,
         TreeView openFileTree,
@@ -1285,6 +1351,7 @@ public class TerminalEditorApp {
         TabBar tabBar
     ) {
         String statusMessage = null;
+        boolean statusWarning = false;
         int nextActiveTabIndex = activeTabIndex;
         TextModel nextModel = model;
         EditorState nextState = state;
@@ -1305,7 +1372,7 @@ public class TerminalEditorApp {
                 SearchController.SearchUiOptions before = nextSearchUi;
                 nextSearchUi = SearchController.toggleFocusedSearchOption(nextSearchUi, uiSessionState.searchFocus);
                 if (!nextSearchUi.equals(before)) {
-                    statusMessage = "Search options updated";
+                    statusMessage = "";
                 }
             } else if (uiSessionState.searchFocus == SearchFocus.REPLACE) {
                 searchReplaceInput.insert(ch);
@@ -1316,7 +1383,6 @@ public class TerminalEditorApp {
             }
             return new SearchModeResult(
                 true,
-                statusMessage,
                 nextSearchUi,
                 nextActiveTabIndex,
                 nextModel,
@@ -1459,10 +1525,10 @@ public class TerminalEditorApp {
                             searchReplaceInput.text(),
                             SearchController.toSearchOptions(nextSearchUi)
                         );
-                        notification.warning("Replace all: " + replaced);
                         statusMessage = replaced > 0
-                            ? "Replaced " + replaced + " occurrence(s)"
+                            ? "Replaced " + replaced + " occurrence(s). Undo available: Ctrl+Z"
                             : "Nothing to replace";
+                        statusWarning = true;
                     }
                 } else {
                     boolean found;
@@ -1491,7 +1557,7 @@ public class TerminalEditorApp {
                 }
             }
             case CTRL_F -> {
-                if (!SearchController.isSearchFieldFocus(uiSessionState.searchFocus)) {
+                if (SearchController.isSearchActionFocus(uiSessionState.searchFocus)) {
                     uiSessionState.searchFocus = SearchFocus.NEXT_BUTTON;
                 }
                 boolean found;
@@ -1519,7 +1585,7 @@ public class TerminalEditorApp {
                 statusMessage = found ? "Found next match" : "Not found";
             }
             case CTRL_G -> {
-                if (!SearchController.isSearchFieldFocus(uiSessionState.searchFocus)) {
+                if (SearchController.isSearchActionFocus(uiSessionState.searchFocus)) {
                     uiSessionState.searchFocus = SearchFocus.PREV_BUTTON;
                 }
                 boolean found;
@@ -1547,7 +1613,7 @@ public class TerminalEditorApp {
                 statusMessage = found ? "Found previous match" : "Not found";
             }
             case CTRL_R -> {
-                if (!SearchController.isSearchFieldFocus(uiSessionState.searchFocus)) {
+                if (SearchController.isSearchActionFocus(uiSessionState.searchFocus)) {
                     uiSessionState.searchFocus = SearchFocus.REPLACE_BUTTON;
                 }
                 if (uiSessionState.readingModeSetting) {
@@ -1562,7 +1628,7 @@ public class TerminalEditorApp {
                 }
             }
             case CTRL_A -> {
-                if (!SearchController.isSearchFieldFocus(uiSessionState.searchFocus)) {
+                if (SearchController.isSearchActionFocus(uiSessionState.searchFocus)) {
                     uiSessionState.searchFocus = SearchFocus.ALL_BUTTON;
                 }
                 if (uiSessionState.readingModeSetting) {
@@ -1573,10 +1639,10 @@ public class TerminalEditorApp {
                         searchReplaceInput.text(),
                         SearchController.toSearchOptions(nextSearchUi)
                     );
-                    notification.warning("Replace all: " + replaced);
                     statusMessage = replaced > 0
-                        ? "Replaced " + replaced + " occurrence(s)"
+                        ? "Replaced " + replaced + " occurrence(s). Undo available: Ctrl+Z"
                         : "Nothing to replace";
+                    statusWarning = true;
                 }
             }
             case CTRL_Q -> {
@@ -1593,18 +1659,26 @@ public class TerminalEditorApp {
                     uiSessionState.searchMode = false;
                     uiSessionState.searchFocus = SearchFocus.FIND;
                     nextSaveAsMode = true;
-                    saveAsInput.set(DEFAULT_FILE_NAME);
+                    saveAsInput.set(
+                        saveAsSuggestions.suggestionFor(
+                            tabs.get(nextActiveTabIndex).tabSession(),
+                            nextState.getCurrentFile(),
+                            DEFAULT_FILE_NAME
+                        )
+                    );
                     notification.clear();
                 } else if (isReadOnlyFile(nextState.getCurrentFile())) {
                     uiSessionState.searchMode = false;
                     uiSessionState.searchFocus = SearchFocus.FIND;
                     nextSaveAsMode = true;
-                    saveAsInput.set(suggestWritableName(nextState.getCurrentFile()));
-                    notification.error("Save failed: current file is read-only: "
-                        + nextState.getCurrentFile() + ". Save As mode.");
+                    String suggestion = suggestWritableName(nextState.getCurrentFile());
+                    saveAsInput.set(suggestion);
+                    saveAsSuggestions.rememberDraft(tabs.get(nextActiveTabIndex).tabSession(), suggestion);
+                    notification.error(readOnlySaveAsMessage(nextState.getCurrentFile()));
                 } else {
                     try {
                         nextEngine.save();
+                        saveAsSuggestions.rememberSavedPath(tabs.get(nextActiveTabIndex).tabSession(), nextState.getCurrentFile());
                         notification.success(savedMessage(nextState));
                     } catch (IOException e) {
                         notification.error(saveErrorMessage(e));
@@ -1655,7 +1729,6 @@ public class TerminalEditorApp {
                 nextEngine = tabs.get(nextActiveTabIndex).engine();
                 nextRenderPlanBuilder = tabs.get(nextActiveTabIndex).renderPlanBuilder();
                 uiSessionState.searchMode = false;
-                statusMessage = "Tab " + (nextActiveTabIndex + 1) + "/" + tabs.size();
             }
             case TAB_PREVIOUS -> {
                 nextActiveTabIndex = switchTab(tabs, nextActiveTabIndex, -1);
@@ -1664,32 +1737,31 @@ public class TerminalEditorApp {
                 nextEngine = tabs.get(nextActiveTabIndex).engine();
                 nextRenderPlanBuilder = tabs.get(nextActiveTabIndex).renderPlanBuilder();
                 uiSessionState.searchMode = false;
-                statusMessage = "Tab " + (nextActiveTabIndex + 1) + "/" + tabs.size();
             }
             case TAB_CLOSE -> {
                 if (nextState.isDirty() && uiSessionState.confirmOnCloseSetting) {
                     nextCloseTabConfirmMode = true;
                     nextPendingCloseTabIndex = nextActiveTabIndex;
                 } else {
-                    nextActiveTabIndex = closeCurrentTab(tabs, nextActiveTabIndex);
+                    nextActiveTabIndex = closeCurrentTab(tabs, nextActiveTabIndex, saveAsSuggestions);
                     nextModel = tabs.get(nextActiveTabIndex).model();
                     nextState = tabs.get(nextActiveTabIndex).state();
                     nextEngine = tabs.get(nextActiveTabIndex).engine();
                     nextRenderPlanBuilder = tabs.get(nextActiveTabIndex).renderPlanBuilder();
                     uiSessionState.searchMode = false;
-                    statusMessage = "Closed tab";
                 }
             }
             case CTRL_K, CTRL_W, CTRL_SHIFT_S -> {
                 uiSessionState.searchMode = false;
                 uiSessionState.searchFocus = SearchFocus.FIND;
                 nextSaveAsMode = true;
-                saveAsInput.clear();
-                if (nextState.getCurrentFile() != null) {
-                    saveAsInput.set(nextState.getCurrentFile().toString());
-                } else {
-                    saveAsInput.set(DEFAULT_FILE_NAME);
-                }
+                saveAsInput.set(
+                    saveAsSuggestions.suggestionFor(
+                        tabs.get(nextActiveTabIndex).tabSession(),
+                        nextState.getCurrentFile(),
+                        DEFAULT_FILE_NAME
+                    )
+                );
                 notification.clear();
             }
             default -> {
@@ -1703,8 +1775,7 @@ public class TerminalEditorApp {
                         writer,
                         ENABLE_MOUSE_TRACKING,
                         DISABLE_MOUSE_TRACKING,
-                        contentRows,
-                        SEARCH_HELP
+                        contentRows
                     )
                 );
                 if (dispatchResult.handled()) {
@@ -1713,9 +1784,16 @@ public class TerminalEditorApp {
             }
         }
 
+        if (statusMessage != null && !statusMessage.isBlank()) {
+            if (statusWarning) {
+                notification.warning(statusMessage);
+            } else {
+                notification.info(statusMessage);
+            }
+        }
+
         return new SearchModeResult(
             true,
-            statusMessage,
             nextSearchUi,
             nextActiveTabIndex,
             nextModel,
@@ -1734,7 +1812,6 @@ public class TerminalEditorApp {
 
     private record SearchModeResult(
         boolean consumed,
-        String statusMessage,
         SearchController.SearchUiOptions searchUi,
         int activeTabIndex,
         TextModel model,
@@ -1758,8 +1835,7 @@ public class TerminalEditorApp {
         int pendingCloseTabIndex,
         boolean saveAsMode,
         boolean openFileMode,
-        OpenFileDialogController.Focus openFileFocus,
-        String statusMessage
+        OpenFileDialogController.Focus openFileFocus
     ) {
     }
 
@@ -1779,6 +1855,55 @@ public class TerminalEditorApp {
         for (int i = 0; i < text.length() && startCol + i < cols; i++) {
             buffer.set(row, startCol + i, String.valueOf(text.charAt(i)), style);
         }
+    }
+
+    private void paintSelectedConfirmButton(CellBuffer buffer, ConfirmBarView confirmBar, int rows, int cols) {
+        if (buffer == null || confirmBar == null || rows < 2 || cols <= 0) {
+            return;
+        }
+        Button selected = confirmBar.selectedButton();
+        if (selected == null) {
+            return;
+        }
+        int row = rows - 2;
+        if (row < 0 || row >= buffer.rows()) {
+            return;
+        }
+        selected.drawAt(buffer, row, cols, focusedButtonStyle(styles.promptAlert()));
+    }
+
+    private void paintSelectedSearchButton(
+        CellBuffer buffer,
+        SearchBarView searchBar,
+        SearchFocus searchFocus,
+        int rows,
+        int inlinePromptBarHeight,
+        int cols
+    ) {
+        if (buffer == null || searchBar == null || cols <= 0) {
+            return;
+        }
+        Button selected = searchBar.buttonForFocus(searchFocus);
+        if (selected == null) {
+            return;
+        }
+        int topRow = rows - 1 - inlinePromptBarHeight;
+        int row = topRow + selected.row();
+        if (row < 0 || row >= buffer.rows()) {
+            return;
+        }
+        selected.drawAt(buffer, row, cols, focusedButtonStyle(styles.searchBar()));
+    }
+
+    private boolean isAction(KeyEvent key, KeyEvent.Action expected) {
+        return key instanceof KeyEvent.ActionEvent actionEvent && actionEvent.action() == expected;
+    }
+
+    private Style focusedButtonStyle(Style parentStyle) {
+        if (parentStyle == null) {
+            return styles.menuSelected();
+        }
+        return new Style(parentStyle.bg(), parentStyle.fg(), true, parentStyle.underline());
     }
 
     private String padRight(String text, int width) {
@@ -1934,16 +2059,19 @@ public class TerminalEditorApp {
         return text.length() <= width ? text : text.substring(0, width);
     }
 
-    private OpenFileActionResult activateOpenFileSelection(
+    private OpenFileDialogController.ActivationResult activateOpenFileSelection(
         TreeView.Item entry,
         List<EditorTab> tabs,
-        int activeTabIndex
+        int activeTabIndex,
+        NotificationState notification
     ) {
         if (entry == null) {
-            return new OpenFileActionResult(true, activeTabIndex, "Select a file");
+            notification.warning("Select a file");
+            return new OpenFileDialogController.ActivationResult(true, activeTabIndex);
         }
         if (entry.parentLink() || entry.directory()) {
-            return new OpenFileActionResult(true, activeTabIndex, "Select a file");
+            notification.warning("Select a file");
+            return new OpenFileDialogController.ActivationResult(true, activeTabIndex);
         }
         Path target = entry.path();
         try {
@@ -1952,9 +2080,11 @@ public class TerminalEditorApp {
             tab = tab.withRenderPlanBuilder(new RenderPlanBuilder(resolveHighlighter(target)));
             tabs.add(tab);
             int newIndex = tabs.size() - 1;
-            return new OpenFileActionResult(false, newIndex, "Opened " + target);
+            notification.success("Opened " + target);
+            return new OpenFileDialogController.ActivationResult(false, newIndex);
         } catch (IOException e) {
-            return new OpenFileActionResult(true, activeTabIndex, "Open failed: " + e.getMessage());
+            notification.error("Open failed: " + e.getMessage());
+            return new OpenFileDialogController.ActivationResult(true, activeTabIndex);
         }
     }
 
@@ -2051,6 +2181,7 @@ public class TerminalEditorApp {
         boolean searchMode,
         String searchQuery,
         SearchController.SearchUiOptions searchUi,
+        SearchFocus searchFocus,
         String interactiveBarText,
         Style interactiveBarStyle,
         NotificationBar notificationBar,
@@ -2065,6 +2196,7 @@ public class TerminalEditorApp {
         boolean closeTabConfirmMode,
         int pendingCloseTabIndex,
         SearchBarView searchBar,
+        ConfirmBarView confirmBar,
         boolean openFileMode,
         TreeView openFileTree,
         OpenFileDialogController.Focus openFileFocus,
@@ -2073,15 +2205,24 @@ public class TerminalEditorApp {
         RenderPlan previousPlan,
         int previousCursorRow,
         int previousCursorCol,
+        boolean previousCursorVisible,
         boolean colorEnabled,
         PrintWriter writer,
+        TerminalCursorController cursorController,
         RenderRasterizer renderer,
         EditorView editorView,
         TabBar tabBar,
         MenuBar topMenu
     ) {
         if (!needsRender) {
-            return new RenderFrameResult(previous, previousPlan, previousCursorRow, previousCursorCol, false);
+            return new RenderFrameResult(
+                previous,
+                previousPlan,
+                previousCursorRow,
+                previousCursorCol,
+                previousCursorVisible,
+                false
+            );
         }
         RenderPlan plan = renderPlanBuilder.build(
             model,
@@ -2100,6 +2241,8 @@ public class TerminalEditorApp {
             wrapWordsSetting
         );
         CellBuffer current = renderer.rasterize(plan, rows, cols, contentTopRow);
+        paintSelectedConfirmButton(current, confirmBar, rows, cols);
+        paintSelectedSearchButton(current, searchBar, searchFocus, rows, inlinePromptBarHeight, cols);
         if (showTabBar) {
             tabBar.draw(current, cols, tabItems, activeTabIndex, colorEnabled);
         }
@@ -2119,23 +2262,25 @@ public class TerminalEditorApp {
         EditorView.CursorPosition editorCursor = editorView.cursorFromPlan(plan, contentTopRow);
         int desiredCursorRow = editorCursor.row();
         int desiredCursorCol = editorCursor.col();
+        boolean desiredCursorVisible = CursorPolicy.shouldShowCursor(
+            saveAsMode,
+            searchBar != null,
+            searchFocus,
+            saveOverwriteConfirmMode,
+            quitConfirmMode,
+            closeTabConfirmMode,
+            topMenu.isOpen(),
+            openFileMode,
+            helpHintsMode
+        );
         int interactiveBottomCursorRow = Math.max(1, rows - 1);
         int interactiveTopCursorRow = interactiveBottomCursorRow - inlinePromptBarHeight + 1;
         if (saveAsMode) {
             desiredCursorRow = interactiveBottomCursorRow;
             desiredCursorCol = Math.min(cols, SAVE_AS_PROMPT.length() + saveAsInput.cursor() + 1);
-        } else if (saveOverwriteConfirmMode) {
-            String prompt = buildOverwritePrompt(pendingOverwritePath);
+        } else if ((saveOverwriteConfirmMode || quitConfirmMode || closeTabConfirmMode) && confirmBar != null) {
             desiredCursorRow = interactiveBottomCursorRow;
-            desiredCursorCol = Math.min(cols, prompt.length() + 1);
-        } else if (quitConfirmMode) {
-            String prompt = buildQuitPrompt(countDirtyTabs(tabs));
-            desiredCursorRow = interactiveBottomCursorRow;
-            desiredCursorCol = Math.min(cols, prompt.length() + 1);
-        } else if (closeTabConfirmMode) {
-            String prompt = buildCloseTabPrompt(tabs, pendingCloseTabIndex);
-            desiredCursorRow = interactiveBottomCursorRow;
-            desiredCursorCol = Math.min(cols, prompt.length() + 1);
+            desiredCursorCol = 1;
         } else if (searchBar != null) {
             desiredCursorRow = interactiveTopCursorRow + searchBar.cursorRow() - 1;
             desiredCursorCol = searchBar.cursorCol();
@@ -2163,17 +2308,21 @@ public class TerminalEditorApp {
         }
 
         String frameDiff = AnsiDiff.diff(previous, current, colorEnabled);
-        boolean cursorMoved = desiredCursorRow != previousCursorRow || desiredCursorCol != previousCursorCol;
-        int nextCursorRow = previousCursorRow;
-        int nextCursorCol = previousCursorCol;
-        if (!frameDiff.isEmpty() || cursorMoved) {
-            writer.print(frameDiff);
-            writer.print("\u001B[" + desiredCursorRow + ";" + desiredCursorCol + "H");
-            writer.flush();
-            nextCursorRow = desiredCursorRow;
-            nextCursorCol = desiredCursorCol;
-        }
-        return new RenderFrameResult(current, plan, nextCursorRow, nextCursorCol, true);
+        TerminalCursorController.ApplyResult cursorApplyResult = cursorController.apply(
+            writer,
+            frameDiff,
+            desiredCursorRow,
+            desiredCursorCol,
+            desiredCursorVisible
+        );
+        return new RenderFrameResult(
+            current,
+            plan,
+            cursorApplyResult.row(),
+            cursorApplyResult.col(),
+            cursorApplyResult.visible(),
+            true
+        );
     }
 
     private final class RenderFrameController {
@@ -2183,6 +2332,7 @@ public class TerminalEditorApp {
         private final TabBar tabBar;
         private final MenuBar topMenu;
         private final boolean colorEnabled;
+        private final TerminalCursorController cursorController;
 
         private RenderFrameController(
             PrintWriter writer,
@@ -2190,7 +2340,8 @@ public class TerminalEditorApp {
             EditorView editorView,
             TabBar tabBar,
             MenuBar topMenu,
-            boolean colorEnabled
+            boolean colorEnabled,
+            TerminalCursorController cursorController
         ) {
             this.writer = writer;
             this.renderer = renderer;
@@ -2198,6 +2349,7 @@ public class TerminalEditorApp {
             this.tabBar = tabBar;
             this.topMenu = topMenu;
             this.colorEnabled = colorEnabled;
+            this.cursorController = cursorController;
         }
 
         private RenderFrameResult renderFrameIfNeeded(
@@ -2218,6 +2370,7 @@ public class TerminalEditorApp {
             boolean searchMode,
             String searchQuery,
             SearchController.SearchUiOptions searchUi,
+            SearchFocus searchFocus,
             String interactiveBarText,
             Style interactiveBarStyle,
             NotificationBar notificationBar,
@@ -2232,6 +2385,7 @@ public class TerminalEditorApp {
             boolean closeTabConfirmMode,
             int pendingCloseTabIndex,
             SearchBarView searchBar,
+            ConfirmBarView confirmBar,
             boolean openFileMode,
             TreeView openFileTree,
             OpenFileDialogController.Focus openFileFocus,
@@ -2239,7 +2393,8 @@ public class TerminalEditorApp {
             CellBuffer previous,
             RenderPlan previousPlan,
             int previousCursorRow,
-            int previousCursorCol
+            int previousCursorCol,
+            boolean previousCursorVisible
         ) {
             return doRenderFrameIfNeeded(
                 needsRender,
@@ -2259,6 +2414,7 @@ public class TerminalEditorApp {
                 searchMode,
                 searchQuery,
                 searchUi,
+                searchFocus,
                 interactiveBarText,
                 interactiveBarStyle,
                 notificationBar,
@@ -2273,6 +2429,7 @@ public class TerminalEditorApp {
                 closeTabConfirmMode,
                 pendingCloseTabIndex,
                 searchBar,
+                confirmBar,
                 openFileMode,
                 openFileTree,
                 openFileFocus,
@@ -2281,8 +2438,10 @@ public class TerminalEditorApp {
                 previousPlan,
                 previousCursorRow,
                 previousCursorCol,
+                previousCursorVisible,
                 colorEnabled,
                 writer,
+                cursorController,
                 renderer,
                 editorView,
                 tabBar,
@@ -2317,11 +2476,11 @@ public class TerminalEditorApp {
     }
 
     private String buildOverwritePrompt(Path path) {
-        return "Overwrite: " + path + " ? (y/N)";
+        return "Overwrite existing file: " + path + " ? (y/N)";
     }
 
     private String buildQuitPrompt(int dirtyTabs) {
-        return "Unsaved tabs: " + dirtyTabs + ". Quit anyway? (y/N)";
+        return "Unsaved tabs: " + dirtyTabs + ". Quit now? (y/N)";
     }
 
     private String buildCloseTabPrompt(List<EditorTab> tabs, int closeTabIndex) {
@@ -2331,6 +2490,40 @@ public class TerminalEditorApp {
         Path path = tabs.get(closeTabIndex).state().getCurrentFile();
         String name = path == null ? "--no name--" : path.toString();
         return "Close modified tab: " + name + " ? (y/N)";
+    }
+
+    private boolean saveDirtyTabs(List<EditorTab> tabs, NotificationState notification) {
+        for (EditorTab tab : tabs) {
+            if (!tab.state().isDirty()) {
+                continue;
+            }
+            if (!saveDirtyTab(tab, notification)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean saveDirtyTab(EditorTab tab, NotificationState notification) {
+        if (tab == null || !tab.state().isDirty()) {
+            return true;
+        }
+        Path file = tab.state().getCurrentFile();
+        if (file == null) {
+            notification.error("Save failed: tab has no file path. Use Save As.");
+            return false;
+        }
+        if (isReadOnlyFile(file)) {
+            notification.error(readOnlySaveAsMessage(file));
+            return false;
+        }
+        try {
+            tab.engine().save();
+            return true;
+        } catch (IOException e) {
+            notification.error(saveErrorMessage(e));
+            return false;
+        }
     }
 
     private String savedMessage(EditorState state) {
@@ -2350,6 +2543,10 @@ public class TerminalEditorApp {
             return "Save failed: target is a directory";
         }
         return "Save failed: " + msg;
+    }
+
+    private String readOnlySaveAsMessage(Path path) {
+        return "File is read-only. Use Save As. " + path;
     }
 
     private String validateSaveTarget(Path path) {
@@ -2426,21 +2623,33 @@ public class TerminalEditorApp {
         int replacementCursor = replacementField == null ? safeReplacement.length() : replacementField.cursor();
         String findField = formatField("Find", safeQuery);
         String replaceField = formatField("Replace", safeReplacement);
-        String csToggle = formatToggle("Аа", searchUi.caseSensitive());
-        String wToggle = formatToggle("word", searchUi.matchMode() == SearchOptions.MatchMode.WHOLE_WORD);
-        String starToggle = formatToggle("*", searchUi.matchMode() == SearchOptions.MatchMode.WILDCARD);
-        String allToggle = formatToggle("All", searchUi.allTabs());
+        Button caseToggleTemplate = new Button(0, 0, "Аа:" + (searchUi.caseSensitive() ? "x" : " "));
+        Button wordToggleTemplate = new Button(0, 0, "word:" + (
+            searchUi.matchMode() == SearchOptions.MatchMode.WHOLE_WORD ? "x" : " "
+        ));
+        Button wildcardToggleTemplate = new Button(0, 0, "*:" + (
+            searchUi.matchMode() == SearchOptions.MatchMode.WILDCARD ? "x" : " "
+        ));
+        Button allToggleTemplate = new Button(0, 0, "All:" + (searchUi.allTabs() ? "x" : " "));
+        String csToggle = caseToggleTemplate.renderedText();
+        String wToggle = wordToggleTemplate.renderedText();
+        String starToggle = wildcardToggleTemplate.renderedText();
+        String allToggle = allToggleTemplate.renderedText();
         String optionsCluster = csToggle + " " + wToggle + " " + starToggle + " " + allToggle;
         String row1 = alignLeftRight(findField, optionsCluster, cols, 1);
-        String nextButton = "[Next]";
-        String prevButton = "[Prev]";
-        String replaceButton = "[Replace]";
-        String allButton = "[All]";
+        Button nextButtonTemplate = new Button(1, 0, "Next");
+        Button prevButtonTemplate = new Button(1, 0, "Prev");
+        Button replaceButtonTemplate = new Button(1, 0, "Replace");
+        Button allButtonTemplate = new Button(1, 0, "All");
+        String nextButton = nextButtonTemplate.renderedText();
+        String prevButton = prevButtonTemplate.renderedText();
+        String replaceButton = replaceButtonTemplate.renderedText();
+        String allButton = allButtonTemplate.renderedText();
         String actionsCluster = nextButton + " " + prevButton + " " + replaceButton + " " + allButton;
         String row2 = alignLeftRight(replaceField, actionsCluster, cols, 1);
 
-        int optionsStart = rightClusterStart(row1, optionsCluster);
-        int actionsStart = rightClusterStart(row2, actionsCluster);
+        int optionsStart = Math.max(0, rightClusterStart(row1, optionsCluster));
+        int actionsStart = Math.max(0, rightClusterStart(row2, actionsCluster));
         int findStart = 0;
         int findEnd = findField.length();
         int caseStart = optionsStart;
@@ -2451,6 +2660,10 @@ public class TerminalEditorApp {
         int wildcardEnd = wildcardStart + starToggle.length();
         int allStart = wildcardEnd + 1;
         int allEnd = allStart + allToggle.length();
+        Button caseButtonView = new Button(0, caseStart, caseToggleTemplate.text());
+        Button wordButtonView = new Button(0, wordStart, wordToggleTemplate.text());
+        Button wildcardButtonView = new Button(0, wildcardStart, wildcardToggleTemplate.text());
+        Button allToggleButtonView = new Button(0, allStart, allToggleTemplate.text());
         int replaceStart = 0;
         int replaceEnd = replaceField.length();
         int nextStart = actionsStart;
@@ -2461,6 +2674,10 @@ public class TerminalEditorApp {
         int replaceActionEnd = replaceActionStart + replaceButton.length();
         int allActionStart = replaceActionEnd + 1;
         int allActionEnd = allActionStart + allButton.length();
+        Button nextButtonView = new Button(1, nextStart, "Next");
+        Button prevButtonView = new Button(1, prevStart, "Prev");
+        Button replaceButtonView = new Button(1, replaceActionStart, "Replace");
+        Button allButtonView = new Button(1, allActionStart, "All");
 
         SearchCursor cursor = cursorForFocus(
             findField,
@@ -2507,7 +2724,15 @@ public class TerminalEditorApp {
             replaceActionStart,
             replaceActionEnd,
             allActionStart,
-            allActionEnd
+            allActionEnd,
+            caseButtonView,
+            wordButtonView,
+            wildcardButtonView,
+            allToggleButtonView,
+            nextButtonView,
+            prevButtonView,
+            replaceButtonView,
+            allButtonView
         );
     }
 
@@ -2593,19 +2818,51 @@ public class TerminalEditorApp {
         int replaceActionStart,
         int replaceActionEnd,
         int allActionStart,
-        int allActionEnd
+        int allActionEnd,
+        Button caseButtonView,
+        Button wordButtonView,
+        Button wildcardButtonView,
+        Button allToggleButtonView,
+        Button nextButtonView,
+        Button prevButtonView,
+        Button replaceButtonView,
+        Button allButtonView
     ) {
         private String text() {
             return row1 + "\n" + row2;
+        }
+
+        private Button buttonForFocus(SearchFocus focus) {
+            if (focus == SearchFocus.CASE) {
+                return caseButtonView;
+            }
+            if (focus == SearchFocus.WORD) {
+                return wordButtonView;
+            }
+            if (focus == SearchFocus.WILDCARD) {
+                return wildcardButtonView;
+            }
+            if (focus == SearchFocus.ALL) {
+                return allToggleButtonView;
+            }
+            if (focus == SearchFocus.NEXT_BUTTON) {
+                return nextButtonView;
+            }
+            if (focus == SearchFocus.PREV_BUTTON) {
+                return prevButtonView;
+            }
+            if (focus == SearchFocus.REPLACE_BUTTON) {
+                return replaceButtonView;
+            }
+            if (focus == SearchFocus.ALL_BUTTON) {
+                return allButtonView;
+            }
+            return null;
         }
     }
 
     private static String formatField(String label, String value) {
         return label + ": " + value;
-    }
-
-    private static String formatToggle(String label, boolean checked) {
-        return "[" + label + ":" + (checked ? "x" : " ") + "]";
     }
 
     private static SearchCursor cursorForFocus(
@@ -2629,23 +2886,12 @@ public class TerminalEditorApp {
         int replaceActionStart,
         int allActionStart
     ) {
+        int findCursorCol = "Find: ".length() + Math.max(0, Math.min(queryCursor, query.length()));
         if (focus == SearchFocus.FIND) {
-            return new SearchCursor(1, "Find: ".length() + Math.max(0, Math.min(queryCursor, query.length())));
+            return new SearchCursor(1, findCursorCol);
         }
         if (focus == SearchFocus.REPLACE) {
             return new SearchCursor(2, "Replace: ".length() + Math.max(0, Math.min(replacementCursor, replacement.length())));
-        }
-        if (focus == SearchFocus.NEXT_BUTTON) {
-            return new SearchCursor(2, nextStart + 1);
-        }
-        if (focus == SearchFocus.PREV_BUTTON) {
-            return new SearchCursor(2, prevStart + 1);
-        }
-        if (focus == SearchFocus.REPLACE_BUTTON) {
-            return new SearchCursor(2, replaceActionStart + 1);
-        }
-        if (focus == SearchFocus.ALL_BUTTON) {
-            return new SearchCursor(2, allActionStart + 1);
         }
         int iCheckOffset = iToggle.indexOf(':') + 1;
         int wCheckOffset = wToggle.indexOf(':') + 1;
@@ -2659,8 +2905,11 @@ public class TerminalEditorApp {
         if (focus == SearchFocus.WILDCARD) {
             return new SearchCursor(1, wildcardStart + starCheckOffset);
         }
-        int allCheckOffset = allToggle.indexOf(':') + 1;
-        return new SearchCursor(1, allStart + allCheckOffset);
+        if (focus == SearchFocus.ALL) {
+            int allCheckOffset = allToggle.indexOf(':') + 1;
+            return new SearchCursor(1, allStart + allCheckOffset);
+        }
+        return new SearchCursor(1, findCursorCol);
     }
 
     private static String clipPad(String text, int cols) {
@@ -2721,18 +2970,12 @@ public class TerminalEditorApp {
     private record HelpDialogLayout(int top, int left, int width, int height) {
     }
 
-    private record OpenFileActionResult(
-        boolean keepDialogOpen,
-        int activeTabIndex,
-        String statusMessage
-    ) {
-    }
-
     private record RenderFrameResult(
         CellBuffer previous,
         RenderPlan plan,
         int lastCursorRow,
         int lastCursorCol,
+        boolean lastCursorVisible,
         boolean rendered
     ) {
     }
@@ -2747,8 +2990,9 @@ public class TerminalEditorApp {
         return TabSessions.switchByDelta(tabs.size(), currentIndex, delta);
     }
 
-    private int closeCurrentTab(List<EditorTab> tabs, int activeTabIndex) {
+    private int closeCurrentTab(List<EditorTab> tabs, int activeTabIndex, SaveAsSuggestionStore saveAsSuggestions) {
         int size = tabs.size();
+        saveAsSuggestions.remove(tabs.get(activeTabIndex).tabSession());
         if (tabs.size() <= 1) {
             tabs.set(0, newEditorTab());
             return 0;
@@ -2757,8 +3001,14 @@ public class TerminalEditorApp {
         return TabSessions.closeIndex(size, activeTabIndex, activeTabIndex);
     }
 
-    private int closeTab(List<EditorTab> tabs, int activeTabIndex, int closeTabIndex) {
+    private int closeTab(
+        List<EditorTab> tabs,
+        int activeTabIndex,
+        int closeTabIndex,
+        SaveAsSuggestionStore saveAsSuggestions
+    ) {
         int size = tabs.size();
+        saveAsSuggestions.remove(tabs.get(closeTabIndex).tabSession());
         if (tabs.size() <= 1) {
             tabs.set(0, newEditorTab());
             return 0;
@@ -2915,7 +3165,13 @@ public class TerminalEditorApp {
         private void error(String message) {
             this.message = message;
             this.kind = Kind.ERROR;
-            this.expiresAtNanos = System.nanoTime() + NOTIFY_DURATION_NANOS;
+            this.expiresAtNanos = 0L;
+        }
+
+        private void clearErrorOnUserAction() {
+            if (kind == Kind.ERROR) {
+                clear();
+            }
         }
 
         private void clear() {
@@ -2937,7 +3193,7 @@ public class TerminalEditorApp {
         }
 
         private boolean expireIfNeeded() {
-            if (message != null && System.nanoTime() >= expiresAtNanos) {
+            if (message != null && expiresAtNanos > 0L && System.nanoTime() >= expiresAtNanos) {
                 clear();
                 return true;
             }
@@ -2945,7 +3201,7 @@ public class TerminalEditorApp {
         }
 
         private long nanosUntilExpire(long nowNanos) {
-            if (message == null) {
+            if (message == null || expiresAtNanos <= 0L) {
                 return -1L;
             }
             return Math.max(0L, expiresAtNanos - nowNanos);

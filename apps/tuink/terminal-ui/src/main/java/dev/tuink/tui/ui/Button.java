@@ -59,13 +59,17 @@ public final class Button {
     }
 
     public void draw(CellBuffer buffer, int cols, Style style) {
+        drawAt(buffer, row, cols, style);
+    }
+
+    public void drawAt(CellBuffer buffer, int drawRow, int cols, Style style) {
         String rendered = renderedText();
         for (int i = 0; i < rendered.length() && col + i < cols; i++) {
-            buffer.set(row, col + i, String.valueOf(rendered.charAt(i)), style);
+            buffer.set(drawRow, col + i, String.valueOf(rendered.charAt(i)), style);
         }
     }
 
-    private String renderedText() {
+    public String renderedText() {
         return framed ? "[" + text + "]" : text;
     }
 }

@@ -105,16 +105,16 @@ final class InputActionDispatcher {
             }
             case SHOW_KEY_HINTS -> {
                 ui.helpHintsMode = true;
-                return DispatchResult.handled("Keyboard hints");
+                return DispatchResult.handled(null);
             }
             case CTRL_F -> {
                 ui.searchMode = true;
                 ui.searchFocus = SearchFocus.FIND;
-                return DispatchResult.handled(ctx.searchHelpMessage());
+                return DispatchResult.handled(null);
             }
             case CTRL_C -> {
                 if (ctx.engine().hasSelection()) {
-                    statusMessage = ctx.engine().copySelection() ? "Copied selection" : "Nothing selected";
+                    statusMessage = ctx.engine().copySelection() ? "Copied selection" : "Nothing to copy";
                 } else {
                     statusMessage = ctx.engine().copyCurrentLine() ? "Copied line" : "Nothing to copy";
                 }
@@ -125,7 +125,7 @@ final class InputActionDispatcher {
                     statusMessage = "Reading mode: editing is disabled";
                 } else {
                     if (ctx.engine().hasSelection()) {
-                        statusMessage = ctx.engine().cutSelection() ? "Cut selection" : "Nothing selected";
+                        statusMessage = ctx.engine().cutSelection() ? "Cut selection" : "Nothing to cut";
                     } else {
                         statusMessage = ctx.engine().cutCurrentLine() ? "Cut line" : "Nothing to cut";
                     }
@@ -160,9 +160,6 @@ final class InputActionDispatcher {
                     statusMessage = "";
                 }
                 return DispatchResult.handled(statusMessage);
-            }
-            case CTRL_G -> {
-                return DispatchResult.handled("Goto line not implemented");
             }
             case ARROW_UP -> {
                 ctx.engine().moveUp();
@@ -268,8 +265,7 @@ final class InputActionDispatcher {
         PrintWriter writer,
         String enableMouseTracking,
         String disableMouseTracking,
-        int contentRows,
-        String searchHelpMessage
+        int contentRows
     ) {
     }
 

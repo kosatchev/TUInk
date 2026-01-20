@@ -176,7 +176,7 @@ public class RenderPlanBuilder {
     ) {
         int safeRows = Math.max(rows, 1);
         int safeCols = Math.max(cols, 1);
-        int extraBottomRows = lineCount(interactiveBarText) + lineCount(notificationBarText);
+        int extraBottomRows = lineCount(interactiveBarText);
         int contentRows = Math.max(0, safeRows - 2 - extraBottomRows);
         boolean needVerticalScrollbar = state.getTopLine() > 0 || model.lineCount() > contentRows;
         int scrollbarWidth = safeCols >= 8 && needVerticalScrollbar ? 1 : 0;

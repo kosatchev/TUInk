@@ -15,8 +15,7 @@ public final class OpenFileDialogController {
 
     public record ActivationResult(
         boolean keepDialogOpen,
-        int activeTabIndex,
-        String statusMessage
+        int activeTabIndex
     ) {
     }
 
@@ -24,8 +23,7 @@ public final class OpenFileDialogController {
         boolean consumed,
         boolean openFileMode,
         Focus focus,
-        int activeTabIndex,
-        String statusMessage
+        int activeTabIndex
     ) {
     }
 
@@ -34,8 +32,7 @@ public final class OpenFileDialogController {
         boolean openFileMode,
         Focus focus,
         TreeView.ScrollAxis dragAxis,
-        int activeTabIndex,
-        String statusMessage
+        int activeTabIndex
     ) {
     }
 
@@ -91,17 +88,17 @@ public final class OpenFileDialogController {
         Function<TreeView.Item, ActivationResult> activateSelection
     ) {
         if (!openFileMode) {
-            return new HandleResult(false, openFileMode, focus, activeTabIndex, null);
+            return new HandleResult(false, openFileMode, focus, activeTabIndex);
         }
 
         if (key instanceof KeyEvent.CharInput) {
-            return new HandleResult(true, openFileMode, focus, activeTabIndex, null);
+            return new HandleResult(true, openFileMode, focus, activeTabIndex);
         }
 
         KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
         return switch (action) {
-            case ESCAPE -> new HandleResult(true, false, focus, activeTabIndex, null);
-            case TAB -> new HandleResult(true, openFileMode, nextFocus(focus), activeTabIndex, null);
+            case ESCAPE -> new HandleResult(true, false, focus, activeTabIndex);
+            case TAB -> new HandleResult(true, openFileMode, nextFocus(focus), activeTabIndex);
             case ARROW_UP -> {
                 if (focus == Focus.LIST) {
                     TreeViewInteractionController.handleListKey(
@@ -111,7 +108,7 @@ public final class OpenFileDialogController {
                         visibleTextWidth
                     );
                 }
-                yield new HandleResult(true, openFileMode, focus, activeTabIndex, null);
+                yield new HandleResult(true, openFileMode, focus, activeTabIndex);
             }
             case ARROW_DOWN -> {
                 if (focus == Focus.LIST) {
@@ -122,7 +119,7 @@ public final class OpenFileDialogController {
                         visibleTextWidth
                     );
                 }
-                yield new HandleResult(true, openFileMode, focus, activeTabIndex, null);
+                yield new HandleResult(true, openFileMode, focus, activeTabIndex);
             }
             case PAGE_UP -> {
                 if (focus == Focus.LIST) {
@@ -133,7 +130,7 @@ public final class OpenFileDialogController {
                         visibleTextWidth
                     );
                 }
-                yield new HandleResult(true, openFileMode, focus, activeTabIndex, null);
+                yield new HandleResult(true, openFileMode, focus, activeTabIndex);
             }
             case PAGE_DOWN -> {
                 if (focus == Focus.LIST) {
@@ -144,7 +141,7 @@ public final class OpenFileDialogController {
                         visibleTextWidth
                     );
                 }
-                yield new HandleResult(true, openFileMode, focus, activeTabIndex, null);
+                yield new HandleResult(true, openFileMode, focus, activeTabIndex);
             }
             case HOME -> {
                 if (focus == Focus.LIST) {
@@ -155,7 +152,7 @@ public final class OpenFileDialogController {
                         visibleTextWidth
                     );
                 }
-                yield new HandleResult(true, openFileMode, focus, activeTabIndex, null);
+                yield new HandleResult(true, openFileMode, focus, activeTabIndex);
             }
             case END -> {
                 if (focus == Focus.LIST) {
@@ -166,11 +163,11 @@ public final class OpenFileDialogController {
                         visibleTextWidth
                     );
                 }
-                yield new HandleResult(true, openFileMode, focus, activeTabIndex, null);
+                yield new HandleResult(true, openFileMode, focus, activeTabIndex);
             }
             case ENTER -> {
                 if (focus == Focus.CANCEL) {
-                    yield new HandleResult(true, false, focus, activeTabIndex, null);
+                    yield new HandleResult(true, false, focus, activeTabIndex);
                 }
                 if (focus == Focus.OK) {
                     ActivationResult result = activateSelection.apply(openFileTree.selectedItem());
@@ -178,8 +175,7 @@ public final class OpenFileDialogController {
                         true,
                         result.keepDialogOpen(),
                         focus,
-                        result.activeTabIndex(),
-                        result.statusMessage()
+                        result.activeTabIndex()
                     );
                 }
                 TreeViewInteractionController.handleListKey(
@@ -188,7 +184,7 @@ public final class OpenFileDialogController {
                     listRows,
                     visibleTextWidth
                 );
-                yield new HandleResult(true, openFileMode, focus, activeTabIndex, null);
+                yield new HandleResult(true, openFileMode, focus, activeTabIndex);
             }
             case ARROW_RIGHT -> {
                 Focus nextFocus = focus;
@@ -202,7 +198,7 @@ public final class OpenFileDialogController {
                         visibleTextWidth
                     );
                 }
-                yield new HandleResult(true, openFileMode, nextFocus, activeTabIndex, null);
+                yield new HandleResult(true, openFileMode, nextFocus, activeTabIndex);
             }
             case SHIFT_ARROW_RIGHT -> {
                 if (focus == Focus.LIST) {
@@ -213,7 +209,7 @@ public final class OpenFileDialogController {
                         visibleTextWidth
                     );
                 }
-                yield new HandleResult(true, openFileMode, focus, activeTabIndex, null);
+                yield new HandleResult(true, openFileMode, focus, activeTabIndex);
             }
             case ARROW_LEFT -> {
                 Focus nextFocus = focus;
@@ -229,7 +225,7 @@ public final class OpenFileDialogController {
                         visibleTextWidth
                     );
                 }
-                yield new HandleResult(true, openFileMode, nextFocus, activeTabIndex, null);
+                yield new HandleResult(true, openFileMode, nextFocus, activeTabIndex);
             }
             case SHIFT_ARROW_LEFT -> {
                 if (focus == Focus.LIST) {
@@ -240,7 +236,7 @@ public final class OpenFileDialogController {
                         visibleTextWidth
                     );
                 }
-                yield new HandleResult(true, openFileMode, focus, activeTabIndex, null);
+                yield new HandleResult(true, openFileMode, focus, activeTabIndex);
             }
             case BACKSPACE -> {
                 if (focus == Focus.LIST) {
@@ -251,9 +247,9 @@ public final class OpenFileDialogController {
                         visibleTextWidth
                     );
                 }
-                yield new HandleResult(true, openFileMode, focus, activeTabIndex, null);
+                yield new HandleResult(true, openFileMode, focus, activeTabIndex);
             }
-            default -> new HandleResult(true, openFileMode, focus, activeTabIndex, null);
+            default -> new HandleResult(true, openFileMode, focus, activeTabIndex);
         };
     }
 
@@ -288,11 +284,11 @@ public final class OpenFileDialogController {
         Function<TreeView.Item, ActivationResult> activateSelection
     ) {
         if (!openFileMode) {
-            return new MousePressResult(false, openFileMode, focus, TreeView.ScrollAxis.NONE, activeTabIndex, null);
+            return new MousePressResult(false, openFileMode, focus, TreeView.ScrollAxis.NONE, activeTabIndex);
         }
         if (closeButtonHit) {
             tree.resetClickTracking();
-            return new MousePressResult(true, false, focus, TreeView.ScrollAxis.NONE, activeTabIndex, null);
+            return new MousePressResult(true, false, focus, TreeView.ScrollAxis.NONE, activeTabIndex);
         }
 
         TreeViewInteractionController.PressResult press = TreeViewInteractionController.handlePress(
@@ -327,13 +323,12 @@ public final class OpenFileDialogController {
                             activation.keepDialogOpen(),
                             nextFocus,
                             press.dragAxis(),
-                            activation.activeTabIndex(),
-                            activation.statusMessage()
+                            activation.activeTabIndex()
                         );
                     }
                 }
             }
-            return new MousePressResult(true, openFileMode, nextFocus, press.dragAxis(), activeTabIndex, null);
+            return new MousePressResult(true, openFileMode, nextFocus, press.dragAxis(), activeTabIndex);
         }
 
         if (okHit) {
@@ -343,14 +338,13 @@ public final class OpenFileDialogController {
                 activation.keepDialogOpen(),
                 Focus.OK,
                 TreeView.ScrollAxis.NONE,
-                activation.activeTabIndex(),
-                activation.statusMessage()
+                activation.activeTabIndex()
             );
         }
         if (cancelHit) {
-            return new MousePressResult(true, false, Focus.CANCEL, TreeView.ScrollAxis.NONE, activeTabIndex, null);
+            return new MousePressResult(true, false, Focus.CANCEL, TreeView.ScrollAxis.NONE, activeTabIndex);
         }
-        return new MousePressResult(true, openFileMode, focus, TreeView.ScrollAxis.NONE, activeTabIndex, null);
+        return new MousePressResult(true, openFileMode, focus, TreeView.ScrollAxis.NONE, activeTabIndex);
     }
 
     public static boolean handleMouseDrag(

@@ -32,7 +32,6 @@ final class EditorActionController {
         boolean requestSaveCurrent = false;
         boolean requestOpenFile = false;
         boolean requestToggleTheme = false;
-        String statusMessage = null;
 
         switch (action) {
             case CTRL_Q -> {
@@ -50,21 +49,19 @@ final class EditorActionController {
                 } else if (currentFileReadOnly) {
                     nextSaveAsMode = true;
                     saveAsPreset = SaveAsPreset.SUGGESTED_FROM_CURRENT;
-                    notificationError = "Save failed: current file is read-only: " + currentFile + ". Save As mode.";
+                    notificationError = "File is read-only. Use Save As. " + currentFile;
                 } else {
                     requestSaveCurrent = true;
                 }
             }
             case CTRL_O -> {
                 requestOpenFile = true;
-                statusMessage = "Open file";
             }
             case TOGGLE_THEME -> {
                 requestToggleTheme = true;
             }
             case CTRL_N, TAB_NEW -> {
                 tabCommand = TabCommand.NEW_TAB;
-                statusMessage = "New tab";
             }
             case TAB_NEXT -> tabCommand = TabCommand.NEXT_TAB;
             case TAB_PREVIOUS -> tabCommand = TabCommand.PREV_TAB;
@@ -74,7 +71,6 @@ final class EditorActionController {
                     nextPendingCloseTabIndex = activeTabIndex;
                 } else {
                     tabCommand = TabCommand.CLOSE_TAB;
-                    statusMessage = "Closed tab";
                 }
             }
             case CTRL_K, CTRL_W, CTRL_SHIFT_S -> {
@@ -110,8 +106,7 @@ final class EditorActionController {
             notificationError,
             requestSaveCurrent,
             requestOpenFile,
-            requestToggleTheme,
-            statusMessage
+            requestToggleTheme
         );
     }
 
@@ -142,8 +137,7 @@ final class EditorActionController {
         String notificationError,
         boolean requestSaveCurrent,
         boolean requestOpenFile,
-        boolean requestToggleTheme,
-        String statusMessage
+        boolean requestToggleTheme
     ) {
     }
 }

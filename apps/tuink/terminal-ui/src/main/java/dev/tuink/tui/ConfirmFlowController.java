@@ -45,14 +45,13 @@ final class ConfirmFlowController {
             return CloseTabResult.notConsumed(closeTabConfirmMode, pendingCloseTabIndex);
         }
         if (pendingCloseTabIndex < 0 || pendingCloseTabIndex >= tabsSize) {
-            return new CloseTabResult(true, false, -1, false, -1, null);
+            return new CloseTabResult(true, false, -1, false, -1);
         }
 
         boolean nextCloseTabConfirmMode = closeTabConfirmMode;
         int nextPendingCloseTabIndex = pendingCloseTabIndex;
         boolean activeTabChanged = false;
         int activeTabIndex = -1;
-        String statusMessage = null;
         if (key instanceof KeyEvent.CharInput charInput) {
             char ch = charInput.ch();
             if (ch == 'y' || ch == 'Y') {
@@ -60,7 +59,6 @@ final class ConfirmFlowController {
                 activeTabChanged = true;
                 nextCloseTabConfirmMode = false;
                 nextPendingCloseTabIndex = -1;
-                statusMessage = "Closed tab";
             } else if (ch == 'n' || ch == 'N') {
                 nextCloseTabConfirmMode = false;
                 nextPendingCloseTabIndex = -1;
@@ -70,8 +68,7 @@ final class ConfirmFlowController {
                 nextCloseTabConfirmMode,
                 nextPendingCloseTabIndex,
                 activeTabChanged,
-                activeTabIndex,
-                statusMessage
+                activeTabIndex
             );
         }
 
@@ -82,7 +79,6 @@ final class ConfirmFlowController {
                 activeTabChanged = true;
                 nextCloseTabConfirmMode = false;
                 nextPendingCloseTabIndex = -1;
-                statusMessage = "Closed tab";
             }
             case ESCAPE, ENTER -> {
                 nextCloseTabConfirmMode = false;
@@ -97,8 +93,7 @@ final class ConfirmFlowController {
             nextCloseTabConfirmMode,
             nextPendingCloseTabIndex,
             activeTabChanged,
-            activeTabIndex,
-            statusMessage
+            activeTabIndex
         );
     }
 
@@ -113,11 +108,10 @@ final class ConfirmFlowController {
         boolean closeTabConfirmMode,
         int pendingCloseTabIndex,
         boolean activeTabChanged,
-        int activeTabIndex,
-        String statusMessage
+        int activeTabIndex
     ) {
         static CloseTabResult notConsumed(boolean closeTabConfirmMode, int pendingCloseTabIndex) {
-            return new CloseTabResult(false, closeTabConfirmMode, pendingCloseTabIndex, false, -1, null);
+            return new CloseTabResult(false, closeTabConfirmMode, pendingCloseTabIndex, false, -1);
         }
     }
 }

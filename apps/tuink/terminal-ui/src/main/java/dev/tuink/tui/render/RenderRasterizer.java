@@ -83,6 +83,8 @@ public class RenderRasterizer {
 
         drawText(buffer, 0, 0, truncateOrPad(plan.topBarText(), cols), styles.renderTopbar(), cols);
         drawText(buffer, statusRow, 0, truncateOrPad(plan.bottomBarText(), cols), styles.renderStatus(), cols);
+        drawScrollbar(buffer, plan, rows, cols, topRow);
+        drawHorizontalScrollbar(buffer, plan, rows, cols, topRow);
         int overlayBottomRow = rows - 2;
         int overlayTopRow = overlayBottomRow;
         if (plan.interactiveBarText() != null && overlayBottomRow >= 0) {
@@ -108,8 +110,6 @@ public class RenderRasterizer {
                 drawText(buffer, row, 0, truncateOrPad(lines[i], cols), style, cols);
             }
         }
-        drawScrollbar(buffer, plan, rows, cols, topRow);
-        drawHorizontalScrollbar(buffer, plan, rows, cols, topRow);
 
         return buffer;
     }

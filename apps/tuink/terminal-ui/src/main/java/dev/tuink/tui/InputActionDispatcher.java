@@ -46,6 +46,7 @@ final class InputActionDispatcher {
                 ui.wrapLinesSetting = !ui.wrapLinesSetting;
                 if (ui.wrapLinesSetting) {
                     ctx.state().setLeftColumn(0);
+                    ctx.state().setLeftVisualColumn(0);
                 }
                 statusMessage = ui.wrapLinesSetting ? "Wrap lines enabled" : "Wrap lines disabled";
                 return DispatchResult.handled(statusMessage);

@@ -57,6 +57,7 @@ public class EditorEngine {
         state.setCursor(new Position(0, 0));
         state.setTopLine(0);
         state.setLeftColumn(0);
+        state.setLeftVisualColumn(0);
         state.setDirty(false);
         state.clearSelection();
         undoStack.clear();
@@ -566,22 +567,19 @@ public class EditorEngine {
             return;
         }
         String line = model.getLine(p.line());
-        int left = state.getLeftColumn();
         int safeMargin = Math.max(0, Math.min(H_SCROLL_MARGIN, Math.max(0, contentCols / 3)));
         int cursorVisual = visualColumn(line, 0, p.col());
         int longestVisualWidth = model.maxVisualLineWidth(tabWidth);
         int maxLeftVisual = Math.max(0, longestVisualWidth - Math.max(1, contentCols));
-        int currentLeftVisual = visualColumn(line, 0, left);
-        int leftVisual = Math.min(currentLeftVisual, maxLeftVisual);
-        if (leftVisual != currentLeftVisual) {
-            state.setLeftColumn(columnForVisualColumn(line, leftVisual));
-            left = state.getLeftColumn();
-        }
+        int leftVisual = Math.min(state.getLeftVisualColumn(), maxLeftVisual);
+        state.setLeftVisualColumn(leftVisual);
+        state.setLeftColumn(columnForVisualColumn(line, leftVisual));
 
         int leftVisibleBound = leftVisual + safeMargin;
         if (cursorVisual < leftVisibleBound) {
             int targetLeftVisual = Math.max(0, cursorVisual - safeMargin);
             targetLeftVisual = Math.min(targetLeftVisual, maxLeftVisual);
+            state.setLeftVisualColumn(targetLeftVisual);
             state.setLeftColumn(columnForVisualColumn(line, targetLeftVisual));
             return;
         }
@@ -590,6 +588,7 @@ public class EditorEngine {
         if (cursorVisual > rightVisibleBound) {
             int targetLeftVisual = Math.max(0, cursorVisual - Math.max(0, contentCols - 1 - safeMargin));
             targetLeftVisual = Math.min(targetLeftVisual, maxLeftVisual);
+            state.setLeftVisualColumn(targetLeftVisual);
             state.setLeftColumn(columnForVisualColumn(line, targetLeftVisual));
         }
     }
@@ -667,6 +666,7 @@ public class EditorEngine {
             state.getCursor(),
             state.getTopLine(),
             state.getLeftColumn(),
+            state.getLeftVisualColumn(),
             state.isDirty(),
             state.getSelectionAnchor()
         );
@@ -677,6 +677,7 @@ public class EditorEngine {
         state.setCursor(model.clamp(snapshot.cursor()));
         state.setTopLine(snapshot.topLine());
         state.setLeftColumn(snapshot.leftColumn());
+        state.setLeftVisualColumn(snapshot.leftVisualColumn());
         state.setDirty(snapshot.dirty());
         state.setSelectionAnchor(snapshot.selectionAnchor());
     }
@@ -693,6 +694,7 @@ public class EditorEngine {
         Position cursor,
         int topLine,
         int leftColumn,
+        int leftVisualColumn,
         boolean dirty,
         Position selectionAnchor
     ) {

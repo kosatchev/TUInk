@@ -37,6 +37,7 @@ import dev.tuink.tui.ui.TerminalCursorController;
 import dev.tuink.tui.ui.TabBar;
 import dev.tuink.tui.ui.TextField;
 import dev.tuink.tui.ui.TreeView;
+import dev.tuink.tui.ui.ViewportController;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
@@ -259,6 +260,7 @@ public class TerminalEditorApp {
                     cursorController
                 );
                 InputEventPump inputEventPump = new InputEventPump(decoder, notification, resized);
+                ViewportController viewportController = new ViewportController();
                 boolean running = true;
                 boolean needsRender = true;
                 while (running && !stopRequested.get()) {
@@ -356,14 +358,14 @@ public class TerminalEditorApp {
                         int scrollbarWidth = needVerticalScrollbar ? 1 : 0;
                         contentCols = Math.max(0, cols - gutterWidth - scrollbarWidth);
                         needHorizontalScrollbar = !uiSessionState.wrapLinesSetting && contentCols > 0
-                            && (state.getLeftColumn() > 0 || maxLineLength > contentCols);
+                            && (state.getLeftVisualColumn() > 0 || maxLineLength > contentCols);
                         int newContentRows = Math.max(0, baseContentRows - (needHorizontalScrollbar ? 1 : 0));
                         if (newContentRows == contentRows) {
                             break;
                         }
                         contentRows = newContentRows;
                     }
-                    engine.ensureCursorVisible(contentRows, contentCols);
+                    viewportController.ensureCursorVisible(engine, contentRows, contentCols);
                     boolean[] tabMatchFlags = findTabsWithMatches(
                         tabs,
                         searchQueryInput.text(),
@@ -470,6 +472,7 @@ public class TerminalEditorApp {
                     if (key == null) {
                         continue;
                     }
+                    viewportController.onInput(key);
                     notification.clearErrorOnUserAction();
                     needsRender = true;
 
@@ -704,6 +707,7 @@ public class TerminalEditorApp {
                                         continue;
                                     }
                                     if (modalState.isNone() && !uiSessionState.searchMode) {
+                                        int leftBeforeScrollPointer = state.getLeftVisualColumn();
                                         EditorView.ScrollPointerResult scrollPointer = editorView.handleScrollbarPointer(
                                             mouse.row(),
                                             mouse.col(),
@@ -716,6 +720,11 @@ public class TerminalEditorApp {
                                         );
                                         if (scrollPointer.consumed()) {
                                             editorScrollDrag = scrollPointer.dragAxis();
+                                            viewportController.onScrollbarInteraction(
+                                                scrollPointer,
+                                                leftBeforeScrollPointer,
+                                                state.getLeftVisualColumn()
+                                            );
                                             editorView.cancelMouseSelection();
                                             continue;
                                         }
@@ -753,7 +762,8 @@ public class TerminalEditorApp {
                                 if (modalState.isNone() && !uiSessionState.searchMode) {
                                     if (mouse.button() == KeyEvent.MouseButton.LEFT
                                         && editorScrollDrag != EditorView.ScrollAxis.NONE) {
-                                        editorView.handleScrollbarPointer(
+                                        int leftBeforeDragScroll = state.getLeftVisualColumn();
+                                        EditorView.ScrollPointerResult dragScrollPointer = editorView.handleScrollbarPointer(
                                             mouse.row(),
                                             mouse.col(),
                                             rows,
@@ -763,6 +773,11 @@ public class TerminalEditorApp {
                                             model,
                                             state,
                                             editorScrollDrag
+                                        );
+                                        viewportController.onScrollbarInteraction(
+                                            dragScrollPointer,
+                                            leftBeforeDragScroll,
+                                            state.getLeftVisualColumn()
                                         );
                                         continue;
                                     }

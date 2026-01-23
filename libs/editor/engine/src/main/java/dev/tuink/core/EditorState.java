@@ -11,6 +11,7 @@ public class EditorState {
     private Position cursor = new Position(0, 0);
     private int topLine;
     private int leftColumn;
+    private int leftVisualColumn;
     private boolean dirty;
     private Path currentFile;
     private Charset fileEncoding = StandardCharsets.UTF_8;
@@ -38,6 +39,27 @@ public class EditorState {
 
     public void setLeftColumn(int leftColumn) {
         this.leftColumn = Math.max(0, leftColumn);
+    }
+
+    public int getLeftVisualColumn() {
+        return leftVisualColumn;
+    }
+
+    public void setLeftVisualColumn(int leftVisualColumn) {
+        this.leftVisualColumn = Math.max(0, leftVisualColumn);
+    }
+
+    public ViewportState viewport() {
+        return new ViewportState(topLine, leftColumn, leftVisualColumn);
+    }
+
+    public void setViewport(ViewportState viewport) {
+        if (viewport == null) {
+            return;
+        }
+        setTopLine(viewport.topLine());
+        setLeftColumn(viewport.leftColumn());
+        setLeftVisualColumn(viewport.leftVisualColumn());
     }
 
     public boolean isDirty() {

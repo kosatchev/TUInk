@@ -2,6 +2,7 @@ package dev.tuink.tui.ui;
 
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
+import dev.tuink.core.ViewportMetrics;
 import dev.tuink.core.EditorViewportBehavior;
 import dev.tuink.core.Position;
 import dev.tuink.core.TextModel;
@@ -182,6 +183,8 @@ public final class EditorView {
             int barCol = cols - 1;
             int trackTop = contentTopRow;
             int trackHeight = Math.min(plan.contentRows(), Math.max(0, rows - contentTopRow - 1));
+            int verticalScroll = Math.max(0, plan.topLine());
+            int verticalTotal = Math.max(1, plan.totalLines());
             boolean draggingVertical = axis == ScrollAxis.VERTICAL;
             ScrollInteraction.Hit verticalHit = draggingVertical
                 ? ScrollInteraction.Hit.THUMB
@@ -191,20 +194,32 @@ public final class EditorView {
                     trackTop,
                     barCol,
                     trackHeight,
-                    plan.totalLines(),
-                    state.getTopLine()
+                    verticalTotal,
+                    verticalScroll
                 );
             if (trackHeight > 0 && verticalHit != ScrollInteraction.Hit.NONE) {
                 int targetTop = verticalHit == ScrollInteraction.Hit.TRACK
                     ? VerticalScrollbar.pageScrollFromTrackClick(
-                        state.getTopLine(),
+                        verticalScroll,
                         mouseRow,
                         trackTop,
                         trackHeight,
-                        plan.totalLines()
+                        verticalTotal
                     )
-                    : VerticalScrollbar.scrollFromPointer(mouseRow, trackTop, trackHeight, plan.totalLines());
-                EditorViewportBehavior.applyVerticalScroll(state, model, targetTop);
+                    : VerticalScrollbar.scrollFromPointer(mouseRow, trackTop, trackHeight, verticalTotal);
+                if (plan.wrapLines()) {
+                    int visibleCols = Math.max(0, cols - plan.gutterWidth() - plan.scrollbarWidth());
+                    int targetLine = ViewportMetrics.lineIndexFromWrappedOffset(
+                        model,
+                        targetTop,
+                        visibleCols,
+                        plan.wrapByWords(),
+                        tabWidth
+                    );
+                    EditorViewportBehavior.applyVerticalScroll(state, model, targetLine);
+                } else {
+                    EditorViewportBehavior.applyVerticalScroll(state, model, targetTop);
+                }
                 return new ScrollPointerResult(true, verticalHit == ScrollInteraction.Hit.THUMB ? ScrollAxis.VERTICAL : ScrollAxis.NONE);
             }
         }
@@ -254,4 +269,5 @@ public final class EditorView {
 
     public record ScrollPointerResult(boolean consumed, ScrollAxis dragAxis) {
     }
+
 }

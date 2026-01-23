@@ -4,6 +4,7 @@ import dev.tuink.core.EditorState;
 import dev.tuink.core.Position;
 import dev.tuink.core.SearchOptions;
 import dev.tuink.core.TextModel;
+import dev.tuink.core.ViewportMetrics;
 import java.util.ArrayList;
 import java.util.Locale;
 import java.util.List;
@@ -183,30 +184,42 @@ public class RenderPlanBuilder {
         int gutterDigits = Math.max(1, String.valueOf(Math.max(model.lineCount(), 1)).length());
         int gutterWidth = gutterDigits + 1;
         int textWidth = Math.max(0, safeCols - gutterWidth - scrollbarWidth);
+        if (wrapLines) {
+            int wrappedTop = wrappedRowsBefore(model, state.getTopLine(), textWidth, wrapByWords);
+            int wrappedTotal = totalWrappedRows(model, textWidth, wrapByWords);
+            boolean wrappedNeedVertical = wrappedTop > 0 || wrappedTotal > contentRows;
+            int wrappedScrollbarWidth = safeCols >= 8 && wrappedNeedVertical ? 1 : 0;
+            if (wrappedScrollbarWidth != scrollbarWidth) {
+                scrollbarWidth = wrappedScrollbarWidth;
+                textWidth = Math.max(0, safeCols - gutterWidth - scrollbarWidth);
+            }
+        }
         int totalColumns = 0;
         for (int i = 0; i < model.lineCount(); i++) {
             String line = model.getLine(i);
-            totalColumns = Math.max(totalColumns, visualColumn(line, 0, line.length()));
+            totalColumns = Math.max(totalColumns, ViewportMetrics.textToVisualColumn(line, 0, line.length(), tabWidth));
         }
 
         List<LineVisual> lines = new ArrayList<>(contentRows);
         if (!wrapLines) {
+            int leftVisualColumn = Math.max(0, state.getLeftVisualColumn());
             for (int row = 0; row < contentRows; row++) {
                 int lineIndex = state.getTopLine() + row;
                 if (lineIndex < model.lineCount()) {
                     String line = model.getLine(lineIndex);
-                    String visibleText = clipByVisualWidth(line, state.getLeftColumn(), textWidth);
+                    int lineLeftColumn = columnForVisualColumn(line, leftVisualColumn);
+                    String visibleText = clipByVisualWidth(line, lineLeftColumn, textWidth);
                     List<StyleSpan> spans = new ArrayList<>(
-                        clipSpans(highlighter.highlight(line), state.getLeftColumn(), visibleText.length())
+                        clipSpans(highlighter.highlight(line), lineLeftColumn, visibleText.length())
                     );
                     spans.addAll(
                         clipSpans(
                             searchMatchSpans(line, searchQuery, searchOptions, SEARCH_MATCH_STYLE),
-                            state.getLeftColumn(),
+                            lineLeftColumn,
                             visibleText.length()
                         )
                     );
-                    StyleSpan selection = selectionSpanForLine(state, model, lineIndex, state.getLeftColumn(), visibleText.length());
+                    StyleSpan selection = selectionSpanForLine(state, model, lineIndex, lineLeftColumn, visibleText.length());
                     if (selection != null) {
                         spans.add(selection);
                     }
@@ -214,7 +227,7 @@ public class RenderPlanBuilder {
                         state,
                         model,
                         lineIndex,
-                        state.getLeftColumn(),
+                        lineLeftColumn,
                         visibleText.length(),
                         searchQuery,
                         searchOptions
@@ -272,12 +285,17 @@ public class RenderPlanBuilder {
 
         Position cursor = model.clamp(state.getCursor());
         int cursorRow;
-        int anchorLine = Math.max(0, Math.min(state.getTopLine(), model.lineCount() - 1));
-        int leftVisualColumn = visualColumn(model.getLine(anchorLine), 0, state.getLeftColumn());
+        int leftVisualColumn = Math.max(0, state.getLeftVisualColumn());
+        int cursorLineLeftColumn = columnForVisualColumn(model.getLine(cursor.line()), leftVisualColumn);
         int cursorCol;
         if (!wrapLines) {
             cursorRow = cursor.line() - state.getTopLine();
-            cursorCol = gutterWidth + visualColumn(model.getLine(cursor.line()), state.getLeftColumn(), cursor.col());
+            cursorCol = gutterWidth + ViewportMetrics.textToVisualColumn(
+                model.getLine(cursor.line()),
+                cursorLineLeftColumn,
+                cursor.col(),
+                tabWidth
+            );
         } else {
             cursorRow = 0;
             for (int i = state.getTopLine(); i < cursor.line(); i++) {
@@ -302,7 +320,7 @@ public class RenderPlanBuilder {
                 }
             }
             cursorRow += segIndex;
-            cursorCol = gutterWidth + visualColumn(cursorLine, segStart, cursor.col());
+            cursorCol = gutterWidth + ViewportMetrics.textToVisualColumn(cursorLine, segStart, cursor.col(), tabWidth);
         }
         int maxCursorCol = Math.max(gutterWidth, safeCols - 1 - scrollbarWidth);
         cursorRow = Math.max(0, Math.min(cursorRow, Math.max(contentRows - 1, 0)));
@@ -319,10 +337,15 @@ public class RenderPlanBuilder {
             cursorRow,
             cursorCol,
             wrapLines,
+            wrapByWords,
             contentRows,
-            state.getTopLine(),
-            model.lineCount(),
-            state.getLeftColumn(),
+            wrapLines
+                ? wrappedRowsBefore(model, state.getTopLine(), textWidth, wrapByWords)
+                : state.getTopLine(),
+            wrapLines
+                ? totalWrappedRows(model, textWidth, wrapByWords)
+                : model.lineCount(),
+            cursorLineLeftColumn,
             leftVisualColumn,
             totalColumns,
             safeCols,
@@ -345,68 +368,7 @@ public class RenderPlanBuilder {
     }
 
     private List<Integer> wrapStarts(String line, int maxVisualWidth, boolean wrapByWords) {
-        if (line.isEmpty()) {
-            return List.of(0);
-        }
-        if (maxVisualWidth <= 0) {
-            return List.of(0);
-        }
-        List<Integer> starts = new ArrayList<>();
-        int start = 0;
-        starts.add(0);
-        while (start < line.length()) {
-            int end = wrapByWords
-                ? advanceByWordWrap(line, start, maxVisualWidth)
-                : advanceByVisualWidth(line, start, maxVisualWidth);
-            if (end <= start) {
-                end = Math.min(line.length(), start + 1);
-            }
-            if (end < line.length()) {
-                starts.add(end);
-            }
-            start = end;
-        }
-        return starts;
-    }
-
-    private int advanceByVisualWidth(String line, int start, int maxVisualWidth) {
-        int visual = 0;
-        int i = Math.max(0, Math.min(start, line.length()));
-        while (i < line.length()) {
-            char ch = line.charAt(i);
-            int adv = ch == '\t' ? tabWidth - (visual % tabWidth) : 1;
-            if (visual + adv > maxVisualWidth) {
-                break;
-            }
-            visual += adv;
-            i++;
-        }
-        return i;
-    }
-
-    private int advanceByWordWrap(String line, int start, int maxVisualWidth) {
-        int visual = 0;
-        int i = Math.max(0, Math.min(start, line.length()));
-        int lastBreakAfterWhitespace = -1;
-        while (i < line.length()) {
-            char ch = line.charAt(i);
-            int adv = ch == '\t' ? tabWidth - (visual % tabWidth) : 1;
-            if (visual + adv > maxVisualWidth) {
-                break;
-            }
-            visual += adv;
-            i++;
-            if (Character.isWhitespace(ch)) {
-                lastBreakAfterWhitespace = i;
-            }
-        }
-        if (i >= line.length()) {
-            return i;
-        }
-        if (lastBreakAfterWhitespace > start) {
-            return lastBreakAfterWhitespace;
-        }
-        return i;
+        return ViewportMetrics.wrapStarts(line, maxVisualWidth, wrapByWords, tabWidth);
     }
 
     private String clipByVisualWidth(String line, int leftColumn, int maxWidth) {
@@ -447,20 +409,16 @@ public class RenderPlanBuilder {
         return clipped;
     }
 
-    private int visualColumn(String line, int leftColumn, int col) {
-        int start = Math.max(0, Math.min(leftColumn, line.length()));
-        int end = Math.max(start, Math.min(col, line.length()));
-        int visual = 0;
-        for (int i = start; i < end; i++) {
-            char ch = line.charAt(i);
-            if (ch == '\t') {
-                int tabAdvance = tabWidth - (visual % tabWidth);
-                visual += tabAdvance;
-            } else {
-                visual++;
-            }
-        }
-        return visual;
+    private int columnForVisualColumn(String line, int targetVisual) {
+        return ViewportMetrics.visualToTextColumn(line, 0, targetVisual, tabWidth);
+    }
+
+    private int wrappedRowsBefore(TextModel model, int lineIndexExclusive, int width, boolean wrapByWords) {
+        return ViewportMetrics.wrappedRowsBefore(model, lineIndexExclusive, width, wrapByWords, tabWidth);
+    }
+
+    private int totalWrappedRows(TextModel model, int width, boolean wrapByWords) {
+        return ViewportMetrics.totalWrappedRows(model, width, wrapByWords, tabWidth);
     }
 
     private static String lineNumberGutter(int lineNumber, int gutterWidth) {

@@ -671,7 +671,7 @@ public final class MenuBar {
                     new MenuItem("[" + (showTabBarEnabled ? "x" : " ") + "] Show Tab Bar", true),
                     new MenuItem("[" + (wrapLinesEnabled ? "x" : " ") + "] Wrap Lines", true),
                     new MenuItem(wrapWordsLabel, wrapLinesEnabled),
-                    new MenuItem("[" + (tabWidth <= 2 ? "x" : " ") + "] Thin tabs (2)", true),
+                    new MenuItem("[" + (tabWidth <= 2 ? "x" : " ") + "] Thin tabs", true),
                     new MenuItem("[" + (visibleWhitespaceEnabled ? "x" : " ") + "] Visible tabs/spaces", true),
                     new MenuItem("[" + (activeGutterHighlightEnabled ? "x" : " ") + "] Highlight current line number", true),
                     new MenuItem("[>] Theme: " + themeLabel, true)

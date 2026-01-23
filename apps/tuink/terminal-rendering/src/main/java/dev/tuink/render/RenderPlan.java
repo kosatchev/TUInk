@@ -16,6 +16,7 @@ public record RenderPlan(
     int cursorRow,
     int cursorCol,
     boolean wrapLines,
+    boolean wrapByWords,
     int contentRows,
     int topLine,
     int totalLines,

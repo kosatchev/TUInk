@@ -24,16 +24,27 @@ public class RegexHighlighter implements LineHighlighter {
     private static final Style MARKUP_STYLE = new Style(Color.BRIGHT_YELLOW, Color.DEFAULT, true, false);
 
     private static final Set<String> JAVA_EXT = Set.of("java");
-    private static final Set<String> C_EXT = Set.of("c", "h");
+    private static final Set<String> C_EXT = Set.of("c", "h", "ino");
     private static final Set<String> PY_EXT = Set.of("py");
     private static final Set<String> MD_EXT = Set.of("md", "markdown");
     private static final Set<String> JS_EXT = Set.of("js", "mjs", "cjs", "jsx");
     private static final Set<String> TS_EXT = Set.of("ts", "tsx");
+    private static final Set<String> GRADLE_EXT = Set.of("gradle");
+    private static final Set<String> SHELL_EXT = Set.of("sh", "bash", "zsh");
+    private static final Set<String> SQL_EXT = Set.of("sql");
+    private static final Set<String> GO_EXT = Set.of("go");
+    private static final Set<String> RUST_EXT = Set.of("rs");
+    private static final Set<String> KOTLIN_EXT = Set.of("kt", "kts");
+    private static final Set<String> PROTO_EXT = Set.of("proto");
+    private static final Set<String> HTML_EXT = Set.of("html", "htm");
+    private static final Set<String> CSS_EXT = Set.of("css", "scss");
+    private static final Set<String> DIFF_EXT = Set.of("diff", "patch");
+    private static final Set<String> CSV_EXT = Set.of("csv");
     private static final Set<String> CONFIG_EXT = Set.of(
         "json", "yaml", "yml", "toml", "ini", "cfg", "conf", "properties", "xml"
     );
     private static final Set<String> CONFIG_FILE_NAMES = Set.of(
-        "dockerfile", ".gitignore"
+        "dockerfile", ".gitignore", "makefile", ".editorconfig", "docker-compose.yml", "docker-compose.yaml"
     );
 
     private final List<RegexRule> rules;
@@ -62,6 +73,9 @@ public class RegexHighlighter implements LineHighlighter {
             if (CONFIG_FILE_NAMES.contains(name)) {
                 return forConfigFileName(name);
             }
+            if (name.startsWith("git-commit")) {
+                return forGitCommit();
+            }
             if (name.startsWith(".env")) {
                 return forEnv();
             }
@@ -89,6 +103,39 @@ public class RegexHighlighter implements LineHighlighter {
         if (TS_EXT.contains(ext)) {
             return forTypeScript();
         }
+        if (GRADLE_EXT.contains(ext)) {
+            return forGradle();
+        }
+        if (SHELL_EXT.contains(ext)) {
+            return forShell();
+        }
+        if (SQL_EXT.contains(ext)) {
+            return forSql();
+        }
+        if (GO_EXT.contains(ext)) {
+            return forGo();
+        }
+        if (RUST_EXT.contains(ext)) {
+            return forRust();
+        }
+        if (KOTLIN_EXT.contains(ext)) {
+            return forKotlin();
+        }
+        if (PROTO_EXT.contains(ext)) {
+            return forProto();
+        }
+        if (HTML_EXT.contains(ext)) {
+            return forHtml();
+        }
+        if (CSS_EXT.contains(ext)) {
+            return forCssLike();
+        }
+        if (DIFF_EXT.contains(ext)) {
+            return forDiff();
+        }
+        if (CSV_EXT.contains(ext)) {
+            return forCsv();
+        }
         if (CONFIG_EXT.contains(ext)) {
             return forConfig(ext);
         }
@@ -103,6 +150,9 @@ public class RegexHighlighter implements LineHighlighter {
         return switch (name) {
             case "dockerfile" -> forDockerfile();
             case ".gitignore" -> forGitIgnore();
+            case "makefile" -> forMakefile();
+            case ".editorconfig" -> forIniLike();
+            case "docker-compose.yml", "docker-compose.yaml" -> forYaml();
             default -> withDefaults();
         };
     }
@@ -192,6 +242,121 @@ public class RegexHighlighter implements LineHighlighter {
             new RegexRule(Pattern.compile("`([^`\\\\]|\\\\.)*`"), STRING_STYLE),
             new RegexRule(Pattern.compile("//.*$"), COMMENT_STYLE),
             new RegexRule(Pattern.compile("/\\*.*\\*/"), COMMENT_STYLE)
+        ));
+    }
+
+    public static RegexHighlighter forGradle() {
+        return new RegexHighlighter(List.of(
+            new RegexRule(
+                Pattern.compile("\\b(plugins|pluginManagement|dependencyResolutionManagement|repositories|dependencies|buildscript|allprojects|subprojects|tasks|task|apply|from|id|version|group|name|implementation|api|compileOnly|runtimeOnly|testImplementation|classpath|ext|sourceSets|publishing|mavenCentral|google)\\b"),
+                KEYWORD_STYLE
+            ),
+            new RegexRule(
+                Pattern.compile("\\b(def|if|else|for|while|return|new|true|false|null)\\b"),
+                TYPE_STYLE
+            ),
+            new RegexRule(Pattern.compile("\\b\\d+(?:\\.\\d+)?\\b"), NUMBER_STYLE),
+            new RegexRule(Pattern.compile("\"([^\"\\\\]|\\\\.)*\""), STRING_STYLE),
+            new RegexRule(Pattern.compile("'([^'\\\\]|\\\\.)*'"), STRING_STYLE),
+            new RegexRule(Pattern.compile("//.*$"), COMMENT_STYLE),
+            new RegexRule(Pattern.compile("/\\*.*\\*/"), COMMENT_STYLE)
+        ));
+    }
+
+    public static RegexHighlighter forShell() {
+        return new RegexHighlighter(List.of(
+            new RegexRule(
+                Pattern.compile("\\b(if|then|else|elif|fi|for|while|do|done|case|esac|function|in|select|until|return|break|continue|local|export|readonly)\\b"),
+                KEYWORD_STYLE
+            ),
+            new RegexRule(Pattern.compile("\\$\\{?[A-Za-z_][A-Za-z0-9_]*\\}?"), TYPE_STYLE),
+            new RegexRule(Pattern.compile("\\b\\d+\\b"), NUMBER_STYLE),
+            new RegexRule(Pattern.compile("\"([^\"\\\\]|\\\\.)*\""), STRING_STYLE),
+            new RegexRule(Pattern.compile("'([^'\\\\]|\\\\.)*'"), STRING_STYLE),
+            new RegexRule(Pattern.compile("#.*$"), COMMENT_STYLE)
+        ));
+    }
+
+    public static RegexHighlighter forSql() {
+        return new RegexHighlighter(List.of(
+            new RegexRule(
+                Pattern.compile("\\b(SELECT|FROM|WHERE|JOIN|LEFT|RIGHT|INNER|OUTER|FULL|ON|GROUP|BY|ORDER|HAVING|LIMIT|OFFSET|INSERT|INTO|VALUES|UPDATE|SET|DELETE|CREATE|ALTER|DROP|TABLE|VIEW|INDEX|DISTINCT|UNION|ALL|AS|AND|OR|NOT|NULL|IS|IN|EXISTS|CASE|WHEN|THEN|ELSE|END)\\b", Pattern.CASE_INSENSITIVE),
+                KEYWORD_STYLE
+            ),
+            new RegexRule(Pattern.compile("\\b\\d+(?:\\.\\d+)?\\b"), NUMBER_STYLE),
+            new RegexRule(Pattern.compile("'([^'\\\\]|\\\\.)*'"), STRING_STYLE),
+            new RegexRule(Pattern.compile("--.*$"), COMMENT_STYLE)
+        ));
+    }
+
+    public static RegexHighlighter forGo() {
+        return new RegexHighlighter(List.of(
+            new RegexRule(
+                Pattern.compile("\\b(package|import|func|type|struct|interface|map|chan|go|defer|select|case|default|if|else|for|range|switch|return|break|continue|fallthrough|var|const)\\b"),
+                KEYWORD_STYLE
+            ),
+            new RegexRule(
+                Pattern.compile("\\b(bool|byte|rune|string|int|int8|int16|int32|int64|uint|uint8|uint16|uint32|uint64|float32|float64|complex64|complex128|error)\\b"),
+                TYPE_STYLE
+            ),
+            new RegexRule(Pattern.compile("\\b\\d+(?:\\.\\d+)?\\b"), NUMBER_STYLE),
+            new RegexRule(Pattern.compile("\"([^\"\\\\]|\\\\.)*\""), STRING_STYLE),
+            new RegexRule(Pattern.compile("`[^`]*`"), STRING_STYLE),
+            new RegexRule(Pattern.compile("//.*$"), COMMENT_STYLE),
+            new RegexRule(Pattern.compile("/\\*.*\\*/"), COMMENT_STYLE)
+        ));
+    }
+
+    public static RegexHighlighter forRust() {
+        return new RegexHighlighter(List.of(
+            new RegexRule(
+                Pattern.compile("\\b(fn|let|mut|const|static|struct|enum|impl|trait|mod|pub|use|crate|super|self|match|if|else|for|while|loop|in|where|return|break|continue|async|await|move)\\b"),
+                KEYWORD_STYLE
+            ),
+            new RegexRule(
+                Pattern.compile("\\b(i8|i16|i32|i64|i128|isize|u8|u16|u32|u64|u128|usize|f32|f64|bool|char|str|String|Option|Result)\\b"),
+                TYPE_STYLE
+            ),
+            new RegexRule(Pattern.compile("\\b\\d+(?:\\.\\d+)?\\b"), NUMBER_STYLE),
+            new RegexRule(Pattern.compile("\"([^\"\\\\]|\\\\.)*\""), STRING_STYLE),
+            new RegexRule(Pattern.compile("'([^'\\\\]|\\\\.)*'"), STRING_STYLE),
+            new RegexRule(Pattern.compile("//.*$"), COMMENT_STYLE),
+            new RegexRule(Pattern.compile("/\\*.*\\*/"), COMMENT_STYLE)
+        ));
+    }
+
+    public static RegexHighlighter forKotlin() {
+        return new RegexHighlighter(List.of(
+            new RegexRule(
+                Pattern.compile("\\b(package|import|class|interface|object|fun|val|var|typealias|if|else|when|for|while|do|return|break|continue|is|in|as|try|catch|finally|throw|this|super|companion)\\b"),
+                KEYWORD_STYLE
+            ),
+            new RegexRule(
+                Pattern.compile("\\b(Int|Long|Short|Byte|Float|Double|Boolean|Char|String|Unit|Any|Nothing)\\b"),
+                TYPE_STYLE
+            ),
+            new RegexRule(Pattern.compile("@[A-Za-z_][A-Za-z0-9_\\.]*"), DECORATOR_STYLE),
+            new RegexRule(Pattern.compile("\\b\\d+(?:\\.\\d+)?\\b"), NUMBER_STYLE),
+            new RegexRule(Pattern.compile("\"([^\"\\\\]|\\\\.)*\""), STRING_STYLE),
+            new RegexRule(Pattern.compile("'([^'\\\\]|\\\\.)*'"), STRING_STYLE),
+            new RegexRule(Pattern.compile("//.*$"), COMMENT_STYLE),
+            new RegexRule(Pattern.compile("/\\*.*\\*/"), COMMENT_STYLE)
+        ));
+    }
+
+    public static RegexHighlighter forProto() {
+        return new RegexHighlighter(List.of(
+            new RegexRule(
+                Pattern.compile("\\b(syntax|import|package|option|message|enum|service|rpc|returns|oneof|repeated|map|reserved|to)\\b"),
+                KEYWORD_STYLE
+            ),
+            new RegexRule(
+                Pattern.compile("\\b(string|bytes|bool|int32|int64|uint32|uint64|sint32|sint64|fixed32|fixed64|sfixed32|sfixed64|float|double)\\b"),
+                TYPE_STYLE
+            ),
+            new RegexRule(Pattern.compile("\\b\\d+\\b"), NUMBER_STYLE),
+            new RegexRule(Pattern.compile("\"([^\"\\\\]|\\\\.)*\""), STRING_STYLE),
+            new RegexRule(Pattern.compile("//.*$"), COMMENT_STYLE)
         ));
     }
 
@@ -289,6 +454,62 @@ public class RegexHighlighter implements LineHighlighter {
             new RegexRule(Pattern.compile("^\\s*!.*$"), DECORATOR_STYLE),
             new RegexRule(Pattern.compile("^\\s*#.*$"), COMMENT_STYLE),
             new RegexRule(Pattern.compile("([*?\\[\\]])"), TYPE_STYLE)
+        ));
+    }
+
+    public static RegexHighlighter forMakefile() {
+        return new RegexHighlighter(List.of(
+            new RegexRule(Pattern.compile("^\\s*([A-Za-z0-9_.-]+)\\s*:"), KEYWORD_STYLE),
+            new RegexRule(Pattern.compile("\\$\\(([^\\)]+)\\)|\\$\\{([^\\}]+)\\}"), TYPE_STYLE),
+            new RegexRule(Pattern.compile("\\b(ifeq|ifneq|ifdef|ifndef|else|endif|include|override|export|unexport|define|endef)\\b"), KEYWORD_STYLE),
+            new RegexRule(Pattern.compile("\\b\\d+\\b"), NUMBER_STYLE),
+            new RegexRule(Pattern.compile("#.*$"), COMMENT_STYLE)
+        ));
+    }
+
+    public static RegexHighlighter forHtml() {
+        return new RegexHighlighter(List.of(
+            new RegexRule(Pattern.compile("</?[A-Za-z][A-Za-z0-9:-]*"), KEYWORD_STYLE),
+            new RegexRule(Pattern.compile("\\s+[A-Za-z_:][A-Za-z0-9:._-]*\\s*="), TYPE_STYLE),
+            new RegexRule(Pattern.compile("\"([^\"\\\\]|\\\\.)*\""), STRING_STYLE),
+            new RegexRule(Pattern.compile("'([^'\\\\]|\\\\.)*'"), STRING_STYLE),
+            new RegexRule(Pattern.compile("<!--.*-->"), COMMENT_STYLE)
+        ));
+    }
+
+    public static RegexHighlighter forCssLike() {
+        return new RegexHighlighter(List.of(
+            new RegexRule(Pattern.compile("(^|\\{|;)\\s*([A-Za-z_-][A-Za-z0-9_-]*)\\s*:"), KEYWORD_STYLE),
+            new RegexRule(Pattern.compile("\\.[A-Za-z_-][A-Za-z0-9_-]*|#[A-Fa-f0-9]{3,8}|#[A-Za-z_-][A-Za-z0-9_-]*"), TYPE_STYLE),
+            new RegexRule(Pattern.compile("\\b\\d+(?:\\.\\d+)?(px|em|rem|%|vh|vw|s|ms)?\\b"), NUMBER_STYLE),
+            new RegexRule(Pattern.compile("\"([^\"\\\\]|\\\\.)*\""), STRING_STYLE),
+            new RegexRule(Pattern.compile("'([^'\\\\]|\\\\.)*'"), STRING_STYLE),
+            new RegexRule(Pattern.compile("/\\*.*\\*/"), COMMENT_STYLE)
+        ));
+    }
+
+    public static RegexHighlighter forDiff() {
+        return new RegexHighlighter(List.of(
+            new RegexRule(Pattern.compile("^\\+\\+\\+.*$|^---.*$|^diff\\s+.*$|^index\\s+.*$"), DECORATOR_STYLE),
+            new RegexRule(Pattern.compile("^@@.*@@.*$"), KEYWORD_STYLE),
+            new RegexRule(Pattern.compile("^\\+.*$"), STRING_STYLE),
+            new RegexRule(Pattern.compile("^-.*$"), TYPE_STYLE)
+        ));
+    }
+
+    public static RegexHighlighter forGitCommit() {
+        return new RegexHighlighter(List.of(
+            new RegexRule(Pattern.compile("^#.*$"), COMMENT_STYLE),
+            new RegexRule(Pattern.compile("^(feat|fix|docs|style|refactor|test|chore)(\\([^\\)]+\\))?:\\s+.*$"), KEYWORD_STYLE),
+            new RegexRule(Pattern.compile("\\b#[0-9]+\\b"), DECORATOR_STYLE)
+        ));
+    }
+
+    public static RegexHighlighter forCsv() {
+        return new RegexHighlighter(List.of(
+            new RegexRule(Pattern.compile("^([^,\"]+|\"[^\"]*\")(,([^,\"]+|\"[^\"]*\"))*$"), TYPE_STYLE),
+            new RegexRule(Pattern.compile("\"([^\"]|\"\")*\""), STRING_STYLE),
+            new RegexRule(Pattern.compile("\\b-?\\d+(?:\\.\\d+)?\\b"), NUMBER_STYLE)
         ));
     }
 

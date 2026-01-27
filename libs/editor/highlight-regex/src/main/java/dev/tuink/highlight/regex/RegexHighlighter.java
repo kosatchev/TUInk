@@ -507,7 +507,6 @@ public class RegexHighlighter implements LineHighlighter {
 
     public static RegexHighlighter forCsv() {
         return new RegexHighlighter(List.of(
-            new RegexRule(Pattern.compile("^([^,\"]+|\"[^\"]*\")(,([^,\"]+|\"[^\"]*\"))*$"), TYPE_STYLE),
             new RegexRule(Pattern.compile("\"([^\"]|\"\")*\""), STRING_STYLE),
             new RegexRule(Pattern.compile("\\b-?\\d+(?:\\.\\d+)?\\b"), NUMBER_STYLE)
         ));
@@ -539,13 +538,18 @@ public class RegexHighlighter implements LineHighlighter {
 
         Style[] styleAt = new Style[line.length()];
         for (RegexRule rule : rules) {
-            Matcher matcher = rule.pattern().matcher(line);
-            while (matcher.find()) {
-                int start = Math.max(0, matcher.start());
-                int end = Math.min(line.length(), matcher.end());
-                for (int i = start; i < end; i++) {
-                    styleAt[i] = rule.style();
+            try {
+                Matcher matcher = rule.pattern().matcher(line);
+                while (matcher.find()) {
+                    int start = Math.max(0, matcher.start());
+                    int end = Math.min(line.length(), matcher.end());
+                    for (int i = start; i < end; i++) {
+                        styleAt[i] = rule.style();
+                    }
                 }
+            } catch (StackOverflowError ignored) {
+                // Java regex can overflow stack on pathological long lines/patterns.
+                // Ignore this rule for the current line to keep the editor responsive.
             }
         }
 

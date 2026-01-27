@@ -6,7 +6,7 @@ Minimal Java terminal text editor with clean multi-module architecture:
 - `render`: UI-agnostic render planning and style spans
 - `highlight-regex`: regex-based syntax highlighter
 - `tui`: JLine-based terminal frontend (raw mode + alternate screen + ANSI diff)
-- `app`: canonical application entrypoint
+- `app`: canonical entrypoint and GraalVM native build configuration
 
 ## Requirements
 
@@ -40,8 +40,8 @@ Run with file and flags:
 ## Native Build
 
 ```bash
-./gradlew :tui:nativeCompile
-./gradlew :tui:nativeMuslCompile
+./gradlew :app:nativeCompile
+./gradlew :app:nativeMuslCompile
 ```
 
 Default binary names:

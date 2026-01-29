@@ -12,15 +12,15 @@ public final class UiStyles {
 
     public static Palette forTheme(Theme theme) {
         return switch (theme) {
-            case CLASSIC -> bluePalette();
+            case BLUE -> bluePalette();
             case CYAN -> cyanPalette();
             case LIGHT -> lightPalette();
         };
     }
 
     public enum Theme {
-        CLASSIC("Blue"),
         CYAN("Cyan"),
+        BLUE("Blue"),
         LIGHT("Light");
 
         private final String label;
@@ -35,20 +35,21 @@ public final class UiStyles {
 
         public Theme next() {
             return switch (this) {
-                case CLASSIC -> CYAN;
-                case CYAN -> LIGHT;
-                case LIGHT -> CLASSIC;
+                case CYAN -> BLUE;
+                case BLUE -> LIGHT;
+                case LIGHT -> BLUE;
             };
         }
 
         public static Theme parse(String raw) {
             if (raw == null) {
-                return CLASSIC;
+                return CYAN;
             }
             return switch (raw.trim().toLowerCase()) {
-                case "classic" -> CLASSIC;
+                case "cyan" -> CYAN;
+                case "blue" -> BLUE;
                 case "light" -> LIGHT;
-                default -> throw new IllegalArgumentException("Unknown theme: " + raw + " (expected: classic, light)");
+                default -> throw new IllegalArgumentException("Unknown theme: " + raw + " (expected: blue, cyan, light)");
             };
         }
     }
@@ -88,42 +89,6 @@ public final class UiStyles {
     ) {
     }
 
-    private static Palette bluePalette() {
-        return new Palette(
-            style(Color.BRIGHT_WHITE, Color.RED),
-            style(Color.BRIGHT_WHITE, Color.BLUE, true, false),
-            style(Color.BLACK, Color.BRIGHT_WHITE),
-            style(Color.BRIGHT_WHITE, Color.BLUE),
-            style(Color.BLUE, Color.BRIGHT_WHITE),
-            style(Color.DEFAULT, Color.DEFAULT),
-            style(Color.BLACK, Color.BRIGHT_WHITE),
-            style(Color.DEFAULT, Color.BRIGHT_WHITE),
-            style(Color.BLUE, Color.DEFAULT),
-            style(Color.DEFAULT, Color.DEFAULT),
-            style(Color.BLACK, Color.BRIGHT_WHITE),
-            style(Color.BLACK, Color.BRIGHT_WHITE, true, false),
-            style(Color.BRIGHT_WHITE, Color.BLUE, true, false),
-            style(Color.DEFAULT, Color.DEFAULT),
-            style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE),
-            style(Color.BLACK, Color.BRIGHT_YELLOW),
-            style(Color.BRIGHT_WHITE, Color.BLUE),
-            style(Color.BLACK, Color.BRIGHT_GREEN),
-            style(Color.BRIGHT_WHITE, Color.BLUE),
-            style(Color.BLACK, Color.BRIGHT_YELLOW),
-            style(Color.BRIGHT_WHITE, Color.RED),
-            style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE),
-            style(Color.BRIGHT_BLACK, Color.BLACK),
-            style(Color.BRIGHT_WHITE, Color.BLUE, true, false),
-            style(Color.BRIGHT_WHITE, Color.BLUE),
-            style(Color.BLACK, Color.BRIGHT_WHITE),
-            style(Color.BLACK, Color.BRIGHT_YELLOW),
-            style(Color.BLACK, Color.BRIGHT_GREEN),
-            style(Color.BRIGHT_BLACK, Color.DEFAULT),
-            style(Color.BRIGHT_BLACK, Color.DEFAULT),
-            style(Color.BRIGHT_WHITE, Color.DEFAULT)
-        );
-    }
-
     private static Palette cyanPalette() {
         return new Palette(
             style(Color.BRIGHT_WHITE, Color.RED),
@@ -160,6 +125,42 @@ public final class UiStyles {
         );
     }
 
+    private static Palette bluePalette() {
+        return new Palette(
+            style(Color.BRIGHT_WHITE, Color.RED),
+            style(Color.BRIGHT_WHITE, Color.BLUE, true, false),
+            style(Color.BLACK, Color.BRIGHT_WHITE),
+            style(Color.BRIGHT_WHITE, Color.BLUE),
+            style(Color.BLUE, Color.BRIGHT_WHITE),
+            style(Color.DEFAULT, Color.DEFAULT),
+            style(Color.BLACK, Color.BRIGHT_WHITE),
+            style(Color.DEFAULT, Color.BRIGHT_WHITE),
+            style(Color.BLUE, Color.DEFAULT),
+            style(Color.DEFAULT, Color.DEFAULT),
+            style(Color.BLACK, Color.BRIGHT_WHITE),
+            style(Color.BLACK, Color.BRIGHT_WHITE, true, false),
+            style(Color.BRIGHT_WHITE, Color.BLUE, true, false),
+            style(Color.DEFAULT, Color.DEFAULT),
+            style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE),
+            style(Color.BLACK, Color.BRIGHT_YELLOW),
+            style(Color.BRIGHT_WHITE, Color.BLUE),
+            style(Color.BLACK, Color.BRIGHT_GREEN),
+            style(Color.BRIGHT_WHITE, Color.BLUE),
+            style(Color.BLACK, Color.BRIGHT_YELLOW),
+            style(Color.BRIGHT_WHITE, Color.RED),
+            style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE),
+            style(Color.BRIGHT_BLACK, Color.BLACK),
+            style(Color.BRIGHT_WHITE, Color.BLUE, true, false),
+            style(Color.BRIGHT_WHITE, Color.BLUE),
+            style(Color.BLACK, Color.BRIGHT_WHITE),
+            style(Color.BLACK, Color.BRIGHT_YELLOW),
+            style(Color.BLACK, Color.BRIGHT_GREEN),
+            style(Color.BRIGHT_BLACK, Color.DEFAULT),
+            style(Color.BRIGHT_BLACK, Color.DEFAULT),
+            style(Color.BRIGHT_WHITE, Color.DEFAULT)
+        );
+    }
+
     private static Palette lightPalette() {
         return new Palette(
             style(Color.BRIGHT_WHITE, Color.RED),
@@ -184,15 +185,15 @@ public final class UiStyles {
             style(Color.BLACK, Color.BRIGHT_YELLOW),
             style(Color.BRIGHT_WHITE, Color.RED),
             style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE),
-            style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE),
-            style(Color.BLACK, Color.BRIGHT_WHITE, true, false),
+            style(Color.BLACK, Color.BRIGHT_WHITE),
+            style(Color.BRIGHT_WHITE, Color.BLACK, true, false),
             style(Color.BLACK, Color.BRIGHT_WHITE),
             style(Color.BLACK, Color.BRIGHT_WHITE),
             style(Color.BLACK, Color.BRIGHT_YELLOW),
             style(Color.BLACK, Color.BRIGHT_GREEN),
             style(Color.BRIGHT_BLACK, Color.DEFAULT),
             style(Color.BRIGHT_BLACK, Color.DEFAULT),
-            style(Color.BLACK, Color.DEFAULT)
+            style(Color.BRIGHT_WHITE, Color.DEFAULT)
         );
     }
 

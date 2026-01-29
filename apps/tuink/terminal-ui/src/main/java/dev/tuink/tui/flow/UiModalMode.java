@@ -6,5 +6,7 @@ public enum UiModalMode {
     SAVE_OVERWRITE_CONFIRM,
     QUIT_CONFIRM,
     CLOSE_TAB_CONFIRM,
-    HELP_HINTS
+    HELP_HINTS,
+    HELP_LICENSES,
+    HELP_AUTHOR
 }

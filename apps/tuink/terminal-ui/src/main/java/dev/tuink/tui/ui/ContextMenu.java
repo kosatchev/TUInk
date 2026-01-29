@@ -10,7 +10,7 @@ import dev.tuink.tui.render.CellBuffer;
 final class ContextMenu {
     private static final int MIN_WIDTH = 16;
     private static final Style DISABLED_ITEM_STYLE =
-        UiStyles.forTheme(UiStyles.Theme.CLASSIC).contextMenuDisabledItem();
+        UiStyles.forTheme(UiStyles.Theme.CYAN).contextMenuDisabledItem();
 
     private ContextMenu() {
     }

@@ -77,6 +77,10 @@ public final class MenuBar {
         controller.setVisibleWhitespaceEnabled(enabled);
     }
 
+    public void setSyntaxHighlightingEnabled(boolean enabled) {
+        controller.setSyntaxHighlightingEnabled(enabled);
+    }
+
     public void setTabWidth(int tabWidth) {
         controller.setTabWidth(tabWidth);
     }
@@ -247,7 +251,7 @@ public final class MenuBar {
         private static final String[] FILE_MENU_ITEMS = {"New", "Open...", "Save", "Save As...", "Quit"};
         private static final String[] EDIT_MENU_ITEMS = {"Undo", "Redo", "Cut", "Copy", "Paste", "Select All", "Find"};
         private static final String[] TAB_MENU_BASE_ITEMS = {"New Tab", "Close Tab", "Next Tab", "Previous Tab", SEPARATOR};
-        private static final String[] HELP_MENU_ITEMS = {"Keyboard hints"};
+        private static final String[] HELP_MENU_ITEMS = {"Keyboard hints", "Licenses", "Author"};
         private boolean open;
         private MenuId active = MenuId.EDIT;
         private int index;
@@ -264,8 +268,9 @@ public final class MenuBar {
         private boolean activeGutterHighlightEnabled = true;
         private boolean smartHomeEndEnabled = true;
         private boolean visibleWhitespaceEnabled = true;
+        private boolean syntaxHighlightingEnabled = true;
         private int tabWidth = 4;
-        private String themeLabel = "Classic";
+        private String themeLabel = "Cyan";
         private int[] activeMnemonics = new int[0];
 
         private void setOpenTabs(List<OpenTab> tabs, int activeTabIndex) {
@@ -347,6 +352,13 @@ public final class MenuBar {
             }
         }
 
+        private void setSyntaxHighlightingEnabled(boolean enabled) {
+            this.syntaxHighlightingEnabled = enabled;
+            if (open && active == MenuId.VIEW) {
+                rebuildMnemonics();
+            }
+        }
+
         private void setTabWidth(int tabWidth) {
             this.tabWidth = tabWidth <= 2 ? 2 : 4;
             if (open && active == MenuId.VIEW) {
@@ -355,7 +367,7 @@ public final class MenuBar {
         }
 
         private void setThemeLabel(String label) {
-            this.themeLabel = label == null || label.isBlank() ? "Classic" : label;
+            this.themeLabel = label == null || label.isBlank() ? "Cyan" : label;
             if (open && active == MenuId.VIEW) {
                 rebuildMnemonics();
             }
@@ -634,7 +646,7 @@ public final class MenuBar {
             String file = currentFile == null ? NO_NAME_LABEL : currentFile.toString();
             String dirtyMarker = dirty ? " *" : "";
             String left = fileMenu + " " + editMenu + " " + viewMenu + " " + tabMenu + " "
-                + settingsMenu + " " + helpMenu + " ";
+                + settingsMenu + " " + helpMenu + " | ";
             fileNameStartCol = left.length();
             String base = left + file + dirtyMarker;
             String right = readingMode ? " READ " : "";
@@ -673,6 +685,7 @@ public final class MenuBar {
                     new MenuItem(wrapWordsLabel, wrapLinesEnabled),
                     new MenuItem("[" + (tabWidth <= 2 ? "x" : " ") + "] Thin tabs", true),
                     new MenuItem("[" + (visibleWhitespaceEnabled ? "x" : " ") + "] Visible tabs/spaces", true),
+                    new MenuItem("[" + (syntaxHighlightingEnabled ? "x" : " ") + "] Syntax highlighting", true),
                     new MenuItem("[" + (activeGutterHighlightEnabled ? "x" : " ") + "] Highlight current line number", true),
                     new MenuItem("[>] Theme: " + themeLabel, true)
                 };
@@ -755,8 +768,9 @@ public final class MenuBar {
                     case 2 -> KeyEvent.Action.TOGGLE_WORD_WRAP;
                     case 3 -> KeyEvent.Action.TOGGLE_TAB_WIDTH;
                     case 4 -> KeyEvent.Action.TOGGLE_VISIBLE_WHITESPACE;
-                    case 5 -> KeyEvent.Action.TOGGLE_ACTIVE_GUTTER_HIGHLIGHT;
-                    case 6 -> KeyEvent.Action.TOGGLE_THEME;
+                    case 5 -> KeyEvent.Action.TOGGLE_SYNTAX_HIGHLIGHTING;
+                    case 6 -> KeyEvent.Action.TOGGLE_ACTIVE_GUTTER_HIGHLIGHT;
+                    case 7 -> KeyEvent.Action.TOGGLE_THEME;
                     default -> null;
                 };
             }
@@ -772,6 +786,8 @@ public final class MenuBar {
             if (menu == MenuId.HELP) {
                 return switch (itemIndex) {
                     case 0 -> KeyEvent.Action.SHOW_KEY_HINTS;
+                    case 1 -> KeyEvent.Action.SHOW_LICENSES;
+                    case 2 -> KeyEvent.Action.SHOW_AUTHOR;
                     default -> null;
                 };
             }

@@ -14,8 +14,11 @@ final class UiSessionState {
     boolean highlightActiveGutterSetting;
     boolean smartHomeEndSetting;
     boolean visibleWhitespaceSetting;
+    boolean syntaxHighlightingSetting;
     int tabWidthSetting;
     boolean helpHintsMode;
+    boolean helpLicensesMode;
+    boolean helpAuthorMode;
 
     static UiSessionState from(
         boolean searchMode,
@@ -29,8 +32,11 @@ final class UiSessionState {
         boolean highlightActiveGutterSetting,
         boolean smartHomeEndSetting,
         boolean visibleWhitespaceSetting,
+        boolean syntaxHighlightingSetting,
         int tabWidthSetting,
-        boolean helpHintsMode
+        boolean helpHintsMode,
+        boolean helpLicensesMode,
+        boolean helpAuthorMode
     ) {
         UiSessionState state = new UiSessionState();
         state.searchMode = searchMode;
@@ -44,8 +50,11 @@ final class UiSessionState {
         state.highlightActiveGutterSetting = highlightActiveGutterSetting;
         state.smartHomeEndSetting = smartHomeEndSetting;
         state.visibleWhitespaceSetting = visibleWhitespaceSetting;
+        state.syntaxHighlightingSetting = syntaxHighlightingSetting;
         state.tabWidthSetting = tabWidthSetting <= 2 ? 2 : 4;
         state.helpHintsMode = helpHintsMode;
+        state.helpLicensesMode = helpLicensesMode;
+        state.helpAuthorMode = helpAuthorMode;
         return state;
     }
 }

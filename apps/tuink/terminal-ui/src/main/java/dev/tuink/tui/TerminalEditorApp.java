@@ -29,6 +29,8 @@ import dev.tuink.tui.ui.InlinePromptBar;
 import dev.tuink.tui.ui.MenuBar;
 import dev.tuink.tui.ui.Modal;
 import dev.tuink.tui.ui.NotificationBar;
+import dev.tuink.tui.ui.HelpPage;
+import dev.tuink.tui.ui.HelpPages;
 import dev.tuink.tui.ui.OpenFileDialogController.OpenDialogButtons;
 import dev.tuink.tui.ui.OpenFileDialogController.OpenDialogLayout;
 import dev.tuink.tui.ui.OpenFileDialogController;
@@ -64,46 +66,7 @@ public class TerminalEditorApp {
     private static final long MAX_DEADLINE_INPUT_POLL_TIMEOUT_MS = 50L;
     private static final String ENABLE_MOUSE_TRACKING = "\u001B[?1000h\u001B[?1002h\u001B[?1006h";
     private static final String DISABLE_MOUSE_TRACKING = "\u001B[?1000l\u001B[?1002l\u001B[?1006l";
-    private static final String[] HELP_HINT_ROWS = {
-        "Key                  Action",
-        "-------------------- ----------------------------------",
-        "",
-        "              GLOBAL",
-        "Ctrl+O               Open file dialog",
-        "Ctrl+N               New tab",
-        "Ctrl+S               Save",
-        "Ctrl+K               Save As",
-        "Ctrl+Q               Quit",
-        "Ctrl+F               Open find bar",
-        "Ctrl+/               Keyboard hints",
-        "Ctrl+A               Select all",
-        "Arrows/Home/End      Move cursor",
-        "Ctrl+Left/Right      Move by word",
-        "Alt+B / Alt+F        Move by word (fallback)",
-        "PgUp/PgDn            Scroll page",
-        "",
-        "               MENU",
-        "F10                  Open File menu",
-        "Ctrl+E or Alt+E      Open Edit menu",
-        "Alt+V                Open View menu",
-        "Ctrl+T or Alt+T      Open Tab menu",
-        "F2 or Alt+S          Open Settings menu",
-        "F1 or Alt+H          Open Help menu",
-        "Arrows               Move selection",
-        "Enter                Activate item",
-        "Letters / 1-9        Mnemonic selection",
-        "Esc                  Close menu",
-        "",
-        "              SEARCH",
-        "Tab                  Next search field/toggle",
-        "Space                Toggle option",
-        "Enter or Ctrl+F      Next match",
-        "Ctrl+G               Previous match",
-        "Ctrl+R               Replace current/next",
-        "Ctrl+A               Replace all",
-        "Esc                  Close search bar"
-    };
-    private UiStyles.Theme theme = UiStyles.Theme.CLASSIC;
+    private UiStyles.Theme theme = UiStyles.Theme.CYAN;
     private UiStyles.Palette styles = UiStyles.forTheme(theme);
 
     public static void main(String[] args) throws Exception {
@@ -160,7 +123,10 @@ public class TerminalEditorApp {
             loadedSettings.highlightActiveGutter(),
             loadedSettings.smartHomeEnd(),
             loadedSettings.visibleWhitespace(),
+            loadedSettings.syntaxHighlighting(),
             loadedSettings.tabWidth(),
+            false,
+            false,
             false
         );
         TextField searchQueryInput = new TextField();
@@ -302,6 +268,8 @@ public class TerminalEditorApp {
                     boolean quitConfirmMode = modalState.isQuitConfirm();
                     boolean closeTabConfirmMode = modalState.isCloseTabConfirm();
                     boolean helpHintsMode = modalState.isHelpHints();
+                    boolean helpLicensesMode = modalState.isHelpLicenses();
+                    boolean helpAuthorMode = modalState.isHelpAuthor();
                     Path pendingOverwritePath = modalState.pendingOverwritePath();
                     int pendingCloseTabIndex = modalState.pendingCloseTabIndex();
                     ConfirmBarView confirmBar = null;
@@ -382,10 +350,12 @@ public class TerminalEditorApp {
                     topMenu.setActiveGutterHighlightEnabled(uiSessionState.highlightActiveGutterSetting);
                     topMenu.setSmartHomeEndEnabled(uiSessionState.smartHomeEndSetting);
                     topMenu.setVisibleWhitespaceEnabled(uiSessionState.visibleWhitespaceSetting);
+                    topMenu.setSyntaxHighlightingEnabled(uiSessionState.syntaxHighlightingSetting);
                     topMenu.setTabWidth(uiSessionState.tabWidthSetting);
                     renderer.setHighlightActiveGutter(uiSessionState.highlightActiveGutterSetting);
                     renderer.setVisibleWhitespace(uiSessionState.visibleWhitespaceSetting);
                     renderer.setTabWidth(uiSessionState.tabWidthSetting);
+                    renderPlanBuilder.setSyntaxHighlightingEnabled(uiSessionState.syntaxHighlightingSetting);
                     renderPlanBuilder.setTabWidth(uiSessionState.tabWidthSetting);
                     editorView.setTabWidth(uiSessionState.tabWidthSetting);
                     engine.setTabWidth(uiSessionState.tabWidthSetting);
@@ -448,6 +418,8 @@ public class TerminalEditorApp {
                         openFileTree,
                         openFileFocus,
                         helpHintsMode,
+                        helpLicensesMode,
+                        helpAuthorMode,
                         previous,
                         plan,
                         lastCursorRow,
@@ -480,11 +452,12 @@ public class TerminalEditorApp {
                         if (!uiSessionState.mouseModeSetting) {
                             continue;
                         }
-                        if (helpHintsMode) {
+                        if (helpHintsMode || helpLicensesMode || helpAuthorMode) {
                             if (mouse.kind() == KeyEvent.MouseKind.PRESS
                                 && mouse.button() == KeyEvent.MouseButton.LEFT) {
-                                HelpDialogLayout layout = helpDialogLayout(rows, cols);
-                                Modal frame = helpDialogFrame(layout);
+                                HelpPage helpPage = activeHelpPage(helpHintsMode, helpLicensesMode, helpAuthorMode);
+                                HelpDialogLayout layout = helpDialogLayout(rows, cols, helpPage.rows().length);
+                                Modal frame = infoDialogFrame(layout, helpPage.title());
                                 Button close = helpCloseButton(layout);
                                 if (frame.closeButton().hit(mouse.row(), mouse.col())
                                     || close.hit(mouse.row(), mouse.col())) {
@@ -844,6 +817,32 @@ public class TerminalEditorApp {
                         }
                     }
 
+                    if (modalState.isHelpLicenses()) {
+                        if (key instanceof KeyEvent.CharInput) {
+                            continue;
+                        }
+                        KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
+                        if (action == KeyEvent.Action.ESCAPE
+                            || action == KeyEvent.Action.ENTER
+                            || action == KeyEvent.Action.SHOW_LICENSES) {
+                            modalState = UiModalState.none();
+                        }
+                        continue;
+                    }
+
+                    if (modalState.isHelpAuthor()) {
+                        if (key instanceof KeyEvent.CharInput) {
+                            continue;
+                        }
+                        KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
+                        if (action == KeyEvent.Action.ESCAPE
+                            || action == KeyEvent.Action.ENTER
+                            || action == KeyEvent.Action.SHOW_AUTHOR) {
+                            modalState = UiModalState.none();
+                        }
+                        continue;
+                    }
+
                     if (modalState.isSaveAs()) {
                         String saveAsDraftBefore = saveAsInput.text();
                         SaveFlowController.SaveAsResult saveAsResult = SaveFlowController.handleSaveAsInput(
@@ -1074,6 +1073,12 @@ public class TerminalEditorApp {
                         if (uiSessionState.helpHintsMode) {
                             modalState = UiModalState.helpHints();
                             uiSessionState.helpHintsMode = false;
+                        } else if (uiSessionState.helpLicensesMode) {
+                            modalState = UiModalState.helpLicenses();
+                            uiSessionState.helpLicensesMode = false;
+                        } else if (uiSessionState.helpAuthorMode) {
+                            modalState = UiModalState.helpAuthor();
+                            uiSessionState.helpAuthorMode = false;
                         }
                         if (dispatchResult.statusMessage() != null && !dispatchResult.statusMessage().isBlank()) {
                             notification.info(dispatchResult.statusMessage());
@@ -1143,6 +1148,7 @@ public class TerminalEditorApp {
             uiSessionState.highlightActiveGutterSetting,
             uiSessionState.smartHomeEndSetting,
             uiSessionState.visibleWhitespaceSetting,
+            uiSessionState.syntaxHighlightingSetting,
             uiSessionState.tabWidthSetting,
             theme
         );
@@ -2008,9 +2014,10 @@ public class TerminalEditorApp {
         );
     }
 
-    private HelpDialogLayout helpDialogLayout(int rows, int cols) {
+    private HelpDialogLayout helpDialogLayout(int rows, int cols, int contentRows) {
         int preferredWidth = 68;
-        int preferredHeight = HELP_HINT_ROWS.length + 3;
+        // +2 = top/bottom frame borders; content fills the interior without an extra blank row.
+        int preferredHeight = contentRows + 2;
         int width = Math.max(24, Math.min(preferredWidth, cols - 4));
         int height = Math.max(8, Math.min(preferredHeight, rows - 4));
         int left = Math.max(0, (cols - width) / 2);
@@ -2018,13 +2025,13 @@ public class TerminalEditorApp {
         return new HelpDialogLayout(top, left, width, height);
     }
 
-    private Modal helpDialogFrame(HelpDialogLayout layout) {
+    private Modal infoDialogFrame(HelpDialogLayout layout, String title) {
         return new Modal(
             layout.top(),
             layout.left(),
             layout.width(),
             layout.height(),
-            " Keyboard Hints ",
+            title,
             styles.dialog(),
             styles.dialogBorder(),
             styles.dialogTitle()
@@ -2038,23 +2045,30 @@ public class TerminalEditorApp {
         return new Button(row, col, closeText);
     }
 
-    private void drawHelpOverlay(CellBuffer buffer, int rows, int cols, boolean visible, boolean colorEnabled) {
+    private void drawInfoOverlay(
+        CellBuffer buffer,
+        int rows,
+        int cols,
+        boolean visible,
+        HelpPage page,
+        boolean colorEnabled
+    ) {
         if (!visible || rows < 8 || cols < 24) {
             return;
         }
-        HelpDialogLayout layout = helpDialogLayout(rows, cols);
-        Modal frame = helpDialogFrame(layout);
+        HelpDialogLayout layout = helpDialogLayout(rows, cols, page.rows().length);
+        Modal frame = infoDialogFrame(layout, page.title());
         frame.draw(buffer, rows, cols);
         int textRow = layout.top() + 1;
         int textCol = layout.left() + 2;
         int textWidth = Math.max(0, layout.width() - 4);
         int maxRows = Math.max(0, layout.height() - 2);
-        for (int i = 0; i < HELP_HINT_ROWS.length && i < maxRows; i++) {
+        for (int i = 0; i < page.rows().length && i < maxRows; i++) {
             drawMenuLine(
                 buffer,
                 textRow + i,
                 textCol,
-                clipText(HELP_HINT_ROWS[i], textWidth),
+                clipText(page.rows()[i], textWidth),
                 styles.dialog(),
                 cols
             );
@@ -2065,6 +2079,19 @@ public class TerminalEditorApp {
             cols,
             colorEnabled ? styles.menuSelected() : styles.dialogSelectedMono()
         );
+    }
+
+    private HelpPage activeHelpPage(boolean helpHintsMode, boolean helpLicensesMode, boolean helpAuthorMode) {
+        if (helpHintsMode) {
+            return HelpPages.KEYMAP;
+        }
+        if (helpLicensesMode) {
+            return HelpPages.LICENSES;
+        }
+        if (helpAuthorMode) {
+            return HelpPages.AUTHOR;
+        }
+        return null;
     }
 
     private String clipText(String text, int width) {
@@ -2216,6 +2243,8 @@ public class TerminalEditorApp {
         TreeView openFileTree,
         OpenFileDialogController.Focus openFileFocus,
         boolean helpHintsMode,
+        boolean helpLicensesMode,
+        boolean helpAuthorMode,
         CellBuffer previous,
         RenderPlan previousPlan,
         int previousCursorRow,
@@ -2272,7 +2301,30 @@ public class TerminalEditorApp {
             openFileFocus,
             colorEnabled
         );
-        drawHelpOverlay(current, rows, cols, helpHintsMode, colorEnabled);
+        drawInfoOverlay(
+            current,
+            rows,
+            cols,
+            helpHintsMode,
+            HelpPages.KEYMAP,
+            colorEnabled
+        );
+        drawInfoOverlay(
+            current,
+            rows,
+            cols,
+            helpLicensesMode,
+            HelpPages.LICENSES,
+            colorEnabled
+        );
+        drawInfoOverlay(
+            current,
+            rows,
+            cols,
+            helpAuthorMode,
+            HelpPages.AUTHOR,
+            colorEnabled
+        );
 
         EditorView.CursorPosition editorCursor = editorView.cursorFromPlan(plan, contentTopRow);
         int desiredCursorRow = editorCursor.row();
@@ -2286,7 +2338,7 @@ public class TerminalEditorApp {
             closeTabConfirmMode,
             topMenu.isOpen(),
             openFileMode,
-            helpHintsMode
+            helpHintsMode || helpLicensesMode || helpAuthorMode
         );
         int interactiveBottomCursorRow = Math.max(1, rows - 1);
         int interactiveTopCursorRow = interactiveBottomCursorRow - inlinePromptBarHeight + 1;
@@ -2315,8 +2367,9 @@ public class TerminalEditorApp {
                     : buttons.cancel().cursorCol();
                 desiredCursorRow = layout.bottom() + 1;
             }
-        } else if (helpHintsMode) {
-            HelpDialogLayout layout = helpDialogLayout(rows, cols);
+        } else if (helpHintsMode || helpLicensesMode || helpAuthorMode) {
+            HelpPage helpPage = activeHelpPage(helpHintsMode, helpLicensesMode, helpAuthorMode);
+            HelpDialogLayout layout = helpDialogLayout(rows, cols, helpPage.rows().length);
             Button close = helpCloseButton(layout);
             desiredCursorRow = Math.min(rows, close.row() + 1);
             desiredCursorCol = Math.min(cols, close.cursorCol() + 1);
@@ -2405,6 +2458,8 @@ public class TerminalEditorApp {
             TreeView openFileTree,
             OpenFileDialogController.Focus openFileFocus,
             boolean helpHintsMode,
+            boolean helpLicensesMode,
+            boolean helpAuthorMode,
             CellBuffer previous,
             RenderPlan previousPlan,
             int previousCursorRow,
@@ -2449,6 +2504,8 @@ public class TerminalEditorApp {
                 openFileTree,
                 openFileFocus,
                 helpHintsMode,
+                helpLicensesMode,
+                helpAuthorMode,
                 previous,
                 previousPlan,
                 previousCursorRow,
@@ -3228,7 +3285,7 @@ public class TerminalEditorApp {
     }
 
     private void applyTheme(UiStyles.Theme theme) {
-        this.theme = theme == null ? UiStyles.Theme.CLASSIC : theme;
+        this.theme = theme == null ? UiStyles.Theme.CYAN : theme;
         this.styles = UiStyles.forTheme(this.theme);
     }
 
@@ -3272,7 +3329,7 @@ public class TerminalEditorApp {
         System.out.println("  --no-mouse       Disable mouse tracking and mouse interactions");
         System.out.println("  --no-alt-screen  Do not use alternate screen buffer");
         System.out.println("  --no-color       Render in monochrome (no ANSI colors, keep text attributes)");
-        System.out.println("  --theme=<name>   UI palette: classic (default), light");
+        System.out.println("  --theme=<name>   UI palette: blue, cyan (default), light");
         System.out.println("  --read           Start in reading mode (editing disabled)");
         System.out.println("  --help, -h       Show this help");
     }

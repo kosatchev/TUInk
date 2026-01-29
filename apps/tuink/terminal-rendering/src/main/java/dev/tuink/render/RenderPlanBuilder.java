@@ -17,6 +17,7 @@ import java.util.regex.Pattern;
 public class RenderPlanBuilder {
     private final LineHighlighter highlighter;
     private int tabWidth = 4;
+    private boolean syntaxHighlightingEnabled = true;
     private static final Style SELECTION_STYLE = new Style(Color.BLACK, Color.BRIGHT_WHITE, false, false);
     private static final Style SEARCH_MATCH_STYLE = SELECTION_STYLE;
     private static final Style CURRENT_SEARCH_MATCH_STYLE = new Style(Color.BLACK, Color.BRIGHT_YELLOW, false, false);
@@ -27,6 +28,10 @@ public class RenderPlanBuilder {
 
     public void setTabWidth(int tabWidth) {
         this.tabWidth = tabWidth <= 2 ? 2 : 4;
+    }
+
+    public void setSyntaxHighlightingEnabled(boolean enabled) {
+        this.syntaxHighlightingEnabled = enabled;
     }
 
     public RenderPlan build(
@@ -209,9 +214,8 @@ public class RenderPlanBuilder {
                     String line = model.getLine(lineIndex);
                     int lineLeftColumn = columnForVisualColumn(line, leftVisualColumn);
                     String visibleText = clipByVisualWidth(line, lineLeftColumn, textWidth);
-                    List<StyleSpan> spans = new ArrayList<>(
-                        clipSpans(highlighter.highlight(line), lineLeftColumn, visibleText.length())
-                    );
+                    List<StyleSpan> syntaxSpans = syntaxHighlightingEnabled ? highlighter.highlight(line) : List.of();
+                    List<StyleSpan> spans = new ArrayList<>(clipSpans(syntaxSpans, lineLeftColumn, visibleText.length()));
                     spans.addAll(
                         clipSpans(
                             searchMatchSpans(line, searchQuery, searchOptions, SEARCH_MATCH_STYLE),
@@ -249,7 +253,9 @@ public class RenderPlanBuilder {
                     continue;
                 }
                 String line = model.getLine(lineIndex);
-                List<StyleSpan> lineSpans = new ArrayList<>(highlighter.highlight(line));
+                List<StyleSpan> lineSpans = new ArrayList<>(
+                    syntaxHighlightingEnabled ? highlighter.highlight(line) : List.of()
+                );
                 lineSpans.addAll(searchMatchSpans(line, searchQuery, searchOptions, SEARCH_MATCH_STYLE));
                 StyleSpan selection = selectionSpanForLine(state, model, lineIndex, 0, line.length());
                 if (selection != null) {

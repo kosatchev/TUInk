@@ -19,11 +19,11 @@ public class RenderRasterizer {
     private int tabWidth = 4;
 
     public RenderRasterizer() {
-        this(1, UiStyles.Theme.CLASSIC);
+        this(1, UiStyles.Theme.CYAN);
     }
 
     public RenderRasterizer(int contentTopRow) {
-        this(contentTopRow, UiStyles.Theme.CLASSIC);
+        this(contentTopRow, UiStyles.Theme.CYAN);
     }
 
     public RenderRasterizer(int contentTopRow, UiStyles.Theme theme) {

@@ -12,6 +12,7 @@ public record AppSettings(
     boolean highlightActiveGutter,
     boolean smartHomeEnd,
     boolean visibleWhitespace,
+    boolean syntaxHighlighting,
     int tabWidth,
     UiStyles.Theme theme
 ) {
@@ -26,8 +27,9 @@ public record AppSettings(
             true,
             true,
             true,
+            true,
             4,
-            UiStyles.Theme.CLASSIC
+            UiStyles.Theme.CYAN
         );
     }
 }

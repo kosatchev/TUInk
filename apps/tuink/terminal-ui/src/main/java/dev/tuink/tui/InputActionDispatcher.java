@@ -97,6 +97,13 @@ final class InputActionDispatcher {
                     : "Visible whitespace disabled";
                 return DispatchResult.handled(statusMessage);
             }
+            case TOGGLE_SYNTAX_HIGHLIGHTING -> {
+                ui.syntaxHighlightingSetting = !ui.syntaxHighlightingSetting;
+                statusMessage = ui.syntaxHighlightingSetting
+                    ? "Syntax highlighting enabled"
+                    : "Syntax highlighting disabled";
+                return DispatchResult.handled(statusMessage);
+            }
             case TOGGLE_TAB_WIDTH -> {
                 ui.tabWidthSetting = ui.tabWidthSetting <= 2 ? 4 : 2;
                 statusMessage = ui.tabWidthSetting <= 2
@@ -106,6 +113,14 @@ final class InputActionDispatcher {
             }
             case SHOW_KEY_HINTS -> {
                 ui.helpHintsMode = true;
+                return DispatchResult.handled(null);
+            }
+            case SHOW_LICENSES -> {
+                ui.helpLicensesMode = true;
+                return DispatchResult.handled(null);
+            }
+            case SHOW_AUTHOR -> {
+                ui.helpAuthorMode = true;
                 return DispatchResult.handled(null);
             }
             case CTRL_F -> {

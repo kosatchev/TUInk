@@ -32,6 +32,14 @@ public record UiModalState(
         return new UiModalState(UiModalMode.HELP_HINTS, null, -1, ConfirmChoice.CANCEL);
     }
 
+    public static UiModalState helpLicenses() {
+        return new UiModalState(UiModalMode.HELP_LICENSES, null, -1, ConfirmChoice.CANCEL);
+    }
+
+    public static UiModalState helpAuthor() {
+        return new UiModalState(UiModalMode.HELP_AUTHOR, null, -1, ConfirmChoice.CANCEL);
+    }
+
     public boolean isNone() {
         return mode == UiModalMode.NONE;
     }
@@ -54,6 +62,14 @@ public record UiModalState(
 
     public boolean isHelpHints() {
         return mode == UiModalMode.HELP_HINTS;
+    }
+
+    public boolean isHelpLicenses() {
+        return mode == UiModalMode.HELP_LICENSES;
+    }
+
+    public boolean isHelpAuthor() {
+        return mode == UiModalMode.HELP_AUTHOR;
     }
 
     public UiModalState withConfirmChoice(ConfirmChoice nextConfirmChoice) {

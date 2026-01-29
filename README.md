@@ -8,6 +8,11 @@ Minimal Java terminal text editor with clean multi-module architecture:
 - `tui`: JLine-based terminal frontend (raw mode + alternate screen + ANSI diff)
 - `app`: canonical entrypoint and GraalVM native build configuration
 
+## Project Status
+
+This project is currently feature-first: new capabilities sometimes arrive before the dust from recent changes has settled.
+The editor is functional, cleanup is ongoing, and a larger refactor is planned once the core feature set stabilizes.
+
 ## Requirements
 
 - Java 17

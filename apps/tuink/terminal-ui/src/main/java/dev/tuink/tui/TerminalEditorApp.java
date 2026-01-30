@@ -350,12 +350,16 @@ public class TerminalEditorApp {
                     topMenu.setActiveGutterHighlightEnabled(uiSessionState.highlightActiveGutterSetting);
                     topMenu.setSmartHomeEndEnabled(uiSessionState.smartHomeEndSetting);
                     topMenu.setVisibleWhitespaceEnabled(uiSessionState.visibleWhitespaceSetting);
-                    topMenu.setSyntaxHighlightingEnabled(uiSessionState.syntaxHighlightingSetting);
+                    topMenu.setSyntaxHighlightingEnabled(
+                        effectiveSyntaxHighlighting(uiSessionState.syntaxHighlightingSetting)
+                    );
                     topMenu.setTabWidth(uiSessionState.tabWidthSetting);
                     renderer.setHighlightActiveGutter(uiSessionState.highlightActiveGutterSetting);
                     renderer.setVisibleWhitespace(uiSessionState.visibleWhitespaceSetting);
                     renderer.setTabWidth(uiSessionState.tabWidthSetting);
-                    renderPlanBuilder.setSyntaxHighlightingEnabled(uiSessionState.syntaxHighlightingSetting);
+                    renderPlanBuilder.setSyntaxHighlightingEnabled(
+                        effectiveSyntaxHighlighting(uiSessionState.syntaxHighlightingSetting)
+                    );
                     renderPlanBuilder.setTabWidth(uiSessionState.tabWidthSetting);
                     editorView.setTabWidth(uiSessionState.tabWidthSetting);
                     engine.setTabWidth(uiSessionState.tabWidthSetting);
@@ -1081,7 +1085,13 @@ public class TerminalEditorApp {
                             uiSessionState.helpAuthorMode = false;
                         }
                         if (dispatchResult.statusMessage() != null && !dispatchResult.statusMessage().isBlank()) {
-                            notification.info(dispatchResult.statusMessage());
+                            if (dispatchResult.statusLevel() == InputActionDispatcher.StatusLevel.ERROR) {
+                                notification.error(dispatchResult.statusMessage());
+                            } else if (dispatchResult.statusLevel() == InputActionDispatcher.StatusLevel.WARNING) {
+                                notification.warning(dispatchResult.statusMessage());
+                            } else {
+                                notification.info(dispatchResult.statusMessage());
+                            }
                         }
                         continue;
                     }
@@ -1372,6 +1382,7 @@ public class TerminalEditorApp {
         TabBar tabBar
     ) {
         String statusMessage = null;
+        boolean statusError = false;
         boolean statusWarning = false;
         int nextActiveTabIndex = activeTabIndex;
         TextModel nextModel = model;
@@ -1801,12 +1812,19 @@ public class TerminalEditorApp {
                 );
                 if (dispatchResult.handled()) {
                     statusMessage = dispatchResult.statusMessage();
+                    statusError = dispatchResult.statusLevel() == InputActionDispatcher.StatusLevel.ERROR;
+                    if (!statusError) {
+                        statusWarning = statusWarning
+                            || dispatchResult.statusLevel() == InputActionDispatcher.StatusLevel.WARNING;
+                    }
                 }
             }
         }
 
         if (statusMessage != null && !statusMessage.isBlank()) {
-            if (statusWarning) {
+            if (statusError) {
+                notification.error(statusMessage);
+            } else if (statusWarning) {
                 notification.warning(statusMessage);
             } else {
                 notification.info(statusMessage);
@@ -3282,6 +3300,10 @@ public class TerminalEditorApp {
 
     private LineHighlighter resolveHighlighter(Path file) {
         return file == null ? RegexHighlighter.withDefaults() : RegexHighlighter.forFileName(file.getFileName().toString());
+    }
+
+    private boolean effectiveSyntaxHighlighting(boolean syntaxHighlightingSetting) {
+        return theme != UiStyles.Theme.LIGHT && syntaxHighlightingSetting;
     }
 
     private void applyTheme(UiStyles.Theme theme) {

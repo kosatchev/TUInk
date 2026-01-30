@@ -37,7 +37,7 @@ public final class UiStyles {
             return switch (this) {
                 case CYAN -> BLUE;
                 case BLUE -> LIGHT;
-                case LIGHT -> BLUE;
+                case LIGHT -> CYAN;
             };
         }
 
@@ -91,109 +91,109 @@ public final class UiStyles {
 
     private static Palette cyanPalette() {
         return new Palette(
-            style(Color.BRIGHT_WHITE, Color.RED),
-            style(Color.BRIGHT_WHITE, Color.CYAN, true, false),
-            style(Color.BLACK, Color.BRIGHT_WHITE),
-            style(Color.BRIGHT_WHITE, Color.CYAN),
-            style(Color.CYAN, Color.BRIGHT_WHITE),
-            style(Color.DEFAULT, Color.DEFAULT),
-            style(Color.BLACK, Color.BRIGHT_WHITE),
-            style(Color.DEFAULT, Color.BRIGHT_WHITE),
-            style(Color.CYAN, Color.DEFAULT),
-            style(Color.DEFAULT, Color.DEFAULT),
-            style(Color.BLACK, Color.BRIGHT_WHITE),
-            style(Color.BLACK, Color.BRIGHT_WHITE, true, false),
-            style(Color.BRIGHT_WHITE, Color.CYAN, true, false),
-            style(Color.DEFAULT, Color.DEFAULT),
-            style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE),
-            style(Color.BLACK, Color.BRIGHT_YELLOW),
-            style(Color.BRIGHT_WHITE, Color.CYAN),
-            style(Color.BLACK, Color.BRIGHT_GREEN),
-            style(Color.BRIGHT_WHITE, Color.CYAN),
-            style(Color.BLACK, Color.BRIGHT_YELLOW),
-            style(Color.BRIGHT_WHITE, Color.RED),
-            style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE),
-            style(Color.BRIGHT_BLACK, Color.BLACK),
-            style(Color.BRIGHT_WHITE, Color.CYAN, true, false),
-            style(Color.BRIGHT_WHITE, Color.CYAN),
-            style(Color.BLACK, Color.BRIGHT_WHITE),
-            style(Color.BLACK, Color.BRIGHT_YELLOW),
-            style(Color.BLACK, Color.BRIGHT_GREEN),
-            style(Color.BRIGHT_BLACK, Color.DEFAULT),
-            style(Color.BRIGHT_BLACK, Color.DEFAULT),
-            style(Color.BRIGHT_WHITE, Color.DEFAULT)
+            style(Color.BRIGHT_WHITE, Color.RED),               // promptAlert
+            style(Color.BRIGHT_WHITE, Color.CYAN, true, false), // topbarFilenameHighlight
+            style(Color.BLACK, Color.BRIGHT_WHITE),             // menuPopup
+            style(Color.BRIGHT_WHITE, Color.CYAN),              // menuSelected
+            style(Color.CYAN, Color.BRIGHT_WHITE),              // menuTopSelected
+            style(Color.DEFAULT, Color.DEFAULT),                // menuSelectedMono
+            style(Color.BLACK, Color.BRIGHT_WHITE),             // tabbar
+            style(Color.DEFAULT, Color.BRIGHT_WHITE),           // tabbarMono
+            style(Color.CYAN, Color.DEFAULT),                   // tabbarActive
+            style(Color.DEFAULT, Color.DEFAULT),                // tabbarActiveMono
+            style(Color.BLACK, Color.BRIGHT_WHITE),             // dialog
+            style(Color.BLACK, Color.BRIGHT_WHITE, true, false), // dialogBorder
+            style(Color.BRIGHT_WHITE, Color.CYAN, true, false), // dialogTitle
+            style(Color.DEFAULT, Color.DEFAULT),                // dialogSelectedMono
+            style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE),      // dialogScrollTrack
+            style(Color.BLACK, Color.BRIGHT_YELLOW),            // dialogScrollThumb
+            style(Color.BRIGHT_WHITE, Color.CYAN),              // searchBar
+            style(Color.BLACK, Color.BRIGHT_GREEN),             // notifySuccess
+            style(Color.BRIGHT_WHITE, Color.BLUE),              // notifyInfo
+            style(Color.BLACK, Color.BRIGHT_YELLOW),            // notifyWarning
+            style(Color.BRIGHT_WHITE, Color.RED),               // notifyError
+            style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE),      // contextMenuDisabledItem
+            style(Color.BRIGHT_BLACK, Color.BLACK),             // renderGutter
+            style(Color.BRIGHT_WHITE, Color.CYAN, true, false), // renderGutterActive
+            style(Color.BRIGHT_WHITE, Color.CYAN),              // renderTopbar
+            style(Color.BLACK, Color.BRIGHT_WHITE),             // renderStatus
+            style(Color.BLACK, Color.BRIGHT_YELLOW),            // renderInteractive
+            style(Color.BLACK, Color.BRIGHT_GREEN),             // renderNotification
+            style(Color.BRIGHT_BLACK, Color.DEFAULT),           // renderLeadingWhitespace
+            style(Color.BRIGHT_BLACK, Color.DEFAULT),           // renderScrollTrack
+            style(Color.BRIGHT_WHITE, Color.DEFAULT)            // renderScrollThumb
         );
     }
 
     private static Palette bluePalette() {
         return new Palette(
-            style(Color.BRIGHT_WHITE, Color.RED),
-            style(Color.BRIGHT_WHITE, Color.BLUE, true, false),
-            style(Color.BLACK, Color.BRIGHT_WHITE),
-            style(Color.BRIGHT_WHITE, Color.BLUE),
-            style(Color.BLUE, Color.BRIGHT_WHITE),
-            style(Color.DEFAULT, Color.DEFAULT),
-            style(Color.BLACK, Color.BRIGHT_WHITE),
-            style(Color.DEFAULT, Color.BRIGHT_WHITE),
-            style(Color.BLUE, Color.DEFAULT),
-            style(Color.DEFAULT, Color.DEFAULT),
-            style(Color.BLACK, Color.BRIGHT_WHITE),
-            style(Color.BLACK, Color.BRIGHT_WHITE, true, false),
-            style(Color.BRIGHT_WHITE, Color.BLUE, true, false),
-            style(Color.DEFAULT, Color.DEFAULT),
-            style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE),
-            style(Color.BLACK, Color.BRIGHT_YELLOW),
-            style(Color.BRIGHT_WHITE, Color.BLUE),
-            style(Color.BLACK, Color.BRIGHT_GREEN),
-            style(Color.BRIGHT_WHITE, Color.BLUE),
-            style(Color.BLACK, Color.BRIGHT_YELLOW),
-            style(Color.BRIGHT_WHITE, Color.RED),
-            style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE),
-            style(Color.BRIGHT_BLACK, Color.BLACK),
-            style(Color.BRIGHT_WHITE, Color.BLUE, true, false),
-            style(Color.BRIGHT_WHITE, Color.BLUE),
-            style(Color.BLACK, Color.BRIGHT_WHITE),
-            style(Color.BLACK, Color.BRIGHT_YELLOW),
-            style(Color.BLACK, Color.BRIGHT_GREEN),
-            style(Color.BRIGHT_BLACK, Color.DEFAULT),
-            style(Color.BRIGHT_BLACK, Color.DEFAULT),
-            style(Color.BRIGHT_WHITE, Color.DEFAULT)
+            style(Color.BRIGHT_WHITE, Color.RED),               // promptAlert
+            style(Color.BRIGHT_WHITE, Color.BLUE, true, false), // topbarFilenameHighlight
+            style(Color.BLACK, Color.BRIGHT_WHITE),             // menuPopup
+            style(Color.BRIGHT_WHITE, Color.BLUE),              // menuSelected
+            style(Color.BLUE, Color.BRIGHT_WHITE),              // menuTopSelected
+            style(Color.DEFAULT, Color.DEFAULT),                // menuSelectedMono
+            style(Color.BLACK, Color.BRIGHT_WHITE),             // tabbar
+            style(Color.DEFAULT, Color.BRIGHT_WHITE),           // tabbarMono
+            style(Color.BLUE, Color.DEFAULT),                   // tabbarActive
+            style(Color.DEFAULT, Color.DEFAULT),                // tabbarActiveMono
+            style(Color.BLACK, Color.BRIGHT_WHITE),             // dialog
+            style(Color.BLACK, Color.BRIGHT_WHITE, true, false), // dialogBorder
+            style(Color.BRIGHT_WHITE, Color.BLUE, true, false), // dialogTitle
+            style(Color.DEFAULT, Color.DEFAULT),                // dialogSelectedMono
+            style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE),      // dialogScrollTrack
+            style(Color.BLACK, Color.BRIGHT_YELLOW),            // dialogScrollThumb
+            style(Color.BRIGHT_WHITE, Color.BLUE),              // searchBar
+            style(Color.BLACK, Color.BRIGHT_GREEN),             // notifySuccess
+            style(Color.BRIGHT_WHITE, Color.BLUE),              // notifyInfo
+            style(Color.BLACK, Color.BRIGHT_YELLOW),            // notifyWarning
+            style(Color.BRIGHT_WHITE, Color.RED),               // notifyError
+            style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE),      // contextMenuDisabledItem
+            style(Color.BRIGHT_BLACK, Color.BLACK),             // renderGutter
+            style(Color.BRIGHT_WHITE, Color.BLUE, true, false), // renderGutterActive
+            style(Color.BRIGHT_WHITE, Color.BLUE),              // renderTopbar
+            style(Color.BLACK, Color.BRIGHT_WHITE),             // renderStatus
+            style(Color.BLACK, Color.BRIGHT_YELLOW),            // renderInteractive
+            style(Color.BLACK, Color.BRIGHT_GREEN),             // renderNotification
+            style(Color.BRIGHT_BLACK, Color.DEFAULT),           // renderLeadingWhitespace
+            style(Color.BRIGHT_BLACK, Color.DEFAULT),           // renderScrollTrack
+            style(Color.BRIGHT_WHITE, Color.DEFAULT)            // renderScrollThumb
         );
     }
 
     private static Palette lightPalette() {
         return new Palette(
-            style(Color.BRIGHT_WHITE, Color.RED),
-            style(Color.BLACK, Color.BRIGHT_WHITE, true, false),
-            style(Color.BLACK, Color.BRIGHT_WHITE),
-            style(Color.BRIGHT_WHITE, Color.BLACK),
-            style(Color.BLACK, Color.BRIGHT_WHITE),
-            style(Color.DEFAULT, Color.DEFAULT),
-            style(Color.BLACK, Color.BRIGHT_WHITE),
-            style(Color.DEFAULT, Color.BRIGHT_WHITE),
-            style(Color.BRIGHT_WHITE, Color.BLACK),
-            style(Color.DEFAULT, Color.DEFAULT),
-            style(Color.BLACK, Color.BRIGHT_WHITE),
-            style(Color.BLACK, Color.BRIGHT_WHITE, true, false),
-            style(Color.BLACK, Color.BRIGHT_WHITE, true, false),
-            style(Color.DEFAULT, Color.DEFAULT),
-            style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE),
-            style(Color.BRIGHT_WHITE, Color.BLACK),
-            style(Color.BLACK, Color.BRIGHT_WHITE),
-            style(Color.BLACK, Color.BRIGHT_GREEN),
-            style(Color.BLACK, Color.BRIGHT_WHITE),
-            style(Color.BLACK, Color.BRIGHT_YELLOW),
-            style(Color.BRIGHT_WHITE, Color.RED),
-            style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE),
-            style(Color.BLACK, Color.BRIGHT_WHITE),
-            style(Color.BRIGHT_WHITE, Color.BLACK, true, false),
-            style(Color.BLACK, Color.BRIGHT_WHITE),
-            style(Color.BLACK, Color.BRIGHT_WHITE),
-            style(Color.BLACK, Color.BRIGHT_YELLOW),
-            style(Color.BLACK, Color.BRIGHT_GREEN),
-            style(Color.BRIGHT_BLACK, Color.DEFAULT),
-            style(Color.BRIGHT_BLACK, Color.DEFAULT),
-            style(Color.BRIGHT_WHITE, Color.DEFAULT)
+            style(Color.BRIGHT_WHITE, Color.RED),                // promptAlert
+            style(Color.BLACK, Color.BRIGHT_WHITE, true, false), // topbarFilenameHighlight
+            style(Color.BLACK, Color.BRIGHT_WHITE),              // menuPopup
+            style(Color.BRIGHT_WHITE, Color.BLACK),              // menuSelected
+            style(Color.BLACK, Color.BRIGHT_WHITE),              // menuTopSelected
+            style(Color.DEFAULT, Color.DEFAULT),                 // menuSelectedMono
+            style(Color.BLACK, Color.BRIGHT_WHITE),              // tabbar
+            style(Color.DEFAULT, Color.BRIGHT_WHITE),            // tabbarMono
+            style(Color.BRIGHT_WHITE, Color.BLACK),              // tabbarActive
+            style(Color.DEFAULT, Color.DEFAULT),                 // tabbarActiveMono
+            style(Color.BLACK, Color.BRIGHT_WHITE),              // dialog
+            style(Color.BLACK, Color.BRIGHT_WHITE, true, false), // dialogBorder
+            style(Color.BLACK, Color.BRIGHT_WHITE, true, false), // dialogTitle
+            style(Color.DEFAULT, Color.DEFAULT),                 // dialogSelectedMono
+            style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE),       // dialogScrollTrack
+            style(Color.BRIGHT_WHITE, Color.BLACK),              // dialogScrollThumb
+            style(Color.BLACK, Color.BRIGHT_WHITE),              // searchBar
+            style(Color.BLACK, Color.BRIGHT_GREEN),              // notifySuccess
+            style(Color.BRIGHT_WHITE, Color.BLUE),               // notifyInfo
+            style(Color.BLACK, Color.BRIGHT_YELLOW),             // notifyWarning
+            style(Color.BRIGHT_WHITE, Color.RED),                // notifyError
+            style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE),       // contextMenuDisabledItem
+            style(Color.BLACK, Color.BRIGHT_WHITE),              // renderGutter
+            style(Color.BRIGHT_WHITE, Color.BLACK, true, false), // renderGutterActive
+            style(Color.BLACK, Color.BRIGHT_WHITE),              // renderTopbar
+            style(Color.BLACK, Color.BRIGHT_WHITE),              // renderStatus
+            style(Color.BLACK, Color.BRIGHT_YELLOW),             // renderInteractive
+            style(Color.BLACK, Color.BRIGHT_GREEN),              // renderNotification
+            style(Color.BRIGHT_BLACK, Color.DEFAULT),            // renderLeadingWhitespace
+            style(Color.BRIGHT_BLACK, Color.DEFAULT),            // renderScrollTrack
+            style(Color.BRIGHT_WHITE, Color.DEFAULT)             // renderScrollThumb
         );
     }
 

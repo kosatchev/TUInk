@@ -73,8 +73,13 @@ final class InputActionDispatcher {
                 PrintWriter writer = ctx.writer();
                 writer.print(ui.mouseModeSetting ? ctx.enableMouseTracking() : ctx.disableMouseTracking());
                 writer.flush();
-                statusMessage = ui.mouseModeSetting ? "Mouse mode enabled" : "Mouse mode disabled";
-                return DispatchResult.handled(statusMessage);
+                if (ui.mouseModeSetting) {
+                    return DispatchResult.handled("Mouse mode enabled");
+                }
+                return DispatchResult.handled(
+                    "Mouse mode disabled. Press Alt+S to open Settings and re-enable mouse, or Ctrl+? for keymap help.",
+                    StatusLevel.ERROR
+                );
             }
             case TOGGLE_ACTIVE_GUTTER_HIGHLIGHT -> {
                 ui.highlightActiveGutterSetting = !ui.highlightActiveGutterSetting;
@@ -285,13 +290,23 @@ final class InputActionDispatcher {
     ) {
     }
 
-    record DispatchResult(boolean handled, String statusMessage) {
+    enum StatusLevel {
+        INFO,
+        WARNING,
+        ERROR
+    }
+
+    record DispatchResult(boolean handled, String statusMessage, StatusLevel statusLevel) {
         static DispatchResult handled(String statusMessage) {
-            return new DispatchResult(true, statusMessage);
+            return handled(statusMessage, StatusLevel.INFO);
+        }
+
+        static DispatchResult handled(String statusMessage, StatusLevel statusLevel) {
+            return new DispatchResult(true, statusMessage, statusLevel);
         }
 
         static DispatchResult notHandled() {
-            return new DispatchResult(false, null);
+            return new DispatchResult(false, null, StatusLevel.INFO);
         }
     }
 }

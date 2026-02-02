@@ -76,6 +76,17 @@ public final class ScrollInteraction {
         return maxScroll == 0 ? 0 : (int) Math.round((clampedScroll / (double) maxScroll) * thumbTravel);
     }
 
+    public static int scrollFromThumbStart(int thumbStartOffset, int visibleItems, int totalItems) {
+        int thumbSize = thumbSize(visibleItems, totalItems);
+        int thumbTravel = Math.max(0, visibleItems - thumbSize);
+        int maxScroll = maxScroll(visibleItems, totalItems);
+        if (thumbTravel <= 0 || maxScroll <= 0) {
+            return 0;
+        }
+        int clampedOffset = clamp(thumbStartOffset, 0, thumbTravel);
+        return (int) Math.round((clampedOffset / (double) thumbTravel) * maxScroll);
+    }
+
     private static int maxScroll(int visibleItems, int totalItems) {
         return Math.max(0, totalItems - visibleItems);
     }

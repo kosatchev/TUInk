@@ -706,8 +706,8 @@ public final class MenuBar {
                 boolean selectable = !SEPARATOR.equals(base);
                 items.add(new MenuItem(base, selectable));
             }
-            for (OpenTab tab : openTabs) {
-                items.add(new MenuItem(tabLabel(tab), true));
+            for (int i = 0; i < openTabs.size(); i++) {
+                items.add(new MenuItem(tabLabel(openTabs.get(i), i), true));
             }
             return items.toArray(MenuItem[]::new);
         }
@@ -812,11 +812,12 @@ public final class MenuBar {
             };
         }
 
-        private String tabLabel(OpenTab tab) {
+        private String tabLabel(OpenTab tab, int tabIndex) {
             if (tab == null) {
                 return NO_NAME_LABEL;
             }
-            return TabBar.formatTabTitle(tab.file(), tab.dirty(), tab.hasMatch());
+            String marker = tabIndex == activeTabIndex ? "> " : "   ";
+            return marker + TabBar.formatTabTitle(tab.file(), tab.dirty(), tab.hasMatch());
         }
 
         private static MenuId nextMenu(MenuId menu) {

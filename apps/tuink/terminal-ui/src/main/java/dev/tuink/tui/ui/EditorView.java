@@ -165,7 +165,7 @@ public final class EditorView {
         TextModel model,
         EditorState state
     ) {
-        return handleScrollbarPointer(mouseRow, mouseCol, rows, cols, contentTopRow, plan, model, state, ScrollAxis.NONE);
+        return handleScrollbarPointer(mouseRow, mouseCol, rows, cols, contentTopRow, plan, model, state, ScrollAxis.NONE, 0);
     }
 
     public ScrollPointerResult handleScrollbarPointer(
@@ -179,12 +179,28 @@ public final class EditorView {
         EditorState state,
         ScrollAxis axis
     ) {
+        return handleScrollbarPointer(mouseRow, mouseCol, rows, cols, contentTopRow, plan, model, state, axis, 0);
+    }
+
+    public ScrollPointerResult handleScrollbarPointer(
+        int mouseRow,
+        int mouseCol,
+        int rows,
+        int cols,
+        int contentTopRow,
+        RenderPlan plan,
+        TextModel model,
+        EditorState state,
+        ScrollAxis axis,
+        int dragThumbOffset
+    ) {
         if (axis != ScrollAxis.HORIZONTAL && plan.scrollbarWidth() > 0 && cols > 0 && rows > 2) {
             int barCol = cols - 1;
             int trackTop = contentTopRow;
             int trackHeight = Math.min(plan.contentRows(), Math.max(0, rows - contentTopRow - 1));
             int verticalScroll = Math.max(0, plan.topLine());
             int verticalTotal = Math.max(1, plan.totalLines());
+            int verticalThumbStart = trackTop + ScrollInteraction.thumbOffset(trackHeight, verticalTotal, verticalScroll);
             boolean draggingVertical = axis == ScrollAxis.VERTICAL;
             ScrollInteraction.Hit verticalHit = draggingVertical
                 ? ScrollInteraction.Hit.THUMB
@@ -206,7 +222,9 @@ public final class EditorView {
                         trackHeight,
                         verticalTotal
                     )
-                    : VerticalScrollbar.scrollFromPointer(mouseRow, trackTop, trackHeight, verticalTotal);
+                    : (draggingVertical
+                        ? ScrollInteraction.scrollFromThumbStart(mouseRow - trackTop - dragThumbOffset, trackHeight, verticalTotal)
+                        : verticalScroll);
                 if (plan.wrapLines()) {
                     int visibleCols = Math.max(0, cols - plan.gutterWidth() - plan.scrollbarWidth());
                     int targetLine = ViewportMetrics.lineIndexFromWrappedOffset(
@@ -216,11 +234,18 @@ public final class EditorView {
                         plan.wrapByWords(),
                         tabWidth
                     );
-                    EditorViewportBehavior.applyVerticalScroll(state, model, targetLine);
+                    EditorViewportBehavior.applyVerticalScrollKeepCursor(state, model, targetLine);
                 } else {
-                    EditorViewportBehavior.applyVerticalScroll(state, model, targetTop);
+                    EditorViewportBehavior.applyVerticalScrollKeepCursor(state, model, targetTop);
                 }
-                return new ScrollPointerResult(true, verticalHit == ScrollInteraction.Hit.THUMB ? ScrollAxis.VERTICAL : ScrollAxis.NONE);
+                int thumbGrabOffset = verticalHit == ScrollInteraction.Hit.THUMB
+                    ? Math.max(0, mouseRow - verticalThumbStart)
+                    : 0;
+                return new ScrollPointerResult(
+                    true,
+                    verticalHit == ScrollInteraction.Hit.THUMB ? ScrollAxis.VERTICAL : ScrollAxis.NONE,
+                    thumbGrabOffset
+                );
             }
         }
 
@@ -228,6 +253,12 @@ public final class EditorView {
             int visibleCols = Math.max(0, cols - plan.gutterWidth() - plan.scrollbarWidth());
             int row = contentTopRow + plan.contentRows();
             boolean hasHorizontal = visibleCols > 0 && (plan.leftVisualColumn() > 0 || plan.totalColumns() > visibleCols);
+            int horizontalTotal = Math.max(visibleCols, plan.totalColumns());
+            int horizontalThumbStart = plan.gutterWidth() + ScrollInteraction.thumbOffset(
+                visibleCols,
+                horizontalTotal,
+                plan.leftVisualColumn()
+            );
             boolean draggingHorizontal = axis == ScrollAxis.HORIZONTAL;
             ScrollInteraction.Hit horizontalHit = !hasHorizontal ? ScrollInteraction.Hit.NONE
                 : (draggingHorizontal
@@ -238,7 +269,7 @@ public final class EditorView {
                         row,
                         plan.gutterWidth(),
                         visibleCols,
-                        Math.max(visibleCols, plan.totalColumns()),
+                        horizontalTotal,
                         plan.leftVisualColumn()
                     ));
             if (hasHorizontal && row >= contentTopRow && row < rows - 1 && horizontalHit != ScrollInteraction.Hit.NONE) {
@@ -248,26 +279,34 @@ public final class EditorView {
                         mouseCol,
                         plan.gutterWidth(),
                         visibleCols,
-                        Math.max(visibleCols, plan.totalColumns())
+                        horizontalTotal
                     )
-                    : HorizontalScrollbar.scrollFromPointer(
-                        mouseCol,
-                        plan.gutterWidth(),
-                        visibleCols,
-                        Math.max(visibleCols, plan.totalColumns())
-                    );
+                    : (draggingHorizontal
+                        ? ScrollInteraction.scrollFromThumbStart(
+                            mouseCol - plan.gutterWidth() - dragThumbOffset,
+                            visibleCols,
+                            horizontalTotal
+                        )
+                        : plan.leftVisualColumn());
                 EditorViewportBehavior.applyHorizontalScrollVisual(state, model, targetLeft, tabWidth);
-                return new ScrollPointerResult(true, horizontalHit == ScrollInteraction.Hit.THUMB ? ScrollAxis.HORIZONTAL : ScrollAxis.NONE);
+                int thumbGrabOffset = horizontalHit == ScrollInteraction.Hit.THUMB
+                    ? Math.max(0, mouseCol - horizontalThumbStart)
+                    : 0;
+                return new ScrollPointerResult(
+                    true,
+                    horizontalHit == ScrollInteraction.Hit.THUMB ? ScrollAxis.HORIZONTAL : ScrollAxis.NONE,
+                    thumbGrabOffset
+                );
             }
         }
 
-        return new ScrollPointerResult(false, ScrollAxis.NONE);
+        return new ScrollPointerResult(false, ScrollAxis.NONE, 0);
     }
 
     public record CursorPosition(int row, int col) {
     }
 
-    public record ScrollPointerResult(boolean consumed, ScrollAxis dragAxis) {
+    public record ScrollPointerResult(boolean consumed, ScrollAxis dragAxis, int dragThumbOffset) {
     }
 
 }

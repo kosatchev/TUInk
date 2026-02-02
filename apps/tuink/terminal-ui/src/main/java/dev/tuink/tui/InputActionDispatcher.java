@@ -77,7 +77,7 @@ final class InputActionDispatcher {
                     return DispatchResult.handled("Mouse mode enabled");
                 }
                 return DispatchResult.handled(
-                    "Mouse mode disabled. Press Alt+S to open Settings and re-enable mouse, or Ctrl+? for keymap help.",
+                    "Mouse mode disabled. Press Alt+S to open Settings and re-enable mouse, or Ctrl+/ for keymap help.",
                     StatusLevel.ERROR
                 );
             }

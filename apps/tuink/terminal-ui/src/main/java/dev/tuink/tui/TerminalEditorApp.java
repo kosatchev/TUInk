@@ -2,6 +2,7 @@ package dev.tuink.tui;
 
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
+import dev.tuink.core.EditorViewportBehavior;
 import dev.tuink.core.Position;
 import dev.tuink.core.SearchOptions;
 import dev.tuink.core.TabSession;
@@ -149,6 +150,7 @@ public class TerminalEditorApp {
         TreeView openFileTree = new TreeView(initialOpenRoot(state));
         OpenFileDialogController.Focus openFileFocus = OpenFileDialogController.Focus.LIST;
         EditorView.ScrollAxis editorScrollDrag = EditorView.ScrollAxis.NONE;
+        int editorScrollDragThumbOffset = 0;
         TreeView.ScrollAxis openFileScrollDrag = TreeView.ScrollAxis.NONE;
 
         if (cli.file() != null) {
@@ -482,7 +484,15 @@ public class TerminalEditorApp {
                                     break;
                                 }
                                 if (modalState.isNone() && !uiSessionState.searchMode) {
-                                    engine.pageUp(Math.max(1, contentRows / 2));
+                                    int topBefore = state.getTopLine();
+                                    EditorViewportBehavior.applyVerticalScrollKeepCursor(
+                                        state,
+                                        model,
+                                        Math.max(0, state.getTopLine() - 3)
+                                    );
+                                    if (state.getTopLine() != topBefore) {
+                                        viewportController.onManualVerticalPan();
+                                    }
                                 }
                             }
                             case SCROLL_DOWN -> {
@@ -495,12 +505,21 @@ public class TerminalEditorApp {
                                     break;
                                 }
                                 if (modalState.isNone() && !uiSessionState.searchMode) {
-                                    engine.pageDown(Math.max(1, contentRows / 2));
+                                    int topBefore = state.getTopLine();
+                                    EditorViewportBehavior.applyVerticalScrollKeepCursor(
+                                        state,
+                                        model,
+                                        state.getTopLine() + 3
+                                    );
+                                    if (state.getTopLine() != topBefore) {
+                                        viewportController.onManualVerticalPan();
+                                    }
                                 }
                             }
                             case PRESS -> {
                                 if (mouse.button() == KeyEvent.MouseButton.LEFT) {
                                     editorScrollDrag = EditorView.ScrollAxis.NONE;
+                                    editorScrollDragThumbOffset = 0;
                                     openFileScrollDrag = TreeView.ScrollAxis.NONE;
                                     if (openFileMode) {
                                         OpenFileDialogController.OpenDialogLayout layout = OpenFileDialogController.layoutForTerminal(rows, cols);
@@ -685,6 +704,7 @@ public class TerminalEditorApp {
                                     }
                                     if (modalState.isNone() && !uiSessionState.searchMode) {
                                         int leftBeforeScrollPointer = state.getLeftVisualColumn();
+                                        int topBeforeScrollPointer = state.getTopLine();
                                         EditorView.ScrollPointerResult scrollPointer = editorView.handleScrollbarPointer(
                                             mouse.row(),
                                             mouse.col(),
@@ -697,10 +717,13 @@ public class TerminalEditorApp {
                                         );
                                         if (scrollPointer.consumed()) {
                                             editorScrollDrag = scrollPointer.dragAxis();
+                                            editorScrollDragThumbOffset = scrollPointer.dragThumbOffset();
                                             viewportController.onScrollbarInteraction(
                                                 scrollPointer,
                                                 leftBeforeScrollPointer,
-                                                state.getLeftVisualColumn()
+                                                state.getLeftVisualColumn(),
+                                                topBeforeScrollPointer,
+                                                state.getTopLine()
                                             );
                                             editorView.cancelMouseSelection();
                                             continue;
@@ -740,6 +763,7 @@ public class TerminalEditorApp {
                                     if (mouse.button() == KeyEvent.MouseButton.LEFT
                                         && editorScrollDrag != EditorView.ScrollAxis.NONE) {
                                         int leftBeforeDragScroll = state.getLeftVisualColumn();
+                                        int topBeforeDragScroll = state.getTopLine();
                                         EditorView.ScrollPointerResult dragScrollPointer = editorView.handleScrollbarPointer(
                                             mouse.row(),
                                             mouse.col(),
@@ -749,12 +773,15 @@ public class TerminalEditorApp {
                                             plan,
                                             model,
                                             state,
-                                            editorScrollDrag
+                                            editorScrollDrag,
+                                            editorScrollDragThumbOffset
                                         );
                                         viewportController.onScrollbarInteraction(
                                             dragScrollPointer,
                                             leftBeforeDragScroll,
-                                            state.getLeftVisualColumn()
+                                            state.getLeftVisualColumn(),
+                                            topBeforeDragScroll,
+                                            state.getTopLine()
                                         );
                                         continue;
                                     }
@@ -771,6 +798,7 @@ public class TerminalEditorApp {
                             }
                             case RELEASE -> {
                                 editorScrollDrag = EditorView.ScrollAxis.NONE;
+                                editorScrollDragThumbOffset = 0;
                                 openFileScrollDrag = TreeView.ScrollAxis.NONE;
                                 editorView.handleMouseRelease(state);
                             }

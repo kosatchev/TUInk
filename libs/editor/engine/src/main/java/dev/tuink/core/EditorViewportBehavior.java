@@ -52,6 +52,19 @@ public final class EditorViewportBehavior {
         state.setCursor(new Position(targetLine, targetCol));
     }
 
+    public static void applyVerticalScrollKeepCursor(EditorState state, TextModel model, int targetTopLine) {
+        int lineCount = Math.max(1, model.lineCount());
+        int clampedTop = Math.max(0, Math.min(targetTopLine, lineCount - 1));
+        state.setTopLine(clampedTop);
+
+        Position cursor = state.getCursor();
+        int clampedLine = Math.max(0, Math.min(cursor.line(), lineCount - 1));
+        int clampedCol = Math.min(cursor.col(), model.getLine(clampedLine).length());
+        if (clampedLine != cursor.line() || clampedCol != cursor.col()) {
+            state.setCursor(new Position(clampedLine, clampedCol));
+        }
+    }
+
     public static void applyHorizontalScroll(EditorState state, TextModel model, int targetLeftColumn) {
         int next = Math.max(0, targetLeftColumn);
         state.setLeftVisualColumn(next);

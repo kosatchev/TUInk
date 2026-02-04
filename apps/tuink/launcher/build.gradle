@@ -32,6 +32,20 @@ def jlineNativeManualArgs = [
         'META-INF/native-image/org.jline/jline-terminal-jni/reflection-config.json',
     '-H:JNIConfigurationResources=META-INF/native-image/org.jline/jline-native/jni-config.json'
 ]
+def nativeMarch = (project.findProperty('nativeMarch') ?: 'compatibility').toString()
+def pgoProfilePath = (project.findProperty('pgoProfile') ?: "${buildDir}/pgo/default.iprof").toString()
+def target = (project.findProperty('target') ?: 'glibc').toString().toLowerCase()
+if (!(target in ['glibc', 'musl', 'all'])) {
+    throw new GradleException("Unsupported -Ptarget=${target}. Use glibc, musl, or all.")
+}
+def baseNativeBuildArgs = {
+    [
+        '--no-fallback',
+        '-H:+AddAllCharsets',
+        '-O2',
+        '--gc=serial'
+    ] + jlineNativeExcludes + jlineNativeManualArgs
+}
 
 graalvmNative {
     toolchainDetection = true
@@ -39,22 +53,85 @@ graalvmNative {
         main {
             imageName = 'tuink'
             mainClass = application.mainClass
-            buildArgs.add('--no-fallback')
-            buildArgs.add('-H:+AddAllCharsets')
-            buildArgs.addAll(jlineNativeExcludes)
-            buildArgs.addAll(jlineNativeManualArgs)
+            buildArgs.addAll(baseNativeBuildArgs())
         }
         musl {
             imageName = 'tuink-musl'
             mainClass = application.mainClass
             classpath(sourceSets.main.runtimeClasspath, tasks.named('jar'))
-            buildArgs.add('--no-fallback')
-            buildArgs.add('-H:+AddAllCharsets')
+            buildArgs.addAll(baseNativeBuildArgs())
+            buildArgs.add("-march=${nativeMarch}")
             buildArgs.add('--static')
             buildArgs.add('--libc=musl')
-            buildArgs.addAll(jlineNativeExcludes)
-            buildArgs.addAll(jlineNativeManualArgs)
+            buildArgs.add('-Ddev.tuink.terminal.provider=exec')
         }
+        pgoInstrument {
+            imageName = 'tuink-pgo-instrument'
+            mainClass = application.mainClass
+            classpath(sourceSets.main.runtimeClasspath, tasks.named('jar'))
+            buildArgs.addAll(baseNativeBuildArgs())
+            buildArgs.add('--pgo-instrument')
+        }
+        pgoOptimized {
+            imageName = 'tuink-pgo'
+            mainClass = application.mainClass
+            classpath(sourceSets.main.runtimeClasspath, tasks.named('jar'))
+            buildArgs.addAll(baseNativeBuildArgs())
+            buildArgs.add("--pgo=${pgoProfilePath}")
+        }
+        muslPgoInstrument {
+            imageName = 'tuink-musl-pgo-instrument'
+            mainClass = application.mainClass
+            classpath(sourceSets.main.runtimeClasspath, tasks.named('jar'))
+            buildArgs.addAll(baseNativeBuildArgs())
+            buildArgs.add("-march=${nativeMarch}")
+            buildArgs.add('--static')
+            buildArgs.add('--libc=musl')
+            buildArgs.add('-Ddev.tuink.terminal.provider=exec')
+            buildArgs.add('--pgo-instrument')
+        }
+        muslPgoOptimized {
+            imageName = 'tuink-musl-pgo'
+            mainClass = application.mainClass
+            classpath(sourceSets.main.runtimeClasspath, tasks.named('jar'))
+            buildArgs.addAll(baseNativeBuildArgs())
+            buildArgs.add("-march=${nativeMarch}")
+            buildArgs.add('--static')
+            buildArgs.add('--libc=musl')
+            buildArgs.add('-Ddev.tuink.terminal.provider=exec')
+            buildArgs.add("--pgo=${pgoProfilePath}")
+        }
+    }
+}
+
+tasks.register('nativeProfileInstrument') {
+    group = 'build'
+    description = 'Build instrumented native binary for profile collection. Use -Ptarget=glibc|musl|all.'
+    if (target == 'musl') {
+        dependsOn(tasks.named('nativeMuslPgoInstrumentCompile'))
+    } else if (target == 'glibc') {
+        dependsOn(tasks.named('nativePgoInstrumentCompile'))
+    } else if (target == 'all') {
+        dependsOn(tasks.named('nativePgoInstrumentCompile'))
+        dependsOn(tasks.named('nativeMuslPgoInstrumentCompile'))
+    }
+}
+
+tasks.register('nativeProfileBuild') {
+    group = 'build'
+    description = 'Build PGO-optimized native binary. Use -Ptarget=glibc|musl|all -PpgoProfile=/abs/path/profile.iprof.'
+    doFirst {
+        if (!file(pgoProfilePath).exists()) {
+            throw new GradleException("PGO profile not found: ${pgoProfilePath}")
+        }
+    }
+    if (target == 'musl') {
+        dependsOn(tasks.named('nativeMuslPgoOptimizedCompile'))
+    } else if (target == 'glibc') {
+        dependsOn(tasks.named('nativePgoOptimizedCompile'))
+    } else if (target == 'all') {
+        dependsOn(tasks.named('nativePgoOptimizedCompile'))
+        dependsOn(tasks.named('nativeMuslPgoOptimizedCompile'))
     }
 }
 
@@ -62,5 +139,122 @@ tasks.named('run', JavaExec) {
     standardInput = System.in
     if (project.hasProperty('appArgs')) {
         args(project.property('appArgs').toString().split('\\s+').findAll { !it.isBlank() })
+    }
+}
+
+def installScripts = files(
+    'scripts/install.sh',
+    'scripts/uninstall.sh'
+)
+
+tasks.register('copyInstallScriptsToNativeCompile', Copy) {
+    from(installScripts)
+    into(layout.buildDirectory.dir('native/nativeCompile'))
+    fileMode = 0755
+}
+
+tasks.register('copyInstallScriptsToNativeMuslCompile', Copy) {
+    from(installScripts)
+    into(layout.buildDirectory.dir('native/nativeMuslCompile'))
+    fileMode = 0755
+}
+
+tasks.register('copyInstallScriptsToNativePgoOptimizedCompile', Copy) {
+    from(installScripts)
+    into(layout.buildDirectory.dir('native/nativePgoOptimizedCompile'))
+    fileMode = 0755
+}
+
+tasks.register('copyInstallScriptsToNativeMuslPgoOptimizedCompile', Copy) {
+    from(installScripts)
+    into(layout.buildDirectory.dir('native/nativeMuslPgoOptimizedCompile'))
+    fileMode = 0755
+}
+
+tasks.named('nativeCompile') {
+    if (target == 'musl') {
+        dependsOn(tasks.named('nativeMuslCompile'))
+        onlyIf { false }
+    } else if (target == 'all') {
+        dependsOn(tasks.named('nativeMuslCompile'))
+    }
+    finalizedBy(tasks.named('copyInstallScriptsToNativeCompile'))
+}
+
+tasks.named('nativeMuslCompile') {
+    finalizedBy(tasks.named('copyInstallScriptsToNativeMuslCompile'))
+}
+
+tasks.named('nativePgoOptimizedCompile') {
+    finalizedBy(tasks.named('copyInstallScriptsToNativePgoOptimizedCompile'))
+}
+tasks.named('nativeMuslPgoOptimizedCompile') {
+    finalizedBy(tasks.named('copyInstallScriptsToNativeMuslPgoOptimizedCompile'))
+}
+
+def osToken = org.gradle.internal.os.OperatingSystem.current().toString().toLowerCase().contains('windows')
+    ? 'windows'
+    : (org.gradle.internal.os.OperatingSystem.current().isMacOsX() ? 'macos' : 'linux')
+def archToken = {
+    def raw = System.getProperty('os.arch', 'x86_64').toLowerCase()
+    if (raw == 'amd64') return 'x86_64'
+    if (raw == 'aarch64') return 'arm64'
+    return raw.replaceAll('[^a-z0-9_\\-]', '_')
+}.call()
+
+def releaseCommonFiles = files(
+    "${rootProject.projectDir}/README.md",
+    "${rootProject.projectDir}/LICENSE",
+    "${rootProject.projectDir}/THIRD_PARTY_NOTICES.md"
+)
+
+tasks.register('nativeTarGz', Tar) {
+    dependsOn(tasks.named('nativeCompile'))
+    dependsOn(tasks.named('copyInstallScriptsToNativeCompile'))
+    compression = Compression.GZIP
+    archiveBaseName = 'tuink'
+    archiveVersion = project.version.toString()
+    archiveClassifier = "${osToken}-${archToken}"
+    archiveExtension = 'tar.gz'
+    destinationDirectory = layout.buildDirectory.dir('distributions')
+
+    into("tuink-${project.version}-${osToken}-${archToken}") {
+        from(layout.buildDirectory.file('native/nativeCompile/tuink'))
+        from(layout.buildDirectory.file('native/nativeCompile/install.sh'))
+        from(layout.buildDirectory.file('native/nativeCompile/uninstall.sh'))
+        from(releaseCommonFiles)
+    }
+}
+
+tasks.register('nativeMuslTarGz', Tar) {
+    dependsOn(tasks.named('nativeMuslCompile'))
+    dependsOn(tasks.named('copyInstallScriptsToNativeMuslCompile'))
+    compression = Compression.GZIP
+    archiveBaseName = 'tuink'
+    archiveVersion = project.version.toString()
+    archiveClassifier = "${osToken}-${archToken}-musl"
+    archiveExtension = 'tar.gz'
+    destinationDirectory = layout.buildDirectory.dir('distributions')
+
+    into("tuink-${project.version}-${osToken}-${archToken}-musl") {
+        from(layout.buildDirectory.file('native/nativeMuslCompile/tuink-musl')) {
+            rename { 'tuink' }
+        }
+        from(layout.buildDirectory.file('native/nativeMuslCompile/install.sh'))
+        from(layout.buildDirectory.file('native/nativeMuslCompile/uninstall.sh'))
+        from(releaseCommonFiles)
+    }
+}
+
+tasks.register('nativeDistTarGz') {
+    group = 'distribution'
+    description = 'Build native tar.gz release archives. Use -Ptarget=glibc|musl|all (default: glibc).'
+    if (target == 'glibc') {
+        dependsOn(tasks.named('nativeTarGz'))
+    } else if (target == 'musl') {
+        dependsOn(tasks.named('nativeMuslTarGz'))
+    } else {
+        dependsOn(tasks.named('nativeTarGz'))
+        dependsOn(tasks.named('nativeMuslTarGz'))
     }
 }

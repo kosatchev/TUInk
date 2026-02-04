@@ -16,3 +16,9 @@ application {
 tasks.named('run', JavaExec) {
     standardInput = System.in
 }
+
+tasks.named('processResources') {
+    filesMatching('tuink-version.properties') {
+        expand(version: project.version)
+    }
+}

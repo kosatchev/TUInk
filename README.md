@@ -46,12 +46,99 @@ Run with file and flags:
 
 ```bash
 ./gradlew :app:nativeCompile
-./gradlew :app:nativeMuslCompile
+./gradlew :app:nativeCompile -Ptarget=musl
+./gradlew :app:nativeCompile -Ptarget=all
+```
+
+For older x86_64 CPUs, musl builds default to `-march=compatibility`.
+You can override it explicitly:
+
+```bash
+./gradlew :app:nativeCompile -Ptarget=musl -PnativeMarch=compatibility
+./gradlew :app:nativeCompile -Ptarget=musl -PnativeMarch=native
 ```
 
 Default binary names:
 - `tuink`
 - `tuink-musl`
+
+## Native Tasks Reference
+
+Level 1 (basic):
+
+```bash
+./gradlew :app:nativeCompile
+./gradlew :app:nativeCompile -Ptarget=musl
+./gradlew :app:nativeDistTarGz                 # default target=glibc
+./gradlew :app:nativeDistTarGz -Ptarget=musl
+./gradlew :app:nativeDistTarGz -Ptarget=all
+```
+
+Level 2 (advanced, PGO):
+
+```bash
+./gradlew :app:nativeProfileInstrument -Ptarget=glibc
+./gradlew :app:nativeProfileInstrument -Ptarget=musl
+./gradlew :app:nativeProfileInstrument -Ptarget=all
+./gradlew :app:nativeProfileBuild -Ptarget=glibc -PpgoProfile=/absolute/path/to/profile.iprof
+./gradlew :app:nativeProfileBuild -Ptarget=musl -PpgoProfile=/absolute/path/to/profile.iprof
+./gradlew :app:nativeProfileBuild -Ptarget=all -PpgoProfile=/absolute/path/to/profile.iprof
+```
+
+## Install
+
+Install scripts are copied next to native binaries after native build.
+
+### Install from native build output
+
+Build native binary:
+
+```bash
+./gradlew :app:nativeCompile
+# or musl
+./gradlew :app:nativeCompile -Ptarget=musl
+```
+
+Install:
+
+```bash
+cd apps/tuink/launcher/build/native/nativeCompile
+./install.sh               # auto-detects tuink/tuink-musl
+# or explicitly:
+./install.sh tuink
+./install.sh tuink-musl
+```
+
+This installs:
+- binary to `/opt/tuink/tuink`
+- scripts to `/opt/tuink/install.sh` and `/opt/tuink/uninstall.sh`
+- release docs (if present nearby): `README.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`
+- symlink `/usr/local/bin/tuink -> /opt/tuink/tuink`
+
+Uninstall:
+
+```bash
+cd apps/tuink/launcher/build/native/nativeCompile
+./uninstall.sh
+```
+
+### Install from release tar.gz
+
+Build archives:
+
+```bash
+./gradlew :app:nativeDistTarGz
+./gradlew :app:nativeDistTarGz -Ptarget=musl
+./gradlew :app:nativeDistTarGz -Ptarget=all
+```
+
+Then:
+
+```bash
+tar -xzf apps/tuink/launcher/build/distributions/tuink-<version>-<os>-<arch>.tar.gz
+cd tuink-<version>-<os>-<arch>
+./install.sh
+```
 
 ## MVP keybindings
 

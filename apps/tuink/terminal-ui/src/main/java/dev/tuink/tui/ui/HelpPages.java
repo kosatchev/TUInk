@@ -1,5 +1,8 @@
 package dev.tuink.tui.ui;
 
+import java.io.InputStream;
+import java.util.Properties;
+
 public final class HelpPages {
     public static final HelpPage KEYMAP = new HelpPage(
         " Keyboard Hints ",
@@ -60,9 +63,10 @@ public final class HelpPages {
     );
 
     public static final HelpPage AUTHOR = new HelpPage(
-        " Author ",
+        " About ",
         new String[] {
-            "Project: TUInk",
+            "Application: TUInk",
+            "Version: " + appVersion(),
             "Author: Dmitry Kosatchev",
             "Contact: kosatchev@yandex.com",
             "",
@@ -76,5 +80,26 @@ public final class HelpPages {
     );
 
     private HelpPages() {
+    }
+
+    private static String appVersion() {
+        try (InputStream in = HelpPages.class.getResourceAsStream("/tuink-version.properties")) {
+            if (in != null) {
+                Properties p = new Properties();
+                p.load(in);
+                String fromResource = p.getProperty("version");
+                if (fromResource != null && !fromResource.isBlank()) {
+                    return fromResource.trim();
+                }
+            }
+        } catch (Exception ignored) {
+            // fall through to other sources
+        }
+
+        String implementationVersion = HelpPages.class.getPackage().getImplementationVersion();
+        if (implementationVersion != null && !implementationVersion.isBlank()) {
+            return implementationVersion;
+        }
+        return System.getProperty("tuink.version", "dev");
     }
 }

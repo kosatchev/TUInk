@@ -164,7 +164,18 @@ public class TerminalEditorApp {
             }
         }
 
-        try (Terminal terminal = TerminalBuilder.builder().system(true).encoding(StandardCharsets.UTF_8).build()) {
+        TerminalBuilder terminalBuilder = TerminalBuilder.builder().system(true).encoding(StandardCharsets.UTF_8);
+        if (shouldForceExecTerminalProvider()) {
+            // Explicit fallback for musl static images that cannot load jline-native .so from /tmp.
+            terminalBuilder
+                .jni(false)
+                .ffm(false)
+                .jna(false)
+                .jansi(false)
+                .exec(true)
+                .providers("exec,dumb");
+        }
+        try (Terminal terminal = terminalBuilder.build()) {
             if ("dumb".equalsIgnoreCase(terminal.getType())) {
                 throw new IOException(
                     "Interactive terminal is not available (dumb terminal). " +
@@ -3387,6 +3398,10 @@ public class TerminalEditorApp {
         System.out.println("  --theme=<name>   UI palette: blue, cyan (default), light");
         System.out.println("  --read           Start in reading mode (editing disabled)");
         System.out.println("  --help, -h       Show this help");
+    }
+
+    private boolean shouldForceExecTerminalProvider() {
+        return "exec".equalsIgnoreCase(System.getProperty("dev.tuink.terminal.provider", ""));
     }
 
     private record CliOptions(

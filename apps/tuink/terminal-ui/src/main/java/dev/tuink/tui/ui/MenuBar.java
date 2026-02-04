@@ -251,7 +251,7 @@ public final class MenuBar {
         private static final String[] FILE_MENU_ITEMS = {"New", "Open...", "Save", "Save As...", "Quit"};
         private static final String[] EDIT_MENU_ITEMS = {"Undo", "Redo", "Cut", "Copy", "Paste", "Select All", "Find"};
         private static final String[] TAB_MENU_BASE_ITEMS = {"New Tab", "Close Tab", "Next Tab", "Previous Tab", SEPARATOR};
-        private static final String[] HELP_MENU_ITEMS = {"Keyboard hints", "Licenses", "Author"};
+        private static final String[] HELP_MENU_ITEMS = {"Keyboard hints", "Licenses", "About"};
         private boolean open;
         private MenuId active = MenuId.EDIT;
         private int index;

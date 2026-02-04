@@ -115,7 +115,7 @@ public final class UiStyles {
             style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE),      // contextMenuDisabledItem
             style(Color.BRIGHT_BLACK, Color.BLACK),             // renderGutter
             style(Color.BRIGHT_WHITE, Color.CYAN, true, false), // renderGutterActive
-            style(Color.BRIGHT_WHITE, Color.CYAN),              // renderTopbar
+            style(Color.BRIGHT_WHITE, Color.CYAN, true, false),              // renderTopbar
             style(Color.BLACK, Color.BRIGHT_WHITE),             // renderStatus
             style(Color.BLACK, Color.BRIGHT_YELLOW),            // renderInteractive
             style(Color.BLACK, Color.BRIGHT_GREEN),             // renderNotification
@@ -151,7 +151,7 @@ public final class UiStyles {
             style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE),      // contextMenuDisabledItem
             style(Color.BRIGHT_BLACK, Color.BLACK),             // renderGutter
             style(Color.BRIGHT_WHITE, Color.BLUE, true, false), // renderGutterActive
-            style(Color.BRIGHT_WHITE, Color.BLUE),              // renderTopbar
+            style(Color.BRIGHT_WHITE, Color.BLUE, true, false),              // renderTopbar
             style(Color.BLACK, Color.BRIGHT_WHITE),             // renderStatus
             style(Color.BLACK, Color.BRIGHT_YELLOW),            // renderInteractive
             style(Color.BLACK, Color.BRIGHT_GREEN),             // renderNotification
@@ -187,7 +187,7 @@ public final class UiStyles {
             style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE),       // contextMenuDisabledItem
             style(Color.BLACK, Color.BRIGHT_WHITE),              // renderGutter
             style(Color.BRIGHT_WHITE, Color.BLACK, true, false), // renderGutterActive
-            style(Color.BLACK, Color.BRIGHT_WHITE),              // renderTopbar
+            style(Color.BLACK, Color.BRIGHT_WHITE, true, false),              // renderTopbar
             style(Color.BLACK, Color.BRIGHT_WHITE),              // renderStatus
             style(Color.BLACK, Color.BRIGHT_YELLOW),             // renderInteractive
             style(Color.BLACK, Color.BRIGHT_GREEN),              // renderNotification

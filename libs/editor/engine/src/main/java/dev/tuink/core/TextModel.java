@@ -188,29 +188,35 @@ public class TextModel {
         return new Position(line, col);
     }
 
-    public Charset load(Path path) throws IOException {
+    public LoadMetadata load(Path path) throws IOException {
         byte[] data = Files.readAllBytes(path);
         DecodedContent decoded = decodeWithDetectedCharset(data);
+        String lineSeparator = detectLineSeparator(decoded.text());
         List<String> lines = splitLines(decoded.text());
         buffer.clear();
         if (lines.isEmpty()) {
             buffer.setLine(0, "");
-            return decoded.charset();
+            return new LoadMetadata(decoded.charset(), lineSeparator);
         }
         buffer.setLine(0, lines.get(0));
         for (int i = 1; i < lines.size(); i++) {
             buffer.insertLine(i, lines.get(i));
         }
         invalidateVisualWidthCache();
-        return decoded.charset();
+        return new LoadMetadata(decoded.charset(), lineSeparator);
     }
 
     public void save(Path path) throws IOException {
-        save(path, StandardCharsets.UTF_8);
+        save(path, StandardCharsets.UTF_8, EditorState.LINE_SEPARATOR_LF);
     }
 
     public void save(Path path, Charset charset) throws IOException {
-        String content = String.join("\n", snapshotLines());
+        save(path, charset, EditorState.LINE_SEPARATOR_LF);
+    }
+
+    public void save(Path path, Charset charset, String lineSeparator) throws IOException {
+        String normalizedSeparator = normalizeLineSeparator(lineSeparator);
+        String content = String.join(normalizedSeparator, snapshotLines());
         Path target = path.toAbsolutePath().normalize();
         Path parent = target.getParent();
         Path tempDir = parent != null ? parent : Path.of(".").toAbsolutePath().normalize();
@@ -320,6 +326,26 @@ public class TextModel {
         return parts;
     }
 
+    private static String detectLineSeparator(String text) {
+        if (text.contains("\r\n")) {
+            return EditorState.LINE_SEPARATOR_CRLF;
+        }
+        if (text.indexOf('\r') >= 0) {
+            return EditorState.LINE_SEPARATOR_CR;
+        }
+        return EditorState.LINE_SEPARATOR_LF;
+    }
+
+    private static String normalizeLineSeparator(String lineSeparator) {
+        if (EditorState.LINE_SEPARATOR_CRLF.equals(lineSeparator)) {
+            return EditorState.LINE_SEPARATOR_CRLF;
+        }
+        if (EditorState.LINE_SEPARATOR_CR.equals(lineSeparator)) {
+            return EditorState.LINE_SEPARATOR_CR;
+        }
+        return EditorState.LINE_SEPARATOR_LF;
+    }
+
     private static boolean isValidUtf8(byte[] data) {
         CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder()
             .onMalformedInput(CodingErrorAction.REPORT)
@@ -352,6 +378,9 @@ public class TextModel {
     }
 
     private record DecodedContent(Charset charset, String text) {
+    }
+
+    public record LoadMetadata(Charset charset, String lineSeparator) {
     }
 
     private static boolean comesAfter(Position a, Position b) {

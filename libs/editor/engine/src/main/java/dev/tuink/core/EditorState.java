@@ -8,6 +8,10 @@ import java.nio.file.Path;
  * Mutable editor state independent from terminal specifics.
  */
 public class EditorState {
+    public static final String LINE_SEPARATOR_LF = "\n";
+    public static final String LINE_SEPARATOR_CRLF = "\r\n";
+    public static final String LINE_SEPARATOR_CR = "\r";
+
     private Position cursor = new Position(0, 0);
     private int topLine;
     private int leftColumn;
@@ -15,6 +19,7 @@ public class EditorState {
     private boolean dirty;
     private Path currentFile;
     private Charset fileEncoding = StandardCharsets.UTF_8;
+    private String lineSeparator = LINE_SEPARATOR_LF;
     private Position selectionAnchor;
 
     public Position getCursor() {
@@ -84,6 +89,22 @@ public class EditorState {
 
     public void setFileEncoding(Charset fileEncoding) {
         this.fileEncoding = fileEncoding == null ? StandardCharsets.UTF_8 : fileEncoding;
+    }
+
+    public String getLineSeparator() {
+        return lineSeparator;
+    }
+
+    public void setLineSeparator(String lineSeparator) {
+        if (LINE_SEPARATOR_CRLF.equals(lineSeparator)) {
+            this.lineSeparator = LINE_SEPARATOR_CRLF;
+            return;
+        }
+        if (LINE_SEPARATOR_CR.equals(lineSeparator)) {
+            this.lineSeparator = LINE_SEPARATOR_CR;
+            return;
+        }
+        this.lineSeparator = LINE_SEPARATOR_LF;
     }
 
     public Position getSelectionAnchor() {

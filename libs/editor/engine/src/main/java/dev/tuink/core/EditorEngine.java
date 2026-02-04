@@ -49,9 +49,12 @@ public class EditorEngine {
 
     public void open(Path path) throws IOException {
         if (Files.exists(path)) {
-            state.setFileEncoding(model.load(path));
+            TextModel.LoadMetadata loaded = model.load(path);
+            state.setFileEncoding(loaded.charset());
+            state.setLineSeparator(loaded.lineSeparator());
         } else {
             state.setFileEncoding(StandardCharsets.UTF_8);
+            state.setLineSeparator(EditorState.LINE_SEPARATOR_LF);
         }
         state.setCurrentFile(path);
         state.setCursor(new Position(0, 0));
@@ -69,7 +72,7 @@ public class EditorEngine {
         if (state.getCurrentFile() == null) {
             throw new IOException("No file selected");
         }
-        model.save(state.getCurrentFile(), state.getFileEncoding());
+        model.save(state.getCurrentFile(), state.getFileEncoding(), state.getLineSeparator());
         state.setDirty(false);
         breakCoalescing();
     }

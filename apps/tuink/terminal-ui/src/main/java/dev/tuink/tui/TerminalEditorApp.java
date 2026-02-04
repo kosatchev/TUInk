@@ -2212,7 +2212,7 @@ public class TerminalEditorApp {
         }
         int free = cols - left.length();
         if (free <= rightBlock.length()) {
-            return left.substring(0, cols);
+            return left + rightBlock.substring(0, Math.max(0, free));
         }
         return left + " ".repeat(free - rightBlock.length()) + rightBlock;
     }
@@ -2236,7 +2236,12 @@ public class TerminalEditorApp {
     private String buildStateIndicators(EditorState state, boolean readingMode) {
         String ro = isReadOnlyFile(state.getCurrentFile()) ? "RO" : "RW";
         String enc = state.getFileEncoding() == null ? "UTF-8" : state.getFileEncoding().name();
-        return ro + " | ENC:" + enc + " | " + (readingMode ? "READ" : "INS");
+        String eol = switch (state.getLineSeparator()) {
+            case EditorState.LINE_SEPARATOR_CRLF -> "CRLF";
+            case EditorState.LINE_SEPARATOR_CR -> "CR";
+            default -> "LF";
+        };
+        return ro + " | ENC:" + enc + " | EOL:" + eol + " | " + (readingMode ? "READ" : "INS");
     }
 
     private long nextInputTimeoutMs(NotificationState notification) {

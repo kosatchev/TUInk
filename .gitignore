@@ -1,6 +1,7 @@
 # Gradle
 .gradle/
 .gradle-local/
+*.iprof
 build/
 **/build/
 

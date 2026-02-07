@@ -22,6 +22,7 @@ public class TextModel {
     private int cachedVisualWidthTabWidth = -1;
     private int cachedMaxVisualLineWidth = 0;
     private boolean maxVisualWidthDirty = true;
+    private long revision = 0L;
 
     public TextModel(TextBuffer buffer) {
         this.buffer = buffer;
@@ -283,6 +284,10 @@ public class TextModel {
         return max;
     }
 
+    public long revision() {
+        return revision;
+    }
+
     public void replaceLines(List<String> lines) {
         buffer.clear();
         if (lines == null || lines.isEmpty()) {
@@ -299,6 +304,7 @@ public class TextModel {
 
     private void invalidateVisualWidthCache() {
         maxVisualWidthDirty = true;
+        revision++;
     }
 
     private DecodedContent decodeWithDetectedCharset(byte[] data) {

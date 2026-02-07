@@ -242,6 +242,15 @@ public class TerminalEditorApp {
                 ViewportController viewportController = new ViewportController();
                 boolean running = true;
                 boolean needsRender = true;
+                SearchBarView searchBar = null;
+                ConfirmBarView confirmBar = null;
+                InlinePromptBar inlinePromptBar = InlinePromptBar.hidden();
+                boolean showTabBar = false;
+                int contentTopRow = 1;
+                int contentRows = 0;
+                int contentCols = 0;
+                List<TabBar.TabItem> tabItems = List.of();
+                TabMatchCache tabMatchCache = new TabMatchCache();
                 while (running && !stopRequested.get()) {
                     activeTabIndex = sessionContext.activeTabIndex();
                     model = sessionContext.model();
@@ -253,29 +262,6 @@ public class TerminalEditorApp {
                     }
                     int rows = Math.max(2, terminal.getHeight());
                     int cols = Math.max(1, terminal.getWidth());
-                    int searchMatchCount = countSearchMatches(
-                        searchUi.allTabs() ? null : model,
-                        searchUi.allTabs() ? tabs : null,
-                        searchQueryInput.text(),
-                        SearchController.toSearchOptions(searchUi)
-                    );
-                    SearchBarView searchBar = uiSessionState.searchMode
-                        ? buildSearchBar(
-                            searchQueryInput,
-                            searchReplaceInput,
-                            uiSessionState.searchFocus,
-                            cols,
-                            searchUi,
-                            searchMatchCount
-                        )
-                        : null;
-                    String searchSummary = buildSearchSummary(
-                        uiSessionState.searchMode,
-                        searchQueryInput.text(),
-                        searchUi,
-                        searchMatchCount,
-                        tabs.size()
-                    );
                     boolean saveAsMode = modalState.isSaveAs();
                     boolean saveOverwriteConfirmMode = modalState.isSaveOverwriteConfirm();
                     boolean quitConfirmMode = modalState.isQuitConfirm();
@@ -285,171 +271,198 @@ public class TerminalEditorApp {
                     boolean helpAuthorMode = modalState.isHelpAuthor();
                     Path pendingOverwritePath = modalState.pendingOverwritePath();
                     int pendingCloseTabIndex = modalState.pendingCloseTabIndex();
-                    ConfirmBarView confirmBar = null;
-                    InlinePromptBar inlinePromptBar = InlinePromptBar.hidden();
-                    if (saveAsMode) {
-                        inlinePromptBar = InlinePromptBar.of(
-                            buildSaveAsPrompt(saveAsInput),
-                            styles.promptAlert(),
-                            SAVE_AS_PROMPT.length() + saveAsInput.cursor() + 1
+                    if (needsRender) {
+                        int searchMatchCount = countSearchMatches(
+                            searchUi.allTabs() ? null : model,
+                            searchUi.allTabs() ? tabs : null,
+                            searchQueryInput.text(),
+                            SearchController.toSearchOptions(searchUi)
                         );
-                    } else if (saveOverwriteConfirmMode) {
-                        confirmBar = ConfirmBarView.build(
-                            buildOverwritePrompt(pendingOverwritePath),
-                            modalState.confirmChoice(),
-                            cols
+                        searchBar = uiSessionState.searchMode
+                            ? buildSearchBar(
+                                searchQueryInput,
+                                searchReplaceInput,
+                                uiSessionState.searchFocus,
+                                cols,
+                                searchUi,
+                                searchMatchCount
+                            )
+                            : null;
+                        String searchSummary = buildSearchSummary(
+                            uiSessionState.searchMode,
+                            searchQueryInput.text(),
+                            searchUi,
+                            searchMatchCount,
+                            tabs.size()
                         );
-                        inlinePromptBar = InlinePromptBar.of(confirmBar.row(), styles.promptAlert(), 1, confirmBar.cursorCol() + 1);
-                    } else if (quitConfirmMode) {
-                        confirmBar = ConfirmBarView.build(
-                            buildQuitPrompt(countDirtyTabs(tabs)),
-                            modalState.confirmChoice(),
-                            cols
-                        );
-                        inlinePromptBar = InlinePromptBar.of(confirmBar.row(), styles.promptAlert(), 1, confirmBar.cursorCol() + 1);
-                    } else if (closeTabConfirmMode) {
-                        confirmBar = ConfirmBarView.build(
-                            buildCloseTabPrompt(tabs, pendingCloseTabIndex),
-                            modalState.confirmChoice(),
-                            cols
-                        );
-                        inlinePromptBar = InlinePromptBar.of(confirmBar.row(), styles.promptAlert(), 1, confirmBar.cursorCol() + 1);
-                    } else if (searchBar != null) {
-                        inlinePromptBar = InlinePromptBar.of(
-                            searchBar.text(),
-                            styles.searchBar(),
-                            searchBar.cursorRow(),
-                            searchBar.cursorCol()
-                        );
-                    }
-                    NotificationBar notificationBar = NotificationBar.of(notification.message, notification.style());
-                    boolean showTabBar = uiSessionState.showTabBarSetting && tabs.size() > 1;
-                    int overlayRows = inlinePromptBar.height();
-                    int contentTopRow = showTabBar ? 2 : 1;
-                    int baseContentRows = Math.max(0, rows - overlayRows - contentTopRow - 1);
-                    int gutterWidth = Math.max(1, String.valueOf(Math.max(model.lineCount(), 1)).length()) + 1;
-                    int maxLineLength = model.maxVisualLineWidth(uiSessionState.tabWidthSetting);
-                    boolean canShowVScrollbar = cols >= 8;
-                    int contentRows = baseContentRows;
-                    int contentCols = Math.max(0, cols - gutterWidth);
-                    boolean needHorizontalScrollbar = false;
-                    for (int i = 0; i < 3; i++) {
-                        boolean needVerticalScrollbar = canShowVScrollbar
-                            && (state.getTopLine() > 0 || model.lineCount() > contentRows);
-                        int scrollbarWidth = needVerticalScrollbar ? 1 : 0;
-                        contentCols = Math.max(0, cols - gutterWidth - scrollbarWidth);
-                        needHorizontalScrollbar = !uiSessionState.wrapLinesSetting && contentCols > 0
-                            && (state.getLeftVisualColumn() > 0 || maxLineLength > contentCols);
-                        int newContentRows = Math.max(0, baseContentRows - (needHorizontalScrollbar ? 1 : 0));
-                        if (newContentRows == contentRows) {
-                            break;
+                        confirmBar = null;
+                        inlinePromptBar = InlinePromptBar.hidden();
+                        if (saveAsMode) {
+                            inlinePromptBar = InlinePromptBar.of(
+                                buildSaveAsPrompt(saveAsInput),
+                                styles.promptAlert(),
+                                SAVE_AS_PROMPT.length() + saveAsInput.cursor() + 1
+                            );
+                        } else if (saveOverwriteConfirmMode) {
+                            confirmBar = ConfirmBarView.build(
+                                buildOverwritePrompt(pendingOverwritePath),
+                                modalState.confirmChoice(),
+                                cols
+                            );
+                            inlinePromptBar = InlinePromptBar.of(confirmBar.row(), styles.promptAlert(), 1, confirmBar.cursorCol() + 1);
+                        } else if (quitConfirmMode) {
+                            confirmBar = ConfirmBarView.build(
+                                buildQuitPrompt(countDirtyTabs(tabs)),
+                                modalState.confirmChoice(),
+                                cols
+                            );
+                            inlinePromptBar = InlinePromptBar.of(confirmBar.row(), styles.promptAlert(), 1, confirmBar.cursorCol() + 1);
+                        } else if (closeTabConfirmMode) {
+                            confirmBar = ConfirmBarView.build(
+                                buildCloseTabPrompt(tabs, pendingCloseTabIndex),
+                                modalState.confirmChoice(),
+                                cols
+                            );
+                            inlinePromptBar = InlinePromptBar.of(confirmBar.row(), styles.promptAlert(), 1, confirmBar.cursorCol() + 1);
+                        } else if (searchBar != null) {
+                            inlinePromptBar = InlinePromptBar.of(
+                                searchBar.text(),
+                                styles.searchBar(),
+                                searchBar.cursorRow(),
+                                searchBar.cursorCol()
+                            );
                         }
-                        contentRows = newContentRows;
-                    }
-                    viewportController.ensureCursorVisible(engine, contentRows, contentCols);
-                    boolean[] tabMatchFlags = findTabsWithMatches(
-                        tabs,
-                        searchQueryInput.text(),
-                        SearchController.toSearchOptions(searchUi)
-                    );
-                    List<TabBar.TabItem> tabItems = toTabItems(tabs, tabMatchFlags);
-                    topMenu.setOpenTabs(toMenuTabs(tabs, tabMatchFlags), activeTabIndex);
-                    topMenu.setShowTabBarEnabled(uiSessionState.showTabBarSetting);
-                    topMenu.setWrapLinesEnabled(uiSessionState.wrapLinesSetting);
-                    topMenu.setWrapWordsEnabled(uiSessionState.wrapWordsSetting);
-                    topMenu.setReadingModeEnabled(uiSessionState.readingModeSetting);
-                    topMenu.setConfirmOnCloseEnabled(uiSessionState.confirmOnCloseSetting);
-                    topMenu.setMouseModeEnabled(uiSessionState.mouseModeSetting);
-                    topMenu.setActiveGutterHighlightEnabled(uiSessionState.highlightActiveGutterSetting);
-                    topMenu.setSmartHomeEndEnabled(uiSessionState.smartHomeEndSetting);
-                    topMenu.setVisibleWhitespaceEnabled(uiSessionState.visibleWhitespaceSetting);
-                    topMenu.setSyntaxHighlightingEnabled(
-                        effectiveSyntaxHighlighting(uiSessionState.syntaxHighlightingSetting)
-                    );
-                    topMenu.setTabWidth(uiSessionState.tabWidthSetting);
-                    renderer.setHighlightActiveGutter(uiSessionState.highlightActiveGutterSetting);
-                    renderer.setVisibleWhitespace(uiSessionState.visibleWhitespaceSetting);
-                    renderer.setTabWidth(uiSessionState.tabWidthSetting);
-                    renderPlanBuilder.setSyntaxHighlightingEnabled(
-                        effectiveSyntaxHighlighting(uiSessionState.syntaxHighlightingSetting)
-                    );
-                    renderPlanBuilder.setTabWidth(uiSessionState.tabWidthSetting);
-                    editorView.setTabWidth(uiSessionState.tabWidthSetting);
-                    engine.setTabWidth(uiSessionState.tabWidthSetting);
+                        NotificationBar notificationBar = NotificationBar.of(notification.message, notification.style());
+                        showTabBar = uiSessionState.showTabBarSetting && tabs.size() > 1;
+                        int overlayRows = inlinePromptBar.height();
+                        contentTopRow = showTabBar ? 2 : 1;
+                        int baseContentRows = Math.max(0, rows - overlayRows - contentTopRow - 1);
+                        int gutterWidth = Math.max(1, String.valueOf(Math.max(model.lineCount(), 1)).length()) + 1;
+                        int maxLineLength = model.maxVisualLineWidth(uiSessionState.tabWidthSetting);
+                        boolean canShowVScrollbar = cols >= 8;
+                        contentRows = baseContentRows;
+                        contentCols = Math.max(0, cols - gutterWidth);
+                        boolean needHorizontalScrollbar = false;
+                        for (int i = 0; i < 3; i++) {
+                            boolean needVerticalScrollbar = canShowVScrollbar
+                                && (state.getTopLine() > 0 || model.lineCount() > contentRows);
+                            int scrollbarWidth = needVerticalScrollbar ? 1 : 0;
+                            contentCols = Math.max(0, cols - gutterWidth - scrollbarWidth);
+                            needHorizontalScrollbar = !uiSessionState.wrapLinesSetting && contentCols > 0
+                                && (state.getLeftVisualColumn() > 0 || maxLineLength > contentCols);
+                            int newContentRows = Math.max(0, baseContentRows - (needHorizontalScrollbar ? 1 : 0));
+                            if (newContentRows == contentRows) {
+                                break;
+                            }
+                            contentRows = newContentRows;
+                        }
+                        viewportController.ensureCursorVisible(engine, contentRows, contentCols);
+                        boolean[] tabMatchFlags = resolveTabMatchFlags(
+                            tabs,
+                            uiSessionState.searchMode,
+                            searchQueryInput.text(),
+                            SearchController.toSearchOptions(searchUi),
+                            tabMatchCache
+                        );
+                        tabItems = toTabItems(tabs, tabMatchFlags);
+                        topMenu.setOpenTabs(toMenuTabs(tabs, tabMatchFlags), activeTabIndex);
+                        topMenu.setShowTabBarEnabled(uiSessionState.showTabBarSetting);
+                        topMenu.setWrapLinesEnabled(uiSessionState.wrapLinesSetting);
+                        topMenu.setWrapWordsEnabled(uiSessionState.wrapWordsSetting);
+                        topMenu.setReadingModeEnabled(uiSessionState.readingModeSetting);
+                        topMenu.setConfirmOnCloseEnabled(uiSessionState.confirmOnCloseSetting);
+                        topMenu.setMouseModeEnabled(uiSessionState.mouseModeSetting);
+                        topMenu.setActiveGutterHighlightEnabled(uiSessionState.highlightActiveGutterSetting);
+                        topMenu.setSmartHomeEndEnabled(uiSessionState.smartHomeEndSetting);
+                        topMenu.setVisibleWhitespaceEnabled(uiSessionState.visibleWhitespaceSetting);
+                        topMenu.setSyntaxHighlightingEnabled(
+                            effectiveSyntaxHighlighting(uiSessionState.syntaxHighlightingSetting)
+                        );
+                        topMenu.setTabWidth(uiSessionState.tabWidthSetting);
+                        renderer.setHighlightActiveGutter(uiSessionState.highlightActiveGutterSetting);
+                        renderer.setVisibleWhitespace(uiSessionState.visibleWhitespaceSetting);
+                        renderer.setTabWidth(uiSessionState.tabWidthSetting);
+                        renderPlanBuilder.setSyntaxHighlightingEnabled(
+                            effectiveSyntaxHighlighting(uiSessionState.syntaxHighlightingSetting)
+                        );
+                        renderPlanBuilder.setTabWidth(uiSessionState.tabWidthSetting);
+                        editorView.setTabWidth(uiSessionState.tabWidthSetting);
+                        engine.setTabWidth(uiSessionState.tabWidthSetting);
 
-                    String topBar = topMenu.buildTopBar(
-                        state.getCurrentFile(),
-                        state.isDirty(),
-                        activeTabIndex,
-                        tabs.size(),
-                        cols,
-                        uiSessionState.readingModeSetting
-                    );
-                    String bottomBar = buildBottomBar(
-                        state,
-                        model,
-                        cols,
-                        uiSessionState.readingModeSetting,
-                        activeTabIndex,
-                        tabs.size(),
-                        searchSummary
-                    );
-                    String interactiveBarText = inlinePromptBar.text();
-                    Style interactiveBarStyle = inlinePromptBar.style();
-                    int planRows = Math.max(1, (showTabBar ? rows - 1 : rows) - (needHorizontalScrollbar ? 1 : 0));
-                    RenderFrameResult frameResult = renderFrameController.renderFrameIfNeeded(
-                        needsRender,
-                        renderPlanBuilder,
-                        model,
-                        state,
-                        rows,
-                        cols,
-                        contentTopRow,
-                        showTabBar,
-                        activeTabIndex,
-                        tabItems,
-                        planRows,
-                        inlinePromptBar.height(),
-                        topBar,
-                        bottomBar,
-                        uiSessionState.searchMode,
-                        searchQueryInput.text(),
-                        searchUi,
-                        uiSessionState.searchFocus,
-                        interactiveBarText,
-                        interactiveBarStyle,
-                        notificationBar,
-                        uiSessionState.wrapLinesSetting,
-                        uiSessionState.wrapWordsSetting,
-                        saveAsMode,
-                        saveAsInput,
-                        saveOverwriteConfirmMode,
-                        pendingOverwritePath,
-                        quitConfirmMode,
-                        tabs,
-                        closeTabConfirmMode,
-                        pendingCloseTabIndex,
-                        searchBar,
-                        confirmBar,
-                        openFileMode,
-                        openFileTree,
-                        openFileFocus,
-                        helpHintsMode,
-                        helpLicensesMode,
-                        helpAuthorMode,
-                        previous,
-                        plan,
-                        lastCursorRow,
-                        lastCursorCol,
-                        lastCursorVisible
-                    );
-                    previous = frameResult.previous();
-                    plan = frameResult.plan();
-                    lastCursorRow = frameResult.lastCursorRow();
-                    lastCursorCol = frameResult.lastCursorCol();
-                    lastCursorVisible = frameResult.lastCursorVisible();
-                    if (frameResult.rendered()) {
-                        needsRender = false;
+                        String topBar = topMenu.buildTopBar(
+                            state.getCurrentFile(),
+                            state.isDirty(),
+                            activeTabIndex,
+                            tabs.size(),
+                            cols,
+                            uiSessionState.readingModeSetting
+                        );
+                        String bottomBar = buildBottomBar(
+                            state,
+                            model,
+                            cols,
+                            uiSessionState.readingModeSetting,
+                            activeTabIndex,
+                            tabs.size(),
+                            searchSummary
+                        );
+                        String interactiveBarText = inlinePromptBar.text();
+                        Style interactiveBarStyle = inlinePromptBar.style();
+                        int planRows = Math.max(1, (showTabBar ? rows - 1 : rows) - (needHorizontalScrollbar ? 1 : 0));
+                        RenderFrameResult frameResult = renderFrameController.renderFrameIfNeeded(
+                            needsRender,
+                            renderPlanBuilder,
+                            model,
+                            state,
+                            rows,
+                            cols,
+                            contentTopRow,
+                            showTabBar,
+                            activeTabIndex,
+                            tabItems,
+                            planRows,
+                            inlinePromptBar.height(),
+                            topBar,
+                            bottomBar,
+                            uiSessionState.searchMode,
+                            searchQueryInput.text(),
+                            searchUi,
+                            uiSessionState.searchFocus,
+                            interactiveBarText,
+                            interactiveBarStyle,
+                            notificationBar,
+                            uiSessionState.wrapLinesSetting,
+                            uiSessionState.wrapWordsSetting,
+                            saveAsMode,
+                            saveAsInput,
+                            saveOverwriteConfirmMode,
+                            pendingOverwritePath,
+                            quitConfirmMode,
+                            tabs,
+                            closeTabConfirmMode,
+                            pendingCloseTabIndex,
+                            searchBar,
+                            confirmBar,
+                            openFileMode,
+                            openFileTree,
+                            openFileFocus,
+                            helpHintsMode,
+                            helpLicensesMode,
+                            helpAuthorMode,
+                            previous,
+                            plan,
+                            lastCursorRow,
+                            lastCursorCol,
+                            lastCursorVisible
+                        );
+                        previous = frameResult.previous();
+                        plan = frameResult.plan();
+                        lastCursorRow = frameResult.lastCursorRow();
+                        lastCursorCol = frameResult.lastCursorCol();
+                        lastCursorVisible = frameResult.lastCursorVisible();
+                        if (frameResult.rendered()) {
+                            needsRender = false;
+                        }
                     }
 
                     InputEventPump.PollResult pollResult = inputEventPump.poll();
@@ -3159,6 +3172,15 @@ public class TerminalEditorApp {
         return sessions;
     }
 
+    private long tabsRevisionFingerprint(List<EditorTab> tabs) {
+        long hash = 1469598103934665603L;
+        for (EditorTab tab : tabs) {
+            hash ^= tab.model().revision();
+            hash *= 1099511628211L;
+        }
+        return hash;
+    }
+
     private List<TabBar.TabItem> toTabItems(List<EditorTab> tabs, boolean[] matchFlags) {
         List<TabBar.TabItem> out = new ArrayList<>(tabs.size());
         for (int i = 0; i < tabs.size(); i++) {
@@ -3171,11 +3193,28 @@ public class TerminalEditorApp {
 
     private boolean[] findTabsWithMatches(List<EditorTab> tabs, String query, SearchOptions options) {
         boolean[] flags = new boolean[tabs.size()];
+        if (query == null || query.isBlank()) {
+            return flags;
+        }
         int[] match = TabSearch.findMatchTabs(toTabSessions(tabs), query, options);
         for (int i = 0; i < flags.length && i < match.length; i++) {
             flags[i] = match[i] != 0;
         }
         return flags;
+    }
+
+    private boolean[] resolveTabMatchFlags(
+        List<EditorTab> tabs,
+        boolean searchMode,
+        String query,
+        SearchOptions options,
+        TabMatchCache cache
+    ) {
+        if (!searchMode || query == null || query.isBlank()) {
+            return new boolean[tabs.size()];
+        }
+        long revisionFingerprint = tabsRevisionFingerprint(tabs);
+        return cache.resolve(tabs, query, options, revisionFingerprint, () -> findTabsWithMatches(tabs, query, options));
     }
 
     private List<MenuBar.OpenTab> toMenuTabs(List<EditorTab> tabs, boolean[] matchFlags) {
@@ -3206,6 +3245,35 @@ public class TerminalEditorApp {
 
         private EditorTab withRenderPlanBuilder(RenderPlanBuilder nextBuilder) {
             return new EditorTab(tabSession, nextBuilder);
+        }
+    }
+
+    private static final class TabMatchCache {
+        private String query;
+        private SearchOptions options;
+        private long tabsFingerprint = Long.MIN_VALUE;
+        private boolean[] flags = new boolean[0];
+
+        private boolean[] resolve(
+            List<EditorTab> tabs,
+            String query,
+            SearchOptions options,
+            long tabsFingerprint,
+            java.util.function.Supplier<boolean[]> compute
+        ) {
+            if (this.query != null
+                && this.query.equals(query)
+                && this.options != null
+                && this.options.equals(options)
+                && this.tabsFingerprint == tabsFingerprint
+                && this.flags.length == tabs.size()) {
+                return this.flags;
+            }
+            this.query = query;
+            this.options = options;
+            this.tabsFingerprint = tabsFingerprint;
+            this.flags = compute.get();
+            return this.flags;
         }
     }
 

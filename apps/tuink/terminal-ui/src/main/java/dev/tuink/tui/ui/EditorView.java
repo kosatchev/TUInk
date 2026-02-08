@@ -143,6 +143,38 @@ public final class EditorView {
         int contentRows,
         int contentTopRow
     ) {
+        if (plan.wrapLines()) {
+            int top = Math.max(1, contentTopRow);
+            if (mouse.row() < top || mouse.row() >= top + contentRows) {
+                return null;
+            }
+            int visibleCols = Math.max(0, plan.cols() - plan.gutterWidth() - plan.scrollbarWidth());
+            int targetVisualCol = mouse.col() < plan.gutterWidth() ? 0 : mouse.col() - plan.gutterWidth();
+            int remainingWrappedRows = Math.max(0, state.getTopWrapSegment()) + (mouse.row() - top);
+            int line = Math.max(0, Math.min(state.getTopLine(), model.lineCount() - 1));
+            while (line < model.lineCount()) {
+                String lineText = model.getLine(line);
+                var starts = ViewportMetrics.wrapStarts(
+                    lineText,
+                    visibleCols,
+                    plan.wrapByWords(),
+                    tabWidth
+                );
+                if (remainingWrappedRows < starts.size()) {
+                    int segmentStart = starts.get(Math.max(0, remainingWrappedRows));
+                    int col = ViewportMetrics.visualToTextColumn(
+                        lineText,
+                        segmentStart,
+                        Math.max(0, targetVisualCol),
+                        tabWidth
+                    );
+                    return model.clamp(new Position(line, Math.max(0, col)));
+                }
+                remainingWrappedRows -= starts.size();
+                line++;
+            }
+            return model.clamp(new Position(Math.max(0, model.lineCount() - 1), 0));
+        }
         return EditorViewportBehavior.pointerToTextPosition(
             model,
             state,
@@ -227,14 +259,15 @@ public final class EditorView {
                         : verticalScroll);
                 if (plan.wrapLines()) {
                     int visibleCols = Math.max(0, cols - plan.gutterWidth() - plan.scrollbarWidth());
-                    int targetLine = ViewportMetrics.lineIndexFromWrappedOffset(
+                    WrapTop target = wrapTopFromWrappedOffset(
                         model,
                         targetTop,
                         visibleCols,
                         plan.wrapByWords(),
                         tabWidth
                     );
-                    EditorViewportBehavior.applyVerticalScrollKeepCursor(state, model, targetLine);
+                    state.setTopLine(target.line());
+                    state.setTopWrapSegment(target.segmentOffset());
                 } else {
                     EditorViewportBehavior.applyVerticalScrollKeepCursor(state, model, targetTop);
                 }
@@ -303,10 +336,26 @@ public final class EditorView {
         return new ScrollPointerResult(false, ScrollAxis.NONE, 0);
     }
 
+    private static WrapTop wrapTopFromWrappedOffset(
+        TextModel model,
+        int wrappedOffset,
+        int width,
+        boolean wrapByWords,
+        int tabWidth
+    ) {
+        int line = ViewportMetrics.lineIndexFromWrappedOffset(model, wrappedOffset, width, wrapByWords, tabWidth);
+        int lineWrappedStart = ViewportMetrics.wrappedRowsBefore(model, line, width, wrapByWords, tabWidth);
+        int segmentOffset = Math.max(0, wrappedOffset - lineWrappedStart);
+        return new WrapTop(line, segmentOffset);
+    }
+
     public record CursorPosition(int row, int col) {
     }
 
     public record ScrollPointerResult(boolean consumed, ScrollAxis dragAxis, int dragThumbOffset) {
+    }
+
+    private record WrapTop(int line, int segmentOffset) {
     }
 
 }

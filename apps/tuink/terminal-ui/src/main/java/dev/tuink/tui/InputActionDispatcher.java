@@ -45,6 +45,7 @@ final class InputActionDispatcher {
             case TOGGLE_WRAP_LINES -> {
                 ui.wrapLinesSetting = !ui.wrapLinesSetting;
                 if (ui.wrapLinesSetting) {
+                    ctx.state().setTopWrapSegment(0);
                     ctx.state().setLeftColumn(0);
                     ctx.state().setLeftVisualColumn(0);
                 }

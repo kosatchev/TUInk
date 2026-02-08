@@ -14,6 +14,7 @@ public class EditorState {
 
     private Position cursor = new Position(0, 0);
     private int topLine;
+    private int topWrapSegment;
     private int leftColumn;
     private int leftVisualColumn;
     private boolean dirty;
@@ -36,6 +37,15 @@ public class EditorState {
 
     public void setTopLine(int topLine) {
         this.topLine = Math.max(0, topLine);
+        this.topWrapSegment = 0;
+    }
+
+    public int getTopWrapSegment() {
+        return topWrapSegment;
+    }
+
+    public void setTopWrapSegment(int topWrapSegment) {
+        this.topWrapSegment = Math.max(0, topWrapSegment);
     }
 
     public int getLeftColumn() {
@@ -55,7 +65,7 @@ public class EditorState {
     }
 
     public ViewportState viewport() {
-        return new ViewportState(topLine, leftColumn, leftVisualColumn);
+        return new ViewportState(topLine, topWrapSegment, leftColumn, leftVisualColumn);
     }
 
     public void setViewport(ViewportState viewport) {
@@ -63,6 +73,7 @@ public class EditorState {
             return;
         }
         setTopLine(viewport.topLine());
+        setTopWrapSegment(viewport.topWrapSegment());
         setLeftColumn(viewport.leftColumn());
         setLeftVisualColumn(viewport.leftVisualColumn());
     }

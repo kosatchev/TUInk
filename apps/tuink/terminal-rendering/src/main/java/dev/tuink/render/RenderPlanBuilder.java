@@ -189,14 +189,16 @@ public class RenderPlanBuilder {
         int gutterDigits = Math.max(1, String.valueOf(Math.max(model.lineCount(), 1)).length());
         int gutterWidth = gutterDigits + 1;
         int textWidth = Math.max(0, safeCols - gutterWidth - scrollbarWidth);
+        WrapViewport wrapViewport = null;
         if (wrapLines) {
-            int wrappedTop = wrappedRowsBefore(model, state.getTopLine(), textWidth, wrapByWords);
+            wrapViewport = resolveWrapViewport(model, state.getTopLine(), state.getTopWrapSegment(), textWidth, wrapByWords);
             int wrappedTotal = totalWrappedRows(model, textWidth, wrapByWords);
-            boolean wrappedNeedVertical = wrappedTop > 0 || wrappedTotal > contentRows;
+            boolean wrappedNeedVertical = wrapViewport.topWrappedOffset() > 0 || wrappedTotal > contentRows;
             int wrappedScrollbarWidth = safeCols >= 8 && wrappedNeedVertical ? 1 : 0;
             if (wrappedScrollbarWidth != scrollbarWidth) {
                 scrollbarWidth = wrappedScrollbarWidth;
                 textWidth = Math.max(0, safeCols - gutterWidth - scrollbarWidth);
+                wrapViewport = resolveWrapViewport(model, state.getTopLine(), state.getTopWrapSegment(), textWidth, wrapByWords);
             }
         }
         int totalColumns = 0;
@@ -246,7 +248,8 @@ public class RenderPlanBuilder {
                 }
             }
         } else {
-            int lineIndex = state.getTopLine();
+            int lineIndex = wrapViewport == null ? state.getTopLine() : wrapViewport.lineIndex();
+            int firstSegmentOffset = wrapViewport == null ? 0 : wrapViewport.segmentOffset();
             while (lines.size() < contentRows) {
                 if (lineIndex >= model.lineCount()) {
                     lines.add(new LineVisual(tildeGutter(gutterWidth), "", List.of()));
@@ -275,7 +278,8 @@ public class RenderPlanBuilder {
                 }
 
                 List<Integer> starts = wrapStarts(line, textWidth, wrapByWords);
-                for (int seg = 0; seg < starts.size() && lines.size() < contentRows; seg++) {
+                int segStart = Math.max(0, Math.min(firstSegmentOffset, starts.size() - 1));
+                for (int seg = segStart; seg < starts.size() && lines.size() < contentRows; seg++) {
                     int start = starts.get(seg);
                     int end = seg + 1 < starts.size() ? starts.get(seg + 1) : line.length();
                     String part = line.substring(start, end);
@@ -285,6 +289,7 @@ public class RenderPlanBuilder {
                         : " ".repeat(gutterWidth);
                     lines.add(new LineVisual(gutter, part, partSpans));
                 }
+                firstSegmentOffset = 0;
                 lineIndex++;
             }
         }
@@ -303,10 +308,6 @@ public class RenderPlanBuilder {
                 tabWidth
             );
         } else {
-            cursorRow = 0;
-            for (int i = state.getTopLine(); i < cursor.line(); i++) {
-                cursorRow += wrapStarts(model.getLine(i), textWidth, wrapByWords).size();
-            }
             String cursorLine = model.getLine(cursor.line());
             List<Integer> starts = wrapStarts(cursorLine, textWidth, wrapByWords);
             int segIndex = 0;
@@ -325,7 +326,9 @@ public class RenderPlanBuilder {
                     break;
                 }
             }
-            cursorRow += segIndex;
+            int cursorAbsoluteWrapped = wrappedRowsBefore(model, cursor.line(), textWidth, wrapByWords) + segIndex;
+            int topWrapped = wrapViewport == null ? 0 : wrapViewport.topWrappedOffset();
+            cursorRow = cursorAbsoluteWrapped - topWrapped;
             cursorCol = gutterWidth + ViewportMetrics.textToVisualColumn(cursorLine, segStart, cursor.col(), tabWidth);
         }
         int maxCursorCol = Math.max(gutterWidth, safeCols - 1 - scrollbarWidth);
@@ -346,7 +349,7 @@ public class RenderPlanBuilder {
             wrapByWords,
             contentRows,
             wrapLines
-                ? wrappedRowsBefore(model, state.getTopLine(), textWidth, wrapByWords)
+                ? (wrapViewport == null ? 0 : wrapViewport.topWrappedOffset())
                 : state.getTopLine(),
             wrapLines
                 ? totalWrappedRows(model, textWidth, wrapByWords)
@@ -358,6 +361,33 @@ public class RenderPlanBuilder {
             gutterWidth,
             scrollbarWidth
         );
+    }
+
+    private WrapViewport resolveWrapViewport(
+        TextModel model,
+        int topLine,
+        int segmentOffset,
+        int width,
+        boolean wrapByWords
+    ) {
+        int lineCount = Math.max(1, model.lineCount());
+        int line = Math.max(0, Math.min(topLine, lineCount - 1));
+        int segment = Math.max(0, segmentOffset);
+        int topWrapped = wrappedRowsBefore(model, line, width, wrapByWords);
+        while (line < lineCount) {
+            int segments = wrapStarts(model.getLine(line), width, wrapByWords).size();
+            if (segment < segments) {
+                return new WrapViewport(line, segment, topWrapped + segment);
+            }
+            segment -= segments;
+            topWrapped += segments;
+            line++;
+        }
+        int lastLine = lineCount - 1;
+        return new WrapViewport(lastLine, 0, Math.max(0, totalWrappedRows(model, width, wrapByWords) - 1));
+    }
+
+    private record WrapViewport(int lineIndex, int segmentOffset, int topWrappedOffset) {
     }
 
     private static int lineCount(String text) {

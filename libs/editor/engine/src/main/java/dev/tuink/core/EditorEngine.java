@@ -668,6 +668,7 @@ public class EditorEngine {
             model.snapshotLines(),
             state.getCursor(),
             state.getTopLine(),
+            state.getTopWrapSegment(),
             state.getLeftColumn(),
             state.getLeftVisualColumn(),
             state.isDirty(),
@@ -679,6 +680,7 @@ public class EditorEngine {
         model.replaceLines(snapshot.lines());
         state.setCursor(model.clamp(snapshot.cursor()));
         state.setTopLine(snapshot.topLine());
+        state.setTopWrapSegment(snapshot.topWrapSegment());
         state.setLeftColumn(snapshot.leftColumn());
         state.setLeftVisualColumn(snapshot.leftVisualColumn());
         state.setDirty(snapshot.dirty());
@@ -696,6 +698,7 @@ public class EditorEngine {
         List<String> lines,
         Position cursor,
         int topLine,
+        int topWrapSegment,
         int leftColumn,
         int leftVisualColumn,
         boolean dirty,

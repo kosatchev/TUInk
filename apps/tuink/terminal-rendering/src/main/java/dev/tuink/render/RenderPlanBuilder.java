@@ -277,7 +277,7 @@ public class RenderPlanBuilder {
                     lineSpans.add(currentMatch);
                 }
 
-                List<Integer> starts = wrapStarts(line, textWidth, wrapByWords);
+                List<Integer> starts = wrapStarts(model, lineIndex, textWidth, wrapByWords);
                 int segStart = Math.max(0, Math.min(firstSegmentOffset, starts.size() - 1));
                 for (int seg = segStart; seg < starts.size() && lines.size() < contentRows; seg++) {
                     int start = starts.get(seg);
@@ -309,7 +309,7 @@ public class RenderPlanBuilder {
             );
         } else {
             String cursorLine = model.getLine(cursor.line());
-            List<Integer> starts = wrapStarts(cursorLine, textWidth, wrapByWords);
+            List<Integer> starts = wrapStarts(model, cursor.line(), textWidth, wrapByWords);
             int segIndex = 0;
             int segStart = 0;
             for (int i = 0; i < starts.size(); i++) {
@@ -375,7 +375,7 @@ public class RenderPlanBuilder {
         int segment = Math.max(0, segmentOffset);
         int topWrapped = wrappedRowsBefore(model, line, width, wrapByWords);
         while (line < lineCount) {
-            int segments = wrapStarts(model.getLine(line), width, wrapByWords).size();
+            int segments = wrapStarts(model, line, width, wrapByWords).size();
             if (segment < segments) {
                 return new WrapViewport(line, segment, topWrapped + segment);
             }
@@ -403,8 +403,8 @@ public class RenderPlanBuilder {
         return lines;
     }
 
-    private List<Integer> wrapStarts(String line, int maxVisualWidth, boolean wrapByWords) {
-        return ViewportMetrics.wrapStarts(line, maxVisualWidth, wrapByWords, tabWidth);
+    private List<Integer> wrapStarts(TextModel model, int lineIndex, int maxVisualWidth, boolean wrapByWords) {
+        return model.wrapStarts(lineIndex, maxVisualWidth, wrapByWords, tabWidth);
     }
 
     private String clipByVisualWidth(String line, int leftColumn, int maxWidth) {
@@ -450,11 +450,16 @@ public class RenderPlanBuilder {
     }
 
     private int wrappedRowsBefore(TextModel model, int lineIndexExclusive, int width, boolean wrapByWords) {
-        return ViewportMetrics.wrappedRowsBefore(model, lineIndexExclusive, width, wrapByWords, tabWidth);
+        int limit = Math.max(0, Math.min(lineIndexExclusive, model.lineCount()));
+        int rows = 0;
+        for (int i = 0; i < limit; i++) {
+            rows += wrapStarts(model, i, width, wrapByWords).size();
+        }
+        return rows;
     }
 
     private int totalWrappedRows(TextModel model, int width, boolean wrapByWords) {
-        return ViewportMetrics.totalWrappedRows(model, width, wrapByWords, tabWidth);
+        return wrappedRowsBefore(model, model.lineCount(), width, wrapByWords);
     }
 
     private static String lineNumberGutter(int lineNumber, int gutterWidth) {

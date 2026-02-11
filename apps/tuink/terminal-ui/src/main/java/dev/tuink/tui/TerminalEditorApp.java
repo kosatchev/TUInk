@@ -9,7 +9,6 @@ import dev.tuink.core.TabSession;
 import dev.tuink.core.TabSearch;
 import dev.tuink.core.TabSessions;
 import dev.tuink.core.TextModel;
-import dev.tuink.core.ViewportMetrics;
 import dev.tuink.highlight.regex.RegexHighlighter;
 import dev.tuink.tui.flow.AppSettings;
 import dev.tuink.tui.flow.AppSettingsStore;
@@ -510,8 +509,9 @@ public class TerminalEditorApp {
                                 }
                                 if (modalState.isNone() && !uiSessionState.searchMode) {
                                     int topBefore = state.getTopLine();
+                                    int topWrapBefore = state.getTopWrapSegment();
                                     applyWheelVerticalScroll(model, state, plan, -3, uiSessionState.tabWidthSetting);
-                                    if (state.getTopLine() != topBefore) {
+                                    if (state.getTopLine() != topBefore || state.getTopWrapSegment() != topWrapBefore) {
                                         viewportController.onManualVerticalPan();
                                     }
                                 }
@@ -527,8 +527,9 @@ public class TerminalEditorApp {
                                 }
                                 if (modalState.isNone() && !uiSessionState.searchMode) {
                                     int topBefore = state.getTopLine();
+                                    int topWrapBefore = state.getTopWrapSegment();
                                     applyWheelVerticalScroll(model, state, plan, 3, uiSessionState.tabWidthSetting);
-                                    if (state.getTopLine() != topBefore) {
+                                    if (state.getTopLine() != topBefore || state.getTopWrapSegment() != topWrapBefore) {
                                         viewportController.onManualVerticalPan();
                                     }
                                 }
@@ -722,6 +723,7 @@ public class TerminalEditorApp {
                                     if (modalState.isNone() && !uiSessionState.searchMode) {
                                         int leftBeforeScrollPointer = state.getLeftVisualColumn();
                                         int topBeforeScrollPointer = state.getTopLine();
+                                        int topWrapBeforeScrollPointer = state.getTopWrapSegment();
                                         EditorView.ScrollPointerResult scrollPointer = editorView.handleScrollbarPointer(
                                             mouse.row(),
                                             mouse.col(),
@@ -742,6 +744,9 @@ public class TerminalEditorApp {
                                                 topBeforeScrollPointer,
                                                 state.getTopLine()
                                             );
+                                            if (state.getTopWrapSegment() != topWrapBeforeScrollPointer) {
+                                                viewportController.onManualVerticalPan();
+                                            }
                                             editorView.cancelMouseSelection();
                                             continue;
                                         }
@@ -781,6 +786,7 @@ public class TerminalEditorApp {
                                         && editorScrollDrag != EditorView.ScrollAxis.NONE) {
                                         int leftBeforeDragScroll = state.getLeftVisualColumn();
                                         int topBeforeDragScroll = state.getTopLine();
+                                        int topWrapBeforeDragScroll = state.getTopWrapSegment();
                                         EditorView.ScrollPointerResult dragScrollPointer = editorView.handleScrollbarPointer(
                                             mouse.row(),
                                             mouse.col(),
@@ -800,6 +806,9 @@ public class TerminalEditorApp {
                                             topBeforeDragScroll,
                                             state.getTopLine()
                                         );
+                                        if (state.getTopWrapSegment() != topWrapBeforeDragScroll) {
+                                            viewportController.onManualVerticalPan();
+                                        }
                                         continue;
                                     }
                                     editorView.handleMouseDrag(
@@ -1362,21 +1371,33 @@ public class TerminalEditorApp {
         if (plan != null && plan.wrapLines()) {
             int visibleCols = Math.max(0, plan.cols() - plan.gutterWidth() - plan.scrollbarWidth());
             if (visibleCols > 0) {
-                int topWrappedRow = Math.max(0, plan.topLine());
-                int totalWrappedRows = Math.max(1, plan.totalLines());
-                int targetWrappedRow = Math.max(0, Math.min(topWrappedRow + deltaRows, Math.max(0, totalWrappedRows - 1)));
-                WrapTop targetTop = wrapTopFromWrappedOffsetNear(
+                EditorViewportBehavior.WrapTop normalized = EditorViewportBehavior.normalizeWrapTop(
                     model,
-                    Math.max(0, Math.min(state.getTopLine(), model.lineCount() - 1)),
-                    Math.max(0, state.getTopWrapSegment()),
-                    topWrappedRow,
+                    state.getTopLine(),
+                    state.getTopWrapSegment(),
+                    visibleCols,
+                    plan.wrapByWords(),
+                    tabWidth
+                );
+                EditorViewportBehavior.applyWrapTop(state, normalized);
+                int topWrappedRow = EditorViewportBehavior.wrappedOffsetForWrapTop(
+                    model,
+                    normalized,
+                    visibleCols,
+                    plan.wrapByWords(),
+                    tabWidth
+                );
+                int totalWrappedRows = Math.max(1, plan.totalLines());
+                int maxTopWrappedRow = Math.max(0, totalWrappedRows - Math.max(1, plan.contentRows()));
+                int targetWrappedRow = Math.max(0, Math.min(topWrappedRow + deltaRows, maxTopWrappedRow));
+                EditorViewportBehavior.WrapTop targetTop = EditorViewportBehavior.wrapTopFromWrappedOffset(
+                    model,
                     targetWrappedRow,
                     visibleCols,
                     plan.wrapByWords(),
                     tabWidth
                 );
-                state.setTopLine(targetTop.line());
-                state.setTopWrapSegment(targetTop.segmentOffset());
+                EditorViewportBehavior.applyWrapTop(state, targetTop);
                 return;
             }
         }
@@ -1386,84 +1407,6 @@ public class TerminalEditorApp {
             model,
             Math.max(0, state.getTopLine() + deltaRows)
         );
-    }
-
-    private static WrapTop wrapTopFromWrappedOffsetNear(
-        TextModel model,
-        int currentLine,
-        int currentSegmentOffset,
-        int currentWrappedOffset,
-        int targetWrappedOffset,
-        int width,
-        boolean wrapByWords,
-        int tabWidth
-    ) {
-        int lineCount = model.lineCount();
-        if (lineCount <= 0) {
-            return new WrapTop(0, 0);
-        }
-        int line = Math.max(0, Math.min(currentLine, lineCount - 1));
-        int offset = Math.max(0, currentWrappedOffset);
-        int segmentOffset = Math.max(0, currentSegmentOffset);
-        int target = Math.max(0, targetWrappedOffset);
-
-        if (segmentOffset > 0) {
-            int segments = ViewportMetrics.wrapStarts(
-                model.getLine(line),
-                width,
-                wrapByWords,
-                tabWidth
-            ).size();
-            while (line < lineCount - 1 && segmentOffset >= segments) {
-                offset += segments;
-                segmentOffset -= segments;
-                line++;
-                segments = ViewportMetrics.wrapStarts(
-                    model.getLine(line),
-                    width,
-                    wrapByWords,
-                    tabWidth
-                ).size();
-            }
-        }
-
-        if (target >= offset) {
-            while (line < lineCount) {
-                int segments = ViewportMetrics.wrapStarts(
-                    model.getLine(line),
-                    width,
-                    wrapByWords,
-                    tabWidth
-                ).size();
-                int nextOffset = offset + segments;
-                if (target < nextOffset || line == lineCount - 1) {
-                    return new WrapTop(line, Math.max(0, target - offset));
-                }
-                offset = nextOffset;
-                line++;
-            }
-            return new WrapTop(lineCount - 1, 0);
-        }
-
-        while (line > 0) {
-            int prevLine = line - 1;
-            int prevSegments = ViewportMetrics.wrapStarts(
-                model.getLine(prevLine),
-                width,
-                wrapByWords,
-                tabWidth
-            ).size();
-            int prevOffset = Math.max(0, offset - prevSegments);
-            if (target >= prevOffset) {
-                return new WrapTop(prevLine, Math.max(0, target - prevOffset));
-            }
-            offset = prevOffset;
-            line = prevLine;
-        }
-        return new WrapTop(0, 0);
-    }
-
-    private record WrapTop(int line, int segmentOffset) {
     }
 
     private UiModalState modalFromSaveAsResult(SaveFlowController.SaveAsResult result) {

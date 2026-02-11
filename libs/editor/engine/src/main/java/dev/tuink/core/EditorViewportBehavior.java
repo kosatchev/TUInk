@@ -7,6 +7,13 @@ public final class EditorViewportBehavior {
     private EditorViewportBehavior() {
     }
 
+    public record WrapTop(int line, int segmentOffset) {
+        public WrapTop {
+            line = Math.max(0, line);
+            segmentOffset = Math.max(0, segmentOffset);
+        }
+    }
+
     public static Position pointerToTextPosition(
         TextModel model,
         EditorState state,
@@ -88,5 +95,158 @@ public final class EditorViewportBehavior {
         );
         state.setLeftVisualColumn(Math.max(0, targetLeftVisualColumn));
         state.setLeftColumn(Math.max(0, targetLeftColumn));
+    }
+
+    public static void applyWrapTop(EditorState state, WrapTop top) {
+        if (top == null) {
+            state.setTopWrapSegment(0);
+            return;
+        }
+        state.setTopLine(top.line());
+        state.setTopWrapSegment(top.segmentOffset());
+    }
+
+    public static WrapTop normalizeWrapTop(
+        TextModel model,
+        int topLine,
+        int topWrapSegment,
+        int width,
+        boolean wrapByWords,
+        int tabWidth
+    ) {
+        int lineCount = Math.max(1, model.lineCount());
+        int line = Math.max(0, Math.min(topLine, lineCount - 1));
+        int segment = Math.max(0, topWrapSegment);
+        while (line < lineCount) {
+            int segments = model.wrapStarts(line, width, wrapByWords, tabWidth).size();
+            if (segment < segments) {
+                return new WrapTop(line, segment);
+            }
+            segment -= segments;
+            line++;
+        }
+        return new WrapTop(Math.max(0, lineCount - 1), 0);
+    }
+
+    public static WrapTop wrapTopFromWrappedOffset(
+        TextModel model,
+        int wrappedOffset,
+        int width,
+        boolean wrapByWords,
+        int tabWidth
+    ) {
+        int line = lineIndexFromWrappedOffset(model, wrappedOffset, width, wrapByWords, tabWidth);
+        int lineWrappedStart = wrappedRowsBefore(model, line, width, wrapByWords, tabWidth);
+        int segmentOffset = Math.max(0, wrappedOffset - lineWrappedStart);
+        return new WrapTop(line, segmentOffset);
+    }
+
+    public static int wrappedOffsetForWrapTop(
+        TextModel model,
+        WrapTop top,
+        int width,
+        boolean wrapByWords,
+        int tabWidth
+    ) {
+        if (top == null) {
+            return 0;
+        }
+        WrapTop normalized = normalizeWrapTop(
+            model,
+            top.line(),
+            top.segmentOffset(),
+            width,
+            wrapByWords,
+            tabWidth
+        );
+        return wrappedRowsBefore(model, normalized.line(), width, wrapByWords, tabWidth) + normalized.segmentOffset();
+    }
+
+    public static WrapTop wrapTopFromWrappedOffsetNear(
+        TextModel model,
+        int currentLine,
+        int currentSegmentOffset,
+        int currentWrappedOffset,
+        int targetWrappedOffset,
+        int width,
+        boolean wrapByWords,
+        int tabWidth
+    ) {
+        int lineCount = model.lineCount();
+        if (lineCount <= 0) {
+            return new WrapTop(0, 0);
+        }
+        int line = Math.max(0, Math.min(currentLine, lineCount - 1));
+        int offset = Math.max(0, currentWrappedOffset);
+        int segmentOffset = Math.max(0, currentSegmentOffset);
+        int target = Math.max(0, targetWrappedOffset);
+
+        if (segmentOffset > 0) {
+            int segments = model.wrapStarts(line, width, wrapByWords, tabWidth).size();
+            while (line < lineCount - 1 && segmentOffset >= segments) {
+                offset += segments;
+                segmentOffset -= segments;
+                line++;
+                segments = model.wrapStarts(line, width, wrapByWords, tabWidth).size();
+            }
+        }
+
+        if (target >= offset) {
+            while (line < lineCount) {
+                int segments = model.wrapStarts(line, width, wrapByWords, tabWidth).size();
+                int nextOffset = offset + segments;
+                if (target < nextOffset || line == lineCount - 1) {
+                    return new WrapTop(line, Math.max(0, target - offset));
+                }
+                offset = nextOffset;
+                line++;
+            }
+            return new WrapTop(lineCount - 1, 0);
+        }
+
+        while (line > 0) {
+            int prevLine = line - 1;
+            int prevSegments = model.wrapStarts(prevLine, width, wrapByWords, tabWidth).size();
+            int prevOffset = Math.max(0, offset - prevSegments);
+            if (target >= prevOffset) {
+                return new WrapTop(prevLine, Math.max(0, target - prevOffset));
+            }
+            offset = prevOffset;
+            line = prevLine;
+        }
+        return new WrapTop(0, 0);
+    }
+
+    private static int wrappedRowsBefore(
+        TextModel model,
+        int lineIndexExclusive,
+        int width,
+        boolean wrapByWords,
+        int tabWidth
+    ) {
+        int limit = Math.max(0, Math.min(lineIndexExclusive, model.lineCount()));
+        int rows = 0;
+        for (int i = 0; i < limit; i++) {
+            rows += model.wrapStarts(i, width, wrapByWords, tabWidth).size();
+        }
+        return rows;
+    }
+
+    private static int lineIndexFromWrappedOffset(
+        TextModel model,
+        int wrappedOffset,
+        int width,
+        boolean wrapByWords,
+        int tabWidth
+    ) {
+        int remaining = Math.max(0, wrappedOffset);
+        for (int line = 0; line < model.lineCount(); line++) {
+            int segments = model.wrapStarts(line, width, wrapByWords, tabWidth).size();
+            if (remaining < segments) {
+                return line;
+            }
+            remaining -= segments;
+        }
+        return Math.max(0, model.lineCount() - 1);
     }
 }

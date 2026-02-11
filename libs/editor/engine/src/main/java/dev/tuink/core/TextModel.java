@@ -11,7 +11,9 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Editing operations and persistence over a {@link TextBuffer}.
@@ -22,6 +24,7 @@ public class TextModel {
     private int cachedVisualWidthTabWidth = -1;
     private int cachedMaxVisualLineWidth = 0;
     private boolean maxVisualWidthDirty = true;
+    private final Map<WrapStartsKey, List<Integer>> wrapStartsCache = new HashMap<>();
     private long revision = 0L;
 
     public TextModel(TextBuffer buffer) {
@@ -288,6 +291,26 @@ public class TextModel {
         return revision;
     }
 
+    public List<Integer> wrapStarts(int line, int width, boolean wrapByWords, int tabWidth) {
+        if (lineCount() <= 0) {
+            return List.of(0);
+        }
+        int safeLine = Math.max(0, Math.min(line, lineCount() - 1));
+        WrapStartsKey key = new WrapStartsKey(safeLine, Math.max(0, width), wrapByWords, Math.max(1, tabWidth));
+        List<Integer> cached = wrapStartsCache.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        List<Integer> computed = ViewportMetrics.wrapStarts(
+            getLine(safeLine),
+            key.width(),
+            key.wrapByWords(),
+            key.tabWidth()
+        );
+        wrapStartsCache.put(key, computed);
+        return computed;
+    }
+
     public void replaceLines(List<String> lines) {
         buffer.clear();
         if (lines == null || lines.isEmpty()) {
@@ -304,7 +327,11 @@ public class TextModel {
 
     private void invalidateVisualWidthCache() {
         maxVisualWidthDirty = true;
+        wrapStartsCache.clear();
         revision++;
+    }
+
+    private record WrapStartsKey(int line, int width, boolean wrapByWords, int tabWidth) {
     }
 
     private DecodedContent decodeWithDetectedCharset(byte[] data) {

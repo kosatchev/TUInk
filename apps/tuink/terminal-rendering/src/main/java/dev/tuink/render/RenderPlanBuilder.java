@@ -450,16 +450,11 @@ public class RenderPlanBuilder {
     }
 
     private int wrappedRowsBefore(TextModel model, int lineIndexExclusive, int width, boolean wrapByWords) {
-        int limit = Math.max(0, Math.min(lineIndexExclusive, model.lineCount()));
-        int rows = 0;
-        for (int i = 0; i < limit; i++) {
-            rows += wrapStarts(model, i, width, wrapByWords).size();
-        }
-        return rows;
+        return model.wrappedRowsBefore(lineIndexExclusive, width, wrapByWords, tabWidth);
     }
 
     private int totalWrappedRows(TextModel model, int width, boolean wrapByWords) {
-        return wrappedRowsBefore(model, model.lineCount(), width, wrapByWords);
+        return model.totalWrappedRows(width, wrapByWords, tabWidth);
     }
 
     private static String lineNumberGutter(int lineNumber, int gutterWidth) {

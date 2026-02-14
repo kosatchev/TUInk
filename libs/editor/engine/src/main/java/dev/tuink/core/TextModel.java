@@ -25,6 +25,7 @@ public class TextModel {
     private int cachedMaxVisualLineWidth = 0;
     private boolean maxVisualWidthDirty = true;
     private final Map<WrapStartsKey, List<Integer>> wrapStartsCache = new HashMap<>();
+    private final Map<WrapLayoutKey, int[]> wrapPrefixCache = new HashMap<>();
     private long revision = 0L;
 
     public TextModel(TextBuffer buffer) {
@@ -311,6 +312,38 @@ public class TextModel {
         return computed;
     }
 
+    public int wrappedRowsBefore(int lineIndexExclusive, int width, boolean wrapByWords, int tabWidth) {
+        int[] prefix = wrapPrefix(width, wrapByWords, tabWidth);
+        int limit = Math.max(0, Math.min(lineIndexExclusive, lineCount()));
+        return prefix[limit];
+    }
+
+    public int totalWrappedRows(int width, boolean wrapByWords, int tabWidth) {
+        int[] prefix = wrapPrefix(width, wrapByWords, tabWidth);
+        return prefix[Math.max(0, lineCount())];
+    }
+
+    public int lineIndexFromWrappedOffset(int wrappedOffset, int width, boolean wrapByWords, int tabWidth) {
+        int[] prefix = wrapPrefix(width, wrapByWords, tabWidth);
+        int total = prefix[Math.max(0, lineCount())];
+        int target = Math.max(0, Math.min(wrappedOffset, Math.max(0, total - 1)));
+        int lo = 0;
+        int hi = Math.max(0, lineCount() - 1);
+        while (lo <= hi) {
+            int mid = (lo + hi) >>> 1;
+            int start = prefix[mid];
+            int end = prefix[mid + 1];
+            if (target < start) {
+                hi = mid - 1;
+            } else if (target >= end) {
+                lo = mid + 1;
+            } else {
+                return mid;
+            }
+        }
+        return Math.max(0, lineCount() - 1);
+    }
+
     public void replaceLines(List<String> lines) {
         buffer.clear();
         if (lines == null || lines.isEmpty()) {
@@ -328,10 +361,29 @@ public class TextModel {
     private void invalidateVisualWidthCache() {
         maxVisualWidthDirty = true;
         wrapStartsCache.clear();
+        wrapPrefixCache.clear();
         revision++;
     }
 
     private record WrapStartsKey(int line, int width, boolean wrapByWords, int tabWidth) {
+    }
+
+    private int[] wrapPrefix(int width, boolean wrapByWords, int tabWidth) {
+        WrapLayoutKey key = new WrapLayoutKey(Math.max(0, width), wrapByWords, Math.max(1, tabWidth));
+        int[] cached = wrapPrefixCache.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        int count = lineCount();
+        int[] prefix = new int[count + 1];
+        for (int i = 0; i < count; i++) {
+            prefix[i + 1] = prefix[i] + wrapStarts(i, key.width(), key.wrapByWords(), key.tabWidth()).size();
+        }
+        wrapPrefixCache.put(key, prefix);
+        return prefix;
+    }
+
+    private record WrapLayoutKey(int width, boolean wrapByWords, int tabWidth) {
     }
 
     private DecodedContent decodeWithDetectedCharset(byte[] data) {

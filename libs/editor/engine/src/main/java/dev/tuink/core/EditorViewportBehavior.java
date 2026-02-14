@@ -135,8 +135,8 @@ public final class EditorViewportBehavior {
         boolean wrapByWords,
         int tabWidth
     ) {
-        int line = lineIndexFromWrappedOffset(model, wrappedOffset, width, wrapByWords, tabWidth);
-        int lineWrappedStart = wrappedRowsBefore(model, line, width, wrapByWords, tabWidth);
+        int line = model.lineIndexFromWrappedOffset(wrappedOffset, width, wrapByWords, tabWidth);
+        int lineWrappedStart = model.wrappedRowsBefore(line, width, wrapByWords, tabWidth);
         int segmentOffset = Math.max(0, wrappedOffset - lineWrappedStart);
         return new WrapTop(line, segmentOffset);
     }
@@ -159,7 +159,7 @@ public final class EditorViewportBehavior {
             wrapByWords,
             tabWidth
         );
-        return wrappedRowsBefore(model, normalized.line(), width, wrapByWords, tabWidth) + normalized.segmentOffset();
+        return model.wrappedRowsBefore(normalized.line(), width, wrapByWords, tabWidth) + normalized.segmentOffset();
     }
 
     public static WrapTop wrapTopFromWrappedOffsetNear(
@@ -217,36 +217,4 @@ public final class EditorViewportBehavior {
         return new WrapTop(0, 0);
     }
 
-    private static int wrappedRowsBefore(
-        TextModel model,
-        int lineIndexExclusive,
-        int width,
-        boolean wrapByWords,
-        int tabWidth
-    ) {
-        int limit = Math.max(0, Math.min(lineIndexExclusive, model.lineCount()));
-        int rows = 0;
-        for (int i = 0; i < limit; i++) {
-            rows += model.wrapStarts(i, width, wrapByWords, tabWidth).size();
-        }
-        return rows;
-    }
-
-    private static int lineIndexFromWrappedOffset(
-        TextModel model,
-        int wrappedOffset,
-        int width,
-        boolean wrapByWords,
-        int tabWidth
-    ) {
-        int remaining = Math.max(0, wrappedOffset);
-        for (int line = 0; line < model.lineCount(); line++) {
-            int segments = model.wrapStarts(line, width, wrapByWords, tabWidth).size();
-            if (remaining < segments) {
-                return line;
-            }
-            remaining -= segments;
-        }
-        return Math.max(0, model.lineCount() - 1);
-    }
 }

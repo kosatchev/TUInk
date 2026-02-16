@@ -25,6 +25,12 @@ public final class ViewportController {
         manualVerticalPan = true;
     }
 
+    public void onEditorTextInteraction() {
+        // Returning focus to the text area should restore cursor-follow behavior.
+        manualHorizontalPan = false;
+        manualVerticalPan = false;
+    }
+
     public void onScrollbarInteraction(
         EditorView.ScrollPointerResult scrollPointer,
         int leftVisualBefore,

@@ -16,6 +16,8 @@ import dev.tuink.tui.render.VerticalScrollbar;
  * UI helper for the main editor text area.
  */
 public final class EditorView {
+    private static final int EDGE_AUTO_SCROLL_MAX_STEP = 6;
+
     public enum ScrollAxis {
         NONE,
         VERTICAL,
@@ -24,6 +26,7 @@ public final class EditorView {
 
     private final int contentTopRow;
     private boolean mouseSelecting;
+    private boolean edgeAutoScrollDuringSelection;
     private int tabWidth = 4;
 
     public EditorView() {
@@ -45,6 +48,7 @@ public final class EditorView {
 
     public void cancelMouseSelection() {
         mouseSelecting = false;
+        edgeAutoScrollDuringSelection = false;
     }
 
     public void setTabWidth(int tabWidth) {
@@ -74,10 +78,12 @@ public final class EditorView {
         Position hit = mouseToTextPosition(mouse, model, state, plan, contentRows, contentTopRow);
         if (hit != null) {
             mouseSelecting = true;
+            edgeAutoScrollDuringSelection = false;
             state.setSelectionAnchor(hit);
             state.setCursor(hit);
         } else {
             mouseSelecting = false;
+            edgeAutoScrollDuringSelection = false;
         }
         engine.ensureCursorVisible(contentRows);
     }
@@ -105,7 +111,18 @@ public final class EditorView {
         if (!mouseSelecting || mouse.button() != KeyEvent.MouseButton.LEFT) {
             return;
         }
-        Position hit = mouseToTextPosition(mouse, model, state, plan, contentRows, contentTopRow);
+        int top = Math.max(1, contentTopRow);
+        int bottom = top + Math.max(0, contentRows) - 1;
+        KeyEvent.MouseEvent effectiveMouse = mouse;
+        edgeAutoScrollDuringSelection = autoScrollVerticalOnDrag(mouse, model, state, plan, contentRows, contentTopRow);
+        if (mouse.row() < top || mouse.row() > bottom) {
+            int clampedRow = Math.max(
+                top,
+                Math.min(mouse.row(), bottom)
+            );
+            effectiveMouse = new KeyEvent.MouseEvent(clampedRow, mouse.col(), mouse.kind(), mouse.button());
+        }
+        Position hit = mouseToTextPosition(effectiveMouse, model, state, plan, contentRows, contentTopRow);
         if (hit != null) {
             if (state.getSelectionAnchor() == null) {
                 state.setSelectionAnchor(state.getCursor());
@@ -115,14 +132,83 @@ public final class EditorView {
         }
     }
 
+    private boolean autoScrollVerticalOnDrag(
+        KeyEvent.MouseEvent mouse,
+        TextModel model,
+        EditorState state,
+        RenderPlan plan,
+        int contentRows,
+        int contentTopRow
+    ) {
+        if (contentRows <= 0) {
+            return false;
+        }
+        int top = Math.max(1, contentTopRow);
+        int bottom = top + contentRows - 1;
+        int delta = autoScrollDeltaForMouseRow(mouse.row(), top, bottom);
+        if (delta == 0) {
+            return false;
+        }
+        if (plan.wrapLines()) {
+            int visibleCols = Math.max(0, plan.cols() - plan.gutterWidth() - plan.scrollbarWidth());
+            int currentWrappedTop = Math.max(0, plan.topLine());
+            int maxWrappedTop = Math.max(0, plan.totalLines() - Math.max(1, contentRows));
+            int targetWrappedTop = Math.max(0, Math.min(maxWrappedTop, currentWrappedTop + delta));
+            if (targetWrappedTop == currentWrappedTop) {
+                return false;
+            }
+            EditorViewportBehavior.WrapTop targetTop = EditorViewportBehavior.wrapTopFromWrappedOffsetNear(
+                model,
+                state.getTopLine(),
+                state.getTopWrapSegment(),
+                currentWrappedTop,
+                targetWrappedTop,
+                visibleCols,
+                plan.wrapByWords(),
+                tabWidth
+            );
+            EditorViewportBehavior.applyWrapTop(state, targetTop);
+            return true;
+        }
+        int currentTop = state.getTopLine();
+        int maxTop = Math.max(0, model.lineCount() - Math.max(1, contentRows));
+        int targetTop = Math.max(0, Math.min(maxTop, currentTop + delta));
+        if (targetTop != currentTop) {
+            state.setTopLine(targetTop);
+            return true;
+        }
+        return false;
+    }
+
+    private int autoScrollDeltaForMouseRow(int mouseRow, int top, int bottom) {
+        if (mouseRow < top) {
+            return -Math.min(EDGE_AUTO_SCROLL_MAX_STEP, Math.max(1, top - mouseRow));
+        }
+        if (mouseRow > bottom) {
+            return Math.min(EDGE_AUTO_SCROLL_MAX_STEP, Math.max(1, mouseRow - bottom));
+        }
+        if (mouseRow == top) {
+            return -1;
+        }
+        if (mouseRow == bottom) {
+            return 1;
+        }
+        return 0;
+    }
+
     public void handleMouseRelease(EditorState state) {
         if (!mouseSelecting) {
             return;
         }
         mouseSelecting = false;
+        edgeAutoScrollDuringSelection = false;
         if (state.getSelectionAnchor() != null && state.getSelectionAnchor().equals(state.getCursor())) {
             state.clearSelection();
         }
+    }
+
+    public boolean isEdgeAutoScrollDuringSelection() {
+        return edgeAutoScrollDuringSelection;
     }
 
     public Position mouseToTextPosition(

@@ -759,6 +759,7 @@ public class TerminalEditorApp {
                                             engine,
                                             contentTopRow
                                         );
+                                        viewportController.onEditorTextInteraction();
                                     }
                                 }
                             }
@@ -820,6 +821,7 @@ public class TerminalEditorApp {
                                         engine,
                                         contentTopRow
                                     );
+                                    viewportController.onEditorTextInteraction();
                                 }
                             }
                             case RELEASE -> {

@@ -250,24 +250,44 @@ public class EditorEngine {
 
     public void pageUp(int pageRows) {
         preferredVisualColumn = -1;
+        int step = Math.max(pageRows, 1);
+        if (state.hasSelection()) {
+            state.setTopWrapSegment(0);
+            EditorViewportBehavior.applyVerticalScrollKeepCursor(
+                state,
+                model,
+                Math.max(0, state.getTopLine() - step)
+            );
+            return;
+        }
         Position p = state.getCursor();
-        int targetLine = Math.max(0, p.line() - Math.max(pageRows, 1));
+        int targetLine = Math.max(0, p.line() - step);
         int col = Math.min(p.col(), model.getLine(targetLine).length());
         breakCoalescing();
         state.clearSelection();
         state.setCursor(new Position(targetLine, col));
-        state.setTopLine(Math.max(0, state.getTopLine() - Math.max(pageRows, 1)));
+        state.setTopLine(Math.max(0, state.getTopLine() - step));
     }
 
     public void pageDown(int pageRows) {
         preferredVisualColumn = -1;
+        int step = Math.max(pageRows, 1);
+        if (state.hasSelection()) {
+            state.setTopWrapSegment(0);
+            EditorViewportBehavior.applyVerticalScrollKeepCursor(
+                state,
+                model,
+                Math.max(0, state.getTopLine() + step)
+            );
+            return;
+        }
         Position p = state.getCursor();
-        int targetLine = Math.min(model.lineCount() - 1, p.line() + Math.max(pageRows, 1));
+        int targetLine = Math.min(model.lineCount() - 1, p.line() + step);
         int col = Math.min(p.col(), model.getLine(targetLine).length());
         breakCoalescing();
         state.clearSelection();
         state.setCursor(new Position(targetLine, col));
-        state.setTopLine(Math.max(0, state.getTopLine() + Math.max(pageRows, 1)));
+        state.setTopLine(Math.max(0, state.getTopLine() + step));
     }
 
     public void insertChar(char ch) {

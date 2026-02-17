@@ -69,6 +69,8 @@ public class TerminalEditorApp {
     private static final String DISABLE_MOUSE_TRACKING = "\u001B[?1000l\u001B[?1002l\u001B[?1006l";
     private UiStyles.Theme theme = UiStyles.Theme.CYAN;
     private UiStyles.Palette styles = UiStyles.forTheme(theme);
+    private boolean lastOpenFileModeForDiff = false;
+    private int lastOpenFileScrollForDiff = 0;
 
     public static void main(String[] args) throws Exception {
         new TerminalEditorApp().run(args);
@@ -2502,7 +2504,55 @@ public class TerminalEditorApp {
             desiredCursorCol = Math.min(cols, close.cursorCol() + 1);
         }
 
-        String frameDiff = AnsiDiff.diff(previous, current, colorEnabled);
+        String frameDiff;
+        boolean canUseVerticalScrollFastPath = previousPlan != null
+            && previous != null
+            && plan.wrapLines() == previousPlan.wrapLines()
+            && plan.gutterWidth() == previousPlan.gutterWidth()
+            && plan.scrollbarWidth() == previousPlan.scrollbarWidth()
+            && plan.leftVisualColumn() == previousPlan.leftVisualColumn()
+            && plan.topLine() != previousPlan.topLine();
+        boolean canUseHorizontalScrollFastPath = previousPlan != null
+            && previous != null
+            && !plan.wrapLines()
+            && !state.hasSelection()
+            && plan.wrapLines() == previousPlan.wrapLines()
+            && plan.gutterWidth() == previousPlan.gutterWidth()
+            && plan.scrollbarWidth() == previousPlan.scrollbarWidth()
+            && plan.topLine() == previousPlan.topLine()
+            && plan.leftVisualColumn() != previousPlan.leftVisualColumn();
+        int horizontalDeltaColumns = previousPlan == null ? 0 : plan.leftVisualColumn() - previousPlan.leftVisualColumn();
+        int diffRegionTop = contentTopRow;
+        int diffRegionHeight = plan.contentRows();
+        int textStartCol = plan.gutterWidth();
+        int textEndCol = cols - plan.scrollbarWidth() - 1;
+        if (openFileMode) {
+            OpenFileDialogController.OpenDialogLayout layout = OpenFileDialogController.layoutForTerminal(rows, cols);
+            int listTextWidth = openFileTree.visibleTextWidth(layout.left(), layout.right(), layout.listRows());
+            diffRegionTop = layout.listStartRow();
+            diffRegionHeight = layout.listRows();
+            textStartCol = layout.left() + 1;
+            textEndCol = textStartCol + Math.max(0, listTextWidth) - 1;
+            textStartCol = Math.max(0, Math.min(cols - 1, textStartCol));
+            textEndCol = Math.max(textStartCol, Math.min(cols - 1, textEndCol));
+            canUseVerticalScrollFastPath = previous != null
+                && lastOpenFileModeForDiff
+                && openFileTree.scrollOffset() != lastOpenFileScrollForDiff;
+            canUseHorizontalScrollFastPath = false;
+            horizontalDeltaColumns = 0;
+        }
+        frameDiff = AnsiDiff.diff(
+            previous,
+            current,
+            colorEnabled,
+            diffRegionTop,
+            diffRegionHeight,
+            textStartCol,
+            textEndCol,
+            canUseVerticalScrollFastPath,
+            canUseHorizontalScrollFastPath,
+            horizontalDeltaColumns
+        );
         TerminalCursorController.ApplyResult cursorApplyResult = cursorController.apply(
             writer,
             frameDiff,
@@ -2510,6 +2560,8 @@ public class TerminalEditorApp {
             desiredCursorCol,
             desiredCursorVisible
         );
+        lastOpenFileModeForDiff = openFileMode;
+        lastOpenFileScrollForDiff = openFileMode ? openFileTree.scrollOffset() : 0;
         return new RenderFrameResult(
             current,
             plan,

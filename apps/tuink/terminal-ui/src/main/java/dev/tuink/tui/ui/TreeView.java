@@ -40,6 +40,10 @@ public final class TreeView {
         return selectedIndex;
     }
 
+    public int scrollOffset() {
+        return scroll;
+    }
+
     public int visibleIndex(int listRows) {
         ensureVisible(listRows);
         return Math.max(0, Math.min(selectedIndex - scroll, Math.max(0, listRows - 1)));

@@ -6,8 +6,10 @@ import dev.tuink.core.SearchOptions;
 import dev.tuink.core.TextModel;
 import dev.tuink.core.ViewportMetrics;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -15,9 +17,27 @@ import java.util.regex.Pattern;
  * Builds render data from current model and state.
  */
 public class RenderPlanBuilder {
+    private static final int MAX_VISUAL_CACHE_LINES = 1024;
+    private static final int MAX_VISUAL_CACHE_CHARS_PER_LINE = 8192;
+    private static final int MAX_SYNTAX_CACHE_LINES = 1024;
     private final LineHighlighter highlighter;
     private int tabWidth = 4;
     private boolean syntaxHighlightingEnabled = true;
+    private long visualCacheRevision = Long.MIN_VALUE;
+    private int visualCacheTabWidth = -1;
+    private final Map<Integer, LineMetrics> lineMetricsCache = new LinkedHashMap<>(256, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<Integer, LineMetrics> eldest) {
+            return size() > MAX_VISUAL_CACHE_LINES;
+        }
+    };
+    private long syntaxCacheRevision = Long.MIN_VALUE;
+    private final Map<Integer, SyntaxSpans> syntaxSpanCache = new LinkedHashMap<>(256, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<Integer, SyntaxSpans> eldest) {
+            return size() > MAX_SYNTAX_CACHE_LINES;
+        }
+    };
     private static final Style SELECTION_STYLE = new Style(Color.BLACK, Color.BRIGHT_WHITE, false, false);
     private static final Style SEARCH_MATCH_STYLE = SELECTION_STYLE;
     private static final Style CURRENT_SEARCH_MATCH_STYLE = new Style(Color.BLACK, Color.BRIGHT_YELLOW, false, false);
@@ -182,6 +202,8 @@ public class RenderPlanBuilder {
     ) {
         int safeRows = Math.max(rows, 1);
         int safeCols = Math.max(cols, 1);
+        ensureVisualCache(model);
+        ensureSyntaxCache(model);
         int extraBottomRows = lineCount(interactiveBarText);
         int contentRows = Math.max(0, safeRows - 2 - extraBottomRows);
         boolean needVerticalScrollbar = state.getTopLine() > 0 || model.lineCount() > contentRows;
@@ -201,11 +223,8 @@ public class RenderPlanBuilder {
                 wrapViewport = resolveWrapViewport(model, state.getTopLine(), state.getTopWrapSegment(), textWidth, wrapByWords);
             }
         }
-        int totalColumns = 0;
-        for (int i = 0; i < model.lineCount(); i++) {
-            String line = model.getLine(i);
-            totalColumns = Math.max(totalColumns, ViewportMetrics.textToVisualColumn(line, 0, line.length(), tabWidth));
-        }
+        // Reuse model-level cache instead of scanning all lines on every frame.
+        int totalColumns = model.maxVisualLineWidth(tabWidth);
 
         List<LineVisual> lines = new ArrayList<>(contentRows);
         if (!wrapLines) {
@@ -214,9 +233,12 @@ public class RenderPlanBuilder {
                 int lineIndex = state.getTopLine() + row;
                 if (lineIndex < model.lineCount()) {
                     String line = model.getLine(lineIndex);
-                    int lineLeftColumn = columnForVisualColumn(line, leftVisualColumn);
-                    String visibleText = clipByVisualWidth(line, lineLeftColumn, textWidth);
-                    List<StyleSpan> syntaxSpans = syntaxHighlightingEnabled ? highlighter.highlight(line) : List.of();
+                    VisualSlice slice = visibleSlice(model, lineIndex, line, leftVisualColumn, textWidth);
+                    int lineLeftColumn = slice.startCol();
+                    String visibleText = slice.text();
+                    List<StyleSpan> syntaxSpans = syntaxHighlightingEnabled
+                        ? syntaxSpansForLine(model, lineIndex, line)
+                        : List.of();
                     List<StyleSpan> spans = new ArrayList<>(clipSpans(syntaxSpans, lineLeftColumn, visibleText.length()));
                     spans.addAll(
                         clipSpans(
@@ -257,7 +279,7 @@ public class RenderPlanBuilder {
                 }
                 String line = model.getLine(lineIndex);
                 List<StyleSpan> lineSpans = new ArrayList<>(
-                    syntaxHighlightingEnabled ? highlighter.highlight(line) : List.of()
+                    syntaxHighlightingEnabled ? syntaxSpansForLine(model, lineIndex, line) : List.of()
                 );
                 lineSpans.addAll(searchMatchSpans(line, searchQuery, searchOptions, SEARCH_MATCH_STYLE));
                 StyleSpan selection = selectionSpanForLine(state, model, lineIndex, 0, line.length());
@@ -297,7 +319,7 @@ public class RenderPlanBuilder {
         Position cursor = model.clamp(state.getCursor());
         int cursorRow;
         int leftVisualColumn = Math.max(0, state.getLeftVisualColumn());
-        int cursorLineLeftColumn = columnForVisualColumn(model.getLine(cursor.line()), leftVisualColumn);
+        int cursorLineLeftColumn = columnForVisualColumn(model, cursor.line(), model.getLine(cursor.line()), leftVisualColumn);
         int cursorCol;
         if (!wrapLines) {
             cursorRow = cursor.line() - state.getTopLine();
@@ -407,25 +429,6 @@ public class RenderPlanBuilder {
         return model.wrapStarts(lineIndex, maxVisualWidth, wrapByWords, tabWidth);
     }
 
-    private String clipByVisualWidth(String line, int leftColumn, int maxWidth) {
-        if (maxWidth <= 0 || leftColumn >= line.length()) {
-            return "";
-        }
-        int start = Math.max(0, leftColumn);
-        int end = start;
-        int visual = 0;
-        while (end < line.length()) {
-            char ch = line.charAt(end);
-            int advance = ch == '\t' ? tabWidth - (visual % tabWidth) : 1;
-            if (visual + advance > maxWidth) {
-                break;
-            }
-            visual += advance;
-            end++;
-        }
-        return line.substring(start, end);
-    }
-
     private static List<StyleSpan> clipSpans(List<StyleSpan> spans, int leftColumn, int visibleLength) {
         if (visibleLength <= 0 || spans.isEmpty()) {
             return List.of();
@@ -445,8 +448,134 @@ public class RenderPlanBuilder {
         return clipped;
     }
 
-    private int columnForVisualColumn(String line, int targetVisual) {
-        return ViewportMetrics.visualToTextColumn(line, 0, targetVisual, tabWidth);
+    private VisualSlice visibleSlice(TextModel model, int lineIndex, String line, int leftVisualColumn, int maxWidth) {
+        if (maxWidth <= 0 || line.isEmpty()) {
+            return new VisualSlice(0, "");
+        }
+        int safeLeftVisual = Math.max(0, leftVisualColumn);
+        LineMetrics metrics = lineMetrics(model, lineIndex, line);
+        if (metrics == null) {
+            int start = ViewportMetrics.visualToTextColumn(line, 0, safeLeftVisual, tabWidth);
+            int end = start;
+            int visual = 0;
+            while (end < line.length()) {
+                char ch = line.charAt(end);
+                int advance = ch == '\t' ? tabWidth - (visual % tabWidth) : 1;
+                if (visual + advance > maxWidth) {
+                    break;
+                }
+                visual += advance;
+                end++;
+            }
+            return new VisualSlice(start, line.substring(start, end));
+        }
+        int start = columnForVisualWithMetrics(metrics, safeLeftVisual);
+        int[] prefix = metrics.visualPrefix();
+        int baseVisual = prefix[start];
+        int maxVisual = baseVisual + maxWidth;
+        int end = upperBound(prefix, maxVisual) - 1;
+        end = Math.max(start, Math.min(end, line.length()));
+        return new VisualSlice(start, line.substring(start, end));
+    }
+
+    private int columnForVisualColumn(TextModel model, int lineIndex, String line, int targetVisual) {
+        LineMetrics metrics = lineMetrics(model, lineIndex, line);
+        if (metrics == null) {
+            return ViewportMetrics.visualToTextColumn(line, 0, targetVisual, tabWidth);
+        }
+        return columnForVisualWithMetrics(metrics, Math.max(0, targetVisual));
+    }
+
+    private int columnForVisualWithMetrics(LineMetrics metrics, int targetVisual) {
+        int[] prefix = metrics.visualPrefix();
+        int atOrAfter = upperBound(prefix, targetVisual);
+        if (atOrAfter <= 1) {
+            return 0;
+        }
+        if (atOrAfter > prefix.length) {
+            return prefix.length - 1;
+        }
+        // Floor semantics are required for viewport-left mapping and cursor-follow.
+        return atOrAfter - 1;
+    }
+
+    private LineMetrics lineMetrics(TextModel model, int lineIndex, String line) {
+        if (line.length() > MAX_VISUAL_CACHE_CHARS_PER_LINE) {
+            return null;
+        }
+        LineMetrics cached = lineMetricsCache.get(lineIndex);
+        if (cached != null && cached.lineText().equals(line)) {
+            return cached;
+        }
+        int[] prefix = new int[line.length() + 1];
+        int visual = 0;
+        prefix[0] = 0;
+        for (int i = 0; i < line.length(); i++) {
+            char ch = line.charAt(i);
+            int advance = ch == '\t' ? tabWidth - (visual % tabWidth) : 1;
+            visual += advance;
+            prefix[i + 1] = visual;
+        }
+        LineMetrics computed = new LineMetrics(line, prefix);
+        lineMetricsCache.put(lineIndex, computed);
+        return computed;
+    }
+
+    private void ensureVisualCache(TextModel model) {
+        long revision = model.revision();
+        if (visualCacheRevision == revision && visualCacheTabWidth == tabWidth) {
+            return;
+        }
+        lineMetricsCache.clear();
+        visualCacheRevision = revision;
+        visualCacheTabWidth = tabWidth;
+    }
+
+    private void ensureSyntaxCache(TextModel model) {
+        long revision = model.revision();
+        if (syntaxCacheRevision == revision) {
+            return;
+        }
+        syntaxSpanCache.clear();
+        syntaxCacheRevision = revision;
+    }
+
+    private List<StyleSpan> syntaxSpansForLine(TextModel model, int lineIndex, String line) {
+        SyntaxSpans cached = syntaxSpanCache.get(lineIndex);
+        if (cached != null && cached.lineText().equals(line)) {
+            return cached.spans();
+        }
+        List<StyleSpan> spans = List.copyOf(highlighter.highlight(line));
+        syntaxSpanCache.put(lineIndex, new SyntaxSpans(line, spans));
+        return spans;
+    }
+
+    private static int lowerBound(int[] arr, int target) {
+        int lo = 0;
+        int hi = arr.length;
+        while (lo < hi) {
+            int mid = (lo + hi) >>> 1;
+            if (arr[mid] < target) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        return lo;
+    }
+
+    private static int upperBound(int[] arr, int target) {
+        int lo = 0;
+        int hi = arr.length;
+        while (lo < hi) {
+            int mid = (lo + hi) >>> 1;
+            if (arr[mid] <= target) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        return lo;
     }
 
     private int wrappedRowsBefore(TextModel model, int lineIndexExclusive, int width, boolean wrapByWords) {
@@ -626,5 +755,14 @@ public class RenderPlanBuilder {
     }
 
     private record LineMatch(int start, int end) {
+    }
+
+    private record LineMetrics(String lineText, int[] visualPrefix) {
+    }
+
+    private record VisualSlice(int startCol, String text) {
+    }
+
+    private record SyntaxSpans(String lineText, List<StyleSpan> spans) {
     }
 }

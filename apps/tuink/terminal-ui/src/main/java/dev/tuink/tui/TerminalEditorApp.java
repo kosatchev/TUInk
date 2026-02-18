@@ -46,8 +46,10 @@ import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.jline.terminal.Attributes;
 import org.jline.terminal.Attributes.LocalFlag;
@@ -65,10 +67,13 @@ public class TerminalEditorApp {
     private static final long OPEN_DIALOG_DOUBLE_CLICK_NANOS = 450_000_000L;
     private static final long IDLE_INPUT_POLL_TIMEOUT_MS = 16L;
     private static final long MAX_DEADLINE_INPUT_POLL_TIMEOUT_MS = 50L;
+    private static final int PROFILE_LOG_EVERY_FRAMES = 30;
     private static final String ENABLE_MOUSE_TRACKING = "\u001B[?1000h\u001B[?1002h\u001B[?1006h";
     private static final String DISABLE_MOUSE_TRACKING = "\u001B[?1000l\u001B[?1002l\u001B[?1006l";
     private UiStyles.Theme theme = UiStyles.Theme.CYAN;
     private UiStyles.Palette styles = UiStyles.forTheme(theme);
+    private boolean profileEnabled = false;
+    private final FrameProfiler frameProfiler = new FrameProfiler();
     private boolean lastOpenFileModeForDiff = false;
     private int lastOpenFileScrollForDiff = 0;
 
@@ -88,6 +93,20 @@ public class TerminalEditorApp {
         if (cli.showHelp()) {
             printUsage();
             return;
+        }
+        profileEnabled = cli.profileEnabled();
+        if (cli.profileFile() != null) {
+            PrintWriter profileWriter = new PrintWriter(
+                Files.newBufferedWriter(
+                    cli.profileFile(),
+                    StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING,
+                    StandardOpenOption.WRITE
+                ),
+                true
+            );
+            frameProfiler.setOutput(profileWriter, true);
         }
 
         AppSettings loadedSettings = AppSettings.defaults();
@@ -274,12 +293,18 @@ public class TerminalEditorApp {
                     Path pendingOverwritePath = modalState.pendingOverwritePath();
                     int pendingCloseTabIndex = modalState.pendingCloseTabIndex();
                     if (needsRender) {
+                        if (profileEnabled) {
+                            frameProfiler.beginFrame();
+                        }
                         int searchMatchCount = countSearchMatches(
                             searchUi.allTabs() ? null : model,
                             searchUi.allTabs() ? tabs : null,
                             searchQueryInput.text(),
                             SearchController.toSearchOptions(searchUi)
                         );
+                        if (profileEnabled) {
+                            frameProfiler.searchNanos = frameProfiler.stopwatchNanos();
+                        }
                         searchBar = uiSessionState.searchMode
                             ? buildSearchBar(
                                 searchQueryInput,
@@ -464,6 +489,9 @@ public class TerminalEditorApp {
                         lastCursorVisible = frameResult.lastCursorVisible();
                         if (frameResult.rendered()) {
                             needsRender = false;
+                        }
+                        if (profileEnabled) {
+                            frameProfiler.endFrame(frameResult.rendered());
                         }
                     }
 
@@ -1198,6 +1226,7 @@ public class TerminalEditorApp {
                 }
             } finally {
                 cleanup.run();
+                frameProfiler.close();
                 try {
                     Runtime.getRuntime().removeShutdownHook(shutdownHook);
                 } catch (IllegalStateException ignored) {
@@ -2397,23 +2426,52 @@ public class TerminalEditorApp {
                 false
             );
         }
-        RenderPlan plan = renderPlanBuilder.build(
-            model,
-            state,
-            planRows,
-            cols,
-            topBar,
-            bottomBar,
-            searchMode ? searchQuery : null,
-            SearchController.toSearchOptions(searchUi),
-            interactiveBarText,
-            interactiveBarStyle,
-            notificationBar.text(),
-            notificationBar.style(),
-            wrapLinesSetting,
-            wrapWordsSetting
-        );
-        CellBuffer current = renderer.rasterize(plan, rows, cols, contentTopRow);
+        RenderPlan plan;
+        if (profileEnabled) {
+            long buildStart = System.nanoTime();
+            plan = renderPlanBuilder.build(
+                model,
+                state,
+                planRows,
+                cols,
+                topBar,
+                bottomBar,
+                searchMode ? searchQuery : null,
+                SearchController.toSearchOptions(searchUi),
+                interactiveBarText,
+                interactiveBarStyle,
+                notificationBar.text(),
+                notificationBar.style(),
+                wrapLinesSetting,
+                wrapWordsSetting
+            );
+            frameProfiler.buildNanos = System.nanoTime() - buildStart;
+        } else {
+            plan = renderPlanBuilder.build(
+                model,
+                state,
+                planRows,
+                cols,
+                topBar,
+                bottomBar,
+                searchMode ? searchQuery : null,
+                SearchController.toSearchOptions(searchUi),
+                interactiveBarText,
+                interactiveBarStyle,
+                notificationBar.text(),
+                notificationBar.style(),
+                wrapLinesSetting,
+                wrapWordsSetting
+            );
+        }
+        CellBuffer current;
+        if (profileEnabled) {
+            long rasterStart = System.nanoTime();
+            current = renderer.rasterize(plan, rows, cols, contentTopRow);
+            frameProfiler.rasterNanos = System.nanoTime() - rasterStart;
+        } else {
+            current = renderer.rasterize(plan, rows, cols, contentTopRow);
+        }
         paintSelectedConfirmButton(current, confirmBar, rows, cols);
         paintSelectedSearchButton(current, searchBar, searchFocus, rows, inlinePromptBarHeight, cols);
         if (showTabBar) {
@@ -2541,18 +2599,35 @@ public class TerminalEditorApp {
             canUseHorizontalScrollFastPath = false;
             horizontalDeltaColumns = 0;
         }
-        frameDiff = AnsiDiff.diff(
-            previous,
-            current,
-            colorEnabled,
-            diffRegionTop,
-            diffRegionHeight,
-            textStartCol,
-            textEndCol,
-            canUseVerticalScrollFastPath,
-            canUseHorizontalScrollFastPath,
-            horizontalDeltaColumns
-        );
+        if (profileEnabled) {
+            long diffStart = System.nanoTime();
+            frameDiff = AnsiDiff.diff(
+                previous,
+                current,
+                colorEnabled,
+                diffRegionTop,
+                diffRegionHeight,
+                textStartCol,
+                textEndCol,
+                canUseVerticalScrollFastPath,
+                canUseHorizontalScrollFastPath,
+                horizontalDeltaColumns
+            );
+            frameProfiler.diffNanos = System.nanoTime() - diffStart;
+        } else {
+            frameDiff = AnsiDiff.diff(
+                previous,
+                current,
+                colorEnabled,
+                diffRegionTop,
+                diffRegionHeight,
+                textStartCol,
+                textEndCol,
+                canUseVerticalScrollFastPath,
+                canUseHorizontalScrollFastPath,
+                horizontalDeltaColumns
+            );
+        }
         TerminalCursorController.ApplyResult cursorApplyResult = cursorController.apply(
             writer,
             frameDiff,
@@ -3533,19 +3608,36 @@ public class TerminalEditorApp {
         boolean colorEnabled = true;
         Boolean readModeOverride = null;
         boolean showHelp = false;
+        boolean profileEnabled = false;
+        Path profileFile = null;
         UiStyles.Theme themeOverride = null;
         Path file = null;
 
-        for (String arg : args) {
+        for (int i = 0; i < args.length; i++) {
+            String arg = args[i];
             switch (arg) {
                 case "--no-mouse" -> mouseEnabledOverride = false;
                 case "--no-alt-screen" -> altScreenEnabled = false;
                 case "--no-color" -> colorEnabled = false;
                 case "--read" -> readModeOverride = true;
+                case "--profile" -> profileEnabled = true;
                 case "--help", "-h" -> showHelp = true;
                 default -> {
+                    if ("--profile-file".equals(arg)) {
+                        if (i + 1 >= args.length) {
+                            throw new IllegalArgumentException("Missing value after --profile-file");
+                        }
+                        profileFile = Path.of(args[++i]);
+                        profileEnabled = true;
+                        continue;
+                    }
                     if (arg.startsWith("--theme=")) {
                         themeOverride = UiStyles.Theme.parse(arg.substring("--theme=".length()));
+                        continue;
+                    }
+                    if (arg.startsWith("--profile-file=")) {
+                        profileFile = Path.of(arg.substring("--profile-file=".length()));
+                        profileEnabled = true;
                         continue;
                     }
                     if (arg.startsWith("--")) {
@@ -3558,7 +3650,17 @@ public class TerminalEditorApp {
                 }
             }
         }
-        return new CliOptions(file, mouseEnabledOverride, altScreenEnabled, colorEnabled, readModeOverride, showHelp, themeOverride);
+        return new CliOptions(
+            file,
+            mouseEnabledOverride,
+            altScreenEnabled,
+            colorEnabled,
+            readModeOverride,
+            showHelp,
+            themeOverride,
+            profileEnabled,
+            profileFile
+        );
     }
 
     private void printUsage() {
@@ -3569,6 +3671,8 @@ public class TerminalEditorApp {
         System.out.println("  --no-color       Render in monochrome (no ANSI colors, keep text attributes)");
         System.out.println("  --theme=<name>   UI palette: blue, cyan (default), light");
         System.out.println("  --read           Start in reading mode (editing disabled)");
+        System.out.println("  --profile        Log render timings to stderr every " + PROFILE_LOG_EVERY_FRAMES + " frames");
+        System.out.println("  --profile-file   Write profile logs to a file (also enables --profile)");
         System.out.println("  --help, -h       Show this help");
     }
 
@@ -3583,7 +3687,77 @@ public class TerminalEditorApp {
         boolean colorEnabled,
         Boolean readModeOverride,
         boolean showHelp,
-        UiStyles.Theme themeOverride
+        UiStyles.Theme themeOverride,
+        boolean profileEnabled,
+        Path profileFile
     ) {
+    }
+
+    private final class FrameProfiler {
+        private long frameStartNanos;
+        private long searchNanos;
+        private long buildNanos;
+        private long rasterNanos;
+        private long diffNanos;
+        private long totalNanos;
+        private long frameIndex;
+        private long stopwatchStartNanos;
+        private PrintWriter out = new PrintWriter(System.err, true);
+        private boolean closeOut;
+
+        private void setOutput(PrintWriter out, boolean closeOut) {
+            if (out == null) {
+                return;
+            }
+            this.out = out;
+            this.closeOut = closeOut;
+        }
+
+        private void beginFrame() {
+            frameStartNanos = System.nanoTime();
+            stopwatchStartNanos = frameStartNanos;
+            searchNanos = 0L;
+            buildNanos = 0L;
+            rasterNanos = 0L;
+            diffNanos = 0L;
+        }
+
+        private long stopwatchNanos() {
+            long now = System.nanoTime();
+            long delta = now - stopwatchStartNanos;
+            stopwatchStartNanos = now;
+            return delta;
+        }
+
+        private void endFrame(boolean rendered) {
+            if (!rendered) {
+                return;
+            }
+            totalNanos = System.nanoTime() - frameStartNanos;
+            frameIndex++;
+            if (frameIndex % PROFILE_LOG_EVERY_FRAMES == 0) {
+                log();
+            }
+        }
+
+        private void log() {
+            out.printf(
+                Locale.ROOT,
+                "frame=%d build=%.2fms raster=%.2fms diff=%.2fms search=%.2fms total=%.2fms%n",
+                frameIndex,
+                buildNanos / 1_000_000.0,
+                rasterNanos / 1_000_000.0,
+                diffNanos / 1_000_000.0,
+                searchNanos / 1_000_000.0,
+                totalNanos / 1_000_000.0
+            );
+            out.flush();
+        }
+
+        private void close() {
+            if (closeOut) {
+                out.close();
+            }
+        }
     }
 }

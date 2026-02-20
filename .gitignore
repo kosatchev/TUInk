@@ -8,6 +8,7 @@ build/
 # Java
 *.class
 out/
+**/bin/
 
 # IDE
 .idea/
@@ -22,6 +23,7 @@ Thumbs.db
 *.swp
 *.swo
 *~
+*.log
 
 # Local development files
-todo.md
+research/

@@ -30,6 +30,8 @@ The editor is functional, cleanup is ongoing, and a larger refactor is planned o
 ./gradlew :app:run
 ```
 
+Run from an interactive TTY terminal. Non-interactive consoles may fall back to a dumb terminal and fail.
+
 Run with file and flags:
 
 ```bash
@@ -39,8 +41,45 @@ Run with file and flags:
 ./gradlew :app:run -PappArgs="--no-color file.txt"
 ./gradlew :app:run -PappArgs="--theme=light file.txt"
 ./gradlew :app:run -PappArgs="--read file.txt"
+./gradlew :app:run -PappArgs="--profile --profile-file=profile-jvm.log file.txt"
 ./gradlew :app:run -PappArgs="--help"
 ```
+
+## Profiling (render loop)
+
+Supported profiling flags:
+
+- `--profile` enables frame timing logs (every 30 frames) to `stderr`.
+- `--profile-file=<path>` or `--profile-file <path>` writes the same logs to a file and also enables `--profile`.
+
+JVM examples:
+
+```bash
+# log to stderr (redirect to file if needed)
+./gradlew --console=plain :app:run -PappArgs="--profile file.txt" 2>profile-jvm.log
+
+# log directly to file from app argument
+./gradlew --console=plain :app:run -PappArgs="--profile-file=/absolute/path/profile-jvm.log file.txt"
+```
+
+Native example:
+
+```bash
+./apps/tuink/launcher/build/native/nativeCompile/tuink --profile --profile-file=/absolute/path/profile-native.log file.txt
+```
+
+Profile line format:
+
+```text
+frame=30 build=3.10ms raster=0.67ms diff=170.09ms search=0.00ms total=174.03ms
+```
+
+Metrics:
+- `build`: render-plan/UI preparation.
+- `raster`: rasterization into `CellBuffer`.
+- `diff`: ANSI diff generation between previous/current frame.
+- `search`: search match counting for search UI.
+- `total`: full frame time.
 
 ## Native Build
 

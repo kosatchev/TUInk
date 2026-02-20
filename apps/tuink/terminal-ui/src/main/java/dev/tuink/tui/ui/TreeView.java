@@ -8,6 +8,9 @@ import dev.tuink.tui.render.VerticalScrollbar;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -19,16 +22,33 @@ import java.util.Set;
  * Reusable folder-tree UI element: tree model, navigation, rendering and mouse hit-testing.
  */
 public final class TreeView {
+    private static final int MIN_LABEL_WIDTH_WITH_META = 12;
+    private static final int DEFAULT_SIZE_COLUMN_WIDTH = 11;
+    private static final int MIN_SIZE_COLUMN_WIDTH = 7;
+    private static final int DATE_COLUMN_WIDTH = 14;
+    private static final String UNKNOWN_DATE = "--.--.-- --:--";
+    private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd.MM.yy HH:mm", Locale.ROOT);
+
     private Path root;
     private final Set<Path> expandedDirs = new HashSet<>();
     private List<Item> items = List.of();
+    private int maxLabelLength;
     private int selectedIndex;
     private int scroll;
     private int hScroll;
     private int lastClickIndex = -1;
     private long lastClickAtNanos;
+    private boolean showSizeColumn;
+    private boolean showDateColumn;
+    private boolean showHiddenFiles;
 
     public TreeView(Path root) {
+        this(root, false, false);
+    }
+
+    public TreeView(Path root, boolean showSizeColumn, boolean showDateColumn) {
+        this.showSizeColumn = showSizeColumn;
+        this.showDateColumn = showDateColumn;
         setRoot(root);
     }
 
@@ -44,8 +64,42 @@ public final class TreeView {
         return scroll;
     }
 
+    public boolean showHiddenFiles() {
+        return showHiddenFiles;
+    }
+
+    public void setShowHiddenFiles(boolean enabled) {
+        if (showHiddenFiles == enabled) {
+            return;
+        }
+        Path selectedPath = selectedItem() == null ? null : selectedItem().path().toAbsolutePath().normalize();
+        showHiddenFiles = enabled;
+        rebuild();
+        restoreSelection(selectedPath);
+        scroll = Math.min(scroll, Math.max(0, items.size() - 1));
+    }
+
+    public void setShowSizeColumn(boolean enabled) {
+        if (showSizeColumn == enabled) {
+            return;
+        }
+        Path selectedPath = selectedItem() == null ? null : selectedItem().path().toAbsolutePath().normalize();
+        showSizeColumn = enabled;
+        rebuild();
+        restoreSelection(selectedPath);
+    }
+
+    public void setShowDateColumn(boolean enabled) {
+        if (showDateColumn == enabled) {
+            return;
+        }
+        Path selectedPath = selectedItem() == null ? null : selectedItem().path().toAbsolutePath().normalize();
+        showDateColumn = enabled;
+        rebuild();
+        restoreSelection(selectedPath);
+    }
+
     public int visibleIndex(int listRows) {
-        ensureVisible(listRows);
         return Math.max(0, Math.min(selectedIndex - scroll, Math.max(0, listRows - 1)));
     }
 
@@ -111,13 +165,21 @@ public final class TreeView {
     }
 
     public void scrollUp(int listRows) {
-        selectedIndex = Math.max(0, selectedIndex - 1);
-        ensureVisible(listRows);
+        if (items.isEmpty()) {
+            return;
+        }
+        int rows = Math.max(1, listRows);
+        scroll = Math.max(0, scroll - 1);
+        clampScroll(rows);
     }
 
     public void scrollDown(int listRows) {
-        selectedIndex = Math.min(Math.max(0, items.size() - 1), selectedIndex + 1);
-        ensureVisible(listRows);
+        if (items.isEmpty()) {
+            return;
+        }
+        int rows = Math.max(1, listRows);
+        scroll = Math.min(maxScrollForRows(rows), scroll + 1);
+        clampScroll(rows);
     }
 
     public void scrollLeft() {
@@ -133,7 +195,13 @@ public final class TreeView {
         hScroll = Math.min(max, hScroll + 2);
     }
 
+    // Width of scrollable label text area (used by horizontal list navigation).
     public int visibleTextWidth(int left, int right, int listRows) {
+        return computeLayout(left, right, listRows).labelWidth();
+    }
+
+    // Full row width inside list body: label + metadata columns (used by ANSI fast-path region).
+    public int visibleRowWidth(int left, int right, int listRows) {
         return computeLayout(left, right, listRows).textWidth();
     }
 
@@ -147,17 +215,16 @@ public final class TreeView {
     ) {
         DrawLayout layout = computeLayout(left, right, listRows);
         int textRows = layout.textRows();
-        int textWidth = layout.textWidth();
-        if (layout.showHScrollbar()) {
+        if (layout.showHScrollbar() && layout.labelWidth() > 0) {
             int row = listStartRow + textRows;
             int startCol = left + 1;
-            int total = Math.max(textWidth, maxLabelLength());
+            int total = Math.max(layout.labelWidth(), maxLabelLength());
             ScrollInteraction.Hit hit = HorizontalScrollbar.hit(
                 mouseRow,
                 mouseCol,
                 row,
                 startCol,
-                textWidth,
+                layout.labelWidth(),
                 total,
                 hScroll
             );
@@ -165,7 +232,7 @@ public final class TreeView {
                 hScroll = HorizontalScrollbar.scrollFromPointer(
                     mouseCol,
                     startCol,
-                    textWidth,
+                    layout.labelWidth(),
                     total
                 );
                 return new ScrollPointerResult(true, ScrollAxis.HORIZONTAL, true);
@@ -175,7 +242,7 @@ public final class TreeView {
                     hScroll,
                     mouseCol,
                     startCol,
-                    textWidth,
+                    layout.labelWidth(),
                     total
                 );
                 return new ScrollPointerResult(true, ScrollAxis.HORIZONTAL, false);
@@ -195,11 +262,12 @@ public final class TreeView {
             );
             if (hit == ScrollInteraction.Hit.THUMB) {
                 scroll = VerticalScrollbar.scrollFromPointer(mouseRow, top, textRows, items.size());
-                scroll = Math.max(0, Math.min(scroll, Math.max(0, items.size() - textRows)));
+                clampScroll(textRows);
                 return new ScrollPointerResult(true, ScrollAxis.VERTICAL, true);
             }
             if (hit == ScrollInteraction.Hit.TRACK) {
                 scroll = VerticalScrollbar.pageScrollFromTrackClick(scroll, mouseRow, top, textRows, items.size());
+                clampScroll(textRows);
                 return new ScrollPointerResult(true, ScrollAxis.VERTICAL, false);
             }
         }
@@ -219,15 +287,13 @@ public final class TreeView {
             return;
         }
         DrawLayout layout = computeLayout(left, right, listRows);
-        if (axis == ScrollAxis.HORIZONTAL && layout.showHScrollbar()) {
-            int textRows = layout.textRows();
-            int textWidth = layout.textWidth();
+        if (axis == ScrollAxis.HORIZONTAL && layout.showHScrollbar() && layout.labelWidth() > 0) {
             int startCol = left + 1;
             hScroll = HorizontalScrollbar.scrollFromPointer(
                 mouseCol,
                 startCol,
-                textWidth,
-                Math.max(textWidth, maxLabelLength())
+                layout.labelWidth(),
+                Math.max(layout.labelWidth(), maxLabelLength())
             );
             return;
         }
@@ -235,7 +301,7 @@ public final class TreeView {
             int textRows = layout.textRows();
             int top = listStartRow;
             scroll = VerticalScrollbar.scrollFromPointer(mouseRow, top, textRows, items.size());
-            scroll = Math.max(0, Math.min(scroll, Math.max(0, items.size() - textRows)));
+            clampScroll(textRows);
         }
     }
 
@@ -282,12 +348,7 @@ public final class TreeView {
         }
         Path selectedPath = selected.path().toAbsolutePath().normalize();
         rebuild();
-        int restored = findIndexByPath(selectedPath);
-        if (restored >= 0) {
-            selectedIndex = restored;
-        } else {
-            selectedIndex = Math.min(selectedIndex, Math.max(0, items.size() - 1));
-        }
+        restoreSelection(selectedPath);
         scroll = Math.min(scroll, Math.max(0, items.size() - 1));
         return true;
     }
@@ -303,7 +364,7 @@ public final class TreeView {
         long doubleClickWindowNanos
     ) {
         DrawLayout layout = computeLayout(left, right, listRows);
-        int listBottom = listStartRow + listRows - 1;
+        int listBottom = listStartRow + layout.textRows() - 1;
         if (mouseCol < left + 1 || mouseCol > right - 1 || mouseRow < listStartRow || mouseRow > listBottom) {
             return new ClickResult(false, false, false, null);
         }
@@ -321,7 +382,7 @@ public final class TreeView {
         Item selected = items.get(selectedIndex);
 
         int arrowCol = left + 2 + Math.max(0, selected.depth()) * 2 - hScroll;
-        boolean arrowVisible = arrowCol >= left + 1 && arrowCol < left + 1 + layout.textWidth();
+        boolean arrowVisible = arrowCol >= left + 1 && arrowCol < left + 1 + layout.labelWidth();
         boolean arrowClick = selected.directory() && arrowVisible && mouseCol == arrowCol;
         boolean doubleClick = clicked == lastClickIndex && nowNanos - lastClickAtNanos <= doubleClickWindowNanos;
         lastClickIndex = clicked;
@@ -350,20 +411,24 @@ public final class TreeView {
         Style scrollThumbStyle
     ) {
         DrawLayout layout = computeLayout(left, right, listRows);
-        ensureVisible(layout.textRows());
-        int textWidth = layout.textWidth();
+        normalizeSelection();
+        clampScroll(layout.textRows());
+
+        int labelWidth = layout.labelWidth();
         int textRows = layout.textRows();
-        int maxHScroll = Math.max(0, maxLabelLength() - textWidth);
+        int sizeWidth = layout.sizeWidth();
+        int dateWidth = layout.dateWidth();
+        int maxHScroll = Math.max(0, maxLabelLength() - labelWidth);
         hScroll = Math.max(0, Math.min(hScroll, maxHScroll));
+
         for (int i = 0; i < textRows; i++) {
             int itemIndex = scroll + i;
             int row = listStartRow + i;
-            String rawLabel = itemIndex < items.size() ? items.get(itemIndex).label() : "";
-            String label = clipHorizontal(rawLabel, hScroll, textWidth);
             Style style = itemIndex == selectedIndex
                 ? (colorEnabled ? selectedColorStyle : selectedMonoStyle)
                 : normalStyle;
-            drawLine(buffer, row, left + 1, padRight(" " + label, textWidth), style, cols);
+            String line = rowText(itemIndex, labelWidth, sizeWidth, dateWidth);
+            drawLine(buffer, row, left + 1, line, style, cols);
         }
         if (layout.showVScrollbar() && !items.isEmpty()) {
             VerticalScrollbar.draw(
@@ -379,13 +444,13 @@ public final class TreeView {
                 scrollThumbStyle
             );
         }
-        if (layout.showHScrollbar()) {
+        if (layout.showHScrollbar() && labelWidth > 0) {
             HorizontalScrollbar.draw(
                 buffer,
                 listStartRow + textRows,
                 left + 1,
-                textWidth,
-                Math.max(textWidth, maxLabelLength()),
+                labelWidth,
+                Math.max(labelWidth, maxLabelLength()),
                 hScroll,
                 "─",
                 scrollTrackStyle,
@@ -397,7 +462,7 @@ public final class TreeView {
 
     private void ensureVisible(int listRows) {
         int rows = Math.max(1, listRows);
-        int maxScroll = Math.max(0, items.size() - rows);
+        int maxScroll = maxScrollForRows(rows);
         if (selectedIndex < scroll) {
             scroll = selectedIndex;
         }
@@ -406,6 +471,26 @@ public final class TreeView {
             scroll = selectedIndex - rows + 1;
         }
         scroll = Math.max(0, Math.min(scroll, maxScroll));
+    }
+
+    private void normalizeSelection() {
+        if (items.isEmpty()) {
+            selectedIndex = 0;
+            scroll = 0;
+            hScroll = 0;
+            return;
+        }
+        selectedIndex = Math.max(0, Math.min(selectedIndex, items.size() - 1));
+    }
+
+    private void clampScroll(int visibleRows) {
+        int rows = Math.max(1, visibleRows);
+        scroll = Math.max(0, Math.min(scroll, maxScrollForRows(rows)));
+    }
+
+    private int maxScrollForRows(int visibleRows) {
+        int rows = Math.max(1, visibleRows);
+        return Math.max(0, items.size() - rows);
     }
 
     private int maxHorizontalScroll(int visibleTextWidth) {
@@ -420,41 +505,91 @@ public final class TreeView {
         boolean showHScrollbar;
         int textRows;
         int textWidth;
+        int labelWidth;
+        int sizeWidth;
+        int dateWidth;
 
         for (int i = 0; i < 3; i++) {
             textWidth = Math.max(0, innerWidth - (showVScrollbar ? 1 : 0));
-            showHScrollbar = listRows >= 2 && labelMax > textWidth;
+            MetaColumns columns = computeMetaColumns(textWidth);
+            labelWidth = columns.labelWidth();
+            sizeWidth = columns.sizeWidth();
+            dateWidth = columns.dateWidth();
+            showHScrollbar = listRows >= 2 && labelMax > labelWidth;
             textRows = Math.max(1, listRows - (showHScrollbar ? 1 : 0));
             boolean needVScrollbar = items.size() > textRows;
             boolean nextShowVScrollbar = canShowVScrollbar && needVScrollbar;
             if (nextShowVScrollbar == showVScrollbar) {
-                return new DrawLayout(showVScrollbar, showHScrollbar, textRows, textWidth);
+                return new DrawLayout(showVScrollbar, showHScrollbar, textRows, textWidth, labelWidth, sizeWidth, dateWidth);
             }
             showVScrollbar = nextShowVScrollbar;
         }
 
         textWidth = Math.max(0, innerWidth - (showVScrollbar ? 1 : 0));
-        showHScrollbar = listRows >= 2 && labelMax > textWidth;
+        MetaColumns columns = computeMetaColumns(textWidth);
+        labelWidth = columns.labelWidth();
+        sizeWidth = columns.sizeWidth();
+        dateWidth = columns.dateWidth();
+        showHScrollbar = listRows >= 2 && labelMax > labelWidth;
         textRows = Math.max(1, listRows - (showHScrollbar ? 1 : 0));
-        return new DrawLayout(showVScrollbar, showHScrollbar, textRows, textWidth);
+        return new DrawLayout(showVScrollbar, showHScrollbar, textRows, textWidth, labelWidth, sizeWidth, dateWidth);
+    }
+
+    private MetaColumns computeMetaColumns(int textWidth) {
+        if (textWidth <= 0) {
+            return new MetaColumns(0, 0, 0);
+        }
+        int sizeWidth = showSizeColumn ? DEFAULT_SIZE_COLUMN_WIDTH : 0;
+        int dateWidth = showDateColumn ? DATE_COLUMN_WIDTH : 0;
+        int separators = (sizeWidth > 0 ? 1 : 0) + (dateWidth > 0 ? 2 : 0);
+        int labelWidth = textWidth - sizeWidth - dateWidth - separators;
+
+        if ((sizeWidth > 0 || dateWidth > 0) && labelWidth < MIN_LABEL_WIDTH_WITH_META && sizeWidth > 0) {
+            int need = MIN_LABEL_WIDTH_WITH_META - labelWidth;
+            int shrink = Math.min(need, Math.max(0, sizeWidth - MIN_SIZE_COLUMN_WIDTH));
+            sizeWidth -= shrink;
+            labelWidth += shrink;
+        }
+        if ((sizeWidth > 0 || dateWidth > 0) && labelWidth < MIN_LABEL_WIDTH_WITH_META && dateWidth > 0) {
+            labelWidth += dateWidth + 2;
+            dateWidth = 0;
+        }
+        if ((sizeWidth > 0 || dateWidth > 0) && labelWidth < MIN_LABEL_WIDTH_WITH_META && sizeWidth > 0) {
+            labelWidth += sizeWidth + 1;
+            sizeWidth = 0;
+        }
+
+        separators = (sizeWidth > 0 ? 1 : 0) + (dateWidth > 0 ? 2 : 0);
+        labelWidth = Math.max(0, textWidth - sizeWidth - dateWidth - separators);
+        return new MetaColumns(labelWidth, sizeWidth, dateWidth);
     }
 
     private int maxLabelLength() {
-        int max = 0;
-        for (Item item : items) {
-            max = Math.max(max, item.label().length() + 1);
-        }
-        return max;
+        return maxLabelLength;
     }
 
     private void rebuild() {
         List<Item> out = new ArrayList<>();
         Path parent = root.getParent();
         if (parent != null) {
-            out.add(new Item(parent, "..", true, false, true, 0));
+            out.add(new Item(parent, "..", buildSizeValue(parent, true), buildDateValue(parent), true, false, true, 0));
         }
         appendTreeItems(root, 0, out);
         items = out;
+        maxLabelLength = computeMaxLabelLength(out);
+    }
+
+    private void restoreSelection(Path selectedPath) {
+        if (selectedPath == null) {
+            selectedIndex = Math.min(selectedIndex, Math.max(0, items.size() - 1));
+            return;
+        }
+        int restored = findIndexByPath(selectedPath);
+        if (restored >= 0) {
+            selectedIndex = restored;
+        } else {
+            selectedIndex = Math.min(selectedIndex, Math.max(0, items.size() - 1));
+        }
     }
 
     private int findIndexByPath(Path path) {
@@ -471,7 +606,7 @@ public final class TreeView {
         try {
             children = listDirectorySorted(directory);
         } catch (IOException e) {
-            out.add(new Item(directory, "<cannot read directory: " + e.getMessage() + ">", false, false, false, depth));
+            out.add(new Item(directory, "<cannot read directory: " + e.getMessage() + ">", "", "", false, false, false, depth));
             return;
         }
 
@@ -480,7 +615,9 @@ public final class TreeView {
             Path normalized = child.toAbsolutePath().normalize();
             boolean expanded = dir && expandedDirs.contains(normalized);
             String label = formatTreeLabel(depth, child, dir, expanded);
-            out.add(new Item(child, label, dir, expanded, false, depth));
+            String sizeValue = buildSizeValue(child, dir);
+            String dateValue = buildDateValue(child);
+            out.add(new Item(child, label, sizeValue, dateValue, dir, expanded, false, depth));
             if (dir && expanded) {
                 appendTreeItems(child, depth + 1, out);
             }
@@ -490,12 +627,28 @@ public final class TreeView {
     private List<Path> listDirectorySorted(Path directory) throws IOException {
         try (var stream = Files.list(directory)) {
             return stream
+                .filter(this::isVisiblePath)
                 .sorted(
                     Comparator
                         .comparing((Path p) -> !Files.isDirectory(p))
                         .thenComparing(p -> p.getFileName().toString().toLowerCase(Locale.ROOT))
                 )
                 .toList();
+        }
+    }
+
+    private boolean isVisiblePath(Path path) {
+        if (showHiddenFiles) {
+            return true;
+        }
+        String name = path.getFileName() == null ? path.toString() : path.getFileName().toString();
+        if (name.startsWith(".")) {
+            return false;
+        }
+        try {
+            return !Files.isHidden(path);
+        } catch (IOException ignored) {
+            return true;
         }
     }
 
@@ -506,6 +659,82 @@ public final class TreeView {
             return indent + "  " + name;
         }
         return indent + (expanded ? "▼ " : "▶ ") + name + "/";
+    }
+
+    private String rowText(int itemIndex, int labelWidth, int sizeWidth, int dateWidth) {
+        boolean hasItem = itemIndex < items.size();
+        String rawLabel = hasItem ? items.get(itemIndex).label() : "";
+        String label = clipHorizontal(rawLabel, hScroll, Math.max(0, labelWidth - 1));
+        StringBuilder row = new StringBuilder();
+        row.append(padRight(" " + label, labelWidth));
+        if (sizeWidth > 0) {
+            String size = hasItem ? items.get(itemIndex).sizeValue() : "";
+            row.append(' ').append(hasItem ? alignRight(size, sizeWidth) : " ".repeat(sizeWidth));
+        }
+        if (dateWidth > 0) {
+            String date = hasItem ? items.get(itemIndex).dateValue() : "";
+            row.append(hasItem ? " |" : "  ").append(hasItem ? alignRight(date, dateWidth) : " ".repeat(dateWidth));
+        }
+        return row.toString();
+    }
+
+    private static int computeMaxLabelLength(List<Item> items) {
+        int max = 0;
+        for (Item item : items) {
+            max = Math.max(max, item.label().length() + 1);
+        }
+        return max;
+    }
+
+    private String buildDateValue(Path path) {
+        if (!showDateColumn) {
+            return "";
+        }
+        try {
+            LocalDateTime dateTime = LocalDateTime.ofInstant(Files.getLastModifiedTime(path).toInstant(), ZoneId.systemDefault());
+            return DATE_FORMATTER.format(dateTime);
+        } catch (IOException | RuntimeException ignored) {
+            return UNKNOWN_DATE;
+        }
+    }
+
+    private String buildSizeValue(Path path, boolean directory) {
+        if (!showSizeColumn) {
+            return "";
+        }
+        return directory ? formatDirectoryChildCount(path) : formatFileSize(path);
+    }
+
+    private String formatDirectoryChildCount(Path path) {
+        try (var stream = Files.list(path)) {
+            long count = stream.count();
+            return count + " items";
+        } catch (IOException | RuntimeException ignored) {
+            return "? items";
+        }
+    }
+
+    private String formatFileSize(Path path) {
+        try {
+            return humanReadableSize(Files.size(path));
+        } catch (IOException | RuntimeException ignored) {
+            return "?";
+        }
+    }
+
+    private String humanReadableSize(long bytes) {
+        if (bytes < 1024L) {
+            return bytes + "B";
+        }
+        final String[] units = {"K", "M", "G", "T", "P"};
+        double value = bytes;
+        int unit = -1;
+        while (value >= 1024.0 && unit < units.length - 1) {
+            value /= 1024.0;
+            unit++;
+        }
+        String format = value >= 10.0 ? "%.0f%s" : "%.1f%s";
+        return String.format(Locale.ROOT, format, value, units[unit]);
     }
 
     private static void drawLine(CellBuffer buffer, int row, int startCol, String text, Style style, int cols) {
@@ -521,6 +750,17 @@ public final class TreeView {
         return text + " ".repeat(width - text.length());
     }
 
+    private static String alignRight(String text, int width) {
+        if (width <= 0) {
+            return "";
+        }
+        String safe = text == null ? "" : text;
+        if (safe.length() >= width) {
+            return safe.substring(Math.max(0, safe.length() - width));
+        }
+        return " ".repeat(width - safe.length()) + safe;
+    }
+
     private static String clipHorizontal(String text, int offset, int width) {
         if (text.isEmpty() || width <= 0) {
             return "";
@@ -530,10 +770,30 @@ public final class TreeView {
         return text.substring(start, end);
     }
 
-    private record DrawLayout(boolean showVScrollbar, boolean showHScrollbar, int textRows, int textWidth) {
+    private record MetaColumns(int labelWidth, int sizeWidth, int dateWidth) {
     }
 
-    public record Item(Path path, String label, boolean directory, boolean expanded, boolean parentLink, int depth) {
+    private record DrawLayout(
+        boolean showVScrollbar,
+        boolean showHScrollbar,
+        int textRows,
+        int textWidth,
+        int labelWidth,
+        int sizeWidth,
+        int dateWidth
+    ) {
+    }
+
+    public record Item(
+        Path path,
+        String label,
+        String sizeValue,
+        String dateValue,
+        boolean directory,
+        boolean expanded,
+        boolean parentLink,
+        int depth
+    ) {
     }
 
     public record ClickResult(boolean consumed, boolean arrowClick, boolean doubleClick, Item item) {

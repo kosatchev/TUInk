@@ -38,6 +38,7 @@ public sealed interface KeyEvent permits KeyEvent.ActionEvent, KeyEvent.CharInpu
         CTRL_R,
         CTRL_A,
         CTRL_G,
+        CTRL_H,
         CTRL_N,
         CTRL_T,
         OPEN_VIEW_MENU,

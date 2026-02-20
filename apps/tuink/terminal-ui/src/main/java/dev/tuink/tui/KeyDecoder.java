@@ -40,11 +40,12 @@ public class KeyDecoder {
             case 18 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_R);
             case 1 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_A);
             case 7 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_G);
+            case 8 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_H);
             case 14 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_N);
             case 20 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_T);
             case 31 -> new KeyEvent.ActionEvent(KeyEvent.Action.SHOW_KEY_HINTS);
             case 9 -> new KeyEvent.ActionEvent(KeyEvent.Action.TAB);
-            case 127, 8 -> new KeyEvent.ActionEvent(KeyEvent.Action.BACKSPACE);
+            case 127 -> new KeyEvent.ActionEvent(KeyEvent.Action.BACKSPACE);
             case 13 -> {
                 lastWasCarriageReturn = true;
                 yield new KeyEvent.ActionEvent(KeyEvent.Action.ENTER);

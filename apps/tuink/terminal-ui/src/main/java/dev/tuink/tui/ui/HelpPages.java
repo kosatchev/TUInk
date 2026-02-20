@@ -19,6 +19,7 @@ public final class HelpPages {
             "Ctrl+F               Open find bar",
             "Ctrl+/               Keyboard hints",
             "Ctrl+A               Select all",
+            "Ctrl+H               Show hidden files",
             "Arrows/Home/End      Move cursor",
             "Ctrl+Left/Right      Move by word",
             "Alt+B / Alt+F        Move by word (fallback)",

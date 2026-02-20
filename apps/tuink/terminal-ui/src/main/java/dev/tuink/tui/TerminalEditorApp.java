@@ -168,7 +168,7 @@ public class TerminalEditorApp {
             styles.tabbarActiveMono()
         );
         boolean openFileMode = false;
-        TreeView openFileTree = new TreeView(initialOpenRoot(state));
+        TreeView openFileTree = new TreeView(initialOpenRoot(state), true, true);
         OpenFileDialogController.Focus openFileFocus = OpenFileDialogController.Focus.LIST;
         EditorView.ScrollAxis editorScrollDrag = EditorView.ScrollAxis.NONE;
         int editorScrollDragThumbOffset = 0;
@@ -573,6 +573,12 @@ public class TerminalEditorApp {
                                         OpenFileDialogController.OpenDialogLayout layout = OpenFileDialogController.layoutForTerminal(rows, cols);
                                         Modal frame = openFileFrame(layout);
                                         OpenFileDialogController.OpenDialogButtons buttons = OpenFileDialogController.buttonsForLayout(layout);
+                                        Button hiddenToggle = openFileHiddenToggleButton(layout, openFileTree.showHiddenFiles());
+                                        if (hiddenToggle.hit(mouse.row(), mouse.col())) {
+                                            openFileTree.setShowHiddenFiles(!openFileTree.showHiddenFiles());
+                                            openFileFocus = OpenFileDialogController.Focus.LIST;
+                                            continue;
+                                        }
                                         int openFileActiveTabIndex = activeTabIndex;
                                         OpenFileDialogController.MousePressResult mouseResult =
                                             OpenFileDialogController.handleMousePress(
@@ -872,6 +878,11 @@ public class TerminalEditorApp {
 
                     if (openFileMode) {
                         OpenFileDialogController.OpenDialogLayout layout = OpenFileDialogController.layoutForTerminal(rows, cols);
+                        if (isAction(key, KeyEvent.Action.CTRL_H)) {
+                            openFileTree.setShowHiddenFiles(!openFileTree.showHiddenFiles());
+                            openFileFocus = OpenFileDialogController.Focus.LIST;
+                            continue;
+                        }
                         int openFileActiveTabIndex = activeTabIndex;
                         OpenFileDialogController.HandleResult openFileResult = OpenFileDialogController.handleKey(
                             key,
@@ -2112,6 +2123,7 @@ public class TerminalEditorApp {
         OpenFileDialogController.OpenDialogLayout layout = OpenFileDialogController.layoutForTerminal(rows, cols);
         Modal frame = openFileFrame(layout);
         frame.draw(buffer, rows, cols);
+        Button hiddenToggle = openFileHiddenToggleButton(layout, tree.showHiddenFiles());
 
         String pathLine = " " + tree.root();
         drawMenuLine(
@@ -2121,6 +2133,13 @@ public class TerminalEditorApp {
             padRight(pathLine, Math.max(0, layout.width() - 2)),
             styles.dialog(),
             cols
+        );
+        hiddenToggle.draw(
+            buffer,
+            cols,
+            tree.showHiddenFiles()
+                ? (colorEnabled ? styles.menuSelected() : styles.dialogSelectedMono())
+                : styles.dialog()
         );
         tree.draw(
             buffer,
@@ -2165,6 +2184,14 @@ public class TerminalEditorApp {
             styles.dialogBorder(),
             styles.dialogTitle()
         );
+    }
+
+    private Button openFileHiddenToggleButton(OpenFileDialogController.OpenDialogLayout layout, boolean hiddenVisible) {
+        String text = hiddenVisible ? "[hidden:x]" : "[hidden: ]";
+        int rightInnerCol = layout.right() - 1;
+        int leftInnerCol = layout.left() + 1;
+        int col = Math.max(leftInnerCol, rightInnerCol - text.length() + 1);
+        return Button.plain(layout.top() + 1, col, text);
     }
 
     private HelpDialogLayout helpDialogLayout(int rows, int cols, int contentRows) {
@@ -2586,7 +2613,7 @@ public class TerminalEditorApp {
         int textEndCol = cols - plan.scrollbarWidth() - 1;
         if (openFileMode) {
             OpenFileDialogController.OpenDialogLayout layout = OpenFileDialogController.layoutForTerminal(rows, cols);
-            int listTextWidth = openFileTree.visibleTextWidth(layout.left(), layout.right(), layout.listRows());
+            int listTextWidth = openFileTree.visibleRowWidth(layout.left(), layout.right(), layout.listRows());
             diffRegionTop = layout.listStartRow();
             diffRegionHeight = layout.listRows();
             textStartCol = layout.left() + 1;

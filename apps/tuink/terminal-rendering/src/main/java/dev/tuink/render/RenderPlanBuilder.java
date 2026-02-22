@@ -39,8 +39,8 @@ public class RenderPlanBuilder {
         }
     };
     private static final Style SELECTION_STYLE = new Style(Color.BLACK, Color.BRIGHT_WHITE, false, false);
-    private static final Style SEARCH_MATCH_STYLE = SELECTION_STYLE;
-    private static final Style CURRENT_SEARCH_MATCH_STYLE = new Style(Color.BLACK, Color.BRIGHT_YELLOW, false, false);
+    private static final Style SEARCH_MATCH_STYLE = new Style(Color.BLACK, Color.BRIGHT_YELLOW, false, false);
+    private static final Style CURRENT_SEARCH_MATCH_STYLE = SELECTION_STYLE;
 
     public RenderPlanBuilder(LineHighlighter highlighter) {
         this.highlighter = highlighter;

@@ -15,6 +15,7 @@ final class UiSessionState {
     boolean smartHomeEndSetting;
     boolean visibleWhitespaceSetting;
     boolean syntaxHighlightingSetting;
+    boolean autoSelectionHighlightSetting;
     int tabWidthSetting;
     boolean helpHintsMode;
     boolean helpLicensesMode;
@@ -33,6 +34,7 @@ final class UiSessionState {
         boolean smartHomeEndSetting,
         boolean visibleWhitespaceSetting,
         boolean syntaxHighlightingSetting,
+        boolean autoSelectionHighlightSetting,
         int tabWidthSetting,
         boolean helpHintsMode,
         boolean helpLicensesMode,
@@ -51,6 +53,7 @@ final class UiSessionState {
         state.smartHomeEndSetting = smartHomeEndSetting;
         state.visibleWhitespaceSetting = visibleWhitespaceSetting;
         state.syntaxHighlightingSetting = syntaxHighlightingSetting;
+        state.autoSelectionHighlightSetting = autoSelectionHighlightSetting;
         state.tabWidthSetting = tabWidthSetting <= 2 ? 2 : 4;
         state.helpHintsMode = helpHintsMode;
         state.helpLicensesMode = helpLicensesMode;

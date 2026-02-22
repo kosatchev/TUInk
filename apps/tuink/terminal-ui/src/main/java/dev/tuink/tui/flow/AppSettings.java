@@ -13,6 +13,7 @@ public record AppSettings(
     boolean smartHomeEnd,
     boolean visibleWhitespace,
     boolean syntaxHighlighting,
+    boolean autoSelectionHighlight,
     int tabWidth,
     UiStyles.Theme theme
 ) {
@@ -22,6 +23,7 @@ public record AppSettings(
             false,
             true,
             false,
+            true,
             true,
             true,
             true,

@@ -68,6 +68,8 @@ public class TerminalEditorApp {
     private static final long IDLE_INPUT_POLL_TIMEOUT_MS = 16L;
     private static final long MAX_DEADLINE_INPUT_POLL_TIMEOUT_MS = 50L;
     private static final int PROFILE_LOG_EVERY_FRAMES = 30;
+    private static final int AUTO_SELECTION_HIGHLIGHT_MIN_CHARS = 2;
+    private static final int AUTO_SELECTION_HIGHLIGHT_MAX_CHARS = 128;
     private static final String ENABLE_MOUSE_TRACKING = "\u001B[?1000h\u001B[?1002h\u001B[?1006h";
     private static final String DISABLE_MOUSE_TRACKING = "\u001B[?1000l\u001B[?1002l\u001B[?1006l";
     private UiStyles.Theme theme = UiStyles.Theme.CYAN;
@@ -146,6 +148,7 @@ public class TerminalEditorApp {
             loadedSettings.smartHomeEnd(),
             loadedSettings.visibleWhitespace(),
             loadedSettings.syntaxHighlighting(),
+            loadedSettings.autoSelectionHighlight(),
             loadedSettings.tabWidth(),
             false,
             false,
@@ -405,6 +408,7 @@ public class TerminalEditorApp {
                         topMenu.setSyntaxHighlightingEnabled(
                             effectiveSyntaxHighlighting(uiSessionState.syntaxHighlightingSetting)
                         );
+                        topMenu.setAutoSelectionHighlightEnabled(uiSessionState.autoSelectionHighlightSetting);
                         topMenu.setTabWidth(uiSessionState.tabWidthSetting);
                         renderer.setHighlightActiveGutter(uiSessionState.highlightActiveGutterSetting);
                         renderer.setVisibleWhitespace(uiSessionState.visibleWhitespaceSetting);
@@ -460,6 +464,7 @@ public class TerminalEditorApp {
                             notificationBar,
                             uiSessionState.wrapLinesSetting,
                             uiSessionState.wrapWordsSetting,
+                            uiSessionState.autoSelectionHighlightSetting,
                             saveAsMode,
                             saveAsInput,
                             saveOverwriteConfirmMode,
@@ -1257,6 +1262,7 @@ public class TerminalEditorApp {
             uiSessionState.smartHomeEndSetting,
             uiSessionState.visibleWhitespaceSetting,
             uiSessionState.syntaxHighlightingSetting,
+            uiSessionState.autoSelectionHighlightSetting,
             uiSessionState.tabWidthSetting,
             theme
         );
@@ -2414,6 +2420,7 @@ public class TerminalEditorApp {
         NotificationBar notificationBar,
         boolean wrapLinesSetting,
         boolean wrapWordsSetting,
+        boolean autoSelectionHighlightSetting,
         boolean saveAsMode,
         TextField saveAsInput,
         boolean saveOverwriteConfirmMode,
@@ -2454,6 +2461,17 @@ public class TerminalEditorApp {
             );
         }
         RenderPlan plan;
+        SearchOptions renderSearchOptions = searchMode
+            ? SearchController.toSearchOptions(searchUi)
+            : SearchOptions.DEFAULT;
+        String renderSearchQuery = resolveRenderSearchQuery(
+            searchMode,
+            searchQuery,
+            model,
+            state,
+            autoSelectionHighlightSetting,
+            editorView.isMouseSelecting()
+        );
         if (profileEnabled) {
             long buildStart = System.nanoTime();
             plan = renderPlanBuilder.build(
@@ -2463,8 +2481,8 @@ public class TerminalEditorApp {
                 cols,
                 topBar,
                 bottomBar,
-                searchMode ? searchQuery : null,
-                SearchController.toSearchOptions(searchUi),
+                renderSearchQuery,
+                renderSearchOptions,
                 interactiveBarText,
                 interactiveBarStyle,
                 notificationBar.text(),
@@ -2481,8 +2499,8 @@ public class TerminalEditorApp {
                 cols,
                 topBar,
                 bottomBar,
-                searchMode ? searchQuery : null,
-                SearchController.toSearchOptions(searchUi),
+                renderSearchQuery,
+                renderSearchOptions,
                 interactiveBarText,
                 interactiveBarStyle,
                 notificationBar.text(),
@@ -2674,6 +2692,47 @@ public class TerminalEditorApp {
         );
     }
 
+    private String resolveRenderSearchQuery(
+        boolean searchMode,
+        String searchQuery,
+        TextModel model,
+        EditorState state,
+        boolean autoSelectionHighlightSetting,
+        boolean mouseSelectionInProgress
+    ) {
+        if (searchMode) {
+            return searchQuery;
+        }
+        if (!autoSelectionHighlightSetting) {
+            return null;
+        }
+        if (mouseSelectionInProgress) {
+            return null;
+        }
+        if (!state.hasSelection()) {
+            return null;
+        }
+        Position a = state.getSelectionAnchor();
+        Position b = state.getCursor();
+        if (a == null || b == null || a.line() != b.line()) {
+            return null;
+        }
+        if (a.col() > b.col()) {
+            Position tmp = a;
+            a = b;
+            b = tmp;
+        }
+        int length = b.col() - a.col();
+        if (length < AUTO_SELECTION_HIGHLIGHT_MIN_CHARS || length > AUTO_SELECTION_HIGHLIGHT_MAX_CHARS) {
+            return null;
+        }
+        String selected = model.getTextRange(a, b);
+        if (selected.isBlank() || selected.indexOf('\n') >= 0) {
+            return null;
+        }
+        return selected;
+    }
+
     private final class RenderFrameController {
         private final PrintWriter writer;
         private final RenderRasterizer renderer;
@@ -2725,6 +2784,7 @@ public class TerminalEditorApp {
             NotificationBar notificationBar,
             boolean wrapLinesSetting,
             boolean wrapWordsSetting,
+            boolean autoSelectionHighlightSetting,
             boolean saveAsMode,
             TextField saveAsInput,
             boolean saveOverwriteConfirmMode,
@@ -2771,6 +2831,7 @@ public class TerminalEditorApp {
                 notificationBar,
                 wrapLinesSetting,
                 wrapWordsSetting,
+                autoSelectionHighlightSetting,
                 saveAsMode,
                 saveAsInput,
                 saveOverwriteConfirmMode,

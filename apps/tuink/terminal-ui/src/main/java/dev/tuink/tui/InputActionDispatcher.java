@@ -110,6 +110,13 @@ final class InputActionDispatcher {
                     : "Syntax highlighting disabled";
                 return DispatchResult.handled(statusMessage);
             }
+            case TOGGLE_AUTO_SELECTION_HIGHLIGHT -> {
+                ui.autoSelectionHighlightSetting = !ui.autoSelectionHighlightSetting;
+                statusMessage = ui.autoSelectionHighlightSetting
+                    ? "Auto highlight selection enabled"
+                    : "Auto highlight selection disabled";
+                return DispatchResult.handled(statusMessage);
+            }
             case TOGGLE_TAB_WIDTH -> {
                 ui.tabWidthSetting = ui.tabWidthSetting <= 2 ? 4 : 2;
                 statusMessage = ui.tabWidthSetting <= 2

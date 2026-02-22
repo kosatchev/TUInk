@@ -231,6 +231,10 @@ public final class EditorView {
         return edgeAutoScrollDuringSelection;
     }
 
+    public boolean isMouseSelecting() {
+        return mouseSelecting;
+    }
+
     public Position mouseToTextPosition(
         KeyEvent.MouseEvent mouse,
         TextModel model,

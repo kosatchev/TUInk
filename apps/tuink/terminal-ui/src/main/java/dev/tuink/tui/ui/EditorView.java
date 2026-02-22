@@ -17,6 +17,7 @@ import dev.tuink.tui.render.VerticalScrollbar;
  */
 public final class EditorView {
     private static final int EDGE_AUTO_SCROLL_MAX_STEP = 6;
+    private static final long DOUBLE_CLICK_WINDOW_NANOS = 450_000_000L;
 
     public enum ScrollAxis {
         NONE,
@@ -27,6 +28,8 @@ public final class EditorView {
     private final int contentTopRow;
     private boolean mouseSelecting;
     private boolean edgeAutoScrollDuringSelection;
+    private Position lastClickPosition;
+    private long lastClickAtNanos;
     private int tabWidth = 4;
 
     public EditorView() {
@@ -49,6 +52,8 @@ public final class EditorView {
     public void cancelMouseSelection() {
         mouseSelecting = false;
         edgeAutoScrollDuringSelection = false;
+        lastClickPosition = null;
+        lastClickAtNanos = 0L;
     }
 
     public void setTabWidth(int tabWidth) {
@@ -79,11 +84,15 @@ public final class EditorView {
         if (hit != null) {
             mouseSelecting = true;
             edgeAutoScrollDuringSelection = false;
-            state.setSelectionAnchor(hit);
-            state.setCursor(hit);
+            if (!isDoubleClick(hit) || !engine.selectWordAt(hit)) {
+                state.setSelectionAnchor(hit);
+                state.setCursor(hit);
+            }
         } else {
             mouseSelecting = false;
             edgeAutoScrollDuringSelection = false;
+            lastClickPosition = null;
+            lastClickAtNanos = 0L;
         }
         engine.ensureCursorVisible(contentRows);
     }
@@ -194,6 +203,17 @@ public final class EditorView {
             return 1;
         }
         return 0;
+    }
+
+    private boolean isDoubleClick(Position hit) {
+        long now = System.nanoTime();
+        boolean doubleClick = lastClickPosition != null
+            && hit.line() == lastClickPosition.line()
+            && Math.abs(hit.col() - lastClickPosition.col()) <= 1
+            && now - lastClickAtNanos <= DOUBLE_CLICK_WINDOW_NANOS;
+        lastClickPosition = hit;
+        lastClickAtNanos = now;
+        return doubleClick;
     }
 
     public void handleMouseRelease(EditorState state) {

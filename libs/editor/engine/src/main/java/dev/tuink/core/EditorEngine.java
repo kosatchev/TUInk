@@ -176,6 +176,33 @@ public class EditorEngine {
         moveCursor(new Position(line, target), false, previous);
     }
 
+    public boolean selectWordAt(Position requested) {
+        preferredVisualColumn = -1;
+        breakCoalescing();
+        Position p = model.clamp(requested);
+        String text = model.getLine(p.line());
+        if (text.isEmpty()) {
+            state.clearSelection();
+            state.setCursor(p);
+            return false;
+        }
+        int pivot = Math.min(Math.max(0, p.col()), text.length() - 1);
+        int group = charGroup(text.charAt(pivot));
+        int start = pivot;
+        while (start > 0 && charGroup(text.charAt(start - 1)) == group) {
+            start--;
+        }
+        int end = pivot + 1;
+        while (end < text.length() && charGroup(text.charAt(end)) == group) {
+            end++;
+        }
+        Position anchor = new Position(p.line(), start);
+        Position cursor = new Position(p.line(), end);
+        state.setSelectionAnchor(anchor);
+        state.setCursor(cursor);
+        return start < end;
+    }
+
     public void moveUp() {
         moveUp(false);
     }
@@ -955,6 +982,13 @@ public class EditorEngine {
 
     private static boolean isWordChar(char ch) {
         return Character.isLetterOrDigit(ch) || ch == '_';
+    }
+
+    private static int charGroup(char ch) {
+        if (Character.isWhitespace(ch)) {
+            return 0;
+        }
+        return isWordChar(ch) ? 1 : 2;
     }
 
     private record SearchMatch(Position start, int length) {

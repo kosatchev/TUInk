@@ -70,6 +70,7 @@ public class TerminalEditorApp {
     private static final int PROFILE_LOG_EVERY_FRAMES = 30;
     private static final int AUTO_SELECTION_HIGHLIGHT_MIN_CHARS = 2;
     private static final int AUTO_SELECTION_HIGHLIGHT_MAX_CHARS = 128;
+    private static final int CTRL_F_SELECTION_MAX_CHARS = 256;
     private static final String ENABLE_MOUSE_TRACKING = "\u001B[?1000h\u001B[?1002h\u001B[?1006h";
     private static final String DISABLE_MOUSE_TRACKING = "\u001B[?1000l\u001B[?1002l\u001B[?1006l";
     private UiStyles.Theme theme = UiStyles.Theme.CYAN;
@@ -1176,6 +1177,31 @@ public class TerminalEditorApp {
                         )
                     );
                     if (dispatchResult.handled()) {
+                        if (action == KeyEvent.Action.CTRL_F) {
+                            String selectedQuery = selectionQueryForCtrlF(model, state);
+                            if (selectedQuery != null) {
+                                searchQueryInput.set(selectedQuery);
+                                boolean found;
+                                if (searchUi.allTabs()) {
+                                    int foundTab = TabSearch.findNextAcrossTabs(
+                                        toTabSessions(tabs),
+                                        activeTabIndex,
+                                        searchQueryInput.text(),
+                                        SearchController.toSearchOptions(searchUi)
+                                    );
+                                    found = foundTab >= 0;
+                                    if (found && foundTab != activeTabIndex) {
+                                        sessionContext.activate(foundTab);
+                                    }
+                                } else {
+                                    found = engine.findNext(
+                                        searchQueryInput.text(),
+                                        SearchController.toSearchOptions(searchUi)
+                                    );
+                                }
+                                notification.info(found ? "Found next match" : "Not found");
+                            }
+                        }
                         if (uiSessionState.helpHintsMode) {
                             modalState = UiModalState.helpHints();
                             uiSessionState.helpHintsMode = false;
@@ -2731,6 +2757,28 @@ public class TerminalEditorApp {
             return null;
         }
         return selected;
+    }
+
+    private String selectionQueryForCtrlF(TextModel model, EditorState state) {
+        if (!state.hasSelection()) {
+            return null;
+        }
+        Position a = state.getSelectionAnchor();
+        Position b = state.getCursor();
+        if (a == null || b == null || a.line() != b.line()) {
+            return null;
+        }
+        if (a.col() > b.col()) {
+            Position tmp = a;
+            a = b;
+            b = tmp;
+        }
+        int length = b.col() - a.col();
+        if (length <= 0 || length > CTRL_F_SELECTION_MAX_CHARS) {
+            return null;
+        }
+        String selected = model.getTextRange(a, b);
+        return selected.isBlank() ? null : selected;
     }
 
     private final class RenderFrameController {

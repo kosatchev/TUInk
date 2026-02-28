@@ -13,6 +13,9 @@ final class UiSessionState {
     boolean mouseModeSetting;
     boolean highlightActiveGutterSetting;
     boolean smartHomeEndSetting;
+    boolean autoIndentSetting;
+    boolean autoPairsSetting;
+    boolean autoListSetting;
     boolean visibleWhitespaceSetting;
     boolean syntaxHighlightingSetting;
     boolean autoSelectionHighlightSetting;
@@ -32,6 +35,9 @@ final class UiSessionState {
         boolean mouseModeSetting,
         boolean highlightActiveGutterSetting,
         boolean smartHomeEndSetting,
+        boolean autoIndentSetting,
+        boolean autoPairsSetting,
+        boolean autoListSetting,
         boolean visibleWhitespaceSetting,
         boolean syntaxHighlightingSetting,
         boolean autoSelectionHighlightSetting,
@@ -51,6 +57,9 @@ final class UiSessionState {
         state.mouseModeSetting = mouseModeSetting;
         state.highlightActiveGutterSetting = highlightActiveGutterSetting;
         state.smartHomeEndSetting = smartHomeEndSetting;
+        state.autoIndentSetting = autoIndentSetting;
+        state.autoPairsSetting = autoPairsSetting;
+        state.autoListSetting = autoListSetting;
         state.visibleWhitespaceSetting = visibleWhitespaceSetting;
         state.syntaxHighlightingSetting = syntaxHighlightingSetting;
         state.autoSelectionHighlightSetting = autoSelectionHighlightSetting;

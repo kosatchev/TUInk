@@ -73,6 +73,18 @@ public final class MenuBar {
         controller.setSmartHomeEndEnabled(enabled);
     }
 
+    public void setAutoIndentEnabled(boolean enabled) {
+        controller.setAutoIndentEnabled(enabled);
+    }
+
+    public void setAutoPairsEnabled(boolean enabled) {
+        controller.setAutoPairsEnabled(enabled);
+    }
+
+    public void setAutoListEnabled(boolean enabled) {
+        controller.setAutoListEnabled(enabled);
+    }
+
     public void setVisibleWhitespaceEnabled(boolean enabled) {
         controller.setVisibleWhitespaceEnabled(enabled);
     }
@@ -271,6 +283,9 @@ public final class MenuBar {
         private boolean mouseModeEnabled = true;
         private boolean activeGutterHighlightEnabled = true;
         private boolean smartHomeEndEnabled = true;
+        private boolean autoIndentEnabled = true;
+        private boolean autoPairsEnabled = true;
+        private boolean autoListEnabled = true;
         private boolean visibleWhitespaceEnabled = true;
         private boolean syntaxHighlightingEnabled = true;
         private boolean autoSelectionHighlightEnabled = true;
@@ -345,6 +360,27 @@ public final class MenuBar {
 
         private void setSmartHomeEndEnabled(boolean enabled) {
             this.smartHomeEndEnabled = enabled;
+            if (open && active == MenuId.SETTINGS) {
+                rebuildMnemonics();
+            }
+        }
+
+        private void setAutoIndentEnabled(boolean enabled) {
+            this.autoIndentEnabled = enabled;
+            if (open && active == MenuId.SETTINGS) {
+                rebuildMnemonics();
+            }
+        }
+
+        private void setAutoPairsEnabled(boolean enabled) {
+            this.autoPairsEnabled = enabled;
+            if (open && active == MenuId.SETTINGS) {
+                rebuildMnemonics();
+            }
+        }
+
+        private void setAutoListEnabled(boolean enabled) {
+            this.autoListEnabled = enabled;
             if (open && active == MenuId.SETTINGS) {
                 rebuildMnemonics();
             }
@@ -704,9 +740,15 @@ public final class MenuBar {
                 };
             }
             if (menu == MenuId.SETTINGS) {
+                String autoIndentLabel = "[" + (autoIndentEnabled ? "x" : " ") + "] Auto indent";
+                String autoPairsLabel = "[" + (autoPairsEnabled ? "x" : " ") + "] Autopairs";
+                String autoListLabel = "[" + (autoListEnabled ? "x" : " ") + "] Auto list";
                 return new MenuItem[] {
                     new MenuItem("[" + (readingModeEnabled ? "x" : " ") + "] Reading mode", true),
                     new MenuItem("[" + (smartHomeEndEnabled ? "x" : " ") + "] Smart Home/End", true),
+                    new MenuItem(autoIndentLabel, true),
+                    new MenuItem(autoPairsLabel, true),
+                    new MenuItem(autoListLabel, true),
                     new MenuItem("[" + (mouseModeEnabled ? "x" : " ") + "] Mouse mode", true),
                     new MenuItem("[" + (confirmOnCloseEnabled ? "x" : " ") + "] Confirm on close", true),
                 };
@@ -792,8 +834,11 @@ public final class MenuBar {
                 return switch (itemIndex) {
                     case 0 -> KeyEvent.Action.TOGGLE_READING_MODE;
                     case 1 -> KeyEvent.Action.TOGGLE_SMART_HOME_END;
-                    case 2 -> KeyEvent.Action.TOGGLE_MOUSE_MODE;
-                    case 3 -> KeyEvent.Action.TOGGLE_CONFIRM_ON_CLOSE;
+                    case 2 -> KeyEvent.Action.TOGGLE_AUTO_INDENT;
+                    case 3 -> KeyEvent.Action.TOGGLE_AUTO_PAIRS;
+                    case 4 -> KeyEvent.Action.TOGGLE_AUTO_LIST;
+                    case 5 -> KeyEvent.Action.TOGGLE_MOUSE_MODE;
+                    case 6 -> KeyEvent.Action.TOGGLE_CONFIRM_ON_CLOSE;
                     default -> null;
                 };
             }

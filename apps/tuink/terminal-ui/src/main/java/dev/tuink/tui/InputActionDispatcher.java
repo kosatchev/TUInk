@@ -96,6 +96,27 @@ final class InputActionDispatcher {
                     : "Smart Home/End disabled";
                 return DispatchResult.handled(statusMessage);
             }
+            case TOGGLE_AUTO_INDENT -> {
+                ui.autoIndentSetting = !ui.autoIndentSetting;
+                statusMessage = ui.autoIndentSetting
+                    ? "Auto indent enabled"
+                    : "Auto indent disabled";
+                return DispatchResult.handled(statusMessage);
+            }
+            case TOGGLE_AUTO_PAIRS -> {
+                ui.autoPairsSetting = !ui.autoPairsSetting;
+                statusMessage = ui.autoPairsSetting
+                    ? "Autopairs enabled"
+                    : "Autopairs disabled";
+                return DispatchResult.handled(statusMessage);
+            }
+            case TOGGLE_AUTO_LIST -> {
+                ui.autoListSetting = !ui.autoListSetting;
+                statusMessage = ui.autoListSetting
+                    ? "Auto list enabled"
+                    : "Auto list disabled";
+                return DispatchResult.handled(statusMessage);
+            }
             case TOGGLE_VISIBLE_WHITESPACE -> {
                 ui.visibleWhitespaceSetting = !ui.visibleWhitespaceSetting;
                 statusMessage = ui.visibleWhitespaceSetting

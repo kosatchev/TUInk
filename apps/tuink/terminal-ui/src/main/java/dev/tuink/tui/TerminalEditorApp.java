@@ -147,6 +147,9 @@ public class TerminalEditorApp {
             cli.mouseEnabledOverride() != null ? cli.mouseEnabledOverride() : loadedSettings.mouseMode(),
             loadedSettings.highlightActiveGutter(),
             loadedSettings.smartHomeEnd(),
+            loadedSettings.autoIndent(),
+            loadedSettings.autoPairs(),
+            loadedSettings.autoList(),
             loadedSettings.visibleWhitespace(),
             loadedSettings.syntaxHighlighting(),
             loadedSettings.autoSelectionHighlight(),
@@ -405,6 +408,9 @@ public class TerminalEditorApp {
                         topMenu.setMouseModeEnabled(uiSessionState.mouseModeSetting);
                         topMenu.setActiveGutterHighlightEnabled(uiSessionState.highlightActiveGutterSetting);
                         topMenu.setSmartHomeEndEnabled(uiSessionState.smartHomeEndSetting);
+                        topMenu.setAutoIndentEnabled(uiSessionState.autoIndentSetting);
+                        topMenu.setAutoPairsEnabled(uiSessionState.autoPairsSetting);
+                        topMenu.setAutoListEnabled(uiSessionState.autoListSetting);
                         topMenu.setVisibleWhitespaceEnabled(uiSessionState.visibleWhitespaceSetting);
                         topMenu.setSyntaxHighlightingEnabled(
                             effectiveSyntaxHighlighting(uiSessionState.syntaxHighlightingSetting)
@@ -420,6 +426,9 @@ public class TerminalEditorApp {
                         renderPlanBuilder.setTabWidth(uiSessionState.tabWidthSetting);
                         editorView.setTabWidth(uiSessionState.tabWidthSetting);
                         engine.setTabWidth(uiSessionState.tabWidthSetting);
+                        engine.setAutoIndentEnabled(uiSessionState.autoIndentSetting);
+                        engine.setAutoPairsEnabled(uiSessionState.autoPairsSetting);
+                        engine.setAutoListEnabled(uiSessionState.autoListSetting);
 
                         String topBar = topMenu.buildTopBar(
                             state.getCurrentFile(),
@@ -1286,6 +1295,9 @@ public class TerminalEditorApp {
             uiSessionState.mouseModeSetting,
             uiSessionState.highlightActiveGutterSetting,
             uiSessionState.smartHomeEndSetting,
+            uiSessionState.autoIndentSetting,
+            uiSessionState.autoPairsSetting,
+            uiSessionState.autoListSetting,
             uiSessionState.visibleWhitespaceSetting,
             uiSessionState.syntaxHighlightingSetting,
             uiSessionState.autoSelectionHighlightSetting,

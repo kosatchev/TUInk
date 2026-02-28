@@ -19,6 +19,9 @@ public final class AppSettingsStore {
     private static final String KEY_MOUSE_MODE = "ui.mouseMode";
     private static final String KEY_HIGHLIGHT_ACTIVE_GUTTER = "ui.highlightActiveLineNumber";
     private static final String KEY_SMART_HOME_END = "ui.smartHomeEnd";
+    private static final String KEY_AUTO_INDENT = "ui.autoIndent";
+    private static final String KEY_AUTO_PAIRS = "ui.autoPairs";
+    private static final String KEY_AUTO_LIST = "ui.autoList";
     private static final String KEY_VISIBLE_WHITESPACE = "ui.visibleWhitespace";
     private static final String KEY_SYNTAX_HIGHLIGHTING = "ui.syntaxHighlighting";
     private static final String KEY_AUTO_SELECTION_HIGHLIGHT = "ui.autoSelectionHighlight";
@@ -52,6 +55,9 @@ public final class AppSettingsStore {
             parseBoolean(p.getProperty(KEY_MOUSE_MODE), defaults.mouseMode()),
             parseBoolean(p.getProperty(KEY_HIGHLIGHT_ACTIVE_GUTTER), defaults.highlightActiveGutter()),
             parseBoolean(p.getProperty(KEY_SMART_HOME_END), defaults.smartHomeEnd()),
+            parseBoolean(p.getProperty(KEY_AUTO_INDENT), defaults.autoIndent()),
+            parseBoolean(p.getProperty(KEY_AUTO_PAIRS), defaults.autoPairs()),
+            parseBoolean(p.getProperty(KEY_AUTO_LIST), defaults.autoList()),
             parseBoolean(p.getProperty(KEY_VISIBLE_WHITESPACE), defaults.visibleWhitespace()),
             parseBoolean(p.getProperty(KEY_SYNTAX_HIGHLIGHTING), defaults.syntaxHighlighting()),
             parseBoolean(p.getProperty(KEY_AUTO_SELECTION_HIGHLIGHT), defaults.autoSelectionHighlight()),
@@ -75,6 +81,9 @@ public final class AppSettingsStore {
         p.setProperty(KEY_MOUSE_MODE, Boolean.toString(settings.mouseMode()));
         p.setProperty(KEY_HIGHLIGHT_ACTIVE_GUTTER, Boolean.toString(settings.highlightActiveGutter()));
         p.setProperty(KEY_SMART_HOME_END, Boolean.toString(settings.smartHomeEnd()));
+        p.setProperty(KEY_AUTO_INDENT, Boolean.toString(settings.autoIndent()));
+        p.setProperty(KEY_AUTO_PAIRS, Boolean.toString(settings.autoPairs()));
+        p.setProperty(KEY_AUTO_LIST, Boolean.toString(settings.autoList()));
         p.setProperty(KEY_VISIBLE_WHITESPACE, Boolean.toString(settings.visibleWhitespace()));
         p.setProperty(KEY_SYNTAX_HIGHLIGHTING, Boolean.toString(settings.syntaxHighlighting()));
         p.setProperty(KEY_AUTO_SELECTION_HIGHLIGHT, Boolean.toString(settings.autoSelectionHighlight()));

@@ -29,6 +29,9 @@ public class EditorEngine {
     private int preferredVisualColumn = -1;
     private static final int H_SCROLL_MARGIN = 12;
     private int tabWidth = 4;
+    private boolean autoIndentEnabled = true;
+    private boolean autoPairsEnabled = true;
+    private boolean autoListEnabled = true;
 
     public EditorEngine(TextModel model, EditorState state) {
         this.model = model;
@@ -45,6 +48,18 @@ public class EditorEngine {
 
     public void setTabWidth(int tabWidth) {
         this.tabWidth = tabWidth <= 2 ? 2 : 4;
+    }
+
+    public void setAutoIndentEnabled(boolean enabled) {
+        this.autoIndentEnabled = enabled;
+    }
+
+    public void setAutoPairsEnabled(boolean enabled) {
+        this.autoPairsEnabled = enabled;
+    }
+
+    public void setAutoListEnabled(boolean enabled) {
+        this.autoListEnabled = enabled;
     }
 
     public void open(Path path) throws IOException {
@@ -319,10 +334,23 @@ public class EditorEngine {
 
     public void insertChar(char ch) {
         preferredVisualColumn = -1;
+        if (isAutoPairsActive() && shouldSkipOverClosing(ch)) {
+            moveRight();
+            return;
+        }
         boolean hadSelection = state.hasSelection();
         applyEdit(hadSelection ? EditKind.NONE : EditKind.INSERT_CHAR, () -> {
+            if (isAutoPairsActive() && state.hasSelection() && shouldWrapSelectionWithPair(ch)) {
+                wrapSelectionWithPair(ch);
+                return;
+            }
             deleteSelectionIfAny();
-            state.setCursor(model.insertChar(state.getCursor(), ch));
+            if (isAutoPairsActive() && shouldAutoPair(ch)) {
+                insertPair(ch);
+            } else {
+                state.setCursor(model.insertChar(state.getCursor(), ch));
+            }
+            maybeAutoOutdentKeywordLine();
             state.clearSelection();
         });
     }
@@ -333,8 +361,10 @@ public class EditorEngine {
         applyEdit(hadSelection ? EditKind.NONE : EditKind.BACKSPACE, () -> {
             if (state.hasSelection()) {
                 deleteSelectionIfAny();
-            } else {
+            } else if (!isAutoPairsActive() || !deletePairAroundCursor()) {
                 state.setCursor(model.deleteBackward(state.getCursor()));
+            } else {
+                return;
             }
             state.clearSelection();
         });
@@ -357,7 +387,16 @@ public class EditorEngine {
         preferredVisualColumn = -1;
         applyEdit(EditKind.NONE, () -> {
             deleteSelectionIfAny();
-            state.setCursor(model.insertNewline(state.getCursor()));
+            Position before = model.clamp(state.getCursor());
+            String indent = isAutoIndentActive() ? indentForNewLine(before) : "";
+            String continuation = isAutoListActive() ? continuationAfterNewLine(before) : "";
+            state.setCursor(model.insertNewline(before));
+            if (!indent.isEmpty()) {
+                state.setCursor(model.insertText(state.getCursor(), indent));
+            }
+            if (!continuation.isEmpty()) {
+                state.setCursor(model.insertText(state.getCursor(), continuation));
+            }
             state.clearSelection();
         });
     }
@@ -690,6 +729,647 @@ public class EditorEngine {
             end--;
         }
         return end;
+    }
+
+    private String indentForNewLine(Position cursor) {
+        String line = model.getLine(cursor.line());
+        int col = Math.max(0, Math.min(cursor.col(), line.length()));
+        int leading = 0;
+        while (leading < line.length() && Character.isWhitespace(line.charAt(leading))) {
+            leading++;
+        }
+        int keep = Math.min(leading, col);
+        String baseIndent = keep <= 0 ? "" : line.substring(0, keep);
+        if (shouldDedentFromClosing(line, col)) {
+            baseIndent = removeOneIndentUnit(baseIndent, cursor.line());
+        }
+        if (shouldIncreaseIndent(line, col)) {
+            return baseIndent + indentUnit(cursor.line(), baseIndent);
+        }
+        return baseIndent;
+    }
+
+    private boolean shouldDedentFromClosing(String line, int col) {
+        if (line.isEmpty()) {
+            return false;
+        }
+        int safeCol = Math.max(0, Math.min(col, line.length()));
+        String before = line.substring(0, safeCol).stripTrailing();
+        if (startsWithStandaloneClosing(before)) {
+            return true;
+        }
+        // Cursor can be before the first token on a line that already starts with a closing brace.
+        return safeCol <= firstNonWhitespaceColumn(line) && startsWithStandaloneClosing(line);
+    }
+
+    private boolean shouldIncreaseIndent(String line, int col) {
+        String before = line.substring(0, col).stripTrailing();
+        if (before.isEmpty()) {
+            return false;
+        }
+        char last = before.charAt(before.length() - 1);
+        LanguageProfile profile = languageProfile();
+        if (profile.bracketIndentEnabled() && (last == '{' || last == '[' || last == '(')) {
+            return true;
+        }
+        if (last != ':') {
+            return false;
+        }
+        return switch (profile.colonIndentMode()) {
+            case PYTHON -> isPythonBlockIntro(before);
+            case YAML -> isYamlBlockIntro(before);
+            default -> false;
+        };
+    }
+
+    private boolean isPythonBlockIntro(String before) {
+        if (!before.endsWith(":") || before.endsWith("::") || before.indexOf('?') >= 0) {
+            return false;
+        }
+        String head = before.substring(0, before.length() - 1).trim().toLowerCase(Locale.ROOT);
+        if (head.isEmpty() || head.endsWith(";")) {
+            return false;
+        }
+        if (head.startsWith("async ")) {
+            String tail = head.substring("async ".length()).trim();
+            return tail.startsWith("def ")
+                || tail.startsWith("for ")
+                || tail.startsWith("with ");
+        }
+        return head.startsWith("if ")
+            || head.startsWith("elif ")
+            || head.equals("else")
+            || head.startsWith("for ")
+            || head.startsWith("while ")
+            || head.startsWith("def ")
+            || head.startsWith("class ")
+            || head.equals("try")
+            || head.startsWith("except")
+            || head.equals("finally")
+            || head.startsWith("with ")
+            || head.startsWith("match ")
+            || head.startsWith("case ");
+    }
+
+    private boolean isYamlBlockIntro(String before) {
+        if (!before.endsWith(":")) {
+            return false;
+        }
+        String head = before.substring(0, before.length() - 1).stripTrailing();
+        if (head.isEmpty() || head.startsWith("#")) {
+            return false;
+        }
+        // Allow list-style mapping items: "- key:"
+        if (head.startsWith("-")) {
+            head = head.substring(1).stripLeading();
+            if (head.isEmpty()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private String continuationAfterNewLine(Position cursor) {
+        LanguageProfile profile = languageProfile();
+        String line = model.getLine(cursor.line());
+        int col = Math.max(0, Math.min(cursor.col(), line.length()));
+        String beforeCursor = line.substring(0, col);
+        return switch (profile) {
+            case YAML -> yamlContinuationMarker(beforeCursor);
+            case MARKDOWN -> markdownContinuationMarker(cursor.line(), beforeCursor);
+            default -> "";
+        };
+    }
+
+    private boolean shouldAutoPair(char ch) {
+        if (!isOpeningPair(ch)) {
+            return false;
+        }
+        Position cursor = model.clamp(state.getCursor());
+        String line = model.getLine(cursor.line());
+        int col = Math.max(0, Math.min(cursor.col(), line.length()));
+
+        if ((ch == '\'' || ch == '"') && col > 0 && line.charAt(col - 1) == '\\') {
+            return false;
+        }
+        if (ch == '\'' && ((col > 0 && isWordChar(line.charAt(col - 1)))
+            || (col < line.length() && isWordChar(line.charAt(col))))) {
+            return false;
+        }
+        if (col >= line.length()) {
+            return true;
+        }
+        char next = line.charAt(col);
+        return Character.isWhitespace(next)
+            || isClosingPair(next)
+            || next == ','
+            || next == ';'
+            || next == ':';
+    }
+
+    private boolean shouldSkipOverClosing(char ch) {
+        if (!isClosingPair(ch) || state.hasSelection()) {
+            return false;
+        }
+        Position cursor = model.clamp(state.getCursor());
+        String line = model.getLine(cursor.line());
+        int col = Math.max(0, Math.min(cursor.col(), line.length()));
+        if (col >= line.length()) {
+            return false;
+        }
+        return line.charAt(col) == ch;
+    }
+
+    private boolean shouldWrapSelectionWithPair(char ch) {
+        return isOpeningPair(ch) && (ch != '\'' || canWrapWithSingleQuote());
+    }
+
+    private boolean canWrapWithSingleQuote() {
+        SelectionRange range = currentSelection();
+        if (range == null) {
+            return false;
+        }
+        String selected = model.getTextRange(range.start(), range.end());
+        return selected.indexOf('\'') < 0;
+    }
+
+    private void insertPair(char open) {
+        Position cursor = model.clamp(state.getCursor());
+        Position afterOpen = model.insertChar(cursor, open);
+        model.insertChar(afterOpen, closingPairFor(open));
+        state.setCursor(afterOpen);
+    }
+
+    private void wrapSelectionWithPair(char open) {
+        SelectionRange range = currentSelection();
+        if (range == null) {
+            return;
+        }
+        char close = closingPairFor(open);
+        String selected = model.getTextRange(range.start(), range.end());
+        if (selected.isEmpty()) {
+            return;
+        }
+        state.setCursor(model.deleteRange(range.start(), range.end()));
+        state.setCursor(model.insertChar(state.getCursor(), open));
+        Position wrappedStart = state.getCursor();
+        state.setCursor(model.insertText(state.getCursor(), selected));
+        Position wrappedEnd = state.getCursor();
+        state.setCursor(model.insertChar(state.getCursor(), close));
+        state.setSelectionAnchor(wrappedStart);
+        state.setCursor(wrappedEnd);
+    }
+
+    private boolean deletePairAroundCursor() {
+        Position cursor = model.clamp(state.getCursor());
+        if (cursor.col() <= 0) {
+            return false;
+        }
+        String line = model.getLine(cursor.line());
+        if (cursor.col() >= line.length()) {
+            return false;
+        }
+        char left = line.charAt(cursor.col() - 1);
+        char right = line.charAt(cursor.col());
+        if (!isMatchingPair(left, right)) {
+            return false;
+        }
+        Position afterRightDelete = model.deleteForward(cursor);
+        state.setCursor(model.deleteBackward(afterRightDelete));
+        return true;
+    }
+
+    private static boolean isOpeningPair(char ch) {
+        return ch == '(' || ch == '[' || ch == '{' || ch == '"' || ch == '\'';
+    }
+
+    private static boolean isClosingPair(char ch) {
+        return ch == ')' || ch == ']' || ch == '}' || ch == '"' || ch == '\'';
+    }
+
+    private static char closingPairFor(char open) {
+        return switch (open) {
+            case '(' -> ')';
+            case '[' -> ']';
+            case '{' -> '}';
+            case '"' -> '"';
+            case '\'' -> '\'';
+            default -> open;
+        };
+    }
+
+    private static boolean isMatchingPair(char left, char right) {
+        return (left == '(' && right == ')')
+            || (left == '[' && right == ']')
+            || (left == '{' && right == '}')
+            || (left == '"' && right == '"')
+            || (left == '\'' && right == '\'');
+    }
+
+    private String yamlContinuationMarker(String beforeCursor) {
+        int leading = leadingIndentLength(beforeCursor);
+        if (leading >= beforeCursor.length()) {
+            return "";
+        }
+        String rest = beforeCursor.substring(leading);
+        if (!rest.startsWith("- ")) {
+            return "";
+        }
+        if (rest.startsWith("- [ ] ") || rest.startsWith("- [x] ") || rest.startsWith("- [X] ")) {
+            String tail = rest.substring(6).trim();
+            return tail.isEmpty() ? "" : "- [ ] ";
+        }
+        String tail = rest.substring(2).trim();
+        return tail.isEmpty() ? "" : "- ";
+    }
+
+    private String markdownContinuationMarker(int lineIndex, String beforeCursor) {
+        if (isInsideMarkdownFence(lineIndex)) {
+            return "";
+        }
+        int leading = leadingIndentLength(beforeCursor);
+        if (leading >= beforeCursor.length()) {
+            return "";
+        }
+        String rest = beforeCursor.substring(leading);
+
+        String unordered = markdownUnorderedContinuation(rest);
+        if (!unordered.isEmpty()) {
+            return unordered;
+        }
+        return markdownOrderedContinuation(rest);
+    }
+
+    private String markdownUnorderedContinuation(String rest) {
+        if (rest.startsWith("- [ ] ") || rest.startsWith("- [x] ") || rest.startsWith("- [X] ")) {
+            String tail = rest.substring(6).trim();
+            return tail.isEmpty() ? "" : "- [ ] ";
+        }
+        if (rest.length() < 2) {
+            return "";
+        }
+        char marker = rest.charAt(0);
+        if (marker != '-' && marker != '*' && marker != '+') {
+            return "";
+        }
+        if (rest.charAt(1) != ' ') {
+            return "";
+        }
+        String tail = rest.substring(2).trim();
+        return tail.isEmpty() ? "" : marker + " ";
+    }
+
+    private String markdownOrderedContinuation(String rest) {
+        int dot = rest.indexOf('.');
+        if (dot <= 0 || dot >= rest.length() - 1) {
+            return "";
+        }
+        for (int i = 0; i < dot; i++) {
+            if (!Character.isDigit(rest.charAt(i))) {
+                return "";
+            }
+        }
+        if (rest.charAt(dot + 1) != ' ') {
+            return "";
+        }
+        String tail = rest.substring(dot + 2).trim();
+        if (tail.isEmpty()) {
+            return "";
+        }
+        try {
+            int number = Integer.parseInt(rest.substring(0, dot));
+            return Math.max(1, number + 1) + ". ";
+        } catch (NumberFormatException ignored) {
+            return "";
+        }
+    }
+
+    private boolean isInsideMarkdownFence(int lineIndex) {
+        String activeFence = null;
+        for (int i = 0; i <= lineIndex; i++) {
+            String line = model.getLine(i).stripLeading();
+            String fence = fenceMarker(line);
+            if (fence == null) {
+                continue;
+            }
+            if (activeFence == null) {
+                activeFence = fence;
+                continue;
+            }
+            if (!activeFence.isEmpty() && activeFence.charAt(0) == fence.charAt(0) && fence.length() >= activeFence.length()) {
+                activeFence = null;
+            }
+        }
+        return activeFence != null;
+    }
+
+    private static String fenceMarker(String line) {
+        if (line == null || line.length() < 3) {
+            return null;
+        }
+        char ch = line.charAt(0);
+        if (ch != '`' && ch != '~') {
+            return null;
+        }
+        int count = 1;
+        while (count < line.length() && line.charAt(count) == ch) {
+            count++;
+        }
+        if (count < 3) {
+            return null;
+        }
+        return String.valueOf(ch).repeat(count);
+    }
+
+    private boolean startsWithStandaloneClosing(String text) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+        int first = firstNonWhitespaceColumn(text);
+        if (first >= text.length()) {
+            return false;
+        }
+        if (!isClosingBracket(text.charAt(first))) {
+            return false;
+        }
+        for (int i = first + 1; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (Character.isWhitespace(ch)) {
+                continue;
+            }
+            if (isClosingBracket(ch) || ch == ';' || ch == ',') {
+                continue;
+            }
+            if (startsCommentAt(text, i)) {
+                return true;
+            }
+            return false;
+        }
+        return true;
+    }
+
+    private static boolean startsCommentAt(String text, int at) {
+        return text.startsWith("//", at)
+            || text.startsWith("#", at)
+            || text.startsWith("/*", at);
+    }
+
+    private static boolean isClosingBracket(char ch) {
+        return ch == '}' || ch == ']' || ch == ')';
+    }
+
+    private String indentUnit(int lineIndex, String currentIndent) {
+        int tabs = 0;
+        int spaces = 0;
+        for (int i = 0; i < currentIndent.length(); i++) {
+            char ch = currentIndent.charAt(i);
+            if (ch == '\t') {
+                tabs++;
+            } else if (ch == ' ') {
+                spaces++;
+            }
+        }
+        if (tabs > 0 && spaces == 0) {
+            return "\t";
+        }
+        return " ".repeat(detectIndentSize(lineIndex, currentIndent));
+    }
+
+    private int detectIndentSize(int lineIndex, String currentIndent) {
+        int fallback = tabWidth <= 2 ? 2 : 4;
+        int score2 = 0;
+        int score4 = 0;
+        int observed = 0;
+        int prevIndent = -1;
+        int start = Math.max(0, lineIndex - 256);
+        int end = Math.min(model.lineCount() - 1, lineIndex);
+        for (int i = start; i <= end; i++) {
+            String text = model.getLine(i);
+            int leadingSpaces = leadingSpacesOnly(text);
+            if (leadingSpaces < 0 || leadingSpaces >= text.length()) {
+                continue;
+            }
+            if (leadingSpaces > 0) {
+                observed++;
+                if (leadingSpaces % 2 == 0) {
+                    score2++;
+                }
+                if (leadingSpaces % 4 == 0) {
+                    score4++;
+                }
+            }
+            if (prevIndent >= 0) {
+                int delta = leadingSpaces - prevIndent;
+                if (delta > 0) {
+                    observed++;
+                    if (delta % 2 == 0) {
+                        score2++;
+                    }
+                    if (delta % 4 == 0) {
+                        score4++;
+                    }
+                }
+            }
+            prevIndent = leadingSpaces;
+        }
+        if (observed > 0) {
+            if (score4 > 0 && score4 * 2 >= observed) {
+                return 4;
+            }
+            if (score2 > 0) {
+                return 2;
+            }
+        }
+        int trailingSpaces = trailingSpaces(currentIndent);
+        if (trailingSpaces >= 4 && trailingSpaces % 4 == 0) {
+            return 4;
+        }
+        if (trailingSpaces >= 2 && trailingSpaces % 2 == 0) {
+            return 2;
+        }
+        int docFallback = detectIndentFromDocumentStart();
+        if (docFallback > 0) {
+            return docFallback;
+        }
+        return fallback;
+    }
+
+    private int detectIndentFromDocumentStart() {
+        int score2 = 0;
+        int score4 = 0;
+        int observed = 0;
+        int limit = Math.min(model.lineCount(), 256);
+        for (int i = 0; i < limit; i++) {
+            String text = model.getLine(i);
+            int leadingSpaces = leadingSpacesOnly(text);
+            if (leadingSpaces <= 0 || leadingSpaces >= text.length()) {
+                continue;
+            }
+            observed++;
+            if (leadingSpaces % 2 == 0) {
+                score2++;
+            }
+            if (leadingSpaces % 4 == 0) {
+                score4++;
+            }
+        }
+        if (observed == 0) {
+            return -1;
+        }
+        if (score4 > 0 && score4 * 2 >= observed) {
+            return 4;
+        }
+        if (score2 > 0) {
+            return 2;
+        }
+        return -1;
+    }
+
+    private static int leadingSpacesOnly(String line) {
+        int spaces = 0;
+        while (spaces < line.length()) {
+            char ch = line.charAt(spaces);
+            if (ch == ' ') {
+                spaces++;
+                continue;
+            }
+            if (ch == '\t') {
+                return -1;
+            }
+            break;
+        }
+        return spaces;
+    }
+
+    private static int trailingSpaces(String text) {
+        int spaces = 0;
+        for (int i = text.length() - 1; i >= 0; i--) {
+            if (text.charAt(i) != ' ') {
+                break;
+            }
+            spaces++;
+        }
+        return spaces;
+    }
+
+    private String removeOneIndentUnit(String indent, int lineIndex) {
+        if (indent.isEmpty()) {
+            return indent;
+        }
+        int end = indent.length();
+        char last = indent.charAt(end - 1);
+        if (last == '\t') {
+            return indent.substring(0, end - 1);
+        }
+        int spacesInUnit = detectIndentSize(lineIndex, indent);
+        int spacesToDrop = 0;
+        while (end - spacesToDrop - 1 >= 0
+            && indent.charAt(end - spacesToDrop - 1) == ' '
+            && spacesToDrop < spacesInUnit) {
+            spacesToDrop++;
+        }
+        if (spacesToDrop > 0) {
+            return indent.substring(0, end - spacesToDrop);
+        }
+        return indent.substring(0, end - 1);
+    }
+
+    private void maybeAutoOutdentKeywordLine() {
+        if (!isAutoIndentActive()) {
+            return;
+        }
+        LanguageProfile profile = languageProfile();
+        if (!profile.keywordDedentEnabled()) {
+            return;
+        }
+        Position cursor = model.clamp(state.getCursor());
+        int lineIndex = cursor.line();
+        String line = model.getLine(lineIndex);
+        int cursorCol = Math.max(0, Math.min(cursor.col(), line.length()));
+        int leading = leadingIndentLength(line);
+        if (leading <= 0 || cursorCol <= leading) {
+            return;
+        }
+        int prevLine = previousNonBlankLine(lineIndex - 1);
+        if (prevLine < 0) {
+            return;
+        }
+        String previous = model.getLine(prevLine);
+        int prevLeading = leadingIndentLength(previous);
+        if (prevLeading != leading) {
+            return;
+        }
+        String currentIndent = line.substring(0, leading);
+        if (!previous.substring(0, prevLeading).equals(currentIndent)) {
+            return;
+        }
+        if (!startsWithDedentKeyword(line, leading, cursorCol, profile)) {
+            return;
+        }
+        String reduced = removeOneIndentUnit(currentIndent, lineIndex);
+        int drop = currentIndent.length() - reduced.length();
+        if (drop <= 0) {
+            return;
+        }
+        model.deleteRange(new Position(lineIndex, 0), new Position(lineIndex, drop));
+        state.setCursor(new Position(lineIndex, Math.max(0, cursorCol - drop)));
+    }
+
+    private boolean startsWithDedentKeyword(String line, int leading, int cursorCol, LanguageProfile profile) {
+        int tokenEnd = leading;
+        while (tokenEnd < line.length() && isWordChar(line.charAt(tokenEnd))) {
+            tokenEnd++;
+        }
+        if (tokenEnd <= leading || cursorCol < tokenEnd) {
+            return false;
+        }
+        String keyword = line.substring(leading, tokenEnd).toLowerCase(Locale.ROOT);
+        if (!profile.dedentKeywords().contains(keyword)) {
+            return false;
+        }
+        for (int i = tokenEnd; i < cursorCol; i++) {
+            if (!Character.isWhitespace(line.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static int leadingIndentLength(String line) {
+        int i = 0;
+        while (i < line.length()) {
+            char ch = line.charAt(i);
+            if (ch != ' ' && ch != '\t') {
+                break;
+            }
+            i++;
+        }
+        return i;
+    }
+
+    private int previousNonBlankLine(int fromLine) {
+        for (int i = fromLine; i >= 0; i--) {
+            if (!model.getLine(i).isBlank()) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private LanguageProfile languageProfile() {
+        return LanguageProfiles.resolve(state.getCurrentFile());
+    }
+
+    private boolean isAutoIndentActive() {
+        return autoIndentEnabled;
+    }
+
+    private boolean isAutoPairsActive() {
+        return autoPairsEnabled;
+    }
+
+    private boolean isAutoListActive() {
+        return autoListEnabled;
     }
 
     private void applyEdit(EditKind kind, Runnable editOperation) {

@@ -545,7 +545,9 @@ public class RenderPlanBuilder {
         if (cached != null && cached.lineText().equals(line)) {
             return cached.spans();
         }
-        List<StyleSpan> spans = List.copyOf(highlighter.highlight(line));
+        List<StyleSpan> spans = highlighter instanceof ContextualLineHighlighter contextual
+            ? List.copyOf(contextual.highlight(model, lineIndex, line))
+            : List.copyOf(highlighter.highlight(line));
         syntaxSpanCache.put(lineIndex, new SyntaxSpans(line, spans));
         return spans;
     }

@@ -67,7 +67,7 @@ public class RegexHighlighter implements LineHighlighter {
         ));
     }
 
-    public static RegexHighlighter forFileName(String fileName) {
+    public static LineHighlighter forFileName(String fileName) {
         String name = normalizeName(fileName);
         if (name != null) {
             if (CONFIG_FILE_NAMES.contains(name)) {
@@ -95,7 +95,7 @@ public class RegexHighlighter implements LineHighlighter {
             return forPython();
         }
         if (MD_EXT.contains(ext)) {
-            return forMarkdown();
+            return new MarkdownFenceHighlighter();
         }
         if (JS_EXT.contains(ext)) {
             return forJavaScript();

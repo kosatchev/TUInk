@@ -93,6 +93,10 @@ public final class MenuBar {
         controller.setSyntaxHighlightingEnabled(enabled);
     }
 
+    public void setRainbowBracketsEnabled(boolean enabled) {
+        controller.setRainbowBracketsEnabled(enabled);
+    }
+
     public void setAutoSelectionHighlightEnabled(boolean enabled) {
         controller.setAutoSelectionHighlightEnabled(enabled);
     }
@@ -288,6 +292,7 @@ public final class MenuBar {
         private boolean autoListEnabled = true;
         private boolean visibleWhitespaceEnabled = true;
         private boolean syntaxHighlightingEnabled = true;
+        private boolean rainbowBracketsEnabled = true;
         private boolean autoSelectionHighlightEnabled = true;
         private int tabWidth = 4;
         private String themeLabel = "Cyan";
@@ -395,6 +400,13 @@ public final class MenuBar {
 
         private void setSyntaxHighlightingEnabled(boolean enabled) {
             this.syntaxHighlightingEnabled = enabled;
+            if (open && active == MenuId.VIEW) {
+                rebuildMnemonics();
+            }
+        }
+
+        private void setRainbowBracketsEnabled(boolean enabled) {
+            this.rainbowBracketsEnabled = enabled;
             if (open && active == MenuId.VIEW) {
                 rebuildMnemonics();
             }
@@ -734,6 +746,7 @@ public final class MenuBar {
                     new MenuItem("[" + (tabWidth <= 2 ? "x" : " ") + "] Thin tabs", true),
                     new MenuItem("[" + (visibleWhitespaceEnabled ? "x" : " ") + "] Visible tabs/spaces", true),
                     new MenuItem("[" + (syntaxHighlightingEnabled ? "x" : " ") + "] Syntax highlighting", true),
+                    new MenuItem("[" + (rainbowBracketsEnabled ? "x" : " ") + "] Rainbow brackets", true),
                     new MenuItem("[" + (autoSelectionHighlightEnabled ? "x" : " ") + "] Auto highlight selection", true),
                     new MenuItem("[" + (activeGutterHighlightEnabled ? "x" : " ") + "] Highlight current line number", true),
                     new MenuItem("[>] Theme: " + themeLabel, true)
@@ -824,9 +837,10 @@ public final class MenuBar {
                     case 3 -> KeyEvent.Action.TOGGLE_TAB_WIDTH;
                     case 4 -> KeyEvent.Action.TOGGLE_VISIBLE_WHITESPACE;
                     case 5 -> KeyEvent.Action.TOGGLE_SYNTAX_HIGHLIGHTING;
-                    case 6 -> KeyEvent.Action.TOGGLE_AUTO_SELECTION_HIGHLIGHT;
-                    case 7 -> KeyEvent.Action.TOGGLE_ACTIVE_GUTTER_HIGHLIGHT;
-                    case 8 -> KeyEvent.Action.TOGGLE_THEME;
+                    case 6 -> KeyEvent.Action.TOGGLE_RAINBOW_BRACKETS;
+                    case 7 -> KeyEvent.Action.TOGGLE_AUTO_SELECTION_HIGHLIGHT;
+                    case 8 -> KeyEvent.Action.TOGGLE_ACTIVE_GUTTER_HIGHLIGHT;
+                    case 9 -> KeyEvent.Action.TOGGLE_THEME;
                     default -> null;
                 };
             }

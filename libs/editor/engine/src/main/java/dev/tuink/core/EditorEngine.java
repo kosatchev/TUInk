@@ -1020,25 +1020,37 @@ public class EditorEngine {
     }
 
     private String markdownOrderedContinuation(String rest) {
-        int dot = rest.indexOf('.');
-        if (dot <= 0 || dot >= rest.length() - 1) {
+        int sep = -1;
+        char delimiter = '.';
+        for (int i = 0; i < rest.length(); i++) {
+            char ch = rest.charAt(i);
+            if (ch == '.' || ch == ')') {
+                sep = i;
+                delimiter = ch;
+                break;
+            }
+            if (!Character.isDigit(ch)) {
+                return "";
+            }
+        }
+        if (sep <= 0 || sep >= rest.length() - 1) {
             return "";
         }
-        for (int i = 0; i < dot; i++) {
+        for (int i = 0; i < sep; i++) {
             if (!Character.isDigit(rest.charAt(i))) {
                 return "";
             }
         }
-        if (rest.charAt(dot + 1) != ' ') {
+        if (rest.charAt(sep + 1) != ' ') {
             return "";
         }
-        String tail = rest.substring(dot + 2).trim();
+        String tail = rest.substring(sep + 2).trim();
         if (tail.isEmpty()) {
             return "";
         }
         try {
-            int number = Integer.parseInt(rest.substring(0, dot));
-            return Math.max(1, number + 1) + ". ";
+            int number = Integer.parseInt(rest.substring(0, sep));
+            return Math.max(1, number + 1) + String.valueOf(delimiter) + " ";
         } catch (NumberFormatException ignored) {
             return "";
         }

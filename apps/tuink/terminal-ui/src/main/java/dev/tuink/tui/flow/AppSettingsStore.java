@@ -24,6 +24,7 @@ public final class AppSettingsStore {
     private static final String KEY_AUTO_LIST = "ui.autoList";
     private static final String KEY_VISIBLE_WHITESPACE = "ui.visibleWhitespace";
     private static final String KEY_SYNTAX_HIGHLIGHTING = "ui.syntaxHighlighting";
+    private static final String KEY_RAINBOW_BRACKETS = "ui.rainbowBrackets";
     private static final String KEY_AUTO_SELECTION_HIGHLIGHT = "ui.autoSelectionHighlight";
     private static final String KEY_TAB_WIDTH = "ui.tabWidth";
     private static final String KEY_THEME = "ui.theme";
@@ -60,6 +61,7 @@ public final class AppSettingsStore {
             parseBoolean(p.getProperty(KEY_AUTO_LIST), defaults.autoList()),
             parseBoolean(p.getProperty(KEY_VISIBLE_WHITESPACE), defaults.visibleWhitespace()),
             parseBoolean(p.getProperty(KEY_SYNTAX_HIGHLIGHTING), defaults.syntaxHighlighting()),
+            parseBoolean(p.getProperty(KEY_RAINBOW_BRACKETS), defaults.rainbowBrackets()),
             parseBoolean(p.getProperty(KEY_AUTO_SELECTION_HIGHLIGHT), defaults.autoSelectionHighlight()),
             parseTabWidth(p.getProperty(KEY_TAB_WIDTH), defaults.tabWidth()),
             parseTheme(p.getProperty(KEY_THEME), defaults.theme())
@@ -86,6 +88,7 @@ public final class AppSettingsStore {
         p.setProperty(KEY_AUTO_LIST, Boolean.toString(settings.autoList()));
         p.setProperty(KEY_VISIBLE_WHITESPACE, Boolean.toString(settings.visibleWhitespace()));
         p.setProperty(KEY_SYNTAX_HIGHLIGHTING, Boolean.toString(settings.syntaxHighlighting()));
+        p.setProperty(KEY_RAINBOW_BRACKETS, Boolean.toString(settings.rainbowBrackets()));
         p.setProperty(KEY_AUTO_SELECTION_HIGHLIGHT, Boolean.toString(settings.autoSelectionHighlight()));
         p.setProperty(KEY_TAB_WIDTH, Integer.toString(settings.tabWidth()));
         p.setProperty(KEY_THEME, settings.theme().name().toLowerCase());

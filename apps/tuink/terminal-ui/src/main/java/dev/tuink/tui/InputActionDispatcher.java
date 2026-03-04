@@ -131,6 +131,13 @@ final class InputActionDispatcher {
                     : "Syntax highlighting disabled";
                 return DispatchResult.handled(statusMessage);
             }
+            case TOGGLE_RAINBOW_BRACKETS -> {
+                ui.rainbowBracketsSetting = !ui.rainbowBracketsSetting;
+                statusMessage = ui.rainbowBracketsSetting
+                    ? "Rainbow brackets enabled"
+                    : "Rainbow brackets disabled";
+                return DispatchResult.handled(statusMessage);
+            }
             case TOGGLE_AUTO_SELECTION_HIGHLIGHT -> {
                 ui.autoSelectionHighlightSetting = !ui.autoSelectionHighlightSetting;
                 statusMessage = ui.autoSelectionHighlightSetting

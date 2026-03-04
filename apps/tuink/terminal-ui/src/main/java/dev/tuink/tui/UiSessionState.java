@@ -18,6 +18,7 @@ final class UiSessionState {
     boolean autoListSetting;
     boolean visibleWhitespaceSetting;
     boolean syntaxHighlightingSetting;
+    boolean rainbowBracketsSetting;
     boolean autoSelectionHighlightSetting;
     int tabWidthSetting;
     boolean helpHintsMode;
@@ -40,6 +41,7 @@ final class UiSessionState {
         boolean autoListSetting,
         boolean visibleWhitespaceSetting,
         boolean syntaxHighlightingSetting,
+        boolean rainbowBracketsSetting,
         boolean autoSelectionHighlightSetting,
         int tabWidthSetting,
         boolean helpHintsMode,
@@ -62,6 +64,7 @@ final class UiSessionState {
         state.autoListSetting = autoListSetting;
         state.visibleWhitespaceSetting = visibleWhitespaceSetting;
         state.syntaxHighlightingSetting = syntaxHighlightingSetting;
+        state.rainbowBracketsSetting = rainbowBracketsSetting;
         state.autoSelectionHighlightSetting = autoSelectionHighlightSetting;
         state.tabWidthSetting = tabWidthSetting <= 2 ? 2 : 4;
         state.helpHintsMode = helpHintsMode;

@@ -152,6 +152,7 @@ public class TerminalEditorApp {
             loadedSettings.autoList(),
             loadedSettings.visibleWhitespace(),
             loadedSettings.syntaxHighlighting(),
+            loadedSettings.rainbowBrackets(),
             loadedSettings.autoSelectionHighlight(),
             loadedSettings.tabWidth(),
             false,
@@ -415,6 +416,7 @@ public class TerminalEditorApp {
                         topMenu.setSyntaxHighlightingEnabled(
                             effectiveSyntaxHighlighting(uiSessionState.syntaxHighlightingSetting)
                         );
+                        topMenu.setRainbowBracketsEnabled(uiSessionState.rainbowBracketsSetting);
                         topMenu.setAutoSelectionHighlightEnabled(uiSessionState.autoSelectionHighlightSetting);
                         topMenu.setTabWidth(uiSessionState.tabWidthSetting);
                         renderer.setHighlightActiveGutter(uiSessionState.highlightActiveGutterSetting);
@@ -423,6 +425,8 @@ public class TerminalEditorApp {
                         renderPlanBuilder.setSyntaxHighlightingEnabled(
                             effectiveSyntaxHighlighting(uiSessionState.syntaxHighlightingSetting)
                         );
+                        renderPlanBuilder.setCommentSyntaxProfile(resolveCommentSyntaxProfile(state.getCurrentFile()));
+                        renderPlanBuilder.setRainbowBracketsEnabled(uiSessionState.rainbowBracketsSetting);
                         renderPlanBuilder.setTabWidth(uiSessionState.tabWidthSetting);
                         editorView.setTabWidth(uiSessionState.tabWidthSetting);
                         engine.setTabWidth(uiSessionState.tabWidthSetting);
@@ -1300,6 +1304,7 @@ public class TerminalEditorApp {
             uiSessionState.autoListSetting,
             uiSessionState.visibleWhitespaceSetting,
             uiSessionState.syntaxHighlightingSetting,
+            uiSessionState.rainbowBracketsSetting,
             uiSessionState.autoSelectionHighlightSetting,
             uiSessionState.tabWidthSetting,
             theme
@@ -3739,6 +3744,85 @@ public class TerminalEditorApp {
 
     private LineHighlighter resolveHighlighter(Path file) {
         return file == null ? RegexHighlighter.withDefaults() : RegexHighlighter.forFileName(file.getFileName().toString());
+    }
+
+    private RenderPlanBuilder.CommentSyntaxProfile resolveCommentSyntaxProfile(Path file) {
+        if (file == null || file.getFileName() == null) {
+            return RenderPlanBuilder.CommentSyntaxProfile.GENERIC;
+        }
+        String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
+        String ext = extensionOf(name);
+        if ("sql".equals(ext)) {
+            return RenderPlanBuilder.CommentSyntaxProfile.SQL;
+        }
+        if (isHashCommentFile(name, ext)) {
+            return RenderPlanBuilder.CommentSyntaxProfile.HASH;
+        }
+        if (isCStyleCommentFile(ext)) {
+            return RenderPlanBuilder.CommentSyntaxProfile.C_STYLE;
+        }
+        if ("html".equals(ext) || "htm".equals(ext) || "xml".equals(ext)) {
+            return RenderPlanBuilder.CommentSyntaxProfile.HTML;
+        }
+        if ("md".equals(ext) || "markdown".equals(ext)) {
+            return RenderPlanBuilder.CommentSyntaxProfile.MARKDOWN;
+        }
+        if ("txt".equals(ext)) {
+            return RenderPlanBuilder.CommentSyntaxProfile.NONE;
+        }
+        return RenderPlanBuilder.CommentSyntaxProfile.GENERIC;
+    }
+
+    private static boolean isHashCommentFile(String fileName, String ext) {
+        if (ext == null) {
+            return false;
+        }
+        if (ext.equals("py") || ext.equals("sh") || ext.equals("bash") || ext.equals("zsh")
+            || ext.equals("yaml") || ext.equals("yml") || ext.equals("toml")
+            || ext.equals("ini") || ext.equals("cfg") || ext.equals("conf")
+            || ext.equals("properties")) {
+            return true;
+        }
+        return fileName.equals("dockerfile")
+            || fileName.equals(".gitignore")
+            || fileName.equals(".editorconfig")
+            || fileName.startsWith(".env")
+            || fileName.equals("makefile");
+    }
+
+    private static boolean isCStyleCommentFile(String ext) {
+        if (ext == null) {
+            return false;
+        }
+        return ext.equals("java")
+            || ext.equals("c")
+            || ext.equals("h")
+            || ext.equals("ino")
+            || ext.equals("js")
+            || ext.equals("mjs")
+            || ext.equals("cjs")
+            || ext.equals("jsx")
+            || ext.equals("ts")
+            || ext.equals("tsx")
+            || ext.equals("go")
+            || ext.equals("rs")
+            || ext.equals("kt")
+            || ext.equals("kts")
+            || ext.equals("css")
+            || ext.equals("scss")
+            || ext.equals("proto")
+            || ext.equals("gradle");
+    }
+
+    private static String extensionOf(String fileName) {
+        if (fileName == null || fileName.isBlank()) {
+            return null;
+        }
+        int dot = fileName.lastIndexOf('.');
+        if (dot < 0 || dot == fileName.length() - 1) {
+            return null;
+        }
+        return fileName.substring(dot + 1);
     }
 
     private boolean effectiveSyntaxHighlighting(boolean syntaxHighlightingSetting) {

@@ -200,16 +200,12 @@ public class RenderRasterizer {
                 char ch = text.charAt(i);
                 if (ch == ' ') {
                     graphemes[i] = "·";
-                    if (charStyles[i].equals(Style.DEFAULT)) {
-                        charStyles[i] = styles.renderLeadingWhitespace();
-                    }
+                    charStyles[i] = markerStyle(charStyles[i]);
                     continue;
                 }
                 if (ch == '\t') {
                     graphemes[i] = "»";
-                    if (charStyles[i].equals(Style.DEFAULT)) {
-                        charStyles[i] = styles.renderLeadingWhitespace();
-                    }
+                    charStyles[i] = markerStyle(charStyles[i]);
                     continue;
                 }
                 break;
@@ -222,16 +218,12 @@ public class RenderRasterizer {
                 char ch = text.charAt(i);
                 if (ch == ' ') {
                     graphemes[i] = "·";
-                    if (charStyles[i].equals(Style.DEFAULT)) {
-                        charStyles[i] = styles.renderLeadingWhitespace();
-                    }
+                    charStyles[i] = markerStyle(charStyles[i]);
                     continue;
                 }
                 if (ch == '\t') {
                     graphemes[i] = "»";
-                    if (charStyles[i].equals(Style.DEFAULT)) {
-                        charStyles[i] = styles.renderLeadingWhitespace();
-                    }
+                    charStyles[i] = markerStyle(charStyles[i]);
                     continue;
                 }
                 break;
@@ -313,5 +305,14 @@ public class RenderRasterizer {
             return plan.leftColumn() == 0;
         }
         return hasLineNumberGutter(line.gutter());
+    }
+
+    private Style markerStyle(Style base) {
+        Style marker = styles.renderLeadingWhitespace();
+        if (base.equals(Style.DEFAULT)) {
+            return marker;
+        }
+        // Keep background/attributes (selection/search), override only marker foreground.
+        return new Style(marker.fg(), base.bg(), base.bold(), base.underline());
     }
 }

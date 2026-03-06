@@ -1,5 +1,6 @@
 package dev.tuink.tui.flow;
 
+import dev.tuink.core.TabInsertMode;
 import dev.tuink.tui.UiStyles;
 import java.io.IOException;
 import java.io.InputStream;
@@ -27,6 +28,7 @@ public final class AppSettingsStore {
     private static final String KEY_RAINBOW_BRACKETS = "ui.rainbowBrackets";
     private static final String KEY_AUTO_SELECTION_HIGHLIGHT = "ui.autoSelectionHighlight";
     private static final String KEY_TAB_WIDTH = "ui.tabWidth";
+    private static final String KEY_TAB_INSERT_MODE = "ui.tabInsertMode";
     private static final String KEY_THEME = "ui.theme";
 
     private AppSettingsStore() {
@@ -64,6 +66,7 @@ public final class AppSettingsStore {
             parseBoolean(p.getProperty(KEY_RAINBOW_BRACKETS), defaults.rainbowBrackets()),
             parseBoolean(p.getProperty(KEY_AUTO_SELECTION_HIGHLIGHT), defaults.autoSelectionHighlight()),
             parseTabWidth(p.getProperty(KEY_TAB_WIDTH), defaults.tabWidth()),
+            parseTabInsertMode(p.getProperty(KEY_TAB_INSERT_MODE), defaults.tabInsertMode()),
             parseTheme(p.getProperty(KEY_THEME), defaults.theme())
         );
     }
@@ -91,6 +94,7 @@ public final class AppSettingsStore {
         p.setProperty(KEY_RAINBOW_BRACKETS, Boolean.toString(settings.rainbowBrackets()));
         p.setProperty(KEY_AUTO_SELECTION_HIGHLIGHT, Boolean.toString(settings.autoSelectionHighlight()));
         p.setProperty(KEY_TAB_WIDTH, Integer.toString(settings.tabWidth()));
+        p.setProperty(KEY_TAB_INSERT_MODE, settings.tabInsertMode().name().toLowerCase());
         p.setProperty(KEY_THEME, settings.theme().name().toLowerCase());
 
         Path tmp = path.resolveSibling(path.getFileName() + ".tmp");
@@ -134,5 +138,19 @@ public final class AppSettingsStore {
         } catch (NumberFormatException e) {
             return safeFallback;
         }
+    }
+
+    private static TabInsertMode parseTabInsertMode(String raw, TabInsertMode fallback) {
+        if (raw == null || raw.isBlank()) {
+            return fallback;
+        }
+        String normalized = raw.trim().toLowerCase();
+        return switch (normalized) {
+            case "auto" -> TabInsertMode.AUTO;
+            case "always_tab", "tab" -> TabInsertMode.ALWAYS_TAB;
+            case "always_spaces_4", "spaces_4", "4spaces", "spaces4" -> TabInsertMode.ALWAYS_SPACES_4;
+            case "always_spaces_2", "spaces_2", "2spaces", "spaces2" -> TabInsertMode.ALWAYS_SPACES_2;
+            default -> fallback;
+        };
     }
 }

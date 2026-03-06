@@ -155,6 +155,7 @@ public class TerminalEditorApp {
             loadedSettings.rainbowBrackets(),
             loadedSettings.autoSelectionHighlight(),
             loadedSettings.tabWidth(),
+            loadedSettings.tabInsertMode(),
             false,
             false,
             false
@@ -419,6 +420,7 @@ public class TerminalEditorApp {
                         topMenu.setRainbowBracketsEnabled(uiSessionState.rainbowBracketsSetting);
                         topMenu.setAutoSelectionHighlightEnabled(uiSessionState.autoSelectionHighlightSetting);
                         topMenu.setTabWidth(uiSessionState.tabWidthSetting);
+                        topMenu.setTabInsertMode(uiSessionState.tabInsertModeSetting);
                         renderer.setHighlightActiveGutter(uiSessionState.highlightActiveGutterSetting);
                         renderer.setVisibleWhitespace(uiSessionState.visibleWhitespaceSetting);
                         renderer.setTabWidth(uiSessionState.tabWidthSetting);
@@ -430,6 +432,7 @@ public class TerminalEditorApp {
                         renderPlanBuilder.setTabWidth(uiSessionState.tabWidthSetting);
                         editorView.setTabWidth(uiSessionState.tabWidthSetting);
                         engine.setTabWidth(uiSessionState.tabWidthSetting);
+                        engine.setTabInsertMode(uiSessionState.tabInsertModeSetting);
                         engine.setAutoIndentEnabled(uiSessionState.autoIndentSetting);
                         engine.setAutoPairsEnabled(uiSessionState.autoPairsSetting);
                         engine.setAutoListEnabled(uiSessionState.autoListSetting);
@@ -1307,6 +1310,7 @@ public class TerminalEditorApp {
             uiSessionState.rainbowBracketsSetting,
             uiSessionState.autoSelectionHighlightSetting,
             uiSessionState.tabWidthSetting,
+            uiSessionState.tabInsertModeSetting,
             theme
         );
         if (!effectiveSettings.equals(loadedSettings)) {

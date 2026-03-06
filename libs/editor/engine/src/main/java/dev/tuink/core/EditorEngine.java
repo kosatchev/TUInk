@@ -29,6 +29,7 @@ public class EditorEngine {
     private int preferredVisualColumn = -1;
     private static final int H_SCROLL_MARGIN = 12;
     private int tabWidth = 4;
+    private TabInsertMode tabInsertMode = TabInsertMode.AUTO;
     private boolean autoIndentEnabled = true;
     private boolean autoPairsEnabled = true;
     private boolean autoListEnabled = true;
@@ -48,6 +49,10 @@ public class EditorEngine {
 
     public void setTabWidth(int tabWidth) {
         this.tabWidth = tabWidth <= 2 ? 2 : 4;
+    }
+
+    public void setTabInsertMode(TabInsertMode mode) {
+        this.tabInsertMode = mode == null ? TabInsertMode.AUTO : mode;
     }
 
     public void setAutoIndentEnabled(boolean enabled) {
@@ -355,16 +360,34 @@ public class EditorEngine {
         });
     }
 
+    public void insertTab() {
+        preferredVisualColumn = -1;
+        boolean hadSelection = state.hasSelection();
+        applyEdit(hadSelection ? EditKind.NONE : EditKind.INSERT_CHAR, () -> {
+            deleteSelectionIfAny();
+            Position cursor = model.clamp(state.getCursor());
+            String line = model.getLine(cursor.line());
+            int col = Math.min(cursor.col(), line.length());
+            String indentPrefix = line.substring(0, Math.min(col, leadingIndentLength(line)));
+            String tabText = indentUnit(cursor.line(), indentPrefix);
+            state.setCursor(model.insertText(cursor, tabText));
+            maybeAutoOutdentKeywordLine();
+            state.clearSelection();
+        });
+    }
+
     public void backspace() {
         preferredVisualColumn = -1;
         boolean hadSelection = state.hasSelection();
         applyEdit(hadSelection ? EditKind.NONE : EditKind.BACKSPACE, () -> {
             if (state.hasSelection()) {
                 deleteSelectionIfAny();
-            } else if (!isAutoPairsActive() || !deletePairAroundCursor()) {
-                state.setCursor(model.deleteBackward(state.getCursor()));
-            } else {
+            } else if (isAutoPairsActive() && deletePairAroundCursor()) {
                 return;
+            } else if (deleteIndentUnitBackwardIfAny()) {
+                return;
+            } else {
+                state.setCursor(model.deleteBackward(state.getCursor()));
             }
             state.clearSelection();
         });
@@ -1131,6 +1154,15 @@ public class EditorEngine {
     }
 
     private String indentUnit(int lineIndex, String currentIndent) {
+        return switch (tabInsertMode) {
+            case ALWAYS_TAB -> "\t";
+            case ALWAYS_SPACES_4 -> "    ";
+            case ALWAYS_SPACES_2 -> "  ";
+            case AUTO -> autoIndentUnit(lineIndex, currentIndent);
+        };
+    }
+
+    private String autoIndentUnit(int lineIndex, String currentIndent) {
         int tabs = 0;
         int spaces = 0;
         for (int i = 0; i < currentIndent.length(); i++) {
@@ -1142,6 +1174,14 @@ public class EditorEngine {
             }
         }
         if (tabs > 0 && spaces == 0) {
+            return "\t";
+        }
+        if (tabs > 0 && spaces > 0) {
+            return currentIndent.charAt(currentIndent.length() - 1) == '\t'
+                ? "\t"
+                : " ".repeat(detectIndentSize(lineIndex, currentIndent));
+        }
+        if (preferTabsByContext(lineIndex)) {
             return "\t";
         }
         return " ".repeat(detectIndentSize(lineIndex, currentIndent));
@@ -1237,6 +1277,30 @@ public class EditorEngine {
         return -1;
     }
 
+    private boolean preferTabsByContext(int lineIndex) {
+        int tabIndented = 0;
+        int spaceIndented = 0;
+        int start = Math.max(0, lineIndex - 256);
+        int end = Math.min(model.lineCount() - 1, lineIndex + 256);
+        for (int i = start; i <= end; i++) {
+            String text = model.getLine(i);
+            if (text.isBlank()) {
+                continue;
+            }
+            int first = firstNonWhitespaceColumn(text);
+            if (first <= 0 || first >= text.length()) {
+                continue;
+            }
+            char indentLead = text.charAt(0);
+            if (indentLead == '\t') {
+                tabIndented++;
+            } else if (indentLead == ' ') {
+                spaceIndented++;
+            }
+        }
+        return tabIndented > spaceIndented && tabIndented > 0;
+    }
+
     private static int leadingSpacesOnly(String line) {
         int spaces = 0;
         while (spaces < line.length()) {
@@ -1264,7 +1328,72 @@ public class EditorEngine {
         return spaces;
     }
 
+    private boolean deleteIndentUnitBackwardIfAny() {
+        Position cursor = model.clamp(state.getCursor());
+        if (cursor.col() <= 0) {
+            return false;
+        }
+        String line = model.getLine(cursor.line());
+        int col = Math.min(cursor.col(), line.length());
+        if (!isLeadingWhitespaceUntil(line, col)) {
+            return false;
+        }
+        String currentIndent = line.substring(0, col);
+        String reduced = removeOneIndentUnit(currentIndent, cursor.line());
+        int drop = currentIndent.length() - reduced.length();
+        if (drop <= 0) {
+            return false;
+        }
+        int fromCol = col - drop;
+        model.deleteRange(new Position(cursor.line(), fromCol), new Position(cursor.line(), col));
+        state.setCursor(new Position(cursor.line(), fromCol));
+        return true;
+    }
+
+    private static boolean isLeadingWhitespaceUntil(String line, int col) {
+        int limit = Math.min(Math.max(col, 0), line.length());
+        for (int i = 0; i < limit; i++) {
+            char ch = line.charAt(i);
+            if (ch != ' ' && ch != '\t') {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private String removeOneIndentUnit(String indent, int lineIndex) {
+        if (indent.isEmpty()) {
+            return indent;
+        }
+        if (tabInsertMode == TabInsertMode.ALWAYS_TAB) {
+            int end = indent.length();
+            if (indent.charAt(end - 1) == '\t') {
+                return indent.substring(0, end - 1);
+            }
+            return indent.substring(0, end - 1);
+        }
+        if (tabInsertMode == TabInsertMode.ALWAYS_SPACES_4 || tabInsertMode == TabInsertMode.ALWAYS_SPACES_2) {
+            return removeForcedSpacesIndentUnit(indent, tabInsertMode == TabInsertMode.ALWAYS_SPACES_2 ? 2 : 4);
+        }
+        int end = indent.length();
+        char last = indent.charAt(end - 1);
+        if (last == '\t') {
+            return indent.substring(0, end - 1);
+        }
+        int spacesInUnit = detectIndentSize(lineIndex, indent);
+        int spacesToDrop = 0;
+        while (end - spacesToDrop - 1 >= 0
+            && indent.charAt(end - spacesToDrop - 1) == ' '
+            && spacesToDrop < spacesInUnit) {
+            spacesToDrop++;
+        }
+        if (spacesToDrop > 0) {
+            return indent.substring(0, end - spacesToDrop);
+        }
+        return indent.substring(0, end - 1);
+    }
+
+    private static String removeForcedSpacesIndentUnit(String indent, int spacesInUnit) {
         if (indent.isEmpty()) {
             return indent;
         }
@@ -1273,7 +1402,6 @@ public class EditorEngine {
         if (last == '\t') {
             return indent.substring(0, end - 1);
         }
-        int spacesInUnit = detectIndentSize(lineIndex, indent);
         int spacesToDrop = 0;
         while (end - spacesToDrop - 1 >= 0
             && indent.charAt(end - spacesToDrop - 1) == ' '

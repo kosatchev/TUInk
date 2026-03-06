@@ -1,6 +1,7 @@
 package dev.tuink.tui.ui;
 
 import dev.tuink.render.Style;
+import dev.tuink.core.TabInsertMode;
 import dev.tuink.tui.KeyEvent;
 import dev.tuink.tui.render.CellBuffer;
 import java.nio.file.Path;
@@ -103,6 +104,10 @@ public final class MenuBar {
 
     public void setTabWidth(int tabWidth) {
         controller.setTabWidth(tabWidth);
+    }
+
+    public void setTabInsertMode(TabInsertMode mode) {
+        controller.setTabInsertMode(mode);
     }
 
     public Integer consumeTabActivationRequest() {
@@ -295,6 +300,7 @@ public final class MenuBar {
         private boolean rainbowBracketsEnabled = true;
         private boolean autoSelectionHighlightEnabled = true;
         private int tabWidth = 4;
+        private TabInsertMode tabInsertMode = TabInsertMode.AUTO;
         private String themeLabel = "Cyan";
         private int[] activeMnemonics = new int[0];
 
@@ -422,6 +428,13 @@ public final class MenuBar {
         private void setTabWidth(int tabWidth) {
             this.tabWidth = tabWidth <= 2 ? 2 : 4;
             if (open && active == MenuId.VIEW) {
+                rebuildMnemonics();
+            }
+        }
+
+        private void setTabInsertMode(TabInsertMode mode) {
+            this.tabInsertMode = mode == null ? TabInsertMode.AUTO : mode;
+            if (open && active == MenuId.SETTINGS) {
                 rebuildMnemonics();
             }
         }
@@ -756,12 +769,14 @@ public final class MenuBar {
                 String autoIndentLabel = "[" + (autoIndentEnabled ? "x" : " ") + "] Auto indent";
                 String autoPairsLabel = "[" + (autoPairsEnabled ? "x" : " ") + "] Autopairs";
                 String autoListLabel = "[" + (autoListEnabled ? "x" : " ") + "] Auto list";
+                String tabInsertLabel = "[>] Tab insert mode: " + tabInsertMode.label();
                 return new MenuItem[] {
                     new MenuItem("[" + (readingModeEnabled ? "x" : " ") + "] Reading mode", true),
                     new MenuItem("[" + (smartHomeEndEnabled ? "x" : " ") + "] Smart Home/End", true),
                     new MenuItem(autoIndentLabel, true),
                     new MenuItem(autoPairsLabel, true),
                     new MenuItem(autoListLabel, true),
+                    new MenuItem(tabInsertLabel, true),
                     new MenuItem("[" + (mouseModeEnabled ? "x" : " ") + "] Mouse mode", true),
                     new MenuItem("[" + (confirmOnCloseEnabled ? "x" : " ") + "] Confirm on close", true),
                 };
@@ -851,8 +866,9 @@ public final class MenuBar {
                     case 2 -> KeyEvent.Action.TOGGLE_AUTO_INDENT;
                     case 3 -> KeyEvent.Action.TOGGLE_AUTO_PAIRS;
                     case 4 -> KeyEvent.Action.TOGGLE_AUTO_LIST;
-                    case 5 -> KeyEvent.Action.TOGGLE_MOUSE_MODE;
-                    case 6 -> KeyEvent.Action.TOGGLE_CONFIRM_ON_CLOSE;
+                    case 5 -> KeyEvent.Action.TOGGLE_TAB_INSERT_MODE;
+                    case 6 -> KeyEvent.Action.TOGGLE_MOUSE_MODE;
+                    case 7 -> KeyEvent.Action.TOGGLE_CONFIRM_ON_CLOSE;
                     default -> null;
                 };
             }

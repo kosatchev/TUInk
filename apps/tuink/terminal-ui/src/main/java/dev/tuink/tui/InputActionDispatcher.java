@@ -2,6 +2,7 @@ package dev.tuink.tui;
 
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
+import dev.tuink.core.TabInsertMode;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.ui.MenuBar;
 import java.io.PrintWriter;
@@ -152,6 +153,11 @@ final class InputActionDispatcher {
                     : "Thin tabs disabled (4)";
                 return DispatchResult.handled(statusMessage);
             }
+            case TOGGLE_TAB_INSERT_MODE -> {
+                ui.tabInsertModeSetting = nextTabInsertMode(ui.tabInsertModeSetting);
+                statusMessage = "Tab insert mode: " + ui.tabInsertModeSetting.label();
+                return DispatchResult.handled(statusMessage);
+            }
             case SHOW_KEY_HINTS -> {
                 ui.helpHintsMode = true;
                 return DispatchResult.handled(null);
@@ -213,7 +219,7 @@ final class InputActionDispatcher {
                 if (ui.readingModeSetting) {
                     statusMessage = "Reading mode: editing is disabled";
                 } else {
-                    ctx.engine().insertChar('\t');
+                    ctx.engine().insertTab();
                     statusMessage = "";
                 }
                 return DispatchResult.handled(statusMessage);
@@ -313,6 +319,10 @@ final class InputActionDispatcher {
                 return DispatchResult.notHandled();
             }
         }
+    }
+
+    private static TabInsertMode nextTabInsertMode(TabInsertMode mode) {
+        return mode == null ? TabInsertMode.AUTO : mode.next();
     }
 
     record DispatchContext(

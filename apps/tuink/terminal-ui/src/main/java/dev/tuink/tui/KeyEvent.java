@@ -66,6 +66,7 @@ public sealed interface KeyEvent permits KeyEvent.ActionEvent, KeyEvent.CharInpu
         TOGGLE_RAINBOW_BRACKETS,
         TOGGLE_AUTO_SELECTION_HIGHLIGHT,
         TOGGLE_TAB_WIDTH,
+        TOGGLE_TAB_INSERT_MODE,
         TOGGLE_THEME,
         ESCAPE,
         TAB,

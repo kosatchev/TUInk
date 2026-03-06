@@ -1,5 +1,6 @@
 package dev.tuink.tui.flow;
 
+import dev.tuink.core.TabInsertMode;
 import dev.tuink.tui.UiStyles;
 
 public record AppSettings(
@@ -19,6 +20,7 @@ public record AppSettings(
     boolean rainbowBrackets,
     boolean autoSelectionHighlight,
     int tabWidth,
+    TabInsertMode tabInsertMode,
     UiStyles.Theme theme
 ) {
     public static AppSettings defaults() {
@@ -39,6 +41,7 @@ public record AppSettings(
             true,
             true,
             4,
+            TabInsertMode.AUTO,
             UiStyles.Theme.CYAN
         );
     }

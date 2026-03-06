@@ -1,5 +1,6 @@
 package dev.tuink.tui;
 
+import dev.tuink.core.TabInsertMode;
 import dev.tuink.tui.flow.SearchFocus;
 
 final class UiSessionState {
@@ -21,6 +22,7 @@ final class UiSessionState {
     boolean rainbowBracketsSetting;
     boolean autoSelectionHighlightSetting;
     int tabWidthSetting;
+    TabInsertMode tabInsertModeSetting;
     boolean helpHintsMode;
     boolean helpLicensesMode;
     boolean helpAuthorMode;
@@ -44,6 +46,7 @@ final class UiSessionState {
         boolean rainbowBracketsSetting,
         boolean autoSelectionHighlightSetting,
         int tabWidthSetting,
+        TabInsertMode tabInsertModeSetting,
         boolean helpHintsMode,
         boolean helpLicensesMode,
         boolean helpAuthorMode
@@ -67,6 +70,7 @@ final class UiSessionState {
         state.rainbowBracketsSetting = rainbowBracketsSetting;
         state.autoSelectionHighlightSetting = autoSelectionHighlightSetting;
         state.tabWidthSetting = tabWidthSetting <= 2 ? 2 : 4;
+        state.tabInsertModeSetting = tabInsertModeSetting == null ? TabInsertMode.AUTO : tabInsertModeSetting;
         state.helpHintsMode = helpHintsMode;
         state.helpLicensesMode = helpLicensesMode;
         state.helpAuthorMode = helpAuthorMode;

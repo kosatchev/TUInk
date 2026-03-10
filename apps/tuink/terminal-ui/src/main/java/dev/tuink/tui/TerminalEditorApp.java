@@ -290,6 +290,9 @@ public class TerminalEditorApp {
                     if (notification.expireIfNeeded()) {
                         needsRender = true;
                     }
+                    if (openFileMode && openFileTree.consumeMetadataChanged()) {
+                        needsRender = true;
+                    }
                     int rows = Math.max(2, terminal.getHeight());
                     int cols = Math.max(1, terminal.getWidth());
                     boolean saveAsMode = modalState.isSaveAs();

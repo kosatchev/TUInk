@@ -27,6 +27,7 @@ public final class TreeView {
     private static final int MIN_SIZE_COLUMN_WIDTH = 7;
     private static final int DATE_COLUMN_WIDTH = 14;
     private static final String UNKNOWN_DATE = "--.--.-- --:--";
+    private static final String PENDING_META = "...";
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd.MM.yy HH:mm", Locale.ROOT);
 
     private Path root;
@@ -41,6 +42,10 @@ public final class TreeView {
     private boolean showSizeColumn;
     private boolean showDateColumn;
     private boolean showHiddenFiles;
+    private final Object metadataLock = new Object();
+    private long metadataGeneration;
+    private Thread metadataWorker;
+    private volatile boolean metadataChanged;
 
     public TreeView(Path root) {
         this(root, false, false);
@@ -396,6 +401,14 @@ public final class TreeView {
         lastClickAtNanos = 0L;
     }
 
+    public boolean consumeMetadataChanged() {
+        if (!metadataChanged) {
+            return false;
+        }
+        metadataChanged = false;
+        return true;
+    }
+
     public void draw(
         CellBuffer buffer,
         int cols,
@@ -572,11 +585,12 @@ public final class TreeView {
         List<Item> out = new ArrayList<>();
         Path parent = root.getParent();
         if (parent != null) {
-            out.add(new Item(parent, "..", buildSizeValue(parent, true), buildDateValue(parent), true, false, true, 0));
+            out.add(new Item(parent, "..", true, false, true, 0, pendingSizeValue(), pendingDateValue()));
         }
         appendTreeItems(root, 0, out);
         items = out;
         maxLabelLength = computeMaxLabelLength(out);
+        startMetadataEnrichment(out);
     }
 
     private void restoreSelection(Path selectedPath) {
@@ -606,7 +620,7 @@ public final class TreeView {
         try {
             children = listDirectorySorted(directory);
         } catch (IOException e) {
-            out.add(new Item(directory, "<cannot read directory: " + e.getMessage() + ">", "", "", false, false, false, depth));
+            out.add(new Item(directory, "<cannot read directory: " + e.getMessage() + ">", false, false, false, depth, "", ""));
             return;
         }
 
@@ -615,13 +629,78 @@ public final class TreeView {
             Path normalized = child.toAbsolutePath().normalize();
             boolean expanded = dir && expandedDirs.contains(normalized);
             String label = formatTreeLabel(depth, child, dir, expanded);
-            String sizeValue = buildSizeValue(child, dir);
-            String dateValue = buildDateValue(child);
-            out.add(new Item(child, label, sizeValue, dateValue, dir, expanded, false, depth));
+            out.add(new Item(child, label, dir, expanded, false, depth, pendingSizeValue(), pendingDateValue()));
             if (dir && expanded) {
                 appendTreeItems(child, depth + 1, out);
             }
         }
+    }
+
+    private void startMetadataEnrichment(List<Item> snapshot) {
+        long generation;
+        Thread previous;
+        synchronized (metadataLock) {
+            metadataGeneration++;
+            generation = metadataGeneration;
+            previous = metadataWorker;
+            metadataWorker = null;
+        }
+        if (previous != null) {
+            previous.interrupt();
+        }
+        if ((!showSizeColumn && !showDateColumn) || snapshot.isEmpty()) {
+            return;
+        }
+        Thread worker = new Thread(
+            () -> enrichMetadata(snapshot, generation),
+            "tuink-tree-meta-loader"
+        );
+        worker.setDaemon(true);
+        synchronized (metadataLock) {
+            if (metadataGeneration != generation) {
+                return;
+            }
+            metadataWorker = worker;
+        }
+        worker.start();
+    }
+
+    private void enrichMetadata(List<Item> snapshot, long generation) {
+        int changedBatch = 0;
+        for (Item item : snapshot) {
+            if (Thread.currentThread().isInterrupted() || !isCurrentMetadataGeneration(generation)) {
+                return;
+            }
+            if (item.parentLink() || item.label().startsWith("<cannot read directory:")) {
+                continue;
+            }
+            String size = buildSizeValue(item.path(), item.directory());
+            String date = buildDateValue(item.path());
+            if (item.updateMetadata(size, date)) {
+                changedBatch++;
+                if (changedBatch >= 16) {
+                    metadataChanged = true;
+                    changedBatch = 0;
+                }
+            }
+        }
+        if (changedBatch > 0) {
+            metadataChanged = true;
+        }
+    }
+
+    private boolean isCurrentMetadataGeneration(long generation) {
+        synchronized (metadataLock) {
+            return metadataGeneration == generation;
+        }
+    }
+
+    private String pendingSizeValue() {
+        return showSizeColumn ? PENDING_META : "";
+    }
+
+    private String pendingDateValue() {
+        return showDateColumn ? PENDING_META : "";
     }
 
     private List<Path> listDirectorySorted(Path directory) throws IOException {
@@ -784,16 +863,82 @@ public final class TreeView {
     ) {
     }
 
-    public record Item(
-        Path path,
-        String label,
-        String sizeValue,
-        String dateValue,
-        boolean directory,
-        boolean expanded,
-        boolean parentLink,
-        int depth
-    ) {
+    public static final class Item {
+        private final Path path;
+        private final String label;
+        private final boolean directory;
+        private final boolean expanded;
+        private final boolean parentLink;
+        private final int depth;
+        private volatile String sizeValue;
+        private volatile String dateValue;
+
+        Item(
+            Path path,
+            String label,
+            boolean directory,
+            boolean expanded,
+            boolean parentLink,
+            int depth,
+            String sizeValue,
+            String dateValue
+        ) {
+            this.path = path;
+            this.label = label;
+            this.directory = directory;
+            this.expanded = expanded;
+            this.parentLink = parentLink;
+            this.depth = depth;
+            this.sizeValue = sizeValue;
+            this.dateValue = dateValue;
+        }
+
+        public Path path() {
+            return path;
+        }
+
+        public String label() {
+            return label;
+        }
+
+        public String sizeValue() {
+            return sizeValue;
+        }
+
+        public String dateValue() {
+            return dateValue;
+        }
+
+        public boolean directory() {
+            return directory;
+        }
+
+        public boolean expanded() {
+            return expanded;
+        }
+
+        public boolean parentLink() {
+            return parentLink;
+        }
+
+        public int depth() {
+            return depth;
+        }
+
+        boolean updateMetadata(String sizeValue, String dateValue) {
+            String nextSize = sizeValue == null ? "" : sizeValue;
+            String nextDate = dateValue == null ? "" : dateValue;
+            boolean changed = false;
+            if (!this.sizeValue.equals(nextSize)) {
+                this.sizeValue = nextSize;
+                changed = true;
+            }
+            if (!this.dateValue.equals(nextDate)) {
+                this.dateValue = nextDate;
+                changed = true;
+            }
+            return changed;
+        }
     }
 
     public record ClickResult(boolean consumed, boolean arrowClick, boolean doubleClick, Item item) {

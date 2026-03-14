@@ -20,8 +20,8 @@ public class EditorEngine {
     private static final long COALESCE_WINDOW_NANOS = 700_000_000L;
     private final TextModel model;
     private final EditorState state;
-    private final Deque<Snapshot> undoStack = new ArrayDeque<>();
-    private final Deque<Snapshot> redoStack = new ArrayDeque<>();
+    private final Deque<HistoryEntry> undoStack = new ArrayDeque<>();
+    private final Deque<HistoryEntry> redoStack = new ArrayDeque<>();
     private String clipboard = "";
     private EditKind lastEditKind = EditKind.NONE;
     private long lastEditAtNanos;
@@ -344,36 +344,54 @@ public class EditorEngine {
             return;
         }
         boolean hadSelection = state.hasSelection();
-        applyEdit(hadSelection ? EditKind.NONE : EditKind.INSERT_CHAR, () -> {
-            if (isAutoPairsActive() && state.hasSelection() && shouldWrapSelectionWithPair(ch)) {
-                wrapSelectionWithPair(ch);
-                return;
+        if (isAutoPairsActive() && state.hasSelection() && shouldWrapSelectionWithPair(ch)) {
+            applyEdit(EditKind.NONE, () -> wrapSelectionWithPair(ch));
+            return;
+        }
+
+        ViewState before = captureViewState();
+        List<EditOp.ReplaceRange> ops = new ArrayList<>();
+        SelectionRange selection = currentSelection();
+        Position rangeStart = selection == null ? model.clamp(state.getCursor()) : selection.start();
+        Position rangeEnd = selection == null ? rangeStart : selection.end();
+
+        if (isAutoPairsActive() && shouldAutoPair(ch)) {
+            String paired = String.valueOf(ch) + closingPairFor(ch);
+            Position afterInsert = applyReplaceAndTrack(ops, rangeStart, rangeEnd, paired);
+            state.setCursor(new Position(afterInsert.line(), Math.max(0, afterInsert.col() - 1)));
+        } else {
+            Position afterInsert = applyReplaceAndTrack(ops, rangeStart, rangeEnd, String.valueOf(ch));
+            state.setCursor(afterInsert);
+            EditOp.ReplaceRange outdent = maybeAutoOutdentKeywordLineOp();
+            if (outdent != null) {
+                ops.add(outdent);
             }
-            deleteSelectionIfAny();
-            if (isAutoPairsActive() && shouldAutoPair(ch)) {
-                insertPair(ch);
-            } else {
-                state.setCursor(model.insertChar(state.getCursor(), ch));
-            }
-            maybeAutoOutdentKeywordLine();
-            state.clearSelection();
-        });
+        }
+        state.clearSelection();
+        commitOperationEdit(hadSelection ? EditKind.NONE : EditKind.INSERT_CHAR, before, ops);
     }
 
     public void insertTab() {
         preferredVisualColumn = -1;
         boolean hadSelection = state.hasSelection();
-        applyEdit(hadSelection ? EditKind.NONE : EditKind.INSERT_CHAR, () -> {
-            deleteSelectionIfAny();
-            Position cursor = model.clamp(state.getCursor());
-            String line = model.getLine(cursor.line());
-            int col = Math.min(cursor.col(), line.length());
-            String indentPrefix = line.substring(0, Math.min(col, leadingIndentLength(line)));
-            String tabText = indentUnit(cursor.line(), indentPrefix);
-            state.setCursor(model.insertText(cursor, tabText));
-            maybeAutoOutdentKeywordLine();
-            state.clearSelection();
-        });
+        ViewState before = captureViewState();
+        List<EditOp.ReplaceRange> ops = new ArrayList<>();
+        SelectionRange selection = currentSelection();
+        Position rangeStart = selection == null ? model.clamp(state.getCursor()) : selection.start();
+        Position rangeEnd = selection == null ? rangeStart : selection.end();
+        Position cursor = model.clamp(rangeStart);
+        String line = model.getLine(cursor.line());
+        int col = Math.min(cursor.col(), line.length());
+        String indentPrefix = line.substring(0, Math.min(col, leadingIndentLength(line)));
+        String tabText = indentUnit(cursor.line(), indentPrefix);
+        Position afterInsert = applyReplaceAndTrack(ops, rangeStart, rangeEnd, tabText);
+        state.setCursor(afterInsert);
+        EditOp.ReplaceRange outdent = maybeAutoOutdentKeywordLineOp();
+        if (outdent != null) {
+            ops.add(outdent);
+        }
+        state.clearSelection();
+        commitOperationEdit(hadSelection ? EditKind.NONE : EditKind.INSERT_CHAR, before, ops);
     }
 
     public void backspace() {
@@ -408,20 +426,19 @@ public class EditorEngine {
 
     public void insertNewline() {
         preferredVisualColumn = -1;
-        applyEdit(EditKind.NONE, () -> {
-            deleteSelectionIfAny();
-            Position before = model.clamp(state.getCursor());
-            String indent = isAutoIndentActive() ? indentForNewLine(before) : "";
-            String continuation = isAutoListActive() ? continuationAfterNewLine(before) : "";
-            state.setCursor(model.insertNewline(before));
-            if (!indent.isEmpty()) {
-                state.setCursor(model.insertText(state.getCursor(), indent));
-            }
-            if (!continuation.isEmpty()) {
-                state.setCursor(model.insertText(state.getCursor(), continuation));
-            }
-            state.clearSelection();
-        });
+        ViewState before = captureViewState();
+        List<EditOp.ReplaceRange> ops = new ArrayList<>();
+        SelectionRange selection = currentSelection();
+        Position rangeStart = selection == null ? model.clamp(state.getCursor()) : selection.start();
+        Position rangeEnd = selection == null ? rangeStart : selection.end();
+        Position at = model.clamp(rangeStart);
+        String indent = isAutoIndentActive() ? indentForNewLine(at) : "";
+        String continuation = isAutoListActive() ? continuationAfterNewLine(at) : "";
+        String insertText = "\n" + indent + continuation;
+        Position afterInsert = applyReplaceAndTrack(ops, rangeStart, rangeEnd, insertText);
+        state.setCursor(afterInsert);
+        state.clearSelection();
+        commitOperationEdit(EditKind.NONE, before, ops);
     }
 
     public boolean copySelection() {
@@ -526,10 +543,9 @@ public class EditorEngine {
             return false;
         }
         breakCoalescing();
-        Snapshot current = captureSnapshot();
-        Snapshot previous = undoStack.pop();
-        pushWithLimit(redoStack, current);
-        restoreSnapshot(previous);
+        HistoryEntry previous = undoStack.pop();
+        previous.undo();
+        pushWithLimit(redoStack, previous);
         return true;
     }
 
@@ -539,10 +555,9 @@ public class EditorEngine {
             return false;
         }
         breakCoalescing();
-        Snapshot current = captureSnapshot();
-        Snapshot next = redoStack.pop();
-        pushWithLimit(undoStack, current);
-        restoreSnapshot(next);
+        HistoryEntry next = redoStack.pop();
+        next.redo();
+        pushWithLimit(undoStack, next);
         return true;
     }
 
@@ -1414,13 +1429,13 @@ public class EditorEngine {
         return indent.substring(0, end - 1);
     }
 
-    private void maybeAutoOutdentKeywordLine() {
+    private EditOp.ReplaceRange maybeAutoOutdentKeywordLineOp() {
         if (!isAutoIndentActive()) {
-            return;
+            return null;
         }
         LanguageProfile profile = languageProfile();
         if (!profile.keywordDedentEnabled()) {
-            return;
+            return null;
         }
         Position cursor = model.clamp(state.getCursor());
         int lineIndex = cursor.line();
@@ -1428,31 +1443,35 @@ public class EditorEngine {
         int cursorCol = Math.max(0, Math.min(cursor.col(), line.length()));
         int leading = leadingIndentLength(line);
         if (leading <= 0 || cursorCol <= leading) {
-            return;
+            return null;
         }
         int prevLine = previousNonBlankLine(lineIndex - 1);
         if (prevLine < 0) {
-            return;
+            return null;
         }
         String previous = model.getLine(prevLine);
         int prevLeading = leadingIndentLength(previous);
         if (prevLeading != leading) {
-            return;
+            return null;
         }
         String currentIndent = line.substring(0, leading);
         if (!previous.substring(0, prevLeading).equals(currentIndent)) {
-            return;
+            return null;
         }
         if (!startsWithDedentKeyword(line, leading, cursorCol, profile)) {
-            return;
+            return null;
         }
         String reduced = removeOneIndentUnit(currentIndent, lineIndex);
         int drop = currentIndent.length() - reduced.length();
         if (drop <= 0) {
-            return;
+            return null;
         }
-        model.deleteRange(new Position(lineIndex, 0), new Position(lineIndex, drop));
+        Position deleteStart = new Position(lineIndex, 0);
+        Position deleteEnd = new Position(lineIndex, drop);
+        String deleted = model.getTextRange(deleteStart, deleteEnd);
+        model.deleteRange(deleteStart, deleteEnd);
         state.setCursor(new Position(lineIndex, Math.max(0, cursorCol - drop)));
+        return EditOp.delete(deleteStart, deleted);
     }
 
     private boolean startsWithDedentKeyword(String line, int leading, int cursorCol, LanguageProfile profile) {
@@ -1520,14 +1539,107 @@ public class EditorEngine {
             return;
         }
         long now = System.nanoTime();
-        if (!shouldCoalesce(kind, before, now)) {
-            pushWithLimit(undoStack, before);
+        boolean merged = shouldCoalesce(kind, before.cursor(), before.selectionAnchor(), now)
+            && tryMergeSnapshotEntry(kind, after);
+        if (!merged) {
+            pushWithLimit(undoStack, new SnapshotHistoryEntry(kind, before, after));
         }
         redoStack.clear();
         state.setDirty(true);
         lastEditKind = kind;
         lastEditAtNanos = now;
         lastEditCursorAfter = after.cursor();
+    }
+
+    private void commitOperationEdit(EditKind kind, ViewState before, List<EditOp.ReplaceRange> ops) {
+        if (ops == null || ops.isEmpty()) {
+            return;
+        }
+        ViewState after = captureViewState();
+        long now = System.nanoTime();
+        boolean merged = shouldCoalesce(kind, before.cursor(), before.selectionAnchor(), now)
+            && tryMergeOperationEntry(kind, after, ops);
+        if (!merged) {
+            pushWithLimit(undoStack, new OperationHistoryEntry(kind, before, after, ops));
+        }
+        redoStack.clear();
+        state.setDirty(true);
+        lastEditKind = kind;
+        lastEditAtNanos = now;
+        lastEditCursorAfter = after.cursor();
+    }
+
+    private boolean tryMergeSnapshotEntry(EditKind kind, Snapshot after) {
+        HistoryEntry top = undoStack.peek();
+        if (!(top instanceof SnapshotHistoryEntry entry) || entry.kind() != kind) {
+            return false;
+        }
+        entry.setAfter(after);
+        return true;
+    }
+
+    private boolean tryMergeOperationEntry(EditKind kind, ViewState after, List<EditOp.ReplaceRange> ops) {
+        HistoryEntry top = undoStack.peek();
+        if (!(top instanceof OperationHistoryEntry entry) || entry.kind() != kind) {
+            return false;
+        }
+        entry.append(ops, after);
+        return true;
+    }
+
+    private Position applyReplaceAndTrack(
+        List<EditOp.ReplaceRange> ops,
+        Position start,
+        Position end,
+        String insertedText
+    ) {
+        Position a = model.clamp(start);
+        Position b = model.clamp(end);
+        if (comparePositions(a, b) > 0) {
+            Position temp = a;
+            a = b;
+            b = temp;
+        }
+        String deletedText = model.getTextRange(a, b);
+        String inserted = insertedText == null ? "" : insertedText;
+        if (deletedText.isEmpty() && inserted.isEmpty()) {
+            return a;
+        }
+        Position cursor = model.deleteRange(a, b);
+        if (!inserted.isEmpty()) {
+            cursor = model.insertText(cursor, inserted);
+        }
+        ops.add(EditOp.replace(a, deletedText, inserted));
+        return cursor;
+    }
+
+    private static int comparePositions(Position left, Position right) {
+        if (left.line() != right.line()) {
+            return Integer.compare(left.line(), right.line());
+        }
+        return Integer.compare(left.col(), right.col());
+    }
+
+    private ViewState captureViewState() {
+        return new ViewState(
+            state.getCursor(),
+            state.getTopLine(),
+            state.getTopWrapSegment(),
+            state.getLeftColumn(),
+            state.getLeftVisualColumn(),
+            state.isDirty(),
+            state.getSelectionAnchor()
+        );
+    }
+
+    private void restoreViewState(ViewState view) {
+        state.setCursor(model.clamp(view.cursor()));
+        state.setTopLine(view.topLine());
+        state.setTopWrapSegment(view.topWrapSegment());
+        state.setLeftColumn(view.leftColumn());
+        state.setLeftVisualColumn(view.leftVisualColumn());
+        state.setDirty(view.dirty());
+        state.setSelectionAnchor(view.selectionAnchor());
     }
 
     private Snapshot captureSnapshot() {
@@ -1545,17 +1657,19 @@ public class EditorEngine {
 
     private void restoreSnapshot(Snapshot snapshot) {
         model.replaceLines(snapshot.lines());
-        state.setCursor(model.clamp(snapshot.cursor()));
-        state.setTopLine(snapshot.topLine());
-        state.setTopWrapSegment(snapshot.topWrapSegment());
-        state.setLeftColumn(snapshot.leftColumn());
-        state.setLeftVisualColumn(snapshot.leftVisualColumn());
-        state.setDirty(snapshot.dirty());
-        state.setSelectionAnchor(snapshot.selectionAnchor());
+        restoreViewState(new ViewState(
+            snapshot.cursor(),
+            snapshot.topLine(),
+            snapshot.topWrapSegment(),
+            snapshot.leftColumn(),
+            snapshot.leftVisualColumn(),
+            snapshot.dirty(),
+            snapshot.selectionAnchor()
+        ));
     }
 
-    private static void pushWithLimit(Deque<Snapshot> stack, Snapshot snapshot) {
-        stack.push(snapshot);
+    private static <T> void pushWithLimit(Deque<T> stack, T entry) {
+        stack.push(entry);
         while (stack.size() > MAX_HISTORY) {
             stack.removeLast();
         }
@@ -1571,6 +1685,124 @@ public class EditorEngine {
         boolean dirty,
         Position selectionAnchor
     ) {
+    }
+
+    private record ViewState(
+        Position cursor,
+        int topLine,
+        int topWrapSegment,
+        int leftColumn,
+        int leftVisualColumn,
+        boolean dirty,
+        Position selectionAnchor
+    ) {
+    }
+
+    private interface HistoryEntry {
+        void undo();
+
+        void redo();
+    }
+
+    private final class SnapshotHistoryEntry implements HistoryEntry {
+        private final EditKind kind;
+        private final Snapshot before;
+        private Snapshot after;
+
+        private SnapshotHistoryEntry(EditKind kind, Snapshot before, Snapshot after) {
+            this.kind = kind;
+            this.before = before;
+            this.after = after;
+        }
+
+        EditKind kind() {
+            return kind;
+        }
+
+        void setAfter(Snapshot after) {
+            this.after = after;
+        }
+
+        @Override
+        public void undo() {
+            restoreSnapshot(before);
+        }
+
+        @Override
+        public void redo() {
+            restoreSnapshot(after);
+        }
+    }
+
+    private final class OperationHistoryEntry implements HistoryEntry {
+        private final EditKind kind;
+        private final ViewState beforeView;
+        private ViewState afterView;
+        private final List<EditOp.ReplaceRange> ops;
+
+        private OperationHistoryEntry(
+            EditKind kind,
+            ViewState beforeView,
+            ViewState afterView,
+            List<EditOp.ReplaceRange> ops
+        ) {
+            this.kind = kind;
+            this.beforeView = beforeView;
+            this.afterView = afterView;
+            this.ops = new ArrayList<>(ops);
+        }
+
+        EditKind kind() {
+            return kind;
+        }
+
+        void append(List<EditOp.ReplaceRange> extraOps, ViewState mergedAfterView) {
+            this.ops.addAll(extraOps);
+            this.afterView = mergedAfterView;
+        }
+
+        @Override
+        public void undo() {
+            for (int i = ops.size() - 1; i >= 0; i--) {
+                applyReplace(ops.get(i).start(), ops.get(i).insertedText(), ops.get(i).deletedText());
+            }
+            restoreViewState(beforeView);
+        }
+
+        @Override
+        public void redo() {
+            for (EditOp.ReplaceRange op : ops) {
+                applyReplace(op.start(), op.deletedText(), op.insertedText());
+            }
+            restoreViewState(afterView);
+        }
+
+        private void applyReplace(Position start, String deletedText, String insertedText) {
+            Position a = model.clamp(start);
+            Position b = advancePosition(a, deletedText);
+            Position cursor = model.deleteRange(a, b);
+            if (insertedText != null && !insertedText.isEmpty()) {
+                model.insertText(cursor, insertedText);
+            }
+        }
+
+        private Position advancePosition(Position start, String text) {
+            int line = start.line();
+            int col = start.col();
+            if (text == null || text.isEmpty()) {
+                return start;
+            }
+            for (int i = 0; i < text.length(); i++) {
+                char ch = text.charAt(i);
+                if (ch == '\n') {
+                    line++;
+                    col = 0;
+                } else {
+                    col++;
+                }
+            }
+            return model.clamp(new Position(line, col));
+        }
     }
 
     private record SelectionRange(Position start, Position end) {
@@ -1821,15 +2053,20 @@ public class EditorEngine {
         return state.hasSelection();
     }
 
-    private boolean shouldCoalesce(EditKind kind, Snapshot before, long nowNanos) {
+    private boolean shouldCoalesce(
+        EditKind kind,
+        Position beforeCursor,
+        Position beforeSelectionAnchor,
+        long nowNanos
+    ) {
         if (kind == EditKind.NONE || lastEditKind != kind || lastEditCursorAfter == null) {
             return false;
         }
         if (nowNanos - lastEditAtNanos > COALESCE_WINDOW_NANOS) {
             return false;
         }
-        return before.cursor().equals(lastEditCursorAfter)
-            && before.selectionAnchor() == null;
+        return beforeCursor.equals(lastEditCursorAfter)
+            && beforeSelectionAnchor == null;
     }
 
     private void breakCoalescing() {

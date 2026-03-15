@@ -6,66 +6,83 @@ public final class ConfirmBarView {
     private final String row;
     private final int cursorCol;
     private final ConfirmChoice selectedChoice;
-    private final Button saveButton;
-    private final Button discardButton;
-    private final Button cancelButton;
+    private final ChoiceButton[] choices;
+    private final ConfirmChoice defaultChoice;
 
     private ConfirmBarView(
         String row,
         int cursorCol,
         ConfirmChoice selectedChoice,
-        Button saveButton,
-        Button discardButton,
-        Button cancelButton
+        ChoiceButton[] choices,
+        ConfirmChoice defaultChoice
     ) {
         this.row = row;
         this.cursorCol = cursorCol;
-        this.selectedChoice = selectedChoice == null ? ConfirmChoice.CANCEL : selectedChoice;
-        this.saveButton = saveButton;
-        this.discardButton = discardButton;
-        this.cancelButton = cancelButton;
+        this.choices = choices == null ? new ChoiceButton[0] : choices;
+        this.defaultChoice = defaultChoice == null ? ConfirmChoice.SAVE : defaultChoice;
+        this.selectedChoice = normalizeSelected(selectedChoice, this.choices, this.defaultChoice);
     }
 
     public static ConfirmBarView build(String prompt, ConfirmChoice selectedChoice, int cols) {
-        ConfirmChoice selected = selectedChoice == null ? ConfirmChoice.CANCEL : selectedChoice;
-        Button savePrototype = new Button(0, 0, "Save");
-        Button discardPrototype = new Button(0, 0, "Discard");
-        Button cancelPrototype = new Button(0, 0, "Cancel");
-        String actionsCluster = savePrototype.renderedText() + " "
-            + discardPrototype.renderedText() + " "
-            + cancelPrototype.renderedText();
+        return build(prompt, selectedChoice, cols, "Save", "Discard", true, "Cancel");
+    }
+
+    public static ConfirmBarView buildRecovery(String prompt, ConfirmChoice selectedChoice, int cols) {
+        return build(prompt, selectedChoice, cols, "Restore", "Discard", false, "Cancel");
+    }
+
+    public static ConfirmBarView build(
+        String prompt,
+        ConfirmChoice selectedChoice,
+        int cols,
+        String primaryLabel,
+        String secondaryLabel,
+        boolean includeCancel,
+        String cancelLabel
+    ) {
+        Button primaryPrototype = new Button(0, 0, primaryLabel);
+        Button secondaryPrototype = new Button(0, 0, secondaryLabel);
+        StringBuilder clusterBuilder = new StringBuilder();
+        clusterBuilder.append(primaryPrototype.renderedText())
+            .append(" ")
+            .append(secondaryPrototype.renderedText());
+        if (includeCancel) {
+            Button cancelPrototype = new Button(0, 0, cancelLabel);
+            clusterBuilder.append(" ").append(cancelPrototype.renderedText());
+        }
+        String actionsCluster = clusterBuilder.toString();
         String row = alignLeftRight(prompt, actionsCluster, cols, 1);
         int actionsStart = Math.max(0, rightClusterStart(row, actionsCluster));
-        Button saveButton = new Button(0, actionsStart, "Save");
-        Button discardButton = new Button(0, actionsStart + saveButton.width() + 1, "Discard");
-        Button cancelButton = new Button(0, discardButton.col() + discardButton.width() + 1, "Cancel");
-        int cursorCol = switch (selected) {
-            case SAVE -> saveButton.cursorCol();
-            case DISCARD -> discardButton.cursorCol();
-            case CANCEL -> cancelButton.cursorCol();
-        };
-        return new ConfirmBarView(
-            row,
-            cursorCol,
-            selected,
-            saveButton,
-            discardButton,
-            cancelButton
-        );
+        Button primaryButton = new Button(0, actionsStart, primaryLabel);
+        Button secondaryButton = new Button(0, actionsStart + primaryButton.width() + 1, secondaryLabel);
+        ChoiceButton[] choices = includeCancel
+            ? new ChoiceButton[] {
+                new ChoiceButton(ConfirmChoice.SAVE, primaryButton),
+                new ChoiceButton(ConfirmChoice.DISCARD, secondaryButton),
+                new ChoiceButton(
+                    ConfirmChoice.CANCEL,
+                    new Button(0, secondaryButton.col() + secondaryButton.width() + 1, cancelLabel)
+                )
+            }
+            : new ChoiceButton[] {
+                new ChoiceButton(ConfirmChoice.SAVE, primaryButton),
+                new ChoiceButton(ConfirmChoice.DISCARD, secondaryButton)
+            };
+        ConfirmChoice selected = normalizeSelected(selectedChoice, choices, ConfirmChoice.SAVE);
+        Button selectedButton = buttonFor(choices, selected);
+        int cursorCol = selectedButton == null ? 0 : selectedButton.cursorCol();
+        return new ConfirmBarView(row, cursorCol, selected, choices, ConfirmChoice.SAVE);
     }
 
     public ConfirmChoice choiceAtMouse(int mouseRow, int mouseCol, int topRow) {
         if (mouseCol < 0 || mouseRow != topRow) {
             return null;
         }
-        if (mouseCol >= saveButton.col() && mouseCol < saveButton.col() + saveButton.width()) {
-            return ConfirmChoice.SAVE;
-        }
-        if (mouseCol >= discardButton.col() && mouseCol < discardButton.col() + discardButton.width()) {
-            return ConfirmChoice.DISCARD;
-        }
-        if (mouseCol >= cancelButton.col() && mouseCol < cancelButton.col() + cancelButton.width()) {
-            return ConfirmChoice.CANCEL;
+        for (ChoiceButton choice : choices) {
+            Button button = choice.button();
+            if (mouseCol >= button.col() && mouseCol < button.col() + button.width()) {
+                return choice.choice();
+            }
         }
         return null;
     }
@@ -79,11 +96,12 @@ public final class ConfirmBarView {
     }
 
     public Button selectedButton() {
-        return switch (selectedChoice) {
-            case SAVE -> saveButton;
-            case DISCARD -> discardButton;
-            case CANCEL -> cancelButton;
-        };
+        Button selected = buttonFor(choices, selectedChoice);
+        if (selected != null) {
+            return selected;
+        }
+        Button fallback = buttonFor(choices, defaultChoice);
+        return fallback == null ? new Button(0, 0, "") : fallback;
     }
 
     private static String clipPad(String text, int cols) {
@@ -122,5 +140,34 @@ public final class ConfirmBarView {
             return -1;
         }
         return row.indexOf(cluster);
+    }
+
+    private static ConfirmChoice normalizeSelected(
+        ConfirmChoice selected,
+        ChoiceButton[] choices,
+        ConfirmChoice defaultChoice
+    ) {
+        if (buttonFor(choices, selected) != null) {
+            return selected;
+        }
+        if (buttonFor(choices, defaultChoice) != null) {
+            return defaultChoice;
+        }
+        return choices != null && choices.length > 0 ? choices[0].choice() : ConfirmChoice.SAVE;
+    }
+
+    private static Button buttonFor(ChoiceButton[] choices, ConfirmChoice choice) {
+        if (choices == null || choice == null) {
+            return null;
+        }
+        for (ChoiceButton candidate : choices) {
+            if (candidate.choice() == choice) {
+                return candidate.button();
+            }
+        }
+        return null;
+    }
+
+    private record ChoiceButton(ConfirmChoice choice, Button button) {
     }
 }

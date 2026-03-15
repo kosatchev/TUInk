@@ -217,7 +217,7 @@ cd tuink-<version>-<os>-<arch>
 - all save failures are explained in the save notification bar (read-only file, no access to directory, invalid target path, etc).
 - non-interactive save notifications are shown in a separate bar above status: green for success, red for errors, auto-hide after ~3s.
 - save writes atomically via temporary file + move.
-- UI settings are stored in `~/.config/tuink.properties`.
+- UI settings are stored in `~/.config/tuink/tuink.properties`.
 
 ## Status indicators
 

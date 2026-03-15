@@ -36,7 +36,7 @@ public final class AppSettingsStore {
 
     public static Path path() {
         String home = System.getProperty("user.home", ".");
-        return Path.of(home, ".config", FILE_NAME);
+        return Path.of(home, ".config", "tuink", FILE_NAME);
     }
 
     public static AppSettings load() throws IOException {

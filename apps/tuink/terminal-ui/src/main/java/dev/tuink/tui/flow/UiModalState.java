@@ -20,6 +20,10 @@ public record UiModalState(
         return new UiModalState(UiModalMode.SAVE_OVERWRITE_CONFIRM, path, -1, ConfirmChoice.CANCEL);
     }
 
+    public static UiModalState recoveryConfirm() {
+        return new UiModalState(UiModalMode.RECOVERY_CONFIRM, null, -1, ConfirmChoice.CANCEL);
+    }
+
     public static UiModalState quitConfirm() {
         return new UiModalState(UiModalMode.QUIT_CONFIRM, null, -1, ConfirmChoice.CANCEL);
     }
@@ -50,6 +54,10 @@ public record UiModalState(
 
     public boolean isSaveOverwriteConfirm() {
         return mode == UiModalMode.SAVE_OVERWRITE_CONFIRM;
+    }
+
+    public boolean isRecoveryConfirm() {
+        return mode == UiModalMode.RECOVERY_CONFIRM;
     }
 
     public boolean isQuitConfirm() {

@@ -13,6 +13,7 @@ import dev.tuink.highlight.regex.RegexHighlighter;
 import dev.tuink.tui.flow.AppSettings;
 import dev.tuink.tui.flow.AppSettingsStore;
 import dev.tuink.tui.flow.ConfirmChoice;
+import dev.tuink.tui.flow.RecoveryStore;
 import dev.tuink.tui.flow.SaveAsSuggestionStore;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.flow.UiModalState;
@@ -48,8 +49,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.jline.terminal.Attributes;
 import org.jline.terminal.Attributes.LocalFlag;
@@ -71,6 +75,8 @@ public class TerminalEditorApp {
     private static final int AUTO_SELECTION_HIGHLIGHT_MIN_CHARS = 2;
     private static final int AUTO_SELECTION_HIGHLIGHT_MAX_CHARS = 128;
     private static final int CTRL_F_SELECTION_MAX_CHARS = 256;
+    private static final long RECOVERY_AUTOSAVE_DEBOUNCE_NANOS = 2_000_000_000L;
+    private static final long RECOVERY_ERROR_NOTIFY_COOLDOWN_NANOS = 5_000_000_000L;
     private static final String ENABLE_MOUSE_TRACKING = "\u001B[?1000h\u001B[?1002h\u001B[?1006h";
     private static final String DISABLE_MOUSE_TRACKING = "\u001B[?1000l\u001B[?1002l\u001B[?1006l";
     private UiStyles.Theme theme = UiStyles.Theme.CYAN;
@@ -134,6 +140,9 @@ public class TerminalEditorApp {
 
         NotificationState notification = new NotificationState();
         UiModalState modalState = UiModalState.none();
+        RecoveryStore recoveryStore = new RecoveryStore();
+        RecoveryAutosaveManager recoveryAutosave = new RecoveryAutosaveManager(recoveryStore);
+        List<RecoveryStore.Entry> startupRecoveryEntries = new ArrayList<>();
         TextField saveAsInput = new TextField();
         SaveAsSuggestionStore saveAsSuggestions = new SaveAsSuggestionStore();
         UiSessionState uiSessionState = UiSessionState.from(
@@ -182,6 +191,16 @@ public class TerminalEditorApp {
         EditorView.ScrollAxis editorScrollDrag = EditorView.ScrollAxis.NONE;
         int editorScrollDragThumbOffset = 0;
         TreeView.ScrollAxis openFileScrollDrag = TreeView.ScrollAxis.NONE;
+        try {
+            startupRecoveryEntries.addAll(recoveryStore.loadAll());
+            if (!startupRecoveryEntries.isEmpty()) {
+                modalState = UiModalState.recoveryConfirm();
+            }
+        } catch (IOException e) {
+            System.err.println(
+                "Warning: failed to load recovery snapshots from " + recoveryStore.directory() + ": " + e.getMessage()
+            );
+        }
 
         if (cli.file() != null) {
             Path file = cli.file();
@@ -287,6 +306,11 @@ public class TerminalEditorApp {
                     state = sessionContext.state();
                     engine = sessionContext.engine();
                     renderPlanBuilder = sessionContext.renderPlanBuilder();
+                    recoveryAutosave.syncTabs(tabs);
+                    String recoveryWarning = recoveryAutosave.autosaveDirtyTabs(tabs, System.nanoTime());
+                    if (recoveryWarning != null) {
+                        notification.warning(recoveryWarning);
+                    }
                     if (notification.expireIfNeeded()) {
                         needsRender = true;
                     }
@@ -297,6 +321,7 @@ public class TerminalEditorApp {
                     int cols = Math.max(1, terminal.getWidth());
                     boolean saveAsMode = modalState.isSaveAs();
                     boolean saveOverwriteConfirmMode = modalState.isSaveOverwriteConfirm();
+                    boolean recoveryConfirmMode = modalState.isRecoveryConfirm();
                     boolean quitConfirmMode = modalState.isQuitConfirm();
                     boolean closeTabConfirmMode = modalState.isCloseTabConfirm();
                     boolean helpHintsMode = modalState.isHelpHints();
@@ -345,6 +370,13 @@ public class TerminalEditorApp {
                         } else if (saveOverwriteConfirmMode) {
                             confirmBar = ConfirmBarView.build(
                                 buildOverwritePrompt(pendingOverwritePath),
+                                modalState.confirmChoice(),
+                                cols
+                            );
+                            inlinePromptBar = InlinePromptBar.of(confirmBar.row(), styles.promptAlert(), 1, confirmBar.cursorCol() + 1);
+                        } else if (recoveryConfirmMode) {
+                            confirmBar = ConfirmBarView.buildRecovery(
+                                buildRecoveryPrompt(startupRecoveryEntries.size()),
                                 modalState.confirmChoice(),
                                 cols
                             );
@@ -969,6 +1001,41 @@ public class TerminalEditorApp {
                         continue;
                     }
 
+                    if (modalState.isRecoveryConfirm()) {
+                        ConfirmBarController.InputResult confirmInput = ConfirmBarController.handleKey(
+                            key,
+                            modalState.confirmChoice(),
+                            ConfirmChoice.SAVE,
+                            ConfirmChoice.DISCARD,
+                            false
+                        );
+                        if (confirmInput.consumed()) {
+                            if (confirmInput.decision() == null) {
+                                modalState = modalState.withConfirmChoice(confirmInput.confirmChoice());
+                                continue;
+                            }
+                            if (confirmInput.decision() == ConfirmChoice.SAVE) {
+                                int restoredCount = restoreRecoveredTabs(startupRecoveryEntries, tabs, sessionContext);
+                                recoveryAutosave.deleteEntries(startupRecoveryEntries);
+                                startupRecoveryEntries.clear();
+                                if (restoredCount > 0) {
+                                    activeTabIndex = sessionContext.activeTabIndex();
+                                    state = sessionContext.state();
+                                    openFileTree.setRoot(initialOpenRoot(state));
+                                    notification.info("Recovered " + restoredCount + " tab(s)");
+                                } else {
+                                    notification.info("No recovery snapshots restored");
+                                }
+                            } else if (confirmInput.decision() == ConfirmChoice.DISCARD) {
+                                recoveryAutosave.deleteEntries(startupRecoveryEntries);
+                                startupRecoveryEntries.clear();
+                                notification.info("Recovery snapshots discarded");
+                            }
+                            modalState = UiModalState.none();
+                            continue;
+                        }
+                    }
+
                     if (modalState.isSaveAs()) {
                         String saveAsDraftBefore = saveAsInput.text();
                         SaveFlowController.SaveAsResult saveAsResult = SaveFlowController.handleSaveAsInput(
@@ -1285,6 +1352,7 @@ public class TerminalEditorApp {
                     openFileMode = editorActionApplyResult.openFileMode();
                     openFileFocus = editorActionApplyResult.openFileFocus();
                 }
+                recoveryAutosave.clearRuntimeSnapshots();
             } finally {
                 cleanup.run();
                 frameProfiler.close();
@@ -2969,6 +3037,10 @@ public class TerminalEditorApp {
         return "Unsaved tabs: " + dirtyTabs + ". Quit now? (y/N)";
     }
 
+    private String buildRecoveryPrompt(int count) {
+        return "Recovery snapshots found: " + count + ". Restore now? (Y/n)";
+    }
+
     private String buildCloseTabPrompt(List<EditorTab> tabs, int closeTabIndex) {
         if (closeTabIndex < 0 || closeTabIndex >= tabs.size()) {
             return "Close modified tab? (y/N)";
@@ -3010,6 +3082,29 @@ public class TerminalEditorApp {
             notification.error(saveErrorMessage(e));
             return false;
         }
+    }
+
+    private int restoreRecoveredTabs(List<RecoveryStore.Entry> entries, List<EditorTab> tabs, SessionContext sessionContext) {
+        if (entries == null || entries.isEmpty()) {
+            return 0;
+        }
+        List<EditorTab> restored = new ArrayList<>();
+        for (RecoveryStore.Entry entry : entries) {
+            if (entry == null || entry.snapshot() == null) {
+                continue;
+            }
+            TabSession tabSession = TabSession.createEmpty();
+            tabSession.engine().restoreRecoverySnapshot(entry.snapshot());
+            RenderPlanBuilder builder = new RenderPlanBuilder(resolveHighlighter(tabSession.state().getCurrentFile()));
+            restored.add(new EditorTab(tabSession, builder));
+        }
+        if (restored.isEmpty()) {
+            return 0;
+        }
+        tabs.clear();
+        tabs.addAll(restored);
+        sessionContext.activate(0);
+        return restored.size();
     }
 
     private String savedMessage(EditorState state) {
@@ -3751,6 +3846,144 @@ public class TerminalEditorApp {
 
     private LineHighlighter resolveHighlighter(Path file) {
         return file == null ? RegexHighlighter.withDefaults() : RegexHighlighter.forFileName(file.getFileName().toString());
+    }
+
+    private final class RecoveryAutosaveManager {
+        private final RecoveryStore store;
+        private final Map<TabSession, RuntimeRecoveryState> runtime = new IdentityHashMap<>();
+        private long lastErrorNotifyAtNanos = Long.MIN_VALUE;
+
+        private RecoveryAutosaveManager(RecoveryStore store) {
+            this.store = store;
+        }
+
+        private void syncTabs(List<EditorTab> tabs) {
+            if (tabs == null || tabs.isEmpty()) {
+                clearRuntimeSnapshots();
+                return;
+            }
+            Map<TabSession, Boolean> active = new IdentityHashMap<>();
+            for (EditorTab tab : tabs) {
+                TabSession session = tab.tabSession();
+                active.put(session, Boolean.TRUE);
+                runtime.computeIfAbsent(session, key -> new RuntimeRecoveryState(UUID.randomUUID().toString()));
+            }
+            var iterator = runtime.entrySet().iterator();
+            while (iterator.hasNext()) {
+                Map.Entry<TabSession, RuntimeRecoveryState> entry = iterator.next();
+                if (!active.containsKey(entry.getKey())) {
+                    deleteSnapshotQuietly(entry.getValue().entryId());
+                    iterator.remove();
+                }
+            }
+        }
+
+        private String autosaveDirtyTabs(List<EditorTab> tabs, long nowNanos) {
+            if (tabs == null || tabs.isEmpty()) {
+                return null;
+            }
+            for (EditorTab tab : tabs) {
+                TabSession session = tab.tabSession();
+                RuntimeRecoveryState state = runtime.computeIfAbsent(
+                    session,
+                    key -> new RuntimeRecoveryState(UUID.randomUUID().toString())
+                );
+                if (!tab.state().isDirty()) {
+                    if (state.hasSnapshot()) {
+                        deleteSnapshotQuietly(state.entryId());
+                        state.clearSnapshotState();
+                    }
+                    continue;
+                }
+
+                long revision = tab.model().revision();
+                if (state.hasSnapshot() && revision == state.lastRevision()) {
+                    continue;
+                }
+                boolean firstSnapshot = !state.hasSnapshot();
+                if (!firstSnapshot && nowNanos - state.lastSavedAtNanos() < RECOVERY_AUTOSAVE_DEBOUNCE_NANOS) {
+                    continue;
+                }
+                try {
+                    store.save(state.entryId(), tab.engine().captureRecoverySnapshot());
+                    state.markSaved(revision, nowNanos);
+                } catch (IOException e) {
+                    if (nowNanos - lastErrorNotifyAtNanos >= RECOVERY_ERROR_NOTIFY_COOLDOWN_NANOS) {
+                        lastErrorNotifyAtNanos = nowNanos;
+                        return "Recovery autosave failed: " + e.getMessage();
+                    }
+                }
+            }
+            return null;
+        }
+
+        private void deleteEntries(List<RecoveryStore.Entry> entries) {
+            if (entries == null || entries.isEmpty()) {
+                return;
+            }
+            for (RecoveryStore.Entry entry : entries) {
+                if (entry == null) {
+                    continue;
+                }
+                deleteSnapshotQuietly(entry.id());
+            }
+        }
+
+        private void clearRuntimeSnapshots() {
+            for (RuntimeRecoveryState state : runtime.values()) {
+                deleteSnapshotQuietly(state.entryId());
+            }
+            runtime.clear();
+        }
+
+        private void deleteSnapshotQuietly(String entryId) {
+            if (entryId == null || entryId.isBlank()) {
+                return;
+            }
+            try {
+                store.delete(entryId);
+            } catch (IOException ignored) {
+                // Best-effort cleanup.
+            }
+        }
+    }
+
+    private static final class RuntimeRecoveryState {
+        private final String entryId;
+        private long lastRevision = Long.MIN_VALUE;
+        private long lastSavedAtNanos = Long.MIN_VALUE;
+        private boolean hasSnapshot;
+
+        private RuntimeRecoveryState(String entryId) {
+            this.entryId = entryId;
+        }
+
+        private String entryId() {
+            return entryId;
+        }
+
+        private long lastRevision() {
+            return lastRevision;
+        }
+
+        private long lastSavedAtNanos() {
+            return lastSavedAtNanos;
+        }
+
+        private boolean hasSnapshot() {
+            return hasSnapshot;
+        }
+
+        private void markSaved(long revision, long nowNanos) {
+            lastRevision = revision;
+            lastSavedAtNanos = nowNanos;
+            hasSnapshot = true;
+        }
+
+        private void clearSnapshotState() {
+            hasSnapshot = false;
+            lastSavedAtNanos = Long.MIN_VALUE;
+        }
     }
 
     private RenderPlanBuilder.CommentSyntaxProfile resolveCommentSyntaxProfile(Path file) {

@@ -47,6 +47,20 @@ public class EditorEngine {
         return state;
     }
 
+    public RecoverySnapshot captureRecoverySnapshot() {
+        return RecoverySnapshot.capture(model, state);
+    }
+
+    public void restoreRecoverySnapshot(RecoverySnapshot snapshot) {
+        if (snapshot == null) {
+            return;
+        }
+        snapshot.restore(model, state);
+        undoStack.clear();
+        redoStack.clear();
+        breakCoalescing();
+    }
+
     public void setTabWidth(int tabWidth) {
         this.tabWidth = tabWidth <= 2 ? 2 : 4;
     }

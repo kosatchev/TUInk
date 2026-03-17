@@ -1,5 +1,6 @@
 package dev.tuink.tui;
 
+import dev.tuink.core.GutterDiffMode;
 import dev.tuink.core.TabInsertMode;
 import dev.tuink.tui.flow.SearchFocus;
 
@@ -21,6 +22,7 @@ final class UiSessionState {
     boolean syntaxHighlightingSetting;
     boolean rainbowBracketsSetting;
     boolean autoSelectionHighlightSetting;
+    GutterDiffMode gutterDiffModeSetting;
     int tabWidthSetting;
     TabInsertMode tabInsertModeSetting;
     boolean helpHintsMode;
@@ -45,6 +47,7 @@ final class UiSessionState {
         boolean syntaxHighlightingSetting,
         boolean rainbowBracketsSetting,
         boolean autoSelectionHighlightSetting,
+        GutterDiffMode gutterDiffModeSetting,
         int tabWidthSetting,
         TabInsertMode tabInsertModeSetting,
         boolean helpHintsMode,
@@ -69,6 +72,7 @@ final class UiSessionState {
         state.syntaxHighlightingSetting = syntaxHighlightingSetting;
         state.rainbowBracketsSetting = rainbowBracketsSetting;
         state.autoSelectionHighlightSetting = autoSelectionHighlightSetting;
+        state.gutterDiffModeSetting = gutterDiffModeSetting == null ? GutterDiffMode.MYERS : gutterDiffModeSetting;
         state.tabWidthSetting = tabWidthSetting <= 2 ? 2 : 4;
         state.tabInsertModeSetting = tabInsertModeSetting == null ? TabInsertMode.AUTO : tabInsertModeSetting;
         state.helpHintsMode = helpHintsMode;

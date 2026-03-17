@@ -163,6 +163,7 @@ public class TerminalEditorApp {
             loadedSettings.syntaxHighlighting(),
             loadedSettings.rainbowBrackets(),
             loadedSettings.autoSelectionHighlight(),
+            loadedSettings.gutterDiffMode(),
             loadedSettings.tabWidth(),
             loadedSettings.tabInsertMode(),
             false,
@@ -454,6 +455,7 @@ public class TerminalEditorApp {
                         );
                         topMenu.setRainbowBracketsEnabled(uiSessionState.rainbowBracketsSetting);
                         topMenu.setAutoSelectionHighlightEnabled(uiSessionState.autoSelectionHighlightSetting);
+                        topMenu.setGutterDiffMode(uiSessionState.gutterDiffModeSetting);
                         topMenu.setTabWidth(uiSessionState.tabWidthSetting);
                         topMenu.setTabInsertMode(uiSessionState.tabInsertModeSetting);
                         renderer.setHighlightActiveGutter(uiSessionState.highlightActiveGutterSetting);
@@ -465,6 +467,8 @@ public class TerminalEditorApp {
                         renderPlanBuilder.setCommentSyntaxProfile(resolveCommentSyntaxProfile(state.getCurrentFile()));
                         renderPlanBuilder.setRainbowBracketsEnabled(uiSessionState.rainbowBracketsSetting);
                         renderPlanBuilder.setTabWidth(uiSessionState.tabWidthSetting);
+                        engine.setGutterDiffMode(uiSessionState.gutterDiffModeSetting);
+                        renderPlanBuilder.setGutterDiffResolver(engine::gutterDiffMarkerForLine);
                         editorView.setTabWidth(uiSessionState.tabWidthSetting);
                         engine.setTabWidth(uiSessionState.tabWidthSetting);
                         engine.setTabInsertMode(uiSessionState.tabInsertModeSetting);
@@ -1380,6 +1384,7 @@ public class TerminalEditorApp {
             uiSessionState.syntaxHighlightingSetting,
             uiSessionState.rainbowBracketsSetting,
             uiSessionState.autoSelectionHighlightSetting,
+            uiSessionState.gutterDiffModeSetting,
             uiSessionState.tabWidthSetting,
             uiSessionState.tabInsertModeSetting,
             theme

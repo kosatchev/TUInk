@@ -2,6 +2,7 @@ package dev.tuink.tui;
 
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
+import dev.tuink.core.GutterDiffMode;
 import dev.tuink.core.TabInsertMode;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.ui.MenuBar;
@@ -144,6 +145,11 @@ final class InputActionDispatcher {
                 statusMessage = ui.autoSelectionHighlightSetting
                     ? "Auto highlight selection enabled"
                     : "Auto highlight selection disabled";
+                return DispatchResult.handled(statusMessage);
+            }
+            case TOGGLE_GUTTER_DIFF -> {
+                ui.gutterDiffModeSetting = nextGutterDiffMode(ui.gutterDiffModeSetting);
+                statusMessage = "Gutter diff: " + ui.gutterDiffModeSetting.label();
                 return DispatchResult.handled(statusMessage);
             }
             case TOGGLE_TAB_WIDTH -> {
@@ -323,6 +329,10 @@ final class InputActionDispatcher {
 
     private static TabInsertMode nextTabInsertMode(TabInsertMode mode) {
         return mode == null ? TabInsertMode.AUTO : mode.next();
+    }
+
+    private static GutterDiffMode nextGutterDiffMode(GutterDiffMode mode) {
+        return mode == null ? GutterDiffMode.MYERS : mode.next();
     }
 
     record DispatchContext(

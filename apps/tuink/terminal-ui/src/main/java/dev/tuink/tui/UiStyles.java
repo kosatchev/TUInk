@@ -79,6 +79,12 @@ public final class UiStyles {
         Style contextMenuDisabledItem,
         Style renderGutter,
         Style renderGutterActive,
+        Style renderGutterAdded,
+        Style renderGutterModified,
+        Style renderGutterDeleted,
+        Style renderGutterAddedHistorical,
+        Style renderGutterModifiedHistorical,
+        Style renderGutterDeletedHistorical,
         Style renderTopbar,
         Style renderStatus,
         Style renderInteractive,
@@ -115,6 +121,12 @@ public final class UiStyles {
             style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE),      // contextMenuDisabledItem
             style(Color.BRIGHT_BLACK, Color.BLACK),             // renderGutter
             style(Color.BRIGHT_WHITE, Color.CYAN, true, false), // renderGutterActive
+            style(Color.BRIGHT_GREEN, Color.BLACK, true, false), // renderGutterAdded
+            style(Color.BRIGHT_YELLOW, Color.BLACK, true, false), // renderGutterModified
+            style(Color.BRIGHT_RED, Color.BLACK, true, false), // renderGutterDeleted
+            style(Color.BRIGHT_BLACK, Color.BLACK, false, false), // renderGutterAddedHistorical
+            style(Color.BRIGHT_BLACK, Color.BLACK, false, false), // renderGutterModifiedHistorical
+            style(Color.BRIGHT_BLACK, Color.BLACK, false, false), // renderGutterDeletedHistorical
             style(Color.BRIGHT_WHITE, Color.CYAN, true, false),              // renderTopbar
             style(Color.BLACK, Color.BRIGHT_WHITE),             // renderStatus
             style(Color.BLACK, Color.BRIGHT_YELLOW),            // renderInteractive
@@ -151,6 +163,12 @@ public final class UiStyles {
             style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE),      // contextMenuDisabledItem
             style(Color.BRIGHT_BLACK, Color.BLACK),             // renderGutter
             style(Color.BRIGHT_WHITE, Color.BLUE, true, false), // renderGutterActive
+            style(Color.BRIGHT_GREEN, Color.BLACK, true, false), // renderGutterAdded
+            style(Color.BRIGHT_YELLOW, Color.BLACK, true, false), // renderGutterModified
+            style(Color.BRIGHT_RED, Color.BLACK, true, false), // renderGutterDeleted
+            style(Color.BRIGHT_BLACK, Color.BLACK, false, false), // renderGutterAddedHistorical
+            style(Color.BRIGHT_BLACK, Color.BLACK, false, false), // renderGutterModifiedHistorical
+            style(Color.BRIGHT_BLACK, Color.BLACK, false, false), // renderGutterDeletedHistorical
             style(Color.BRIGHT_WHITE, Color.BLUE, true, false),              // renderTopbar
             style(Color.BLACK, Color.BRIGHT_WHITE),             // renderStatus
             style(Color.BLACK, Color.BRIGHT_YELLOW),            // renderInteractive
@@ -187,6 +205,12 @@ public final class UiStyles {
             style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE),       // contextMenuDisabledItem
             style(Color.BLACK, Color.BRIGHT_WHITE),              // renderGutter
             style(Color.BRIGHT_WHITE, Color.BLACK, true, false), // renderGutterActive
+            style(Color.BRIGHT_GREEN, Color.BRIGHT_WHITE, true, false), // renderGutterAdded
+            style(Color.BRIGHT_YELLOW, Color.BRIGHT_WHITE, true, false), // renderGutterModified
+            style(Color.BRIGHT_RED, Color.BRIGHT_WHITE, true, false), // renderGutterDeleted
+            style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE, false, false), // renderGutterAddedHistorical
+            style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE, false, false), // renderGutterModifiedHistorical
+            style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE, false, false), // renderGutterDeletedHistorical
             style(Color.BLACK, Color.BRIGHT_WHITE, true, false),              // renderTopbar
             style(Color.BLACK, Color.BRIGHT_WHITE),              // renderStatus
             style(Color.BLACK, Color.BRIGHT_YELLOW),             // renderInteractive

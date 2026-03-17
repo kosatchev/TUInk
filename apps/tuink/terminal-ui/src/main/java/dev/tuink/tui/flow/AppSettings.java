@@ -1,5 +1,6 @@
 package dev.tuink.tui.flow;
 
+import dev.tuink.core.GutterDiffMode;
 import dev.tuink.core.TabInsertMode;
 import dev.tuink.tui.UiStyles;
 
@@ -19,6 +20,7 @@ public record AppSettings(
     boolean syntaxHighlighting,
     boolean rainbowBrackets,
     boolean autoSelectionHighlight,
+    GutterDiffMode gutterDiffMode,
     int tabWidth,
     TabInsertMode tabInsertMode,
     UiStyles.Theme theme
@@ -40,6 +42,7 @@ public record AppSettings(
             true,
             true,
             true,
+            GutterDiffMode.MYERS,
             4,
             TabInsertMode.AUTO,
             UiStyles.Theme.CYAN

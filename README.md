@@ -1,5 +1,7 @@
 # TUInk
 
+Current version: `0.9.0`
+
 Minimal Java terminal text editor with clean multi-module architecture:
 
 - `core`: editor engine and text model (`TextBuffer` + `SimpleLineBuffer`)
@@ -12,6 +14,14 @@ Minimal Java terminal text editor with clean multi-module architecture:
 
 This project is currently feature-first: new capabilities sometimes arrive before the dust from recent changes has settled.
 The editor is functional, cleanup is ongoing, and a larger refactor is planned once the core feature set stabilizes.
+
+## Gutter Diff
+
+- Переключаемые режимы в меню `View`: `Disabled`, `Histogram`, `Myers`, `Stable`.
+- Два слоя маркеров:
+- `saved -> current` показывается обычными цветными маркерами.
+- `open -> current` показывается серыми маркерами.
+- Режим сохраняется в `~/.config/tuink/tuink.properties` (`ui.gutterDiffMode`).
 
 ## Requirements
 

@@ -1,6 +1,7 @@
 package dev.tuink.tui.ui;
 
 import dev.tuink.render.Style;
+import dev.tuink.core.GutterDiffMode;
 import dev.tuink.core.TabInsertMode;
 import dev.tuink.tui.KeyEvent;
 import dev.tuink.tui.render.CellBuffer;
@@ -100,6 +101,10 @@ public final class MenuBar {
 
     public void setAutoSelectionHighlightEnabled(boolean enabled) {
         controller.setAutoSelectionHighlightEnabled(enabled);
+    }
+
+    public void setGutterDiffMode(GutterDiffMode mode) {
+        controller.setGutterDiffMode(mode);
     }
 
     public void setTabWidth(int tabWidth) {
@@ -299,6 +304,7 @@ public final class MenuBar {
         private boolean syntaxHighlightingEnabled = true;
         private boolean rainbowBracketsEnabled = true;
         private boolean autoSelectionHighlightEnabled = true;
+        private GutterDiffMode gutterDiffMode = GutterDiffMode.MYERS;
         private int tabWidth = 4;
         private TabInsertMode tabInsertMode = TabInsertMode.AUTO;
         private String themeLabel = "Cyan";
@@ -420,6 +426,13 @@ public final class MenuBar {
 
         private void setAutoSelectionHighlightEnabled(boolean enabled) {
             this.autoSelectionHighlightEnabled = enabled;
+            if (open && active == MenuId.VIEW) {
+                rebuildMnemonics();
+            }
+        }
+
+        private void setGutterDiffMode(GutterDiffMode mode) {
+            this.gutterDiffMode = mode == null ? GutterDiffMode.MYERS : mode;
             if (open && active == MenuId.VIEW) {
                 rebuildMnemonics();
             }
@@ -756,12 +769,16 @@ public final class MenuBar {
                     new MenuItem("[" + (showTabBarEnabled ? "x" : " ") + "] Show Tab Bar", true),
                     new MenuItem("[" + (wrapLinesEnabled ? "x" : " ") + "] Wrap Lines", true),
                     new MenuItem(wrapWordsLabel, wrapLinesEnabled),
-                    new MenuItem("[" + (tabWidth <= 2 ? "x" : " ") + "] Thin tabs", true),
+                    new MenuItem(SEPARATOR, false),
+                    new MenuItem("[" + (activeGutterHighlightEnabled ? "x" : " ") + "] Highlight current line number", true),
                     new MenuItem("[" + (visibleWhitespaceEnabled ? "x" : " ") + "] Visible tabs/spaces", true),
+                    new MenuItem(SEPARATOR, false),
                     new MenuItem("[" + (syntaxHighlightingEnabled ? "x" : " ") + "] Syntax highlighting", true),
                     new MenuItem("[" + (rainbowBracketsEnabled ? "x" : " ") + "] Rainbow brackets", true),
                     new MenuItem("[" + (autoSelectionHighlightEnabled ? "x" : " ") + "] Auto highlight selection", true),
-                    new MenuItem("[" + (activeGutterHighlightEnabled ? "x" : " ") + "] Highlight current line number", true),
+                    new MenuItem("[>] Gutter diff: " + gutterDiffMode.label(), true),
+                    new MenuItem(SEPARATOR, false),
+                    new MenuItem("[" + (tabWidth <= 2 ? "x" : " ") + "] Thin tabs", true),
                     new MenuItem("[>] Theme: " + themeLabel, true)
                 };
             }
@@ -772,13 +789,14 @@ public final class MenuBar {
                 String tabInsertLabel = "[>] Tab insert mode: " + tabInsertMode.label();
                 return new MenuItem[] {
                     new MenuItem("[" + (readingModeEnabled ? "x" : " ") + "] Reading mode", true),
+                    new MenuItem("[" + (mouseModeEnabled ? "x" : " ") + "] Mouse mode", true),
+                    new MenuItem("[" + (confirmOnCloseEnabled ? "x" : " ") + "] Confirm on close", true),
+                    new MenuItem(SEPARATOR, false),
                     new MenuItem("[" + (smartHomeEndEnabled ? "x" : " ") + "] Smart Home/End", true),
                     new MenuItem(autoIndentLabel, true),
                     new MenuItem(autoPairsLabel, true),
                     new MenuItem(autoListLabel, true),
                     new MenuItem(tabInsertLabel, true),
-                    new MenuItem("[" + (mouseModeEnabled ? "x" : " ") + "] Mouse mode", true),
-                    new MenuItem("[" + (confirmOnCloseEnabled ? "x" : " ") + "] Confirm on close", true),
                 };
             }
             if (menu == MenuId.HELP) {
@@ -849,26 +867,27 @@ public final class MenuBar {
                     case 0 -> KeyEvent.Action.TOGGLE_TAB_BAR;
                     case 1 -> KeyEvent.Action.TOGGLE_WRAP_LINES;
                     case 2 -> KeyEvent.Action.TOGGLE_WORD_WRAP;
-                    case 3 -> KeyEvent.Action.TOGGLE_TAB_WIDTH;
-                    case 4 -> KeyEvent.Action.TOGGLE_VISIBLE_WHITESPACE;
-                    case 5 -> KeyEvent.Action.TOGGLE_SYNTAX_HIGHLIGHTING;
-                    case 6 -> KeyEvent.Action.TOGGLE_RAINBOW_BRACKETS;
-                    case 7 -> KeyEvent.Action.TOGGLE_AUTO_SELECTION_HIGHLIGHT;
-                    case 8 -> KeyEvent.Action.TOGGLE_ACTIVE_GUTTER_HIGHLIGHT;
-                    case 9 -> KeyEvent.Action.TOGGLE_THEME;
+                    case 4 -> KeyEvent.Action.TOGGLE_ACTIVE_GUTTER_HIGHLIGHT;
+                    case 5 -> KeyEvent.Action.TOGGLE_VISIBLE_WHITESPACE;
+                    case 7 -> KeyEvent.Action.TOGGLE_SYNTAX_HIGHLIGHTING;
+                    case 8 -> KeyEvent.Action.TOGGLE_RAINBOW_BRACKETS;
+                    case 9 -> KeyEvent.Action.TOGGLE_AUTO_SELECTION_HIGHLIGHT;
+                    case 10 -> KeyEvent.Action.TOGGLE_GUTTER_DIFF;
+                    case 12 -> KeyEvent.Action.TOGGLE_TAB_WIDTH;
+                    case 13 -> KeyEvent.Action.TOGGLE_THEME;
                     default -> null;
                 };
             }
             if (menu == MenuId.SETTINGS) {
                 return switch (itemIndex) {
                     case 0 -> KeyEvent.Action.TOGGLE_READING_MODE;
-                    case 1 -> KeyEvent.Action.TOGGLE_SMART_HOME_END;
-                    case 2 -> KeyEvent.Action.TOGGLE_AUTO_INDENT;
-                    case 3 -> KeyEvent.Action.TOGGLE_AUTO_PAIRS;
-                    case 4 -> KeyEvent.Action.TOGGLE_AUTO_LIST;
-                    case 5 -> KeyEvent.Action.TOGGLE_TAB_INSERT_MODE;
-                    case 6 -> KeyEvent.Action.TOGGLE_MOUSE_MODE;
-                    case 7 -> KeyEvent.Action.TOGGLE_CONFIRM_ON_CLOSE;
+                    case 1 -> KeyEvent.Action.TOGGLE_MOUSE_MODE;
+                    case 2 -> KeyEvent.Action.TOGGLE_CONFIRM_ON_CLOSE;
+                    case 4 -> KeyEvent.Action.TOGGLE_SMART_HOME_END;
+                    case 5 -> KeyEvent.Action.TOGGLE_AUTO_INDENT;
+                    case 6 -> KeyEvent.Action.TOGGLE_AUTO_PAIRS;
+                    case 7 -> KeyEvent.Action.TOGGLE_AUTO_LIST;
+                    case 8 -> KeyEvent.Action.TOGGLE_TAB_INSERT_MODE;
                     default -> null;
                 };
             }

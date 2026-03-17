@@ -11,6 +11,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.eclipse.jgit.diff.DiffAlgorithm;
+import org.eclipse.jgit.diff.Edit;
+import org.eclipse.jgit.diff.EditList;
+import org.eclipse.jgit.diff.Sequence;
+import org.eclipse.jgit.diff.SequenceComparator;
 
 /**
  * Core editing commands and viewport management.
@@ -18,6 +23,16 @@ import java.util.regex.Pattern;
 public class EditorEngine {
     private static final int MAX_HISTORY = 500;
     private static final long COALESCE_WINDOW_NANOS = 700_000_000L;
+    private static final int GUTTER_DIFF_LARGE_FILE_THRESHOLD_LINES = 20_000;
+    private static final long GUTTER_DIFF_MIN_REBUILD_INTERVAL_NANOS = 50_000_000L;
+    private static final long GUTTER_DIFF_MIN_REBUILD_INTERVAL_LARGE_NANOS = 150_000_000L;
+    private static final long GUTTER_DIFF_MAX_REBUILD_INTERVAL_NANOS = 350_000_000L;
+    private static final int GUTTER_DIFF_DURATION_FACTOR = 2;
+    private static final DiffAlgorithm GUTTER_DIFF_ALGORITHM_HISTOGRAM =
+        DiffAlgorithm.getAlgorithm(DiffAlgorithm.SupportedAlgorithm.HISTOGRAM);
+    private static final DiffAlgorithm GUTTER_DIFF_ALGORITHM_MYERS =
+        DiffAlgorithm.getAlgorithm(DiffAlgorithm.SupportedAlgorithm.MYERS);
+    private static final LineSequenceComparator GUTTER_SEQUENCE_COMPARATOR = new LineSequenceComparator();
     private final TextModel model;
     private final EditorState state;
     private final Deque<HistoryEntry> undoStack = new ArrayDeque<>();
@@ -33,10 +48,22 @@ public class EditorEngine {
     private boolean autoIndentEnabled = true;
     private boolean autoPairsEnabled = true;
     private boolean autoListEnabled = true;
+    private GutterDiffMode gutterDiffMode = GutterDiffMode.MYERS;
+    private List<String> openBaselineLines = List.of("");
+    private List<String> savedBaselineLines = List.of("");
+    private final List<GutterDiffFlag> savedDiffFlags = new ArrayList<>();
+    private final List<Boolean> savedDeletedMarkers = new ArrayList<>();
+    private final List<GutterDiffFlag> openDiffFlags = new ArrayList<>();
+    private final List<Boolean> openDeletedMarkers = new ArrayList<>();
+    private long gutterDiffComputedRevision = Long.MIN_VALUE;
+    private long gutterDiffLastRebuildAtNanos;
+    private long gutterDiffLastRebuildDurationNanos;
+    private boolean gutterDiffPendingRebuild;
 
     public EditorEngine(TextModel model, EditorState state) {
         this.model = model;
         this.state = state;
+        resetGutterDiffBaselinesOnOpen();
     }
 
     public TextModel model() {
@@ -59,6 +86,40 @@ public class EditorEngine {
         undoStack.clear();
         redoStack.clear();
         breakCoalescing();
+        resetGutterDiffBaselinesOnOpen();
+    }
+
+    public GutterDiffMarker gutterDiffMarkerForLine(int lineIndex) {
+        if (gutterDiffMode == GutterDiffMode.DISABLED) {
+            return GutterDiffMarker.NONE;
+        }
+        ensureGutterDiffUpToDate();
+        if (lineIndex < 0 || lineIndex >= model.lineCount()) {
+            return GutterDiffMarker.NONE;
+        }
+        if (lineIndex < savedDeletedMarkers.size() && Boolean.TRUE.equals(savedDeletedMarkers.get(lineIndex))) {
+            return new GutterDiffMarker(GutterDiffFlag.DELETED, false);
+        }
+        if (lineIndex < savedDiffFlags.size()) {
+            GutterDiffFlag direct = savedDiffFlags.get(lineIndex);
+            if (direct != null && direct != GutterDiffFlag.NONE) {
+                return new GutterDiffMarker(direct, false);
+            }
+        }
+        if (lineIndex < openDeletedMarkers.size() && Boolean.TRUE.equals(openDeletedMarkers.get(lineIndex))) {
+            return new GutterDiffMarker(GutterDiffFlag.DELETED, true);
+        }
+        if (lineIndex < openDiffFlags.size()) {
+            GutterDiffFlag direct = openDiffFlags.get(lineIndex);
+            if (direct != null && direct != GutterDiffFlag.NONE) {
+                return new GutterDiffMarker(direct, true);
+            }
+        }
+        return GutterDiffMarker.NONE;
+    }
+
+    public GutterDiffFlag gutterDiffFlagForLine(int lineIndex) {
+        return gutterDiffMarkerForLine(lineIndex).flag();
     }
 
     public void setTabWidth(int tabWidth) {
@@ -81,6 +142,21 @@ public class EditorEngine {
         this.autoListEnabled = enabled;
     }
 
+    public void setGutterDiffMode(GutterDiffMode mode) {
+        GutterDiffMode nextMode = mode == null ? GutterDiffMode.MYERS : mode;
+        if (gutterDiffMode == nextMode) {
+            return;
+        }
+        gutterDiffMode = nextMode;
+        if (gutterDiffMode == GutterDiffMode.DISABLED) {
+            gutterDiffComputedRevision = model.revision();
+            gutterDiffPendingRebuild = false;
+        } else {
+            gutterDiffComputedRevision = Long.MIN_VALUE;
+            gutterDiffPendingRebuild = true;
+        }
+    }
+
     public void open(Path path) throws IOException {
         if (Files.exists(path)) {
             TextModel.LoadMetadata loaded = model.load(path);
@@ -100,6 +176,7 @@ public class EditorEngine {
         undoStack.clear();
         redoStack.clear();
         breakCoalescing();
+        resetGutterDiffBaselinesOnOpen();
     }
 
     public void save() throws IOException {
@@ -109,6 +186,7 @@ public class EditorEngine {
         model.save(state.getCurrentFile(), state.getFileEncoding(), state.getLineSeparator());
         state.setDirty(false);
         breakCoalescing();
+        resetGutterDiffSavedBaseline();
     }
 
     public void saveAs(Path path) throws IOException {
@@ -1563,6 +1641,7 @@ public class EditorEngine {
         lastEditKind = kind;
         lastEditAtNanos = now;
         lastEditCursorAfter = after.cursor();
+        gutterDiffComputedRevision = Long.MIN_VALUE;
     }
 
     private void commitOperationEdit(EditKind kind, ViewState before, List<EditOp.ReplaceRange> ops) {
@@ -1623,7 +1702,9 @@ public class EditorEngine {
         if (!inserted.isEmpty()) {
             cursor = model.insertText(cursor, inserted);
         }
-        ops.add(EditOp.replace(a, deletedText, inserted));
+        EditOp.ReplaceRange op = EditOp.replace(a, deletedText, inserted);
+        ops.add(op);
+        applyGutterDiffOp(op);
         return cursor;
     }
 
@@ -1632,6 +1713,223 @@ public class EditorEngine {
             return Integer.compare(left.line(), right.line());
         }
         return Integer.compare(left.col(), right.col());
+    }
+
+    private void resetGutterDiffBaselinesOnOpen() {
+        List<String> snapshot = List.copyOf(model.snapshotLines());
+        openBaselineLines = snapshot;
+        savedBaselineLines = snapshot;
+        clearAllGutterDiffBuffers(model.lineCount());
+        gutterDiffComputedRevision = model.revision();
+        gutterDiffPendingRebuild = false;
+        gutterDiffLastRebuildAtNanos = 0L;
+        gutterDiffLastRebuildDurationNanos = 0L;
+    }
+
+    private void resetGutterDiffSavedBaseline() {
+        savedBaselineLines = List.copyOf(model.snapshotLines());
+        if (gutterDiffMode == GutterDiffMode.DISABLED) {
+            clearAllGutterDiffBuffers(model.lineCount());
+            gutterDiffComputedRevision = model.revision();
+            gutterDiffPendingRebuild = false;
+            return;
+        }
+        rebuildGutterDiffFromCurrentState();
+    }
+
+    private void clearAllGutterDiffBuffers(int lineCount) {
+        initGutterDiffBuffers(savedDiffFlags, savedDeletedMarkers, lineCount);
+        initGutterDiffBuffers(openDiffFlags, openDeletedMarkers, lineCount);
+    }
+
+    private void initGutterDiffBuffers(List<GutterDiffFlag> flags, List<Boolean> deleted, int lineCount) {
+        flags.clear();
+        deleted.clear();
+        int lines = Math.max(1, lineCount);
+        for (int i = 0; i < lines; i++) {
+            flags.add(GutterDiffFlag.NONE);
+            deleted.add(false);
+        }
+    }
+
+    private void rebuildGutterDiffFromCurrentState() {
+        if (gutterDiffMode == GutterDiffMode.DISABLED) {
+            clearAllGutterDiffBuffers(model.lineCount());
+            gutterDiffComputedRevision = model.revision();
+            gutterDiffPendingRebuild = false;
+            return;
+        }
+        long startedAt = System.nanoTime();
+        List<String> current = model.snapshotLines();
+        int lines = Math.max(1, current.size());
+        initGutterDiffBuffers(savedDiffFlags, savedDeletedMarkers, lines);
+        initGutterDiffBuffers(openDiffFlags, openDeletedMarkers, lines);
+
+        DiffAlgorithm algorithm = resolveGutterDiffAlgorithm();
+        EditList savedEdits = algorithm.diff(
+            GUTTER_SEQUENCE_COMPARATOR,
+            new LineSequence(savedBaselineLines),
+            new LineSequence(current)
+        );
+        applyDiffEdits(savedEdits, lines, savedDiffFlags, savedDeletedMarkers);
+
+        EditList openEdits = algorithm.diff(
+            GUTTER_SEQUENCE_COMPARATOR,
+            new LineSequence(openBaselineLines),
+            new LineSequence(current)
+        );
+        applyDiffEdits(openEdits, lines, openDiffFlags, openDeletedMarkers);
+
+        gutterDiffLastRebuildDurationNanos = System.nanoTime() - startedAt;
+        gutterDiffComputedRevision = model.revision();
+        gutterDiffPendingRebuild = false;
+        gutterDiffLastRebuildAtNanos = System.nanoTime();
+    }
+
+    private void applyGutterDiffOp(EditOp.ReplaceRange op) {
+        if (op == null) {
+            return;
+        }
+        if (gutterDiffMode == GutterDiffMode.DISABLED) {
+            return;
+        }
+        gutterDiffComputedRevision = Long.MIN_VALUE;
+        gutterDiffPendingRebuild = true;
+    }
+
+    private void ensureGutterDiffUpToDate() {
+        if (gutterDiffMode == GutterDiffMode.DISABLED) {
+            return;
+        }
+        if (gutterDiffComputedRevision == model.revision()
+            && savedDiffFlags.size() == model.lineCount()
+            && savedDeletedMarkers.size() == model.lineCount()
+            && openDiffFlags.size() == model.lineCount()
+            && openDeletedMarkers.size() == model.lineCount()) {
+            return;
+        }
+        if (!shouldRebuildGutterDiffNow()) {
+            return;
+        }
+        rebuildGutterDiffFromCurrentState();
+    }
+
+    private DiffAlgorithm resolveGutterDiffAlgorithm() {
+        return switch (gutterDiffMode) {
+            case DISABLED -> GUTTER_DIFF_ALGORITHM_MYERS;
+            case HISTOGRAM -> GUTTER_DIFF_ALGORITHM_HISTOGRAM;
+            case MYERS, STABLE -> GUTTER_DIFF_ALGORITHM_MYERS;
+        };
+    }
+
+    private boolean shouldRebuildGutterDiffNow() {
+        if (!gutterDiffPendingRebuild && gutterDiffComputedRevision == Long.MIN_VALUE) {
+            return true;
+        }
+        if (!gutterDiffPendingRebuild) {
+            return true;
+        }
+        long now = System.nanoTime();
+        long minInterval = model.lineCount() >= GUTTER_DIFF_LARGE_FILE_THRESHOLD_LINES
+            ? GUTTER_DIFF_MIN_REBUILD_INTERVAL_LARGE_NANOS
+            : GUTTER_DIFF_MIN_REBUILD_INTERVAL_NANOS;
+        if (gutterDiffLastRebuildDurationNanos > 0L) {
+            long adaptive = gutterDiffLastRebuildDurationNanos * GUTTER_DIFF_DURATION_FACTOR;
+            if (adaptive > minInterval) {
+                minInterval = Math.min(adaptive, GUTTER_DIFF_MAX_REBUILD_INTERVAL_NANOS);
+            }
+        }
+        return gutterDiffLastRebuildAtNanos == 0L || now - gutterDiffLastRebuildAtNanos >= minInterval;
+    }
+
+    private void applyDiffEdits(
+        EditList edits,
+        int currentLineCount,
+        List<GutterDiffFlag> flags,
+        List<Boolean> deletedMarkers
+    ) {
+        if (edits == null || edits.isEmpty()) {
+            return;
+        }
+        for (Edit edit : edits) {
+            int deleted = Math.max(0, edit.getEndA() - edit.getBeginA());
+            int added = Math.max(0, edit.getEndB() - edit.getBeginB());
+            int beginCurrent = Math.max(0, edit.getBeginB());
+            switch (edit.getType()) {
+                case INSERT -> {
+                    for (int i = 0; i < added; i++) {
+                        int line = beginCurrent + i;
+                        if (line >= 0 && line < flags.size()) {
+                            flags.set(line, GutterDiffFlag.ADDED);
+                        }
+                    }
+                }
+                case DELETE -> {
+                    if (!deletedMarkers.isEmpty()) {
+                        int target = Math.max(0, Math.min(beginCurrent, currentLineCount - 1));
+                        deletedMarkers.set(target, true);
+                    }
+                }
+                case REPLACE -> {
+                    if (gutterDiffMode == GutterDiffMode.STABLE) {
+                        for (int i = 0; i < added; i++) {
+                            int line = beginCurrent + i;
+                            if (line >= 0 && line < flags.size()) {
+                                flags.set(line, GutterDiffFlag.MODIFIED);
+                            }
+                        }
+                    } else {
+                        // Balanced mapping: replacement pairs are MODIFIED,
+                        // extra new lines are ADDED.
+                        int paired = Math.min(deleted, added);
+                        for (int i = 0; i < paired; i++) {
+                            int line = beginCurrent + i;
+                            if (line >= 0 && line < flags.size()) {
+                                flags.set(line, GutterDiffFlag.MODIFIED);
+                            }
+                        }
+                        for (int i = paired; i < added; i++) {
+                            int line = beginCurrent + i;
+                            if (line >= 0 && line < flags.size()) {
+                                flags.set(line, GutterDiffFlag.ADDED);
+                            }
+                        }
+                    }
+                }
+                default -> {
+                    // EMPTY edit: no markers.
+                }
+            }
+        }
+    }
+
+    private static final class LineSequence extends Sequence {
+        private final List<String> lines;
+
+        private LineSequence(List<String> lines) {
+            this.lines = lines == null ? List.of() : lines;
+        }
+
+        @Override
+        public int size() {
+            return lines.size();
+        }
+
+        private String line(int index) {
+            return lines.get(index);
+        }
+    }
+
+    private static final class LineSequenceComparator extends SequenceComparator<LineSequence> {
+        @Override
+        public boolean equals(LineSequence a, int ai, LineSequence b, int bi) {
+            return a.line(ai).equals(b.line(bi));
+        }
+
+        @Override
+        public int hash(LineSequence seq, int ptr) {
+            return seq.line(ptr).hashCode();
+        }
     }
 
     private ViewState captureViewState() {
@@ -1680,6 +1978,7 @@ public class EditorEngine {
             snapshot.dirty(),
             snapshot.selectionAnchor()
         ));
+        gutterDiffComputedRevision = Long.MIN_VALUE;
     }
 
     private static <T> void pushWithLimit(Deque<T> stack, T entry) {
@@ -1798,6 +2097,7 @@ public class EditorEngine {
             if (insertedText != null && !insertedText.isEmpty()) {
                 model.insertText(cursor, insertedText);
             }
+            applyGutterDiffOp(EditOp.replace(a, deletedText, insertedText));
         }
 
         private Position advancePosition(Position start, String text) {

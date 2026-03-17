@@ -19,14 +19,12 @@ def jlineNativeManualArgs = [
         'META-INF/native-image/org.jline/jansi-core/resource-config.json,' +
         'META-INF/native-image/org.jline/jline-native/resource-config.json,' +
         'META-INF/native-image/org.jline/jline-terminal/resource-config.json,' +
-        'META-INF/native-image/org.jline/jline-terminal-ffm/resource-config.json,' +
         'META-INF/native-image/org.jline/jline-terminal-jansi/resource-config.json,' +
         'META-INF/native-image/org.jline/jline-terminal-jna/resource-config.json,' +
         'META-INF/native-image/org.jline/jline-terminal-jni/resource-config.json',
     '-H:ReflectionConfigurationResources=' +
         'META-INF/native-image/org.jline/jline-native/reflection-config.json,' +
         'META-INF/native-image/org.jline/jline-terminal/reflection-config.json,' +
-        'META-INF/native-image/org.jline/jline-terminal-ffm/reflection-config.json,' +
         'META-INF/native-image/org.jline/jline-terminal-jansi/reflection-config.json,' +
         'META-INF/native-image/org.jline/jline-terminal-jna/reflection-config.json,' +
         'META-INF/native-image/org.jline/jline-terminal-jni/reflection-config.json',

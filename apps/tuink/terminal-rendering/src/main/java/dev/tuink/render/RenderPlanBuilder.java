@@ -1,6 +1,8 @@
 package dev.tuink.render;
 
 import dev.tuink.core.EditorState;
+import dev.tuink.core.GutterDiffFlag;
+import dev.tuink.core.GutterDiffMarker;
 import dev.tuink.core.Position;
 import dev.tuink.core.SearchOptions;
 import dev.tuink.core.TextModel;
@@ -12,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.List;
 import java.util.Map;
+import java.util.function.IntFunction;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -29,6 +32,7 @@ public class RenderPlanBuilder {
     private boolean syntaxHighlightingEnabled = true;
     private boolean bracketMatchingEnabled = true;
     private boolean rainbowBracketsEnabled = true;
+    private IntFunction<GutterDiffMarker> gutterDiffResolver = line -> GutterDiffMarker.NONE;
     private CommentSyntaxProfile commentSyntaxProfile = CommentSyntaxProfile.GENERIC;
     private long visualCacheRevision = Long.MIN_VALUE;
     private int visualCacheTabWidth = -1;
@@ -91,6 +95,10 @@ public class RenderPlanBuilder {
     public void setRainbowBracketsEnabled(boolean enabled) {
         this.rainbowBracketsEnabled = enabled;
         this.bracketCacheRevision = Long.MIN_VALUE;
+    }
+
+    public void setGutterDiffResolver(IntFunction<GutterDiffMarker> resolver) {
+        this.gutterDiffResolver = resolver == null ? line -> GutterDiffMarker.NONE : resolver;
     }
 
     public void setCommentSyntaxProfile(CommentSyntaxProfile profile) {
@@ -260,7 +268,7 @@ public class RenderPlanBuilder {
         boolean needVerticalScrollbar = state.getTopLine() > 0 || model.lineCount() > contentRows;
         int scrollbarWidth = safeCols >= 8 && needVerticalScrollbar ? 1 : 0;
         int gutterDigits = Math.max(1, String.valueOf(Math.max(model.lineCount(), 1)).length());
-        int gutterWidth = gutterDigits + 1;
+        int gutterWidth = gutterDigits + 2;
         int textWidth = Math.max(0, safeCols - gutterWidth - scrollbarWidth);
         WrapViewport wrapViewport = null;
         if (wrapLines) {
@@ -325,10 +333,11 @@ public class RenderPlanBuilder {
                     if (currentMatch != null) {
                         spans.add(currentMatch);
                     }
-                    String gutter = lineNumberGutter(lineIndex + 1, gutterWidth);
-                    lines.add(new LineVisual(gutter, visibleText, spans));
+                    GutterDiffMarker gutterDiff = gutterDiffForLine(lineIndex);
+                    String gutter = lineNumberGutter(lineIndex + 1, gutterWidth, gutterDiff.flag());
+                    lines.add(new LineVisual(gutter, visibleText, spans, gutterDiff));
                 } else {
-                    lines.add(new LineVisual(tildeGutter(gutterWidth), "", List.of()));
+                    lines.add(new LineVisual(tildeGutter(gutterWidth), "", List.of(), GutterDiffMarker.NONE));
                 }
             }
         } else {
@@ -336,10 +345,11 @@ public class RenderPlanBuilder {
             int firstSegmentOffset = wrapViewport == null ? 0 : wrapViewport.segmentOffset();
             while (lines.size() < contentRows) {
                 if (lineIndex >= model.lineCount()) {
-                    lines.add(new LineVisual(tildeGutter(gutterWidth), "", List.of()));
+                    lines.add(new LineVisual(tildeGutter(gutterWidth), "", List.of(), GutterDiffMarker.NONE));
                     continue;
                 }
                 String line = model.getLine(lineIndex);
+                GutterDiffMarker gutterDiff = gutterDiffForLine(lineIndex);
                 List<StyleSpan> lineSpans = new ArrayList<>(
                     syntaxHighlightingEnabled ? syntaxSpansForLine(model, lineIndex, line) : List.of()
                 );
@@ -376,9 +386,9 @@ public class RenderPlanBuilder {
                     String part = line.substring(start, end);
                     List<StyleSpan> partSpans = clipSpans(lineSpans, start, part.length());
                     String gutter = seg == 0
-                        ? lineNumberGutter(lineIndex + 1, gutterWidth)
+                        ? lineNumberGutter(lineIndex + 1, gutterWidth, gutterDiff.flag())
                         : " ".repeat(gutterWidth);
-                    lines.add(new LineVisual(gutter, part, partSpans));
+                    lines.add(new LineVisual(gutter, part, partSpans, seg == 0 ? gutterDiff : GutterDiffMarker.NONE));
                 }
                 firstSegmentOffset = 0;
                 lineIndex++;
@@ -850,12 +860,33 @@ public class RenderPlanBuilder {
         return model.totalWrappedRows(width, wrapByWords, tabWidth);
     }
 
-    private static String lineNumberGutter(int lineNumber, int gutterWidth) {
-        return String.format("%" + (gutterWidth - 1) + "d ", lineNumber);
+    private GutterDiffMarker gutterDiffForLine(int lineIndex) {
+        if (lineIndex < 0) {
+            return GutterDiffMarker.NONE;
+        }
+        GutterDiffMarker marker = gutterDiffResolver.apply(lineIndex);
+        return marker == null ? GutterDiffMarker.NONE : marker;
+    }
+
+    private static String lineNumberGutter(int lineNumber, int gutterWidth, GutterDiffFlag diff) {
+        char marker = markerChar(diff);
+        return marker + String.format("%" + (gutterWidth - 2) + "d ", lineNumber);
     }
 
     private static String tildeGutter(int gutterWidth) {
-        return String.format("%" + (gutterWidth - 1) + "s ", "~");
+        return " " + String.format("%" + (gutterWidth - 2) + "s ", "~");
+    }
+
+    private static char markerChar(GutterDiffFlag diff) {
+        if (diff == null) {
+            return ' ';
+        }
+        return switch (diff) {
+            case ADDED -> '+';
+            case MODIFIED -> '~';
+            case DELETED -> '-';
+            default -> ' ';
+        };
     }
 
     private List<StyleSpan> searchMatchSpans(String line, String query, SearchOptions options, Style style) {

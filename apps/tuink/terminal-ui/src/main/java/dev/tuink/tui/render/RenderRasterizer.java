@@ -1,5 +1,7 @@
 package dev.tuink.tui.render;
 
+import dev.tuink.core.GutterDiffFlag;
+import dev.tuink.core.GutterDiffMarker;
 import dev.tuink.render.LineVisual;
 import dev.tuink.render.RenderPlan;
 import dev.tuink.render.Style;
@@ -66,7 +68,7 @@ public class RenderRasterizer {
             Style gutterStyle = highlightActiveGutter && row == activeGutterRow
                 ? styles.renderGutterActive()
                 : styles.renderGutter();
-            drawText(buffer, screenRow, 0, line.gutter(), gutterStyle, contentCols);
+            drawGutter(buffer, screenRow, line, gutterStyle, contentCols);
             boolean markLeadingWhitespace = shouldMarkLeadingWhitespace(plan, line);
             drawHighlightedText(
                 buffer,
@@ -254,6 +256,43 @@ public class RenderRasterizer {
             buffer.set(row, outCol, graphemes[i], charStyles[i]);
             outCol++;
         }
+    }
+
+    private void drawGutter(CellBuffer buffer, int row, LineVisual line, Style baseStyle, int cols) {
+        String gutter = line.gutter();
+        if (gutter == null || gutter.isEmpty()) {
+            return;
+        }
+        drawText(buffer, row, 0, gutter, baseStyle, cols);
+        if (cols <= 0) {
+            return;
+        }
+        Style markerStyle = gutterMarkerStyle(line.gutterDiff());
+        if (markerStyle == null) {
+            return;
+        }
+        buffer.set(row, 0, String.valueOf(gutter.charAt(0)), markerStyle);
+    }
+
+    private Style gutterMarkerStyle(GutterDiffMarker marker) {
+        if (marker == null || marker.flag() == null) {
+            return null;
+        }
+        GutterDiffFlag diff = marker.flag();
+        if (marker.historical()) {
+            return switch (diff) {
+                case ADDED -> styles.renderGutterAddedHistorical();
+                case MODIFIED -> styles.renderGutterModifiedHistorical();
+                case DELETED -> styles.renderGutterDeletedHistorical();
+                default -> null;
+            };
+        }
+        return switch (diff) {
+            case ADDED -> styles.renderGutterAdded();
+            case MODIFIED -> styles.renderGutterModified();
+            case DELETED -> styles.renderGutterDeleted();
+            default -> null;
+        };
     }
 
     private void drawText(CellBuffer buffer, int row, int col, String text, Style style, int cols) {

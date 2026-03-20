@@ -26,7 +26,6 @@ public class KeyDecoder {
 
         return switch (ch) {
             case 3 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_C);
-            case 5 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_E);
             case 17 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_Q);
             case 19 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_S);
             case 26 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_Z);
@@ -42,7 +41,6 @@ public class KeyDecoder {
             case 7 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_G);
             case 8 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_H);
             case 14 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_N);
-            case 20 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_T);
             case 31 -> new KeyEvent.ActionEvent(KeyEvent.Action.SHOW_KEY_HINTS);
             case 9 -> new KeyEvent.ActionEvent(KeyEvent.Action.TAB);
             case 127 -> new KeyEvent.ActionEvent(KeyEvent.Action.BACKSPACE);
@@ -79,10 +77,16 @@ public class KeyDecoder {
         if (second == 'O') {
             int third = reader.read(5);
             if (third == 'P') {
-                return new KeyEvent.ActionEvent(KeyEvent.Action.OPEN_HELP_MENU);
+                return new KeyEvent.ActionEvent(KeyEvent.Action.F10);
             }
             if (third == 'Q') {
-                return new KeyEvent.ActionEvent(KeyEvent.Action.F2);
+                return new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_E);
+            }
+            if (third == 'R') {
+                return new KeyEvent.ActionEvent(KeyEvent.Action.OPEN_VIEW_MENU);
+            }
+            if (third == 'S') {
+                return new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_T);
             }
             return new KeyEvent.ActionEvent(KeyEvent.Action.UNKNOWN);
         }
@@ -116,6 +120,7 @@ public class KeyDecoder {
         return switch (key) {
             case 'b' -> new KeyEvent.ActionEvent(KeyEvent.Action.WORD_LEFT);
             case 'f' -> new KeyEvent.ActionEvent(KeyEvent.Action.WORD_RIGHT);
+            case 'i' -> new KeyEvent.ActionEvent(KeyEvent.Action.F10);
             case 'e' -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_E);
             case 't' -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_T);
             case 'v' -> new KeyEvent.ActionEvent(KeyEvent.Action.OPEN_VIEW_MENU);
@@ -145,8 +150,12 @@ public class KeyDecoder {
             case "5;5~" -> new KeyEvent.ActionEvent(KeyEvent.Action.TAB_PREVIOUS);
             case "6;5~" -> new KeyEvent.ActionEvent(KeyEvent.Action.TAB_NEXT);
             case "1;5I", "1;9I" -> new KeyEvent.ActionEvent(KeyEvent.Action.TAB_NEXT);
-            case "21~" -> new KeyEvent.ActionEvent(KeyEvent.Action.F10);
-            case "12~" -> new KeyEvent.ActionEvent(KeyEvent.Action.F2);
+            case "11~" -> new KeyEvent.ActionEvent(KeyEvent.Action.F10);
+            case "12~" -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_E);
+            case "13~" -> new KeyEvent.ActionEvent(KeyEvent.Action.OPEN_VIEW_MENU);
+            case "14~" -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_T);
+            case "15~" -> new KeyEvent.ActionEvent(KeyEvent.Action.F2);
+            case "17~" -> new KeyEvent.ActionEvent(KeyEvent.Action.OPEN_HELP_MENU);
             case "1;6S", "83;6u", "27;6;83~" -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_SHIFT_S);
             default -> mapModifiedArrows(seq);
         };

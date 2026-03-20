@@ -4,6 +4,7 @@ import dev.tuink.render.Style;
 import dev.tuink.core.GutterDiffMode;
 import dev.tuink.core.TabInsertMode;
 import dev.tuink.tui.KeyEvent;
+import dev.tuink.tui.render.Cell;
 import dev.tuink.tui.render.CellBuffer;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -155,6 +156,7 @@ public final class MenuBar {
             topSelectedStyle,
             selectedMonoStyle
         );
+        View.drawTopMenuMnemonics(buffer, cols);
     }
 
     public boolean isOpen() {
@@ -1031,6 +1033,39 @@ public final class MenuBar {
                 case HELP -> " Help ";
             };
             drawLine(buffer, 0, startCol(active), label, style, cols);
+        }
+
+        private static void drawTopMenuMnemonics(CellBuffer buffer, int cols) {
+            if (buffer.rows() < 1 || cols < 1) {
+                return;
+            }
+            underlineTopMnemonic(buffer, cols, MenuId.FILE, 2);     // Alt+I
+            underlineTopMnemonic(buffer, cols, MenuId.EDIT, 1);     // Alt+E
+            underlineTopMnemonic(buffer, cols, MenuId.VIEW, 1);     // Alt+V
+            underlineTopMnemonic(buffer, cols, MenuId.TAB, 1);      // Alt+T
+            underlineTopMnemonic(buffer, cols, MenuId.SETTINGS, 1); // Alt+S
+            underlineTopMnemonic(buffer, cols, MenuId.HELP, 1);     // Alt+H
+        }
+
+        private static void underlineTopMnemonic(CellBuffer buffer, int cols, MenuId menu, int offset) {
+            int col = startCol(menu) + offset;
+            if (col < 0 || col >= cols) {
+                return;
+            }
+            Cell cell = buffer.get(0, col);
+            if (cell == null) {
+                return;
+            }
+            Style style = cell.style();
+            if (style == null || style.underline()) {
+                return;
+            }
+            buffer.set(
+                0,
+                col,
+                cell.grapheme(),
+                new Style(style.fg(), style.bg(), style.bold(), true)
+            );
         }
 
         private static int startCol(MenuId menu) {

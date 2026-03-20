@@ -34,6 +34,9 @@ public class RegexHighlighter implements LineHighlighter {
     private static final Set<String> SQL_EXT = Set.of("sql");
     private static final Set<String> GO_EXT = Set.of("go");
     private static final Set<String> RUST_EXT = Set.of("rs");
+    private static final Set<String> PHP_EXT = Set.of("php", "phtml", "php5", "php7", "php8");
+    private static final Set<String> RUBY_EXT = Set.of("rb", "rake", "gemspec");
+    private static final Set<String> PERL_EXT = Set.of("pl", "pm", "perl", "t");
     private static final Set<String> KOTLIN_EXT = Set.of("kt", "kts");
     private static final Set<String> PROTO_EXT = Set.of("proto");
     private static final Set<String> HTML_EXT = Set.of("html", "htm");
@@ -117,6 +120,15 @@ public class RegexHighlighter implements LineHighlighter {
         }
         if (RUST_EXT.contains(ext)) {
             return forRust();
+        }
+        if (PHP_EXT.contains(ext)) {
+            return forPhp();
+        }
+        if (RUBY_EXT.contains(ext)) {
+            return forRuby();
+        }
+        if (PERL_EXT.contains(ext)) {
+            return forPerl();
         }
         if (KOTLIN_EXT.contains(ext)) {
             return forKotlin();
@@ -322,6 +334,59 @@ public class RegexHighlighter implements LineHighlighter {
             new RegexRule(Pattern.compile("'([^'\\\\]|\\\\.)*'"), STRING_STYLE),
             new RegexRule(Pattern.compile("//.*$"), COMMENT_STYLE),
             new RegexRule(Pattern.compile("/\\*.*\\*/"), COMMENT_STYLE)
+        ));
+    }
+
+    public static RegexHighlighter forPhp() {
+        return new RegexHighlighter(List.of(
+            new RegexRule(
+                Pattern.compile("\\b(namespace|use|class|interface|trait|extends|implements|public|private|protected|static|final|abstract|function|fn|if|elseif|else|for|foreach|while|do|switch|case|default|try|catch|finally|throw|return|break|continue|new|clone|instanceof|echo|include|include_once|require|require_once|match|null|true|false)\\b"),
+                KEYWORD_STYLE
+            ),
+            new RegexRule(
+                Pattern.compile("\\b(int|float|string|bool|array|object|mixed|void|iterable|callable|self|parent|static)\\b"),
+                TYPE_STYLE
+            ),
+            new RegexRule(Pattern.compile("\\$[A-Za-z_][A-Za-z0-9_]*"), TYPE_STYLE),
+            new RegexRule(Pattern.compile("<\\?(?:php|=)?|\\?>"), DECORATOR_STYLE),
+            new RegexRule(Pattern.compile("\\b\\d+(?:\\.\\d+)?\\b"), NUMBER_STYLE),
+            new RegexRule(Pattern.compile("\"([^\"\\\\]|\\\\.)*\""), STRING_STYLE),
+            new RegexRule(Pattern.compile("'([^'\\\\]|\\\\.)*'"), STRING_STYLE),
+            new RegexRule(Pattern.compile("//.*$"), COMMENT_STYLE),
+            new RegexRule(Pattern.compile("#.*$"), COMMENT_STYLE),
+            new RegexRule(Pattern.compile("/\\*.*\\*/"), COMMENT_STYLE)
+        ));
+    }
+
+    public static RegexHighlighter forRuby() {
+        return new RegexHighlighter(List.of(
+            new RegexRule(
+                Pattern.compile("\\b(alias|and|BEGIN|begin|break|case|class|def|defined\\?|do|else|elsif|END|end|ensure|false|for|if|in|module|next|nil|not|or|redo|rescue|retry|return|self|super|then|true|undef|unless|until|when|while|yield)\\b"),
+                KEYWORD_STYLE
+            ),
+            new RegexRule(Pattern.compile("\\b[A-Z][A-Za-z0-9_]*\\b"), TYPE_STYLE),
+            new RegexRule(Pattern.compile(":[A-Za-z_][A-Za-z0-9_]*[!?=]?"), TYPE_STYLE),
+            new RegexRule(Pattern.compile("@@?[A-Za-z_][A-Za-z0-9_]*|\\$[A-Za-z_][A-Za-z0-9_]*"), TYPE_STYLE),
+            new RegexRule(Pattern.compile("#\\{[^}]+\\}"), DECORATOR_STYLE),
+            new RegexRule(Pattern.compile("\\b\\d+(?:\\.\\d+)?\\b"), NUMBER_STYLE),
+            new RegexRule(Pattern.compile("\"([^\"\\\\]|\\\\.)*\""), STRING_STYLE),
+            new RegexRule(Pattern.compile("'([^'\\\\]|\\\\.)*'"), STRING_STYLE),
+            new RegexRule(Pattern.compile("#.*$"), COMMENT_STYLE)
+        ));
+    }
+
+    public static RegexHighlighter forPerl() {
+        return new RegexHighlighter(List.of(
+            new RegexRule(
+                Pattern.compile("\\b(use|my|our|state|local|sub|package|if|elsif|else|unless|while|until|for|foreach|given|when|continue|last|next|redo|return|do|eval|require|bless|undef)\\b"),
+                KEYWORD_STYLE
+            ),
+            new RegexRule(Pattern.compile("[\\$@%][A-Za-z_][A-Za-z0-9_]*"), TYPE_STYLE),
+            new RegexRule(Pattern.compile("\\b\\d+(?:\\.\\d+)?\\b"), NUMBER_STYLE),
+            new RegexRule(Pattern.compile("\"([^\"\\\\]|\\\\.)*\""), STRING_STYLE),
+            new RegexRule(Pattern.compile("'([^'\\\\]|\\\\.)*'"), STRING_STYLE),
+            new RegexRule(Pattern.compile("\\b(qw|qq|qx|qr|m|s|tr|y)\\b"), DECORATOR_STYLE),
+            new RegexRule(Pattern.compile("#.*$"), COMMENT_STYLE)
         ));
     }
 

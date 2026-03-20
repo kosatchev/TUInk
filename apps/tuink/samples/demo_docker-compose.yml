@@ -1,0 +1,88 @@
+# Demo: Docker Compose stack with anchors, env vars, and service dependencies.
+version: "3.9"
+
+x-common-env: &common-env
+  APP_ENV: development
+  TZ: UTC
+  LOG_LEVEL: info
+
+services:
+  api:
+    image: ghcr.io/example/notes-api:latest
+    container_name: notes_api
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+      HTTP_PORT: "8080"
+      DATABASE_URL: postgres://notes:notes@db:5432/notes
+      REDIS_URL: redis://cache:6379/0
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config:/app/config:ro
+      - api_data:/var/lib/notes
+    depends_on:
+      - db
+      - cache
+    networks: [backend]
+
+  worker:
+    image: ghcr.io/example/notes-worker:latest
+    container_name: notes_worker
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+      QUEUE_NAME: note_jobs
+      DATABASE_URL: postgres://notes:notes@db:5432/notes
+    depends_on:
+      - db
+      - cache
+    networks: [backend]
+
+  db:
+    image: postgres:16-alpine
+    container_name: notes_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: notes
+      POSTGRES_USER: notes
+      POSTGRES_PASSWORD: notes
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"
+    networks: [backend]
+
+  cache:
+    image: redis:7-alpine
+    container_name: notes_cache
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1000", "--appendonly", "yes"]
+    volumes:
+      - cache_data:/data
+    ports:
+      - "6379:6379"
+    networks: [backend]
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: notes_nginx
+    restart: unless-stopped
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - api
+    networks: [backend]
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  api_data:
+  db_data:
+  cache_data:

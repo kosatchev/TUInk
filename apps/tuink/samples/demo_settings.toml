@@ -1,0 +1,66 @@
+# Demo: Application settings in TOML with sections and scalar types.
+[app]
+name = "notes-editor"
+environment = "dev"
+debug = true
+default_locale = "en-US"
+timezone = "UTC"
+
+[paths]
+workspace = "./workspace"
+plugins = "./plugins"
+cache = "./.cache"
+logs = "./logs"
+
+[server]
+host = "127.0.0.1"
+port = 9090
+read_timeout_ms = 5000
+write_timeout_ms = 8000
+max_connections = 200
+
+[ui]
+theme = "sepia"
+font_family = "JetBrains Mono"
+font_size = 14
+line_height = 1.35
+show_minimap = true
+show_ruler = true
+ruler_columns = [80, 100, 120]
+tab_size = 4
+insert_spaces = true
+word_wrap = "bounded"
+
+[lint]
+enabled = true
+run_on_save = true
+max_problems = 200
+severity_order = ["error", "warning", "info"]
+
+[autosave]
+enabled = true
+interval_seconds = 20
+trim_trailing_whitespace = true
+ensure_newline_at_eof = true
+backup_count = 5
+
+[search]
+smart_case = true
+use_regex = true
+follow_symlinks = false
+exclude_globs = [
+  "**/.git/**",
+  "**/node_modules/**",
+  "**/build/**",
+  "**/.cache/**",
+]
+
+[telemetry]
+enabled = false
+endpoint = "https://telemetry.invalid/api/events"
+flush_interval_seconds = 30
+max_batch_size = 100
+
+[plugins]
+allow_unsigned = false
+autoload = ["yaml-tools", "sql-helper", "todo-highlighter"]

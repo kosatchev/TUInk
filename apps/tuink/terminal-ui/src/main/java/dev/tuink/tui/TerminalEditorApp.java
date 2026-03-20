@@ -4023,6 +4023,8 @@ public class TerminalEditorApp {
             return false;
         }
         if (ext.equals("py") || ext.equals("sh") || ext.equals("bash") || ext.equals("zsh")
+            || ext.equals("rb") || ext.equals("rake") || ext.equals("gemspec")
+            || ext.equals("pl") || ext.equals("pm") || ext.equals("perl") || ext.equals("t")
             || ext.equals("yaml") || ext.equals("yml") || ext.equals("toml")
             || ext.equals("ini") || ext.equals("cfg") || ext.equals("conf")
             || ext.equals("properties")) {
@@ -4051,6 +4053,11 @@ public class TerminalEditorApp {
             || ext.equals("tsx")
             || ext.equals("go")
             || ext.equals("rs")
+            || ext.equals("php")
+            || ext.equals("phtml")
+            || ext.equals("php5")
+            || ext.equals("php7")
+            || ext.equals("php8")
             || ext.equals("kt")
             || ext.equals("kts")
             || ext.equals("css")

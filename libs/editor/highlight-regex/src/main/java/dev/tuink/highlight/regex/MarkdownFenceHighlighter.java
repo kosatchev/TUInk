@@ -100,6 +100,9 @@ final class MarkdownFenceHighlighter implements ContextualLineHighlighter {
             case "sql" -> RegexHighlighter.forSql();
             case "go", "golang" -> RegexHighlighter.forGo();
             case "rs", "rust" -> RegexHighlighter.forRust();
+            case "php" -> RegexHighlighter.forPhp();
+            case "ruby", "rb" -> RegexHighlighter.forRuby();
+            case "perl", "pl", "pm" -> RegexHighlighter.forPerl();
             case "kt", "kts", "kotlin" -> RegexHighlighter.forKotlin();
             case "proto", "protobuf" -> RegexHighlighter.forProto();
             case "html", "htm" -> RegexHighlighter.forHtml();

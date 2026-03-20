@@ -1,6 +1,6 @@
 # TUInk
 
-Current version: `0.9.0`
+Current version: `0.9.1`
 
 Minimal Java terminal text editor with clean multi-module architecture:
 
@@ -14,6 +14,16 @@ Minimal Java terminal text editor with clean multi-module architecture:
 
 This project is currently feature-first: new capabilities sometimes arrive before the dust from recent changes has settled.
 The editor is functional, cleanup is ongoing, and a larger refactor is planned once the core feature set stabilizes.
+
+## Samples
+
+Repository contains syntax and content samples in `apps/tuink/samples/`.
+
+These files are useful for:
+
+- quick manual checks of syntax highlighting
+- scroll/performance smoke checks on medium-size files
+- markdown fenced-code rendering checks
 
 ## Gutter Diff
 
@@ -151,10 +161,14 @@ Build native binary:
 Install:
 
 ```bash
+# glibc build
 cd apps/tuink/launcher/build/native/nativeCompile
-./install.sh               # auto-detects tuink/tuink-musl
-# or explicitly:
+./install.sh               # auto-detects tuink
 ./install.sh tuink
+
+# musl build
+cd apps/tuink/launcher/build/native/nativeMuslCompile
+./install.sh               # auto-detects tuink-musl
 ./install.sh tuink-musl
 ```
 
@@ -167,7 +181,12 @@ This installs:
 Uninstall:
 
 ```bash
+# from glibc output
 cd apps/tuink/launcher/build/native/nativeCompile
+./uninstall.sh
+
+# from musl output
+cd apps/tuink/launcher/build/native/nativeMuslCompile
 ./uninstall.sh
 ```
 
@@ -189,6 +208,13 @@ cd tuink-<version>-<os>-<arch>
 ./install.sh
 ```
 
+Archive content includes:
+
+- `tuink` binary
+- `install.sh` and `uninstall.sh`
+- `README.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`
+- `samples/`
+
 ## MVP keybindings
 
 - `Ctrl+Q`: quit (asks confirmation if dirty)
@@ -203,7 +229,7 @@ cd tuink-<version>-<os>-<arch>
 - `Enter`: insert newline
 - Typing: insert character
 - `Ctrl+F`: search mode (`Esc` to return)
-- `Ctrl+E`: open `Edit` menu, `F10`: open `File` menu (`←/→`, `↑/↓`, `Enter`, `Esc`)
+- Menu shortcuts: `F1` = `File`, `F2` = `Edit`, `F3` = `View`, `F4` = `Tab`, `F5` = `Settings`, `F6` = `Help` (`Alt+I/E/V/T/S/H` also works); navigation with `←/→`, `↑/↓`, `Enter`, `Esc`
 - Mouse:
 - left click `File`/`Edit` in top bar to open/close corresponding menu
 - left click menu item to execute it
@@ -252,6 +278,9 @@ Auto-detected by file extension for:
 - `sql`
 - `go`
 - `rs`
+- `php`, `phtml`, `php5`, `php7`, `php8`
+- `rb`, `rake`, `gemspec`
+- `pl`, `pm`, `perl`, `t`
 - `kt`, `kts`
 - `proto`
 - `html`, `htm`

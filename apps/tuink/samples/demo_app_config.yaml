@@ -1,0 +1,93 @@
+# Demo: Application config sample with nested settings and limits.
+app:
+  name: notes-service
+  environment: staging
+  version: 0.4.2
+  owner: platform-team
+
+paths:
+  data_dir: /var/lib/notes
+  cache_dir: /var/cache/notes
+  temp_dir: /tmp/notes
+  import_dir: /opt/notes/import
+  export_dir: /opt/notes/export
+
+server:
+  host: 0.0.0.0
+  port: 8080
+  request_timeout_ms: 15000
+  read_timeout_ms: 7000
+  write_timeout_ms: 9000
+  max_body_mb: 16
+  cors:
+    enabled: true
+    allow_origins:
+      - https://notes.example.com
+      - https://admin.example.com
+    allow_methods: [GET, POST, PUT, PATCH, DELETE]
+    allow_headers: [Authorization, Content-Type, X-Request-Id]
+
+logging:
+  level: info
+  format: json
+  output: stdout
+  include_caller: false
+  rotate:
+    enabled: true
+    max_size_mb: 50
+    max_files: 8
+    compress: true
+
+security:
+  require_https: true
+  session_ttl_minutes: 120
+  password_policy:
+    min_length: 12
+    require_digits: true
+    require_symbols: true
+    prevent_reuse: 5
+  rate_limit:
+    per_minute: 180
+    burst: 40
+
+features:
+  markdown_preview: true
+  share_links: false
+  autosave: true
+  archive_mode: true
+  beta_editor: false
+
+integrations:
+  postgres:
+    host: db.internal
+    port: 5432
+    db_name: notes
+    pool_size: 18
+    connect_timeout_sec: 5
+  redis:
+    host: cache.internal
+    port: 6379
+    db: 2
+    key_prefix: notes:
+  s3:
+    endpoint: https://s3.internal.example.com
+    bucket: notes-attachments
+    region: us-east-1
+    path_style: true
+
+jobs:
+  cleanup_sessions: "0 */2 * * *"
+  build_search_index: "15 * * * *"
+  export_backups: "30 3 * * *"
+  ping_integrations: "*/5 * * * *"
+
+alerts:
+  email:
+    enabled: true
+    from: alerts@example.com
+    recipients:
+      - devops@example.com
+      - backend@example.com
+  slack:
+    enabled: false
+    webhook: https://hooks.slack.local/replace-me

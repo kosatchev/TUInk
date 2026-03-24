@@ -1,6 +1,6 @@
 # TUInk
 
-Current version: `0.9.1`
+Current version: `0.9.2`
 
 Minimal Java terminal text editor with clean multi-module architecture:
 

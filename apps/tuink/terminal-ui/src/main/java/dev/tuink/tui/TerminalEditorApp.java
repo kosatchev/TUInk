@@ -55,6 +55,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Pattern;
 import org.jline.terminal.Attributes;
 import org.jline.terminal.Attributes.LocalFlag;
 import org.jline.terminal.Terminal;
@@ -467,6 +468,15 @@ public class TerminalEditorApp {
                         renderPlanBuilder.setCommentSyntaxProfile(resolveCommentSyntaxProfile(state.getCurrentFile()));
                         renderPlanBuilder.setRainbowBracketsEnabled(uiSessionState.rainbowBracketsSetting);
                         renderPlanBuilder.setTabWidth(uiSessionState.tabWidthSetting);
+                        renderPlanBuilder.setDecorationStyles(
+                            styles.renderSelection(),
+                            styles.renderSearchMatch(),
+                            styles.renderCurrentSearchMatch(),
+                            styles.renderBracketMatch(),
+                            styles.renderQuoteMatch(),
+                            styles.renderUnmatchedBracket(),
+                            styles.renderRainbowBrackets()
+                        );
                         engine.setGutterDiffMode(uiSessionState.gutterDiffModeSetting);
                         renderPlanBuilder.setGutterDiffResolver(engine::gutterDiffMarkerForLine);
                         editorView.setTabWidth(uiSessionState.tabWidthSetting);
@@ -598,7 +608,7 @@ public class TerminalEditorApp {
                                     tabBar.scrollLeft();
                                     break;
                                 }
-                                if (modalState.isNone() && !uiSessionState.searchMode) {
+                                if (modalState.isNone()) {
                                     int topBefore = state.getTopLine();
                                     int topWrapBefore = state.getTopWrapSegment();
                                     applyWheelVerticalScroll(model, state, plan, -3, uiSessionState.tabWidthSetting);
@@ -616,7 +626,7 @@ public class TerminalEditorApp {
                                     tabBar.scrollRight(tabItems);
                                     break;
                                 }
-                                if (modalState.isNone() && !uiSessionState.searchMode) {
+                                if (modalState.isNone()) {
                                     int topBefore = state.getTopLine();
                                     int topWrapBefore = state.getTopWrapSegment();
                                     applyWheelVerticalScroll(model, state, plan, 3, uiSessionState.tabWidthSetting);
@@ -802,22 +812,21 @@ public class TerminalEditorApp {
                                                     // Toggle is reflected directly in the search bar.
                                                 }
                                             }
-                                        } else {
-                                            KeyEvent.Action clickAction = searchActionAtMouse(
-                                                searchBar,
-                                                mouse.row(),
-                                                mouse.col(),
-                                                searchBarTopRow
-                                            );
-                                            if (clickAction != null) {
-                                                remappedMouseKey = new KeyEvent.ActionEvent(clickAction);
-                                                break;
-                                            }
+                                            editorView.cancelMouseSelection();
+                                            continue;
                                         }
-                                        editorView.cancelMouseSelection();
-                                        continue;
+                                        KeyEvent.Action clickAction = searchActionAtMouse(
+                                            searchBar,
+                                            mouse.row(),
+                                            mouse.col(),
+                                            searchBarTopRow
+                                        );
+                                        if (clickAction != null) {
+                                            remappedMouseKey = new KeyEvent.ActionEvent(clickAction);
+                                            break;
+                                        }
                                     }
-                                    if (modalState.isNone() && !uiSessionState.searchMode) {
+                                    if (modalState.isNone()) {
                                         int leftBeforeScrollPointer = state.getLeftVisualColumn();
                                         int topBeforeScrollPointer = state.getTopLine();
                                         int topWrapBeforeScrollPointer = state.getTopWrapSegment();
@@ -847,7 +856,9 @@ public class TerminalEditorApp {
                                             editorView.cancelMouseSelection();
                                             continue;
                                         }
-                                        editorView.handleMousePress(
+                                        Position cursorBeforePress = state.getCursor();
+                                        Position anchorBeforePress = state.getSelectionAnchor();
+                                        boolean selectedWordByDoubleClick = editorView.handleMousePress(
                                             mouse,
                                             model,
                                             state,
@@ -856,7 +867,21 @@ public class TerminalEditorApp {
                                             engine,
                                             contentTopRow
                                         );
-                                        viewportController.onEditorTextInteraction();
+                                        if (uiSessionState.searchMode) {
+                                            if (selectedWordByDoubleClick) {
+                                                String selectedQuery = selectionQueryForCtrlF(model, state);
+                                                if (selectedQuery != null) {
+                                                    searchQueryInput.set(selectedQuery);
+                                                }
+                                                uiSessionState.searchFocus = SearchFocus.FIND;
+                                            } else {
+                                                state.setCursor(cursorBeforePress);
+                                                state.setSelectionAnchor(anchorBeforePress);
+                                            }
+                                        }
+                                        if (!uiSessionState.searchMode) {
+                                            viewportController.onEditorTextInteraction();
+                                        }
                                     }
                                 }
                             }
@@ -879,7 +904,7 @@ public class TerminalEditorApp {
                                         continue;
                                     }
                                 }
-                                if (modalState.isNone() && !uiSessionState.searchMode) {
+                                if (modalState.isNone()) {
                                     if (mouse.button() == KeyEvent.MouseButton.LEFT
                                         && editorScrollDrag != EditorView.ScrollAxis.NONE) {
                                         int leftBeforeDragScroll = state.getLeftVisualColumn();
@@ -909,16 +934,18 @@ public class TerminalEditorApp {
                                         }
                                         continue;
                                     }
-                                    editorView.handleMouseDrag(
-                                        mouse,
-                                        model,
-                                        state,
-                                        plan,
-                                        contentRows,
-                                        engine,
-                                        contentTopRow
-                                    );
-                                    viewportController.onEditorTextInteraction();
+                                    if (!uiSessionState.searchMode) {
+                                        editorView.handleMouseDrag(
+                                            mouse,
+                                            model,
+                                            state,
+                                            plan,
+                                            contentRows,
+                                            engine,
+                                            contentTopRow
+                                        );
+                                        viewportController.onEditorTextInteraction();
+                                    }
                                 }
                             }
                             case RELEASE -> {
@@ -1271,25 +1298,6 @@ public class TerminalEditorApp {
                             String selectedQuery = selectionQueryForCtrlF(model, state);
                             if (selectedQuery != null) {
                                 searchQueryInput.set(selectedQuery);
-                                boolean found;
-                                if (searchUi.allTabs()) {
-                                    int foundTab = TabSearch.findNextAcrossTabs(
-                                        toTabSessions(tabs),
-                                        activeTabIndex,
-                                        searchQueryInput.text(),
-                                        SearchController.toSearchOptions(searchUi)
-                                    );
-                                    found = foundTab >= 0;
-                                    if (found && foundTab != activeTabIndex) {
-                                        sessionContext.activate(foundTab);
-                                    }
-                                } else {
-                                    found = engine.findNext(
-                                        searchQueryInput.text(),
-                                        SearchController.toSearchOptions(searchUi)
-                                    );
-                                }
-                                notification.info(found ? "Found next match" : "Not found");
                             }
                         }
                         if (uiSessionState.helpHintsMode) {
@@ -1811,6 +1819,9 @@ public class TerminalEditorApp {
                             SearchController.toSearchOptions(nextSearchUi)
                         );
                     }
+                    if (found) {
+                        nextEngine.ensureCursorVisible(contentRows);
+                    }
                     statusMessage = found ? "Found previous match" : "Not found";
                 } else if (enterAction == KeyEvent.Action.CTRL_R) {
                     if (uiSessionState.readingModeSetting) {
@@ -1839,12 +1850,24 @@ public class TerminalEditorApp {
                     }
                 } else {
                     boolean found;
+                    SearchOptions searchOptions = SearchController.toSearchOptions(nextSearchUi);
+                    boolean focusedCurrent = focusCurrentMatchIfOffscreen(
+                        nextModel,
+                        nextState,
+                        nextEngine,
+                        contentRows,
+                        searchQueryInput.text(),
+                        searchOptions
+                    );
+                    if (focusedCurrent) {
+                        found = true;
+                    } else
                     if (nextSearchUi.allTabs()) {
                         int foundTab = TabSearch.findNextAcrossTabs(
                             toTabSessions(tabs),
                             nextActiveTabIndex,
                             searchQueryInput.text(),
-                            SearchController.toSearchOptions(nextSearchUi)
+                            searchOptions
                         );
                         found = foundTab >= 0;
                         if (found) {
@@ -1857,8 +1880,11 @@ public class TerminalEditorApp {
                     } else {
                         found = nextEngine.findNext(
                             searchQueryInput.text(),
-                            SearchController.toSearchOptions(nextSearchUi)
+                            searchOptions
                         );
+                    }
+                    if (found) {
+                        nextEngine.ensureCursorVisible(contentRows);
                     }
                     statusMessage = found ? "Found next match" : "Not found";
                 }
@@ -1868,12 +1894,24 @@ public class TerminalEditorApp {
                     uiSessionState.searchFocus = SearchFocus.NEXT_BUTTON;
                 }
                 boolean found;
+                SearchOptions searchOptions = SearchController.toSearchOptions(nextSearchUi);
+                boolean focusedCurrent = focusCurrentMatchIfOffscreen(
+                    nextModel,
+                    nextState,
+                    nextEngine,
+                    contentRows,
+                    searchQueryInput.text(),
+                    searchOptions
+                );
+                if (focusedCurrent) {
+                    found = true;
+                } else
                 if (nextSearchUi.allTabs()) {
                     int foundTab = TabSearch.findNextAcrossTabs(
                         toTabSessions(tabs),
                         nextActiveTabIndex,
                         searchQueryInput.text(),
-                        SearchController.toSearchOptions(nextSearchUi)
+                        searchOptions
                     );
                     found = foundTab >= 0;
                     if (found) {
@@ -1886,8 +1924,11 @@ public class TerminalEditorApp {
                 } else {
                     found = nextEngine.findNext(
                         searchQueryInput.text(),
-                        SearchController.toSearchOptions(nextSearchUi)
+                        searchOptions
                     );
+                }
+                if (found) {
+                    nextEngine.ensureCursorVisible(contentRows);
                 }
                 statusMessage = found ? "Found next match" : "Not found";
             }
@@ -1916,6 +1957,9 @@ public class TerminalEditorApp {
                         searchQueryInput.text(),
                         SearchController.toSearchOptions(nextSearchUi)
                     );
+                }
+                if (found) {
+                    nextEngine.ensureCursorVisible(contentRows);
                 }
                 statusMessage = found ? "Found previous match" : "Not found";
             }
@@ -2876,6 +2920,60 @@ public class TerminalEditorApp {
         }
         String selected = model.getTextRange(a, b);
         return selected.isBlank() ? null : selected;
+    }
+
+    private boolean focusCurrentMatchIfOffscreen(
+        TextModel model,
+        EditorState state,
+        EditorEngine engine,
+        int contentRows,
+        String query,
+        SearchOptions options
+    ) {
+        if (query == null || query.isBlank()) {
+            return false;
+        }
+        String selected = selectionQueryForCtrlF(model, state);
+        if (selected == null || !searchSelectionMatchesQuery(selected, query, options)) {
+            return false;
+        }
+        int topBefore = state.getTopLine();
+        int wrapBefore = state.getTopWrapSegment();
+        int leftBefore = state.getLeftVisualColumn();
+        engine.ensureCursorVisible(contentRows);
+        return topBefore != state.getTopLine()
+            || wrapBefore != state.getTopWrapSegment()
+            || leftBefore != state.getLeftVisualColumn();
+    }
+
+    private boolean searchSelectionMatchesQuery(String selected, String query, SearchOptions options) {
+        SearchOptions normalized = options == null ? SearchOptions.DEFAULT : options;
+        String selectedValue = selected;
+        String queryValue = query;
+        if (normalized.caseInsensitive()) {
+            selectedValue = selectedValue.toLowerCase(Locale.ROOT);
+            queryValue = queryValue.toLowerCase(Locale.ROOT);
+        }
+        return switch (normalized.matchMode()) {
+            case SUBSTRING, WHOLE_WORD -> selectedValue.equals(queryValue);
+            case WILDCARD -> wildcardPattern(queryValue).matcher(selectedValue).matches();
+        };
+    }
+
+    private Pattern wildcardPattern(String wildcard) {
+        StringBuilder regex = new StringBuilder();
+        regex.append("(?s)");
+        for (int i = 0; i < wildcard.length(); i++) {
+            char ch = wildcard.charAt(i);
+            if (ch == '*') {
+                regex.append(".*");
+            } else if (ch == '?') {
+                regex.append('.');
+            } else {
+                regex.append(Pattern.quote(String.valueOf(ch)));
+            }
+        }
+        return Pattern.compile(regex.toString());
     }
 
     private final class RenderFrameController {

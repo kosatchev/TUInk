@@ -2,6 +2,7 @@ package dev.tuink.tui;
 
 import dev.tuink.render.Color;
 import dev.tuink.render.Style;
+import java.util.List;
 
 /**
  * Centralized style palette for TUI widgets and renderer defaults.
@@ -85,6 +86,13 @@ public final class UiStyles {
         Style renderGutterAddedHistorical,
         Style renderGutterModifiedHistorical,
         Style renderGutterDeletedHistorical,
+        Style renderSelection,
+        Style renderSearchMatch,
+        Style renderCurrentSearchMatch,
+        Style renderBracketMatch,
+        Style renderQuoteMatch,
+        Style renderUnmatchedBracket,
+        List<Style> renderRainbowBrackets,
         Style renderTopbar,
         Style renderStatus,
         Style renderInteractive,
@@ -127,6 +135,20 @@ public final class UiStyles {
             style(Color.BRIGHT_BLACK, Color.BLACK, false, false), // renderGutterAddedHistorical
             style(Color.BRIGHT_BLACK, Color.BLACK, false, false), // renderGutterModifiedHistorical
             style(Color.BRIGHT_BLACK, Color.BLACK, false, false), // renderGutterDeletedHistorical
+            new Style(Color.BLACK, Color.BRIGHT_CYAN, false, false), // renderSelection
+            new Style(Color.BLACK, Color.BRIGHT_YELLOW, false, false), // renderSearchMatch
+            new Style(Color.BLACK, Color.BRIGHT_CYAN, false, false), // renderCurrentSearchMatch
+            new Style(Color.BLACK, Color.BRIGHT_YELLOW, true, false), // renderBracketMatch
+            new Style(Color.BLACK, Color.BRIGHT_YELLOW, true, false), // renderQuoteMatch
+            new Style(Color.BRIGHT_WHITE, Color.RED, true, false), // renderUnmatchedBracket
+            List.of(
+                new Style(Color.BRIGHT_BLUE, Color.DEFAULT, true, false),
+                new Style(Color.BRIGHT_CYAN, Color.DEFAULT, true, false),
+                new Style(Color.BRIGHT_GREEN, Color.DEFAULT, true, false),
+                new Style(Color.BRIGHT_YELLOW, Color.DEFAULT, true, false),
+                new Style(Color.BRIGHT_MAGENTA, Color.DEFAULT, true, false),
+                new Style(Color.BRIGHT_RED, Color.DEFAULT, true, false)
+            ),                                                    // renderRainbowBrackets
             style(Color.BRIGHT_WHITE, Color.CYAN, true, false),              // renderTopbar
             style(Color.BLACK, Color.BRIGHT_WHITE),             // renderStatus
             style(Color.BLACK, Color.BRIGHT_YELLOW),            // renderInteractive
@@ -169,6 +191,20 @@ public final class UiStyles {
             style(Color.BRIGHT_BLACK, Color.BLACK, false, false), // renderGutterAddedHistorical
             style(Color.BRIGHT_BLACK, Color.BLACK, false, false), // renderGutterModifiedHistorical
             style(Color.BRIGHT_BLACK, Color.BLACK, false, false), // renderGutterDeletedHistorical
+            new Style(Color.BLACK, Color.BRIGHT_BLUE, false, false), // renderSelection
+            new Style(Color.BLACK, Color.BRIGHT_YELLOW, false, false), // renderSearchMatch
+            new Style(Color.BLACK, Color.BRIGHT_BLUE, false, false), // renderCurrentSearchMatch
+            new Style(Color.BLACK, Color.BRIGHT_YELLOW, true, false), // renderBracketMatch
+            new Style(Color.BLACK, Color.BRIGHT_YELLOW, true, false), // renderQuoteMatch
+            new Style(Color.BRIGHT_WHITE, Color.RED, true, false), // renderUnmatchedBracket
+            List.of(
+                new Style(Color.BRIGHT_BLUE, Color.DEFAULT, true, false),
+                new Style(Color.BRIGHT_CYAN, Color.DEFAULT, true, false),
+                new Style(Color.BRIGHT_GREEN, Color.DEFAULT, true, false),
+                new Style(Color.BRIGHT_YELLOW, Color.DEFAULT, true, false),
+                new Style(Color.BRIGHT_MAGENTA, Color.DEFAULT, true, false),
+                new Style(Color.BRIGHT_RED, Color.DEFAULT, true, false)
+            ),                                                    // renderRainbowBrackets
             style(Color.BRIGHT_WHITE, Color.BLUE, true, false),              // renderTopbar
             style(Color.BLACK, Color.BRIGHT_WHITE),             // renderStatus
             style(Color.BLACK, Color.BRIGHT_YELLOW),            // renderInteractive
@@ -211,6 +247,20 @@ public final class UiStyles {
             style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE, false, false), // renderGutterAddedHistorical
             style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE, false, false), // renderGutterModifiedHistorical
             style(Color.BRIGHT_BLACK, Color.BRIGHT_WHITE, false, false), // renderGutterDeletedHistorical
+            new Style(Color.BLACK, Color.BRIGHT_CYAN, false, false), // renderSelection
+            new Style(Color.BLACK, Color.BRIGHT_YELLOW, false, false), // renderSearchMatch
+            new Style(Color.BLACK, Color.BRIGHT_CYAN, false, false), // renderCurrentSearchMatch
+            new Style(Color.BLACK, Color.BRIGHT_YELLOW, true, false), // renderBracketMatch
+            new Style(Color.BLACK, Color.BRIGHT_YELLOW, true, false), // renderQuoteMatch
+            new Style(Color.BRIGHT_WHITE, Color.RED, true, false), // renderUnmatchedBracket
+            List.of(
+                new Style(Color.BRIGHT_BLUE, Color.DEFAULT, true, false),
+                new Style(Color.BRIGHT_CYAN, Color.DEFAULT, true, false),
+                new Style(Color.BRIGHT_GREEN, Color.DEFAULT, true, false),
+                new Style(Color.BRIGHT_YELLOW, Color.DEFAULT, true, false),
+                new Style(Color.BRIGHT_MAGENTA, Color.DEFAULT, true, false),
+                new Style(Color.BRIGHT_RED, Color.DEFAULT, true, false)
+            ),                                                       // renderRainbowBrackets
             style(Color.BLACK, Color.BRIGHT_WHITE, true, false),              // renderTopbar
             style(Color.BLACK, Color.BRIGHT_WHITE),              // renderStatus
             style(Color.BLACK, Color.BRIGHT_YELLOW),             // renderInteractive

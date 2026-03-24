@@ -60,7 +60,7 @@ public final class EditorView {
         this.tabWidth = tabWidth <= 2 ? 2 : 4;
     }
 
-    public void handleMousePress(
+    public boolean handleMousePress(
         KeyEvent.MouseEvent mouse,
         TextModel model,
         EditorState state,
@@ -68,10 +68,10 @@ public final class EditorView {
         int contentRows,
         EditorEngine engine
     ) {
-        handleMousePress(mouse, model, state, plan, contentRows, engine, contentTopRow);
+        return handleMousePress(mouse, model, state, plan, contentRows, engine, contentTopRow);
     }
 
-    public void handleMousePress(
+    public boolean handleMousePress(
         KeyEvent.MouseEvent mouse,
         TextModel model,
         EditorState state,
@@ -80,11 +80,14 @@ public final class EditorView {
         EditorEngine engine,
         int contentTopRow
     ) {
+        boolean selectedWordByDoubleClick = false;
         Position hit = mouseToTextPosition(mouse, model, state, plan, contentRows, contentTopRow);
         if (hit != null) {
             mouseSelecting = true;
             edgeAutoScrollDuringSelection = false;
-            if (!isDoubleClick(hit) || !engine.selectWordAt(hit)) {
+            if (isDoubleClick(hit) && engine.selectWordAt(hit)) {
+                selectedWordByDoubleClick = true;
+            } else {
                 state.setSelectionAnchor(hit);
                 state.setCursor(hit);
             }
@@ -95,6 +98,7 @@ public final class EditorView {
             lastClickAtNanos = 0L;
         }
         engine.ensureCursorVisible(contentRows);
+        return selectedWordByDoubleClick;
     }
 
     public void handleMouseDrag(

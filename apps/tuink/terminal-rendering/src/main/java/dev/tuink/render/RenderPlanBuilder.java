@@ -61,20 +61,13 @@ public class RenderPlanBuilder {
     private long unmatchedCacheRevision = Long.MIN_VALUE;
     private Map<Integer, List<Integer>> unmatchedBracketColumnsByLine = Map.of();
     private Map<Integer, List<StyleSpan>> rainbowBracketSpansByLine = Map.of();
-    private static final Style SELECTION_STYLE = new Style(Color.BLACK, Color.BRIGHT_WHITE, false, false);
-    private static final Style SEARCH_MATCH_STYLE = new Style(Color.BLACK, Color.BRIGHT_YELLOW, false, false);
-    private static final Style CURRENT_SEARCH_MATCH_STYLE = SELECTION_STYLE;
-    private static final Style[] RAINBOW_BRACKET_STYLES = {
-        new Style(Color.BRIGHT_BLUE, Color.DEFAULT, true, false),
-        new Style(Color.BRIGHT_CYAN, Color.DEFAULT, true, false),
-        new Style(Color.BRIGHT_GREEN, Color.DEFAULT, true, false),
-        new Style(Color.BRIGHT_YELLOW, Color.DEFAULT, true, false),
-        new Style(Color.BRIGHT_MAGENTA, Color.DEFAULT, true, false),
-        new Style(Color.BRIGHT_RED, Color.DEFAULT, true, false)
-    };
-    private static final Style BRACKET_MATCH_STYLE = new Style(Color.BRIGHT_YELLOW, Color.DEFAULT, true, false);
-    private static final Style QUOTE_MATCH_STYLE = new Style(Color.BRIGHT_YELLOW, Color.DEFAULT, true, false);
-    private static final Style UNMATCHED_BRACKET_STYLE = new Style(Color.BRIGHT_WHITE, Color.RED, true, false);
+    private Style selectionStyle = Style.DEFAULT;
+    private Style searchMatchStyle = Style.DEFAULT;
+    private Style currentSearchMatchStyle = Style.DEFAULT;
+    private Style bracketMatchStyle = Style.DEFAULT;
+    private Style quoteMatchStyle = Style.DEFAULT;
+    private Style unmatchedBracketStyle = Style.DEFAULT;
+    private List<Style> rainbowBracketStyles = List.of(Style.DEFAULT);
 
     public RenderPlanBuilder(LineHighlighter highlighter) {
         this.highlighter = highlighter;
@@ -110,6 +103,26 @@ public class RenderPlanBuilder {
         this.quoteMaskCacheRevision = Long.MIN_VALUE;
         this.unmatchedCacheRevision = Long.MIN_VALUE;
         this.bracketCacheRevision = Long.MIN_VALUE;
+    }
+
+    public void setDecorationStyles(
+        Style selectionStyle,
+        Style searchMatchStyle,
+        Style currentSearchMatchStyle,
+        Style bracketMatchStyle,
+        Style quoteMatchStyle,
+        Style unmatchedBracketStyle,
+        List<Style> rainbowBracketStyles
+    ) {
+        this.selectionStyle = selectionStyle == null ? Style.DEFAULT : selectionStyle;
+        this.searchMatchStyle = searchMatchStyle == null ? Style.DEFAULT : searchMatchStyle;
+        this.currentSearchMatchStyle = currentSearchMatchStyle == null ? Style.DEFAULT : currentSearchMatchStyle;
+        this.bracketMatchStyle = bracketMatchStyle == null ? Style.DEFAULT : bracketMatchStyle;
+        this.quoteMatchStyle = quoteMatchStyle == null ? Style.DEFAULT : quoteMatchStyle;
+        this.unmatchedBracketStyle = unmatchedBracketStyle == null ? Style.DEFAULT : unmatchedBracketStyle;
+        this.rainbowBracketStyles = rainbowBracketStyles == null || rainbowBracketStyles.isEmpty()
+            ? List.of(Style.DEFAULT)
+            : List.copyOf(rainbowBracketStyles);
     }
 
     public RenderPlan build(
@@ -312,7 +325,7 @@ public class RenderPlanBuilder {
                     }
                     spans.addAll(
                         clipSpans(
-                            searchMatchSpans(line, searchQuery, searchOptions, SEARCH_MATCH_STYLE),
+                            searchMatchSpans(line, searchQuery, searchOptions, searchMatchStyle),
                             lineLeftColumn,
                             visibleText.length()
                         )
@@ -360,7 +373,7 @@ public class RenderPlanBuilder {
                     lineSpans.addAll(unmatchedBracketSpansForLine(lineIndex, 0, line.length()));
                     lineSpans.addAll(bracketSpansForLine(bracketPair, lineIndex, 0, line.length()));
                 }
-                lineSpans.addAll(searchMatchSpans(line, searchQuery, searchOptions, SEARCH_MATCH_STYLE));
+                lineSpans.addAll(searchMatchSpans(line, searchQuery, searchOptions, searchMatchStyle));
                 StyleSpan selection = selectionSpanForLine(state, model, lineIndex, 0, line.length());
                 if (selection != null) {
                     lineSpans.add(selection);
@@ -924,7 +937,13 @@ public class RenderPlanBuilder {
             if (visEnd <= 0 || visStart >= visibleLength) {
                 continue;
             }
-            spans.add(new StyleSpan(Math.max(0, visStart), Math.min(visibleLength, visEnd), UNMATCHED_BRACKET_STYLE));
+            spans.add(
+                new StyleSpan(
+                    Math.max(0, visStart),
+                    Math.min(visibleLength, visEnd),
+                    unmatchedBracketStyle
+                )
+            );
         }
         return spans;
     }
@@ -992,7 +1011,7 @@ public class RenderPlanBuilder {
         if (visEnd <= visStart) {
             return null;
         }
-        return new StyleSpan(visStart, visEnd, SELECTION_STYLE);
+        return new StyleSpan(visStart, visEnd, selectionStyle);
     }
 
     private StyleSpan currentMatchSpanForLine(
@@ -1029,7 +1048,7 @@ public class RenderPlanBuilder {
         if (visEnd <= visStart) {
             return null;
         }
-        return new StyleSpan(visStart, visEnd, CURRENT_SEARCH_MATCH_STYLE);
+        return new StyleSpan(visStart, visEnd, currentSearchMatchStyle);
     }
 
     private static boolean selectionMatchesQuery(String selected, String query, SearchOptions options) {
@@ -1142,9 +1161,11 @@ public class RenderPlanBuilder {
         };
         Style style = switch (at.kind()) {
             case BRACKET -> match == null
-                ? UNMATCHED_BRACKET_STYLE
-                : BRACKET_MATCH_STYLE;
-            case QUOTE -> match == null ? UNMATCHED_BRACKET_STYLE : QUOTE_MATCH_STYLE;
+                ? unmatchedBracketStyle
+                : bracketMatchStyle;
+            case QUOTE -> match == null
+                ? unmatchedBracketStyle
+                : quoteMatchStyle;
         };
         BracketPair pair = new BracketPair(at.position(), match, style);
         bracketCacheRevision = revision;
@@ -1161,7 +1182,9 @@ public class RenderPlanBuilder {
         }
         Map<Integer, List<Integer>> unmatched = new HashMap<>();
         Map<Integer, List<StyleSpan>> rainbow = new HashMap<>();
-        ArrayDeque<OpenBracket> stack = new ArrayDeque<>();
+        ArrayDeque<OpenBracket> roundStack = new ArrayDeque<>();
+        ArrayDeque<OpenBracket> squareStack = new ArrayDeque<>();
+        ArrayDeque<OpenBracket> curlyStack = new ArrayDeque<>();
         int scanned = 0;
         boolean complete = true;
         outer:
@@ -1182,36 +1205,88 @@ public class RenderPlanBuilder {
                     break outer;
                 }
                 if (isOpeningBracket(ch)) {
-                    int depth = stack.size() + 1;
+                    int depth = totalOpenBracketCount(roundStack, squareStack, curlyStack) + 1;
                     addRainbowBracket(rainbow, line, col, depth);
-                    stack.push(new OpenBracket(new Position(line, col), ch, depth));
+                    stackForOpeningBracket(ch, roundStack, squareStack, curlyStack)
+                        .push(new OpenBracket(new Position(line, col), ch, depth));
                     continue;
                 }
-                if (!stack.isEmpty() && isMatchingPair(stack.peek().ch(), ch)) {
-                    OpenBracket open = stack.pop();
+                ArrayDeque<OpenBracket> typedStack = stackForClosingBracket(ch, roundStack, squareStack, curlyStack);
+                if (!typedStack.isEmpty()) {
+                    OpenBracket open = typedStack.pop();
                     addRainbowBracket(rainbow, line, col, open.depth());
                 } else {
-                    addRainbowBracket(rainbow, line, col, Math.max(1, stack.size() + 1));
+                    addRainbowBracket(
+                        rainbow,
+                        line,
+                        col,
+                        Math.max(1, totalOpenBracketCount(roundStack, squareStack, curlyStack) + 1)
+                    );
                     addUnmatchedBracket(unmatched, line, col);
                 }
             }
         }
         if (complete) {
-            while (!stack.isEmpty()) {
-                OpenBracket bracket = stack.pop();
-                addUnmatchedBracket(unmatched, bracket.position().line(), bracket.position().col());
-            }
+            markUnmatchedOpenBrackets(unmatched, roundStack);
+            markUnmatchedOpenBrackets(unmatched, squareStack);
+            markUnmatchedOpenBrackets(unmatched, curlyStack);
         }
         unmatchedBracketColumnsByLine = unmatched;
         rainbowBracketSpansByLine = rainbow;
         unmatchedCacheRevision = revision;
     }
 
+    private static int totalOpenBracketCount(
+        ArrayDeque<OpenBracket> roundStack,
+        ArrayDeque<OpenBracket> squareStack,
+        ArrayDeque<OpenBracket> curlyStack
+    ) {
+        return roundStack.size() + squareStack.size() + curlyStack.size();
+    }
+
+    private static ArrayDeque<OpenBracket> stackForOpeningBracket(
+        char ch,
+        ArrayDeque<OpenBracket> roundStack,
+        ArrayDeque<OpenBracket> squareStack,
+        ArrayDeque<OpenBracket> curlyStack
+    ) {
+        return switch (ch) {
+            case '(' -> roundStack;
+            case '[' -> squareStack;
+            case '{' -> curlyStack;
+            default -> roundStack;
+        };
+    }
+
+    private static ArrayDeque<OpenBracket> stackForClosingBracket(
+        char ch,
+        ArrayDeque<OpenBracket> roundStack,
+        ArrayDeque<OpenBracket> squareStack,
+        ArrayDeque<OpenBracket> curlyStack
+    ) {
+        return switch (ch) {
+            case ')' -> roundStack;
+            case ']' -> squareStack;
+            case '}' -> curlyStack;
+            default -> roundStack;
+        };
+    }
+
+    private static void markUnmatchedOpenBrackets(
+        Map<Integer, List<Integer>> unmatched,
+        ArrayDeque<OpenBracket> stack
+    ) {
+        while (!stack.isEmpty()) {
+            OpenBracket bracket = stack.pop();
+            addUnmatchedBracket(unmatched, bracket.position().line(), bracket.position().col());
+        }
+    }
+
     private static void addUnmatchedBracket(Map<Integer, List<Integer>> map, int line, int col) {
         map.computeIfAbsent(line, key -> new ArrayList<>(2)).add(col);
     }
 
-    private static void addRainbowBracket(Map<Integer, List<StyleSpan>> map, int line, int col, int depth) {
+    private void addRainbowBracket(Map<Integer, List<StyleSpan>> map, int line, int col, int depth) {
         map.computeIfAbsent(line, key -> new ArrayList<>(4))
             .add(new StyleSpan(col, col + 1, rainbowBracketStyle(depth)));
     }
@@ -1420,9 +1495,9 @@ public class RenderPlanBuilder {
             || (open == '{' && close == '}');
     }
 
-    private static Style rainbowBracketStyle(int depth) {
-        int idx = Math.floorMod(Math.max(depth, 1) - 1, RAINBOW_BRACKET_STYLES.length);
-        return RAINBOW_BRACKET_STYLES[idx];
+    private Style rainbowBracketStyle(int depth) {
+        int idx = Math.floorMod(Math.max(depth, 1) - 1, rainbowBracketStyles.size());
+        return rainbowBracketStyles.get(idx);
     }
 
     private static char closingBracketFor(char open) {

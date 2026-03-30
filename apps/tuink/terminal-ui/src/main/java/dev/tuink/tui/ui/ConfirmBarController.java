@@ -20,7 +20,7 @@ public final class ConfirmBarController {
     ) {
         ConfirmChoice current = normalizeSelected(selected, yesChoice, noChoice, includeCancel);
         if (key instanceof KeyEvent.CharInput charInput) {
-            char ch = Character.toLowerCase(charInput.ch());
+            char ch = Character.toLowerCase(charInput.asciiCharOrZero());
             if (ch == 'y') {
                 return InputResult.decide(yesChoice);
             }

@@ -31,16 +31,10 @@ public final class EditorViewportBehavior {
         int line = state.getTopLine() + (mouseRow - top);
         line = Math.max(0, Math.min(line, model.lineCount() - 1));
         int targetVisualCol = mouseCol < gutterWidth ? 0 : mouseCol - gutterWidth;
-        int lineLeftColumn = visualToTextColumn(
-            model.getLine(line),
-            0,
-            Math.max(0, state.getLeftVisualColumn()),
-            tabWidth
-        );
         int col = visualToTextColumn(
             model.getLine(line),
-            lineLeftColumn,
-            Math.max(0, targetVisualCol),
+            0,
+            Math.max(0, state.getLeftVisualColumn() + targetVisualCol),
             tabWidth
         );
         return model.clamp(new Position(line, Math.max(0, col)));
@@ -54,7 +48,11 @@ public final class EditorViewportBehavior {
         int oldTop = state.getTopLine();
         int relativeLine = state.getCursor().line() - oldTop;
         int targetLine = Math.max(0, Math.min(targetTopLine + relativeLine, model.lineCount() - 1));
-        int targetCol = Math.min(state.getCursor().col(), model.getLine(targetLine).length());
+        String targetText = model.getLine(targetLine);
+        int targetCol = DisplayText.floorBoundary(
+            targetText,
+            Math.min(state.getCursor().col(), targetText.length())
+        );
         state.setTopLine(Math.max(0, targetTopLine));
         state.setCursor(new Position(targetLine, targetCol));
     }
@@ -66,7 +64,11 @@ public final class EditorViewportBehavior {
 
         Position cursor = state.getCursor();
         int clampedLine = Math.max(0, Math.min(cursor.line(), lineCount - 1));
-        int clampedCol = Math.min(cursor.col(), model.getLine(clampedLine).length());
+        String clampedText = model.getLine(clampedLine);
+        int clampedCol = Math.min(cursor.col(), clampedText.length());
+        if (clampedLine != cursor.line()) {
+            clampedCol = DisplayText.floorBoundary(clampedText, clampedCol);
+        }
         if (clampedLine != cursor.line() || clampedCol != cursor.col()) {
             state.setCursor(new Position(clampedLine, clampedCol));
         }
@@ -87,9 +89,8 @@ public final class EditorViewportBehavior {
         int safeTabWidth = tabWidth <= 2 ? 2 : 4;
         int line = Math.max(0, Math.min(state.getCursor().line(), model.lineCount() - 1));
         String lineText = model.getLine(line);
-        int targetLeftColumn = visualToTextColumn(
+        int targetLeftColumn = ViewportMetrics.visualToTextColumnFloor(
             lineText,
-            0,
             Math.max(0, targetLeftVisualColumn),
             safeTabWidth
         );

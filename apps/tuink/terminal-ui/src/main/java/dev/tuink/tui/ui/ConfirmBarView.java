@@ -1,6 +1,7 @@
 package dev.tuink.tui.ui;
 
 import dev.tuink.tui.flow.ConfirmChoice;
+import dev.tuink.tui.render.CellText;
 
 public final class ConfirmBarView {
     private final String row;
@@ -108,10 +109,7 @@ public final class ConfirmBarView {
         if (cols <= 0) {
             return "";
         }
-        if (text.length() >= cols) {
-            return text.substring(0, cols);
-        }
-        return text + " ".repeat(cols - text.length());
+        return CellText.fit(text, cols);
     }
 
     private static String alignLeftRight(String left, String right, int cols, int rightMargin) {
@@ -121,7 +119,7 @@ public final class ConfirmBarView {
         String safeLeft = left == null ? "" : left;
         String safeRight = right == null ? "" : right;
         int margin = Math.max(0, rightMargin);
-        int rightBlock = safeRight.length() + margin;
+        int rightBlock = CellText.width(safeRight) + margin;
         if (safeRight.isEmpty()) {
             return clipPad(safeLeft, cols);
         }
@@ -129,9 +127,7 @@ public final class ConfirmBarView {
             return clipPad(safeRight, cols);
         }
         int leftWidth = cols - rightBlock;
-        String leftPart = safeLeft.length() > leftWidth
-            ? safeLeft.substring(0, leftWidth)
-            : safeLeft + " ".repeat(leftWidth - safeLeft.length());
+        String leftPart = CellText.fit(safeLeft, leftWidth);
         return leftPart + safeRight + " ".repeat(margin);
     }
 
@@ -139,7 +135,11 @@ public final class ConfirmBarView {
         if (row == null || cluster == null || cluster.isEmpty()) {
             return -1;
         }
-        return row.indexOf(cluster);
+        int charOffset = row.indexOf(cluster);
+        if (charOffset < 0) {
+            return -1;
+        }
+        return dev.tuink.core.DisplayText.visualColumnAt(row, charOffset, 4);
     }
 
     private static ConfirmChoice normalizeSelected(

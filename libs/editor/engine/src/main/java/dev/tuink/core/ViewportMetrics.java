@@ -10,66 +10,96 @@ public final class ViewportMetrics {
     private ViewportMetrics() {
     }
 
+    public static int gutterWidth(int lineCount) {
+        int digits = Math.max(1, String.valueOf(Math.max(1, lineCount)).length());
+        return digits + 2;
+    }
+
     public static int textToVisualColumn(String line, int startCol, int endCol, int tabWidth) {
-        int safeTabWidth = Math.max(1, tabWidth);
-        int start = Math.max(0, Math.min(startCol, line.length()));
-        int end = Math.max(start, Math.min(endCol, line.length()));
-        int visual = 0;
-        for (int i = start; i < end; i++) {
-            char ch = line.charAt(i);
-            int advance = ch == '\t' ? safeTabWidth - (visual % safeTabWidth) : 1;
-            visual += advance;
-        }
-        return visual;
+        String value = line == null ? "" : line;
+        int start = DisplayText.floorBoundary(value, startCol);
+        int end = DisplayText.floorBoundary(value, Math.max(start, endCol));
+        return Math.max(
+            0,
+            DisplayText.visualColumnAt(value, end, tabWidth)
+                - DisplayText.visualColumnAt(value, start, tabWidth)
+        );
+    }
+
+    public static int absoluteVisualColumn(String line, int textColumn, int tabWidth) {
+        return DisplayText.visualColumnAt(line, textColumn, tabWidth);
     }
 
     public static int visualToTextColumn(String line, int leftColumn, int targetVisualCol, int tabWidth) {
-        int safeTabWidth = Math.max(1, tabWidth);
-        int len = line.length();
-        int col = Math.max(0, Math.min(leftColumn, len));
-        int visual = 0;
+        String value = line == null ? "" : line;
+        int left = DisplayText.floorBoundary(value, leftColumn);
+        int leftVisual = DisplayText.visualColumnAt(value, left, tabWidth);
+        return DisplayText.offsetForVisualColumn(
+            value,
+            leftVisual + Math.max(0, targetVisualCol),
+            tabWidth,
+            DisplayText.Bias.NEAREST
+        );
+    }
 
-        while (col < len) {
-            char ch = line.charAt(col);
-            int advance = ch == '\t' ? safeTabWidth - (visual % safeTabWidth) : 1;
-            int nextVisual = visual + advance;
-            if (targetVisualCol < nextVisual) {
-                int leftDist = targetVisualCol - visual;
-                int rightDist = nextVisual - targetVisualCol;
-                return leftDist <= rightDist ? col : col + 1;
-            }
-            if (targetVisualCol == nextVisual) {
-                return col + 1;
-            }
-            visual = nextVisual;
-            col++;
-        }
-        return len;
+    public static int visualToTextColumnFloor(String line, int targetVisualCol, int tabWidth) {
+        return DisplayText.offsetForVisualColumn(
+            line,
+            Math.max(0, targetVisualCol),
+            tabWidth,
+            DisplayText.Bias.FLOOR
+        );
     }
 
     public static List<Integer> wrapStarts(String line, int maxVisualWidth, boolean wrapByWords, int tabWidth) {
-        if (line.isEmpty()) {
+        String value = line == null ? "" : line;
+        if (value.isEmpty() || maxVisualWidth <= 0) {
             return List.of(0);
         }
-        if (maxVisualWidth <= 0) {
-            return List.of(0);
-        }
+        int safeTabWidth = Math.max(1, tabWidth);
+        List<DisplayText.Grapheme> graphemes = DisplayText.graphemes(value);
         List<Integer> starts = new ArrayList<>();
-        int start = 0;
         starts.add(0);
-        while (start < line.length()) {
-            int end = wrapByWords
-                ? advanceByWordWrap(line, start, maxVisualWidth, tabWidth)
-                : advanceByVisualWidth(line, start, maxVisualWidth, tabWidth);
-            if (end <= start) {
-                end = Math.min(line.length(), start + 1);
+        int segmentStartIndex = 0;
+        int segmentStartVisual = 0;
+        int visual = 0;
+        int lastWhitespaceEndIndex = -1;
+        int index = 0;
+
+        while (index < graphemes.size()) {
+            DisplayText.Grapheme grapheme = graphemes.get(index);
+            int advance = grapheme.tab()
+                ? safeTabWidth - (visual % safeTabWidth)
+                : Math.max(1, grapheme.width());
+            if (visual + advance - segmentStartVisual > maxVisualWidth && index > segmentStartIndex) {
+                int breakIndex = wrapByWords && lastWhitespaceEndIndex > segmentStartIndex
+                    ? lastWhitespaceEndIndex
+                    : index;
+                int startOffset = graphemes.get(breakIndex).start();
+                starts.add(startOffset);
+                segmentStartIndex = breakIndex;
+                segmentStartVisual = DisplayText.visualColumnAt(value, startOffset, safeTabWidth);
+                visual = segmentStartVisual;
+                lastWhitespaceEndIndex = -1;
+                index = breakIndex;
+                continue;
             }
-            if (end < line.length()) {
-                starts.add(end);
+
+            visual += advance;
+            index++;
+            if (grapheme.whitespace()) {
+                lastWhitespaceEndIndex = index;
             }
-            start = end;
+            if (visual - segmentStartVisual > maxVisualWidth && index == segmentStartIndex + 1) {
+                if (index < graphemes.size()) {
+                    starts.add(graphemes.get(index).start());
+                }
+                segmentStartIndex = index;
+                segmentStartVisual = visual;
+                lastWhitespaceEndIndex = -1;
+            }
         }
-        return starts;
+        return List.copyOf(starts);
     }
 
     public static int wrappedRowsBefore(
@@ -107,47 +137,5 @@ public final class ViewportMetrics {
             remaining -= segments;
         }
         return Math.max(0, model.lineCount() - 1);
-    }
-
-    private static int advanceByVisualWidth(String line, int start, int maxVisualWidth, int tabWidth) {
-        int safeTabWidth = Math.max(1, tabWidth);
-        int visual = 0;
-        int i = Math.max(0, Math.min(start, line.length()));
-        while (i < line.length()) {
-            char ch = line.charAt(i);
-            int adv = ch == '\t' ? safeTabWidth - (visual % safeTabWidth) : 1;
-            if (visual + adv > maxVisualWidth) {
-                break;
-            }
-            visual += adv;
-            i++;
-        }
-        return i;
-    }
-
-    private static int advanceByWordWrap(String line, int start, int maxVisualWidth, int tabWidth) {
-        int safeTabWidth = Math.max(1, tabWidth);
-        int visual = 0;
-        int i = Math.max(0, Math.min(start, line.length()));
-        int lastBreakAfterWhitespace = -1;
-        while (i < line.length()) {
-            char ch = line.charAt(i);
-            int adv = ch == '\t' ? safeTabWidth - (visual % safeTabWidth) : 1;
-            if (visual + adv > maxVisualWidth) {
-                break;
-            }
-            visual += adv;
-            i++;
-            if (Character.isWhitespace(ch)) {
-                lastBreakAfterWhitespace = i;
-            }
-        }
-        if (i >= line.length()) {
-            return i;
-        }
-        if (lastBreakAfterWhitespace > start) {
-            return lastBreakAfterWhitespace;
-        }
-        return i;
     }
 }

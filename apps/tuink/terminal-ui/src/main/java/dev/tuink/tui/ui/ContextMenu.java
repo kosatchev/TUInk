@@ -1,8 +1,10 @@
 package dev.tuink.tui.ui;
 
+import dev.tuink.core.DisplayText;
 import dev.tuink.render.Style;
 import dev.tuink.tui.UiStyles;
 import dev.tuink.tui.render.CellBuffer;
+import dev.tuink.tui.render.CellText;
 
 /**
  * Reusable dropdown menu element with frame, item highlighting and hit-testing.
@@ -18,7 +20,7 @@ final class ContextMenu {
     static int widthForItems(int cols, MenuItem[] items) {
         int width = MIN_WIDTH;
         for (MenuItem item : items) {
-            width = Math.max(width, item.text().length() + 4);
+            width = Math.max(width, CellText.width(item.text()) + 4);
         }
         return Math.min(cols, width);
     }
@@ -102,9 +104,7 @@ final class ContextMenu {
     }
 
     private static void drawLine(CellBuffer buffer, int row, int startCol, String text, Style style, int cols) {
-        for (int i = 0; i < text.length() && startCol + i < cols; i++) {
-            buffer.set(row, startCol + i, String.valueOf(text.charAt(i)), style);
-        }
+        CellText.draw(buffer, row, startCol, text, style, cols);
     }
 
     private static void drawLineWithMnemonic(
@@ -119,9 +119,17 @@ final class ContextMenu {
     ) {
         int mnemonicInContent = mnemonicInLabel >= 0 ? mnemonicInLabel + 1 : -1;
         Style mnemonicStyle = new Style(style.fg(), style.bg(), style.bold(), true);
-        for (int i = 0; i < text.length() && startCol + i < cols; i++) {
-            Style charStyle = selectable && i == mnemonicInContent ? mnemonicStyle : style;
-            buffer.set(row, startCol + i, String.valueOf(text.charAt(i)), charStyle);
+        int outCol = startCol;
+        for (DisplayText.Grapheme grapheme : DisplayText.graphemes(text)) {
+            int advance = Math.max(1, grapheme.width());
+            if (outCol + advance > cols) {
+                break;
+            }
+            boolean mnemonic = selectable
+                && mnemonicInContent >= grapheme.start()
+                && mnemonicInContent < grapheme.end();
+            CellText.draw(buffer, row, outCol, grapheme.text(), mnemonic ? mnemonicStyle : style, cols);
+            outCol += advance;
         }
     }
 
@@ -133,10 +141,7 @@ final class ContextMenu {
     }
 
     private static String padRight(String text, int width) {
-        if (text.length() >= width) {
-            return text.substring(0, width);
-        }
-        return text + " ".repeat(width - text.length());
+        return CellText.fit(text, width);
     }
 
     record Hit(boolean insidePopup, boolean insideItemContent, int itemIndex) {

@@ -13,7 +13,7 @@ final class TopMenuInputController {
 
         KeyEvent.Action mappedAction;
         if (key instanceof KeyEvent.CharInput charInput) {
-            mappedAction = topMenu.handleChar(charInput.ch());
+            mappedAction = topMenu.handleChar(charInput.asciiCharOrZero());
         } else {
             KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
             mappedAction = topMenu.handleKey(action);

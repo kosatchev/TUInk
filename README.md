@@ -1,6 +1,6 @@
 # TUInk
 
-Current version: `0.9.2`
+Current version: `0.10.0`
 
 Minimal Java terminal text editor with clean multi-module architecture:
 
@@ -41,13 +41,15 @@ These files are useful for:
 ## Build
 
 ```bash
-./gradlew build
+./gradlew clean test build
 ```
 
 ## Run
 
+Run the canonical `app` module from the repository root:
+
 ```bash
-./gradlew :app:run
+./gradlew --console=plain :app:run
 ```
 
 Run from an interactive TTY terminal. Non-interactive consoles may fall back to a dumb terminal and fail.
@@ -55,14 +57,43 @@ Run from an interactive TTY terminal. Non-interactive consoles may fall back to 
 Run with file and flags:
 
 ```bash
-./gradlew :app:run -PappArgs="file.txt"
-./gradlew :app:run -PappArgs="--no-mouse file.txt"
-./gradlew :app:run -PappArgs="--no-alt-screen file.txt"
-./gradlew :app:run -PappArgs="--no-color file.txt"
-./gradlew :app:run -PappArgs="--theme=light file.txt"
-./gradlew :app:run -PappArgs="--read file.txt"
-./gradlew :app:run -PappArgs="--profile --profile-file=profile-jvm.log file.txt"
-./gradlew :app:run -PappArgs="--help"
+./gradlew --console=plain :app:run -PappArgs="file.txt"
+./gradlew --console=plain :app:run -PappArgs="--no-mouse file.txt"
+./gradlew --console=plain :app:run -PappArgs="--no-alt-screen file.txt"
+./gradlew --console=plain :app:run -PappArgs="--no-color file.txt"
+./gradlew --console=plain :app:run -PappArgs="--theme=light file.txt"
+./gradlew --console=plain :app:run -PappArgs="--read file.txt"
+./gradlew --console=plain :app:run -PappArgs="--profile --profile-file=profile-jvm.log file.txt"
+./gradlew --console=plain :app:run -PappArgs="--help"
+```
+
+### JVM distribution
+
+Build a self-contained JVM application directory or ZIP:
+
+```bash
+./gradlew :app:installDist
+./gradlew :app:distZip
+```
+
+Run the installed JVM layout:
+
+```bash
+./apps/tuink/launcher/build/install/app/bin/app file.txt
+```
+
+The ZIP is written to `apps/tuink/launcher/build/distributions/` and requires Java 17 on the
+target machine.
+
+### Legacy `jpackage/tte` warning
+
+`build/jpackage/tte` is an obsolete `com.tte` 0.1.0 package and is not produced
+by the current build. Do not launch `build/jpackage/tte/bin/tte`; it can contain
+stale classes even after the source code has been updated. Remove it and use
+`:app:run`, `:app:installDist`, or the native build:
+
+```bash
+rm -rf build/jpackage/tte
 ```
 
 ## Profiling (render loop)
@@ -101,11 +132,41 @@ Metrics:
 - `search`: search match counting for search UI.
 - `total`: full frame time.
 
+## Gradle Cache Cleanup
+
+If Gradle state becomes stale, you can clean caches.
+
+Project-local cleanup:
+
+```bash
+./gradlew --stop
+rm -rf .gradle build
+```
+
+Full cleanup (global Gradle cache too):
+
+```bash
+./gradlew --stop
+rm -rf .gradle build
+rm -rf ~/.gradle/caches ~/.gradle/daemon ~/.gradle/native ~/.gradle/wrapper
+```
+
 ## Native Build
+
+Native compilation requires GraalVM with `native-image` and a system C
+toolchain. Build and run the default glibc binary:
 
 ```bash
 ./gradlew :app:nativeCompile
+./apps/tuink/launcher/build/native/nativeCompile/tuink file.txt
+```
+
+Other targets:
+
+```bash
 ./gradlew :app:nativeCompile -Ptarget=musl
+./apps/tuink/launcher/build/native/nativeMuslCompile/tuink-musl file.txt
+
 ./gradlew :app:nativeCompile -Ptarget=all
 ```
 
@@ -192,12 +253,13 @@ cd apps/tuink/launcher/build/native/nativeMuslCompile
 
 ### Install from release tar.gz
 
-Build archives:
+Build release archives. These are the preferred artifacts for GitHub/GitLab
+releases:
 
 ```bash
-./gradlew :app:nativeDistTarGz
-./gradlew :app:nativeDistTarGz -Ptarget=musl
-./gradlew :app:nativeDistTarGz -Ptarget=all
+./gradlew clean test :app:nativeDistTarGz
+./gradlew clean test :app:nativeDistTarGz -Ptarget=musl
+./gradlew clean test :app:nativeDistTarGz -Ptarget=all
 ```
 
 Then:

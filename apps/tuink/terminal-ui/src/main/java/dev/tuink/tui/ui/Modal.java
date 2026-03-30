@@ -1,6 +1,7 @@
 package dev.tuink.tui.ui;
 
 import dev.tuink.tui.render.CellBuffer;
+import dev.tuink.tui.render.CellText;
 import dev.tuink.render.Style;
 
 /**
@@ -88,8 +89,6 @@ public final class Modal {
     }
 
     private static void drawLine(CellBuffer buffer, int cols, int row, int startCol, String text, Style style) {
-        for (int i = 0; i < text.length() && startCol + i < cols; i++) {
-            buffer.set(row, startCol + i, String.valueOf(text.charAt(i)), style);
-        }
+        CellText.draw(buffer, row, startCol, text, style, cols);
     }
 }

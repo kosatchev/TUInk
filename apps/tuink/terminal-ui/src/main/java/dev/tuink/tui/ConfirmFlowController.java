@@ -14,7 +14,7 @@ final class ConfirmFlowController {
         boolean nextRunning = running;
         boolean nextQuitConfirmMode = quitConfirmMode;
         if (key instanceof KeyEvent.CharInput charInput) {
-            char ch = charInput.ch();
+            char ch = charInput.asciiCharOrZero();
             if (ch == 'y' || ch == 'Y') {
                 nextRunning = false;
             } else if (ch == 'n' || ch == 'N') {
@@ -53,7 +53,7 @@ final class ConfirmFlowController {
         boolean activeTabChanged = false;
         int activeTabIndex = -1;
         if (key instanceof KeyEvent.CharInput charInput) {
-            char ch = charInput.ch();
+            char ch = charInput.asciiCharOrZero();
             if (ch == 'y' || ch == 'Y') {
                 activeTabIndex = closePendingTab.getAsInt();
                 activeTabChanged = true;

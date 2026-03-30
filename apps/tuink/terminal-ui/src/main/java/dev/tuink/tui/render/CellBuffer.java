@@ -32,13 +32,27 @@ public class CellBuffer {
     }
 
     public void fill(Cell cell) {
+        if (cell == null) {
+            throw new IllegalArgumentException("cell must not be null");
+        }
         for (int r = 0; r < rows; r++) {
             long sig1 = 0L;
             long sig2 = 0L;
             for (int c = 0; c < cols; c++) {
-                cells[r][c] = cell;
-                sig1 ^= mix(cell, c, HASH_SEED_1);
-                sig2 ^= mix(cell, c, HASH_SEED_2);
+                Cell placed = cell.continuation() ? new Cell(" ", cell.style()) : cell;
+                if (placed.width() == 2 && c + 1 >= cols) {
+                    placed = new Cell("�", placed.style());
+                }
+                cells[r][c] = placed;
+                sig1 ^= mix(placed, c, HASH_SEED_1);
+                sig2 ^= mix(placed, c, HASH_SEED_2);
+                if (placed.width() == 2) {
+                    Cell continuation = Cell.continuation(placed.style());
+                    c++;
+                    cells[r][c] = continuation;
+                    sig1 ^= mix(continuation, c, HASH_SEED_1);
+                    sig2 ^= mix(continuation, c, HASH_SEED_2);
+                }
             }
             rowSignature1[r] = sig1;
             rowSignature2[r] = sig2;
@@ -49,12 +63,68 @@ public class CellBuffer {
         if (row < 0 || row >= rows || col < 0 || col >= cols) {
             return;
         }
+        Cell next = new Cell(grapheme, style);
+        if (next.width() == 2 && col + 1 >= cols) {
+            next = new Cell("�", style);
+        }
+        clearFootprint(row, col);
+        if (next.width() == 2) {
+            clearFootprint(row, col + 1);
+        }
+        replace(row, col, next);
+        if (next.width() == 2) {
+            replace(row, col + 1, Cell.continuation(style));
+        }
+    }
+
+    public boolean rowHasWideCells(int row) {
+        for (int col = 0; col < cols; col++) {
+            Cell cell = cells[row][col];
+            if (cell.width() == 2 || cell.continuation()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public boolean regionHasWideCells(int top, int bottom, int fromCol, int toCol) {
+        int safeTop = Math.max(0, top);
+        int safeBottom = Math.min(rows - 1, bottom);
+        int safeFrom = Math.max(0, fromCol);
+        int safeTo = Math.min(cols - 1, toCol);
+        for (int row = safeTop; row <= safeBottom; row++) {
+            for (int col = safeFrom; col <= safeTo; col++) {
+                Cell cell = cells[row][col];
+                if (cell.width() == 2 || cell.continuation()) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private void clearFootprint(int row, int col) {
+        if (col < 0 || col >= cols) {
+            return;
+        }
+        Cell current = cells[row][col];
+        if (current.continuation() && col > 0) {
+            Cell lead = cells[row][col - 1];
+            if (lead.width() == 2) {
+                replace(row, col - 1, Cell.EMPTY);
+            }
+        } else if (current.width() == 2 && col + 1 < cols) {
+            replace(row, col + 1, Cell.EMPTY);
+        }
+        replace(row, col, Cell.EMPTY);
+    }
+
+    private void replace(int row, int col, Cell next) {
         Cell previous = cells[row][col];
         if (previous != null) {
             rowSignature1[row] ^= mix(previous, col, HASH_SEED_1);
             rowSignature2[row] ^= mix(previous, col, HASH_SEED_2);
         }
-        Cell next = new Cell(grapheme, style);
         cells[row][col] = next;
         rowSignature1[row] ^= mix(next, col, HASH_SEED_1);
         rowSignature2[row] ^= mix(next, col, HASH_SEED_2);

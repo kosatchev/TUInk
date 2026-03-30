@@ -6,6 +6,7 @@ import dev.tuink.core.TabInsertMode;
 import dev.tuink.tui.KeyEvent;
 import dev.tuink.tui.render.Cell;
 import dev.tuink.tui.render.CellBuffer;
+import dev.tuink.tui.render.CellText;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -735,23 +736,20 @@ public final class MenuBar {
             String dirtyMarker = dirty ? " *" : "";
             String left = fileMenu + " " + editMenu + " " + viewMenu + " " + tabMenu + " "
                 + settingsMenu + " " + helpMenu + " | ";
-            fileNameStartCol = left.length();
+            fileNameStartCol = CellText.width(left);
             String base = left + file + dirtyMarker;
             String right = readingMode ? " READ " : "";
             if (right.isEmpty()) {
-                if (base.length() > cols) {
-                    return base.substring(0, cols);
-                }
-                return base + " ".repeat(cols - base.length());
+                return CellText.fit(base, cols);
             }
 
-            int rightLen = right.length();
+            int rightLen = CellText.width(right);
             if (cols <= rightLen) {
-                return right.substring(rightLen - cols);
+                return CellText.alignRight(right, cols);
             }
 
             int leftSpace = cols - rightLen;
-            String leftPart = base.length() > leftSpace ? base.substring(0, leftSpace) : base + " ".repeat(leftSpace - base.length());
+            String leftPart = CellText.fit(base, leftSpace);
             return leftPart + right;
         }
 
@@ -1096,9 +1094,7 @@ public final class MenuBar {
         }
 
         private static void drawLine(CellBuffer buffer, int row, int startCol, String text, Style style, int cols) {
-            for (int i = 0; i < text.length() && startCol + i < cols; i++) {
-                buffer.set(row, startCol + i, String.valueOf(text.charAt(i)), style);
-            }
+            CellText.draw(buffer, row, startCol, text, style, cols);
         }
     }
 

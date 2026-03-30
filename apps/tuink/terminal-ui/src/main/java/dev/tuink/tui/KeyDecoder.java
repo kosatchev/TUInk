@@ -7,15 +7,17 @@ import java.io.IOException;
  * Minimal key decoder for raw terminal input.
  */
 public class KeyDecoder {
+    private static final int REPLACEMENT_CHARACTER = 0xFFFD;
     private final NonBlockingReader reader;
     private boolean lastWasCarriageReturn;
+    private int pendingCodeUnit = -1;
 
     public KeyDecoder(NonBlockingReader reader) {
         this.reader = reader;
     }
 
     public KeyEvent readKey(long timeoutMs) throws IOException {
-        int ch = reader.read(timeoutMs);
+        int ch = readCodeUnit(timeoutMs);
         if (ch == NonBlockingReader.READ_EXPIRED || ch < 0) {
             return null;
         }
@@ -58,7 +60,7 @@ public class KeyDecoder {
             default -> {
                 lastWasCarriageReturn = false;
                 if (isPrintable(ch)) {
-                    yield new KeyEvent.CharInput((char) ch);
+                    yield decodePrintable(ch);
                 }
                 yield new KeyEvent.ActionEvent(KeyEvent.Action.UNKNOWN);
             }
@@ -66,7 +68,38 @@ public class KeyDecoder {
     }
 
     private boolean isPrintable(int ch) {
-        return ch >= 0 && !Character.isISOControl(ch);
+        return ch >= 0 && Character.isValidCodePoint(ch) && !Character.isISOControl(ch);
+    }
+
+    private int readCodeUnit(long timeoutMs) throws IOException {
+        if (pendingCodeUnit >= 0) {
+            int pending = pendingCodeUnit;
+            pendingCodeUnit = -1;
+            return pending;
+        }
+        return reader.read(timeoutMs);
+    }
+
+    private KeyEvent decodePrintable(int ch) throws IOException {
+        if (ch > Character.MAX_VALUE) {
+            return new KeyEvent.CharInput(ch);
+        }
+        char first = (char) ch;
+        if (Character.isLowSurrogate(first)) {
+            return new KeyEvent.CharInput(REPLACEMENT_CHARACTER);
+        }
+        if (!Character.isHighSurrogate(first)) {
+            return new KeyEvent.CharInput(ch);
+        }
+
+        int second = reader.read(5);
+        if (second >= 0 && second != NonBlockingReader.READ_EXPIRED) {
+            if (second <= Character.MAX_VALUE && Character.isLowSurrogate((char) second)) {
+                return new KeyEvent.CharInput(Character.toCodePoint(first, (char) second));
+            }
+            pendingCodeUnit = second;
+        }
+        return new KeyEvent.CharInput(REPLACEMENT_CHARACTER);
     }
 
     private KeyEvent decodeEscapeSequence() throws IOException {
@@ -95,6 +128,7 @@ public class KeyDecoder {
             if (alt != null) {
                 return alt;
             }
+            pendingCodeUnit = second;
             return new KeyEvent.ActionEvent(KeyEvent.Action.ESCAPE);
         }
         StringBuilder seq = new StringBuilder();

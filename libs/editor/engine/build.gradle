@@ -28,6 +28,7 @@ tasks.register('unsignedJgitJar', Jar) {
 dependencies {
     jgitBinary "org.eclipse.jgit:org.eclipse.jgit:${jgitVersion}"
     implementation(files(tasks.named('unsignedJgitJar')))
+    implementation 'org.jline:jline:3.30.6'
     implementation 'com.googlecode.javaewah:JavaEWAH:1.2.3'
     implementation 'org.slf4j:slf4j-api:1.7.36'
     implementation 'commons-codec:commons-codec:1.17.0'

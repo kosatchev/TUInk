@@ -202,7 +202,8 @@ public class EditorEngine {
         preferredVisualColumn = -1;
         Position p = state.getCursor();
         if (p.col() > 0) {
-            moveCursor(new Position(p.line(), p.col() - 1), selecting, p);
+            String line = model.getLine(p.line());
+            moveCursor(new Position(p.line(), DisplayText.previousBoundary(line, p.col())), selecting, p);
         } else if (p.line() > 0) {
             int prevLen = model.getLine(p.line() - 1).length();
             moveCursor(new Position(p.line() - 1, prevLen), selecting, p);
@@ -218,7 +219,8 @@ public class EditorEngine {
         Position p = state.getCursor();
         int len = model.getLine(p.line()).length();
         if (p.col() < len) {
-            moveCursor(new Position(p.line(), p.col() + 1), selecting, p);
+            String line = model.getLine(p.line());
+            moveCursor(new Position(p.line(), DisplayText.nextBoundary(line, p.col())), selecting, p);
         } else if (p.line() < model.lineCount() - 1) {
             moveCursor(new Position(p.line() + 1, 0), selecting, p);
         }
@@ -238,18 +240,24 @@ public class EditorEngine {
             col = model.getLine(line).length();
         }
         String text = model.getLine(line);
-        int target = col;
-        while (target > 0 && Character.isWhitespace(text.charAt(target - 1))) {
-            target--;
+        int target = DisplayText.floorBoundary(text, col);
+        while (target > 0) {
+            int previousBoundary = DisplayText.previousBoundary(text, target);
+            if (!isWhitespaceGrapheme(text, previousBoundary, target)) {
+                break;
+            }
+            target = previousBoundary;
         }
         if (target > 0) {
-            boolean word = isWordChar(text.charAt(target - 1));
+            int previousBoundary = DisplayText.previousBoundary(text, target);
+            boolean word = isWordGrapheme(text, previousBoundary, target);
             while (target > 0) {
-                char ch = text.charAt(target - 1);
-                if (Character.isWhitespace(ch) || isWordChar(ch) != word) {
+                previousBoundary = DisplayText.previousBoundary(text, target);
+                if (isWhitespaceGrapheme(text, previousBoundary, target)
+                    || isWordGrapheme(text, previousBoundary, target) != word) {
                     break;
                 }
-                target--;
+                target = previousBoundary;
             }
         }
         moveCursor(new Position(line, target), false, previous);
@@ -271,18 +279,24 @@ public class EditorEngine {
             col = 0;
             text = model.getLine(line);
         }
-        int target = col;
-        while (target < text.length() && Character.isWhitespace(text.charAt(target))) {
-            target++;
+        int target = DisplayText.ceilBoundary(text, col);
+        while (target < text.length()) {
+            int nextBoundary = DisplayText.nextBoundary(text, target);
+            if (!isWhitespaceGrapheme(text, target, nextBoundary)) {
+                break;
+            }
+            target = nextBoundary;
         }
         if (target < text.length()) {
-            boolean word = isWordChar(text.charAt(target));
+            int nextBoundary = DisplayText.nextBoundary(text, target);
+            boolean word = isWordGrapheme(text, target, nextBoundary);
             while (target < text.length()) {
-                char ch = text.charAt(target);
-                if (Character.isWhitespace(ch) || isWordChar(ch) != word) {
+                nextBoundary = DisplayText.nextBoundary(text, target);
+                if (isWhitespaceGrapheme(text, target, nextBoundary)
+                    || isWordGrapheme(text, target, nextBoundary) != word) {
                     break;
                 }
-                target++;
+                target = nextBoundary;
             }
         }
         moveCursor(new Position(line, target), false, previous);
@@ -298,15 +312,25 @@ public class EditorEngine {
             state.setCursor(p);
             return false;
         }
-        int pivot = Math.min(Math.max(0, p.col()), text.length() - 1);
-        int group = charGroup(text.charAt(pivot));
+        int requestedColumn = Math.min(Math.max(0, p.col()), text.length() - 1);
+        int pivot = DisplayText.floorBoundary(text, requestedColumn);
+        int pivotEnd = DisplayText.nextBoundary(text, pivot);
+        int group = graphemeGroup(text, pivot, pivotEnd);
         int start = pivot;
-        while (start > 0 && charGroup(text.charAt(start - 1)) == group) {
-            start--;
+        while (start > 0) {
+            int previous = DisplayText.previousBoundary(text, start);
+            if (graphemeGroup(text, previous, start) != group) {
+                break;
+            }
+            start = previous;
         }
-        int end = pivot + 1;
-        while (end < text.length() && charGroup(text.charAt(end)) == group) {
-            end++;
+        int end = pivotEnd;
+        while (end < text.length()) {
+            int next = DisplayText.nextBoundary(text, end);
+            if (graphemeGroup(text, end, next) != group) {
+                break;
+            }
+            end = next;
         }
         Position anchor = new Position(p.line(), start);
         Position cursor = new Position(p.line(), end);
@@ -401,7 +425,8 @@ public class EditorEngine {
         }
         Position p = state.getCursor();
         int targetLine = Math.max(0, p.line() - step);
-        int col = Math.min(p.col(), model.getLine(targetLine).length());
+        String targetText = model.getLine(targetLine);
+        int col = DisplayText.floorBoundary(targetText, Math.min(p.col(), targetText.length()));
         breakCoalescing();
         state.clearSelection();
         state.setCursor(new Position(targetLine, col));
@@ -422,7 +447,8 @@ public class EditorEngine {
         }
         Position p = state.getCursor();
         int targetLine = Math.min(model.lineCount() - 1, p.line() + step);
-        int col = Math.min(p.col(), model.getLine(targetLine).length());
+        String targetText = model.getLine(targetLine);
+        int col = DisplayText.floorBoundary(targetText, Math.min(p.col(), targetText.length()));
         breakCoalescing();
         state.clearSelection();
         state.setCursor(new Position(targetLine, col));
@@ -458,6 +484,33 @@ public class EditorEngine {
             if (outdent != null) {
                 ops.add(outdent);
             }
+        }
+        state.clearSelection();
+        commitOperationEdit(hadSelection ? EditKind.NONE : EditKind.INSERT_CHAR, before, ops);
+    }
+
+    /** Inserts one decoded Unicode input event without splitting supplementary characters. */
+    public void insertInput(String text) {
+        if (text == null || text.isEmpty()) {
+            return;
+        }
+        if (text.length() == 1 && !Character.isSurrogate(text.charAt(0))) {
+            insertChar(text.charAt(0));
+            return;
+        }
+
+        preferredVisualColumn = -1;
+        boolean hadSelection = state.hasSelection();
+        ViewState before = captureViewState();
+        List<EditOp.ReplaceRange> ops = new ArrayList<>();
+        SelectionRange selection = currentSelection();
+        Position rangeStart = selection == null ? model.clamp(state.getCursor()) : selection.start();
+        Position rangeEnd = selection == null ? rangeStart : selection.end();
+        Position afterInsert = applyReplaceAndTrack(ops, rangeStart, rangeEnd, text);
+        state.setCursor(afterInsert);
+        EditOp.ReplaceRange outdent = maybeAutoOutdentKeywordLineOp();
+        if (outdent != null) {
+            ops.add(outdent);
         }
         state.clearSelection();
         commitOperationEdit(hadSelection ? EditKind.NONE : EditKind.INSERT_CHAR, before, ops);
@@ -765,16 +818,77 @@ public class EditorEngine {
     }
 
     public void ensureCursorVisible(int contentRows) {
-        ensureCursorVisible(contentRows, -1);
+        ensureCursorVisible(contentRows, -1, false, false);
     }
 
     public void ensureCursorVisible(int contentRows, int contentCols) {
+        ensureCursorVisible(contentRows, contentCols, false, false);
+    }
+
+    public void ensureCursorVisible(
+        int contentRows,
+        int contentCols,
+        boolean wrapLines,
+        boolean wrapByWords
+    ) {
         if (contentRows <= 0) {
             return;
         }
 
         Position p = model.clamp(state.getCursor());
-        state.setCursor(p);
+        String cursorLine = model.getLine(p.line());
+        p = new Position(p.line(), DisplayText.floorBoundary(cursorLine, p.col()));
+
+        if (wrapLines) {
+            int width = Math.max(1, contentCols);
+            List<Integer> starts = model.wrapStarts(p.line(), width, wrapByWords, tabWidth);
+            int cursorSegment = 0;
+            for (int i = 1; i < starts.size(); i++) {
+                if (p.col() < starts.get(i)) {
+                    break;
+                }
+                cursorSegment = i;
+            }
+            int cursorWrappedOffset = model.wrappedRowsBefore(p.line(), width, wrapByWords, tabWidth)
+                + cursorSegment;
+            EditorViewportBehavior.WrapTop normalizedTop = EditorViewportBehavior.normalizeWrapTop(
+                model,
+                state.getTopLine(),
+                state.getTopWrapSegment(),
+                width,
+                wrapByWords,
+                tabWidth
+            );
+            int topWrappedOffset = EditorViewportBehavior.wrappedOffsetForWrapTop(
+                model,
+                normalizedTop,
+                width,
+                wrapByWords,
+                tabWidth
+            );
+            int totalWrappedRows = model.totalWrappedRows(width, wrapByWords, tabWidth);
+            int maxTop = Math.max(0, totalWrappedRows - contentRows);
+            int targetTop = topWrappedOffset;
+            if (cursorWrappedOffset < topWrappedOffset) {
+                targetTop = cursorWrappedOffset;
+            } else if (cursorWrappedOffset >= topWrappedOffset + contentRows) {
+                targetTop = cursorWrappedOffset - contentRows + 1;
+            }
+            targetTop = Math.max(0, Math.min(targetTop, maxTop));
+            EditorViewportBehavior.applyWrapTop(
+                state,
+                EditorViewportBehavior.wrapTopFromWrappedOffset(
+                    model,
+                    targetTop,
+                    width,
+                    wrapByWords,
+                    tabWidth
+                )
+            );
+            state.setLeftColumn(0);
+            state.setLeftVisualColumn(0);
+            return;
+        }
 
         if (p.line() < state.getTopLine()) {
             state.setTopLine(p.line());
@@ -788,8 +902,8 @@ public class EditorEngine {
         String line = model.getLine(p.line());
         int safeMargin = Math.max(0, Math.min(H_SCROLL_MARGIN, Math.max(0, contentCols / 3)));
         int cursorVisual = visualColumn(line, 0, p.col());
-        int longestVisualWidth = model.maxVisualLineWidth(tabWidth);
-        int maxLeftVisual = Math.max(0, longestVisualWidth - Math.max(1, contentCols));
+        int requiredVisualWidth = Math.max(model.maxVisualLineWidth(tabWidth), cursorVisual + 1);
+        int maxLeftVisual = Math.max(0, requiredVisualWidth - Math.max(1, contentCols));
         int leftVisual = Math.min(state.getLeftVisualColumn(), maxLeftVisual);
         state.setLeftVisualColumn(leftVisual);
         state.setLeftColumn(columnForVisualColumn(line, leftVisual));
@@ -813,35 +927,11 @@ public class EditorEngine {
     }
 
     private int visualColumn(String line, int startCol, int endCol) {
-        int start = Math.max(0, Math.min(startCol, line.length()));
-        int end = Math.max(start, Math.min(endCol, line.length()));
-        int visual = 0;
-        for (int i = start; i < end; i++) {
-            char ch = line.charAt(i);
-            if (ch == '\t') {
-                visual += tabWidth - (visual % tabWidth);
-            } else {
-                visual++;
-            }
-        }
-        return visual;
+        return ViewportMetrics.textToVisualColumn(line, startCol, endCol, tabWidth);
     }
 
     private int columnForVisualColumn(String line, int targetVisual) {
-        if (targetVisual <= 0) {
-            return 0;
-        }
-        int visual = 0;
-        for (int i = 0; i < line.length(); i++) {
-            int advance = line.charAt(i) == '\t'
-                ? tabWidth - (visual % tabWidth)
-                : 1;
-            if (visual + advance > targetVisual) {
-                return i;
-            }
-            visual += advance;
-        }
-        return line.length();
+        return ViewportMetrics.visualToTextColumn(line, 0, targetVisual, tabWidth);
     }
 
     private static int firstNonWhitespaceColumn(String line) {
@@ -2350,11 +2440,33 @@ public class EditorEngine {
         return Character.isLetterOrDigit(ch) || ch == '_';
     }
 
-    private static int charGroup(char ch) {
-        if (Character.isWhitespace(ch)) {
+    private static boolean isWhitespaceGrapheme(String text, int start, int end) {
+        if (start >= end) {
+            return false;
+        }
+        for (int i = start; i < end;) {
+            int codePoint = text.codePointAt(i);
+            if (!Character.isWhitespace(codePoint)) {
+                return false;
+            }
+            i += Character.charCount(codePoint);
+        }
+        return true;
+    }
+
+    private static boolean isWordGrapheme(String text, int start, int end) {
+        if (start >= end) {
+            return false;
+        }
+        int codePoint = text.codePointAt(start);
+        return Character.isLetterOrDigit(codePoint) || codePoint == '_';
+    }
+
+    private static int graphemeGroup(String text, int start, int end) {
+        if (isWhitespaceGrapheme(text, start, end)) {
             return 0;
         }
-        return isWordChar(ch) ? 1 : 2;
+        return isWordGrapheme(text, start, end) ? 1 : 2;
     }
 
     private record SearchMatch(Position start, int length) {

@@ -1,6 +1,7 @@
 package dev.tuink.tui.ui;
 
 import dev.tuink.tui.render.CellBuffer;
+import dev.tuink.tui.render.CellText;
 import dev.tuink.render.ScrollInteraction;
 import dev.tuink.render.Style;
 import dev.tuink.tui.render.HorizontalScrollbar;
@@ -760,7 +761,7 @@ public final class TreeView {
     private static int computeMaxLabelLength(List<Item> items) {
         int max = 0;
         for (Item item : items) {
-            max = Math.max(max, item.label().length() + 1);
+            max = Math.max(max, CellText.width(item.label()) + 1);
         }
         return max;
     }
@@ -817,36 +818,25 @@ public final class TreeView {
     }
 
     private static void drawLine(CellBuffer buffer, int row, int startCol, String text, Style style, int cols) {
-        for (int i = 0; i < text.length() && startCol + i < cols; i++) {
-            buffer.set(row, startCol + i, String.valueOf(text.charAt(i)), style);
-        }
+        CellText.draw(buffer, row, startCol, text, style, cols);
     }
 
     private static String padRight(String text, int width) {
-        if (text.length() >= width) {
-            return text.substring(0, width);
-        }
-        return text + " ".repeat(width - text.length());
+        return CellText.fit(text, width);
     }
 
     private static String alignRight(String text, int width) {
         if (width <= 0) {
             return "";
         }
-        String safe = text == null ? "" : text;
-        if (safe.length() >= width) {
-            return safe.substring(Math.max(0, safe.length() - width));
-        }
-        return " ".repeat(width - safe.length()) + safe;
+        return CellText.alignRight(text, width);
     }
 
     private static String clipHorizontal(String text, int offset, int width) {
         if (text.isEmpty() || width <= 0) {
             return "";
         }
-        int start = Math.max(0, Math.min(offset, text.length()));
-        int end = Math.min(text.length(), start + width);
-        return text.substring(start, end);
+        return CellText.clip(text, offset, width);
     }
 
     private record MetaColumns(int labelWidth, int sizeWidth, int dateWidth) {

@@ -178,13 +178,13 @@ public final class OpenFileDialogController {
                         result.activeTabIndex()
                     );
                 }
-                TreeViewInteractionController.handleListKey(
-                    openFileTree,
-                    TreeViewInteractionController.ListKeyAction.ENTER,
-                    listRows,
-                    visibleTextWidth
+                ActivationResult activation = activateListItem(openFileTree, activeTabIndex, activateSelection);
+                yield new HandleResult(
+                    true,
+                    activation.keepDialogOpen(),
+                    focus,
+                    activation.activeTabIndex()
                 );
-                yield new HandleResult(true, openFileMode, focus, activeTabIndex);
             }
             case ARROW_RIGHT -> {
                 Focus nextFocus = focus;
@@ -312,20 +312,15 @@ public final class OpenFileDialogController {
                     tree.toggleSelectedAndRefresh();
                     tree.resetClickTracking();
                 } else if (press.doubleClick()) {
-                    TreeView.Item selected = press.item();
-                    if (selected != null && (selected.parentLink() || selected.directory())) {
-                        tree.toggleSelectedAndRefresh();
-                    } else {
-                        ActivationResult activation = activateSelection.apply(selected);
-                        tree.resetClickTracking();
-                        return new MousePressResult(
-                            true,
-                            activation.keepDialogOpen(),
-                            nextFocus,
-                            press.dragAxis(),
-                            activation.activeTabIndex()
-                        );
-                    }
+                    ActivationResult activation = activateListItem(tree, activeTabIndex, activateSelection);
+                    tree.resetClickTracking();
+                    return new MousePressResult(
+                        true,
+                        activation.keepDialogOpen(),
+                        nextFocus,
+                        press.dragAxis(),
+                        activation.activeTabIndex()
+                    );
                 }
             }
             return new MousePressResult(true, openFileMode, nextFocus, press.dragAxis(), activeTabIndex);
@@ -372,5 +367,18 @@ public final class OpenFileDialogController {
             dragAxis
         );
         return true;
+    }
+
+    private static ActivationResult activateListItem(
+        TreeView tree,
+        int activeTabIndex,
+        Function<TreeView.Item, ActivationResult> activateSelection
+    ) {
+        TreeView.Item selected = tree.selectedItem();
+        if (selected != null && (selected.parentLink() || selected.directory())) {
+            tree.setRoot(selected.path());
+            return new ActivationResult(true, activeTabIndex);
+        }
+        return activateSelection.apply(selected);
     }
 }

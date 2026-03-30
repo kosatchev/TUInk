@@ -1,7 +1,9 @@
 package dev.tuink.tui.ui;
 
+import dev.tuink.core.DisplayText;
 import dev.tuink.render.Style;
 import dev.tuink.tui.render.CellBuffer;
+import dev.tuink.tui.render.CellText;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -75,19 +77,13 @@ public final class TabBar {
                 ? (colorEnabled ? activeStyle : activeMonoStyle)
                 : (colorEnabled ? baseStyle : baseMonoStyle);
             String text = formatTab(tab);
-            if (col + text.length() > viewportEnd) {
+            int textWidth = CellText.width(text);
+            if (col + textWidth > viewportEnd) {
                 break;
             }
             int tabStart = col;
-            int closeCol = -1;
-            for (int j = 0; j < text.length() && col < viewportEnd; j++) {
-                char ch = text.charAt(j);
-                buffer.set(1, col, String.valueOf(ch), style);
-                if (ch == 'x') {
-                    closeCol = col;
-                }
-                col++;
-            }
+            int closeCol = tabStart + Math.max(0, textWidth - 2);
+            col = CellText.draw(buffer, 1, col, text, style, viewportEnd);
             int tabEnd = col - 1;
             if (tabEnd >= tabStart) {
                 lastHits.add(new TabHit(i, tabStart, tabEnd, closeCol));
@@ -145,7 +141,7 @@ public final class TabBar {
     private int totalWidth(List<TabItem> tabs) {
         int total = 0;
         for (TabItem tab : tabs) {
-            total += formatTab(tab).length() + 1;
+            total += CellText.width(formatTab(tab)) + 1;
         }
         return Math.max(0, total - 1);
     }
@@ -154,7 +150,7 @@ public final class TabBar {
         int col = 0;
         int lastVisible = firstVisibleIndex - 1;
         for (int i = firstVisibleIndex; i < tabs.size(); i++) {
-            int width = formatTab(tabs.get(i)).length() + (col == 0 ? 0 : 1);
+            int width = CellText.width(formatTab(tabs.get(i))) + (col == 0 ? 0 : 1);
             if (col + width > viewportWidth) {
                 break;
             }

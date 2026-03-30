@@ -68,6 +68,9 @@ public final class AnsiDiff {
                 moveTo(out, r, 0);
                 for (int c = 0; c < current.cols(); c++) {
                     Cell cell = current.get(r, c);
+                    if (cell.continuation()) {
+                        continue;
+                    }
                     String styleAnsi = ansiFor(cell.style(), colorEnabled);
                     if (!styleAnsi.equals(activeStyleAnsi)) {
                         out.append(styleAnsi);
@@ -92,7 +95,9 @@ public final class AnsiDiff {
             && horizontalDeltaColumns != 0
             && scrollRegionTop >= 0
             && regionBottom >= regionTop
-            && safeTextEnd >= safeTextStart) {
+            && safeTextEnd >= safeTextStart
+            && !previous.regionHasWideCells(regionTop, regionBottom, safeTextStart, safeTextEnd)
+            && !current.regionHasWideCells(regionTop, regionBottom, safeTextStart, safeTextEnd)) {
             activeStyleAnsi = applyHorizontalScroll(
                 out,
                 current,
@@ -203,6 +208,19 @@ public final class AnsiDiff {
                 && previous.rowSignature2(r) == current.rowSignature2(r)) {
                 continue;
             }
+            if (previous.rowHasWideCells(r) || current.rowHasWideCells(r)) {
+                activeStyleAnsi = drawRowRange(
+                    current,
+                    colorEnabled,
+                    r,
+                    0,
+                    current.cols() - 1,
+                    out,
+                    activeStyleAnsi
+                );
+                wroteAnyCell = true;
+                continue;
+            }
             int firstDiff = firstDifferentColumn(previous, current, r, 0, current.cols() - 1);
             if (firstDiff < 0) {
                 continue;
@@ -228,7 +246,9 @@ public final class AnsiDiff {
                         out.append(styleAnsi);
                         activeStyleAnsi = styleAnsi;
                     }
-                    out.append(next.grapheme());
+                    if (!next.continuation()) {
+                        out.append(next.grapheme());
+                    }
                     wroteAnyCell = true;
                     c++;
                 }
@@ -265,6 +285,9 @@ public final class AnsiDiff {
             if (shift >= width) {
                 for (int c = textStartCol; c <= textEndCol; c++) {
                     Cell cell = current.get(row, c);
+                    if (cell.continuation()) {
+                        continue;
+                    }
                     String styleAnsi = ansiFor(cell.style(), colorEnabled);
                     if (!styleAnsi.equals(activeStyleAnsi)) {
                         out.append(styleAnsi);
@@ -280,6 +303,9 @@ public final class AnsiDiff {
                 moveTo(out, row, enteringStart);
                 for (int c = enteringStart; c <= textEndCol; c++) {
                     Cell cell = current.get(row, c);
+                    if (cell.continuation()) {
+                        continue;
+                    }
                     String styleAnsi = ansiFor(cell.style(), colorEnabled);
                     if (!styleAnsi.equals(activeStyleAnsi)) {
                         out.append(styleAnsi);
@@ -293,6 +319,9 @@ public final class AnsiDiff {
                 int enteringEnd = textStartCol + shift - 1;
                 for (int c = textStartCol; c <= enteringEnd; c++) {
                     Cell cell = current.get(row, c);
+                    if (cell.continuation()) {
+                        continue;
+                    }
                     String styleAnsi = ansiFor(cell.style(), colorEnabled);
                     if (!styleAnsi.equals(activeStyleAnsi)) {
                         out.append(styleAnsi);
@@ -435,6 +464,9 @@ public final class AnsiDiff {
             moveTo(out, row, 0);
             for (int c = 0; c < current.cols(); c++) {
                 Cell cell = current.get(row, c);
+                if (cell.continuation()) {
+                    continue;
+                }
                 String styleAnsi = ansiFor(cell.style(), colorEnabled);
                 if (!styleAnsi.equals(activeStyleAnsi)) {
                     out.append(styleAnsi);
@@ -555,6 +587,18 @@ public final class AnsiDiff {
         String activeStyleAnsi
     ) {
         currentActiveStyleAnsi = activeStyleAnsi;
+        if (previous.rowHasWideCells(previousRow) || current.rowHasWideCells(currentRow)) {
+            currentActiveStyleAnsi = drawRowRange(
+                current,
+                colorEnabled,
+                currentRow,
+                0,
+                current.cols() - 1,
+                out,
+                currentActiveStyleAnsi
+            );
+            return true;
+        }
         int firstDiff = firstDifferentColumn(previous, current, previousRow, currentRow, fromCol, toCol);
         if (firstDiff < 0) {
             return false;
@@ -581,7 +625,9 @@ public final class AnsiDiff {
                     out.append(styleAnsi);
                     currentActiveStyleAnsi = styleAnsi;
                 }
-                out.append(next.grapheme());
+                if (!next.continuation()) {
+                    out.append(next.grapheme());
+                }
                 wroteAny = true;
                 c++;
             }
@@ -605,6 +651,9 @@ public final class AnsiDiff {
         moveTo(out, row, fromCol);
         for (int c = fromCol; c <= toCol; c++) {
             Cell cell = current.get(row, c);
+            if (cell.continuation()) {
+                continue;
+            }
             String styleAnsi = ansiFor(cell.style(), colorEnabled);
             if (!styleAnsi.equals(currentActiveStyleAnsi)) {
                 out.append(styleAnsi);

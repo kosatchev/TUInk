@@ -64,10 +64,12 @@ public class TextModel {
         if (position.col() > 0) {
             String line = buffer.getLine(position.line());
             int col = Math.min(position.col(), line.length());
-            String updated = line.substring(0, col - 1) + line.substring(col);
+            int end = DisplayText.ceilBoundary(line, col);
+            int previous = DisplayText.previousBoundary(line, end);
+            String updated = line.substring(0, previous) + line.substring(end);
             buffer.setLine(position.line(), updated);
             invalidateVisualWidthCache();
-            return new Position(position.line(), col - 1);
+            return new Position(position.line(), previous);
         }
 
         if (position.line() == 0) {
@@ -87,10 +89,12 @@ public class TextModel {
         int col = Math.min(position.col(), line.length());
 
         if (col < line.length()) {
-            String updated = line.substring(0, col) + line.substring(col + 1);
+            int start = DisplayText.floorBoundary(line, col);
+            int next = DisplayText.nextBoundary(line, start);
+            String updated = line.substring(0, start) + line.substring(next);
             buffer.setLine(position.line(), updated);
             invalidateVisualWidthCache();
-            return new Position(position.line(), col);
+            return new Position(position.line(), start);
         }
 
         if (position.line() >= buffer.lineCount() - 1) {
@@ -270,17 +274,7 @@ public class TextModel {
         }
         int max = 0;
         for (int i = 0; i < lineCount(); i++) {
-            String line = getLine(i);
-            int visual = 0;
-            for (int j = 0; j < line.length(); j++) {
-                char ch = line.charAt(j);
-                if (ch == '\t') {
-                    visual += safeTabWidth - (visual % safeTabWidth);
-                } else {
-                    visual++;
-                }
-            }
-            max = Math.max(max, visual);
+            max = Math.max(max, DisplayText.visualWidth(getLine(i), safeTabWidth));
         }
         cachedVisualWidthTabWidth = safeTabWidth;
         cachedMaxVisualLineWidth = max;

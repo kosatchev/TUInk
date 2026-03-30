@@ -49,10 +49,21 @@ public final class ViewportController {
         }
     }
 
-    public void ensureCursorVisible(EditorEngine engine, int contentRows, int contentCols) {
+    public void ensureCursorVisible(
+        EditorEngine engine,
+        int contentRows,
+        int contentCols,
+        boolean wrapLines,
+        boolean wrapByWords
+    ) {
         if (manualVerticalPan) {
             return;
         }
-        engine.ensureCursorVisible(contentRows, manualHorizontalPan ? -1 : contentCols);
+        engine.ensureCursorVisible(
+            contentRows,
+            wrapLines ? contentCols : (manualHorizontalPan ? -1 : contentCols),
+            wrapLines,
+            wrapByWords
+        );
     }
 }

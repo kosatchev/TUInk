@@ -1,5 +1,7 @@
 package dev.tuink.tui.ui;
 
+import dev.tuink.core.DisplayText;
+
 /**
  * Reusable single-line text input buffer for TUI prompts.
  */
@@ -8,32 +10,47 @@ public final class TextField {
     private int cursor;
 
     public void insert(char ch) {
-        value.insert(cursor, ch);
-        cursor++;
+        insert(String.valueOf(ch));
+    }
+
+    public void insert(String text) {
+        if (text == null || text.isEmpty()) {
+            return;
+        }
+        cursor = DisplayText.floorBoundary(value.toString(), cursor);
+        value.insert(cursor, text);
+        cursor += text.length();
     }
 
     public void backspace() {
         if (cursor > 0) {
-            value.deleteCharAt(cursor - 1);
-            cursor--;
+            String text = value.toString();
+            int end = DisplayText.ceilBoundary(text, cursor);
+            int start = DisplayText.previousBoundary(text, end);
+            value.delete(start, end);
+            cursor = start;
         }
     }
 
     public void deleteForward() {
         if (cursor < value.length()) {
-            value.deleteCharAt(cursor);
+            String text = value.toString();
+            int start = DisplayText.floorBoundary(text, cursor);
+            int end = DisplayText.nextBoundary(text, start);
+            value.delete(start, end);
+            cursor = start;
         }
     }
 
     public void moveLeft() {
         if (cursor > 0) {
-            cursor--;
+            cursor = DisplayText.previousBoundary(value.toString(), cursor);
         }
     }
 
     public void moveRight() {
         if (cursor < value.length()) {
-            cursor++;
+            cursor = DisplayText.nextBoundary(value.toString(), cursor);
         }
     }
 
@@ -68,6 +85,14 @@ public final class TextField {
 
     public int cursor() {
         return cursor;
+    }
+
+    public int cursorCellColumn() {
+        return DisplayText.visualColumnAt(value.toString(), cursor, 4);
+    }
+
+    public int displayWidth() {
+        return DisplayText.visualWidth(value.toString(), 4);
     }
 
     public String text() {

@@ -94,7 +94,22 @@ public sealed interface KeyEvent permits KeyEvent.ActionEvent, KeyEvent.CharInpu
     record ActionEvent(Action action) implements KeyEvent {
     }
 
-    record CharInput(char ch) implements KeyEvent {
+    record CharInput(int codePoint) implements KeyEvent {
+        public CharInput {
+            if (!Character.isValidCodePoint(codePoint)
+                || codePoint >= Character.MIN_SURROGATE && codePoint <= Character.MAX_SURROGATE
+                || Character.isISOControl(codePoint)) {
+                throw new IllegalArgumentException("CharInput requires one printable Unicode scalar value");
+            }
+        }
+
+        public String text() {
+            return new String(Character.toChars(codePoint));
+        }
+
+        public char asciiCharOrZero() {
+            return codePoint <= 0x7F ? (char) codePoint : '\0';
+        }
     }
 
     record MouseEvent(int row, int col, MouseKind kind, MouseButton button) implements KeyEvent {

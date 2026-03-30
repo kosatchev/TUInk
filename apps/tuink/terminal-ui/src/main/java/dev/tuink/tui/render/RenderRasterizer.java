@@ -2,6 +2,7 @@ package dev.tuink.tui.render;
 
 import dev.tuink.core.GutterDiffFlag;
 import dev.tuink.core.GutterDiffMarker;
+import dev.tuink.core.DisplayText;
 import dev.tuink.render.LineVisual;
 import dev.tuink.render.RenderPlan;
 import dev.tuink.render.Style;
@@ -74,8 +75,7 @@ public class RenderRasterizer {
                 buffer,
                 screenRow,
                 plan.gutterWidth(),
-                line.text(),
-                line.spans(),
+                line,
                 contentCols,
                 markLeadingWhitespace
             );
@@ -177,85 +177,69 @@ public class RenderRasterizer {
         CellBuffer buffer,
         int row,
         int startCol,
-        String text,
-        List<StyleSpan> spans,
+        LineVisual line,
         int cols,
         boolean markLeadingWhitespace
     ) {
-        Style[] charStyles = new Style[text.length()];
-        String[] graphemes = new String[text.length()];
-        for (int i = 0; i < charStyles.length; i++) {
-            charStyles[i] = Style.DEFAULT;
-            graphemes[i] = String.valueOf(text.charAt(i));
+        String text = line.text();
+        List<StyleSpan> spans = line.spans();
+        List<DisplayText.Grapheme> graphemes = DisplayText.graphemes(text);
+        int leadingEnd = 0;
+        while (leadingEnd < graphemes.size() && graphemes.get(leadingEnd).whitespace()) {
+            leadingEnd++;
         }
+        int trailingStart = graphemes.size();
+        while (trailingStart > 0 && graphemes.get(trailingStart - 1).whitespace()) {
+            trailingStart--;
+        }
+
+        int absoluteVisual = line.sourceVisualColumn();
+        int sourceVisual = line.sourceVisualColumn();
+        for (int index = 0; index < graphemes.size(); index++) {
+            DisplayText.Grapheme grapheme = graphemes.get(index);
+            Style style = styleForGrapheme(spans, grapheme.start(), grapheme.end());
+            boolean mark = visibleWhitespace
+                && (index >= trailingStart || (markLeadingWhitespace && index < leadingEnd))
+                && (" ".equals(grapheme.text()) || grapheme.tab());
+            if (mark) {
+                style = markerStyle(style);
+            }
+            int advance = grapheme.tab()
+                ? tabWidth - (absoluteVisual % tabWidth)
+                : Math.max(1, grapheme.width());
+            int screenCol = startCol
+                + (absoluteVisual - sourceVisual)
+                - line.leadingClippedCells();
+
+            if (grapheme.tab()) {
+                for (int cell = 0; cell < advance; cell++) {
+                    int target = screenCol + cell;
+                    if (target < startCol || target >= cols) {
+                        continue;
+                    }
+                    String shown = mark && cell == 0 && screenCol >= startCol ? "»" : " ";
+                    buffer.set(row, target, shown, style);
+                }
+            } else if (screenCol >= startCol && screenCol + advance <= cols) {
+                buffer.set(
+                    row,
+                    screenCol,
+                    mark && " ".equals(grapheme.text()) ? "·" : DisplayText.sanitizeGrapheme(grapheme.text()),
+                    style
+                );
+            }
+            absoluteVisual += advance;
+        }
+    }
+
+    private Style styleForGrapheme(List<StyleSpan> spans, int start, int end) {
+        Style style = Style.DEFAULT;
         for (StyleSpan span : spans) {
-            int from = Math.max(0, span.start());
-            int to = Math.min(text.length(), span.end());
-            for (int i = from; i < to; i++) {
-                charStyles[i] = span.style();
+            if (span.end() > start && span.start() < end) {
+                style = span.style();
             }
         }
-
-        if (visibleWhitespace && markLeadingWhitespace) {
-            // Render leading indentation markers: space -> '·', tab -> '»'
-            for (int i = 0; i < text.length(); i++) {
-                char ch = text.charAt(i);
-                if (ch == ' ') {
-                    graphemes[i] = "·";
-                    charStyles[i] = markerStyle(charStyles[i]);
-                    continue;
-                }
-                if (ch == '\t') {
-                    graphemes[i] = "»";
-                    charStyles[i] = markerStyle(charStyles[i]);
-                    continue;
-                }
-                break;
-            }
-        }
-
-        if (visibleWhitespace) {
-            // Render trailing whitespace markers so hanging spaces are visible.
-            for (int i = text.length() - 1; i >= 0; i--) {
-                char ch = text.charAt(i);
-                if (ch == ' ') {
-                    graphemes[i] = "·";
-                    charStyles[i] = markerStyle(charStyles[i]);
-                    continue;
-                }
-                if (ch == '\t') {
-                    graphemes[i] = "»";
-                    charStyles[i] = markerStyle(charStyles[i]);
-                    continue;
-                }
-                break;
-            }
-        }
-
-        int outCol = startCol;
-        for (int i = 0; i < text.length() && outCol < cols; i++) {
-            char ch = text.charAt(i);
-            if (ch == '\t') {
-                int relativeCol = Math.max(0, outCol - startCol);
-                int tabAdvance = tabWidth - (relativeCol % tabWidth);
-                if (visibleWhitespace && "»".equals(graphemes[i])) {
-                    buffer.set(row, outCol, "»", charStyles[i]);
-                    outCol++;
-                    for (int j = 1; j < tabAdvance && outCol < cols; j++) {
-                        buffer.set(row, outCol, " ", charStyles[i]);
-                        outCol++;
-                    }
-                } else {
-                    for (int j = 0; j < tabAdvance && outCol < cols; j++) {
-                        buffer.set(row, outCol, " ", charStyles[i]);
-                        outCol++;
-                    }
-                }
-                continue;
-            }
-            buffer.set(row, outCol, graphemes[i], charStyles[i]);
-            outCol++;
-        }
+        return style;
     }
 
     private void drawGutter(CellBuffer buffer, int row, LineVisual line, Style baseStyle, int cols) {
@@ -296,16 +280,34 @@ public class RenderRasterizer {
     }
 
     private void drawText(CellBuffer buffer, int row, int col, String text, Style style, int cols) {
-        for (int i = 0; i < text.length() && col + i < cols; i++) {
-            buffer.set(row, col + i, String.valueOf(text.charAt(i)), style);
+        int outCol = col;
+        for (DisplayText.Grapheme grapheme : DisplayText.graphemes(text)) {
+            String safe = DisplayText.sanitizeGrapheme(grapheme.text());
+            int width = Math.max(1, DisplayText.graphemeWidth(safe));
+            if (outCol + width > cols) {
+                break;
+            }
+            buffer.set(row, outCol, safe, style);
+            outCol += width;
         }
     }
 
     private String truncateOrPad(String text, int width) {
-        if (text.length() >= width) {
-            return text.substring(0, width);
+        if (width <= 0) {
+            return "";
         }
-        return text + " ".repeat(width - text.length());
+        StringBuilder out = new StringBuilder();
+        int used = 0;
+        for (DisplayText.Grapheme grapheme : DisplayText.graphemes(text == null ? "" : text)) {
+            String safe = DisplayText.sanitizeGrapheme(grapheme.text());
+            int cellWidth = Math.max(1, DisplayText.graphemeWidth(safe));
+            if (used + cellWidth > width) {
+                break;
+            }
+            out.append(safe);
+            used += cellWidth;
+        }
+        return out.append(" ".repeat(Math.max(0, width - used))).toString();
     }
 
     private String[] splitLines(String text) {

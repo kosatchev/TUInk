@@ -3,6 +3,7 @@ package dev.tuink.tui;
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.EditorViewportBehavior;
+import dev.tuink.core.DisplayText;
 import dev.tuink.core.Position;
 import dev.tuink.core.SearchOptions;
 import dev.tuink.core.TabSession;
@@ -18,7 +19,9 @@ import dev.tuink.tui.flow.SaveAsSuggestionStore;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.flow.UiModalState;
 import dev.tuink.tui.render.CellBuffer;
+import dev.tuink.tui.render.CellText;
 import dev.tuink.render.LineHighlighter;
+import dev.tuink.render.EditorLayout;
 import dev.tuink.render.RenderPlan;
 import dev.tuink.render.RenderPlanBuilder;
 import dev.tuink.render.Style;
@@ -230,7 +233,7 @@ public class TerminalEditorApp {
             if ("dumb".equalsIgnoreCase(terminal.getType())) {
                 throw new IOException(
                     "Interactive terminal is not available (dumb terminal). " +
-                    "Run in a real TTY, for example: ./gradlew --console=plain :tui:run --args=\"file.txt\""
+                    "Run in a real TTY, for example: ./gradlew --console=plain :app:run -PappArgs=\"file.txt\""
                 );
             }
             PrintWriter writer = terminal.writer();
@@ -367,7 +370,7 @@ public class TerminalEditorApp {
                             inlinePromptBar = InlinePromptBar.of(
                                 buildSaveAsPrompt(saveAsInput),
                                 styles.promptAlert(),
-                                SAVE_AS_PROMPT.length() + saveAsInput.cursor() + 1
+                                DisplayText.visualWidth(SAVE_AS_PROMPT, 4) + saveAsInput.cursorCellColumn() + 1
                             );
                         } else if (saveOverwriteConfirmMode) {
                             confirmBar = ConfirmBarView.build(
@@ -409,27 +412,49 @@ public class TerminalEditorApp {
                         showTabBar = uiSessionState.showTabBarSetting && tabs.size() > 1;
                         int overlayRows = inlinePromptBar.height();
                         contentTopRow = showTabBar ? 2 : 1;
-                        int baseContentRows = Math.max(0, rows - overlayRows - contentTopRow - 1);
-                        int gutterWidth = Math.max(1, String.valueOf(Math.max(model.lineCount(), 1)).length()) + 1;
-                        int maxLineLength = model.maxVisualLineWidth(uiSessionState.tabWidthSetting);
-                        boolean canShowVScrollbar = cols >= 8;
-                        contentRows = baseContentRows;
-                        contentCols = Math.max(0, cols - gutterWidth);
-                        boolean needHorizontalScrollbar = false;
+                        engine.setTabWidth(uiSessionState.tabWidthSetting);
+                        EditorLayout editorLayout = null;
                         for (int i = 0; i < 3; i++) {
-                            boolean needVerticalScrollbar = canShowVScrollbar
-                                && (state.getTopLine() > 0 || model.lineCount() > contentRows);
-                            int scrollbarWidth = needVerticalScrollbar ? 1 : 0;
-                            contentCols = Math.max(0, cols - gutterWidth - scrollbarWidth);
-                            needHorizontalScrollbar = !uiSessionState.wrapLinesSetting && contentCols > 0
-                                && (state.getLeftVisualColumn() > 0 || maxLineLength > contentCols);
-                            int newContentRows = Math.max(0, baseContentRows - (needHorizontalScrollbar ? 1 : 0));
-                            if (newContentRows == contentRows) {
+                            editorLayout = EditorLayout.resolve(
+                                model,
+                                state,
+                                rows,
+                                cols,
+                                contentTopRow,
+                                overlayRows,
+                                uiSessionState.wrapLinesSetting,
+                                uiSessionState.wrapWordsSetting,
+                                uiSessionState.tabWidthSetting
+                            );
+                            int topBefore = state.getTopLine();
+                            int segmentBefore = state.getTopWrapSegment();
+                            int leftBefore = state.getLeftVisualColumn();
+                            viewportController.ensureCursorVisible(
+                                engine,
+                                editorLayout.contentRows(),
+                                editorLayout.contentColumns(),
+                                uiSessionState.wrapLinesSetting,
+                                uiSessionState.wrapWordsSetting
+                            );
+                            if (topBefore == state.getTopLine()
+                                && segmentBefore == state.getTopWrapSegment()
+                                && leftBefore == state.getLeftVisualColumn()) {
                                 break;
                             }
-                            contentRows = newContentRows;
                         }
-                        viewportController.ensureCursorVisible(engine, contentRows, contentCols);
+                        editorLayout = EditorLayout.resolve(
+                            model,
+                            state,
+                            rows,
+                            cols,
+                            contentTopRow,
+                            overlayRows,
+                            uiSessionState.wrapLinesSetting,
+                            uiSessionState.wrapWordsSetting,
+                            uiSessionState.tabWidthSetting
+                        );
+                        contentRows = editorLayout.contentRows();
+                        contentCols = editorLayout.contentColumns();
                         boolean[] tabMatchFlags = resolveTabMatchFlags(
                             tabs,
                             uiSessionState.searchMode,
@@ -505,7 +530,6 @@ public class TerminalEditorApp {
                         );
                         String interactiveBarText = inlinePromptBar.text();
                         Style interactiveBarStyle = inlinePromptBar.style();
-                        int planRows = Math.max(1, (showTabBar ? rows - 1 : rows) - (needHorizontalScrollbar ? 1 : 0));
                         RenderFrameResult frameResult = renderFrameController.renderFrameIfNeeded(
                             needsRender,
                             renderPlanBuilder,
@@ -517,7 +541,7 @@ public class TerminalEditorApp {
                             showTabBar,
                             activeTabIndex,
                             tabItems,
-                            planRows,
+                            editorLayout,
                             inlinePromptBar.height(),
                             topBar,
                             bottomBar,
@@ -1234,6 +1258,7 @@ public class TerminalEditorApp {
                             engine,
                             renderPlanBuilder,
                             contentRows,
+                            contentCols,
                             running,
                             modalState.isQuitConfirm(),
                             modalState.isCloseTabConfirm(),
@@ -1274,7 +1299,7 @@ public class TerminalEditorApp {
                         if (uiSessionState.readingModeSetting) {
                             notification.warning("Reading mode: editing is disabled");
                         } else {
-                            engine.insertChar(charInput.ch());
+                            engine.insertInput(charInput.text());
                         }
                         continue;
                     }
@@ -1530,7 +1555,7 @@ public class TerminalEditorApp {
         switch (effect.kind()) {
             case NONE -> {
             }
-            case INSERT -> saveAsInput.insert(effect.ch());
+            case INSERT -> saveAsInput.insert(effect.text());
             case SET_TEXT -> saveAsInput.set(effect.text());
             case BACKSPACE -> saveAsInput.backspace();
             case MOVE_LEFT -> saveAsInput.moveLeft();
@@ -1648,6 +1673,7 @@ public class TerminalEditorApp {
         EditorEngine engine,
         RenderPlanBuilder renderPlanBuilder,
         int contentRows,
+        int contentCols,
         boolean running,
         boolean quitConfirmMode,
         boolean closeTabConfirmMode,
@@ -1682,18 +1708,17 @@ public class TerminalEditorApp {
         OpenFileDialogController.Focus nextOpenFileFocus = openFileFocus;
 
         if (key instanceof KeyEvent.CharInput charInput) {
-            char ch = charInput.ch();
-            if (ch == ' ' && SearchController.isToggleFocus(uiSessionState.searchFocus)) {
+            if (charInput.codePoint() == ' ' && SearchController.isToggleFocus(uiSessionState.searchFocus)) {
                 SearchController.SearchUiOptions before = nextSearchUi;
                 nextSearchUi = SearchController.toggleFocusedSearchOption(nextSearchUi, uiSessionState.searchFocus);
                 if (!nextSearchUi.equals(before)) {
                     statusMessage = "";
                 }
             } else if (uiSessionState.searchFocus == SearchFocus.REPLACE) {
-                searchReplaceInput.insert(ch);
+                searchReplaceInput.insert(charInput.text());
                 statusMessage = "";
             } else if (uiSessionState.searchFocus == SearchFocus.FIND) {
-                searchQueryInput.insert(ch);
+                searchQueryInput.insert(charInput.text());
                 statusMessage = "";
             }
             return new SearchModeResult(
@@ -1820,7 +1845,12 @@ public class TerminalEditorApp {
                         );
                     }
                     if (found) {
-                        nextEngine.ensureCursorVisible(contentRows);
+                        nextEngine.ensureCursorVisible(
+                            contentRows,
+                            contentCols,
+                            uiSessionState.wrapLinesSetting,
+                            uiSessionState.wrapWordsSetting
+                        );
                     }
                     statusMessage = found ? "Found previous match" : "Not found";
                 } else if (enterAction == KeyEvent.Action.CTRL_R) {
@@ -1856,6 +1886,9 @@ public class TerminalEditorApp {
                         nextState,
                         nextEngine,
                         contentRows,
+                        contentCols,
+                        uiSessionState.wrapLinesSetting,
+                        uiSessionState.wrapWordsSetting,
                         searchQueryInput.text(),
                         searchOptions
                     );
@@ -1884,7 +1917,12 @@ public class TerminalEditorApp {
                         );
                     }
                     if (found) {
-                        nextEngine.ensureCursorVisible(contentRows);
+                        nextEngine.ensureCursorVisible(
+                            contentRows,
+                            contentCols,
+                            uiSessionState.wrapLinesSetting,
+                            uiSessionState.wrapWordsSetting
+                        );
                     }
                     statusMessage = found ? "Found next match" : "Not found";
                 }
@@ -1900,6 +1938,9 @@ public class TerminalEditorApp {
                     nextState,
                     nextEngine,
                     contentRows,
+                    contentCols,
+                    uiSessionState.wrapLinesSetting,
+                    uiSessionState.wrapWordsSetting,
                     searchQueryInput.text(),
                     searchOptions
                 );
@@ -1928,7 +1969,12 @@ public class TerminalEditorApp {
                     );
                 }
                 if (found) {
-                    nextEngine.ensureCursorVisible(contentRows);
+                    nextEngine.ensureCursorVisible(
+                        contentRows,
+                        contentCols,
+                        uiSessionState.wrapLinesSetting,
+                        uiSessionState.wrapWordsSetting
+                    );
                 }
                 statusMessage = found ? "Found next match" : "Not found";
             }
@@ -1959,7 +2005,12 @@ public class TerminalEditorApp {
                     );
                 }
                 if (found) {
-                    nextEngine.ensureCursorVisible(contentRows);
+                    nextEngine.ensureCursorVisible(
+                        contentRows,
+                        contentCols,
+                        uiSessionState.wrapLinesSetting,
+                        uiSessionState.wrapWordsSetting
+                    );
                 }
                 statusMessage = found ? "Found previous match" : "Not found";
             }
@@ -2202,17 +2253,20 @@ public class TerminalEditorApp {
             return;
         }
         String file = state.getCurrentFile() == null ? "--no name--" : state.getCurrentFile().toString();
-        int endCol = Math.min(cols, startCol + file.length());
-        for (int col = startCol; col < endCol; col++) {
-            String grapheme = buffer.get(0, col).grapheme();
-            buffer.set(0, col, grapheme, styles.topbarFilenameHighlight());
+        int endCol = Math.min(cols, startCol + CellText.width(file));
+        for (int col = startCol; col < endCol;) {
+            var cell = buffer.get(0, col);
+            if (cell.continuation()) {
+                col++;
+                continue;
+            }
+            buffer.set(0, col, cell.grapheme(), styles.topbarFilenameHighlight());
+            col += Math.max(1, cell.width());
         }
     }
 
     private void drawMenuLine(CellBuffer buffer, int row, int startCol, String text, Style style, int cols) {
-        for (int i = 0; i < text.length() && startCol + i < cols; i++) {
-            buffer.set(row, startCol + i, String.valueOf(text.charAt(i)), style);
-        }
+        CellText.draw(buffer, row, startCol, text, style, cols);
     }
 
     private void paintSelectedConfirmButton(CellBuffer buffer, ConfirmBarView confirmBar, int rows, int cols) {
@@ -2265,10 +2319,7 @@ public class TerminalEditorApp {
     }
 
     private String padRight(String text, int width) {
-        if (text.length() >= width) {
-            return text.substring(0, width);
-        }
-        return text + " ".repeat(width - text.length());
+        return CellText.fit(text, width);
     }
 
     private Path initialOpenRoot(EditorState state) {
@@ -2451,7 +2502,7 @@ public class TerminalEditorApp {
         if (text == null || width <= 0) {
             return "";
         }
-        return text.length() <= width ? text : text.substring(0, width);
+        return CellText.clip(text, 0, width);
     }
 
     private OpenFileDialogController.ActivationResult activateOpenFileSelection(
@@ -2510,18 +2561,20 @@ public class TerminalEditorApp {
         if (cols <= 0) {
             return "";
         }
-        if (left.length() >= cols) {
-            return left.substring(0, cols);
+        int leftWidth = CellText.width(left);
+        if (leftWidth >= cols) {
+            return CellText.clip(left, 0, cols);
         }
         String rightBlock = indicators + " ".repeat(Math.max(0, rightMargin));
-        if (rightBlock.length() >= cols) {
-            return rightBlock.substring(0, cols);
+        int rightWidth = CellText.width(rightBlock);
+        if (rightWidth >= cols) {
+            return CellText.clip(rightBlock, 0, cols);
         }
-        int free = cols - left.length();
-        if (free <= rightBlock.length()) {
-            return left + rightBlock.substring(0, Math.max(0, free));
+        int free = cols - leftWidth;
+        if (free <= rightWidth) {
+            return left + CellText.clip(rightBlock, 0, Math.max(0, free));
         }
-        return left + " ".repeat(free - rightBlock.length()) + rightBlock;
+        return left + " ".repeat(free - rightWidth) + rightBlock;
     }
 
     private String buildSearchSummary(
@@ -2574,7 +2627,7 @@ public class TerminalEditorApp {
         boolean showTabBar,
         int activeTabIndex,
         List<TabBar.TabItem> tabItems,
-        int planRows,
+        EditorLayout editorLayout,
         int inlinePromptBarHeight,
         String topBar,
         String bottomBar,
@@ -2644,7 +2697,7 @@ public class TerminalEditorApp {
             plan = renderPlanBuilder.build(
                 model,
                 state,
-                planRows,
+                rows,
                 cols,
                 topBar,
                 bottomBar,
@@ -2655,14 +2708,15 @@ public class TerminalEditorApp {
                 notificationBar.text(),
                 notificationBar.style(),
                 wrapLinesSetting,
-                wrapWordsSetting
+                wrapWordsSetting,
+                editorLayout
             );
             frameProfiler.buildNanos = System.nanoTime() - buildStart;
         } else {
             plan = renderPlanBuilder.build(
                 model,
                 state,
-                planRows,
+                rows,
                 cols,
                 topBar,
                 bottomBar,
@@ -2673,7 +2727,8 @@ public class TerminalEditorApp {
                 notificationBar.text(),
                 notificationBar.style(),
                 wrapLinesSetting,
-                wrapWordsSetting
+                wrapWordsSetting,
+                editorLayout
             );
         }
         CellBuffer current;
@@ -2739,11 +2794,25 @@ public class TerminalEditorApp {
             openFileMode,
             helpHintsMode || helpLicensesMode || helpAuthorMode
         );
+        boolean editorOwnsCursor = !saveAsMode
+            && searchBar == null
+            && !saveOverwriteConfirmMode
+            && !quitConfirmMode
+            && !closeTabConfirmMode
+            && !topMenu.isOpen()
+            && !openFileMode
+            && !(helpHintsMode || helpLicensesMode || helpAuthorMode);
+        if (editorOwnsCursor && !plan.cursorInViewport()) {
+            desiredCursorVisible = false;
+        }
         int interactiveBottomCursorRow = Math.max(1, rows - 1);
         int interactiveTopCursorRow = interactiveBottomCursorRow - inlinePromptBarHeight + 1;
         if (saveAsMode) {
             desiredCursorRow = interactiveBottomCursorRow;
-            desiredCursorCol = Math.min(cols, SAVE_AS_PROMPT.length() + saveAsInput.cursor() + 1);
+            desiredCursorCol = Math.min(
+                cols,
+                DisplayText.visualWidth(SAVE_AS_PROMPT, 4) + saveAsInput.cursorCellColumn() + 1
+            );
         } else if ((saveOverwriteConfirmMode || quitConfirmMode || closeTabConfirmMode) && confirmBar != null) {
             desiredCursorRow = interactiveBottomCursorRow;
             desiredCursorCol = 1;
@@ -2927,6 +2996,9 @@ public class TerminalEditorApp {
         EditorState state,
         EditorEngine engine,
         int contentRows,
+        int contentCols,
+        boolean wrapLines,
+        boolean wrapByWords,
         String query,
         SearchOptions options
     ) {
@@ -2940,7 +3012,7 @@ public class TerminalEditorApp {
         int topBefore = state.getTopLine();
         int wrapBefore = state.getTopWrapSegment();
         int leftBefore = state.getLeftVisualColumn();
-        engine.ensureCursorVisible(contentRows);
+        engine.ensureCursorVisible(contentRows, contentCols, wrapLines, wrapByWords);
         return topBefore != state.getTopLine()
             || wrapBefore != state.getTopWrapSegment()
             || leftBefore != state.getLeftVisualColumn();
@@ -3014,7 +3086,7 @@ public class TerminalEditorApp {
             boolean showTabBar,
             int activeTabIndex,
             List<TabBar.TabItem> tabItems,
-            int planRows,
+            EditorLayout editorLayout,
             int inlinePromptBarHeight,
             String topBar,
             String bottomBar,
@@ -3061,7 +3133,7 @@ public class TerminalEditorApp {
                 showTabBar,
                 activeTabIndex,
                 tabItems,
-                planRows,
+                editorLayout,
                 inlinePromptBarHeight,
                 topBar,
                 bottomBar,
@@ -3303,8 +3375,12 @@ public class TerminalEditorApp {
     ) {
         String safeQuery = queryField == null ? "" : queryField.text();
         String safeReplacement = replacementField == null ? "" : replacementField.text();
-        int queryCursor = queryField == null ? safeQuery.length() : queryField.cursor();
-        int replacementCursor = replacementField == null ? safeReplacement.length() : replacementField.cursor();
+        int queryCursor = queryField == null
+            ? DisplayText.visualWidth(safeQuery, 4)
+            : queryField.cursorCellColumn();
+        int replacementCursor = replacementField == null
+            ? DisplayText.visualWidth(safeReplacement, 4)
+            : replacementField.cursorCellColumn();
         String findField = formatField("Find", safeQuery);
         String replaceField = formatField("Replace", safeReplacement);
         Button caseToggleTemplate = new Button(0, 0, "Аа:" + (searchUi.caseSensitive() ? "x" : " "));
@@ -3335,29 +3411,29 @@ public class TerminalEditorApp {
         int optionsStart = Math.max(0, rightClusterStart(row1, optionsCluster));
         int actionsStart = Math.max(0, rightClusterStart(row2, actionsCluster));
         int findStart = 0;
-        int findEnd = findField.length();
+        int findEnd = DisplayText.visualWidth(findField, 4);
         int caseStart = optionsStart;
-        int caseEnd = caseStart + csToggle.length();
+        int caseEnd = caseStart + DisplayText.visualWidth(csToggle, 4);
         int wordStart = caseEnd + 1;
-        int wordEnd = wordStart + wToggle.length();
+        int wordEnd = wordStart + DisplayText.visualWidth(wToggle, 4);
         int wildcardStart = wordEnd + 1;
-        int wildcardEnd = wildcardStart + starToggle.length();
+        int wildcardEnd = wildcardStart + DisplayText.visualWidth(starToggle, 4);
         int allStart = wildcardEnd + 1;
-        int allEnd = allStart + allToggle.length();
+        int allEnd = allStart + DisplayText.visualWidth(allToggle, 4);
         Button caseButtonView = new Button(0, caseStart, caseToggleTemplate.text());
         Button wordButtonView = new Button(0, wordStart, wordToggleTemplate.text());
         Button wildcardButtonView = new Button(0, wildcardStart, wildcardToggleTemplate.text());
         Button allToggleButtonView = new Button(0, allStart, allToggleTemplate.text());
         int replaceStart = 0;
-        int replaceEnd = replaceField.length();
+        int replaceEnd = DisplayText.visualWidth(replaceField, 4);
         int nextStart = actionsStart;
-        int nextEnd = nextStart + nextButton.length();
+        int nextEnd = nextStart + DisplayText.visualWidth(nextButton, 4);
         int prevStart = nextEnd + 1;
-        int prevEnd = prevStart + prevButton.length();
+        int prevEnd = prevStart + DisplayText.visualWidth(prevButton, 4);
         int replaceActionStart = prevEnd + 1;
-        int replaceActionEnd = replaceActionStart + replaceButton.length();
+        int replaceActionEnd = replaceActionStart + DisplayText.visualWidth(replaceButton, 4);
         int allActionStart = replaceActionEnd + 1;
-        int allActionEnd = allActionStart + allButton.length();
+        int allActionEnd = allActionStart + DisplayText.visualWidth(allButton, 4);
         Button nextButtonView = new Button(1, nextStart, "Next");
         Button prevButtonView = new Button(1, prevStart, "Prev");
         Button replaceButtonView = new Button(1, replaceActionStart, "Replace");
@@ -3570,12 +3646,17 @@ public class TerminalEditorApp {
         int replaceActionStart,
         int allActionStart
     ) {
-        int findCursorCol = "Find: ".length() + Math.max(0, Math.min(queryCursor, query.length()));
+        int findCursorCol = DisplayText.visualWidth("Find: ", 4)
+            + Math.max(0, Math.min(queryCursor, DisplayText.visualWidth(query, 4)));
         if (focus == SearchFocus.FIND) {
             return new SearchCursor(1, findCursorCol);
         }
         if (focus == SearchFocus.REPLACE) {
-            return new SearchCursor(2, "Replace: ".length() + Math.max(0, Math.min(replacementCursor, replacement.length())));
+            return new SearchCursor(
+                2,
+                DisplayText.visualWidth("Replace: ", 4)
+                    + Math.max(0, Math.min(replacementCursor, DisplayText.visualWidth(replacement, 4)))
+            );
         }
         int iCheckOffset = iToggle.indexOf(':') + 1;
         int wCheckOffset = wToggle.indexOf(':') + 1;
@@ -3600,10 +3681,24 @@ public class TerminalEditorApp {
         if (cols <= 0) {
             return "";
         }
-        if (text.length() >= cols) {
-            return text.substring(0, cols);
+        String safe = text == null ? "" : text;
+        StringBuilder clipped = new StringBuilder();
+        int used = 0;
+        for (DisplayText.Grapheme grapheme : DisplayText.graphemes(safe)) {
+            int advance = grapheme.tab()
+                ? 4 - (used % 4)
+                : Math.max(1, grapheme.width());
+            if (used + advance > cols) {
+                break;
+            }
+            if (grapheme.tab()) {
+                clipped.append(" ".repeat(advance));
+            } else {
+                clipped.append(grapheme.text());
+            }
+            used += advance;
         }
-        return text + " ".repeat(cols - text.length());
+        return clipped + " ".repeat(cols - used);
     }
 
     private static String alignLeftRight(String left, String right, int cols, int rightMargin) {
@@ -3613,7 +3708,7 @@ public class TerminalEditorApp {
         String safeLeft = left == null ? "" : left;
         String safeRight = right == null ? "" : right;
         int margin = Math.max(0, rightMargin);
-        int rightBlock = safeRight.length() + margin;
+        int rightBlock = DisplayText.visualWidth(safeRight, 4) + margin;
         if (safeRight.isEmpty()) {
             return clipPad(safeLeft, cols);
         }
@@ -3621,9 +3716,7 @@ public class TerminalEditorApp {
             return clipPad(safeRight, cols);
         }
         int leftWidth = cols - rightBlock;
-        String leftPart = safeLeft.length() > leftWidth
-            ? safeLeft.substring(0, leftWidth)
-            : safeLeft + " ".repeat(leftWidth - safeLeft.length());
+        String leftPart = clipPad(safeLeft, leftWidth);
         return leftPart + safeRight + " ".repeat(margin);
     }
 
@@ -3631,7 +3724,8 @@ public class TerminalEditorApp {
         if (row == null || cluster == null || cluster.isEmpty()) {
             return -1;
         }
-        return row.indexOf(cluster);
+        int charOffset = row.indexOf(cluster);
+        return charOffset < 0 ? -1 : DisplayText.visualColumnAt(row, charOffset, 4);
     }
 
     private record SearchCursor(int row, int col) {
@@ -4246,7 +4340,8 @@ public class TerminalEditorApp {
     }
 
     private void printUsage() {
-        System.out.println("Usage: :tui:run --args=\"[options] [file]\"");
+        System.out.println("Usage: tuink [options] [file]");
+        System.out.println("Development: ./gradlew --console=plain :app:run -PappArgs=\"[options] [file]\"");
         System.out.println("Options:");
         System.out.println("  --no-mouse       Disable mouse tracking and mouse interactions");
         System.out.println("  --no-alt-screen  Do not use alternate screen buffer");

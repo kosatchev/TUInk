@@ -1,7 +1,9 @@
 package dev.tuink.core;
 
 /**
- * Immutable cursor position in the text model.
+ * Immutable position in the text model. {@code col} is a raw UTF-16 offset;
+ * interactive cursor operations snap it to grapheme boundaries, while search,
+ * undo and edit ranges may intentionally keep exact offsets.
  */
 public record Position(int line, int col) {
     public Position {

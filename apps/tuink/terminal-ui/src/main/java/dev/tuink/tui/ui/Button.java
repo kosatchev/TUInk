@@ -1,6 +1,8 @@
 package dev.tuink.tui.ui;
 
 import dev.tuink.tui.render.CellBuffer;
+import dev.tuink.tui.render.CellText;
+import dev.tuink.core.DisplayText;
 import dev.tuink.render.Style;
 
 /**
@@ -41,21 +43,23 @@ public final class Button {
 
     public int cursorCol() {
         String rendered = renderedText();
-        for (int i = 0; i < rendered.length(); i++) {
-            char ch = rendered.charAt(i);
-            if (Character.isLetterOrDigit(ch)) {
-                return col + i;
+        int visual = 0;
+        for (DisplayText.Grapheme grapheme : DisplayText.graphemes(rendered)) {
+            int codePoint = grapheme.text().codePointAt(0);
+            if (Character.isLetterOrDigit(codePoint)) {
+                return col + visual;
             }
+            visual += Math.max(1, grapheme.width());
         }
         return col + (framed ? 1 : 0);
     }
 
     public int width() {
-        return renderedText().length();
+        return CellText.width(renderedText());
     }
 
     public boolean hit(int hitRow, int hitCol) {
-        return hitRow == row && hitCol >= col && hitCol < col + renderedText().length();
+        return hitRow == row && hitCol >= col && hitCol < col + width();
     }
 
     public void draw(CellBuffer buffer, int cols, Style style) {
@@ -63,10 +67,7 @@ public final class Button {
     }
 
     public void drawAt(CellBuffer buffer, int drawRow, int cols, Style style) {
-        String rendered = renderedText();
-        for (int i = 0; i < rendered.length() && col + i < cols; i++) {
-            buffer.set(drawRow, col + i, String.valueOf(rendered.charAt(i)), style);
-        }
+        CellText.draw(buffer, drawRow, col, renderedText(), style, cols);
     }
 
     public String renderedText() {

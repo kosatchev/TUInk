@@ -32,7 +32,7 @@ final class SaveFlowController {
                 true,
                 saveOverwriteConfirmMode,
                 pendingOverwritePath,
-                TextInputEffect.insert(charInput.ch()),
+                TextInputEffect.insert(charInput.text()),
                 true,
                 null,
                 null
@@ -206,7 +206,7 @@ final class SaveFlowController {
         }
 
         if (key instanceof KeyEvent.CharInput charInput) {
-            char ch = charInput.ch();
+            char ch = charInput.asciiCharOrZero();
             if (ch == 'y' || ch == 'Y') {
                 return new SaveOverwriteResult(true, false, null, false, false, pendingOverwritePath);
             }
@@ -258,7 +258,13 @@ final class SaveFlowController {
         }
 
         static TextInputEffect insert(char ch) {
-            return new TextInputEffect(TextInputEffectKind.INSERT, ch, null);
+            return insert(String.valueOf(ch));
+        }
+
+        static TextInputEffect insert(String text) {
+            String safe = text == null ? "" : text;
+            Character legacyChar = safe.length() == 1 ? safe.charAt(0) : null;
+            return new TextInputEffect(TextInputEffectKind.INSERT, legacyChar, safe);
         }
 
         static TextInputEffect setText(String text) {

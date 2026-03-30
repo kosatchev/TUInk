@@ -97,7 +97,7 @@ public final class EditorView {
             lastClickPosition = null;
             lastClickAtNanos = 0L;
         }
-        engine.ensureCursorVisible(contentRows);
+        ensureCursorVisible(engine, plan, contentRows);
         return selectedWordByDoubleClick;
     }
 
@@ -141,8 +141,13 @@ public final class EditorView {
                 state.setSelectionAnchor(state.getCursor());
             }
             state.setCursor(hit);
-            engine.ensureCursorVisible(contentRows);
+            ensureCursorVisible(engine, plan, contentRows);
         }
+    }
+
+    private void ensureCursorVisible(EditorEngine engine, RenderPlan plan, int contentRows) {
+        int contentColumns = Math.max(0, plan.cols() - plan.gutterWidth() - plan.scrollbarWidth());
+        engine.ensureCursorVisible(contentRows, contentColumns, plan.wrapLines(), plan.wrapByWords());
     }
 
     private boolean autoScrollVerticalOnDrag(

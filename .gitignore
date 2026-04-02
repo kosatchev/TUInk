@@ -1,6 +1,7 @@
 # Gradle
 .gradle/
 .gradle-local/
+.gradle-user-home/
 *.iprof
 build/
 **/build/
@@ -17,6 +18,7 @@ out/
 
 # OS
 .DS_Store
+.directory
 Thumbs.db
 
 # Local/editor temp files
@@ -25,5 +27,12 @@ Thumbs.db
 *~
 *.log
 
+# Release artifacts
+*.deb
+*.tar.gz
+*.sha256
+SHA256SUMS
+
 # Local development files
 research/
+.local/

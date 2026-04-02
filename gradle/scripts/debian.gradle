@@ -1,0 +1,214 @@
+import org.apache.tools.ant.taskdefs.condition.Os
+import org.apache.tools.ant.filters.ReplaceTokens
+
+def nativeTarget = (project.findProperty('target') ?: 'glibc').toString().toLowerCase()
+def rawArch = System.getProperty('os.arch', 'amd64').toLowerCase()
+def debArchitecture = [
+    'amd64': 'amd64',
+    'x86_64': 'amd64',
+    'aarch64': 'arm64',
+    'arm64': 'arm64',
+    'x86': 'i386',
+    'i386': 'i386',
+    'i686': 'i386'
+].get(rawArch, rawArch.replaceAll('[^a-z0-9-]', '-'))
+def debRootName = "tuink_${project.version}_${debArchitecture}"
+def debStageDir = layout.buildDirectory.dir("debian/${debRootName}")
+def debOutput = rootProject.layout.buildDirectory.file("releases/${debRootName}.deb")
+def generatedDebianDir = layout.buildDirectory.dir('generated/debian')
+def generatedDebianDocsDir = layout.buildDirectory.dir('generated/debian-docs')
+def releaseEpochSeconds = providers.environmentVariable('SOURCE_DATE_EPOCH').orElse('946684800')
+
+tasks.register('generateDebianMetadata', Copy) {
+    group = 'distribution'
+    description = 'Generate Debian control metadata from project properties.'
+    inputs.property('version', project.version.toString())
+    inputs.property('architecture', debArchitecture)
+    from(rootProject.file('apps/tuink/packaging/debian/control.template')) {
+        rename { 'control' }
+        filter(ReplaceTokens, tokens: [
+            VERSION: project.version.toString(),
+            ARCHITECTURE: debArchitecture
+        ])
+    }
+    into(generatedDebianDir)
+}
+
+tasks.register('generateDebianDocs') {
+    group = 'distribution'
+    description = 'Generate versioned Debian package documentation.'
+    def changelogTemplate = rootProject.file('apps/tuink/packaging/debian/changelog.template')
+    def manPageTemplate = rootProject.file('apps/tuink/packaging/debian/tuink.1.template')
+    def changelogOutput = generatedDebianDocsDir.map { it.file('changelog') }
+    def manPageOutput = generatedDebianDocsDir.map { it.file('tuink.1') }
+    inputs.files(changelogTemplate, manPageTemplate)
+    inputs.property('version', project.version.toString())
+    outputs.files(changelogOutput, manPageOutput)
+
+    doLast {
+        def renderTemplate = { File template, File output ->
+            output.parentFile.mkdirs()
+            output.setText(
+                template.getText('UTF-8').replace('@VERSION@', project.version.toString()),
+                'UTF-8'
+            )
+        }
+        renderTemplate(changelogTemplate, changelogOutput.get().asFile)
+        renderTemplate(manPageTemplate, manPageOutput.get().asFile)
+    }
+}
+
+def compressDebianChangelog = tasks.register('compressDebianChangelog', Exec) {
+    dependsOn(tasks.named('generateDebianDocs'))
+    def source = generatedDebianDocsDir.map { it.file('changelog') }
+    def output = generatedDebianDocsDir.map { it.file('changelog.gz') }
+    inputs.file(source)
+    outputs.file(output)
+    commandLine('gzip', '-9n', '-k', '-f', source.get().asFile.absolutePath)
+}
+
+def compressDebianManPage = tasks.register('compressDebianManPage', Exec) {
+    dependsOn(tasks.named('generateDebianDocs'))
+    def source = generatedDebianDocsDir.map { it.file('tuink.1') }
+    def output = generatedDebianDocsDir.map { it.file('tuink.1.gz') }
+    inputs.file(source)
+    outputs.file(output)
+    commandLine('gzip', '-9n', '-k', '-f', source.get().asFile.absolutePath)
+}
+
+tasks.register('stageDeb', Sync) {
+    group = 'distribution'
+    description = 'Prepare the Debian filesystem tree before packaging.'
+    dependsOn(tasks.named('nativeCompile'))
+    dependsOn(tasks.named('generateDebianMetadata'))
+    dependsOn(compressDebianChangelog)
+    dependsOn(compressDebianManPage)
+    into(debStageDir)
+    dirPermissions {
+        unix('rwxr-xr-x')
+    }
+
+    from(generatedDebianDir) {
+        into('DEBIAN')
+        filePermissions {
+            unix('rw-r--r--')
+        }
+    }
+    from(layout.buildDirectory.file('native/nativeCompile/tuink')) {
+        into('usr/bin')
+        filePermissions {
+            unix('rwxr-xr-x')
+        }
+    }
+    from(rootProject.file('README.md')) {
+        into('usr/share/doc/tuink')
+        filePermissions {
+            unix('rw-r--r--')
+        }
+    }
+    from(rootProject.file('THIRD_PARTY_NOTICES.md')) {
+        into('usr/share/doc/tuink')
+        filePermissions {
+            unix('rw-r--r--')
+        }
+    }
+    from(rootProject.file('apps/tuink/packaging/debian/copyright')) {
+        into('usr/share/doc/tuink')
+        filePermissions {
+            unix('rw-r--r--')
+        }
+    }
+    from(generatedDebianDocsDir) {
+        include('changelog.gz')
+        into('usr/share/doc/tuink')
+        filePermissions {
+            unix('rw-r--r--')
+        }
+    }
+    from(generatedDebianDocsDir) {
+        include('tuink.1.gz')
+        into('usr/share/man/man1')
+        filePermissions {
+            unix('rw-r--r--')
+        }
+    }
+    from(rootProject.file('apps/tuink/samples')) {
+        into('usr/share/doc/tuink/examples')
+        filePermissions {
+            unix('rw-r--r--')
+        }
+    }
+
+    doFirst {
+        if (!Os.isFamily(Os.FAMILY_UNIX) || Os.isFamily(Os.FAMILY_MAC)) {
+            throw new GradleException('Debian packages can only be built on Linux.')
+        }
+        if (nativeTarget == 'musl') {
+            throw new GradleException('nativeDeb requires the glibc target. Omit -Ptarget or use -Ptarget=all.')
+        }
+    }
+}
+
+def stagedDebBinary = debStageDir.map { it.file('usr/bin/tuink') }
+
+def stripDebBinary = tasks.register('stripDebBinary', Exec) {
+    group = 'distribution'
+    description = 'Strip the staged Debian binary without changing nativeCompile output.'
+    dependsOn(tasks.named('stageDeb'))
+    inputs.file(stagedDebBinary)
+    outputs.file(stagedDebBinary)
+    outputs.upToDateWhen { false }
+    commandLine('strip', '--strip-unneeded', stagedDebBinary.get().asFile.absolutePath)
+
+    doLast {
+        long timestamp = releaseEpochSeconds.get().toLong() * 1000L
+        fileTree(debStageDir).visit { details ->
+            details.file.setLastModified(timestamp)
+            if (details.directory) {
+                java.nio.file.Files.setPosixFilePermissions(
+                    details.file.toPath(),
+                    java.nio.file.attribute.PosixFilePermissions.fromString('rwxr-xr-x')
+                )
+            }
+        }
+        def root = debStageDir.get().asFile
+        root.setLastModified(timestamp)
+        java.nio.file.Files.setPosixFilePermissions(
+            root.toPath(),
+            java.nio.file.attribute.PosixFilePermissions.fromString('rwxr-xr-x')
+        )
+    }
+}
+
+def nativeDeb = tasks.register('nativeDeb', Exec) {
+    group = 'distribution'
+    description = 'Build a Debian package from the glibc native binary.'
+    dependsOn(stripDebBinary)
+    inputs.dir(debStageDir)
+    outputs.file(debOutput)
+    environment('SOURCE_DATE_EPOCH', releaseEpochSeconds.get())
+    environment('TZ', 'UTC')
+    commandLine(
+        'dpkg-deb',
+        '--root-owner-group',
+        '--build',
+        debStageDir.get().asFile.absolutePath,
+        debOutput.get().asFile.absolutePath
+    )
+    doFirst {
+        debOutput.get().asFile.parentFile.mkdirs()
+    }
+}
+
+releaseArtifactFiles.from(nativeDeb.map { debOutput.get().asFile })
+
+tasks.named('releaseChecksums') {
+    dependsOn(nativeDeb)
+}
+
+tasks.register('release') {
+    group = 'distribution'
+    description = 'Build tested JVM/native archives, Debian package, and SHA-256 checksums.'
+    dependsOn(rootProject.subprojects.collect { "${it.path}:test" })
+    dependsOn(tasks.named('releaseChecksums'))
+}

@@ -51,6 +51,39 @@ Source:
 Notes:
 - Used by core editor engine for gutter-diff computation.
 
+## 4) JavaEWAH
+
+Artifact:
+- `com.googlecode.javaewah:JavaEWAH:1.2.3`
+
+License:
+- Apache License, Version 2.0
+
+Source:
+- https://github.com/lemire/javaewah
+
+## 5) SLF4J API
+
+Artifact:
+- `org.slf4j:slf4j-api:1.7.36`
+
+License:
+- MIT License
+
+Source:
+- https://www.slf4j.org/
+
+## 6) Apache Commons Codec
+
+Artifact:
+- `commons-codec:commons-codec:1.17.0`
+
+License:
+- Apache License, Version 2.0
+
+Source:
+- https://commons.apache.org/proper/commons-codec/
+
 ---
 
 If additional third-party dependencies are introduced, this file should be updated accordingly.

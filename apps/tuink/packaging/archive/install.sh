@@ -31,7 +31,6 @@ chmod +x "${APP_PATH}"
 sudo mkdir -p "${INSTALL_DIR}"
 sudo install -m 0755 "${APP_PATH}" "${TARGET_BIN}"
 
-# Keep maintenance scripts and release documents alongside the installed binary.
 for script in install.sh uninstall.sh; do
   if [[ -f "${SCRIPT_DIR}/${script}" ]]; then
     sudo install -m 0755 "${SCRIPT_DIR}/${script}" "${INSTALL_DIR}/${script}"

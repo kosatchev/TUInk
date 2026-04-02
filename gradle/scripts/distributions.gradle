@@ -1,0 +1,198 @@
+import org.apache.tools.ant.taskdefs.condition.Os
+
+def nativeTarget = (project.findProperty('target') ?: 'glibc').toString().toLowerCase()
+if (!(nativeTarget in ['glibc', 'musl', 'all'])) {
+    throw new GradleException("Unsupported -Ptarget=${nativeTarget}. Use glibc, musl, or all.")
+}
+
+def osToken = Os.isFamily(Os.FAMILY_WINDOWS)
+    ? 'windows'
+    : (Os.isFamily(Os.FAMILY_MAC) ? 'macos' : 'linux')
+def archToken = {
+    def raw = System.getProperty('os.arch', 'x86_64').toLowerCase()
+    if (raw == 'amd64') return 'x86_64'
+    if (raw == 'aarch64') return 'arm64'
+    return raw.replaceAll('[^a-z0-9_\\-]', '_')
+}.call()
+
+def glibcReleaseName = "tuink-${project.version}-${osToken}-${archToken}"
+def muslReleaseName = "${glibcReleaseName}-musl"
+def distributionDir = rootProject.layout.buildDirectory.dir('releases')
+def releaseCommonFiles = files(
+    rootProject.file('README.md'),
+    rootProject.file('LICENSE'),
+    rootProject.file('THIRD_PARTY_NOTICES.md')
+)
+def releaseSamplesDir = rootProject.file('apps/tuink/samples')
+def archiveInstallScripts = rootProject.files(
+    rootProject.file('apps/tuink/packaging/archive/install.sh'),
+    rootProject.file('apps/tuink/packaging/archive/uninstall.sh')
+)
+
+ext.releaseArtifactFiles = objects.fileCollection()
+
+distributions {
+    main {
+        contents {
+            from(releaseCommonFiles)
+            from(releaseSamplesDir) {
+                into('samples')
+            }
+        }
+    }
+}
+
+def jvmDistZip = tasks.named('distZip', Zip) {
+    destinationDirectory = distributionDir
+}
+
+tasks.withType(AbstractArchiveTask).configureEach {
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
+
+tasks.register('stageNativeGlibc', Sync) {
+    group = 'distribution'
+    description = 'Prepare the glibc native release directory before packaging.'
+    dependsOn(tasks.named('nativeCompile'))
+    into(layout.buildDirectory.dir("staging/glibc/${glibcReleaseName}"))
+    dirPermissions {
+        unix('rwxr-xr-x')
+    }
+
+    from(layout.buildDirectory.file('native/nativeCompile/tuink')) {
+        filePermissions {
+            unix('rwxr-xr-x')
+        }
+    }
+    from(archiveInstallScripts) {
+        filePermissions {
+            unix('rwxr-xr-x')
+        }
+    }
+    from(releaseCommonFiles) {
+        filePermissions {
+            unix('rw-r--r--')
+        }
+    }
+    from(releaseSamplesDir) {
+        into('samples')
+        filePermissions {
+            unix('rw-r--r--')
+        }
+    }
+}
+
+tasks.register('stageNativeMusl', Sync) {
+    group = 'distribution'
+    description = 'Prepare the musl native release directory before packaging.'
+    dependsOn(tasks.named('nativeMuslCompile'))
+    into(layout.buildDirectory.dir("staging/musl/${muslReleaseName}"))
+    dirPermissions {
+        unix('rwxr-xr-x')
+    }
+
+    from(layout.buildDirectory.file('native/nativeMuslCompile/tuink-musl')) {
+        rename { 'tuink' }
+        filePermissions {
+            unix('rwxr-xr-x')
+        }
+    }
+    from(archiveInstallScripts) {
+        filePermissions {
+            unix('rwxr-xr-x')
+        }
+    }
+    from(releaseCommonFiles) {
+        filePermissions {
+            unix('rw-r--r--')
+        }
+    }
+    from(releaseSamplesDir) {
+        into('samples')
+        filePermissions {
+            unix('rw-r--r--')
+        }
+    }
+}
+
+def nativeTarGz = tasks.register('nativeTarGz', Tar) {
+    group = 'distribution'
+    description = 'Build the glibc native tar.gz release archive.'
+    dependsOn(tasks.named('stageNativeGlibc'))
+    compression = Compression.GZIP
+    archiveBaseName = 'tuink'
+    archiveVersion = project.version.toString()
+    archiveClassifier = "${osToken}-${archToken}"
+    archiveExtension = 'tar.gz'
+    destinationDirectory = distributionDir
+
+    from(layout.buildDirectory.dir("staging/glibc/${glibcReleaseName}")) {
+        into(glibcReleaseName)
+    }
+}
+
+def nativeMuslTarGz = tasks.register('nativeMuslTarGz', Tar) {
+    group = 'distribution'
+    description = 'Build the musl native tar.gz release archive.'
+    dependsOn(tasks.named('stageNativeMusl'))
+    compression = Compression.GZIP
+    archiveBaseName = 'tuink'
+    archiveVersion = project.version.toString()
+    archiveClassifier = "${osToken}-${archToken}-musl"
+    archiveExtension = 'tar.gz'
+    destinationDirectory = distributionDir
+
+    from(layout.buildDirectory.dir("staging/musl/${muslReleaseName}")) {
+        into(muslReleaseName)
+    }
+}
+
+tasks.register('nativeDistTarGz') {
+    group = 'distribution'
+    description = 'Build native tar.gz release archives. Use -Ptarget=glibc|musl|all (default: glibc).'
+    if (nativeTarget == 'glibc') {
+        dependsOn(nativeTarGz)
+        releaseArtifactFiles.from(nativeTarGz.flatMap { it.archiveFile })
+    } else if (nativeTarget == 'musl') {
+        dependsOn(nativeMuslTarGz)
+        releaseArtifactFiles.from(nativeMuslTarGz.flatMap { it.archiveFile })
+    } else {
+        dependsOn(nativeTarGz, nativeMuslTarGz)
+        releaseArtifactFiles.from(nativeTarGz.flatMap { it.archiveFile })
+        releaseArtifactFiles.from(nativeMuslTarGz.flatMap { it.archiveFile })
+    }
+}
+
+tasks.register('releaseChecksums') {
+    group = 'distribution'
+    description = 'Write SHA256SUMS for all artifacts produced by the release task.'
+    dependsOn(tasks.named('nativeDistTarGz'))
+    dependsOn(jvmDistZip)
+    releaseArtifactFiles.from(jvmDistZip.flatMap { it.archiveFile })
+    inputs.files(releaseArtifactFiles)
+    def checksumFile = distributionDir.map { it.file('SHA256SUMS') }
+    outputs.file(checksumFile)
+
+    doLast {
+        def lines = releaseArtifactFiles.files
+            .sort { left, right -> left.name <=> right.name }
+            .collect { artifact ->
+                if (!artifact.isFile()) {
+                    throw new GradleException("Release artifact not found: ${artifact}")
+                }
+                def digest = java.security.MessageDigest.getInstance('SHA-256')
+                artifact.withInputStream { stream ->
+                    byte[] buffer = new byte[8192]
+                    int count
+                    while ((count = stream.read(buffer)) != -1) {
+                        digest.update(buffer, 0, count)
+                    }
+                }
+                "${digest.digest().encodeHex()}  ${artifact.name}"
+            }
+        def output = checksumFile.get().asFile
+        output.parentFile.mkdirs()
+        output.setText(lines.join(System.lineSeparator()) + System.lineSeparator(), 'UTF-8')
+    }
+}

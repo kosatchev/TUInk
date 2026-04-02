@@ -1,20 +1,8 @@
-plugins {
-    id 'application'
-}
-
 dependencies {
     implementation project(':core')
     implementation project(':render')
     implementation project(':highlight-regex')
     implementation 'org.jline:jline:3.30.6'
-}
-
-application {
-    mainClass = 'dev.tuink.tui.TerminalEditorApp'
-}
-
-tasks.named('run', JavaExec) {
-    standardInput = System.in
 }
 
 tasks.named('processResources') {

@@ -1,0 +1,85 @@
+def nativeMarch = project.ext.tuinkNativeMarch.toString()
+def baseNativeBuildArgs = project.ext.tuinkBaseNativeBuildArgs
+def pgoProfilePath = (
+    project.findProperty('pgoProfile')
+        ?: rootProject.file('.local/pgo/default.iprof').absolutePath
+).toString()
+def nativeTarget = (project.findProperty('target') ?: 'glibc').toString().toLowerCase()
+
+if (!(nativeTarget in ['glibc', 'musl', 'all'])) {
+    throw new GradleException("Unsupported -Ptarget=${nativeTarget}. Use glibc, musl, or all.")
+}
+
+graalvmNative {
+    binaries {
+        pgoInstrument {
+            imageName = 'tuink-pgo-instrument'
+            mainClass = application.mainClass
+            classpath(sourceSets.main.runtimeClasspath, tasks.named('jar'))
+            buildArgs.addAll(baseNativeBuildArgs())
+            buildArgs.add("-march=${nativeMarch}")
+            buildArgs.add('--pgo-instrument')
+        }
+        pgoOptimized {
+            imageName = 'tuink-pgo'
+            mainClass = application.mainClass
+            classpath(sourceSets.main.runtimeClasspath, tasks.named('jar'))
+            buildArgs.addAll(baseNativeBuildArgs())
+            buildArgs.add("-march=${nativeMarch}")
+            buildArgs.add("--pgo=${pgoProfilePath}")
+        }
+        muslPgoInstrument {
+            imageName = 'tuink-musl-pgo-instrument'
+            mainClass = application.mainClass
+            classpath(sourceSets.main.runtimeClasspath, tasks.named('jar'))
+            buildArgs.addAll(baseNativeBuildArgs())
+            buildArgs.add("-march=${nativeMarch}")
+            buildArgs.add('--static')
+            buildArgs.add('--libc=musl')
+            buildArgs.add('-Ddev.tuink.terminal.provider=exec')
+            buildArgs.add('--pgo-instrument')
+        }
+        muslPgoOptimized {
+            imageName = 'tuink-musl-pgo'
+            mainClass = application.mainClass
+            classpath(sourceSets.main.runtimeClasspath, tasks.named('jar'))
+            buildArgs.addAll(baseNativeBuildArgs())
+            buildArgs.add("-march=${nativeMarch}")
+            buildArgs.add('--static')
+            buildArgs.add('--libc=musl')
+            buildArgs.add('-Ddev.tuink.terminal.provider=exec')
+            buildArgs.add("--pgo=${pgoProfilePath}")
+        }
+    }
+}
+
+tasks.register('nativeProfileInstrument') {
+    group = 'build'
+    description = 'Build an instrumented native binary. Requires -PenablePgo.'
+    if (nativeTarget == 'musl') {
+        dependsOn(tasks.named('nativeMuslPgoInstrumentCompile'))
+    } else if (nativeTarget == 'glibc') {
+        dependsOn(tasks.named('nativePgoInstrumentCompile'))
+    } else {
+        dependsOn(tasks.named('nativePgoInstrumentCompile'))
+        dependsOn(tasks.named('nativeMuslPgoInstrumentCompile'))
+    }
+}
+
+tasks.register('nativeProfileBuild') {
+    group = 'build'
+    description = 'Build a PGO-optimized native binary. Requires -PenablePgo and -PpgoProfile.'
+    doFirst {
+        if (!file(pgoProfilePath).exists()) {
+            throw new GradleException("PGO profile not found: ${pgoProfilePath}")
+        }
+    }
+    if (nativeTarget == 'musl') {
+        dependsOn(tasks.named('nativeMuslPgoOptimizedCompile'))
+    } else if (nativeTarget == 'glibc') {
+        dependsOn(tasks.named('nativePgoOptimizedCompile'))
+    } else {
+        dependsOn(tasks.named('nativePgoOptimizedCompile'))
+        dependsOn(tasks.named('nativeMuslPgoOptimizedCompile'))
+    }
+}

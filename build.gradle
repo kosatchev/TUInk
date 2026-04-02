@@ -1,6 +1,10 @@
+plugins {
+    id 'base'
+}
+
 allprojects {
-    group = 'dev.tuink'
-    version = '0.10.0'
+    group = rootProject.group
+    version = rootProject.version
 
     repositories {
         mavenCentral()
@@ -23,16 +27,4 @@ subprojects {
     dependencies {
         testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
     }
-}
-
-tasks.register('buildApp') {
-    group = 'application'
-    description = 'Build the app module (canonical entrypoint).'
-    dependsOn ':app:build'
-}
-
-tasks.register('runApp') {
-    group = 'application'
-    description = 'Run the app module (canonical entrypoint).'
-    dependsOn ':app:run'
 }

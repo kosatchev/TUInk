@@ -1,0 +1,72 @@
+def jlineNativeExcludes = [
+    '--exclude-config', '.*jline-.*\\.jar', 'META-INF/native-image/org\\.jline/.*'
+]
+def jlineNativeManualArgs = [
+    '-H:ResourceConfigurationResources=' +
+        'META-INF/native-image/org.jline/jansi-core/resource-config.json,' +
+        'META-INF/native-image/org.jline/jline-native/resource-config.json,' +
+        'META-INF/native-image/org.jline/jline-terminal/resource-config.json,' +
+        'META-INF/native-image/org.jline/jline-terminal-jansi/resource-config.json,' +
+        'META-INF/native-image/org.jline/jline-terminal-jna/resource-config.json,' +
+        'META-INF/native-image/org.jline/jline-terminal-jni/resource-config.json',
+    '-H:ReflectionConfigurationResources=' +
+        'META-INF/native-image/org.jline/jline-native/reflection-config.json,' +
+        'META-INF/native-image/org.jline/jline-terminal/reflection-config.json,' +
+        'META-INF/native-image/org.jline/jline-terminal-jansi/reflection-config.json,' +
+        'META-INF/native-image/org.jline/jline-terminal-jna/reflection-config.json,' +
+        'META-INF/native-image/org.jline/jline-terminal-jni/reflection-config.json',
+    '-H:JNIConfigurationResources=META-INF/native-image/org.jline/jline-native/jni-config.json'
+]
+def nativeMarch = (project.findProperty('nativeMarch') ?: 'compatibility').toString()
+def baseNativeBuildArgs = {
+    [
+        '--no-fallback',
+        '-H:+AddAllCharsets',
+        '-O2',
+        '--gc=serial'
+    ] + jlineNativeExcludes + jlineNativeManualArgs
+}
+
+ext.tuinkNativeMarch = nativeMarch
+ext.tuinkBaseNativeBuildArgs = baseNativeBuildArgs
+
+graalvmNative {
+    toolchainDetection = true
+    binaries {
+        main {
+            imageName = 'tuink'
+            mainClass = application.mainClass
+            buildArgs.addAll(baseNativeBuildArgs())
+            buildArgs.add("-march=${nativeMarch}")
+        }
+        musl {
+            imageName = 'tuink-musl'
+            mainClass = application.mainClass
+            classpath(sourceSets.main.runtimeClasspath, tasks.named('jar'))
+            buildArgs.addAll(baseNativeBuildArgs())
+            buildArgs.add("-march=${nativeMarch}")
+            buildArgs.add('--static')
+            buildArgs.add('--libc=musl')
+            buildArgs.add('-Ddev.tuink.terminal.provider=exec')
+        }
+    }
+}
+
+tasks.register('nativeGlibc') {
+    group = 'build'
+    description = 'Build the glibc native binary.'
+    dependsOn(tasks.named('nativeCompile'))
+}
+
+tasks.register('nativeMusl') {
+    group = 'build'
+    description = 'Build the static musl native binary.'
+    dependsOn(tasks.named('nativeMuslCompile'))
+}
+
+tasks.register('nativeAll') {
+    group = 'build'
+    description = 'Build both glibc and musl native binaries.'
+    dependsOn(tasks.named('nativeCompile'))
+    dependsOn(tasks.named('nativeMuslCompile'))
+}

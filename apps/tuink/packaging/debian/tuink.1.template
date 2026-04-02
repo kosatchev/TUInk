@@ -1,0 +1,45 @@
+.TH TUINK 1 "April 2026" "TUInk @VERSION@" "User Commands"
+.SH NAME
+tuink \- terminal text editor
+.SH SYNOPSIS
+.B tuink
+.RI [ options ]
+.RI [ file ]
+.SH DESCRIPTION
+.B tuink
+is a terminal text editor with syntax highlighting, search, multiple tabs,
+and Git-aware gutter markers.
+.SH OPTIONS
+.TP
+.BR \-\-no\-mouse
+Disable mouse tracking and mouse interactions.
+.TP
+.BR \-\-no\-alt\-screen
+Do not use the alternate screen buffer.
+.TP
+.BR \-\-no\-color
+Render without ANSI colors.
+.TP
+.BR \-\-theme= name
+Select the UI palette: blue, cyan, or light.
+.TP
+.BR \-\-read
+Start in reading mode with editing disabled.
+.TP
+.BR \-\-profile
+Log render timings to standard error.
+.TP
+.BR \-\-profile\-file= path
+Write render timings to a file and enable profiling.
+.TP
+.BR \-\-ui= tui
+Select the terminal interface. The GUI target is not implemented.
+.TP
+.BR \-h ", " \-\-help
+Show command-line help.
+.SH FILES
+.TP
+.I ~/.config/tuink/tuink.properties
+Per-user UI settings.
+.SH AUTHORS
+Dmitry Kosatchev.

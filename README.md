@@ -1,14 +1,12 @@
 # TUInk
 
-Current version: `0.10.0`
-
 Minimal Java terminal text editor with clean multi-module architecture:
 
 - `core`: editor engine and text model (`TextBuffer` + `SimpleLineBuffer`)
 - `render`: UI-agnostic render planning and style spans
 - `highlight-regex`: regex-based syntax highlighter
 - `tui`: JLine-based terminal frontend (raw mode + alternate screen + ANSI diff)
-- `app`: canonical entrypoint and GraalVM native build configuration
+- `app`: canonical entrypoint and release assembly
 
 ## Project Status
 
@@ -37,8 +35,9 @@ These files are useful for:
 
 - Java 17
 - Gradle wrapper (`./gradlew`)
+- GraalVM with `native-image` and a C toolchain for native releases
 
-## Build
+## Build and test
 
 ```bash
 ./gradlew clean test build
@@ -67,215 +66,29 @@ Run with file and flags:
 ./gradlew --console=plain :app:run -PappArgs="--help"
 ```
 
-### JVM distribution
+## Release artifacts
 
-Build a self-contained JVM application directory or ZIP:
-
-```bash
-./gradlew :app:installDist
-./gradlew :app:distZip
-```
-
-Run the installed JVM layout:
+Build the tested JVM ZIP, glibc archive, Debian package, and SHA-256 manifest:
 
 ```bash
-./apps/tuink/launcher/build/install/app/bin/app file.txt
+./gradlew clean :app:release
 ```
 
-The ZIP is written to `apps/tuink/launcher/build/distributions/` and requires Java 17 on the
-target machine.
+Artifacts are written to `build/releases/`.
 
-### Legacy `jpackage/tte` warning
-
-`build/jpackage/tte` is an obsolete `com.tte` 0.1.0 package and is not produced
-by the current build. Do not launch `build/jpackage/tte/bin/tte`; it can contain
-stale classes even after the source code has been updated. Remove it and use
-`:app:run`, `:app:installDist`, or the native build:
+Install the Debian package:
 
 ```bash
-rm -rf build/jpackage/tte
+sudo apt install ./build/releases/tuink_<version>_<arch>.deb
 ```
 
-## Profiling (render loop)
+Or extract the native archive and use its `install.sh`.
 
-Supported profiling flags:
+Detailed documentation:
 
-- `--profile` enables frame timing logs (every 30 frames) to `stderr`.
-- `--profile-file=<path>` or `--profile-file <path>` writes the same logs to a file and also enables `--profile`.
-
-JVM examples:
-
-```bash
-# log to stderr (redirect to file if needed)
-./gradlew --console=plain :app:run -PappArgs="--profile file.txt" 2>profile-jvm.log
-
-# log directly to file from app argument
-./gradlew --console=plain :app:run -PappArgs="--profile-file=/absolute/path/profile-jvm.log file.txt"
-```
-
-Native example:
-
-```bash
-./apps/tuink/launcher/build/native/nativeCompile/tuink --profile --profile-file=/absolute/path/profile-native.log file.txt
-```
-
-Profile line format:
-
-```text
-frame=30 build=3.10ms raster=0.67ms diff=170.09ms search=0.00ms total=174.03ms
-```
-
-Metrics:
-- `build`: render-plan/UI preparation.
-- `raster`: rasterization into `CellBuffer`.
-- `diff`: ANSI diff generation between previous/current frame.
-- `search`: search match counting for search UI.
-- `total`: full frame time.
-
-## Gradle Cache Cleanup
-
-If Gradle state becomes stale, you can clean caches.
-
-Project-local cleanup:
-
-```bash
-./gradlew --stop
-rm -rf .gradle build
-```
-
-Full cleanup (global Gradle cache too):
-
-```bash
-./gradlew --stop
-rm -rf .gradle build
-rm -rf ~/.gradle/caches ~/.gradle/daemon ~/.gradle/native ~/.gradle/wrapper
-```
-
-## Native Build
-
-Native compilation requires GraalVM with `native-image` and a system C
-toolchain. Build and run the default glibc binary:
-
-```bash
-./gradlew :app:nativeCompile
-./apps/tuink/launcher/build/native/nativeCompile/tuink file.txt
-```
-
-Other targets:
-
-```bash
-./gradlew :app:nativeCompile -Ptarget=musl
-./apps/tuink/launcher/build/native/nativeMuslCompile/tuink-musl file.txt
-
-./gradlew :app:nativeCompile -Ptarget=all
-```
-
-For older x86_64 CPUs, musl builds default to `-march=compatibility`.
-You can override it explicitly:
-
-```bash
-./gradlew :app:nativeCompile -Ptarget=musl -PnativeMarch=compatibility
-./gradlew :app:nativeCompile -Ptarget=musl -PnativeMarch=native
-```
-
-Default binary names:
-- `tuink`
-- `tuink-musl`
-
-## Native Tasks Reference
-
-Level 1 (basic):
-
-```bash
-./gradlew :app:nativeCompile
-./gradlew :app:nativeCompile -Ptarget=musl
-./gradlew :app:nativeDistTarGz                 # default target=glibc
-./gradlew :app:nativeDistTarGz -Ptarget=musl
-./gradlew :app:nativeDistTarGz -Ptarget=all
-```
-
-Level 2 (advanced, PGO):
-
-```bash
-./gradlew :app:nativeProfileInstrument -Ptarget=glibc
-./gradlew :app:nativeProfileInstrument -Ptarget=musl
-./gradlew :app:nativeProfileInstrument -Ptarget=all
-./gradlew :app:nativeProfileBuild -Ptarget=glibc -PpgoProfile=/absolute/path/to/profile.iprof
-./gradlew :app:nativeProfileBuild -Ptarget=musl -PpgoProfile=/absolute/path/to/profile.iprof
-./gradlew :app:nativeProfileBuild -Ptarget=all -PpgoProfile=/absolute/path/to/profile.iprof
-```
-
-## Install
-
-Install scripts are copied next to native binaries after native build.
-
-### Install from native build output
-
-Build native binary:
-
-```bash
-./gradlew :app:nativeCompile
-# or musl
-./gradlew :app:nativeCompile -Ptarget=musl
-```
-
-Install:
-
-```bash
-# glibc build
-cd apps/tuink/launcher/build/native/nativeCompile
-./install.sh               # auto-detects tuink
-./install.sh tuink
-
-# musl build
-cd apps/tuink/launcher/build/native/nativeMuslCompile
-./install.sh               # auto-detects tuink-musl
-./install.sh tuink-musl
-```
-
-This installs:
-- binary to `/opt/tuink/tuink`
-- scripts to `/opt/tuink/install.sh` and `/opt/tuink/uninstall.sh`
-- release docs (if present nearby): `README.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`
-- symlink `/usr/local/bin/tuink -> /opt/tuink/tuink`
-
-Uninstall:
-
-```bash
-# from glibc output
-cd apps/tuink/launcher/build/native/nativeCompile
-./uninstall.sh
-
-# from musl output
-cd apps/tuink/launcher/build/native/nativeMuslCompile
-./uninstall.sh
-```
-
-### Install from release tar.gz
-
-Build release archives. These are the preferred artifacts for GitHub/GitLab
-releases:
-
-```bash
-./gradlew clean test :app:nativeDistTarGz
-./gradlew clean test :app:nativeDistTarGz -Ptarget=musl
-./gradlew clean test :app:nativeDistTarGz -Ptarget=all
-```
-
-Then:
-
-```bash
-tar -xzf apps/tuink/launcher/build/distributions/tuink-<version>-<os>-<arch>.tar.gz
-cd tuink-<version>-<os>-<arch>
-./install.sh
-```
-
-Archive content includes:
-
-- `tuink` binary
-- `install.sh` and `uninstall.sh`
-- `README.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`
-- `samples/`
+- [Build and native targets](docs/building.md)
+- [Release archives and Debian packaging](docs/packaging.md)
+- [Render-loop profiling](docs/profiling.md)
 
 ## MVP keybindings
 

@@ -1,7 +1,7 @@
 package dev.tuink.tui.ui;
 
 import dev.tuink.core.EditorEngine;
-import dev.tuink.tui.KeyEvent;
+import dev.tuink.tui.input.KeyEvent;
 
 /**
  * Tracks viewport interaction mode and applies cursor visibility policy.

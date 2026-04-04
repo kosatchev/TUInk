@@ -1,5 +1,6 @@
 package dev.tuink.tui;
 
+import dev.tuink.tui.input.KeyEvent;
 import java.nio.file.Path;
 
 final class EditorActionController {

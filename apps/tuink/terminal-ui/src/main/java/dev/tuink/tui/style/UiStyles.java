@@ -1,4 +1,4 @@
-package dev.tuink.tui;
+package dev.tuink.tui.style;
 
 import dev.tuink.render.Color;
 import dev.tuink.render.Style;

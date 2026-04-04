@@ -1,5 +1,6 @@
 package dev.tuink.tui;
 
+import dev.tuink.tui.input.KeyEvent;
 import java.nio.file.Path;
 import java.util.function.BiPredicate;
 import java.util.function.Function;

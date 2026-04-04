@@ -1,4 +1,4 @@
-package dev.tuink.tui;
+package dev.tuink.tui.input;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;

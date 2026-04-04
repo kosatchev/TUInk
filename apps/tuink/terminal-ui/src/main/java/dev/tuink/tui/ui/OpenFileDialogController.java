@@ -1,6 +1,6 @@
 package dev.tuink.tui.ui;
 
-import dev.tuink.tui.KeyEvent;
+import dev.tuink.tui.input.KeyEvent;
 import java.util.function.Function;
 
 public final class OpenFileDialogController {

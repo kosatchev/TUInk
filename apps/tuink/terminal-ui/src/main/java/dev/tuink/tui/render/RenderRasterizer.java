@@ -7,8 +7,8 @@ import dev.tuink.render.LineVisual;
 import dev.tuink.render.RenderPlan;
 import dev.tuink.render.Style;
 import dev.tuink.render.StyleSpan;
-import dev.tuink.tui.UiStyles;
-import dev.tuink.tui.UiStyles.Palette;
+import dev.tuink.tui.style.UiStyles;
+import dev.tuink.tui.style.UiStyles.Palette;
 import java.util.List;
 
 /**

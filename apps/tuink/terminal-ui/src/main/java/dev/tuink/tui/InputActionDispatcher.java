@@ -5,6 +5,7 @@ import dev.tuink.core.EditorState;
 import dev.tuink.core.GutterDiffMode;
 import dev.tuink.core.TabInsertMode;
 import dev.tuink.tui.flow.SearchFocus;
+import dev.tuink.tui.input.KeyEvent;
 import dev.tuink.tui.ui.MenuBar;
 import java.io.PrintWriter;
 

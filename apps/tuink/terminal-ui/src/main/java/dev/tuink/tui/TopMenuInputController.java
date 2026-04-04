@@ -1,5 +1,6 @@
 package dev.tuink.tui;
 
+import dev.tuink.tui.input.KeyEvent;
 import dev.tuink.tui.ui.MenuBar;
 
 final class TopMenuInputController {

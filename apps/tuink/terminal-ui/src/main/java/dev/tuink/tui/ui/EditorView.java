@@ -8,7 +8,7 @@ import dev.tuink.core.Position;
 import dev.tuink.core.TextModel;
 import dev.tuink.render.RenderPlan;
 import dev.tuink.render.ScrollInteraction;
-import dev.tuink.tui.KeyEvent;
+import dev.tuink.tui.input.KeyEvent;
 import dev.tuink.tui.render.HorizontalScrollbar;
 import dev.tuink.tui.render.VerticalScrollbar;
 

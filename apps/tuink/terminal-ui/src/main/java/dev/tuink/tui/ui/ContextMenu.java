@@ -2,7 +2,7 @@ package dev.tuink.tui.ui;
 
 import dev.tuink.core.DisplayText;
 import dev.tuink.render.Style;
-import dev.tuink.tui.UiStyles;
+import dev.tuink.tui.style.UiStyles;
 import dev.tuink.tui.render.CellBuffer;
 import dev.tuink.tui.render.CellText;
 

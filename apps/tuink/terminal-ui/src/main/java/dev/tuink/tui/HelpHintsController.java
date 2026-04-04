@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.tui.input.KeyEvent;
+
 final class HelpHintsController {
     private HelpHintsController() {
     }

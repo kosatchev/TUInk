@@ -1,6 +1,6 @@
 package dev.tuink.tui.ui;
 
-import dev.tuink.tui.KeyEvent;
+import dev.tuink.tui.input.KeyEvent;
 import dev.tuink.tui.flow.ConfirmChoice;
 
 public final class ConfirmBarController {

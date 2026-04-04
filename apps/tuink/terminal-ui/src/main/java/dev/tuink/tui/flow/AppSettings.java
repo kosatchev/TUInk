@@ -2,7 +2,7 @@ package dev.tuink.tui.flow;
 
 import dev.tuink.core.GutterDiffMode;
 import dev.tuink.core.TabInsertMode;
-import dev.tuink.tui.UiStyles;
+import dev.tuink.tui.style.UiStyles;
 
 public record AppSettings(
     boolean showTabBar,

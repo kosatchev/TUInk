@@ -1,4 +1,4 @@
-package dev.tuink.tui;
+package dev.tuink.tui.input;
 
 import org.jline.utils.NonBlockingReader;
 import java.io.IOException;

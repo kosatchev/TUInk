@@ -3,7 +3,7 @@ package dev.tuink.tui.ui;
 import dev.tuink.render.Style;
 import dev.tuink.core.GutterDiffMode;
 import dev.tuink.core.TabInsertMode;
-import dev.tuink.tui.KeyEvent;
+import dev.tuink.tui.input.KeyEvent;
 import dev.tuink.tui.render.Cell;
 import dev.tuink.tui.render.CellBuffer;
 import dev.tuink.tui.render.CellText;

@@ -2,7 +2,7 @@ package dev.tuink.tui.flow;
 
 import dev.tuink.core.GutterDiffMode;
 import dev.tuink.core.TabInsertMode;
-import dev.tuink.tui.UiStyles;
+import dev.tuink.tui.style.UiStyles;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;

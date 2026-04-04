@@ -1,4 +1,4 @@
-package dev.tuink.tui;
+package dev.tuink.tui.input;
 
 /**
  * Decoded key events from terminal input.

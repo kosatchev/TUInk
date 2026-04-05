@@ -1,15 +1,76 @@
 # Building TUInk
 
+Run the built-in command reference from the repository root:
+
+```bash
+./gradlew buildHelp
+```
+
+This task only prints help. It does not compile sources or create artifacts.
+
 ## Requirements
 
 JVM builds require Java 17 and use the checked-in Gradle wrapper.
+
+Check the active JVM and Gradle environment:
+
+```bash
+./gradlew --version
+```
+
+Do not rely on a system Gradle installation: use `./gradlew` so the project
+uses the checked-in wrapper version.
+
+Native builds additionally require:
+
+- GraalVM with `native-image`;
+- a system C toolchain;
+- the platform libraries required by GraalVM;
+- a musl-capable toolchain for the static musl target.
+
+Debian packaging additionally requires Linux with `dpkg-deb`, `gzip`, and
+`strip`. `lintian` is optional and is used only for package validation.
+
+## Choose a build
+
+| Goal | Command | Primary output |
+|---|---|---|
+| Run tests | `./gradlew test` | Test reports below module `build/` directories |
+| Build JVM project | `./gradlew clean test build` | Module classes and JARs |
+| Run from sources | `./gradlew --console=plain :app:run` | Interactive process |
+| Installable JVM layout | `./gradlew :app:installDist` | `apps/tuink/launcher/build/install/tuink/` |
+| JVM release ZIP | `./gradlew :app:distZip` | `build/releases/tuink-<version>.zip` |
+| Native glibc binary | `./gradlew :app:nativeGlibc` | `apps/tuink/launcher/build/native/nativeCompile/tuink` |
+| Native musl binary | `./gradlew :app:nativeMusl` | `apps/tuink/launcher/build/native/nativeMuslCompile/tuink-musl` |
+| Native archive | `./gradlew :app:nativeDistTarGz` | `build/releases/*.tar.gz` |
+| Debian package | `./gradlew :app:nativeDeb` | `build/releases/tuink_<version>_<arch>.deb` |
+| Complete release | `./gradlew clean :app:release` | ZIP, glibc archive, DEB, checksums |
+
+## JVM development build
+
+Build and test all modules:
 
 ```bash
 ./gradlew clean test build
 ```
 
-Native builds additionally require GraalVM with `native-image` and a system C
-toolchain.
+Run only a specific module's tests when iterating:
+
+```bash
+./gradlew :core:test
+./gradlew :render:test
+./gradlew :tui:test
+```
+
+Run the canonical application entrypoint:
+
+```bash
+./gradlew --console=plain :app:run
+./gradlew --console=plain :app:run -PappArgs="file.txt"
+```
+
+The editor requires an interactive TTY. An IDE console or redirected stdin may
+be detected as a dumb terminal.
 
 ## JVM distribution
 
@@ -28,6 +89,11 @@ Run the installed layout:
 
 The JVM distribution requires Java 17 on the target machine. It includes
 `README.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, and `samples/`.
+
+Gradle also creates module JARs as internal build products. They are not
+standalone fat/executable JAR distributions and do not carry the complete
+runtime dependency set. Use `:app:distZip` when a portable JVM release is
+needed.
 
 ## Native targets
 
@@ -58,6 +124,61 @@ older x86_64 CPUs. Override it only when the deployment CPU is known:
 ./gradlew :app:nativeMusl -PnativeMarch=native
 ```
 
+Use `nativeMarch=native` only for a binary that will run on the same or a known
+compatible CPU generation. Release builds should keep the default
+`compatibility` value.
+
+## Native release archives
+
+Build a glibc, musl, or both native archives:
+
+```bash
+./gradlew :app:nativeDistTarGz
+./gradlew :app:nativeDistTarGz -Ptarget=musl
+./gradlew :app:nativeDistTarGz -Ptarget=all
+```
+
+Archives are written to `build/releases/` and include the binary, installer,
+uninstaller, README, licenses, third-party notices, and samples.
+
+## Debian package
+
+Build a Debian package from the glibc native binary:
+
+```bash
+./gradlew :app:nativeDeb
+```
+
+The package is written to:
+
+```text
+build/releases/tuink_<version>_<deb-arch>.deb
+```
+
+The Debian task does not use the archive installer and does not invoke `sudo`.
+Do not pass `-Ptarget=musl` to `nativeDeb`.
+
+See [Packaging TUInk](packaging.md) for package contents, inspection, linting,
+and installation.
+
+## Complete release
+
+Build the tested JVM ZIP, default glibc archive, Debian package, and checksum
+manifest:
+
+```bash
+./gradlew clean :app:release
+```
+
+Include the musl archive as well:
+
+```bash
+./gradlew clean :app:release -Ptarget=all
+```
+
+The `release` task runs module tests before assembling public artifacts. It does
+not publish or install anything outside the repository.
+
 ## PGO
 
 PGO tasks are optional and are registered only when `-PenablePgo` is present.
@@ -84,6 +205,57 @@ If `-PpgoProfile` is omitted, the default profile location is
 
 PGO is an internal optimization step and does not create a separate release
 format.
+
+## Output layout
+
+```text
+apps/tuink/launcher/build/
+├── install/tuink/                 # JVM installDist layout
+├── libs/                          # internal app JAR
+├── native/nativeCompile/          # glibc native binary
+├── native/nativeMuslCompile/      # musl native binary
+└── staging/                       # temporary release staging
+
+build/releases/
+├── tuink-<version>.zip
+├── tuink-<version>-linux-<arch>.tar.gz
+├── tuink-<version>-linux-<arch>-musl.tar.gz  # when requested
+├── tuink_<version>_<deb-arch>.deb
+└── SHA256SUMS
+```
+
+`apps/tuink/launcher/build/` and other module `build/` directories are intermediate output.
+Only `build/releases/` is the public release output directory.
+
+## Cleaning
+
+Remove generated module output and public release artifacts:
+
+```bash
+./gradlew clean
+```
+
+The project-local `.gradle/` cache is not a release artifact. The ignored
+`.local/pgo/default.iprof` profile is intentionally outside Gradle build
+directories and survives `clean`.
+
+## Inspect available tasks
+
+```bash
+./gradlew tasks
+./gradlew :app:tasks --group build
+./gradlew :app:tasks --group distribution
+./gradlew help --task :app:release
+./gradlew help --task :app:nativeDistTarGz
+```
+
+Use `--stacktrace` for a failure trace and `--info` when toolchain discovery or
+task inputs need inspection:
+
+```bash
+./gradlew :app:nativeGlibc --stacktrace
+./gradlew :app:nativeDeb --info
+```
 
 ## Build configuration layout
 

@@ -28,3 +28,64 @@ subprojects {
         testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
     }
 }
+
+tasks.register('buildHelp') {
+    group = 'help'
+    description = 'Print the supported TUInk build, packaging, and release commands.'
+
+    doLast {
+        println """
+            TUInk ${rootProject.version} build help
+
+            JVM development
+              ./gradlew test
+                  Run all module tests.
+              ./gradlew clean test build
+                  Clean and build the complete multi-module JVM project.
+              ./gradlew --console=plain :app:run
+                  Run the canonical application entrypoint in an interactive TTY.
+
+            JVM distribution
+              ./gradlew :app:installDist
+                  Installed layout: apps/tuink/launcher/build/install/tuink/
+              ./gradlew :app:distZip
+                  ZIP: build/releases/tuink-${rootProject.version}.zip
+
+            Native binaries (require GraalVM native-image and a C toolchain)
+              ./gradlew :app:nativeGlibc
+                  Binary: apps/tuink/launcher/build/native/nativeCompile/tuink
+              ./gradlew :app:nativeMusl
+                  Static binary: apps/tuink/launcher/build/native/nativeMuslCompile/tuink-musl
+              ./gradlew :app:nativeAll
+                  Build both native binaries.
+
+            Native archives
+              ./gradlew :app:nativeDistTarGz
+                  Build the default glibc tar.gz in build/releases/.
+              ./gradlew :app:nativeDistTarGz -Ptarget=musl
+                  Build the musl tar.gz.
+              ./gradlew :app:nativeDistTarGz -Ptarget=all
+                  Build both native archives.
+
+            Debian package (Linux, glibc target)
+              ./gradlew :app:nativeDeb
+                  Package: build/releases/tuink_${rootProject.version}_<deb-arch>.deb
+
+            Complete release
+              ./gradlew clean :app:release
+                  Run tests and build the JVM ZIP, glibc archive, Debian package,
+                  and build/releases/SHA256SUMS.
+              ./gradlew clean :app:release -Ptarget=all
+                  Also include the musl archive.
+
+            Useful inspection
+              ./gradlew :app:tasks --group distribution
+              ./gradlew help --task :app:release
+
+            Notes
+              Module JARs are internal build artifacts, not the supported standalone
+              distribution. Use :app:distZip for a JVM release.
+              Detailed docs: docs/building.md and docs/packaging.md
+        """.stripIndent().trim()
+    }
+}

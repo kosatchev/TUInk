@@ -86,6 +86,7 @@ Or extract the native archive and use its `install.sh`.
 
 Detailed documentation:
 
+- Print the local build command reference with `./gradlew buildHelp`.
 - [Build and native targets](docs/building.md)
 - [Release archives and Debian packaging](docs/packaging.md)
 - [Render-loop profiling](docs/profiling.md)

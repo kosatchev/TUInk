@@ -9,15 +9,21 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Properties;
+import java.util.Set;
 
 /**
  * Filesystem store for recovery snapshots.
@@ -26,6 +32,15 @@ public final class RecoveryStore {
     private static final String RECOVERY_DIR = "recovery";
     private static final String META_SUFFIX = ".meta.properties";
     private static final String TEXT_SUFFIX = ".txt";
+    private static final Set<PosixFilePermission> DIRECTORY_PERMISSIONS = Set.of(
+        PosixFilePermission.OWNER_READ,
+        PosixFilePermission.OWNER_WRITE,
+        PosixFilePermission.OWNER_EXECUTE
+    );
+    private static final Set<PosixFilePermission> FILE_PERMISSIONS = Set.of(
+        PosixFilePermission.OWNER_READ,
+        PosixFilePermission.OWNER_WRITE
+    );
     private static final String KEY_CREATED_AT = "createdAtEpochMillis";
     private static final String KEY_DIRTY = "dirty";
     private static final String KEY_CURRENT_FILE = "currentFile";
@@ -40,10 +55,20 @@ public final class RecoveryStore {
     private static final String KEY_SELECTION_PRESENT = "selection.present";
     private static final String KEY_SELECTION_LINE = "selection.line";
     private static final String KEY_SELECTION_COL = "selection.col";
+    private final Path recoveryDirectory;
+
+    public RecoveryStore() {
+        this(defaultDirectory());
+    }
+
+    RecoveryStore(Path recoveryDirectory) {
+        this.recoveryDirectory = Objects.requireNonNull(recoveryDirectory, "recoveryDirectory")
+            .toAbsolutePath()
+            .normalize();
+    }
 
     public Path directory() {
-        String home = System.getProperty("user.home", ".");
-        return Path.of(home, ".config", "tuink", RECOVERY_DIR);
+        return recoveryDirectory;
     }
 
     public void save(String entryId, RecoverySnapshot snapshot) throws IOException {
@@ -51,7 +76,8 @@ public final class RecoveryStore {
             return;
         }
         Path dir = directory();
-        Files.createDirectories(dir);
+        ensurePrivateDirectory(dir);
+        hardenExistingSnapshotFiles(dir);
         String id = sanitize(entryId);
         Path text = dir.resolve(id + TEXT_SUFFIX);
         Path meta = dir.resolve(id + META_SUFFIX);
@@ -61,13 +87,19 @@ public final class RecoveryStore {
 
     public List<Entry> loadAll() throws IOException {
         Path dir = directory();
-        if (!Files.exists(dir)) {
+        if (!Files.exists(dir, LinkOption.NOFOLLOW_LINKS)) {
             return List.of();
         }
+        ensurePrivateDirectory(dir);
+        hardenExistingSnapshotFiles(dir);
         List<Entry> out = new ArrayList<>();
         try (var files = Files.list(dir)) {
             files
-                .filter(path -> path.getFileName() != null && path.getFileName().toString().endsWith(META_SUFFIX))
+                .filter(path ->
+                    path.getFileName() != null
+                        && path.getFileName().toString().endsWith(META_SUFFIX)
+                        && Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
+                )
                 .sorted()
                 .forEach(meta -> {
                     String name = meta.getFileName().toString();
@@ -92,6 +124,11 @@ public final class RecoveryStore {
         }
         String id = sanitize(entryId);
         Path dir = directory();
+        if (!Files.exists(dir, LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+        ensurePrivateDirectory(dir);
+        hardenExistingSnapshotFiles(dir);
         Files.deleteIfExists(dir.resolve(id + META_SUFFIX));
         Files.deleteIfExists(dir.resolve(id + TEXT_SUFFIX));
     }
@@ -106,7 +143,8 @@ public final class RecoveryStore {
     }
 
     private Entry readEntry(String id, Path metaPath, Path textPath) throws IOException {
-        if (!Files.exists(metaPath) || !Files.exists(textPath)) {
+        if (!Files.isRegularFile(metaPath, LinkOption.NOFOLLOW_LINKS)
+            || !Files.isRegularFile(textPath, LinkOption.NOFOLLOW_LINKS)) {
             return null;
         }
         Properties p = new Properties();
@@ -166,16 +204,82 @@ public final class RecoveryStore {
     private static void writeAtomically(Path target, Writer writer) throws IOException {
         Path parent = target.getParent();
         if (parent != null) {
-            Files.createDirectories(parent);
+            ensurePrivateDirectory(parent);
         }
-        Path tmp = target.resolveSibling(target.getFileName() + ".tmp");
-        try (OutputStream out = Files.newOutputStream(tmp)) {
-            writer.write(out);
+        Path tmp = createPrivateTempFile(parent, target.getFileName().toString());
+        try {
+            try (OutputStream out = Files.newOutputStream(tmp)) {
+                writer.write(out);
+            }
+            setPrivateFilePermissions(tmp);
+            try {
+                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException ignored) {
+                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(tmp);
+        }
+    }
+
+    private static Path defaultDirectory() {
+        String home = System.getProperty("user.home", ".");
+        return Path.of(home, ".config", "tuink", RECOVERY_DIR);
+    }
+
+    private static void ensurePrivateDirectory(Path directory) throws IOException {
+        if (Files.isSymbolicLink(directory)) {
+            throw new IOException("Recovery directory must not be a symbolic link: " + directory);
         }
         try {
-            Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-        } catch (IOException ignored) {
-            Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+            Files.createDirectories(
+                directory,
+                PosixFilePermissions.asFileAttribute(DIRECTORY_PERMISSIONS)
+            );
+        } catch (UnsupportedOperationException ignored) {
+            Files.createDirectories(directory);
+        }
+        if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("Recovery path is not a directory: " + directory);
+        }
+        setPosixPermissions(directory, DIRECTORY_PERMISSIONS);
+    }
+
+    private static void hardenExistingSnapshotFiles(Path directory) throws IOException {
+        try (var paths = Files.newDirectoryStream(directory)) {
+            for (Path path : paths) {
+                String name = path.getFileName() == null ? "" : path.getFileName().toString();
+                if ((name.endsWith(META_SUFFIX) || name.endsWith(TEXT_SUFFIX))
+                    && Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+                    setPrivateFilePermissions(path);
+                }
+            }
+        }
+    }
+
+    private static Path createPrivateTempFile(Path parent, String fileName) throws IOException {
+        try {
+            return Files.createTempFile(
+                parent,
+                "." + fileName + ".",
+                ".tmp",
+                PosixFilePermissions.asFileAttribute(FILE_PERMISSIONS)
+            );
+        } catch (UnsupportedOperationException ignored) {
+            return Files.createTempFile(parent, "." + fileName + ".", ".tmp");
+        }
+    }
+
+    private static void setPrivateFilePermissions(Path file) throws IOException {
+        setPosixPermissions(file, FILE_PERMISSIONS);
+    }
+
+    private static void setPosixPermissions(Path path, Set<PosixFilePermission> permissions)
+        throws IOException {
+        try {
+            Files.setPosixFilePermissions(path, permissions);
+        } catch (UnsupportedOperationException ignored) {
+            // Rely on the platform's default ACLs when POSIX permissions are unavailable.
         }
     }
 

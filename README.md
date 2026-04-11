@@ -83,6 +83,8 @@ sudo apt install ./build/releases/tuink_<version>_<arch>.deb
 ```
 
 Or extract the native archive and use its `install.sh`.
+The archive scripts manage `/opt/tuink` and `/usr/local/bin/tuink`; they refuse
+to replace unrelated files or remove unrecognized directory contents.
 
 Detailed documentation:
 
@@ -129,7 +131,14 @@ Detailed documentation:
 - all save failures are explained in the save notification bar (read-only file, no access to directory, invalid target path, etc).
 - non-interactive save notifications are shown in a separate bar above status: green for success, red for errors, auto-hide after ~3s.
 - save writes atomically via temporary file + move.
+- existing POSIX permission bits are preserved, including executable bits.
+- saving through a symbolic link updates its resolved target without replacing the link.
+- atomic replacement gives the saved path a new inode; other hard links keep their previous content.
 - UI settings are stored in `~/.config/tuink/tuink.properties`.
+- recovery snapshots are stored under `~/.config/tuink/recovery`; on POSIX
+  systems the directory is restricted to `0700` and snapshot files to `0600`.
+  Existing snapshots are tightened on access; a symlink in place of the
+  recovery directory is rejected.
 
 ## Status indicators
 

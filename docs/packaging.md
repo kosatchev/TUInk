@@ -56,6 +56,16 @@ cd tuink-<version>-linux-<arch>
 The archive installer uses `/opt/tuink` and creates
 `/usr/local/bin/tuink`.
 
+The installer marks `/opt/tuink` as an archive-managed installation. It
+refuses to replace an existing non-TUInk file or symlink at
+`/usr/local/bin/tuink`, and it refuses to adopt an unmarked `/opt/tuink`
+directory. Only the current marker format is supported; markerless and unknown
+installations are left unchanged.
+
+The uninstaller removes only the managed symlink and the known files installed
+by the archive. It refuses to continue if the installation marker is missing,
+the symlink points elsewhere, or `/opt/tuink` contains unexpected entries.
+
 ## Debian package
 
 Build the package from the glibc native binary:

@@ -11,9 +11,12 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Editing operations and persistence over a {@link TextBuffer}.
@@ -21,6 +24,14 @@ import java.util.Map;
 public class TextModel {
     private final TextBuffer buffer;
     private static final Charset FALLBACK_CHARSET = Charset.forName("windows-1251");
+    private static final Set<PosixFilePermission> NEW_FILE_PERMISSIONS = Set.of(
+        PosixFilePermission.OWNER_READ,
+        PosixFilePermission.OWNER_WRITE,
+        PosixFilePermission.GROUP_READ,
+        PosixFilePermission.GROUP_WRITE,
+        PosixFilePermission.OTHERS_READ,
+        PosixFilePermission.OTHERS_WRITE
+    );
     private int cachedVisualWidthTabWidth = -1;
     private int cachedMaxVisualLineWidth = 0;
     private boolean maxVisualWidthDirty = true;
@@ -226,7 +237,10 @@ public class TextModel {
     public void save(Path path, Charset charset, String lineSeparator) throws IOException {
         String normalizedSeparator = normalizeLineSeparator(lineSeparator);
         String content = String.join(normalizedSeparator, snapshotLines());
-        Path target = path.toAbsolutePath().normalize();
+        Path requestedTarget = path.toAbsolutePath().normalize();
+        Path target = resolveSaveTarget(requestedTarget);
+        boolean targetExists = Files.exists(target);
+        Set<PosixFilePermission> targetPermissions = readPosixPermissions(target, targetExists);
         Path parent = target.getParent();
         Path tempDir = parent != null ? parent : Path.of(".").toAbsolutePath().normalize();
         String fileName = target.getFileName() == null ? "tuink" : target.getFileName().toString();
@@ -235,9 +249,12 @@ public class TextModel {
             prefix = ".tuink.";
         }
 
-        Path tempFile = Files.createTempFile(tempDir, prefix, ".tmp");
+        Path tempFile = createSaveTempFile(tempDir, prefix, targetExists);
         try {
             Files.writeString(tempFile, content, charset);
+            if (targetPermissions != null) {
+                Files.setPosixFilePermissions(tempFile, targetPermissions);
+            }
             try {
                 Files.move(
                     tempFile,
@@ -250,6 +267,42 @@ public class TextModel {
             }
         } finally {
             Files.deleteIfExists(tempFile);
+        }
+    }
+
+    private static Path resolveSaveTarget(Path requestedTarget) throws IOException {
+        if (Files.isSymbolicLink(requestedTarget)) {
+            return requestedTarget.toRealPath();
+        }
+        return requestedTarget;
+    }
+
+    private static Set<PosixFilePermission> readPosixPermissions(Path target, boolean targetExists)
+        throws IOException {
+        if (!targetExists) {
+            return null;
+        }
+        try {
+            return Files.getPosixFilePermissions(target);
+        } catch (UnsupportedOperationException ignored) {
+            return null;
+        }
+    }
+
+    private static Path createSaveTempFile(Path tempDir, String prefix, boolean targetExists)
+        throws IOException {
+        if (targetExists) {
+            return Files.createTempFile(tempDir, prefix, ".tmp");
+        }
+        try {
+            return Files.createTempFile(
+                tempDir,
+                prefix,
+                ".tmp",
+                PosixFilePermissions.asFileAttribute(NEW_FILE_PERMISSIONS)
+            );
+        } catch (UnsupportedOperationException ignored) {
+            return Files.createTempFile(tempDir, prefix, ".tmp");
         }
     }
 

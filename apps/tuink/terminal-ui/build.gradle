@@ -2,7 +2,8 @@ dependencies {
     implementation project(':core')
     implementation project(':render')
     implementation project(':highlight-regex')
-    implementation 'org.jline:jline:3.30.6'
+    implementation 'org.jline:jline-terminal:3.30.6'
+    runtimeOnly 'org.jline:jline-terminal-jni:3.30.6'
 }
 
 tasks.named('processResources') {

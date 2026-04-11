@@ -23,7 +23,9 @@ Notes:
 ## 2) JLine
 
 Artifact:
-- `org.jline:jline:3.30.6`
+- `org.jline:jline-terminal:3.30.6`
+- `org.jline:jline-terminal-jni:3.30.6`
+- `org.jline:jline-native:3.30.6`
 
 License:
 - BSD 3-Clause License
@@ -33,7 +35,8 @@ Source:
 - Maven coordinates listed in project build files.
 
 Notes:
-- Used by TUI terminal frontend.
+- Used by the TUI terminal frontend. The aggregate JLine artifact and its
+  unused remote telnet/SSH modules are not included.
 
 ## 3) JGit
 

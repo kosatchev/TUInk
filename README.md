@@ -92,6 +92,8 @@ Detailed documentation:
 - [Build and native targets](docs/building.md)
 - [Release archives and Debian packaging](docs/packaging.md)
 - [Render-loop profiling](docs/profiling.md)
+- [Compatibility policy](docs/compatibility.md)
+- [Contributing](CONTRIBUTING.md)
 
 ## MVP keybindings
 

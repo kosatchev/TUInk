@@ -1,5 +1,6 @@
 package dev.tuink.tui;
 
+import dev.tuink.tui.flow.UiModalState;
 import dev.tuink.tui.input.KeyEvent;
 import java.nio.file.Path;
 import java.util.function.BiPredicate;
@@ -12,10 +13,8 @@ final class SaveFlowController {
 
     static SaveAsResult handleSaveAsInput(
         KeyEvent key,
-        boolean saveAsMode,
+        UiModalState modalState,
         String saveAsText,
-        boolean saveOverwriteConfirmMode,
-        Path pendingOverwritePath,
         Path currentFile,
         Function<Path, String> validateSaveTarget,
         Predicate<Path> pathExists,
@@ -23,281 +22,163 @@ final class SaveFlowController {
         BiPredicate<Path, Path> isSameFilePath,
         Function<Path, String> suggestWritableName
     ) {
-        if (!saveAsMode) {
-            return SaveAsResult.notConsumed(saveAsMode, saveOverwriteConfirmMode, pendingOverwritePath);
+        if (!modalState.isSaveAs()) {
+            return result(false, modalState, TextInputEffect.none(), false, null, null);
+        }
+        if (key instanceof KeyEvent.CharInput charInput) {
+            return result(true, modalState, TextInputEffect.insert(charInput.text()), true, null, null);
         }
 
-        if (key instanceof KeyEvent.CharInput charInput) {
-            return new SaveAsResult(
+        KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
+        return switch (action) {
+            case BACKSPACE -> result(true, modalState, TextInputEffect.backspace(), true, null, null);
+            case ENTER -> handleEnter(
+                saveAsText,
+                currentFile,
+                validateSaveTarget,
+                pathExists,
+                isReadOnlyFile,
+                isSameFilePath,
+                suggestWritableName
+            );
+            case ESCAPE, CTRL_Q -> result(
                 true,
+                UiModalState.none(),
+                TextInputEffect.clear(),
                 true,
-                saveOverwriteConfirmMode,
-                pendingOverwritePath,
-                TextInputEffect.insert(charInput.text()),
+                null,
+                null
+            );
+            case ARROW_LEFT -> result(true, modalState, TextInputEffect.moveLeft(), false, null, null);
+            case ARROW_RIGHT -> result(true, modalState, TextInputEffect.moveRight(), false, null, null);
+            case HOME -> result(true, modalState, TextInputEffect.moveHome(), false, null, null);
+            case END -> result(true, modalState, TextInputEffect.moveEnd(), false, null, null);
+            case DELETE -> result(true, modalState, TextInputEffect.deleteForward(), false, null, null);
+            default -> result(true, modalState, TextInputEffect.none(), false, null, null);
+        };
+    }
+
+    private static SaveAsResult handleEnter(
+        String saveAsText,
+        Path currentFile,
+        Function<Path, String> validateSaveTarget,
+        Predicate<Path> pathExists,
+        Predicate<Path> isReadOnlyFile,
+        BiPredicate<Path, Path> isSameFilePath,
+        Function<Path, String> suggestWritableName
+    ) {
+        String target = saveAsText.trim();
+        if (target.isEmpty()) {
+            return result(true, UiModalState.none(), TextInputEffect.clear(), true, null, null);
+        }
+
+        final Path path;
+        try {
+            path = Path.of(target);
+        } catch (RuntimeException e) {
+            return result(
+                true,
+                UiModalState.saveAs(),
+                TextInputEffect.none(),
+                false,
+                "Save failed: invalid target path",
+                null
+            );
+        }
+        String validation = validateSaveTarget.apply(path);
+        if (validation != null) {
+            return result(true, UiModalState.saveAs(), TextInputEffect.none(), false, validation, null);
+        }
+        if (isReadOnlyFile.test(path)) {
+            return result(
+                true,
+                UiModalState.saveAs(),
+                TextInputEffect.setText(suggestWritableName.apply(path)),
+                false,
+                "Save failed: target is read-only: " + path + ". Choose another name.",
+                null
+            );
+        }
+        if (pathExists.test(path) && !isSameFilePath.test(path, currentFile)) {
+            return result(
+                true,
+                UiModalState.saveOverwriteConfirm(path),
+                TextInputEffect.none(),
                 true,
                 null,
                 null
             );
         }
-
-        KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
-        switch (action) {
-            case BACKSPACE -> {
-                return new SaveAsResult(
-                    true,
-                    true,
-                    saveOverwriteConfirmMode,
-                    pendingOverwritePath,
-                    TextInputEffect.backspace(),
-                    true,
-                    null,
-                    null
-                );
-            }
-            case ENTER -> {
-                String target = saveAsText.trim();
-                if (target.isEmpty()) {
-                    return new SaveAsResult(
-                        true,
-                        false,
-                        saveOverwriteConfirmMode,
-                        pendingOverwritePath,
-                        TextInputEffect.clear(),
-                        true,
-                        null,
-                        null
-                    );
-                }
-
-                Path path = Path.of(target);
-                String validation = validateSaveTarget.apply(path);
-                if (validation != null) {
-                    return new SaveAsResult(
-                        true,
-                        true,
-                        saveOverwriteConfirmMode,
-                        pendingOverwritePath,
-                        TextInputEffect.none(),
-                        false,
-                        validation,
-                        null
-                    );
-                }
-                if (isReadOnlyFile.test(path)) {
-                    return new SaveAsResult(
-                        true,
-                        true,
-                        saveOverwriteConfirmMode,
-                        pendingOverwritePath,
-                        TextInputEffect.setText(suggestWritableName.apply(path)),
-                        false,
-                        "Save failed: target is read-only: " + path + ". Choose another name.",
-                        null
-                    );
-                }
-                if (pathExists.test(path) && !isSameFilePath.test(path, currentFile)) {
-                    return new SaveAsResult(true, false, true, path, TextInputEffect.none(), true, null, null);
-                }
-                return new SaveAsResult(
-                    true,
-                    false,
-                    saveOverwriteConfirmMode,
-                    pendingOverwritePath,
-                    TextInputEffect.clear(),
-                    false,
-                    null,
-                    path
-                );
-            }
-            case ESCAPE, CTRL_Q -> {
-                return new SaveAsResult(
-                    true,
-                    false,
-                    saveOverwriteConfirmMode,
-                    pendingOverwritePath,
-                    TextInputEffect.clear(),
-                    true,
-                    null,
-                    null
-                );
-            }
-            case ARROW_LEFT -> {
-                return new SaveAsResult(
-                    true,
-                    true,
-                    saveOverwriteConfirmMode,
-                    pendingOverwritePath,
-                    TextInputEffect.moveLeft(),
-                    false,
-                    null,
-                    null
-                );
-            }
-            case ARROW_RIGHT -> {
-                return new SaveAsResult(
-                    true,
-                    true,
-                    saveOverwriteConfirmMode,
-                    pendingOverwritePath,
-                    TextInputEffect.moveRight(),
-                    false,
-                    null,
-                    null
-                );
-            }
-            case HOME -> {
-                return new SaveAsResult(
-                    true,
-                    true,
-                    saveOverwriteConfirmMode,
-                    pendingOverwritePath,
-                    TextInputEffect.moveHome(),
-                    false,
-                    null,
-                    null
-                );
-            }
-            case END -> {
-                return new SaveAsResult(
-                    true,
-                    true,
-                    saveOverwriteConfirmMode,
-                    pendingOverwritePath,
-                    TextInputEffect.moveEnd(),
-                    false,
-                    null,
-                    null
-                );
-            }
-            case DELETE -> {
-                return new SaveAsResult(
-                    true,
-                    true,
-                    saveOverwriteConfirmMode,
-                    pendingOverwritePath,
-                    TextInputEffect.deleteForward(),
-                    false,
-                    null,
-                    null
-                );
-            }
-            default -> {
-                // Ignore unsupported keys while Save As prompt is active.
-            }
-        }
-        return new SaveAsResult(
-            true,
-            true,
-            saveOverwriteConfirmMode,
-            pendingOverwritePath,
-            TextInputEffect.none(),
-            false,
-            null,
-            null
-        );
+        return result(true, UiModalState.none(), TextInputEffect.clear(), false, null, path);
     }
 
-    static SaveOverwriteResult handleOverwriteConfirm(
-        KeyEvent key,
-        boolean saveOverwriteConfirmMode,
-        Path pendingOverwritePath
-    ) {
-        if (!saveOverwriteConfirmMode) {
-            return SaveOverwriteResult.notConsumed(saveOverwriteConfirmMode, pendingOverwritePath);
-        }
-
-        if (key instanceof KeyEvent.CharInput charInput) {
-            char ch = charInput.asciiCharOrZero();
-            if (ch == 'y' || ch == 'Y') {
-                return new SaveOverwriteResult(true, false, null, false, false, pendingOverwritePath);
-            }
-            if (ch == 'n' || ch == 'N') {
-                return new SaveOverwriteResult(true, false, null, true, true, null);
-            }
-            return new SaveOverwriteResult(true, true, pendingOverwritePath, false, false, null);
-        }
-
-        KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
-        switch (action) {
-            case ESCAPE, CTRL_Q, ENTER -> {
-                return new SaveOverwriteResult(true, false, null, true, true, null);
-            }
-            default -> {
-                // Ignore unsupported keys in overwrite confirmation.
-            }
-        }
-        return new SaveOverwriteResult(true, true, pendingOverwritePath, false, false, null);
-    }
-
-    record SaveAsResult(
+    private static SaveAsResult result(
         boolean consumed,
-        boolean saveAsMode,
-        boolean saveOverwriteConfirmMode,
-        Path pendingOverwritePath,
+        UiModalState modalState,
         TextInputEffect textInputEffect,
         boolean clearNotification,
         String errorMessage,
         Path saveNowPath
     ) {
-        static SaveAsResult notConsumed(boolean saveAsMode, boolean saveOverwriteConfirmMode, Path pendingOverwritePath) {
-            return new SaveAsResult(
-                false,
-                saveAsMode,
-                saveOverwriteConfirmMode,
-                pendingOverwritePath,
-                TextInputEffect.none(),
-                false,
-                null,
-                null
-            );
-        }
+        return new SaveAsResult(
+            consumed,
+            modalState,
+            textInputEffect,
+            clearNotification,
+            errorMessage,
+            saveNowPath
+        );
     }
 
-    record TextInputEffect(TextInputEffectKind kind, Character ch, String text) {
-        static TextInputEffect none() {
-            return new TextInputEffect(TextInputEffectKind.NONE, null, null);
-        }
+    record SaveAsResult(
+        boolean consumed,
+        UiModalState modalState,
+        TextInputEffect textInputEffect,
+        boolean clearNotification,
+        String errorMessage,
+        Path saveNowPath
+    ) {
+    }
 
-        static TextInputEffect insert(char ch) {
-            return insert(String.valueOf(ch));
+    record TextInputEffect(TextInputEffectKind kind, String text) {
+        static TextInputEffect none() {
+            return new TextInputEffect(TextInputEffectKind.NONE, null);
         }
 
         static TextInputEffect insert(String text) {
-            String safe = text == null ? "" : text;
-            Character legacyChar = safe.length() == 1 ? safe.charAt(0) : null;
-            return new TextInputEffect(TextInputEffectKind.INSERT, legacyChar, safe);
+            return new TextInputEffect(TextInputEffectKind.INSERT, text == null ? "" : text);
         }
 
         static TextInputEffect setText(String text) {
-            return new TextInputEffect(TextInputEffectKind.SET_TEXT, null, text);
+            return new TextInputEffect(TextInputEffectKind.SET_TEXT, text);
         }
 
         static TextInputEffect backspace() {
-            return new TextInputEffect(TextInputEffectKind.BACKSPACE, null, null);
+            return new TextInputEffect(TextInputEffectKind.BACKSPACE, null);
         }
 
         static TextInputEffect moveLeft() {
-            return new TextInputEffect(TextInputEffectKind.MOVE_LEFT, null, null);
+            return new TextInputEffect(TextInputEffectKind.MOVE_LEFT, null);
         }
 
         static TextInputEffect moveRight() {
-            return new TextInputEffect(TextInputEffectKind.MOVE_RIGHT, null, null);
+            return new TextInputEffect(TextInputEffectKind.MOVE_RIGHT, null);
         }
 
         static TextInputEffect moveHome() {
-            return new TextInputEffect(TextInputEffectKind.MOVE_HOME, null, null);
+            return new TextInputEffect(TextInputEffectKind.MOVE_HOME, null);
         }
 
         static TextInputEffect moveEnd() {
-            return new TextInputEffect(TextInputEffectKind.MOVE_END, null, null);
+            return new TextInputEffect(TextInputEffectKind.MOVE_END, null);
         }
 
         static TextInputEffect deleteForward() {
-            return new TextInputEffect(TextInputEffectKind.DELETE_FORWARD, null, null);
+            return new TextInputEffect(TextInputEffectKind.DELETE_FORWARD, null);
         }
 
         static TextInputEffect clear() {
-            return new TextInputEffect(TextInputEffectKind.CLEAR, null, null);
+            return new TextInputEffect(TextInputEffectKind.CLEAR, null);
         }
     }
 
@@ -312,18 +193,5 @@ final class SaveFlowController {
         MOVE_END,
         DELETE_FORWARD,
         CLEAR
-    }
-
-    record SaveOverwriteResult(
-        boolean consumed,
-        boolean saveOverwriteConfirmMode,
-        Path pendingOverwritePath,
-        boolean saveAsMode,
-        boolean clearNotification,
-        Path saveNowPath
-    ) {
-        static SaveOverwriteResult notConsumed(boolean saveOverwriteConfirmMode, Path pendingOverwritePath) {
-            return new SaveOverwriteResult(false, saveOverwriteConfirmMode, pendingOverwritePath, false, false, null);
-        }
     }
 }

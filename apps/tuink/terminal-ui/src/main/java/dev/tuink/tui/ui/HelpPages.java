@@ -84,24 +84,20 @@ public final class HelpPages {
     private HelpPages() {
     }
 
-    private static String appVersion() {
+    static String appVersion() {
         try (InputStream in = HelpPages.class.getResourceAsStream("/tuink-version.properties")) {
-            if (in != null) {
-                Properties p = new Properties();
-                p.load(in);
-                String fromResource = p.getProperty("version");
-                if (fromResource != null && !fromResource.isBlank()) {
-                    return fromResource.trim();
-                }
+            if (in == null) {
+                return "dev";
             }
-        } catch (Exception ignored) {
-            // fall through to other sources
+            Properties p = new Properties();
+            p.load(in);
+            String version = p.getProperty("version");
+            if (version == null || version.isBlank()) {
+                throw new IllegalStateException("Generated TUInk version resource has no version");
+            }
+            return version.trim();
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("Failed to read generated TUInk version resource", e);
         }
-
-        String implementationVersion = HelpPages.class.getPackage().getImplementationVersion();
-        if (implementationVersion != null && !implementationVersion.isBlank()) {
-            return implementationVersion;
-        }
-        return System.getProperty("tuink.version", "dev");
     }
 }

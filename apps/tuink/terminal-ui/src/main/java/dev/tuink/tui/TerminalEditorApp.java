@@ -126,9 +126,11 @@ public class TerminalEditorApp {
         }
 
         AppSettings loadedSettings = AppSettings.defaults();
+        boolean settingsFileAccepted = true;
         try {
             loadedSettings = AppSettingsStore.load();
         } catch (IOException e) {
+            settingsFileAccepted = false;
             System.err.println("Warning: failed to load settings from " + AppSettingsStore.path() + ": " + e.getMessage());
         }
 
@@ -200,7 +202,21 @@ public class TerminalEditorApp {
         int editorScrollDragThumbOffset = 0;
         TreeView.ScrollAxis openFileScrollDrag = TreeView.ScrollAxis.NONE;
         try {
-            startupRecoveryEntries.addAll(recoveryStore.loadAll());
+            RecoveryStore.LoadResult recoveryLoad = recoveryStore.loadAll();
+            startupRecoveryEntries.addAll(recoveryLoad.entries());
+            if (!recoveryLoad.skipped().isEmpty()) {
+                String ids = recoveryLoad.skipped().stream()
+                    .map(RecoveryStore.SkippedSnapshot::id)
+                    .collect(java.util.stream.Collectors.joining(", "));
+                notification.warning(
+                    "Skipped " + recoveryLoad.skipped().size()
+                        + " incompatible recovery snapshot(s): " + ids
+                );
+                System.err.println(
+                    "Warning: incompatible recovery snapshots were left unchanged in "
+                        + recoveryStore.directory() + ": " + recoveryLoad.skipped()
+                );
+            }
             if (!startupRecoveryEntries.isEmpty()) {
                 modalState = UiModalState.recoveryConfirm();
             }
@@ -558,14 +574,9 @@ public class TerminalEditorApp {
                             uiSessionState.wrapLinesSetting,
                             uiSessionState.wrapWordsSetting,
                             uiSessionState.autoSelectionHighlightSetting,
-                            saveAsMode,
+                            modalState,
                             saveAsInput,
-                            saveOverwriteConfirmMode,
-                            pendingOverwritePath,
-                            quitConfirmMode,
                             tabs,
-                            closeTabConfirmMode,
-                            pendingCloseTabIndex,
                             searchBar,
                             confirmBar,
                             openFileMode,
@@ -1098,10 +1109,8 @@ public class TerminalEditorApp {
                         String saveAsDraftBefore = saveAsInput.text();
                         SaveFlowController.SaveAsResult saveAsResult = SaveFlowController.handleSaveAsInput(
                             key,
-                            true,
+                            modalState,
                             saveAsInput.text(),
-                            false,
-                            modalState.pendingOverwritePath(),
                             state.getCurrentFile(),
                             this::validateSaveTarget,
                             path -> Files.exists(path),
@@ -1110,7 +1119,7 @@ public class TerminalEditorApp {
                             this::suggestWritableName
                         );
                         if (saveAsResult.consumed()) {
-                            modalState = modalFromSaveAsResult(saveAsResult);
+                            modalState = saveAsResult.modalState();
                             if (saveAsResult.clearNotification()) {
                                 notification.clear();
                             }
@@ -1118,7 +1127,7 @@ public class TerminalEditorApp {
                                 notification.error(saveAsResult.errorMessage());
                             }
                             applySaveAsTextInputEffect(saveAsInput, saveAsResult.textInputEffect());
-                            if (saveAsResult.saveAsMode()) {
+                            if (saveAsResult.modalState().isSaveAs()) {
                                 saveAsSuggestions.rememberDraft(tabs.get(activeTabIndex).tabSession(), saveAsInput.text());
                             } else {
                                 saveAsSuggestions.rememberDraft(tabs.get(activeTabIndex).tabSession(), saveAsDraftBefore);
@@ -1263,10 +1272,7 @@ public class TerminalEditorApp {
                             contentRows,
                             contentCols,
                             running,
-                            modalState.isQuitConfirm(),
-                            modalState.isCloseTabConfirm(),
-                            modalState.pendingCloseTabIndex(),
-                            modalState.isSaveAs(),
+                            modalState,
                             saveAsInput,
                             saveAsSuggestions,
                             notification,
@@ -1284,14 +1290,7 @@ public class TerminalEditorApp {
                                 sessionContext.activate(searchModeResult.activeTabIndex());
                             }
                             running = searchModeResult.running();
-                            modalState = modalFromLegacyFlags(
-                                searchModeResult.saveAsMode(),
-                                false,
-                                null,
-                                searchModeResult.quitConfirmMode(),
-                                searchModeResult.closeTabConfirmMode(),
-                                searchModeResult.pendingCloseTabIndex()
-                            );
+                            modalState = searchModeResult.modalState();
                             openFileMode = searchModeResult.openFileMode();
                             openFileFocus = searchModeResult.openFileFocus();
                             continue;
@@ -1352,10 +1351,7 @@ public class TerminalEditorApp {
                     EditorActionController.Result editorAction = EditorActionController.decide(
                         action,
                         running,
-                        modalState.isQuitConfirm(),
-                        modalState.isCloseTabConfirm(),
-                        modalState.pendingCloseTabIndex(),
-                        modalState.isSaveAs(),
+                        modalState,
                         uiSessionState.confirmOnCloseSetting,
                         hasDirtyTabs(tabs),
                         state.isDirty(),
@@ -1381,14 +1377,7 @@ public class TerminalEditorApp {
                         tabBar
                     );
                     running = editorActionApplyResult.running();
-                    modalState = modalFromLegacyFlags(
-                        editorActionApplyResult.saveAsMode(),
-                        false,
-                        null,
-                        editorActionApplyResult.quitConfirmMode(),
-                        editorActionApplyResult.closeTabConfirmMode(),
-                        editorActionApplyResult.pendingCloseTabIndex()
-                    );
+                    modalState = editorActionApplyResult.modalState();
                     openFileMode = editorActionApplyResult.openFileMode();
                     openFileFocus = editorActionApplyResult.openFileFocus();
                 }
@@ -1425,7 +1414,7 @@ public class TerminalEditorApp {
             uiSessionState.tabInsertModeSetting,
             theme
         );
-        if (!effectiveSettings.equals(loadedSettings)) {
+        if (settingsFileAccepted && !effectiveSettings.equals(loadedSettings)) {
             try {
                 AppSettingsStore.save(effectiveSettings);
             } catch (IOException e) {
@@ -1452,10 +1441,7 @@ public class TerminalEditorApp {
         TabBar tabBar
     ) {
         boolean running = editorAction.running();
-        boolean quitConfirmMode = editorAction.quitConfirmMode();
-        boolean closeTabConfirmMode = editorAction.closeTabConfirmMode();
-        int pendingCloseTabIndex = editorAction.pendingCloseTabIndex();
-        boolean saveAsMode = editorAction.saveAsMode();
+        UiModalState modalState = editorAction.modalState();
         boolean nextOpenFileMode = openFileMode;
         OpenFileDialogController.Focus nextOpenFileFocus = openFileFocus;
 
@@ -1542,10 +1528,7 @@ public class TerminalEditorApp {
 
         return new EditorActionApplyResult(
             running,
-            quitConfirmMode,
-            closeTabConfirmMode,
-            pendingCloseTabIndex,
-            saveAsMode,
+            modalState,
             nextOpenFileMode,
             nextOpenFileFocus
         );
@@ -1618,51 +1601,6 @@ public class TerminalEditorApp {
         );
     }
 
-    private UiModalState modalFromSaveAsResult(SaveFlowController.SaveAsResult result) {
-        return modalFromLegacyFlags(
-            result.saveAsMode(),
-            result.saveOverwriteConfirmMode(),
-            result.pendingOverwritePath(),
-            false,
-            false,
-            -1
-        );
-    }
-
-    private UiModalState modalFromSaveOverwriteResult(SaveFlowController.SaveOverwriteResult result) {
-        return modalFromLegacyFlags(
-            result.saveAsMode(),
-            result.saveOverwriteConfirmMode(),
-            result.pendingOverwritePath(),
-            false,
-            false,
-            -1
-        );
-    }
-
-    private UiModalState modalFromLegacyFlags(
-        boolean saveAsMode,
-        boolean saveOverwriteConfirmMode,
-        Path pendingOverwritePath,
-        boolean quitConfirmMode,
-        boolean closeTabConfirmMode,
-        int pendingCloseTabIndex
-    ) {
-        if (saveAsMode) {
-            return UiModalState.saveAs();
-        }
-        if (saveOverwriteConfirmMode) {
-            return UiModalState.saveOverwriteConfirm(pendingOverwritePath);
-        }
-        if (quitConfirmMode) {
-            return UiModalState.quitConfirm();
-        }
-        if (closeTabConfirmMode) {
-            return UiModalState.closeTabConfirm(pendingCloseTabIndex);
-        }
-        return UiModalState.none();
-    }
-
     private SearchModeResult handleSearchModeInput(
         KeyEvent key,
         UiSessionState uiSessionState,
@@ -1678,10 +1616,7 @@ public class TerminalEditorApp {
         int contentRows,
         int contentCols,
         boolean running,
-        boolean quitConfirmMode,
-        boolean closeTabConfirmMode,
-        int pendingCloseTabIndex,
-        boolean saveAsMode,
+        UiModalState modalState,
         TextField saveAsInput,
         SaveAsSuggestionStore saveAsSuggestions,
         NotificationState notification,
@@ -1703,10 +1638,7 @@ public class TerminalEditorApp {
         RenderPlanBuilder nextRenderPlanBuilder = renderPlanBuilder;
         SearchController.SearchUiOptions nextSearchUi = searchUi;
         boolean nextRunning = running;
-        boolean nextQuitConfirmMode = quitConfirmMode;
-        boolean nextCloseTabConfirmMode = closeTabConfirmMode;
-        int nextPendingCloseTabIndex = pendingCloseTabIndex;
-        boolean nextSaveAsMode = saveAsMode;
+        UiModalState nextModalState = modalState;
         boolean nextOpenFileMode = openFileMode;
         OpenFileDialogController.Focus nextOpenFileFocus = openFileFocus;
 
@@ -1733,10 +1665,7 @@ public class TerminalEditorApp {
                 nextEngine,
                 nextRenderPlanBuilder,
                 nextRunning,
-                nextQuitConfirmMode,
-                nextCloseTabConfirmMode,
-                nextPendingCloseTabIndex,
-                nextSaveAsMode,
+                nextModalState,
                 nextOpenFileMode,
                 nextOpenFileFocus
             );
@@ -2054,7 +1983,7 @@ public class TerminalEditorApp {
                 if (uiSessionState.confirmOnCloseSetting && hasDirtyTabs(tabs)) {
                     uiSessionState.searchMode = false;
                     uiSessionState.searchFocus = SearchFocus.FIND;
-                    nextQuitConfirmMode = true;
+                    nextModalState = UiModalState.quitConfirm();
                 } else {
                     nextRunning = false;
                 }
@@ -2063,7 +1992,7 @@ public class TerminalEditorApp {
                 if (nextState.getCurrentFile() == null) {
                     uiSessionState.searchMode = false;
                     uiSessionState.searchFocus = SearchFocus.FIND;
-                    nextSaveAsMode = true;
+                    nextModalState = UiModalState.saveAs();
                     saveAsInput.set(
                         saveAsSuggestions.suggestionFor(
                             tabs.get(nextActiveTabIndex).tabSession(),
@@ -2075,7 +2004,7 @@ public class TerminalEditorApp {
                 } else if (isReadOnlyFile(nextState.getCurrentFile())) {
                     uiSessionState.searchMode = false;
                     uiSessionState.searchFocus = SearchFocus.FIND;
-                    nextSaveAsMode = true;
+                    nextModalState = UiModalState.saveAs();
                     String suggestion = suggestWritableName(nextState.getCurrentFile());
                     saveAsInput.set(suggestion);
                     saveAsSuggestions.rememberDraft(tabs.get(nextActiveTabIndex).tabSession(), suggestion);
@@ -2145,8 +2074,7 @@ public class TerminalEditorApp {
             }
             case TAB_CLOSE -> {
                 if (nextState.isDirty() && uiSessionState.confirmOnCloseSetting) {
-                    nextCloseTabConfirmMode = true;
-                    nextPendingCloseTabIndex = nextActiveTabIndex;
+                    nextModalState = UiModalState.closeTabConfirm(nextActiveTabIndex);
                 } else {
                     nextActiveTabIndex = closeCurrentTab(tabs, nextActiveTabIndex, saveAsSuggestions);
                     nextModel = tabs.get(nextActiveTabIndex).model();
@@ -2159,7 +2087,7 @@ public class TerminalEditorApp {
             case CTRL_K, CTRL_W, CTRL_SHIFT_S -> {
                 uiSessionState.searchMode = false;
                 uiSessionState.searchFocus = SearchFocus.FIND;
-                nextSaveAsMode = true;
+                nextModalState = UiModalState.saveAs();
                 saveAsInput.set(
                     saveAsSuggestions.suggestionFor(
                         tabs.get(nextActiveTabIndex).tabSession(),
@@ -2213,10 +2141,7 @@ public class TerminalEditorApp {
             nextEngine,
             nextRenderPlanBuilder,
             nextRunning,
-            nextQuitConfirmMode,
-            nextCloseTabConfirmMode,
-            nextPendingCloseTabIndex,
-            nextSaveAsMode,
+            nextModalState,
             nextOpenFileMode,
             nextOpenFileFocus
         );
@@ -2231,10 +2156,7 @@ public class TerminalEditorApp {
         EditorEngine engine,
         RenderPlanBuilder renderPlanBuilder,
         boolean running,
-        boolean quitConfirmMode,
-        boolean closeTabConfirmMode,
-        int pendingCloseTabIndex,
-        boolean saveAsMode,
+        UiModalState modalState,
         boolean openFileMode,
         OpenFileDialogController.Focus openFileFocus
     ) {
@@ -2242,10 +2164,7 @@ public class TerminalEditorApp {
 
     private record EditorActionApplyResult(
         boolean running,
-        boolean quitConfirmMode,
-        boolean closeTabConfirmMode,
-        int pendingCloseTabIndex,
-        boolean saveAsMode,
+        UiModalState modalState,
         boolean openFileMode,
         OpenFileDialogController.Focus openFileFocus
     ) {
@@ -2644,14 +2563,9 @@ public class TerminalEditorApp {
         boolean wrapLinesSetting,
         boolean wrapWordsSetting,
         boolean autoSelectionHighlightSetting,
-        boolean saveAsMode,
+        UiModalState modalState,
         TextField saveAsInput,
-        boolean saveOverwriteConfirmMode,
-        Path pendingOverwritePath,
-        boolean quitConfirmMode,
         List<EditorTab> tabs,
-        boolean closeTabConfirmMode,
-        int pendingCloseTabIndex,
         SearchBarView searchBar,
         ConfirmBarView confirmBar,
         boolean openFileMode,
@@ -2683,6 +2597,12 @@ public class TerminalEditorApp {
                 false
             );
         }
+        boolean saveAsMode = modalState.isSaveAs();
+        boolean saveOverwriteConfirmMode = modalState.isSaveOverwriteConfirm();
+        Path pendingOverwritePath = modalState.pendingOverwritePath();
+        boolean quitConfirmMode = modalState.isQuitConfirm();
+        boolean closeTabConfirmMode = modalState.isCloseTabConfirm();
+        int pendingCloseTabIndex = modalState.pendingCloseTabIndex();
         RenderPlan plan;
         SearchOptions renderSearchOptions = searchMode
             ? SearchController.toSearchOptions(searchUi)
@@ -3103,14 +3023,9 @@ public class TerminalEditorApp {
             boolean wrapLinesSetting,
             boolean wrapWordsSetting,
             boolean autoSelectionHighlightSetting,
-            boolean saveAsMode,
+            UiModalState modalState,
             TextField saveAsInput,
-            boolean saveOverwriteConfirmMode,
-            Path pendingOverwritePath,
-            boolean quitConfirmMode,
             List<EditorTab> tabs,
-            boolean closeTabConfirmMode,
-            int pendingCloseTabIndex,
             SearchBarView searchBar,
             ConfirmBarView confirmBar,
             boolean openFileMode,
@@ -3150,14 +3065,9 @@ public class TerminalEditorApp {
                 wrapLinesSetting,
                 wrapWordsSetting,
                 autoSelectionHighlightSetting,
-                saveAsMode,
+                modalState,
                 saveAsInput,
-                saveOverwriteConfirmMode,
-                pendingOverwritePath,
-                quitConfirmMode,
                 tabs,
-                closeTabConfirmMode,
-                pendingCloseTabIndex,
                 searchBar,
                 confirmBar,
                 openFileMode,

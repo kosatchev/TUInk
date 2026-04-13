@@ -1,5 +1,6 @@
 package dev.tuink.tui;
 
+import dev.tuink.tui.flow.UiModalState;
 import dev.tuink.tui.input.KeyEvent;
 import java.nio.file.Path;
 
@@ -10,10 +11,7 @@ final class EditorActionController {
     static Result decide(
         KeyEvent.Action action,
         boolean running,
-        boolean quitConfirmMode,
-        boolean closeTabConfirmMode,
-        int pendingCloseTabIndex,
-        boolean saveAsMode,
+        UiModalState modalState,
         boolean confirmOnCloseSetting,
         boolean hasDirtyTabs,
         boolean activeTabDirty,
@@ -22,10 +20,7 @@ final class EditorActionController {
         boolean currentFileReadOnly
     ) {
         boolean nextRunning = running;
-        boolean nextQuitConfirmMode = quitConfirmMode;
-        boolean nextCloseTabConfirmMode = closeTabConfirmMode;
-        int nextPendingCloseTabIndex = pendingCloseTabIndex;
-        boolean nextSaveAsMode = saveAsMode;
+        UiModalState nextModalState = modalState;
         SaveAsPreset saveAsPreset = SaveAsPreset.NONE;
         TabCommand tabCommand = TabCommand.NONE;
         boolean clearNotification = false;
@@ -37,18 +32,18 @@ final class EditorActionController {
         switch (action) {
             case CTRL_Q -> {
                 if (confirmOnCloseSetting && hasDirtyTabs) {
-                    nextQuitConfirmMode = true;
+                    nextModalState = UiModalState.quitConfirm();
                 } else {
                     nextRunning = false;
                 }
             }
             case CTRL_S -> {
                 if (currentFile == null) {
-                    nextSaveAsMode = true;
+                    nextModalState = UiModalState.saveAs();
                     saveAsPreset = SaveAsPreset.DEFAULT_FILE_NAME;
                     clearNotification = true;
                 } else if (currentFileReadOnly) {
-                    nextSaveAsMode = true;
+                    nextModalState = UiModalState.saveAs();
                     saveAsPreset = SaveAsPreset.SUGGESTED_FROM_CURRENT;
                     notificationError = "File is read-only. Use Save As. " + currentFile;
                 } else {
@@ -68,14 +63,13 @@ final class EditorActionController {
             case TAB_PREVIOUS -> tabCommand = TabCommand.PREV_TAB;
             case TAB_CLOSE -> {
                 if (activeTabDirty && confirmOnCloseSetting) {
-                    nextCloseTabConfirmMode = true;
-                    nextPendingCloseTabIndex = activeTabIndex;
+                    nextModalState = UiModalState.closeTabConfirm(activeTabIndex);
                 } else {
                     tabCommand = TabCommand.CLOSE_TAB;
                 }
             }
             case CTRL_K, CTRL_W, CTRL_SHIFT_S -> {
-                nextSaveAsMode = true;
+                nextModalState = UiModalState.saveAs();
                 saveAsPreset = SaveAsPreset.FROM_CURRENT_OR_DEFAULT;
                 clearNotification = true;
             }
@@ -98,10 +92,7 @@ final class EditorActionController {
 
         return new Result(
             nextRunning,
-            nextQuitConfirmMode,
-            nextCloseTabConfirmMode,
-            nextPendingCloseTabIndex,
-            nextSaveAsMode,
+            nextModalState,
             saveAsPreset,
             tabCommand,
             clearNotification,
@@ -129,10 +120,7 @@ final class EditorActionController {
 
     record Result(
         boolean running,
-        boolean quitConfirmMode,
-        boolean closeTabConfirmMode,
-        int pendingCloseTabIndex,
-        boolean saveAsMode,
+        UiModalState modalState,
         SaveAsPreset saveAsPreset,
         TabCommand tabCommand,
         boolean clearNotification,

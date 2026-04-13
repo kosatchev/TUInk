@@ -8,6 +8,23 @@ public record UiModalState(
     int pendingCloseTabIndex,
     ConfirmChoice confirmChoice
 ) {
+    public UiModalState {
+        if (mode == null || confirmChoice == null) {
+            throw new IllegalArgumentException("Modal mode and confirm choice are required");
+        }
+        if (mode == UiModalMode.SAVE_OVERWRITE_CONFIRM) {
+            if (pendingOverwritePath == null || pendingCloseTabIndex != -1) {
+                throw new IllegalArgumentException("Overwrite confirmation requires only an overwrite path");
+            }
+        } else if (mode == UiModalMode.CLOSE_TAB_CONFIRM) {
+            if (pendingOverwritePath != null || pendingCloseTabIndex < 0) {
+                throw new IllegalArgumentException("Close-tab confirmation requires only a tab index");
+            }
+        } else if (pendingOverwritePath != null || pendingCloseTabIndex != -1) {
+            throw new IllegalArgumentException("Modal payload does not match mode " + mode);
+        }
+    }
+
     public static UiModalState none() {
         return new UiModalState(UiModalMode.NONE, null, -1, ConfirmChoice.CANCEL);
     }

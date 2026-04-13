@@ -51,48 +51,10 @@ class RecoveryStoreTest {
         assertEquals(PRIVATE_FILE, Files.getPosixFilePermissions(meta));
         assertEquals(List.of(), temporaryFiles(directory));
 
-        List<RecoveryStore.Entry> entries = store.loadAll();
+        List<RecoveryStore.Entry> entries = store.loadAll().entries();
         assertEquals(1, entries.size());
         assertEquals("session01", entries.get(0).id());
         assertEquals(snapshot, entries.get(0).snapshot());
-    }
-
-    @Test
-    void loadHardensPermissionsFromOlderInstallation() throws IOException {
-        assumePosix();
-        Path directory = tempDir.resolve("recovery");
-        RecoveryStore store = new RecoveryStore(directory);
-        store.save("legacy", snapshot());
-        Path text = directory.resolve("legacy.txt");
-        Path meta = directory.resolve("legacy.meta.properties");
-        Files.setPosixFilePermissions(
-            directory,
-            Set.of(
-                PosixFilePermission.OWNER_READ,
-                PosixFilePermission.OWNER_WRITE,
-                PosixFilePermission.OWNER_EXECUTE,
-                PosixFilePermission.GROUP_READ,
-                PosixFilePermission.GROUP_EXECUTE,
-                PosixFilePermission.OTHERS_READ,
-                PosixFilePermission.OTHERS_EXECUTE
-            )
-        );
-        Files.setPosixFilePermissions(
-            text,
-            Set.of(
-                PosixFilePermission.OWNER_READ,
-                PosixFilePermission.OWNER_WRITE,
-                PosixFilePermission.GROUP_READ,
-                PosixFilePermission.OTHERS_READ
-            )
-        );
-        Files.setPosixFilePermissions(meta, Files.getPosixFilePermissions(text));
-
-        assertEquals(1, store.loadAll().size());
-
-        assertEquals(PRIVATE_DIRECTORY, Files.getPosixFilePermissions(directory));
-        assertEquals(PRIVATE_FILE, Files.getPosixFilePermissions(text));
-        assertEquals(PRIVATE_FILE, Files.getPosixFilePermissions(meta));
     }
 
     @Test
@@ -117,7 +79,7 @@ class RecoveryStoreTest {
 
         RecoveryStore store = new RecoveryStore(directory);
 
-        assertEquals(List.of(), store.loadAll());
+        assertEquals(List.of(), store.loadAll().entries());
         assertEquals(externalPermissions, Files.getPosixFilePermissions(externalText));
         assertEquals(externalPermissions, Files.getPosixFilePermissions(externalMeta));
     }
@@ -137,6 +99,58 @@ class RecoveryStoreTest {
         try (var entries = Files.list(targetDirectory)) {
             assertFalse(entries.findAny().isPresent());
         }
+    }
+
+    @Test
+    void skipsMarkerlessSnapshotAndLeavesFilesUnchanged() throws IOException {
+        Path directory = tempDir.resolve("recovery");
+        Files.createDirectories(directory);
+        Path text = directory.resolve("old.txt");
+        Path meta = directory.resolve("old.meta.properties");
+        String originalText = "unsaved work";
+        String originalMeta = "dirty=true\n";
+        Files.writeString(text, originalText);
+        Files.writeString(meta, originalMeta);
+
+        RecoveryStore.LoadResult result = new RecoveryStore(directory).loadAll();
+
+        assertEquals(List.of(), result.entries());
+        assertEquals(1, result.skipped().size());
+        assertEquals("old", result.skipped().get(0).id());
+        assertEquals(originalText, Files.readString(text));
+        assertEquals(originalMeta, Files.readString(meta));
+    }
+
+    @Test
+    void refusesToOverwriteIncompatibleSnapshot() throws IOException {
+        Path directory = tempDir.resolve("recovery");
+        Files.createDirectories(directory);
+        Path text = directory.resolve("session.txt");
+        Path meta = directory.resolve("session.meta.properties");
+        Files.writeString(text, "old text");
+        Files.writeString(meta, "format=2\n");
+
+        RecoveryStore store = new RecoveryStore(directory);
+
+        assertThrows(IOException.class, () -> store.save("session", snapshot()));
+        assertEquals("old text", Files.readString(text));
+        assertEquals("format=2\n", Files.readString(meta));
+    }
+
+    @Test
+    void rejectsInvalidCurrentFormatValues() throws IOException {
+        Path directory = tempDir.resolve("recovery");
+        RecoveryStore store = new RecoveryStore(directory);
+        store.save("session", snapshot());
+        Path meta = directory.resolve("session.meta.properties");
+        String current = Files.readString(meta);
+        Files.writeString(meta, current.replace("cursor.line=1", "cursor.line=-1"));
+
+        RecoveryStore.LoadResult result = store.loadAll();
+
+        assertEquals(List.of(), result.entries());
+        assertEquals(1, result.skipped().size());
+        assertTrue(result.skipped().get(0).reason().contains("must not be negative"));
     }
 
     private void assumePosix() throws IOException {

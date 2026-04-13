@@ -134,11 +134,14 @@ Detailed documentation:
 - existing POSIX permission bits are preserved, including executable bits.
 - saving through a symbolic link updates its resolved target without replacing the link.
 - atomic replacement gives the saved path a new inode; other hard links keep their previous content.
-- UI settings are stored in `~/.config/tuink/tuink.properties`.
+- UI settings are stored in `~/.config/tuink/tuink.properties`. Only the
+  current `format=1` schema is accepted; an incompatible file is left unchanged
+  and the editor starts with defaults after showing a warning.
 - recovery snapshots are stored under `~/.config/tuink/recovery`; on POSIX
   systems the directory is restricted to `0700` and snapshot files to `0600`.
-  Existing snapshots are tightened on access; a symlink in place of the
-  recovery directory is rejected.
+  Only current `format=1` snapshots are restored. Incompatible snapshots are
+  reported and left unchanged. A symlink in place of the recovery directory is
+  rejected.
 
 ## Status indicators
 

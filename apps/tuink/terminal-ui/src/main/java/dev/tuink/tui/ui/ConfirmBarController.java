@@ -7,38 +7,39 @@ public final class ConfirmBarController {
     private ConfirmBarController() {
     }
 
-    public static InputResult handleKey(KeyEvent key, ConfirmChoice selected, ConfirmChoice yesChoice) {
-        return handleKey(key, selected, yesChoice, ConfirmChoice.DISCARD, true);
+    public static InputResult handleKey(KeyEvent key, ConfirmChoice selected, ConfirmChoice yesDecision) {
+        return handleKey(key, selected, yesDecision, ConfirmChoice.DISCARD, true);
     }
 
     public static InputResult handleKey(
         KeyEvent key,
         ConfirmChoice selected,
-        ConfirmChoice yesChoice,
-        ConfirmChoice noChoice,
+        ConfirmChoice yesDecision,
+        ConfirmChoice noDecision,
         boolean includeCancel
     ) {
-        ConfirmChoice current = normalizeSelected(selected, yesChoice, noChoice, includeCancel);
+        ConfirmChoice current = normalizeSelected(selected, includeCancel);
         if (key instanceof KeyEvent.CharInput charInput) {
             char ch = Character.toLowerCase(charInput.asciiCharOrZero());
             if (ch == 'y') {
-                return InputResult.decide(yesChoice);
+                return InputResult.decide(yesDecision);
             }
             if (ch == 'n') {
-                return InputResult.decide(includeCancel ? ConfirmChoice.CANCEL : noChoice);
+                return InputResult.decide(includeCancel ? ConfirmChoice.CANCEL : noDecision);
             }
             return InputResult.consumeWithoutChanges(current);
         }
 
         KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
+        // Navigation follows the rendered button order; y/n may intentionally map to different decisions.
         return switch (action) {
-            case TAB, TAB_NEXT, ARROW_RIGHT -> InputResult.navigate(nextChoice(current, yesChoice, noChoice, includeCancel));
-            case ARROW_LEFT -> InputResult.navigate(previousChoice(current, yesChoice, noChoice, includeCancel));
-            case HOME -> InputResult.navigate(yesChoice);
-            case END -> InputResult.navigate(includeCancel ? ConfirmChoice.CANCEL : noChoice);
+            case TAB, TAB_NEXT, ARROW_RIGHT -> InputResult.navigate(nextChoice(current, includeCancel));
+            case ARROW_LEFT -> InputResult.navigate(previousChoice(current, includeCancel));
+            case HOME -> InputResult.navigate(ConfirmChoice.SAVE);
+            case END -> InputResult.navigate(includeCancel ? ConfirmChoice.CANCEL : ConfirmChoice.DISCARD);
             case ENTER -> InputResult.decide(current);
-            case ESCAPE, CTRL_Q -> InputResult.decide(includeCancel ? ConfirmChoice.CANCEL : noChoice);
-            case TAB_CLOSE -> InputResult.decide(noChoice);
+            case ESCAPE, CTRL_Q -> InputResult.decide(includeCancel ? ConfirmChoice.CANCEL : noDecision);
+            case TAB_CLOSE -> InputResult.decide(noDecision);
             default -> InputResult.consumeWithoutChanges(current);
         };
     }
@@ -76,51 +77,26 @@ public final class ConfirmBarController {
         }
     }
 
-    private static ConfirmChoice normalizeSelected(
-        ConfirmChoice selected,
-        ConfirmChoice yesChoice,
-        ConfirmChoice noChoice,
-        boolean includeCancel
-    ) {
-        if (selected == yesChoice || selected == noChoice || (includeCancel && selected == ConfirmChoice.CANCEL)) {
+    private static ConfirmChoice normalizeSelected(ConfirmChoice selected, boolean includeCancel) {
+        if (selected == ConfirmChoice.SAVE
+            || selected == ConfirmChoice.DISCARD
+            || includeCancel && selected == ConfirmChoice.CANCEL) {
             return selected;
         }
-        return yesChoice;
+        return ConfirmChoice.SAVE;
     }
 
-    private static ConfirmChoice nextChoice(
-        ConfirmChoice current,
-        ConfirmChoice yesChoice,
-        ConfirmChoice noChoice,
-        boolean includeCancel
-    ) {
+    private static ConfirmChoice nextChoice(ConfirmChoice current, boolean includeCancel) {
         if (!includeCancel) {
-            return current == yesChoice ? noChoice : yesChoice;
+            return current == ConfirmChoice.SAVE ? ConfirmChoice.DISCARD : ConfirmChoice.SAVE;
         }
-        if (current == yesChoice) {
-            return noChoice;
-        }
-        if (current == noChoice) {
-            return ConfirmChoice.CANCEL;
-        }
-        return yesChoice;
+        return current.next();
     }
 
-    private static ConfirmChoice previousChoice(
-        ConfirmChoice current,
-        ConfirmChoice yesChoice,
-        ConfirmChoice noChoice,
-        boolean includeCancel
-    ) {
+    private static ConfirmChoice previousChoice(ConfirmChoice current, boolean includeCancel) {
         if (!includeCancel) {
-            return current == yesChoice ? noChoice : yesChoice;
+            return current == ConfirmChoice.SAVE ? ConfirmChoice.DISCARD : ConfirmChoice.SAVE;
         }
-        if (current == yesChoice) {
-            return ConfirmChoice.CANCEL;
-        }
-        if (current == noChoice) {
-            return yesChoice;
-        }
-        return noChoice;
+        return current.previous();
     }
 }

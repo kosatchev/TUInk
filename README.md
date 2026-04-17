@@ -128,6 +128,9 @@ Detailed documentation:
 
 - `Ctrl+S` saves current file and shows confirmation in status bar.
 - if current file is read-only, editor opens `Save As` prompt with suggested new name.
+- closing one modified unnamed/read-only tab offers `Save As` and closes it after a successful save.
+- quitting with multiple modified tabs lists their names and offers `Save All`, `Discard All`, or `Cancel`; `Save All` opens `Save As` in turn for tabs that need a path.
+- automatic `Save As` suggestions skip existing files by adding a numeric suffix.
 - `Save As` validates target path and asks overwrite confirmation when file exists (`y/N`).
 - `Save As`/overwrite prompt is shown in a separate bar above status bar (red).
 - all save failures are explained in the save notification bar (read-only file, no access to directory, invalid target path, etc).

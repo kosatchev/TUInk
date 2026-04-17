@@ -48,6 +48,33 @@ class ConfirmBarControllerTest {
     }
 
     @Test
+    void customButtonLabelsKeepTheirSemanticChoices() {
+        ConfirmBarView bar = ConfirmBarView.build(
+            "Unsaved (2): a.txt, b.txt",
+            ConfirmChoice.CANCEL,
+            80,
+            "Save All",
+            "Discard All",
+            true,
+            "Cancel"
+        );
+
+        int saveAllCol = bar.row().indexOf("[Save All]");
+        int discardAllCol = bar.row().indexOf("[Discard All]");
+
+        assertTrue(saveAllCol >= 0);
+        assertTrue(discardAllCol >= 0);
+        assertEquals(
+            ConfirmChoice.SAVE,
+            ConfirmBarController.handleMousePress(bar, 4, saveAllCol, 4).decision()
+        );
+        assertEquals(
+            ConfirmChoice.DISCARD,
+            ConfirmBarController.handleMousePress(bar, 4, discardAllCol, 4).decision()
+        );
+    }
+
+    @Test
     void yesAndNoKeepQuitPromptSemantics() {
         ConfirmBarController.InputResult yesResult = ConfirmBarController.handleKey(
             new KeyEvent.CharInput('y'),

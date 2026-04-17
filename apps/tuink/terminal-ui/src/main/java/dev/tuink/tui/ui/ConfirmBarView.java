@@ -41,17 +41,7 @@ public final class ConfirmBarView {
         boolean includeCancel,
         String cancelLabel
     ) {
-        Button primaryPrototype = new Button(0, 0, primaryLabel);
-        Button secondaryPrototype = new Button(0, 0, secondaryLabel);
-        StringBuilder clusterBuilder = new StringBuilder();
-        clusterBuilder.append(primaryPrototype.renderedText())
-            .append(" ")
-            .append(secondaryPrototype.renderedText());
-        if (includeCancel) {
-            Button cancelPrototype = new Button(0, 0, cancelLabel);
-            clusterBuilder.append(" ").append(cancelPrototype.renderedText());
-        }
-        String actionsCluster = clusterBuilder.toString();
+        String actionsCluster = actionsCluster(primaryLabel, secondaryLabel, includeCancel, cancelLabel);
         String row = alignLeftRight(prompt, actionsCluster, cols, 1);
         int actionsStart = Math.max(0, rightClusterStart(row, actionsCluster));
         Button primaryButton = new Button(0, actionsStart, primaryLabel);
@@ -73,6 +63,36 @@ public final class ConfirmBarView {
         Button selectedButton = buttonFor(choices, selected);
         int cursorCol = selectedButton == null ? 0 : selectedButton.cursorCol();
         return new ConfirmBarView(row, cursorCol, selected, choices, ConfirmChoice.SAVE);
+    }
+
+    public static int promptWidth(
+        int cols,
+        String primaryLabel,
+        String secondaryLabel,
+        boolean includeCancel,
+        String cancelLabel
+    ) {
+        String actions = actionsCluster(primaryLabel, secondaryLabel, includeCancel, cancelLabel);
+        return Math.max(0, cols - CellText.width(actions) - 1);
+    }
+
+    private static String actionsCluster(
+        String primaryLabel,
+        String secondaryLabel,
+        boolean includeCancel,
+        String cancelLabel
+    ) {
+        Button primaryPrototype = new Button(0, 0, primaryLabel);
+        Button secondaryPrototype = new Button(0, 0, secondaryLabel);
+        StringBuilder clusterBuilder = new StringBuilder();
+        clusterBuilder.append(primaryPrototype.renderedText())
+            .append(" ")
+            .append(secondaryPrototype.renderedText());
+        if (includeCancel) {
+            Button cancelPrototype = new Button(0, 0, cancelLabel);
+            clusterBuilder.append(" ").append(cancelPrototype.renderedText());
+        }
+        return clusterBuilder.toString();
     }
 
     public ConfirmChoice choiceAtMouse(int mouseRow, int mouseCol, int topRow) {

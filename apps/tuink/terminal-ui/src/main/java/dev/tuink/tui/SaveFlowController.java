@@ -33,6 +33,7 @@ final class SaveFlowController {
         return switch (action) {
             case BACKSPACE -> result(true, modalState, TextInputEffect.backspace(), true, null, null);
             case ENTER -> handleEnter(
+                modalState,
                 saveAsText,
                 currentFile,
                 validateSaveTarget,
@@ -59,6 +60,7 @@ final class SaveFlowController {
     }
 
     private static SaveAsResult handleEnter(
+        UiModalState modalState,
         String saveAsText,
         Path currentFile,
         Function<Path, String> validateSaveTarget,
@@ -78,7 +80,7 @@ final class SaveFlowController {
         } catch (RuntimeException e) {
             return result(
                 true,
-                UiModalState.saveAs(),
+                modalState,
                 TextInputEffect.none(),
                 false,
                 "Save failed: invalid target path",
@@ -87,12 +89,12 @@ final class SaveFlowController {
         }
         String validation = validateSaveTarget.apply(path);
         if (validation != null) {
-            return result(true, UiModalState.saveAs(), TextInputEffect.none(), false, validation, null);
+            return result(true, modalState, TextInputEffect.none(), false, validation, null);
         }
         if (isReadOnlyFile.test(path)) {
             return result(
                 true,
-                UiModalState.saveAs(),
+                modalState,
                 TextInputEffect.setText(suggestWritableName.apply(path)),
                 false,
                 "Save failed: target is read-only: " + path + ". Choose another name.",
@@ -102,14 +104,14 @@ final class SaveFlowController {
         if (pathExists.test(path) && !isSameFilePath.test(path, currentFile)) {
             return result(
                 true,
-                UiModalState.saveOverwriteConfirm(path),
+                modalState.confirmOverwrite(path),
                 TextInputEffect.none(),
                 true,
                 null,
                 null
             );
         }
-        return result(true, UiModalState.none(), TextInputEffect.clear(), false, null, path);
+        return result(true, modalState, TextInputEffect.none(), false, null, path);
     }
 
     private static SaveAsResult result(

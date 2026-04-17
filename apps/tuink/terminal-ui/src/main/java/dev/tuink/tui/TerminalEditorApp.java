@@ -16,6 +16,8 @@ import dev.tuink.tui.flow.AppSettingsStore;
 import dev.tuink.tui.flow.ConfirmChoice;
 import dev.tuink.tui.flow.RecoveryStore;
 import dev.tuink.tui.flow.SaveAsSuggestionStore;
+import dev.tuink.tui.flow.SaveContinuation;
+import dev.tuink.tui.flow.SaveTargetSuggester;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.flow.UiModalState;
 import dev.tuink.tui.input.KeyDecoder;
@@ -32,6 +34,7 @@ import dev.tuink.tui.style.UiStyles;
 import dev.tuink.tui.ui.Button;
 import dev.tuink.tui.ui.ConfirmBarController;
 import dev.tuink.tui.ui.ConfirmBarView;
+import dev.tuink.tui.ui.DirtyTabSummary;
 import dev.tuink.tui.ui.EditorView;
 import dev.tuink.tui.ui.InlinePromptBar;
 import dev.tuink.tui.ui.MenuBar;
@@ -406,15 +409,12 @@ public class TerminalEditorApp {
                             );
                             inlinePromptBar = InlinePromptBar.of(confirmBar.row(), styles.promptAlert(), 1, confirmBar.cursorCol() + 1);
                         } else if (quitConfirmMode) {
-                            confirmBar = ConfirmBarView.build(
-                                buildQuitPrompt(countDirtyTabs(tabs)),
-                                modalState.confirmChoice(),
-                                cols
-                            );
+                            confirmBar = buildQuitConfirmBar(tabs, modalState.confirmChoice(), cols);
                             inlinePromptBar = InlinePromptBar.of(confirmBar.row(), styles.promptAlert(), 1, confirmBar.cursorCol() + 1);
                         } else if (closeTabConfirmMode) {
-                            confirmBar = ConfirmBarView.build(
-                                buildCloseTabPrompt(tabs, pendingCloseTabIndex),
+                            confirmBar = buildCloseTabConfirmBar(
+                                tabs,
+                                pendingCloseTabIndex,
                                 modalState.confirmChoice(),
                                 cols
                             );
@@ -1106,6 +1106,7 @@ public class TerminalEditorApp {
                     }
 
                     if (modalState.isSaveAs()) {
+                        UiModalState saveAsState = modalState;
                         String saveAsDraftBefore = saveAsInput.text();
                         SaveFlowController.SaveAsResult saveAsResult = SaveFlowController.handleSaveAsInput(
                             key,
@@ -1139,7 +1140,19 @@ public class TerminalEditorApp {
                                     sessionContext.replaceActiveRenderPlanBuilder(renderPlanBuilder);
                                     saveAsSuggestions.rememberSavedPath(tabs.get(activeTabIndex).tabSession(), state.getCurrentFile());
                                     notification.success(savedMessage(state));
+                                    saveAsInput.clear();
+                                    SaveFlowProgress progress = continueAfterSuccessfulSave(
+                                        saveAsState,
+                                        sessionContext,
+                                        tabs,
+                                        saveAsInput,
+                                        saveAsSuggestions,
+                                        notification
+                                    );
+                                    running = progress.running();
+                                    modalState = progress.modalState();
                                 } catch (IOException e) {
+                                    modalState = saveAsState;
                                     notification.error(saveErrorMessage(e));
                                 }
                             }
@@ -1148,6 +1161,7 @@ public class TerminalEditorApp {
                     }
 
                     if (modalState.isSaveOverwriteConfirm()) {
+                        UiModalState overwriteState = modalState;
                         ConfirmBarController.InputResult confirmInput = ConfirmBarController.handleKey(
                             key,
                             modalState.confirmChoice(),
@@ -1163,12 +1177,22 @@ public class TerminalEditorApp {
                                     sessionContext.replaceActiveRenderPlanBuilder(renderPlanBuilder);
                                     saveAsSuggestions.rememberSavedPath(tabs.get(activeTabIndex).tabSession(), state.getCurrentFile());
                                     notification.success(savedMessage(state));
-                                    modalState = UiModalState.none();
+                                    saveAsInput.clear();
+                                    SaveFlowProgress progress = continueAfterSuccessfulSave(
+                                        overwriteState,
+                                        sessionContext,
+                                        tabs,
+                                        saveAsInput,
+                                        saveAsSuggestions,
+                                        notification
+                                    );
+                                    running = progress.running();
+                                    modalState = progress.modalState();
                                 } catch (IOException e) {
                                     notification.error(saveErrorMessage(e));
                                 }
                             } else if (confirmInput.decision() == ConfirmChoice.DISCARD) {
-                                modalState = UiModalState.saveAs();
+                                modalState = modalState.backToSaveAs();
                                 notification.clear();
                             } else {
                                 modalState = UiModalState.none();
@@ -1193,10 +1217,15 @@ public class TerminalEditorApp {
                             if (confirmInput.decision() == null) {
                                 modalState = modalState.withConfirmChoice(confirmInput.confirmChoice());
                             } else if (confirmInput.decision() == ConfirmChoice.SAVE) {
-                                if (saveDirtyTabs(tabs, notification)) {
-                                    running = false;
-                                    modalState = UiModalState.none();
-                                }
+                                SaveFlowProgress progress = continueQuitSaveFlow(
+                                    sessionContext,
+                                    tabs,
+                                    saveAsInput,
+                                    saveAsSuggestions,
+                                    notification
+                                );
+                                running = progress.running();
+                                modalState = progress.modalState();
                             } else if (confirmInput.decision() == ConfirmChoice.DISCARD) {
                                 running = false;
                                 modalState = UiModalState.none();
@@ -1225,7 +1254,11 @@ public class TerminalEditorApp {
                             }
                             if (confirmInput.decision() == ConfirmChoice.SAVE) {
                                 EditorTab pendingTab = tabs.get(closeIndex);
-                                if (saveDirtyTab(pendingTab, notification)) {
+                                if (requiresSaveAs(pendingTab)) {
+                                    sessionContext.activate(closeIndex);
+                                    prepareSaveAs(pendingTab, saveAsInput, saveAsSuggestions, notification);
+                                    modalState = UiModalState.saveAsForCloseTab(closeIndex);
+                                } else if (saveDirtyTab(pendingTab, notification, saveAsSuggestions)) {
                                     sessionContext.activate(closeTab(tabs, activeTabIndex, closeIndex, saveAsSuggestions));
                                     modalState = UiModalState.none();
                                 }
@@ -1505,7 +1538,11 @@ public class TerminalEditorApp {
                 );
             }
             case SUGGESTED_FROM_CURRENT -> {
-                String suggestion = suggestWritableName(state.getCurrentFile());
+                String suggestion = saveAsSuggestions.suggestionFor(
+                    tabs.get(activeTabIndex).tabSession(),
+                    null,
+                    suggestWritableName(state.getCurrentFile())
+                );
                 saveAsInput.set(suggestion);
                 saveAsSuggestions.rememberDraft(tabs.get(activeTabIndex).tabSession(), suggestion);
             }
@@ -2005,7 +2042,11 @@ public class TerminalEditorApp {
                     uiSessionState.searchMode = false;
                     uiSessionState.searchFocus = SearchFocus.FIND;
                     nextModalState = UiModalState.saveAs();
-                    String suggestion = suggestWritableName(nextState.getCurrentFile());
+                    String suggestion = saveAsSuggestions.suggestionFor(
+                        tabs.get(nextActiveTabIndex).tabSession(),
+                        null,
+                        suggestWritableName(nextState.getCurrentFile())
+                    );
                     saveAsInput.set(suggestion);
                     saveAsSuggestions.rememberDraft(tabs.get(nextActiveTabIndex).tabSession(), suggestion);
                     notification.error(readOnlySaveAsMessage(nextState.getCurrentFile()));
@@ -2168,6 +2209,9 @@ public class TerminalEditorApp {
         boolean openFileMode,
         OpenFileDialogController.Focus openFileFocus
     ) {
+    }
+
+    private record SaveFlowProgress(boolean running, UiModalState modalState) {
     }
 
     private void drawTopFileNameBold(CellBuffer buffer, int cols, EditorState state, int startCol) {
@@ -3121,8 +3165,66 @@ public class TerminalEditorApp {
         return "Overwrite existing file: " + path + " ? (y/N)";
     }
 
-    private String buildQuitPrompt(int dirtyTabs) {
-        return "Unsaved tabs: " + dirtyTabs + ". Quit now? (y/N)";
+    private ConfirmBarView buildQuitConfirmBar(
+        List<EditorTab> tabs,
+        ConfirmChoice selectedChoice,
+        int cols
+    ) {
+        List<EditorTab> dirtyTabs = new ArrayList<>();
+        List<Path> dirtyPaths = new ArrayList<>();
+        for (EditorTab tab : tabs) {
+            if (tab.state().isDirty()) {
+                dirtyTabs.add(tab);
+                dirtyPaths.add(tab.state().getCurrentFile());
+            }
+        }
+        boolean multiple = dirtyTabs.size() > 1;
+        String primaryLabel;
+        if (multiple) {
+            primaryLabel = "Save All";
+        } else if (dirtyTabs.size() == 1 && requiresSaveAs(dirtyTabs.get(0))) {
+            primaryLabel = "Save As";
+        } else {
+            primaryLabel = "Save";
+        }
+        String secondaryLabel = multiple ? "Discard All" : "Discard";
+        int promptWidth = ConfirmBarView.promptWidth(
+            cols,
+            primaryLabel,
+            secondaryLabel,
+            true,
+            "Cancel"
+        );
+        return ConfirmBarView.build(
+            DirtyTabSummary.build(dirtyPaths, promptWidth),
+            selectedChoice,
+            cols,
+            primaryLabel,
+            secondaryLabel,
+            true,
+            "Cancel"
+        );
+    }
+
+    private ConfirmBarView buildCloseTabConfirmBar(
+        List<EditorTab> tabs,
+        int closeTabIndex,
+        ConfirmChoice selectedChoice,
+        int cols
+    ) {
+        EditorTab pendingTab = closeTabIndex >= 0 && closeTabIndex < tabs.size()
+            ? tabs.get(closeTabIndex)
+            : null;
+        String primaryLabel = pendingTab != null && requiresSaveAs(pendingTab) ? "Save As" : "Save";
+        return ConfirmBarView.build(
+            buildCloseTabPrompt(tabs, closeTabIndex),
+            selectedChoice,
+            cols,
+            primaryLabel,
+            "Discard",
+            true,
+            "Cancel"
+        );
     }
 
     private String buildRecoveryPrompt(int count) {
@@ -3138,19 +3240,99 @@ public class TerminalEditorApp {
         return "Close modified tab: " + name + " ? (y/N)";
     }
 
-    private boolean saveDirtyTabs(List<EditorTab> tabs, NotificationState notification) {
-        for (EditorTab tab : tabs) {
+    private boolean requiresSaveAs(EditorTab tab) {
+        if (tab == null) {
+            return false;
+        }
+        Path file = tab.state().getCurrentFile();
+        return file == null || isReadOnlyFile(file);
+    }
+
+    private void prepareSaveAs(
+        EditorTab tab,
+        TextField saveAsInput,
+        SaveAsSuggestionStore saveAsSuggestions,
+        NotificationState notification
+    ) {
+        Path file = tab.state().getCurrentFile();
+        String suggestion = file == null
+            ? saveAsSuggestions.suggestionFor(tab.tabSession(), null, DEFAULT_FILE_NAME)
+            : saveAsSuggestions.suggestionFor(
+                tab.tabSession(),
+                null,
+                suggestWritableName(file)
+            );
+        saveAsInput.set(suggestion);
+        saveAsSuggestions.rememberDraft(tab.tabSession(), suggestion);
+        notification.clear();
+    }
+
+    private SaveFlowProgress continueQuitSaveFlow(
+        SessionContext sessionContext,
+        List<EditorTab> tabs,
+        TextField saveAsInput,
+        SaveAsSuggestionStore saveAsSuggestions,
+        NotificationState notification
+    ) {
+        for (int i = 0; i < tabs.size(); i++) {
+            EditorTab tab = tabs.get(i);
+            if (tab.state().isDirty() && requiresSaveAs(tab)) {
+                sessionContext.activate(i);
+                prepareSaveAs(tab, saveAsInput, saveAsSuggestions, notification);
+                return new SaveFlowProgress(true, UiModalState.saveAsForQuit());
+            }
+        }
+        for (int i = 0; i < tabs.size(); i++) {
+            EditorTab tab = tabs.get(i);
             if (!tab.state().isDirty()) {
                 continue;
             }
-            if (!saveDirtyTab(tab, notification)) {
-                return false;
+            if (!saveDirtyTab(tab, notification, saveAsSuggestions)) {
+                sessionContext.activate(i);
+                return new SaveFlowProgress(true, UiModalState.quitConfirm());
             }
         }
-        return true;
+        return new SaveFlowProgress(false, UiModalState.none());
     }
 
-    private boolean saveDirtyTab(EditorTab tab, NotificationState notification) {
+    private SaveFlowProgress continueAfterSuccessfulSave(
+        UiModalState completedSaveState,
+        SessionContext sessionContext,
+        List<EditorTab> tabs,
+        TextField saveAsInput,
+        SaveAsSuggestionStore saveAsSuggestions,
+        NotificationState notification
+    ) {
+        if (completedSaveState.saveContinuation() == SaveContinuation.QUIT) {
+            return continueQuitSaveFlow(
+                sessionContext,
+                tabs,
+                saveAsInput,
+                saveAsSuggestions,
+                notification
+            );
+        }
+        if (completedSaveState.saveContinuation() == SaveContinuation.CLOSE_TAB) {
+            int closeIndex = completedSaveState.pendingCloseTabIndex();
+            if (closeIndex >= 0 && closeIndex < tabs.size()) {
+                sessionContext.activate(
+                    closeTab(
+                        tabs,
+                        sessionContext.activeTabIndex(),
+                        closeIndex,
+                        saveAsSuggestions
+                    )
+                );
+            }
+        }
+        return new SaveFlowProgress(true, UiModalState.none());
+    }
+
+    private boolean saveDirtyTab(
+        EditorTab tab,
+        NotificationState notification,
+        SaveAsSuggestionStore saveAsSuggestions
+    ) {
         if (tab == null || !tab.state().isDirty()) {
             return true;
         }
@@ -3165,6 +3347,7 @@ public class TerminalEditorApp {
         }
         try {
             tab.engine().save();
+            saveAsSuggestions.rememberSavedPath(tab.tabSession(), file);
             return true;
         } catch (IOException e) {
             notification.error(saveErrorMessage(e));
@@ -3253,10 +3436,6 @@ public class TerminalEditorApp {
         return TabSessions.hasDirtyTabs(toTabSessions(tabs));
     }
 
-    private int countDirtyTabs(List<EditorTab> tabs) {
-        return TabSessions.countDirtyTabs(toTabSessions(tabs));
-    }
-
     private String suggestWritableName(Path path) {
         String fileName = path.getFileName() == null ? DEFAULT_FILE_NAME : path.getFileName().toString();
         int dot = fileName.lastIndexOf('.');
@@ -3264,7 +3443,8 @@ public class TerminalEditorApp {
         String ext = dot > 0 ? fileName.substring(dot) : "";
         String candidate = base + "-copy" + ext;
         Path parent = path.getParent();
-        return parent == null ? candidate : parent.resolve(candidate).toString();
+        Path preferred = parent == null ? Path.of(candidate) : parent.resolve(candidate);
+        return SaveTargetSuggester.firstAvailable(preferred, Files::exists).toString();
     }
 
     private boolean isSameFilePath(Path a, Path b) {

@@ -1,6 +1,7 @@
 package dev.tuink.tui.flow;
 
 import dev.tuink.core.TabSession;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.IdentityHashMap;
 import java.util.Map;
@@ -16,7 +17,8 @@ public final class SaveAsSuggestionStore {
         if (currentFile != null) {
             return currentFile.toAbsolutePath().normalize().toString();
         }
-        return Path.of("").toAbsolutePath().normalize().resolve(defaultFileName).toString();
+        Path preferred = Path.of("").toAbsolutePath().normalize().resolve(defaultFileName);
+        return SaveTargetSuggester.firstAvailable(preferred, Files::exists).toString();
     }
 
     public void rememberDraft(TabSession tabSession, String text) {

@@ -16,48 +16,48 @@ public final class ViewportMetrics {
     }
 
     public static int textToVisualColumn(String line, int startCol, int endCol, int tabWidth) {
-        String value = line == null ? "" : line;
-        int start = DisplayText.floorBoundary(value, startCol);
-        int end = DisplayText.floorBoundary(value, Math.max(start, endCol));
+        DisplayText.Metrics metrics = DisplayText.metrics(line, tabWidth);
+        int start = metrics.floorBoundary(startCol);
+        int end = metrics.floorBoundary(Math.max(start, endCol));
         return Math.max(
             0,
-            DisplayText.visualColumnAt(value, end, tabWidth)
-                - DisplayText.visualColumnAt(value, start, tabWidth)
+            metrics.visualColumnAt(end) - metrics.visualColumnAt(start)
         );
     }
 
     public static int absoluteVisualColumn(String line, int textColumn, int tabWidth) {
-        return DisplayText.visualColumnAt(line, textColumn, tabWidth);
+        return DisplayText.metrics(line, tabWidth).visualColumnAt(textColumn);
     }
 
     public static int visualToTextColumn(String line, int leftColumn, int targetVisualCol, int tabWidth) {
-        String value = line == null ? "" : line;
-        int left = DisplayText.floorBoundary(value, leftColumn);
-        int leftVisual = DisplayText.visualColumnAt(value, left, tabWidth);
-        return DisplayText.offsetForVisualColumn(
-            value,
+        DisplayText.Metrics metrics = DisplayText.metrics(line, tabWidth);
+        int left = metrics.floorBoundary(leftColumn);
+        int leftVisual = metrics.visualColumnAt(left);
+        return metrics.offsetForVisualColumn(
             leftVisual + Math.max(0, targetVisualCol),
-            tabWidth,
             DisplayText.Bias.NEAREST
         );
     }
 
     public static int visualToTextColumnFloor(String line, int targetVisualCol, int tabWidth) {
-        return DisplayText.offsetForVisualColumn(
-            line,
+        return DisplayText.metrics(line, tabWidth).offsetForVisualColumn(
             Math.max(0, targetVisualCol),
-            tabWidth,
             DisplayText.Bias.FLOOR
         );
     }
 
     public static List<Integer> wrapStarts(String line, int maxVisualWidth, boolean wrapByWords, int tabWidth) {
-        String value = line == null ? "" : line;
-        if (value.isEmpty() || maxVisualWidth <= 0) {
+        return wrapStarts(DisplayText.metrics(line, tabWidth), maxVisualWidth, wrapByWords);
+    }
+
+    public static List<Integer> wrapStarts(
+        DisplayText.Metrics metrics,
+        int maxVisualWidth,
+        boolean wrapByWords
+    ) {
+        if (metrics.text().isEmpty() || maxVisualWidth <= 0) {
             return List.of(0);
         }
-        int safeTabWidth = Math.max(1, tabWidth);
-        List<DisplayText.Grapheme> graphemes = DisplayText.graphemes(value);
         List<Integer> starts = new ArrayList<>();
         starts.add(0);
         int segmentStartIndex = 0;
@@ -66,19 +66,17 @@ public final class ViewportMetrics {
         int lastWhitespaceEndIndex = -1;
         int index = 0;
 
-        while (index < graphemes.size()) {
-            DisplayText.Grapheme grapheme = graphemes.get(index);
-            int advance = grapheme.tab()
-                ? safeTabWidth - (visual % safeTabWidth)
-                : Math.max(1, grapheme.width());
+        while (index < metrics.graphemeCount()) {
+            int advance = metrics.visualColumnAtBoundary(index + 1)
+                - metrics.visualColumnAtBoundary(index);
             if (visual + advance - segmentStartVisual > maxVisualWidth && index > segmentStartIndex) {
                 int breakIndex = wrapByWords && lastWhitespaceEndIndex > segmentStartIndex
                     ? lastWhitespaceEndIndex
                     : index;
-                int startOffset = graphemes.get(breakIndex).start();
+                int startOffset = metrics.start(breakIndex);
                 starts.add(startOffset);
                 segmentStartIndex = breakIndex;
-                segmentStartVisual = DisplayText.visualColumnAt(value, startOffset, safeTabWidth);
+                segmentStartVisual = metrics.visualColumnAtBoundary(breakIndex);
                 visual = segmentStartVisual;
                 lastWhitespaceEndIndex = -1;
                 index = breakIndex;
@@ -87,12 +85,12 @@ public final class ViewportMetrics {
 
             visual += advance;
             index++;
-            if (grapheme.whitespace()) {
+            if (metrics.isWhitespace(index - 1)) {
                 lastWhitespaceEndIndex = index;
             }
             if (visual - segmentStartVisual > maxVisualWidth && index == segmentStartIndex + 1) {
-                if (index < graphemes.size()) {
-                    starts.add(graphemes.get(index).start());
+                if (index < metrics.graphemeCount()) {
+                    starts.add(metrics.start(index));
                 }
                 segmentStartIndex = index;
                 segmentStartVisual = visual;

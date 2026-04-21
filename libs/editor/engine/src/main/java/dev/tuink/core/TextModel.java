@@ -14,6 +14,7 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -22,6 +23,8 @@ import java.util.Set;
  * Editing operations and persistence over a {@link TextBuffer}.
  */
 public class TextModel {
+    private static final int MAX_DISPLAY_METRICS_LINES = 200_000;
+    private static final int MAX_DISPLAY_METRICS_WEIGHT = 8_388_608;
     private final TextBuffer buffer;
     private static final Charset FALLBACK_CHARSET = Charset.forName("windows-1251");
     private static final Set<PosixFilePermission> NEW_FILE_PERMISSIONS = Set.of(
@@ -37,6 +40,9 @@ public class TextModel {
     private boolean maxVisualWidthDirty = true;
     private final Map<WrapStartsKey, List<Integer>> wrapStartsCache = new HashMap<>();
     private final Map<WrapLayoutKey, int[]> wrapPrefixCache = new HashMap<>();
+    private final Map<Integer, DisplayMetricsEntry> displayMetricsCache =
+        new LinkedHashMap<>(256, 0.75f, true);
+    private int displayMetricsWeight = 0;
     private long revision = 0L;
 
     public TextModel(TextBuffer buffer) {
@@ -213,6 +219,7 @@ public class TextModel {
         DecodedContent decoded = decodeWithDetectedCharset(data);
         String lineSeparator = detectLineSeparator(decoded.text());
         List<String> lines = splitLines(decoded.text());
+        clearDisplayMetricsCache();
         buffer.clear();
         if (lines.isEmpty()) {
             buffer.setLine(0, "");
@@ -327,7 +334,7 @@ public class TextModel {
         }
         int max = 0;
         for (int i = 0; i < lineCount(); i++) {
-            max = Math.max(max, DisplayText.visualWidth(getLine(i), safeTabWidth));
+            max = Math.max(max, displayMetrics(i, safeTabWidth).visualWidth());
         }
         cachedVisualWidthTabWidth = safeTabWidth;
         cachedMaxVisualLineWidth = max;
@@ -337,6 +344,30 @@ public class TextModel {
 
     public long revision() {
         return revision;
+    }
+
+    public DisplayText.Metrics displayMetrics(int line, int tabWidth) {
+        if (lineCount() <= 0) {
+            return DisplayText.metrics("", tabWidth);
+        }
+        int safeLine = Math.max(0, Math.min(line, lineCount() - 1));
+        int safeTabWidth = Math.max(1, tabWidth);
+        String text = getLine(safeLine);
+        DisplayMetricsEntry cached = displayMetricsCache.get(safeLine);
+        if (cached != null && cached.matches(text, safeTabWidth)) {
+            return cached.metrics();
+        }
+        if (cached != null) {
+            displayMetricsCache.remove(safeLine);
+            displayMetricsWeight -= cached.weight();
+        }
+
+        DisplayText.Metrics metrics = DisplayText.metrics(text, safeTabWidth);
+        DisplayMetricsEntry computed = new DisplayMetricsEntry(text, safeTabWidth, metrics);
+        displayMetricsCache.put(safeLine, computed);
+        displayMetricsWeight += computed.weight();
+        trimDisplayMetricsCache();
+        return metrics;
     }
 
     public List<Integer> wrapStarts(int line, int width, boolean wrapByWords, int tabWidth) {
@@ -350,10 +381,9 @@ public class TextModel {
             return cached;
         }
         List<Integer> computed = ViewportMetrics.wrapStarts(
-            getLine(safeLine),
+            displayMetrics(safeLine, key.tabWidth()),
             key.width(),
-            key.wrapByWords(),
-            key.tabWidth()
+            key.wrapByWords()
         );
         wrapStartsCache.put(key, computed);
         return computed;
@@ -392,6 +422,7 @@ public class TextModel {
     }
 
     public void replaceLines(List<String> lines) {
+        clearDisplayMetricsCache();
         buffer.clear();
         if (lines == null || lines.isEmpty()) {
             buffer.setLine(0, "");
@@ -410,6 +441,33 @@ public class TextModel {
         wrapStartsCache.clear();
         wrapPrefixCache.clear();
         revision++;
+    }
+
+    private void trimDisplayMetricsCache() {
+        var iterator = displayMetricsCache.entrySet().iterator();
+        while (iterator.hasNext()
+            && (displayMetricsCache.size() > MAX_DISPLAY_METRICS_LINES
+                || (displayMetricsWeight > MAX_DISPLAY_METRICS_WEIGHT
+                    && displayMetricsCache.size() > 1))) {
+            DisplayMetricsEntry removed = iterator.next().getValue();
+            displayMetricsWeight -= removed.weight();
+            iterator.remove();
+        }
+    }
+
+    private void clearDisplayMetricsCache() {
+        displayMetricsCache.clear();
+        displayMetricsWeight = 0;
+    }
+
+    private record DisplayMetricsEntry(String lineText, int tabWidth, DisplayText.Metrics metrics) {
+        private boolean matches(String text, int width) {
+            return tabWidth == width && lineText.equals(text);
+        }
+
+        private int weight() {
+            return Math.max(1, metrics.storageWeight());
+        }
     }
 
     private record WrapStartsKey(int line, int width, boolean wrapByWords, int tabWidth) {

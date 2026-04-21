@@ -1,5 +1,6 @@
 package dev.tuink.core;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -107,6 +108,42 @@ class DisplayTextTest {
         assertEquals(2, DisplayText.offsetForVisualColumn(text, 5, 4, DisplayText.Bias.FLOOR));
         assertEquals(3, DisplayText.offsetForVisualColumn(text, 5, 4, DisplayText.Bias.CEIL));
         assertEquals(2, DisplayText.offsetForVisualColumn(text, 5, 4, DisplayText.Bias.NEAREST));
+    }
+
+    @Test
+    void metricsReuseOneUnicodeLayoutForBoundaryAndVisualQueries() {
+        String text = "A\t" + FAMILY + "中B";
+        DisplayText.Metrics metrics = DisplayText.metrics(text, 4);
+
+        assertAll(
+            () -> assertEquals(5, metrics.graphemeCount()),
+            () -> assertEquals(2, metrics.floorBoundary(7)),
+            () -> assertEquals(13, metrics.ceilBoundary(7)),
+            () -> assertEquals(4, metrics.visualColumnAt(7)),
+            () -> assertEquals(9, metrics.visualWidth()),
+            () -> assertEquals(1, metrics.offsetForVisualColumn(2, DisplayText.Bias.FLOOR)),
+            () -> assertEquals(2, metrics.offsetForVisualColumn(2, DisplayText.Bias.CEIL)),
+            () -> assertEquals(1, metrics.offsetForVisualColumn(2, DisplayText.Bias.NEAREST)),
+            () -> assertEquals(2, metrics.offsetForVisualColumn(5, DisplayText.Bias.FLOOR)),
+            () -> assertEquals(13, metrics.offsetForVisualColumn(5, DisplayText.Bias.CEIL)),
+            () -> assertEquals(text.length(), metrics.offsetForVisualColumn(Integer.MAX_VALUE, DisplayText.Bias.CEIL))
+        );
+    }
+
+    @Test
+    void asciiMetricsKeepDirectBoundariesAndAbsoluteTabStops() {
+        DisplayText.Metrics plain = DisplayText.metrics("abcdef", 4);
+        DisplayText.Metrics tabbed = DisplayText.metrics("a\tb", 4);
+
+        assertAll(
+            () -> assertEquals(3, plain.previousBoundary(4)),
+            () -> assertEquals(5, plain.nextBoundary(4)),
+            () -> assertEquals(4, plain.visualColumnAt(4)),
+            () -> assertEquals(4, tabbed.visualColumnAt(2)),
+            () -> assertEquals(5, tabbed.visualWidth()),
+            () -> assertEquals(1, tabbed.offsetForVisualColumn(2, DisplayText.Bias.FLOOR)),
+            () -> assertEquals(2, tabbed.offsetForVisualColumn(2, DisplayText.Bias.CEIL))
+        );
     }
 
     @Test

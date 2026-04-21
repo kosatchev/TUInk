@@ -66,7 +66,11 @@ public class RenderPlanBuilder {
     }
 
     public void setTabWidth(int tabWidth) {
-        this.tabWidth = tabWidth <= 2 ? 2 : 4;
+        int normalized = tabWidth <= 2 ? 2 : 4;
+        if (this.tabWidth == normalized) {
+            return;
+        }
+        this.tabWidth = normalized;
     }
 
     public void setSyntaxHighlightingEnabled(boolean enabled) {
@@ -344,11 +348,8 @@ public class RenderPlanBuilder {
         }
         // Reuse model-level cache instead of scanning all lines on every frame.
         Position layoutCursor = model.clamp(state.getCursor());
-        int cursorExtent = ViewportMetrics.absoluteVisualColumn(
-            model.getLine(layoutCursor.line()),
-            layoutCursor.col(),
-            tabWidth
-        ) + 1;
+        int cursorExtent = lineMetrics(model, layoutCursor.line())
+            .visualColumnAt(layoutCursor.col()) + 1;
         int totalColumns = Math.max(model.maxVisualLineWidth(tabWidth), cursorExtent);
         BracketPair bracketPair = bracketMatchingEnabled ? bracketPairForCursor(model, state) : null;
         if (bracketMatchingEnabled || rainbowBracketsEnabled) {
@@ -469,7 +470,7 @@ public class RenderPlanBuilder {
                             part,
                             partSpans,
                             seg == 0 ? gutterDiff : GutterDiffMarker.NONE,
-                            ViewportMetrics.absoluteVisualColumn(line, start, tabWidth),
+                            lineMetrics(model, lineIndex).visualColumnAt(start),
                             0
                         )
                     );
@@ -480,17 +481,18 @@ public class RenderPlanBuilder {
         }
 
         Position cursor = model.clamp(state.getCursor());
+        String cursorLine = model.getLine(cursor.line());
+        DisplayText.Metrics cursorMetrics = lineMetrics(model, cursor.line());
         int cursorRow;
         int leftVisualColumn = Math.max(0, state.getLeftVisualColumn());
-        int cursorLineLeftColumn = columnForVisualColumn(model, cursor.line(), model.getLine(cursor.line()), leftVisualColumn);
+        int cursorLineLeftColumn = columnForVisualColumn(model, cursor.line(), leftVisualColumn);
         int cursorCol;
         if (!wrapLines) {
             cursorRow = cursor.line() - state.getTopLine();
             cursorCol = gutterWidth
-                + ViewportMetrics.absoluteVisualColumn(model.getLine(cursor.line()), cursor.col(), tabWidth)
+                + cursorMetrics.visualColumnAt(cursor.col())
                 - leftVisualColumn;
         } else {
-            String cursorLine = model.getLine(cursor.line());
             List<Integer> starts = wrapStarts(model, cursor.line(), layoutWidth, wrapByWords);
             int segIndex = 0;
             int segStart = 0;
@@ -512,8 +514,8 @@ public class RenderPlanBuilder {
             int topWrapped = wrapViewport == null ? 0 : wrapViewport.topWrappedOffset();
             cursorRow = cursorAbsoluteWrapped - topWrapped;
             cursorCol = gutterWidth
-                + ViewportMetrics.absoluteVisualColumn(cursorLine, cursor.col(), tabWidth)
-                - ViewportMetrics.absoluteVisualColumn(cursorLine, segStart, tabWidth);
+                + cursorMetrics.visualColumnAt(cursor.col())
+                - cursorMetrics.visualColumnAt(segStart);
         }
         int maxCursorCol = Math.max(0, safeCols - 1 - scrollbarWidth);
         boolean cursorInViewport = contentRows > 0
@@ -624,17 +626,15 @@ public class RenderPlanBuilder {
             return new VisualSlice(0, "", 0, 0);
         }
         int safeLeftVisual = Math.max(0, leftVisualColumn);
-        int start = DisplayText.offsetForVisualColumn(
-            line,
+        DisplayText.Metrics metrics = lineMetrics(model, lineIndex);
+        int start = metrics.offsetForVisualColumn(
             safeLeftVisual,
-            tabWidth,
             DisplayText.Bias.FLOOR
         );
-        int sourceVisual = ViewportMetrics.absoluteVisualColumn(line, start, tabWidth);
-        int end = DisplayText.offsetForVisualColumn(
-            line,
-            safeLeftVisual + maxWidth,
-            tabWidth,
+        int sourceVisual = metrics.visualColumnAt(start);
+        int rightVisual = (int) Math.min(Integer.MAX_VALUE, (long) safeLeftVisual + maxWidth);
+        int end = metrics.offsetForVisualColumn(
+            rightVisual,
             DisplayText.Bias.CEIL
         );
         end = Math.max(start, Math.min(end, line.length()));
@@ -646,8 +646,15 @@ public class RenderPlanBuilder {
         );
     }
 
-    private int columnForVisualColumn(TextModel model, int lineIndex, String line, int targetVisual) {
-        return ViewportMetrics.visualToTextColumnFloor(line, targetVisual, tabWidth);
+    private int columnForVisualColumn(TextModel model, int lineIndex, int targetVisual) {
+        return lineMetrics(model, lineIndex).offsetForVisualColumn(
+            Math.max(0, targetVisual),
+            DisplayText.Bias.FLOOR
+        );
+    }
+
+    private DisplayText.Metrics lineMetrics(TextModel model, int lineIndex) {
+        return model.displayMetrics(lineIndex, tabWidth);
     }
 
     private void ensureSyntaxCache(TextModel model) {

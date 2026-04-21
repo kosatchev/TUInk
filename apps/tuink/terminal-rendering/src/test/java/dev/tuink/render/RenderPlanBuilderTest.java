@@ -112,6 +112,64 @@ class RenderPlanBuilderTest {
     }
 
     @Test
+    void clippedWideGraphemeKeepsWholeClusterAndVisualMetadata() {
+        String family = "👨‍👩‍👧‍👦";
+        TextModel model = model("A" + family + "B");
+        EditorState state = new EditorState();
+        state.setLeftVisualColumn(2);
+
+        RenderPlan plan = build(model, state, 5, 4, false, false);
+        LineVisual line = plan.lines().get(0);
+
+        assertAll(
+            () -> assertEquals(family, line.text()),
+            () -> assertEquals(1, line.sourceVisualColumn()),
+            () -> assertEquals(1, line.leadingClippedCells())
+        );
+    }
+
+    @Test
+    void visualCacheRecomputesOnlyTheChangedLineSemantically() {
+        String family = "👨‍👩‍👧‍👦";
+        TextModel model = model("A" + family + "B");
+        EditorState state = new EditorState();
+        state.setLeftVisualColumn(2);
+        RenderPlanBuilder builder = builder();
+
+        build(builder, model, state, 5, 4, false, false);
+        model.insertChar(new Position(0, 0), 'X');
+        RenderPlan changed = build(builder, model, state, 5, 4, false, false);
+        LineVisual line = changed.lines().get(0);
+
+        assertAll(
+            () -> assertEquals(family, line.text()),
+            () -> assertEquals(2, line.sourceVisualColumn()),
+            () -> assertEquals(0, line.leadingClippedCells())
+        );
+    }
+
+    @Test
+    void tabWidthChangeDoesNotReuseStaleVisualMetrics() {
+        TextModel model = model("A\tB");
+        EditorState state = new EditorState();
+        state.setLeftVisualColumn(2);
+        RenderPlanBuilder builder = builder();
+
+        RenderPlan tabFour = build(builder, model, state, 5, 6, false, false);
+        builder.setTabWidth(2);
+        RenderPlan tabTwo = build(builder, model, state, 5, 6, false, false);
+
+        assertAll(
+            () -> assertEquals("\tB", tabFour.lines().get(0).text()),
+            () -> assertEquals(1, tabFour.lines().get(0).sourceVisualColumn()),
+            () -> assertEquals(1, tabFour.lines().get(0).leadingClippedCells()),
+            () -> assertEquals("B", tabTwo.lines().get(0).text()),
+            () -> assertEquals(2, tabTwo.lines().get(0).sourceVisualColumn()),
+            () -> assertEquals(0, tabTwo.lines().get(0).leadingClippedCells())
+        );
+    }
+
+    @Test
     void narrowTerminalsKeepPlanCoordinatesAndMetadataBounded() {
         TextModel model = model("\t界abc", "second");
         EditorState state = new EditorState();
@@ -153,10 +211,26 @@ class RenderPlanBuilderTest {
         boolean wrapLines,
         boolean wrapByWords
     ) {
+        return build(builder(), model, state, rows, cols, wrapLines, wrapByWords);
+    }
+
+    private static RenderPlanBuilder builder() {
         RenderPlanBuilder builder = new RenderPlanBuilder(line -> List.of());
         builder.setSyntaxHighlightingEnabled(false);
         builder.setBracketMatchingEnabled(false);
         builder.setRainbowBracketsEnabled(false);
+        return builder;
+    }
+
+    private static RenderPlan build(
+        RenderPlanBuilder builder,
+        TextModel model,
+        EditorState state,
+        int rows,
+        int cols,
+        boolean wrapLines,
+        boolean wrapByWords
+    ) {
         return builder.build(
             model,
             state,

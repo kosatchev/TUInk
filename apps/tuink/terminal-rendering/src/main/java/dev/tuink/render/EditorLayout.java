@@ -50,6 +50,8 @@ public record EditorLayout(
         int horizontalHeight = 0;
         int contentRows = 0;
         int contentColumns = 0;
+        Position cursor = model.clamp(state.getCursor());
+        DisplayText.Metrics cursorMetrics = model.displayMetrics(cursor.line(), tabWidth);
 
         for (int pass = 0; pass < 4; pass++) {
             contentRows = Math.max(0, safeRows - top - 1 - overlays - horizontalHeight);
@@ -65,10 +67,9 @@ public record EditorLayout(
             int nextVertical = safeCols >= 8 && (topOffset > 0 || totalRows > contentRows) ? 1 : 0;
             int nextColumns = Math.max(0, safeCols - gutter - nextVertical);
             int maxWidth = wrapLines ? 0 : model.maxVisualLineWidth(tabWidth);
-            Position cursor = model.clamp(state.getCursor());
             int cursorExtent = wrapLines
                 ? 0
-                : DisplayText.visualColumnAt(model.getLine(cursor.line()), cursor.col(), tabWidth) + 1;
+                : cursorMetrics.visualColumnAt(cursor.col()) + 1;
             int requiredColumns = Math.max(maxWidth, cursorExtent);
             int nextHorizontal = !wrapLines
                 && nextColumns > 0

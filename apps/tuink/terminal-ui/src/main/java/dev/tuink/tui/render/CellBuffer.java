@@ -8,6 +8,7 @@ import dev.tuink.render.Style;
 public class CellBuffer {
     private static final long HASH_SEED_1 = 0x9E3779B97F4A7C15L;
     private static final long HASH_SEED_2 = 0xD1B54A32D192ED03L;
+    private static final int EMPTY_CELL_HASH = Cell.EMPTY.hashCode();
     private final int rows;
     private final int cols;
     private final Cell[][] cells;
@@ -44,14 +45,16 @@ public class CellBuffer {
                     placed = new Cell("�", placed.style());
                 }
                 cells[r][c] = placed;
-                sig1 ^= mix(placed, c, HASH_SEED_1);
-                sig2 ^= mix(placed, c, HASH_SEED_2);
+                int placedHash = signatureHash(placed);
+                sig1 ^= mix(placedHash, c, HASH_SEED_1);
+                sig2 ^= mix(placedHash, c, HASH_SEED_2);
                 if (placed.width() == 2) {
                     Cell continuation = Cell.continuation(placed.style());
                     c++;
                     cells[r][c] = continuation;
-                    sig1 ^= mix(continuation, c, HASH_SEED_1);
-                    sig2 ^= mix(continuation, c, HASH_SEED_2);
+                    int continuationHash = signatureHash(continuation);
+                    sig1 ^= mix(continuationHash, c, HASH_SEED_1);
+                    sig2 ^= mix(continuationHash, c, HASH_SEED_2);
                 }
             }
             rowSignature1[r] = sig1;
@@ -121,13 +124,18 @@ public class CellBuffer {
 
     private void replace(int row, int col, Cell next) {
         Cell previous = cells[row][col];
+        if (previous == next) {
+            return;
+        }
         if (previous != null) {
-            rowSignature1[row] ^= mix(previous, col, HASH_SEED_1);
-            rowSignature2[row] ^= mix(previous, col, HASH_SEED_2);
+            int previousHash = signatureHash(previous);
+            rowSignature1[row] ^= mix(previousHash, col, HASH_SEED_1);
+            rowSignature2[row] ^= mix(previousHash, col, HASH_SEED_2);
         }
         cells[row][col] = next;
-        rowSignature1[row] ^= mix(next, col, HASH_SEED_1);
-        rowSignature2[row] ^= mix(next, col, HASH_SEED_2);
+        int nextHash = signatureHash(next);
+        rowSignature1[row] ^= mix(nextHash, col, HASH_SEED_1);
+        rowSignature2[row] ^= mix(nextHash, col, HASH_SEED_2);
     }
 
     public Cell get(int row, int col) {
@@ -142,13 +150,17 @@ public class CellBuffer {
         return rowSignature2[row];
     }
 
-    private static long mix(Cell cell, int col, long seed) {
-        long x = seed ^ ((long) cell.hashCode() * 0x9E3779B185EBCA87L) ^ (long) col * 0xC2B2AE3D27D4EB4FL;
+    private static long mix(int cellHash, int col, long seed) {
+        long x = seed ^ ((long) cellHash * 0x9E3779B185EBCA87L) ^ (long) col * 0xC2B2AE3D27D4EB4FL;
         x ^= (x >>> 33);
         x *= 0xFF51AFD7ED558CCDL;
         x ^= (x >>> 33);
         x *= 0xC4CEB9FE1A85EC53L;
         x ^= (x >>> 33);
         return x;
+    }
+
+    private static int signatureHash(Cell cell) {
+        return cell == Cell.EMPTY ? EMPTY_CELL_HASH : cell.hashCode();
     }
 }

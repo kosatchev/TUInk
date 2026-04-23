@@ -16,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.IntFunction;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -24,10 +25,13 @@ import java.util.regex.Pattern;
  * Builds render data from current model and state.
  */
 public class RenderPlanBuilder {
+    private static final AtomicLong NEXT_BASE_STYLE_OWNER_ID = new AtomicLong();
     private static final int MAX_SYNTAX_CACHE_LINES = 1024;
     private static final int MAX_BRACKET_SCAN_CHARS = 200_000;
     private static final int MAX_UNMATCHED_SCAN_CHARS = 1_000_000;
     private final LineHighlighter highlighter;
+    private final long baseStyleOwnerId = NEXT_BASE_STYLE_OWNER_ID.incrementAndGet();
+    private long baseStyleGeneration;
     private int tabWidth = 4;
     private boolean syntaxHighlightingEnabled = true;
     private boolean bracketMatchingEnabled = true;
@@ -74,16 +78,28 @@ public class RenderPlanBuilder {
     }
 
     public void setSyntaxHighlightingEnabled(boolean enabled) {
+        if (this.syntaxHighlightingEnabled == enabled) {
+            return;
+        }
         this.syntaxHighlightingEnabled = enabled;
+        baseStyleGeneration++;
     }
 
     public void setBracketMatchingEnabled(boolean enabled) {
+        if (this.bracketMatchingEnabled == enabled) {
+            return;
+        }
         this.bracketMatchingEnabled = enabled;
+        baseStyleGeneration++;
     }
 
     public void setRainbowBracketsEnabled(boolean enabled) {
+        if (this.rainbowBracketsEnabled == enabled) {
+            return;
+        }
         this.rainbowBracketsEnabled = enabled;
         this.bracketCacheRevision = Long.MIN_VALUE;
+        baseStyleGeneration++;
     }
 
     public void setGutterDiffResolver(IntFunction<GutterDiffMarker> resolver) {
@@ -99,6 +115,7 @@ public class RenderPlanBuilder {
         this.quoteMaskCacheRevision = Long.MIN_VALUE;
         this.unmatchedCacheRevision = Long.MIN_VALUE;
         this.bracketCacheRevision = Long.MIN_VALUE;
+        baseStyleGeneration++;
     }
 
     public void setDecorationStyles(
@@ -110,15 +127,28 @@ public class RenderPlanBuilder {
         Style unmatchedBracketStyle,
         List<Style> rainbowBracketStyles
     ) {
-        this.selectionStyle = selectionStyle == null ? Style.DEFAULT : selectionStyle;
-        this.searchMatchStyle = searchMatchStyle == null ? Style.DEFAULT : searchMatchStyle;
-        this.currentSearchMatchStyle = currentSearchMatchStyle == null ? Style.DEFAULT : currentSearchMatchStyle;
-        this.bracketMatchStyle = bracketMatchStyle == null ? Style.DEFAULT : bracketMatchStyle;
-        this.quoteMatchStyle = quoteMatchStyle == null ? Style.DEFAULT : quoteMatchStyle;
-        this.unmatchedBracketStyle = unmatchedBracketStyle == null ? Style.DEFAULT : unmatchedBracketStyle;
-        this.rainbowBracketStyles = rainbowBracketStyles == null || rainbowBracketStyles.isEmpty()
+        Style nextSelection = selectionStyle == null ? Style.DEFAULT : selectionStyle;
+        Style nextSearchMatch = searchMatchStyle == null ? Style.DEFAULT : searchMatchStyle;
+        Style nextCurrentSearchMatch = currentSearchMatchStyle == null ? Style.DEFAULT : currentSearchMatchStyle;
+        Style nextBracketMatch = bracketMatchStyle == null ? Style.DEFAULT : bracketMatchStyle;
+        Style nextQuoteMatch = quoteMatchStyle == null ? Style.DEFAULT : quoteMatchStyle;
+        Style nextUnmatchedBracket = unmatchedBracketStyle == null ? Style.DEFAULT : unmatchedBracketStyle;
+        List<Style> nextRainbowBracketStyles = rainbowBracketStyles == null || rainbowBracketStyles.isEmpty()
             ? List.of(Style.DEFAULT)
             : List.copyOf(rainbowBracketStyles);
+        if (
+            !this.unmatchedBracketStyle.equals(nextUnmatchedBracket)
+                || !this.rainbowBracketStyles.equals(nextRainbowBracketStyles)
+        ) {
+            baseStyleGeneration++;
+        }
+        this.selectionStyle = nextSelection;
+        this.searchMatchStyle = nextSearchMatch;
+        this.currentSearchMatchStyle = nextCurrentSearchMatch;
+        this.bracketMatchStyle = nextBracketMatch;
+        this.quoteMatchStyle = nextQuoteMatch;
+        this.unmatchedBracketStyle = nextUnmatchedBracket;
+        this.rainbowBracketStyles = nextRainbowBracketStyles;
     }
 
     public RenderPlan build(
@@ -375,6 +405,9 @@ public class RenderPlanBuilder {
                     }
                     if (bracketMatchingEnabled) {
                         spans.addAll(unmatchedBracketSpansForLine(lineIndex, lineLeftColumn, visibleText.length()));
+                    }
+                    int baseSpanCount = spans.size();
+                    if (bracketMatchingEnabled) {
                         spans.addAll(bracketSpansForLine(bracketPair, lineIndex, lineLeftColumn, visibleText.length()));
                     }
                     spans.addAll(
@@ -409,7 +442,14 @@ public class RenderPlanBuilder {
                             spans,
                             gutterDiff,
                             slice.sourceVisualColumn(),
-                            slice.leadingClippedCells()
+                            slice.leadingClippedCells(),
+                            baseSpanCount,
+                            baseStyleKey(
+                                model,
+                                lineIndex,
+                                lineLeftColumn,
+                                visibleText.length()
+                            )
                         )
                     );
                 } else {
@@ -434,6 +474,9 @@ public class RenderPlanBuilder {
                 }
                 if (bracketMatchingEnabled) {
                     lineSpans.addAll(unmatchedBracketSpansForLine(lineIndex, 0, line.length()));
+                }
+                int baseSpanCount = lineSpans.size();
+                if (bracketMatchingEnabled) {
                     lineSpans.addAll(bracketSpansForLine(bracketPair, lineIndex, 0, line.length()));
                 }
                 lineSpans.addAll(searchMatchSpans(line, searchQuery, searchOptions, searchMatchStyle));
@@ -460,7 +503,13 @@ public class RenderPlanBuilder {
                     int start = starts.get(seg);
                     int end = seg + 1 < starts.size() ? starts.get(seg + 1) : line.length();
                     String part = line.substring(start, end);
-                    List<StyleSpan> partSpans = clipSpans(lineSpans, start, part.length());
+                    List<StyleSpan> partSpans = new ArrayList<>(
+                        clipSpans(lineSpans.subList(0, baseSpanCount), start, part.length())
+                    );
+                    int partBaseSpanCount = partSpans.size();
+                    partSpans.addAll(
+                        clipSpans(lineSpans.subList(baseSpanCount, lineSpans.size()), start, part.length())
+                    );
                     String gutter = seg == 0
                         ? lineNumberGutter(lineIndex + 1, gutterWidth, gutterDiff.flag())
                         : " ".repeat(gutterWidth);
@@ -471,7 +520,9 @@ public class RenderPlanBuilder {
                             partSpans,
                             seg == 0 ? gutterDiff : GutterDiffMarker.NONE,
                             lineMetrics(model, lineIndex).visualColumnAt(start),
-                            0
+                            0,
+                            partBaseSpanCount,
+                            baseStyleKey(model, lineIndex, start, part.length())
                         )
                     );
                 }
@@ -600,6 +651,23 @@ public class RenderPlanBuilder {
 
     private List<Integer> wrapStarts(TextModel model, int lineIndex, int maxVisualWidth, boolean wrapByWords) {
         return model.wrapStarts(lineIndex, maxVisualWidth, wrapByWords, tabWidth);
+    }
+
+    private Object baseStyleKey(
+        TextModel model,
+        int lineIndex,
+        int sliceStart,
+        int sliceLength
+    ) {
+        return new BaseStyleKey(
+            baseStyleOwnerId,
+            model.renderCacheIdentity(),
+            baseStyleGeneration,
+            model.revision(),
+            lineIndex,
+            sliceStart,
+            sliceLength
+        );
     }
 
     private static List<StyleSpan> clipSpans(List<StyleSpan> spans, int leftColumn, int visibleLength) {
@@ -1599,6 +1667,64 @@ public class RenderPlanBuilder {
     }
 
     private record VisualSlice(int startCol, String text, int sourceVisualColumn, int leadingClippedCells) {
+    }
+
+    private static final class BaseStyleKey {
+        private final long ownerId;
+        private final long modelId;
+        private final long generation;
+        private final long modelRevision;
+        private final int lineIndex;
+        private final int sliceStart;
+        private final int sliceLength;
+        private final int hashCode;
+
+        private BaseStyleKey(
+            long ownerId,
+            long modelId,
+            long generation,
+            long modelRevision,
+            int lineIndex,
+            int sliceStart,
+            int sliceLength
+        ) {
+            this.ownerId = ownerId;
+            this.modelId = modelId;
+            this.generation = generation;
+            this.modelRevision = modelRevision;
+            this.lineIndex = lineIndex;
+            this.sliceStart = sliceStart;
+            this.sliceLength = sliceLength;
+            int hash = Long.hashCode(ownerId);
+            hash = 31 * hash + Long.hashCode(modelId);
+            hash = 31 * hash + Long.hashCode(generation);
+            hash = 31 * hash + Long.hashCode(modelRevision);
+            hash = 31 * hash + lineIndex;
+            hash = 31 * hash + sliceStart;
+            this.hashCode = 31 * hash + sliceLength;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+            if (!(other instanceof BaseStyleKey key)) {
+                return false;
+            }
+            return ownerId == key.ownerId
+                && modelId == key.modelId
+                && generation == key.generation
+                && modelRevision == key.modelRevision
+                && lineIndex == key.lineIndex
+                && sliceStart == key.sliceStart
+                && sliceLength == key.sliceLength;
+        }
+
+        @Override
+        public int hashCode() {
+            return hashCode;
+        }
     }
 
     private record SyntaxSpans(String lineText, List<StyleSpan> spans) {

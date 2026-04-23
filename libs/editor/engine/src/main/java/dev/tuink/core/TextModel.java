@@ -18,11 +18,13 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Editing operations and persistence over a {@link TextBuffer}.
  */
 public class TextModel {
+    private static final AtomicLong NEXT_RENDER_CACHE_ID = new AtomicLong();
     private static final int MAX_DISPLAY_METRICS_LINES = 200_000;
     private static final int MAX_DISPLAY_METRICS_WEIGHT = 8_388_608;
     private final TextBuffer buffer;
@@ -44,6 +46,7 @@ public class TextModel {
         new LinkedHashMap<>(256, 0.75f, true);
     private int displayMetricsWeight = 0;
     private long revision = 0L;
+    private final long renderCacheIdentity = NEXT_RENDER_CACHE_ID.incrementAndGet();
 
     public TextModel(TextBuffer buffer) {
         this.buffer = buffer;
@@ -344,6 +347,10 @@ public class TextModel {
 
     public long revision() {
         return revision;
+    }
+
+    public long renderCacheIdentity() {
+        return renderCacheIdentity;
     }
 
     public DisplayText.Metrics displayMetrics(int line, int tabWidth) {

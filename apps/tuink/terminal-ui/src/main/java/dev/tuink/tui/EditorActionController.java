@@ -75,6 +75,7 @@ final class EditorActionController {
             }
             case CTRL_E, CTRL_T, OPEN_VIEW_MENU, OPEN_HELP_MENU, F10, F2,
                 CTRL_C, CTRL_X, CTRL_V, CTRL_Z, CTRL_Y,
+                TOGGLE_LINE_COMMENT,
                 TOGGLE_TAB_BAR, TOGGLE_WRAP_LINES, TOGGLE_WORD_WRAP,
                 TOGGLE_READING_MODE, TOGGLE_CONFIRM_ON_CLOSE, TOGGLE_MOUSE_MODE, SHOW_KEY_HINTS,
                 TOGGLE_GUTTER_DIFF,

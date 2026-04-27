@@ -109,6 +109,7 @@ Detailed documentation:
 - `Enter`: insert newline
 - Typing: insert character
 - `Ctrl+F`: search mode (`Esc` to return)
+- `Ctrl+/`: toggle line comments on the current line or selected lines
 - Menu shortcuts: `F1` = `File`, `F2` = `Edit`, `F3` = `View`, `F4` = `Tab`, `F5` = `Settings`, `F6` = `Help` (`Alt+I/E/V/T/S/H` also works); navigation with `←/→`, `↑/↓`, `Enter`, `Esc`
 - Mouse:
 - left click `File`/`Edit` in top bar to open/close corresponding menu

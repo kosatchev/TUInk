@@ -586,6 +586,88 @@ public class EditorEngine {
         commitOperationEdit(EditKind.NONE, before, ops);
     }
 
+    public LineCommentResult toggleLineComment() {
+        preferredVisualColumn = -1;
+        CommentSyntaxProfile syntax = LanguageProfiles.resolveCommentSyntax(state.getCurrentFile());
+        String marker = syntax.lineCommentPrefix();
+        if (marker == null) {
+            return new LineCommentResult(LineCommentAction.UNSUPPORTED, 0);
+        }
+
+        Position cursorBefore = model.clamp(state.getCursor());
+        Position anchorBefore = state.getSelectionAnchor() == null
+            ? null
+            : model.clamp(state.getSelectionAnchor());
+        SelectionRange selection = currentSelection();
+        int firstLine = cursorBefore.line();
+        int lastLine = cursorBefore.line();
+        if (selection != null) {
+            firstLine = selection.start().line();
+            lastLine = selection.end().line();
+            if (lastLine > firstLine && selection.end().col() == 0) {
+                lastLine--;
+            }
+        }
+
+        List<Integer> nonBlankLines = new ArrayList<>();
+        for (int lineIndex = firstLine; lineIndex <= lastLine; lineIndex++) {
+            if (!model.getLine(lineIndex).isBlank()) {
+                nonBlankLines.add(lineIndex);
+            }
+        }
+        if (nonBlankLines.isEmpty()) {
+            return new LineCommentResult(LineCommentAction.NO_CONTENT, 0);
+        }
+
+        boolean uncomment = true;
+        for (int lineIndex : nonBlankLines) {
+            if (lineCommentColumn(model.getLine(lineIndex), marker, lineIndex) < 0) {
+                uncomment = false;
+                break;
+            }
+        }
+
+        ViewState before = captureViewState();
+        List<EditOp.ReplaceRange> ops = new ArrayList<>(nonBlankLines.size());
+        List<LineCommentEdit> positionEdits = new ArrayList<>(nonBlankLines.size());
+        if (uncomment) {
+            for (int lineIndex : nonBlankLines) {
+                String line = model.getLine(lineIndex);
+                int column = lineCommentColumn(line, marker, lineIndex);
+                int removeLength = marker.length();
+                int afterMarker = column + removeLength;
+                if (afterMarker < line.length() && line.charAt(afterMarker) == ' ') {
+                    removeLength++;
+                }
+                applyReplaceAndTrack(
+                    ops,
+                    new Position(lineIndex, column),
+                    new Position(lineIndex, column + removeLength),
+                    ""
+                );
+                positionEdits.add(new LineCommentEdit(lineIndex, column, removeLength, 0));
+            }
+        } else {
+            int commonIndent = commonIndentLength(nonBlankLines);
+            String inserted = marker + " ";
+            for (int lineIndex : nonBlankLines) {
+                Position at = new Position(lineIndex, commonIndent);
+                applyReplaceAndTrack(ops, at, at, inserted);
+                positionEdits.add(new LineCommentEdit(lineIndex, commonIndent, 0, inserted.length()));
+            }
+        }
+
+        state.setCursor(transformPosition(cursorBefore, positionEdits));
+        if (anchorBefore != null) {
+            state.setSelectionAnchor(transformPosition(anchorBefore, positionEdits));
+        }
+        commitOperationEdit(EditKind.NONE, before, ops);
+        return new LineCommentResult(
+            uncomment ? LineCommentAction.UNCOMMENTED : LineCommentAction.COMMENTED,
+            nonBlankLines.size()
+        );
+    }
+
     public boolean copySelection() {
         SelectionRange range = currentSelection();
         if (range == null) {
@@ -2212,6 +2294,16 @@ public class EditorEngine {
     private record SelectionRange(Position start, Position end) {
     }
 
+    public enum LineCommentAction {
+        COMMENTED,
+        UNCOMMENTED,
+        UNSUPPORTED,
+        NO_CONTENT
+    }
+
+    public record LineCommentResult(LineCommentAction action, int lineCount) {
+    }
+
     private enum EditKind {
         NONE,
         INSERT_CHAR,
@@ -2243,11 +2335,65 @@ public class EditorEngine {
         return new SelectionRange(a, b);
     }
 
+    private int commonIndentLength(List<Integer> lineIndexes) {
+        String common = null;
+        for (int lineIndex : lineIndexes) {
+            String line = model.getLine(lineIndex);
+            String indent = line.substring(0, leadingIndentLength(line));
+            if (common == null) {
+                common = indent;
+                continue;
+            }
+            int shared = 0;
+            int limit = Math.min(common.length(), indent.length());
+            while (shared < limit && common.charAt(shared) == indent.charAt(shared)) {
+                shared++;
+            }
+            common = common.substring(0, shared);
+            if (common.isEmpty()) {
+                return 0;
+            }
+        }
+        return common == null ? 0 : common.length();
+    }
+
+    private static int lineCommentColumn(String line, String marker, int lineIndex) {
+        int column = leadingIndentLength(line);
+        if (!line.startsWith(marker, column)) {
+            return -1;
+        }
+        if ("#".equals(marker) && lineIndex == 0 && line.startsWith("#!", column)) {
+            return -1;
+        }
+        return column;
+    }
+
+    private static Position transformPosition(Position position, List<LineCommentEdit> edits) {
+        for (LineCommentEdit edit : edits) {
+            if (edit.line() != position.line()) {
+                continue;
+            }
+            int column = position.col();
+            if (edit.removedLength() == 0) {
+                if (column >= edit.column()) {
+                    column += edit.insertedLength();
+                }
+            } else if (column > edit.column()) {
+                column = Math.max(edit.column(), column - edit.removedLength());
+            }
+            return new Position(position.line(), column);
+        }
+        return position;
+    }
+
     private void deleteSelectionIfAny() {
         SelectionRange range = currentSelection();
         if (range != null) {
             state.setCursor(model.deleteRange(range.start(), range.end()));
         }
+    }
+
+    private record LineCommentEdit(int line, int column, int removedLength, int insertedLength) {
     }
 
     private String normalizeQuery(String query) {

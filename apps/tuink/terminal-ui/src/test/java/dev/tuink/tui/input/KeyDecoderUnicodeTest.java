@@ -43,6 +43,24 @@ class KeyDecoderUnicodeTest {
     }
 
     @Test
+    void ctrlSlashMapsToToggleLineComment() throws IOException {
+        KeyDecoder decoder = new KeyDecoder(new QueueReader(31));
+
+        KeyEvent.ActionEvent event = assertInstanceOf(KeyEvent.ActionEvent.class, decoder.readKey(1));
+
+        assertEquals(KeyEvent.Action.TOGGLE_LINE_COMMENT, event.action());
+    }
+
+    @Test
+    void enhancedKeyboardCtrlSlashMapsToToggleLineComment() throws IOException {
+        KeyDecoder decoder = new KeyDecoder(new QueueReader(27, '[', '4', '7', ';', '5', 'u'));
+
+        KeyEvent.ActionEvent event = assertInstanceOf(KeyEvent.ActionEvent.class, decoder.readKey(1));
+
+        assertEquals(KeyEvent.Action.TOGGLE_LINE_COMMENT, event.action());
+    }
+
+    @Test
     void charInputRejectsControlsAndSurrogateCodePoints() {
         assertThrows(IllegalArgumentException.class, () -> new KeyEvent.CharInput(0x1B));
         assertThrows(IllegalArgumentException.class, () -> new KeyEvent.CharInput(0x9B));

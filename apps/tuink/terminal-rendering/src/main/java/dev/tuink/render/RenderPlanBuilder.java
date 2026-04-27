@@ -1,5 +1,6 @@
 package dev.tuink.render;
 
+import dev.tuink.core.CommentSyntaxProfile;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.EditorViewportBehavior;
 import dev.tuink.core.DisplayText;
@@ -865,6 +866,12 @@ public class RenderPlanBuilder {
                 }
                 break;
             }
+            if (profile.semicolonLine() && ch == ';' && (i == 0 || Character.isWhitespace(line.charAt(i - 1)))) {
+                for (int j = i; j < line.length(); j++) {
+                    mask[j] = true;
+                }
+                break;
+            }
             if (profile.dashDashLine() && ch == '-' && next == '-') {
                 for (int j = i; j < line.length(); j++) {
                     mask[j] = true;
@@ -1604,63 +1611,6 @@ public class RenderPlanBuilder {
     private enum MatchKind {
         BRACKET,
         QUOTE
-    }
-
-    public enum CommentSyntaxProfile {
-        NONE(false, false, false, false, false, false),
-        HASH(true, false, false, false, false, false),
-        C_STYLE(false, true, true, false, false, false),
-        SQL(false, false, true, true, false, false),
-        HTML(false, false, false, false, true, false),
-        MARKDOWN(false, false, false, false, true, true),
-        GENERIC(true, true, true, true, false, false);
-
-        private final boolean hashLine;
-        private final boolean slashLine;
-        private final boolean slashBlock;
-        private final boolean dashDashLine;
-        private final boolean htmlBlock;
-        private final boolean markdownNumberParen;
-
-        CommentSyntaxProfile(
-            boolean hashLine,
-            boolean slashLine,
-            boolean slashBlock,
-            boolean dashDashLine,
-            boolean htmlBlock,
-            boolean markdownNumberParen
-        ) {
-            this.hashLine = hashLine;
-            this.slashLine = slashLine;
-            this.slashBlock = slashBlock;
-            this.dashDashLine = dashDashLine;
-            this.htmlBlock = htmlBlock;
-            this.markdownNumberParen = markdownNumberParen;
-        }
-
-        private boolean hashLine() {
-            return hashLine;
-        }
-
-        private boolean slashLine() {
-            return slashLine;
-        }
-
-        private boolean slashBlock() {
-            return slashBlock;
-        }
-
-        private boolean dashDashLine() {
-            return dashDashLine;
-        }
-
-        private boolean htmlBlock() {
-            return htmlBlock;
-        }
-
-        private boolean markdownNumberParen() {
-            return markdownNumberParen;
-        }
     }
 
     private record OpenBracket(Position position, char ch, int depth) {

@@ -81,7 +81,7 @@ final class InputActionDispatcher {
                     return DispatchResult.handled("Mouse mode enabled");
                 }
                 return DispatchResult.handled(
-                    "Mouse mode disabled. Press Alt+S to open Settings and re-enable mouse, or Ctrl+/ for keymap help.",
+                    "Mouse mode disabled. Press Alt+S to open Settings and re-enable mouse.",
                     StatusLevel.ERROR
                 );
             }
@@ -222,6 +222,28 @@ final class InputActionDispatcher {
                 statusMessage = ctx.engine().selectAll() ? "Selected all" : "Nothing to select";
                 return DispatchResult.handled(statusMessage);
             }
+            case TOGGLE_LINE_COMMENT -> {
+                if (ui.readingModeSetting) {
+                    return DispatchResult.handled("Reading mode: editing is disabled");
+                }
+                EditorEngine.LineCommentResult result = ctx.engine().toggleLineComment();
+                return switch (result.action()) {
+                    case COMMENTED -> DispatchResult.handled(
+                        "Commented " + lineCountLabel(result.lineCount())
+                    );
+                    case UNCOMMENTED -> DispatchResult.handled(
+                        "Uncommented " + lineCountLabel(result.lineCount())
+                    );
+                    case UNSUPPORTED -> DispatchResult.handled(
+                        "Line comments are not supported for this file type",
+                        StatusLevel.WARNING
+                    );
+                    case NO_CONTENT -> DispatchResult.handled(
+                        "No non-empty lines to comment",
+                        StatusLevel.WARNING
+                    );
+                };
+            }
             case TAB -> {
                 if (ui.readingModeSetting) {
                     statusMessage = "Reading mode: editing is disabled";
@@ -334,6 +356,10 @@ final class InputActionDispatcher {
 
     private static GutterDiffMode nextGutterDiffMode(GutterDiffMode mode) {
         return mode == null ? GutterDiffMode.MYERS : mode.next();
+    }
+
+    private static String lineCountLabel(int count) {
+        return count + (count == 1 ? " line" : " lines");
     }
 
     record DispatchContext(

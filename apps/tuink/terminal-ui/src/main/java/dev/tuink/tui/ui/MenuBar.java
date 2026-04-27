@@ -282,7 +282,9 @@ public final class MenuBar {
         private static final int TAB_DYNAMIC_START_INDEX = 5;
 
         private static final String[] FILE_MENU_ITEMS = {"New", "Open...", "Save", "Save As...", "Quit"};
-        private static final String[] EDIT_MENU_ITEMS = {"Undo", "Redo", "Cut", "Copy", "Paste", "Select All", "Find"};
+        private static final String[] EDIT_MENU_ITEMS = {
+            "Undo", "Redo", "Cut", "Copy", "Paste", "Toggle Line Comment", "Select All", "Find"
+        };
         private static final String[] TAB_MENU_BASE_ITEMS = {"New Tab", "Close Tab", "Next Tab", "Previous Tab", SEPARATOR};
         private static final String[] HELP_MENU_ITEMS = {"Keyboard hints", "Licenses", "About"};
         private boolean open;
@@ -857,8 +859,9 @@ public final class MenuBar {
                     case 2 -> KeyEvent.Action.CTRL_X;
                     case 3 -> KeyEvent.Action.CTRL_C;
                     case 4 -> KeyEvent.Action.CTRL_V;
-                    case 5 -> KeyEvent.Action.CTRL_A;
-                    case 6 -> KeyEvent.Action.CTRL_F;
+                    case 5 -> KeyEvent.Action.TOGGLE_LINE_COMMENT;
+                    case 6 -> KeyEvent.Action.CTRL_A;
+                    case 7 -> KeyEvent.Action.CTRL_F;
                     default -> null;
                 };
             }

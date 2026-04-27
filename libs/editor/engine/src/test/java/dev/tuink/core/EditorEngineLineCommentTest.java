@@ -1,0 +1,159 @@
+package dev.tuink.core;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.nio.file.Path;
+import java.util.List;
+import org.junit.jupiter.api.Test;
+
+class EditorEngineLineCommentTest {
+    @Test
+    void togglesCurrentLineAndKeepsLogicalCursorPosition() {
+        Fixture fixture = fixture("  value();", "Demo.java");
+        fixture.state.setCursor(new Position(0, 2));
+
+        EditorEngine.LineCommentResult commented = fixture.engine.toggleLineComment();
+
+        assertEquals(EditorEngine.LineCommentAction.COMMENTED, commented.action());
+        assertEquals(1, commented.lineCount());
+        assertEquals("  // value();", fixture.model.getLine(0));
+        assertEquals(new Position(0, 5), fixture.state.getCursor());
+
+        EditorEngine.LineCommentResult uncommented = fixture.engine.toggleLineComment();
+
+        assertEquals(EditorEngine.LineCommentAction.UNCOMMENTED, uncommented.action());
+        assertEquals("  value();", fixture.model.getLine(0));
+        assertEquals(new Position(0, 2), fixture.state.getCursor());
+    }
+
+    @Test
+    void commentsSelectedLinesAtCommonIndentAndExcludesZeroColumnEnd() {
+        Fixture fixture = fixture("  first();\n    second();\n\nthird();", "Demo.java");
+        fixture.state.setSelectionAnchor(new Position(0, 2));
+        fixture.state.setCursor(new Position(3, 0));
+
+        EditorEngine.LineCommentResult result = fixture.engine.toggleLineComment();
+
+        assertEquals(EditorEngine.LineCommentAction.COMMENTED, result.action());
+        assertEquals(2, result.lineCount());
+        assertEquals(
+            List.of("  // first();", "  //   second();", "", "third();"),
+            fixture.model.snapshotLines()
+        );
+        assertEquals(new Position(0, 5), fixture.state.getSelectionAnchor());
+        assertEquals(new Position(3, 0), fixture.state.getCursor());
+        assertTrue(fixture.state.isDirty());
+
+        assertTrue(fixture.engine.undo());
+        assertEquals(
+            List.of("  first();", "    second();", "", "third();"),
+            fixture.model.snapshotLines()
+        );
+        assertEquals(new Position(0, 2), fixture.state.getSelectionAnchor());
+        assertEquals(new Position(3, 0), fixture.state.getCursor());
+        assertFalse(fixture.state.isDirty());
+
+        assertTrue(fixture.engine.redo());
+        assertEquals(
+            List.of("  // first();", "  //   second();", "", "third();"),
+            fixture.model.snapshotLines()
+        );
+        assertEquals(new Position(0, 5), fixture.state.getSelectionAnchor());
+    }
+
+    @Test
+    void preservesReverseSelectionWhenTogglingRange() {
+        Fixture fixture = fixture("one();\n  two();\nthree();", "Demo.java");
+        fixture.state.setSelectionAnchor(new Position(2, 0));
+        fixture.state.setCursor(new Position(0, 0));
+
+        fixture.engine.toggleLineComment();
+
+        assertEquals(List.of("// one();", "//   two();", "three();"), fixture.model.snapshotLines());
+        assertEquals(new Position(2, 0), fixture.state.getSelectionAnchor());
+        assertEquals(new Position(0, 3), fixture.state.getCursor());
+    }
+
+    @Test
+    void mixedCommentStateCommentsEveryNonBlankLine() {
+        Fixture fixture = fixture("// one\n  two", "Demo.java");
+        fixture.state.setSelectionAnchor(new Position(0, 0));
+        fixture.state.setCursor(new Position(1, 5));
+
+        EditorEngine.LineCommentResult result = fixture.engine.toggleLineComment();
+
+        assertEquals(EditorEngine.LineCommentAction.COMMENTED, result.action());
+        assertEquals(List.of("// // one", "//   two"), fixture.model.snapshotLines());
+    }
+
+    @Test
+    void usesLanguageSpecificMarkers() {
+        assertCommentMarker("value = 1", "script.py", "# value = 1");
+        assertCommentMarker("select 1;", "query.sql", "-- select 1;");
+        assertCommentMarker("name=value", "settings.ini", "; name=value");
+    }
+
+    @Test
+    void reportsUnsupportedSyntaxWithoutEditing() {
+        Fixture fixture = fixture("{\"value\": 1}", "data.json");
+
+        EditorEngine.LineCommentResult result = fixture.engine.toggleLineComment();
+
+        assertEquals(EditorEngine.LineCommentAction.UNSUPPORTED, result.action());
+        assertEquals("{\"value\": 1}", fixture.model.getLine(0));
+        assertFalse(fixture.state.isDirty());
+        assertFalse(fixture.engine.undo());
+    }
+
+    @Test
+    void unnamedAndExtensionlessDocumentsAreSafelyUnsupported() {
+        assertEquals(CommentSyntaxProfile.GENERIC, LanguageProfiles.resolveCommentSyntax(null));
+        assertEquals(
+            CommentSyntaxProfile.GENERIC,
+            LanguageProfiles.resolveCommentSyntax(Path.of("README"))
+        );
+    }
+
+    @Test
+    void leavesBlankOnlyRangeUnchanged() {
+        Fixture fixture = fixture("   \n\t", "Demo.java");
+        fixture.state.setSelectionAnchor(new Position(0, 0));
+        fixture.state.setCursor(new Position(1, 1));
+
+        EditorEngine.LineCommentResult result = fixture.engine.toggleLineComment();
+
+        assertEquals(EditorEngine.LineCommentAction.NO_CONTENT, result.action());
+        assertEquals(List.of("   ", "\t"), fixture.model.snapshotLines());
+        assertFalse(fixture.state.isDirty());
+    }
+
+    @Test
+    void commentsShebangInsteadOfMistakingItForToggleMarker() {
+        Fixture fixture = fixture("#!/usr/bin/env python3", "script.py");
+
+        fixture.engine.toggleLineComment();
+        assertEquals("# #!/usr/bin/env python3", fixture.model.getLine(0));
+
+        fixture.engine.toggleLineComment();
+        assertEquals("#!/usr/bin/env python3", fixture.model.getLine(0));
+    }
+
+    private static void assertCommentMarker(String input, String fileName, String expected) {
+        Fixture fixture = fixture(input, fileName);
+        fixture.engine.toggleLineComment();
+        assertEquals(expected, fixture.model.getLine(0));
+    }
+
+    private static Fixture fixture(String text, String fileName) {
+        TextModel model = new TextModel(new SimpleLineBuffer());
+        model.insertText(new Position(0, 0), text);
+        EditorState state = new EditorState();
+        state.setCurrentFile(Path.of(fileName));
+        return new Fixture(model, state, new EditorEngine(model, state));
+    }
+
+    private record Fixture(TextModel model, EditorState state, EditorEngine engine) {
+    }
+}

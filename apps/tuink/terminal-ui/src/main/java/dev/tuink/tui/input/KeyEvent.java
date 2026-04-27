@@ -43,6 +43,7 @@ public sealed interface KeyEvent permits KeyEvent.ActionEvent, KeyEvent.CharInpu
         CTRL_T,
         OPEN_VIEW_MENU,
         OPEN_HELP_MENU,
+        TOGGLE_LINE_COMMENT,
         SHOW_KEY_HINTS,
         SHOW_LICENSES,
         SHOW_AUTHOR,

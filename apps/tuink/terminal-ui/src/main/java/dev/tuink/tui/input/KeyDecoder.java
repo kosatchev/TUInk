@@ -43,7 +43,7 @@ public class KeyDecoder {
             case 7 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_G);
             case 8 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_H);
             case 14 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_N);
-            case 31 -> new KeyEvent.ActionEvent(KeyEvent.Action.SHOW_KEY_HINTS);
+            case 31 -> new KeyEvent.ActionEvent(KeyEvent.Action.TOGGLE_LINE_COMMENT);
             case 9 -> new KeyEvent.ActionEvent(KeyEvent.Action.TAB);
             case 127 -> new KeyEvent.ActionEvent(KeyEvent.Action.BACKSPACE);
             case 13 -> {
@@ -191,6 +191,7 @@ public class KeyDecoder {
             case "15~" -> new KeyEvent.ActionEvent(KeyEvent.Action.F2);
             case "17~" -> new KeyEvent.ActionEvent(KeyEvent.Action.OPEN_HELP_MENU);
             case "1;6S", "83;6u", "27;6;83~" -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_SHIFT_S);
+            case "47;5u", "27;5;47~" -> new KeyEvent.ActionEvent(KeyEvent.Action.TOGGLE_LINE_COMMENT);
             default -> mapModifiedArrows(seq);
         };
     }

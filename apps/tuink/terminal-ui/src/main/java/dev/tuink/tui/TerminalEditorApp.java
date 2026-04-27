@@ -4,6 +4,7 @@ import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.EditorViewportBehavior;
 import dev.tuink.core.DisplayText;
+import dev.tuink.core.LanguageProfiles;
 import dev.tuink.core.Position;
 import dev.tuink.core.SearchOptions;
 import dev.tuink.core.TabSession;
@@ -509,7 +510,9 @@ public class TerminalEditorApp {
                         renderPlanBuilder.setSyntaxHighlightingEnabled(
                             effectiveSyntaxHighlighting(uiSessionState.syntaxHighlightingSetting)
                         );
-                        renderPlanBuilder.setCommentSyntaxProfile(resolveCommentSyntaxProfile(state.getCurrentFile()));
+                        renderPlanBuilder.setCommentSyntaxProfile(
+                            LanguageProfiles.resolveCommentSyntax(state.getCurrentFile())
+                        );
                         renderPlanBuilder.setRainbowBracketsEnabled(uiSessionState.rainbowBracketsSetting);
                         renderPlanBuilder.setTabWidth(uiSessionState.tabWidthSetting);
                         renderPlanBuilder.setDecorationStyles(
@@ -4274,92 +4277,6 @@ public class TerminalEditorApp {
             hasSnapshot = false;
             lastSavedAtNanos = Long.MIN_VALUE;
         }
-    }
-
-    private RenderPlanBuilder.CommentSyntaxProfile resolveCommentSyntaxProfile(Path file) {
-        if (file == null || file.getFileName() == null) {
-            return RenderPlanBuilder.CommentSyntaxProfile.GENERIC;
-        }
-        String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
-        String ext = extensionOf(name);
-        if ("sql".equals(ext)) {
-            return RenderPlanBuilder.CommentSyntaxProfile.SQL;
-        }
-        if (isHashCommentFile(name, ext)) {
-            return RenderPlanBuilder.CommentSyntaxProfile.HASH;
-        }
-        if (isCStyleCommentFile(ext)) {
-            return RenderPlanBuilder.CommentSyntaxProfile.C_STYLE;
-        }
-        if ("html".equals(ext) || "htm".equals(ext) || "xml".equals(ext)) {
-            return RenderPlanBuilder.CommentSyntaxProfile.HTML;
-        }
-        if ("md".equals(ext) || "markdown".equals(ext)) {
-            return RenderPlanBuilder.CommentSyntaxProfile.MARKDOWN;
-        }
-        if ("txt".equals(ext)) {
-            return RenderPlanBuilder.CommentSyntaxProfile.NONE;
-        }
-        return RenderPlanBuilder.CommentSyntaxProfile.GENERIC;
-    }
-
-    private static boolean isHashCommentFile(String fileName, String ext) {
-        if (ext == null) {
-            return false;
-        }
-        if (ext.equals("py") || ext.equals("sh") || ext.equals("bash") || ext.equals("zsh")
-            || ext.equals("rb") || ext.equals("rake") || ext.equals("gemspec")
-            || ext.equals("pl") || ext.equals("pm") || ext.equals("perl") || ext.equals("t")
-            || ext.equals("yaml") || ext.equals("yml") || ext.equals("toml")
-            || ext.equals("ini") || ext.equals("cfg") || ext.equals("conf")
-            || ext.equals("properties")) {
-            return true;
-        }
-        return fileName.equals("dockerfile")
-            || fileName.equals(".gitignore")
-            || fileName.equals(".editorconfig")
-            || fileName.startsWith(".env")
-            || fileName.equals("makefile");
-    }
-
-    private static boolean isCStyleCommentFile(String ext) {
-        if (ext == null) {
-            return false;
-        }
-        return ext.equals("java")
-            || ext.equals("c")
-            || ext.equals("h")
-            || ext.equals("ino")
-            || ext.equals("js")
-            || ext.equals("mjs")
-            || ext.equals("cjs")
-            || ext.equals("jsx")
-            || ext.equals("ts")
-            || ext.equals("tsx")
-            || ext.equals("go")
-            || ext.equals("rs")
-            || ext.equals("php")
-            || ext.equals("phtml")
-            || ext.equals("php5")
-            || ext.equals("php7")
-            || ext.equals("php8")
-            || ext.equals("kt")
-            || ext.equals("kts")
-            || ext.equals("css")
-            || ext.equals("scss")
-            || ext.equals("proto")
-            || ext.equals("gradle");
-    }
-
-    private static String extensionOf(String fileName) {
-        if (fileName == null || fileName.isBlank()) {
-            return null;
-        }
-        int dot = fileName.lastIndexOf('.');
-        if (dot < 0 || dot == fileName.length() - 1) {
-            return null;
-        }
-        return fileName.substring(dot + 1);
     }
 
     private boolean effectiveSyntaxHighlighting(boolean syntaxHighlightingSetting) {

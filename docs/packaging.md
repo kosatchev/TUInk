@@ -2,7 +2,9 @@
 
 ## Complete release
 
-Build the tested JVM ZIP, glibc archive, Debian package, and checksum manifest:
+Build the tested JVM ZIP, glibc archive, Debian package, and checksum manifest.
+The task runs module tests and a short native PTY render benchmark before
+assembling the artifacts:
 
 ```bash
 ./gradlew clean :app:release
@@ -20,6 +22,8 @@ build/releases/
 
 Release archives use reproducible file order and normalized timestamps.
 `SOURCE_DATE_EPOCH` can be set explicitly for Debian package timestamps.
+Benchmark results are written separately below `build/performance/render/`;
+they are diagnostic build output and are not included in release archives.
 
 ## Native archives
 

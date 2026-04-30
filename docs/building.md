@@ -28,6 +28,9 @@ Native builds additionally require:
 - the platform libraries required by GraalVM;
 - a musl-capable toolchain for the static musl target.
 
+Render benchmarks require Python 3.10+ and a POSIX pseudo-terminal. The short
+benchmark is part of the complete release task.
+
 Debian packaging additionally requires Linux with `dpkg-deb`, `gzip`, and
 `strip`. `lintian` is optional and is used only for package validation.
 
@@ -44,6 +47,8 @@ Debian packaging additionally requires Linux with `dpkg-deb`, `gzip`, and
 | Native musl binary | `./gradlew :app:nativeMusl` | `apps/tuink/launcher/build/native/nativeMuslCompile/tuink-musl` |
 | Native archive | `./gradlew :app:nativeDistTarGz` | `build/releases/*.tar.gz` |
 | Debian package | `./gradlew :app:nativeDeb` | `build/releases/tuink_<version>_<arch>.deb` |
+| Render smoke benchmark | `./gradlew :app:perfSmoke` | `build/performance/render/` |
+| Full render benchmark | `./gradlew :app:perfCheck` | `build/performance/render/` |
 | Complete release | `./gradlew clean :app:release` | ZIP, glibc archive, DEB, checksums |
 
 ## JVM development build
@@ -176,8 +181,9 @@ Include the musl archive as well:
 ./gradlew clean :app:release -Ptarget=all
 ```
 
-The `release` task runs module tests before assembling public artifacts. It does
-not publish or install anything outside the repository.
+The `release` task runs module tests and the short native render benchmark
+before assembling public artifacts. It does not publish or install anything
+outside the repository.
 
 ## PGO
 

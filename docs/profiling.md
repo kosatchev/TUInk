@@ -33,3 +33,37 @@ frame=30 build=3.10ms raster=0.67ms diff=170.09ms search=0.00ms total=174.03ms
 - `diff`: ANSI diff generation between frames.
 - `search`: search match counting.
 - `total`: complete frame time.
+
+## Reproducible native benchmark
+
+Use the repository PTY harness instead of sending keys manually when comparing
+rendering or input changes:
+
+```bash
+./gradlew :app:perfHarnessTest
+./gradlew :app:perfSmoke
+./gradlew :app:perfCheck -PperfLabel=render-check
+```
+
+`perfSmoke` runs 120 events once and is included in `:app:release`.
+`perfCheck` runs 600 events three times for `Down`, `Shift+Down`, and mouse
+drag. It builds the glibc native binary automatically. Results are written to:
+
+```text
+build/performance/render/<timestamp>-<label>/
+├── fixture.java
+├── <scenario>-<repeat>.log
+├── summary.json
+└── summary.md
+```
+
+The generated fixture, terminal size, injection interval, queue quiet window,
+and statistical aggregation are controlled by
+`verification/performance/render_benchmark.py`. The JSON summary records the binary and
+fixture SHA-256 values together with host metadata.
+
+When completing an interface-related change, run `perfCheck` before and after
+on the same host and toolchain, and keep the accepted results in ignored local build output; see
+[benchmark guidance](../verification/performance/README.md). Treat a repeated
+10–15% regression or increasing queue-drain time as a reason to investigate;
+do not gate arbitrary developer machines on small timing differences.

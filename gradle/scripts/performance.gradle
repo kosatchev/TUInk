@@ -1,0 +1,52 @@
+def benchmarkScript = rootProject.file('verification/performance/render_benchmark.py')
+def nativeBinary = layout.buildDirectory.file('native/nativeCompile/tuink')
+def performanceRoot = rootProject.layout.buildDirectory.dir('performance/render')
+
+def perfHarnessTest = tasks.register('perfHarnessTest', Exec) {
+    group = 'verification'
+    description = 'Validate the deterministic render benchmark fixture, parser, and statistics.'
+    inputs.file(benchmarkScript)
+    commandLine('python3', benchmarkScript.absolutePath, '--self-test')
+}
+
+def configureNativeBenchmark = { task, String frames, String repeats, String label ->
+    task.dependsOn(tasks.named('nativeCompile'))
+    task.dependsOn(perfHarnessTest)
+    task.inputs.file(benchmarkScript)
+    task.inputs.file(nativeBinary)
+    task.outputs.dir(performanceRoot)
+    task.outputs.upToDateWhen { false }
+    task.doFirst {
+        commandLine(
+            'python3',
+            benchmarkScript.absolutePath,
+            '--binary', nativeBinary.get().asFile.absolutePath,
+            '--output-root', performanceRoot.get().asFile.absolutePath,
+            '--label', label,
+            '--frames', frames,
+            '--repeats', repeats,
+            '--scenarios', 'down,shift-down,mouse-drag'
+        )
+    }
+}
+
+def perfSmoke = tasks.register('perfSmoke', Exec) {
+    group = 'verification'
+    description = 'Run a short native PTY render-loop smoke benchmark.'
+}
+configureNativeBenchmark(perfSmoke.get(), '120', '1', "${project.version}-smoke")
+
+def perfCheck = tasks.register('perfCheck', Exec) {
+    group = 'verification'
+    description = 'Run the full native PTY render benchmark (600 events, three repeats by default).'
+}
+configureNativeBenchmark(
+    perfCheck.get(),
+    (project.findProperty('perfFrames') ?: '600').toString(),
+    (project.findProperty('perfRepeats') ?: '3').toString(),
+    (project.findProperty('perfLabel') ?: project.version).toString()
+)
+
+tasks.named('release') {
+    dependsOn(perfSmoke)
+}

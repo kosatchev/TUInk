@@ -31,3 +31,4 @@ if (project.hasProperty('enablePgo')) {
 }
 apply from: "${rootProject.projectDir}/gradle/scripts/distributions.gradle"
 apply from: "${rootProject.projectDir}/gradle/scripts/debian.gradle"
+apply from: "${rootProject.projectDir}/gradle/scripts/performance.gradle"

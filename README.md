@@ -36,6 +36,7 @@ These files are useful for:
 - Java 17
 - Gradle wrapper (`./gradlew`)
 - GraalVM with `native-image` and a C toolchain for native releases
+- Python 3.10+ on a POSIX system for render benchmarks and complete releases
 
 ## Build and test
 
@@ -68,7 +69,8 @@ Run with file and flags:
 
 ## Release artifacts
 
-Build the tested JVM ZIP, glibc archive, Debian package, and SHA-256 manifest:
+Build the tested JVM ZIP, glibc archive, Debian package, and SHA-256 manifest.
+The release task also runs the short native render benchmark:
 
 ```bash
 ./gradlew clean :app:release
@@ -92,6 +94,7 @@ Detailed documentation:
 - [Build and native targets](docs/building.md)
 - [Release archives and Debian packaging](docs/packaging.md)
 - [Render-loop profiling](docs/profiling.md)
+- [Render benchmarks](verification/performance/README.md)
 - [Compatibility policy](docs/compatibility.md)
 - [Contributing](CONTRIBUTING.md)
 

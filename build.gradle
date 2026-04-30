@@ -71,10 +71,21 @@ tasks.register('buildHelp') {
               ./gradlew :app:nativeDeb
                   Package: build/releases/tuink_${rootProject.version}_<deb-arch>.deb
 
+            Render performance
+              ./gradlew :app:perfHarnessTest
+                  Validate the benchmark fixture, parser, and statistics.
+              ./gradlew :app:perfSmoke
+                  Run a short native PTY smoke benchmark.
+              ./gradlew :app:perfCheck
+                  Run 600 events in three repeats for Down, Shift+Down,
+                  and mouse drag. Results: build/performance/render/.
+              ./gradlew :app:perfCheck -PperfLabel=<label> -PperfRepeats=<n>
+                  Label a run or override the repeat count.
+
             Complete release
               ./gradlew clean :app:release
                   Run tests and build the JVM ZIP, glibc archive, Debian package,
-                  and build/releases/SHA256SUMS.
+                  build/releases/SHA256SUMS, and the render smoke benchmark.
               ./gradlew clean :app:release -Ptarget=all
                   Also include the musl archive.
 

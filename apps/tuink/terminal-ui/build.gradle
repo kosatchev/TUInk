@@ -6,9 +6,11 @@ dependencies {
     runtimeOnly 'org.jline:jline-terminal-jni:3.30.6'
 }
 
+def tuinkVersion = project.version.toString()
+
 tasks.named('processResources') {
-    inputs.property('tuinkVersion', project.version.toString())
+    inputs.property('tuinkVersion', tuinkVersion)
     filesMatching('tuink-version.properties') {
-        expand(version: project.version)
+        expand(version: tuinkVersion)
     }
 }

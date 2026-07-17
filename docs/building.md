@@ -10,7 +10,7 @@ This task only prints help. It does not compile sources or create artifacts.
 
 ## Requirements
 
-JVM builds require Java 17 and use the checked-in Gradle wrapper.
+JVM builds and `check` require Java 17 and use the checked-in Gradle wrapper.
 
 Check the active JVM and Gradle environment:
 
@@ -28,8 +28,12 @@ Native builds additionally require:
 - the platform libraries required by GraalVM;
 - a musl-capable toolchain for the static musl target.
 
-Render benchmarks require Python 3.10+ and a POSIX pseudo-terminal. The short
-benchmark is part of the complete release task.
+Benchmark tasks require Python 3.10+ available as `python3` on a POSIX system.
+The standalone `:app:perfHarnessTest` validates the benchmark harness without
+building or launching the native editor. It is separate from `check` and runs
+explicitly in CI. `:app:perfSmoke` and `:app:perfCheck` also require a POSIX
+pseudo-terminal and the native toolchain; both run the harness self-test first.
+The short benchmark is part of the complete release task.
 
 Debian packaging additionally requires Linux with `dpkg-deb`, `gzip`, and
 `strip`. `lintian` is optional and is used only for package validation.
@@ -38,7 +42,7 @@ Debian packaging additionally requires Linux with `dpkg-deb`, `gzip`, and
 
 | Goal | Command | Primary output |
 |---|---|---|
-| Run tests | `./gradlew test` | Test reports below module `build/` directories |
+| Run verification | `./gradlew check` | Tests plus architecture/dependency checks |
 | Build JVM project | `./gradlew clean test build` | Module classes and JARs |
 | Run from sources | `./gradlew --console=plain :app:run` | Interactive process |
 | Installable JVM layout | `./gradlew :app:installDist` | `apps/tuink/launcher/build/install/tuink/` |
@@ -47,6 +51,7 @@ Debian packaging additionally requires Linux with `dpkg-deb`, `gzip`, and
 | Native musl binary | `./gradlew :app:nativeMusl` | `apps/tuink/launcher/build/native/nativeMuslCompile/tuink-musl` |
 | Native archive | `./gradlew :app:nativeDistTarGz` | `build/releases/*.tar.gz` |
 | Debian package | `./gradlew :app:nativeDeb` | `build/releases/tuink_<version>_<arch>.deb` |
+| Benchmark harness self-test | `./gradlew :app:perfHarnessTest` | Python fixture, parser, and statistics checks |
 | Render smoke benchmark | `./gradlew :app:perfSmoke` | `build/performance/render/` |
 | Full render benchmark | `./gradlew :app:perfCheck` | `build/performance/render/` |
 | Complete release | `./gradlew clean :app:release` | ZIP, glibc archive, DEB, checksums |
@@ -56,7 +61,7 @@ Debian packaging additionally requires Linux with `dpkg-deb`, `gzip`, and
 Build and test all modules:
 
 ```bash
-./gradlew clean test build
+./gradlew clean check build
 ```
 
 Run only a specific module's tests when iterating:
@@ -76,6 +81,29 @@ Run the canonical application entrypoint:
 
 The editor requires an interactive TTY. An IDE console or redirected stdin may
 be detected as a dumb terminal.
+
+## Dependency integrity
+
+Dependency versions are locked per module, downloaded artifacts are checked
+against `gradle/verification-metadata.xml`, and both the wrapper JAR and Gradle
+distribution have pinned SHA-256 checksums. A normal build must not rewrite any
+of these files.
+
+After an intentional dependency change, regenerate the lock state and
+verification metadata together while resolving the complete CI dependency
+graph:
+
+```bash
+./gradlew --write-locks --write-verification-metadata sha256 \
+  check :app:distZip :app:perfHarnessTest \
+  :core:dependencies :render:dependencies :highlight-regex:dependencies \
+  :tui:dependencies :app:dependencies
+```
+
+Review the resulting coordinate and checksum changes before committing them.
+When upgrading Gradle itself, obtain both wrapper checksums from the official
+Gradle distribution index and update `gradle-wrapper.properties` together with
+`gradle-wrapper.jar.sha256`.
 
 ## JVM distribution
 

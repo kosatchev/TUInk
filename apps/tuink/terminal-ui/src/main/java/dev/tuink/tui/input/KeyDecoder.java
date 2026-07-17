@@ -1,7 +1,7 @@
 package dev.tuink.tui.input;
 
-import org.jline.utils.NonBlockingReader;
 import java.io.IOException;
+import org.jline.utils.NonBlockingReader;
 
 /**
  * Minimal key decoder for raw terminal input.
@@ -17,54 +17,63 @@ public class KeyDecoder {
     }
 
     public KeyEvent readKey(long timeoutMs) throws IOException {
+        return read(timeoutMs).key();
+    }
+
+    public ReadResult read(long timeoutMs) throws IOException {
         int ch = readCodeUnit(timeoutMs);
-        if (ch == NonBlockingReader.READ_EXPIRED || ch < 0) {
-            return null;
+        if (ch == NonBlockingReader.READ_EXPIRED) {
+            return ReadResult.idle();
+        }
+        if (ch < 0) {
+            return ReadResult.end();
         }
 
+        KeyEvent key;
         if (ch == 27) {
-            return decodeEscapeSequence();
-        }
-
-        return switch (ch) {
-            case 3 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_C);
-            case 17 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_Q);
-            case 19 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_S);
-            case 26 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_Z);
-            case 25 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_Y);
-            case 24 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_X);
-            case 22 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_V);
-            case 11 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_K);
-            case 23 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_W);
-            case 15 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_O);
-            case 6 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_F);
-            case 18 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_R);
-            case 1 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_A);
-            case 7 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_G);
-            case 8 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_H);
-            case 14 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_N);
-            case 31 -> new KeyEvent.ActionEvent(KeyEvent.Action.TOGGLE_LINE_COMMENT);
-            case 9 -> new KeyEvent.ActionEvent(KeyEvent.Action.TAB);
-            case 127 -> new KeyEvent.ActionEvent(KeyEvent.Action.BACKSPACE);
-            case 13 -> {
-                lastWasCarriageReturn = true;
-                yield new KeyEvent.ActionEvent(KeyEvent.Action.ENTER);
-            }
-            case 10 -> {
-                if (lastWasCarriageReturn) {
+            key = decodeEscapeSequence();
+        } else {
+            key = switch (ch) {
+                case 3 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_C);
+                case 17 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_Q);
+                case 19 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_S);
+                case 26 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_Z);
+                case 25 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_Y);
+                case 24 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_X);
+                case 22 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_V);
+                case 11 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_K);
+                case 23 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_W);
+                case 15 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_O);
+                case 6 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_F);
+                case 18 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_R);
+                case 1 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_A);
+                case 7 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_G);
+                case 8 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_H);
+                case 14 -> new KeyEvent.ActionEvent(KeyEvent.Action.CTRL_N);
+                case 31 -> new KeyEvent.ActionEvent(KeyEvent.Action.TOGGLE_LINE_COMMENT);
+                case 9 -> new KeyEvent.ActionEvent(KeyEvent.Action.TAB);
+                case 127 -> new KeyEvent.ActionEvent(KeyEvent.Action.BACKSPACE);
+                case 13 -> {
+                    lastWasCarriageReturn = true;
+                    yield new KeyEvent.ActionEvent(KeyEvent.Action.ENTER);
+                }
+                case 10 -> {
+                    if (lastWasCarriageReturn) {
+                        lastWasCarriageReturn = false;
+                        yield null;
+                    }
+                    yield new KeyEvent.ActionEvent(KeyEvent.Action.ENTER);
+                }
+                default -> {
                     lastWasCarriageReturn = false;
-                    yield null;
+                    if (isPrintable(ch)) {
+                        yield decodePrintable(ch);
+                    }
+                    yield new KeyEvent.ActionEvent(KeyEvent.Action.UNKNOWN);
                 }
-                yield new KeyEvent.ActionEvent(KeyEvent.Action.ENTER);
-            }
-            default -> {
-                lastWasCarriageReturn = false;
-                if (isPrintable(ch)) {
-                    yield decodePrintable(ch);
-                }
-                yield new KeyEvent.ActionEvent(KeyEvent.Action.UNKNOWN);
-            }
-        };
+            };
+        }
+        return key == null ? ReadResult.idle() : ReadResult.event(key);
     }
 
     private boolean isPrintable(int ch) {
@@ -278,5 +287,34 @@ public class KeyDecoder {
             return new KeyEvent.ActionEvent(KeyEvent.Action.END);
         }
         return new KeyEvent.ActionEvent(KeyEvent.Action.UNKNOWN);
+    }
+
+    public enum ReadStatus {
+        EVENT,
+        IDLE,
+        END
+    }
+
+    public record ReadResult(ReadStatus status, KeyEvent key) {
+        public ReadResult {
+            if (status == null) {
+                throw new IllegalArgumentException("status must not be null");
+            }
+            if ((status == ReadStatus.EVENT) != (key != null)) {
+                throw new IllegalArgumentException("Only EVENT results may contain a key");
+            }
+        }
+
+        private static ReadResult event(KeyEvent key) {
+            return new ReadResult(ReadStatus.EVENT, key);
+        }
+
+        private static ReadResult idle() {
+            return new ReadResult(ReadStatus.IDLE, null);
+        }
+
+        private static ReadResult end() {
+            return new ReadResult(ReadStatus.END, null);
+        }
     }
 }

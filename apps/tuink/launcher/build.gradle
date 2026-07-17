@@ -5,6 +5,7 @@ plugins {
 
 dependencies {
     implementation project(':tui')
+    testImplementation 'com.tngtech.archunit:archunit:1.4.2'
 }
 
 application {

@@ -7,7 +7,7 @@ import dev.tuink.core.TabInsertMode;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.input.KeyEvent;
 import dev.tuink.tui.ui.MenuBar;
-import java.io.PrintWriter;
+import java.util.function.Consumer;
 
 final class InputActionDispatcher {
     private InputActionDispatcher() {
@@ -74,9 +74,7 @@ final class InputActionDispatcher {
             }
             case TOGGLE_MOUSE_MODE -> {
                 ui.mouseModeSetting = !ui.mouseModeSetting;
-                PrintWriter writer = ctx.writer();
-                writer.print(ui.mouseModeSetting ? ctx.enableMouseTracking() : ctx.disableMouseTracking());
-                writer.flush();
+                ctx.mouseTrackingController().accept(ui.mouseModeSetting);
                 if (ui.mouseModeSetting) {
                     return DispatchResult.handled("Mouse mode enabled");
                 }
@@ -366,11 +364,14 @@ final class InputActionDispatcher {
         EditorEngine engine,
         EditorState state,
         MenuBar topMenu,
-        PrintWriter writer,
-        String enableMouseTracking,
-        String disableMouseTracking,
+        Consumer<Boolean> mouseTrackingController,
         int contentRows
     ) {
+        DispatchContext {
+            if (mouseTrackingController == null) {
+                throw new IllegalArgumentException("mouseTrackingController must not be null");
+            }
+        }
     }
 
     enum StatusLevel {

@@ -9,7 +9,7 @@ Before changing build or packaging behavior, read [Build and native targets](doc
 TUInk requires Java 17 or newer. Use the checked-in Gradle wrapper so local and CI builds use the same Gradle version. GraalVM is required only for native-image work.
 
 ```bash
-./gradlew test
+./gradlew check
 ./gradlew run
 ```
 
@@ -66,8 +66,15 @@ Add tests at the narrowest useful level and include a regression test for every 
 Run the focused test while developing, then the full suite before committing:
 
 ```bash
-./gradlew test
+./gradlew check
 ```
+
+`check` runs all module tests and the architecture/dependency-boundary gates.
+For benchmark-harness changes, also run `./gradlew :app:perfHarnessTest` on a
+POSIX system with Python 3.10+ available as `python3`. CI runs this self-test
+explicitly, and native benchmark/release tasks retain it as a prerequisite.
+When intentionally changing dependencies, also update and review the lockfiles
+and verification metadata as described in [Build and native targets](docs/building.md#dependency-integrity).
 
 Packaging changes should also exercise the relevant archive, installer, or Debian-package checks documented in [docs/packaging.md](docs/packaging.md).
 
@@ -93,7 +100,7 @@ Use the release and packaging commands documented in [docs/packaging.md](docs/pa
 At minimum:
 
 ```bash
-./gradlew test
+./gradlew check
 git diff --check
 ```
 

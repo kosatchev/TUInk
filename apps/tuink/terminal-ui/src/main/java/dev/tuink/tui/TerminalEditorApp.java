@@ -31,7 +31,9 @@ import dev.tuink.render.RenderPlan;
 import dev.tuink.render.RenderPlanBuilder;
 import dev.tuink.render.Style;
 import dev.tuink.tui.render.RenderRasterizer;
+import dev.tuink.tui.runtime.TuiEventLoop;
 import dev.tuink.tui.style.UiStyles;
+import dev.tuink.tui.terminal.TerminalSession;
 import dev.tuink.tui.ui.Button;
 import dev.tuink.tui.ui.ConfirmBarController;
 import dev.tuink.tui.ui.ConfirmBarView;
@@ -64,13 +66,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import java.util.regex.Pattern;
-import org.jline.terminal.Attributes;
-import org.jline.terminal.Attributes.LocalFlag;
-import org.jline.terminal.Terminal;
-import org.jline.terminal.TerminalBuilder;
-import org.jline.utils.NonBlockingReader;
 
 /**
  * JLine terminal application wiring core + render + highlighter.
@@ -80,16 +77,12 @@ public class TerminalEditorApp {
     private static final String SAVE_AS_PROMPT = "Save As: ";
     private static final long NOTIFY_DURATION_NANOS = 3_000_000_000L;
     private static final long OPEN_DIALOG_DOUBLE_CLICK_NANOS = 450_000_000L;
-    private static final long IDLE_INPUT_POLL_TIMEOUT_MS = 16L;
-    private static final long MAX_DEADLINE_INPUT_POLL_TIMEOUT_MS = 50L;
     private static final int PROFILE_LOG_EVERY_FRAMES = 30;
     private static final int AUTO_SELECTION_HIGHLIGHT_MIN_CHARS = 2;
     private static final int AUTO_SELECTION_HIGHLIGHT_MAX_CHARS = 128;
     private static final int CTRL_F_SELECTION_MAX_CHARS = 256;
     private static final long RECOVERY_AUTOSAVE_DEBOUNCE_NANOS = 2_000_000_000L;
     private static final long RECOVERY_ERROR_NOTIFY_COOLDOWN_NANOS = 5_000_000_000L;
-    private static final String ENABLE_MOUSE_TRACKING = "\u001B[?1000h\u001B[?1002h\u001B[?1006h";
-    private static final String DISABLE_MOUSE_TRACKING = "\u001B[?1000l\u001B[?1002l\u001B[?1006l";
     private UiStyles.Theme theme = UiStyles.Theme.CYAN;
     private UiStyles.Palette styles = UiStyles.forTheme(theme);
     private boolean profileEnabled = false;
@@ -102,9 +95,9 @@ public class TerminalEditorApp {
     }
 
     private void run(String[] args) throws Exception {
-        CliOptions cli;
+        TuiCliOptions cli;
         try {
-            cli = parseArgs(args);
+            cli = TuiCliOptions.parse(args);
         } catch (IllegalArgumentException e) {
             System.err.println(e.getMessage());
             printUsage();
@@ -241,35 +234,15 @@ public class TerminalEditorApp {
             }
         }
 
-        TerminalBuilder terminalBuilder = TerminalBuilder.builder().system(true).encoding(StandardCharsets.UTF_8);
-        if (shouldForceExecTerminalProvider()) {
-            // Explicit fallback for musl static images that cannot load jline-native .so from /tmp.
-            terminalBuilder
-                .jni(false)
-                .ffm(false)
-                .jna(false)
-                .jansi(false)
-                .exec(true)
-                .providers("exec,dumb");
-        }
-        try (Terminal terminal = terminalBuilder.build()) {
-            if ("dumb".equalsIgnoreCase(terminal.getType())) {
-                throw new IOException(
-                    "Interactive terminal is not available (dumb terminal). " +
-                    "Run in a real TTY, for example: ./gradlew --console=plain :app:run -PappArgs=\"file.txt\""
-                );
-            }
+        try (TerminalSession terminal = TerminalSession.open(
+            new TerminalSession.Options(
+                cli.altScreenEnabled(),
+                uiSessionState.mouseModeSetting,
+                shouldForceExecTerminalProvider()
+            )
+        )) {
             PrintWriter writer = terminal.writer();
-            Attributes original = terminal.enterRawMode();
-            Attributes raw = terminal.getAttributes();
-            raw.setLocalFlag(LocalFlag.ISIG, false);
-            terminal.setAttributes(raw);
-            NonBlockingReader input = terminal.reader();
-            AtomicBoolean resized = new AtomicBoolean(false);
-            AtomicBoolean stopRequested = new AtomicBoolean(false);
-            AtomicBoolean cleanedUp = new AtomicBoolean(false);
-            terminal.handle(Terminal.Signal.WINCH, sig -> resized.set(true));
-            terminal.handle(Terminal.Signal.INT, sig -> stopRequested.set(true));
+            var input = terminal.reader();
 
             CellBuffer previous = null;
             RenderPlan plan = null;
@@ -277,35 +250,18 @@ public class TerminalEditorApp {
             int lastCursorCol = -1;
             boolean lastCursorVisible = true;
             TerminalCursorController cursorController = new TerminalCursorController();
-            Runnable cleanup = () -> {
-                if (cleanedUp.compareAndSet(false, true)) {
-                    StringBuilder out = new StringBuilder("\u001B[0m");
-                    out.append(DISABLE_MOUSE_TRACKING);
-                    out.append("\u001B[?25h");
-                    if (cli.altScreenEnabled()) {
-                        out.append("\u001B[?1049l");
-                    }
-                    out.append("\u001B[2J\u001B[H");
-                    writer.print(out);
-                    writer.flush();
-                    terminal.setAttributes(original);
-                }
-            };
-            Thread shutdownHook = new Thread(cleanup, "tuink-terminal-cleanup");
-            Runtime.getRuntime().addShutdownHook(shutdownHook);
             try {
-                StringBuilder init = new StringBuilder();
-                if (cli.altScreenEnabled()) {
-                    init.append("\u001B[?1049h");
-                }
-                init.append("\u001B[?25h\u001B[2J");
-                if (uiSessionState.mouseModeSetting) {
-                    init.append(ENABLE_MOUSE_TRACKING);
-                }
-                writer.print(init);
-                writer.flush();
-
                 KeyDecoder decoder = new KeyDecoder(input);
+                TuiEventLoop<KeyEvent> eventLoop = new TuiEventLoop<>(timeoutMillis -> {
+                    KeyDecoder.ReadResult result = decoder.read(timeoutMillis);
+                    return switch (result.status()) {
+                        case EVENT -> TuiEventLoop.Read.event(result.key());
+                        case IDLE -> TuiEventLoop.Read.idle();
+                        case END -> TuiEventLoop.Read.end();
+                    };
+                });
+                terminal.onResize(eventLoop::requestResize);
+                terminal.onInterrupt(eventLoop::requestStop);
                 RenderFrameController renderFrameController = new RenderFrameController(
                     writer,
                     renderer,
@@ -315,10 +271,8 @@ public class TerminalEditorApp {
                     cli.colorEnabled(),
                     cursorController
                 );
-                InputEventPump inputEventPump = new InputEventPump(decoder, notification, resized);
                 ViewportController viewportController = new ViewportController();
                 boolean running = true;
-                boolean needsRender = true;
                 SearchBarView searchBar = null;
                 ConfirmBarView confirmBar = null;
                 InlinePromptBar inlinePromptBar = InlinePromptBar.hidden();
@@ -328,7 +282,7 @@ public class TerminalEditorApp {
                 int contentCols = 0;
                 List<TabBar.TabItem> tabItems = List.of();
                 TabMatchCache tabMatchCache = new TabMatchCache();
-                while (running && !stopRequested.get()) {
+                while (running && eventLoop.running()) {
                     activeTabIndex = sessionContext.activeTabIndex();
                     model = sessionContext.model();
                     state = sessionContext.state();
@@ -340,13 +294,13 @@ public class TerminalEditorApp {
                         notification.warning(recoveryWarning);
                     }
                     if (notification.expireIfNeeded()) {
-                        needsRender = true;
+                        eventLoop.invalidate();
                     }
                     if (openFileMode && openFileTree.consumeMetadataChanged()) {
-                        needsRender = true;
+                        eventLoop.invalidate();
                     }
-                    int rows = Math.max(2, terminal.getHeight());
-                    int cols = Math.max(1, terminal.getWidth());
+                    int rows = Math.max(2, terminal.height());
+                    int cols = Math.max(1, terminal.width());
                     boolean saveAsMode = modalState.isSaveAs();
                     boolean saveOverwriteConfirmMode = modalState.isSaveOverwriteConfirm();
                     boolean recoveryConfirmMode = modalState.isRecoveryConfirm();
@@ -357,7 +311,11 @@ public class TerminalEditorApp {
                     boolean helpAuthorMode = modalState.isHelpAuthor();
                     Path pendingOverwritePath = modalState.pendingOverwritePath();
                     int pendingCloseTabIndex = modalState.pendingCloseTabIndex();
-                    if (needsRender) {
+                    TuiEventLoop.FrameTicket frameTicket = eventLoop.beginFrame();
+                    if (frameTicket != null) {
+                        if (frameTicket.fullRedraw()) {
+                            previous = null;
+                        }
                         if (profileEnabled) {
                             frameProfiler.beginFrame();
                         }
@@ -553,7 +511,6 @@ public class TerminalEditorApp {
                         String interactiveBarText = inlinePromptBar.text();
                         Style interactiveBarStyle = inlinePromptBar.style();
                         RenderFrameResult frameResult = renderFrameController.renderFrameIfNeeded(
-                            needsRender,
                             renderPlanBuilder,
                             model,
                             state,
@@ -599,26 +556,20 @@ public class TerminalEditorApp {
                         lastCursorRow = frameResult.lastCursorRow();
                         lastCursorCol = frameResult.lastCursorCol();
                         lastCursorVisible = frameResult.lastCursorVisible();
-                        if (frameResult.rendered()) {
-                            needsRender = false;
-                        }
+                        eventLoop.endFrame(frameTicket, frameResult.rendered());
                         if (profileEnabled) {
                             frameProfiler.endFrame(frameResult.rendered());
                         }
                     }
 
-                    InputEventPump.PollResult pollResult = inputEventPump.poll();
-                    if (pollResult.resized()) {
-                        previous = null;
-                        needsRender = true;
-                    }
-                    KeyEvent key = pollResult.key();
+                    TuiEventLoop.Poll<KeyEvent> pollResult = eventLoop.poll(notification::nanosUntilExpire);
+                    KeyEvent key = pollResult.event();
                     if (key == null) {
                         continue;
                     }
                     viewportController.onInput(key);
                     notification.clearErrorOnUserAction();
-                    needsRender = true;
+                    eventLoop.invalidate();
 
                     if (key instanceof KeyEvent.MouseEvent mouse) {
                         if (!uiSessionState.mouseModeSetting) {
@@ -1316,7 +1267,7 @@ public class TerminalEditorApp {
                             openFileTree,
                             openFileFocus,
                             topMenu,
-                            writer,
+                            terminal::setMouseTracking,
                             renderer,
                             tabBar
                         );
@@ -1350,9 +1301,7 @@ public class TerminalEditorApp {
                             engine,
                             state,
                             topMenu,
-                            writer,
-                            ENABLE_MOUSE_TRACKING,
-                            DISABLE_MOUSE_TRACKING,
+                            terminal::setMouseTracking,
                             contentRows
                         )
                     );
@@ -1419,13 +1368,7 @@ public class TerminalEditorApp {
                 }
                 recoveryAutosave.clearRuntimeSnapshots();
             } finally {
-                cleanup.run();
                 frameProfiler.close();
-                try {
-                    Runtime.getRuntime().removeShutdownHook(shutdownHook);
-                } catch (IllegalStateException ignored) {
-                    // JVM is already shutting down.
-                }
             }
         }
 
@@ -1664,7 +1607,7 @@ public class TerminalEditorApp {
         TreeView openFileTree,
         OpenFileDialogController.Focus openFileFocus,
         MenuBar topMenu,
-        PrintWriter writer,
+        Consumer<Boolean> mouseTrackingController,
         RenderRasterizer renderer,
         TabBar tabBar
     ) {
@@ -2149,9 +2092,7 @@ public class TerminalEditorApp {
                         nextEngine,
                         nextState,
                         topMenu,
-                        writer,
-                        ENABLE_MOUSE_TRACKING,
-                        DISABLE_MOUSE_TRACKING,
+                        mouseTrackingController,
                         contentRows
                     )
                 );
@@ -2573,20 +2514,7 @@ public class TerminalEditorApp {
         return ro + " | ENC:" + enc + " | EOL:" + eol + " | " + (readingMode ? "READ" : "INS");
     }
 
-    private long nextInputTimeoutMs(NotificationState notification) {
-        long nanosUntilExpire = notification.nanosUntilExpire(System.nanoTime());
-        if (nanosUntilExpire < 0) {
-            return IDLE_INPUT_POLL_TIMEOUT_MS;
-        }
-        long millisUntilExpire = nanosUntilExpire / 1_000_000L;
-        if (nanosUntilExpire % 1_000_000L != 0L) {
-            millisUntilExpire++;
-        }
-        return Math.max(0L, Math.min(MAX_DEADLINE_INPUT_POLL_TIMEOUT_MS, millisUntilExpire));
-    }
-
     private RenderFrameResult doRenderFrameIfNeeded(
-        boolean needsRender,
         RenderPlanBuilder renderPlanBuilder,
         TextModel model,
         EditorState state,
@@ -2634,16 +2562,6 @@ public class TerminalEditorApp {
         TabBar tabBar,
         MenuBar topMenu
     ) {
-        if (!needsRender) {
-            return new RenderFrameResult(
-                previous,
-                previousPlan,
-                previousCursorRow,
-                previousCursorCol,
-                previousCursorVisible,
-                false
-            );
-        }
         boolean saveAsMode = modalState.isSaveAs();
         boolean saveOverwriteConfirmMode = modalState.isSaveOverwriteConfirm();
         Path pendingOverwritePath = modalState.pendingOverwritePath();
@@ -3046,7 +2964,6 @@ public class TerminalEditorApp {
         }
 
         private RenderFrameResult renderFrameIfNeeded(
-            boolean needsRender,
             RenderPlanBuilder renderPlanBuilder,
             TextModel model,
             EditorState state,
@@ -3088,7 +3005,6 @@ public class TerminalEditorApp {
             boolean previousCursorVisible
         ) {
             return doRenderFrameIfNeeded(
-                needsRender,
                 renderPlanBuilder,
                 model,
                 state,
@@ -3136,27 +3052,6 @@ public class TerminalEditorApp {
                 tabBar,
                 topMenu
             );
-        }
-    }
-
-    private final class InputEventPump {
-        private final KeyDecoder decoder;
-        private final NotificationState notification;
-        private final AtomicBoolean resized;
-
-        private InputEventPump(KeyDecoder decoder, NotificationState notification, AtomicBoolean resized) {
-            this.decoder = decoder;
-            this.notification = notification;
-            this.resized = resized;
-        }
-
-        private PollResult poll() throws IOException {
-            KeyEvent key = decoder.readKey(nextInputTimeoutMs(notification));
-            boolean wasResized = resized.getAndSet(false);
-            return new PollResult(key, wasResized);
-        }
-
-        private record PollResult(KeyEvent key, boolean resized) {
         }
     }
 
@@ -4288,67 +4183,6 @@ public class TerminalEditorApp {
         this.styles = UiStyles.forTheme(this.theme);
     }
 
-    private CliOptions parseArgs(String[] args) {
-        Boolean mouseEnabledOverride = null;
-        boolean altScreenEnabled = true;
-        boolean colorEnabled = true;
-        Boolean readModeOverride = null;
-        boolean showHelp = false;
-        boolean profileEnabled = false;
-        Path profileFile = null;
-        UiStyles.Theme themeOverride = null;
-        Path file = null;
-
-        for (int i = 0; i < args.length; i++) {
-            String arg = args[i];
-            switch (arg) {
-                case "--no-mouse" -> mouseEnabledOverride = false;
-                case "--no-alt-screen" -> altScreenEnabled = false;
-                case "--no-color" -> colorEnabled = false;
-                case "--read" -> readModeOverride = true;
-                case "--profile" -> profileEnabled = true;
-                case "--help", "-h" -> showHelp = true;
-                default -> {
-                    if ("--profile-file".equals(arg)) {
-                        if (i + 1 >= args.length) {
-                            throw new IllegalArgumentException("Missing value after --profile-file");
-                        }
-                        profileFile = Path.of(args[++i]);
-                        profileEnabled = true;
-                        continue;
-                    }
-                    if (arg.startsWith("--theme=")) {
-                        themeOverride = UiStyles.Theme.parse(arg.substring("--theme=".length()));
-                        continue;
-                    }
-                    if (arg.startsWith("--profile-file=")) {
-                        profileFile = Path.of(arg.substring("--profile-file=".length()));
-                        profileEnabled = true;
-                        continue;
-                    }
-                    if (arg.startsWith("--")) {
-                        throw new IllegalArgumentException("Unknown option: " + arg);
-                    }
-                    if (file != null) {
-                        throw new IllegalArgumentException("Only one file path is supported.");
-                    }
-                    file = Path.of(arg);
-                }
-            }
-        }
-        return new CliOptions(
-            file,
-            mouseEnabledOverride,
-            altScreenEnabled,
-            colorEnabled,
-            readModeOverride,
-            showHelp,
-            themeOverride,
-            profileEnabled,
-            profileFile
-        );
-    }
-
     private void printUsage() {
         System.out.println("Usage: tuink [options] [file]");
         System.out.println("Development: ./gradlew --console=plain :app:run -PappArgs=\"[options] [file]\"");
@@ -4365,19 +4199,6 @@ public class TerminalEditorApp {
 
     private boolean shouldForceExecTerminalProvider() {
         return "exec".equalsIgnoreCase(System.getProperty("dev.tuink.terminal.provider", ""));
-    }
-
-    private record CliOptions(
-        Path file,
-        Boolean mouseEnabledOverride,
-        boolean altScreenEnabled,
-        boolean colorEnabled,
-        Boolean readModeOverride,
-        boolean showHelp,
-        UiStyles.Theme themeOverride,
-        boolean profileEnabled,
-        Path profileFile
-    ) {
     }
 
     private final class FrameProfiler {

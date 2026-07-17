@@ -15,6 +15,13 @@ profiler records one checkpoint every 30 frames.
 ./gradlew :app:perfCheck -PperfLabel=render-check
 ```
 
+These tasks require Python 3.10+ available as `python3` on a POSIX system.
+`perfHarnessTest` checks the fixture, parser, and statistics without building or
+launching TUInk. It runs explicitly in CI and is separate from the JVM `check`
+task. Both native benchmarks depend on this self-test and additionally require
+the [native toolchain](../../docs/building.md#requirements) and a POSIX
+pseudo-terminal.
+
 `perfSmoke` runs 120 events once and is part of `:app:release`. `perfCheck`
 runs 600 events three times for `Down`, `Shift+Down`, and mouse drag. Override
 the full-run defaults with `-PperfFrames=<multiple-of-30>` and

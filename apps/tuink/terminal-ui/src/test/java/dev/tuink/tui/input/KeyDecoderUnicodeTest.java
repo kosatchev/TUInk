@@ -2,6 +2,7 @@ package dev.tuink.tui.input;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.io.IOException;
@@ -58,6 +59,20 @@ class KeyDecoderUnicodeTest {
         KeyEvent.ActionEvent event = assertInstanceOf(KeyEvent.ActionEvent.class, decoder.readKey(1));
 
         assertEquals(KeyEvent.Action.TOGGLE_LINE_COMMENT, event.action());
+    }
+
+    @Test
+    void distinguishesIdleReadsFromEndOfInput() throws IOException {
+        KeyDecoder idleDecoder = new KeyDecoder(new QueueReader());
+        KeyDecoder endDecoder = new KeyDecoder(new QueueReader(-1));
+
+        KeyDecoder.ReadResult idle = idleDecoder.read(1);
+        KeyDecoder.ReadResult end = endDecoder.read(1);
+
+        assertEquals(KeyDecoder.ReadStatus.IDLE, idle.status());
+        assertNull(idle.key());
+        assertEquals(KeyDecoder.ReadStatus.END, end.status());
+        assertNull(end.key());
     }
 
     @Test

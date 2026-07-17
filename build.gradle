@@ -9,6 +9,11 @@ allprojects {
     repositories {
         mavenCentral()
     }
+
+    dependencyLocking {
+        lockAllConfigurations()
+        lockMode = org.gradle.api.artifacts.dsl.LockMode.STRICT
+    }
 }
 
 subprojects {
@@ -26,7 +31,60 @@ subprojects {
 
     dependencies {
         testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+        testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.10.2'
     }
+}
+
+def allowedProjectDependencies = [
+    ':core'           : [] as Set,
+    ':render'         : [':core'] as Set,
+    ':highlight-regex': [':core', ':render'] as Set,
+    ':tui'            : [':core', ':render', ':highlight-regex'] as Set,
+    ':app'            : [':tui'] as Set
+]
+
+def verifyProjectDependencies = tasks.register('verifyProjectDependencies') {
+    group = 'verification'
+    description = 'Verify the allowed direct dependencies between project modules.'
+    notCompatibleWithConfigurationCache('Reads the configured multi-project dependency model.')
+
+    doLast {
+        Set<String> currentProjects = subprojects.collect { it.path } as Set
+        Set<String> unclassifiedProjects = currentProjects - allowedProjectDependencies.keySet()
+        if (!unclassifiedProjects.isEmpty()) {
+            throw new GradleException(
+                "Unclassified project modules: ${unclassifiedProjects.sort()}. "
+                    + 'Add their allowed dependencies to allowedProjectDependencies.'
+            )
+        }
+
+        List<String> violations = []
+        subprojects.each { sourceProject ->
+            Set<String> allowed = allowedProjectDependencies[sourceProject.path]
+            sourceProject.configurations.each { configuration ->
+                configuration.dependencies
+                    .withType(org.gradle.api.artifacts.ProjectDependency)
+                    .each { dependency ->
+                        if (dependency.path != sourceProject.path && !allowed.contains(dependency.path)) {
+                            violations.add(
+                                "${sourceProject.path}:${configuration.name} -> ${dependency.path}"
+                            )
+                        }
+                    }
+            }
+        }
+
+        if (!violations.isEmpty()) {
+            throw new GradleException(
+                'Forbidden project dependencies:\n  ' + violations.sort().join('\n  ')
+            )
+        }
+    }
+}
+
+tasks.named('check') {
+    dependsOn(verifyProjectDependencies)
+    dependsOn(subprojects.collect { it.tasks.named('check') })
 }
 
 tasks.register('buildHelp') {
@@ -38,10 +96,10 @@ tasks.register('buildHelp') {
             TUInk ${rootProject.version} build help
 
             JVM development
-              ./gradlew test
-                  Run all module tests.
-              ./gradlew clean test build
-                  Clean and build the complete multi-module JVM project.
+              ./gradlew check
+                  Run all module tests and architecture checks.
+              ./gradlew clean check build
+                  Clean, verify, and build the complete multi-module JVM project.
               ./gradlew --console=plain :app:run
                   Run the canonical application entrypoint in an interactive TTY.
 

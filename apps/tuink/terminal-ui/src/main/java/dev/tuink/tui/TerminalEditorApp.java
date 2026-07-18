@@ -21,8 +21,15 @@ import dev.tuink.tui.flow.SaveContinuation;
 import dev.tuink.tui.flow.SaveTargetSuggester;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.flow.UiModalState;
+import dev.tuink.tui.command.CommandInvocation;
 import dev.tuink.tui.input.KeyDecoder;
 import dev.tuink.tui.input.KeyEvent;
+import dev.tuink.tui.input.KeyStroke;
+import dev.tuink.tui.input.LegacyKeyEventAdapter;
+import dev.tuink.tui.input.PasteEvent;
+import dev.tuink.tui.input.ResizeEvent;
+import dev.tuink.tui.input.TextInput;
+import dev.tuink.tui.input.TuiInputEvent;
 import dev.tuink.tui.render.CellBuffer;
 import dev.tuink.tui.render.CellText;
 import dev.tuink.render.LineHighlighter;
@@ -252,15 +259,21 @@ public class TerminalEditorApp {
             TerminalCursorController cursorController = new TerminalCursorController();
             try {
                 KeyDecoder decoder = new KeyDecoder(input);
-                TuiEventLoop<KeyEvent> eventLoop = new TuiEventLoop<>(timeoutMillis -> {
+                LegacyCommandBridge commandBridge = new LegacyCommandBridge();
+                TuiEventLoop<TuiInputEvent> eventLoop = new TuiEventLoop<>(timeoutMillis -> {
                     KeyDecoder.ReadResult result = decoder.read(timeoutMillis);
                     return switch (result.status()) {
-                        case EVENT -> TuiEventLoop.Read.event(result.key());
+                        case EVENT -> TuiEventLoop.Read.event(result.event());
                         case IDLE -> TuiEventLoop.Read.idle();
                         case END -> TuiEventLoop.Read.end();
                     };
                 });
-                terminal.onResize(eventLoop::requestResize);
+                terminal.onResize(() -> eventLoop.requestResize(
+                    new ResizeEvent(
+                        Math.max(2, terminal.height()),
+                        Math.max(1, terminal.width())
+                    )
+                ));
                 terminal.onInterrupt(eventLoop::requestStop);
                 RenderFrameController renderFrameController = new RenderFrameController(
                     writer,
@@ -562,14 +575,83 @@ public class TerminalEditorApp {
                         }
                     }
 
-                    TuiEventLoop.Poll<KeyEvent> pollResult = eventLoop.poll(notification::nanosUntilExpire);
-                    KeyEvent key = pollResult.event();
+                    TuiEventLoop.Poll<TuiInputEvent> pollResult = eventLoop.poll(notification::nanosUntilExpire);
+                    TuiInputEvent inputEvent = pollResult.event();
+                    if (inputEvent == null) {
+                        continue;
+                    }
+                    if (inputEvent instanceof ResizeEvent) {
+                        continue;
+                    }
+                    notification.clearErrorOnUserAction();
+                    eventLoop.invalidate();
+                    CommandInvocation pendingCommand = inputEvent instanceof KeyStroke stroke
+                        ? commandBridge.invocationFor(stroke).orElse(null)
+                        : null;
+
+                    if (inputEvent instanceof PasteEvent paste) {
+                        if (paste.truncated()) {
+                            notification.error("Paste is too large and was not inserted");
+                            continue;
+                        }
+                        if (modalState.isSaveAs()) {
+                            String singleLine = singleLinePaste(paste.text());
+                            saveAsInput.insert(singleLine);
+                            saveAsSuggestions.rememberDraft(
+                                tabs.get(activeTabIndex).tabSession(),
+                                saveAsInput.text()
+                            );
+                        } else if (!modalState.isNone() || openFileMode || topMenu.isOpen()) {
+                            // The focused overlay owns input; paste cannot leak through it.
+                        } else if (uiSessionState.searchMode) {
+                            TextField target = uiSessionState.searchFocus == SearchFocus.REPLACE
+                                ? searchReplaceInput
+                                : uiSessionState.searchFocus == SearchFocus.FIND ? searchQueryInput : null;
+                            if (target != null) {
+                                target.insert(singleLinePaste(paste.text()));
+                            }
+                        } else {
+                            if (uiSessionState.readingModeSetting) {
+                                notification.warning("Reading mode: editing is disabled");
+                            } else {
+                                engine.insertInput(paste.text());
+                                viewportController.onEditorTextInteraction();
+                            }
+                        }
+                        continue;
+                    }
+
+                    if (inputEvent instanceof TextInput text
+                        && text.text().codePointCount(0, text.text().length()) > 1) {
+                        if (modalState.isSaveAs()) {
+                            saveAsInput.insert(text.text());
+                            saveAsSuggestions.rememberDraft(
+                                tabs.get(activeTabIndex).tabSession(),
+                                saveAsInput.text()
+                            );
+                        } else if (!modalState.isNone() || openFileMode || topMenu.isOpen()) {
+                            // Multi-scalar IME input is ignored by overlays that only accept keys.
+                        } else if (uiSessionState.searchMode) {
+                            TextField target = uiSessionState.searchFocus == SearchFocus.REPLACE
+                                ? searchReplaceInput
+                                : uiSessionState.searchFocus == SearchFocus.FIND ? searchQueryInput : null;
+                            if (target != null) {
+                                target.insert(text.text());
+                            }
+                        } else if (uiSessionState.readingModeSetting) {
+                            notification.warning("Reading mode: editing is disabled");
+                        } else {
+                            engine.insertInput(text.text());
+                            viewportController.onEditorTextInteraction();
+                        }
+                        continue;
+                    }
+
+                    KeyEvent key = LegacyKeyEventAdapter.toLegacy(inputEvent).orElse(null);
                     if (key == null) {
                         continue;
                     }
                     viewportController.onInput(key);
-                    notification.clearErrorOnUserAction();
-                    eventLoop.invalidate();
 
                     if (key instanceof KeyEvent.MouseEvent mouse) {
                         if (!uiSessionState.mouseModeSetting) {
@@ -752,11 +834,20 @@ public class TerminalEditorApp {
                                     if (menuMouse.consumed()) {
                                         Integer tabActivation = topMenu.consumeTabActivationRequest();
                                         if (tabActivation != null && tabActivation >= 0 && tabActivation < tabs.size()) {
-                                            sessionContext.activate(tabActivation);
+                                            CommandInvocation activation = commandBridge.tabActivationInvocation(
+                                                tabActivation
+                                            );
+                                            int resolvedTab = commandBridge.invokeTabActivation(activation).orElse(-1);
+                                            if (resolvedTab >= 0 && resolvedTab < tabs.size()) {
+                                                sessionContext.activate(resolvedTab);
+                                            }
                                             editorView.cancelMouseSelection();
                                             continue;
                                         }
                                         if (menuMouse.mappedAction() != null) {
+                                            pendingCommand = commandBridge.invocationFor(
+                                                menuMouse.mappedAction()
+                                            ).orElse(null);
                                             remappedMouseKey = new KeyEvent.ActionEvent(menuMouse.mappedAction());
                                             editorView.cancelMouseSelection();
                                             break;
@@ -775,6 +866,9 @@ public class TerminalEditorApp {
                                             );
                                         if (confirmMouseResult.consumed()) {
                                             modalState = modalState.withConfirmChoice(confirmMouseResult.confirmChoice());
+                                            pendingCommand = commandBridge.invocationFor(
+                                                KeyEvent.Action.ENTER
+                                            ).orElse(null);
                                             remappedMouseKey = new KeyEvent.ActionEvent(KeyEvent.Action.ENTER);
                                             editorView.cancelMouseSelection();
                                             break;
@@ -793,6 +887,9 @@ public class TerminalEditorApp {
                                             if (SearchController.isSearchActionFocus(clickedFocus)) {
                                                 KeyEvent.Action mappedAction = SearchController.actionForSearchFocus(clickedFocus);
                                                 if (mappedAction != null) {
+                                                    pendingCommand = commandBridge.invocationFor(
+                                                        mappedAction
+                                                    ).orElse(null);
                                                     remappedMouseKey = new KeyEvent.ActionEvent(mappedAction);
                                                     break;
                                                 }
@@ -814,6 +911,9 @@ public class TerminalEditorApp {
                                             searchBarTopRow
                                         );
                                         if (clickAction != null) {
+                                            pendingCommand = commandBridge.invocationFor(
+                                                clickAction
+                                            ).orElse(null);
                                             remappedMouseKey = new KeyEvent.ActionEvent(clickAction);
                                             break;
                                         }
@@ -1230,7 +1330,11 @@ public class TerminalEditorApp {
                         TopMenuInputController.HandleResult topMenuResult = TopMenuInputController.handleWhenOpen(topMenu, key);
                         Integer tabActivation = topMenuResult.tabActivation();
                         if (tabActivation != null && tabActivation >= 0 && tabActivation < tabs.size()) {
-                            sessionContext.activate(tabActivation);
+                            CommandInvocation activation = commandBridge.tabActivationInvocation(tabActivation);
+                            int resolvedTab = commandBridge.invokeTabActivation(activation).orElse(-1);
+                            if (resolvedTab >= 0 && resolvedTab < tabs.size()) {
+                                sessionContext.activate(resolvedTab);
+                            }
                             activeTabIndex = sessionContext.activeTabIndex();
                             model = sessionContext.model();
                             state = sessionContext.state();
@@ -1238,7 +1342,12 @@ public class TerminalEditorApp {
                             renderPlanBuilder = sessionContext.renderPlanBuilder();
                         }
                         key = topMenuResult.nextKey();
-                        if (topMenuResult.keepMenuOpen()) {
+                        if (topMenuResult.selectedAction() != null) {
+                            pendingCommand = commandBridge.invocationFor(
+                                topMenuResult.selectedAction()
+                            ).orElse(null);
+                        }
+                        if (topMenuResult.keepMenuOpen() || topMenuResult.selectedAction() == null) {
                             continue;
                         }
                     }
@@ -1246,6 +1355,8 @@ public class TerminalEditorApp {
                     if (uiSessionState.searchMode) {
                         SearchModeResult searchModeResult = handleSearchModeInput(
                             key,
+                            pendingCommand,
+                            commandBridge,
                             uiSessionState,
                             searchUi,
                             searchQueryInput,
@@ -1294,6 +1405,10 @@ public class TerminalEditorApp {
                     }
 
                     KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
+                    if (pendingCommand == null) {
+                        pendingCommand = commandBridge.invocationFor(action).orElse(null);
+                    }
+                    action = commandBridge.resolve(pendingCommand, action);
                     InputActionDispatcher.DispatchResult dispatchResult = InputActionDispatcher.dispatch(
                         action,
                         uiSessionState,
@@ -1586,6 +1701,8 @@ public class TerminalEditorApp {
 
     private SearchModeResult handleSearchModeInput(
         KeyEvent key,
+        CommandInvocation pendingCommand,
+        LegacyCommandBridge commandBridge,
         UiSessionState uiSessionState,
         SearchController.SearchUiOptions searchUi,
         TextField searchQueryInput,
@@ -1655,6 +1772,12 @@ public class TerminalEditorApp {
         }
 
         KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
+        CommandInvocation focusedCommand = commandBridge.invocationForSearch(
+            action,
+            uiSessionState.searchFocus,
+            pendingCommand
+        );
+        action = commandBridge.resolve(focusedCommand, action);
         switch (action) {
             case ESCAPE -> {
                 uiSessionState.searchMode = false;
@@ -2219,6 +2342,31 @@ public class TerminalEditorApp {
 
     private boolean isAction(KeyEvent key, KeyEvent.Action expected) {
         return key instanceof KeyEvent.ActionEvent actionEvent && actionEvent.action() == expected;
+    }
+
+    static String singleLinePaste(String text) {
+        if (text == null || text.isEmpty()) {
+            return "";
+        }
+        StringBuilder result = new StringBuilder(text.length());
+        boolean separatorPending = false;
+        for (int offset = 0; offset < text.length();) {
+            int codePoint = text.codePointAt(offset);
+            offset += Character.charCount(codePoint);
+            if (codePoint == '\r' || codePoint == '\n' || codePoint == '\t') {
+                separatorPending = !result.isEmpty();
+                continue;
+            }
+            if (Character.isISOControl(codePoint)) {
+                continue;
+            }
+            if (separatorPending) {
+                result.append(' ');
+                separatorPending = false;
+            }
+            result.appendCodePoint(codePoint);
+        }
+        return result.toString();
     }
 
     private Style focusedButtonStyle(Style parentStyle) {

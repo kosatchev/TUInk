@@ -3,7 +3,6 @@ package dev.tuink.tui.input;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.io.IOException;
 import java.util.ArrayDeque;
@@ -16,11 +15,9 @@ class KeyDecoderUnicodeTest {
     void combinesSurrogatePairIntoOneUnicodeScalarEvent() throws IOException {
         KeyDecoder decoder = new KeyDecoder(new QueueReader('\uD83D', '\uDE00'));
 
-        KeyEvent.CharInput input = assertInstanceOf(KeyEvent.CharInput.class, decoder.readKey(1));
+        TextInput input = assertInstanceOf(TextInput.class, decoder.read(1).event());
 
-        assertEquals(0x1F600, input.codePoint());
         assertEquals("😀", input.text());
-        assertEquals('\0', input.asciiCharOrZero());
     }
 
     @Test
@@ -28,37 +25,37 @@ class KeyDecoderUnicodeTest {
         KeyDecoder high = new KeyDecoder(new QueueReader('\uD83D'));
         KeyDecoder low = new KeyDecoder(new QueueReader('\uDE00'));
 
-        assertEquals("�", assertInstanceOf(KeyEvent.CharInput.class, high.readKey(1)).text());
-        assertEquals("�", assertInstanceOf(KeyEvent.CharInput.class, low.readKey(1)).text());
+        assertEquals("�", assertInstanceOf(TextInput.class, high.read(1).event()).text());
+        assertEquals("�", assertInstanceOf(TextInput.class, low.read(1).event()).text());
     }
 
     @Test
-    void escapeBeforeUnknownPrintableInputDoesNotConsumeThatInput() throws IOException {
-        KeyDecoder decoder = new KeyDecoder(new QueueReader(27, 'z'));
+    void escapeBeforeUnmappableUnicodeInputDoesNotConsumeThatInput() throws IOException {
+        KeyDecoder decoder = new KeyDecoder(new QueueReader(27, '中'));
 
-        KeyEvent.ActionEvent escape = assertInstanceOf(KeyEvent.ActionEvent.class, decoder.readKey(1));
-        KeyEvent.CharInput input = assertInstanceOf(KeyEvent.CharInput.class, decoder.readKey(1));
+        KeyStroke escape = assertInstanceOf(KeyStroke.class, decoder.read(1).event());
+        TextInput input = assertInstanceOf(TextInput.class, decoder.read(1).event());
 
-        assertEquals(KeyEvent.Action.ESCAPE, escape.action());
-        assertEquals("z", input.text());
+        assertEquals(KeyStroke.of(KeyStroke.Key.ESCAPE), escape);
+        assertEquals("中", input.text());
     }
 
     @Test
-    void ctrlSlashMapsToToggleLineComment() throws IOException {
+    void ctrlSlashRemainsAPhysicalChord() throws IOException {
         KeyDecoder decoder = new KeyDecoder(new QueueReader(31));
 
-        KeyEvent.ActionEvent event = assertInstanceOf(KeyEvent.ActionEvent.class, decoder.readKey(1));
+        KeyStroke event = assertInstanceOf(KeyStroke.class, decoder.read(1).event());
 
-        assertEquals(KeyEvent.Action.TOGGLE_LINE_COMMENT, event.action());
+        assertEquals(KeyStroke.of(KeyStroke.Key.SLASH, KeyStroke.Modifier.CTRL), event);
     }
 
     @Test
-    void enhancedKeyboardCtrlSlashMapsToToggleLineComment() throws IOException {
+    void enhancedKeyboardCtrlSlashRemainsAPhysicalChord() throws IOException {
         KeyDecoder decoder = new KeyDecoder(new QueueReader(27, '[', '4', '7', ';', '5', 'u'));
 
-        KeyEvent.ActionEvent event = assertInstanceOf(KeyEvent.ActionEvent.class, decoder.readKey(1));
+        KeyStroke event = assertInstanceOf(KeyStroke.class, decoder.read(1).event());
 
-        assertEquals(KeyEvent.Action.TOGGLE_LINE_COMMENT, event.action());
+        assertEquals(KeyStroke.of(KeyStroke.Key.SLASH, KeyStroke.Modifier.CTRL), event);
     }
 
     @Test
@@ -70,16 +67,9 @@ class KeyDecoderUnicodeTest {
         KeyDecoder.ReadResult end = endDecoder.read(1);
 
         assertEquals(KeyDecoder.ReadStatus.IDLE, idle.status());
-        assertNull(idle.key());
+        assertNull(idle.event());
         assertEquals(KeyDecoder.ReadStatus.END, end.status());
-        assertNull(end.key());
-    }
-
-    @Test
-    void charInputRejectsControlsAndSurrogateCodePoints() {
-        assertThrows(IllegalArgumentException.class, () -> new KeyEvent.CharInput(0x1B));
-        assertThrows(IllegalArgumentException.class, () -> new KeyEvent.CharInput(0x9B));
-        assertThrows(IllegalArgumentException.class, () -> new KeyEvent.CharInput(0xD83D));
+        assertNull(end.event());
     }
 
     private static final class QueueReader extends NonBlockingReader {

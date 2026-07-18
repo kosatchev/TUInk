@@ -1,8 +1,12 @@
 package dev.tuink.tui.input;
 
 /**
- * Decoded key events from terminal input.
+ * Legacy application-oriented input used while TUInk migrates to
+ * {@link TuiInputEvent} and command keymaps.
+ *
+ * @deprecated Use physical {@link TuiInputEvent} values instead.
  */
+@Deprecated
 public sealed interface KeyEvent permits KeyEvent.ActionEvent, KeyEvent.CharInput, KeyEvent.MouseEvent {
     enum MouseButton {
         LEFT,

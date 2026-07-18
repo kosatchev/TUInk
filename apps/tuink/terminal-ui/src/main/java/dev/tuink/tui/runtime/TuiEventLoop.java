@@ -18,6 +18,7 @@ public final class TuiEventLoop<E> {
     private final NanoClock clock;
     private boolean stopRequested;
     private boolean resizePending;
+    private E resizeEventPending;
     private boolean renderPending = true;
     private boolean fullRedrawPending = true;
     private long nextFrameSequence;
@@ -34,6 +35,16 @@ public final class TuiEventLoop<E> {
 
     public synchronized void requestResize() {
         resizePending = true;
+        renderPending = true;
+        fullRedrawPending = true;
+    }
+
+    /** Coalesces resize signals while retaining the latest typed resize event. */
+    public synchronized void requestResize(E resizeEvent) {
+        resizePending = true;
+        resizeEventPending = Objects.requireNonNull(resizeEvent, "resizeEvent");
+        renderPending = true;
+        fullRedrawPending = true;
     }
 
     public synchronized void requestStop() {
@@ -91,16 +102,32 @@ public final class TuiEventLoop<E> {
      */
     public Poll<E> poll(Deadline deadline) throws IOException {
         Objects.requireNonNull(deadline, "deadline");
+        synchronized (this) {
+            if (resizeEventPending != null) {
+                E event = resizeEventPending;
+                resizeEventPending = null;
+                resizePending = false;
+                return new Poll<>(event, true, false);
+            }
+        }
+
         long timeoutMillis = timeoutMillis(deadline.nanosUntil(clock.nanoTime()));
         Read<E> read = Objects.requireNonNull(input.poll(timeoutMillis), "input result");
 
         boolean resized;
+        E deliveredResize = null;
         synchronized (this) {
-            resized = resizePending;
-            resizePending = false;
-            if (resized) {
-                renderPending = true;
-                fullRedrawPending = true;
+            if (resizeEventPending != null && read.kind() == ReadKind.IDLE) {
+                deliveredResize = resizeEventPending;
+                resizeEventPending = null;
+                resizePending = false;
+                resized = true;
+            } else if (resizeEventPending != null) {
+                // Preserve a typed resize until the current input event is delivered.
+                resized = false;
+            } else {
+                resized = resizePending;
+                resizePending = false;
             }
             if (read.kind() == ReadKind.EVENT) {
                 renderPending = true;
@@ -109,6 +136,9 @@ public final class TuiEventLoop<E> {
             }
         }
 
+        if (deliveredResize != null) {
+            return new Poll<>(deliveredResize, true, false);
+        }
         return new Poll<>(read.event(), resized, read.kind() == ReadKind.END);
     }
 

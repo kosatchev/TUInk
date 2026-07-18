@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.io.Writer;
 import org.jline.terminal.Attributes;
 import org.jline.terminal.Attributes.LocalFlag;
 import org.jline.utils.NonBlockingReader;
@@ -17,6 +18,8 @@ import org.junit.jupiter.api.Test;
 class TerminalSessionTest {
     private static final String ENABLE_MOUSE = "\u001B[?1000h\u001B[?1002h\u001B[?1006h";
     private static final String DISABLE_MOUSE = "\u001B[?1000l\u001B[?1002l\u001B[?1006l";
+    private static final String ENABLE_BRACKETED_PASTE = "\u001B[?2004h";
+    private static final String DISABLE_BRACKETED_PASTE = "\u001B[?2004l";
 
     @Test
     void ownsRawAlternateScreenMouseAndCleanupLifecycle() throws Exception {
@@ -34,7 +37,10 @@ class TerminalSessionTest {
         assertSame(session.writer(), backend.writer);
         assertEquals(24, session.height());
         assertEquals(80, session.width());
-        assertEquals("\u001B[?1049h\u001B[?25h\u001B[2J" + ENABLE_MOUSE, backend.output());
+        assertEquals(
+            "\u001B[?1049h\u001B[?25h\u001B[2J" + ENABLE_BRACKETED_PASTE + ENABLE_MOUSE,
+            backend.output()
+        );
         assertSame(hooks.added, hooks.current);
 
         session.close();
@@ -44,8 +50,9 @@ class TerminalSessionTest {
         assertEquals(1, backend.closeCount);
         assertEquals(1, hooks.removeCount);
         assertEquals(
-            "\u001B[?1049h\u001B[?25h\u001B[2J" + ENABLE_MOUSE
-                + "\u001B[0m" + DISABLE_MOUSE + "\u001B[?25h\u001B[?1049l\u001B[2J\u001B[H",
+            "\u001B[?1049h\u001B[?25h\u001B[2J" + ENABLE_BRACKETED_PASTE + ENABLE_MOUSE
+                + "\u001B[0m" + DISABLE_MOUSE + DISABLE_BRACKETED_PASTE
+                + "\u001B[?25h\u001B[?1049l\u001B[2J\u001B[H",
             backend.output()
         );
 
@@ -63,13 +70,16 @@ class TerminalSessionTest {
             new FakeShutdownHooks()
         );
 
-        assertEquals("\u001B[?25h\u001B[2J", backend.output());
+        assertEquals("\u001B[?25h\u001B[2J" + ENABLE_BRACKETED_PASTE, backend.output());
         session.setMouseTracking(false);
         session.setMouseTracking(true);
         session.setMouseTracking(true);
         session.setMouseTracking(false);
 
-        assertEquals("\u001B[?25h\u001B[2J" + ENABLE_MOUSE + DISABLE_MOUSE, backend.output());
+        assertEquals(
+            "\u001B[?25h\u001B[2J" + ENABLE_BRACKETED_PASTE + ENABLE_MOUSE + DISABLE_MOUSE,
+            backend.output()
+        );
         session.close();
     }
 
@@ -153,8 +163,31 @@ class TerminalSessionTest {
         assertEquals(1, backend.closeCount);
         assertEquals(1, hooks.removeCount);
         assertTrue(backend.output().endsWith(
-            "\u001B[0m" + DISABLE_MOUSE + "\u001B[?25h\u001B[?1049l\u001B[2J\u001B[H"
+            "\u001B[0m" + DISABLE_MOUSE + DISABLE_BRACKETED_PASTE
+                + "\u001B[?25h\u001B[?1049l\u001B[2J\u001B[H"
         ));
+    }
+
+    @Test
+    void detectsPrintWriterIoErrorsDuringInitializationAndStillCleansUp() {
+        FakeBackend backend = new FakeBackend("xterm");
+        backend.failWritesWithIo();
+        FakeShutdownHooks hooks = new FakeShutdownHooks();
+
+        IllegalStateException error = assertThrows(
+            IllegalStateException.class,
+            () -> TerminalSession.start(
+                new TerminalSession.Options(true, true, false),
+                backend,
+                hooks
+            )
+        );
+
+        assertEquals("Failed to write terminal control sequence", error.getMessage());
+        assertTrue(backend.currentAttributes.getLocalFlag(LocalFlag.ISIG));
+        assertEquals(1, backend.closeCount);
+        assertEquals(1, hooks.removeCount);
+        assertEquals(1, error.getSuppressed().length);
     }
 
     @Test
@@ -176,7 +209,8 @@ class TerminalSessionTest {
         assertTrue(backend.currentAttributes.getLocalFlag(LocalFlag.ISIG));
         assertEquals(1, backend.closeCount);
         assertTrue(backend.output().endsWith(
-            "\u001B[0m" + DISABLE_MOUSE + "\u001B[?25h\u001B[?1049l\u001B[2J\u001B[H"
+            "\u001B[0m" + DISABLE_MOUSE + DISABLE_BRACKETED_PASTE
+                + "\u001B[?25h\u001B[?1049l\u001B[2J\u001B[H"
         ));
     }
 
@@ -216,6 +250,23 @@ class TerminalSessionTest {
                     super.print(value);
                 }
             };
+        }
+
+        private void failWritesWithIo() {
+            writer = new PrintWriter(new Writer() {
+                @Override
+                public void write(char[] buffer, int offset, int length) throws IOException {
+                    throw new IOException("write failed");
+                }
+
+                @Override
+                public void flush() {
+                }
+
+                @Override
+                public void close() {
+                }
+            });
         }
 
         @Override

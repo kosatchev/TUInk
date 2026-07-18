@@ -22,17 +22,18 @@ final class TopMenuInputController {
 
         Integer tabActivation = topMenu.consumeTabActivationRequest();
         KeyEvent nextKey = mappedAction == null ? key : new KeyEvent.ActionEvent(mappedAction);
-        return new HandleResult(true, topMenu.isOpen(), tabActivation, nextKey);
+        return new HandleResult(true, topMenu.isOpen(), tabActivation, nextKey, mappedAction);
     }
 
     record HandleResult(
         boolean consumed,
         boolean keepMenuOpen,
         Integer tabActivation,
-        KeyEvent nextKey
+        KeyEvent nextKey,
+        KeyEvent.Action selectedAction
     ) {
         static HandleResult notConsumed(KeyEvent key) {
-            return new HandleResult(false, false, null, key);
+            return new HandleResult(false, false, null, key, null);
         }
     }
 }

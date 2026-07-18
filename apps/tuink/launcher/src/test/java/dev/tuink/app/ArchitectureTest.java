@@ -11,6 +11,8 @@ import com.tngtech.archunit.lang.ArchRule;
 import org.junit.jupiter.api.Test;
 
 class ArchitectureTest {
+    private static final String KEY_DECODER = "dev.tuink.tui.input.KeyDecoder";
+
     private static final JavaClasses PRODUCTION_CLASSES = new ClassFileImporter()
         .withImportOption(new ImportOption.DoNotIncludeTests())
         .importPackages("dev.tuink");
@@ -66,12 +68,64 @@ class ArchitectureTest {
             "dev.tuink.tui.terminal.."
         );
 
-    static final ArchRule INPUT_DECODING_IS_EDITOR_INDEPENDENT = classes()
+    static final ArchRule PHYSICAL_INPUT_MODEL_IS_SELF_CONTAINED = classes()
         .that().resideInAPackage("dev.tuink.tui.input..")
+        .and().doNotHaveFullyQualifiedName(KEY_DECODER)
+        .should().onlyDependOnClassesThat().resideInAnyPackage(
+            "java..",
+            "dev.tuink.tui.input.."
+        );
+
+    static final ArchRule KEY_DECODER_IS_A_SELF_CONTAINED_JLINE_ADAPTER = classes()
+        .that().haveFullyQualifiedName(KEY_DECODER)
         .should().onlyDependOnClassesThat().resideInAnyPackage(
             "java..",
             "org.jline..",
             "dev.tuink.tui.input.."
+        );
+
+    static final ArchRule KEY_DECODER_DOES_NOT_DEPEND_ON_LEGACY_INPUT = noClasses()
+        .that().haveFullyQualifiedName(KEY_DECODER)
+        .should().dependOnClassesThat().haveNameMatching(
+            "dev\\.tuink\\.tui\\.input\\.(?:KeyEvent|LegacyKeyEventAdapter)(\\$.*)?"
+        );
+
+    static final ArchRule PHYSICAL_INPUT_EVENTS_DO_NOT_DEPEND_ON_THE_LEGACY_MODEL = noClasses()
+        .that().haveNameMatching(
+            "dev\\.tuink\\.tui\\.input\\.(?:TuiInputEvent|KeyStroke|TextInput|PasteEvent|PointerEvent|ResizeEvent)(\\$.*)?"
+        )
+        .should().dependOnClassesThat().haveNameMatching(
+            "dev\\.tuink\\.tui\\.input\\.(?:KeyEvent|LegacyKeyEventAdapter)(\\$.*)?"
+        );
+
+    static final ArchRule COMMAND_MODEL_IS_SELF_CONTAINED = classes()
+        .that().resideInAPackage("dev.tuink.tui.command..")
+        .should().onlyDependOnClassesThat().resideInAnyPackage(
+            "java..",
+            "dev.tuink.tui.command.."
+        );
+
+    static final ArchRule KEYMAP_LAYER_STAYS_EDITOR_INDEPENDENT = classes()
+        .that().resideInAPackage("dev.tuink.tui.keymap..")
+        .should().onlyDependOnClassesThat().resideInAnyPackage(
+            "java..",
+            "dev.tuink.tui.command..",
+            "dev.tuink.tui.input..",
+            "dev.tuink.tui.keymap.."
+        );
+
+    static final ArchRule GENERIC_KEYMAP_DOES_NOT_IMPORT_PHYSICAL_OR_LEGACY_INPUT = classes()
+        .that().haveFullyQualifiedName("dev.tuink.tui.keymap.Keymap")
+        .should().onlyDependOnClassesThat().resideInAnyPackage(
+            "java..",
+            "dev.tuink.tui.command..",
+            "dev.tuink.tui.keymap.."
+        );
+
+    static final ArchRule TUINK_KEYMAP_DOES_NOT_IMPORT_DECODER_OR_LEGACY_EVENTS = noClasses()
+        .that().haveFullyQualifiedName("dev.tuink.tui.keymap.TuinkKeymap")
+        .should().dependOnClassesThat().haveNameMatching(
+            "dev\\.tuink\\.tui\\.input\\.(?:KeyDecoder|KeyEvent|LegacyKeyEventAdapter)(?:\\$.*)?"
         );
 
     static final ArchRule EVENT_LOOP_IS_EDITOR_INDEPENDENT = classes()
@@ -103,8 +157,19 @@ class ArchitectureTest {
     @Test
     void terminalFoundationStaysEditorIndependent() {
         TERMINAL_RUNTIME_IS_EDITOR_INDEPENDENT.check(PRODUCTION_CLASSES);
-        INPUT_DECODING_IS_EDITOR_INDEPENDENT.check(PRODUCTION_CLASSES);
         EVENT_LOOP_IS_EDITOR_INDEPENDENT.check(PRODUCTION_CLASSES);
         JLINE_STAYS_IN_TUI_EXCEPT_FOR_THE_KNOWN_METRICS_DEBT.check(PRODUCTION_CLASSES);
+    }
+
+    @Test
+    void inputCommandsAndKeymapStayReusable() {
+        PHYSICAL_INPUT_MODEL_IS_SELF_CONTAINED.check(PRODUCTION_CLASSES);
+        KEY_DECODER_IS_A_SELF_CONTAINED_JLINE_ADAPTER.check(PRODUCTION_CLASSES);
+        KEY_DECODER_DOES_NOT_DEPEND_ON_LEGACY_INPUT.check(PRODUCTION_CLASSES);
+        PHYSICAL_INPUT_EVENTS_DO_NOT_DEPEND_ON_THE_LEGACY_MODEL.check(PRODUCTION_CLASSES);
+        COMMAND_MODEL_IS_SELF_CONTAINED.check(PRODUCTION_CLASSES);
+        KEYMAP_LAYER_STAYS_EDITOR_INDEPENDENT.check(PRODUCTION_CLASSES);
+        GENERIC_KEYMAP_DOES_NOT_IMPORT_PHYSICAL_OR_LEGACY_INPUT.check(PRODUCTION_CLASSES);
+        TUINK_KEYMAP_DOES_NOT_IMPORT_DECODER_OR_LEGACY_EVENTS.check(PRODUCTION_CLASSES);
     }
 }

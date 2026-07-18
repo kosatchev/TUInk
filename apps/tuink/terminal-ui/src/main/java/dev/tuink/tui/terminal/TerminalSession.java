@@ -15,12 +15,14 @@ import org.jline.utils.NonBlockingReader;
  * Owns one interactive terminal lifecycle.
  *
  * <p>The session is responsible for raw mode, signal handlers, alternate
- * screen and mouse tracking. Closing it is idempotent and restores terminal
- * state even when application code exits exceptionally.</p>
+ * screen, bracketed paste and mouse tracking. Closing it is idempotent and
+ * restores terminal state even when application code exits exceptionally.</p>
  */
 public final class TerminalSession implements AutoCloseable {
     private static final String ENABLE_MOUSE_TRACKING = "\u001B[?1000h\u001B[?1002h\u001B[?1006h";
     private static final String DISABLE_MOUSE_TRACKING = "\u001B[?1000l\u001B[?1002l\u001B[?1006l";
+    private static final String ENABLE_BRACKETED_PASTE = "\u001B[?2004h";
+    private static final String DISABLE_BRACKETED_PASTE = "\u001B[?2004l";
     private static final String ENTER_ALTERNATE_SCREEN = "\u001B[?1049h";
     private static final String LEAVE_ALTERNATE_SCREEN = "\u001B[?1049l";
     private static final String SHOW_CURSOR_AND_CLEAR = "\u001B[?25h\u001B[2J";
@@ -178,6 +180,7 @@ public final class TerminalSession implements AutoCloseable {
         try {
             StringBuilder cleanup = new StringBuilder(RESET_STYLE);
             cleanup.append(DISABLE_MOUSE_TRACKING);
+            cleanup.append(DISABLE_BRACKETED_PASTE);
             cleanup.append(SHOW_CURSOR);
             if (options.alternateScreenEnabled()) {
                 cleanup.append(LEAVE_ALTERNATE_SCREEN);
@@ -185,7 +188,7 @@ public final class TerminalSession implements AutoCloseable {
             cleanup.append(CLEAR_AND_HOME);
             write(cleanup.toString());
         } catch (RuntimeException e) {
-            failure = new IOException("Failed to restore terminal output state", e);
+            failure = appendFailure(failure, "Failed to restore terminal output state", e);
         }
 
         try {
@@ -211,6 +214,7 @@ public final class TerminalSession implements AutoCloseable {
             init.append(ENTER_ALTERNATE_SCREEN);
         }
         init.append(SHOW_CURSOR_AND_CLEAR);
+        init.append(ENABLE_BRACKETED_PASTE);
         if (mouseTrackingEnabled) {
             init.append(ENABLE_MOUSE_TRACKING);
         }
@@ -220,6 +224,9 @@ public final class TerminalSession implements AutoCloseable {
     private void write(String sequence) {
         writer.print(sequence);
         writer.flush();
+        if (writer.checkError()) {
+            throw new IllegalStateException("Failed to write terminal control sequence");
+        }
     }
 
     private void closeQuietly() {

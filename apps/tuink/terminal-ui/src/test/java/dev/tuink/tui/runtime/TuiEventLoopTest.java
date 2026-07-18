@@ -80,6 +80,41 @@ class TuiEventLoopTest {
     }
 
     @Test
+    void typedResizeIsDeliveredWithoutWaitingForTerminalInput() throws Exception {
+        ScriptedInput<String> input = new ScriptedInput<>();
+        TuiEventLoop<String> loop = cleanLoop(input);
+        loop.requestResize("40x120");
+
+        TuiEventLoop.Poll<String> poll = loop.poll(NO_DEADLINE);
+        TuiEventLoop.FrameTicket frame = loop.beginFrame();
+
+        assertEquals("40x120", poll.event());
+        assertTrue(poll.resized());
+        assertTrue(frame.fullRedraw());
+        assertEquals(List.of(), input.timeouts);
+    }
+
+    @Test
+    void typedResizeQueuedDuringInputDoesNotDiscardThatInput() throws Exception {
+        AtomicReference<TuiEventLoop<String>> loopReference = new AtomicReference<>();
+        TuiEventLoop<String> loop = new TuiEventLoop<>(timeout -> {
+            loopReference.get().requestResize("40x120");
+            return TuiEventLoop.Read.event("key");
+        });
+        loopReference.set(loop);
+        TuiEventLoop.FrameTicket initial = loop.beginFrame();
+        loop.endFrame(initial, true);
+
+        TuiEventLoop.Poll<String> key = loop.poll(NO_DEADLINE);
+        TuiEventLoop.Poll<String> resize = loop.poll(NO_DEADLINE);
+
+        assertEquals("key", key.event());
+        assertFalse(key.resized());
+        assertEquals("40x120", resize.event());
+        assertTrue(resize.resized());
+    }
+
+    @Test
     void failedFrameRetriesAndKeepsItsFullRedrawRequirement() {
         TuiEventLoop<String> loop = new TuiEventLoop<>(timeout -> TuiEventLoop.Read.idle());
 

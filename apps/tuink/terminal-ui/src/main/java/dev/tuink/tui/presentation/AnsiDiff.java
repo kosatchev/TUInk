@@ -1,7 +1,9 @@
-package dev.tuink.tui;
+package dev.tuink.tui.presentation;
 
 import dev.tuink.tui.render.Cell;
 import dev.tuink.tui.render.CellBuffer;
+import dev.tuink.tui.geometry.Rect;
+import dev.tuink.tui.screen.ScrollHint;
 import dev.tuink.render.Color;
 import dev.tuink.render.Style;
 import java.util.HashMap;
@@ -10,54 +12,36 @@ import java.util.Map;
 /**
  * Produces ANSI output for differences between two cell buffers.
  */
-public final class AnsiDiff {
-    private static final Map<Style, String> COLOR_STYLE_CACHE = new HashMap<>();
-    private static final Map<Style, String> MONO_STYLE_CACHE = new HashMap<>();
+final class AnsiDiff {
+    private final Map<Style, String> colorStyleCache = new HashMap<>();
+    private final Map<Style, String> monoStyleCache = new HashMap<>();
 
-    private AnsiDiff() {
+    AnsiDiff() {
     }
 
-    public static String diff(CellBuffer previous, CellBuffer current) {
-        return diff(previous, current, true);
-    }
-
-    public static String diff(CellBuffer previous, CellBuffer current, boolean colorEnabled) {
-        return diff(previous, current, colorEnabled, -1, 0);
-    }
-
-    public static String diff(
+    String diff(
         CellBuffer previous,
         CellBuffer current,
         boolean colorEnabled,
-        int scrollRegionTop,
-        int scrollRegionHeight
+        ScrollHint scrollHint
     ) {
-        return diff(
-            previous,
-            current,
-            colorEnabled,
-            scrollRegionTop,
-            scrollRegionHeight,
-            0,
-            current.cols() - 1,
-            true,
-            false,
-            0
-        );
-    }
-
-    public static String diff(
-        CellBuffer previous,
-        CellBuffer current,
-        boolean colorEnabled,
-        int scrollRegionTop,
-        int scrollRegionHeight,
-        int textStartCol,
-        int textEndCol,
-        boolean enableVerticalScrollFastPath,
-        boolean enableHorizontalScrollFastPath,
-        int horizontalDeltaColumns
-    ) {
+        ScrollHint hint = scrollHint == null ? ScrollHint.none() : scrollHint;
+        Rect scrollRegion = hint instanceof ScrollHint.Vertical vertical
+            ? vertical.region()
+            : hint instanceof ScrollHint.Horizontal horizontal
+                ? horizontal.region()
+                : new Rect(0, 0, current.cols(), 0);
+        int scrollRegionTop = scrollRegion.y();
+        int scrollRegionHeight = scrollRegion.height();
+        int textStartCol = scrollRegion.x();
+        int textEndCol = scrollRegion.width() == 0
+            ? current.cols() - 1
+            : scrollRegion.rightExclusive() - 1;
+        boolean enableVerticalScrollFastPath = hint instanceof ScrollHint.Vertical;
+        boolean enableHorizontalScrollFastPath = hint instanceof ScrollHint.Horizontal;
+        int horizontalDeltaColumns = hint instanceof ScrollHint.Horizontal horizontal
+            ? horizontal.deltaColumns()
+            : 0;
         StringBuilder out = new StringBuilder();
         String activeStyleAnsi = null;
         boolean wroteAnyCell = false;
@@ -97,7 +81,16 @@ public final class AnsiDiff {
             && regionBottom >= regionTop
             && safeTextEnd >= safeTextStart
             && !previous.regionHasWideCells(regionTop, regionBottom, safeTextStart, safeTextEnd)
-            && !current.regionHasWideCells(regionTop, regionBottom, safeTextStart, safeTextEnd)) {
+            && !current.regionHasWideCells(regionTop, regionBottom, safeTextStart, safeTextEnd)
+            && horizontalOverlapMatches(
+                previous,
+                current,
+                regionTop,
+                regionBottom,
+                safeTextStart,
+                safeTextEnd,
+                horizontalDeltaColumns
+            )) {
             activeStyleAnsi = applyHorizontalScroll(
                 out,
                 current,
@@ -141,7 +134,6 @@ public final class AnsiDiff {
                     out,
                     activeStyleAnsi
                 );
-                activeStyleAnsi = currentActiveStyleAnsi;
                 activeStyleAnsi = drawRowRange(
                     current,
                     colorEnabled,
@@ -151,7 +143,6 @@ public final class AnsiDiff {
                     out,
                     activeStyleAnsi
                 );
-                activeStyleAnsi = currentActiveStyleAnsi;
                 wroteAnyCell = true;
                 continue;
             }
@@ -160,7 +151,7 @@ public final class AnsiDiff {
             }
             if (scroll != null && scroll.matchedRows()[r]) {
                 int shiftedPrevRow = r + scroll.delta();
-                wroteAnyCell = diffRowRange(
+                RowWrite left = diffRowRange(
                     previous,
                     current,
                     colorEnabled,
@@ -170,9 +161,10 @@ public final class AnsiDiff {
                     safeTextStart - 1,
                     out,
                     activeStyleAnsi
-                ) || wroteAnyCell;
-                activeStyleAnsi = currentActiveStyleAnsi;
-                wroteAnyCell = diffRowRange(
+                );
+                wroteAnyCell = left.wroteAny() || wroteAnyCell;
+                activeStyleAnsi = left.activeStyleAnsi();
+                RowWrite right = diffRowRange(
                     previous,
                     current,
                     colorEnabled,
@@ -182,15 +174,16 @@ public final class AnsiDiff {
                     current.cols() - 1,
                     out,
                     activeStyleAnsi
-                ) || wroteAnyCell;
-                activeStyleAnsi = currentActiveStyleAnsi;
+                );
+                wroteAnyCell = right.wroteAny() || wroteAnyCell;
+                activeStyleAnsi = right.activeStyleAnsi();
                 continue;
             }
             if (scroll != null && scroll.inRegion(r)) {
                 // After terminal scroll command, the physical row r contains previous row (r + delta).
                 // For non-matched rows we must diff against that shifted row to avoid stale styles.
                 int shiftedPrevRow = r + scroll.delta();
-                wroteAnyCell = diffRowRange(
+                RowWrite rowWrite = diffRowRange(
                     previous,
                     current,
                     colorEnabled,
@@ -200,8 +193,9 @@ public final class AnsiDiff {
                     current.cols() - 1,
                     out,
                     activeStyleAnsi
-                ) || wroteAnyCell;
-                activeStyleAnsi = currentActiveStyleAnsi;
+                );
+                wroteAnyCell = rowWrite.wroteAny() || wroteAnyCell;
+                activeStyleAnsi = rowWrite.activeStyleAnsi();
                 continue;
             }
             if (previous.rowSignature1(r) == current.rowSignature1(r)
@@ -261,7 +255,7 @@ public final class AnsiDiff {
         return out.toString();
     }
 
-    private static String applyHorizontalScroll(
+    private String applyHorizontalScroll(
         StringBuilder out,
         CellBuffer current,
         boolean colorEnabled,
@@ -276,7 +270,7 @@ public final class AnsiDiff {
         if (width <= 0) {
             return activeStyleAnsi;
         }
-        int shift = Math.min(Math.abs(deltaColumns), width);
+        int shift = (int) Math.min(Math.abs((long) deltaColumns), (long) width);
         if (shift <= 0) {
             return activeStyleAnsi;
         }
@@ -332,6 +326,38 @@ public final class AnsiDiff {
             }
         }
         return activeStyleAnsi;
+    }
+
+    private static boolean horizontalOverlapMatches(
+        CellBuffer previous,
+        CellBuffer current,
+        int topRow,
+        int bottomRow,
+        int textStartCol,
+        int textEndCol,
+        int deltaColumns
+    ) {
+        int width = textEndCol - textStartCol + 1;
+        int shift = (int) Math.min(Math.abs((long) deltaColumns), (long) width);
+        if (shift >= width) {
+            return true;
+        }
+        for (int row = topRow; row <= bottomRow; row++) {
+            if (deltaColumns > 0) {
+                for (int col = textStartCol; col <= textEndCol - shift; col++) {
+                    if (!current.get(row, col).equals(previous.get(row, col + shift))) {
+                        return false;
+                    }
+                }
+            } else {
+                for (int col = textStartCol + shift; col <= textEndCol; col++) {
+                    if (!current.get(row, col).equals(previous.get(row, col - shift))) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
     }
 
     private static VerticalScroll detectVerticalScroll(
@@ -450,7 +476,7 @@ public final class AnsiDiff {
         out.append("\u001B[r");
     }
 
-    private static String drawEnteringRows(
+    private String drawEnteringRows(
         StringBuilder out,
         CellBuffer current,
         boolean colorEnabled,
@@ -478,8 +504,8 @@ public final class AnsiDiff {
         return activeStyleAnsi;
     }
 
-    private static String ansiFor(Style style, boolean colorEnabled) {
-        Map<Style, String> cache = colorEnabled ? COLOR_STYLE_CACHE : MONO_STYLE_CACHE;
+    private String ansiFor(Style style, boolean colorEnabled) {
+        Map<Style, String> cache = colorEnabled ? colorStyleCache : monoStyleCache;
         String cached = cache.get(style);
         if (cached != null) {
             return cached;
@@ -573,9 +599,7 @@ public final class AnsiDiff {
         return firstDiff;
     }
 
-    private static String currentActiveStyleAnsi;
-
-    private static boolean diffRowRange(
+    private RowWrite diffRowRange(
         CellBuffer previous,
         CellBuffer current,
         boolean colorEnabled,
@@ -586,22 +610,21 @@ public final class AnsiDiff {
         StringBuilder out,
         String activeStyleAnsi
     ) {
-        currentActiveStyleAnsi = activeStyleAnsi;
         if (previous.rowHasWideCells(previousRow) || current.rowHasWideCells(currentRow)) {
-            currentActiveStyleAnsi = drawRowRange(
+            String resultingStyle = drawRowRange(
                 current,
                 colorEnabled,
                 currentRow,
                 0,
                 current.cols() - 1,
                 out,
-                currentActiveStyleAnsi
+                activeStyleAnsi
             );
-            return true;
+            return new RowWrite(true, resultingStyle);
         }
         int firstDiff = firstDifferentColumn(previous, current, previousRow, currentRow, fromCol, toCol);
         if (firstDiff < 0) {
-            return false;
+            return new RowWrite(false, activeStyleAnsi);
         }
         int lastDiff = lastDifferentColumn(previous, current, previousRow, currentRow, firstDiff, toCol);
         int c = firstDiff;
@@ -621,9 +644,9 @@ public final class AnsiDiff {
                     break;
                 }
                 String styleAnsi = ansiFor(next.style(), colorEnabled);
-                if (!styleAnsi.equals(currentActiveStyleAnsi)) {
+                if (!styleAnsi.equals(activeStyleAnsi)) {
                     out.append(styleAnsi);
-                    currentActiveStyleAnsi = styleAnsi;
+                    activeStyleAnsi = styleAnsi;
                 }
                 if (!next.continuation()) {
                     out.append(next.grapheme());
@@ -632,10 +655,10 @@ public final class AnsiDiff {
                 c++;
             }
         }
-        return wroteAny;
+        return new RowWrite(wroteAny, activeStyleAnsi);
     }
 
-    private static String drawRowRange(
+    private String drawRowRange(
         CellBuffer current,
         boolean colorEnabled,
         int row,
@@ -644,9 +667,8 @@ public final class AnsiDiff {
         StringBuilder out,
         String activeStyleAnsi
     ) {
-        currentActiveStyleAnsi = activeStyleAnsi;
         if (fromCol > toCol) {
-            return currentActiveStyleAnsi;
+            return activeStyleAnsi;
         }
         moveTo(out, row, fromCol);
         for (int c = fromCol; c <= toCol; c++) {
@@ -655,13 +677,16 @@ public final class AnsiDiff {
                 continue;
             }
             String styleAnsi = ansiFor(cell.style(), colorEnabled);
-            if (!styleAnsi.equals(currentActiveStyleAnsi)) {
+            if (!styleAnsi.equals(activeStyleAnsi)) {
                 out.append(styleAnsi);
-                currentActiveStyleAnsi = styleAnsi;
+                activeStyleAnsi = styleAnsi;
             }
             out.append(cell.grapheme());
         }
-        return currentActiveStyleAnsi;
+        return activeStyleAnsi;
+    }
+
+    private record RowWrite(boolean wroteAny, String activeStyleAnsi) {
     }
 
     private static void moveTo(StringBuilder out, int row, int col) {

@@ -30,6 +30,9 @@ import dev.tuink.tui.input.PasteEvent;
 import dev.tuink.tui.input.ResizeEvent;
 import dev.tuink.tui.input.TextInput;
 import dev.tuink.tui.input.TuiInputEvent;
+import dev.tuink.tui.geometry.Point;
+import dev.tuink.tui.geometry.Rect;
+import dev.tuink.tui.presentation.ScreenPresenter;
 import dev.tuink.tui.render.CellBuffer;
 import dev.tuink.tui.render.CellText;
 import dev.tuink.render.LineHighlighter;
@@ -39,6 +42,9 @@ import dev.tuink.render.RenderPlanBuilder;
 import dev.tuink.render.Style;
 import dev.tuink.tui.render.RenderRasterizer;
 import dev.tuink.tui.runtime.TuiEventLoop;
+import dev.tuink.tui.screen.Frame;
+import dev.tuink.tui.screen.ScreenCursor;
+import dev.tuink.tui.screen.ScrollHint;
 import dev.tuink.tui.style.UiStyles;
 import dev.tuink.tui.terminal.TerminalSession;
 import dev.tuink.tui.ui.Button;
@@ -56,7 +62,6 @@ import dev.tuink.tui.ui.OpenFileDialogController.OpenDialogButtons;
 import dev.tuink.tui.ui.OpenFileDialogController.OpenDialogLayout;
 import dev.tuink.tui.ui.OpenFileDialogController;
 import dev.tuink.tui.ui.CursorPolicy;
-import dev.tuink.tui.ui.TerminalCursorController;
 import dev.tuink.tui.ui.TabBar;
 import dev.tuink.tui.ui.TextField;
 import dev.tuink.tui.ui.TreeView;
@@ -251,12 +256,8 @@ public class TerminalEditorApp {
             PrintWriter writer = terminal.writer();
             var input = terminal.reader();
 
-            CellBuffer previous = null;
             RenderPlan plan = null;
-            int lastCursorRow = -1;
-            int lastCursorCol = -1;
-            boolean lastCursorVisible = true;
-            TerminalCursorController cursorController = new TerminalCursorController();
+            ScreenPresenter screenPresenter = new ScreenPresenter(writer, cli.colorEnabled());
             try {
                 KeyDecoder decoder = new KeyDecoder(input);
                 LegacyCommandBridge commandBridge = new LegacyCommandBridge();
@@ -276,13 +277,12 @@ public class TerminalEditorApp {
                 ));
                 terminal.onInterrupt(eventLoop::requestStop);
                 RenderFrameController renderFrameController = new RenderFrameController(
-                    writer,
                     renderer,
                     editorView,
                     tabBar,
                     topMenu,
                     cli.colorEnabled(),
-                    cursorController
+                    screenPresenter
                 );
                 ViewportController viewportController = new ViewportController();
                 boolean running = true;
@@ -327,7 +327,7 @@ public class TerminalEditorApp {
                     TuiEventLoop.FrameTicket frameTicket = eventLoop.beginFrame();
                     if (frameTicket != null) {
                         if (frameTicket.fullRedraw()) {
-                            previous = null;
+                            screenPresenter.invalidate();
                         }
                         if (profileEnabled) {
                             frameProfiler.beginFrame();
@@ -558,17 +558,9 @@ public class TerminalEditorApp {
                             helpHintsMode,
                             helpLicensesMode,
                             helpAuthorMode,
-                            previous,
-                            plan,
-                            lastCursorRow,
-                            lastCursorCol,
-                            lastCursorVisible
+                            plan
                         );
-                        previous = frameResult.previous();
                         plan = frameResult.plan();
-                        lastCursorRow = frameResult.lastCursorRow();
-                        lastCursorCol = frameResult.lastCursorCol();
-                        lastCursorVisible = frameResult.lastCursorVisible();
                         eventLoop.endFrame(frameTicket, frameResult.rendered());
                         if (profileEnabled) {
                             frameProfiler.endFrame(frameResult.rendered());
@@ -2697,14 +2689,9 @@ public class TerminalEditorApp {
         boolean helpHintsMode,
         boolean helpLicensesMode,
         boolean helpAuthorMode,
-        CellBuffer previous,
         RenderPlan previousPlan,
-        int previousCursorRow,
-        int previousCursorCol,
-        boolean previousCursorVisible,
         boolean colorEnabled,
-        PrintWriter writer,
-        TerminalCursorController cursorController,
+        ScreenPresenter screenPresenter,
         RenderRasterizer renderer,
         EditorView editorView,
         TabBar tabBar,
@@ -2879,16 +2866,13 @@ public class TerminalEditorApp {
             desiredCursorCol = Math.min(cols, close.cursorCol() + 1);
         }
 
-        String frameDiff;
         boolean canUseVerticalScrollFastPath = previousPlan != null
-            && previous != null
             && plan.wrapLines() == previousPlan.wrapLines()
             && plan.gutterWidth() == previousPlan.gutterWidth()
             && plan.scrollbarWidth() == previousPlan.scrollbarWidth()
             && plan.leftVisualColumn() == previousPlan.leftVisualColumn()
             && plan.topLine() != previousPlan.topLine();
         boolean canUseHorizontalScrollFastPath = previousPlan != null
-            && previous != null
             && !plan.wrapLines()
             && !state.hasSelection()
             && plan.wrapLines() == previousPlan.wrapLines()
@@ -2910,58 +2894,48 @@ public class TerminalEditorApp {
             textEndCol = textStartCol + Math.max(0, listTextWidth) - 1;
             textStartCol = Math.max(0, Math.min(cols - 1, textStartCol));
             textEndCol = Math.max(textStartCol, Math.min(cols - 1, textEndCol));
-            canUseVerticalScrollFastPath = previous != null
+            canUseVerticalScrollFastPath = previousPlan != null
                 && lastOpenFileModeForDiff
                 && openFileTree.scrollOffset() != lastOpenFileScrollForDiff;
             canUseHorizontalScrollFastPath = false;
             horizontalDeltaColumns = 0;
         }
-        if (profileEnabled) {
-            long diffStart = System.nanoTime();
-            frameDiff = AnsiDiff.diff(
-                previous,
-                current,
-                colorEnabled,
-                diffRegionTop,
-                diffRegionHeight,
-                textStartCol,
-                textEndCol,
-                canUseVerticalScrollFastPath,
-                canUseHorizontalScrollFastPath,
-                horizontalDeltaColumns
-            );
-            frameProfiler.diffNanos = System.nanoTime() - diffStart;
-        } else {
-            frameDiff = AnsiDiff.diff(
-                previous,
-                current,
-                colorEnabled,
-                diffRegionTop,
-                diffRegionHeight,
-                textStartCol,
-                textEndCol,
-                canUseVerticalScrollFastPath,
-                canUseHorizontalScrollFastPath,
-                horizontalDeltaColumns
-            );
-        }
-        TerminalCursorController.ApplyResult cursorApplyResult = cursorController.apply(
-            writer,
-            frameDiff,
-            desiredCursorRow,
-            desiredCursorCol,
-            desiredCursorVisible
+
+        int regionLeft = Math.max(0, Math.min(cols, textStartCol));
+        int regionRight = Math.max(regionLeft, Math.min(cols, textEndCol + 1));
+        int regionTop = Math.max(0, Math.min(rows, diffRegionTop));
+        int regionBottom = Math.max(regionTop, Math.min(rows, diffRegionTop + diffRegionHeight));
+        Rect diffRegion = new Rect(
+            regionLeft,
+            regionTop,
+            regionRight - regionLeft,
+            regionBottom - regionTop
         );
+        ScrollHint scrollHint = ScrollHint.none();
+        if (!diffRegion.isEmpty()) {
+            if (canUseHorizontalScrollFastPath && horizontalDeltaColumns != 0) {
+                scrollHint = new ScrollHint.Horizontal(diffRegion, horizontalDeltaColumns);
+            } else if (canUseVerticalScrollFastPath) {
+                scrollHint = new ScrollHint.Vertical(diffRegion);
+            }
+        }
+
+        Point cursorPosition = new Point(
+            Math.max(0, Math.min(cols - 1, desiredCursorCol - 1)),
+            Math.max(0, Math.min(rows - 1, desiredCursorRow - 1))
+        );
+        Frame frame = new Frame(
+            current,
+            new ScreenCursor(cursorPosition, desiredCursorVisible),
+            scrollHint
+        );
+        ScreenPresenter.PresentResult presentResult = screenPresenter.present(frame, profileEnabled);
+        if (profileEnabled) {
+            frameProfiler.diffNanos = presentResult.patchNanos();
+        }
         lastOpenFileModeForDiff = openFileMode;
         lastOpenFileScrollForDiff = openFileMode ? openFileTree.scrollOffset() : 0;
-        return new RenderFrameResult(
-            current,
-            plan,
-            cursorApplyResult.row(),
-            cursorApplyResult.col(),
-            cursorApplyResult.visible(),
-            true
-        );
+        return new RenderFrameResult(plan, true);
     }
 
     private String resolveRenderSearchQuery(
@@ -3085,30 +3059,27 @@ public class TerminalEditorApp {
     }
 
     private final class RenderFrameController {
-        private final PrintWriter writer;
         private final RenderRasterizer renderer;
         private final EditorView editorView;
         private final TabBar tabBar;
         private final MenuBar topMenu;
         private final boolean colorEnabled;
-        private final TerminalCursorController cursorController;
+        private final ScreenPresenter screenPresenter;
 
         private RenderFrameController(
-            PrintWriter writer,
             RenderRasterizer renderer,
             EditorView editorView,
             TabBar tabBar,
             MenuBar topMenu,
             boolean colorEnabled,
-            TerminalCursorController cursorController
+            ScreenPresenter screenPresenter
         ) {
-            this.writer = writer;
             this.renderer = renderer;
             this.editorView = editorView;
             this.tabBar = tabBar;
             this.topMenu = topMenu;
             this.colorEnabled = colorEnabled;
-            this.cursorController = cursorController;
+            this.screenPresenter = screenPresenter;
         }
 
         private RenderFrameResult renderFrameIfNeeded(
@@ -3146,11 +3117,7 @@ public class TerminalEditorApp {
             boolean helpHintsMode,
             boolean helpLicensesMode,
             boolean helpAuthorMode,
-            CellBuffer previous,
-            RenderPlan previousPlan,
-            int previousCursorRow,
-            int previousCursorCol,
-            boolean previousCursorVisible
+            RenderPlan previousPlan
         ) {
             return doRenderFrameIfNeeded(
                 renderPlanBuilder,
@@ -3187,14 +3154,9 @@ public class TerminalEditorApp {
                 helpHintsMode,
                 helpLicensesMode,
                 helpAuthorMode,
-                previous,
                 previousPlan,
-                previousCursorRow,
-                previousCursorCol,
-                previousCursorVisible,
                 colorEnabled,
-                writer,
-                cursorController,
+                screenPresenter,
                 renderer,
                 editorView,
                 tabBar,
@@ -3888,11 +3850,7 @@ public class TerminalEditorApp {
     }
 
     private record RenderFrameResult(
-        CellBuffer previous,
         RenderPlan plan,
-        int lastCursorRow,
-        int lastCursorCol,
-        boolean lastCursorVisible,
         boolean rendered
     ) {
     }

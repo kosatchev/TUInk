@@ -2,6 +2,7 @@
 
 Minimal Java terminal text editor with clean multi-module architecture:
 
+- `unicode-text`: dependency-free grapheme boundaries and UTF-16 offset mapping
 - `core`: editor engine and text model (`TextBuffer` + `SimpleLineBuffer`)
 - `render`: UI-agnostic render planning and style spans
 - `highlight-regex`: regex-based syntax highlighter

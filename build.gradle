@@ -36,16 +36,25 @@ subprojects {
 }
 
 def allowedProjectDependencies = [
-    ':core'           : [] as Set,
+    ':unicode-text'   : [] as Set,
+    ':core'           : [':unicode-text'] as Set,
     ':render'         : [':core'] as Set,
     ':highlight-regex': [':core', ':render'] as Set,
-    ':tui'            : [':core', ':render', ':highlight-regex'] as Set,
+    ':tui'            : [':unicode-text', ':core', ':render', ':highlight-regex'] as Set,
     ':app'            : [':tui'] as Set
 ]
+def unicodeProductionConfigurations = [
+    'annotationProcessor',
+    'api',
+    'compileOnly',
+    'compileOnlyApi',
+    'implementation',
+    'runtimeOnly'
+] as Set
 
 def verifyProjectDependencies = tasks.register('verifyProjectDependencies') {
     group = 'verification'
-    description = 'Verify the allowed direct dependencies between project modules.'
+    description = 'Verify direct module dependencies and terminal-backend isolation.'
     notCompatibleWithConfigurationCache('Reads the configured multi-project dependency model.')
 
     doLast {
@@ -58,7 +67,7 @@ def verifyProjectDependencies = tasks.register('verifyProjectDependencies') {
             )
         }
 
-        List<String> violations = []
+        Set<String> violations = [] as Set
         subprojects.each { sourceProject ->
             Set<String> allowed = allowedProjectDependencies[sourceProject.path]
             sourceProject.configurations.each { configuration ->
@@ -71,12 +80,29 @@ def verifyProjectDependencies = tasks.register('verifyProjectDependencies') {
                             )
                         }
                     }
+                configuration.dependencies
+                    .withType(org.gradle.api.artifacts.ExternalModuleDependency)
+                    .each { dependency ->
+                        if (sourceProject.path != ':tui' && dependency.group == 'org.jline') {
+                            violations.add(
+                                "${sourceProject.path}:${configuration.name} -> "
+                                    + "${dependency.group}:${dependency.name}"
+                            )
+                        }
+                        if (sourceProject.path == ':unicode-text'
+                            && unicodeProductionConfigurations.contains(configuration.name)) {
+                            violations.add(
+                                "${sourceProject.path}:${configuration.name} -> "
+                                    + "${dependency.group}:${dependency.name}"
+                            )
+                        }
+                    }
             }
         }
 
         if (!violations.isEmpty()) {
             throw new GradleException(
-                'Forbidden project dependencies:\n  ' + violations.sort().join('\n  ')
+                'Forbidden direct dependencies:\n  ' + violations.sort().join('\n  ')
             )
         }
     }

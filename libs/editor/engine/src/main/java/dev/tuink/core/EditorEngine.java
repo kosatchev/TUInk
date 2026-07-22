@@ -1,5 +1,6 @@
 package dev.tuink.core;
 
+import dev.tuink.unicode.GraphemeText;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -203,7 +204,7 @@ public class EditorEngine {
         Position p = state.getCursor();
         if (p.col() > 0) {
             String line = model.getLine(p.line());
-            moveCursor(new Position(p.line(), DisplayText.previousBoundary(line, p.col())), selecting, p);
+            moveCursor(new Position(p.line(), GraphemeText.previousBoundary(line, p.col())), selecting, p);
         } else if (p.line() > 0) {
             int prevLen = model.getLine(p.line() - 1).length();
             moveCursor(new Position(p.line() - 1, prevLen), selecting, p);
@@ -220,7 +221,7 @@ public class EditorEngine {
         int len = model.getLine(p.line()).length();
         if (p.col() < len) {
             String line = model.getLine(p.line());
-            moveCursor(new Position(p.line(), DisplayText.nextBoundary(line, p.col())), selecting, p);
+            moveCursor(new Position(p.line(), GraphemeText.nextBoundary(line, p.col())), selecting, p);
         } else if (p.line() < model.lineCount() - 1) {
             moveCursor(new Position(p.line() + 1, 0), selecting, p);
         }
@@ -240,19 +241,20 @@ public class EditorEngine {
             col = model.getLine(line).length();
         }
         String text = model.getLine(line);
-        int target = DisplayText.floorBoundary(text, col);
+        GraphemeText graphemes = GraphemeText.of(text);
+        int target = graphemes.floorBoundary(col);
         while (target > 0) {
-            int previousBoundary = DisplayText.previousBoundary(text, target);
+            int previousBoundary = graphemes.previousBoundary(target);
             if (!isWhitespaceGrapheme(text, previousBoundary, target)) {
                 break;
             }
             target = previousBoundary;
         }
         if (target > 0) {
-            int previousBoundary = DisplayText.previousBoundary(text, target);
+            int previousBoundary = graphemes.previousBoundary(target);
             boolean word = isWordGrapheme(text, previousBoundary, target);
             while (target > 0) {
-                previousBoundary = DisplayText.previousBoundary(text, target);
+                previousBoundary = graphemes.previousBoundary(target);
                 if (isWhitespaceGrapheme(text, previousBoundary, target)
                     || isWordGrapheme(text, previousBoundary, target) != word) {
                     break;
@@ -279,19 +281,20 @@ public class EditorEngine {
             col = 0;
             text = model.getLine(line);
         }
-        int target = DisplayText.ceilBoundary(text, col);
+        GraphemeText graphemes = GraphemeText.of(text);
+        int target = graphemes.ceilBoundary(col);
         while (target < text.length()) {
-            int nextBoundary = DisplayText.nextBoundary(text, target);
+            int nextBoundary = graphemes.nextBoundary(target);
             if (!isWhitespaceGrapheme(text, target, nextBoundary)) {
                 break;
             }
             target = nextBoundary;
         }
         if (target < text.length()) {
-            int nextBoundary = DisplayText.nextBoundary(text, target);
+            int nextBoundary = graphemes.nextBoundary(target);
             boolean word = isWordGrapheme(text, target, nextBoundary);
             while (target < text.length()) {
-                nextBoundary = DisplayText.nextBoundary(text, target);
+                nextBoundary = graphemes.nextBoundary(target);
                 if (isWhitespaceGrapheme(text, target, nextBoundary)
                     || isWordGrapheme(text, target, nextBoundary) != word) {
                     break;
@@ -313,12 +316,13 @@ public class EditorEngine {
             return false;
         }
         int requestedColumn = Math.min(Math.max(0, p.col()), text.length() - 1);
-        int pivot = DisplayText.floorBoundary(text, requestedColumn);
-        int pivotEnd = DisplayText.nextBoundary(text, pivot);
+        GraphemeText graphemes = GraphemeText.of(text);
+        int pivot = graphemes.floorBoundary(requestedColumn);
+        int pivotEnd = graphemes.nextBoundary(pivot);
         int group = graphemeGroup(text, pivot, pivotEnd);
         int start = pivot;
         while (start > 0) {
-            int previous = DisplayText.previousBoundary(text, start);
+            int previous = graphemes.previousBoundary(start);
             if (graphemeGroup(text, previous, start) != group) {
                 break;
             }
@@ -326,7 +330,7 @@ public class EditorEngine {
         }
         int end = pivotEnd;
         while (end < text.length()) {
-            int next = DisplayText.nextBoundary(text, end);
+            int next = graphemes.nextBoundary(end);
             if (graphemeGroup(text, end, next) != group) {
                 break;
             }
@@ -426,7 +430,7 @@ public class EditorEngine {
         Position p = state.getCursor();
         int targetLine = Math.max(0, p.line() - step);
         String targetText = model.getLine(targetLine);
-        int col = DisplayText.floorBoundary(targetText, Math.min(p.col(), targetText.length()));
+        int col = GraphemeText.floorBoundary(targetText, Math.min(p.col(), targetText.length()));
         breakCoalescing();
         state.clearSelection();
         state.setCursor(new Position(targetLine, col));
@@ -448,7 +452,7 @@ public class EditorEngine {
         Position p = state.getCursor();
         int targetLine = Math.min(model.lineCount() - 1, p.line() + step);
         String targetText = model.getLine(targetLine);
-        int col = DisplayText.floorBoundary(targetText, Math.min(p.col(), targetText.length()));
+        int col = GraphemeText.floorBoundary(targetText, Math.min(p.col(), targetText.length()));
         breakCoalescing();
         state.clearSelection();
         state.setCursor(new Position(targetLine, col));
@@ -919,7 +923,7 @@ public class EditorEngine {
 
         Position p = model.clamp(state.getCursor());
         String cursorLine = model.getLine(p.line());
-        p = new Position(p.line(), DisplayText.floorBoundary(cursorLine, p.col()));
+        p = new Position(p.line(), GraphemeText.floorBoundary(cursorLine, p.col()));
 
         if (wrapLines) {
             int width = Math.max(1, contentCols);

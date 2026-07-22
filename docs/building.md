@@ -96,7 +96,7 @@ graph:
 ```bash
 ./gradlew --write-locks --write-verification-metadata sha256 \
   check :app:distZip :app:perfHarnessTest \
-  :core:dependencies :render:dependencies :highlight-regex:dependencies \
+  :unicode-text:dependencies :core:dependencies :render:dependencies :highlight-regex:dependencies \
   :tui:dependencies :app:dependencies
 ```
 

@@ -5,7 +5,14 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.render.Style;
+import dev.tuink.tui.geometry.Point;
+import dev.tuink.tui.presentation.ScreenPresenter;
 import dev.tuink.tui.render.CellBuffer;
+import dev.tuink.tui.screen.Frame;
+import dev.tuink.tui.screen.ScreenCursor;
+import dev.tuink.tui.screen.ScrollHint;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import org.junit.jupiter.api.Test;
 
 class AnsiDiffUnicodeSafetyTest {
@@ -14,7 +21,7 @@ class AnsiDiffUnicodeSafetyTest {
         CellBuffer current = new CellBuffer(1, 4);
         current.set(0, 1, "中", Style.DEFAULT);
 
-        String ansi = AnsiDiff.diff(null, current, false);
+        String ansi = present(current);
 
         assertEquals(1, occurrences(ansi, "中"));
     }
@@ -24,7 +31,7 @@ class AnsiDiffUnicodeSafetyTest {
         CellBuffer current = new CellBuffer(1, 8);
         current.set(0, 0, "\u001B]52;c;secret\u0007", Style.DEFAULT);
 
-        String ansi = AnsiDiff.diff(null, current, false);
+        String ansi = present(current);
 
         assertFalse(ansi.contains("]52;c;secret"));
         assertFalse(ansi.contains("\u0007"));
@@ -39,10 +46,31 @@ class AnsiDiffUnicodeSafetyTest {
         current.set(0, 0, "a", Style.DEFAULT);
         current.set(0, 1, "b", Style.DEFAULT);
 
-        String ansi = AnsiDiff.diff(previous, current, false);
+        StringWriter output = new StringWriter();
+        ScreenPresenter presenter = new ScreenPresenter(new PrintWriter(output), false);
+        presenter.present(frame(previous));
+        output.getBuffer().setLength(0);
+
+        presenter.present(frame(current));
+        String ansi = output.toString();
 
         assertTrue(ansi.contains("ab"));
         assertFalse(ansi.contains("中"));
+    }
+
+    private static String present(CellBuffer buffer) {
+        StringWriter output = new StringWriter();
+        ScreenPresenter presenter = new ScreenPresenter(new PrintWriter(output), false);
+        presenter.present(frame(buffer));
+        return output.toString();
+    }
+
+    private static Frame frame(CellBuffer buffer) {
+        return new Frame(
+            buffer,
+            new ScreenCursor(new Point(0, 0), false),
+            ScrollHint.none()
+        );
     }
 
     private static int occurrences(String text, String needle) {

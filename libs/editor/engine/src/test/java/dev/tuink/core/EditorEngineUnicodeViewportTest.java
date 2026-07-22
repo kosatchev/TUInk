@@ -2,6 +2,7 @@ package dev.tuink.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import dev.tuink.unicode.GraphemeText;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -17,13 +18,13 @@ class EditorEngineUnicodeViewportTest {
         for (int expected : List.of(1, 3, 14, 15)) {
             fixture.engine().moveRight();
             assertEquals(new Position(0, expected), fixture.state().getCursor());
-            assertEquals(true, DisplayText.isBoundary(text, expected));
+            assertEquals(true, GraphemeText.isBoundary(text, expected));
         }
 
         for (int expected : List.of(14, 3, 1, 0)) {
             fixture.engine().moveLeft();
             assertEquals(new Position(0, expected), fixture.state().getCursor());
-            assertEquals(true, DisplayText.isBoundary(text, expected));
+            assertEquals(true, GraphemeText.isBoundary(text, expected));
         }
     }
 

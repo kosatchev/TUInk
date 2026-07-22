@@ -1,15 +1,17 @@
 package dev.tuink.core;
 
+import dev.tuink.unicode.GraphemeText;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import org.jline.utils.WCWidth;
 
 /**
- * Shared mapping between UTF-16 document offsets, grapheme clusters and
- * terminal cell columns.
+ * Compatibility facade for grapheme-aware terminal cell metrics.
+ *
+ * <p>New boundary-only code uses {@link GraphemeText}. This type remains in
+ * core until visual-column and wrapping caches move to the TUI foundation.</p>
  */
 public final class DisplayText {
     public enum Bias {
@@ -341,23 +343,26 @@ public final class DisplayText {
     }
 
     public static int previousBoundary(String text, int offset) {
-        return metrics(text, 1).previousBoundary(offset);
+        return GraphemeText.previousBoundary(text, offset);
     }
 
     public static int nextBoundary(String text, int offset) {
-        return metrics(text, 1).nextBoundary(offset);
+        return GraphemeText.nextBoundary(text, offset);
     }
 
     public static int floorBoundary(String text, int offset) {
-        return metrics(text, 1).floorBoundary(offset);
+        return GraphemeText.floorBoundary(text, offset);
     }
 
     public static boolean isBoundary(String text, int offset) {
-        return metrics(text, 1).isBoundary(offset);
+        String value = text == null ? "" : text;
+        // Preserve the legacy facade's endpoint-clamping semantics.
+        int safeOffset = Math.max(0, Math.min(offset, value.length()));
+        return GraphemeText.isBoundary(value, safeOffset);
     }
 
     public static int ceilBoundary(String text, int offset) {
-        return metrics(text, 1).ceilBoundary(offset);
+        return GraphemeText.ceilBoundary(text, offset);
     }
 
     public static int visualColumnAt(String text, int offset, int tabWidth) {
@@ -448,7 +453,7 @@ public final class DisplayText {
                 || type == Character.ENCLOSING_MARK;
             if (!formatting && !combining) {
                 visibleBase = true;
-                maximum = Math.max(maximum, Math.max(0, WCWidth.wcwidth(codePoint)));
+                maximum = Math.max(maximum, TerminalCellWidth.visibleBaseWidth(codePoint));
             }
             i += Character.charCount(codePoint);
         }

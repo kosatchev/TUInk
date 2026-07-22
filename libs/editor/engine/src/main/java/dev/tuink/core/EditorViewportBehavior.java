@@ -1,5 +1,7 @@
 package dev.tuink.core;
 
+import dev.tuink.unicode.GraphemeText;
+
 /**
  * UI-agnostic behavior for mapping viewport coordinates and applying viewport scroll.
  */
@@ -49,7 +51,7 @@ public final class EditorViewportBehavior {
         int relativeLine = state.getCursor().line() - oldTop;
         int targetLine = Math.max(0, Math.min(targetTopLine + relativeLine, model.lineCount() - 1));
         String targetText = model.getLine(targetLine);
-        int targetCol = DisplayText.floorBoundary(
+        int targetCol = GraphemeText.floorBoundary(
             targetText,
             Math.min(state.getCursor().col(), targetText.length())
         );
@@ -67,7 +69,7 @@ public final class EditorViewportBehavior {
         String clampedText = model.getLine(clampedLine);
         int clampedCol = Math.min(cursor.col(), clampedText.length());
         if (clampedLine != cursor.line()) {
-            clampedCol = DisplayText.floorBoundary(clampedText, clampedCol);
+            clampedCol = GraphemeText.floorBoundary(clampedText, clampedCol);
         }
         if (clampedLine != cursor.line() || clampedCol != cursor.col()) {
             state.setCursor(new Position(clampedLine, clampedCol));

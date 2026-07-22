@@ -46,6 +46,8 @@ class DisplayTextTest {
         assertFalse(DisplayText.isBoundary(text, 8));
         assertEquals(0, DisplayText.floorBoundary(text, -10));
         assertEquals(text.length(), DisplayText.ceilBoundary(text, text.length() + 10));
+        assertTrue(DisplayText.isBoundary(text, -10));
+        assertTrue(DisplayText.isBoundary(text, text.length() + 10));
     }
 
     @Test

@@ -1,6 +1,7 @@
 package dev.tuink.tui.ui;
 
 import dev.tuink.core.DisplayText;
+import dev.tuink.unicode.GraphemeText;
 
 /**
  * Reusable single-line text input buffer for TUI prompts.
@@ -17,7 +18,7 @@ public final class TextField {
         if (text == null || text.isEmpty()) {
             return;
         }
-        cursor = DisplayText.floorBoundary(value.toString(), cursor);
+        cursor = GraphemeText.floorBoundary(value.toString(), cursor);
         value.insert(cursor, text);
         cursor += text.length();
     }
@@ -25,8 +26,9 @@ public final class TextField {
     public void backspace() {
         if (cursor > 0) {
             String text = value.toString();
-            int end = DisplayText.ceilBoundary(text, cursor);
-            int start = DisplayText.previousBoundary(text, end);
+            GraphemeText graphemes = GraphemeText.of(text);
+            int end = graphemes.ceilBoundary(cursor);
+            int start = graphemes.previousBoundary(end);
             value.delete(start, end);
             cursor = start;
         }
@@ -35,8 +37,9 @@ public final class TextField {
     public void deleteForward() {
         if (cursor < value.length()) {
             String text = value.toString();
-            int start = DisplayText.floorBoundary(text, cursor);
-            int end = DisplayText.nextBoundary(text, start);
+            GraphemeText graphemes = GraphemeText.of(text);
+            int start = graphemes.floorBoundary(cursor);
+            int end = graphemes.nextBoundary(start);
             value.delete(start, end);
             cursor = start;
         }
@@ -44,13 +47,13 @@ public final class TextField {
 
     public void moveLeft() {
         if (cursor > 0) {
-            cursor = DisplayText.previousBoundary(value.toString(), cursor);
+            cursor = GraphemeText.previousBoundary(value.toString(), cursor);
         }
     }
 
     public void moveRight() {
         if (cursor < value.length()) {
-            cursor = DisplayText.nextBoundary(value.toString(), cursor);
+            cursor = GraphemeText.nextBoundary(value.toString(), cursor);
         }
     }
 

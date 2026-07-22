@@ -1,5 +1,6 @@
 package dev.tuink.core;
 
+import dev.tuink.unicode.GraphemeText;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
@@ -84,8 +85,9 @@ public class TextModel {
         if (position.col() > 0) {
             String line = buffer.getLine(position.line());
             int col = Math.min(position.col(), line.length());
-            int end = DisplayText.ceilBoundary(line, col);
-            int previous = DisplayText.previousBoundary(line, end);
+            GraphemeText graphemes = GraphemeText.of(line);
+            int end = graphemes.ceilBoundary(col);
+            int previous = graphemes.previousBoundary(end);
             String updated = line.substring(0, previous) + line.substring(end);
             buffer.setLine(position.line(), updated);
             invalidateVisualWidthCache();
@@ -109,8 +111,9 @@ public class TextModel {
         int col = Math.min(position.col(), line.length());
 
         if (col < line.length()) {
-            int start = DisplayText.floorBoundary(line, col);
-            int next = DisplayText.nextBoundary(line, start);
+            GraphemeText graphemes = GraphemeText.of(line);
+            int start = graphemes.floorBoundary(col);
+            int next = graphemes.nextBoundary(start);
             String updated = line.substring(0, start) + line.substring(next);
             buffer.setLine(position.line(), updated);
             invalidateVisualWidthCache();

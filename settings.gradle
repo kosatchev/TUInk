@@ -11,7 +11,8 @@ def projectDirectories = [
     ':tui': 'apps/tuink/terminal-ui',
     ':render': 'apps/tuink/terminal-rendering',
     ':core': 'libs/editor/engine',
-    ':highlight-regex': 'libs/editor/highlight-regex'
+    ':highlight-regex': 'libs/editor/highlight-regex',
+    ':unicode-text': 'libs/unicode-text'
 ]
 projectDirectories.each { projectPath, directory ->
     include projectPath

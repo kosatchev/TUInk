@@ -3,6 +3,7 @@ package dev.tuink.core;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.unicode.GraphemeText;
 import org.junit.jupiter.api.Test;
 
 class EditorViewportBehaviorUnicodeTest {
@@ -20,7 +21,7 @@ class EditorViewportBehaviorUnicodeTest {
         assertEquals(new Position(0, 1), cjkRight);
         assertEquals(new Position(0, 2), emojiLeft);
         assertEquals(new Position(0, 2), emojiRight);
-        assertTrue(DisplayText.isBoundary(model.getLine(0), emojiRight.col()));
+        assertTrue(GraphemeText.isBoundary(model.getLine(0), emojiRight.col()));
     }
 
     @Test

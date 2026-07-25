@@ -16,7 +16,7 @@ import dev.tuink.tui.input.KeyEvent;
 import dev.tuink.tui.input.KeyStroke;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.keymap.Keymap;
-import dev.tuink.render.Style;
+import dev.tuink.tui.style.CellStyle;
 import dev.tuink.tui.ui.MenuBar;
 import java.util.Arrays;
 import java.util.List;
@@ -43,7 +43,12 @@ class LegacyCommandBridgeTest {
 
     @Test
     void actualMenuSelectionJoinsTheSameCommandPath() {
-        MenuBar menu = new MenuBar(Style.DEFAULT, Style.DEFAULT, Style.DEFAULT, Style.DEFAULT);
+        MenuBar menu = new MenuBar(
+            CellStyle.DEFAULT,
+            CellStyle.DEFAULT,
+            CellStyle.DEFAULT,
+            CellStyle.DEFAULT
+        );
         menu.openEdit();
         for (int i = 0; i < 5; i++) {
             TopMenuInputController.handleWhenOpen(

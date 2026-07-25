@@ -1,7 +1,7 @@
 package dev.tuink.tui.ui;
 
 import dev.tuink.core.DisplayText;
-import dev.tuink.render.Style;
+import dev.tuink.tui.style.CellStyle;
 import dev.tuink.tui.style.UiStyles;
 import dev.tuink.tui.render.CellBuffer;
 import dev.tuink.tui.render.CellText;
@@ -11,7 +11,7 @@ import dev.tuink.tui.render.CellText;
  */
 final class ContextMenu {
     private static final int MIN_WIDTH = 16;
-    private static final Style DISABLED_ITEM_STYLE =
+    private static final CellStyle DISABLED_ITEM_STYLE =
         UiStyles.forTheme(UiStyles.Theme.CYAN).contextMenuDisabledItem();
 
     private ContextMenu() {
@@ -35,9 +35,9 @@ final class ContextMenu {
         MenuItem[] items,
         int[] mnemonicIndexes,
         boolean colorEnabled,
-        Style popupStyle,
-        Style selectedStyle,
-        Style selectedMonoStyle
+        CellStyle popupStyle,
+        CellStyle selectedStyle,
+        CellStyle selectedMonoStyle
     ) {
         if (!visible || buffer.rows() < topRow + 3 || cols < 8) {
             return;
@@ -54,7 +54,7 @@ final class ContextMenu {
             String label = i < items.length ? items[i].text() : "";
             String content = padRight(" " + label, Math.max(0, width - 2));
             boolean selectable = i < items.length && items[i].selectable();
-            Style itemStyle;
+            CellStyle itemStyle;
             if (!selectable) {
                 itemStyle = colorEnabled ? DISABLED_ITEM_STYLE : popupStyle;
             } else {
@@ -103,7 +103,7 @@ final class ContextMenu {
         return new Hit(insidePopup, insideItemContent, itemIndex);
     }
 
-    private static void drawLine(CellBuffer buffer, int row, int startCol, String text, Style style, int cols) {
+    private static void drawLine(CellBuffer buffer, int row, int startCol, String text, CellStyle style, int cols) {
         CellText.draw(buffer, row, startCol, text, style, cols);
     }
 
@@ -112,13 +112,13 @@ final class ContextMenu {
         int row,
         int startCol,
         String text,
-        Style style,
+        CellStyle style,
         int mnemonicInLabel,
         boolean selectable,
         int cols
     ) {
         int mnemonicInContent = mnemonicInLabel >= 0 ? mnemonicInLabel + 1 : -1;
-        Style mnemonicStyle = new Style(style.fg(), style.bg(), style.bold(), true);
+        CellStyle mnemonicStyle = new CellStyle(style.fg(), style.bg(), style.bold(), true);
         int outCol = startCol;
         for (DisplayText.Grapheme grapheme : DisplayText.graphemes(text)) {
             int advance = Math.max(1, grapheme.width());

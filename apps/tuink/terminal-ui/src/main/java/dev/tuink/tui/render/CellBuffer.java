@@ -1,6 +1,6 @@
 package dev.tuink.tui.render;
 
-import dev.tuink.render.Style;
+import dev.tuink.tui.style.CellStyle;
 
 /**
  * 2D frame buffer used by UI adapters (terminal, GUI, web).
@@ -62,7 +62,7 @@ public class CellBuffer {
         }
     }
 
-    public void set(int row, int col, String grapheme, Style style) {
+    public void set(int row, int col, String grapheme, CellStyle style) {
         if (row < 0 || row >= rows || col < 0 || col >= cols) {
             return;
         }

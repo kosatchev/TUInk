@@ -149,6 +149,19 @@ class ArchitectureTest {
             "dev.tuink.tui.geometry.."
         );
 
+    static final ArchRule CELL_STYLE_IS_SELF_CONTAINED = classes()
+        .that().haveNameMatching("dev\\.tuink\\.tui\\.style\\.Cell(?:Color|Style)(?:\\$.*)?")
+        .should().onlyDependOnClassesThat().haveNameMatching(
+            "(?:\\[+[ZBCSIJFD]|\\[+Ldev\\.tuink\\.tui\\.style\\.Cell(?:Color|Style);|"
+                + "java\\..*|dev\\.tuink\\.tui\\.style\\.Cell(?:Color|Style)(?:\\$.*)?)"
+        );
+
+    static final ArchRule CELL_MODEL_DOES_NOT_DEPEND_ON_EDITOR_RENDER = noClasses()
+        .that().haveNameMatching(
+            "dev\\.tuink\\.tui\\.render\\.(?:Cell|CellBuffer|CellText)(?:\\$.*)?"
+        )
+        .should().dependOnClassesThat().resideInAPackage("dev.tuink.render..");
+
     static final ArchRule SCREEN_MODEL_STAYS_FOUNDATION_ONLY = classes()
         .that().resideInAPackage("dev.tuink.tui.screen..")
         .should().onlyDependOnClassesThat().haveNameMatching(
@@ -159,7 +172,7 @@ class ArchitectureTest {
     static final ArchRule SCREEN_PRESENTATION_STAYS_EDITOR_INDEPENDENT = classes()
         .that().resideInAPackage("dev.tuink.tui.presentation..")
         .should().onlyDependOnClassesThat().haveNameMatching(
-            "(?:\\[+[ZBCSIJFD]|java\\..*|dev\\.tuink\\.render\\.(?:Color|Style)(?:\\$.*)?|"
+            "(?:\\[+[ZBCSIJFD]|java\\..*|dev\\.tuink\\.tui\\.style\\.(?:CellColor|CellStyle)(?:\\$.*)?|"
                 + "dev\\.tuink\\.tui\\.render\\.(?:Cell|CellBuffer)(?:\\$.*)?|"
                 + "dev\\.tuink\\.tui\\.(?:geometry|screen|presentation)\\..*)"
         );
@@ -194,6 +207,8 @@ class ArchitectureTest {
         TERMINAL_RUNTIME_IS_EDITOR_INDEPENDENT.check(PRODUCTION_CLASSES);
         EVENT_LOOP_IS_EDITOR_INDEPENDENT.check(PRODUCTION_CLASSES);
         TUI_GEOMETRY_IS_SELF_CONTAINED.check(PRODUCTION_CLASSES);
+        CELL_STYLE_IS_SELF_CONTAINED.check(PRODUCTION_CLASSES);
+        CELL_MODEL_DOES_NOT_DEPEND_ON_EDITOR_RENDER.check(PRODUCTION_CLASSES);
         SCREEN_MODEL_STAYS_FOUNDATION_ONLY.check(PRODUCTION_CLASSES);
         SCREEN_PRESENTATION_STAYS_EDITOR_INDEPENDENT.check(PRODUCTION_CLASSES);
         TERMINAL_EDITOR_APP_DOES_NOT_BYPASS_SCREEN_PRESENTER.check(PRODUCTION_CLASSES);

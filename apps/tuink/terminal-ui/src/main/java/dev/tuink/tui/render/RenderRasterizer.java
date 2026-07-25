@@ -3,10 +3,12 @@ package dev.tuink.tui.render;
 import dev.tuink.core.GutterDiffFlag;
 import dev.tuink.core.GutterDiffMarker;
 import dev.tuink.core.DisplayText;
+import dev.tuink.render.Color;
 import dev.tuink.render.LineVisual;
 import dev.tuink.render.RenderPlan;
 import dev.tuink.render.Style;
 import dev.tuink.render.StyleSpan;
+import dev.tuink.tui.style.CellStyle;
 import dev.tuink.tui.style.UiStyles;
 import dev.tuink.tui.style.UiStyles.Palette;
 import java.util.Arrays;
@@ -21,6 +23,8 @@ import java.util.Map;
 public class RenderRasterizer {
     private static final int MAX_PREPARED_LINES = 1024;
     private static final int MAX_PREPARED_CACHE_WEIGHT = 16 * 1024 * 1024;
+    private static final int EDITOR_COLOR_COUNT = Color.values().length;
+    private static final int CELL_STYLE_VARIANTS = EDITOR_COLOR_COUNT * EDITOR_COLOR_COUNT * 4;
     private static final String[] ASCII_DISPLAY = createAsciiDisplay();
 
     private Palette styles;
@@ -33,7 +37,8 @@ public class RenderRasterizer {
     private int preparedLineCacheWeight;
     private long preparedLineCacheHits;
     private long preparedLineCacheMisses;
-    private Style[] styleScratch = new Style[0];
+    private final CellStyle[] cellStyleCache = new CellStyle[CELL_STYLE_VARIANTS];
+    private CellStyle[] styleScratch = new CellStyle[0];
     private PreparedLineKey[] previousFrameLineKeys = new PreparedLineKey[0];
     private PreparedLine[] previousFrameLines = new PreparedLine[0];
     private PreparedLineKey[] currentFrameLineKeys = new PreparedLineKey[0];
@@ -91,7 +96,7 @@ public class RenderRasterizer {
             if (screenRow >= rows) {
                 break;
             }
-            Style gutterStyle = highlightActiveGutter && row == activeGutterRow
+            CellStyle gutterStyle = highlightActiveGutter && row == activeGutterRow
                 ? styles.renderGutterActive()
                 : styles.renderGutter();
             drawGutter(buffer, screenRow, line, gutterStyle, contentCols);
@@ -117,7 +122,9 @@ public class RenderRasterizer {
         int overlayBottomRow = rows - 2;
         int overlayTopRow = overlayBottomRow;
         if (plan.interactiveBarText() != null && overlayBottomRow >= 0) {
-            Style style = plan.interactiveBarStyle() == null ? styles.renderInteractive() : plan.interactiveBarStyle();
+            CellStyle style = plan.interactiveBarStyle() == null
+                ? styles.renderInteractive()
+                : cellStyle(plan.interactiveBarStyle());
             String[] lines = splitLines(plan.interactiveBarText());
             for (int i = lines.length - 1; i >= 0; i--) {
                 int row = overlayBottomRow - (lines.length - 1 - i);
@@ -129,7 +136,9 @@ public class RenderRasterizer {
             overlayTopRow = overlayBottomRow - lines.length;
         }
         if (plan.notificationBarText() != null && overlayTopRow >= 0) {
-            Style style = plan.notificationBarStyle() == null ? styles.renderNotification() : plan.notificationBarStyle();
+            CellStyle style = plan.notificationBarStyle() == null
+                ? styles.renderNotification()
+                : cellStyle(plan.notificationBarStyle());
             String[] lines = splitLines(plan.notificationBarText());
             for (int i = lines.length - 1; i >= 0; i--) {
                 int row = overlayTopRow - (lines.length - 1 - i);
@@ -222,7 +231,7 @@ public class RenderRasterizer {
             cacheSlot
         );
         int graphemeCount = prepared.metrics().graphemeCount();
-        Style[] resolvedStyles = prepared.baseStyles();
+        CellStyle[] resolvedStyles = prepared.baseStyles();
         if (baseSpanCount < spans.size()) {
             ensureStyleScratch(graphemeCount);
             System.arraycopy(prepared.baseStyles(), 0, styleScratch, 0, graphemeCount);
@@ -237,7 +246,7 @@ public class RenderRasterizer {
         }
 
         for (int index = 0; index < graphemeCount; index++) {
-            Style style = resolvedStyles[index];
+            CellStyle style = resolvedStyles[index];
             boolean mark = visibleWhitespace
                 && (
                     index >= prepared.trailingStart()
@@ -270,7 +279,7 @@ public class RenderRasterizer {
         }
     }
 
-    private void drawGutter(CellBuffer buffer, int row, LineVisual line, Style baseStyle, int cols) {
+    private void drawGutter(CellBuffer buffer, int row, LineVisual line, CellStyle baseStyle, int cols) {
         String gutter = line.gutter();
         if (gutter == null || gutter.isEmpty()) {
             return;
@@ -279,14 +288,14 @@ public class RenderRasterizer {
         if (cols <= 0) {
             return;
         }
-        Style markerStyle = gutterMarkerStyle(line.gutterDiff());
+        CellStyle markerStyle = gutterMarkerStyle(line.gutterDiff());
         if (markerStyle == null) {
             return;
         }
         buffer.set(row, 0, String.valueOf(gutter.charAt(0)), markerStyle);
     }
 
-    private Style gutterMarkerStyle(GutterDiffMarker marker) {
+    private CellStyle gutterMarkerStyle(GutterDiffMarker marker) {
         if (marker == null || marker.flag() == null) {
             return null;
         }
@@ -307,7 +316,7 @@ public class RenderRasterizer {
         };
     }
 
-    private void drawText(CellBuffer buffer, int row, int col, String text, Style style, int cols) {
+    private void drawText(CellBuffer buffer, int row, int col, String text, CellStyle style, int cols) {
         int outCol = col;
         String value = text == null ? "" : text;
         DisplayText.Metrics metrics = DisplayText.metrics(value, 1);
@@ -380,13 +389,13 @@ public class RenderRasterizer {
         return hasLineNumberGutter(line.gutter());
     }
 
-    private Style markerStyle(Style base) {
-        Style marker = styles.renderLeadingWhitespace();
-        if (base.equals(Style.DEFAULT)) {
+    private CellStyle markerStyle(CellStyle base) {
+        CellStyle marker = styles.renderLeadingWhitespace();
+        if (base.equals(CellStyle.DEFAULT)) {
             return marker;
         }
         // Keep background/attributes (selection/search), override only marker foreground.
-        return new Style(marker.fg(), base.bg(), base.bold(), base.underline());
+        return new CellStyle(marker.fg(), base.bg(), base.bold(), base.underline());
     }
 
     private PreparedLine preparedLine(
@@ -430,8 +439,8 @@ public class RenderRasterizer {
         int[] visualOffsets = new int[count];
         boolean[] tabs = new boolean[count];
         boolean[] exactSpaces = new boolean[count];
-        Style[] baseStyles = new Style[count];
-        Arrays.fill(baseStyles, Style.DEFAULT);
+        CellStyle[] baseStyles = new CellStyle[count];
+        Arrays.fill(baseStyles, CellStyle.DEFAULT);
         applySpans(metrics, baseSpans, 0, baseSpans.size(), baseStyles);
 
         int absoluteVisual = tabPhase;
@@ -539,7 +548,7 @@ public class RenderRasterizer {
         List<StyleSpan> spans,
         int fromIndex,
         int toIndex,
-        Style[] target
+        CellStyle[] target
     ) {
         int count = metrics.graphemeCount();
         if (count == 0) {
@@ -550,7 +559,8 @@ public class RenderRasterizer {
             int first = firstOverlappingGrapheme(metrics, span.start());
             int afterLast = firstStartingAtOrAfter(metrics, span.end());
             if (first < afterLast) {
-                Arrays.fill(target, first, afterLast, span.style());
+                CellStyle style = cellStyle(span.style());
+                Arrays.fill(target, first, afterLast, style);
             }
         }
     }
@@ -585,8 +595,24 @@ public class RenderRasterizer {
 
     private void ensureStyleScratch(int required) {
         if (styleScratch.length < required) {
-            styleScratch = new Style[Math.max(required, styleScratch.length * 2 + 16)];
+            styleScratch = new CellStyle[Math.max(required, styleScratch.length * 2 + 16)];
         }
+    }
+
+    private CellStyle cellStyle(Style style) {
+        if (style.equals(Style.DEFAULT)) {
+            return CellStyle.DEFAULT;
+        }
+        int attributes = (style.bold() ? 2 : 0) | (style.underline() ? 1 : 0);
+        int index = ((style.fg().ordinal() * EDITOR_COLOR_COUNT + style.bg().ordinal()) << 2)
+            | attributes;
+        CellStyle cached = cellStyleCache[index];
+        if (cached != null) {
+            return cached;
+        }
+        CellStyle mapped = EditorStyleAdapter.toCell(style);
+        cellStyleCache[index] = mapped;
+        return mapped;
     }
 
     private void trimPreparedLineCache() {
@@ -712,7 +738,7 @@ public class RenderRasterizer {
         int[] visualOffsets,
         boolean[] tabs,
         boolean[] exactSpaces,
-        Style[] baseStyles,
+        CellStyle[] baseStyles,
         int leadingEnd,
         int trailingStart,
         int cacheWeight

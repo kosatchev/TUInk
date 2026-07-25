@@ -4,13 +4,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.tuink.render.Style;
 import dev.tuink.tui.geometry.Point;
 import dev.tuink.tui.presentation.ScreenPresenter;
 import dev.tuink.tui.render.CellBuffer;
 import dev.tuink.tui.screen.Frame;
 import dev.tuink.tui.screen.ScreenCursor;
 import dev.tuink.tui.screen.ScrollHint;
+import dev.tuink.tui.style.CellStyle;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import org.junit.jupiter.api.Test;
@@ -19,7 +19,7 @@ class AnsiDiffUnicodeSafetyTest {
     @Test
     void emitsWideGraphemeOnceAndNeverEmitsContinuationPayload() {
         CellBuffer current = new CellBuffer(1, 4);
-        current.set(0, 1, "中", Style.DEFAULT);
+        current.set(0, 1, "中", CellStyle.DEFAULT);
 
         String ansi = present(current);
 
@@ -29,7 +29,7 @@ class AnsiDiffUnicodeSafetyTest {
     @Test
     void documentControlPayloadIsRenderedVisiblyInsteadOfExecuted() {
         CellBuffer current = new CellBuffer(1, 8);
-        current.set(0, 0, "\u001B]52;c;secret\u0007", Style.DEFAULT);
+        current.set(0, 0, "\u001B]52;c;secret\u0007", CellStyle.DEFAULT);
 
         String ansi = present(current);
 
@@ -41,10 +41,10 @@ class AnsiDiffUnicodeSafetyTest {
     @Test
     void changingWideRowToAsciiRedrawsACompleteSafeRow() {
         CellBuffer previous = new CellBuffer(1, 4);
-        previous.set(0, 0, "中", Style.DEFAULT);
+        previous.set(0, 0, "中", CellStyle.DEFAULT);
         CellBuffer current = new CellBuffer(1, 4);
-        current.set(0, 0, "a", Style.DEFAULT);
-        current.set(0, 1, "b", Style.DEFAULT);
+        current.set(0, 0, "a", CellStyle.DEFAULT);
+        current.set(0, 1, "b", CellStyle.DEFAULT);
 
         StringWriter output = new StringWriter();
         ScreenPresenter presenter = new ScreenPresenter(new PrintWriter(output), false);

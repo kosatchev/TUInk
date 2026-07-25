@@ -1,6 +1,6 @@
 package dev.tuink.tui.ui;
 
-import dev.tuink.render.Style;
+import dev.tuink.tui.style.CellStyle;
 import dev.tuink.core.GutterDiffMode;
 import dev.tuink.core.TabInsertMode;
 import dev.tuink.tui.input.KeyEvent;
@@ -18,19 +18,19 @@ import java.util.Set;
  */
 public final class MenuBar {
     private final Controller controller = new Controller();
-    private Style popupStyle;
-    private Style popupSelectedStyle;
-    private Style topSelectedStyle;
-    private Style selectedMonoStyle;
+    private CellStyle popupStyle;
+    private CellStyle popupSelectedStyle;
+    private CellStyle topSelectedStyle;
+    private CellStyle selectedMonoStyle;
 
-    public MenuBar(Style popupStyle, Style popupSelectedStyle, Style topSelectedStyle, Style selectedMonoStyle) {
+    public MenuBar(CellStyle popupStyle, CellStyle popupSelectedStyle, CellStyle topSelectedStyle, CellStyle selectedMonoStyle) {
         this.popupStyle = popupStyle;
         this.popupSelectedStyle = popupSelectedStyle;
         this.topSelectedStyle = topSelectedStyle;
         this.selectedMonoStyle = selectedMonoStyle;
     }
 
-    public void setStyles(Style popupStyle, Style popupSelectedStyle, Style topSelectedStyle, Style selectedMonoStyle) {
+    public void setStyles(CellStyle popupStyle, CellStyle popupSelectedStyle, CellStyle topSelectedStyle, CellStyle selectedMonoStyle) {
         this.popupStyle = popupStyle;
         this.popupSelectedStyle = popupSelectedStyle;
         this.topSelectedStyle = topSelectedStyle;
@@ -992,9 +992,9 @@ public final class MenuBar {
             MenuItem[] items,
             int[] mnemonicIndexes,
             boolean colorEnabled,
-            Style popupStyle,
-            Style selectedStyle,
-            Style selectedMonoStyle
+            CellStyle popupStyle,
+            CellStyle selectedStyle,
+            CellStyle selectedMonoStyle
         ) {
             ContextMenu.draw(
                 buffer,
@@ -1018,13 +1018,13 @@ public final class MenuBar {
             boolean menuOpen,
             MenuId active,
             boolean colorEnabled,
-            Style selectedStyle,
-            Style selectedMonoStyle
+            CellStyle selectedStyle,
+            CellStyle selectedMonoStyle
         ) {
             if (!menuOpen || buffer.rows() < 1 || cols < 1) {
                 return;
             }
-            Style style = colorEnabled ? selectedStyle : selectedMonoStyle;
+            CellStyle style = colorEnabled ? selectedStyle : selectedMonoStyle;
             String label = switch (active) {
                 case FILE -> " File ";
                 case EDIT -> " Edit ";
@@ -1057,7 +1057,7 @@ public final class MenuBar {
             if (cell == null) {
                 return;
             }
-            Style style = cell.style();
+            CellStyle style = cell.style();
             if (style == null || style.underline()) {
                 return;
             }
@@ -1065,7 +1065,7 @@ public final class MenuBar {
                 0,
                 col,
                 cell.grapheme(),
-                new Style(style.fg(), style.bg(), style.bold(), true)
+                new CellStyle(style.fg(), style.bg(), style.bold(), true)
             );
         }
 
@@ -1096,7 +1096,7 @@ public final class MenuBar {
             };
         }
 
-        private static void drawLine(CellBuffer buffer, int row, int startCol, String text, Style style, int cols) {
+        private static void drawLine(CellBuffer buffer, int row, int startCol, String text, CellStyle style, int cols) {
             CellText.draw(buffer, row, startCol, text, style, cols);
         }
     }

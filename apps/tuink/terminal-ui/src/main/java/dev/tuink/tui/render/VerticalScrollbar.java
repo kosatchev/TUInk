@@ -1,7 +1,7 @@
 package dev.tuink.tui.render;
 
 import dev.tuink.render.ScrollInteraction;
-import dev.tuink.render.Style;
+import dev.tuink.tui.style.CellStyle;
 
 /**
  * Reusable vertical scrollbar painter (track + thumb) for cell buffers.
@@ -57,9 +57,9 @@ public final class VerticalScrollbar {
         int totalItems,
         int scroll,
         String trackGrapheme,
-        Style trackStyle,
+        CellStyle trackStyle,
         String thumbGrapheme,
-        Style thumbStyle
+        CellStyle thumbStyle
     ) {
         if (visibleRows <= 0 || totalItems <= 0) {
             return;

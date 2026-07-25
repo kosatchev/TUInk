@@ -3,7 +3,7 @@ package dev.tuink.tui.ui;
 import dev.tuink.tui.render.CellBuffer;
 import dev.tuink.tui.render.CellText;
 import dev.tuink.core.DisplayText;
-import dev.tuink.render.Style;
+import dev.tuink.tui.style.CellStyle;
 
 /**
  * Reusable single-line text button for TUI overlays.
@@ -62,11 +62,11 @@ public final class Button {
         return hitRow == row && hitCol >= col && hitCol < col + width();
     }
 
-    public void draw(CellBuffer buffer, int cols, Style style) {
+    public void draw(CellBuffer buffer, int cols, CellStyle style) {
         drawAt(buffer, row, cols, style);
     }
 
-    public void drawAt(CellBuffer buffer, int drawRow, int cols, Style style) {
+    public void drawAt(CellBuffer buffer, int drawRow, int cols, CellStyle style) {
         CellText.draw(buffer, drawRow, col, renderedText(), style, cols);
     }
 

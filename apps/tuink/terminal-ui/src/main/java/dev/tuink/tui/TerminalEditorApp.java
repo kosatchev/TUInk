@@ -35,6 +35,7 @@ import dev.tuink.tui.geometry.Rect;
 import dev.tuink.tui.presentation.ScreenPresenter;
 import dev.tuink.tui.render.CellBuffer;
 import dev.tuink.tui.render.CellText;
+import dev.tuink.tui.render.EditorStyleAdapter;
 import dev.tuink.render.LineHighlighter;
 import dev.tuink.render.EditorLayout;
 import dev.tuink.render.RenderPlan;
@@ -45,6 +46,7 @@ import dev.tuink.tui.runtime.TuiEventLoop;
 import dev.tuink.tui.screen.Frame;
 import dev.tuink.tui.screen.ScreenCursor;
 import dev.tuink.tui.screen.ScrollHint;
+import dev.tuink.tui.style.CellStyle;
 import dev.tuink.tui.style.UiStyles;
 import dev.tuink.tui.terminal.TerminalSession;
 import dev.tuink.tui.ui.Button;
@@ -363,7 +365,7 @@ public class TerminalEditorApp {
                         if (saveAsMode) {
                             inlinePromptBar = InlinePromptBar.of(
                                 buildSaveAsPrompt(saveAsInput),
-                                styles.promptAlert(),
+                                EditorStyleAdapter.toEditor(styles.promptAlert()),
                                 DisplayText.visualWidth(SAVE_AS_PROMPT, 4) + saveAsInput.cursorCellColumn() + 1
                             );
                         } else if (saveOverwriteConfirmMode) {
@@ -372,17 +374,32 @@ public class TerminalEditorApp {
                                 modalState.confirmChoice(),
                                 cols
                             );
-                            inlinePromptBar = InlinePromptBar.of(confirmBar.row(), styles.promptAlert(), 1, confirmBar.cursorCol() + 1);
+                            inlinePromptBar = InlinePromptBar.of(
+                                confirmBar.row(),
+                                EditorStyleAdapter.toEditor(styles.promptAlert()),
+                                1,
+                                confirmBar.cursorCol() + 1
+                            );
                         } else if (recoveryConfirmMode) {
                             confirmBar = ConfirmBarView.buildRecovery(
                                 buildRecoveryPrompt(startupRecoveryEntries.size()),
                                 modalState.confirmChoice(),
                                 cols
                             );
-                            inlinePromptBar = InlinePromptBar.of(confirmBar.row(), styles.promptAlert(), 1, confirmBar.cursorCol() + 1);
+                            inlinePromptBar = InlinePromptBar.of(
+                                confirmBar.row(),
+                                EditorStyleAdapter.toEditor(styles.promptAlert()),
+                                1,
+                                confirmBar.cursorCol() + 1
+                            );
                         } else if (quitConfirmMode) {
                             confirmBar = buildQuitConfirmBar(tabs, modalState.confirmChoice(), cols);
-                            inlinePromptBar = InlinePromptBar.of(confirmBar.row(), styles.promptAlert(), 1, confirmBar.cursorCol() + 1);
+                            inlinePromptBar = InlinePromptBar.of(
+                                confirmBar.row(),
+                                EditorStyleAdapter.toEditor(styles.promptAlert()),
+                                1,
+                                confirmBar.cursorCol() + 1
+                            );
                         } else if (closeTabConfirmMode) {
                             confirmBar = buildCloseTabConfirmBar(
                                 tabs,
@@ -390,16 +407,24 @@ public class TerminalEditorApp {
                                 modalState.confirmChoice(),
                                 cols
                             );
-                            inlinePromptBar = InlinePromptBar.of(confirmBar.row(), styles.promptAlert(), 1, confirmBar.cursorCol() + 1);
+                            inlinePromptBar = InlinePromptBar.of(
+                                confirmBar.row(),
+                                EditorStyleAdapter.toEditor(styles.promptAlert()),
+                                1,
+                                confirmBar.cursorCol() + 1
+                            );
                         } else if (searchBar != null) {
                             inlinePromptBar = InlinePromptBar.of(
                                 searchBar.text(),
-                                styles.searchBar(),
+                                EditorStyleAdapter.toEditor(styles.searchBar()),
                                 searchBar.cursorRow(),
                                 searchBar.cursorCol()
                             );
                         }
-                        NotificationBar notificationBar = NotificationBar.of(notification.message, notification.style());
+                        NotificationBar notificationBar = NotificationBar.of(
+                            notification.message,
+                            EditorStyleAdapter.toEditor(notification.style())
+                        );
                         showTabBar = uiSessionState.showTabBarSetting && tabs.size() > 1;
                         int overlayRows = inlinePromptBar.height();
                         contentTopRow = showTabBar ? 2 : 1;
@@ -2290,7 +2315,7 @@ public class TerminalEditorApp {
         }
     }
 
-    private void drawMenuLine(CellBuffer buffer, int row, int startCol, String text, Style style, int cols) {
+    private void drawMenuLine(CellBuffer buffer, int row, int startCol, String text, CellStyle style, int cols) {
         CellText.draw(buffer, row, startCol, text, style, cols);
     }
 
@@ -2361,11 +2386,11 @@ public class TerminalEditorApp {
         return result.toString();
     }
 
-    private Style focusedButtonStyle(Style parentStyle) {
+    private CellStyle focusedButtonStyle(CellStyle parentStyle) {
         if (parentStyle == null) {
             return styles.menuSelected();
         }
-        return new Style(parentStyle.bg(), parentStyle.fg(), true, parentStyle.underline());
+        return new CellStyle(parentStyle.bg(), parentStyle.fg(), true, parentStyle.underline());
     }
 
     private String padRight(String text, int width) {
@@ -4110,7 +4135,7 @@ public class TerminalEditorApp {
             this.expiresAtNanos = 0L;
         }
 
-        private Style style() {
+        private CellStyle style() {
             if (kind == null) {
                 return null;
             }

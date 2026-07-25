@@ -3,7 +3,7 @@ package dev.tuink.tui.ui;
 import dev.tuink.tui.render.CellBuffer;
 import dev.tuink.tui.render.CellText;
 import dev.tuink.render.ScrollInteraction;
-import dev.tuink.render.Style;
+import dev.tuink.tui.style.CellStyle;
 import dev.tuink.tui.render.HorizontalScrollbar;
 import dev.tuink.tui.render.VerticalScrollbar;
 import java.io.IOException;
@@ -418,11 +418,11 @@ public final class TreeView {
         int listStartRow,
         int listRows,
         boolean colorEnabled,
-        Style normalStyle,
-        Style selectedColorStyle,
-        Style selectedMonoStyle,
-        Style scrollTrackStyle,
-        Style scrollThumbStyle
+        CellStyle normalStyle,
+        CellStyle selectedColorStyle,
+        CellStyle selectedMonoStyle,
+        CellStyle scrollTrackStyle,
+        CellStyle scrollThumbStyle
     ) {
         DrawLayout layout = computeLayout(left, right, listRows);
         normalizeSelection();
@@ -438,7 +438,7 @@ public final class TreeView {
         for (int i = 0; i < textRows; i++) {
             int itemIndex = scroll + i;
             int row = listStartRow + i;
-            Style style = itemIndex == selectedIndex
+            CellStyle style = itemIndex == selectedIndex
                 ? (colorEnabled ? selectedColorStyle : selectedMonoStyle)
                 : normalStyle;
             String line = rowText(itemIndex, labelWidth, sizeWidth, dateWidth);
@@ -817,7 +817,7 @@ public final class TreeView {
         return String.format(Locale.ROOT, format, value, units[unit]);
     }
 
-    private static void drawLine(CellBuffer buffer, int row, int startCol, String text, Style style, int cols) {
+    private static void drawLine(CellBuffer buffer, int row, int startCol, String text, CellStyle style, int cols) {
         CellText.draw(buffer, row, startCol, text, style, cols);
     }
 

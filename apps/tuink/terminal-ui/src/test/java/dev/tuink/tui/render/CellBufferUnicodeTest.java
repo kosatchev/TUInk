@@ -5,19 +5,19 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.core.DisplayText;
-import dev.tuink.render.Style;
+import dev.tuink.tui.style.CellStyle;
 import org.junit.jupiter.api.Test;
 
 class CellBufferUnicodeTest {
     @Test
     void wideCellOwnsAContinuationAndOverwriteClearsTheWholeFootprint() {
         CellBuffer buffer = new CellBuffer(1, 4);
-        buffer.set(0, 1, "中", Style.DEFAULT);
+        buffer.set(0, 1, "中", CellStyle.DEFAULT);
 
         assertEquals(2, buffer.get(0, 1).width());
         assertTrue(buffer.get(0, 2).continuation());
 
-        buffer.set(0, 2, "x", Style.DEFAULT);
+        buffer.set(0, 2, "x", CellStyle.DEFAULT);
 
         assertEquals(" ", buffer.get(0, 1).grapheme());
         assertFalse(buffer.get(0, 1).continuation());
@@ -27,10 +27,10 @@ class CellBufferUnicodeTest {
     @Test
     void replacingAsciiWithWideCellClearsBothDestinationCells() {
         CellBuffer buffer = new CellBuffer(1, 4);
-        buffer.set(0, 1, "a", Style.DEFAULT);
-        buffer.set(0, 2, "b", Style.DEFAULT);
+        buffer.set(0, 1, "a", CellStyle.DEFAULT);
+        buffer.set(0, 2, "b", CellStyle.DEFAULT);
 
-        buffer.set(0, 1, "😀", Style.DEFAULT);
+        buffer.set(0, 1, "😀", CellStyle.DEFAULT);
 
         assertEquals("😀", buffer.get(0, 1).grapheme());
         assertEquals(2, buffer.get(0, 1).width());
@@ -40,10 +40,10 @@ class CellBufferUnicodeTest {
     @Test
     void controlPayloadsAndUnpairedSurrogatesNeverEnterCells() {
         CellBuffer buffer = new CellBuffer(1, 5);
-        buffer.set(0, 0, "\u001B", Style.DEFAULT);
-        buffer.set(0, 1, "\u0007", Style.DEFAULT);
-        buffer.set(0, 2, "\u009B", Style.DEFAULT);
-        buffer.set(0, 3, "\uD83D", Style.DEFAULT);
+        buffer.set(0, 0, "\u001B", CellStyle.DEFAULT);
+        buffer.set(0, 1, "\u0007", CellStyle.DEFAULT);
+        buffer.set(0, 2, "\u009B", CellStyle.DEFAULT);
+        buffer.set(0, 3, "\uD83D", CellStyle.DEFAULT);
 
         assertEquals("␛", buffer.get(0, 0).grapheme());
         assertEquals("␇", buffer.get(0, 1).grapheme());
@@ -57,7 +57,7 @@ class CellBufferUnicodeTest {
     @Test
     void wideFillPreservesLeadContinuationInvariantAtOddWidth() {
         CellBuffer buffer = new CellBuffer(1, 5);
-        buffer.fill(new Cell("界", Style.DEFAULT));
+        buffer.fill(new Cell("界", CellStyle.DEFAULT));
 
         assertEquals(2, buffer.get(0, 0).width());
         assertTrue(buffer.get(0, 1).continuation());

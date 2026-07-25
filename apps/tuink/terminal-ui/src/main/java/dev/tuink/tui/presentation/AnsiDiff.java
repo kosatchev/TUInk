@@ -4,8 +4,8 @@ import dev.tuink.tui.render.Cell;
 import dev.tuink.tui.render.CellBuffer;
 import dev.tuink.tui.geometry.Rect;
 import dev.tuink.tui.screen.ScrollHint;
-import dev.tuink.render.Color;
-import dev.tuink.render.Style;
+import dev.tuink.tui.style.CellColor;
+import dev.tuink.tui.style.CellStyle;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -13,8 +13,8 @@ import java.util.Map;
  * Produces ANSI output for differences between two cell buffers.
  */
 final class AnsiDiff {
-    private final Map<Style, String> colorStyleCache = new HashMap<>();
-    private final Map<Style, String> monoStyleCache = new HashMap<>();
+    private final Map<CellStyle, String> colorStyleCache = new HashMap<>();
+    private final Map<CellStyle, String> monoStyleCache = new HashMap<>();
 
     AnsiDiff() {
     }
@@ -504,8 +504,8 @@ final class AnsiDiff {
         return activeStyleAnsi;
     }
 
-    private String ansiFor(Style style, boolean colorEnabled) {
-        Map<Style, String> cache = colorEnabled ? colorStyleCache : monoStyleCache;
+    private String ansiFor(CellStyle style, boolean colorEnabled) {
+        Map<CellStyle, String> cache = colorEnabled ? colorStyleCache : monoStyleCache;
         String cached = cache.get(style);
         if (cached != null) {
             return cached;
@@ -693,7 +693,7 @@ final class AnsiDiff {
         out.append("\u001B[").append(row + 1).append(';').append(col + 1).append('H');
     }
 
-    private static String toAnsi(Style style) {
+    private static String toAnsi(CellStyle style) {
         return "\u001B["
             + fgCode(style.fg()) + ';'
             + bgCode(style.bg()) + ';'
@@ -701,15 +701,15 @@ final class AnsiDiff {
             + (style.underline() ? "4" : "24") + 'm';
     }
 
-    private static String toMonochromeAnsi(Style style) {
+    private static String toMonochromeAnsi(CellStyle style) {
         return "\u001B["
             + "39;49;"
             + (style.bold() ? "1" : "22") + ';'
             + (style.underline() ? "4" : "24") + ';'
-            + (style.bg() != Color.DEFAULT ? "7" : "27") + 'm';
+            + (style.bg() != CellColor.DEFAULT ? "7" : "27") + 'm';
     }
 
-    private static int fgCode(Color color) {
+    private static int fgCode(CellColor color) {
         return switch (color) {
             case DEFAULT -> 39;
             case BLACK -> 30;
@@ -731,7 +731,7 @@ final class AnsiDiff {
         };
     }
 
-    private static int bgCode(Color color) {
+    private static int bgCode(CellColor color) {
         return switch (color) {
             case DEFAULT -> 49;
             case BLACK -> 40;

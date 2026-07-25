@@ -1,15 +1,15 @@
 package dev.tuink.tui.render;
 
 import dev.tuink.core.DisplayText;
-import dev.tuink.render.Style;
+import dev.tuink.tui.style.CellStyle;
 
 /**
  * One terminal cell. A width-two grapheme is followed by a continuation cell.
  */
-public record Cell(String grapheme, Style style, int width, boolean continuation) {
-    public static final Cell EMPTY = new Cell(" ", Style.DEFAULT);
+public record Cell(String grapheme, CellStyle style, int width, boolean continuation) {
+    public static final Cell EMPTY = new Cell(" ", CellStyle.DEFAULT);
 
-    public Cell(String grapheme, Style style) {
+    public Cell(String grapheme, CellStyle style) {
         this(grapheme, style, 0, false);
     }
 
@@ -29,7 +29,7 @@ public record Cell(String grapheme, Style style, int width, boolean continuation
         }
     }
 
-    public static Cell continuation(Style style) {
+    public static Cell continuation(CellStyle style) {
         return new Cell(" ", style, 0, true);
     }
 }

@@ -17,6 +17,7 @@ import dev.tuink.render.RenderPlan;
 import dev.tuink.render.RenderPlanBuilder;
 import dev.tuink.render.Style;
 import dev.tuink.render.StyleSpan;
+import dev.tuink.tui.style.CellStyle;
 import dev.tuink.tui.style.UiStyles;
 import java.util.ArrayList;
 import java.util.List;
@@ -83,10 +84,10 @@ class RenderRasterizerUnicodeTest {
 
         CellBuffer buffer = new RenderRasterizer().rasterize(directPlan(line, 5, 12), 5, 12);
 
-        assertEquals(base, buffer.get(1, 0).style());
+        assertEquals(EditorStyleAdapter.toCell(base), buffer.get(1, 0).style());
         assertEquals("e\u0301", buffer.get(1, 1).grapheme());
-        assertEquals(overlay, buffer.get(1, 1).style());
-        assertEquals(base, buffer.get(1, 2).style());
+        assertEquals(EditorStyleAdapter.toCell(overlay), buffer.get(1, 1).style());
+        assertEquals(EditorStyleAdapter.toCell(base), buffer.get(1, 2).style());
     }
 
     @Test
@@ -120,10 +121,10 @@ class RenderRasterizerUnicodeTest {
         );
         CellBuffer secondFrame = rasterizer.rasterize(directPlan(second, 4, 8), 4, 8);
 
-        assertEquals(firstOverlay, firstFrame.get(1, 0).style());
-        assertEquals(base, secondFrame.get(1, 0).style());
-        assertEquals(secondOverlay, secondFrame.get(1, 1).style());
-        assertEquals(base, secondFrame.get(1, 2).style());
+        assertEquals(EditorStyleAdapter.toCell(firstOverlay), firstFrame.get(1, 0).style());
+        assertEquals(EditorStyleAdapter.toCell(base), secondFrame.get(1, 0).style());
+        assertEquals(EditorStyleAdapter.toCell(secondOverlay), secondFrame.get(1, 1).style());
+        assertEquals(EditorStyleAdapter.toCell(base), secondFrame.get(1, 2).style());
         assertEquals(misses, rasterizer.preparedLineCacheMisses());
         assertTrue(rasterizer.preparedLineCacheHits() > 0);
     }
@@ -189,7 +190,7 @@ class RenderRasterizerUnicodeTest {
         RenderPlan plan = directPlan(line, 4, 14);
 
         CellBuffer cyan = rasterizer.rasterize(plan, 4, 14);
-        Style cyanMarker = cyan.get(1, 0).style();
+        CellStyle cyanMarker = cyan.get(1, 0).style();
 
         assertEquals("·", cyan.get(1, 0).grapheme());
         assertEquals("»", cyan.get(1, 1).grapheme());
@@ -199,7 +200,7 @@ class RenderRasterizerUnicodeTest {
         assertEquals(" ", cyan.get(1, 6).grapheme());
         assertEquals("·", cyan.get(1, 8).grapheme());
         assertEquals("·", cyan.get(1, 9).grapheme());
-        assertEquals(overlay.bg(), cyanMarker.bg());
+        assertEquals(EditorStyleAdapter.toCell(overlay).bg(), cyanMarker.bg());
         assertTrue(cyanMarker.bold());
         assertTrue(cyanMarker.underline());
 
@@ -212,12 +213,12 @@ class RenderRasterizerUnicodeTest {
             UiStyles.forTheme(UiStyles.Theme.LIGHT).renderLeadingWhitespace().fg(),
             light.get(1, 0).style().fg()
         );
-        assertEquals(overlay.bg(), light.get(1, 0).style().bg());
+        assertEquals(EditorStyleAdapter.toCell(overlay).bg(), light.get(1, 0).style().bg());
 
         rasterizer.setVisibleWhitespace(false);
         CellBuffer hidden = rasterizer.rasterize(plan, 4, 14);
         assertEquals(" ", hidden.get(1, 0).grapheme());
-        assertEquals(overlay, hidden.get(1, 0).style());
+        assertEquals(EditorStyleAdapter.toCell(overlay), hidden.get(1, 0).style());
     }
 
     @Test
@@ -333,6 +334,7 @@ class RenderRasterizerUnicodeTest {
                     style = span.style();
                 }
             }
+            CellStyle cellStyle = EditorStyleAdapter.toCell(style);
             int advance = grapheme.tab()
                 ? tabWidth - (absoluteVisual % tabWidth)
                 : Math.max(1, grapheme.width());
@@ -343,7 +345,7 @@ class RenderRasterizerUnicodeTest {
                 for (int cell = 0; cell < advance; cell++) {
                     int target = screenCol + cell;
                     if (target >= 0 && target < cols) {
-                        buffer.set(1, target, " ", style);
+                        buffer.set(1, target, " ", cellStyle);
                     }
                 }
             } else if (screenCol >= 0 && screenCol + advance <= cols) {
@@ -351,7 +353,7 @@ class RenderRasterizerUnicodeTest {
                     1,
                     screenCol,
                     DisplayText.sanitizeGrapheme(grapheme.text()),
-                    style
+                    cellStyle
                 );
             }
             absoluteVisual += advance;

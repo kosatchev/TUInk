@@ -5,7 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.tuink.render.Style;
+import dev.tuink.tui.style.CellStyle;
 import dev.tuink.tui.input.KeyEvent;
 import dev.tuink.tui.ui.MenuBar;
 import java.nio.file.Path;
@@ -72,7 +72,12 @@ class TopMenuInputControllerTest {
     }
 
     private static MenuBar menu() {
-        return new MenuBar(Style.DEFAULT, Style.DEFAULT, Style.DEFAULT, Style.DEFAULT);
+        return new MenuBar(
+            CellStyle.DEFAULT,
+            CellStyle.DEFAULT,
+            CellStyle.DEFAULT,
+            CellStyle.DEFAULT
+        );
     }
 
     private static KeyEvent.ActionEvent action(KeyEvent.Action action) {

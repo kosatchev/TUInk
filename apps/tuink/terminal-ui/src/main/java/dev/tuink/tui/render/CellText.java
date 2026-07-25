@@ -1,7 +1,7 @@
 package dev.tuink.tui.render;
 
 import dev.tuink.core.DisplayText;
-import dev.tuink.render.Style;
+import dev.tuink.tui.style.CellStyle;
 
 /** Shared grapheme-aware drawing and sizing for single-line TUI widgets. */
 public final class CellText {
@@ -15,7 +15,7 @@ public final class CellText {
     }
 
     /** Draws complete graphemes only and returns the first cell after the text. */
-    public static int draw(CellBuffer buffer, int row, int startCol, String text, Style style, int endCol) {
+    public static int draw(CellBuffer buffer, int row, int startCol, String text, CellStyle style, int endCol) {
         if (buffer == null || text == null || text.isEmpty()) {
             return startCol;
         }

@@ -2,7 +2,7 @@ package dev.tuink.tui.ui;
 
 import dev.tuink.tui.render.CellBuffer;
 import dev.tuink.tui.render.CellText;
-import dev.tuink.render.Style;
+import dev.tuink.tui.style.CellStyle;
 
 /**
  * Reusable modal frame element with title and close button.
@@ -13,9 +13,9 @@ public final class Modal {
     private final int width;
     private final int height;
     private final String title;
-    private final Style bodyStyle;
-    private final Style borderStyle;
-    private final Style titleStyle;
+    private final CellStyle bodyStyle;
+    private final CellStyle borderStyle;
+    private final CellStyle titleStyle;
 
     public Modal(
         int top,
@@ -23,9 +23,9 @@ public final class Modal {
         int width,
         int height,
         String title,
-        Style bodyStyle,
-        Style borderStyle,
-        Style titleStyle
+        CellStyle bodyStyle,
+        CellStyle borderStyle,
+        CellStyle titleStyle
     ) {
         this.top = top;
         this.left = left;
@@ -71,7 +71,7 @@ public final class Modal {
         int left,
         int height,
         int width,
-        Style style
+        CellStyle style
     ) {
         for (int r = 0; r < height; r++) {
             int row = top + r;
@@ -88,7 +88,7 @@ public final class Modal {
         }
     }
 
-    private static void drawLine(CellBuffer buffer, int cols, int row, int startCol, String text, Style style) {
+    private static void drawLine(CellBuffer buffer, int cols, int row, int startCol, String text, CellStyle style) {
         CellText.draw(buffer, row, startCol, text, style, cols);
     }
 }

@@ -1,7 +1,7 @@
 package dev.tuink.tui.ui;
 
 import dev.tuink.core.DisplayText;
-import dev.tuink.render.Style;
+import dev.tuink.tui.style.CellStyle;
 import dev.tuink.tui.render.CellBuffer;
 import dev.tuink.tui.render.CellText;
 import java.nio.file.Path;
@@ -12,24 +12,24 @@ import java.util.List;
  * UI element that renders open editor tabs on a single row.
  */
 public final class TabBar {
-    private Style baseStyle;
-    private Style baseMonoStyle;
-    private Style activeStyle;
-    private Style activeMonoStyle;
+    private CellStyle baseStyle;
+    private CellStyle baseMonoStyle;
+    private CellStyle activeStyle;
+    private CellStyle activeMonoStyle;
     private final List<TabHit> lastHits = new ArrayList<>();
     private int firstVisibleIndex;
     private boolean lastCanScrollLeft;
     private boolean lastCanScrollRight;
     private int lastCols;
 
-    public TabBar(Style baseStyle, Style baseMonoStyle, Style activeStyle, Style activeMonoStyle) {
+    public TabBar(CellStyle baseStyle, CellStyle baseMonoStyle, CellStyle activeStyle, CellStyle activeMonoStyle) {
         this.baseStyle = baseStyle;
         this.baseMonoStyle = baseMonoStyle;
         this.activeStyle = activeStyle;
         this.activeMonoStyle = activeMonoStyle;
     }
 
-    public void setStyles(Style baseStyle, Style baseMonoStyle, Style activeStyle, Style activeMonoStyle) {
+    public void setStyles(CellStyle baseStyle, CellStyle baseMonoStyle, CellStyle activeStyle, CellStyle activeMonoStyle) {
         this.baseStyle = baseStyle;
         this.baseMonoStyle = baseMonoStyle;
         this.activeStyle = activeStyle;
@@ -62,7 +62,7 @@ public final class TabBar {
             viewportEnd = Math.max(1, cols - 1);
             lastCanScrollLeft = firstVisibleIndex > 0;
             lastCanScrollRight = hasHiddenRight(tabs, Math.max(1, cols - 2));
-            Style monoOrColorBase = colorEnabled ? baseStyle : baseMonoStyle;
+            CellStyle monoOrColorBase = colorEnabled ? baseStyle : baseMonoStyle;
             buffer.set(1, 0, lastCanScrollLeft ? "<" : " ", monoOrColorBase);
             buffer.set(1, cols - 1, lastCanScrollRight ? ">" : " ", monoOrColorBase);
         } else {
@@ -73,7 +73,7 @@ public final class TabBar {
         for (int i = firstVisibleIndex; i < tabs.size() && col < viewportEnd; i++) {
             TabItem tab = tabs.get(i);
             boolean active = i == activeIndex;
-            Style style = active
+            CellStyle style = active
                 ? (colorEnabled ? activeStyle : activeMonoStyle)
                 : (colorEnabled ? baseStyle : baseMonoStyle);
             String text = formatTab(tab);

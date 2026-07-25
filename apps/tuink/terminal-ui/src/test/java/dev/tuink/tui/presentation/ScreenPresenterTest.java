@@ -5,13 +5,13 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.tuink.render.Style;
 import dev.tuink.tui.geometry.Point;
 import dev.tuink.tui.geometry.Rect;
 import dev.tuink.tui.render.CellBuffer;
 import dev.tuink.tui.screen.Frame;
 import dev.tuink.tui.screen.ScreenCursor;
 import dev.tuink.tui.screen.ScrollHint;
+import dev.tuink.tui.style.CellStyle;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import org.junit.jupiter.api.Test;
@@ -136,8 +136,8 @@ class ScreenPresenterTest {
         RecordingPrintWriter writer = new RecordingPrintWriter();
         ScreenPresenter presenter = new ScreenPresenter(writer, false);
         CellBuffer cells = new CellBuffer(1, 8);
-        cells.set(0, 0, "中", Style.DEFAULT);
-        cells.set(0, 2, "\u001B]52;c;secret\u0007", Style.DEFAULT);
+        cells.set(0, 0, "中", CellStyle.DEFAULT);
+        cells.set(0, 2, "\u001B]52;c;secret\u0007", CellStyle.DEFAULT);
 
         ScreenPresenter.PresentResult result = presenter.present(frame(cells, 0, 0, false));
         String output = writer.output();
@@ -154,14 +154,14 @@ class ScreenPresenterTest {
         RecordingPrintWriter writer = new RecordingPrintWriter();
         ScreenPresenter presenter = new ScreenPresenter(writer, false);
         CellBuffer previous = new CellBuffer(1, 7);
-        previous.set(0, 0, "A", Style.DEFAULT);
-        previous.set(0, 1, "中", Style.DEFAULT);
+        previous.set(0, 0, "A", CellStyle.DEFAULT);
+        previous.set(0, 1, "中", CellStyle.DEFAULT);
         putAscii(previous, 0, 3, "BC");
         presenter.present(frame(previous, 0, 0, false));
         writer.clearOutput();
 
         CellBuffer current = new CellBuffer(1, 7);
-        current.set(0, 0, "中", Style.DEFAULT);
+        current.set(0, 0, "中", CellStyle.DEFAULT);
         putAscii(current, 0, 2, "BCDE");
         ScrollHint hint = new ScrollHint.Horizontal(new Rect(0, 0, 7, 1), 1);
         Frame shifted = new Frame(current, new ScreenCursor(new Point(0, 0), false), hint);
@@ -332,7 +332,7 @@ class ScreenPresenterTest {
     private static void putAscii(CellBuffer buffer, int row, int startCol, String text) {
         int col = startCol;
         for (int offset = 0; offset < text.length() && col < buffer.cols(); offset++) {
-            buffer.set(row, col++, String.valueOf(text.charAt(offset)), Style.DEFAULT);
+            buffer.set(row, col++, String.valueOf(text.charAt(offset)), CellStyle.DEFAULT);
         }
     }
 

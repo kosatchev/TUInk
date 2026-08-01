@@ -134,7 +134,7 @@ class RenderPlanBuilderTest {
         TextModel model = model("A" + family + "B");
         EditorState state = new EditorState();
         state.setLeftVisualColumn(2);
-        RenderPlanBuilder builder = builder();
+        RenderPlanBuilder builder = builder(model);
 
         build(builder, model, state, 5, 4, false, false);
         model.insertChar(new Position(0, 0), 'X');
@@ -153,7 +153,7 @@ class RenderPlanBuilderTest {
         TextModel model = model("A\tB");
         EditorState state = new EditorState();
         state.setLeftVisualColumn(2);
-        RenderPlanBuilder builder = builder();
+        RenderPlanBuilder builder = builder(model);
 
         RenderPlan tabFour = build(builder, model, state, 5, 6, false, false);
         builder.setTabWidth(2);
@@ -211,11 +211,14 @@ class RenderPlanBuilderTest {
         boolean wrapLines,
         boolean wrapByWords
     ) {
-        return build(builder(), model, state, rows, cols, wrapLines, wrapByWords);
+        return build(builder(model), model, state, rows, cols, wrapLines, wrapByWords);
     }
 
-    private static RenderPlanBuilder builder() {
-        RenderPlanBuilder builder = new RenderPlanBuilder(line -> List.of());
+    private static RenderPlanBuilder builder(TextModel model) {
+        RenderPlanBuilder builder = new RenderPlanBuilder(
+            line -> List.of(),
+            new TerminalEditorTextLayout(model)
+        );
         builder.setSyntaxHighlightingEnabled(false);
         builder.setBracketMatchingEnabled(false);
         builder.setRainbowBracketsEnabled(false);

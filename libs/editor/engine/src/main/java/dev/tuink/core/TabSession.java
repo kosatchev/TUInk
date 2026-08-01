@@ -1,13 +1,32 @@
 package dev.tuink.core;
 
 /**
- * Core tab session containing editor model, mutable state and engine.
+ * Core tab session containing editor model, mutable state, layout port and engine.
  */
-public record TabSession(TextModel model, EditorState state, EditorEngine engine) {
-    public static TabSession createEmpty() {
+public record TabSession(
+    TextModel model,
+    EditorState state,
+    EditorTextLayout textLayout,
+    EditorEngine engine
+) {
+    public TabSession {
+        if (model == null
+            || state == null
+            || textLayout == null
+            || engine == null
+            || textLayout.model() != model
+            || engine.model() != model
+            || engine.state() != state
+            || engine.textLayout() != textLayout) {
+            throw new IllegalArgumentException("tab components must share model, state and textLayout");
+        }
+    }
+
+    public static TabSession createEmpty(EditorTextLayout.Factory textLayoutFactory) {
         TextModel model = new TextModel(new SimpleLineBuffer());
         EditorState state = new EditorState();
-        EditorEngine engine = new EditorEngine(model, state);
-        return new TabSession(model, state, engine);
+        EditorTextLayout textLayout = textLayoutFactory.create(model);
+        EditorEngine engine = new EditorEngine(model, state, textLayout);
+        return new TabSession(model, state, textLayout, engine);
     }
 }

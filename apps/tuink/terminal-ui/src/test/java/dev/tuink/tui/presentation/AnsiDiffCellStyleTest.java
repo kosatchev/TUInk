@@ -4,10 +4,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.tuink.tui.render.CellBuffer;
-import dev.tuink.tui.screen.ScrollHint;
-import dev.tuink.tui.style.CellColor;
-import dev.tuink.tui.style.CellStyle;
+import dev.tuink.terminal.cell.CellBuffer;
+import dev.tuink.terminal.screen.ScrollHint;
+import dev.tuink.terminal.style.CellColor;
+import dev.tuink.terminal.style.CellStyle;
 import org.junit.jupiter.api.Test;
 
 class AnsiDiffCellStyleTest {

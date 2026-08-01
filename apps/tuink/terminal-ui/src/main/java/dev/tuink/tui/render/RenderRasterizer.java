@@ -2,13 +2,16 @@ package dev.tuink.tui.render;
 
 import dev.tuink.core.GutterDiffFlag;
 import dev.tuink.core.GutterDiffMarker;
-import dev.tuink.core.DisplayText;
+import dev.tuink.terminal.text.TerminalText;
 import dev.tuink.render.Color;
 import dev.tuink.render.LineVisual;
 import dev.tuink.render.RenderPlan;
 import dev.tuink.render.Style;
 import dev.tuink.render.StyleSpan;
-import dev.tuink.tui.style.CellStyle;
+import dev.tuink.terminal.cell.CellBuffer;
+import dev.tuink.terminal.scroll.HorizontalScrollbar;
+import dev.tuink.terminal.scroll.VerticalScrollbar;
+import dev.tuink.terminal.style.CellStyle;
 import dev.tuink.tui.style.UiStyles;
 import dev.tuink.tui.style.UiStyles.Palette;
 import java.util.Arrays;
@@ -319,7 +322,7 @@ public class RenderRasterizer {
     private void drawText(CellBuffer buffer, int row, int col, String text, CellStyle style, int cols) {
         int outCol = col;
         String value = text == null ? "" : text;
-        DisplayText.Metrics metrics = DisplayText.metrics(value, 1);
+        TerminalText.Metrics metrics = TerminalText.metrics(value, 1);
         for (int index = 0; index < metrics.graphemeCount(); index++) {
             String safe = displayGrapheme(value, metrics.start(index), metrics.end(index));
             int width = Math.max(1, metrics.width(index));
@@ -338,7 +341,7 @@ public class RenderRasterizer {
         StringBuilder out = new StringBuilder();
         int used = 0;
         String value = text == null ? "" : text;
-        DisplayText.Metrics metrics = DisplayText.metrics(value, 1);
+        TerminalText.Metrics metrics = TerminalText.metrics(value, 1);
         for (int index = 0; index < metrics.graphemeCount(); index++) {
             String safe = displayGrapheme(value, metrics.start(index), metrics.end(index));
             int cellWidth = Math.max(1, metrics.width(index));
@@ -432,7 +435,7 @@ public class RenderRasterizer {
         }
 
         preparedLineCacheMisses++;
-        DisplayText.Metrics metrics = DisplayText.metrics(value, tabWidth);
+        TerminalText.Metrics metrics = TerminalText.metrics(value, tabWidth);
         int count = metrics.graphemeCount();
         String[] display = new String[count];
         int[] advances = new int[count];
@@ -544,7 +547,7 @@ public class RenderRasterizer {
     }
 
     private void applySpans(
-        DisplayText.Metrics metrics,
+        TerminalText.Metrics metrics,
         List<StyleSpan> spans,
         int fromIndex,
         int toIndex,
@@ -565,7 +568,7 @@ public class RenderRasterizer {
         }
     }
 
-    private int firstOverlappingGrapheme(DisplayText.Metrics metrics, int offset) {
+    private int firstOverlappingGrapheme(TerminalText.Metrics metrics, int offset) {
         int low = 0;
         int high = metrics.graphemeCount();
         while (low < high) {
@@ -579,7 +582,7 @@ public class RenderRasterizer {
         return low;
     }
 
-    private int firstStartingAtOrAfter(DisplayText.Metrics metrics, int offset) {
+    private int firstStartingAtOrAfter(TerminalText.Metrics metrics, int offset) {
         int low = 0;
         int high = metrics.graphemeCount();
         while (low < high) {
@@ -659,20 +662,20 @@ public class RenderRasterizer {
                 return ASCII_DISPLAY[value];
             }
         }
-        return DisplayText.sanitizeGrapheme(text.substring(start, end));
+        return TerminalText.sanitizeGrapheme(text.substring(start, end));
     }
 
     private static String[] createAsciiDisplay() {
         String[] display = new String[128];
         for (int value = 0; value < display.length; value++) {
-            display[value] = DisplayText.sanitizeGrapheme(Character.toString(value));
+            display[value] = TerminalText.sanitizeGrapheme(Character.toString(value));
         }
         return display;
     }
 
     private static int preparedLineWeight(
         String text,
-        DisplayText.Metrics metrics,
+        TerminalText.Metrics metrics,
         int baseSpanCount
     ) {
         long estimated = 64L
@@ -732,7 +735,7 @@ public class RenderRasterizer {
     }
 
     private record PreparedLine(
-        DisplayText.Metrics metrics,
+        TerminalText.Metrics metrics,
         String[] display,
         int[] advances,
         int[] visualOffsets,

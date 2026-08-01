@@ -1,8 +1,8 @@
 package dev.tuink.tui.ui;
 
-import dev.tuink.tui.render.CellBuffer;
-import dev.tuink.tui.render.CellText;
-import dev.tuink.tui.style.CellStyle;
+import dev.tuink.terminal.cell.CellBuffer;
+import dev.tuink.terminal.cell.CellText;
+import dev.tuink.terminal.style.CellStyle;
 
 /**
  * Reusable modal frame element with title and close button.

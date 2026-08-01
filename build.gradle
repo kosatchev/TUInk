@@ -37,13 +37,14 @@ subprojects {
 
 def allowedProjectDependencies = [
     ':unicode-text'   : [] as Set,
+    ':tui-core'       : [':unicode-text'] as Set,
     ':core'           : [':unicode-text'] as Set,
-    ':render'         : [':core'] as Set,
+    ':render'         : [':tui-core', ':core'] as Set,
     ':highlight-regex': [':core', ':render'] as Set,
-    ':tui'            : [':unicode-text', ':core', ':render', ':highlight-regex'] as Set,
+    ':tui'            : [':unicode-text', ':tui-core', ':core', ':render', ':highlight-regex'] as Set,
     ':app'            : [':tui'] as Set
 ]
-def unicodeProductionConfigurations = [
+def externallyDependencyFreeProductionConfigurations = [
     'annotationProcessor',
     'api',
     'compileOnly',
@@ -89,8 +90,8 @@ def verifyProjectDependencies = tasks.register('verifyProjectDependencies') {
                                     + "${dependency.group}:${dependency.name}"
                             )
                         }
-                        if (sourceProject.path == ':unicode-text'
-                            && unicodeProductionConfigurations.contains(configuration.name)) {
+                        if ([':unicode-text', ':tui-core'].contains(sourceProject.path)
+                            && externallyDependencyFreeProductionConfigurations.contains(configuration.name)) {
                             violations.add(
                                 "${sourceProject.path}:${configuration.name} -> "
                                     + "${dependency.group}:${dependency.name}"

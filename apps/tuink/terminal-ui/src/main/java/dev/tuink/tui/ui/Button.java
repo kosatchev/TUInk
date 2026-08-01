@@ -1,9 +1,9 @@
 package dev.tuink.tui.ui;
 
-import dev.tuink.tui.render.CellBuffer;
-import dev.tuink.tui.render.CellText;
-import dev.tuink.core.DisplayText;
-import dev.tuink.tui.style.CellStyle;
+import dev.tuink.terminal.cell.CellBuffer;
+import dev.tuink.terminal.cell.CellText;
+import dev.tuink.terminal.text.TerminalText;
+import dev.tuink.terminal.style.CellStyle;
 
 /**
  * Reusable single-line text button for TUI overlays.
@@ -44,7 +44,7 @@ public final class Button {
     public int cursorCol() {
         String rendered = renderedText();
         int visual = 0;
-        for (DisplayText.Grapheme grapheme : DisplayText.graphemes(rendered)) {
+        for (TerminalText.Grapheme grapheme : TerminalText.graphemes(rendered)) {
             int codePoint = grapheme.text().codePointAt(0);
             if (Character.isLetterOrDigit(codePoint)) {
                 return col + visual;

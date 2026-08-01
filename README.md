@@ -3,10 +3,13 @@
 Minimal Java terminal text editor with clean multi-module architecture:
 
 - `unicode-text`: dependency-free grapheme boundaries and UTF-16 offset mapping
+- `tui-core`: editor-independent terminal text, cells, geometry, input, scrolling,
+  frame, and event-loop contracts under `dev.tuink.terminal.*`
 - `core`: editor engine and text model (`TextBuffer` + `SimpleLineBuffer`)
-- `render`: UI-agnostic render planning and style spans
+- `render`: editor render planning, style spans, and terminal-aware layout
 - `highlight-regex`: regex-based syntax highlighter
-- `tui`: JLine-based terminal frontend (raw mode + alternate screen + ANSI diff)
+- `tui`: TUInk widgets/rasterization and the JLine terminal backend
+  (raw mode + alternate screen + ANSI presentation)
 - `app`: canonical entrypoint and release assembly
 
 ## Project Status

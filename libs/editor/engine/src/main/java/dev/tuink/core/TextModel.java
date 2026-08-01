@@ -14,10 +14,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -25,9 +22,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * Editing operations and persistence over a {@link TextBuffer}.
  */
 public class TextModel {
-    private static final AtomicLong NEXT_RENDER_CACHE_ID = new AtomicLong();
-    private static final int MAX_DISPLAY_METRICS_LINES = 200_000;
-    private static final int MAX_DISPLAY_METRICS_WEIGHT = 8_388_608;
+    private static final AtomicLong NEXT_CACHE_ID = new AtomicLong();
     private final TextBuffer buffer;
     private static final Charset FALLBACK_CHARSET = Charset.forName("windows-1251");
     private static final Set<PosixFilePermission> NEW_FILE_PERMISSIONS = Set.of(
@@ -38,16 +33,9 @@ public class TextModel {
         PosixFilePermission.OTHERS_READ,
         PosixFilePermission.OTHERS_WRITE
     );
-    private int cachedVisualWidthTabWidth = -1;
-    private int cachedMaxVisualLineWidth = 0;
-    private boolean maxVisualWidthDirty = true;
-    private final Map<WrapStartsKey, List<Integer>> wrapStartsCache = new HashMap<>();
-    private final Map<WrapLayoutKey, int[]> wrapPrefixCache = new HashMap<>();
-    private final Map<Integer, DisplayMetricsEntry> displayMetricsCache =
-        new LinkedHashMap<>(256, 0.75f, true);
-    private int displayMetricsWeight = 0;
     private long revision = 0L;
-    private final long renderCacheIdentity = NEXT_RENDER_CACHE_ID.incrementAndGet();
+    private long contentEpoch = 0L;
+    private final long cacheIdentity = NEXT_CACHE_ID.incrementAndGet();
 
     public TextModel(TextBuffer buffer) {
         this.buffer = buffer;
@@ -66,7 +54,7 @@ public class TextModel {
         int col = Math.min(position.col(), line.length());
         String updated = line.substring(0, col) + ch + line.substring(col);
         buffer.setLine(position.line(), updated);
-        invalidateVisualWidthCache();
+        markChanged();
         return new Position(position.line(), col + 1);
     }
 
@@ -77,7 +65,7 @@ public class TextModel {
         String right = line.substring(col);
         buffer.setLine(position.line(), left);
         buffer.insertLine(position.line() + 1, right);
-        invalidateVisualWidthCache();
+        markChanged();
         return new Position(position.line() + 1, 0);
     }
 
@@ -90,7 +78,7 @@ public class TextModel {
             int previous = graphemes.previousBoundary(end);
             String updated = line.substring(0, previous) + line.substring(end);
             buffer.setLine(position.line(), updated);
-            invalidateVisualWidthCache();
+            markChanged();
             return new Position(position.line(), previous);
         }
 
@@ -102,7 +90,7 @@ public class TextModel {
         int prevLineIndex = position.line() - 1;
         String prev = buffer.getLine(prevLineIndex);
         buffer.setLine(prevLineIndex, prev + current);
-        invalidateVisualWidthCache();
+        markChanged();
         return new Position(prevLineIndex, prev.length());
     }
 
@@ -116,7 +104,7 @@ public class TextModel {
             int next = graphemes.nextBoundary(start);
             String updated = line.substring(0, start) + line.substring(next);
             buffer.setLine(position.line(), updated);
-            invalidateVisualWidthCache();
+            markChanged();
             return new Position(position.line(), start);
         }
 
@@ -126,7 +114,7 @@ public class TextModel {
 
         String next = buffer.removeLine(position.line() + 1);
         buffer.setLine(position.line(), line + next);
-        invalidateVisualWidthCache();
+        markChanged();
         return new Position(position.line(), col);
     }
 
@@ -171,7 +159,7 @@ public class TextModel {
         if (a.line() == b.line()) {
             String line = buffer.getLine(a.line());
             buffer.setLine(a.line(), line.substring(0, a.col()) + line.substring(b.col()));
-            invalidateVisualWidthCache();
+            markChanged();
             return a;
         }
 
@@ -181,7 +169,7 @@ public class TextModel {
         for (int i = b.line(); i > a.line(); i--) {
             buffer.removeLine(i);
         }
-        invalidateVisualWidthCache();
+        markChanged();
         return a;
     }
 
@@ -200,7 +188,7 @@ public class TextModel {
 
         if (parts.length == 1) {
             buffer.setLine(at.line(), left + parts[0] + right);
-            invalidateVisualWidthCache();
+            markChanged();
             return new Position(at.line(), col + parts[0].length());
         }
 
@@ -210,7 +198,7 @@ public class TextModel {
         }
         String last = parts[parts.length - 1];
         buffer.insertLine(at.line() + parts.length - 1, last + right);
-        invalidateVisualWidthCache();
+        markChanged();
         return new Position(at.line() + parts.length - 1, last.length());
     }
 
@@ -225,17 +213,17 @@ public class TextModel {
         DecodedContent decoded = decodeWithDetectedCharset(data);
         String lineSeparator = detectLineSeparator(decoded.text());
         List<String> lines = splitLines(decoded.text());
-        clearDisplayMetricsCache();
         buffer.clear();
         if (lines.isEmpty()) {
             buffer.setLine(0, "");
+            markContentReplaced();
             return new LoadMetadata(decoded.charset(), lineSeparator);
         }
         buffer.setLine(0, lines.get(0));
         for (int i = 1; i < lines.size(); i++) {
             buffer.insertLine(i, lines.get(i));
         }
-        invalidateVisualWidthCache();
+        markContentReplaced();
         return new LoadMetadata(decoded.charset(), lineSeparator);
     }
 
@@ -333,172 +321,42 @@ public class TextModel {
         return max;
     }
 
-    public int maxVisualLineWidth(int tabWidth) {
-        int safeTabWidth = Math.max(1, tabWidth);
-        if (!maxVisualWidthDirty && cachedVisualWidthTabWidth == safeTabWidth) {
-            return cachedMaxVisualLineWidth;
-        }
-        int max = 0;
-        for (int i = 0; i < lineCount(); i++) {
-            max = Math.max(max, displayMetrics(i, safeTabWidth).visualWidth());
-        }
-        cachedVisualWidthTabWidth = safeTabWidth;
-        cachedMaxVisualLineWidth = max;
-        maxVisualWidthDirty = false;
-        return max;
-    }
-
     public long revision() {
         return revision;
     }
 
-    public long renderCacheIdentity() {
-        return renderCacheIdentity;
+    /**
+     * Generation of whole-document replacements such as load and recovery restore.
+     */
+    public long contentEpoch() {
+        return contentEpoch;
     }
 
-    public DisplayText.Metrics displayMetrics(int line, int tabWidth) {
-        if (lineCount() <= 0) {
-            return DisplayText.metrics("", tabWidth);
-        }
-        int safeLine = Math.max(0, Math.min(line, lineCount() - 1));
-        int safeTabWidth = Math.max(1, tabWidth);
-        String text = getLine(safeLine);
-        DisplayMetricsEntry cached = displayMetricsCache.get(safeLine);
-        if (cached != null && cached.matches(text, safeTabWidth)) {
-            return cached.metrics();
-        }
-        if (cached != null) {
-            displayMetricsCache.remove(safeLine);
-            displayMetricsWeight -= cached.weight();
-        }
-
-        DisplayText.Metrics metrics = DisplayText.metrics(text, safeTabWidth);
-        DisplayMetricsEntry computed = new DisplayMetricsEntry(text, safeTabWidth, metrics);
-        displayMetricsCache.put(safeLine, computed);
-        displayMetricsWeight += computed.weight();
-        trimDisplayMetricsCache();
-        return metrics;
-    }
-
-    public List<Integer> wrapStarts(int line, int width, boolean wrapByWords, int tabWidth) {
-        if (lineCount() <= 0) {
-            return List.of(0);
-        }
-        int safeLine = Math.max(0, Math.min(line, lineCount() - 1));
-        WrapStartsKey key = new WrapStartsKey(safeLine, Math.max(0, width), wrapByWords, Math.max(1, tabWidth));
-        List<Integer> cached = wrapStartsCache.get(key);
-        if (cached != null) {
-            return cached;
-        }
-        List<Integer> computed = ViewportMetrics.wrapStarts(
-            displayMetrics(safeLine, key.tabWidth()),
-            key.width(),
-            key.wrapByWords()
-        );
-        wrapStartsCache.put(key, computed);
-        return computed;
-    }
-
-    public int wrappedRowsBefore(int lineIndexExclusive, int width, boolean wrapByWords, int tabWidth) {
-        int[] prefix = wrapPrefix(width, wrapByWords, tabWidth);
-        int limit = Math.max(0, Math.min(lineIndexExclusive, lineCount()));
-        return prefix[limit];
-    }
-
-    public int totalWrappedRows(int width, boolean wrapByWords, int tabWidth) {
-        int[] prefix = wrapPrefix(width, wrapByWords, tabWidth);
-        return prefix[Math.max(0, lineCount())];
-    }
-
-    public int lineIndexFromWrappedOffset(int wrappedOffset, int width, boolean wrapByWords, int tabWidth) {
-        int[] prefix = wrapPrefix(width, wrapByWords, tabWidth);
-        int total = prefix[Math.max(0, lineCount())];
-        int target = Math.max(0, Math.min(wrappedOffset, Math.max(0, total - 1)));
-        int lo = 0;
-        int hi = Math.max(0, lineCount() - 1);
-        while (lo <= hi) {
-            int mid = (lo + hi) >>> 1;
-            int start = prefix[mid];
-            int end = prefix[mid + 1];
-            if (target < start) {
-                hi = mid - 1;
-            } else if (target >= end) {
-                lo = mid + 1;
-            } else {
-                return mid;
-            }
-        }
-        return Math.max(0, lineCount() - 1);
+    public long cacheIdentity() {
+        return cacheIdentity;
     }
 
     public void replaceLines(List<String> lines) {
-        clearDisplayMetricsCache();
         buffer.clear();
         if (lines == null || lines.isEmpty()) {
             buffer.setLine(0, "");
-            invalidateVisualWidthCache();
+            markContentReplaced();
             return;
         }
         buffer.setLine(0, lines.get(0));
         for (int i = 1; i < lines.size(); i++) {
             buffer.insertLine(i, lines.get(i));
         }
-        invalidateVisualWidthCache();
+        markContentReplaced();
     }
 
-    private void invalidateVisualWidthCache() {
-        maxVisualWidthDirty = true;
-        wrapStartsCache.clear();
-        wrapPrefixCache.clear();
+    private void markChanged() {
         revision++;
     }
 
-    private void trimDisplayMetricsCache() {
-        var iterator = displayMetricsCache.entrySet().iterator();
-        while (iterator.hasNext()
-            && (displayMetricsCache.size() > MAX_DISPLAY_METRICS_LINES
-                || (displayMetricsWeight > MAX_DISPLAY_METRICS_WEIGHT
-                    && displayMetricsCache.size() > 1))) {
-            DisplayMetricsEntry removed = iterator.next().getValue();
-            displayMetricsWeight -= removed.weight();
-            iterator.remove();
-        }
-    }
-
-    private void clearDisplayMetricsCache() {
-        displayMetricsCache.clear();
-        displayMetricsWeight = 0;
-    }
-
-    private record DisplayMetricsEntry(String lineText, int tabWidth, DisplayText.Metrics metrics) {
-        private boolean matches(String text, int width) {
-            return tabWidth == width && lineText.equals(text);
-        }
-
-        private int weight() {
-            return Math.max(1, metrics.storageWeight());
-        }
-    }
-
-    private record WrapStartsKey(int line, int width, boolean wrapByWords, int tabWidth) {
-    }
-
-    private int[] wrapPrefix(int width, boolean wrapByWords, int tabWidth) {
-        WrapLayoutKey key = new WrapLayoutKey(Math.max(0, width), wrapByWords, Math.max(1, tabWidth));
-        int[] cached = wrapPrefixCache.get(key);
-        if (cached != null) {
-            return cached;
-        }
-        int count = lineCount();
-        int[] prefix = new int[count + 1];
-        for (int i = 0; i < count; i++) {
-            prefix[i + 1] = prefix[i] + wrapStarts(i, key.width(), key.wrapByWords(), key.tabWidth()).size();
-        }
-        wrapPrefixCache.put(key, prefix);
-        return prefix;
-    }
-
-    private record WrapLayoutKey(int width, boolean wrapByWords, int tabWidth) {
+    private void markContentReplaced() {
+        contentEpoch++;
+        markChanged();
     }
 
     private DecodedContent decodeWithDetectedCharset(byte[] data) {

@@ -8,7 +8,7 @@ import static dev.tuink.tui.command.TuinkCommandIds.MENU_HELP;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
-import dev.tuink.tui.input.KeyStroke;
+import dev.tuink.terminal.input.KeyStroke;
 import org.junit.jupiter.api.Test;
 
 class TuinkKeymapTest {

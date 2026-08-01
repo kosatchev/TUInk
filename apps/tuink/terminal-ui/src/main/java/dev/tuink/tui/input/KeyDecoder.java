@@ -1,5 +1,10 @@
 package dev.tuink.tui.input;
 
+import dev.tuink.terminal.input.KeyStroke;
+import dev.tuink.terminal.input.PasteEvent;
+import dev.tuink.terminal.input.PointerEvent;
+import dev.tuink.terminal.input.TextInput;
+import dev.tuink.terminal.input.TuiInputEvent;
 import java.io.IOException;
 import java.util.EnumSet;
 import java.util.Set;

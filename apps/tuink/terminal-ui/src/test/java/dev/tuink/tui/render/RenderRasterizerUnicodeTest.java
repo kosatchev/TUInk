@@ -4,7 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.tuink.core.DisplayText;
+import dev.tuink.terminal.text.TerminalText;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.GutterDiffMarker;
 import dev.tuink.core.Position;
@@ -17,7 +17,11 @@ import dev.tuink.render.RenderPlan;
 import dev.tuink.render.RenderPlanBuilder;
 import dev.tuink.render.Style;
 import dev.tuink.render.StyleSpan;
-import dev.tuink.tui.style.CellStyle;
+import dev.tuink.render.TerminalEditorTextLayout;
+import dev.tuink.terminal.cell.Cell;
+import dev.tuink.terminal.cell.CellBuffer;
+import dev.tuink.terminal.cell.CellText;
+import dev.tuink.terminal.style.CellStyle;
 import dev.tuink.tui.style.UiStyles;
 import java.util.ArrayList;
 import java.util.List;
@@ -40,7 +44,7 @@ class RenderRasterizerUnicodeTest {
         assertEquals("e\u0301", buffer.get(1, start + 5).grapheme());
         for (int row = 0; row < buffer.rows(); row++) {
             for (int col = 0; col < buffer.cols(); col++) {
-                assertFalse(DisplayText.containsUnsafeControl(buffer.get(row, col).grapheme()));
+                assertFalse(TerminalText.containsUnsafeControl(buffer.get(row, col).grapheme()));
             }
         }
     }
@@ -137,7 +141,8 @@ class RenderRasterizerUnicodeTest {
         Style syntax = new Style(Color.RED, Color.DEFAULT, false, false);
         Style selection = new Style(Color.BLACK, Color.BRIGHT_CYAN, false, false);
         RenderPlanBuilder builder = new RenderPlanBuilder(
-            text -> List.of(new StyleSpan(0, text.length(), syntax))
+            text -> List.of(new StyleSpan(0, text.length(), syntax)),
+            new TerminalEditorTextLayout(model)
         );
         builder.setBracketMatchingEnabled(false);
         builder.setRainbowBracketsEnabled(false);
@@ -327,7 +332,7 @@ class RenderRasterizerUnicodeTest {
     private static CellBuffer referenceLine(LineVisual line, int cols, int tabWidth) {
         CellBuffer buffer = new CellBuffer(4, cols);
         int absoluteVisual = line.sourceVisualColumn();
-        for (DisplayText.Grapheme grapheme : DisplayText.graphemes(line.text())) {
+        for (TerminalText.Grapheme grapheme : TerminalText.graphemes(line.text())) {
             Style style = Style.DEFAULT;
             for (StyleSpan span : line.spans()) {
                 if (span.end() > grapheme.start() && span.start() < grapheme.end()) {
@@ -352,7 +357,7 @@ class RenderRasterizerUnicodeTest {
                 buffer.set(
                     1,
                     screenCol,
-                    DisplayText.sanitizeGrapheme(grapheme.text()),
+                    TerminalText.sanitizeGrapheme(grapheme.text()),
                     cellStyle
                 );
             }
@@ -423,7 +428,10 @@ class RenderRasterizerUnicodeTest {
         SimpleLineBuffer buffer = new SimpleLineBuffer();
         buffer.setLine(0, line);
         TextModel model = new TextModel(buffer);
-        RenderPlanBuilder builder = new RenderPlanBuilder(ignored -> List.of());
+        RenderPlanBuilder builder = new RenderPlanBuilder(
+            ignored -> List.of(),
+            new TerminalEditorTextLayout(model)
+        );
         builder.setSyntaxHighlightingEnabled(false);
         builder.setBracketMatchingEnabled(false);
         builder.setRainbowBracketsEnabled(false);

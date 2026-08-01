@@ -11,7 +11,7 @@ class EditorEngineSearchGraphemeTest {
         TextModel model = new TextModel(new SimpleLineBuffer());
         model.insertText(new Position(0, 0), "e\u0301");
         EditorState state = new EditorState();
-        EditorEngine engine = new EditorEngine(model, state);
+        EditorEngine engine = new EditorEngine(model, state, new TestEditorTextLayout(model));
 
         assertTrue(engine.findNext("e"));
         assertEquals(new Position(0, 0), state.getSelectionAnchor());

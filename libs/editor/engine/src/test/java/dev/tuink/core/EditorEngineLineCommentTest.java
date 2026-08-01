@@ -151,7 +151,7 @@ class EditorEngineLineCommentTest {
         model.insertText(new Position(0, 0), text);
         EditorState state = new EditorState();
         state.setCurrentFile(Path.of(fileName));
-        return new Fixture(model, state, new EditorEngine(model, state));
+        return new Fixture(model, state, new EditorEngine(model, state, new TestEditorTextLayout(model)));
     }
 
     private record Fixture(TextModel model, EditorState state, EditorEngine engine) {

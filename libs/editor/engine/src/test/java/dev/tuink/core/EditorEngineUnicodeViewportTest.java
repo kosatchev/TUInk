@@ -64,7 +64,7 @@ class EditorEngineUnicodeViewportTest {
 
         fixture.engine().ensureCursorVisible(1, 4, true, false);
 
-        assertEquals(List.of(0, 1), fixture.model().wrapStarts(0, 4, false, 4));
+        assertEquals(List.of(0, 1), fixture.engine().textLayout().wrapStarts(0, 4, false, 4));
         assertEquals(0, fixture.state().getTopLine());
         assertEquals(1, fixture.state().getTopWrapSegment());
     }
@@ -109,7 +109,7 @@ class EditorEngineUnicodeViewportTest {
         TextModel model = new TextModel(new SimpleLineBuffer());
         model.insertText(new Position(0, 0), text);
         EditorState state = new EditorState();
-        EditorEngine engine = new EditorEngine(model, state);
+        EditorEngine engine = new EditorEngine(model, state, new TestEditorTextLayout(model));
         return new Fixture(model, state, engine);
     }
 

@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
+import dev.tuink.terminal.input.KeyStroke;
+import dev.tuink.terminal.input.TextInput;
 import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.Queue;

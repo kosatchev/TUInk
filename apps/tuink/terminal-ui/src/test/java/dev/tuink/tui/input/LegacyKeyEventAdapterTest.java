@@ -5,6 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.terminal.input.KeyStroke;
+import dev.tuink.terminal.input.PasteEvent;
+import dev.tuink.terminal.input.PointerEvent;
+import dev.tuink.terminal.input.ResizeEvent;
+import dev.tuink.terminal.input.TextInput;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;

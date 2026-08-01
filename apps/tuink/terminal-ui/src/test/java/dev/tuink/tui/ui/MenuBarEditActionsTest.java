@@ -2,7 +2,7 @@ package dev.tuink.tui.ui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import dev.tuink.tui.style.CellStyle;
+import dev.tuink.terminal.style.CellStyle;
 import dev.tuink.tui.input.KeyEvent;
 import org.junit.jupiter.api.Test;
 

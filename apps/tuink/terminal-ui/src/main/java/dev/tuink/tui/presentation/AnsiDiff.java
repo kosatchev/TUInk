@@ -1,11 +1,11 @@
 package dev.tuink.tui.presentation;
 
-import dev.tuink.tui.render.Cell;
-import dev.tuink.tui.render.CellBuffer;
-import dev.tuink.tui.geometry.Rect;
-import dev.tuink.tui.screen.ScrollHint;
-import dev.tuink.tui.style.CellColor;
-import dev.tuink.tui.style.CellStyle;
+import dev.tuink.terminal.cell.Cell;
+import dev.tuink.terminal.cell.CellBuffer;
+import dev.tuink.terminal.geometry.Rect;
+import dev.tuink.terminal.screen.ScrollHint;
+import dev.tuink.terminal.style.CellColor;
+import dev.tuink.terminal.style.CellStyle;
 import java.util.HashMap;
 import java.util.Map;
 

@@ -1,9 +1,9 @@
 package dev.tuink.tui.ui;
 
-import dev.tuink.core.DisplayText;
-import dev.tuink.tui.style.CellStyle;
-import dev.tuink.tui.render.CellBuffer;
-import dev.tuink.tui.render.CellText;
+import dev.tuink.terminal.text.TerminalText;
+import dev.tuink.terminal.style.CellStyle;
+import dev.tuink.terminal.cell.CellBuffer;
+import dev.tuink.terminal.cell.CellText;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;

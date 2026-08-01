@@ -5,8 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 
 import dev.tuink.render.Color;
 import dev.tuink.render.Style;
-import dev.tuink.tui.style.CellColor;
-import dev.tuink.tui.style.CellStyle;
+import dev.tuink.terminal.style.CellColor;
+import dev.tuink.terminal.style.CellStyle;
 import org.junit.jupiter.api.Test;
 
 class EditorStyleAdapterTest {

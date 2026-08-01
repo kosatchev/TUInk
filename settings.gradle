@@ -12,7 +12,8 @@ def projectDirectories = [
     ':render': 'apps/tuink/terminal-rendering',
     ':core': 'libs/editor/engine',
     ':highlight-regex': 'libs/editor/highlight-regex',
-    ':unicode-text': 'libs/unicode-text'
+    ':unicode-text': 'libs/unicode-text',
+    ':tui-core': 'libs/tuiframe/core'
 ]
 projectDirectories.each { projectPath, directory ->
     include projectPath

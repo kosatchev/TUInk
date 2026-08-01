@@ -1,12 +1,12 @@
 package dev.tuink.tui.ui;
 
-import dev.tuink.tui.style.CellStyle;
+import dev.tuink.terminal.style.CellStyle;
 import dev.tuink.core.GutterDiffMode;
 import dev.tuink.core.TabInsertMode;
 import dev.tuink.tui.input.KeyEvent;
-import dev.tuink.tui.render.Cell;
-import dev.tuink.tui.render.CellBuffer;
-import dev.tuink.tui.render.CellText;
+import dev.tuink.terminal.cell.Cell;
+import dev.tuink.terminal.cell.CellBuffer;
+import dev.tuink.terminal.cell.CellText;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;

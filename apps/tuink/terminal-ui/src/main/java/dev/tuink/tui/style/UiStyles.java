@@ -2,6 +2,8 @@ package dev.tuink.tui.style;
 
 import dev.tuink.render.Color;
 import dev.tuink.render.Style;
+import dev.tuink.terminal.style.CellColor;
+import dev.tuink.terminal.style.CellStyle;
 import java.util.List;
 
 /**

@@ -18,6 +18,7 @@ public final class EditorViewportBehavior {
 
     public static Position pointerToTextPosition(
         TextModel model,
+        EditorTextLayout textLayout,
         EditorState state,
         int contentTopRow,
         int contentRows,
@@ -26,6 +27,7 @@ public final class EditorViewportBehavior {
         int gutterWidth,
         int tabWidth
     ) {
+        requireBoundModel(model, textLayout);
         int top = Math.max(1, contentTopRow);
         if (mouseRow < top || mouseRow >= top + contentRows) {
             return null;
@@ -34,7 +36,8 @@ public final class EditorViewportBehavior {
         line = Math.max(0, Math.min(line, model.lineCount() - 1));
         int targetVisualCol = mouseCol < gutterWidth ? 0 : mouseCol - gutterWidth;
         int col = visualToTextColumn(
-            model.getLine(line),
+            textLayout,
+            line,
             0,
             Math.max(0, state.getLeftVisualColumn() + targetVisualCol),
             tabWidth
@@ -42,8 +45,20 @@ public final class EditorViewportBehavior {
         return model.clamp(new Position(line, Math.max(0, col)));
     }
 
-    public static int visualToTextColumn(String line, int leftColumn, int targetVisualCol, int tabWidth) {
-        return ViewportMetrics.visualToTextColumn(line, leftColumn, targetVisualCol, tabWidth);
+    public static int visualToTextColumn(
+        EditorTextLayout textLayout,
+        int line,
+        int leftColumn,
+        int targetVisualCol,
+        int tabWidth
+    ) {
+        int leftVisual = textLayout.visualColumnAt(line, leftColumn, tabWidth);
+        return textLayout.textOffsetAtVisualColumn(
+            line,
+            leftVisual + Math.max(0, targetVisualCol),
+            tabWidth,
+            EditorTextLayout.Bias.NEAREST
+        );
     }
 
     public static void applyVerticalScroll(EditorState state, TextModel model, int targetTopLine) {
@@ -85,16 +100,18 @@ public final class EditorViewportBehavior {
     public static void applyHorizontalScrollVisual(
         EditorState state,
         TextModel model,
+        EditorTextLayout textLayout,
         int targetLeftVisualColumn,
         int tabWidth
     ) {
+        requireBoundModel(model, textLayout);
         int safeTabWidth = tabWidth <= 2 ? 2 : 4;
         int line = Math.max(0, Math.min(state.getCursor().line(), model.lineCount() - 1));
-        String lineText = model.getLine(line);
-        int targetLeftColumn = ViewportMetrics.visualToTextColumnFloor(
-            lineText,
+        int targetLeftColumn = textLayout.textOffsetAtVisualColumn(
+            line,
             Math.max(0, targetLeftVisualColumn),
-            safeTabWidth
+            safeTabWidth,
+            EditorTextLayout.Bias.FLOOR
         );
         state.setLeftVisualColumn(Math.max(0, targetLeftVisualColumn));
         state.setLeftColumn(Math.max(0, targetLeftColumn));
@@ -111,17 +128,19 @@ public final class EditorViewportBehavior {
 
     public static WrapTop normalizeWrapTop(
         TextModel model,
+        EditorTextLayout textLayout,
         int topLine,
         int topWrapSegment,
         int width,
         boolean wrapByWords,
         int tabWidth
     ) {
+        requireBoundModel(model, textLayout);
         int lineCount = Math.max(1, model.lineCount());
         int line = Math.max(0, Math.min(topLine, lineCount - 1));
         int segment = Math.max(0, topWrapSegment);
         while (line < lineCount) {
-            int segments = model.wrapStarts(line, width, wrapByWords, tabWidth).size();
+            int segments = textLayout.wrapStarts(line, width, wrapByWords, tabWidth).size();
             if (segment < segments) {
                 return new WrapTop(line, segment);
             }
@@ -133,40 +152,47 @@ public final class EditorViewportBehavior {
 
     public static WrapTop wrapTopFromWrappedOffset(
         TextModel model,
+        EditorTextLayout textLayout,
         int wrappedOffset,
         int width,
         boolean wrapByWords,
         int tabWidth
     ) {
-        int line = model.lineIndexFromWrappedOffset(wrappedOffset, width, wrapByWords, tabWidth);
-        int lineWrappedStart = model.wrappedRowsBefore(line, width, wrapByWords, tabWidth);
+        requireBoundModel(model, textLayout);
+        int line = textLayout.lineIndexFromWrappedOffset(wrappedOffset, width, wrapByWords, tabWidth);
+        int lineWrappedStart = textLayout.wrappedRowsBefore(line, width, wrapByWords, tabWidth);
         int segmentOffset = Math.max(0, wrappedOffset - lineWrappedStart);
         return new WrapTop(line, segmentOffset);
     }
 
     public static int wrappedOffsetForWrapTop(
         TextModel model,
+        EditorTextLayout textLayout,
         WrapTop top,
         int width,
         boolean wrapByWords,
         int tabWidth
     ) {
+        requireBoundModel(model, textLayout);
         if (top == null) {
             return 0;
         }
         WrapTop normalized = normalizeWrapTop(
             model,
+            textLayout,
             top.line(),
             top.segmentOffset(),
             width,
             wrapByWords,
             tabWidth
         );
-        return model.wrappedRowsBefore(normalized.line(), width, wrapByWords, tabWidth) + normalized.segmentOffset();
+        return textLayout.wrappedRowsBefore(normalized.line(), width, wrapByWords, tabWidth)
+            + normalized.segmentOffset();
     }
 
     public static WrapTop wrapTopFromWrappedOffsetNear(
         TextModel model,
+        EditorTextLayout textLayout,
         int currentLine,
         int currentSegmentOffset,
         int currentWrappedOffset,
@@ -175,6 +201,7 @@ public final class EditorViewportBehavior {
         boolean wrapByWords,
         int tabWidth
     ) {
+        requireBoundModel(model, textLayout);
         int lineCount = model.lineCount();
         if (lineCount <= 0) {
             return new WrapTop(0, 0);
@@ -185,18 +212,18 @@ public final class EditorViewportBehavior {
         int target = Math.max(0, targetWrappedOffset);
 
         if (segmentOffset > 0) {
-            int segments = model.wrapStarts(line, width, wrapByWords, tabWidth).size();
+            int segments = textLayout.wrapStarts(line, width, wrapByWords, tabWidth).size();
             while (line < lineCount - 1 && segmentOffset >= segments) {
                 offset += segments;
                 segmentOffset -= segments;
                 line++;
-                segments = model.wrapStarts(line, width, wrapByWords, tabWidth).size();
+                segments = textLayout.wrapStarts(line, width, wrapByWords, tabWidth).size();
             }
         }
 
         if (target >= offset) {
             while (line < lineCount) {
-                int segments = model.wrapStarts(line, width, wrapByWords, tabWidth).size();
+                int segments = textLayout.wrapStarts(line, width, wrapByWords, tabWidth).size();
                 int nextOffset = offset + segments;
                 if (target < nextOffset || line == lineCount - 1) {
                     return new WrapTop(line, Math.max(0, target - offset));
@@ -209,7 +236,7 @@ public final class EditorViewportBehavior {
 
         while (line > 0) {
             int prevLine = line - 1;
-            int prevSegments = model.wrapStarts(prevLine, width, wrapByWords, tabWidth).size();
+            int prevSegments = textLayout.wrapStarts(prevLine, width, wrapByWords, tabWidth).size();
             int prevOffset = Math.max(0, offset - prevSegments);
             if (target >= prevOffset) {
                 return new WrapTop(prevLine, Math.max(0, target - prevOffset));
@@ -218,6 +245,12 @@ public final class EditorViewportBehavior {
             line = prevLine;
         }
         return new WrapTop(0, 0);
+    }
+
+    private static void requireBoundModel(TextModel model, EditorTextLayout textLayout) {
+        if (model == null || textLayout == null || textLayout.model() != model) {
+            throw new IllegalArgumentException("textLayout must be bound to model");
+        }
     }
 
 }

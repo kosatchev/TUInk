@@ -1,7 +1,7 @@
 package dev.tuink.tui.ui;
 
 import dev.tuink.tui.flow.ConfirmChoice;
-import dev.tuink.tui.render.CellText;
+import dev.tuink.terminal.cell.CellText;
 
 public final class ConfirmBarView {
     private final String row;
@@ -159,7 +159,7 @@ public final class ConfirmBarView {
         if (charOffset < 0) {
             return -1;
         }
-        return dev.tuink.core.DisplayText.visualColumnAt(row, charOffset, 4);
+        return dev.tuink.terminal.text.TerminalText.visualColumnAt(row, charOffset, 4);
     }
 
     private static ConfirmChoice normalizeSelected(

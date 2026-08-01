@@ -40,8 +40,20 @@ class EditorLayoutTest {
         TextModel model = model("123456789");
         EditorState state = new EditorState();
         state.setCursor(new Position(0, 9));
+        TerminalEditorTextLayout textLayout = new TerminalEditorTextLayout(model);
 
-        EditorLayout layout = EditorLayout.resolve(model, state, 5, 12, 1, 0, false, false, 4);
+        EditorLayout layout = EditorLayout.resolve(
+            model,
+            textLayout,
+            state,
+            5,
+            12,
+            1,
+            0,
+            false,
+            false,
+            4
+        );
 
         assertEquals(1, layout.horizontalScrollbarHeight());
         assertEquals(2, layout.contentRows());
@@ -70,15 +82,27 @@ class EditorLayoutTest {
     void wrappingIsRecomputedAfterVerticalScrollbarNarrowsViewport() {
         TextModel model = model("1234567890123456789");
         EditorState state = new EditorState();
+        TerminalEditorTextLayout textLayout = new TerminalEditorTextLayout(model);
 
-        EditorLayout layout = EditorLayout.resolve(model, state, 5, 9, 1, 0, true, false, 4);
+        EditorLayout layout = EditorLayout.resolve(
+            model,
+            textLayout,
+            state,
+            5,
+            9,
+            1,
+            0,
+            true,
+            false,
+            4
+        );
 
         assertAll(
             () -> assertEquals(5, layout.contentColumns()),
             () -> assertEquals(3, layout.contentRows()),
             () -> assertEquals(1, layout.scrollbarWidth()),
             () -> assertEquals(0, layout.horizontalScrollbarHeight()),
-            () -> assertEquals(4, model.totalWrappedRows(layout.contentColumns(), false, 4))
+            () -> assertEquals(4, textLayout.totalWrappedRows(layout.contentColumns(), false, 4))
         );
     }
 
@@ -117,6 +141,7 @@ class EditorLayoutTest {
     ) {
         return EditorLayout.resolve(
             model,
+            new TerminalEditorTextLayout(model),
             new EditorState(),
             rows,
             cols,

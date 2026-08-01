@@ -36,6 +36,7 @@ public class EditorEngine {
     private static final LineSequenceComparator GUTTER_SEQUENCE_COMPARATOR = new LineSequenceComparator();
     private final TextModel model;
     private final EditorState state;
+    private final EditorTextLayout textLayout;
     private final Deque<HistoryEntry> undoStack = new ArrayDeque<>();
     private final Deque<HistoryEntry> redoStack = new ArrayDeque<>();
     private String clipboard = "";
@@ -61,9 +62,13 @@ public class EditorEngine {
     private long gutterDiffLastRebuildDurationNanos;
     private boolean gutterDiffPendingRebuild;
 
-    public EditorEngine(TextModel model, EditorState state) {
+    public EditorEngine(TextModel model, EditorState state, EditorTextLayout textLayout) {
         this.model = model;
         this.state = state;
+        if (textLayout == null || textLayout.model() != model) {
+            throw new IllegalArgumentException("textLayout must be bound to the engine model");
+        }
+        this.textLayout = textLayout;
         resetGutterDiffBaselinesOnOpen();
     }
 
@@ -73,6 +78,10 @@ public class EditorEngine {
 
     public EditorState state() {
         return state;
+    }
+
+    public EditorTextLayout textLayout() {
+        return textLayout;
     }
 
     public RecoverySnapshot captureRecoverySnapshot() {
@@ -353,10 +362,10 @@ public class EditorEngine {
             return;
         }
         if (preferredVisualColumn < 0) {
-            preferredVisualColumn = visualColumn(model.getLine(p.line()), 0, p.col());
+            preferredVisualColumn = visualColumn(p.line(), 0, p.col());
         }
         int targetLine = p.line() - 1;
-        int col = columnForVisualColumn(model.getLine(targetLine), preferredVisualColumn);
+        int col = columnForVisualColumn(targetLine, preferredVisualColumn);
         moveCursor(new Position(targetLine, col), selecting, p);
     }
 
@@ -370,10 +379,10 @@ public class EditorEngine {
             return;
         }
         if (preferredVisualColumn < 0) {
-            preferredVisualColumn = visualColumn(model.getLine(p.line()), 0, p.col());
+            preferredVisualColumn = visualColumn(p.line(), 0, p.col());
         }
         int targetLine = p.line() + 1;
-        int col = columnForVisualColumn(model.getLine(targetLine), preferredVisualColumn);
+        int col = columnForVisualColumn(targetLine, preferredVisualColumn);
         moveCursor(new Position(targetLine, col), selecting, p);
     }
 
@@ -927,7 +936,7 @@ public class EditorEngine {
 
         if (wrapLines) {
             int width = Math.max(1, contentCols);
-            List<Integer> starts = model.wrapStarts(p.line(), width, wrapByWords, tabWidth);
+            List<Integer> starts = textLayout.wrapStarts(p.line(), width, wrapByWords, tabWidth);
             int cursorSegment = 0;
             for (int i = 1; i < starts.size(); i++) {
                 if (p.col() < starts.get(i)) {
@@ -935,10 +944,11 @@ public class EditorEngine {
                 }
                 cursorSegment = i;
             }
-            int cursorWrappedOffset = model.wrappedRowsBefore(p.line(), width, wrapByWords, tabWidth)
+            int cursorWrappedOffset = textLayout.wrappedRowsBefore(p.line(), width, wrapByWords, tabWidth)
                 + cursorSegment;
             EditorViewportBehavior.WrapTop normalizedTop = EditorViewportBehavior.normalizeWrapTop(
                 model,
+                textLayout,
                 state.getTopLine(),
                 state.getTopWrapSegment(),
                 width,
@@ -947,12 +957,13 @@ public class EditorEngine {
             );
             int topWrappedOffset = EditorViewportBehavior.wrappedOffsetForWrapTop(
                 model,
+                textLayout,
                 normalizedTop,
                 width,
                 wrapByWords,
                 tabWidth
             );
-            int totalWrappedRows = model.totalWrappedRows(width, wrapByWords, tabWidth);
+            int totalWrappedRows = textLayout.totalWrappedRows(width, wrapByWords, tabWidth);
             int maxTop = Math.max(0, totalWrappedRows - contentRows);
             int targetTop = topWrappedOffset;
             if (cursorWrappedOffset < topWrappedOffset) {
@@ -965,6 +976,7 @@ public class EditorEngine {
                 state,
                 EditorViewportBehavior.wrapTopFromWrappedOffset(
                     model,
+                    textLayout,
                     targetTop,
                     width,
                     wrapByWords,
@@ -985,21 +997,20 @@ public class EditorEngine {
         if (contentCols <= 0) {
             return;
         }
-        String line = model.getLine(p.line());
         int safeMargin = Math.max(0, Math.min(H_SCROLL_MARGIN, Math.max(0, contentCols / 3)));
-        int cursorVisual = visualColumn(line, 0, p.col());
-        int requiredVisualWidth = Math.max(model.maxVisualLineWidth(tabWidth), cursorVisual + 1);
+        int cursorVisual = visualColumn(p.line(), 0, p.col());
+        int requiredVisualWidth = Math.max(textLayout.maxVisualLineWidth(tabWidth), cursorVisual + 1);
         int maxLeftVisual = Math.max(0, requiredVisualWidth - Math.max(1, contentCols));
         int leftVisual = Math.min(state.getLeftVisualColumn(), maxLeftVisual);
         state.setLeftVisualColumn(leftVisual);
-        state.setLeftColumn(columnForVisualColumn(line, leftVisual));
+        state.setLeftColumn(columnForVisualColumn(p.line(), leftVisual));
 
         int leftVisibleBound = leftVisual + safeMargin;
         if (cursorVisual < leftVisibleBound) {
             int targetLeftVisual = Math.max(0, cursorVisual - safeMargin);
             targetLeftVisual = Math.min(targetLeftVisual, maxLeftVisual);
             state.setLeftVisualColumn(targetLeftVisual);
-            state.setLeftColumn(columnForVisualColumn(line, targetLeftVisual));
+            state.setLeftColumn(columnForVisualColumn(p.line(), targetLeftVisual));
             return;
         }
 
@@ -1008,16 +1019,23 @@ public class EditorEngine {
             int targetLeftVisual = Math.max(0, cursorVisual - Math.max(0, contentCols - 1 - safeMargin));
             targetLeftVisual = Math.min(targetLeftVisual, maxLeftVisual);
             state.setLeftVisualColumn(targetLeftVisual);
-            state.setLeftColumn(columnForVisualColumn(line, targetLeftVisual));
+            state.setLeftColumn(columnForVisualColumn(p.line(), targetLeftVisual));
         }
     }
 
-    private int visualColumn(String line, int startCol, int endCol) {
-        return ViewportMetrics.textToVisualColumn(line, startCol, endCol, tabWidth);
+    private int visualColumn(int line, int startCol, int endCol) {
+        int start = textLayout.visualColumnAt(line, startCol, tabWidth);
+        int end = textLayout.visualColumnAt(line, endCol, tabWidth);
+        return Math.max(0, end - start);
     }
 
-    private int columnForVisualColumn(String line, int targetVisual) {
-        return ViewportMetrics.visualToTextColumn(line, 0, targetVisual, tabWidth);
+    private int columnForVisualColumn(int line, int targetVisual) {
+        return textLayout.textOffsetAtVisualColumn(
+            line,
+            Math.max(0, targetVisual),
+            tabWidth,
+            EditorTextLayout.Bias.NEAREST
+        );
     }
 
     private static int firstNonWhitespaceColumn(String line) {

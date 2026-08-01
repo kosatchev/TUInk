@@ -86,7 +86,7 @@ import dev.tuink.tui.command.CommandInvocation;
 import dev.tuink.tui.command.CommandRegistry;
 import dev.tuink.tui.command.InvocationResult;
 import dev.tuink.tui.input.KeyEvent;
-import dev.tuink.tui.input.KeyStroke;
+import dev.tuink.terminal.input.KeyStroke;
 import dev.tuink.tui.keymap.Keymap;
 import dev.tuink.tui.keymap.TuinkKeymap;
 import dev.tuink.tui.flow.SearchFocus;

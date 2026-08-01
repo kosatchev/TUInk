@@ -1,11 +1,11 @@
 package dev.tuink.tui.ui;
 
-import dev.tuink.tui.render.CellBuffer;
-import dev.tuink.tui.render.CellText;
-import dev.tuink.render.ScrollInteraction;
-import dev.tuink.tui.style.CellStyle;
-import dev.tuink.tui.render.HorizontalScrollbar;
-import dev.tuink.tui.render.VerticalScrollbar;
+import dev.tuink.terminal.cell.CellBuffer;
+import dev.tuink.terminal.cell.CellText;
+import dev.tuink.terminal.scroll.ScrollInteraction;
+import dev.tuink.terminal.style.CellStyle;
+import dev.tuink.terminal.scroll.HorizontalScrollbar;
+import dev.tuink.terminal.scroll.VerticalScrollbar;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;

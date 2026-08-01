@@ -2,15 +2,15 @@ package dev.tuink.tui.ui;
 
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
-import dev.tuink.core.ViewportMetrics;
+import dev.tuink.core.EditorTextLayout;
 import dev.tuink.core.EditorViewportBehavior;
 import dev.tuink.core.Position;
 import dev.tuink.core.TextModel;
 import dev.tuink.render.RenderPlan;
-import dev.tuink.render.ScrollInteraction;
+import dev.tuink.terminal.scroll.ScrollInteraction;
 import dev.tuink.tui.input.KeyEvent;
-import dev.tuink.tui.render.HorizontalScrollbar;
-import dev.tuink.tui.render.VerticalScrollbar;
+import dev.tuink.terminal.scroll.HorizontalScrollbar;
+import dev.tuink.terminal.scroll.VerticalScrollbar;
 
 /**
  * UI helper for the main editor text area.
@@ -81,7 +81,15 @@ public final class EditorView {
         int contentTopRow
     ) {
         boolean selectedWordByDoubleClick = false;
-        Position hit = mouseToTextPosition(mouse, model, state, plan, contentRows, contentTopRow);
+        Position hit = mouseToTextPosition(
+            mouse,
+            model,
+            engine.textLayout(),
+            state,
+            plan,
+            contentRows,
+            contentTopRow
+        );
         if (hit != null) {
             mouseSelecting = true;
             edgeAutoScrollDuringSelection = false;
@@ -127,7 +135,15 @@ public final class EditorView {
         int top = Math.max(1, contentTopRow);
         int bottom = top + Math.max(0, contentRows) - 1;
         KeyEvent.MouseEvent effectiveMouse = mouse;
-        edgeAutoScrollDuringSelection = autoScrollVerticalOnDrag(mouse, model, state, plan, contentRows, contentTopRow);
+        edgeAutoScrollDuringSelection = autoScrollVerticalOnDrag(
+            mouse,
+            model,
+            engine.textLayout(),
+            state,
+            plan,
+            contentRows,
+            contentTopRow
+        );
         if (mouse.row() < top || mouse.row() > bottom) {
             int clampedRow = Math.max(
                 top,
@@ -135,7 +151,15 @@ public final class EditorView {
             );
             effectiveMouse = new KeyEvent.MouseEvent(clampedRow, mouse.col(), mouse.kind(), mouse.button());
         }
-        Position hit = mouseToTextPosition(effectiveMouse, model, state, plan, contentRows, contentTopRow);
+        Position hit = mouseToTextPosition(
+            effectiveMouse,
+            model,
+            engine.textLayout(),
+            state,
+            plan,
+            contentRows,
+            contentTopRow
+        );
         if (hit != null) {
             if (state.getSelectionAnchor() == null) {
                 state.setSelectionAnchor(state.getCursor());
@@ -153,6 +177,7 @@ public final class EditorView {
     private boolean autoScrollVerticalOnDrag(
         KeyEvent.MouseEvent mouse,
         TextModel model,
+        EditorTextLayout textLayout,
         EditorState state,
         RenderPlan plan,
         int contentRows,
@@ -177,6 +202,7 @@ public final class EditorView {
             }
             EditorViewportBehavior.WrapTop targetTop = EditorViewportBehavior.wrapTopFromWrappedOffsetNear(
                 model,
+                textLayout,
                 state.getTopLine(),
                 state.getTopWrapSegment(),
                 currentWrappedTop,
@@ -247,16 +273,18 @@ public final class EditorView {
     public Position mouseToTextPosition(
         KeyEvent.MouseEvent mouse,
         TextModel model,
+        EditorTextLayout textLayout,
         EditorState state,
         RenderPlan plan,
         int contentRows
     ) {
-        return mouseToTextPosition(mouse, model, state, plan, contentRows, contentTopRow);
+        return mouseToTextPosition(mouse, model, textLayout, state, plan, contentRows, contentTopRow);
     }
 
     public Position mouseToTextPosition(
         KeyEvent.MouseEvent mouse,
         TextModel model,
+        EditorTextLayout textLayout,
         EditorState state,
         RenderPlan plan,
         int contentRows,
@@ -271,6 +299,7 @@ public final class EditorView {
             int targetVisualCol = mouse.col() < plan.gutterWidth() ? 0 : mouse.col() - plan.gutterWidth();
             EditorViewportBehavior.WrapTop wrapTop = EditorViewportBehavior.normalizeWrapTop(
                 model,
+                textLayout,
                 state.getTopLine(),
                 state.getTopWrapSegment(),
                 visibleCols,
@@ -280,12 +309,12 @@ public final class EditorView {
             int remainingWrappedRows = wrapTop.segmentOffset() + (mouse.row() - top);
             int line = wrapTop.line();
             while (line < model.lineCount()) {
-                String lineText = model.getLine(line);
-                var starts = model.wrapStarts(line, visibleCols, plan.wrapByWords(), tabWidth);
+                var starts = textLayout.wrapStarts(line, visibleCols, plan.wrapByWords(), tabWidth);
                 if (remainingWrappedRows < starts.size()) {
                     int segmentStart = starts.get(Math.max(0, remainingWrappedRows));
-                    int col = ViewportMetrics.visualToTextColumn(
-                        lineText,
+                    int col = EditorViewportBehavior.visualToTextColumn(
+                        textLayout,
+                        line,
                         segmentStart,
                         Math.max(0, targetVisualCol),
                         tabWidth
@@ -299,6 +328,7 @@ public final class EditorView {
         }
         return EditorViewportBehavior.pointerToTextPosition(
             model,
+            textLayout,
             state,
             contentTopRow,
             contentRows,
@@ -317,9 +347,22 @@ public final class EditorView {
         int contentTopRow,
         RenderPlan plan,
         TextModel model,
+        EditorTextLayout textLayout,
         EditorState state
     ) {
-        return handleScrollbarPointer(mouseRow, mouseCol, rows, cols, contentTopRow, plan, model, state, ScrollAxis.NONE, 0);
+        return handleScrollbarPointer(
+            mouseRow,
+            mouseCol,
+            rows,
+            cols,
+            contentTopRow,
+            plan,
+            model,
+            textLayout,
+            state,
+            ScrollAxis.NONE,
+            0
+        );
     }
 
     public ScrollPointerResult handleScrollbarPointer(
@@ -330,10 +373,23 @@ public final class EditorView {
         int contentTopRow,
         RenderPlan plan,
         TextModel model,
+        EditorTextLayout textLayout,
         EditorState state,
         ScrollAxis axis
     ) {
-        return handleScrollbarPointer(mouseRow, mouseCol, rows, cols, contentTopRow, plan, model, state, axis, 0);
+        return handleScrollbarPointer(
+            mouseRow,
+            mouseCol,
+            rows,
+            cols,
+            contentTopRow,
+            plan,
+            model,
+            textLayout,
+            state,
+            axis,
+            0
+        );
     }
 
     public ScrollPointerResult handleScrollbarPointer(
@@ -344,6 +400,7 @@ public final class EditorView {
         int contentTopRow,
         RenderPlan plan,
         TextModel model,
+        EditorTextLayout textLayout,
         EditorState state,
         ScrollAxis axis,
         int dragThumbOffset
@@ -383,6 +440,7 @@ public final class EditorView {
                     int visibleCols = Math.max(0, cols - plan.gutterWidth() - plan.scrollbarWidth());
                     EditorViewportBehavior.WrapTop target = EditorViewportBehavior.wrapTopFromWrappedOffset(
                         model,
+                        textLayout,
                         targetTop,
                         visibleCols,
                         plan.wrapByWords(),
@@ -442,7 +500,13 @@ public final class EditorView {
                             horizontalTotal
                         )
                         : plan.leftVisualColumn());
-                EditorViewportBehavior.applyHorizontalScrollVisual(state, model, targetLeft, tabWidth);
+                EditorViewportBehavior.applyHorizontalScrollVisual(
+                    state,
+                    model,
+                    textLayout,
+                    targetLeft,
+                    tabWidth
+                );
                 int thumbGrabOffset = horizontalHit == ScrollInteraction.Hit.THUMB
                     ? Math.max(0, mouseCol - horizontalThumbStart)
                     : 0;

@@ -1,10 +1,10 @@
 package dev.tuink.tui.ui;
 
-import dev.tuink.core.DisplayText;
-import dev.tuink.tui.style.CellStyle;
+import dev.tuink.terminal.text.TerminalText;
+import dev.tuink.terminal.style.CellStyle;
 import dev.tuink.tui.style.UiStyles;
-import dev.tuink.tui.render.CellBuffer;
-import dev.tuink.tui.render.CellText;
+import dev.tuink.terminal.cell.CellBuffer;
+import dev.tuink.terminal.cell.CellText;
 
 /**
  * Reusable dropdown menu element with frame, item highlighting and hit-testing.
@@ -120,7 +120,7 @@ final class ContextMenu {
         int mnemonicInContent = mnemonicInLabel >= 0 ? mnemonicInLabel + 1 : -1;
         CellStyle mnemonicStyle = new CellStyle(style.fg(), style.bg(), style.bold(), true);
         int outCol = startCol;
-        for (DisplayText.Grapheme grapheme : DisplayText.graphemes(text)) {
+        for (TerminalText.Grapheme grapheme : TerminalText.graphemes(text)) {
             int advance = Math.max(1, grapheme.width());
             if (outCol + advance > cols) {
                 break;

@@ -47,7 +47,7 @@ class EditorEngineUnicodeInteractionTest {
         buffer.setLine(0, text);
         TextModel model = new TextModel(buffer);
         EditorState state = new EditorState();
-        return new Fixture(model, state, new EditorEngine(model, state));
+        return new Fixture(model, state, new EditorEngine(model, state, new TestEditorTextLayout(model)));
     }
 
     private record Fixture(TextModel model, EditorState state, EditorEngine engine) {

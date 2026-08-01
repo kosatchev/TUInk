@@ -46,7 +46,7 @@ import static dev.tuink.tui.command.TuinkCommandIds.UI_ESCAPE;
 
 import dev.tuink.tui.command.CommandId;
 import dev.tuink.tui.command.CommandInvocation;
-import dev.tuink.tui.input.KeyStroke;
+import dev.tuink.terminal.input.KeyStroke;
 
 /** Builds TUInk's default editor/global bindings from physical key strokes. */
 public final class TuinkKeymap {

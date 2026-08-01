@@ -1,8 +1,8 @@
 package dev.tuink.tui.presentation;
 
-import dev.tuink.tui.geometry.Point;
-import dev.tuink.tui.render.CellBuffer;
-import dev.tuink.tui.screen.Frame;
+import dev.tuink.terminal.geometry.Point;
+import dev.tuink.terminal.cell.CellBuffer;
+import dev.tuink.terminal.screen.Frame;
 import java.io.PrintWriter;
 import java.util.Objects;
 

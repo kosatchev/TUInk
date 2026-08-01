@@ -1,5 +1,6 @@
 dependencies {
     implementation project(':unicode-text')
+    implementation project(':tui-core')
     implementation project(':core')
     implementation project(':render')
     implementation project(':highlight-regex')

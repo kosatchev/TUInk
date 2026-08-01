@@ -5,7 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.tuink.tui.style.CellStyle;
+import dev.tuink.terminal.style.CellStyle;
 import dev.tuink.tui.input.KeyEvent;
 import dev.tuink.tui.ui.MenuBar;
 import java.nio.file.Path;

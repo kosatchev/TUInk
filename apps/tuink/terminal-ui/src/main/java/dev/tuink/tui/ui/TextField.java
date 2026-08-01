@@ -1,6 +1,6 @@
 package dev.tuink.tui.ui;
 
-import dev.tuink.core.DisplayText;
+import dev.tuink.terminal.text.TerminalText;
 import dev.tuink.unicode.GraphemeText;
 
 /**
@@ -91,11 +91,11 @@ public final class TextField {
     }
 
     public int cursorCellColumn() {
-        return DisplayText.visualColumnAt(value.toString(), cursor, 4);
+        return TerminalText.visualColumnAt(value.toString(), cursor, 4);
     }
 
     public int displayWidth() {
-        return DisplayText.visualWidth(value.toString(), 4);
+        return TerminalText.visualWidth(value.toString(), 4);
     }
 
     public String text() {

@@ -70,13 +70,64 @@ public class CellBuffer {
         if (next.width() == 2 && col + 1 >= cols) {
             next = new Cell("�", style);
         }
+        place(row, col, next);
+    }
+
+    /**
+     * Atomically places a cell without touching a wide-cell footprint outside
+     * the supplied half-open clip. Used by {@link Canvas}.
+     */
+    boolean trySetClipped(
+        int row,
+        int col,
+        Cell next,
+        int clipLeft,
+        int clipTop,
+        int clipRight,
+        int clipBottom
+    ) {
+        if (next == null) {
+            throw new IllegalArgumentException("cell must not be null");
+        }
+        int left = Math.max(0, clipLeft);
+        int top = Math.max(0, clipTop);
+        int right = Math.min(cols, clipRight);
+        int bottom = Math.min(rows, clipBottom);
+        if (row < top || row >= bottom || col < left || col >= right) {
+            return false;
+        }
+
+        Cell placed = next.continuation() ? new Cell(" ", next.style()) : next;
+        int footprintWidth = placed.width() == 2 ? 2 : 1;
+        if ((long) col + footprintWidth > right) {
+            return false;
+        }
+        for (int targetCol = col; targetCol < col + footprintWidth; targetCol++) {
+            if (!existingFootprintInsideClip(row, targetCol, left, right)) {
+                return false;
+            }
+        }
+
+        place(row, col, placed);
+        return true;
+    }
+
+    private boolean existingFootprintInsideClip(int row, int col, int clipLeft, int clipRight) {
+        Cell current = cells[row][col];
+        if (current.continuation()) {
+            return col - 1 >= clipLeft;
+        }
+        return current.width() != 2 || col + 1 < clipRight;
+    }
+
+    private void place(int row, int col, Cell next) {
         clearFootprint(row, col);
         if (next.width() == 2) {
             clearFootprint(row, col + 1);
         }
         replace(row, col, next);
         if (next.width() == 2) {
-            replace(row, col + 1, Cell.continuation(style));
+            replace(row, col + 1, Cell.continuation(next.style()));
         }
     }
 

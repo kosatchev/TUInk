@@ -2,6 +2,7 @@ package dev.tuink.terminal.cell;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.terminal.text.TerminalText;
@@ -52,6 +53,18 @@ class CellBufferUnicodeTest {
         for (int col = 0; col < buffer.cols(); col++) {
             assertFalse(TerminalText.containsUnsafeControl(buffer.get(0, col).grapheme()));
         }
+    }
+
+    @Test
+    void rejectsMultipleGraphemesAsOnePhysicalCell() {
+        CellBuffer buffer = new CellBuffer(1, 2);
+
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> buffer.set(0, 0, "ab", CellStyle.DEFAULT)
+        );
+        assertEquals(Cell.EMPTY, buffer.get(0, 0));
+        assertEquals(Cell.EMPTY, buffer.get(0, 1));
     }
 
     @Test

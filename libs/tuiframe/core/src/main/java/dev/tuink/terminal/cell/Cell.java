@@ -22,6 +22,9 @@ public record Cell(String grapheme, CellStyle style, int width, boolean continua
             width = 0;
         } else {
             grapheme = TerminalText.sanitizeGrapheme(grapheme);
+            if (!TerminalText.isSingleGrapheme(grapheme)) {
+                throw new IllegalArgumentException("cell payload must contain exactly one grapheme");
+            }
             width = Math.max(1, TerminalText.graphemeWidth(grapheme));
             if (width > 2) {
                 width = 2;

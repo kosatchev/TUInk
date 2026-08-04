@@ -30,6 +30,40 @@ import org.junit.jupiter.api.Test;
 
 class RenderRasterizerUnicodeTest {
     @Test
+    void rasterizesBothScrollbarsThroughTheCanvasPainter() {
+        RenderPlan plan = new RenderPlan(
+            List.of(line("x", List.of(), 0, 0, 0)),
+            "",
+            "",
+            null,
+            null,
+            null,
+            null,
+            0,
+            0,
+            true,
+            false,
+            false,
+            3,
+            6,
+            12,
+            0,
+            7,
+            14,
+            10,
+            2,
+            1
+        );
+
+        CellBuffer buffer = new RenderRasterizer().rasterize(plan, 6, 10);
+
+        assertEquals("  x      │", rowText(buffer, 1));
+        assertEquals("         █", rowText(buffer, 2));
+        assertEquals("         │", rowText(buffer, 3));
+        assertEquals("  ───████ ", rowText(buffer, 4));
+    }
+
+    @Test
     void rasterizesControlsCjkEmojiAndCombiningClustersIntoSafeCells() {
         RenderPlan plan = plan("\u001B中😀e\u0301", new EditorState(), 5, 16);
 
@@ -376,6 +410,14 @@ class RenderRasterizerUnicodeTest {
                 .append('/')
                 .append(cell.style().fg())
                 .append(' ');
+        }
+        return out.toString();
+    }
+
+    private static String rowText(CellBuffer buffer, int row) {
+        StringBuilder out = new StringBuilder(buffer.cols());
+        for (int col = 0; col < buffer.cols(); col++) {
+            out.append(buffer.get(row, col).grapheme());
         }
         return out.toString();
     }

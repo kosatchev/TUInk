@@ -71,6 +71,18 @@ class TerminalTextTest {
     }
 
     @Test
+    void recognizesExactlyOneExtendedGraphemeWithoutSplittingEmoji() {
+        assertTrue(TerminalText.isSingleGrapheme("A"));
+        assertTrue(TerminalText.isSingleGrapheme("中"));
+        assertTrue(TerminalText.isSingleGrapheme(COMBINING_E));
+        assertTrue(TerminalText.isSingleGrapheme(FAMILY));
+        assertFalse(TerminalText.isSingleGrapheme("ab"));
+        assertFalse(TerminalText.isSingleGrapheme(FAMILY + "x"));
+        assertFalse(TerminalText.isSingleGrapheme(""));
+        assertFalse(TerminalText.isSingleGrapheme(null));
+    }
+
+    @Test
     void sanitizesC0C1DelUnpairedSurrogatesAndStandaloneZeroWidthClusters() {
         assertEquals("␀", TerminalText.sanitizeGrapheme("\u0000"));
         assertEquals("␉", TerminalText.sanitizeGrapheme("\t"));

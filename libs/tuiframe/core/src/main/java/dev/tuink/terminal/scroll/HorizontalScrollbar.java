@@ -1,7 +1,11 @@
 package dev.tuink.terminal.scroll;
 
 import dev.tuink.terminal.cell.CellBuffer;
+import dev.tuink.terminal.cell.Cell;
+import dev.tuink.terminal.cell.Canvas;
+import dev.tuink.terminal.geometry.Rect;
 import dev.tuink.terminal.style.CellStyle;
+import java.util.Objects;
 
 /**
  * Reusable horizontal scrollbar painter (track + thumb) for cell buffers.
@@ -64,7 +68,6 @@ public final class HorizontalScrollbar {
         if (visibleCols <= 0 || totalItems <= 0) {
             return;
         }
-
         for (int i = 0; i < visibleCols; i++) {
             buffer.set(row, leftCol + i, trackGrapheme, trackStyle);
         }
@@ -75,5 +78,56 @@ public final class HorizontalScrollbar {
         for (int i = 0; i < thumbSize; i++) {
             buffer.set(row, leftCol + thumbOffset + i, thumbGrapheme, thumbStyle);
         }
+    }
+
+    /** Draws into a one-row track, honoring the canvas clip. */
+    public static void draw(
+        Canvas canvas,
+        Rect track,
+        int totalItems,
+        int scroll,
+        String trackGrapheme,
+        CellStyle trackStyle,
+        String thumbGrapheme,
+        CellStyle thumbStyle
+    ) {
+        Objects.requireNonNull(canvas, "canvas");
+        Objects.requireNonNull(track, "track");
+        if (track.height() != 1) {
+            throw new IllegalArgumentException("horizontal scrollbar track must be one row high");
+        }
+        int visibleCols = track.width();
+        if (visibleCols <= 0 || totalItems <= 0) {
+            return;
+        }
+        Cell trackCell = requireSingleCell(trackGrapheme, trackStyle, "trackGrapheme");
+        Cell thumbCell = requireSingleCell(thumbGrapheme, thumbStyle, "thumbGrapheme");
+
+        int mark = canvas.save();
+        try {
+            if (!canvas.clip(track)) {
+                return;
+            }
+            for (int i = 0; i < visibleCols; i++) {
+                canvas.put(track.x() + i, track.y(), trackCell);
+            }
+
+            int thumbSize = ScrollInteraction.thumbSize(visibleCols, totalItems);
+            int thumbOffset = ScrollInteraction.thumbOffset(visibleCols, totalItems, scroll);
+
+            for (int i = 0; i < thumbSize; i++) {
+                canvas.put(track.x() + thumbOffset + i, track.y(), thumbCell);
+            }
+        } finally {
+            canvas.restore(mark);
+        }
+    }
+
+    private static Cell requireSingleCell(String grapheme, CellStyle style, String name) {
+        Cell cell = new Cell(grapheme, style);
+        if (cell.width() != 1) {
+            throw new IllegalArgumentException(name + " must occupy exactly one cell");
+        }
+        return cell;
     }
 }

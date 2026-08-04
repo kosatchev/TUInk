@@ -175,7 +175,7 @@ class ArchitectureTest {
 
     static final ArchRule CELL_MODEL_DOES_NOT_DEPEND_ON_EDITOR_RENDER = noClasses()
         .that().haveNameMatching(
-            "dev\\.tuink\\.terminal\\.cell\\.(?:Cell|CellBuffer|CellText)(?:\\$.*)?"
+            "dev\\.tuink\\.terminal\\.cell\\.(?:Cell|CellBuffer|CellText|Canvas)(?:\\$.*)?"
         )
         .should().dependOnClassesThat().resideInAnyPackage(
             "dev.tuink.core..",

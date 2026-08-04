@@ -379,6 +379,25 @@ public final class TerminalText {
         return graphemeWidth(grapheme, 0, grapheme.length());
     }
 
+    /** Returns whether the complete string is exactly one extended grapheme cluster. */
+    public static boolean isSingleGrapheme(String text) {
+        if (text == null || text.isEmpty()) {
+            return false;
+        }
+        if (text.length() == 1) {
+            return true;
+        }
+        int firstCodePoint = text.codePointAt(0);
+        if (Character.charCount(firstCodePoint) == text.length()) {
+            return true;
+        }
+        if (isSimpleAscii(text)) {
+            return false;
+        }
+        Matcher matcher = GRAPHEME_PATTERN.matcher(text);
+        return matcher.lookingAt() && matcher.end() == text.length();
+    }
+
     /** Returns a safe single display grapheme for storage in a terminal cell. */
     public static String sanitizeGrapheme(String grapheme) {
         if (grapheme == null || grapheme.isEmpty()) {

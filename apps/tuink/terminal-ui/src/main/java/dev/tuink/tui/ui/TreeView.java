@@ -2,6 +2,8 @@ package dev.tuink.tui.ui;
 
 import dev.tuink.terminal.cell.CellBuffer;
 import dev.tuink.terminal.cell.CellText;
+import dev.tuink.terminal.cell.Canvas;
+import dev.tuink.terminal.geometry.Rect;
 import dev.tuink.terminal.scroll.ScrollInteraction;
 import dev.tuink.terminal.style.CellStyle;
 import dev.tuink.terminal.scroll.HorizontalScrollbar;
@@ -425,6 +427,7 @@ public final class TreeView {
         CellStyle scrollThumbStyle
     ) {
         DrawLayout layout = computeLayout(left, right, listRows);
+        Canvas canvas = new Canvas(buffer);
         normalizeSelection();
         clampScroll(layout.textRows());
 
@@ -446,10 +449,8 @@ public final class TreeView {
         }
         if (layout.showVScrollbar() && !items.isEmpty()) {
             VerticalScrollbar.draw(
-                buffer,
-                listStartRow,
-                right - 1,
-                textRows,
+                canvas,
+                new Rect(right - 1, listStartRow, 1, textRows),
                 items.size(),
                 scroll,
                 "│",
@@ -460,10 +461,8 @@ public final class TreeView {
         }
         if (layout.showHScrollbar() && labelWidth > 0) {
             HorizontalScrollbar.draw(
-                buffer,
-                listStartRow + textRows,
-                left + 1,
-                labelWidth,
+                canvas,
+                new Rect(left + 1, listStartRow + textRows, labelWidth, 1),
                 Math.max(labelWidth, maxLabelLength()),
                 hScroll,
                 "─",

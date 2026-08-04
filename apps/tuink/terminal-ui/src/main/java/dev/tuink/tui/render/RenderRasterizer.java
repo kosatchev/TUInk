@@ -9,6 +9,8 @@ import dev.tuink.render.RenderPlan;
 import dev.tuink.render.Style;
 import dev.tuink.render.StyleSpan;
 import dev.tuink.terminal.cell.CellBuffer;
+import dev.tuink.terminal.cell.Canvas;
+import dev.tuink.terminal.geometry.Rect;
 import dev.tuink.terminal.scroll.HorizontalScrollbar;
 import dev.tuink.terminal.scroll.VerticalScrollbar;
 import dev.tuink.terminal.style.CellStyle;
@@ -87,6 +89,7 @@ public class RenderRasterizer {
 
     public CellBuffer rasterize(RenderPlan plan, int rows, int cols, int contentTopRow) {
         CellBuffer buffer = new CellBuffer(rows, cols);
+        Canvas canvas = new Canvas(buffer);
         int contentCols = Math.max(1, cols - plan.scrollbarWidth());
         int topRow = Math.max(1, contentTopRow);
         int activeGutterRow = resolveActiveGutterRow(plan);
@@ -120,8 +123,8 @@ public class RenderRasterizer {
 
         drawText(buffer, 0, 0, truncateOrPad(plan.topBarText(), cols), styles.renderTopbar(), cols);
         drawText(buffer, statusRow, 0, truncateOrPad(plan.bottomBarText(), cols), styles.renderStatus(), cols);
-        drawScrollbar(buffer, plan, rows, cols, topRow);
-        drawHorizontalScrollbar(buffer, plan, rows, cols, topRow);
+        drawScrollbar(canvas, plan, rows, cols, topRow);
+        drawHorizontalScrollbar(canvas, plan, rows, cols, topRow);
         int overlayBottomRow = rows - 2;
         int overlayTopRow = overlayBottomRow;
         if (plan.interactiveBarText() != null && overlayBottomRow >= 0) {
@@ -155,7 +158,7 @@ public class RenderRasterizer {
         return buffer;
     }
 
-    private void drawScrollbar(CellBuffer buffer, RenderPlan plan, int rows, int cols, int contentTopRow) {
+    private void drawScrollbar(Canvas canvas, RenderPlan plan, int rows, int cols, int contentTopRow) {
         if (plan.scrollbarWidth() == 0 || cols <= 0 || rows <= 2) {
             return;
         }
@@ -167,10 +170,8 @@ public class RenderRasterizer {
             return;
         }
         VerticalScrollbar.draw(
-            buffer,
-            trackTop,
-            barCol,
-            trackHeight,
+            canvas,
+            new Rect(barCol, trackTop, 1, trackHeight),
             Math.max(1, plan.totalLines()),
             Math.max(0, plan.topLine()),
             "│",
@@ -180,7 +181,7 @@ public class RenderRasterizer {
         );
     }
 
-    private void drawHorizontalScrollbar(CellBuffer buffer, RenderPlan plan, int rows, int cols, int contentTopRow) {
+    private void drawHorizontalScrollbar(Canvas canvas, RenderPlan plan, int rows, int cols, int contentTopRow) {
         if (plan.wrapLines()) {
             return;
         }
@@ -199,10 +200,8 @@ public class RenderRasterizer {
             return;
         }
         HorizontalScrollbar.draw(
-            buffer,
-            row,
-            plan.gutterWidth(),
-            visibleCols,
+            canvas,
+            new Rect(plan.gutterWidth(), row, visibleCols, 1),
             Math.max(visibleCols, plan.totalColumns()),
             Math.max(0, plan.leftVisualColumn()),
             "─",

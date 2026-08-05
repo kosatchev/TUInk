@@ -2,13 +2,17 @@ package dev.tuink.tui.ui;
 
 import dev.tuink.terminal.cell.CellBuffer;
 import dev.tuink.terminal.cell.CellText;
+import dev.tuink.terminal.cell.Canvas;
 import dev.tuink.terminal.text.TerminalText;
 import dev.tuink.terminal.style.CellStyle;
+import java.util.Objects;
 
 /**
  * Reusable single-line text button for TUI overlays.
  */
 public final class Button {
+    private static final int TAB_WIDTH = 4;
+
     private final int row;
     private final int col;
     private final String text;
@@ -49,7 +53,9 @@ public final class Button {
             if (Character.isLetterOrDigit(codePoint)) {
                 return col + visual;
             }
-            visual += Math.max(1, grapheme.width());
+            visual += grapheme.tab()
+                ? TAB_WIDTH - (visual % TAB_WIDTH)
+                : Math.max(1, grapheme.width());
         }
         return col + (framed ? 1 : 0);
     }
@@ -68,6 +74,30 @@ public final class Button {
 
     public void drawAt(CellBuffer buffer, int drawRow, int cols, CellStyle style) {
         CellText.draw(buffer, drawRow, col, renderedText(), style, cols);
+    }
+
+    /** Draws at the button's local Canvas coordinates with strict clipping. */
+    public void draw(Canvas canvas, CellStyle style) {
+        drawAt(canvas, row, style);
+    }
+
+    /** Draws on an alternate local row without changing hit-test geometry. */
+    public void drawAt(Canvas canvas, int drawRow, CellStyle style) {
+        Objects.requireNonNull(canvas, "canvas");
+        String rendered = renderedText();
+        int paintWidth = CellText.width(rendered);
+        if (paintWidth <= 0) {
+            return;
+        }
+        int mark = canvas.save();
+        try {
+            if (!canvas.clip(col, drawRow, paintWidth, 1)) {
+                return;
+            }
+            CellText.draw(canvas, col, drawRow, rendered, style);
+        } finally {
+            canvas.restore(mark);
+        }
     }
 
     public String renderedText() {

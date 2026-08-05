@@ -36,6 +36,7 @@ import dev.tuink.terminal.geometry.Rect;
 import dev.tuink.tui.presentation.ScreenPresenter;
 import dev.tuink.terminal.cell.CellBuffer;
 import dev.tuink.terminal.cell.CellText;
+import dev.tuink.terminal.cell.Canvas;
 import dev.tuink.tui.render.EditorStyleAdapter;
 import dev.tuink.render.LineHighlighter;
 import dev.tuink.render.EditorLayout;
@@ -2349,6 +2350,12 @@ public class TerminalEditorApp {
         CellText.draw(buffer, row, startCol, text, style, cols);
     }
 
+    private Canvas frameCanvas(CellBuffer buffer, int rows, int cols) {
+        Canvas canvas = new Canvas(buffer);
+        canvas.clip(0, 0, Math.max(0, cols), Math.max(0, rows));
+        return canvas;
+    }
+
     private void paintSelectedConfirmButton(CellBuffer buffer, ConfirmBarView confirmBar, int rows, int cols) {
         if (buffer == null || confirmBar == null || rows < 2 || cols <= 0) {
             return;
@@ -2361,7 +2368,7 @@ public class TerminalEditorApp {
         if (row < 0 || row >= buffer.rows()) {
             return;
         }
-        selected.drawAt(buffer, row, cols, focusedButtonStyle(styles.promptAlert()));
+        selected.drawAt(frameCanvas(buffer, rows, cols), row, focusedButtonStyle(styles.promptAlert()));
     }
 
     private void paintSelectedSearchButton(
@@ -2384,7 +2391,7 @@ public class TerminalEditorApp {
         if (row < 0 || row >= buffer.rows()) {
             return;
         }
-        selected.drawAt(buffer, row, cols, focusedButtonStyle(styles.searchBar()));
+        selected.drawAt(frameCanvas(buffer, rows, cols), row, focusedButtonStyle(styles.searchBar()));
     }
 
     private boolean isAction(KeyEvent key, KeyEvent.Action expected) {
@@ -2452,6 +2459,7 @@ public class TerminalEditorApp {
         OpenFileDialogController.OpenDialogLayout layout = OpenFileDialogController.layoutForTerminal(rows, cols);
         Modal frame = openFileFrame(layout);
         frame.draw(buffer, rows, cols);
+        Canvas canvas = frameCanvas(buffer, rows, cols);
         Button hiddenToggle = openFileHiddenToggleButton(layout, tree.showHiddenFiles());
 
         String pathLine = " " + tree.root();
@@ -2464,8 +2472,7 @@ public class TerminalEditorApp {
             cols
         );
         hiddenToggle.draw(
-            buffer,
-            cols,
+            canvas,
             tree.showHiddenFiles()
                 ? (colorEnabled ? styles.menuSelected() : styles.dialogSelectedMono())
                 : styles.dialog()
@@ -2487,15 +2494,13 @@ public class TerminalEditorApp {
 
         OpenFileDialogController.OpenDialogButtons buttons = OpenFileDialogController.buttonsForLayout(layout);
         buttons.ok().draw(
-            buffer,
-            cols,
+            canvas,
             focus == OpenFileDialogController.Focus.OK
                 ? (colorEnabled ? styles.menuSelected() : styles.dialogSelectedMono())
                 : styles.dialog()
         );
         buttons.cancel().draw(
-            buffer,
-            cols,
+            canvas,
             focus == OpenFileDialogController.Focus.CANCEL
                 ? (colorEnabled ? styles.menuSelected() : styles.dialogSelectedMono())
                 : styles.dialog()
@@ -2583,9 +2588,9 @@ public class TerminalEditorApp {
             );
         }
         Button close = helpCloseButton(layout);
+        Canvas canvas = frameCanvas(buffer, rows, cols);
         close.draw(
-            buffer,
-            cols,
+            canvas,
             colorEnabled ? styles.menuSelected() : styles.dialogSelectedMono()
         );
     }

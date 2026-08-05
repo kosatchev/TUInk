@@ -139,6 +139,45 @@ public final class Canvas {
         );
     }
 
+    /** Fills the requested local rectangle with styled blank cells. */
+    public void fill(Rect rect, CellStyle style) {
+        Objects.requireNonNull(rect, "rect");
+        fill(rect.x(), rect.y(), rect.width(), rect.height(), style);
+    }
+
+    /**
+     * Fills the requested local rectangle with styled blank cells.
+     * The rectangle is itself a strict boundary: an existing wide-cell
+     * footprint crossing any of its edges is left unchanged.
+     */
+    public void fill(int x, int y, int width, int height, CellStyle style) {
+        if (width < 0 || height < 0) {
+            throw new IllegalArgumentException("width and height must not be negative");
+        }
+        long requestedLeft = (long) originX + x;
+        long requestedTop = (long) originY + y;
+        long requestedRight = requestedLeft + width;
+        long requestedBottom = requestedTop + height;
+        long effectiveLeft = Math.max((long) clipLeft, requestedLeft);
+        long effectiveTop = Math.max((long) clipTop, requestedTop);
+        long effectiveRight = Math.min((long) clipRight, requestedRight);
+        long effectiveBottom = Math.min((long) clipBottom, requestedBottom);
+        if (effectiveRight <= effectiveLeft || effectiveBottom <= effectiveTop) {
+            return;
+        }
+
+        int left = (int) effectiveLeft;
+        int top = (int) effectiveTop;
+        int right = (int) effectiveRight;
+        int bottom = (int) effectiveBottom;
+        Cell blank = new Cell(" ", style);
+        for (int row = top; row < bottom; row++) {
+            for (int col = left; col < right; col++) {
+                target.trySetClipped(row, col, blank, left, top, right, bottom);
+            }
+        }
+    }
+
     private boolean insideClip(long absoluteX, long absoluteY) {
         return absoluteX >= clipLeft
             && absoluteX < clipRight

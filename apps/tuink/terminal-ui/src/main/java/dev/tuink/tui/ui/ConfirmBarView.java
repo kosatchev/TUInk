@@ -159,7 +159,7 @@ public final class ConfirmBarView {
         if (charOffset < 0) {
             return -1;
         }
-        return dev.tuink.terminal.text.TerminalText.visualColumnAt(row, charOffset, 4);
+        return CellText.visualColumnAt(row, charOffset);
     }
 
     private static ConfirmChoice normalizeSelected(

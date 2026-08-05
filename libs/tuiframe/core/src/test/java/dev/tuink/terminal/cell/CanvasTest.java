@@ -199,6 +199,99 @@ class CanvasTest {
     }
 
     @Test
+    void fillTreatsItsRectangleAsAStrictWideCellBoundary() {
+        CellBuffer buffer = filled(2, 8, ".");
+        buffer.set(0, 0, "中", ACCENT);
+        buffer.set(0, 6, "界", ACCENT);
+        Cell leftLead = buffer.get(0, 0);
+        Cell leftContinuation = buffer.get(0, 1);
+        Cell rightLead = buffer.get(0, 6);
+        Cell rightContinuation = buffer.get(0, 7);
+        Canvas canvas = new Canvas(buffer);
+
+        canvas.fill(new Rect(1, 0, 6, 1), ACCENT);
+
+        assertEquals("中", buffer.get(0, 0).grapheme());
+        assertTrue(buffer.get(0, 1).continuation());
+        assertEquals("界", buffer.get(0, 6).grapheme());
+        assertTrue(buffer.get(0, 7).continuation());
+        assertSame(leftLead, buffer.get(0, 0));
+        assertSame(leftContinuation, buffer.get(0, 1));
+        assertSame(rightLead, buffer.get(0, 6));
+        assertSame(rightContinuation, buffer.get(0, 7));
+        Cell firstBlank = buffer.get(0, 2);
+        for (int col = 2; col < 6; col++) {
+            assertEquals(" ", buffer.get(0, col).grapheme());
+            assertEquals(ACCENT, buffer.get(0, col).style());
+            assertSame(firstBlank, buffer.get(0, col));
+        }
+        for (int col = 0; col < buffer.cols(); col++) {
+            assertEquals(".", buffer.get(1, col).grapheme());
+        }
+        CellBuffer rebuilt = rebuildRow(buffer, 0);
+        assertEquals(rebuilt.rowSignature1(0), buffer.rowSignature1(0));
+        assertEquals(rebuilt.rowSignature2(0), buffer.rowSignature2(0));
+    }
+
+    @Test
+    void fillIntersectsTranslationOuterClipAndRequestedGeometryWithoutChangingState() {
+        CellBuffer buffer = filled(3, 6, ".");
+        Canvas canvas = new Canvas(buffer);
+        canvas.translate(1, 1);
+        assertTrue(canvas.clip(0, 0, 4, 2));
+
+        canvas.fill(-1, 0, 4, 3, ACCENT);
+
+        for (int row = 1; row < 3; row++) {
+            assertEquals(".", buffer.get(row, 0).grapheme());
+            for (int col = 1; col < 4; col++) {
+                assertEquals(" ", buffer.get(row, col).grapheme());
+                assertEquals(ACCENT, buffer.get(row, col).style());
+            }
+            assertEquals(".", buffer.get(row, 4).grapheme());
+        }
+        assertTrue(canvas.put(3, 0, "x", ACCENT));
+        assertEquals("x", buffer.get(1, 4).grapheme());
+        assertThrows(IllegalArgumentException.class, () -> canvas.fill(0, 0, -1, 1, ACCENT));
+    }
+
+    @Test
+    void fillOverwritesWidePairWhollyInsideItsBoundary() {
+        CellBuffer buffer = filled(1, 6, ".");
+        buffer.set(0, 2, "中", ACCENT);
+        Canvas canvas = new Canvas(buffer);
+
+        canvas.fill(1, 0, 4, 1, ACCENT);
+
+        Cell firstBlank = buffer.get(0, 1);
+        for (int col = 1; col < 5; col++) {
+            assertEquals(" ", buffer.get(0, col).grapheme());
+            assertFalse(buffer.get(0, col).continuation());
+            assertSame(firstBlank, buffer.get(0, col));
+        }
+        CellBuffer rebuilt = rebuildRow(buffer, 0);
+        assertEquals(rebuilt.rowSignature1(0), buffer.rowSignature1(0));
+        assertEquals(rebuilt.rowSignature2(0), buffer.rowSignature2(0));
+    }
+
+    @Test
+    void fillUsesLongGeometryForExtremeTranslatedCoordinates() {
+        CellBuffer buffer = filled(1, 2, ".");
+        Canvas canvas = new Canvas(buffer);
+        canvas.translate(Integer.MAX_VALUE, Integer.MIN_VALUE);
+
+        canvas.fill(Integer.MIN_VALUE + 1, Integer.MAX_VALUE, 2, 2, ACCENT);
+
+        assertEquals(" ", buffer.get(0, 0).grapheme());
+        assertEquals(" ", buffer.get(0, 1).grapheme());
+        long signature1 = buffer.rowSignature1(0);
+        long signature2 = buffer.rowSignature2(0);
+        canvas.fill(Integer.MAX_VALUE, Integer.MAX_VALUE, Integer.MAX_VALUE, 0, null);
+        assertEquals(signature1, buffer.rowSignature1(0));
+        assertEquals(signature2, buffer.rowSignature2(0));
+    }
+
+    @Test
     void randomizedClippedWritesPreserveOutsideCellsWidePairsAndSignatures() {
         CellBuffer buffer = filled(4, 12, ".");
         buffer.set(1, 1, "中", ACCENT);

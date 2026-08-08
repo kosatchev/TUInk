@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.terminal.capability.ColorDepth;
+import dev.tuink.terminal.capability.TerminalCapabilities;
 import dev.tuink.terminal.cell.CellBuffer;
 import dev.tuink.terminal.screen.ScrollHint;
 import dev.tuink.terminal.style.CellColor;
@@ -101,6 +103,20 @@ class AnsiDiffCellStyleTest {
         String ansi = fullRedraw(new AnsiDiff(), CellStyle.DEFAULT, true);
 
         assertTrue(ansi.endsWith(RESET));
+    }
+
+    @Test
+    void deeperColorCapabilitiesUseThePortableAnsi16CellPalette() {
+        CellStyle style = new CellStyle(CellColor.BRIGHT_CYAN, CellColor.BLUE, true, false);
+
+        for (ColorDepth depth : new ColorDepth[] {ColorDepth.ANSI_16, ColorDepth.ANSI_256, ColorDepth.TRUECOLOR}) {
+            TerminalCapabilities capabilities = new TerminalCapabilities(depth, false, false, false);
+            assertEquals(
+                FULL_REDRAW_PREFIX + colorAnsi(style) + "x" + RESET,
+                new AnsiDiff().diff(null, oneCell("x", style), capabilities, ScrollHint.none()),
+                depth.toString()
+            );
+        }
     }
 
     private static String fullRedraw(AnsiDiff diff, CellStyle style, boolean colorEnabled) {

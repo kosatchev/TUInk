@@ -1,14 +1,18 @@
 package dev.tuink.tui.terminal;
 
+import dev.tuink.terminal.capability.ColorDepth;
+import dev.tuink.terminal.capability.TerminalCapabilities;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.jline.terminal.Attributes;
 import org.jline.terminal.Attributes.LocalFlag;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
+import org.jline.utils.InfoCmp.Capability;
 import org.jline.utils.NonBlockingReader;
 
 /**
@@ -35,6 +39,7 @@ public final class TerminalSession implements AutoCloseable {
     private final Options options;
     private final Attributes originalAttributes;
     private final PrintWriter writer;
+    private final TerminalCapabilities capabilities;
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final Thread shutdownHook;
     private boolean mouseTrackingEnabled;
@@ -50,7 +55,8 @@ public final class TerminalSession implements AutoCloseable {
         this.options = options;
         this.originalAttributes = originalAttributes;
         this.writer = backend.writer();
-        this.mouseTrackingEnabled = options.mouseTrackingEnabled();
+        this.capabilities = Objects.requireNonNull(backend.capabilities(), "backend capabilities");
+        this.mouseTrackingEnabled = options.mouseTrackingEnabled() && capabilities.mouseTracking();
         this.shutdownHook = new Thread(this::closeQuietly, "tuink-terminal-cleanup");
     }
 
@@ -134,6 +140,10 @@ public final class TerminalSession implements AutoCloseable {
         return backend.reader();
     }
 
+    public TerminalCapabilities capabilities() {
+        return capabilities;
+    }
+
     public int height() {
         return backend.height();
     }
@@ -151,11 +161,12 @@ public final class TerminalSession implements AutoCloseable {
     }
 
     public synchronized void setMouseTracking(boolean enabled) {
-        if (closed.get() || mouseTrackingEnabled == enabled) {
+        boolean effectiveEnabled = enabled && capabilities.mouseTracking();
+        if (closed.get() || mouseTrackingEnabled == effectiveEnabled) {
             return;
         }
-        write(enabled ? ENABLE_MOUSE_TRACKING : DISABLE_MOUSE_TRACKING);
-        mouseTrackingEnabled = enabled;
+        write(effectiveEnabled ? ENABLE_MOUSE_TRACKING : DISABLE_MOUSE_TRACKING);
+        mouseTrackingEnabled = effectiveEnabled;
     }
 
     public boolean isClosed() {
@@ -179,7 +190,9 @@ public final class TerminalSession implements AutoCloseable {
 
         try {
             StringBuilder cleanup = new StringBuilder(RESET_STYLE);
-            cleanup.append(DISABLE_MOUSE_TRACKING);
+            if (capabilities.mouseTracking()) {
+                cleanup.append(DISABLE_MOUSE_TRACKING);
+            }
             cleanup.append(DISABLE_BRACKETED_PASTE);
             cleanup.append(SHOW_CURSOR);
             if (options.alternateScreenEnabled()) {
@@ -256,6 +269,10 @@ public final class TerminalSession implements AutoCloseable {
     interface Backend extends AutoCloseable {
         String type();
 
+        default TerminalCapabilities capabilities() {
+            return TerminalCapabilities.DEFAULT;
+        }
+
         PrintWriter writer();
 
         NonBlockingReader reader();
@@ -286,14 +303,31 @@ public final class TerminalSession implements AutoCloseable {
 
     private static final class JLineBackend implements Backend {
         private final Terminal terminal;
+        private final TerminalCapabilities capabilities;
 
         private JLineBackend(Terminal terminal) {
             this.terminal = terminal;
+            this.capabilities = detectCapabilities(
+                terminal.getType(),
+                terminal.getNumericCapability(Capability.max_colors),
+                System.getenv("COLORTERM"),
+                terminal.getStringCapability(Capability.key_mouse),
+                hasCapability(terminal, Capability.parm_dch)
+                    && hasCapability(terminal, Capability.parm_ich),
+                hasCapability(terminal, Capability.change_scroll_region)
+                    && hasCapability(terminal, Capability.parm_index)
+                    && hasCapability(terminal, Capability.parm_rindex)
+            );
         }
 
         @Override
         public String type() {
             return terminal.getType();
+        }
+
+        @Override
+        public TerminalCapabilities capabilities() {
+            return capabilities;
         }
 
         @Override
@@ -345,6 +379,63 @@ public final class TerminalSession implements AutoCloseable {
         public void close() throws IOException {
             terminal.close();
         }
+
+        private static boolean hasCapability(Terminal terminal, Capability capability) {
+            String sequence = terminal.getStringCapability(capability);
+            return sequence != null && !sequence.isEmpty();
+        }
+    }
+
+    static TerminalCapabilities detectCapabilities(
+        String terminalType,
+        Integer maximumColors,
+        String colorTerm,
+        String mouseSequence,
+        boolean horizontalScroll,
+        boolean verticalScroll
+    ) {
+        int colors = maximumColors == null ? 0 : Math.max(0, maximumColors);
+        ColorDepth colorDepth;
+        if (colors == 0) {
+            colorDepth = ColorDepth.MONOCHROME;
+        } else if (colors > 256 || isTrueColorHint(colorTerm)) {
+            colorDepth = ColorDepth.TRUECOLOR;
+        } else if (colors >= 256) {
+            colorDepth = ColorDepth.ANSI_256;
+        } else {
+            colorDepth = ColorDepth.ANSI_16;
+        }
+        return new TerminalCapabilities(
+            colorDepth,
+            supportsSgrMouse(terminalType, mouseSequence),
+            horizontalScroll,
+            verticalScroll
+        );
+    }
+
+    private static boolean isTrueColorHint(String colorTerm) {
+        if (colorTerm == null) {
+            return false;
+        }
+        String normalized = colorTerm.trim().toLowerCase(Locale.ROOT);
+        return "truecolor".equals(normalized) || "24bit".equals(normalized);
+    }
+
+    private static boolean supportsSgrMouse(String terminalType, String mouseSequence) {
+        if (mouseSequence == null || mouseSequence.isEmpty()) {
+            return false;
+        }
+        String normalizedSequence = mouseSequence.toLowerCase(Locale.ROOT);
+        if (mouseSequence.contains("\u001B[<")
+            || normalizedSequence.contains("\\e[<")
+            || normalizedSequence.contains("\\033[<")
+            || normalizedSequence.contains("\\x1b[<")) {
+            return true;
+        }
+        String normalizedType = terminalType == null ? "" : terminalType.toLowerCase(Locale.ROOT);
+        // screen and tmux commonly publish the legacy kmous sequence while
+        // forwarding the SGR protocol that this frontend enables and decodes.
+        return normalizedType.startsWith("screen") || normalizedType.startsWith("tmux");
     }
 
     private enum RuntimeShutdownHooks implements ShutdownHooks {

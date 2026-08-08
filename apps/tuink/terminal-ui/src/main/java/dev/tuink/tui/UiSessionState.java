@@ -13,6 +13,7 @@ final class UiSessionState {
     boolean readingModeSetting;
     boolean confirmOnCloseSetting;
     boolean mouseModeSetting;
+    boolean mouseModeAvailable = true;
     boolean highlightActiveGutterSetting;
     boolean smartHomeEndSetting;
     boolean autoIndentSetting;

@@ -7,10 +7,12 @@ import dev.tuink.tui.input.KeyEvent;
 import dev.tuink.terminal.cell.Cell;
 import dev.tuink.terminal.cell.CellBuffer;
 import dev.tuink.terminal.cell.CellText;
+import dev.tuink.terminal.cell.Canvas;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -158,6 +160,63 @@ public final class MenuBar {
             selectedMonoStyle
         );
         View.drawTopMenuMnemonics(buffer, cols);
+    }
+
+    public void draw(
+        Canvas canvas,
+        int rows,
+        int cols,
+        boolean colorEnabled,
+        CellStyle topBarStyle
+    ) {
+        Objects.requireNonNull(canvas, "canvas");
+        if (rows <= 0 || cols <= 0) {
+            return;
+        }
+        int mark = canvas.save();
+        try {
+            if (!canvas.clip(0, 0, cols, rows)) {
+                return;
+            }
+            MenuItem[] activeItems = controller.activeItems();
+            View.drawPopup(
+                canvas,
+                rows,
+                cols,
+                controller.isOpen(),
+                controller.active(),
+                controller.selectedIndex(),
+                activeItems,
+                controller.activeMnemonics(),
+                colorEnabled,
+                popupStyle,
+                popupSelectedStyle,
+                selectedMonoStyle
+            );
+            View.drawTopSelection(
+                canvas,
+                rows,
+                cols,
+                controller.isOpen(),
+                controller.active(),
+                colorEnabled,
+                topSelectedStyle,
+                selectedMonoStyle
+            );
+            View.drawTopMenuMnemonics(
+                canvas,
+                rows,
+                cols,
+                controller.isOpen(),
+                controller.active(),
+                colorEnabled,
+                topBarStyle,
+                topSelectedStyle,
+                selectedMonoStyle
+            );
+        } finally {
+            canvas.restore(mark);
+        }
     }
 
     public boolean isOpen() {
@@ -1012,6 +1071,37 @@ public final class MenuBar {
             );
         }
 
+        private static void drawPopup(
+            Canvas canvas,
+            int rows,
+            int cols,
+            boolean visible,
+            MenuId menu,
+            int selectedIndex,
+            MenuItem[] items,
+            int[] mnemonicIndexes,
+            boolean colorEnabled,
+            CellStyle popupStyle,
+            CellStyle selectedStyle,
+            CellStyle selectedMonoStyle
+        ) {
+            ContextMenu.draw(
+                canvas,
+                rows,
+                cols,
+                visible,
+                startCol(menu),
+                POPUP_TOP_ROW,
+                selectedIndex,
+                items,
+                mnemonicIndexes,
+                colorEnabled,
+                popupStyle,
+                selectedStyle,
+                selectedMonoStyle
+            );
+        }
+
         private static void drawTopSelection(
             CellBuffer buffer,
             int cols,
@@ -1036,6 +1126,23 @@ public final class MenuBar {
             drawLine(buffer, 0, startCol(active), label, style, cols);
         }
 
+        private static void drawTopSelection(
+            Canvas canvas,
+            int rows,
+            int cols,
+            boolean menuOpen,
+            MenuId active,
+            boolean colorEnabled,
+            CellStyle selectedStyle,
+            CellStyle selectedMonoStyle
+        ) {
+            if (!menuOpen || rows < 1 || cols < 1) {
+                return;
+            }
+            CellStyle style = colorEnabled ? selectedStyle : selectedMonoStyle;
+            CellText.draw(canvas, startCol(active), 0, label(active), style);
+        }
+
         private static void drawTopMenuMnemonics(CellBuffer buffer, int cols) {
             if (buffer.rows() < 1 || cols < 1) {
                 return;
@@ -1046,6 +1153,31 @@ public final class MenuBar {
             underlineTopMnemonic(buffer, cols, MenuId.TAB, 1);      // Alt+T
             underlineTopMnemonic(buffer, cols, MenuId.SETTINGS, 1); // Alt+S
             underlineTopMnemonic(buffer, cols, MenuId.HELP, 1);     // Alt+H
+        }
+
+        private static void drawTopMenuMnemonics(
+            Canvas canvas,
+            int rows,
+            int cols,
+            boolean menuOpen,
+            MenuId active,
+            boolean colorEnabled,
+            CellStyle topBarStyle,
+            CellStyle selectedStyle,
+            CellStyle selectedMonoStyle
+        ) {
+            if (rows < 1 || cols < 1) {
+                return;
+            }
+            CellStyle selected = colorEnabled ? selectedStyle : selectedMonoStyle;
+            CellStyle underlinedTop = underlined(topBarStyle);
+            CellStyle underlinedSelected = underlined(selected);
+            underlineTopMnemonic(canvas, cols, MenuId.FILE, 2, menuOpen, active, underlinedTop, underlinedSelected);
+            underlineTopMnemonic(canvas, cols, MenuId.EDIT, 1, menuOpen, active, underlinedTop, underlinedSelected);
+            underlineTopMnemonic(canvas, cols, MenuId.VIEW, 1, menuOpen, active, underlinedTop, underlinedSelected);
+            underlineTopMnemonic(canvas, cols, MenuId.TAB, 1, menuOpen, active, underlinedTop, underlinedSelected);
+            underlineTopMnemonic(canvas, cols, MenuId.SETTINGS, 1, menuOpen, active, underlinedTop, underlinedSelected);
+            underlineTopMnemonic(canvas, cols, MenuId.HELP, 1, menuOpen, active, underlinedTop, underlinedSelected);
         }
 
         private static void underlineTopMnemonic(CellBuffer buffer, int cols, MenuId menu, int offset) {
@@ -1067,6 +1199,43 @@ public final class MenuBar {
                 cell.grapheme(),
                 new CellStyle(style.fg(), style.bg(), style.bold(), true)
             );
+        }
+
+        private static void underlineTopMnemonic(
+            Canvas canvas,
+            int cols,
+            MenuId menu,
+            int offset,
+            boolean menuOpen,
+            MenuId active,
+            CellStyle underlinedTop,
+            CellStyle underlinedSelected
+        ) {
+            int col = startCol(menu) + offset;
+            String label = label(menu);
+            if (col < 0 || col >= cols || offset < 0 || offset >= label.length()) {
+                return;
+            }
+            CellStyle style = menuOpen && menu == active ? underlinedSelected : underlinedTop;
+            canvas.put(col, 0, label.substring(offset, offset + 1), style);
+        }
+
+        private static CellStyle underlined(CellStyle style) {
+            Objects.requireNonNull(style, "style");
+            return style.underline()
+                ? style
+                : new CellStyle(style.fg(), style.bg(), style.bold(), true);
+        }
+
+        private static String label(MenuId menu) {
+            return switch (menu) {
+                case FILE -> " File ";
+                case EDIT -> " Edit ";
+                case VIEW -> " View ";
+                case TAB -> " Tab ";
+                case SETTINGS -> " Settings ";
+                case HELP -> " Help ";
+            };
         }
 
         private static int startCol(MenuId menu) {

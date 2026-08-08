@@ -145,12 +145,37 @@ public final class Canvas {
         fill(rect.x(), rect.y(), rect.width(), rect.height(), style);
     }
 
+    /** Fills the requested local rectangle with one reusable width-one cell. */
+    public void fillCell(Rect rect, Cell cell) {
+        Objects.requireNonNull(rect, "rect");
+        fillCell(rect.x(), rect.y(), rect.width(), rect.height(), cell);
+    }
+
     /**
      * Fills the requested local rectangle with styled blank cells.
      * The rectangle is itself a strict boundary: an existing wide-cell
      * footprint crossing any of its edges is left unchanged.
      */
     public void fill(int x, int y, int width, int height, CellStyle style) {
+        fillSingleCell(x, y, width, height, null, style);
+    }
+
+    /**
+     * Fills the requested local rectangle with one immutable width-one cell.
+     * Continuations and wide cells are rejected rather than tiled ambiguously.
+     */
+    public void fillCell(int x, int y, int width, int height, Cell cell) {
+        fillSingleCell(x, y, width, height, cell, null);
+    }
+
+    private void fillSingleCell(
+        int x,
+        int y,
+        int width,
+        int height,
+        Cell suppliedCell,
+        CellStyle blankStyle
+    ) {
         if (width < 0 || height < 0) {
             throw new IllegalArgumentException("width and height must not be negative");
         }
@@ -170,10 +195,13 @@ public final class Canvas {
         int top = (int) effectiveTop;
         int right = (int) effectiveRight;
         int bottom = (int) effectiveBottom;
-        Cell blank = new Cell(" ", style);
+        Cell fillCell = suppliedCell == null ? new Cell(" ", blankStyle) : suppliedCell;
+        if (fillCell.continuation() || fillCell.width() != 1) {
+            throw new IllegalArgumentException("fill cell must occupy exactly one cell");
+        }
         for (int row = top; row < bottom; row++) {
             for (int col = left; col < right; col++) {
-                target.trySetClipped(row, col, blank, left, top, right, bottom);
+                target.trySetClipped(row, col, fillCell, left, top, right, bottom);
             }
         }
     }

@@ -1,5 +1,6 @@
 package dev.tuink.tui.presentation;
 
+import dev.tuink.terminal.capability.TerminalCapabilities;
 import dev.tuink.terminal.cell.Cell;
 import dev.tuink.terminal.cell.CellBuffer;
 import dev.tuink.terminal.geometry.Rect;
@@ -8,6 +9,7 @@ import dev.tuink.terminal.style.CellColor;
 import dev.tuink.terminal.style.CellStyle;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Produces ANSI output for differences between two cell buffers.
@@ -25,6 +27,22 @@ final class AnsiDiff {
         boolean colorEnabled,
         ScrollHint scrollHint
     ) {
+        return diff(
+            previous,
+            current,
+            TerminalCapabilities.DEFAULT.withColorEnabled(colorEnabled),
+            scrollHint
+        );
+    }
+
+    String diff(
+        CellBuffer previous,
+        CellBuffer current,
+        TerminalCapabilities capabilities,
+        ScrollHint scrollHint
+    ) {
+        Objects.requireNonNull(capabilities, "capabilities");
+        boolean colorEnabled = capabilities.colorEnabled();
         ScrollHint hint = scrollHint == null ? ScrollHint.none() : scrollHint;
         Rect scrollRegion = hint instanceof ScrollHint.Vertical vertical
             ? vertical.region()
@@ -37,8 +55,10 @@ final class AnsiDiff {
         int textEndCol = scrollRegion.width() == 0
             ? current.cols() - 1
             : scrollRegion.rightExclusive() - 1;
-        boolean enableVerticalScrollFastPath = hint instanceof ScrollHint.Vertical;
-        boolean enableHorizontalScrollFastPath = hint instanceof ScrollHint.Horizontal;
+        boolean enableVerticalScrollFastPath = capabilities.verticalScroll()
+            && hint instanceof ScrollHint.Vertical;
+        boolean enableHorizontalScrollFastPath = capabilities.horizontalScroll()
+            && hint instanceof ScrollHint.Horizontal;
         int horizontalDeltaColumns = hint instanceof ScrollHint.Horizontal horizontal
             ? horizontal.deltaColumns()
             : 0;

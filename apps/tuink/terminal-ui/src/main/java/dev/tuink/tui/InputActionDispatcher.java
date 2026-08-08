@@ -73,6 +73,12 @@ final class InputActionDispatcher {
                 return DispatchResult.handled(statusMessage);
             }
             case TOGGLE_MOUSE_MODE -> {
+                if (!ui.mouseModeAvailable) {
+                    return DispatchResult.handled(
+                        "Mouse mode is unavailable in this terminal",
+                        StatusLevel.WARNING
+                    );
+                }
                 ui.mouseModeSetting = !ui.mouseModeSetting;
                 ctx.mouseTrackingController().accept(ui.mouseModeSetting);
                 if (ui.mouseModeSetting) {

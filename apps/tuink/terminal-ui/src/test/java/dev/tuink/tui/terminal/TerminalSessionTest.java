@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.terminal.capability.ColorDepth;
+import dev.tuink.terminal.capability.TerminalCapabilities;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -35,6 +37,7 @@ class TerminalSessionTest {
         assertTrue(backend.enteredRawMode);
         assertFalse(backend.currentAttributes.getLocalFlag(LocalFlag.ISIG));
         assertSame(session.writer(), backend.writer);
+        assertSame(TerminalCapabilities.DEFAULT, session.capabilities());
         assertEquals(24, session.height());
         assertEquals(80, session.width());
         assertEquals(
@@ -81,6 +84,114 @@ class TerminalSessionTest {
             backend.output()
         );
         session.close();
+    }
+
+    @Test
+    void unsupportedMouseTrackingNeverWritesMouseControlSequences() throws Exception {
+        FakeBackend backend = new FakeBackend("linux");
+        backend.capabilities = new TerminalCapabilities(
+            ColorDepth.ANSI_16,
+            false,
+            true,
+            false
+        );
+        TerminalSession session = TerminalSession.start(
+            new TerminalSession.Options(false, true, false),
+            backend,
+            new FakeShutdownHooks()
+        );
+
+        assertSame(backend.capabilities, session.capabilities());
+        assertFalse(backend.output().contains(ENABLE_MOUSE));
+        session.setMouseTracking(true);
+        session.setMouseTracking(false);
+        session.close();
+
+        assertFalse(backend.output().contains(ENABLE_MOUSE));
+        assertFalse(backend.output().contains(DISABLE_MOUSE));
+    }
+
+    @Test
+    void classifiesColorMouseAndScrollCapabilitiesConservatively() {
+        assertEquals(
+            new TerminalCapabilities(ColorDepth.ANSI_256, true, true, true),
+            TerminalSession.detectCapabilities(
+                "xterm-256color",
+                256,
+                null,
+                "\\E[<",
+                true,
+                true
+            )
+        );
+        assertTrue(TerminalSession.detectCapabilities(
+            "xterm-256color",
+            256,
+            null,
+            "\u001B[<",
+            false,
+            false
+        ).mouseTracking());
+        assertTrue(TerminalSession.detectCapabilities(
+            "xterm-256color",
+            256,
+            null,
+            "\\033[<",
+            false,
+            false
+        ).mouseTracking());
+        assertTrue(TerminalSession.detectCapabilities(
+            "xterm-256color",
+            256,
+            null,
+            "\\x1b[<",
+            false,
+            false
+        ).mouseTracking());
+        assertEquals(
+            new TerminalCapabilities(ColorDepth.TRUECOLOR, true, true, false),
+            TerminalSession.detectCapabilities(
+                "screen-256color",
+                256,
+                " TrueColor ",
+                "\u001B[M",
+                true,
+                false
+            )
+        );
+        assertEquals(
+            new TerminalCapabilities(ColorDepth.TRUECOLOR, false, true, false),
+            TerminalSession.detectCapabilities(
+                "linux",
+                8,
+                "24bit",
+                "\u001B[M",
+                true,
+                false
+            )
+        );
+        assertEquals(
+            TerminalCapabilities.MINIMAL,
+            TerminalSession.detectCapabilities(
+                "unknown",
+                null,
+                "truecolor",
+                null,
+                false,
+                false
+            )
+        );
+        assertEquals(
+            ColorDepth.TRUECOLOR,
+            TerminalSession.detectCapabilities(
+                "direct",
+                16_777_216,
+                null,
+                null,
+                false,
+                false
+            ).colorDepth()
+        );
     }
 
     @Test
@@ -220,6 +331,7 @@ class TerminalSessionTest {
         private PrintWriter writer = new PrintWriter(output, true);
         private final Attributes originalAttributes = new Attributes();
         private Attributes currentAttributes = new Attributes();
+        private TerminalCapabilities capabilities = TerminalCapabilities.DEFAULT;
         private boolean enteredRawMode;
         private int closeCount;
         private IOException closeFailure;
@@ -272,6 +384,11 @@ class TerminalSessionTest {
         @Override
         public String type() {
             return type;
+        }
+
+        @Override
+        public TerminalCapabilities capabilities() {
+            return capabilities;
         }
 
         @Override

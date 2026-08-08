@@ -292,6 +292,53 @@ class CanvasTest {
     }
 
     @Test
+    void immutableCellFillVisitsOnlyVisibleCellsAndProtectsCrossingWidePairs() {
+        CellBuffer buffer = filled(2, 6, ".");
+        buffer.set(0, 0, "中", ACCENT);
+        buffer.set(0, 4, "界", ACCENT);
+        Cell leftLead = buffer.get(0, 0);
+        Cell leftContinuation = buffer.get(0, 1);
+        Cell rightLead = buffer.get(0, 4);
+        Cell rightContinuation = buffer.get(0, 5);
+        Cell dash = new Cell("-", ACCENT);
+        Canvas canvas = new Canvas(buffer);
+        assertTrue(canvas.clip(1, 0, 4, 1));
+
+        canvas.fillCell(0, 0, Integer.MAX_VALUE, 1, dash);
+
+        assertSame(leftLead, buffer.get(0, 0));
+        assertSame(leftContinuation, buffer.get(0, 1));
+        assertSame(dash, buffer.get(0, 2));
+        assertSame(dash, buffer.get(0, 3));
+        assertSame(rightLead, buffer.get(0, 4));
+        assertSame(rightContinuation, buffer.get(0, 5));
+
+        new Canvas(buffer).fillCell(new Rect(2, 1, 2, 1), dash);
+        assertSame(dash, buffer.get(1, 2));
+        assertSame(dash, buffer.get(1, 3));
+    }
+
+    @Test
+    void immutableCellFillRejectsWideAndContinuationPatternsWithoutMutation() {
+        CellBuffer buffer = filled(1, 3, ".");
+        Canvas canvas = new Canvas(buffer);
+        long signature1 = buffer.rowSignature1(0);
+        long signature2 = buffer.rowSignature2(0);
+
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> canvas.fillCell(0, 0, 3, 1, new Cell("中", ACCENT))
+        );
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> canvas.fillCell(0, 0, 3, 1, Cell.continuation(ACCENT))
+        );
+
+        assertEquals(signature1, buffer.rowSignature1(0));
+        assertEquals(signature2, buffer.rowSignature2(0));
+    }
+
+    @Test
     void randomizedClippedWritesPreserveOutsideCellsWidePairsAndSignatures() {
         CellBuffer buffer = filled(4, 12, ".");
         buffer.set(1, 1, "中", ACCENT);

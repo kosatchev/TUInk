@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.terminal.capability.ColorDepth;
+import dev.tuink.terminal.capability.TerminalCapabilities;
 import dev.tuink.terminal.geometry.Point;
 import dev.tuink.terminal.geometry.Rect;
 import dev.tuink.terminal.cell.CellBuffer;
@@ -221,6 +223,31 @@ class ScreenPresenterTest {
     }
 
     @Test
+    void unsupportedHorizontalScrollFallsBackToOrdinaryCellDiff() {
+        RecordingPrintWriter writer = new RecordingPrintWriter();
+        ScreenPresenter presenter = new ScreenPresenter(
+            writer,
+            new TerminalCapabilities(ColorDepth.MONOCHROME, false, false, true)
+        );
+        presenter.present(frame(buffer("abcde", 1, 5), 0, 0, false));
+        writer.clearOutput();
+
+        Frame shifted = new Frame(
+            buffer("bcdeX", 1, 5),
+            ScreenCursor.hidden(),
+            new ScrollHint.Horizontal(new Rect(0, 0, 5, 1), 1)
+        );
+        ScreenPresenter.PresentResult result = presenter.present(shifted);
+        String output = writer.output();
+
+        assertTrue(result.updated());
+        assertFalse(result.fullRedraw());
+        assertFalse(output.contains("\u001B[1P"));
+        assertFalse(output.contains("\u001B[1@"));
+        assertTrue(output.contains("bcdeX"));
+    }
+
+    @Test
     void validVerticalScrollHintsUseTerminalScrollAndDrawEnteringRows() {
         RecordingPrintWriter writer = new RecordingPrintWriter();
         ScreenPresenter presenter = new ScreenPresenter(writer, false);
@@ -248,6 +275,33 @@ class ScreenPresenterTest {
 
         assertTrue(writer.output().contains("\u001B[1T"));
         assertTrue(writer.output().contains("zzzzz"));
+    }
+
+    @Test
+    void unsupportedVerticalScrollFallsBackWithoutChangingTargetFrame() {
+        RecordingPrintWriter writer = new RecordingPrintWriter();
+        ScreenPresenter presenter = new ScreenPresenter(
+            writer,
+            new TerminalCapabilities(ColorDepth.MONOCHROME, false, true, false)
+        );
+        presenter.present(frame(rows("aaaaa", "bbbbb", "ccccc", "ddddd"), 0, 0, false));
+        writer.clearOutput();
+
+        Frame shifted = new Frame(
+            rows("bbbbb", "ccccc", "ddddd", "eeeee"),
+            ScreenCursor.hidden(),
+            new ScrollHint.Vertical(new Rect(0, 0, 5, 4))
+        );
+        ScreenPresenter.PresentResult result = presenter.present(shifted);
+        String output = writer.output();
+
+        assertTrue(result.updated());
+        assertFalse(result.fullRedraw());
+        assertFalse(output.contains("\u001B[1;4r"));
+        assertFalse(output.contains("\u001B[1S"));
+        assertFalse(output.contains("\u001B[1T"));
+        assertTrue(output.contains("bbbbb"));
+        assertTrue(output.contains("eeeee"));
     }
 
     @Test

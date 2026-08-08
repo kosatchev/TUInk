@@ -19,6 +19,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -426,8 +427,46 @@ public final class TreeView {
         CellStyle scrollTrackStyle,
         CellStyle scrollThumbStyle
     ) {
+        Objects.requireNonNull(buffer, "buffer");
+        draw(
+            new Canvas(buffer),
+            buffer.rows(),
+            cols,
+            left,
+            right,
+            listStartRow,
+            listRows,
+            colorEnabled,
+            normalStyle,
+            selectedColorStyle,
+            selectedMonoStyle,
+            scrollTrackStyle,
+            scrollThumbStyle
+        );
+    }
+
+    /**
+     * Draws list rows and scrollbars into one caller-owned Canvas. The declared
+     * frame and list-text geometry are strict clips, and caller state is always
+     * restored.
+     */
+    public void draw(
+        Canvas canvas,
+        int rows,
+        int cols,
+        int left,
+        int right,
+        int listStartRow,
+        int listRows,
+        boolean colorEnabled,
+        CellStyle normalStyle,
+        CellStyle selectedColorStyle,
+        CellStyle selectedMonoStyle,
+        CellStyle scrollTrackStyle,
+        CellStyle scrollThumbStyle
+    ) {
+        Objects.requireNonNull(canvas, "canvas");
         DrawLayout layout = computeLayout(left, right, listRows);
-        Canvas canvas = new Canvas(buffer);
         normalizeSelection();
         clampScroll(layout.textRows());
 
@@ -438,38 +477,87 @@ public final class TreeView {
         int maxHScroll = Math.max(0, maxLabelLength() - labelWidth);
         hScroll = Math.max(0, Math.min(hScroll, maxHScroll));
 
-        for (int i = 0; i < textRows; i++) {
-            int itemIndex = scroll + i;
-            int row = listStartRow + i;
-            CellStyle style = itemIndex == selectedIndex
-                ? (colorEnabled ? selectedColorStyle : selectedMonoStyle)
-                : normalStyle;
-            String line = rowText(itemIndex, labelWidth, sizeWidth, dateWidth);
-            drawLine(buffer, row, left + 1, line, style, cols);
-        }
-        if (layout.showVScrollbar() && !items.isEmpty()) {
-            VerticalScrollbar.draw(
+        int mark = canvas.save();
+        try {
+            if (!canvas.clip(0, 0, Math.max(0, cols), Math.max(0, rows)) || listRows <= 0) {
+                return;
+            }
+            drawTextRows(
                 canvas,
-                new Rect(right - 1, listStartRow, 1, textRows),
-                items.size(),
-                scroll,
-                "│",
-                scrollTrackStyle,
-                "█",
-                scrollThumbStyle
+                left,
+                listStartRow,
+                layout.textWidth(),
+                textRows,
+                labelWidth,
+                sizeWidth,
+                dateWidth,
+                colorEnabled,
+                normalStyle,
+                selectedColorStyle,
+                selectedMonoStyle
             );
+            if (layout.showVScrollbar() && !items.isEmpty()) {
+                VerticalScrollbar.draw(
+                    canvas,
+                    new Rect(right - 1, listStartRow, 1, textRows),
+                    items.size(),
+                    scroll,
+                    "│",
+                    scrollTrackStyle,
+                    "█",
+                    scrollThumbStyle
+                );
+            }
+            if (layout.showHScrollbar() && labelWidth > 0) {
+                HorizontalScrollbar.draw(
+                    canvas,
+                    new Rect(left + 1, listStartRow + textRows, labelWidth, 1),
+                    Math.max(labelWidth, maxLabelLength()),
+                    hScroll,
+                    "─",
+                    scrollTrackStyle,
+                    "█",
+                    scrollThumbStyle
+                );
+            }
+        } finally {
+            canvas.restore(mark);
         }
-        if (layout.showHScrollbar() && labelWidth > 0) {
-            HorizontalScrollbar.draw(
-                canvas,
-                new Rect(left + 1, listStartRow + textRows, labelWidth, 1),
-                Math.max(labelWidth, maxLabelLength()),
-                hScroll,
-                "─",
-                scrollTrackStyle,
-                "█",
-                scrollThumbStyle
-            );
+    }
+
+    private void drawTextRows(
+        Canvas canvas,
+        int left,
+        int listStartRow,
+        int textWidth,
+        int textRows,
+        int labelWidth,
+        int sizeWidth,
+        int dateWidth,
+        boolean colorEnabled,
+        CellStyle normalStyle,
+        CellStyle selectedColorStyle,
+        CellStyle selectedMonoStyle
+    ) {
+        if (textWidth <= 0 || textRows <= 0) {
+            return;
+        }
+        int mark = canvas.save();
+        try {
+            if (!canvas.clip(left + 1, listStartRow, textWidth, textRows)) {
+                return;
+            }
+            for (int i = 0; i < textRows; i++) {
+                int itemIndex = scroll + i;
+                int row = listStartRow + i;
+                CellStyle style = itemIndex == selectedIndex
+                    ? (colorEnabled ? selectedColorStyle : selectedMonoStyle)
+                    : normalStyle;
+                String line = rowText(itemIndex, labelWidth, sizeWidth, dateWidth);
+                CellText.draw(canvas, left + 1, row, line, style);
+            }
+        } finally {
+            canvas.restore(mark);
         }
     }
 
@@ -814,10 +902,6 @@ public final class TreeView {
         }
         String format = value >= 10.0 ? "%.0f%s" : "%.1f%s";
         return String.format(Locale.ROOT, format, value, units[unit]);
-    }
-
-    private static void drawLine(CellBuffer buffer, int row, int startCol, String text, CellStyle style, int cols) {
-        CellText.draw(buffer, row, startCol, text, style, cols);
     }
 
     private static String padRight(String text, int width) {

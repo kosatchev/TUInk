@@ -2,11 +2,14 @@ package dev.tuink.tui.ui;
 
 import dev.tuink.terminal.text.TerminalText;
 import dev.tuink.terminal.style.CellStyle;
+import dev.tuink.terminal.cell.Cell;
 import dev.tuink.terminal.cell.CellBuffer;
 import dev.tuink.terminal.cell.CellText;
+import dev.tuink.terminal.cell.Canvas;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * UI element that renders open editor tabs on a single row.
@@ -92,6 +95,78 @@ public final class TabBar {
                 buffer.set(1, col, " ", colorEnabled ? baseStyle : baseMonoStyle);
                 col++;
             }
+        }
+    }
+
+    /**
+     * Draws the tab bar on local row {@code 1} inside the requested viewport.
+     * Parent translation and clipping affect paint visibility, but not the
+     * tab bar's local hit-test geometry.
+     */
+    public void draw(Canvas canvas, int cols, List<TabItem> tabs, int activeIndex, boolean colorEnabled) {
+        Objects.requireNonNull(canvas, "canvas");
+        if (cols <= 0) {
+            return;
+        }
+
+        int mark = canvas.save();
+        try {
+            canvas.clip(0, 1, cols, 1);
+            lastHits.clear();
+            lastCols = cols;
+            lastCanScrollLeft = false;
+            lastCanScrollRight = false;
+
+            CellStyle base = colorEnabled ? baseStyle : baseMonoStyle;
+            Cell blank = new Cell(" ", base);
+            canvas.fillCell(0, 1, cols, 1, blank);
+
+            if (tabs.isEmpty()) {
+                firstVisibleIndex = 0;
+                return;
+            }
+            firstVisibleIndex = Math.max(0, Math.min(firstVisibleIndex, tabs.size() - 1));
+
+            int viewportStart = 0;
+            int viewportEnd = cols;
+            boolean overflow = tabs.size() > 1 && totalWidth(tabs) > cols;
+            if (overflow) {
+                viewportStart = 1;
+                viewportEnd = Math.max(1, cols - 1);
+                lastCanScrollLeft = firstVisibleIndex > 0;
+                lastCanScrollRight = hasHiddenRight(tabs, Math.max(1, cols - 2));
+                canvas.put(0, 1, lastCanScrollLeft ? new Cell("<", base) : blank);
+                canvas.put(cols - 1, 1, lastCanScrollRight ? new Cell(">", base) : blank);
+            } else {
+                firstVisibleIndex = 0;
+            }
+
+            int col = viewportStart;
+            for (int i = firstVisibleIndex; i < tabs.size() && col < viewportEnd; i++) {
+                TabItem tab = tabs.get(i);
+                boolean active = i == activeIndex;
+                CellStyle style = active
+                    ? (colorEnabled ? activeStyle : activeMonoStyle)
+                    : base;
+                String text = formatTab(tab);
+                int textWidth = CellText.width(text);
+                if (col + textWidth > viewportEnd) {
+                    break;
+                }
+                int tabStart = col;
+                int closeCol = tabStart + Math.max(0, textWidth - 2);
+                col = CellText.draw(canvas, col, 1, text, style);
+                int tabEnd = col - 1;
+                if (tabEnd >= tabStart) {
+                    lastHits.add(new TabHit(i, tabStart, tabEnd, closeCol));
+                }
+                if (col < viewportEnd) {
+                    canvas.put(col, 1, blank);
+                    col++;
+                }
+            }
+        } finally {
+            canvas.restore(mark);
         }
     }
 

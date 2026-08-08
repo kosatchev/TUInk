@@ -89,6 +89,7 @@ class ArchitectureTest {
         .should().onlyDependOnClassesThat().resideInAnyPackage(
             "java..",
             "org.jline..",
+            "dev.tuink.terminal.capability..",
             "dev.tuink.tui.terminal.."
         );
 

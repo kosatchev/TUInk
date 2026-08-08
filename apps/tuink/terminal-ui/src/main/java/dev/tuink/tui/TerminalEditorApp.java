@@ -13,6 +13,7 @@ import dev.tuink.core.TabSearch;
 import dev.tuink.core.TabSessions;
 import dev.tuink.core.TextModel;
 import dev.tuink.highlight.regex.RegexHighlighter;
+import dev.tuink.terminal.capability.TerminalCapabilities;
 import dev.tuink.tui.flow.AppSettings;
 import dev.tuink.tui.flow.AppSettingsStore;
 import dev.tuink.tui.flow.ConfirmChoice;
@@ -260,9 +261,13 @@ public class TerminalEditorApp {
         )) {
             PrintWriter writer = terminal.writer();
             var input = terminal.reader();
+            TerminalCapabilities effectiveCapabilities = terminal.capabilities()
+                .withColorEnabled(cli.colorEnabled());
+            boolean colorEnabled = effectiveCapabilities.colorEnabled();
+            uiSessionState.mouseModeAvailable = effectiveCapabilities.mouseTracking();
 
             RenderPlan plan = null;
-            ScreenPresenter screenPresenter = new ScreenPresenter(writer, cli.colorEnabled());
+            ScreenPresenter screenPresenter = new ScreenPresenter(writer, effectiveCapabilities);
             try {
                 KeyDecoder decoder = new KeyDecoder(input);
                 LegacyCommandBridge commandBridge = new LegacyCommandBridge();
@@ -286,7 +291,7 @@ public class TerminalEditorApp {
                     editorView,
                     tabBar,
                     topMenu,
-                    cli.colorEnabled(),
+                    colorEnabled,
                     screenPresenter
                 );
                 ViewportController viewportController = new ViewportController();
@@ -490,7 +495,9 @@ public class TerminalEditorApp {
                         topMenu.setWrapWordsEnabled(uiSessionState.wrapWordsSetting);
                         topMenu.setReadingModeEnabled(uiSessionState.readingModeSetting);
                         topMenu.setConfirmOnCloseEnabled(uiSessionState.confirmOnCloseSetting);
-                        topMenu.setMouseModeEnabled(uiSessionState.mouseModeSetting);
+                        topMenu.setMouseModeEnabled(
+                            uiSessionState.mouseModeSetting && uiSessionState.mouseModeAvailable
+                        );
                         topMenu.setActiveGutterHighlightEnabled(uiSessionState.highlightActiveGutterSetting);
                         topMenu.setSmartHomeEndEnabled(uiSessionState.smartHomeEndSetting);
                         topMenu.setAutoIndentEnabled(uiSessionState.autoIndentSetting);
@@ -676,7 +683,7 @@ public class TerminalEditorApp {
                     viewportController.onInput(key);
 
                     if (key instanceof KeyEvent.MouseEvent mouse) {
-                        if (!uiSessionState.mouseModeSetting) {
+                        if (!uiSessionState.mouseModeSetting || !uiSessionState.mouseModeAvailable) {
                             continue;
                         }
                         if (helpHintsMode || helpLicensesMode || helpAuthorMode) {
@@ -2329,7 +2336,13 @@ public class TerminalEditorApp {
     private record SaveFlowProgress(boolean running, UiModalState modalState) {
     }
 
-    private void drawTopFileNameBold(CellBuffer buffer, int cols, EditorState state, int startCol) {
+    private void drawTopFileNameBold(
+        CellBuffer buffer,
+        Canvas canvas,
+        int cols,
+        EditorState state,
+        int startCol
+    ) {
         if (buffer.rows() < 1 || cols <= startCol || startCol < 0) {
             return;
         }
@@ -2341,13 +2354,13 @@ public class TerminalEditorApp {
                 col++;
                 continue;
             }
-            buffer.set(0, col, cell.grapheme(), styles.topbarFilenameHighlight());
+            canvas.put(col, 0, cell.grapheme(), styles.topbarFilenameHighlight());
             col += Math.max(1, cell.width());
         }
     }
 
-    private void drawMenuLine(CellBuffer buffer, int row, int startCol, String text, CellStyle style, int cols) {
-        CellText.draw(buffer, row, startCol, text, style, cols);
+    private void drawMenuLine(Canvas canvas, int row, int startCol, String text, CellStyle style) {
+        CellText.draw(canvas, startCol, row, text, style);
     }
 
     private Canvas frameCanvas(CellBuffer buffer, int rows, int cols) {
@@ -2356,8 +2369,8 @@ public class TerminalEditorApp {
         return canvas;
     }
 
-    private void paintSelectedConfirmButton(CellBuffer buffer, ConfirmBarView confirmBar, int rows, int cols) {
-        if (buffer == null || confirmBar == null || rows < 2 || cols <= 0) {
+    private void paintSelectedConfirmButton(Canvas canvas, ConfirmBarView confirmBar, int rows, int cols) {
+        if (confirmBar == null || rows < 2 || cols <= 0) {
             return;
         }
         Button selected = confirmBar.selectedButton();
@@ -2365,21 +2378,21 @@ public class TerminalEditorApp {
             return;
         }
         int row = rows - 2;
-        if (row < 0 || row >= buffer.rows()) {
+        if (row < 0 || row >= rows) {
             return;
         }
-        selected.drawAt(frameCanvas(buffer, rows, cols), row, focusedButtonStyle(styles.promptAlert()));
+        selected.drawAt(canvas, row, focusedButtonStyle(styles.promptAlert()));
     }
 
     private void paintSelectedSearchButton(
-        CellBuffer buffer,
+        Canvas canvas,
         SearchBarView searchBar,
         SearchFocus searchFocus,
         int rows,
         int inlinePromptBarHeight,
         int cols
     ) {
-        if (buffer == null || searchBar == null || cols <= 0) {
+        if (searchBar == null || cols <= 0) {
             return;
         }
         Button selected = searchBar.buttonForFocus(searchFocus);
@@ -2388,10 +2401,10 @@ public class TerminalEditorApp {
         }
         int topRow = rows - 1 - inlinePromptBarHeight;
         int row = topRow + selected.row();
-        if (row < 0 || row >= buffer.rows()) {
+        if (row < 0 || row >= rows) {
             return;
         }
-        selected.drawAt(frameCanvas(buffer, rows, cols), row, focusedButtonStyle(styles.searchBar()));
+        selected.drawAt(canvas, row, focusedButtonStyle(styles.searchBar()));
     }
 
     private boolean isAction(KeyEvent key, KeyEvent.Action expected) {
@@ -2445,7 +2458,7 @@ public class TerminalEditorApp {
     }
 
     private void drawOpenFileOverlay(
-        CellBuffer buffer,
+        Canvas canvas,
         int rows,
         int cols,
         boolean visible,
@@ -2458,18 +2471,16 @@ public class TerminalEditorApp {
         }
         OpenFileDialogController.OpenDialogLayout layout = OpenFileDialogController.layoutForTerminal(rows, cols);
         Modal frame = openFileFrame(layout);
-        frame.draw(buffer, rows, cols);
-        Canvas canvas = frameCanvas(buffer, rows, cols);
+        frame.draw(canvas);
         Button hiddenToggle = openFileHiddenToggleButton(layout, tree.showHiddenFiles());
 
         String pathLine = " " + tree.root();
         drawMenuLine(
-            buffer,
+            canvas,
             layout.top() + 1,
             layout.left() + 1,
             padRight(pathLine, Math.max(0, layout.width() - 2)),
-            styles.dialog(),
-            cols
+            styles.dialog()
         );
         hiddenToggle.draw(
             canvas,
@@ -2478,7 +2489,8 @@ public class TerminalEditorApp {
                 : styles.dialog()
         );
         tree.draw(
-            buffer,
+            canvas,
+            rows,
             cols,
             layout.left(),
             layout.right(),
@@ -2560,7 +2572,7 @@ public class TerminalEditorApp {
     }
 
     private void drawInfoOverlay(
-        CellBuffer buffer,
+        Canvas canvas,
         int rows,
         int cols,
         boolean visible,
@@ -2572,23 +2584,21 @@ public class TerminalEditorApp {
         }
         HelpDialogLayout layout = helpDialogLayout(rows, cols, page.rows().length);
         Modal frame = infoDialogFrame(layout, page.title());
-        frame.draw(buffer, rows, cols);
+        frame.draw(canvas);
         int textRow = layout.top() + 1;
         int textCol = layout.left() + 2;
         int textWidth = Math.max(0, layout.width() - 4);
         int maxRows = Math.max(0, layout.height() - 2);
         for (int i = 0; i < page.rows().length && i < maxRows; i++) {
             drawMenuLine(
-                buffer,
+                canvas,
                 textRow + i,
                 textCol,
                 clipText(page.rows()[i], textWidth),
-                styles.dialog(),
-                cols
+                styles.dialog()
             );
         }
         Button close = helpCloseButton(layout);
-        Canvas canvas = frameCanvas(buffer, rows, cols);
         close.draw(
             canvas,
             colorEnabled ? styles.menuSelected() : styles.dialogSelectedMono()
@@ -2822,15 +2832,16 @@ public class TerminalEditorApp {
         } else {
             current = renderer.rasterize(plan, rows, cols, contentTopRow);
         }
-        paintSelectedConfirmButton(current, confirmBar, rows, cols);
-        paintSelectedSearchButton(current, searchBar, searchFocus, rows, inlinePromptBarHeight, cols);
+        Canvas canvas = frameCanvas(current, rows, cols);
+        paintSelectedConfirmButton(canvas, confirmBar, rows, cols);
+        paintSelectedSearchButton(canvas, searchBar, searchFocus, rows, inlinePromptBarHeight, cols);
         if (showTabBar) {
-            tabBar.draw(current, cols, tabItems, activeTabIndex, colorEnabled);
+            tabBar.draw(canvas, cols, tabItems, activeTabIndex, colorEnabled);
         }
-        topMenu.draw(current, cols, colorEnabled);
-        drawTopFileNameBold(current, cols, state, topMenu.fileNameStartCol());
+        topMenu.draw(canvas, rows, cols, colorEnabled, styles.renderTopbar());
+        drawTopFileNameBold(current, canvas, cols, state, topMenu.fileNameStartCol());
         drawOpenFileOverlay(
-            current,
+            canvas,
             rows,
             cols,
             openFileMode,
@@ -2839,7 +2850,7 @@ public class TerminalEditorApp {
             colorEnabled
         );
         drawInfoOverlay(
-            current,
+            canvas,
             rows,
             cols,
             helpHintsMode,
@@ -2847,7 +2858,7 @@ public class TerminalEditorApp {
             colorEnabled
         );
         drawInfoOverlay(
-            current,
+            canvas,
             rows,
             cols,
             helpLicensesMode,
@@ -2855,7 +2866,7 @@ public class TerminalEditorApp {
             colorEnabled
         );
         drawInfoOverlay(
-            current,
+            canvas,
             rows,
             cols,
             helpAuthorMode,

@@ -73,6 +73,12 @@ Run only a specific module's tests when iterating:
 ./gradlew :tui:test
 ```
 
+Verify the JVM build and distribution:
+
+```bash
+./gradlew --console=plain clean check :app:distZip
+```
+
 Run the canonical application entrypoint:
 
 ```bash

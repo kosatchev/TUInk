@@ -1,8 +1,11 @@
 package dev.tuink.tui.ui;
 
+import dev.tuink.terminal.cell.Cell;
 import dev.tuink.terminal.cell.CellBuffer;
 import dev.tuink.terminal.cell.CellText;
+import dev.tuink.terminal.cell.Canvas;
 import dev.tuink.terminal.style.CellStyle;
+import java.util.Objects;
 
 /**
  * Reusable modal frame element with title and close button.
@@ -61,6 +64,108 @@ public final class Modal {
         }
         drawLine(buffer, cols, top, left + 2, title, titleStyle);
         closeButton().draw(buffer, cols, titleStyle);
+    }
+
+    /**
+     * Draws inside the modal's local geometry and restores the caller's Canvas
+     * state. The title is clipped before the close button so a wide-grapheme
+     * footprint crossing that boundary cannot hide the button or overwrite
+     * the right frame edge.
+     */
+    public void draw(Canvas canvas) {
+        Objects.requireNonNull(canvas, "canvas");
+        if (width <= 0 || height <= 0) {
+            return;
+        }
+
+        int drawRight = Math.addExact(left, width - 1);
+        int drawBottom = Math.addExact(top, height - 1);
+
+        int mark = canvas.save();
+        try {
+            if (!canvas.clip(left, top, width, height)) {
+                return;
+            }
+
+            Cell horizontal = new Cell("─", borderStyle);
+            Cell vertical = new Cell("│", borderStyle);
+            Cell topLeft = new Cell("┌", borderStyle);
+            Cell topRight = new Cell("┐", borderStyle);
+            Cell bottomLeft = new Cell("└", borderStyle);
+            Cell bottomRight = new Cell("┘", borderStyle);
+
+            canvas.fill(left, top, width, height, bodyStyle);
+            drawBorder(
+                canvas,
+                drawRight,
+                drawBottom,
+                horizontal,
+                vertical,
+                topLeft,
+                topRight,
+                bottomLeft,
+                bottomRight
+            );
+            drawTitle(canvas);
+            if (width >= 4) {
+                closeButton().draw(canvas, titleStyle);
+            }
+        } finally {
+            canvas.restore(mark);
+        }
+    }
+
+    private void drawBorder(
+        Canvas canvas,
+        int drawRight,
+        int drawBottom,
+        Cell horizontal,
+        Cell vertical,
+        Cell topLeft,
+        Cell topRight,
+        Cell bottomLeft,
+        Cell bottomRight
+    ) {
+        canvas.put(left, top, topLeft);
+        if (width > 2) {
+            canvas.fillCell(left + 1, top, width - 2, 1, horizontal);
+        }
+        if (width > 1) {
+            canvas.put(drawRight, top, topRight);
+        }
+
+        if (height > 1) {
+            canvas.put(left, drawBottom, bottomLeft);
+            if (width > 2) {
+                canvas.fillCell(left + 1, drawBottom, width - 2, 1, horizontal);
+            }
+            if (width > 1) {
+                canvas.put(drawRight, drawBottom, bottomRight);
+            }
+        }
+
+        if (height > 2) {
+            canvas.fillCell(left, top + 1, 1, height - 2, vertical);
+            if (width > 1) {
+                canvas.fillCell(drawRight, top + 1, 1, height - 2, vertical);
+            }
+        }
+    }
+
+    private void drawTitle(Canvas canvas) {
+        int titleWidth = width - 5;
+        if (titleWidth <= 0 || title == null || title.isEmpty()) {
+            return;
+        }
+        int titleLeft = left + 2;
+        int mark = canvas.save();
+        try {
+            if (canvas.clip(titleLeft, top, titleWidth, 1)) {
+                CellText.draw(canvas, titleLeft, top, title, titleStyle);
+            }
+        } finally {
+            canvas.restore(mark);
+        }
     }
 
     private static void fillRect(

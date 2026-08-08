@@ -1,7 +1,8 @@
 package dev.tuink.tui.presentation;
 
-import dev.tuink.terminal.geometry.Point;
+import dev.tuink.terminal.capability.TerminalCapabilities;
 import dev.tuink.terminal.cell.CellBuffer;
+import dev.tuink.terminal.geometry.Point;
 import dev.tuink.terminal.screen.Frame;
 import java.io.PrintWriter;
 import java.util.Objects;
@@ -18,7 +19,7 @@ public final class ScreenPresenter {
     private static final String HIDE_CURSOR = "\u001B[?25l";
 
     private final PrintWriter writer;
-    private final boolean colorEnabled;
+    private final TerminalCapabilities capabilities;
     private final AnsiDiff ansiDiff = new AnsiDiff();
     private Frame previousFrame;
     private Point cursorPosition;
@@ -26,8 +27,12 @@ public final class ScreenPresenter {
     private boolean cursorKnown;
 
     public ScreenPresenter(PrintWriter writer, boolean colorEnabled) {
+        this(writer, TerminalCapabilities.DEFAULT.withColorEnabled(colorEnabled));
+    }
+
+    public ScreenPresenter(PrintWriter writer, TerminalCapabilities capabilities) {
         this.writer = Objects.requireNonNull(writer, "writer");
-        this.colorEnabled = colorEnabled;
+        this.capabilities = Objects.requireNonNull(capabilities, "capabilities");
     }
 
     public synchronized PresentResult present(Frame frame) {
@@ -47,7 +52,7 @@ public final class ScreenPresenter {
             || previous.cols() != current.cols();
 
         long patchStart = measurePatchTime ? System.nanoTime() : 0L;
-        String patch = ansiDiff.diff(previous, current, colorEnabled, frame.scrollHint());
+        String patch = ansiDiff.diff(previous, current, capabilities, frame.scrollHint());
         long patchNanos = measurePatchTime ? System.nanoTime() - patchStart : 0L;
 
         Point desiredPosition = frame.cursor().position();

@@ -38,10 +38,12 @@ subprojects {
 def allowedProjectDependencies = [
     ':unicode-text'   : [] as Set,
     ':tui-core'       : [':unicode-text'] as Set,
+    ':tui-jline'      : [':tui-core'] as Set,
+    ':tui-widgets'    : [':tui-core'] as Set,
     ':core'           : [':unicode-text'] as Set,
     ':render'         : [':tui-core', ':core'] as Set,
     ':highlight-regex': [':core', ':render'] as Set,
-    ':tui'            : [':unicode-text', ':tui-core', ':core', ':render', ':highlight-regex'] as Set,
+    ':tui'            : [':tui-core', ':tui-jline', ':tui-widgets', ':core', ':render', ':highlight-regex'] as Set,
     ':app'            : [':tui'] as Set
 ]
 def externallyDependencyFreeProductionConfigurations = [
@@ -84,13 +86,13 @@ def verifyProjectDependencies = tasks.register('verifyProjectDependencies') {
                 configuration.dependencies
                     .withType(org.gradle.api.artifacts.ExternalModuleDependency)
                     .each { dependency ->
-                        if (sourceProject.path != ':tui' && dependency.group == 'org.jline') {
+                        if (sourceProject.path != ':tui-jline' && dependency.group == 'org.jline') {
                             violations.add(
                                 "${sourceProject.path}:${configuration.name} -> "
                                     + "${dependency.group}:${dependency.name}"
                             )
                         }
-                        if ([':unicode-text', ':tui-core'].contains(sourceProject.path)
+                        if ([':unicode-text', ':tui-core', ':tui-widgets'].contains(sourceProject.path)
                             && externallyDependencyFreeProductionConfigurations.contains(configuration.name)) {
                             violations.add(
                                 "${sourceProject.path}:${configuration.name} -> "

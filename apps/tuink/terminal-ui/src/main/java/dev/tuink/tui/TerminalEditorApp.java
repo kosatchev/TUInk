@@ -24,7 +24,6 @@ import dev.tuink.tui.flow.SaveTargetSuggester;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.flow.UiModalState;
 import dev.tuink.tui.command.CommandInvocation;
-import dev.tuink.tui.input.KeyDecoder;
 import dev.tuink.tui.input.KeyEvent;
 import dev.tuink.terminal.input.KeyStroke;
 import dev.tuink.tui.input.LegacyKeyEventAdapter;
@@ -34,7 +33,7 @@ import dev.tuink.terminal.input.TextInput;
 import dev.tuink.terminal.input.TuiInputEvent;
 import dev.tuink.terminal.geometry.Point;
 import dev.tuink.terminal.geometry.Rect;
-import dev.tuink.tui.presentation.ScreenPresenter;
+import dev.tuink.terminal.jline.presentation.ScreenPresenter;
 import dev.tuink.terminal.cell.CellBuffer;
 import dev.tuink.terminal.cell.CellText;
 import dev.tuink.terminal.cell.Canvas;
@@ -52,15 +51,17 @@ import dev.tuink.terminal.screen.ScreenCursor;
 import dev.tuink.terminal.screen.ScrollHint;
 import dev.tuink.terminal.style.CellStyle;
 import dev.tuink.tui.style.UiStyles;
-import dev.tuink.tui.terminal.TerminalSession;
-import dev.tuink.tui.ui.Button;
+import dev.tuink.terminal.jline.TerminalSession;
+import dev.tuink.terminal.jline.TerminalRuntime;
+import dev.tuink.terminal.widget.Button;
+import dev.tuink.terminal.widget.Modal;
+import dev.tuink.terminal.widget.TextField;
 import dev.tuink.tui.ui.ConfirmBarController;
 import dev.tuink.tui.ui.ConfirmBarView;
 import dev.tuink.tui.ui.DirtyTabSummary;
 import dev.tuink.tui.ui.EditorView;
 import dev.tuink.tui.ui.InlinePromptBar;
 import dev.tuink.tui.ui.MenuBar;
-import dev.tuink.tui.ui.Modal;
 import dev.tuink.tui.ui.NotificationBar;
 import dev.tuink.tui.ui.HelpPage;
 import dev.tuink.tui.ui.HelpPages;
@@ -69,7 +70,6 @@ import dev.tuink.tui.ui.OpenFileDialogController.OpenDialogLayout;
 import dev.tuink.tui.ui.OpenFileDialogController;
 import dev.tuink.tui.ui.CursorPolicy;
 import dev.tuink.tui.ui.TabBar;
-import dev.tuink.tui.ui.TextField;
 import dev.tuink.tui.ui.TreeView;
 import dev.tuink.tui.ui.ViewportController;
 import java.io.IOException;
@@ -252,40 +252,23 @@ public class TerminalEditorApp {
             }
         }
 
-        try (TerminalSession terminal = TerminalSession.open(
+        try (TerminalRuntime terminal = TerminalRuntime.open(
             new TerminalSession.Options(
                 cli.altScreenEnabled(),
                 uiSessionState.mouseModeSetting,
                 shouldForceExecTerminalProvider()
-            )
+            ),
+            cli.colorEnabled()
         )) {
-            PrintWriter writer = terminal.writer();
-            var input = terminal.reader();
-            TerminalCapabilities effectiveCapabilities = terminal.capabilities()
-                .withColorEnabled(cli.colorEnabled());
+            TerminalCapabilities effectiveCapabilities = terminal.capabilities();
             boolean colorEnabled = effectiveCapabilities.colorEnabled();
             uiSessionState.mouseModeAvailable = effectiveCapabilities.mouseTracking();
 
             RenderPlan plan = null;
-            ScreenPresenter screenPresenter = new ScreenPresenter(writer, effectiveCapabilities);
+            ScreenPresenter screenPresenter = terminal.screenPresenter();
             try {
-                KeyDecoder decoder = new KeyDecoder(input);
                 LegacyCommandBridge commandBridge = new LegacyCommandBridge();
-                TuiEventLoop<TuiInputEvent> eventLoop = new TuiEventLoop<>(timeoutMillis -> {
-                    KeyDecoder.ReadResult result = decoder.read(timeoutMillis);
-                    return switch (result.status()) {
-                        case EVENT -> TuiEventLoop.Read.event(result.event());
-                        case IDLE -> TuiEventLoop.Read.idle();
-                        case END -> TuiEventLoop.Read.end();
-                    };
-                });
-                terminal.onResize(() -> eventLoop.requestResize(
-                    new ResizeEvent(
-                        Math.max(2, terminal.height()),
-                        Math.max(1, terminal.width())
-                    )
-                ));
-                terminal.onInterrupt(eventLoop::requestStop);
+                TuiEventLoop<TuiInputEvent> eventLoop = terminal.eventLoop();
                 RenderFrameController renderFrameController = new RenderFrameController(
                     renderer,
                     editorView,

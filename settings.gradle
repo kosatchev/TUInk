@@ -13,7 +13,9 @@ def projectDirectories = [
     ':core': 'libs/editor/engine',
     ':highlight-regex': 'libs/editor/highlight-regex',
     ':unicode-text': 'libs/unicode-text',
-    ':tui-core': 'libs/tuiframe/core'
+    ':tui-core': 'libs/tuiframe/core',
+    ':tui-jline': 'libs/tuiframe/jline',
+    ':tui-widgets': 'libs/tuiframe/widgets'
 ]
 projectDirectories.each { projectPath, directory ->
     include projectPath

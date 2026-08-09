@@ -1,11 +1,10 @@
 dependencies {
-    implementation project(':unicode-text')
     implementation project(':tui-core')
+    implementation project(':tui-jline')
+    implementation project(':tui-widgets')
     implementation project(':core')
     implementation project(':render')
     implementation project(':highlight-regex')
-    implementation 'org.jline:jline-terminal:3.30.6'
-    runtimeOnly 'org.jline:jline-terminal-jni:3.30.6'
 }
 
 def tuinkVersion = project.version.toString()

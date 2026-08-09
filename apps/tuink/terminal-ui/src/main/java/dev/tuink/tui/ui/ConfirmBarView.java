@@ -1,5 +1,7 @@
 package dev.tuink.tui.ui;
 
+import dev.tuink.terminal.widget.Button;
+
 import dev.tuink.tui.flow.ConfirmChoice;
 import dev.tuink.terminal.cell.CellText;
 

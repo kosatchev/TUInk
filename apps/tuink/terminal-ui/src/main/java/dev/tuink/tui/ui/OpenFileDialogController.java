@@ -1,5 +1,7 @@
 package dev.tuink.tui.ui;
 
+import dev.tuink.terminal.widget.Button;
+
 import dev.tuink.tui.input.KeyEvent;
 import java.util.function.Function;
 

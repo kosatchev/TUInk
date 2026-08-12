@@ -8,11 +8,16 @@ import dev.tuink.terminal.cell.Cell;
 import dev.tuink.terminal.cell.CellBuffer;
 import dev.tuink.terminal.cell.CellText;
 import dev.tuink.terminal.cell.Canvas;
+import dev.tuink.terminal.geometry.Rect;
 import dev.tuink.terminal.style.CellColor;
 import dev.tuink.terminal.style.CellStyle;
 import dev.tuink.terminal.widget.Button;
-import dev.tuink.tui.ui.MenuBar;
 import dev.tuink.terminal.widget.Modal;
+import dev.tuink.terminal.widget.PlacedModal;
+import dev.tuink.terminal.widget.Theme;
+import dev.tuink.terminal.widget.WidgetState;
+import dev.tuink.terminal.widget.WidgetThemeKeys;
+import dev.tuink.tui.ui.MenuBar;
 import dev.tuink.tui.ui.TabBar;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -71,6 +76,21 @@ class FrameCompositionGoldenTest {
         true,
         false
     );
+    private static final Theme WIDGET_THEME = key -> {
+        if (WidgetThemeKeys.MODAL_BODY.equals(key)) {
+            return MODAL_BODY;
+        }
+        if (WidgetThemeKeys.MODAL_BORDER.equals(key)) {
+            return MODAL_BORDER;
+        }
+        if (WidgetThemeKeys.MODAL_TITLE.equals(key)) {
+            return MODAL_TITLE;
+        }
+        if (WidgetThemeKeys.BUTTON_FOCUSED.equals(key)) {
+            return ACTION;
+        }
+        return null;
+    };
 
     @Test
     void compositedCanvasFrameMatchesIndependentGoldenScreen() {
@@ -99,18 +119,12 @@ class FrameCompositionGoldenTest {
         CellText.draw(canvas, 2, 9, "footer", CONTENT);
         menu.draw(canvas, ROWS, COLS, true, TOP);
 
-        Modal modal = new Modal(
-            3,
-            7,
-            30,
-            5,
-            " T中e\u0301 ",
-            MODAL_BODY,
-            MODAL_BORDER,
-            MODAL_TITLE
-        );
-        modal.draw(canvas);
-        new Button(8, 30, "OK中").draw(canvas, ACTION);
+        Modal modal = new Modal(30, 5, " T中e\u0301 ");
+        PlacedModal placedModal = modal.layout(new Rect(7, 3, 30, 5));
+        placedModal.paint(canvas, WIDGET_THEME);
+        Button action = new Button("OK中");
+        action.layout(new Rect(30, 8, action.width(), 1))
+            .paint(canvas, WIDGET_THEME, WidgetState.FOCUSED);
 
         assertEquals(
             List.of(
@@ -137,7 +151,8 @@ class FrameCompositionGoldenTest {
         assertTrue(frame.get(2, 12).continuation());
         assertEquals(MODAL_BORDER, frame.get(3, 7).style());
         assertEquals(MODAL_TITLE, frame.get(3, 11).style());
-        assertEquals(MODAL_TITLE, frame.get(3, modal.closeButton().col()).style());
+        assertTrue(placedModal.closeHit(3, 34));
+        assertEquals(MODAL_TITLE, frame.get(3, 34).style());
         assertEquals(MODAL_BODY, frame.get(4, 8).style());
         assertEquals(BACKGROUND, frame.get(8, 29).style());
         assertEquals(ACTION, frame.get(8, 30).style());

@@ -7,8 +7,8 @@ Minimal Java terminal text editor with clean multi-module architecture:
   frame, capability, and event-loop contracts under `dev.tuink.terminal.*`
 - `tui-jline`: JLine lifecycle, composed terminal runtime, physical input
   decoder, capability detection, and ANSI screen presentation
-- `tui-widgets`: editor-independent widget primitives; currently `Button`,
-  `Modal`, and Unicode-aware `TextField`, with the rest migrating incrementally
+- `tui-widgets`: editor-independent passive layout/theme contracts plus
+  reusable `Button`, `Modal`, and Unicode-aware `TextField` primitives
 - `core`: editor engine and text model (`TextBuffer` + `SimpleLineBuffer`)
 - `render`: editor render planning, style spans, and terminal-aware layout
 - `highlight-regex`: regex-based syntax highlighter

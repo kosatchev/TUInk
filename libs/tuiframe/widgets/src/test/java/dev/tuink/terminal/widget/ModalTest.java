@@ -1,6 +1,7 @@
 package dev.tuink.terminal.widget;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -8,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import dev.tuink.terminal.cell.Cell;
 import dev.tuink.terminal.cell.CellBuffer;
 import dev.tuink.terminal.cell.Canvas;
+import dev.tuink.terminal.geometry.Rect;
+import dev.tuink.terminal.geometry.Size;
 import dev.tuink.terminal.style.CellColor;
 import dev.tuink.terminal.style.CellStyle;
 import org.junit.jupiter.api.Test;
@@ -154,6 +157,61 @@ class ModalTest {
         assertEquals(signature2, buffer.rowSignature2(1));
         assertTrue(canvas.put(0, 1, "y", ACCENT));
         assertEquals("y", buffer.get(1, 1).grapheme());
+    }
+
+    @Test
+    void genericModalPlacementMatchesLegacyAndUsesThemeRoles() {
+        String title = " T中e\u0301 ";
+        Modal legacyModal = new Modal(1, 2, 14, 4, title, BODY, BORDER, TITLE);
+        Modal genericModal = new Modal(14, 4, title);
+        CellBuffer legacy = filled(7, 20);
+        CellBuffer actual = filled(7, 20);
+        Theme theme = key -> {
+            if (WidgetThemeKeys.MODAL_BODY.equals(key)) {
+                return BODY;
+            }
+            if (WidgetThemeKeys.MODAL_BORDER.equals(key)) {
+                return BORDER;
+            }
+            if (WidgetThemeKeys.MODAL_TITLE.equals(key)) {
+                return TITLE;
+            }
+            throw new AssertionError("unexpected key: " + key);
+        };
+
+        assertEquals(new Size(14, 4), genericModal.measure(new Size(20, 7)));
+        assertEquals(new Size(8, 2), genericModal.measure(new Size(8, 2)));
+        PlacedModal placed = genericModal.layout(new Rect(2, 1, 14, 4));
+        legacyModal.draw(new Canvas(legacy));
+        placed.paint(new Canvas(actual), theme);
+
+        assertBuffersEqual(legacy, actual);
+        assertTrue(placed.hit(1, 2));
+        assertTrue(placed.hit(4, 15));
+        assertTrue(placed.closeHit(1, 13));
+        assertFalse(placed.closeHit(1, 12));
+        assertFalse(new Modal(3, 1, "").layout(new Rect(2, 1, 3, 1)).closeHit(1, 2));
+        assertFalse(new Modal(4, 0, "").layout(new Rect(2, 1, 4, 0)).closeHit(1, 3));
+    }
+
+    @Test
+    void missingGenericThemeRoleFallsBackAndCallerCanvasStateSurvives() {
+        CellBuffer buffer = filled(4, 10);
+        Canvas canvas = new Canvas(buffer);
+        canvas.translate(1, 1);
+        assertTrue(canvas.clip(0, 0, 8, 3));
+        PlacedModal placed = new Modal(6, 2, "T").layout(new Rect(1, 0, 6, 2));
+
+        assertTrue(placed.closeHit(0, 4));
+        assertFalse(placed.closeHit(1, 5));
+
+        placed.paint(canvas, key -> WidgetThemeKeys.MODAL_TITLE.equals(key) ? null : BODY);
+
+        assertEquals("T", buffer.get(1, 4).grapheme());
+        assertEquals(CellStyle.DEFAULT, buffer.get(1, 4).style());
+        assertEquals("X", buffer.get(1, 5).grapheme());
+        assertTrue(canvas.put(0, 0, "z", ACCENT));
+        assertEquals("z", buffer.get(1, 1).grapheme());
     }
 
     private static CellBuffer filled(int rows, int cols) {

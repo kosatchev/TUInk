@@ -3,6 +3,8 @@ package dev.tuink.terminal.widget;
 import dev.tuink.terminal.cell.CellBuffer;
 import dev.tuink.terminal.cell.CellText;
 import dev.tuink.terminal.cell.Canvas;
+import dev.tuink.terminal.geometry.Rect;
+import dev.tuink.terminal.geometry.Size;
 import dev.tuink.terminal.text.TerminalText;
 import dev.tuink.terminal.style.CellStyle;
 import java.util.Objects;
@@ -10,13 +12,20 @@ import java.util.Objects;
 /**
  * Reusable single-line text button for TUI overlays.
  */
-public final class Button {
+public final class Button implements Widget {
     private static final int TAB_WIDTH = 4;
 
     private final int row;
     private final int col;
     private final String text;
     private final boolean framed;
+    private final String renderedText;
+    private final int renderedWidth;
+    private final int cursorOffset;
+
+    public Button(String text) {
+        this(0, 0, text, true);
+    }
 
     public Button(int row, int col, String text) {
         this(row, col, text, true);
@@ -27,10 +36,18 @@ public final class Button {
         this.col = col;
         this.text = text;
         this.framed = framed;
+        this.renderedText = framed ? "[" + text + "]" : text;
+        TerminalText.Metrics metrics = TerminalText.metrics(renderedText, TAB_WIDTH);
+        this.renderedWidth = metrics.visualWidth();
+        this.cursorOffset = resolveCursorOffset(metrics, framed);
     }
 
     public static Button plain(int row, int col, String text) {
         return new Button(row, col, text, false);
+    }
+
+    public static Button plain(String text) {
+        return new Button(0, 0, text, false);
     }
 
     public int row() {
@@ -46,22 +63,11 @@ public final class Button {
     }
 
     public int cursorCol() {
-        String rendered = renderedText();
-        int visual = 0;
-        for (TerminalText.Grapheme grapheme : TerminalText.graphemes(rendered)) {
-            int codePoint = grapheme.text().codePointAt(0);
-            if (Character.isLetterOrDigit(codePoint)) {
-                return col + visual;
-            }
-            visual += grapheme.tab()
-                ? TAB_WIDTH - (visual % TAB_WIDTH)
-                : Math.max(1, grapheme.width());
-        }
-        return col + (framed ? 1 : 0);
+        return col + cursorOffset;
     }
 
     public int width() {
-        return CellText.width(renderedText());
+        return renderedWidth;
     }
 
     public boolean hit(int hitRow, int hitCol) {
@@ -84,23 +90,78 @@ public final class Button {
     /** Draws on an alternate local row without changing hit-test geometry. */
     public void drawAt(Canvas canvas, int drawRow, CellStyle style) {
         Objects.requireNonNull(canvas, "canvas");
-        String rendered = renderedText();
-        int paintWidth = CellText.width(rendered);
-        if (paintWidth <= 0) {
+        if (renderedWidth <= 0) {
             return;
         }
         int mark = canvas.save();
         try {
-            if (!canvas.clip(col, drawRow, paintWidth, 1)) {
+            if (!canvas.clip(col, drawRow, renderedWidth, 1)) {
                 return;
             }
-            CellText.draw(canvas, col, drawRow, rendered, style);
+            CellText.draw(canvas, col, drawRow, renderedText, style);
         } finally {
             canvas.restore(mark);
         }
     }
 
     public String renderedText() {
-        return framed ? "[" + text + "]" : text;
+        return renderedText;
+    }
+
+    @Override
+    public Size measure(Size available) {
+        Objects.requireNonNull(available, "available");
+        return new Size(
+            Math.min(renderedWidth, available.width()),
+            Math.min(1, available.height())
+        );
+    }
+
+    @Override
+    public PlacedWidget layout(Rect bounds) {
+        return new Placement(this, Objects.requireNonNull(bounds, "bounds"));
+    }
+
+    private static int resolveCursorOffset(TerminalText.Metrics metrics, boolean framed) {
+        for (int index = 0; index < metrics.graphemeCount(); index++) {
+            int codePoint = metrics.text().codePointAt(metrics.start(index));
+            if (Character.isLetterOrDigit(codePoint)) {
+                return metrics.visualColumnAtBoundary(index);
+            }
+        }
+        return framed ? 1 : 0;
+    }
+
+    private record Placement(Button button, Rect bounds) implements PlacedWidget {
+        private Placement {
+            Objects.requireNonNull(button, "button");
+            Objects.requireNonNull(bounds, "bounds");
+        }
+
+        @Override
+        public void paint(Canvas canvas, Theme theme, WidgetState state) {
+            Objects.requireNonNull(theme, "theme");
+            Objects.requireNonNull(state, "state");
+            WidgetStyleRole role = !state.enabled()
+                ? WidgetThemeKeys.BUTTON_DISABLED
+                : state.focused() ? WidgetThemeKeys.BUTTON_FOCUSED : WidgetThemeKeys.BUTTON;
+            paintText(canvas, bounds, button.renderedText, theme.resolveStyle(role));
+        }
+    }
+
+    private static void paintText(Canvas canvas, Rect bounds, String text, CellStyle style) {
+        Objects.requireNonNull(canvas, "canvas");
+        if (bounds.isEmpty()) {
+            return;
+        }
+        int mark = canvas.save();
+        try {
+            if (!canvas.clip(bounds)) {
+                return;
+            }
+            CellText.draw(canvas, bounds.x(), bounds.y(), text, style);
+        } finally {
+            canvas.restore(mark);
+        }
     }
 }

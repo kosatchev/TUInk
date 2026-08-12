@@ -55,7 +55,13 @@ import dev.tuink.terminal.jline.TerminalSession;
 import dev.tuink.terminal.jline.TerminalRuntime;
 import dev.tuink.terminal.widget.Button;
 import dev.tuink.terminal.widget.Modal;
+import dev.tuink.terminal.widget.PlacedModal;
+import dev.tuink.terminal.widget.PlacedWidget;
+import dev.tuink.terminal.widget.WidgetStyleRole;
 import dev.tuink.terminal.widget.TextField;
+import dev.tuink.terminal.widget.Theme;
+import dev.tuink.terminal.widget.WidgetState;
+import dev.tuink.terminal.widget.WidgetThemeKeys;
 import dev.tuink.tui.ui.ConfirmBarController;
 import dev.tuink.tui.ui.ConfirmBarView;
 import dev.tuink.tui.ui.DirtyTabSummary;
@@ -103,6 +109,9 @@ public class TerminalEditorApp {
     private static final long RECOVERY_ERROR_NOTIFY_COOLDOWN_NANOS = 5_000_000_000L;
     private UiStyles.Theme theme = UiStyles.Theme.CYAN;
     private UiStyles.Palette styles = UiStyles.forTheme(theme);
+    private final Theme colorOverlayWidgetTheme = key -> resolveOverlayWidgetStyle(key, true);
+    private final Theme monoOverlayWidgetTheme = key -> resolveOverlayWidgetStyle(key, false);
+    private HelpOverlayPlacement helpOverlayCache;
     private boolean profileEnabled = false;
     private final FrameProfiler frameProfiler = new FrameProfiler();
     private boolean lastOpenFileModeForDiff = false;
@@ -673,11 +682,9 @@ public class TerminalEditorApp {
                             if (mouse.kind() == KeyEvent.MouseKind.PRESS
                                 && mouse.button() == KeyEvent.MouseButton.LEFT) {
                                 HelpPage helpPage = activeHelpPage(helpHintsMode, helpLicensesMode, helpAuthorMode);
-                                HelpDialogLayout layout = helpDialogLayout(rows, cols, helpPage.rows().length);
-                                Modal frame = infoDialogFrame(layout, helpPage.title());
-                                Button close = helpCloseButton(layout);
-                                if (frame.closeButton().hit(mouse.row(), mouse.col())
-                                    || close.hit(mouse.row(), mouse.col())) {
+                                HelpOverlayPlacement overlay = helpOverlayPlacement(rows, cols, helpPage);
+                                if (overlay.frame().closeHit(mouse.row(), mouse.col())
+                                    || overlay.close().hit(mouse.row(), mouse.col())) {
                                     modalState = UiModalState.none();
                                 }
                             }
@@ -2535,16 +2542,7 @@ public class TerminalEditorApp {
     }
 
     private Modal infoDialogFrame(HelpDialogLayout layout, String title) {
-        return new Modal(
-            layout.top(),
-            layout.left(),
-            layout.width(),
-            layout.height(),
-            title,
-            styles.dialog(),
-            styles.dialogBorder(),
-            styles.dialogTitle()
-        );
+        return new Modal(layout.width(), layout.height(), title);
     }
 
     private Button helpCloseButton(HelpDialogLayout layout) {
@@ -2552,6 +2550,25 @@ public class TerminalEditorApp {
         int col = layout.left() + Math.max(1, (layout.width() - (closeText.length() + 2)) / 2);
         int row = layout.top() + layout.height() - 1;
         return new Button(row, col, closeText);
+    }
+
+    private HelpOverlayPlacement helpOverlayPlacement(int rows, int cols, HelpPage page) {
+        HelpDialogLayout layout = helpDialogLayout(rows, cols, page.rows().length);
+        HelpOverlayPlacement cached = helpOverlayCache;
+        if (cached != null && cached.page() == page && cached.layout().equals(layout)) {
+            return cached;
+        }
+        Modal frame = infoDialogFrame(layout, page.title());
+        Button close = helpCloseButton(layout);
+        HelpOverlayPlacement prepared = new HelpOverlayPlacement(
+            page,
+            layout,
+            frame.layout(new Rect(layout.left(), layout.top(), layout.width(), layout.height())),
+            close,
+            close.layout(new Rect(close.col(), close.row(), close.width(), 1))
+        );
+        helpOverlayCache = prepared;
+        return prepared;
     }
 
     private void drawInfoOverlay(
@@ -2565,9 +2582,10 @@ public class TerminalEditorApp {
         if (!visible || rows < 8 || cols < 24) {
             return;
         }
-        HelpDialogLayout layout = helpDialogLayout(rows, cols, page.rows().length);
-        Modal frame = infoDialogFrame(layout, page.title());
-        frame.draw(canvas);
+        HelpOverlayPlacement overlay = helpOverlayPlacement(rows, cols, page);
+        HelpDialogLayout layout = overlay.layout();
+        Theme widgetTheme = colorEnabled ? colorOverlayWidgetTheme : monoOverlayWidgetTheme;
+        overlay.frame().paint(canvas, widgetTheme);
         int textRow = layout.top() + 1;
         int textCol = layout.left() + 2;
         int textWidth = Math.max(0, layout.width() - 4);
@@ -2581,11 +2599,26 @@ public class TerminalEditorApp {
                 styles.dialog()
             );
         }
-        Button close = helpCloseButton(layout);
-        close.draw(
-            canvas,
-            colorEnabled ? styles.menuSelected() : styles.dialogSelectedMono()
-        );
+        overlay.closePlacement().paint(canvas, widgetTheme, WidgetState.FOCUSED);
+    }
+
+    CellStyle resolveOverlayWidgetStyle(WidgetStyleRole key, boolean colorEnabled) {
+        if (WidgetThemeKeys.MODAL_BODY.equals(key) || WidgetThemeKeys.BUTTON.equals(key)) {
+            return styles.dialog();
+        }
+        if (WidgetThemeKeys.MODAL_BORDER.equals(key)) {
+            return styles.dialogBorder();
+        }
+        if (WidgetThemeKeys.MODAL_TITLE.equals(key)) {
+            return styles.dialogTitle();
+        }
+        if (WidgetThemeKeys.BUTTON_FOCUSED.equals(key)) {
+            return colorEnabled ? styles.menuSelected() : styles.dialogSelectedMono();
+        }
+        if (WidgetThemeKeys.BUTTON_DISABLED.equals(key)) {
+            return styles.dialog();
+        }
+        return null;
     }
 
     private HelpPage activeHelpPage(boolean helpHintsMode, boolean helpLicensesMode, boolean helpAuthorMode) {
@@ -2914,8 +2947,7 @@ public class TerminalEditorApp {
             }
         } else if (helpHintsMode || helpLicensesMode || helpAuthorMode) {
             HelpPage helpPage = activeHelpPage(helpHintsMode, helpLicensesMode, helpAuthorMode);
-            HelpDialogLayout layout = helpDialogLayout(rows, cols, helpPage.rows().length);
-            Button close = helpCloseButton(layout);
+            Button close = helpOverlayPlacement(rows, cols, helpPage).close();
             desiredCursorRow = Math.min(rows, close.row() + 1);
             desiredCursorCol = Math.min(cols, close.cursorCol() + 1);
         }
@@ -3904,6 +3936,15 @@ public class TerminalEditorApp {
     }
 
     private record HelpDialogLayout(int top, int left, int width, int height) {
+    }
+
+    private record HelpOverlayPlacement(
+        HelpPage page,
+        HelpDialogLayout layout,
+        PlacedModal frame,
+        Button close,
+        PlacedWidget closePlacement
+    ) {
     }
 
     private record RenderFrameResult(

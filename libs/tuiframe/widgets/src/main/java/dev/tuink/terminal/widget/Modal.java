@@ -4,13 +4,15 @@ import dev.tuink.terminal.cell.Cell;
 import dev.tuink.terminal.cell.CellBuffer;
 import dev.tuink.terminal.cell.CellText;
 import dev.tuink.terminal.cell.Canvas;
+import dev.tuink.terminal.geometry.Rect;
+import dev.tuink.terminal.geometry.Size;
 import dev.tuink.terminal.style.CellStyle;
 import java.util.Objects;
 
 /**
  * Reusable modal frame element with title and close button.
  */
-public final class Modal {
+public final class Modal implements Widget {
     private final int top;
     private final int left;
     private final int width;
@@ -19,6 +21,23 @@ public final class Modal {
     private final CellStyle bodyStyle;
     private final CellStyle borderStyle;
     private final CellStyle titleStyle;
+
+    /** Creates a geometry-free modal model for the measure/layout contract. */
+    public Modal(int preferredWidth, int preferredHeight, String title) {
+        this(
+            0,
+            0,
+            preferredWidth,
+            preferredHeight,
+            title,
+            CellStyle.DEFAULT,
+            CellStyle.DEFAULT,
+            CellStyle.DEFAULT
+        );
+        if (preferredWidth < 0 || preferredHeight < 0) {
+            throw new IllegalArgumentException("preferred width and height must not be negative");
+        }
+    }
 
     public Modal(
         int top,
@@ -73,7 +92,44 @@ public final class Modal {
      * the right frame edge.
      */
     public void draw(Canvas canvas) {
-        Objects.requireNonNull(canvas, "canvas");
+        paint(
+            Objects.requireNonNull(canvas, "canvas"),
+            top,
+            left,
+            width,
+            height,
+            title,
+            bodyStyle,
+            borderStyle,
+            titleStyle
+        );
+    }
+
+    @Override
+    public Size measure(Size available) {
+        Objects.requireNonNull(available, "available");
+        return new Size(
+            Math.min(Math.max(0, width), available.width()),
+            Math.min(Math.max(0, height), available.height())
+        );
+    }
+
+    @Override
+    public PlacedModal layout(Rect bounds) {
+        return new PlacedModal(title, Objects.requireNonNull(bounds, "bounds"));
+    }
+
+    static void paint(
+        Canvas canvas,
+        int top,
+        int left,
+        int width,
+        int height,
+        String title,
+        CellStyle bodyStyle,
+        CellStyle borderStyle,
+        CellStyle titleStyle
+    ) {
         if (width <= 0 || height <= 0) {
             return;
         }
@@ -97,6 +153,10 @@ public final class Modal {
             canvas.fill(left, top, width, height, bodyStyle);
             drawBorder(
                 canvas,
+                top,
+                left,
+                width,
+                height,
                 drawRight,
                 drawBottom,
                 horizontal,
@@ -106,17 +166,21 @@ public final class Modal {
                 bottomLeft,
                 bottomRight
             );
-            drawTitle(canvas);
+            drawTitle(canvas, top, left, width, title, titleStyle);
             if (width >= 4) {
-                closeButton().draw(canvas, titleStyle);
+                Button.plain(top, drawRight - 2, "X").draw(canvas, titleStyle);
             }
         } finally {
             canvas.restore(mark);
         }
     }
 
-    private void drawBorder(
+    private static void drawBorder(
         Canvas canvas,
+        int top,
+        int left,
+        int width,
+        int height,
         int drawRight,
         int drawBottom,
         Cell horizontal,
@@ -152,7 +216,14 @@ public final class Modal {
         }
     }
 
-    private void drawTitle(Canvas canvas) {
+    private static void drawTitle(
+        Canvas canvas,
+        int top,
+        int left,
+        int width,
+        String title,
+        CellStyle titleStyle
+    ) {
         int titleWidth = width - 5;
         if (titleWidth <= 0 || title == null || title.isEmpty()) {
             return;

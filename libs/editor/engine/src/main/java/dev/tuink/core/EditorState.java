@@ -19,6 +19,7 @@ public class EditorState {
     private int leftVisualColumn;
     private boolean dirty;
     private Path currentFile;
+    private SaveDisposition saveDisposition = SaveDisposition.CREATE_NEW;
     private Charset fileEncoding = StandardCharsets.UTF_8;
     private String lineSeparator = LINE_SEPARATOR_LF;
     private Position selectionAnchor;
@@ -27,6 +28,10 @@ public class EditorState {
         return cursor;
     }
 
+    /**
+     * Core-internal mutation hook. Production callers outside {@code dev.tuink.core}
+     * must use {@link EditorEngine} so movement/coalescing state stays coherent.
+     */
     public void setCursor(Position cursor) {
         this.cursor = cursor;
     }
@@ -94,6 +99,17 @@ public class EditorState {
         this.currentFile = currentFile;
     }
 
+    /** Filesystem commit intent retained until this document successfully owns its path. */
+    public SaveDisposition getSaveDisposition() {
+        return saveDisposition;
+    }
+
+    public void setSaveDisposition(SaveDisposition saveDisposition) {
+        this.saveDisposition = saveDisposition == null
+            ? SaveDisposition.CREATE_NEW
+            : saveDisposition;
+    }
+
     public Charset getFileEncoding() {
         return fileEncoding;
     }
@@ -122,10 +138,12 @@ public class EditorState {
         return selectionAnchor;
     }
 
+    /** Core-internal mutation hook; outer layers route selection through {@link EditorEngine}. */
     public void setSelectionAnchor(Position selectionAnchor) {
         this.selectionAnchor = selectionAnchor;
     }
 
+    /** Core-internal mutation hook; outer layers route selection through {@link EditorEngine}. */
     public void clearSelection() {
         this.selectionAnchor = null;
     }

@@ -7,6 +7,8 @@ import dev.tuink.core.EditorViewportBehavior;
 import dev.tuink.terminal.text.TerminalText;
 import dev.tuink.core.LanguageProfiles;
 import dev.tuink.core.Position;
+import dev.tuink.core.RecoverySnapshot;
+import dev.tuink.core.SaveDisposition;
 import dev.tuink.core.SearchOptions;
 import dev.tuink.core.TabSession;
 import dev.tuink.core.TabSearch;
@@ -86,6 +88,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -303,8 +306,12 @@ public class TerminalEditorApp {
                     state = sessionContext.state();
                     engine = sessionContext.engine();
                     renderPlanBuilder = sessionContext.renderPlanBuilder();
-                    recoveryAutosave.syncTabs(tabs);
-                    String recoveryWarning = recoveryAutosave.autosaveDirtyTabs(tabs, System.nanoTime());
+                    List<TabSession> recoveryTabSessions = toTabSessions(tabs);
+                    recoveryAutosave.syncTabs(recoveryTabSessions);
+                    String recoveryWarning = recoveryAutosave.autosaveDirtyTabs(
+                        recoveryTabSessions,
+                        System.nanoTime()
+                    );
                     if (recoveryWarning != null) {
                         notification.warning(recoveryWarning);
                     }
@@ -527,7 +534,6 @@ public class TerminalEditorApp {
                         engine.setGutterDiffMode(uiSessionState.gutterDiffModeSetting);
                         renderPlanBuilder.setGutterDiffResolver(engine::gutterDiffMarkerForLine);
                         editorView.setTabWidth(uiSessionState.tabWidthSetting);
-                        engine.setTabWidth(uiSessionState.tabWidthSetting);
                         engine.setTabInsertMode(uiSessionState.tabInsertModeSetting);
                         engine.setAutoIndentEnabled(uiSessionState.autoIndentSetting);
                         engine.setAutoPairsEnabled(uiSessionState.autoPairsSetting);
@@ -1001,8 +1007,7 @@ public class TerminalEditorApp {
                                                 }
                                                 uiSessionState.searchFocus = SearchFocus.FIND;
                                             } else {
-                                                state.setCursor(cursorBeforePress);
-                                                state.setSelectionAnchor(anchorBeforePress);
+                                                engine.restoreSelection(cursorBeforePress, anchorBeforePress);
                                             }
                                         }
                                         if (!uiSessionState.searchMode) {
@@ -1079,7 +1084,7 @@ public class TerminalEditorApp {
                                 editorScrollDrag = EditorView.ScrollAxis.NONE;
                                 editorScrollDragThumbOffset = 0;
                                 openFileScrollDrag = TreeView.ScrollAxis.NONE;
-                                editorView.handleMouseRelease(state);
+                                editorView.handleMouseRelease(engine);
                             }
                             default -> {
                                 // Ignore drag and release mouse events.
@@ -1173,8 +1178,13 @@ public class TerminalEditorApp {
                                 continue;
                             }
                             if (confirmInput.decision() == ConfirmChoice.SAVE) {
-                                int restoredCount = restoreRecoveredTabs(startupRecoveryEntries, tabs, sessionContext);
-                                recoveryAutosave.deleteEntries(startupRecoveryEntries);
+                                int restoredCount = restoreRecoveredTabs(
+                                    startupRecoveryEntries,
+                                    tabs,
+                                    sessionContext,
+                                    recoveryAutosave,
+                                    System.nanoTime()
+                                );
                                 startupRecoveryEntries.clear();
                                 if (restoredCount > 0) {
                                     activeTabIndex = sessionContext.activeTabIndex();
@@ -1185,8 +1195,16 @@ public class TerminalEditorApp {
                                     notification.info("No recovery snapshots restored");
                                 }
                             } else if (confirmInput.decision() == ConfirmChoice.DISCARD) {
-                                recoveryAutosave.deleteEntries(startupRecoveryEntries);
+                                RecoveryAutosaveManager.DeletionResult deletion =
+                                    recoveryAutosave.deleteEntries(startupRecoveryEntries);
                                 startupRecoveryEntries.clear();
+                                startupRecoveryEntries.addAll(deletion.failedEntries());
+                                if (!deletion.successful()) {
+                                    notification.error(deletion.failureMessage());
+                                    modalState = UiModalState.recoveryConfirm()
+                                        .withConfirmChoice(ConfirmChoice.DISCARD);
+                                    continue;
+                                }
                                 notification.info("Recovery snapshots discarded");
                             }
                             modalState = UiModalState.none();
@@ -1202,6 +1220,7 @@ public class TerminalEditorApp {
                             modalState,
                             saveAsInput.text(),
                             state.getCurrentFile(),
+                            state.getSaveDisposition(),
                             this::validateSaveTarget,
                             path -> Files.exists(path),
                             this::isReadOnlyFile,
@@ -1224,7 +1243,10 @@ public class TerminalEditorApp {
                             }
                             if (saveAsResult.saveNowPath() != null) {
                                 try {
-                                    engine.saveAs(saveAsResult.saveNowPath());
+                                    engine.saveAs(
+                                        saveAsResult.saveNowPath(),
+                                        saveAsResult.saveDisposition()
+                                    );
                                     renderPlanBuilder = new RenderPlanBuilder(
                                         resolveHighlighter(state.getCurrentFile()),
                                         engine.textLayout()
@@ -1264,7 +1286,10 @@ public class TerminalEditorApp {
                                 modalState = modalState.withConfirmChoice(confirmInput.confirmChoice());
                             } else if (confirmInput.decision() == ConfirmChoice.SAVE) {
                                 try {
-                                    engine.saveAs(modalState.pendingOverwritePath());
+                                    engine.saveAs(
+                                        modalState.pendingOverwritePath(),
+                                        SaveDisposition.REPLACE_EXISTING
+                                    );
                                     renderPlanBuilder = new RenderPlanBuilder(
                                         resolveHighlighter(state.getCurrentFile()),
                                         engine.textLayout()
@@ -1522,7 +1547,10 @@ public class TerminalEditorApp {
                     openFileMode = editorActionApplyResult.openFileMode();
                     openFileFocus = editorActionApplyResult.openFileFocus();
                 }
-                recoveryAutosave.clearRuntimeSnapshots();
+                String recoveryCleanupWarning = recoveryAutosave.clearRuntimeSnapshots();
+                if (recoveryCleanupWarning != null) {
+                    System.err.println("Warning: " + recoveryCleanupWarning);
+                }
             } finally {
                 frameProfiler.close();
             }
@@ -3449,7 +3477,13 @@ public class TerminalEditorApp {
         }
     }
 
-    private int restoreRecoveredTabs(List<RecoveryStore.Entry> entries, List<EditorTab> tabs, SessionContext sessionContext) {
+    private int restoreRecoveredTabs(
+        List<RecoveryStore.Entry> entries,
+        List<EditorTab> tabs,
+        SessionContext sessionContext,
+        RecoveryAutosaveManager recoveryAutosave,
+        long nowNanos
+    ) {
         if (entries == null || entries.isEmpty()) {
             return 0;
         }
@@ -3464,6 +3498,10 @@ public class TerminalEditorApp {
                 resolveHighlighter(tabSession.state().getCurrentFile()),
                 tabSession.textLayout()
             );
+            // Keep the already committed startup snapshot as the durable backing
+            // for this tab. The next autosave updates the same entry instead of
+            // creating a gap in which neither the old nor a new snapshot exists.
+            recoveryAutosave.adoptSnapshot(tabSession, entry.id(), nowNanos);
             restored.add(new EditorTab(tabSession, builder));
         }
         if (restored.isEmpty()) {
@@ -4252,55 +4290,110 @@ public class TerminalEditorApp {
         return file == null ? RegexHighlighter.withDefaults() : RegexHighlighter.forFileName(file.getFileName().toString());
     }
 
-    private final class RecoveryAutosaveManager {
-        private final RecoveryStore store;
+    interface RecoveryPersistence {
+        void save(String entryId, RecoverySnapshot snapshot) throws IOException;
+
+        void delete(String entryId) throws IOException;
+    }
+
+    static final class RecoveryAutosaveManager {
+        private final RecoveryPersistence store;
         private final Map<TabSession, RuntimeRecoveryState> runtime = new IdentityHashMap<>();
+        private final Map<String, Long> pendingDeletes = new LinkedHashMap<>();
         private long lastErrorNotifyAtNanos = Long.MIN_VALUE;
 
         private RecoveryAutosaveManager(RecoveryStore store) {
+            this(new RecoveryPersistence() {
+                @Override
+                public void save(String entryId, RecoverySnapshot snapshot) throws IOException {
+                    store.save(entryId, snapshot);
+                }
+
+                @Override
+                public void delete(String entryId) throws IOException {
+                    store.delete(entryId);
+                }
+            });
+        }
+
+        RecoveryAutosaveManager(RecoveryPersistence store) {
+            if (store == null) {
+                throw new IllegalArgumentException("store must not be null");
+            }
             this.store = store;
         }
 
-        private void syncTabs(List<EditorTab> tabs) {
-            if (tabs == null || tabs.isEmpty()) {
-                clearRuntimeSnapshots();
-                return;
-            }
+        void syncTabs(List<TabSession> tabs) {
             Map<TabSession, Boolean> active = new IdentityHashMap<>();
-            for (EditorTab tab : tabs) {
-                TabSession session = tab.tabSession();
-                active.put(session, Boolean.TRUE);
-                runtime.computeIfAbsent(session, key -> new RuntimeRecoveryState(UUID.randomUUID().toString()));
+            if (tabs != null) {
+                for (TabSession session : tabs) {
+                    if (session == null) {
+                        continue;
+                    }
+                    active.put(session, Boolean.TRUE);
+                    runtime.computeIfAbsent(
+                        session,
+                        key -> new RuntimeRecoveryState(UUID.randomUUID().toString())
+                    );
+                }
             }
             var iterator = runtime.entrySet().iterator();
             while (iterator.hasNext()) {
                 Map.Entry<TabSession, RuntimeRecoveryState> entry = iterator.next();
                 if (!active.containsKey(entry.getKey())) {
-                    deleteSnapshotQuietly(entry.getValue().entryId());
+                    queueDelete(entry.getValue().entryId());
                     iterator.remove();
                 }
             }
         }
 
-        private String autosaveDirtyTabs(List<EditorTab> tabs, long nowNanos) {
-            if (tabs == null || tabs.isEmpty()) {
-                return null;
+        void adoptSnapshot(TabSession session, String entryId, long nowNanos) {
+            if (session == null || entryId == null || entryId.isBlank()) {
+                throw new IllegalArgumentException("session and recovery entryId are required");
             }
-            for (EditorTab tab : tabs) {
-                TabSession session = tab.tabSession();
+            RuntimeRecoveryState adopted = new RuntimeRecoveryState(entryId);
+            adopted.markSaved(session.model().revision(), nowNanos);
+            RuntimeRecoveryState replaced = runtime.put(session, adopted);
+            pendingDeletes.remove(entryId);
+            if (replaced != null && !entryId.equals(replaced.entryId())) {
+                queueDelete(replaced.entryId());
+            }
+        }
+
+        String autosaveDirtyTabs(List<TabSession> tabs, long nowNanos) {
+            String warning = retryPendingDeletes(nowNanos, false);
+            if (tabs == null || tabs.isEmpty()) {
+                return warning;
+            }
+            for (TabSession session : tabs) {
+                if (session == null) {
+                    continue;
+                }
                 RuntimeRecoveryState state = runtime.computeIfAbsent(
                     session,
                     key -> new RuntimeRecoveryState(UUID.randomUUID().toString())
                 );
-                if (!tab.state().isDirty()) {
+                if (!session.state().isDirty()) {
                     if (state.hasSnapshot()) {
-                        deleteSnapshotQuietly(state.entryId());
-                        state.clearSnapshotState();
+                        if (!state.cleanupDue(nowNanos)) {
+                            continue;
+                        }
+                        state.markCleanupAttempt(nowNanos);
+                        try {
+                            store.delete(state.entryId());
+                            pendingDeletes.remove(state.entryId());
+                            state.clearSnapshotState();
+                        } catch (IOException e) {
+                            warning = firstNonNull(
+                                warning,
+                                maybeNotifyFailure("Recovery cleanup failed", e, nowNanos)
+                            );
+                        }
                     }
                     continue;
                 }
 
-                long revision = tab.model().revision();
+                long revision = session.model().revision();
                 if (state.hasSnapshot() && revision == state.lastRevision()) {
                     continue;
                 }
@@ -4309,45 +4402,123 @@ public class TerminalEditorApp {
                     continue;
                 }
                 try {
-                    store.save(state.entryId(), tab.engine().captureRecoverySnapshot());
+                    store.save(state.entryId(), session.engine().captureRecoverySnapshot());
                     state.markSaved(revision, nowNanos);
                 } catch (IOException e) {
-                    if (nowNanos - lastErrorNotifyAtNanos >= RECOVERY_ERROR_NOTIFY_COOLDOWN_NANOS) {
-                        lastErrorNotifyAtNanos = nowNanos;
-                        return "Recovery autosave failed: " + e.getMessage();
-                    }
+                    warning = firstNonNull(
+                        warning,
+                        maybeNotifyFailure("Recovery autosave failed", e, nowNanos)
+                    );
                 }
             }
-            return null;
+            return warning;
         }
 
-        private void deleteEntries(List<RecoveryStore.Entry> entries) {
+        DeletionResult deleteEntries(List<RecoveryStore.Entry> entries) {
             if (entries == null || entries.isEmpty()) {
-                return;
+                return new DeletionResult(0, List.of(), List.of());
             }
+            int deleted = 0;
+            List<RecoveryStore.Entry> failed = new ArrayList<>();
+            List<String> failureDetails = new ArrayList<>();
             for (RecoveryStore.Entry entry : entries) {
                 if (entry == null) {
                     continue;
                 }
-                deleteSnapshotQuietly(entry.id());
+                try {
+                    store.delete(entry.id());
+                    pendingDeletes.remove(entry.id());
+                    deleted++;
+                } catch (IOException e) {
+                    failed.add(entry);
+                    failureDetails.add(entry.id() + ": " + messageOf(e));
+                }
             }
+            return new DeletionResult(deleted, failed, failureDetails);
         }
 
-        private void clearRuntimeSnapshots() {
+        String clearRuntimeSnapshots() {
             for (RuntimeRecoveryState state : runtime.values()) {
-                deleteSnapshotQuietly(state.entryId());
+                queueDelete(state.entryId());
             }
             runtime.clear();
+            return retryPendingDeletes(System.nanoTime(), true);
         }
 
-        private void deleteSnapshotQuietly(String entryId) {
+        private void queueDelete(String entryId) {
             if (entryId == null || entryId.isBlank()) {
                 return;
             }
-            try {
-                store.delete(entryId);
-            } catch (IOException ignored) {
-                // Best-effort cleanup.
+            pendingDeletes.putIfAbsent(entryId, Long.MIN_VALUE);
+        }
+
+        private String retryPendingDeletes(long nowNanos, boolean force) {
+            String warning = null;
+            var iterator = pendingDeletes.entrySet().iterator();
+            while (iterator.hasNext()) {
+                Map.Entry<String, Long> pending = iterator.next();
+                if (!force && !delayElapsed(nowNanos, pending.getValue(), RECOVERY_AUTOSAVE_DEBOUNCE_NANOS)) {
+                    continue;
+                }
+                pending.setValue(nowNanos);
+                try {
+                    store.delete(pending.getKey());
+                    iterator.remove();
+                } catch (IOException e) {
+                    warning = firstNonNull(
+                        warning,
+                        maybeNotifyFailure("Recovery cleanup failed", e, nowNanos)
+                    );
+                }
+            }
+            return warning;
+        }
+
+        private String maybeNotifyFailure(String prefix, IOException error, long nowNanos) {
+            if (!delayElapsed(
+                nowNanos,
+                lastErrorNotifyAtNanos,
+                RECOVERY_ERROR_NOTIFY_COOLDOWN_NANOS
+            )) {
+                return null;
+            }
+            lastErrorNotifyAtNanos = nowNanos;
+            return prefix + ": " + messageOf(error);
+        }
+
+        private static boolean delayElapsed(long nowNanos, long previousNanos, long delayNanos) {
+            return previousNanos == Long.MIN_VALUE || nowNanos - previousNanos >= delayNanos;
+        }
+
+        private static String firstNonNull(String current, String candidate) {
+            return current != null ? current : candidate;
+        }
+
+        private static String messageOf(IOException error) {
+            return error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
+        }
+
+        record DeletionResult(
+            int deletedCount,
+            List<RecoveryStore.Entry> failedEntries,
+            List<String> failureDetails
+        ) {
+            DeletionResult {
+                failedEntries = List.copyOf(failedEntries);
+                failureDetails = List.copyOf(failureDetails);
+            }
+
+            boolean successful() {
+                return failedEntries.isEmpty();
+            }
+
+            String failureMessage() {
+                if (successful()) {
+                    return "";
+                }
+                return "Failed to discard " + failedEntries.size()
+                    + " recovery snapshot(s); they were kept for retry or restore: "
+                    + String.join("; ", failureDetails);
             }
         }
     }
@@ -4356,6 +4527,7 @@ public class TerminalEditorApp {
         private final String entryId;
         private long lastRevision = Long.MIN_VALUE;
         private long lastSavedAtNanos = Long.MIN_VALUE;
+        private long lastCleanupAttemptAtNanos = Long.MIN_VALUE;
         private boolean hasSnapshot;
 
         private RuntimeRecoveryState(String entryId) {
@@ -4381,12 +4553,26 @@ public class TerminalEditorApp {
         private void markSaved(long revision, long nowNanos) {
             lastRevision = revision;
             lastSavedAtNanos = nowNanos;
+            lastCleanupAttemptAtNanos = Long.MIN_VALUE;
             hasSnapshot = true;
+        }
+
+        private boolean cleanupDue(long nowNanos) {
+            return RecoveryAutosaveManager.delayElapsed(
+                nowNanos,
+                lastCleanupAttemptAtNanos,
+                RECOVERY_AUTOSAVE_DEBOUNCE_NANOS
+            );
+        }
+
+        private void markCleanupAttempt(long nowNanos) {
+            lastCleanupAttemptAtNanos = nowNanos;
         }
 
         private void clearSnapshotState() {
             hasSnapshot = false;
             lastSavedAtNanos = Long.MIN_VALUE;
+            lastCleanupAttemptAtNanos = Long.MIN_VALUE;
         }
     }
 

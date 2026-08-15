@@ -88,4 +88,58 @@ class TextModelRevisionTest {
         assertEquals(identity, first.cacheIdentity());
         assertNotEquals(identity, second.cacheIdentity());
     }
+
+    @Test
+    void constructorDefensivelyImportsAndValidatesTheStorageBuffer() {
+        SimpleLineBuffer source = new SimpleLineBuffer();
+        source.setLine(0, "owned");
+        TextModel model = new TextModel(source);
+
+        source.setLine(0, "external mutation");
+        source.insertLine(1, "extra");
+
+        assertEquals(List.of("owned"), model.snapshotLines());
+        assertEquals(0, model.revision());
+        assertEquals(List.of(), model.fileMetadata().lineSeparators());
+
+        SimpleLineBuffer malformed = new SimpleLineBuffer();
+        malformed.setLine(0, "two\nlines");
+        assertThrows(IllegalArgumentException.class, () -> new TextModel(malformed));
+    }
+
+    @Test
+    void constructorPreservesTheSuppliedStorageStrategyWithoutRetainingItsAlias() {
+        final class StrategyBuffer extends SimpleLineBuffer {
+            private final int generation;
+
+            private StrategyBuffer(int generation) {
+                this.generation = generation;
+            }
+
+            @Override
+            public TextBuffer createEmptySibling() {
+                return new StrategyBuffer(generation + 1);
+            }
+
+            @Override
+            public void setLine(int line, String text) {
+                if (generation == 1 && "edited".equals(text)) {
+                    throw new StrategyObservedException();
+                }
+                super.setLine(line, text);
+            }
+        }
+        StrategyBuffer source = new StrategyBuffer(0);
+        TextModel model = new TextModel(source);
+
+        assertThrows(
+            StrategyObservedException.class,
+            () -> model.insertText(new Position(0, 0), "edited")
+        );
+        assertEquals(1, source.lineCount());
+        assertEquals("", source.getLine(0));
+    }
+
+    private static final class StrategyObservedException extends RuntimeException {
+    }
 }

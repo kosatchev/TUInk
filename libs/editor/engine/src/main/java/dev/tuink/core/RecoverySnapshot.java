@@ -1,7 +1,6 @@
 package dev.tuink.core;
 
 import java.nio.charset.Charset;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
@@ -16,17 +15,61 @@ public record RecoverySnapshot(
     Position selectionAnchor,
     boolean dirty,
     Path currentFile,
-    Charset fileEncoding,
-    String lineSeparator,
+    SaveDisposition saveDisposition,
+    DocumentFileMetadata fileMetadata,
     Instant createdAt
 ) {
     public RecoverySnapshot {
-        lines = lines == null ? List.of("") : List.copyOf(lines);
+        lines = LogicalDocumentLines.copyOfOrEmptyDocument(lines);
         cursor = cursor == null ? new Position(0, 0) : cursor;
         viewport = viewport == null ? new ViewportState(0, 0, 0, 0) : viewport;
-        fileEncoding = fileEncoding == null ? StandardCharsets.UTF_8 : fileEncoding;
-        lineSeparator = normalizeLineSeparator(lineSeparator);
+        fileMetadata = fileMetadata == null
+            ? DocumentFileMetadata.newDocument(lines.size())
+            : fileMetadata;
+        if (!fileMetadata.isCompatibleWithLineCount(lines.size())) {
+            throw new IllegalArgumentException("File metadata does not match recovery document lines");
+        }
+        requirePositionInDocument(cursor, lines, "cursor");
+        if (selectionAnchor != null) {
+            requirePositionInDocument(selectionAnchor, lines, "selection anchor");
+        }
+        if (viewport.topLine() >= lines.size()) {
+            throw new IllegalArgumentException("Viewport top line is outside recovery document");
+        }
+        currentFile = currentFile == null ? null : currentFile.toAbsolutePath().normalize();
+        saveDisposition = saveDisposition == null
+            ? (currentFile == null ? SaveDisposition.CREATE_NEW : SaveDisposition.REPLACE_EXISTING)
+            : saveDisposition;
+        if (currentFile == null && saveDisposition != SaveDisposition.CREATE_NEW) {
+            throw new IllegalArgumentException(
+                "A recovery snapshot without a current path cannot replace an existing file"
+            );
+        }
         createdAt = createdAt == null ? Instant.now() : createdAt;
+    }
+
+    /** Compatibility constructor for callers that already own an existing path. */
+    public RecoverySnapshot(
+        List<String> lines,
+        Position cursor,
+        ViewportState viewport,
+        Position selectionAnchor,
+        boolean dirty,
+        Path currentFile,
+        DocumentFileMetadata fileMetadata,
+        Instant createdAt
+    ) {
+        this(
+            lines,
+            cursor,
+            viewport,
+            selectionAnchor,
+            dirty,
+            currentFile,
+            currentFile == null ? SaveDisposition.CREATE_NEW : SaveDisposition.REPLACE_EXISTING,
+            fileMetadata,
+            createdAt
+        );
     }
 
     public static RecoverySnapshot capture(TextModel model, EditorState state) {
@@ -37,30 +80,47 @@ public record RecoverySnapshot(
             state.getSelectionAnchor(),
             state.isDirty(),
             state.getCurrentFile(),
-            state.getFileEncoding(),
-            state.getLineSeparator(),
+            state.getSaveDisposition(),
+            model.fileMetadata(),
             Instant.now()
         );
     }
 
     public void restore(TextModel model, EditorState state) {
-        model.replaceLines(lines);
+        model.replaceLines(lines, fileMetadata);
         state.setCurrentFile(currentFile);
-        state.setFileEncoding(fileEncoding);
-        state.setLineSeparator(lineSeparator);
+        state.setSaveDisposition(saveDisposition);
+        state.setFileEncoding(fileMetadata.charset());
+        state.setLineSeparator(fileMetadata.defaultLineSeparator());
         state.setViewport(viewport);
         state.setCursor(model.clamp(cursor));
         state.setSelectionAnchor(selectionAnchor);
         state.setDirty(dirty);
     }
 
-    private static String normalizeLineSeparator(String separator) {
-        if (EditorState.LINE_SEPARATOR_CRLF.equals(separator)) {
-            return EditorState.LINE_SEPARATOR_CRLF;
+    public Charset fileEncoding() {
+        return fileMetadata.charset();
+    }
+
+    public String lineSeparator() {
+        return fileMetadata.defaultLineSeparator();
+    }
+
+    private static void requirePositionInDocument(
+        Position position,
+        List<String> lines,
+        String field
+    ) {
+        if (position.line() >= lines.size() || position.col() > lines.get(position.line()).length()) {
+            throw new IllegalArgumentException(field + " is outside recovery document");
         }
-        if (EditorState.LINE_SEPARATOR_CR.equals(separator)) {
-            return EditorState.LINE_SEPARATOR_CR;
+        String line = lines.get(position.line());
+        int offset = position.col();
+        if (offset > 0
+            && offset < line.length()
+            && Character.isHighSurrogate(line.charAt(offset - 1))
+            && Character.isLowSurrogate(line.charAt(offset))) {
+            throw new IllegalArgumentException(field + " splits a UTF-16 surrogate pair");
         }
-        return EditorState.LINE_SEPARATOR_LF;
     }
 }

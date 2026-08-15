@@ -96,8 +96,7 @@ public final class EditorView {
             if (isDoubleClick(hit) && engine.selectWordAt(hit)) {
                 selectedWordByDoubleClick = true;
             } else {
-                state.setSelectionAnchor(hit);
-                state.setCursor(hit);
+                engine.beginSelectionAt(hit);
             }
         } else {
             mouseSelecting = false;
@@ -161,10 +160,7 @@ public final class EditorView {
             contentTopRow
         );
         if (hit != null) {
-            if (state.getSelectionAnchor() == null) {
-                state.setSelectionAnchor(state.getCursor());
-            }
-            state.setCursor(hit);
+            engine.extendSelectionTo(hit);
             ensureCursorVisible(engine, plan, contentRows);
         }
     }
@@ -251,15 +247,13 @@ public final class EditorView {
         return doubleClick;
     }
 
-    public void handleMouseRelease(EditorState state) {
+    public void handleMouseRelease(EditorEngine engine) {
         if (!mouseSelecting) {
             return;
         }
         mouseSelecting = false;
         edgeAutoScrollDuringSelection = false;
-        if (state.getSelectionAnchor() != null && state.getSelectionAnchor().equals(state.getCursor())) {
-            state.clearSelection();
-        }
+        engine.finishSelection();
     }
 
     public boolean isEdgeAutoScrollDuringSelection() {

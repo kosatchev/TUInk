@@ -14,6 +14,11 @@ public class SimpleLineBuffer implements TextBuffer {
     }
 
     @Override
+    public TextBuffer createEmptySibling() {
+        return new SimpleLineBuffer();
+    }
+
+    @Override
     public int lineCount() {
         return lines.size();
     }

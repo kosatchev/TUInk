@@ -119,8 +119,8 @@ class TextModelSaveTest {
     }
 
     private static TextModel modelWith(String text) {
-        SimpleLineBuffer buffer = new SimpleLineBuffer();
-        buffer.setLine(0, text);
-        return new TextModel(buffer);
+        TextModel model = new TextModel(new SimpleLineBuffer());
+        model.insertText(new Position(0, 0), text);
+        return model;
     }
 }

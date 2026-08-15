@@ -3,9 +3,11 @@ package dev.tuink.core;
 import dev.tuink.unicode.GraphemeText;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
 import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CharsetEncoder;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -14,7 +16,11 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -36,9 +42,31 @@ public class TextModel {
     private long revision = 0L;
     private long contentEpoch = 0L;
     private final long cacheIdentity = NEXT_CACHE_ID.incrementAndGet();
+    private DocumentFileMetadata fileMetadata;
 
-    public TextModel(TextBuffer buffer) {
-        this.buffer = buffer;
+    public TextModel(TextBuffer sourceBuffer) {
+        TextBuffer source = Objects.requireNonNull(sourceBuffer, "buffer");
+        int sourceLineCount = source.lineCount();
+        List<String> imported = new ArrayList<>(Math.max(1, sourceLineCount));
+        for (int line = 0; line < sourceLineCount; line++) {
+            imported.add(source.getLine(line));
+        }
+        List<String> checked = LogicalDocumentLines.copyOfOrEmptyDocument(imported);
+        TextBuffer owned = Objects.requireNonNull(
+            source.createEmptySibling(),
+            "buffer.createEmptySibling()"
+        );
+        if (owned == source || owned.lineCount() != 1 || !owned.getLine(0).isEmpty()) {
+            throw new IllegalArgumentException(
+                "createEmptySibling() must return an independent buffer with one empty line"
+            );
+        }
+        owned.setLine(0, checked.get(0));
+        for (int line = 1; line < checked.size(); line++) {
+            owned.insertLine(line, checked.get(line));
+        }
+        this.buffer = owned;
+        this.fileMetadata = DocumentFileMetadata.newDocument(checked.size());
     }
 
     public int lineCount() {
@@ -50,23 +78,29 @@ public class TextModel {
     }
 
     public Position insertChar(Position position, char ch) {
-        String line = buffer.getLine(position.line());
-        int col = Math.min(position.col(), line.length());
+        if (Character.isSurrogate(ch)) {
+            throw new IllegalArgumentException("A standalone UTF-16 surrogate is not valid text");
+        }
+        Position at = requireCodePointBoundary(position);
+        String line = buffer.getLine(at.line());
+        int col = at.col();
         String updated = line.substring(0, col) + ch + line.substring(col);
-        buffer.setLine(position.line(), updated);
+        buffer.setLine(at.line(), updated);
         markChanged();
-        return new Position(position.line(), col + 1);
+        return new Position(at.line(), col + 1);
     }
 
     public Position insertNewline(Position position) {
-        String line = buffer.getLine(position.line());
-        int col = Math.min(position.col(), line.length());
+        Position at = requireCodePointBoundary(position);
+        String line = buffer.getLine(at.line());
+        int col = at.col();
         String left = line.substring(0, col);
         String right = line.substring(col);
-        buffer.setLine(position.line(), left);
-        buffer.insertLine(position.line() + 1, right);
+        buffer.setLine(at.line(), left);
+        buffer.insertLine(at.line() + 1, right);
+        insertDefaultLineSeparators(at.line(), 1);
         markChanged();
-        return new Position(position.line() + 1, 0);
+        return new Position(at.line() + 1, 0);
     }
 
     public Position deleteBackward(Position position) {
@@ -90,6 +124,7 @@ public class TextModel {
         int prevLineIndex = position.line() - 1;
         String prev = buffer.getLine(prevLineIndex);
         buffer.setLine(prevLineIndex, prev + current);
+        removeLineSeparators(prevLineIndex, 1);
         markChanged();
         return new Position(prevLineIndex, prev.length());
     }
@@ -114,13 +149,14 @@ public class TextModel {
 
         String next = buffer.removeLine(position.line() + 1);
         buffer.setLine(position.line(), line + next);
+        removeLineSeparators(position.line(), 1);
         markChanged();
         return new Position(position.line(), col);
     }
 
     public String getTextRange(Position start, Position end) {
-        Position a = clamp(start);
-        Position b = clamp(end);
+        Position a = requireCodePointBoundary(start);
+        Position b = requireCodePointBoundary(end);
         if (comesAfter(a, b)) {
             Position t = a;
             a = b;
@@ -145,8 +181,8 @@ public class TextModel {
     }
 
     public Position deleteRange(Position start, Position end) {
-        Position a = clamp(start);
-        Position b = clamp(end);
+        Position a = requireCodePointBoundary(start);
+        Position b = requireCodePointBoundary(end);
         if (comesAfter(a, b)) {
             Position t = a;
             a = b;
@@ -169,6 +205,7 @@ public class TextModel {
         for (int i = b.line(); i > a.line(); i--) {
             buffer.removeLine(i);
         }
+        removeLineSeparators(a.line(), b.line() - a.line());
         markChanged();
         return a;
     }
@@ -177,8 +214,9 @@ public class TextModel {
         if (text == null || text.isEmpty()) {
             return clamp(position);
         }
+        LogicalDocumentLines.requireWellFormedUtf16(text);
 
-        Position at = clamp(position);
+        Position at = requireCodePointBoundary(position);
         String normalized = text.replace("\r\n", "\n").replace('\r', '\n');
         String[] parts = normalized.split("\n", -1);
         String line = buffer.getLine(at.line());
@@ -198,6 +236,7 @@ public class TextModel {
         }
         String last = parts[parts.length - 1];
         buffer.insertLine(at.line() + parts.length - 1, last + right);
+        insertDefaultLineSeparators(at.line(), parts.length - 1);
         markChanged();
         return new Position(at.line() + parts.length - 1, last.length());
     }
@@ -208,27 +247,41 @@ public class TextModel {
         return new Position(line, col);
     }
 
+    private Position requireCodePointBoundary(Position requested) {
+        Position clamped = clamp(Objects.requireNonNull(requested, "position"));
+        String line = buffer.getLine(clamped.line());
+        int offset = clamped.col();
+        if (offset > 0
+            && offset < line.length()
+            && Character.isHighSurrogate(line.charAt(offset - 1))
+            && Character.isLowSurrogate(line.charAt(offset))) {
+            throw new IllegalArgumentException("Position splits a UTF-16 surrogate pair");
+        }
+        return clamped;
+    }
+
     public LoadMetadata load(Path path) throws IOException {
         byte[] data = Files.readAllBytes(path);
         DecodedContent decoded = decodeWithDetectedCharset(data);
-        String lineSeparator = detectLineSeparator(decoded.text());
-        List<String> lines = splitLines(decoded.text());
+        ParsedContent parsed = parseContent(decoded.text());
+        DocumentFileMetadata loadedMetadata = new DocumentFileMetadata(
+            decoded.charset(),
+            decoded.bomKind(),
+            detectDefaultLineSeparator(parsed.lineSeparators()),
+            parsed.lineSeparators()
+        );
         buffer.clear();
-        if (lines.isEmpty()) {
-            buffer.setLine(0, "");
-            markContentReplaced();
-            return new LoadMetadata(decoded.charset(), lineSeparator);
+        buffer.setLine(0, parsed.lines().get(0));
+        for (int i = 1; i < parsed.lines().size(); i++) {
+            buffer.insertLine(i, parsed.lines().get(i));
         }
-        buffer.setLine(0, lines.get(0));
-        for (int i = 1; i < lines.size(); i++) {
-            buffer.insertLine(i, lines.get(i));
-        }
+        fileMetadata = loadedMetadata;
         markContentReplaced();
-        return new LoadMetadata(decoded.charset(), lineSeparator);
+        return new LoadMetadata(loadedMetadata);
     }
 
     public void save(Path path) throws IOException {
-        save(path, StandardCharsets.UTF_8, EditorState.LINE_SEPARATOR_LF);
+        save(path, fileMetadata);
     }
 
     public void save(Path path, Charset charset) throws IOException {
@@ -236,8 +289,21 @@ public class TextModel {
     }
 
     public void save(Path path, Charset charset, String lineSeparator) throws IOException {
-        String normalizedSeparator = normalizeLineSeparator(lineSeparator);
-        String content = String.join(normalizedSeparator, snapshotLines());
+        save(path, fileMetadata.canonicalized(charset, lineSeparator, lineCount()));
+    }
+
+    public void save(Path path, DocumentFileMetadata metadata) throws IOException {
+        save(path, metadata, SaveDisposition.REPLACE_EXISTING);
+    }
+
+    public void save(
+        Path path,
+        DocumentFileMetadata metadata,
+        SaveDisposition disposition
+    ) throws IOException {
+        DocumentFileMetadata checkedMetadata = requireCompatibleMetadata(metadata, lineCount());
+        SaveDisposition checkedDisposition = Objects.requireNonNull(disposition, "disposition");
+        byte[] content = encode(snapshotLines(), checkedMetadata);
         Path requestedTarget = path.toAbsolutePath().normalize();
         Path target = resolveSaveTarget(requestedTarget);
         boolean targetExists = Files.exists(target);
@@ -251,23 +317,40 @@ public class TextModel {
         }
 
         Path tempFile = createSaveTempFile(tempDir, prefix, targetExists);
+        boolean committed = false;
         try {
-            Files.writeString(tempFile, content, charset);
+            Files.write(tempFile, content);
             if (targetPermissions != null) {
                 Files.setPosixFilePermissions(tempFile, targetPermissions);
             }
-            try {
-                Files.move(
-                    tempFile,
-                    target,
-                    StandardCopyOption.REPLACE_EXISTING,
-                    StandardCopyOption.ATOMIC_MOVE
-                );
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(tempFile, target, StandardCopyOption.REPLACE_EXISTING);
+            if (checkedDisposition == SaveDisposition.CREATE_NEW) {
+                // No REPLACE_EXISTING: a target created after UI validation is
+                // rejected by the filesystem at the commit boundary.
+                Files.move(tempFile, target);
+            } else {
+                try {
+                    Files.move(
+                        tempFile,
+                        target,
+                        StandardCopyOption.REPLACE_EXISTING,
+                        StandardCopyOption.ATOMIC_MOVE
+                    );
+                } catch (AtomicMoveNotSupportedException e) {
+                    Files.move(tempFile, target, StandardCopyOption.REPLACE_EXISTING);
+                }
             }
+            fileMetadata = checkedMetadata;
+            committed = true;
         } finally {
-            Files.deleteIfExists(tempFile);
+            try {
+                Files.deleteIfExists(tempFile);
+            } catch (IOException cleanupFailure) {
+                if (!committed) {
+                    throw cleanupFailure;
+                }
+                // The target is already committed. A private orphan temp file is
+                // preferable to reporting a failed save and desynchronizing state.
+            }
         }
     }
 
@@ -313,6 +396,20 @@ public class TextModel {
             .toList();
     }
 
+    public DocumentFileMetadata fileMetadata() {
+        return fileMetadata;
+    }
+
+    /** Restores file metadata captured together with an undo/redo content state. */
+    void restoreFileMetadata(DocumentFileMetadata metadata) {
+        fileMetadata = requireCompatibleMetadata(metadata, lineCount());
+    }
+
+    /** Resets persistence metadata for a new file without changing document text. */
+    public void resetFileMetadata() {
+        fileMetadata = DocumentFileMetadata.newDocument(lineCount());
+    }
+
     public int maxLineLength() {
         int max = 0;
         for (int i = 0; i < lineCount(); i++) {
@@ -337,16 +434,27 @@ public class TextModel {
     }
 
     public void replaceLines(List<String> lines) {
+        List<String> replacement = LogicalDocumentLines.copyOfOrEmptyDocument(lines);
+        DocumentFileMetadata replacementMetadata = fileMetadata;
+        if (replacement.size() != lineCount()) {
+            List<String> separators = new ArrayList<>(Math.max(0, replacement.size() - 1));
+            for (int i = 1; i < replacement.size(); i++) {
+                separators.add(fileMetadata.defaultLineSeparator());
+            }
+            replacementMetadata = fileMetadata.withLineSeparators(separators);
+        }
+        replaceLines(replacement, replacementMetadata);
+    }
+
+    public void replaceLines(List<String> lines, DocumentFileMetadata metadata) {
+        List<String> replacement = LogicalDocumentLines.copyOfOrEmptyDocument(lines);
+        DocumentFileMetadata checkedMetadata = requireCompatibleMetadata(metadata, replacement.size());
         buffer.clear();
-        if (lines == null || lines.isEmpty()) {
-            buffer.setLine(0, "");
-            markContentReplaced();
-            return;
+        buffer.setLine(0, replacement.get(0));
+        for (int i = 1; i < replacement.size(); i++) {
+            buffer.insertLine(i, replacement.get(i));
         }
-        buffer.setLine(0, lines.get(0));
-        for (int i = 1; i < lines.size(); i++) {
-            buffer.insertLine(i, lines.get(i));
-        }
+        fileMetadata = checkedMetadata;
         markContentReplaced();
     }
 
@@ -359,49 +467,148 @@ public class TextModel {
         markChanged();
     }
 
-    private DecodedContent decodeWithDetectedCharset(byte[] data) {
+    private void insertDefaultLineSeparators(int index, int count) {
+        if (count <= 0) {
+            return;
+        }
+        List<String> separators = new ArrayList<>(fileMetadata.lineSeparators());
+        for (int i = 0; i < count; i++) {
+            separators.add(index + i, fileMetadata.defaultLineSeparator());
+        }
+        fileMetadata = fileMetadata.withLineSeparators(separators);
+    }
+
+    private void removeLineSeparators(int index, int count) {
+        if (count <= 0) {
+            return;
+        }
+        List<String> separators = new ArrayList<>(fileMetadata.lineSeparators());
+        for (int i = 0; i < count; i++) {
+            separators.remove(index);
+        }
+        fileMetadata = fileMetadata.withLineSeparators(separators);
+    }
+
+    private static DocumentFileMetadata requireCompatibleMetadata(
+        DocumentFileMetadata metadata,
+        int lineCount
+    ) {
+        DocumentFileMetadata checked = Objects.requireNonNull(metadata, "metadata");
+        if (!checked.isCompatibleWithLineCount(lineCount)) {
+            throw new IllegalArgumentException(
+                "Line separator count " + checked.lineSeparators().size()
+                    + " does not match line count " + lineCount
+            );
+        }
+        return checked;
+    }
+
+    private DecodedContent decodeWithDetectedCharset(byte[] data) throws CharacterCodingException {
         if (hasUtf8Bom(data)) {
-            return new DecodedContent(StandardCharsets.UTF_8, new String(data, 3, data.length - 3, StandardCharsets.UTF_8));
+            return new DecodedContent(
+                StandardCharsets.UTF_8,
+                BomKind.UTF_8,
+                decodeStrict(data, 3, StandardCharsets.UTF_8)
+            );
         }
         if (hasUtf16LeBom(data)) {
-            return new DecodedContent(StandardCharsets.UTF_16LE, new String(data, 2, data.length - 2, StandardCharsets.UTF_16LE));
+            return new DecodedContent(
+                StandardCharsets.UTF_16LE,
+                BomKind.UTF_16_LE,
+                decodeStrict(data, 2, StandardCharsets.UTF_16LE)
+            );
         }
         if (hasUtf16BeBom(data)) {
-            return new DecodedContent(StandardCharsets.UTF_16BE, new String(data, 2, data.length - 2, StandardCharsets.UTF_16BE));
+            return new DecodedContent(
+                StandardCharsets.UTF_16BE,
+                BomKind.UTF_16_BE,
+                decodeStrict(data, 2, StandardCharsets.UTF_16BE)
+            );
         }
         if (isValidUtf8(data)) {
-            return new DecodedContent(StandardCharsets.UTF_8, new String(data, StandardCharsets.UTF_8));
+            return new DecodedContent(StandardCharsets.UTF_8, BomKind.NONE, new String(data, StandardCharsets.UTF_8));
         }
-        return new DecodedContent(FALLBACK_CHARSET, new String(data, FALLBACK_CHARSET));
+        return new DecodedContent(
+            FALLBACK_CHARSET,
+            BomKind.NONE,
+            decodeStrict(data, 0, FALLBACK_CHARSET)
+        );
     }
 
-    private static List<String> splitLines(String content) {
-        String normalized = content.replace("\r\n", "\n").replace('\r', '\n');
-        List<String> parts = List.of(normalized.split("\n", -1));
-        if (!parts.isEmpty() && parts.get(parts.size() - 1).isEmpty()) {
-            return parts.subList(0, parts.size() - 1);
-        }
-        return parts;
+    private static String decodeStrict(byte[] data, int offset, Charset charset)
+        throws CharacterCodingException {
+        CharsetDecoder decoder = charset.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT);
+        return decoder.decode(ByteBuffer.wrap(data, offset, data.length - offset)).toString();
     }
 
-    private static String detectLineSeparator(String text) {
-        if (text.contains("\r\n")) {
-            return EditorState.LINE_SEPARATOR_CRLF;
+    private static ParsedContent parseContent(String content) {
+        List<String> lines = new ArrayList<>();
+        List<String> separators = new ArrayList<>();
+        int lineStart = 0;
+        for (int i = 0; i < content.length(); i++) {
+            char ch = content.charAt(i);
+            if (ch != '\r' && ch != '\n') {
+                continue;
+            }
+            lines.add(content.substring(lineStart, i));
+            if (ch == '\r' && i + 1 < content.length() && content.charAt(i + 1) == '\n') {
+                separators.add(EditorState.LINE_SEPARATOR_CRLF);
+                i++;
+            } else if (ch == '\r') {
+                separators.add(EditorState.LINE_SEPARATOR_CR);
+            } else {
+                separators.add(EditorState.LINE_SEPARATOR_LF);
+            }
+            lineStart = i + 1;
         }
-        if (text.indexOf('\r') >= 0) {
-            return EditorState.LINE_SEPARATOR_CR;
-        }
-        return EditorState.LINE_SEPARATOR_LF;
+        lines.add(content.substring(lineStart));
+        return new ParsedContent(List.copyOf(lines), List.copyOf(separators));
     }
 
-    private static String normalizeLineSeparator(String lineSeparator) {
-        if (EditorState.LINE_SEPARATOR_CRLF.equals(lineSeparator)) {
-            return EditorState.LINE_SEPARATOR_CRLF;
+    private static String detectDefaultLineSeparator(List<String> separators) {
+        if (separators.isEmpty()) {
+            return EditorState.LINE_SEPARATOR_LF;
         }
-        if (EditorState.LINE_SEPARATOR_CR.equals(lineSeparator)) {
-            return EditorState.LINE_SEPARATOR_CR;
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        for (String separator : separators) {
+            counts.merge(separator, 1, Integer::sum);
         }
-        return EditorState.LINE_SEPARATOR_LF;
+        String mostFrequent = separators.get(0);
+        int highestCount = 0;
+        for (Map.Entry<String, Integer> entry : counts.entrySet()) {
+            if (entry.getValue() > highestCount) {
+                mostFrequent = entry.getKey();
+                highestCount = entry.getValue();
+            }
+        }
+        return mostFrequent;
+    }
+
+    private static byte[] encode(List<String> lines, DocumentFileMetadata metadata)
+        throws CharacterCodingException {
+        StringBuilder content = new StringBuilder();
+        for (int i = 0; i < lines.size(); i++) {
+            content.append(lines.get(i));
+            if (i < metadata.lineSeparators().size()) {
+                content.append(metadata.lineSeparators().get(i));
+            }
+        }
+        CharsetEncoder encoder = metadata.charset().newEncoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT);
+        ByteBuffer encodedBuffer = encoder.encode(CharBuffer.wrap(content));
+        byte[] encodedText = new byte[encodedBuffer.remaining()];
+        encodedBuffer.get(encodedText);
+        byte[] bom = metadata.bomKind().bytes();
+        if (bom.length == 0) {
+            return encodedText;
+        }
+        byte[] encoded = new byte[bom.length + encodedText.length];
+        System.arraycopy(bom, 0, encoded, 0, bom.length);
+        System.arraycopy(encodedText, 0, encoded, bom.length, encodedText.length);
+        return encoded;
     }
 
     private static boolean isValidUtf8(byte[] data) {
@@ -435,10 +642,24 @@ public class TextModel {
             && (data[1] & 0xFF) == 0xFF;
     }
 
-    private record DecodedContent(Charset charset, String text) {
+    private record DecodedContent(Charset charset, BomKind bomKind, String text) {
     }
 
-    public record LoadMetadata(Charset charset, String lineSeparator) {
+    private record ParsedContent(List<String> lines, List<String> lineSeparators) {
+    }
+
+    public record LoadMetadata(DocumentFileMetadata fileMetadata) {
+        public LoadMetadata {
+            fileMetadata = Objects.requireNonNull(fileMetadata, "fileMetadata");
+        }
+
+        public Charset charset() {
+            return fileMetadata.charset();
+        }
+
+        public String lineSeparator() {
+            return fileMetadata.defaultLineSeparator();
+        }
     }
 
     private static boolean comesAfter(Position a, Position b) {

@@ -146,18 +146,24 @@ Detailed documentation:
 - `Save As`/overwrite prompt is shown in a separate bar above status bar (red).
 - all save failures are explained in the save notification bar (read-only file, no access to directory, invalid target path, etc).
 - non-interactive save notifications are shown in a separate bar above status: green for success, red for errors, auto-hide after ~3s.
-- save writes atomically via temporary file + move.
+- save writes through a private temporary file and move; replacement is atomic
+  when the filesystem supports atomic move, while the portable fallback makes
+  no crash-atomicity claim.
 - existing POSIX permission bits are preserved, including executable bits.
 - saving through a symbolic link updates its resolved target without replacing the link.
-- atomic replacement gives the saved path a new inode; other hard links keep their previous content.
+- an atomic replacement gives the saved path a new inode; other hard links keep their previous content.
 - UI settings are stored in `~/.config/tuink/tuink.properties`. Only the
   current `format=1` schema is accepted; an incompatible file is left unchanged
   and the editor starts with defaults after showing a warning.
 - recovery snapshots are stored under `~/.config/tuink/recovery`; on POSIX
   systems the directory is restricted to `0700` and snapshot files to `0600`.
-  Only current `format=1` snapshots are restored. Incompatible snapshots are
-  reported and left unchanged. A symlink in place of the recovery directory is
-  rejected.
+  Only current `format=4` snapshots are restored; they retain charset, BOM,
+  final-EOL state, mixed line separators, and create-vs-replace save intent. A
+  generation-specific text file is committed by one metadata replacement. On
+  filesystems with atomic move, an interrupted editor process cannot combine
+  old metadata with new text; the fallback makes no power-loss guarantee. Incompatible snapshots are
+  reported and left unchanged. A symlink in place of the recovery directory
+  is rejected.
 
 ## Status indicators
 

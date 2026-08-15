@@ -4,12 +4,15 @@ import dev.tuink.unicode.GraphemeText;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.ArrayDeque;
+import java.util.Comparator;
 import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.eclipse.jgit.diff.DiffAlgorithm;
@@ -61,6 +64,9 @@ public class EditorEngine {
     private long gutterDiffLastRebuildAtNanos;
     private long gutterDiffLastRebuildDurationNanos;
     private boolean gutterDiffPendingRebuild;
+    private long nextDocumentStateId;
+    private long currentDocumentStateId;
+    private long savedDocumentStateId;
 
     public EditorEngine(TextModel model, EditorState state, EditorTextLayout textLayout) {
         this.model = model;
@@ -70,6 +76,11 @@ public class EditorEngine {
         }
         this.textLayout = textLayout;
         resetGutterDiffBaselinesOnOpen();
+        if (state.isDirty()) {
+            savedDocumentStateId = -1L;
+        } else {
+            markCurrentAsSaved();
+        }
     }
 
     public TextModel model() {
@@ -82,6 +93,95 @@ public class EditorEngine {
 
     public EditorTextLayout textLayout() {
         return textLayout;
+    }
+
+    /**
+     * Applies a prevalidated batch of document replacements as one atomic undo step.
+     *
+     * <p>Every range is checked against the same pre-edit model before any mutation.
+     * Ranges use exact UTF-16 offsets, may not split surrogate pairs or overlap, and
+     * are applied from the end of the document towards the beginning. The cursor is
+     * moved to the end of the earliest applied replacement.</p>
+     *
+     * @return {@code true} when logical document content changed
+     * @throws IllegalArgumentException when any replacement is invalid
+     */
+    public boolean applyTextReplacements(List<TextReplacement> replacements) {
+        List<TextReplacement> canonical = validateTextReplacements(replacements);
+        List<TextReplacement> effective = new ArrayList<>(canonical.size());
+        for (TextReplacement replacement : canonical) {
+            String normalized = normalizeInsertedText(replacement.replacement());
+            if (!model.getTextRange(replacement.start(), replacement.end()).equals(normalized)) {
+                effective.add(new TextReplacement(
+                    replacement.start(),
+                    replacement.end(),
+                    normalized
+                ));
+            }
+        }
+        if (effective.isEmpty()) {
+            return false;
+        }
+
+        preferredVisualColumn = -1;
+        breakCoalescing();
+        applyEdit(EditKind.NONE, () -> {
+            List<EditOp.ReplaceRange> tracked = new ArrayList<>(effective.size());
+            Position earliestResult = state.getCursor();
+            for (int index = effective.size() - 1; index >= 0; index--) {
+                TextReplacement replacement = effective.get(index);
+                earliestResult = applyReplaceAndTrack(
+                    tracked,
+                    replacement.start(),
+                    replacement.end(),
+                    replacement.replacement()
+                );
+            }
+            state.setCursor(earliestResult);
+            state.clearSelection();
+        });
+        return true;
+    }
+
+    /** Moves the primary cursor through the engine-owned mutation boundary. */
+    public void moveCursorTo(Position requested) {
+        preferredVisualColumn = -1;
+        Position previous = state.getCursor();
+        moveCursor(clampCursorBoundary(requested), false, previous);
+    }
+
+    /** Starts a pointer selection without exposing mutable cursor state to a frontend. */
+    public void beginSelectionAt(Position requested) {
+        preferredVisualColumn = -1;
+        breakCoalescing();
+        Position next = clampCursorBoundary(requested);
+        state.setSelectionAnchor(next);
+        state.setCursor(next);
+    }
+
+    /** Extends the current selection to a frontend-resolved text position. */
+    public void extendSelectionTo(Position requested) {
+        preferredVisualColumn = -1;
+        breakCoalescing();
+        if (state.getSelectionAnchor() == null) {
+            state.setSelectionAnchor(state.getCursor());
+        }
+        state.setCursor(clampCursorBoundary(requested));
+    }
+
+    /** Restores a cursor/selection snapshot after speculative frontend routing. */
+    public void restoreSelection(Position cursor, Position anchor) {
+        preferredVisualColumn = -1;
+        breakCoalescing();
+        state.setCursor(requireTextBoundary(cursor));
+        state.setSelectionAnchor(anchor == null ? null : requireTextBoundary(anchor));
+    }
+
+    /** Removes a collapsed selection after pointer release. */
+    public void finishSelection() {
+        if (state.getSelectionAnchor() != null && state.getSelectionAnchor().equals(state.getCursor())) {
+            state.clearSelection();
+        }
     }
 
     public RecoverySnapshot captureRecoverySnapshot() {
@@ -97,6 +197,13 @@ public class EditorEngine {
         redoStack.clear();
         breakCoalescing();
         resetGutterDiffBaselinesOnOpen();
+        beginNewDocumentState();
+        if (snapshot.dirty()) {
+            savedDocumentStateId = -1L;
+            state.setDirty(true);
+        } else {
+            markCurrentAsSaved();
+        }
     }
 
     public GutterDiffMarker gutterDiffMarkerForLine(int lineIndex) {
@@ -168,15 +275,30 @@ public class EditorEngine {
     }
 
     public void open(Path path) throws IOException {
-        if (Files.exists(path)) {
-            TextModel.LoadMetadata loaded = model.load(path);
+        if (path == null) {
+            throw new IOException("No file selected");
+        }
+        Path normalizedPath = path.toAbsolutePath().normalize();
+        SaveDisposition openedDisposition;
+        try {
+            TextModel.LoadMetadata loaded = model.load(normalizedPath);
             state.setFileEncoding(loaded.charset());
             state.setLineSeparator(loaded.lineSeparator());
-        } else {
+            openedDisposition = SaveDisposition.REPLACE_EXISTING;
+        } catch (NoSuchFileException missing) {
+            if (Files.isSymbolicLink(normalizedPath)) {
+                throw missing;
+            }
+            model.replaceLines(
+                List.of(""),
+                DocumentFileMetadata.newDocument(1)
+            );
             state.setFileEncoding(StandardCharsets.UTF_8);
             state.setLineSeparator(EditorState.LINE_SEPARATOR_LF);
+            openedDisposition = SaveDisposition.CREATE_NEW;
         }
-        state.setCurrentFile(path);
+        state.setCurrentFile(normalizedPath);
+        state.setSaveDisposition(openedDisposition);
         state.setCursor(new Position(0, 0));
         state.setTopLine(0);
         state.setLeftColumn(0);
@@ -187,21 +309,42 @@ public class EditorEngine {
         redoStack.clear();
         breakCoalescing();
         resetGutterDiffBaselinesOnOpen();
+        beginNewDocumentState();
+        markCurrentAsSaved();
     }
 
     public void save() throws IOException {
         if (state.getCurrentFile() == null) {
             throw new IOException("No file selected");
         }
-        model.save(state.getCurrentFile(), state.getFileEncoding(), state.getLineSeparator());
+        model.save(
+            state.getCurrentFile(),
+            model.fileMetadata(),
+            state.getSaveDisposition()
+        );
+        state.setSaveDisposition(SaveDisposition.REPLACE_EXISTING);
         state.setDirty(false);
         breakCoalescing();
         resetGutterDiffSavedBaseline();
+        markCurrentAsSaved();
     }
 
     public void saveAs(Path path) throws IOException {
-        state.setCurrentFile(path);
-        save();
+        saveAs(path, SaveDisposition.CREATE_NEW);
+    }
+
+    public void saveAs(Path path, SaveDisposition disposition) throws IOException {
+        if (path == null) {
+            throw new IOException("No file selected");
+        }
+        Path normalizedPath = path.toAbsolutePath().normalize();
+        model.save(normalizedPath, model.fileMetadata(), disposition);
+        state.setCurrentFile(normalizedPath);
+        state.setSaveDisposition(SaveDisposition.REPLACE_EXISTING);
+        state.setDirty(false);
+        breakCoalescing();
+        resetGutterDiffSavedBaseline();
+        markCurrentAsSaved();
     }
 
     public void moveLeft() {
@@ -469,6 +612,9 @@ public class EditorEngine {
     }
 
     public void insertChar(char ch) {
+        if (Character.isSurrogate(ch)) {
+            throw new IllegalArgumentException("A standalone UTF-16 surrogate is not valid input");
+        }
         preferredVisualColumn = -1;
         if (isAutoPairsActive() && shouldSkipOverClosing(ch)) {
             moveRight();
@@ -507,6 +653,7 @@ public class EditorEngine {
         if (text == null || text.isEmpty()) {
             return;
         }
+        LogicalDocumentLines.requireWellFormedUtf16(text);
         if (text.length() == 1 && !Character.isSurrogate(text.charAt(0))) {
             insertChar(text.charAt(0));
             return;
@@ -786,6 +933,7 @@ public class EditorEngine {
         HistoryEntry previous = undoStack.pop();
         previous.undo();
         pushWithLimit(redoStack, previous);
+        updateDirtyFromSavepoint();
         return true;
     }
 
@@ -798,6 +946,7 @@ public class EditorEngine {
         HistoryEntry next = redoStack.pop();
         next.redo();
         pushWithLimit(undoStack, next);
+        updateDirtyFromSavepoint();
         return true;
     }
 
@@ -1818,20 +1967,26 @@ public class EditorEngine {
     }
 
     private void applyEdit(EditKind kind, Runnable editOperation) {
+        long beforeStateId = currentDocumentStateId;
         Snapshot before = captureSnapshot();
         editOperation.run();
         Snapshot after = captureSnapshot();
         if (after.equals(before)) {
             return;
         }
+        long afterStateId = nextDocumentStateId();
+        currentDocumentStateId = afterStateId;
         long now = System.nanoTime();
         boolean merged = shouldCoalesce(kind, before.cursor(), before.selectionAnchor(), now)
-            && tryMergeSnapshotEntry(kind, after);
+            && tryMergeSnapshotEntry(kind, after, afterStateId);
         if (!merged) {
-            pushWithLimit(undoStack, new SnapshotHistoryEntry(kind, before, after));
+            pushWithLimit(
+                undoStack,
+                new SnapshotHistoryEntry(kind, before, after, beforeStateId, afterStateId)
+            );
         }
         redoStack.clear();
-        state.setDirty(true);
+        updateDirtyFromSavepoint();
         lastEditKind = kind;
         lastEditAtNanos = now;
         lastEditCursorAfter = after.cursor();
@@ -1842,35 +1997,53 @@ public class EditorEngine {
         if (ops == null || ops.isEmpty()) {
             return;
         }
+        long beforeStateId = currentDocumentStateId;
         ViewState after = captureViewState();
+        long afterStateId = nextDocumentStateId();
+        currentDocumentStateId = afterStateId;
         long now = System.nanoTime();
         boolean merged = shouldCoalesce(kind, before.cursor(), before.selectionAnchor(), now)
-            && tryMergeOperationEntry(kind, after, ops);
+            && tryMergeOperationEntry(kind, after, ops, afterStateId);
         if (!merged) {
-            pushWithLimit(undoStack, new OperationHistoryEntry(kind, before, after, ops));
+            pushWithLimit(
+                undoStack,
+                new OperationHistoryEntry(
+                    kind,
+                    before,
+                    after,
+                    ops,
+                    beforeStateId,
+                    afterStateId
+                )
+            );
         }
         redoStack.clear();
-        state.setDirty(true);
+        updateDirtyFromSavepoint();
         lastEditKind = kind;
         lastEditAtNanos = now;
         lastEditCursorAfter = after.cursor();
     }
 
-    private boolean tryMergeSnapshotEntry(EditKind kind, Snapshot after) {
+    private boolean tryMergeSnapshotEntry(EditKind kind, Snapshot after, long afterStateId) {
         HistoryEntry top = undoStack.peek();
         if (!(top instanceof SnapshotHistoryEntry entry) || entry.kind() != kind) {
             return false;
         }
-        entry.setAfter(after);
+        entry.setAfter(after, afterStateId);
         return true;
     }
 
-    private boolean tryMergeOperationEntry(EditKind kind, ViewState after, List<EditOp.ReplaceRange> ops) {
+    private boolean tryMergeOperationEntry(
+        EditKind kind,
+        ViewState after,
+        List<EditOp.ReplaceRange> ops,
+        long afterStateId
+    ) {
         HistoryEntry top = undoStack.peek();
         if (!(top instanceof OperationHistoryEntry entry) || entry.kind() != kind) {
             return false;
         }
-        entry.append(ops, after);
+        entry.append(ops, after, afterStateId);
         return true;
     }
 
@@ -1888,7 +2061,8 @@ public class EditorEngine {
             b = temp;
         }
         String deletedText = model.getTextRange(a, b);
-        String inserted = insertedText == null ? "" : insertedText;
+        String inserted = normalizeInsertedText(insertedText == null ? "" : insertedText);
+        LogicalDocumentLines.requireWellFormedUtf16(inserted);
         if (deletedText.isEmpty() && inserted.isEmpty()) {
             return a;
         }
@@ -1907,6 +2081,84 @@ public class EditorEngine {
             return Integer.compare(left.line(), right.line());
         }
         return Integer.compare(left.col(), right.col());
+    }
+
+    private Position clampCursorBoundary(Position requested) {
+        Position clamped = model.clamp(requested);
+        String line = model.getLine(clamped.line());
+        return new Position(clamped.line(), GraphemeText.floorBoundary(line, clamped.col()));
+    }
+
+    private Position requireTextBoundary(Position requested) {
+        Position clamped = model.clamp(requested);
+        String line = model.getLine(clamped.line());
+        int offset = clamped.col();
+        if (offset > 0
+            && offset < line.length()
+            && Character.isHighSurrogate(line.charAt(offset - 1))
+            && Character.isLowSurrogate(line.charAt(offset))) {
+            throw new IllegalArgumentException("Text selection splits a UTF-16 surrogate pair");
+        }
+        return clamped;
+    }
+
+    private List<TextReplacement> validateTextReplacements(List<TextReplacement> replacements) {
+        Objects.requireNonNull(replacements, "replacements");
+        List<TextReplacement> canonical = new ArrayList<>(replacements.size());
+        for (int index = 0; index < replacements.size(); index++) {
+            TextReplacement replacement = Objects.requireNonNull(
+                replacements.get(index),
+                "replacement " + index
+            );
+            requireTextPosition(replacement.start(), index, "start");
+            requireTextPosition(replacement.end(), index, "end");
+            try {
+                LogicalDocumentLines.requireWellFormedUtf16(replacement.replacement());
+            } catch (IllegalArgumentException e) {
+                throw invalidReplacement(index, "contains malformed UTF-16 text");
+            }
+            canonical.add(replacement);
+        }
+        canonical.sort(
+            Comparator.comparing(TextReplacement::start, EditorEngine::comparePositions)
+                .thenComparing(TextReplacement::end, EditorEngine::comparePositions)
+        );
+        for (int index = 1; index < canonical.size(); index++) {
+            TextReplacement previous = canonical.get(index - 1);
+            TextReplacement current = canonical.get(index);
+            if (comparePositions(previous.end(), current.start()) > 0
+                || previous.start().equals(current.start())) {
+                throw new IllegalArgumentException(
+                    "Text replacements must not overlap or share an insertion point"
+                );
+            }
+        }
+        return List.copyOf(canonical);
+    }
+
+    private void requireTextPosition(Position position, int replacementIndex, String endpoint) {
+        if (position.line() >= model.lineCount()) {
+            throw invalidReplacement(replacementIndex, endpoint + " line is outside the document");
+        }
+        String line = model.getLine(position.line());
+        if (position.col() > line.length()) {
+            throw invalidReplacement(replacementIndex, endpoint + " offset is outside the line");
+        }
+        int offset = position.col();
+        if (offset > 0
+            && offset < line.length()
+            && Character.isHighSurrogate(line.charAt(offset - 1))
+            && Character.isLowSurrogate(line.charAt(offset))) {
+            throw invalidReplacement(replacementIndex, endpoint + " splits a surrogate pair");
+        }
+    }
+
+    private static IllegalArgumentException invalidReplacement(int index, String problem) {
+        return new IllegalArgumentException("Replacement " + index + " " + problem);
+    }
+
+    private static String normalizeInsertedText(String text) {
+        return text.replace("\r\n", "\n").replace('\r', '\n');
     }
 
     private void resetGutterDiffBaselinesOnOpen() {
@@ -1929,6 +2181,23 @@ public class EditorEngine {
             return;
         }
         rebuildGutterDiffFromCurrentState();
+    }
+
+    private long nextDocumentStateId() {
+        return ++nextDocumentStateId;
+    }
+
+    private void beginNewDocumentState() {
+        currentDocumentStateId = nextDocumentStateId();
+    }
+
+    private void markCurrentAsSaved() {
+        savedDocumentStateId = currentDocumentStateId;
+        state.setDirty(false);
+    }
+
+    private void updateDirtyFromSavepoint() {
+        state.setDirty(savedDocumentStateId < 0L || currentDocumentStateId != savedDocumentStateId);
     }
 
     private void clearAllGutterDiffBuffers(int lineCount) {
@@ -2128,48 +2397,48 @@ public class EditorEngine {
 
     private ViewState captureViewState() {
         return new ViewState(
+            model.fileMetadata(),
             state.getCursor(),
             state.getTopLine(),
             state.getTopWrapSegment(),
             state.getLeftColumn(),
             state.getLeftVisualColumn(),
-            state.isDirty(),
             state.getSelectionAnchor()
         );
     }
 
     private void restoreViewState(ViewState view) {
+        model.restoreFileMetadata(view.fileMetadata());
         state.setCursor(model.clamp(view.cursor()));
         state.setTopLine(view.topLine());
         state.setTopWrapSegment(view.topWrapSegment());
         state.setLeftColumn(view.leftColumn());
         state.setLeftVisualColumn(view.leftVisualColumn());
-        state.setDirty(view.dirty());
         state.setSelectionAnchor(view.selectionAnchor());
     }
 
     private Snapshot captureSnapshot() {
         return new Snapshot(
             model.snapshotLines(),
+            model.fileMetadata(),
             state.getCursor(),
             state.getTopLine(),
             state.getTopWrapSegment(),
             state.getLeftColumn(),
             state.getLeftVisualColumn(),
-            state.isDirty(),
             state.getSelectionAnchor()
         );
     }
 
     private void restoreSnapshot(Snapshot snapshot) {
-        model.replaceLines(snapshot.lines());
+        model.replaceLines(snapshot.lines(), snapshot.fileMetadata());
         restoreViewState(new ViewState(
+            snapshot.fileMetadata(),
             snapshot.cursor(),
             snapshot.topLine(),
             snapshot.topWrapSegment(),
             snapshot.leftColumn(),
             snapshot.leftVisualColumn(),
-            snapshot.dirty(),
             snapshot.selectionAnchor()
         ));
         gutterDiffComputedRevision = Long.MIN_VALUE;
@@ -2184,23 +2453,23 @@ public class EditorEngine {
 
     private record Snapshot(
         List<String> lines,
+        DocumentFileMetadata fileMetadata,
         Position cursor,
         int topLine,
         int topWrapSegment,
         int leftColumn,
         int leftVisualColumn,
-        boolean dirty,
         Position selectionAnchor
     ) {
     }
 
     private record ViewState(
+        DocumentFileMetadata fileMetadata,
         Position cursor,
         int topLine,
         int topWrapSegment,
         int leftColumn,
         int leftVisualColumn,
-        boolean dirty,
         Position selectionAnchor
     ) {
     }
@@ -2215,29 +2484,42 @@ public class EditorEngine {
         private final EditKind kind;
         private final Snapshot before;
         private Snapshot after;
+        private final long beforeStateId;
+        private long afterStateId;
 
-        private SnapshotHistoryEntry(EditKind kind, Snapshot before, Snapshot after) {
+        private SnapshotHistoryEntry(
+            EditKind kind,
+            Snapshot before,
+            Snapshot after,
+            long beforeStateId,
+            long afterStateId
+        ) {
             this.kind = kind;
             this.before = before;
             this.after = after;
+            this.beforeStateId = beforeStateId;
+            this.afterStateId = afterStateId;
         }
 
         EditKind kind() {
             return kind;
         }
 
-        void setAfter(Snapshot after) {
+        void setAfter(Snapshot after, long nextAfterStateId) {
             this.after = after;
+            this.afterStateId = nextAfterStateId;
         }
 
         @Override
         public void undo() {
             restoreSnapshot(before);
+            currentDocumentStateId = beforeStateId;
         }
 
         @Override
         public void redo() {
             restoreSnapshot(after);
+            currentDocumentStateId = afterStateId;
         }
     }
 
@@ -2246,26 +2528,37 @@ public class EditorEngine {
         private final ViewState beforeView;
         private ViewState afterView;
         private final List<EditOp.ReplaceRange> ops;
+        private final long beforeStateId;
+        private long afterStateId;
 
         private OperationHistoryEntry(
             EditKind kind,
             ViewState beforeView,
             ViewState afterView,
-            List<EditOp.ReplaceRange> ops
+            List<EditOp.ReplaceRange> ops,
+            long beforeStateId,
+            long afterStateId
         ) {
             this.kind = kind;
             this.beforeView = beforeView;
             this.afterView = afterView;
             this.ops = new ArrayList<>(ops);
+            this.beforeStateId = beforeStateId;
+            this.afterStateId = afterStateId;
         }
 
         EditKind kind() {
             return kind;
         }
 
-        void append(List<EditOp.ReplaceRange> extraOps, ViewState mergedAfterView) {
+        void append(
+            List<EditOp.ReplaceRange> extraOps,
+            ViewState mergedAfterView,
+            long mergedAfterStateId
+        ) {
             this.ops.addAll(extraOps);
             this.afterView = mergedAfterView;
+            this.afterStateId = mergedAfterStateId;
         }
 
         @Override
@@ -2274,6 +2567,7 @@ public class EditorEngine {
                 applyReplace(ops.get(i).start(), ops.get(i).insertedText(), ops.get(i).deletedText());
             }
             restoreViewState(beforeView);
+            currentDocumentStateId = beforeStateId;
         }
 
         @Override
@@ -2282,6 +2576,7 @@ public class EditorEngine {
                 applyReplace(op.start(), op.deletedText(), op.insertedText());
             }
             restoreViewState(afterView);
+            currentDocumentStateId = afterStateId;
         }
 
         private void applyReplace(Position start, String deletedText, String insertedText) {

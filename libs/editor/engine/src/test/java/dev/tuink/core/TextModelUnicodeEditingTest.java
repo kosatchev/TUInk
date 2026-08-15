@@ -1,6 +1,7 @@
 package dev.tuink.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
@@ -58,6 +59,24 @@ class TextModelUnicodeEditingTest {
 
         assertEquals("AB", model.getLine(0));
         assertEquals(new Position(0, 1), cursor);
+    }
+
+    @Test
+    void insertionAndRangesRejectOffsetsInsideSurrogatePairsBeforeMutation() {
+        TextModel model = modelWith("A😀B");
+        long revision = model.revision();
+
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> model.insertText(new Position(0, 2), "x")
+        );
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> model.deleteRange(new Position(0, 0), new Position(0, 2))
+        );
+
+        assertEquals("A😀B", model.getLine(0));
+        assertEquals(revision, model.revision());
     }
 
     private static TextModel modelWith(String text) {

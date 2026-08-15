@@ -2,6 +2,7 @@ package dev.tuink.tui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import dev.tuink.core.SaveDisposition;
 import dev.tuink.tui.flow.SaveContinuation;
 import dev.tuink.tui.flow.UiModalMode;
 import dev.tuink.tui.flow.UiModalState;
@@ -17,6 +18,7 @@ class SaveFlowControllerTest {
         SaveFlowController.SaveAsResult result = enter(saveAs, "saved.txt", false, null);
 
         assertEquals(Path.of("saved.txt"), result.saveNowPath());
+        assertEquals(SaveDisposition.CREATE_NEW, result.saveDisposition());
         assertEquals(saveAs, result.modalState());
         assertEquals(SaveContinuation.CLOSE_TAB, result.modalState().saveContinuation());
     }
@@ -30,6 +32,44 @@ class SaveFlowControllerTest {
         assertEquals(UiModalMode.SAVE_OVERWRITE_CONFIRM, result.modalState().mode());
         assertEquals(SaveContinuation.QUIT, result.modalState().saveContinuation());
         assertEquals(Path.of("existing.txt"), result.modalState().pendingOverwritePath());
+    }
+
+    @Test
+    void existingCurrentFileCarriesExplicitReplaceAuthorization() {
+        SaveFlowController.SaveAsResult result = SaveFlowController.handleSaveAsInput(
+            new KeyEvent.ActionEvent(KeyEvent.Action.ENTER),
+            UiModalState.saveAs(),
+            "current.txt",
+            Path.of("current.txt"),
+            SaveDisposition.REPLACE_EXISTING,
+            path -> null,
+            path -> true,
+            path -> false,
+            Path::equals,
+            Path::toString
+        );
+
+        assertEquals(Path.of("current.txt"), result.saveNowPath());
+        assertEquals(SaveDisposition.REPLACE_EXISTING, result.saveDisposition());
+    }
+
+    @Test
+    void externallyCreatedExpectedAbsentPathStillRequiresOverwriteConfirmation() {
+        SaveFlowController.SaveAsResult result = SaveFlowController.handleSaveAsInput(
+            new KeyEvent.ActionEvent(KeyEvent.Action.ENTER),
+            UiModalState.saveAs(),
+            "current.txt",
+            Path.of("current.txt"),
+            SaveDisposition.CREATE_NEW,
+            path -> null,
+            path -> true,
+            path -> false,
+            Path::equals,
+            Path::toString
+        );
+
+        assertEquals(UiModalMode.SAVE_OVERWRITE_CONFIRM, result.modalState().mode());
+        assertEquals(Path.of("current.txt"), result.modalState().pendingOverwritePath());
     }
 
     @Test
@@ -54,6 +94,7 @@ class SaveFlowControllerTest {
             UiModalState.saveAsForQuit(),
             "saved.txt",
             null,
+            SaveDisposition.CREATE_NEW,
             path -> null,
             path -> false,
             path -> false,
@@ -76,6 +117,7 @@ class SaveFlowControllerTest {
             modalState,
             text,
             null,
+            SaveDisposition.CREATE_NEW,
             path -> validationError,
             path -> exists,
             path -> false,

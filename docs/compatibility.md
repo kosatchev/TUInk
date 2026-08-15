@@ -80,13 +80,17 @@ The reader accepts only the current schema. Unknown formats, malformed values, m
 Recovery snapshots are stored under `~/.config/tuink/recovery/`. The current schema is:
 
 ```properties
-format=1
+format=4
 createdAtEpochMillis=...
+textGeneration=0123456789abcdef0123456789abcdef
 dirty=true
 currentFile.present=false
 currentFile=
+saveDisposition=CREATE_NEW
 fileEncoding=UTF-8
-lineSeparator=LF
+bomKind=UTF_8
+defaultLineSeparator=CRLF
+lineSeparators=CRLF,LF,CRLF
 cursor.line=0
 cursor.col=0
 viewport.topLine=0
@@ -97,6 +101,36 @@ selection.present=false
 selection.line=0
 selection.col=0
 ```
+
+`bomKind` is one of `NONE`, `UTF_8`, `UTF_16_LE`, or `UTF_16_BE` and must be
+compatible with `fileEncoding`. `lineSeparators` records every separator in file
+order using `LF`, `CRLF`, and `CR`; an empty document has an empty value. For
+`n` recovered logical lines it contains exactly `n - 1` values. A final file
+separator is represented canonically by a trailing empty logical line.
+`defaultLineSeparator` is used for newly inserted lines; loading chooses the
+most frequent separator, with the first encountered separator breaking ties.
+`saveDisposition` is either `CREATE_NEW` or `REPLACE_EXISTING`; it preserves
+whether the current path was observed absent and therefore must not be
+overwritten without a later explicit authorization.
+
+`textGeneration` selects `<entry>.<generation>.txt`; the stable
+`<entry>.meta.properties` file is the commit point. Text is written to a new
+generation before metadata is replaced. Where atomic move is supported,
+interruption of the editor process between those writes can therefore leave
+only an unreferenced orphan, never a hybrid of two snapshots. The portable
+non-atomic fallback and this protocol generally do not claim power-loss
+durability without filesystem-specific fsync guarantees.
+
+Explicit deletion first renames live metadata to
+`<entry>.delete.properties`, which is a deletion commit marker, and only then
+removes generation files. Partial cleanup is retried on startup (and before the
+same runtime id is reused), so live metadata never points at text already
+removed by the discard operation.
+
+Recovery readers accept only the current `format=4` schema. Earlier snapshots
+do not provide both the complete file metadata and generation commit protocol,
+so they are reported as incompatible and left unchanged rather than being
+upgraded implicitly.
 
 All fields must be validated before a snapshot is used. Incompatible snapshots must remain intact, must not be overwritten by autosave, and may be deleted only through an explicit user action. The recovery directory and files must use restrictive permissions where the platform supports them: `0700` for directories and `0600` for files. Symlinks must not be followed when reading, writing, or deleting recovery data.
 

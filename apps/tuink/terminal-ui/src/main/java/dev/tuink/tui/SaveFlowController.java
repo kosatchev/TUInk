@@ -1,5 +1,6 @@
 package dev.tuink.tui;
 
+import dev.tuink.core.SaveDisposition;
 import dev.tuink.tui.flow.UiModalState;
 import dev.tuink.tui.input.KeyEvent;
 import java.nio.file.Path;
@@ -16,6 +17,7 @@ final class SaveFlowController {
         UiModalState modalState,
         String saveAsText,
         Path currentFile,
+        SaveDisposition currentSaveDisposition,
         Function<Path, String> validateSaveTarget,
         Predicate<Path> pathExists,
         Predicate<Path> isReadOnlyFile,
@@ -36,6 +38,7 @@ final class SaveFlowController {
                 modalState,
                 saveAsText,
                 currentFile,
+                currentSaveDisposition,
                 validateSaveTarget,
                 pathExists,
                 isReadOnlyFile,
@@ -63,6 +66,7 @@ final class SaveFlowController {
         UiModalState modalState,
         String saveAsText,
         Path currentFile,
+        SaveDisposition currentSaveDisposition,
         Function<Path, String> validateSaveTarget,
         Predicate<Path> pathExists,
         Predicate<Path> isReadOnlyFile,
@@ -101,7 +105,11 @@ final class SaveFlowController {
                 null
             );
         }
-        if (pathExists.test(path) && !isSameFilePath.test(path, currentFile)) {
+        boolean targetExists = pathExists.test(path);
+        boolean sameFile = targetExists
+            && currentSaveDisposition == SaveDisposition.REPLACE_EXISTING
+            && isSameFilePath.test(path, currentFile);
+        if (targetExists && !sameFile) {
             return result(
                 true,
                 modalState.confirmOverwrite(path),
@@ -111,7 +119,15 @@ final class SaveFlowController {
                 null
             );
         }
-        return result(true, modalState, TextInputEffect.none(), false, null, path);
+        return result(
+            true,
+            modalState,
+            TextInputEffect.none(),
+            false,
+            null,
+            path,
+            targetExists ? SaveDisposition.REPLACE_EXISTING : SaveDisposition.CREATE_NEW
+        );
     }
 
     private static SaveAsResult result(
@@ -122,13 +138,34 @@ final class SaveFlowController {
         String errorMessage,
         Path saveNowPath
     ) {
+        return result(
+            consumed,
+            modalState,
+            textInputEffect,
+            clearNotification,
+            errorMessage,
+            saveNowPath,
+            saveNowPath == null ? null : SaveDisposition.CREATE_NEW
+        );
+    }
+
+    private static SaveAsResult result(
+        boolean consumed,
+        UiModalState modalState,
+        TextInputEffect textInputEffect,
+        boolean clearNotification,
+        String errorMessage,
+        Path saveNowPath,
+        SaveDisposition saveDisposition
+    ) {
         return new SaveAsResult(
             consumed,
             modalState,
             textInputEffect,
             clearNotification,
             errorMessage,
-            saveNowPath
+            saveNowPath,
+            saveDisposition
         );
     }
 
@@ -138,7 +175,8 @@ final class SaveFlowController {
         TextInputEffect textInputEffect,
         boolean clearNotification,
         String errorMessage,
-        Path saveNowPath
+        Path saveNowPath,
+        SaveDisposition saveDisposition
     ) {
     }
 

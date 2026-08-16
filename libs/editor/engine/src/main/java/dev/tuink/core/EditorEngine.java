@@ -13,8 +13,6 @@ import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import org.eclipse.jgit.diff.DiffAlgorithm;
 import org.eclipse.jgit.diff.Edit;
 import org.eclipse.jgit.diff.EditList;
@@ -959,15 +957,16 @@ public class EditorEngine {
         if (needle == null) {
             return false;
         }
+        SearchMatcher matcher = SearchMatcher.compile(needle, options);
         breakCoalescing();
 
         Position from = model.clamp(state.getCursor());
         SelectionRange selected = currentSelection();
-        if (selected != null && matchesSelectedText(needle, selected, options)) {
+        if (selected != null && matchesSelectedText(matcher, selected)) {
             from = selected.end();
         }
 
-        SearchMatch found = findForward(from, needle, options, true);
+        SearchMatch found = findForward(from, matcher, true);
         if (found == null) {
             return false;
         }
@@ -984,15 +983,16 @@ public class EditorEngine {
         if (needle == null) {
             return false;
         }
+        SearchMatcher matcher = SearchMatcher.compile(needle, options);
         breakCoalescing();
 
         Position from = model.clamp(state.getCursor());
         SelectionRange selected = currentSelection();
-        if (selected != null && matchesSelectedText(needle, selected, options)) {
+        if (selected != null && matchesSelectedText(matcher, selected)) {
             from = selected.start();
         }
 
-        SearchMatch found = findBackward(from, needle, options, true);
+        SearchMatch found = findBackward(from, matcher, true);
         if (found == null) {
             return false;
         }
@@ -1009,10 +1009,12 @@ public class EditorEngine {
         if (needle == null) {
             return false;
         }
-        String replacementText = replacement == null ? "" : replacement;
+        SearchMatcher matcher = SearchMatcher.compile(needle, options);
+        String replacementText = normalizeInsertedText(replacement == null ? "" : replacement);
+        LogicalDocumentLines.requireWellFormedUtf16(replacementText);
 
         SelectionRange selected = currentSelection();
-        if (selected == null || !matchesSelectedText(needle, selected, options)) {
+        if (selected == null || !matchesSelectedText(matcher, selected)) {
             if (!findNext(needle, options)) {
                 return false;
             }
@@ -1024,12 +1026,18 @@ public class EditorEngine {
 
         Position rangeStart = selected.start();
         Position rangeEnd = selected.end();
+        String selectedText = model.getTextRange(rangeStart, rangeEnd);
+        if (selectedText.equals(replacementText)) {
+            // Replacing a match with the exact same text must not manufacture a
+            // document revision or an undo entry. Move to the following match so
+            // repeated Replace commands still make progress.
+            return findNext(needle, options);
+        }
         applyEdit(EditKind.NONE, () -> {
             state.setCursor(model.deleteRange(rangeStart, rangeEnd));
             state.setCursor(model.insertText(state.getCursor(), replacementText));
-            state.clearSelection();
+            state.setSelectionAnchor(rangeStart);
         });
-        state.setSelectionAnchor(rangeStart);
         return true;
     }
 
@@ -1042,23 +1050,24 @@ public class EditorEngine {
         if (needle == null) {
             return 0;
         }
-        String replacementText = replacement == null ? "" : replacement;
-        int count = countOccurrencesInDocument(needle, options);
-        if (count == 0) {
+        SearchMatcher matcher = SearchMatcher.compile(needle, options);
+        String replacementText = normalizeInsertedText(replacement == null ? "" : replacement);
+        LogicalDocumentLines.requireWellFormedUtf16(replacementText);
+        List<TextReplacement> replacements = new ArrayList<>();
+        for (int line = 0; line < model.lineCount(); line++) {
+            for (SearchMatcher.Match match : matcher.findAll(model.getLine(line))) {
+                replacements.add(new TextReplacement(
+                    new Position(line, match.startUtf16()),
+                    new Position(line, match.endUtf16()),
+                    replacementText
+                ));
+            }
+        }
+        if (replacements.isEmpty()) {
             return 0;
         }
-
-        applyEdit(EditKind.NONE, () -> {
-            List<String> lines = model.snapshotLines();
-            List<String> replaced = new ArrayList<>(lines.size());
-            for (String line : lines) {
-                replaced.add(replaceAllInLine(line, needle, replacementText, options));
-            }
-            model.replaceLines(replaced);
-            state.setCursor(model.clamp(state.getCursor()));
-            state.clearSelection();
-        });
-        return count;
+        applyTextReplacements(replacements);
+        return replacements.size();
     }
 
     public void ensureCursorVisible(int contentRows) {
@@ -2720,12 +2729,12 @@ public class EditorEngine {
         return query;
     }
 
-    private SearchMatch findForward(Position from, String needle, SearchOptions options, boolean wrap) {
+    private SearchMatch findForward(Position from, SearchMatcher matcher, boolean wrap) {
         int lineCount = model.lineCount();
         for (int line = from.line(); line < lineCount; line++) {
             String text = model.getLine(line);
             int startCol = line == from.line() ? Math.min(from.col(), text.length()) : 0;
-            SearchMatch match = findInLineForward(line, text, needle, options, startCol);
+            SearchMatch match = findInLineForward(line, text, matcher, startCol);
             if (match != null) {
                 return match;
             }
@@ -2736,7 +2745,7 @@ public class EditorEngine {
         for (int line = 0; line <= from.line(); line++) {
             String text = model.getLine(line);
             int limit = line == from.line() ? Math.min(from.col(), text.length()) : text.length();
-            SearchMatch match = findInLineForward(line, text, needle, options, 0);
+            SearchMatch match = findInLineForward(line, text, matcher, 0);
             if (match != null && match.start().col() < limit) {
                 return match;
             }
@@ -2744,11 +2753,11 @@ public class EditorEngine {
         return null;
     }
 
-    private SearchMatch findBackward(Position from, String needle, SearchOptions options, boolean wrap) {
+    private SearchMatch findBackward(Position from, SearchMatcher matcher, boolean wrap) {
         for (int line = from.line(); line >= 0; line--) {
             String text = model.getLine(line);
             int endExclusive = line == from.line() ? Math.min(from.col(), text.length()) : text.length();
-            SearchMatch match = findInLineBackward(line, text, needle, options, endExclusive);
+            SearchMatch match = findInLineBackward(line, text, matcher, endExclusive);
             if (match != null) {
                 return match;
             }
@@ -2759,7 +2768,7 @@ public class EditorEngine {
         for (int line = model.lineCount() - 1; line >= from.line(); line--) {
             String text = model.getLine(line);
             int startExclusive = line == from.line() ? Math.min(from.col(), text.length()) : -1;
-            SearchMatch match = findInLineBackward(line, text, needle, options, text.length());
+            SearchMatch match = findInLineBackward(line, text, matcher, text.length());
             if (match != null && match.start().col() > startExclusive) {
                 return match;
             }
@@ -2775,128 +2784,34 @@ public class EditorEngine {
         state.setCursor(new Position(safeStart.line(), endCol));
     }
 
-    private int countOccurrencesInDocument(String needle, SearchOptions options) {
-        int count = 0;
-        for (int line = 0; line < model.lineCount(); line++) {
-            String text = model.getLine(line);
-            count += findAllMatches(text, needle, options).size();
-        }
-        return count;
-    }
-
-    private static String replaceAllInLine(String text, String needle, String replacement, SearchOptions options) {
-        List<LineMatch> matches = findAllMatches(text, needle, options);
-        if (matches.isEmpty()) {
-            return text;
-        }
-        StringBuilder out = new StringBuilder(text.length() + matches.size() * Math.max(0, replacement.length() - needle.length()));
-        int at = 0;
-        for (LineMatch match : matches) {
-            out.append(text, at, match.start());
-            out.append(replacement);
-            at = match.end();
-        }
-        out.append(text, at, text.length());
-        return out.toString();
-    }
-
-    private boolean matchesSelectedText(String query, SelectionRange selected, SearchOptions options) {
-        String selectedText = model.getTextRange(selected.start(), selected.end());
-        if (selectedText.isEmpty()) {
+    private boolean matchesSelectedText(SearchMatcher matcher, SelectionRange selected) {
+        if (selected.start().line() != selected.end().line()) {
             return false;
         }
-        String normalizedQuery = options.caseInsensitive() ? query.toLowerCase(Locale.ROOT) : query;
-        String normalizedSelected = options.caseInsensitive() ? selectedText.toLowerCase(Locale.ROOT) : selectedText;
-        return switch (options.matchMode()) {
-            case SUBSTRING -> normalizedSelected.equals(normalizedQuery);
-            case WHOLE_WORD -> normalizedSelected.equals(normalizedQuery);
-            case WILDCARD -> wildcardPattern(normalizedQuery).matcher(normalizedSelected).matches();
-        };
+        String line = model.getLine(selected.start().line());
+        return matcher.matchesRange(line, selected.start().col(), selected.end().col());
     }
 
-    private SearchMatch findInLineForward(int line, String text, String needle, SearchOptions options, int fromCol) {
-        for (LineMatch match : findAllMatches(text, needle, options)) {
-            if (match.start() >= fromCol) {
-                return new SearchMatch(new Position(line, match.start()), match.end() - match.start());
+    private SearchMatch findInLineForward(int line, String text, SearchMatcher matcher, int fromCol) {
+        for (SearchMatcher.Match match : matcher.findAll(text)) {
+            if (match.startUtf16() >= fromCol) {
+                return new SearchMatch(new Position(line, match.startUtf16()), match.lengthUtf16());
             }
         }
         return null;
     }
 
-    private SearchMatch findInLineBackward(int line, String text, String needle, SearchOptions options, int beforeCol) {
-        List<LineMatch> matches = findAllMatches(text, needle, options);
+    private SearchMatch findInLineBackward(int line, String text, SearchMatcher matcher, int beforeCol) {
+        List<SearchMatcher.Match> matches = matcher.findAll(text);
         SearchMatch found = null;
-        for (LineMatch match : matches) {
-            if (match.start() < beforeCol) {
-                found = new SearchMatch(new Position(line, match.start()), match.end() - match.start());
+        for (SearchMatcher.Match match : matches) {
+            if (match.startUtf16() < beforeCol) {
+                found = new SearchMatch(new Position(line, match.startUtf16()), match.lengthUtf16());
             } else {
                 break;
             }
         }
         return found;
-    }
-
-    private static List<LineMatch> findAllMatches(String text, String query, SearchOptions options) {
-        String haystack = options.caseInsensitive() ? text.toLowerCase(Locale.ROOT) : text;
-        String needle = options.caseInsensitive() ? query.toLowerCase(Locale.ROOT) : query;
-
-        return switch (options.matchMode()) {
-            case SUBSTRING -> findLiteralMatches(haystack, needle, false);
-            case WHOLE_WORD -> findLiteralMatches(haystack, needle, true);
-            case WILDCARD -> findWildcardMatches(haystack, needle);
-        };
-    }
-
-    private static List<LineMatch> findLiteralMatches(String text, String needle, boolean wholeWord) {
-        List<LineMatch> matches = new ArrayList<>();
-        int at = 0;
-        while (at <= text.length() - needle.length()) {
-            int idx = text.indexOf(needle, at);
-            if (idx < 0) {
-                break;
-            }
-            int end = idx + needle.length();
-            if (!wholeWord || isWholeWord(text, idx, end)) {
-                matches.add(new LineMatch(idx, end));
-            }
-            at = end;
-        }
-        return matches;
-    }
-
-    private static List<LineMatch> findWildcardMatches(String text, String wildcard) {
-        List<LineMatch> matches = new ArrayList<>();
-        Pattern pattern = wildcardPattern(wildcard);
-        Matcher matcher = pattern.matcher(text);
-        while (matcher.find()) {
-            if (matcher.start() == matcher.end()) {
-                break;
-            }
-            matches.add(new LineMatch(matcher.start(), matcher.end()));
-        }
-        return matches;
-    }
-
-    private static Pattern wildcardPattern(String wildcard) {
-        StringBuilder regex = new StringBuilder();
-        regex.append("(?s)");
-        for (int i = 0; i < wildcard.length(); i++) {
-            char ch = wildcard.charAt(i);
-            if (ch == '*') {
-                regex.append(".*");
-            } else if (ch == '?') {
-                regex.append('.');
-            } else {
-                regex.append(Pattern.quote(String.valueOf(ch)));
-            }
-        }
-        return Pattern.compile(regex.toString());
-    }
-
-    private static boolean isWholeWord(String text, int start, int end) {
-        boolean leftOk = start == 0 || !isWordChar(text.charAt(start - 1));
-        boolean rightOk = end == text.length() || !isWordChar(text.charAt(end));
-        return leftOk && rightOk;
     }
 
     private static boolean isWordChar(char ch) {
@@ -2933,9 +2848,6 @@ public class EditorEngine {
     }
 
     private record SearchMatch(Position start, int length) {
-    }
-
-    private record LineMatch(int start, int end) {
     }
 
     public boolean hasSelection() {

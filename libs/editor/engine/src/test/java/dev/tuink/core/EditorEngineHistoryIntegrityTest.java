@@ -81,6 +81,53 @@ class EditorEngineHistoryIntegrityTest {
         assertEquals(revision, fixture.model.revision());
     }
 
+    @Test
+    void replaceAllSupportsCanonicalMultilineReplacementAsOneUndoStep() {
+        Fixture fixture = fixture("a a");
+
+        assertEquals(2, fixture.engine.replaceAll("a", "x\r\ny"));
+        assertEquals(List.of("x", "y x", "y"), fixture.model.snapshotLines());
+        assertTrue(fixture.engine.undo());
+        assertEquals(List.of("a a"), fixture.model.snapshotLines());
+        assertFalse(fixture.engine.undo());
+    }
+
+    @Test
+    void identicalReplaceAdvancesWithoutChangingTextRevisionOrHistory() {
+        Fixture fixture = fixture("x x");
+        fixture.engine.restoreSelection(new Position(0, 1), new Position(0, 0));
+        long revision = fixture.model.revision();
+
+        assertTrue(fixture.engine.replaceCurrentOrNext("x", "x"));
+
+        assertEquals(List.of("x x"), fixture.model.snapshotLines());
+        assertEquals(revision, fixture.model.revision());
+        assertEquals(new Position(0, 2), fixture.state.getSelectionAnchor());
+        assertEquals(new Position(0, 3), fixture.state.getCursor());
+        assertFalse(fixture.engine.undo());
+    }
+
+    @Test
+    void replaceUndoAndRedoRestoreTheExactBeforeAndAfterSelections() {
+        Fixture fixture = fixture("one two");
+        fixture.engine.restoreSelection(new Position(0, 3), new Position(0, 0));
+
+        assertTrue(fixture.engine.replaceCurrentOrNext("one", "1"));
+        assertEquals(List.of("1 two"), fixture.model.snapshotLines());
+        assertEquals(new Position(0, 0), fixture.state.getSelectionAnchor());
+        assertEquals(new Position(0, 1), fixture.state.getCursor());
+
+        assertTrue(fixture.engine.undo());
+        assertEquals(List.of("one two"), fixture.model.snapshotLines());
+        assertEquals(new Position(0, 0), fixture.state.getSelectionAnchor());
+        assertEquals(new Position(0, 3), fixture.state.getCursor());
+
+        assertTrue(fixture.engine.redo());
+        assertEquals(List.of("1 two"), fixture.model.snapshotLines());
+        assertEquals(new Position(0, 0), fixture.state.getSelectionAnchor());
+        assertEquals(new Position(0, 1), fixture.state.getCursor());
+    }
+
     private static Fixture fixture(String text) {
         TextModel model = new TextModel(new SimpleLineBuffer());
         if (!text.isEmpty()) {

@@ -9,6 +9,7 @@ import dev.tuink.core.LanguageProfiles;
 import dev.tuink.core.Position;
 import dev.tuink.core.RecoverySnapshot;
 import dev.tuink.core.SaveDisposition;
+import dev.tuink.core.SearchMatcher;
 import dev.tuink.core.SearchOptions;
 import dev.tuink.core.TabSession;
 import dev.tuink.core.TabSearch;
@@ -94,7 +95,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
-import java.util.regex.Pattern;
 
 /**
  * JLine terminal application wiring core + render + highlighter.
@@ -3130,7 +3130,7 @@ public class TerminalEditorApp {
             return false;
         }
         String selected = selectionQueryForCtrlF(model, state);
-        if (selected == null || !searchSelectionMatchesQuery(selected, query, options)) {
+        if (selected == null || !searchSelectionMatchesQuery(model, state, query, options)) {
             return false;
         }
         int topBefore = state.getTopLine();
@@ -3142,34 +3142,27 @@ public class TerminalEditorApp {
             || leftBefore != state.getLeftVisualColumn();
     }
 
-    private boolean searchSelectionMatchesQuery(String selected, String query, SearchOptions options) {
-        SearchOptions normalized = options == null ? SearchOptions.DEFAULT : options;
-        String selectedValue = selected;
-        String queryValue = query;
-        if (normalized.caseInsensitive()) {
-            selectedValue = selectedValue.toLowerCase(Locale.ROOT);
-            queryValue = queryValue.toLowerCase(Locale.ROOT);
+    private boolean searchSelectionMatchesQuery(
+        TextModel model,
+        EditorState state,
+        String query,
+        SearchOptions options
+    ) {
+        if (!state.hasSelection()) {
+            return false;
         }
-        return switch (normalized.matchMode()) {
-            case SUBSTRING, WHOLE_WORD -> selectedValue.equals(queryValue);
-            case WILDCARD -> wildcardPattern(queryValue).matcher(selectedValue).matches();
-        };
-    }
-
-    private Pattern wildcardPattern(String wildcard) {
-        StringBuilder regex = new StringBuilder();
-        regex.append("(?s)");
-        for (int i = 0; i < wildcard.length(); i++) {
-            char ch = wildcard.charAt(i);
-            if (ch == '*') {
-                regex.append(".*");
-            } else if (ch == '?') {
-                regex.append('.');
-            } else {
-                regex.append(Pattern.quote(String.valueOf(ch)));
-            }
+        Position start = state.getSelectionAnchor();
+        Position end = state.getCursor();
+        if (start == null || end == null || start.line() != end.line()) {
+            return false;
         }
-        return Pattern.compile(regex.toString());
+        if (start.col() > end.col()) {
+            Position temporary = start;
+            start = end;
+            end = temporary;
+        }
+        SearchMatcher matcher = SearchMatcher.compile(query, options);
+        return matcher.matchesRange(model.getLine(start.line()), start.col(), end.col());
     }
 
     private final class RenderFrameController {

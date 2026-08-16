@@ -7,20 +7,18 @@ import dev.tuink.core.EditorViewportBehavior;
 import dev.tuink.core.GutterDiffFlag;
 import dev.tuink.core.GutterDiffMarker;
 import dev.tuink.core.Position;
+import dev.tuink.core.SearchMatcher;
 import dev.tuink.core.SearchOptions;
 import dev.tuink.core.TextModel;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
-import java.util.Locale;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.IntFunction;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Builds render data from current model and state.
@@ -400,6 +398,7 @@ public class RenderPlanBuilder {
         if (bracketMatchingEnabled || rainbowBracketsEnabled) {
             ensureBracketDecorationCache(model);
         }
+        SearchMatcher searchMatcher = SearchMatcher.compile(searchQuery, searchOptions);
 
         List<LineVisual> lines = new ArrayList<>(contentRows);
         if (!wrapLines) {
@@ -427,7 +426,7 @@ public class RenderPlanBuilder {
                     }
                     spans.addAll(
                         clipSpans(
-                            searchMatchSpans(line, searchQuery, searchOptions, searchMatchStyle),
+                            searchMatchSpans(line, searchMatcher, searchMatchStyle),
                             lineLeftColumn,
                             visibleText.length()
                         )
@@ -442,8 +441,7 @@ public class RenderPlanBuilder {
                         lineIndex,
                         lineLeftColumn,
                         visibleText.length(),
-                        searchQuery,
-                        searchOptions
+                        searchMatcher
                     );
                     if (currentMatch != null) {
                         spans.add(currentMatch);
@@ -494,7 +492,7 @@ public class RenderPlanBuilder {
                 if (bracketMatchingEnabled) {
                     lineSpans.addAll(bracketSpansForLine(bracketPair, lineIndex, 0, line.length()));
                 }
-                lineSpans.addAll(searchMatchSpans(line, searchQuery, searchOptions, searchMatchStyle));
+                lineSpans.addAll(searchMatchSpans(line, searchMatcher, searchMatchStyle));
                 StyleSpan selection = selectionSpanForLine(state, model, lineIndex, 0, line.length());
                 if (selection != null) {
                     lineSpans.add(selection);
@@ -505,8 +503,7 @@ public class RenderPlanBuilder {
                     lineIndex,
                     0,
                     line.length(),
-                    searchQuery,
-                    searchOptions
+                    searchMatcher
                 );
                 if (currentMatch != null) {
                     lineSpans.add(currentMatch);
@@ -1000,13 +997,9 @@ public class RenderPlanBuilder {
         };
     }
 
-    private List<StyleSpan> searchMatchSpans(String line, String query, SearchOptions options, Style style) {
-        if (query == null || query.isEmpty() || line.isEmpty()) {
-            return List.of();
-        }
-        SearchOptions safe = options == null ? SearchOptions.DEFAULT : options;
-        return findMatches(line, query, safe).stream()
-            .map(m -> new StyleSpan(m.start(), m.end(), style))
+    private List<StyleSpan> searchMatchSpans(String line, SearchMatcher matcher, Style style) {
+        return matcher.findAll(line).stream()
+            .map(m -> new StyleSpan(m.startUtf16(), m.endUtf16(), style))
             .toList();
     }
 
@@ -1118,10 +1111,9 @@ public class RenderPlanBuilder {
         int lineIndex,
         int leftColumn,
         int visibleLength,
-        String query,
-        SearchOptions options
+        SearchMatcher matcher
     ) {
-        if (!state.hasSelection() || query == null || query.isEmpty() || visibleLength <= 0) {
+        if (!state.hasSelection() || visibleLength <= 0) {
             return null;
         }
         Position a = state.getSelectionAnchor();
@@ -1135,9 +1127,8 @@ public class RenderPlanBuilder {
             return null;
         }
 
-        String selected = model.getTextRange(a, b);
-        SearchOptions safe = options == null ? SearchOptions.DEFAULT : options;
-        if (!selectionMatchesQuery(selected, query, safe)) {
+        String line = model.getLine(lineIndex);
+        if (!matcher.matchesRange(line, a.col(), b.col())) {
             return null;
         }
 
@@ -1147,83 +1138,6 @@ public class RenderPlanBuilder {
             return null;
         }
         return new StyleSpan(visStart, visEnd, currentSearchMatchStyle);
-    }
-
-    private static boolean selectionMatchesQuery(String selected, String query, SearchOptions options) {
-        String left = options.caseInsensitive() ? selected.toLowerCase(Locale.ROOT) : selected;
-        String right = options.caseInsensitive() ? query.toLowerCase(Locale.ROOT) : query;
-        return switch (options.matchMode()) {
-            case SUBSTRING, WHOLE_WORD -> left.equals(right);
-            case WILDCARD -> wildcardPattern(right).matcher(left).matches();
-        };
-    }
-
-    private static List<LineMatch> findMatches(String line, String query, SearchOptions options) {
-        String haystack = options.caseInsensitive() ? line.toLowerCase(Locale.ROOT) : line;
-        String needle = options.caseInsensitive() ? query.toLowerCase(Locale.ROOT) : query;
-        return switch (options.matchMode()) {
-            case SUBSTRING -> findLiteralMatches(haystack, needle, false);
-            case WHOLE_WORD -> findLiteralMatches(haystack, needle, true);
-            case WILDCARD -> findWildcardMatches(haystack, needle);
-        };
-    }
-
-    private static List<LineMatch> findLiteralMatches(String text, String needle, boolean wholeWord) {
-        if (needle.isEmpty()) {
-            return List.of();
-        }
-        List<LineMatch> matches = new ArrayList<>();
-        int at = 0;
-        while (at <= text.length() - needle.length()) {
-            int idx = text.indexOf(needle, at);
-            if (idx < 0) {
-                break;
-            }
-            int end = idx + needle.length();
-            if (!wholeWord || isWholeWord(text, idx, end)) {
-                matches.add(new LineMatch(idx, end));
-            }
-            at = end;
-        }
-        return matches;
-    }
-
-    private static List<LineMatch> findWildcardMatches(String text, String wildcard) {
-        List<LineMatch> matches = new ArrayList<>();
-        Pattern pattern = wildcardPattern(wildcard);
-        Matcher matcher = pattern.matcher(text);
-        while (matcher.find()) {
-            if (matcher.start() == matcher.end()) {
-                break;
-            }
-            matches.add(new LineMatch(matcher.start(), matcher.end()));
-        }
-        return matches;
-    }
-
-    private static Pattern wildcardPattern(String wildcard) {
-        StringBuilder regex = new StringBuilder("(?s)");
-        for (int i = 0; i < wildcard.length(); i++) {
-            char ch = wildcard.charAt(i);
-            if (ch == '*') {
-                regex.append(".*");
-            } else if (ch == '?') {
-                regex.append('.');
-            } else {
-                regex.append(Pattern.quote(String.valueOf(ch)));
-            }
-        }
-        return Pattern.compile(regex.toString());
-    }
-
-    private static boolean isWholeWord(String text, int start, int end) {
-        boolean leftOk = start == 0 || !isWordChar(text.charAt(start - 1));
-        boolean rightOk = end == text.length() || !isWordChar(text.charAt(end));
-        return leftOk && rightOk;
-    }
-
-    private static boolean isWordChar(char ch) {
-        return Character.isLetterOrDigit(ch) || ch == '_';
     }
 
     private BracketPair bracketPairForCursor(TextModel model, EditorState state) {
@@ -1614,9 +1528,6 @@ public class RenderPlanBuilder {
             case '}' -> '{';
             default -> close;
         };
-    }
-
-    private record LineMatch(int start, int end) {
     }
 
     private record BracketPair(Position primary, Position match, Style style) {

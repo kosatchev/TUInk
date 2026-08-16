@@ -1,10 +1,6 @@
 package dev.tuink.core;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Search utilities that work across tab sessions.
@@ -18,11 +14,12 @@ public final class TabSearch {
             return 0;
         }
         SearchOptions safe = options == null ? SearchOptions.DEFAULT : options;
+        SearchMatcher matcher = SearchMatcher.compile(query, safe);
         int total = 0;
         for (TabSession tab : tabs) {
             TextModel model = tab.model();
             for (int i = 0; i < model.lineCount(); i++) {
-                total += findMatchesInLine(model.getLine(i), query, safe).size();
+                total += matcher.findAll(model.getLine(i)).size();
             }
         }
         return total;
@@ -33,9 +30,10 @@ public final class TabSearch {
             return 0;
         }
         SearchOptions safe = options == null ? SearchOptions.DEFAULT : options;
+        SearchMatcher matcher = SearchMatcher.compile(query, safe);
         int total = 0;
         for (int i = 0; i < model.lineCount(); i++) {
-            total += findMatchesInLine(model.getLine(i), query, safe).size();
+            total += matcher.findAll(model.getLine(i)).size();
         }
         return total;
     }
@@ -49,10 +47,11 @@ public final class TabSearch {
             return flags;
         }
         SearchOptions safe = options == null ? SearchOptions.DEFAULT : options;
+        SearchMatcher matcher = SearchMatcher.compile(query, safe);
         for (int tabIndex = 0; tabIndex < tabs.size(); tabIndex++) {
             TextModel model = tabs.get(tabIndex).model();
             for (int line = 0; line < model.lineCount(); line++) {
-                if (!findMatchesInLine(model.getLine(line), query, safe).isEmpty()) {
+                if (!matcher.findAll(model.getLine(line)).isEmpty()) {
                     flags[tabIndex] = 1;
                     break;
                 }
@@ -62,117 +61,208 @@ public final class TabSearch {
     }
 
     public static int findNextAcrossTabs(List<TabSession> tabs, int activeTabIndex, String query, SearchOptions options) {
-        if (tabs == null || tabs.isEmpty()) {
+        if (tabs == null || tabs.isEmpty() || query == null || query.isEmpty()) {
             return -1;
         }
         int safeActive = Math.max(0, Math.min(activeTabIndex, tabs.size() - 1));
         SearchOptions safe = options == null ? SearchOptions.DEFAULT : options;
-        if (tabs.get(safeActive).engine().findNext(query, safe)) {
+        SearchMatcher matcher = SearchMatcher.compile(query, safe);
+        TabSession active = tabs.get(safeActive);
+        Position from = forwardOrigin(active, matcher);
+        MatchPosition activeTail = firstAtOrAfter(active.model(), matcher, from);
+        if (activeTail != null) {
+            select(active.engine(), activeTail);
             return safeActive;
         }
         for (int step = 1; step < tabs.size(); step++) {
             int idx = Math.floorMod(safeActive + step, tabs.size());
             TabSession tab = tabs.get(idx);
-            tab.state().setCursor(new Position(0, 0));
-            tab.state().clearSelection();
-            if (tab.engine().findNext(query, safe)) {
+            MatchPosition match = firstMatch(tab.model(), matcher);
+            if (match != null) {
+                select(tab.engine(), match);
                 return idx;
             }
+        }
+        MatchPosition wrapped = firstBefore(active.model(), matcher, from);
+        if (wrapped != null) {
+            select(active.engine(), wrapped);
+            return safeActive;
         }
         return -1;
     }
 
     public static int findPreviousAcrossTabs(List<TabSession> tabs, int activeTabIndex, String query, SearchOptions options) {
-        if (tabs == null || tabs.isEmpty()) {
+        if (tabs == null || tabs.isEmpty() || query == null || query.isEmpty()) {
             return -1;
         }
         int safeActive = Math.max(0, Math.min(activeTabIndex, tabs.size() - 1));
         SearchOptions safe = options == null ? SearchOptions.DEFAULT : options;
-        if (tabs.get(safeActive).engine().findPrevious(query, safe)) {
+        SearchMatcher matcher = SearchMatcher.compile(query, safe);
+        TabSession active = tabs.get(safeActive);
+        Position from = backwardOrigin(active, matcher);
+        MatchPosition activeHead = lastBefore(active.model(), matcher, from);
+        if (activeHead != null) {
+            select(active.engine(), activeHead);
             return safeActive;
         }
         for (int step = 1; step < tabs.size(); step++) {
             int idx = Math.floorMod(safeActive - step, tabs.size());
             TabSession tab = tabs.get(idx);
-            int lastLine = Math.max(0, tab.model().lineCount() - 1);
-            int lastCol = tab.model().getLine(lastLine).length();
-            tab.state().setCursor(new Position(lastLine, lastCol));
-            tab.state().clearSelection();
-            if (tab.engine().findPrevious(query, safe)) {
+            MatchPosition match = lastMatch(tab.model(), matcher);
+            if (match != null) {
+                select(tab.engine(), match);
                 return idx;
             }
+        }
+        MatchPosition wrapped = lastAtOrAfter(active.model(), matcher, from);
+        if (wrapped != null) {
+            select(active.engine(), wrapped);
+            return safeActive;
         }
         return -1;
     }
 
-    private static List<LineMatch> findMatchesInLine(String line, String query, SearchOptions options) {
-        String haystack = options.caseInsensitive() ? line.toLowerCase(Locale.ROOT) : line;
-        String needle = options.caseInsensitive() ? query.toLowerCase(Locale.ROOT) : query;
-        return switch (options.matchMode()) {
-            case SUBSTRING -> findLiteralMatches(haystack, needle, false);
-            case WHOLE_WORD -> findLiteralMatches(haystack, needle, true);
-            case WILDCARD -> findWildcardMatches(haystack, needle);
-        };
+    private static Position forwardOrigin(TabSession tab, SearchMatcher matcher) {
+        Selection selection = selection(tab.state());
+        if (selection != null && matches(tab.model(), matcher, selection)) {
+            return selection.end();
+        }
+        return tab.model().clamp(tab.state().getCursor());
     }
 
-    private static List<LineMatch> findLiteralMatches(String text, String needle, boolean wholeWord) {
-        if (needle.isEmpty()) {
-            return List.of();
+    private static Position backwardOrigin(TabSession tab, SearchMatcher matcher) {
+        Selection selection = selection(tab.state());
+        if (selection != null && matches(tab.model(), matcher, selection)) {
+            return selection.start();
         }
-        List<LineMatch> matches = new ArrayList<>();
-        int at = 0;
-        while (at <= text.length() - needle.length()) {
-            int idx = text.indexOf(needle, at);
-            if (idx < 0) {
-                break;
-            }
-            int end = idx + needle.length();
-            if (!wholeWord || isWholeWord(text, idx, end)) {
-                matches.add(new LineMatch(idx, end));
-            }
-            at = end;
-        }
-        return matches;
+        return tab.model().clamp(tab.state().getCursor());
     }
 
-    private static List<LineMatch> findWildcardMatches(String text, String wildcard) {
-        List<LineMatch> matches = new ArrayList<>();
-        Pattern pattern = wildcardPattern(wildcard);
-        Matcher matcher = pattern.matcher(text);
-        while (matcher.find()) {
-            if (matcher.start() == matcher.end()) {
-                break;
-            }
-            matches.add(new LineMatch(matcher.start(), matcher.end()));
+    private static Selection selection(EditorState state) {
+        Position anchor = state.getSelectionAnchor();
+        if (anchor == null || anchor.equals(state.getCursor())) {
+            return null;
         }
-        return matches;
+        Position cursor = state.getCursor();
+        return compare(anchor, cursor) <= 0
+            ? new Selection(anchor, cursor)
+            : new Selection(cursor, anchor);
     }
 
-    private static Pattern wildcardPattern(String wildcard) {
-        StringBuilder regex = new StringBuilder("(?s)");
-        for (int i = 0; i < wildcard.length(); i++) {
-            char ch = wildcard.charAt(i);
-            if (ch == '*') {
-                regex.append(".*");
-            } else if (ch == '?') {
-                regex.append('.');
-            } else {
-                regex.append(Pattern.quote(String.valueOf(ch)));
+    private static boolean matches(
+        TextModel model,
+        SearchMatcher matcher,
+        Selection selection
+    ) {
+        return selection.start().line() == selection.end().line()
+            && matcher.matchesRange(
+                model.getLine(selection.start().line()),
+                selection.start().col(),
+                selection.end().col()
+            );
+    }
+
+    private static MatchPosition firstMatch(TextModel model, SearchMatcher matcher) {
+        for (int line = 0; line < model.lineCount(); line++) {
+            List<SearchMatcher.Match> matches = matcher.findAll(model.getLine(line));
+            if (!matches.isEmpty()) {
+                SearchMatcher.Match match = matches.get(0);
+                return new MatchPosition(line, match.startUtf16(), match.endUtf16());
             }
         }
-        return Pattern.compile(regex.toString());
+        return null;
     }
 
-    private static boolean isWholeWord(String text, int start, int end) {
-        boolean leftOk = start == 0 || !isWordChar(text.charAt(start - 1));
-        boolean rightOk = end == text.length() || !isWordChar(text.charAt(end));
-        return leftOk && rightOk;
+    private static MatchPosition lastMatch(TextModel model, SearchMatcher matcher) {
+        for (int line = model.lineCount() - 1; line >= 0; line--) {
+            List<SearchMatcher.Match> matches = matcher.findAll(model.getLine(line));
+            if (!matches.isEmpty()) {
+                SearchMatcher.Match match = matches.get(matches.size() - 1);
+                return new MatchPosition(line, match.startUtf16(), match.endUtf16());
+            }
+        }
+        return null;
     }
 
-    private static boolean isWordChar(char ch) {
-        return Character.isLetterOrDigit(ch) || ch == '_';
+    private static MatchPosition firstAtOrAfter(
+        TextModel model,
+        SearchMatcher matcher,
+        Position from
+    ) {
+        for (int line = from.line(); line < model.lineCount(); line++) {
+            for (SearchMatcher.Match match : matcher.findAll(model.getLine(line))) {
+                if (line > from.line() || match.startUtf16() >= from.col()) {
+                    return new MatchPosition(line, match.startUtf16(), match.endUtf16());
+                }
+            }
+        }
+        return null;
     }
 
-    private record LineMatch(int start, int end) {
+    private static MatchPosition firstBefore(
+        TextModel model,
+        SearchMatcher matcher,
+        Position limit
+    ) {
+        for (int line = 0; line <= limit.line(); line++) {
+            for (SearchMatcher.Match match : matcher.findAll(model.getLine(line))) {
+                if (line < limit.line() || match.startUtf16() < limit.col()) {
+                    return new MatchPosition(line, match.startUtf16(), match.endUtf16());
+                }
+            }
+        }
+        return null;
+    }
+
+    private static MatchPosition lastBefore(
+        TextModel model,
+        SearchMatcher matcher,
+        Position limit
+    ) {
+        MatchPosition found = null;
+        for (int line = 0; line <= limit.line(); line++) {
+            for (SearchMatcher.Match match : matcher.findAll(model.getLine(line))) {
+                if (line < limit.line() || match.startUtf16() < limit.col()) {
+                    found = new MatchPosition(line, match.startUtf16(), match.endUtf16());
+                }
+            }
+        }
+        return found;
+    }
+
+    private static MatchPosition lastAtOrAfter(
+        TextModel model,
+        SearchMatcher matcher,
+        Position limit
+    ) {
+        for (int line = model.lineCount() - 1; line >= limit.line(); line--) {
+            List<SearchMatcher.Match> matches = matcher.findAll(model.getLine(line));
+            for (int index = matches.size() - 1; index >= 0; index--) {
+                SearchMatcher.Match match = matches.get(index);
+                if (line > limit.line() || match.startUtf16() >= limit.col()) {
+                    return new MatchPosition(line, match.startUtf16(), match.endUtf16());
+                }
+            }
+        }
+        return null;
+    }
+
+    private static int compare(Position left, Position right) {
+        return left.line() == right.line()
+            ? Integer.compare(left.col(), right.col())
+            : Integer.compare(left.line(), right.line());
+    }
+
+    private static void select(EditorEngine engine, MatchPosition match) {
+        engine.restoreSelection(
+            new Position(match.line(), match.endUtf16()),
+            new Position(match.line(), match.startUtf16())
+        );
+    }
+
+    private record MatchPosition(int line, int startUtf16, int endUtf16) {
+    }
+
+    private record Selection(Position start, Position end) {
     }
 }

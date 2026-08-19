@@ -70,7 +70,9 @@ Run only a specific module's tests when iterating:
 ./gradlew :tui-core:test
 ./gradlew :tui-jline:test
 ./gradlew :tui-widgets:test
+./gradlew :editor-contract:test
 ./gradlew :core:test
+./gradlew :editor-session:test
 ./gradlew :render:test
 ./gradlew :tui:test
 ```

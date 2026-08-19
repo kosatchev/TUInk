@@ -2,6 +2,24 @@
 
 TUInk supports the current release, the current storage formats, and the current installation layout. Backward compatibility is not guaranteed unless an exception is explicitly approved and documented.
 
+This policy governs application storage and installation contracts. It does not
+define compatibility for future published Java toolkit APIs, plugin APIs, or an
+out-of-process protocol; those receive independent versions and policies before
+public alpha.
+
+## API compatibility
+
+All current toolkit, `editor-contract`, and `editor-session` APIs are internal
+and incubating. Repository releases do not yet promise source or binary
+compatibility for them.
+
+Before any Java or plugin API becomes public, it must have its own SemVer/API
+version policy, automated API baseline, compatibility fixture, and documented
+deprecation period. At that point the default rule below against retaining
+deprecated APIs does not apply to that published contract during its supported
+deprecation window. Storage schema versions and plugin/API versions remain
+independent.
+
 ## Default rule
 
 Do not add compatibility machinery for obsolete TUInk versions. In particular, avoid:

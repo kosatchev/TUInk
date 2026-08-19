@@ -5,7 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.tuink.tui.command.CommandInvocation;
+import dev.tuink.editor.command.CommandInvocation;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 

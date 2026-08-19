@@ -82,6 +82,125 @@ class RegexHighlighterTest {
     }
 
     @Test
+    void cStyleCommentsInsideQuotedStringsDoNotConsumeFollowingCode() {
+        String line = "\"https://example.invalid/* path */\"; 7; // actual comment";
+        List<StyleSpan> expected = List.of(
+            new StyleSpan(0, line.indexOf(';'), STRING),
+            span(line, "7", NUMBER),
+            new StyleSpan(line.lastIndexOf("//"), line.length(), COMMENT)
+        );
+
+        for (String fileName : List.of(
+            "Test.java", "test.c", "test.js", "test.ts", "build.gradle", "test.go",
+            "test.rs", "test.php", "test.kt", "test.proto"
+        )) {
+            assertEquals(expected, RegexHighlighter.forFileName(fileName).highlight(line), fileName);
+        }
+    }
+
+    @Test
+    void escapedQuotesAndCharacterLiteralsKeepCommentMarkersInsideStrings() {
+        String line = "\"escaped \\\" // /* */\"; '/' + '\\''; return 7; // actual comment";
+
+        assertEquals(
+            List.of(
+                new StyleSpan(0, line.indexOf(';'), STRING),
+                span(line, "'/'", STRING),
+                span(line, "'\\''", STRING),
+                span(line, "return", KEYWORD),
+                span(line, "7", NUMBER),
+                new StyleSpan(line.lastIndexOf("//"), line.length(), COMMENT)
+            ),
+            RegexHighlighter.forJava().highlight(line)
+        );
+    }
+
+    @Test
+    void adjacentBlockCommentsLeaveCodeBetweenThemHighlighted() {
+        String line = "/* \"//\" first */ int count = 7; /* second */ return;";
+        int firstEnd = line.indexOf("*/") + 2;
+        int secondStart = line.lastIndexOf("/*");
+        int secondEnd = line.lastIndexOf("*/") + 2;
+
+        assertEquals(
+            List.of(
+                new StyleSpan(0, firstEnd, COMMENT),
+                span(line, "int", TYPE),
+                span(line, "7", NUMBER),
+                new StyleSpan(secondStart, secondEnd, COMMENT),
+                span(line, "return", KEYWORD)
+            ),
+            RegexHighlighter.forJava().highlight(line)
+        );
+    }
+
+    @Test
+    void backtickAndCssStringsKeepTheirLanguageSpecificCommentBehavior() {
+        String javascript = "`https://example.invalid/* path */`; return 7; // actual comment";
+        String css = "url(\"https://example.invalid/* path */\"); 7; /* actual comment */";
+        String php = "\"https://example.invalid/#path\"; return 7; # actual comment";
+
+        assertAll(
+            () -> assertEquals(
+                List.of(
+                    new StyleSpan(0, javascript.indexOf(';'), STRING),
+                    span(javascript, "return", KEYWORD),
+                    span(javascript, "7", NUMBER),
+                    new StyleSpan(javascript.lastIndexOf("//"), javascript.length(), COMMENT)
+                ),
+                RegexHighlighter.forJavaScript().highlight(javascript)
+            ),
+            () -> assertEquals(
+                List.of(
+                    new StyleSpan(css.indexOf('"'), css.lastIndexOf('"') + 1, STRING),
+                    span(css, "7", NUMBER),
+                    new StyleSpan(css.lastIndexOf("/*"), css.length(), COMMENT)
+                ),
+                RegexHighlighter.forCssLike().highlight(css)
+            ),
+            () -> assertEquals(
+                List.of(
+                    new StyleSpan(0, php.indexOf(';'), STRING),
+                    span(php, "return", KEYWORD),
+                    span(php, "7", NUMBER),
+                    new StyleSpan(php.lastIndexOf('#'), php.length(), COMMENT)
+                ),
+                RegexHighlighter.forPhp().highlight(php)
+            )
+        );
+    }
+
+    @Test
+    void rustLifetimesDoNotConsumeCodeAndCommentsButCharactersRemainStrings() {
+        String line = "fn value<'a, 'b>(text: &'a str) { let ch = '🦀'; return 7; } // comment";
+        String escaped = "'\\'' '\\u{1F980}' '\\x41' // comment";
+
+        assertAll(
+            () -> assertEquals(
+                List.of(
+                    span(line, "fn", KEYWORD),
+                    span(line, "str", TYPE),
+                    span(line, "let", KEYWORD),
+                    span(line, "'🦀'", STRING),
+                    span(line, "return", KEYWORD),
+                    span(line, "7", NUMBER),
+                    new StyleSpan(line.indexOf("//"), line.length(), COMMENT)
+                ),
+                RegexHighlighter.forRust().highlight(line)
+            ),
+            () -> assertEquals(
+                List.of(
+                    span(escaped, "'\\''", STRING),
+                    span(escaped, "'\\u{1F980}'", STRING),
+                    span(escaped, "'\\x41'", STRING),
+                    new StyleSpan(escaped.indexOf("//"), escaped.length(), COMMENT)
+                ),
+                RegexHighlighter.forRust().highlight(escaped)
+            )
+        );
+    }
+
+    @Test
     void representativePythonAndSqlRulesApplyLanguageSpecificSyntax() {
         String python = "@cached def value(): # return 9";
         String sql = "select 7 FROM records -- where 9";

@@ -1,6 +1,6 @@
 package dev.tuink.tui.keymap;
 
-import dev.tuink.tui.command.CommandInvocation;
+import dev.tuink.editor.command.CommandInvocation;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;

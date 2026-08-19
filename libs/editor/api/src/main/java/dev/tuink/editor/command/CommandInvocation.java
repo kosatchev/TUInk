@@ -1,4 +1,4 @@
-package dev.tuink.tui.command;
+package dev.tuink.editor.command;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -6,11 +6,10 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * One request to execute a command with immutable string arguments.
+ * One presentation-independent request to execute a command.
  *
- * <p>The invocation deliberately does not encode whether it came from a key,
- * menu, palette, macro or plugin. All of those sources can therefore use the
- * same registry path.</p>
+ * <p>The source is deliberately absent: keyboard, menu, palette, macro and
+ * plugin contributions all use this same value.</p>
  */
 public record CommandInvocation(CommandId id, Map<String, String> arguments) {
     public CommandInvocation {
@@ -47,9 +46,6 @@ public record CommandInvocation(CommandId id, Map<String, String> arguments) {
     }
 
     public Optional<String> argument(String name) {
-        if (name == null) {
-            return Optional.empty();
-        }
-        return Optional.ofNullable(arguments.get(name));
+        return name == null ? Optional.empty() : Optional.ofNullable(arguments.get(name));
     }
 }

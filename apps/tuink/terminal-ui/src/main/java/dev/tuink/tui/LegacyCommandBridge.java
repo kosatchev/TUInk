@@ -80,17 +80,20 @@ import static dev.tuink.tui.command.TuinkCommandIds.VIEW_CYCLE_THEME;
 import static dev.tuink.tui.command.TuinkCommandIds.VIEW_TOGGLE_WHITESPACE;
 import static dev.tuink.tui.command.TuinkCommandIds.VIEW_TOGGLE_WORD_WRAP;
 
-import dev.tuink.tui.command.CommandDescriptor;
-import dev.tuink.tui.command.CommandId;
-import dev.tuink.tui.command.CommandInvocation;
-import dev.tuink.tui.command.CommandRegistry;
-import dev.tuink.tui.command.InvocationResult;
+import dev.tuink.editor.command.CommandDescriptor;
+import dev.tuink.editor.command.CommandArgumentDescriptor;
+import dev.tuink.editor.command.CommandArgumentType;
+import dev.tuink.editor.command.CommandId;
+import dev.tuink.editor.command.CommandInvocation;
+import dev.tuink.editor.session.command.CommandRegistry;
+import dev.tuink.editor.session.command.InvocationResult;
 import dev.tuink.tui.input.KeyEvent;
 import dev.tuink.terminal.input.KeyStroke;
 import dev.tuink.tui.keymap.Keymap;
 import dev.tuink.tui.keymap.TuinkKeymap;
 import dev.tuink.tui.flow.SearchFocus;
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -236,7 +239,18 @@ final class LegacyCommandBridge {
         bind(KeyEvent.Action.TAB_NEXT, TAB_NEXT, "Next tab");
         bind(KeyEvent.Action.TAB_PREVIOUS, TAB_PREVIOUS, "Previous tab");
         registry.register(
-            new CommandDescriptor(TAB_ACTIVATE, "Activate tab"),
+            new CommandDescriptor(
+                TAB_ACTIVATE,
+                "Activate tab",
+                "",
+                List.of(new CommandArgumentDescriptor(
+                    "index",
+                    CommandArgumentType.INTEGER,
+                    true,
+                    0,
+                    null
+                ))
+            ),
             (request, context) -> new ActivateTab(requiredTabIndex(request))
         );
 

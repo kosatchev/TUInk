@@ -1,4 +1,8 @@
+plugins {
+    id 'java-library'
+}
+
 dependencies {
-    implementation project(':core')
-    implementation project(':render')
+    implementation project(':editor-contract')
+    api project(':render')
 }

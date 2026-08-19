@@ -1,5 +1,13 @@
 package dev.tuink.tui.command;
 
+import dev.tuink.editor.command.CommandDescriptor;
+import dev.tuink.editor.command.CommandArgumentDescriptor;
+import dev.tuink.editor.command.CommandArgumentType;
+import dev.tuink.editor.command.CommandId;
+import dev.tuink.editor.command.CommandInvocation;
+import dev.tuink.editor.session.command.CommandRegistry;
+import dev.tuink.editor.session.command.InvocationResult;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -15,7 +23,12 @@ class CommandRegistryTest {
     @Test
     void invokesRegisteredHandlerWithTheSuppliedInvocationAndContext() {
         CommandRegistry<ExecutionContext, String> registry = new CommandRegistry<>();
-        CommandDescriptor descriptor = descriptor("tuink.tabs.activate", "Activate tab");
+        CommandDescriptor descriptor = new CommandDescriptor(
+            CommandId.of("tuink.tabs.activate"),
+            "Activate tab",
+            "",
+            List.of(new CommandArgumentDescriptor("tab", CommandArgumentType.INTEGER, true))
+        );
         CommandInvocation invocation = new CommandInvocation(descriptor.id(), java.util.Map.of("tab", "2"));
         ExecutionContext context = new ExecutionContext("tab-");
         registry.register(descriptor, (request, executionContext) -> {
@@ -105,6 +118,46 @@ class CommandRegistryTest {
 
         assertThrows(NullPointerException.class, () -> registry.invoke(null, "context"));
         assertThrows(NullPointerException.class, () -> registry.invoke(invocation, null));
+    }
+
+    @Test
+    void integerBoundsRejectInvalidArgumentsBeforeTheHandlerRuns() {
+        CommandRegistry<ExecutionContext, String> registry = new CommandRegistry<>();
+        CommandDescriptor descriptor = new CommandDescriptor(
+            CommandId.of("tuink.tabs.activate"),
+            "Activate tab",
+            "",
+            List.of(new CommandArgumentDescriptor(
+                "tab",
+                CommandArgumentType.INTEGER,
+                true,
+                0,
+                9
+            ))
+        );
+        ExecutionContext context = new ExecutionContext("tab-");
+        registry.register(descriptor, (request, executionContext) -> {
+            executionContext.seen.add(request);
+            return request.argument("tab").orElseThrow();
+        });
+
+        CommandInvocation invocation = new CommandInvocation(
+            descriptor.id(),
+            java.util.Map.of("tab", "-1")
+        );
+        InvocationResult.Invalid<?> invalid = assertInstanceOf(
+            InvocationResult.Invalid.class,
+            registry.invoke(invocation, context)
+        );
+
+        assertEquals(
+            List.of(new dev.tuink.editor.session.command.CommandArgumentError(
+                "tab",
+                dev.tuink.editor.session.command.CommandArgumentError.Reason.OUT_OF_RANGE
+            )),
+            invalid.errors()
+        );
+        assertTrue(context.seen.isEmpty());
     }
 
     private static CommandDescriptor descriptor(String id, String title) {

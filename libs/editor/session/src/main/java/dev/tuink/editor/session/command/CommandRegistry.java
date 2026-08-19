@@ -1,5 +1,9 @@
-package dev.tuink.tui.command;
+package dev.tuink.editor.session.command;
 
+import dev.tuink.editor.command.CommandDescriptor;
+import dev.tuink.editor.command.CommandArgumentDescriptor;
+import dev.tuink.editor.command.CommandId;
+import dev.tuink.editor.command.CommandInvocation;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -8,20 +12,14 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Registry and single dispatch path for application commands.
+ * Registry and single dispatch path for session commands.
  *
- * <p>The registry stores no editor or terminal state. The caller supplies an
- * execution context to {@link #invoke(CommandInvocation, Object)}, normally on
- * the application event-loop thread.</p>
+ * <p>The registry stores no editor or frontend state. The owner supplies an
+ * execution context and invokes handlers on its mutation thread.</p>
  */
 public final class CommandRegistry<C, R> {
     private final Map<CommandId, RegisteredCommand<C, R>> commands = new LinkedHashMap<>();
 
-    /**
-     * Registers one command without replacing an existing command with the same ID.
-     *
-     * @throws IllegalStateException when the ID is already registered
-     */
     public synchronized void register(CommandDescriptor descriptor, CommandHandler<C, R> handler) {
         Objects.requireNonNull(descriptor, "descriptor");
         Objects.requireNonNull(handler, "handler");
@@ -47,7 +45,6 @@ public final class CommandRegistry<C, R> {
         return registered == null ? Optional.empty() : Optional.of(registered.descriptor());
     }
 
-    /** Returns an immutable descriptor snapshot in registration order. */
     public synchronized List<CommandDescriptor> descriptors() {
         List<CommandDescriptor> result = new ArrayList<>(commands.size());
         commands.values().forEach(command -> result.add(command.descriptor()));
@@ -58,10 +55,6 @@ public final class CommandRegistry<C, R> {
         return commands.size();
     }
 
-    /**
-     * Resolves and invokes a command. Unknown IDs are reported as data rather
-     * than silently ignored or converted to handler failures.
-     */
     public InvocationResult<R> invoke(CommandInvocation invocation, C context) {
         Objects.requireNonNull(invocation, "invocation");
         Objects.requireNonNull(context, "context");
@@ -73,9 +66,44 @@ public final class CommandRegistry<C, R> {
         if (registered == null) {
             return new InvocationResult.Unknown<>(invocation);
         }
+        List<CommandArgumentError> argumentErrors = validateArguments(
+            registered.descriptor(),
+            invocation
+        );
+        if (!argumentErrors.isEmpty()) {
+            return new InvocationResult.Invalid<>(invocation, argumentErrors);
+        }
+        return new InvocationResult.Executed<>(
+            invocation,
+            registered.handler().execute(invocation, context)
+        );
+    }
 
-        R result = registered.handler().execute(invocation, context);
-        return new InvocationResult.Executed<>(invocation, result);
+    private static List<CommandArgumentError> validateArguments(
+        CommandDescriptor descriptor,
+        CommandInvocation invocation
+    ) {
+        Map<String, CommandArgumentDescriptor> schema = new LinkedHashMap<>();
+        descriptor.arguments().forEach(argument -> schema.put(argument.name(), argument));
+        List<CommandArgumentError> errors = new ArrayList<>();
+        invocation.arguments().forEach((name, value) -> {
+            CommandArgumentDescriptor argument = schema.get(name);
+            if (argument == null) {
+                errors.add(new CommandArgumentError(name, CommandArgumentError.Reason.UNKNOWN));
+            } else if (!argument.type().accepts(value)) {
+                errors.add(new CommandArgumentError(name, CommandArgumentError.Reason.INVALID_TYPE));
+            } else if (!argument.acceptsValue(value)) {
+                errors.add(new CommandArgumentError(name, CommandArgumentError.Reason.OUT_OF_RANGE));
+            }
+        });
+        descriptor.arguments().stream()
+            .filter(CommandArgumentDescriptor::required)
+            .filter(argument -> !invocation.arguments().containsKey(argument.name()))
+            .forEach(argument -> errors.add(new CommandArgumentError(
+                argument.name(),
+                CommandArgumentError.Reason.MISSING_REQUIRED
+            )));
+        return List.copyOf(errors);
     }
 
     private record RegisteredCommand<C, R>(

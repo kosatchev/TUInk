@@ -2,7 +2,9 @@ dependencies {
     implementation project(':tui-core')
     implementation project(':tui-jline')
     implementation project(':tui-widgets')
+    implementation project(':editor-contract')
     implementation project(':core')
+    implementation project(':editor-session')
     implementation project(':render')
     implementation project(':highlight-regex')
 }

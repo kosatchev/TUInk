@@ -40,10 +40,13 @@ def allowedProjectDependencies = [
     ':tui-core'       : [':unicode-text'] as Set,
     ':tui-jline'      : [':tui-core'] as Set,
     ':tui-widgets'    : [':tui-core'] as Set,
+    ':editor-contract': [] as Set,
     ':core'           : [':unicode-text'] as Set,
-    ':render'         : [':tui-core', ':core'] as Set,
-    ':highlight-regex': [':core', ':render'] as Set,
-    ':tui'            : [':tui-core', ':tui-jline', ':tui-widgets', ':core', ':render', ':highlight-regex'] as Set,
+    ':editor-session' : [':editor-contract', ':core'] as Set,
+    ':render'         : [':tui-core', ':editor-contract', ':core'] as Set,
+    ':highlight-regex': [':editor-contract', ':render'] as Set,
+    ':tui'            : [':tui-core', ':tui-jline', ':tui-widgets', ':editor-contract', ':core',
+                         ':editor-session', ':render', ':highlight-regex'] as Set,
     ':app'            : [':tui'] as Set
 ]
 def externallyDependencyFreeProductionConfigurations = [
@@ -92,7 +95,8 @@ def verifyProjectDependencies = tasks.register('verifyProjectDependencies') {
                                     + "${dependency.group}:${dependency.name}"
                             )
                         }
-                        if ([':unicode-text', ':tui-core', ':tui-widgets'].contains(sourceProject.path)
+                        if ([':unicode-text', ':tui-core', ':tui-widgets', ':editor-contract',
+                             ':editor-session'].contains(sourceProject.path)
                             && externallyDependencyFreeProductionConfigurations.contains(configuration.name)) {
                             violations.add(
                                 "${sourceProject.path}:${configuration.name} -> "
@@ -102,6 +106,19 @@ def verifyProjectDependencies = tasks.register('verifyProjectDependencies') {
                     }
             }
         }
+
+        project(':editor-session').configurations
+            .findAll { it.name in ['api', 'compileOnlyApi'] }
+            .each { configuration ->
+                configuration.dependencies
+                    .withType(org.gradle.api.artifacts.ProjectDependency)
+                    .findAll { it.path == ':core' }
+                    .each {
+                        violations.add(
+                            ":editor-session:${configuration.name} must not export :core"
+                        )
+                    }
+            }
 
         if (!violations.isEmpty()) {
             throw new GradleException(

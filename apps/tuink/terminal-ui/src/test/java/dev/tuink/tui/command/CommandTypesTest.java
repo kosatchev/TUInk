@@ -1,5 +1,9 @@
 package dev.tuink.tui.command;
 
+import dev.tuink.editor.command.CommandDescriptor;
+import dev.tuink.editor.command.CommandId;
+import dev.tuink.editor.command.CommandInvocation;
+
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;

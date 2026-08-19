@@ -42,7 +42,7 @@ class TuinkKeymapTest {
         assertFalse(keymap.resolve(KeyStroke.of(KeyStroke.Key.F12)).isPresent());
     }
 
-    private dev.tuink.tui.command.CommandId command(
+    private dev.tuink.editor.command.CommandId command(
         KeyStroke.Key key,
         KeyStroke.Modifier... modifiers
     ) {

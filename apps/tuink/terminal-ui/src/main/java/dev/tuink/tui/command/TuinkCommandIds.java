@@ -1,5 +1,7 @@
 package dev.tuink.tui.command;
 
+import dev.tuink.editor.command.CommandId;
+
 /**
  * Semantic command identifiers built into the TUInk frontend.
  *

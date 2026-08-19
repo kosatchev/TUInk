@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import dev.tuink.tui.command.CommandInvocation;
+import dev.tuink.editor.command.CommandInvocation;
 import dev.tuink.tui.input.KeyEvent;
 import dev.tuink.terminal.input.KeyStroke;
 import dev.tuink.tui.flow.SearchFocus;
@@ -165,5 +165,15 @@ class LegacyCommandBridgeTest {
         assertEquals(3, bridge.invokeTabActivation(invocation).orElseThrow());
         assertFalse(bridge.invoke(invocation).isPresent());
         assertThrows(IllegalArgumentException.class, () -> bridge.tabActivationInvocation(-1));
+    }
+
+    @Test
+    void serializedNegativeTabIndexIsRejectedBeforeDispatch() {
+        CommandInvocation invalid = new CommandInvocation(
+            dev.tuink.tui.command.TuinkCommandIds.TAB_ACTIVATE,
+            java.util.Map.of("index", "-1")
+        );
+
+        assertFalse(bridge.invokeTabActivation(invalid).isPresent());
     }
 }

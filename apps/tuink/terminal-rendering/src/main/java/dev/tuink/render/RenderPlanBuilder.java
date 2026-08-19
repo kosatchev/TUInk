@@ -10,6 +10,7 @@ import dev.tuink.core.Position;
 import dev.tuink.core.SearchMatcher;
 import dev.tuink.core.SearchOptions;
 import dev.tuink.core.TextModel;
+import dev.tuink.editor.document.DocumentView;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -30,6 +31,7 @@ public class RenderPlanBuilder {
     private static final int MAX_UNMATCHED_SCAN_CHARS = 1_000_000;
     private final LineHighlighter highlighter;
     private final EditorTextLayout textLayout;
+    private final DocumentView documentView;
     private final long baseStyleOwnerId = NEXT_BASE_STYLE_OWNER_ID.incrementAndGet();
     private long baseStyleGeneration;
     private int tabWidth = 4;
@@ -68,6 +70,7 @@ public class RenderPlanBuilder {
     public RenderPlanBuilder(LineHighlighter highlighter, EditorTextLayout textLayout) {
         this.highlighter = highlighter;
         this.textLayout = Objects.requireNonNull(textLayout, "textLayout");
+        this.documentView = new TextModelDocumentView(textLayout.model());
     }
 
     /** Returns the shared layout instance used by this builder. */
@@ -666,13 +669,13 @@ public class RenderPlanBuilder {
         return textLayout.wrapStarts(lineIndex, maxVisualWidth, wrapByWords, tabWidth);
     }
 
-    private Object baseStyleKey(
+    private BaseStyleIdentity baseStyleKey(
         TextModel model,
         int lineIndex,
         int sliceStart,
         int sliceLength
     ) {
-        return new BaseStyleKey(
+        return BaseStyleIdentity.of(
             baseStyleOwnerId,
             model.cacheIdentity(),
             baseStyleGeneration,
@@ -948,7 +951,7 @@ public class RenderPlanBuilder {
             return cached.spans();
         }
         List<StyleSpan> spans = highlighter instanceof ContextualLineHighlighter contextual
-            ? List.copyOf(contextual.highlight(model, lineIndex, line))
+            ? List.copyOf(contextual.highlight(documentView, lineIndex, line))
             : List.copyOf(highlighter.highlight(line));
         syntaxSpanCache.put(lineIndex, new SyntaxSpans(line, spans));
         return spans;
@@ -1545,64 +1548,6 @@ public class RenderPlanBuilder {
     }
 
     private record VisualSlice(int startCol, String text, int sourceVisualColumn, int leadingClippedCells) {
-    }
-
-    private static final class BaseStyleKey {
-        private final long ownerId;
-        private final long modelId;
-        private final long generation;
-        private final long modelRevision;
-        private final int lineIndex;
-        private final int sliceStart;
-        private final int sliceLength;
-        private final int hashCode;
-
-        private BaseStyleKey(
-            long ownerId,
-            long modelId,
-            long generation,
-            long modelRevision,
-            int lineIndex,
-            int sliceStart,
-            int sliceLength
-        ) {
-            this.ownerId = ownerId;
-            this.modelId = modelId;
-            this.generation = generation;
-            this.modelRevision = modelRevision;
-            this.lineIndex = lineIndex;
-            this.sliceStart = sliceStart;
-            this.sliceLength = sliceLength;
-            int hash = Long.hashCode(ownerId);
-            hash = 31 * hash + Long.hashCode(modelId);
-            hash = 31 * hash + Long.hashCode(generation);
-            hash = 31 * hash + Long.hashCode(modelRevision);
-            hash = 31 * hash + lineIndex;
-            hash = 31 * hash + sliceStart;
-            this.hashCode = 31 * hash + sliceLength;
-        }
-
-        @Override
-        public boolean equals(Object other) {
-            if (this == other) {
-                return true;
-            }
-            if (!(other instanceof BaseStyleKey key)) {
-                return false;
-            }
-            return ownerId == key.ownerId
-                && modelId == key.modelId
-                && generation == key.generation
-                && modelRevision == key.modelRevision
-                && lineIndex == key.lineIndex
-                && sliceStart == key.sliceStart
-                && sliceLength == key.sliceLength;
-        }
-
-        @Override
-        public int hashCode() {
-            return hashCode;
-        }
     }
 
     private record SyntaxSpans(String lineText, List<StyleSpan> spans) {

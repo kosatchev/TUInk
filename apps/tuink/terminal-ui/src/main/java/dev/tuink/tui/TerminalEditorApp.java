@@ -26,7 +26,7 @@ import dev.tuink.tui.flow.SaveContinuation;
 import dev.tuink.tui.flow.SaveTargetSuggester;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.flow.UiModalState;
-import dev.tuink.tui.command.CommandInvocation;
+import dev.tuink.editor.command.CommandInvocation;
 import dev.tuink.tui.input.KeyEvent;
 import dev.tuink.terminal.input.KeyStroke;
 import dev.tuink.tui.input.LegacyKeyEventAdapter;

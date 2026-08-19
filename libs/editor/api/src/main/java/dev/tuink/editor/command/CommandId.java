@@ -1,12 +1,12 @@
-package dev.tuink.tui.command;
+package dev.tuink.editor.command;
 
 import java.util.regex.Pattern;
 
 /**
- * Stable, namespaced identifier for an application command.
+ * Stable, namespaced identifier for an editor or application command.
  *
- * <p>Identifiers are intentionally presentation-independent and use lower-case
- * dot-separated segments, for example {@code tuink.editor.save}.</p>
+ * <p>Identifiers are presentation-independent and use lower-case dot-separated
+ * segments, for example {@code tuink.editor.save}.</p>
  */
 public record CommandId(String value) {
     private static final int MAX_LENGTH = 200;

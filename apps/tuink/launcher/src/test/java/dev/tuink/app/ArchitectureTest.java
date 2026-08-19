@@ -56,6 +56,20 @@ class ArchitectureTest {
             "dev.tuink.unicode.."
         );
 
+    static final ArchRule OUTER_LAYERS_DO_NOT_MUTATE_CURSOR_STATE_DIRECTLY = noClasses()
+        .that().resideOutsideOfPackage("dev.tuink.core..")
+        .should().callMethod(
+            "dev.tuink.core.EditorState",
+            "setCursor",
+            "dev.tuink.core.Position"
+        )
+        .orShould().callMethod(
+            "dev.tuink.core.EditorState",
+            "setSelectionAnchor",
+            "dev.tuink.core.Position"
+        )
+        .orShould().callMethod("dev.tuink.core.EditorState", "clearSelection");
+
     static final ArchRule RENDER_DOES_NOT_DEPEND_ON_FRONTENDS = noClasses()
         .that().resideInAPackage("dev.tuink.render..")
         .should().dependOnClassesThat().resideInAnyPackage(
@@ -70,6 +84,14 @@ class ArchitectureTest {
             "dev.tuink.tui..",
             "dev.tuink.app.."
         );
+
+    static final ArchRule CONTEXTUAL_HIGHLIGHTER_DOES_NOT_EXPOSE_MUTABLE_MODEL = noClasses()
+        .that().haveFullyQualifiedName("dev.tuink.render.ContextualLineHighlighter")
+        .should().dependOnClassesThat().resideInAPackage("dev.tuink.core..");
+
+    static final ArchRule HIGHLIGHTER_IMPLEMENTATIONS_STAY_CORE_INDEPENDENT = noClasses()
+        .that().resideInAPackage("dev.tuink.highlight..")
+        .should().dependOnClassesThat().resideInAPackage("dev.tuink.core..");
 
     static final ArchRule TUI_DOES_NOT_DEPEND_ON_APPLICATION_ENTRYPOINT = noClasses()
         .that().resideInAPackage("dev.tuink.tui..")
@@ -128,17 +150,35 @@ class ArchitectureTest {
             "dev\\.tuink\\.tui\\.input\\.(?:KeyEvent|LegacyKeyEventAdapter)(\\$.*)?"
         );
 
-    static final ArchRule COMMAND_MODEL_IS_SELF_CONTAINED = classes()
-        .that().resideInAPackage("dev.tuink.tui.command..")
+    static final ArchRule COMMAND_CONTRACT_IS_SELF_CONTAINED = classes()
+        .that().resideInAPackage("dev.tuink.editor.command..")
         .should().onlyDependOnClassesThat().resideInAnyPackage(
             "java..",
-            "dev.tuink.tui.command.."
+            "dev.tuink.editor.command.."
+        );
+
+    static final ArchRule DOCUMENT_CONTRACT_IS_SELF_CONTAINED = classes()
+        .that().resideInAPackage("dev.tuink.editor.document..")
+        .should().onlyDependOnClassesThat().resideInAnyPackage(
+            "java..",
+            "dev.tuink.editor.document.."
+        );
+
+    static final ArchRule EDITOR_SESSION_STAYS_FRONTEND_INDEPENDENT = classes()
+        .that().resideInAPackage("dev.tuink.editor.session..")
+        .should().onlyDependOnClassesThat().resideInAnyPackage(
+            "java..",
+            "dev.tuink.core..",
+            "dev.tuink.editor.command..",
+            "dev.tuink.editor.document..",
+            "dev.tuink.editor.session.."
         );
 
     static final ArchRule KEYMAP_LAYER_STAYS_EDITOR_INDEPENDENT = classes()
         .that().resideInAPackage("dev.tuink.tui.keymap..")
         .should().onlyDependOnClassesThat().resideInAnyPackage(
             "java..",
+            "dev.tuink.editor.command..",
             "dev.tuink.tui.command..",
             "dev.tuink.terminal.input..",
             "dev.tuink.tui.keymap.."
@@ -148,7 +188,7 @@ class ArchitectureTest {
         .that().haveFullyQualifiedName("dev.tuink.tui.keymap.Keymap")
         .should().onlyDependOnClassesThat().resideInAnyPackage(
             "java..",
-            "dev.tuink.tui.command..",
+            "dev.tuink.editor.command..",
             "dev.tuink.tui.keymap.."
         );
 
@@ -171,6 +211,13 @@ class ArchitectureTest {
         .should().onlyDependOnClassesThat().resideInAnyPackage(
             "java..",
             "dev.tuink.terminal.."
+        );
+
+    static final ArchRule WIDGET_LAYER_STAYS_FILESYSTEM_FREE = noClasses()
+        .that().resideInAPackage("dev.tuink.terminal.widget..")
+        .should().dependOnClassesThat().resideInAnyPackage(
+            "java.io..",
+            "java.nio.file.."
         );
 
     static final ArchRule TUI_GEOMETRY_IS_SELF_CONTAINED = classes()
@@ -227,6 +274,14 @@ class ArchitectureTest {
         .matching("dev.tuink.(*)..")
         .should().beFreeOfCycles();
 
+    static final ArchRule TUI_SUBPACKAGE_SLICES_ARE_FREE_OF_CYCLES = slices()
+        .matching("dev.tuink.tui.(*)..")
+        .should().beFreeOfCycles();
+
+    static final ArchRule TERMINAL_SUBPACKAGE_SLICES_ARE_FREE_OF_CYCLES = slices()
+        .matching("dev.tuink.terminal.(*)..")
+        .should().beFreeOfCycles();
+
     @Test
     void moduleDependenciesPointInward() {
         UNICODE_TEXT_IS_PURE.check(PRODUCTION_CLASSES);
@@ -234,11 +289,16 @@ class ArchitectureTest {
         TERMINAL_FOUNDATION_DOES_NOT_DEPEND_ON_JLINE_BACKEND.check(PRODUCTION_CLASSES);
         CORE_DOES_NOT_DEPEND_ON_OUTER_LAYERS.check(PRODUCTION_CLASSES);
         CORE_IS_TERMINAL_INDEPENDENT.check(PRODUCTION_CLASSES);
+        OUTER_LAYERS_DO_NOT_MUTATE_CURSOR_STATE_DIRECTLY.check(PRODUCTION_CLASSES);
         RENDER_DOES_NOT_DEPEND_ON_FRONTENDS.check(PRODUCTION_CLASSES);
         HIGHLIGHTERS_DO_NOT_DEPEND_ON_FRONTENDS.check(PRODUCTION_CLASSES);
+        CONTEXTUAL_HIGHLIGHTER_DOES_NOT_EXPOSE_MUTABLE_MODEL.check(PRODUCTION_CLASSES);
+        HIGHLIGHTER_IMPLEMENTATIONS_STAY_CORE_INDEPENDENT.check(PRODUCTION_CLASSES);
         TUI_DOES_NOT_DEPEND_ON_APPLICATION_ENTRYPOINT.check(PRODUCTION_CLASSES);
         APP_USES_ONLY_THE_TUI_FACADE.check(PRODUCTION_CLASSES);
         TOP_LEVEL_SLICES_ARE_FREE_OF_CYCLES.check(PRODUCTION_CLASSES);
+        TUI_SUBPACKAGE_SLICES_ARE_FREE_OF_CYCLES.check(PRODUCTION_CLASSES);
+        TERMINAL_SUBPACKAGE_SLICES_ARE_FREE_OF_CYCLES.check(PRODUCTION_CLASSES);
     }
 
     @Test
@@ -246,6 +306,7 @@ class ArchitectureTest {
         JLINE_BACKEND_IS_EDITOR_INDEPENDENT.check(PRODUCTION_CLASSES);
         EVENT_LOOP_IS_EDITOR_INDEPENDENT.check(PRODUCTION_CLASSES);
         WIDGET_LAYER_STAYS_EDITOR_INDEPENDENT.check(PRODUCTION_CLASSES);
+        WIDGET_LAYER_STAYS_FILESYSTEM_FREE.check(PRODUCTION_CLASSES);
         TUI_GEOMETRY_IS_SELF_CONTAINED.check(PRODUCTION_CLASSES);
         CELL_STYLE_IS_SELF_CONTAINED.check(PRODUCTION_CLASSES);
         CELL_MODEL_DOES_NOT_DEPEND_ON_EDITOR_RENDER.check(PRODUCTION_CLASSES);
@@ -261,7 +322,9 @@ class ArchitectureTest {
         KEY_DECODER_IS_A_SELF_CONTAINED_JLINE_ADAPTER.check(PRODUCTION_CLASSES);
         KEY_DECODER_DOES_NOT_DEPEND_ON_LEGACY_INPUT.check(PRODUCTION_CLASSES);
         PHYSICAL_INPUT_EVENTS_DO_NOT_DEPEND_ON_THE_LEGACY_MODEL.check(PRODUCTION_CLASSES);
-        COMMAND_MODEL_IS_SELF_CONTAINED.check(PRODUCTION_CLASSES);
+        COMMAND_CONTRACT_IS_SELF_CONTAINED.check(PRODUCTION_CLASSES);
+        DOCUMENT_CONTRACT_IS_SELF_CONTAINED.check(PRODUCTION_CLASSES);
+        EDITOR_SESSION_STAYS_FRONTEND_INDEPENDENT.check(PRODUCTION_CLASSES);
         KEYMAP_LAYER_STAYS_EDITOR_INDEPENDENT.check(PRODUCTION_CLASSES);
         GENERIC_KEYMAP_DOES_NOT_IMPORT_PHYSICAL_OR_LEGACY_INPUT.check(PRODUCTION_CLASSES);
         TUINK_KEYMAP_DOES_NOT_IMPORT_DECODER_OR_LEGACY_EVENTS.check(PRODUCTION_CLASSES);

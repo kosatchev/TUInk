@@ -1,4 +1,9 @@
+plugins {
+    id 'java-library'
+}
+
 dependencies {
-    implementation project(':core')
+    api project(':editor-contract')
+    api project(':core')
     implementation project(':tui-core')
 }

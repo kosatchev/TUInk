@@ -1,6 +1,7 @@
 package dev.tuink.highlight.regex;
 
-import dev.tuink.core.TextModel;
+import dev.tuink.editor.document.DocumentId;
+import dev.tuink.editor.document.DocumentView;
 import dev.tuink.render.ContextualLineHighlighter;
 import dev.tuink.render.LineHighlighter;
 import dev.tuink.render.StyleSpan;
@@ -9,6 +10,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Markdown highlighter that applies language-aware syntax inside fenced code blocks.
@@ -16,9 +18,10 @@ import java.util.Map;
 final class MarkdownFenceHighlighter implements ContextualLineHighlighter {
     private final LineHighlighter markdown = RegexHighlighter.forMarkdown();
     private final Map<String, LineHighlighter> languageCache = new HashMap<>();
+    private DocumentId cachedDocumentId;
     private long cachedRevision = Long.MIN_VALUE;
     private int computedLine = -1;
-    private final List<LineHighlighter> delegatesByLine = new ArrayList<>();
+    private final List<LineDelegate> delegatesByLine = new ArrayList<>();
     private Fence activeFence;
 
     @Override
@@ -27,23 +30,29 @@ final class MarkdownFenceHighlighter implements ContextualLineHighlighter {
     }
 
     @Override
-    public List<StyleSpan> highlight(TextModel model, int lineIndex, String line) {
-        if (model == null || line == null) {
+    public List<StyleSpan> highlight(DocumentView document, int lineIndex, String line) {
+        if (document == null || line == null) {
             return markdown.highlight(line);
         }
-        if (lineIndex < 0 || lineIndex >= model.lineCount()) {
+        if (lineIndex < 0 || lineIndex >= document.lineCount()) {
             return markdown.highlight(line);
         }
-        ensureComputed(model, lineIndex);
+        ensureComputed(document, lineIndex);
         if (lineIndex < delegatesByLine.size()) {
-            return delegatesByLine.get(lineIndex).highlight(line);
+            LineDelegate delegate = delegatesByLine.get(lineIndex);
+            if (delegate.highlighter() instanceof CStyleHighlighter contextual) {
+                return contextual.highlight(document, lineIndex, line, delegate.firstLine());
+            }
+            return delegate.highlighter().highlight(line);
         }
         return markdown.highlight(line);
     }
 
-    private void ensureComputed(TextModel model, int targetLine) {
-        long revision = model.revision();
-        if (revision != cachedRevision) {
+    private void ensureComputed(DocumentView document, int targetLine) {
+        DocumentId documentId = document.documentId();
+        long revision = document.revision();
+        if (!Objects.equals(documentId, cachedDocumentId) || revision != cachedRevision) {
+            cachedDocumentId = documentId;
             cachedRevision = revision;
             computedLine = -1;
             delegatesByLine.clear();
@@ -53,20 +62,20 @@ final class MarkdownFenceHighlighter implements ContextualLineHighlighter {
             return;
         }
         for (int line = computedLine + 1; line <= targetLine; line++) {
-            String text = model.getLine(line);
-            delegatesByLine.add(delegateForLine(text));
+            String text = document.line(line);
+            delegatesByLine.add(delegateForLine(text, line));
         }
         computedLine = targetLine;
     }
 
-    private LineHighlighter delegateForLine(String line) {
+    private LineDelegate delegateForLine(String line, int lineIndex) {
         FenceMarker marker = fenceMarker(line);
         if (activeFence == null) {
             if (marker == null) {
-                return markdown;
+                return new LineDelegate(markdown, 0);
             }
-            activeFence = new Fence(marker.fenceChar(), marker.length(), normalizeLanguageTag(marker.info()));
-            return markdown;
+            activeFence = new Fence(marker.fenceChar(), marker.length(), normalizeLanguageTag(marker.info()), lineIndex + 1);
+            return new LineDelegate(markdown, 0);
         }
 
         // Closing fence uses the same marker kind and at least the opening length.
@@ -75,10 +84,10 @@ final class MarkdownFenceHighlighter implements ContextualLineHighlighter {
             && marker.length() >= activeFence.length()
             && marker.info().isBlank()) {
             activeFence = null;
-            return markdown;
+            return new LineDelegate(markdown, 0);
         }
 
-        return embeddedHighlighter(activeFence.languageTag());
+        return new LineDelegate(embeddedHighlighter(activeFence.languageTag()), activeFence.firstLine());
     }
 
     private LineHighlighter embeddedHighlighter(String languageTag) {
@@ -178,7 +187,10 @@ final class MarkdownFenceHighlighter implements ContextualLineHighlighter {
         return new FenceMarker(fenceChar, length, info);
     }
 
-    private record Fence(char fenceChar, int length, String languageTag) {
+    private record LineDelegate(LineHighlighter highlighter, int firstLine) {
+    }
+
+    private record Fence(char fenceChar, int length, String languageTag, int firstLine) {
     }
 
     private record FenceMarker(char fenceChar, int length, String info) {

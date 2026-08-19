@@ -3,6 +3,7 @@ package dev.tuink.tui.render;
 import dev.tuink.core.GutterDiffFlag;
 import dev.tuink.core.GutterDiffMarker;
 import dev.tuink.terminal.text.TerminalText;
+import dev.tuink.render.BaseStyleIdentity;
 import dev.tuink.render.Color;
 import dev.tuink.render.LineVisual;
 import dev.tuink.render.RenderPlan;
@@ -404,7 +405,7 @@ public class RenderRasterizer {
         String text,
         List<StyleSpan> baseSpans,
         int sourceVisualColumn,
-        Object baseStyleKey,
+        BaseStyleIdentity baseStyleKey,
         int cacheSlot
     ) {
         String value = text == null ? "" : text;
@@ -688,7 +689,7 @@ public class RenderRasterizer {
     private static final class PreparedLineKey {
         private final String text;
         private final List<StyleSpan> baseSpans;
-        private final Object baseStyleKey;
+        private final BaseStyleIdentity baseStyleKey;
         private final int tabWidth;
         private final int tabPhase;
         private final int hashCode;
@@ -696,7 +697,7 @@ public class RenderRasterizer {
         private PreparedLineKey(
             String text,
             List<StyleSpan> baseSpans,
-            Object baseStyleKey,
+            BaseStyleIdentity baseStyleKey,
             int tabWidth,
             int tabPhase
         ) {

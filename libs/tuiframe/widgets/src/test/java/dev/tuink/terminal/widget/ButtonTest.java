@@ -10,8 +10,12 @@ import dev.tuink.terminal.cell.Canvas;
 import dev.tuink.terminal.geometry.Point;
 import dev.tuink.terminal.geometry.Rect;
 import dev.tuink.terminal.geometry.Size;
+import dev.tuink.terminal.input.KeyStroke;
+import dev.tuink.terminal.input.PointerEvent;
+import dev.tuink.terminal.input.TextInput;
 import dev.tuink.terminal.style.CellColor;
 import dev.tuink.terminal.style.CellStyle;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class ButtonTest {
@@ -141,6 +145,51 @@ class ButtonTest {
         assertEquals(".", buffer.get(1, 4).grapheme());
         assertTrue(canvas.put(0, 0, "r", ACCENT));
         assertEquals("r", buffer.get(1, 1).grapheme());
+    }
+
+    @Test
+    void interactivePlacementActivatesFromFocusedKeyboardAndMappedPointer() {
+        PlacedInteractiveWidget<Button.Action> placed = Button.plain("Go").layout(new Rect(2, 1, 2, 1));
+        FocusSpace space = new FocusSpace(new Point(5, 3), new Rect(0, 0, 8, 4));
+        FocusContext focused = new FocusContext(true, true, space);
+
+        assertEquals(
+            Button.Action.ACTIVATED,
+            placed.handle(KeyStroke.of(KeyStroke.Key.ENTER), focused).output().orElseThrow()
+        );
+        assertEquals(
+            Button.Action.ACTIVATED,
+            placed.handle(KeyStroke.of(KeyStroke.Key.SPACE), focused).output().orElseThrow()
+        );
+        assertEquals(
+            Button.Action.ACTIVATED,
+            placed.handle(new TextInput(" "), focused).output().orElseThrow()
+        );
+        assertEquals(
+            Button.Action.ACTIVATED,
+            placed.handle(
+                new PointerEvent(4, 7, PointerEvent.Kind.PRESS, PointerEvent.Button.LEFT, Set.of()),
+                focused
+            ).output().orElseThrow()
+        );
+        assertFalse(
+            placed.handle(
+                new PointerEvent(4, 6, PointerEvent.Kind.PRESS, PointerEvent.Button.LEFT, Set.of()),
+                focused
+            ).consumed()
+        );
+        assertFalse(
+            placed.handle(
+                KeyStroke.of(KeyStroke.Key.ENTER),
+                new FocusContext(false, true, space)
+            ).consumed()
+        );
+        assertFalse(
+            placed.handle(
+                KeyStroke.of(KeyStroke.Key.ENTER),
+                new FocusContext(false, false, space)
+            ).consumed()
+        );
     }
 
     private static CellBuffer filled(int rows, int cols) {

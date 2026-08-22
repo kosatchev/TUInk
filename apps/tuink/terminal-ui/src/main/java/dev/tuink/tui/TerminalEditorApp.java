@@ -31,6 +31,7 @@ import dev.tuink.tui.input.KeyEvent;
 import dev.tuink.terminal.input.KeyStroke;
 import dev.tuink.tui.input.LegacyKeyEventAdapter;
 import dev.tuink.terminal.input.PasteEvent;
+import dev.tuink.terminal.input.PointerEvent;
 import dev.tuink.terminal.input.ResizeEvent;
 import dev.tuink.terminal.input.TextInput;
 import dev.tuink.terminal.input.TuiInputEvent;
@@ -57,13 +58,17 @@ import dev.tuink.tui.style.UiStyles;
 import dev.tuink.terminal.jline.TerminalSession;
 import dev.tuink.terminal.jline.TerminalRuntime;
 import dev.tuink.terminal.widget.Button;
+import dev.tuink.terminal.widget.FocusManager;
+import dev.tuink.terminal.widget.FocusResetPolicy;
+import dev.tuink.terminal.widget.FocusScope;
+import dev.tuink.terminal.widget.FocusSpace;
 import dev.tuink.terminal.widget.Modal;
 import dev.tuink.terminal.widget.PlacedModal;
 import dev.tuink.terminal.widget.PlacedWidget;
+import dev.tuink.terminal.widget.RoutedTarget;
 import dev.tuink.terminal.widget.WidgetStyleRole;
 import dev.tuink.terminal.widget.TextField;
 import dev.tuink.terminal.widget.Theme;
-import dev.tuink.terminal.widget.WidgetState;
 import dev.tuink.terminal.widget.WidgetThemeKeys;
 import dev.tuink.tui.ui.ConfirmBarController;
 import dev.tuink.tui.ui.ConfirmBarView;
@@ -114,6 +119,7 @@ public class TerminalEditorApp {
     private UiStyles.Palette styles = UiStyles.forTheme(theme);
     private final Theme colorOverlayWidgetTheme = key -> resolveOverlayWidgetStyle(key, true);
     private final Theme monoOverlayWidgetTheme = key -> resolveOverlayWidgetStyle(key, false);
+    private final FocusManager<HelpOverlayInputRouter.Target> helpFocusManager = new FocusManager<>();
     private HelpOverlayPlacement helpOverlayCache;
     private boolean profileEnabled = false;
     private final FrameProfiler frameProfiler = new FrameProfiler();
@@ -612,6 +618,32 @@ public class TerminalEditorApp {
                     }
                     notification.clearErrorOnUserAction();
                     eventLoop.invalidate();
+                    if (modalState.isHelpHints() || modalState.isHelpLicenses() || modalState.isHelpAuthor()) {
+                        boolean pointerAllowed = !(inputEvent instanceof PointerEvent)
+                            || uiSessionState.mouseModeSetting && uiSessionState.mouseModeAvailable;
+                        if (pointerAllowed) {
+                            HelpPage helpPage = activeHelpPage(
+                                modalState.isHelpHints(),
+                                modalState.isHelpLicenses(),
+                                modalState.isHelpAuthor()
+                            );
+                            HelpOverlayPlacement overlay = helpOverlayPlacement(rows, cols, helpPage);
+                            HelpOverlayInputRouter.Result helpInput = HelpOverlayInputRouter.route(
+                                helpFocusManager,
+                                overlay.focusScope(),
+                                overlay.frame(),
+                                inputEvent
+                            );
+                            if (helpInput.closeRequested()) {
+                                helpFocusManager.deactivate(overlay.focusScope().id());
+                                modalState = UiModalState.none();
+                                continue;
+                            }
+                            if (helpInput.consumed()) {
+                                continue;
+                            }
+                        }
+                    }
                     CommandInvocation pendingCommand = inputEvent instanceof KeyStroke stroke
                         ? commandBridge.invocationFor(stroke).orElse(null)
                         : null;
@@ -691,6 +723,7 @@ public class TerminalEditorApp {
                                 HelpOverlayPlacement overlay = helpOverlayPlacement(rows, cols, helpPage);
                                 if (overlay.frame().closeHit(mouse.row(), mouse.col())
                                     || overlay.close().hit(mouse.row(), mouse.col())) {
+                                    helpFocusManager.deactivate(HelpOverlayInputRouter.Scope.HELP);
                                     modalState = UiModalState.none();
                                 }
                             }
@@ -1133,6 +1166,9 @@ public class TerminalEditorApp {
                             true
                         );
                         if (helpHintsResult.consumed()) {
+                            if (!helpHintsResult.helpHintsMode()) {
+                                helpFocusManager.deactivate(HelpOverlayInputRouter.Scope.HELP);
+                            }
                             modalState = helpHintsResult.helpHintsMode() ? UiModalState.helpHints() : UiModalState.none();
                             continue;
                         }
@@ -1146,6 +1182,7 @@ public class TerminalEditorApp {
                         if (action == KeyEvent.Action.ESCAPE
                             || action == KeyEvent.Action.ENTER
                             || action == KeyEvent.Action.SHOW_LICENSES) {
+                            helpFocusManager.deactivate(HelpOverlayInputRouter.Scope.HELP);
                             modalState = UiModalState.none();
                         }
                         continue;
@@ -1159,6 +1196,7 @@ public class TerminalEditorApp {
                         if (action == KeyEvent.Action.ESCAPE
                             || action == KeyEvent.Action.ENTER
                             || action == KeyEvent.Action.SHOW_AUTHOR) {
+                            helpFocusManager.deactivate(HelpOverlayInputRouter.Scope.HELP);
                             modalState = UiModalState.none();
                         }
                         continue;
@@ -2583,17 +2621,33 @@ public class TerminalEditorApp {
     private HelpOverlayPlacement helpOverlayPlacement(int rows, int cols, HelpPage page) {
         HelpDialogLayout layout = helpDialogLayout(rows, cols, page.rows().length);
         HelpOverlayPlacement cached = helpOverlayCache;
-        if (cached != null && cached.page() == page && cached.layout().equals(layout)) {
+        Rect viewport = new Rect(0, 0, cols, rows);
+        if (cached != null
+            && cached.page() == page
+            && cached.layout().equals(layout)
+            && cached.viewport().equals(viewport)) {
             return cached;
         }
         Modal frame = infoDialogFrame(layout, page.title());
         Button close = helpCloseButton(layout);
+        RoutedTarget<HelpOverlayInputRouter.Target, Button.Action> closeTarget = new RoutedTarget<>(
+            HelpOverlayInputRouter.Target.CLOSE,
+            close.layout(
+                new Rect(close.col(), close.row(), close.width(), 1)
+            ),
+            FocusSpace.root(viewport)
+        );
         HelpOverlayPlacement prepared = new HelpOverlayPlacement(
             page,
             layout,
+            viewport,
             frame.layout(new Rect(layout.left(), layout.top(), layout.width(), layout.height())),
             close,
-            close.layout(new Rect(close.col(), close.row(), close.width(), 1))
+            FocusScope.single(
+                HelpOverlayInputRouter.Scope.HELP,
+                FocusResetPolicy.FIRST_FOCUSABLE,
+                closeTarget
+            )
         );
         helpOverlayCache = prepared;
         return prepared;
@@ -2627,7 +2681,16 @@ public class TerminalEditorApp {
                 styles.dialog()
             );
         }
-        overlay.closePlacement().paint(canvas, widgetTheme, WidgetState.FOCUSED);
+        RoutedTarget<HelpOverlayInputRouter.Target, Button.Action> closeTarget = overlay.focusScope()
+            .target(HelpOverlayInputRouter.Target.CLOSE)
+            .orElseThrow();
+        closeTarget.placement().paint(
+            canvas,
+            widgetTheme,
+            helpFocusManager.context(overlay.focusScope(), closeTarget.id())
+                .orElseThrow()
+                .widgetState()
+        );
     }
 
     CellStyle resolveOverlayWidgetStyle(WidgetStyleRole key, boolean colorEnabled) {
@@ -3972,9 +4035,10 @@ public class TerminalEditorApp {
     private record HelpOverlayPlacement(
         HelpPage page,
         HelpDialogLayout layout,
+        Rect viewport,
         PlacedModal frame,
         Button close,
-        PlacedWidget closePlacement
+        FocusScope<HelpOverlayInputRouter.Target, Button.Action> focusScope
     ) {
     }
 

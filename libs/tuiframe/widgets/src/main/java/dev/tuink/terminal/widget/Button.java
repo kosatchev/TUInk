@@ -5,6 +5,10 @@ import dev.tuink.terminal.cell.CellText;
 import dev.tuink.terminal.cell.Canvas;
 import dev.tuink.terminal.geometry.Rect;
 import dev.tuink.terminal.geometry.Size;
+import dev.tuink.terminal.input.KeyStroke;
+import dev.tuink.terminal.input.PointerEvent;
+import dev.tuink.terminal.input.TextInput;
+import dev.tuink.terminal.input.TuiInputEvent;
 import dev.tuink.terminal.text.TerminalText;
 import dev.tuink.terminal.style.CellStyle;
 import java.util.Objects;
@@ -12,7 +16,7 @@ import java.util.Objects;
 /**
  * Reusable single-line text button for TUI overlays.
  */
-public final class Button implements Widget {
+public final class Button implements InteractiveWidget<Button.Action> {
     private static final int TAB_WIDTH = 4;
 
     private final int row;
@@ -118,8 +122,13 @@ public final class Button implements Widget {
     }
 
     @Override
-    public PlacedWidget layout(Rect bounds) {
+    public PlacedInteractiveWidget<Action> layout(Rect bounds) {
         return new Placement(this, Objects.requireNonNull(bounds, "bounds"));
+    }
+
+    /** Semantic output independent of application commands and keymaps. */
+    public enum Action {
+        ACTIVATED
     }
 
     private static int resolveCursorOffset(TerminalText.Metrics metrics, boolean framed) {
@@ -132,7 +141,7 @@ public final class Button implements Widget {
         return framed ? 1 : 0;
     }
 
-    private record Placement(Button button, Rect bounds) implements PlacedWidget {
+    private record Placement(Button button, Rect bounds) implements PlacedInteractiveWidget<Action> {
         private Placement {
             Objects.requireNonNull(button, "button");
             Objects.requireNonNull(bounds, "bounds");
@@ -146,6 +155,35 @@ public final class Button implements Widget {
                 ? WidgetThemeKeys.BUTTON_DISABLED
                 : state.focused() ? WidgetThemeKeys.BUTTON_FOCUSED : WidgetThemeKeys.BUTTON;
             paintText(canvas, bounds, button.renderedText, theme.resolveStyle(role));
+        }
+
+        @Override
+        public InteractionResult<Action> handle(TuiInputEvent event, FocusContext context) {
+            Objects.requireNonNull(event, "event");
+            Objects.requireNonNull(context, "context");
+            if (!context.enabled()) {
+                return InteractionResult.ignored();
+            }
+            if (event instanceof PointerEvent pointer) {
+                boolean activated = pointer.kind() == PointerEvent.Kind.PRESS
+                    && pointer.button() == PointerEvent.Button.LEFT
+                    && context.localPoint(pointer).filter(this::hit).isPresent();
+                return activated
+                    ? InteractionResult.output(Action.ACTIVATED)
+                    : InteractionResult.ignored();
+            }
+            if (!context.focused()) {
+                return InteractionResult.ignored();
+            }
+            if (event instanceof KeyStroke stroke
+                && stroke.modifiers().isEmpty()
+                && (stroke.key() == KeyStroke.Key.ENTER || stroke.key() == KeyStroke.Key.SPACE)) {
+                return InteractionResult.output(Action.ACTIVATED);
+            }
+            if (event instanceof TextInput text && " ".equals(text.text())) {
+                return InteractionResult.output(Action.ACTIVATED);
+            }
+            return InteractionResult.ignored();
         }
     }
 

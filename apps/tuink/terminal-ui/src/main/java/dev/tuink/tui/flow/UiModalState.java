@@ -6,12 +6,11 @@ public record UiModalState(
     UiModalMode mode,
     Path pendingOverwritePath,
     int pendingCloseTabIndex,
-    ConfirmChoice confirmChoice,
     SaveContinuation saveContinuation
 ) {
     public UiModalState {
-        if (mode == null || confirmChoice == null || saveContinuation == null) {
-            throw new IllegalArgumentException("Modal mode, confirm choice, and save continuation are required");
+        if (mode == null || saveContinuation == null) {
+            throw new IllegalArgumentException("Modal mode and save continuation are required");
         }
         if (mode == UiModalMode.SAVE_OVERWRITE_CONFIRM) {
             if (pendingOverwritePath == null) {
@@ -116,16 +115,6 @@ public record UiModalState(
         return mode == UiModalMode.HELP_AUTHOR;
     }
 
-    public UiModalState withConfirmChoice(ConfirmChoice nextConfirmChoice) {
-        return new UiModalState(
-            mode,
-            pendingOverwritePath,
-            pendingCloseTabIndex,
-            nextConfirmChoice == null ? ConfirmChoice.CANCEL : nextConfirmChoice,
-            saveContinuation
-        );
-    }
-
     public UiModalState confirmOverwrite(Path path) {
         if (!isSaveAs()) {
             throw new IllegalStateException("Overwrite confirmation can only follow Save As");
@@ -155,7 +144,6 @@ public record UiModalState(
             mode,
             overwritePath,
             closeTabIndex,
-            ConfirmChoice.CANCEL,
             continuation
         );
     }

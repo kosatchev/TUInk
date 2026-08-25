@@ -10,9 +10,7 @@ public final class CursorPolicy {
         boolean saveAsMode,
         boolean searchBarVisible,
         SearchFocus searchFocus,
-        boolean saveOverwriteConfirmMode,
-        boolean quitConfirmMode,
-        boolean closeTabConfirmMode,
+        boolean confirmBarVisible,
         boolean topMenuOpen,
         boolean openFileMode,
         boolean helpHintsMode
@@ -23,7 +21,7 @@ public final class CursorPolicy {
         if (searchBarVisible) {
             return searchFocus == SearchFocus.FIND || searchFocus == SearchFocus.REPLACE;
         }
-        if (saveOverwriteConfirmMode || quitConfirmMode || closeTabConfirmMode) {
+        if (confirmBarVisible) {
             return false;
         }
         if (topMenuOpen || openFileMode || helpHintsMode) {

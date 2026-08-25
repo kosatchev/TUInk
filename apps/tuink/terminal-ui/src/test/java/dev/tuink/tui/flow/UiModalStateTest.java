@@ -19,7 +19,6 @@ class UiModalStateTest {
                 UiModalMode.CLOSE_TAB_CONFIRM,
                 Path.of("other.txt"),
                 3,
-                ConfirmChoice.CANCEL,
                 SaveContinuation.NONE
             )
         );
@@ -54,7 +53,6 @@ class UiModalStateTest {
                 UiModalMode.SAVE_AS,
                 null,
                 -1,
-                ConfirmChoice.CANCEL,
                 SaveContinuation.CLOSE_TAB
             )
         );

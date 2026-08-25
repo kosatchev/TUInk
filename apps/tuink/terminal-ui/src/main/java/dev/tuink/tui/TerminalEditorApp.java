@@ -70,7 +70,6 @@ import dev.tuink.terminal.widget.WidgetStyleRole;
 import dev.tuink.terminal.widget.TextField;
 import dev.tuink.terminal.widget.Theme;
 import dev.tuink.terminal.widget.WidgetThemeKeys;
-import dev.tuink.tui.ui.ConfirmBarController;
 import dev.tuink.tui.ui.ConfirmBarView;
 import dev.tuink.tui.ui.DirtyTabSummary;
 import dev.tuink.tui.ui.EditorView;
@@ -120,6 +119,8 @@ public class TerminalEditorApp {
     private final Theme colorOverlayWidgetTheme = key -> resolveOverlayWidgetStyle(key, true);
     private final Theme monoOverlayWidgetTheme = key -> resolveOverlayWidgetStyle(key, false);
     private final FocusManager<HelpOverlayInputRouter.Target> helpFocusManager = new FocusManager<>();
+    private final Theme confirmWidgetTheme = this::resolveConfirmWidgetStyle;
+    private final FocusManager<ConfirmChoice> confirmFocusManager = new FocusManager<>();
     private HelpOverlayPlacement helpOverlayCache;
     private boolean profileEnabled = false;
     private final FrameProfiler frameProfiler = new FrameProfiler();
@@ -298,7 +299,9 @@ public class TerminalEditorApp {
                 ViewportController viewportController = new ViewportController();
                 boolean running = true;
                 SearchBarView searchBar = null;
-                ConfirmBarView confirmBar = null;
+                ConfirmBarView.Placement confirmBarPlacement = null;
+                UiModalState confirmPromptState = null;
+                Object confirmScopeId = null;
                 InlinePromptBar inlinePromptBar = InlinePromptBar.hidden();
                 boolean showTabBar = false;
                 int contentTopRow = 1;
@@ -339,6 +342,23 @@ public class TerminalEditorApp {
                     boolean helpAuthorMode = modalState.isHelpAuthor();
                     Path pendingOverwritePath = modalState.pendingOverwritePath();
                     int pendingCloseTabIndex = modalState.pendingCloseTabIndex();
+                    boolean confirmMode = recoveryConfirmMode
+                        || saveOverwriteConfirmMode
+                        || quitConfirmMode
+                        || closeTabConfirmMode;
+                    if (confirmMode) {
+                        if (confirmPromptState != modalState) {
+                            deactivateConfirmFocus();
+                            confirmPromptState = modalState;
+                            confirmScopeId = new Object();
+                            confirmBarPlacement = null;
+                        }
+                    } else {
+                        deactivateConfirmFocus();
+                        confirmPromptState = null;
+                        confirmScopeId = null;
+                        confirmBarPlacement = null;
+                    }
                     TuiEventLoop.FrameTicket frameTicket = eventLoop.beginFrame();
                     if (frameTicket != null) {
                         if (frameTicket.fullRedraw()) {
@@ -373,7 +393,9 @@ public class TerminalEditorApp {
                             searchMatchCount,
                             tabs.size()
                         );
-                        confirmBar = null;
+                        showTabBar = uiSessionState.showTabBarSetting && tabs.size() > 1;
+                        contentTopRow = showTabBar ? 2 : 1;
+                        ConfirmBarView confirmBar = null;
                         inlinePromptBar = InlinePromptBar.hidden();
                         if (saveAsMode) {
                             inlinePromptBar = InlinePromptBar.of(
@@ -384,47 +406,44 @@ public class TerminalEditorApp {
                         } else if (saveOverwriteConfirmMode) {
                             confirmBar = ConfirmBarView.build(
                                 buildOverwritePrompt(pendingOverwritePath),
-                                modalState.confirmChoice(),
                                 cols
                             );
                             inlinePromptBar = InlinePromptBar.of(
                                 confirmBar.row(),
                                 EditorStyleAdapter.toEditor(styles.promptAlert()),
                                 1,
-                                confirmBar.cursorCol() + 1
+                                1
                             );
                         } else if (recoveryConfirmMode) {
                             confirmBar = ConfirmBarView.buildRecovery(
                                 buildRecoveryPrompt(startupRecoveryEntries.size()),
-                                modalState.confirmChoice(),
                                 cols
                             );
                             inlinePromptBar = InlinePromptBar.of(
                                 confirmBar.row(),
                                 EditorStyleAdapter.toEditor(styles.promptAlert()),
                                 1,
-                                confirmBar.cursorCol() + 1
+                                1
                             );
                         } else if (quitConfirmMode) {
-                            confirmBar = buildQuitConfirmBar(tabs, modalState.confirmChoice(), cols);
+                            confirmBar = buildQuitConfirmBar(tabs, cols);
                             inlinePromptBar = InlinePromptBar.of(
                                 confirmBar.row(),
                                 EditorStyleAdapter.toEditor(styles.promptAlert()),
                                 1,
-                                confirmBar.cursorCol() + 1
+                                1
                             );
                         } else if (closeTabConfirmMode) {
                             confirmBar = buildCloseTabConfirmBar(
                                 tabs,
                                 pendingCloseTabIndex,
-                                modalState.confirmChoice(),
                                 cols
                             );
                             inlinePromptBar = InlinePromptBar.of(
                                 confirmBar.row(),
                                 EditorStyleAdapter.toEditor(styles.promptAlert()),
                                 1,
-                                confirmBar.cursorCol() + 1
+                                1
                             );
                         } else if (searchBar != null) {
                             inlinePromptBar = InlinePromptBar.of(
@@ -434,13 +453,24 @@ public class TerminalEditorApp {
                                 searchBar.cursorCol()
                             );
                         }
+                        if (confirmBar != null) {
+                            confirmBarPlacement = confirmBar.place(
+                                confirmScopeId,
+                                rows - 1 - inlinePromptBar.height(),
+                                new Rect(
+                                    0,
+                                    contentTopRow,
+                                    cols,
+                                    Math.max(0, rows - contentTopRow)
+                                )
+                            );
+                            confirmBarPlacement.activate(confirmFocusManager);
+                        }
                         NotificationBar notificationBar = NotificationBar.of(
                             notification.message,
                             EditorStyleAdapter.toEditor(notification.style())
                         );
-                        showTabBar = uiSessionState.showTabBarSetting && tabs.size() > 1;
                         int overlayRows = inlinePromptBar.height();
-                        contentTopRow = showTabBar ? 2 : 1;
                         engine.setTabWidth(uiSessionState.tabWidthSetting);
                         EditorLayout editorLayout = null;
                         for (int i = 0; i < 3; i++) {
@@ -592,7 +622,7 @@ public class TerminalEditorApp {
                             saveAsInput,
                             tabs,
                             searchBar,
-                            confirmBar,
+                            confirmBarPlacement,
                             openFileMode,
                             openFileTree,
                             openFileFocus,
@@ -644,7 +674,35 @@ public class TerminalEditorApp {
                             }
                         }
                     }
-                    CommandInvocation pendingCommand = inputEvent instanceof KeyStroke stroke
+                    ConfirmChoice routedConfirmDecision = null;
+                    if (confirmMode) {
+                        if (inputEvent instanceof PointerEvent
+                            && (!uiSessionState.mouseModeSetting || !uiSessionState.mouseModeAvailable)) {
+                            continue;
+                        }
+                        if (confirmBarPlacement == null) {
+                            // A modal transition always schedules a frame before
+                            // input. Capture defensively if a custom runtime
+                            // violates that ordering.
+                            eventLoop.invalidate();
+                            continue;
+                        }
+                        ConfirmBarInputRouter.Result confirmInput = ConfirmBarInputRouter.route(
+                            confirmFocusManager,
+                            confirmBarPlacement,
+                            confirmPolicy(modalState),
+                            inputEvent
+                        );
+                        routedConfirmDecision = confirmInput.decision();
+                        if (routedConfirmDecision != null && inputEvent instanceof PointerEvent) {
+                            editorView.cancelMouseSelection();
+                        }
+                        if (routedConfirmDecision == null && confirmInput.consumed()) {
+                            continue;
+                        }
+                    }
+                    CommandInvocation pendingCommand = routedConfirmDecision == null
+                        && inputEvent instanceof KeyStroke stroke
                         ? commandBridge.invocationFor(stroke).orElse(null)
                         : null;
 
@@ -706,7 +764,9 @@ public class TerminalEditorApp {
                         continue;
                     }
 
-                    KeyEvent key = LegacyKeyEventAdapter.toLegacy(inputEvent).orElse(null);
+                    KeyEvent key = routedConfirmDecision == null
+                        ? LegacyKeyEventAdapter.toLegacy(inputEvent).orElse(null)
+                        : new KeyEvent.ActionEvent(KeyEvent.Action.ENTER);
                     if (key == null) {
                         continue;
                     }
@@ -834,7 +894,7 @@ public class TerminalEditorApp {
                                         }
                                         continue;
                                     }
-                                    if (topMenu.handleTopBarClick(mouse.row(), mouse.col())) {
+                                    if (confirmMode && !modalState.isCloseTabConfirm()) {
                                         editorView.cancelMouseSelection();
                                         continue;
                                     }
@@ -866,6 +926,14 @@ public class TerminalEditorApp {
                                                 modalState = UiModalState.none();
                                             }
                                         }
+                                        editorView.cancelMouseSelection();
+                                        continue;
+                                    }
+                                    if (confirmMode) {
+                                        editorView.cancelMouseSelection();
+                                        continue;
+                                    }
+                                    if (topMenu.handleTopBarClick(mouse.row(), mouse.col())) {
                                         editorView.cancelMouseSelection();
                                         continue;
                                     }
@@ -926,25 +994,6 @@ public class TerminalEditorApp {
                                         }
                                         editorView.cancelMouseSelection();
                                         continue;
-                                    }
-                                    if (confirmBar != null) {
-                                        int confirmBarTopRow = rows - 1 - inlinePromptBar.height();
-                                        ConfirmBarController.InputResult confirmMouseResult =
-                                            ConfirmBarController.handleMousePress(
-                                                confirmBar,
-                                                mouse.row(),
-                                                mouse.col(),
-                                                confirmBarTopRow
-                                            );
-                                        if (confirmMouseResult.consumed()) {
-                                            modalState = modalState.withConfirmChoice(confirmMouseResult.confirmChoice());
-                                            pendingCommand = commandBridge.invocationFor(
-                                                KeyEvent.Action.ENTER
-                                            ).orElse(null);
-                                            remappedMouseKey = new KeyEvent.ActionEvent(KeyEvent.Action.ENTER);
-                                            editorView.cancelMouseSelection();
-                                            break;
-                                        }
                                     }
                                     if (uiSessionState.searchMode && searchBar != null) {
                                         int searchBarTopRow = rows - 1 - inlinePromptBar.height();
@@ -1203,19 +1252,8 @@ public class TerminalEditorApp {
                     }
 
                     if (modalState.isRecoveryConfirm()) {
-                        ConfirmBarController.InputResult confirmInput = ConfirmBarController.handleKey(
-                            key,
-                            modalState.confirmChoice(),
-                            ConfirmChoice.SAVE,
-                            ConfirmChoice.DISCARD,
-                            false
-                        );
-                        if (confirmInput.consumed()) {
-                            if (confirmInput.decision() == null) {
-                                modalState = modalState.withConfirmChoice(confirmInput.confirmChoice());
-                                continue;
-                            }
-                            if (confirmInput.decision() == ConfirmChoice.SAVE) {
+                        if (routedConfirmDecision != null) {
+                            if (routedConfirmDecision == ConfirmChoice.SAVE) {
                                 int restoredCount = restoreRecoveredTabs(
                                     startupRecoveryEntries,
                                     tabs,
@@ -1232,15 +1270,13 @@ public class TerminalEditorApp {
                                 } else {
                                     notification.info("No recovery snapshots restored");
                                 }
-                            } else if (confirmInput.decision() == ConfirmChoice.DISCARD) {
+                            } else if (routedConfirmDecision == ConfirmChoice.DISCARD) {
                                 RecoveryAutosaveManager.DeletionResult deletion =
                                     recoveryAutosave.deleteEntries(startupRecoveryEntries);
                                 startupRecoveryEntries.clear();
                                 startupRecoveryEntries.addAll(deletion.failedEntries());
                                 if (!deletion.successful()) {
                                     notification.error(deletion.failureMessage());
-                                    modalState = UiModalState.recoveryConfirm()
-                                        .withConfirmChoice(ConfirmChoice.DISCARD);
                                     continue;
                                 }
                                 notification.info("Recovery snapshots discarded");
@@ -1314,15 +1350,8 @@ public class TerminalEditorApp {
 
                     if (modalState.isSaveOverwriteConfirm()) {
                         UiModalState overwriteState = modalState;
-                        ConfirmBarController.InputResult confirmInput = ConfirmBarController.handleKey(
-                            key,
-                            modalState.confirmChoice(),
-                            ConfirmChoice.SAVE
-                        );
-                        if (confirmInput.consumed()) {
-                            if (confirmInput.decision() == null) {
-                                modalState = modalState.withConfirmChoice(confirmInput.confirmChoice());
-                            } else if (confirmInput.decision() == ConfirmChoice.SAVE) {
+                        if (routedConfirmDecision != null) {
+                            if (routedConfirmDecision == ConfirmChoice.SAVE) {
                                 try {
                                     engine.saveAs(
                                         modalState.pendingOverwritePath(),
@@ -1349,7 +1378,7 @@ public class TerminalEditorApp {
                                 } catch (IOException e) {
                                     notification.error(saveErrorMessage(e));
                                 }
-                            } else if (confirmInput.decision() == ConfirmChoice.DISCARD) {
+                            } else if (routedConfirmDecision == ConfirmChoice.DISCARD) {
                                 modalState = modalState.backToSaveAs();
                                 notification.clear();
                             } else {
@@ -1361,20 +1390,8 @@ public class TerminalEditorApp {
                     }
 
                     if (modalState.isQuitConfirm()) {
-                        if (isAction(key, KeyEvent.Action.CTRL_Q)) {
-                            running = false;
-                            modalState = UiModalState.none();
-                            continue;
-                        }
-                        ConfirmBarController.InputResult confirmInput = ConfirmBarController.handleKey(
-                            key,
-                            modalState.confirmChoice(),
-                            ConfirmChoice.DISCARD
-                        );
-                        if (confirmInput.consumed()) {
-                            if (confirmInput.decision() == null) {
-                                modalState = modalState.withConfirmChoice(confirmInput.confirmChoice());
-                            } else if (confirmInput.decision() == ConfirmChoice.SAVE) {
+                        if (routedConfirmDecision != null) {
+                            if (routedConfirmDecision == ConfirmChoice.SAVE) {
                                 SaveFlowProgress progress = continueQuitSaveFlow(
                                     sessionContext,
                                     tabs,
@@ -1384,7 +1401,7 @@ public class TerminalEditorApp {
                                 );
                                 running = progress.running();
                                 modalState = progress.modalState();
-                            } else if (confirmInput.decision() == ConfirmChoice.DISCARD) {
+                            } else if (routedConfirmDecision == ConfirmChoice.DISCARD) {
                                 running = false;
                                 modalState = UiModalState.none();
                             } else {
@@ -1395,22 +1412,13 @@ public class TerminalEditorApp {
                     }
 
                     if (modalState.isCloseTabConfirm()) {
-                        ConfirmBarController.InputResult confirmInput = ConfirmBarController.handleKey(
-                            key,
-                            modalState.confirmChoice(),
-                            ConfirmChoice.DISCARD
-                        );
-                        if (confirmInput.consumed()) {
-                            if (confirmInput.decision() == null) {
-                                modalState = modalState.withConfirmChoice(confirmInput.confirmChoice());
-                                continue;
-                            }
+                        if (routedConfirmDecision != null) {
                             int closeIndex = modalState.pendingCloseTabIndex();
                             if (closeIndex < 0 || closeIndex >= tabs.size()) {
                                 modalState = UiModalState.none();
                                 continue;
                             }
-                            if (confirmInput.decision() == ConfirmChoice.SAVE) {
+                            if (routedConfirmDecision == ConfirmChoice.SAVE) {
                                 EditorTab pendingTab = tabs.get(closeIndex);
                                 if (requiresSaveAs(pendingTab)) {
                                     sessionContext.activate(closeIndex);
@@ -1420,7 +1428,7 @@ public class TerminalEditorApp {
                                     sessionContext.activate(closeTab(tabs, activeTabIndex, closeIndex, saveAsSuggestions));
                                     modalState = UiModalState.none();
                                 }
-                            } else if (confirmInput.decision() == ConfirmChoice.DISCARD) {
+                            } else if (routedConfirmDecision == ConfirmChoice.DISCARD) {
                                 sessionContext.activate(closeTab(tabs, activeTabIndex, closeIndex, saveAsSuggestions));
                                 modalState = UiModalState.none();
                             } else {
@@ -2425,19 +2433,11 @@ public class TerminalEditorApp {
         return canvas;
     }
 
-    private void paintSelectedConfirmButton(Canvas canvas, ConfirmBarView confirmBar, int rows, int cols) {
-        if (confirmBar == null || rows < 2 || cols <= 0) {
+    private void paintConfirmButtons(Canvas canvas, ConfirmBarView.Placement placement) {
+        if (placement == null) {
             return;
         }
-        Button selected = confirmBar.selectedButton();
-        if (selected == null) {
-            return;
-        }
-        int row = rows - 2;
-        if (row < 0 || row >= rows) {
-            return;
-        }
-        selected.drawAt(canvas, row, focusedButtonStyle(styles.promptAlert()));
+        placement.paint(canvas, confirmWidgetTheme, confirmFocusManager);
     }
 
     private void paintSelectedSearchButton(
@@ -2712,6 +2712,36 @@ public class TerminalEditorApp {
         return null;
     }
 
+    CellStyle resolveConfirmWidgetStyle(WidgetStyleRole key) {
+        if (WidgetThemeKeys.BUTTON_FOCUSED.equals(key)) {
+            return focusedButtonStyle(styles.promptAlert());
+        }
+        if (WidgetThemeKeys.BUTTON.equals(key) || WidgetThemeKeys.BUTTON_DISABLED.equals(key)) {
+            return styles.promptAlert();
+        }
+        return null;
+    }
+
+    private ConfirmBarInputRouter.Policy confirmPolicy(UiModalState modalState) {
+        if (modalState.isRecoveryConfirm()) {
+            return ConfirmBarInputRouter.Policy.recovery();
+        }
+        if (modalState.isSaveOverwriteConfirm()) {
+            return ConfirmBarInputRouter.Policy.overwrite();
+        }
+        if (modalState.isQuitConfirm()) {
+            return ConfirmBarInputRouter.Policy.quit();
+        }
+        if (modalState.isCloseTabConfirm()) {
+            return ConfirmBarInputRouter.Policy.closeTab();
+        }
+        throw new IllegalArgumentException("Modal is not a confirmation prompt: " + modalState.mode());
+    }
+
+    private void deactivateConfirmFocus() {
+        confirmFocusManager.activeScopeId().ifPresent(confirmFocusManager::deactivate);
+    }
+
     private HelpPage activeHelpPage(boolean helpHintsMode, boolean helpLicensesMode, boolean helpAuthorMode) {
         if (helpHintsMode) {
             return HelpPages.KEYMAP;
@@ -2859,7 +2889,7 @@ public class TerminalEditorApp {
         TextField saveAsInput,
         List<EditorTab> tabs,
         SearchBarView searchBar,
-        ConfirmBarView confirmBar,
+        ConfirmBarView.Placement confirmBarPlacement,
         boolean openFileMode,
         TreeView openFileTree,
         OpenFileDialogController.Focus openFileFocus,
@@ -2940,7 +2970,7 @@ public class TerminalEditorApp {
             current = renderer.rasterize(plan, rows, cols, contentTopRow);
         }
         Canvas canvas = frameCanvas(current, rows, cols);
-        paintSelectedConfirmButton(canvas, confirmBar, rows, cols);
+        paintConfirmButtons(canvas, confirmBarPlacement);
         paintSelectedSearchButton(canvas, searchBar, searchFocus, rows, inlinePromptBarHeight, cols);
         if (showTabBar) {
             tabBar.draw(canvas, cols, tabItems, activeTabIndex, colorEnabled);
@@ -2988,18 +3018,14 @@ public class TerminalEditorApp {
             saveAsMode,
             searchBar != null,
             searchFocus,
-            saveOverwriteConfirmMode,
-            quitConfirmMode,
-            closeTabConfirmMode,
+            confirmBarPlacement != null,
             topMenu.isOpen(),
             openFileMode,
             helpHintsMode || helpLicensesMode || helpAuthorMode
         );
         boolean editorOwnsCursor = !saveAsMode
             && searchBar == null
-            && !saveOverwriteConfirmMode
-            && !quitConfirmMode
-            && !closeTabConfirmMode
+            && confirmBarPlacement == null
             && !topMenu.isOpen()
             && !openFileMode
             && !(helpHintsMode || helpLicensesMode || helpAuthorMode);
@@ -3014,9 +3040,6 @@ public class TerminalEditorApp {
                 cols,
                 TerminalText.visualWidth(SAVE_AS_PROMPT, 4) + saveAsInput.cursorCellColumn() + 1
             );
-        } else if ((saveOverwriteConfirmMode || quitConfirmMode || closeTabConfirmMode) && confirmBar != null) {
-            desiredCursorRow = interactiveBottomCursorRow;
-            desiredCursorCol = 1;
         } else if (searchBar != null) {
             desiredCursorRow = interactiveTopCursorRow + searchBar.cursorRow() - 1;
             desiredCursorCol = searchBar.cursorCol();
@@ -3280,7 +3303,7 @@ public class TerminalEditorApp {
             TextField saveAsInput,
             List<EditorTab> tabs,
             SearchBarView searchBar,
-            ConfirmBarView confirmBar,
+            ConfirmBarView.Placement confirmBarPlacement,
             boolean openFileMode,
             TreeView openFileTree,
             OpenFileDialogController.Focus openFileFocus,
@@ -3317,7 +3340,7 @@ public class TerminalEditorApp {
                 saveAsInput,
                 tabs,
                 searchBar,
-                confirmBar,
+                confirmBarPlacement,
                 openFileMode,
                 openFileTree,
                 openFileFocus,
@@ -3345,7 +3368,6 @@ public class TerminalEditorApp {
 
     private ConfirmBarView buildQuitConfirmBar(
         List<EditorTab> tabs,
-        ConfirmChoice selectedChoice,
         int cols
     ) {
         List<EditorTab> dirtyTabs = new ArrayList<>();
@@ -3375,7 +3397,6 @@ public class TerminalEditorApp {
         );
         return ConfirmBarView.build(
             DirtyTabSummary.build(dirtyPaths, promptWidth),
-            selectedChoice,
             cols,
             primaryLabel,
             secondaryLabel,
@@ -3387,7 +3408,6 @@ public class TerminalEditorApp {
     private ConfirmBarView buildCloseTabConfirmBar(
         List<EditorTab> tabs,
         int closeTabIndex,
-        ConfirmChoice selectedChoice,
         int cols
     ) {
         EditorTab pendingTab = closeTabIndex >= 0 && closeTabIndex < tabs.size()
@@ -3396,7 +3416,6 @@ public class TerminalEditorApp {
         String primaryLabel = pendingTab != null && requiresSaveAs(pendingTab) ? "Save As" : "Save";
         return ConfirmBarView.build(
             buildCloseTabPrompt(tabs, closeTabIndex),
-            selectedChoice,
             cols,
             primaryLabel,
             "Discard",

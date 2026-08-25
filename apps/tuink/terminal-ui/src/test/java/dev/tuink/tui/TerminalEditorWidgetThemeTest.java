@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 import dev.tuink.terminal.widget.WidgetStyleRole;
 import dev.tuink.terminal.widget.WidgetThemeKeys;
+import dev.tuink.terminal.style.CellStyle;
 import dev.tuink.tui.style.UiStyles;
 import org.junit.jupiter.api.Test;
 
@@ -25,5 +26,20 @@ class TerminalEditorWidgetThemeTest {
         );
         assertEquals(palette.dialog(), app.resolveOverlayWidgetStyle(WidgetThemeKeys.BUTTON_DISABLED, true));
         assertNull(app.resolveOverlayWidgetStyle(new WidgetStyleRole("test.unknown"), true));
+    }
+
+    @Test
+    void confirmAdapterUsesPromptStyleAndOneFocusedVariant() {
+        TerminalEditorApp app = new TerminalEditorApp();
+        UiStyles.Palette palette = UiStyles.forTheme(UiStyles.Theme.CYAN);
+        CellStyle prompt = palette.promptAlert();
+
+        assertEquals(prompt, app.resolveConfirmWidgetStyle(WidgetThemeKeys.BUTTON));
+        assertEquals(prompt, app.resolveConfirmWidgetStyle(WidgetThemeKeys.BUTTON_DISABLED));
+        assertEquals(
+            new CellStyle(prompt.bg(), prompt.fg(), true, prompt.underline()),
+            app.resolveConfirmWidgetStyle(WidgetThemeKeys.BUTTON_FOCUSED)
+        );
+        assertNull(app.resolveConfirmWidgetStyle(new WidgetStyleRole("test.unknown")));
     }
 }

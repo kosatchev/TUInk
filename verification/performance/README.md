@@ -27,6 +27,12 @@ runs 600 events three times for `Down`, `Shift+Down`, and mouse drag. Override
 the full-run defaults with `-PperfFrames=<multiple-of-30>` and
 `-PperfRepeats=<n>`.
 
+For field-specific work, the same harness accepts opt-in scenario
+`save-as-left`: it opens Save As, inserts a long Unicode draft, verifies the
+prompt and rendered draft, and drives 300 Left events. This scenario is
+excluded from `perfCheck` so the historical canonical series remains
+comparable.
+
 Raw profiles, `summary.json`, and a ready-to-copy `summary.md` are written
 below `build/performance/render/<timestamp>-<label>/`. Build output is ignored
 by Git; keep comparison results locally.

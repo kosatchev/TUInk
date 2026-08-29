@@ -31,4 +31,22 @@ public record FocusSpace(Point terminalOrigin, Rect parentClip) {
         Point point = new Point((int) localX, (int) localY);
         return parentClip.contains(point) ? Optional.of(point) : Optional.empty();
     }
+
+    /**
+     * Maps a parent-local point back into terminal-global coordinates while
+     * enforcing the same parent clip used for pointer routing.
+     */
+    public Optional<Point> terminalPoint(Point localPoint) {
+        Point required = Objects.requireNonNull(localPoint, "localPoint");
+        if (!parentClip.contains(required)) {
+            return Optional.empty();
+        }
+        long terminalX = (long) terminalOrigin.x() + required.x();
+        long terminalY = (long) terminalOrigin.y() + required.y();
+        if (terminalX < 0 || terminalX > Integer.MAX_VALUE
+            || terminalY < 0 || terminalY > Integer.MAX_VALUE) {
+            return Optional.empty();
+        }
+        return Optional.of(new Point((int) terminalX, (int) terminalY));
+    }
 }

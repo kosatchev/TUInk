@@ -35,7 +35,9 @@ PROFILE_PATTERN = re.compile(
     r"total=(?P<total>\d+(?:\.\d+)?)ms$"
 )
 PROFILE_METRICS = ("build", "raster", "diff", "search", "total")
-SCENARIOS = ("down", "shift-down", "mouse-drag")
+DEFAULT_SCENARIOS = ("down", "shift-down", "mouse-drag")
+SCENARIOS = DEFAULT_SCENARIOS + ("save-as-left",)
+SAVE_AS_STRESS_TEXT = ("draft-segment-" * 128 + "中😀" * 64).encode("utf-8")
 
 
 def sha256(path: Path) -> str:
@@ -136,6 +138,8 @@ def event_sequence(scenario: str, index: int) -> bytes:
         row = 3 + index % 35
         col = 10 + index % 100
         return f"\x1b[<32;{col};{row}M".encode("ascii")
+    if scenario == "save-as-left":
+        return b"\x1b[D"
     raise ValueError(f"unsupported scenario: {scenario}")
 
 
@@ -189,6 +193,22 @@ def run_profile(
             drain(selector, captured)
             time.sleep(0.01)
 
+        if scenario == "save-as-left":
+            # Open Save As through the public Ctrl+K binding, then exercise a
+            # long Unicode field rather than the closed-overlay hot path.
+            os.write(master, b"\x0b")
+            time.sleep(0.05)
+            drain(selector, captured)
+            os.write(master, b"\x1b[200~" + SAVE_AS_STRESS_TEXT + b"\x1b[201~")
+            prelude_deadline = time.monotonic() + 0.15
+            while time.monotonic() < prelude_deadline:
+                drain(selector, captured)
+                time.sleep(0.01)
+            if b"Save As:" not in captured:
+                raise RuntimeError("save-as-left prelude did not open the Save As prompt")
+            if b"draft-segment-" not in captured and "中".encode("utf-8") not in captured:
+                raise RuntimeError("save-as-left prelude did not render the long draft")
+
         input_start = time.monotonic()
         if scenario == "mouse-drag":
             os.write(master, b"\x1b[<0;10;3M")
@@ -211,7 +231,7 @@ def run_profile(
             time.sleep(0.01)
         input_elapsed = time.monotonic() - input_start
 
-        os.write(master, b"\x11")
+        os.write(master, b"\x11\x11" if scenario == "save-as-left" else b"\x11")
         exit_deadline = time.monotonic() + 3.0
         while poll() is None and time.monotonic() < exit_deadline:
             drain(selector, captured)
@@ -314,6 +334,8 @@ def run_self_test() -> None:
     assert abs(percentile([1.0, 2.0, 3.0, 4.0], 0.95) - 3.85) < 1e-9
     stats = distribution([1.0, 2.0, 3.0])
     assert stats == {"mean": 2.0, "p50": 2.0, "p95": 2.9, "max": 3.0}
+    assert event_sequence("save-as-left", 0) == b"\x1b[D"
+    assert parse_scenarios("down,save-as-left") == ["down", "save-as-left"]
 
     with tempfile.TemporaryDirectory(prefix="tuink-render-benchmark-") as temp:
         temp_dir = Path(temp)
@@ -358,7 +380,7 @@ def main() -> None:
     parser.add_argument("--label", default="working-tree")
     parser.add_argument("--frames", type=int, default=600)
     parser.add_argument("--repeats", type=int, default=3)
-    parser.add_argument("--scenarios", default=",".join(SCENARIOS))
+    parser.add_argument("--scenarios", default=",".join(DEFAULT_SCENARIOS))
     parser.add_argument("--rows", type=int, default=42)
     parser.add_argument("--cols", type=int, default=140)
     parser.add_argument("--fixture-lines", type=int, default=1800)

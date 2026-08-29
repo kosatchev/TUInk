@@ -57,6 +57,19 @@ build/performance/render/<timestamp>-<label>/
 └── summary.md
 ```
 
+The harness also has an opt-in `save-as-left` scenario for interactive-field
+changes. It opens Save As through Ctrl+K, pastes a long Unicode value, verifies
+that the prompt and draft were rendered, and then injects Left events. It is
+deliberately not part of the canonical closed-overlay task:
+
+```bash
+./gradlew --console=plain :app:nativeCompile
+python3 verification/performance/render_benchmark.py \
+  --binary apps/tuink/launcher/build/native/nativeCompile/tuink \
+  --label=save-as-cursor \
+  --frames=300 --repeats=3 --scenarios=save-as-left
+```
+
 The generated fixture, terminal size, injection interval, queue quiet window,
 and statistical aggregation are controlled by
 `verification/performance/render_benchmark.py`. The JSON summary records the binary and

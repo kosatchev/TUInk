@@ -42,4 +42,15 @@ class TerminalEditorWidgetThemeTest {
         );
         assertNull(app.resolveConfirmWidgetStyle(new WidgetStyleRole("test.unknown")));
     }
+
+    @Test
+    void saveAsFieldAdapterPreservesTheExistingPromptStyle() {
+        TerminalEditorApp app = new TerminalEditorApp();
+        CellStyle prompt = UiStyles.forTheme(UiStyles.Theme.CYAN).promptAlert();
+
+        assertEquals(prompt, app.resolveSaveAsWidgetStyle(WidgetThemeKeys.TEXT_FIELD));
+        assertEquals(prompt, app.resolveSaveAsWidgetStyle(WidgetThemeKeys.TEXT_FIELD_FOCUSED));
+        assertEquals(prompt, app.resolveSaveAsWidgetStyle(WidgetThemeKeys.TEXT_FIELD_DISABLED));
+        assertNull(app.resolveSaveAsWidgetStyle(new WidgetStyleRole("test.unknown")));
+    }
 }

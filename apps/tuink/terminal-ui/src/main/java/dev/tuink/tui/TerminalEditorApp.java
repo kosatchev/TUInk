@@ -82,6 +82,7 @@ import dev.tuink.tui.ui.OpenFileDialogController.OpenDialogButtons;
 import dev.tuink.tui.ui.OpenFileDialogController.OpenDialogLayout;
 import dev.tuink.tui.ui.OpenFileDialogController;
 import dev.tuink.tui.ui.CursorPolicy;
+import dev.tuink.tui.ui.SaveAsBarView;
 import dev.tuink.tui.ui.TabBar;
 import dev.tuink.tui.ui.TreeView;
 import dev.tuink.tui.ui.ViewportController;
@@ -105,7 +106,7 @@ import java.util.function.Consumer;
  */
 public class TerminalEditorApp {
     private static final String DEFAULT_FILE_NAME = "untitled.txt";
-    private static final String SAVE_AS_PROMPT = "Save As: ";
+    private static final Object SAVE_AS_SCOPE_ID = new Object();
     private static final long NOTIFY_DURATION_NANOS = 3_000_000_000L;
     private static final long OPEN_DIALOG_DOUBLE_CLICK_NANOS = 450_000_000L;
     private static final int PROFILE_LOG_EVERY_FRAMES = 30;
@@ -121,6 +122,8 @@ public class TerminalEditorApp {
     private final FocusManager<HelpOverlayInputRouter.Target> helpFocusManager = new FocusManager<>();
     private final Theme confirmWidgetTheme = this::resolveConfirmWidgetStyle;
     private final FocusManager<ConfirmChoice> confirmFocusManager = new FocusManager<>();
+    private final Theme saveAsWidgetTheme = this::resolveSaveAsWidgetStyle;
+    private final FocusManager<SaveAsBarView.Target> saveAsFocusManager = new FocusManager<>();
     private HelpOverlayPlacement helpOverlayCache;
     private boolean profileEnabled = false;
     private final FrameProfiler frameProfiler = new FrameProfiler();
@@ -300,6 +303,7 @@ public class TerminalEditorApp {
                 boolean running = true;
                 SearchBarView searchBar = null;
                 ConfirmBarView.Placement confirmBarPlacement = null;
+                SaveAsBarView.Placement saveAsBarPlacement = null;
                 UiModalState confirmPromptState = null;
                 Object confirmScopeId = null;
                 InlinePromptBar inlinePromptBar = InlinePromptBar.hidden();
@@ -346,6 +350,10 @@ public class TerminalEditorApp {
                         || saveOverwriteConfirmMode
                         || quitConfirmMode
                         || closeTabConfirmMode;
+                    if (!saveAsMode) {
+                        saveAsFocusManager.deactivate(SAVE_AS_SCOPE_ID);
+                        saveAsBarPlacement = null;
+                    }
                     if (confirmMode) {
                         if (confirmPromptState != modalState) {
                             deactivateConfirmFocus();
@@ -395,13 +403,21 @@ public class TerminalEditorApp {
                         );
                         showTabBar = uiSessionState.showTabBarSetting && tabs.size() > 1;
                         contentTopRow = showTabBar ? 2 : 1;
+                        // Keep the search model for resume-after-modal, but a
+                        // modal prompt exclusively owns this frame's row,
+                        // painter, and cursor.
+                        SearchBarView activeSearchBar = searchOwnsInteractiveRow(modalState)
+                            ? searchBar
+                            : null;
                         ConfirmBarView confirmBar = null;
+                        SaveAsBarView saveAsBar = null;
                         inlinePromptBar = InlinePromptBar.hidden();
                         if (saveAsMode) {
+                            saveAsBar = SaveAsBarView.build(saveAsInput, cols);
                             inlinePromptBar = InlinePromptBar.of(
-                                buildSaveAsPrompt(saveAsInput),
+                                saveAsBar.row(),
                                 EditorStyleAdapter.toEditor(styles.promptAlert()),
-                                TerminalText.visualWidth(SAVE_AS_PROMPT, 4) + saveAsInput.cursorCellColumn() + 1
+                                1
                             );
                         } else if (saveOverwriteConfirmMode) {
                             confirmBar = ConfirmBarView.build(
@@ -445,24 +461,33 @@ public class TerminalEditorApp {
                                 1,
                                 1
                             );
-                        } else if (searchBar != null) {
+                        } else if (activeSearchBar != null) {
                             inlinePromptBar = InlinePromptBar.of(
-                                searchBar.text(),
+                                activeSearchBar.text(),
                                 EditorStyleAdapter.toEditor(styles.searchBar()),
-                                searchBar.cursorRow(),
-                                searchBar.cursorCol()
+                                activeSearchBar.cursorRow(),
+                                activeSearchBar.cursorCol()
                             );
+                        }
+                        Rect promptInteractionClip = new Rect(
+                            0,
+                            contentTopRow,
+                            cols,
+                            Math.max(0, rows - contentTopRow)
+                        );
+                        if (saveAsBar != null) {
+                            saveAsBarPlacement = saveAsBar.place(
+                                SAVE_AS_SCOPE_ID,
+                                rows - 1 - inlinePromptBar.height(),
+                                promptInteractionClip
+                            );
+                            saveAsBarPlacement.activate(saveAsFocusManager);
                         }
                         if (confirmBar != null) {
                             confirmBarPlacement = confirmBar.place(
                                 confirmScopeId,
                                 rows - 1 - inlinePromptBar.height(),
-                                new Rect(
-                                    0,
-                                    contentTopRow,
-                                    cols,
-                                    Math.max(0, rows - contentTopRow)
-                                )
+                                promptInteractionClip
                             );
                             confirmBarPlacement.activate(confirmFocusManager);
                         }
@@ -619,9 +644,9 @@ public class TerminalEditorApp {
                             uiSessionState.wrapWordsSetting,
                             uiSessionState.autoSelectionHighlightSetting,
                             modalState,
-                            saveAsInput,
+                            saveAsBarPlacement,
                             tabs,
-                            searchBar,
+                            activeSearchBar,
                             confirmBarPlacement,
                             openFileMode,
                             openFileTree,
@@ -674,6 +699,51 @@ public class TerminalEditorApp {
                             }
                         }
                     }
+                    boolean routedSaveAsSubmit = false;
+                    if (saveAsMode) {
+                        if (inputEvent instanceof PointerEvent
+                            && (!uiSessionState.mouseModeSetting || !uiSessionState.mouseModeAvailable)) {
+                            continue;
+                        }
+                        if (saveAsBarPlacement == null) {
+                            // Entering the modal always schedules a frame; keep
+                            // a malformed/custom runtime from leaking input.
+                            eventLoop.invalidate();
+                            continue;
+                        }
+                        SaveAsInputRouter.Result saveAsInputResult = SaveAsInputRouter.route(
+                            saveAsFocusManager,
+                            saveAsBarPlacement,
+                            inputEvent
+                        );
+                        boolean clearsSaveAsNotification = (inputEvent instanceof TextInput text
+                                && text.text().codePointCount(0, text.text().length()) == 1)
+                            || (inputEvent instanceof KeyStroke stroke
+                                && stroke.modifiers().isEmpty()
+                                && stroke.key() == KeyStroke.Key.BACKSPACE);
+                        if (saveAsInputResult.consumed() && clearsSaveAsNotification) {
+                            notification.clear();
+                        }
+                        TextField.Action fieldAction = saveAsInputResult.action();
+                        if (fieldAction == TextField.Action.PASTE_REJECTED) {
+                            notification.error("Paste is too large and was not inserted");
+                            continue;
+                        }
+                        if (fieldAction == TextField.Action.VALUE_CHANGED) {
+                            saveAsSuggestions.rememberDraft(
+                                tabs.get(activeTabIndex).tabSession(),
+                                saveAsInput.text()
+                            );
+                            continue;
+                        }
+                        routedSaveAsSubmit = fieldAction == TextField.Action.SUBMITTED;
+                        if (inputEvent instanceof PointerEvent && saveAsInputResult.consumed()) {
+                            editorView.cancelMouseSelection();
+                        }
+                        if (!routedSaveAsSubmit && saveAsInputResult.consumed()) {
+                            continue;
+                        }
+                    }
                     ConfirmChoice routedConfirmDecision = null;
                     if (confirmMode) {
                         if (inputEvent instanceof PointerEvent
@@ -702,6 +772,7 @@ public class TerminalEditorApp {
                         }
                     }
                     CommandInvocation pendingCommand = routedConfirmDecision == null
+                        && !routedSaveAsSubmit
                         && inputEvent instanceof KeyStroke stroke
                         ? commandBridge.invocationFor(stroke).orElse(null)
                         : null;
@@ -711,14 +782,7 @@ public class TerminalEditorApp {
                             notification.error("Paste is too large and was not inserted");
                             continue;
                         }
-                        if (modalState.isSaveAs()) {
-                            String singleLine = singleLinePaste(paste.text());
-                            saveAsInput.insert(singleLine);
-                            saveAsSuggestions.rememberDraft(
-                                tabs.get(activeTabIndex).tabSession(),
-                                saveAsInput.text()
-                            );
-                        } else if (!modalState.isNone() || openFileMode || topMenu.isOpen()) {
+                        if (!modalState.isNone() || openFileMode || topMenu.isOpen()) {
                             // The focused overlay owns input; paste cannot leak through it.
                         } else if (uiSessionState.searchMode) {
                             TextField target = uiSessionState.searchFocus == SearchFocus.REPLACE
@@ -740,13 +804,7 @@ public class TerminalEditorApp {
 
                     if (inputEvent instanceof TextInput text
                         && text.text().codePointCount(0, text.text().length()) > 1) {
-                        if (modalState.isSaveAs()) {
-                            saveAsInput.insert(text.text());
-                            saveAsSuggestions.rememberDraft(
-                                tabs.get(activeTabIndex).tabSession(),
-                                saveAsInput.text()
-                            );
-                        } else if (!modalState.isNone() || openFileMode || topMenu.isOpen()) {
+                        if (!modalState.isNone() || openFileMode || topMenu.isOpen()) {
                             // Multi-scalar IME input is ignored by overlays that only accept keys.
                         } else if (uiSessionState.searchMode) {
                             TextField target = uiSessionState.searchFocus == SearchFocus.REPLACE
@@ -764,7 +822,7 @@ public class TerminalEditorApp {
                         continue;
                     }
 
-                    KeyEvent key = routedConfirmDecision == null
+                    KeyEvent key = routedConfirmDecision == null && !routedSaveAsSubmit
                         ? LegacyKeyEventAdapter.toLegacy(inputEvent).orElse(null)
                         : new KeyEvent.ActionEvent(KeyEvent.Action.ENTER);
                     if (key == null) {
@@ -2440,6 +2498,13 @@ public class TerminalEditorApp {
         placement.paint(canvas, confirmWidgetTheme, confirmFocusManager);
     }
 
+    private void paintSaveAsField(Canvas canvas, SaveAsBarView.Placement placement) {
+        if (placement == null) {
+            return;
+        }
+        placement.paint(canvas, saveAsWidgetTheme, saveAsFocusManager);
+    }
+
     private void paintSelectedSearchButton(
         Canvas canvas,
         SearchBarView searchBar,
@@ -2490,6 +2555,10 @@ public class TerminalEditorApp {
             result.appendCodePoint(codePoint);
         }
         return result.toString();
+    }
+
+    static boolean searchOwnsInteractiveRow(UiModalState modalState) {
+        return modalState != null && modalState.isNone();
     }
 
     private CellStyle focusedButtonStyle(CellStyle parentStyle) {
@@ -2722,6 +2791,15 @@ public class TerminalEditorApp {
         return null;
     }
 
+    CellStyle resolveSaveAsWidgetStyle(WidgetStyleRole key) {
+        if (WidgetThemeKeys.TEXT_FIELD.equals(key)
+            || WidgetThemeKeys.TEXT_FIELD_FOCUSED.equals(key)
+            || WidgetThemeKeys.TEXT_FIELD_DISABLED.equals(key)) {
+            return styles.promptAlert();
+        }
+        return null;
+    }
+
     private ConfirmBarInputRouter.Policy confirmPolicy(UiModalState modalState) {
         if (modalState.isRecoveryConfirm()) {
             return ConfirmBarInputRouter.Policy.recovery();
@@ -2886,7 +2964,7 @@ public class TerminalEditorApp {
         boolean wrapWordsSetting,
         boolean autoSelectionHighlightSetting,
         UiModalState modalState,
-        TextField saveAsInput,
+        SaveAsBarView.Placement saveAsBarPlacement,
         List<EditorTab> tabs,
         SearchBarView searchBar,
         ConfirmBarView.Placement confirmBarPlacement,
@@ -2970,6 +3048,7 @@ public class TerminalEditorApp {
             current = renderer.rasterize(plan, rows, cols, contentTopRow);
         }
         Canvas canvas = frameCanvas(current, rows, cols);
+        paintSaveAsField(canvas, saveAsBarPlacement);
         paintConfirmButtons(canvas, confirmBarPlacement);
         paintSelectedSearchButton(canvas, searchBar, searchFocus, rows, inlinePromptBarHeight, cols);
         if (showTabBar) {
@@ -3035,11 +3114,15 @@ public class TerminalEditorApp {
         int interactiveBottomCursorRow = Math.max(1, rows - 1);
         int interactiveTopCursorRow = interactiveBottomCursorRow - inlinePromptBarHeight + 1;
         if (saveAsMode) {
-            desiredCursorRow = interactiveBottomCursorRow;
-            desiredCursorCol = Math.min(
-                cols,
-                TerminalText.visualWidth(SAVE_AS_PROMPT, 4) + saveAsInput.cursorCellColumn() + 1
-            );
+            Point saveAsCursor = saveAsBarPlacement == null
+                ? null
+                : saveAsBarPlacement.cursorPosition(saveAsFocusManager).orElse(null);
+            if (saveAsCursor == null) {
+                desiredCursorVisible = false;
+            } else {
+                desiredCursorRow = saveAsCursor.y() + 1;
+                desiredCursorCol = saveAsCursor.x() + 1;
+            }
         } else if (searchBar != null) {
             desiredCursorRow = interactiveTopCursorRow + searchBar.cursorRow() - 1;
             desiredCursorCol = searchBar.cursorCol();
@@ -3300,7 +3383,7 @@ public class TerminalEditorApp {
             boolean wrapWordsSetting,
             boolean autoSelectionHighlightSetting,
             UiModalState modalState,
-            TextField saveAsInput,
+            SaveAsBarView.Placement saveAsBarPlacement,
             List<EditorTab> tabs,
             SearchBarView searchBar,
             ConfirmBarView.Placement confirmBarPlacement,
@@ -3337,7 +3420,7 @@ public class TerminalEditorApp {
                 wrapWordsSetting,
                 autoSelectionHighlightSetting,
                 modalState,
-                saveAsInput,
+                saveAsBarPlacement,
                 tabs,
                 searchBar,
                 confirmBarPlacement,
@@ -3356,10 +3439,6 @@ public class TerminalEditorApp {
                 topMenu
             );
         }
-    }
-
-    private String buildSaveAsPrompt(TextField saveAsInput) {
-        return SAVE_AS_PROMPT + saveAsInput.text();
     }
 
     private String buildOverwritePrompt(Path path) {

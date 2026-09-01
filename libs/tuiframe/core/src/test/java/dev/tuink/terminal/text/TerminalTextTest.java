@@ -163,4 +163,24 @@ class TerminalTextTest {
         );
     }
 
+    @Test
+    void visualPrefixStopsAfterTheFirstGraphemeCrossingTheViewport() {
+        assertEquals("abc", TerminalText.prefixForVisualWidth("abcdef", 3, 4));
+        assertEquals("a\t", TerminalText.prefixForVisualWidth("a\tb-tail", 3, 4));
+        assertEquals("中", TerminalText.prefixForVisualWidth("中-tail", 1, 4));
+        assertEquals(
+            "e\u0301中",
+            TerminalText.prefixForVisualWidth("e\u0301中-tail", 2, 4)
+        );
+        assertEquals("", TerminalText.prefixForVisualWidth("value", 0, 4));
+        assertEquals(
+            "中\t中",
+            TerminalText.prefixForVisualWidth(
+                "中\t中tail",
+                Integer.MAX_VALUE,
+                Integer.MAX_VALUE - 1
+            )
+        );
+    }
+
 }

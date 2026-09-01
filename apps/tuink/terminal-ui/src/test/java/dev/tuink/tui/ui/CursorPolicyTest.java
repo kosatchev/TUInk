@@ -3,7 +3,6 @@ package dev.tuink.tui.ui;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.tuink.tui.flow.SearchFocus;
 import org.junit.jupiter.api.Test;
 
 class CursorPolicyTest {
@@ -12,7 +11,7 @@ class CursorPolicyTest {
         assertFalse(CursorPolicy.shouldShowCursor(
             false,
             false,
-            SearchFocus.FIND,
+            false,
             true,
             false,
             false,
@@ -25,7 +24,7 @@ class CursorPolicyTest {
         assertTrue(CursorPolicy.shouldShowCursor(
             true,
             false,
-            SearchFocus.FIND,
+            false,
             false,
             false,
             false,
@@ -34,7 +33,7 @@ class CursorPolicyTest {
         assertTrue(CursorPolicy.shouldShowCursor(
             false,
             true,
-            SearchFocus.REPLACE,
+            true,
             false,
             false,
             false,
@@ -43,10 +42,32 @@ class CursorPolicyTest {
         assertFalse(CursorPolicy.shouldShowCursor(
             false,
             true,
-            SearchFocus.NEXT_BUTTON,
             false,
             false,
             false,
+            false,
+            false
+        ));
+    }
+
+    @Test
+    void foregroundOverlaySuppressesTheRetainedSearchCursor() {
+        assertFalse(CursorPolicy.shouldShowCursor(
+            false,
+            true,
+            true,
+            false,
+            true,
+            false,
+            false
+        ));
+        assertFalse(CursorPolicy.shouldShowCursor(
+            false,
+            true,
+            true,
+            false,
+            false,
+            true,
             false
         ));
     }

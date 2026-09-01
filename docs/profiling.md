@@ -57,9 +57,11 @@ build/performance/render/<timestamp>-<label>/
 └── summary.md
 ```
 
-The harness also has an opt-in `save-as-left` scenario for interactive-field
-changes. It opens Save As through Ctrl+K, pastes a long Unicode value, verifies
-that the prompt and draft were rendered, and then injects Left events. It is
+The harness also has opt-in `save-as-left` and `search-replace-left` scenarios
+for interactive-field changes. The first opens Save As through Ctrl+K. The
+second opens Search through Ctrl+F, inserts a distinct query, traverses the
+ten-target focus ring to Replace, and inserts a long Unicode replacement. Both
+verify their prompt/payload tokens before injecting Left events. They are
 deliberately not part of the canonical closed-overlay task:
 
 ```bash
@@ -68,6 +70,11 @@ python3 verification/performance/render_benchmark.py \
   --binary apps/tuink/launcher/build/native/nativeCompile/tuink \
   --label=save-as-cursor \
   --frames=300 --repeats=3 --scenarios=save-as-left
+
+python3 verification/performance/render_benchmark.py \
+  --binary apps/tuink/launcher/build/native/nativeCompile/tuink \
+  --label=search-cursor \
+  --frames=300 --repeats=3 --scenarios=search-replace-left
 ```
 
 The generated fixture, terminal size, injection interval, queue quiet window,
@@ -75,8 +82,12 @@ and statistical aggregation are controlled by
 `verification/performance/render_benchmark.py`. The JSON summary records the binary and
 fixture SHA-256 values together with host metadata.
 
-When completing an interface-related change, run `perfCheck` before and after
-on the same host and toolchain, and keep the accepted results in ignored local build output; see
+When completing an interface-related change reachable from a benchmarked
+application path, run `perfCheck` before and after on the same host and
+toolchain, and keep the accepted results in ignored local build output; see
 [benchmark guidance](../verification/performance/README.md). Treat a repeated
 10–15% regression or increasing queue-drain time as a reason to investigate;
-do not gate arbitrary developer machines on small timing differences.
+do not gate arbitrary developer machines on small timing differences. A new
+standalone toolkit primitive with no runtime consumer is covered structurally
+and functionally first, then performance-gated when its first real consumer
+makes the path measurable.

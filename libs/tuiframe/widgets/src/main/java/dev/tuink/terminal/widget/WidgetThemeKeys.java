@@ -11,6 +11,22 @@ public final class WidgetThemeKeys {
     public static final WidgetStyleRole MODAL_BODY = new WidgetStyleRole("widget.modal.body");
     public static final WidgetStyleRole MODAL_BORDER = new WidgetStyleRole("widget.modal.border");
     public static final WidgetStyleRole MODAL_TITLE = new WidgetStyleRole("widget.modal.title");
+    public static final WidgetStyleRole LIST_ITEM = new WidgetStyleRole("widget.list.item");
+    public static final WidgetStyleRole LIST_ITEM_SELECTED = new WidgetStyleRole(
+        "widget.list.item.selected"
+    );
+    public static final WidgetStyleRole LIST_ITEM_SELECTED_FOCUSED = new WidgetStyleRole(
+        "widget.list.item.selected-focused"
+    );
+    public static final WidgetStyleRole LIST_ITEM_DISABLED = new WidgetStyleRole(
+        "widget.list.item.disabled"
+    );
+    public static final WidgetStyleRole SCROLLBAR_TRACK = new WidgetStyleRole(
+        "widget.scrollbar.track"
+    );
+    public static final WidgetStyleRole SCROLLBAR_THUMB = new WidgetStyleRole(
+        "widget.scrollbar.thumb"
+    );
 
     private WidgetThemeKeys() {
     }

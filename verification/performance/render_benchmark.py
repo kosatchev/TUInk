@@ -36,8 +36,10 @@ PROFILE_PATTERN = re.compile(
 )
 PROFILE_METRICS = ("build", "raster", "diff", "search", "total")
 DEFAULT_SCENARIOS = ("down", "shift-down", "mouse-drag")
-SCENARIOS = DEFAULT_SCENARIOS + ("save-as-left",)
+SCENARIOS = DEFAULT_SCENARIOS + ("save-as-left", "search-replace-left")
 SAVE_AS_STRESS_TEXT = ("draft-segment-" * 128 + "中😀" * 64).encode("utf-8")
+SEARCH_QUERY = b"__tuink_missing_search__"
+SEARCH_REPLACE_STRESS_TEXT = ("replace-segment-" * 128 + "中😀" * 64).encode("utf-8")
 
 
 def sha256(path: Path) -> str:
@@ -138,7 +140,7 @@ def event_sequence(scenario: str, index: int) -> bytes:
         row = 3 + index % 35
         col = 10 + index % 100
         return f"\x1b[<32;{col};{row}M".encode("ascii")
-    if scenario == "save-as-left":
+    if scenario in ("save-as-left", "search-replace-left"):
         return b"\x1b[D"
     raise ValueError(f"unsupported scenario: {scenario}")
 
@@ -208,6 +210,37 @@ def run_profile(
                 raise RuntimeError("save-as-left prelude did not open the Save As prompt")
             if b"draft-segment-" not in captured and "中".encode("utf-8") not in captured:
                 raise RuntimeError("save-as-left prelude did not render the long draft")
+
+        if scenario == "search-replace-left":
+            # Open Search, keep a short absent query in the first field, then
+            # traverse the public focus ring to Replace and paste a long
+            # Unicode value. This exercises the complete ten-control
+            # composition and the horizontally paged second field.
+            os.write(master, b"\x06")
+            time.sleep(0.05)
+            drain(selector, captured)
+            os.write(master, b"\x1b[200~" + SEARCH_QUERY + b"\x1b[201~")
+            for _ in range(5):
+                os.write(master, b"\t")
+                time.sleep(0.01)
+                drain(selector, captured)
+            os.write(
+                master,
+                b"\x1b[200~" + SEARCH_REPLACE_STRESS_TEXT + b"\x1b[201~",
+            )
+            prelude_deadline = time.monotonic() + 0.15
+            while time.monotonic() < prelude_deadline:
+                drain(selector, captured)
+                time.sleep(0.01)
+            if b"Find:" not in captured or b"Replace:" not in captured:
+                raise RuntimeError("search-replace-left prelude did not open both search rows")
+            if SEARCH_QUERY not in captured:
+                raise RuntimeError("search-replace-left prelude did not render the query")
+            if (
+                b"replace-segment-" not in captured
+                and "中".encode("utf-8") not in captured
+            ):
+                raise RuntimeError("search-replace-left prelude did not render the replacement")
 
         input_start = time.monotonic()
         if scenario == "mouse-drag":
@@ -335,7 +368,12 @@ def run_self_test() -> None:
     stats = distribution([1.0, 2.0, 3.0])
     assert stats == {"mean": 2.0, "p50": 2.0, "p95": 2.9, "max": 3.0}
     assert event_sequence("save-as-left", 0) == b"\x1b[D"
-    assert parse_scenarios("down,save-as-left") == ["down", "save-as-left"]
+    assert event_sequence("search-replace-left", 0) == b"\x1b[D"
+    assert parse_scenarios("down,save-as-left,search-replace-left") == [
+        "down",
+        "save-as-left",
+        "search-replace-left",
+    ]
 
     with tempfile.TemporaryDirectory(prefix="tuink-render-benchmark-") as temp:
         temp_dir = Path(temp)

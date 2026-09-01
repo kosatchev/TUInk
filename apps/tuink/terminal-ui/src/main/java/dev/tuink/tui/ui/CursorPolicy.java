@@ -1,7 +1,5 @@
 package dev.tuink.tui.ui;
 
-import dev.tuink.tui.flow.SearchFocus;
-
 public final class CursorPolicy {
     private CursorPolicy() {
     }
@@ -9,7 +7,7 @@ public final class CursorPolicy {
     public static boolean shouldShowCursor(
         boolean saveAsMode,
         boolean searchBarVisible,
-        SearchFocus searchFocus,
+        boolean searchCursorAvailable,
         boolean confirmBarVisible,
         boolean topMenuOpen,
         boolean openFileMode,
@@ -18,14 +16,11 @@ public final class CursorPolicy {
         if (saveAsMode) {
             return true;
         }
+        if (confirmBarVisible || topMenuOpen || openFileMode || helpHintsMode) {
+            return false;
+        }
         if (searchBarVisible) {
-            return searchFocus == SearchFocus.FIND || searchFocus == SearchFocus.REPLACE;
-        }
-        if (confirmBarVisible) {
-            return false;
-        }
-        if (topMenuOpen || openFileMode || helpHintsMode) {
-            return false;
+            return searchCursorAvailable;
         }
         return true;
     }

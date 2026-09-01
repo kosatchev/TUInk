@@ -4,7 +4,6 @@ import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.GutterDiffMode;
 import dev.tuink.core.TabInsertMode;
-import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.input.KeyEvent;
 import dev.tuink.tui.ui.MenuBar;
 import java.util.function.Consumer;
@@ -183,7 +182,6 @@ final class InputActionDispatcher {
             }
             case CTRL_F -> {
                 ui.searchMode = true;
-                ui.searchFocus = SearchFocus.FIND;
                 return DispatchResult.handled(null);
             }
             case CTRL_C -> {

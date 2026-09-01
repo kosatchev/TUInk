@@ -56,6 +56,69 @@ public final class CellText {
         return outX;
     }
 
+    /**
+     * Draws only the grapheme-safe prefix intersecting a left-aligned cell
+     * viewport. Unlike {@link #draw(Canvas, int, int, String, CellStyle)}, this
+     * method does not segment the invisible remainder of a long string.
+     */
+    public static void drawClipped(
+        Canvas canvas,
+        int x,
+        int y,
+        String text,
+        CellStyle style,
+        int maxCells
+    ) {
+        Objects.requireNonNull(canvas, "canvas");
+        if (text == null || text.isEmpty() || maxCells <= 0) {
+            return;
+        }
+        String prefix = TerminalText.prefixForVisualWidth(text, maxCells, TAB_WIDTH);
+        int mark = canvas.save();
+        try {
+            if (!canvas.clip(x, y, maxCells, 1)) {
+                return;
+            }
+            long visual = 0L;
+            Cell blank = null;
+            for (TerminalText.Grapheme grapheme : TerminalText.graphemes(prefix)) {
+                int advance = grapheme.tab()
+                    ? TAB_WIDTH - (int) (visual % TAB_WIDTH)
+                    : Math.max(1, grapheme.width());
+                long remaining = (long) maxCells - visual;
+                if (remaining <= 0L) {
+                    break;
+                }
+                if (grapheme.tab()) {
+                    if (blank == null) {
+                        blank = new Cell(" ", style);
+                    }
+                    int visible = (int) Math.min((long) advance, remaining);
+                    for (int cell = 0; cell < visible; cell++) {
+                        putAtLongX(canvas, (long) x + visual + cell, y, blank);
+                    }
+                } else if (advance <= remaining) {
+                    putAtLongX(canvas, (long) x + visual, y, grapheme.text(), style);
+                }
+                visual += advance;
+            }
+        } finally {
+            canvas.restore(mark);
+        }
+    }
+
+    private static void putAtLongX(Canvas canvas, long x, int y, Cell cell) {
+        if (x >= Integer.MIN_VALUE && x <= Integer.MAX_VALUE) {
+            canvas.put((int) x, y, cell);
+        }
+    }
+
+    private static void putAtLongX(Canvas canvas, long x, int y, String grapheme, CellStyle style) {
+        if (x >= Integer.MIN_VALUE && x <= Integer.MAX_VALUE) {
+            canvas.put((int) x, y, grapheme, style);
+        }
+    }
+
     /** Draws complete graphemes only and returns the first cell after the text. */
     public static int draw(CellBuffer buffer, int row, int startCol, String text, CellStyle style, int endCol) {
         if (buffer == null || text == null || text.isEmpty()) {

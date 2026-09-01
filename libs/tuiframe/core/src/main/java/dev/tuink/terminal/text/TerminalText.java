@@ -337,6 +337,51 @@ public final class TerminalText {
         return out;
     }
 
+    /**
+     * Returns the smallest grapheme-safe prefix covering a left-aligned cell
+     * viewport. The last grapheme may cross the right edge so a clipped
+     * painter can preserve partial-tab and atomic-wide-cell semantics without
+     * scanning the remainder of a long line.
+     */
+    public static String prefixForVisualWidth(String text, int maxCells, int tabWidth) {
+        String value = text == null ? "" : text;
+        if (value.isEmpty() || maxCells <= 0) {
+            return "";
+        }
+        int safeTabWidth = Math.max(1, tabWidth);
+        int end = 0;
+        long visual = 0L;
+        long limit = maxCells;
+        while (end < value.length() && visual < limit) {
+            char ch = value.charAt(end);
+            if (!isSimpleAsciiChar(ch)
+                || end + 1 < value.length() && !isSimpleAsciiChar(value.charAt(end + 1))) {
+                break;
+            }
+            long advance = ch == '\t'
+                ? safeTabWidth - (visual % safeTabWidth)
+                : 1L;
+            visual += advance;
+            end++;
+        }
+        if (end == value.length() || visual >= limit) {
+            return end == value.length() ? value : value.substring(0, end);
+        }
+
+        Matcher matcher = GRAPHEME_PATTERN.matcher(value);
+        while (end < value.length() && visual < limit) {
+            matcher.region(end, value.length());
+            int next = matcher.lookingAt() ? matcher.end() : Math.min(value.length(), end + 1);
+            boolean tab = next == end + 1 && value.charAt(end) == '\t';
+            long advance = tab
+                ? safeTabWidth - (visual % safeTabWidth)
+                : Math.max(1, graphemeWidth(value, end, next));
+            visual += advance;
+            end = next;
+        }
+        return end == value.length() ? value : value.substring(0, end);
+    }
+
     public static int previousBoundary(String text, int offset) {
         return GraphemeText.previousBoundary(text, offset);
     }
@@ -483,11 +528,15 @@ public final class TerminalText {
     private static boolean isSimpleAscii(String text) {
         for (int i = 0; i < text.length(); i++) {
             char ch = text.charAt(i);
-            if (ch > 0x7F || ch == '\r' || ch == '\n') {
+            if (!isSimpleAsciiChar(ch)) {
                 return false;
             }
         }
         return true;
+    }
+
+    private static boolean isSimpleAsciiChar(char ch) {
+        return ch <= 0x7F && ch != '\r' && ch != '\n';
     }
 
     private static boolean containsUnsafeControl(String text, int start, int end) {

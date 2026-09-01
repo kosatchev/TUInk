@@ -141,4 +141,44 @@ class CellTextTest {
         assertEquals(signature2, buffer.rowSignature2(0));
         assertEquals(Cell.EMPTY, buffer.get(0, 0));
     }
+
+    @Test
+    void clippedCanvasDrawProcessesOnlyTheVisiblePrefixAndKeepsTabAndWideEdgesAtomic() {
+        CellBuffer buffer = new CellBuffer(1, 5);
+        buffer.fill(new Cell(".", CellStyle.DEFAULT));
+        Canvas canvas = new Canvas(buffer);
+
+        CellText.drawClipped(
+            canvas,
+            0,
+            0,
+            "a\t中" + "tail".repeat(10_000),
+            CellStyle.DEFAULT,
+            3
+        );
+
+        assertEquals("a", buffer.get(0, 0).grapheme());
+        assertEquals(" ", buffer.get(0, 1).grapheme());
+        assertEquals(" ", buffer.get(0, 2).grapheme());
+        assertEquals(".", buffer.get(0, 3).grapheme());
+
+        CellBuffer wide = new CellBuffer(1, 2);
+        wide.fill(new Cell(".", CellStyle.DEFAULT));
+        CellText.drawClipped(new Canvas(wide), 0, 0, "中tail", CellStyle.DEFAULT, 1);
+        assertEquals(".", wide.get(0, 0).grapheme());
+        assertEquals(".", wide.get(0, 1).grapheme());
+
+        CellBuffer extreme = new CellBuffer(1, 1);
+        Canvas translated = new Canvas(extreme);
+        translated.translate(-(Integer.MAX_VALUE - 1), 0);
+        CellText.drawClipped(
+            translated,
+            Integer.MAX_VALUE - 1,
+            0,
+            "中",
+            CellStyle.DEFAULT,
+            1
+        );
+        assertEquals(Cell.EMPTY, extreme.get(0, 0));
+    }
 }

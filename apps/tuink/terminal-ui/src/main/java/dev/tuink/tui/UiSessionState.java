@@ -2,11 +2,9 @@ package dev.tuink.tui;
 
 import dev.tuink.core.GutterDiffMode;
 import dev.tuink.core.TabInsertMode;
-import dev.tuink.tui.flow.SearchFocus;
 
 final class UiSessionState {
     boolean searchMode;
-    SearchFocus searchFocus;
     boolean showTabBarSetting;
     boolean wrapLinesSetting;
     boolean wrapWordsSetting;
@@ -32,7 +30,6 @@ final class UiSessionState {
 
     static UiSessionState from(
         boolean searchMode,
-        SearchFocus searchFocus,
         boolean showTabBarSetting,
         boolean wrapLinesSetting,
         boolean wrapWordsSetting,
@@ -57,7 +54,6 @@ final class UiSessionState {
     ) {
         UiSessionState state = new UiSessionState();
         state.searchMode = searchMode;
-        state.searchFocus = searchFocus;
         state.showTabBarSetting = showTabBarSetting;
         state.wrapLinesSetting = wrapLinesSetting;
         state.wrapWordsSetting = wrapWordsSetting;

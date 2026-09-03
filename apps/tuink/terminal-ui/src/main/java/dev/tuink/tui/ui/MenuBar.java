@@ -987,7 +987,7 @@ public final class MenuBar {
                 return NO_NAME_LABEL;
             }
             String marker = tabIndex == activeTabIndex ? "> " : "   ";
-            return marker + TabBar.formatTabTitle(tab.file(), tab.dirty(), tab.hasMatch());
+            return marker + TabBarView.formatTabTitle(tab.file(), tab.dirty(), tab.hasMatch());
         }
 
         private static MenuId nextMenu(MenuId menu) {

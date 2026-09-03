@@ -27,16 +27,21 @@ runs 600 events three times for `Down`, `Shift+Down`, and mouse drag. Override
 the full-run defaults with `-PperfFrames=<multiple-of-30>` and
 `-PperfRepeats=<n>`.
 
-For field-specific work, the same harness accepts opt-in scenarios
-`save-as-left` and `search-replace-left`. They open the corresponding field,
-insert a long Unicode value, verify prompt/payload tokens, and drive 300 Left
-events. These scenarios are excluded from `perfCheck` so the historical
-canonical series remains comparable; exact field routing is covered by the
-functional tests rather than inferred from retained ANSI output.
+For focused widget work, the same harness accepts opt-in scenarios
+`save-as-left`, `search-replace-left`, and `tabbar-wheel`. The field scenarios
+open the corresponding field, insert a long Unicode value, verify
+prompt/payload tokens, and drive 300 Left events. `tabbar-wheel` creates an
+overflowing strip, fail-fast checks that its viewport moves, and alternates
+wheel directions on terminal row 2. These scenarios are excluded from
+`perfCheck` so its default scenario set remains stable; exact routing remains
+covered by functional tests rather than inferred only from retained ANSI
+output.
 
 Raw profiles, `summary.json`, and a ready-to-copy `summary.md` are written
 below `build/performance/render/<timestamp>-<label>/`. Build output is ignored
-by Git; keep comparison results locally.
+by Git; keep comparison results locally. The directory also contains the deterministic
+`tuink.properties` used through a temporary isolated `user.home`; summary
+metadata records its SHA-256 together with binary and text-fixture hashes.
 
 Do not use small timing differences as a hard failure on an arbitrary machine.
 Compare paired runs on the same host and toolchain, and investigate a repeated

@@ -27,6 +27,14 @@ public final class WidgetThemeKeys {
     public static final WidgetStyleRole SCROLLBAR_THUMB = new WidgetStyleRole(
         "widget.scrollbar.thumb"
     );
+    public static final WidgetStyleRole TAB_BAR = new WidgetStyleRole("widget.tab-bar");
+    public static final WidgetStyleRole TAB_ITEM = new WidgetStyleRole("widget.tab.item");
+    public static final WidgetStyleRole TAB_ITEM_ACTIVE = new WidgetStyleRole(
+        "widget.tab.item.active"
+    );
+    public static final WidgetStyleRole TAB_ITEM_DISABLED = new WidgetStyleRole(
+        "widget.tab.item.disabled"
+    );
 
     private WidgetThemeKeys() {
     }

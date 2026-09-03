@@ -52,17 +52,20 @@ drag. It builds the glibc native binary automatically. Results are written to:
 ```text
 build/performance/render/<timestamp>-<label>/
 ├── fixture.java
+├── tuink.properties
 ├── <scenario>-<repeat>.log
 ├── summary.json
 └── summary.md
 ```
 
-The harness also has opt-in `save-as-left` and `search-replace-left` scenarios
-for interactive-field changes. The first opens Save As through Ctrl+K. The
-second opens Search through Ctrl+F, inserts a distinct query, traverses the
-ten-target focus ring to Replace, and inserts a long Unicode replacement. Both
-verify their prompt/payload tokens before injecting Left events. They are
-deliberately not part of the canonical closed-overlay task:
+The harness also has opt-in `save-as-left`, `search-replace-left`, and
+`tabbar-wheel` scenarios. The first opens Save As through Ctrl+K. The second
+opens Search through Ctrl+F, inserts a distinct query, traverses the ten-target
+focus ring to Replace, and inserts a long Unicode replacement. Both verify
+their prompt/payload tokens before injecting Left events. `tabbar-wheel`
+creates enough tabs to overflow the strip, verifies that a wheel event moves
+its viewport, then alternates wheel directions on terminal row 2. These
+scenarios are deliberately not part of the canonical closed-overlay task:
 
 ```bash
 ./gradlew --console=plain :app:nativeCompile
@@ -75,12 +78,18 @@ python3 verification/performance/render_benchmark.py \
   --binary apps/tuink/launcher/build/native/nativeCompile/tuink \
   --label=search-cursor \
   --frames=300 --repeats=3 --scenarios=search-replace-left
+
+python3 verification/performance/render_benchmark.py \
+  --binary apps/tuink/launcher/build/native/nativeCompile/tuink \
+  --label=tabbar-scroll \
+  --frames=300 --repeats=3 --scenarios=tabbar-wheel
 ```
 
 The generated fixture, terminal size, injection interval, queue quiet window,
-and statistical aggregation are controlled by
-`verification/performance/render_benchmark.py`. The JSON summary records the binary and
-fixture SHA-256 values together with host metadata.
+isolated current-schema settings, and statistical aggregation are controlled by
+`verification/performance/render_benchmark.py`. Each child receives a temporary `user.home`,
+so saved mouse/tab preferences cannot silently change a scenario. The JSON
+summary records binary, fixture, and settings SHA-256 values with host metadata.
 
 When completing an interface-related change reachable from a benchmarked
 application path, run `perfCheck` before and after on the same host and

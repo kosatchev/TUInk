@@ -70,4 +70,26 @@ class TerminalEditorWidgetThemeTest {
         );
         assertNull(app.resolveSearchWidgetStyle(new WidgetStyleRole("test.unknown")));
     }
+
+    @Test
+    void tabBarAdapterMapsColorMonoAndActiveRolesWithoutMutableWidgetStyles() {
+        TerminalEditorApp app = new TerminalEditorApp();
+        UiStyles.Palette palette = UiStyles.forTheme(UiStyles.Theme.CYAN);
+
+        assertEquals(palette.tabbar(), app.resolveTabBarWidgetStyle(WidgetThemeKeys.TAB_BAR, true));
+        assertEquals(palette.tabbar(), app.resolveTabBarWidgetStyle(WidgetThemeKeys.TAB_ITEM, true));
+        assertEquals(
+            palette.tabbarActive(),
+            app.resolveTabBarWidgetStyle(WidgetThemeKeys.TAB_ITEM_ACTIVE, true)
+        );
+        assertEquals(
+            palette.tabbarMono(),
+            app.resolveTabBarWidgetStyle(WidgetThemeKeys.TAB_ITEM_DISABLED, false)
+        );
+        assertEquals(
+            palette.tabbarActiveMono(),
+            app.resolveTabBarWidgetStyle(WidgetThemeKeys.TAB_ITEM_ACTIVE, false)
+        );
+        assertNull(app.resolveTabBarWidgetStyle(new WidgetStyleRole("test.unknown"), true));
+    }
 }

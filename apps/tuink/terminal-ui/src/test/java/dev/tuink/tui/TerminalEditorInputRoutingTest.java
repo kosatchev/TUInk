@@ -44,6 +44,69 @@ class TerminalEditorInputRoutingTest {
     }
 
     @Test
+    void rawTabRoutingYieldsToVisualOwnersAndKeepsCloseConfirmationSafe() {
+        assertEquals(
+            TabBarInputRouter.Policy.NORMAL,
+            TerminalEditorApp.tabBarInputPolicy(true, true, UiModalState.none(), false, false, false)
+        );
+        assertEquals(
+            TabBarInputRouter.Policy.SEARCH,
+            TerminalEditorApp.tabBarInputPolicy(true, true, UiModalState.none(), false, false, true)
+        );
+        assertEquals(
+            TabBarInputRouter.Policy.CLOSE_TAB_CONFIRM,
+            TerminalEditorApp.tabBarInputPolicy(
+                true,
+                true,
+                UiModalState.closeTabConfirm(0),
+                false,
+                false,
+                false
+            )
+        );
+        assertNull(TerminalEditorApp.tabBarInputPolicy(
+            true,
+            true,
+            UiModalState.none(),
+            false,
+            true,
+            false
+        ));
+        assertNull(TerminalEditorApp.tabBarInputPolicy(
+            true,
+            true,
+            UiModalState.none(),
+            true,
+            false,
+            false
+        ));
+        assertNull(TerminalEditorApp.tabBarInputPolicy(
+            true,
+            true,
+            UiModalState.saveAs(),
+            false,
+            false,
+            false
+        ));
+        assertNull(TerminalEditorApp.tabBarInputPolicy(
+            false,
+            true,
+            UiModalState.none(),
+            false,
+            false,
+            false
+        ));
+        assertNull(TerminalEditorApp.tabBarInputPolicy(
+            true,
+            false,
+            UiModalState.none(),
+            false,
+            false,
+            false
+        ));
+    }
+
+    @Test
     void helpRequestedWhileSearchOwnsInputIsPromotedAndConsumed() {
         UiSessionState ui = new UiSessionState();
         ui.helpHintsMode = true;

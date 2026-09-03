@@ -18,7 +18,8 @@ import dev.tuink.terminal.widget.Theme;
 import dev.tuink.terminal.widget.WidgetState;
 import dev.tuink.terminal.widget.WidgetThemeKeys;
 import dev.tuink.tui.ui.MenuBar;
-import dev.tuink.tui.ui.TabBar;
+import dev.tuink.tui.ui.TabBarView;
+import dev.tuink.terminal.widget.TabBar;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -77,6 +78,15 @@ class FrameCompositionGoldenTest {
         false
     );
     private static final Theme WIDGET_THEME = key -> {
+        if (WidgetThemeKeys.TAB_BAR.equals(key)) {
+            return TAB;
+        }
+        if (WidgetThemeKeys.TAB_ITEM.equals(key)) {
+            return TAB;
+        }
+        if (WidgetThemeKeys.TAB_ITEM_ACTIVE.equals(key)) {
+            return TAB_ACTIVE;
+        }
         if (WidgetThemeKeys.MODAL_BODY.equals(key)) {
             return MODAL_BODY;
         }
@@ -102,17 +112,15 @@ class FrameCompositionGoldenTest {
         String topBar = menu.buildTopBar(Path.of("中.txt"), true, 0, 2, COLS, false);
         CellText.draw(canvas, 0, 0, topBar, TOP);
 
-        TabBar tabs = new TabBar(TAB, CellStyle.DEFAULT, TAB_ACTIVE, MONO_SELECTED);
-        tabs.draw(
-            canvas,
-            COLS,
+        TabBarView.Placement tabs = TabBarView.build(
             List.of(
-                new TabBar.TabItem(Path.of("α.txt"), false, false),
-                new TabBar.TabItem(Path.of("中e\u0301"), true, true)
+                new TabBarView.TabItem(Path.of("α.txt"), false, false),
+                new TabBarView.TabItem(Path.of("中e\u0301"), true, true)
             ),
             1,
-            true
-        );
+            TabBar.State.initial()
+        ).place(new Rect(0, 1, COLS, 1), new Rect(0, 0, COLS, ROWS));
+        tabs.paint(canvas, WIDGET_THEME);
 
         CellText.draw(canvas, 2, 2, "editor: A中B e\u0301", CONTENT);
         CellText.draw(canvas, 1, 8, "status: ready", CONTENT);

@@ -16,6 +16,7 @@ import pty
 import re
 import selectors
 import signal
+import shutil
 import statistics
 import struct
 import subprocess
@@ -36,10 +37,47 @@ PROFILE_PATTERN = re.compile(
 )
 PROFILE_METRICS = ("build", "raster", "diff", "search", "total")
 DEFAULT_SCENARIOS = ("down", "shift-down", "mouse-drag")
-SCENARIOS = DEFAULT_SCENARIOS + ("save-as-left", "search-replace-left")
+SCENARIOS = DEFAULT_SCENARIOS + (
+    "save-as-left",
+    "search-replace-left",
+    "tabbar-wheel",
+)
+MOUSE_SCENARIOS = ("mouse-drag", "tabbar-wheel")
 SAVE_AS_STRESS_TEXT = ("draft-segment-" * 128 + "中😀" * 64).encode("utf-8")
 SEARCH_QUERY = b"__tuink_missing_search__"
 SEARCH_REPLACE_STRESS_TEXT = ("replace-segment-" * 128 + "中😀" * 64).encode("utf-8")
+
+
+def create_settings_fixture(path: Path) -> None:
+    path.write_text(
+        "\n".join(
+            (
+                "format=1",
+                "ui.showTabBar=true",
+                "ui.wrapLines=false",
+                "ui.wrapWords=true",
+                "ui.readingMode=false",
+                "ui.confirmOnClose=true",
+                "ui.mouseMode=true",
+                "ui.highlightActiveLineNumber=true",
+                "ui.smartHomeEnd=true",
+                "ui.autoIndent=true",
+                "ui.autoPairs=true",
+                "ui.autoList=true",
+                "ui.visibleWhitespace=true",
+                "ui.syntaxHighlighting=true",
+                "ui.rainbowBrackets=true",
+                "ui.autoSelectionHighlight=true",
+                "ui.gutterDiffMode=myers",
+                "ui.tabWidth=4",
+                "ui.tabInsertMode=auto",
+                "ui.theme=cyan",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
 
 
 def sha256(path: Path) -> str:
@@ -140,6 +178,9 @@ def event_sequence(scenario: str, index: int) -> bytes:
         row = 3 + index % 35
         col = 10 + index % 100
         return f"\x1b[<32;{col};{row}M".encode("ascii")
+    if scenario == "tabbar-wheel":
+        button = 65 if index % 2 == 0 else 64
+        return f"\x1b[<{button};10;2M".encode("ascii")
     if scenario in ("save-as-left", "search-replace-left"):
         return b"\x1b[D"
     raise ValueError(f"unsupported scenario: {scenario}")
@@ -148,6 +189,7 @@ def event_sequence(scenario: str, index: int) -> bytes:
 def run_profile(
     binary: Path,
     fixture: Path,
+    settings_fixture: Path,
     profile_path: Path,
     scenario: str,
     frames: int,
@@ -160,6 +202,10 @@ def run_profile(
 ) -> float:
     if profile_path.exists():
         profile_path.unlink()
+    runtime_home = Path(tempfile.mkdtemp(prefix="tuink-render-home-"))
+    settings_path = runtime_home / ".config" / "tuink" / "tuink.properties"
+    settings_path.parent.mkdir(parents=True, exist_ok=False)
+    shutil.copyfile(settings_fixture, settings_path)
 
     pid, master = pty.fork()
     if pid == 0:
@@ -167,11 +213,12 @@ def run_profile(
         os.environ["TERM"] = "xterm-256color"
         child_args = [
             str(binary),
+            f"-Duser.home={runtime_home}",
             f"--profile-file={profile_path}",
             str(fixture),
         ]
-        if scenario != "mouse-drag":
-            child_args.insert(1, "--no-mouse")
+        if scenario not in MOUSE_SCENARIOS:
+            child_args.insert(2, "--no-mouse")
         os.execv(str(binary), child_args)
 
     tty.setraw(master)
@@ -242,6 +289,32 @@ def run_profile(
             ):
                 raise RuntimeError("search-replace-left prelude did not render the replacement")
 
+        if scenario == "tabbar-wheel":
+            # Create enough clean tabs to overflow a 140-column strip, then
+            # prove that a wheel event on terminal row 2 changes its viewport.
+            for _ in range(8):
+                os.write(master, b"\x0e")
+                time.sleep(0.02)
+                drain(selector, captured)
+            prelude_deadline = time.monotonic() + 0.15
+            while time.monotonic() < prelude_deadline:
+                drain(selector, captured)
+                time.sleep(0.01)
+            if b"--no name--" not in captured:
+                raise RuntimeError("tabbar-wheel prelude did not render the created tabs")
+
+            captured.clear()
+            os.write(master, event_sequence(scenario, 0))
+            prelude_deadline = time.monotonic() + 0.15
+            while time.monotonic() < prelude_deadline:
+                drain(selector, captured)
+                time.sleep(0.01)
+            if b"<" not in captured:
+                raise RuntimeError("tabbar-wheel prelude did not move the tab viewport")
+            os.write(master, event_sequence(scenario, 1))
+            time.sleep(0.05)
+            drain(selector, captured)
+
         input_start = time.monotonic()
         if scenario == "mouse-drag":
             os.write(master, b"\x1b[<0;10;3M")
@@ -284,6 +357,7 @@ def run_profile(
             os.waitpid(pid, 0)
         selector.close()
         os.close(master)
+        shutil.rmtree(runtime_home, ignore_errors=True)
 
     expected = frames // 30
     actual = profile_line_count(profile_path)
@@ -334,6 +408,7 @@ def summary_markdown(summary: dict[str, object]) -> str:
         f"- Commit: `{metadata.get('commit') or 'unknown'}`",
         f"- Binary SHA-256: `{metadata['binary_sha256']}`",
         f"- Fixture SHA-256: `{metadata['fixture_sha256']}`",
+        f"- Settings SHA-256: `{metadata['settings_sha256']}`",
         (
             f"- Terminal: `{metadata['rows']}x{metadata['cols']}`, "
             f"events: `{metadata['frames']}`, repeats: `{metadata['repeats']}`"
@@ -369,10 +444,15 @@ def run_self_test() -> None:
     assert stats == {"mean": 2.0, "p50": 2.0, "p95": 2.9, "max": 3.0}
     assert event_sequence("save-as-left", 0) == b"\x1b[D"
     assert event_sequence("search-replace-left", 0) == b"\x1b[D"
-    assert parse_scenarios("down,save-as-left,search-replace-left") == [
+    assert event_sequence("tabbar-wheel", 0) == b"\x1b[<65;10;2M"
+    assert event_sequence("tabbar-wheel", 1) == b"\x1b[<64;10;2M"
+    assert parse_scenarios(
+        "down,save-as-left,search-replace-left,tabbar-wheel"
+    ) == [
         "down",
         "save-as-left",
         "search-replace-left",
+        "tabbar-wheel",
     ]
 
     with tempfile.TemporaryDirectory(prefix="tuink-render-benchmark-") as temp:
@@ -382,6 +462,11 @@ def run_self_test() -> None:
         create_fixture(first_fixture, 32)
         create_fixture(second_fixture, 32)
         assert sha256(first_fixture) == sha256(second_fixture)
+        first_settings = temp_dir / "first.properties"
+        second_settings = temp_dir / "second.properties"
+        create_settings_fixture(first_settings)
+        create_settings_fixture(second_settings)
+        assert sha256(first_settings) == sha256(second_settings)
 
         profile = temp_dir / "profile.log"
         profile.write_text(
@@ -459,6 +544,8 @@ def main() -> None:
     run_dir.mkdir(parents=True, exist_ok=False)
     fixture = run_dir / "fixture.java"
     create_fixture(fixture, args.fixture_lines)
+    settings_fixture = run_dir / "tuink.properties"
+    create_settings_fixture(settings_fixture)
 
     scenario_summaries: dict[str, object] = {}
     for scenario in scenarios:
@@ -470,6 +557,7 @@ def main() -> None:
             elapsed = run_profile(
                 binary=binary,
                 fixture=fixture,
+                settings_fixture=settings_fixture,
                 profile_path=profile_path,
                 scenario=scenario,
                 frames=args.frames,
@@ -500,6 +588,7 @@ def main() -> None:
             "binary": str(binary),
             "binary_sha256": sha256(binary),
             "fixture_sha256": sha256(fixture),
+            "settings_sha256": sha256(settings_fixture),
             "platform": platform.platform(),
             "machine": platform.machine(),
             "processor": platform.processor(),

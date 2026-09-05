@@ -167,7 +167,7 @@ final class LegacyCommandBridge {
     }
 
     Optional<KeyEvent.Action> invoke(CommandInvocation invocation) {
-        Optional<RoutedCommand> routed = invokeRouted(invocation);
+        Optional<RoutedCommand> routed = dispatch(invocation);
         if (routed.isPresent() && routed.get() instanceof RoutedAction action) {
             return Optional.of(action.action());
         }
@@ -175,7 +175,7 @@ final class LegacyCommandBridge {
     }
 
     OptionalInt invokeTabActivation(CommandInvocation invocation) {
-        Optional<RoutedCommand> routed = invokeRouted(invocation);
+        Optional<RoutedCommand> routed = dispatch(invocation);
         if (routed.isPresent() && routed.get() instanceof ActivateTab activateTab) {
             return OptionalInt.of(activateTab.tabIndex());
         }
@@ -362,7 +362,8 @@ final class LegacyCommandBridge {
         );
     }
 
-    private Optional<RoutedCommand> invokeRouted(CommandInvocation invocation) {
+    /** Executes a semantic handler once and exposes its legacy route to the application adapter. */
+    Optional<RoutedCommand> dispatch(CommandInvocation invocation) {
         InvocationResult<RoutedCommand> result = registry.invoke(invocation, ExecutionContext.INSTANCE);
         if (result instanceof InvocationResult.Executed<?> executed) {
             return Optional.of((RoutedCommand) executed.result());
@@ -385,13 +386,13 @@ final class LegacyCommandBridge {
         }
     }
 
-    private sealed interface RoutedCommand permits RoutedAction, ActivateTab {
+    sealed interface RoutedCommand permits RoutedAction, ActivateTab {
     }
 
-    private record RoutedAction(KeyEvent.Action action) implements RoutedCommand {
+    record RoutedAction(KeyEvent.Action action) implements RoutedCommand {
     }
 
-    private record ActivateTab(int tabIndex) implements RoutedCommand {
+    record ActivateTab(int tabIndex) implements RoutedCommand {
     }
 
     private enum ExecutionContext {

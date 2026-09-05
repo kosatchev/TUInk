@@ -1,10 +1,14 @@
 package dev.tuink.tui;
 
+import static dev.tuink.tui.command.TuinkCommandIds.DOCUMENT_SAVE;
+import static dev.tuink.tui.command.TuinkCommandIds.EDIT_SELECT_ALL;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.editor.command.CommandInvocation;
+import dev.tuink.terminal.input.TextInput;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.flow.UiModalState;
 import dev.tuink.tui.input.KeyEvent;
@@ -41,6 +45,54 @@ class TerminalEditorInputRoutingTest {
         assertFalse(TerminalEditorApp.searchOwnsRawInput(true, UiModalState.saveAs(), false, false));
         assertFalse(TerminalEditorApp.searchOwnsRawInput(true, UiModalState.none(), true, false));
         assertFalse(TerminalEditorApp.searchOwnsRawInput(true, UiModalState.none(), false, true));
+        assertFalse(TerminalEditorApp.searchOwnsRawInput(
+            true,
+            UiModalState.none(),
+            false,
+            false,
+            true
+        ));
+    }
+
+    @Test
+    void typedMenuCommandWinsOverUnicodeTextFallbackAndRegistryResolutionRunsOnce() {
+        CommandInvocation selected = CommandInvocation.of(EDIT_SELECT_ALL);
+        TextInput decomposedMnemonic = new TextInput("e\u0301");
+
+        assertTrue(TerminalEditorApp.shouldHandleMultiScalarTextFallback(
+            decomposedMnemonic,
+            null
+        ));
+        assertFalse(TerminalEditorApp.shouldHandleMultiScalarTextFallback(
+            decomposedMnemonic,
+            selected
+        ));
+
+        LegacyCommandBridge bridge = new LegacyCommandBridge();
+        LegacyCommandBridge.RoutedCommand routedSelection = bridge.dispatch(selected).orElseThrow();
+        LegacyCommandBridge.RoutedAction selectedAction =
+            (LegacyCommandBridge.RoutedAction) routedSelection;
+        KeyEvent.Action resolvedSelection = selectedAction.action();
+        assertEquals(KeyEvent.Action.CTRL_A, resolvedSelection);
+        assertEquals(
+            resolvedSelection,
+            TerminalEditorApp.resolvePendingCommand(
+                bridge,
+                CommandInvocation.of(DOCUMENT_SAVE),
+                resolvedSelection,
+                true
+            ),
+            "an already routed menu command must not invoke the pending registry entry again"
+        );
+        assertEquals(
+            KeyEvent.Action.CTRL_S,
+            TerminalEditorApp.resolvePendingCommand(
+                bridge,
+                CommandInvocation.of(DOCUMENT_SAVE),
+                KeyEvent.Action.CTRL_A,
+                false
+            )
+        );
     }
 
     @Test

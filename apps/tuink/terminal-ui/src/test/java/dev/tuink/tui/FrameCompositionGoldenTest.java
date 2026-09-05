@@ -12,14 +12,14 @@ import dev.tuink.terminal.geometry.Rect;
 import dev.tuink.terminal.style.CellColor;
 import dev.tuink.terminal.style.CellStyle;
 import dev.tuink.terminal.widget.Button;
+import dev.tuink.terminal.widget.MenuBar;
 import dev.tuink.terminal.widget.Modal;
 import dev.tuink.terminal.widget.PlacedModal;
+import dev.tuink.terminal.widget.TabBar;
 import dev.tuink.terminal.widget.Theme;
 import dev.tuink.terminal.widget.WidgetState;
 import dev.tuink.terminal.widget.WidgetThemeKeys;
-import dev.tuink.tui.ui.MenuBar;
 import dev.tuink.tui.ui.TabBarView;
-import dev.tuink.terminal.widget.TabBar;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -49,15 +49,6 @@ class FrameCompositionGoldenTest {
         true,
         false
     );
-    private static final CellStyle POPUP = CellStyle.fg(CellColor.WHITE);
-    private static final CellStyle POPUP_SELECTED = CellStyle.fg(CellColor.BRIGHT_CYAN);
-    private static final CellStyle TOP_SELECTED = CellStyle.fg(CellColor.BRIGHT_BLUE);
-    private static final CellStyle MONO_SELECTED = new CellStyle(
-        CellColor.DEFAULT,
-        CellColor.DEFAULT,
-        true,
-        false
-    );
     private static final CellStyle MODAL_BODY = new CellStyle(
         CellColor.WHITE,
         CellColor.BRIGHT_BLACK,
@@ -78,6 +69,9 @@ class FrameCompositionGoldenTest {
         false
     );
     private static final Theme WIDGET_THEME = key -> {
+        if (WidgetThemeKeys.MENU_BAR.equals(key)) {
+            return TOP;
+        }
         if (WidgetThemeKeys.TAB_BAR.equals(key)) {
             return TAB;
         }
@@ -108,9 +102,19 @@ class FrameCompositionGoldenTest {
         Canvas canvas = new Canvas(frame);
         canvas.fill(0, 0, COLS, ROWS, BACKGROUND);
 
-        MenuBar menu = new MenuBar(POPUP, POPUP_SELECTED, TOP_SELECTED, MONO_SELECTED);
-        String topBar = menu.buildTopBar(Path.of("中.txt"), true, 0, 2, COLS, false);
-        CellText.draw(canvas, 0, 0, topBar, TOP);
+        TopMenuView menu = TopMenuView.build(
+            new UiSessionState(),
+            List.of(
+                new TopMenuView.TabItem(Path.of("α.txt"), false, false),
+                new TopMenuView.TabItem(Path.of("中e\u0301"), true, true)
+            ),
+            1,
+            "Cyan",
+            new LegacyCommandBridge(),
+            MenuBar.State.closed()
+        );
+        TopMenuView.TopBar topBar = menu.topBar(Path.of("中.txt"), true, COLS, false);
+        CellText.draw(canvas, 0, 0, topBar.text(), TOP);
 
         TabBarView.Placement tabs = TabBarView.build(
             List.of(
@@ -125,7 +129,7 @@ class FrameCompositionGoldenTest {
         CellText.draw(canvas, 2, 2, "editor: A中B e\u0301", CONTENT);
         CellText.draw(canvas, 1, 8, "status: ready", CONTENT);
         CellText.draw(canvas, 2, 9, "footer", CONTENT);
-        menu.draw(canvas, ROWS, COLS, true, TOP);
+        menu.place(new Rect(0, 0, COLS, ROWS)).paint(canvas, WIDGET_THEME);
 
         Modal modal = new Modal(30, 5, " T中e\u0301 ");
         PlacedModal placedModal = modal.layout(new Rect(7, 3, 30, 5));

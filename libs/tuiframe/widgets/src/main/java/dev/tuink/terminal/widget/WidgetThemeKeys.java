@@ -35,6 +35,21 @@ public final class WidgetThemeKeys {
     public static final WidgetStyleRole TAB_ITEM_DISABLED = new WidgetStyleRole(
         "widget.tab.item.disabled"
     );
+    public static final WidgetStyleRole MENU_BAR = new WidgetStyleRole("widget.menu-bar");
+    public static final WidgetStyleRole MENU_BAR_ACTIVE = new WidgetStyleRole(
+        "widget.menu-bar.active"
+    );
+    public static final WidgetStyleRole MENU_BAR_DISABLED = new WidgetStyleRole(
+        "widget.menu-bar.disabled"
+    );
+    public static final WidgetStyleRole MENU_POPUP = new WidgetStyleRole("widget.menu.popup");
+    public static final WidgetStyleRole MENU_ITEM = new WidgetStyleRole("widget.menu.item");
+    public static final WidgetStyleRole MENU_ITEM_SELECTED = new WidgetStyleRole(
+        "widget.menu.item.selected"
+    );
+    public static final WidgetStyleRole MENU_ITEM_DISABLED = new WidgetStyleRole(
+        "widget.menu.item.disabled"
+    );
 
     private WidgetThemeKeys() {
     }

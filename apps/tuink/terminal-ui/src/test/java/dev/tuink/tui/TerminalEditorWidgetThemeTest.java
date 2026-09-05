@@ -92,4 +92,40 @@ class TerminalEditorWidgetThemeTest {
         );
         assertNull(app.resolveTabBarWidgetStyle(new WidgetStyleRole("test.unknown"), true));
     }
+
+    @Test
+    void topMenuAdapterMapsApplicationPaletteWithoutLeakingItIntoWidgets() {
+        TerminalEditorApp app = new TerminalEditorApp();
+        UiStyles.Palette palette = UiStyles.forTheme(UiStyles.Theme.CYAN);
+
+        assertEquals(
+            palette.renderTopbar(),
+            app.resolveTopMenuWidgetStyle(WidgetThemeKeys.MENU_BAR, true)
+        );
+        assertEquals(
+            palette.menuTopSelected(),
+            app.resolveTopMenuWidgetStyle(WidgetThemeKeys.MENU_BAR_ACTIVE, true)
+        );
+        assertEquals(
+            palette.menuPopup(),
+            app.resolveTopMenuWidgetStyle(WidgetThemeKeys.MENU_POPUP, true)
+        );
+        assertEquals(
+            palette.menuSelected(),
+            app.resolveTopMenuWidgetStyle(WidgetThemeKeys.MENU_ITEM_SELECTED, true)
+        );
+        assertEquals(
+            palette.contextMenuDisabledItem(),
+            app.resolveTopMenuWidgetStyle(WidgetThemeKeys.MENU_ITEM_DISABLED, true)
+        );
+        assertEquals(
+            palette.menuSelectedMono(),
+            app.resolveTopMenuWidgetStyle(WidgetThemeKeys.MENU_ITEM_SELECTED, false)
+        );
+        assertEquals(
+            palette.menuPopup(),
+            app.resolveTopMenuWidgetStyle(WidgetThemeKeys.MENU_ITEM_DISABLED, false)
+        );
+        assertNull(app.resolveTopMenuWidgetStyle(new WidgetStyleRole("test.unknown"), true));
+    }
 }

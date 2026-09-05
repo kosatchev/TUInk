@@ -13,11 +13,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import dev.tuink.editor.command.CommandInvocation;
 import dev.tuink.tui.input.KeyEvent;
+import dev.tuink.terminal.geometry.Rect;
 import dev.tuink.terminal.input.KeyStroke;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.keymap.Keymap;
-import dev.tuink.terminal.style.CellStyle;
-import dev.tuink.tui.ui.MenuBar;
+import dev.tuink.terminal.widget.MenuBar;
 import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -43,32 +43,32 @@ class LegacyCommandBridgeTest {
 
     @Test
     void actualMenuSelectionJoinsTheSameCommandPath() {
-        MenuBar menu = new MenuBar(
-            CellStyle.DEFAULT,
-            CellStyle.DEFAULT,
-            CellStyle.DEFAULT,
-            CellStyle.DEFAULT
-        );
-        menu.openEdit();
+        TopMenuController controller = new TopMenuController();
+        controller.adopt(MenuBar.State.open(TopMenuController.EDIT_INDEX));
         for (int i = 0; i < 5; i++) {
-            TopMenuInputController.handleWhenOpen(
-                menu,
-                new KeyEvent.ActionEvent(KeyEvent.Action.ARROW_DOWN)
+            TopMenuInputRouter.route(
+                controller,
+                menuPlacement(controller),
+                bridge,
+                KeyStroke.of(KeyStroke.Key.ARROW_DOWN)
             );
         }
 
-        TopMenuInputController.HandleResult selected = TopMenuInputController.handleWhenOpen(
-            menu,
-            new KeyEvent.ActionEvent(KeyEvent.Action.ENTER)
+        TopMenuInputRouter.Result selected = TopMenuInputRouter.route(
+            controller,
+            menuPlacement(controller),
+            bridge,
+            KeyStroke.of(KeyStroke.Key.ENTER)
         );
-        CommandInvocation menuInvocation = bridge.invocationFor(selected.selectedAction()).orElseThrow();
+        CommandInvocation menuInvocation = selected.command();
         CommandInvocation keyboardInvocation = bridge.invocationFor(
             KeyStroke.of(KeyStroke.Key.SLASH, KeyStroke.Modifier.CTRL)
         ).orElseThrow();
 
-        assertEquals(KeyEvent.Action.TOGGLE_LINE_COMMENT, selected.selectedAction());
+        assertEquals(EDIT_TOGGLE_LINE_COMMENT, menuInvocation.id());
         assertEquals(keyboardInvocation, menuInvocation);
         assertEquals(KeyEvent.Action.TOGGLE_LINE_COMMENT, bridge.invoke(menuInvocation).orElseThrow());
+        assertEquals(MenuBar.State.closed(), controller.state());
     }
 
     @Test
@@ -175,5 +175,16 @@ class LegacyCommandBridgeTest {
         );
 
         assertFalse(bridge.invokeTabActivation(invalid).isPresent());
+    }
+
+    private TopMenuView.Placement menuPlacement(TopMenuController controller) {
+        return TopMenuView.build(
+            new UiSessionState(),
+            List.of(),
+            -1,
+            "Cyan",
+            bridge,
+            controller.state()
+        ).place(new Rect(0, 0, 80, 20));
     }
 }

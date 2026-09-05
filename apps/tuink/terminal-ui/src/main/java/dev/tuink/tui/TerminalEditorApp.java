@@ -74,7 +74,6 @@ import dev.tuink.tui.ui.ConfirmBarView;
 import dev.tuink.tui.ui.DirtyTabSummary;
 import dev.tuink.tui.ui.EditorView;
 import dev.tuink.tui.ui.InlinePromptBar;
-import dev.tuink.tui.ui.MenuBar;
 import dev.tuink.tui.ui.NotificationBar;
 import dev.tuink.tui.ui.HelpPage;
 import dev.tuink.tui.ui.HelpPages;
@@ -99,6 +98,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -130,6 +130,8 @@ public class TerminalEditorApp {
     private final FocusManager<SearchFocus> searchFocusManager = new FocusManager<>();
     private final Theme colorTabBarWidgetTheme = key -> resolveTabBarWidgetStyle(key, true);
     private final Theme monoTabBarWidgetTheme = key -> resolveTabBarWidgetStyle(key, false);
+    private final Theme colorTopMenuWidgetTheme = key -> resolveTopMenuWidgetStyle(key, true);
+    private final Theme monoTopMenuWidgetTheme = key -> resolveTopMenuWidgetStyle(key, false);
     private HelpOverlayPlacement helpOverlayCache;
     private boolean profileEnabled = false;
     private final FrameProfiler frameProfiler = new FrameProfiler();
@@ -224,13 +226,7 @@ public class TerminalEditorApp {
         TextField searchQueryInput = new TextField();
         TextField searchReplaceInput = new TextField();
         SearchController.SearchUiOptions searchUi = SearchController.SearchUiOptions.DEFAULT;
-        MenuBar topMenu = new MenuBar(
-            styles.menuPopup(),
-            styles.menuSelected(),
-            styles.menuTopSelected(),
-            styles.menuSelectedMono()
-        );
-        topMenu.setThemeLabel(theme.label());
+        TopMenuController topMenu = new TopMenuController();
         boolean openFileMode = false;
         TreeView openFileTree = new TreeView(initialOpenRoot(state), true, true);
         OpenFileDialogController.Focus openFileFocus = OpenFileDialogController.Focus.LIST;
@@ -293,7 +289,6 @@ public class TerminalEditorApp {
                 RenderFrameController renderFrameController = new RenderFrameController(
                     renderer,
                     editorView,
-                    topMenu,
                     colorEnabled,
                     screenPresenter
                 );
@@ -312,6 +307,7 @@ public class TerminalEditorApp {
                 int contentCols = 0;
                 TabBar.State tabBarState = TabBar.State.initial();
                 TabBarView.Placement tabBarPlacement = null;
+                TopMenuView.Placement topMenuPlacement = null;
                 TabMatchCache tabMatchCache = new TabMatchCache();
                 SearchMatchCountCache searchMatchCountCache = new SearchMatchCountCache();
                 while (running && eventLoop.running()) {
@@ -617,29 +613,16 @@ public class TerminalEditorApp {
                         } else {
                             tabBarPlacement = null;
                         }
-                        topMenu.setOpenTabs(toMenuTabs(tabs, tabMatchFlags), activeTabIndex);
-                        topMenu.setShowTabBarEnabled(uiSessionState.showTabBarSetting);
-                        topMenu.setWrapLinesEnabled(uiSessionState.wrapLinesSetting);
-                        topMenu.setWrapWordsEnabled(uiSessionState.wrapWordsSetting);
-                        topMenu.setReadingModeEnabled(uiSessionState.readingModeSetting);
-                        topMenu.setConfirmOnCloseEnabled(uiSessionState.confirmOnCloseSetting);
-                        topMenu.setMouseModeEnabled(
-                            uiSessionState.mouseModeSetting && uiSessionState.mouseModeAvailable
+                        TopMenuView topMenuView = TopMenuView.build(
+                            uiSessionState,
+                            toTopMenuTabs(tabs, tabMatchFlags),
+                            activeTabIndex,
+                            theme.label(),
+                            commandBridge,
+                            topMenu.state()
                         );
-                        topMenu.setActiveGutterHighlightEnabled(uiSessionState.highlightActiveGutterSetting);
-                        topMenu.setSmartHomeEndEnabled(uiSessionState.smartHomeEndSetting);
-                        topMenu.setAutoIndentEnabled(uiSessionState.autoIndentSetting);
-                        topMenu.setAutoPairsEnabled(uiSessionState.autoPairsSetting);
-                        topMenu.setAutoListEnabled(uiSessionState.autoListSetting);
-                        topMenu.setVisibleWhitespaceEnabled(uiSessionState.visibleWhitespaceSetting);
-                        topMenu.setSyntaxHighlightingEnabled(
-                            effectiveSyntaxHighlighting(uiSessionState.syntaxHighlightingSetting)
-                        );
-                        topMenu.setRainbowBracketsEnabled(uiSessionState.rainbowBracketsSetting);
-                        topMenu.setAutoSelectionHighlightEnabled(uiSessionState.autoSelectionHighlightSetting);
-                        topMenu.setGutterDiffMode(uiSessionState.gutterDiffModeSetting);
-                        topMenu.setTabWidth(uiSessionState.tabWidthSetting);
-                        topMenu.setTabInsertMode(uiSessionState.tabInsertModeSetting);
+                        topMenuPlacement = topMenuView.place(new Rect(0, 0, cols, rows));
+                        topMenu.adopt(topMenuPlacement.state());
                         renderer.setHighlightActiveGutter(uiSessionState.highlightActiveGutterSetting);
                         renderer.setVisibleWhitespace(uiSessionState.visibleWhitespaceSetting);
                         renderer.setTabWidth(uiSessionState.tabWidthSetting);
@@ -668,14 +651,13 @@ public class TerminalEditorApp {
                         engine.setAutoPairsEnabled(uiSessionState.autoPairsSetting);
                         engine.setAutoListEnabled(uiSessionState.autoListSetting);
 
-                        String topBar = topMenu.buildTopBar(
+                        TopMenuView.TopBar topMenuBar = topMenuView.topBar(
                             state.getCurrentFile(),
                             state.isDirty(),
-                            activeTabIndex,
-                            tabs.size(),
                             cols,
                             uiSessionState.readingModeSetting
                         );
+                        String topBar = topMenuBar.text();
                         String bottomBar = buildBottomBar(
                             state,
                             model,
@@ -695,6 +677,8 @@ public class TerminalEditorApp {
                             cols,
                             contentTopRow,
                             tabBarPlacement,
+                            topMenuPlacement,
+                            topMenuBar.menuPrefixWidth(),
                             editorLayout,
                             inlinePromptBar.height(),
                             topBar,
@@ -836,12 +820,53 @@ public class TerminalEditorApp {
                             continue;
                         }
                     }
+                    CommandInvocation routedMenuCommand = null;
+                    LegacyCommandBridge.RoutedCommand routedMenuResult = null;
+                    if (modalState.isNone() && !openFileMode) {
+                        boolean pointerAllowed = !(inputEvent instanceof PointerEvent)
+                            || uiSessionState.mouseModeSetting && uiSessionState.mouseModeAvailable;
+                        if (!pointerAllowed && topMenu.isOpen()) {
+                            continue;
+                        }
+                        if (pointerAllowed) {
+                            if (topMenuPlacement == null) {
+                                if (topMenu.isOpen()) {
+                                    eventLoop.invalidate();
+                                    continue;
+                                }
+                            } else {
+                                TopMenuInputRouter.Result menuInput = TopMenuInputRouter.route(
+                                    topMenu,
+                                    topMenuPlacement,
+                                    commandBridge,
+                                    inputEvent
+                                );
+                                if (inputEvent instanceof PointerEvent && menuInput.consumed()) {
+                                    editorView.cancelMouseSelection();
+                                }
+                                routedMenuCommand = menuInput.command();
+                                if (routedMenuCommand != null) {
+                                    routedMenuResult = commandBridge.dispatch(routedMenuCommand)
+                                        .orElse(null);
+                                    if (routedMenuResult instanceof LegacyCommandBridge.ActivateTab tab
+                                        && tab.tabIndex() >= 0
+                                        && tab.tabIndex() < tabs.size()) {
+                                        sessionContext.activate(tab.tabIndex());
+                                        continue;
+                                    }
+                                } else if (menuInput.consumed()) {
+                                    continue;
+                                }
+                            }
+                        }
+                    }
                     SearchBarView.Action routedSearchAction = null;
                     if (searchOwnsRawInput(
                         uiSessionState.searchMode,
                         modalState,
                         openFileMode,
-                        topMenu.isOpen()
+                        topMenu.isOpen(),
+                        routedMenuCommand != null
                     )) {
                         if (inputEvent instanceof PointerEvent
                             && (!uiSessionState.mouseModeSetting || !uiSessionState.mouseModeAvailable)) {
@@ -885,14 +910,14 @@ public class TerminalEditorApp {
                             continue;
                         }
                     }
-                    TabBarInputRouter.Policy tabPolicy = tabBarInputPolicy(
+                    TabBarInputRouter.Policy tabPolicy = routedMenuCommand == null ? tabBarInputPolicy(
                         tabBarPlacement != null,
                         uiSessionState.mouseModeSetting && uiSessionState.mouseModeAvailable,
                         modalState,
                         openFileMode,
                         topMenu.isOpen(),
                         uiSessionState.searchMode
-                    );
+                    ) : null;
                     if (inputEvent instanceof PointerEvent pointer && tabPolicy != null) {
                         TabBarInputRouter.Result tabInput = TabBarInputRouter.route(
                             tabBarPlacement,
@@ -933,7 +958,9 @@ public class TerminalEditorApp {
                         }
                     }
                     KeyEvent.Action routedSearchKeyAction = keyAction(routedSearchAction);
-                    CommandInvocation pendingCommand = routedSearchKeyAction != null
+                    CommandInvocation pendingCommand = routedMenuCommand != null
+                        ? routedMenuCommand
+                        : routedSearchKeyAction != null
                         ? commandBridge.invocationFor(routedSearchKeyAction).orElse(null)
                         : routedConfirmDecision == null
                         && !routedSaveAsSubmit
@@ -941,7 +968,7 @@ public class TerminalEditorApp {
                         ? commandBridge.invocationFor(stroke).orElse(null)
                         : null;
 
-                    if (inputEvent instanceof PasteEvent paste) {
+                    if (routedMenuCommand == null && inputEvent instanceof PasteEvent paste) {
                         if (paste.truncated()) {
                             notification.error("Paste is too large and was not inserted");
                             continue;
@@ -959,8 +986,8 @@ public class TerminalEditorApp {
                         continue;
                     }
 
-                    if (inputEvent instanceof TextInput text
-                        && text.text().codePointCount(0, text.text().length()) > 1) {
+                    if (shouldHandleMultiScalarTextFallback(inputEvent, routedMenuCommand)) {
+                        TextInput text = (TextInput) inputEvent;
                         if (!modalState.isNone() || openFileMode || topMenu.isOpen()) {
                             // Multi-scalar IME input is ignored by overlays that only accept keys.
                         } else if (uiSessionState.readingModeSetting) {
@@ -973,7 +1000,12 @@ public class TerminalEditorApp {
                     }
 
                     KeyEvent key;
-                    if (routedSearchKeyAction != null) {
+                    if (routedMenuCommand != null) {
+                        if (!(routedMenuResult instanceof LegacyCommandBridge.RoutedAction menuAction)) {
+                            continue;
+                        }
+                        key = new KeyEvent.ActionEvent(menuAction.action());
+                    } else if (routedSearchKeyAction != null) {
                         key = new KeyEvent.ActionEvent(routedSearchKeyAction);
                     } else if (routedConfirmDecision != null || routedSaveAsSubmit) {
                         key = new KeyEvent.ActionEvent(KeyEvent.Action.ENTER);
@@ -1104,35 +1136,6 @@ public class TerminalEditorApp {
                                         continue;
                                     }
                                     if (confirmMode) {
-                                        editorView.cancelMouseSelection();
-                                        continue;
-                                    }
-                                    if (topMenu.handleTopBarClick(mouse.row(), mouse.col())) {
-                                        editorView.cancelMouseSelection();
-                                        continue;
-                                    }
-                                    MenuBar.PopupMouseResult menuMouse = topMenu.handlePopupClick(mouse.row(), mouse.col(), cols);
-                                    if (menuMouse.consumed()) {
-                                        Integer tabActivation = topMenu.consumeTabActivationRequest();
-                                        if (tabActivation != null && tabActivation >= 0 && tabActivation < tabs.size()) {
-                                            CommandInvocation activation = commandBridge.tabActivationInvocation(
-                                                tabActivation
-                                            );
-                                            int resolvedTab = commandBridge.invokeTabActivation(activation).orElse(-1);
-                                            if (resolvedTab >= 0 && resolvedTab < tabs.size()) {
-                                                sessionContext.activate(resolvedTab);
-                                            }
-                                            editorView.cancelMouseSelection();
-                                            continue;
-                                        }
-                                        if (menuMouse.mappedAction() != null) {
-                                            pendingCommand = commandBridge.invocationFor(
-                                                menuMouse.mappedAction()
-                                            ).orElse(null);
-                                            remappedMouseKey = new KeyEvent.ActionEvent(menuMouse.mappedAction());
-                                            editorView.cancelMouseSelection();
-                                            break;
-                                        }
                                         editorView.cancelMouseSelection();
                                         continue;
                                     }
@@ -1535,33 +1538,7 @@ public class TerminalEditorApp {
                         }
                     }
 
-                    if (topMenu.isOpen()) {
-                        TopMenuInputController.HandleResult topMenuResult = TopMenuInputController.handleWhenOpen(topMenu, key);
-                        Integer tabActivation = topMenuResult.tabActivation();
-                        if (tabActivation != null && tabActivation >= 0 && tabActivation < tabs.size()) {
-                            CommandInvocation activation = commandBridge.tabActivationInvocation(tabActivation);
-                            int resolvedTab = commandBridge.invokeTabActivation(activation).orElse(-1);
-                            if (resolvedTab >= 0 && resolvedTab < tabs.size()) {
-                                sessionContext.activate(resolvedTab);
-                            }
-                            activeTabIndex = sessionContext.activeTabIndex();
-                            model = sessionContext.model();
-                            state = sessionContext.state();
-                            engine = sessionContext.engine();
-                            renderPlanBuilder = sessionContext.renderPlanBuilder();
-                        }
-                        key = topMenuResult.nextKey();
-                        if (topMenuResult.selectedAction() != null) {
-                            pendingCommand = commandBridge.invocationFor(
-                                topMenuResult.selectedAction()
-                            ).orElse(null);
-                        }
-                        if (topMenuResult.keepMenuOpen() || topMenuResult.selectedAction() == null) {
-                            continue;
-                        }
-                    }
-
-                    if (uiSessionState.searchMode) {
+                    if (uiSessionState.searchMode && routedMenuCommand == null) {
                         SearchModeResult searchModeResult = handleSearchModeInput(
                             key,
                             pendingCommand,
@@ -1615,10 +1592,15 @@ public class TerminalEditorApp {
                     }
 
                     KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
-                    if (pendingCommand == null) {
+                    if (pendingCommand == null && routedMenuCommand == null) {
                         pendingCommand = commandBridge.invocationFor(action).orElse(null);
                     }
-                    action = commandBridge.resolve(pendingCommand, action);
+                    action = resolvePendingCommand(
+                        commandBridge,
+                        pendingCommand,
+                        action,
+                        routedMenuCommand != null
+                    );
                     InputActionDispatcher.DispatchResult dispatchResult = InputActionDispatcher.dispatch(
                         action,
                         uiSessionState,
@@ -1728,7 +1710,7 @@ public class TerminalEditorApp {
         EditorState state,
         EditorEngine engine,
         NotificationState notification,
-        MenuBar topMenu,
+        TopMenuController topMenu,
         TreeView openFileTree,
         boolean openFileMode,
         OpenFileDialogController.Focus openFileFocus,
@@ -1765,13 +1747,6 @@ public class TerminalEditorApp {
         if (editorAction.requestToggleTheme()) {
             applyTheme(theme.next());
             renderer.setTheme(theme);
-            topMenu.setStyles(
-                styles.menuPopup(),
-                styles.menuSelected(),
-                styles.menuTopSelected(),
-                styles.menuSelectedMono()
-            );
-            topMenu.setThemeLabel(theme.label());
             notification.info("Theme: " + theme.label());
         }
 
@@ -1924,7 +1899,7 @@ public class TerminalEditorApp {
         boolean openFileMode,
         TreeView openFileTree,
         OpenFileDialogController.Focus openFileFocus,
-        MenuBar topMenu,
+        TopMenuController topMenu,
         Consumer<Boolean> mouseTrackingController,
         RenderRasterizer renderer
     ) {
@@ -2341,13 +2316,6 @@ public class TerminalEditorApp {
             case TOGGLE_THEME -> {
                 applyTheme(theme.next());
                 renderer.setTheme(theme);
-                topMenu.setStyles(
-                    styles.menuPopup(),
-                    styles.menuSelected(),
-                    styles.menuTopSelected(),
-                    styles.menuSelectedMono()
-                );
-                topMenu.setThemeLabel(theme.label());
                 statusMessage = "Theme: " + theme.label();
             }
             case CTRL_N, TAB_NEW -> {
@@ -2572,16 +2540,56 @@ public class TerminalEditorApp {
         return modalState != null && modalState.isNone();
     }
 
+    static boolean shouldHandleMultiScalarTextFallback(
+        TuiInputEvent event,
+        CommandInvocation routedMenuCommand
+    ) {
+        if (routedMenuCommand != null || !(event instanceof TextInput text)) {
+            return false;
+        }
+        return text.text().codePointCount(0, text.text().length()) > 1;
+    }
+
+    static KeyEvent.Action resolvePendingCommand(
+        LegacyCommandBridge commandBridge,
+        CommandInvocation pendingCommand,
+        KeyEvent.Action fallback,
+        boolean alreadyResolved
+    ) {
+        Objects.requireNonNull(commandBridge, "commandBridge");
+        Objects.requireNonNull(fallback, "fallback");
+        return alreadyResolved
+            ? fallback
+            : commandBridge.resolve(pendingCommand, fallback);
+    }
+
     static boolean searchOwnsRawInput(
         boolean searchMode,
         UiModalState modalState,
         boolean openFileMode,
         boolean topMenuOpen
     ) {
+        return searchOwnsRawInput(
+            searchMode,
+            modalState,
+            openFileMode,
+            topMenuOpen,
+            false
+        );
+    }
+
+    static boolean searchOwnsRawInput(
+        boolean searchMode,
+        UiModalState modalState,
+        boolean openFileMode,
+        boolean topMenuOpen,
+        boolean typedMenuCommandSelected
+    ) {
         return searchMode
             && searchOwnsInteractiveRow(modalState)
             && !openFileMode
-            && !topMenuOpen;
+            && !topMenuOpen
+            && !typedMenuCommandSelected;
     }
 
     static TabBarInputRouter.Policy tabBarInputPolicy(
@@ -2886,6 +2894,27 @@ public class TerminalEditorApp {
         return null;
     }
 
+    CellStyle resolveTopMenuWidgetStyle(WidgetStyleRole key, boolean colorEnabled) {
+        if (WidgetThemeKeys.MENU_BAR_ACTIVE.equals(key)) {
+            return colorEnabled ? styles.menuTopSelected() : styles.menuSelectedMono();
+        }
+        if (WidgetThemeKeys.MENU_BAR.equals(key)
+            || WidgetThemeKeys.MENU_BAR_DISABLED.equals(key)) {
+            return styles.renderTopbar();
+        }
+        if (WidgetThemeKeys.MENU_ITEM_SELECTED.equals(key)) {
+            return colorEnabled ? styles.menuSelected() : styles.menuSelectedMono();
+        }
+        if (WidgetThemeKeys.MENU_ITEM_DISABLED.equals(key)) {
+            return colorEnabled ? styles.contextMenuDisabledItem() : styles.menuPopup();
+        }
+        if (WidgetThemeKeys.MENU_POPUP.equals(key)
+            || WidgetThemeKeys.MENU_ITEM.equals(key)) {
+            return styles.menuPopup();
+        }
+        return null;
+    }
+
     private ConfirmBarInputRouter.Policy confirmPolicy(UiModalState modalState) {
         if (modalState.isRecoveryConfirm()) {
             return ConfirmBarInputRouter.Policy.recovery();
@@ -3033,6 +3062,8 @@ public class TerminalEditorApp {
         int cols,
         int contentTopRow,
         TabBarView.Placement tabBarPlacement,
+        TopMenuView.Placement topMenuPlacement,
+        int topMenuPrefixWidth,
         EditorLayout editorLayout,
         int inlinePromptBarHeight,
         String topBar,
@@ -3061,8 +3092,7 @@ public class TerminalEditorApp {
         boolean colorEnabled,
         ScreenPresenter screenPresenter,
         RenderRasterizer renderer,
-        EditorView editorView,
-        MenuBar topMenu
+        EditorView editorView
     ) {
         boolean saveAsMode = modalState.isSaveAs();
         boolean saveOverwriteConfirmMode = modalState.isSaveOverwriteConfirm();
@@ -3139,8 +3169,13 @@ public class TerminalEditorApp {
                 colorEnabled ? colorTabBarWidgetTheme : monoTabBarWidgetTheme
             );
         }
-        topMenu.draw(canvas, rows, cols, colorEnabled, styles.renderTopbar());
-        drawTopFileNameBold(current, canvas, cols, state, topMenu.fileNameStartCol());
+        if (topMenuPlacement != null) {
+            topMenuPlacement.paint(
+                canvas,
+                colorEnabled ? colorTopMenuWidgetTheme : monoTopMenuWidgetTheme
+            );
+        }
+        drawTopFileNameBold(current, canvas, cols, state, topMenuPrefixWidth);
         drawOpenFileOverlay(
             canvas,
             rows,
@@ -3181,19 +3216,20 @@ public class TerminalEditorApp {
         Point searchCursor = searchBarPlacement == null
             ? null
             : searchBarPlacement.cursorPosition(searchFocusManager).orElse(null);
+        boolean topMenuOpen = topMenuPlacement != null && topMenuPlacement.state().isOpen();
         boolean desiredCursorVisible = CursorPolicy.shouldShowCursor(
             saveAsMode,
             searchBarPlacement != null,
             searchCursor != null,
             confirmBarPlacement != null,
-            topMenu.isOpen(),
+            topMenuOpen,
             openFileMode,
             helpHintsMode || helpLicensesMode || helpAuthorMode
         );
         boolean editorOwnsCursor = !saveAsMode
             && searchBarPlacement == null
             && confirmBarPlacement == null
-            && !topMenu.isOpen()
+            && !topMenuOpen
             && !openFileMode
             && !(helpHintsMode || helpLicensesMode || helpAuthorMode);
         if (editorOwnsCursor && !plan.cursorInViewport()) {
@@ -3216,9 +3252,14 @@ public class TerminalEditorApp {
                 desiredCursorRow = searchCursor.y() + 1;
                 desiredCursorCol = searchCursor.x() + 1;
             }
-        } else if (topMenu.isOpen()) {
-            desiredCursorRow = Math.min(rows, 3 + topMenu.selectedIndex());
-            desiredCursorCol = Math.min(cols, topMenu.popupCursorCol());
+        } else if (topMenuOpen) {
+            Point menuCursor = topMenuPlacement.cursorPosition().orElse(null);
+            if (menuCursor == null) {
+                desiredCursorVisible = false;
+            } else {
+                desiredCursorRow = menuCursor.y() + 1;
+                desiredCursorCol = menuCursor.x() + 1;
+            }
         } else if (openFileMode) {
             OpenFileDialogController.OpenDialogLayout layout = OpenFileDialogController.layoutForTerminal(rows, cols);
             if (openFileFocus == OpenFileDialogController.Focus.LIST) {
@@ -3427,20 +3468,17 @@ public class TerminalEditorApp {
     private final class RenderFrameController {
         private final RenderRasterizer renderer;
         private final EditorView editorView;
-        private final MenuBar topMenu;
         private final boolean colorEnabled;
         private final ScreenPresenter screenPresenter;
 
         private RenderFrameController(
             RenderRasterizer renderer,
             EditorView editorView,
-            MenuBar topMenu,
             boolean colorEnabled,
             ScreenPresenter screenPresenter
         ) {
             this.renderer = renderer;
             this.editorView = editorView;
-            this.topMenu = topMenu;
             this.colorEnabled = colorEnabled;
             this.screenPresenter = screenPresenter;
         }
@@ -3453,6 +3491,8 @@ public class TerminalEditorApp {
             int cols,
             int contentTopRow,
             TabBarView.Placement tabBarPlacement,
+            TopMenuView.Placement topMenuPlacement,
+            int topMenuPrefixWidth,
             EditorLayout editorLayout,
             int inlinePromptBarHeight,
             String topBar,
@@ -3487,6 +3527,8 @@ public class TerminalEditorApp {
                 cols,
                 contentTopRow,
                 tabBarPlacement,
+                topMenuPlacement,
+                topMenuPrefixWidth,
                 editorLayout,
                 inlinePromptBarHeight,
                 topBar,
@@ -3515,8 +3557,7 @@ public class TerminalEditorApp {
                 colorEnabled,
                 screenPresenter,
                 renderer,
-                editorView,
-                topMenu
+                editorView
             );
         }
     }
@@ -3982,12 +4023,16 @@ public class TerminalEditorApp {
         return cache.resolve(tabs, query, options, revisionFingerprint, () -> findTabsWithMatches(tabs, query, options));
     }
 
-    private List<MenuBar.OpenTab> toMenuTabs(List<EditorTab> tabs, boolean[] matchFlags) {
-        List<MenuBar.OpenTab> out = new ArrayList<>(tabs.size());
+    private List<TopMenuView.TabItem> toTopMenuTabs(List<EditorTab> tabs, boolean[] matchFlags) {
+        List<TopMenuView.TabItem> out = new ArrayList<>(tabs.size());
         for (int i = 0; i < tabs.size(); i++) {
             EditorTab tab = tabs.get(i);
             boolean hasMatch = matchFlags != null && i < matchFlags.length && matchFlags[i];
-            out.add(new MenuBar.OpenTab(tab.state().getCurrentFile(), tab.state().isDirty(), hasMatch));
+            out.add(new TopMenuView.TabItem(
+                tab.state().getCurrentFile(),
+                tab.state().isDirty(),
+                hasMatch
+            ));
         }
         return out;
     }

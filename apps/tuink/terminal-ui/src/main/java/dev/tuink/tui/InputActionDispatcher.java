@@ -1,11 +1,18 @@
 package dev.tuink.tui;
 
+import static dev.tuink.tui.command.TuinkCommandIds.MENU_EDIT;
+import static dev.tuink.tui.command.TuinkCommandIds.MENU_FILE;
+import static dev.tuink.tui.command.TuinkCommandIds.MENU_HELP;
+import static dev.tuink.tui.command.TuinkCommandIds.MENU_SETTINGS;
+import static dev.tuink.tui.command.TuinkCommandIds.MENU_TABS;
+import static dev.tuink.tui.command.TuinkCommandIds.MENU_VIEW;
+
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.GutterDiffMode;
 import dev.tuink.core.TabInsertMode;
+import dev.tuink.editor.command.CommandInvocation;
 import dev.tuink.tui.input.KeyEvent;
-import dev.tuink.tui.ui.MenuBar;
 import java.util.function.Consumer;
 
 final class InputActionDispatcher {
@@ -16,27 +23,27 @@ final class InputActionDispatcher {
         String statusMessage = null;
         switch (action) {
             case CTRL_E -> {
-                ctx.topMenu().openEdit();
+                ctx.topMenu().openFor(CommandInvocation.of(MENU_EDIT));
                 return DispatchResult.handled(null);
             }
             case CTRL_T -> {
-                ctx.topMenu().openTab();
+                ctx.topMenu().openFor(CommandInvocation.of(MENU_TABS));
                 return DispatchResult.handled(null);
             }
             case OPEN_VIEW_MENU -> {
-                ctx.topMenu().openView();
+                ctx.topMenu().openFor(CommandInvocation.of(MENU_VIEW));
                 return DispatchResult.handled(null);
             }
             case OPEN_HELP_MENU -> {
-                ctx.topMenu().openHelp();
+                ctx.topMenu().openFor(CommandInvocation.of(MENU_HELP));
                 return DispatchResult.handled(null);
             }
             case F10 -> {
-                ctx.topMenu().openFile();
+                ctx.topMenu().openFor(CommandInvocation.of(MENU_FILE));
                 return DispatchResult.handled(null);
             }
             case F2 -> {
-                ctx.topMenu().openSettings();
+                ctx.topMenu().openFor(CommandInvocation.of(MENU_SETTINGS));
                 return DispatchResult.handled(null);
             }
             case TOGGLE_TAB_BAR -> {
@@ -367,7 +374,7 @@ final class InputActionDispatcher {
     record DispatchContext(
         EditorEngine engine,
         EditorState state,
-        MenuBar topMenu,
+        TopMenuController topMenu,
         Consumer<Boolean> mouseTrackingController,
         int contentRows
     ) {

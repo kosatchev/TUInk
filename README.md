@@ -9,8 +9,8 @@ Minimal Java terminal text editor with clean multi-module architecture:
   decoder, capability detection, and ANSI screen presentation
 - `tui-widgets`: editor-independent layout/theme, typed interaction, flat focus,
   and optional parent-local cursor contracts plus reusable `Button`, `Modal`,
-  interactive Unicode-aware `TextField`, virtualized `ListView`, and `TabBar`
-  primitives
+  interactive Unicode-aware `TextField`, virtualized `ListView`, `TabBar`, and
+  descriptor-driven `MenuBar` primitives
 - `editor-contract`: dependency-free immutable command/document contracts,
   UTF-16 ranges, snapshots, and revision-guarded edits
 - `core`: editor engine and text model (`TextBuffer` + `SimpleLineBuffer`)

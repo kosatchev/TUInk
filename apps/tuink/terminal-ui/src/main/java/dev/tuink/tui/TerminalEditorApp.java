@@ -228,7 +228,7 @@ public class TerminalEditorApp {
         SearchController.SearchUiOptions searchUi = SearchController.SearchUiOptions.DEFAULT;
         TopMenuController topMenu = new TopMenuController();
         boolean openFileMode = false;
-        TreeView openFileTree = new TreeView(initialOpenRoot(state), true, true);
+        Path initialOpenFileRoot = initialOpenRoot(state);
         OpenFileDialogController.Focus openFileFocus = OpenFileDialogController.Focus.LIST;
         EditorView.ScrollAxis editorScrollDrag = EditorView.ScrollAxis.NONE;
         int editorScrollDragThumbOffset = 0;
@@ -269,14 +269,17 @@ public class TerminalEditorApp {
             }
         }
 
-        try (TerminalRuntime terminal = TerminalRuntime.open(
-            new TerminalSession.Options(
-                cli.altScreenEnabled(),
-                uiSessionState.mouseModeSetting,
-                shouldForceExecTerminalProvider()
-            ),
-            cli.colorEnabled()
-        )) {
+        try (
+            TreeView openFileTree = new TreeView(initialOpenFileRoot, true, true);
+            TerminalRuntime terminal = TerminalRuntime.open(
+                new TerminalSession.Options(
+                    cli.altScreenEnabled(),
+                    uiSessionState.mouseModeSetting,
+                    shouldForceExecTerminalProvider()
+                ),
+                cli.colorEnabled()
+            )
+        ) {
             TerminalCapabilities effectiveCapabilities = terminal.capabilities();
             boolean colorEnabled = effectiveCapabilities.colorEnabled();
             uiSessionState.mouseModeAvailable = effectiveCapabilities.mouseTracking();

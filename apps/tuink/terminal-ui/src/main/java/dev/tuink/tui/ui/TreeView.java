@@ -1,5 +1,6 @@
 package dev.tuink.tui.ui;
 
+import dev.tuink.tui.file.FileTreeModel;
 import dev.tuink.terminal.cell.CellBuffer;
 import dev.tuink.terminal.cell.CellText;
 import dev.tuink.terminal.cell.Canvas;
@@ -8,34 +9,17 @@ import dev.tuink.terminal.scroll.ScrollInteraction;
 import dev.tuink.terminal.style.CellStyle;
 import dev.tuink.terminal.scroll.HorizontalScrollbar;
 import dev.tuink.terminal.scroll.VerticalScrollbar;
-import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
-import java.util.Set;
 
-/**
- * Reusable folder-tree UI element: tree model, navigation, rendering and mouse hit-testing.
- */
-public final class TreeView {
+/** TUInk open-file tree facade for selection, layout, painting and pointer interaction. */
+public final class TreeView implements AutoCloseable {
     private static final int MIN_LABEL_WIDTH_WITH_META = 12;
     private static final int DEFAULT_SIZE_COLUMN_WIDTH = 11;
     private static final int MIN_SIZE_COLUMN_WIDTH = 7;
     private static final int DATE_COLUMN_WIDTH = 14;
-    private static final String UNKNOWN_DATE = "--.--.-- --:--";
-    private static final String PENDING_META = "...";
-    private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd.MM.yy HH:mm", Locale.ROOT);
-
-    private Path root;
-    private final Set<Path> expandedDirs = new HashSet<>();
+    private final FileTreeModel model;
     private List<Item> items = List.of();
     private int maxLabelLength;
     private int selectedIndex;
@@ -43,26 +27,22 @@ public final class TreeView {
     private int hScroll;
     private int lastClickIndex = -1;
     private long lastClickAtNanos;
-    private boolean showSizeColumn;
-    private boolean showDateColumn;
-    private boolean showHiddenFiles;
-    private final Object metadataLock = new Object();
-    private long metadataGeneration;
-    private Thread metadataWorker;
-    private volatile boolean metadataChanged;
 
     public TreeView(Path root) {
         this(root, false, false);
     }
 
     public TreeView(Path root, boolean showSizeColumn, boolean showDateColumn) {
-        this.showSizeColumn = showSizeColumn;
-        this.showDateColumn = showDateColumn;
-        setRoot(root);
+        model = new FileTreeModel(root, showSizeColumn, showDateColumn);
+        refreshItems();
+        selectedIndex = 0;
+        scroll = 0;
+        hScroll = 0;
+        resetClickTracking();
     }
 
     public Path root() {
-        return root;
+        return model.root();
     }
 
     public int selectedIndex() {
@@ -74,38 +54,38 @@ public final class TreeView {
     }
 
     public boolean showHiddenFiles() {
-        return showHiddenFiles;
+        return model.showHiddenFiles();
     }
 
     public void setShowHiddenFiles(boolean enabled) {
-        if (showHiddenFiles == enabled) {
+        if (model.showHiddenFiles() == enabled) {
             return;
         }
-        Path selectedPath = selectedItem() == null ? null : selectedItem().path().toAbsolutePath().normalize();
-        showHiddenFiles = enabled;
-        rebuild();
-        restoreSelection(selectedPath);
+        FileTreeModel.EntryId selectedId = selectedItem() == null ? null : selectedItem().id();
+        model.setShowHiddenFiles(enabled);
+        refreshItems();
+        restoreSelection(selectedId);
         scroll = Math.min(scroll, Math.max(0, items.size() - 1));
     }
 
     public void setShowSizeColumn(boolean enabled) {
-        if (showSizeColumn == enabled) {
+        if (model.showSizeColumn() == enabled) {
             return;
         }
-        Path selectedPath = selectedItem() == null ? null : selectedItem().path().toAbsolutePath().normalize();
-        showSizeColumn = enabled;
-        rebuild();
-        restoreSelection(selectedPath);
+        FileTreeModel.EntryId selectedId = selectedItem() == null ? null : selectedItem().id();
+        model.setShowSizeColumn(enabled);
+        refreshItems();
+        restoreSelection(selectedId);
     }
 
     public void setShowDateColumn(boolean enabled) {
-        if (showDateColumn == enabled) {
+        if (model.showDateColumn() == enabled) {
             return;
         }
-        Path selectedPath = selectedItem() == null ? null : selectedItem().path().toAbsolutePath().normalize();
-        showDateColumn = enabled;
-        rebuild();
-        restoreSelection(selectedPath);
+        FileTreeModel.EntryId selectedId = selectedItem() == null ? null : selectedItem().id();
+        model.setShowDateColumn(enabled);
+        refreshItems();
+        restoreSelection(selectedId);
     }
 
     public int visibleIndex(int listRows) {
@@ -120,9 +100,8 @@ public final class TreeView {
     }
 
     public void setRoot(Path root) {
-        this.root = root.toAbsolutePath().normalize();
-        expandedDirs.clear();
-        rebuild();
+        model.setRoot(root);
+        refreshItems();
         selectedIndex = 0;
         scroll = 0;
         hScroll = 0;
@@ -315,7 +294,7 @@ public final class TreeView {
     }
 
     public void moveToParentDirectory() {
-        Path parent = root.getParent();
+        Path parent = model.root().getParent();
         if (parent != null) {
             setRoot(parent);
         }
@@ -349,15 +328,12 @@ public final class TreeView {
         if (!selected.directory()) {
             return false;
         }
-        Path key = selected.path().toAbsolutePath().normalize();
-        if (expandedDirs.contains(key)) {
-            expandedDirs.remove(key);
-        } else {
-            expandedDirs.add(key);
+        FileTreeModel.EntryId selectedId = selected.id();
+        if (!model.toggleDirectory(selectedId)) {
+            return false;
         }
-        Path selectedPath = selected.path().toAbsolutePath().normalize();
-        rebuild();
-        restoreSelection(selectedPath);
+        refreshItems();
+        restoreSelection(selectedId);
         scroll = Math.min(scroll, Math.max(0, items.size() - 1));
         return true;
     }
@@ -406,11 +382,18 @@ public final class TreeView {
     }
 
     public boolean consumeMetadataChanged() {
-        if (!metadataChanged) {
+        if (!model.consumeMetadataChanged()) {
             return false;
         }
-        metadataChanged = false;
+        FileTreeModel.EntryId selectedId = selectedItem() == null ? null : selectedItem().id();
+        refreshItems();
+        restoreSelection(selectedId);
         return true;
+    }
+
+    @Override
+    public void close() {
+        model.close();
     }
 
     public void draw(
@@ -640,8 +623,8 @@ public final class TreeView {
         if (textWidth <= 0) {
             return new MetaColumns(0, 0, 0);
         }
-        int sizeWidth = showSizeColumn ? DEFAULT_SIZE_COLUMN_WIDTH : 0;
-        int dateWidth = showDateColumn ? DATE_COLUMN_WIDTH : 0;
+        int sizeWidth = model.showSizeColumn() ? DEFAULT_SIZE_COLUMN_WIDTH : 0;
+        int dateWidth = model.showDateColumn() ? DATE_COLUMN_WIDTH : 0;
         int separators = (sizeWidth > 0 ? 1 : 0) + (dateWidth > 0 ? 2 : 0);
         int labelWidth = textWidth - sizeWidth - dateWidth - separators;
 
@@ -669,24 +652,19 @@ public final class TreeView {
         return maxLabelLength;
     }
 
-    private void rebuild() {
-        List<Item> out = new ArrayList<>();
-        Path parent = root.getParent();
-        if (parent != null) {
-            out.add(new Item(parent, "..", true, false, true, 0, pendingSizeValue(), pendingDateValue()));
-        }
-        appendTreeItems(root, 0, out);
-        items = out;
-        maxLabelLength = computeMaxLabelLength(out);
-        startMetadataEnrichment(out);
+    private void refreshItems() {
+        items = model.snapshot().entries().stream()
+            .map(entry -> new Item(entry, formatTreeLabel(entry)))
+            .toList();
+        maxLabelLength = computeMaxLabelLength(items);
     }
 
-    private void restoreSelection(Path selectedPath) {
-        if (selectedPath == null) {
+    private void restoreSelection(FileTreeModel.EntryId selectedId) {
+        if (selectedId == null) {
             selectedIndex = Math.min(selectedIndex, Math.max(0, items.size() - 1));
             return;
         }
-        int restored = findIndexByPath(selectedPath);
+        int restored = findIndexById(selectedId);
         if (restored >= 0) {
             selectedIndex = restored;
         } else {
@@ -694,138 +672,24 @@ public final class TreeView {
         }
     }
 
-    private int findIndexByPath(Path path) {
+    private int findIndexById(FileTreeModel.EntryId id) {
         for (int i = 0; i < items.size(); i++) {
-            if (items.get(i).path().toAbsolutePath().normalize().equals(path)) {
+            if (items.get(i).id().equals(id)) {
                 return i;
             }
         }
         return -1;
     }
 
-    private void appendTreeItems(Path directory, int depth, List<Item> out) {
-        List<Path> children;
-        try {
-            children = listDirectorySorted(directory);
-        } catch (IOException e) {
-            out.add(new Item(directory, "<cannot read directory: " + e.getMessage() + ">", false, false, false, depth, "", ""));
-            return;
+    private static String formatTreeLabel(FileTreeModel.Entry entry) {
+        if (entry.kind() == FileTreeModel.Kind.PARENT || entry.kind() == FileTreeModel.Kind.ERROR) {
+            return entry.name();
         }
-
-        for (Path child : children) {
-            boolean dir = Files.isDirectory(child);
-            Path normalized = child.toAbsolutePath().normalize();
-            boolean expanded = dir && expandedDirs.contains(normalized);
-            String label = formatTreeLabel(depth, child, dir, expanded);
-            out.add(new Item(child, label, dir, expanded, false, depth, pendingSizeValue(), pendingDateValue()));
-            if (dir && expanded) {
-                appendTreeItems(child, depth + 1, out);
-            }
+        String indent = "  ".repeat(entry.depth());
+        if (entry.kind() == FileTreeModel.Kind.FILE) {
+            return indent + "  " + entry.name();
         }
-    }
-
-    private void startMetadataEnrichment(List<Item> snapshot) {
-        long generation;
-        Thread previous;
-        synchronized (metadataLock) {
-            metadataGeneration++;
-            generation = metadataGeneration;
-            previous = metadataWorker;
-            metadataWorker = null;
-        }
-        if (previous != null) {
-            previous.interrupt();
-        }
-        if ((!showSizeColumn && !showDateColumn) || snapshot.isEmpty()) {
-            return;
-        }
-        Thread worker = new Thread(
-            () -> enrichMetadata(snapshot, generation),
-            "tuink-tree-meta-loader"
-        );
-        worker.setDaemon(true);
-        synchronized (metadataLock) {
-            if (metadataGeneration != generation) {
-                return;
-            }
-            metadataWorker = worker;
-        }
-        worker.start();
-    }
-
-    private void enrichMetadata(List<Item> snapshot, long generation) {
-        int changedBatch = 0;
-        for (Item item : snapshot) {
-            if (Thread.currentThread().isInterrupted() || !isCurrentMetadataGeneration(generation)) {
-                return;
-            }
-            if (item.parentLink() || item.label().startsWith("<cannot read directory:")) {
-                continue;
-            }
-            String size = buildSizeValue(item.path(), item.directory());
-            String date = buildDateValue(item.path());
-            if (item.updateMetadata(size, date)) {
-                changedBatch++;
-                if (changedBatch >= 16) {
-                    metadataChanged = true;
-                    changedBatch = 0;
-                }
-            }
-        }
-        if (changedBatch > 0) {
-            metadataChanged = true;
-        }
-    }
-
-    private boolean isCurrentMetadataGeneration(long generation) {
-        synchronized (metadataLock) {
-            return metadataGeneration == generation;
-        }
-    }
-
-    private String pendingSizeValue() {
-        return showSizeColumn ? PENDING_META : "";
-    }
-
-    private String pendingDateValue() {
-        return showDateColumn ? PENDING_META : "";
-    }
-
-    private List<Path> listDirectorySorted(Path directory) throws IOException {
-        try (var stream = Files.list(directory)) {
-            return stream
-                .filter(this::isVisiblePath)
-                .sorted(
-                    Comparator
-                        .comparing((Path p) -> !Files.isDirectory(p))
-                        .thenComparing(p -> p.getFileName().toString().toLowerCase(Locale.ROOT))
-                )
-                .toList();
-        }
-    }
-
-    private boolean isVisiblePath(Path path) {
-        if (showHiddenFiles) {
-            return true;
-        }
-        String name = path.getFileName() == null ? path.toString() : path.getFileName().toString();
-        if (name.startsWith(".")) {
-            return false;
-        }
-        try {
-            return !Files.isHidden(path);
-        } catch (IOException ignored) {
-            return true;
-        }
-    }
-
-    private String formatTreeLabel(int depth, Path path, boolean directory, boolean expanded) {
-        String indent = "  ".repeat(Math.max(0, depth));
-        String name = path.getFileName() == null ? path.toString() : path.getFileName().toString();
-        if (!directory) {
-            return indent + "  " + name;
-        }
-        return indent + (expanded ? "▼ " : "▶ ") + name + "/";
+        return indent + (entry.expanded() ? "▼ " : "▶ ") + entry.name() + "/";
     }
 
     private String rowText(int itemIndex, int labelWidth, int sizeWidth, int dateWidth) {
@@ -851,57 +715,6 @@ public final class TreeView {
             max = Math.max(max, CellText.width(item.label()) + 1);
         }
         return max;
-    }
-
-    private String buildDateValue(Path path) {
-        if (!showDateColumn) {
-            return "";
-        }
-        try {
-            LocalDateTime dateTime = LocalDateTime.ofInstant(Files.getLastModifiedTime(path).toInstant(), ZoneId.systemDefault());
-            return DATE_FORMATTER.format(dateTime);
-        } catch (IOException | RuntimeException ignored) {
-            return UNKNOWN_DATE;
-        }
-    }
-
-    private String buildSizeValue(Path path, boolean directory) {
-        if (!showSizeColumn) {
-            return "";
-        }
-        return directory ? formatDirectoryChildCount(path) : formatFileSize(path);
-    }
-
-    private String formatDirectoryChildCount(Path path) {
-        try (var stream = Files.list(path)) {
-            long count = stream.count();
-            return count + " items";
-        } catch (IOException | RuntimeException ignored) {
-            return "? items";
-        }
-    }
-
-    private String formatFileSize(Path path) {
-        try {
-            return humanReadableSize(Files.size(path));
-        } catch (IOException | RuntimeException ignored) {
-            return "?";
-        }
-    }
-
-    private String humanReadableSize(long bytes) {
-        if (bytes < 1024L) {
-            return bytes + "B";
-        }
-        final String[] units = {"K", "M", "G", "T", "P"};
-        double value = bytes;
-        int unit = -1;
-        while (value >= 1024.0 && unit < units.length - 1) {
-            value /= 1024.0;
-            unit++;
-        }
-        String format = value >= 10.0 ? "%.0f%s" : "%.1f%s";
-        return String.format(Locale.ROOT, format, value, units[unit]);
     }
 
     private static String padRight(String text, int width) {
@@ -937,37 +750,20 @@ public final class TreeView {
     }
 
     public static final class Item {
-        private final Path path;
+        private final FileTreeModel.Entry entry;
         private final String label;
-        private final boolean directory;
-        private final boolean expanded;
-        private final boolean parentLink;
-        private final int depth;
-        private volatile String sizeValue;
-        private volatile String dateValue;
 
-        Item(
-            Path path,
-            String label,
-            boolean directory,
-            boolean expanded,
-            boolean parentLink,
-            int depth,
-            String sizeValue,
-            String dateValue
-        ) {
-            this.path = path;
+        Item(FileTreeModel.Entry entry, String label) {
+            this.entry = Objects.requireNonNull(entry, "entry");
             this.label = label;
-            this.directory = directory;
-            this.expanded = expanded;
-            this.parentLink = parentLink;
-            this.depth = depth;
-            this.sizeValue = sizeValue;
-            this.dateValue = dateValue;
+        }
+
+        private FileTreeModel.EntryId id() {
+            return entry.id();
         }
 
         public Path path() {
-            return path;
+            return entry.path();
         }
 
         public String label() {
@@ -975,42 +771,27 @@ public final class TreeView {
         }
 
         public String sizeValue() {
-            return sizeValue;
+            return entry.sizeValue();
         }
 
         public String dateValue() {
-            return dateValue;
+            return entry.dateValue();
         }
 
         public boolean directory() {
-            return directory;
+            return entry.directory();
         }
 
         public boolean expanded() {
-            return expanded;
+            return entry.expanded();
         }
 
         public boolean parentLink() {
-            return parentLink;
+            return entry.kind() == FileTreeModel.Kind.PARENT;
         }
 
         public int depth() {
-            return depth;
-        }
-
-        boolean updateMetadata(String sizeValue, String dateValue) {
-            String nextSize = sizeValue == null ? "" : sizeValue;
-            String nextDate = dateValue == null ? "" : dateValue;
-            boolean changed = false;
-            if (!this.sizeValue.equals(nextSize)) {
-                this.sizeValue = nextSize;
-                changed = true;
-            }
-            if (!this.dateValue.equals(nextDate)) {
-                this.dateValue = nextDate;
-                changed = true;
-            }
-            return changed;
+            return entry.depth();
         }
     }
 

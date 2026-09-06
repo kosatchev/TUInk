@@ -97,6 +97,13 @@ class ArchitectureTest {
         .that().resideInAPackage("dev.tuink.tui..")
         .should().dependOnClassesThat().resideInAPackage("dev.tuink.app..");
 
+    static final ArchRule FILE_TREE_MODEL_STAYS_TERMINAL_INDEPENDENT = classes()
+        .that().resideInAPackage("dev.tuink.tui.file..")
+        .should().onlyDependOnClassesThat().resideInAnyPackage(
+            "java..",
+            "dev.tuink.tui.file.."
+        );
+
     static final ArchRule APP_USES_ONLY_THE_TUI_FACADE = noClasses()
         .that().resideInAPackage("dev.tuink.app..")
         .should().dependOnClassesThat().resideInAnyPackage(
@@ -295,6 +302,7 @@ class ArchitectureTest {
         CONTEXTUAL_HIGHLIGHTER_DOES_NOT_EXPOSE_MUTABLE_MODEL.check(PRODUCTION_CLASSES);
         HIGHLIGHTER_IMPLEMENTATIONS_STAY_CORE_INDEPENDENT.check(PRODUCTION_CLASSES);
         TUI_DOES_NOT_DEPEND_ON_APPLICATION_ENTRYPOINT.check(PRODUCTION_CLASSES);
+        FILE_TREE_MODEL_STAYS_TERMINAL_INDEPENDENT.check(PRODUCTION_CLASSES);
         APP_USES_ONLY_THE_TUI_FACADE.check(PRODUCTION_CLASSES);
         TOP_LEVEL_SLICES_ARE_FREE_OF_CYCLES.check(PRODUCTION_CLASSES);
         TUI_SUBPACKAGE_SLICES_ARE_FREE_OF_CYCLES.check(PRODUCTION_CLASSES);

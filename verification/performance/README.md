@@ -28,14 +28,16 @@ the full-run defaults with `-PperfFrames=<multiple-of-30>` and
 `-PperfRepeats=<n>`.
 
 For focused widget work, the same harness accepts opt-in scenarios
-`save-as-left`, `search-replace-left`, and `tabbar-wheel`. The field scenarios
+`save-as-left`, `search-replace-left`, `tabbar-wheel`, and `open-file-tree`. The field scenarios
 open the corresponding field, insert a long Unicode value, verify
 prompt/payload tokens, and drive 300 Left events. `tabbar-wheel` creates an
 overflowing strip, fail-fast checks that its viewport moves, and alternates
-wheel directions on terminal row 2. These scenarios are excluded from
+wheel directions on terminal row 2. `open-file-tree` creates 360 deterministic
+long Unicode filenames with fixed timestamps, opens their directory through
+Ctrl+O in an isolated home, waits for metadata output to settle, verifies the
+dialog and known rows, then drives Down. These scenarios are excluded from
 `perfCheck` so its default scenario set remains stable; exact routing remains
-covered by functional tests rather than inferred only from retained ANSI
-output.
+covered by functional tests rather than inferred only from retained ANSI output.
 
 Raw profiles, `summary.json`, and a ready-to-copy `summary.md` are written
 below `build/performance/render/<timestamp>-<label>/`. Build output is ignored

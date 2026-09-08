@@ -10,7 +10,7 @@ Minimal Java terminal text editor with clean multi-module architecture:
 - `tui-widgets`: editor-independent layout/theme, typed interaction, flat focus,
   and optional parent-local cursor contracts plus reusable `Button`, `Modal`,
   interactive Unicode-aware `TextField`, virtualized `ListView`, `TabBar`, and
-  descriptor-driven `MenuBar` primitives
+  descriptor-driven `MenuBar` and flat generic `TreeView<V>` primitives
 - `editor-contract`: dependency-free immutable command/document contracts,
   UTF-16 ranges, snapshots, and revision-guarded edits
 - `core`: editor engine and text model (`TextBuffer` + `SimpleLineBuffer`)

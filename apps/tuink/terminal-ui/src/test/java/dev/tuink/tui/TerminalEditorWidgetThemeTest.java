@@ -128,4 +128,33 @@ class TerminalEditorWidgetThemeTest {
         );
         assertNull(app.resolveTopMenuWidgetStyle(new WidgetStyleRole("test.unknown"), true));
     }
+
+    @Test
+    void fileTreeAdapterMapsListAndScrollbarRoles() {
+        TerminalEditorApp app = new TerminalEditorApp();
+        UiStyles.Palette palette = UiStyles.forTheme(UiStyles.Theme.CYAN);
+
+        assertEquals(palette.dialog(), app.resolveFileTreeWidgetStyle(WidgetThemeKeys.LIST_ITEM, true));
+        assertEquals(
+            palette.dialog(),
+            app.resolveFileTreeWidgetStyle(WidgetThemeKeys.LIST_ITEM_DISABLED, false)
+        );
+        assertEquals(
+            palette.menuSelected(),
+            app.resolveFileTreeWidgetStyle(WidgetThemeKeys.LIST_ITEM_SELECTED_FOCUSED, true)
+        );
+        assertEquals(
+            palette.dialogSelectedMono(),
+            app.resolveFileTreeWidgetStyle(WidgetThemeKeys.LIST_ITEM_SELECTED, false)
+        );
+        assertEquals(
+            palette.dialogScrollTrack(),
+            app.resolveFileTreeWidgetStyle(WidgetThemeKeys.SCROLLBAR_TRACK, true)
+        );
+        assertEquals(
+            palette.dialogScrollThumb(),
+            app.resolveFileTreeWidgetStyle(WidgetThemeKeys.SCROLLBAR_THUMB, false)
+        );
+        assertNull(app.resolveFileTreeWidgetStyle(new WidgetStyleRole("test.unknown"), true));
+    }
 }

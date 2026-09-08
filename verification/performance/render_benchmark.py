@@ -41,11 +41,15 @@ SCENARIOS = DEFAULT_SCENARIOS + (
     "save-as-left",
     "search-replace-left",
     "tabbar-wheel",
+    "open-file-tree",
 )
 MOUSE_SCENARIOS = ("mouse-drag", "tabbar-wheel")
 SAVE_AS_STRESS_TEXT = ("draft-segment-" * 128 + "中😀" * 64).encode("utf-8")
 SEARCH_QUERY = b"__tuink_missing_search__"
 SEARCH_REPLACE_STRESS_TEXT = ("replace-segment-" * 128 + "中😀" * 64).encode("utf-8")
+OPEN_FILE_TREE_ENTRY_COUNT = 360
+OPEN_FILE_TREE_FIRST_TOKEN = b"tree-row-000"
+OPEN_FILE_TREE_TIMESTAMP_NS = 946684800_000_000_000
 
 
 def create_settings_fixture(path: Path) -> None:
@@ -146,6 +150,43 @@ def create_fixture(path: Path, line_count: int) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
 
 
+def open_file_tree_entry_name(index: int) -> str:
+    return (
+        f"tree-row-{index:03d}-длинное-имя-中😀-"
+        f"segment-{index % 17:02d}-segment-{index % 29:02d}-known-{index:03d}.txt"
+    )
+
+
+def create_open_file_tree_fixture(path: Path, editor_fixture: Path) -> Path:
+    """Create the large deterministic directory outside the measured input path."""
+    path.mkdir(parents=True, exist_ok=False)
+    for index in range(OPEN_FILE_TREE_ENTRY_COUNT):
+        entry = path / open_file_tree_entry_name(index)
+        entry.write_bytes(b"")
+        os.utime(entry, ns=(OPEN_FILE_TREE_TIMESTAMP_NS, OPEN_FILE_TREE_TIMESTAMP_NS))
+    launch_fixture = path / "zzzz-editor-fixture.java"
+    shutil.copyfile(editor_fixture, launch_fixture)
+    os.utime(
+        launch_fixture,
+        ns=(OPEN_FILE_TREE_TIMESTAMP_NS, OPEN_FILE_TREE_TIMESTAMP_NS),
+    )
+    os.utime(path, ns=(OPEN_FILE_TREE_TIMESTAMP_NS, OPEN_FILE_TREE_TIMESTAMP_NS))
+    return launch_fixture
+
+
+def directory_manifest_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    for entry in sorted(path.iterdir(), key=lambda candidate: candidate.name):
+        if not entry.is_file():
+            raise ValueError(f"fixture manifest only supports files: {entry}")
+        name = entry.name.encode("utf-8")
+        digest.update(len(name).to_bytes(4, "big"))
+        digest.update(name)
+        digest.update(entry.stat().st_size.to_bytes(8, "big"))
+        digest.update(bytes.fromhex(sha256(entry)))
+    return digest.hexdigest()
+
+
 def profile_line_count(path: Path) -> int:
     if not path.exists():
         return 0
@@ -183,12 +224,15 @@ def event_sequence(scenario: str, index: int) -> bytes:
         return f"\x1b[<{button};10;2M".encode("ascii")
     if scenario in ("save-as-left", "search-replace-left"):
         return b"\x1b[D"
+    if scenario == "open-file-tree":
+        return b"\x1b[B"
     raise ValueError(f"unsupported scenario: {scenario}")
 
 
 def run_profile(
     binary: Path,
     fixture: Path,
+    open_file_tree_fixture: Path | None,
     settings_fixture: Path,
     profile_path: Path,
     scenario: str,
@@ -215,7 +259,7 @@ def run_profile(
             str(binary),
             f"-Duser.home={runtime_home}",
             f"--profile-file={profile_path}",
-            str(fixture),
+            str(open_file_tree_fixture if scenario == "open-file-tree" else fixture),
         ]
         if scenario not in MOUSE_SCENARIOS:
             child_args.insert(2, "--no-mouse")
@@ -315,6 +359,33 @@ def run_profile(
             time.sleep(0.05)
             drain(selector, captured)
 
+        if scenario == "open-file-tree":
+            if open_file_tree_fixture is None:
+                raise RuntimeError("open-file-tree fixture was not prepared")
+            # Open through the public Ctrl+O binding. Waiting for a quiet
+            # interval keeps asynchronous metadata publication outside the
+            # measured event stream.
+            os.write(master, b"\x0f")
+            settle_deadline = time.monotonic() + min(10.0, completion_timeout)
+            quiet_since = time.monotonic()
+            while time.monotonic() - quiet_since < quiet_period:
+                if poll() is not None:
+                    raise RuntimeError(
+                        f"application exited during open-file-tree prelude with wait status {status}"
+                    )
+                if time.monotonic() >= settle_deadline:
+                    raise TimeoutError("open-file-tree metadata did not become idle")
+                if drain(selector, captured):
+                    quiet_since = time.monotonic()
+                time.sleep(0.01)
+            if b"Open File" not in captured:
+                raise RuntimeError("open-file-tree prelude did not open the Open File dialog")
+            if OPEN_FILE_TREE_FIRST_TOKEN not in captured:
+                raise RuntimeError(
+                    "open-file-tree prelude did not render the deterministic first row"
+                )
+            captured.clear()
+
         input_start = time.monotonic()
         if scenario == "mouse-drag":
             os.write(master, b"\x1b[<0;10;3M")
@@ -337,7 +408,21 @@ def run_profile(
             time.sleep(0.01)
         input_elapsed = time.monotonic() - input_start
 
-        os.write(master, b"\x11\x11" if scenario == "save-as-left" else b"\x11")
+        if scenario == "open-file-tree":
+            late_row = min(OPEN_FILE_TREE_ENTRY_COUNT - 1, max(0, frames - 2))
+            late_token = f"tree-row-{late_row:03d}".encode("ascii")
+            if late_token not in captured:
+                raise RuntimeError(
+                    "open-file-tree input did not reach the deterministic late row"
+                )
+
+        if scenario == "open-file-tree":
+            os.write(master, b"\x1b")
+            time.sleep(0.05)
+            drain(selector, captured)
+            os.write(master, b"\x11")
+        else:
+            os.write(master, b"\x11\x11" if scenario == "save-as-left" else b"\x11")
         exit_deadline = time.monotonic() + 3.0
         while poll() is None and time.monotonic() < exit_deadline:
             drain(selector, captured)
@@ -409,17 +494,26 @@ def summary_markdown(summary: dict[str, object]) -> str:
         f"- Binary SHA-256: `{metadata['binary_sha256']}`",
         f"- Fixture SHA-256: `{metadata['fixture_sha256']}`",
         f"- Settings SHA-256: `{metadata['settings_sha256']}`",
-        (
-            f"- Terminal: `{metadata['rows']}x{metadata['cols']}`, "
-            f"events: `{metadata['frames']}`, repeats: `{metadata['repeats']}`"
-        ),
-        "",
-        "Values are aggregated over the profiler checkpoints from all repeats.",
-        "",
-        "| Scenario | Build mean/p50/p95 | Raster mean/p50/p95 | "
-        "Diff mean/p50/p95 | Total mean/p50/p95 | Queue mean, s |",
-        "|---|---:|---:|---:|---:|---:|",
     ]
+    if metadata.get("open_file_tree_manifest_sha256"):
+        lines.append(
+            "- Open-file tree manifest SHA-256: "
+            f"`{metadata['open_file_tree_manifest_sha256']}`"
+        )
+    lines.extend(
+        [
+            (
+                f"- Terminal: `{metadata['rows']}x{metadata['cols']}`, "
+                f"events: `{metadata['frames']}`, repeats: `{metadata['repeats']}`"
+            ),
+            "",
+            "Values are aggregated over the profiler checkpoints from all repeats.",
+            "",
+            "| Scenario | Build mean/p50/p95 | Raster mean/p50/p95 | "
+            "Diff mean/p50/p95 | Total mean/p50/p95 | Queue mean, s |",
+            "|---|---:|---:|---:|---:|---:|",
+        ]
+    )
     for scenario, data in scenarios.items():
         metrics = data["metrics_ms"]
 
@@ -446,13 +540,15 @@ def run_self_test() -> None:
     assert event_sequence("search-replace-left", 0) == b"\x1b[D"
     assert event_sequence("tabbar-wheel", 0) == b"\x1b[<65;10;2M"
     assert event_sequence("tabbar-wheel", 1) == b"\x1b[<64;10;2M"
+    assert event_sequence("open-file-tree", 0) == b"\x1b[B"
     assert parse_scenarios(
-        "down,save-as-left,search-replace-left,tabbar-wheel"
+        "down,save-as-left,search-replace-left,tabbar-wheel,open-file-tree"
     ) == [
         "down",
         "save-as-left",
         "search-replace-left",
         "tabbar-wheel",
+        "open-file-tree",
     ]
 
     with tempfile.TemporaryDirectory(prefix="tuink-render-benchmark-") as temp:
@@ -467,6 +563,22 @@ def run_self_test() -> None:
         create_settings_fixture(first_settings)
         create_settings_fixture(second_settings)
         assert sha256(first_settings) == sha256(second_settings)
+
+        first_tree = temp_dir / "first-tree"
+        second_tree = temp_dir / "second-tree"
+        first_launch = create_open_file_tree_fixture(first_tree, first_fixture)
+        second_launch = create_open_file_tree_fixture(second_tree, second_fixture)
+        assert first_launch.name == "zzzz-editor-fixture.java"
+        assert len(list(first_tree.iterdir())) == OPEN_FILE_TREE_ENTRY_COUNT + 1
+        assert (first_tree / open_file_tree_entry_name(0)).is_file()
+        assert (first_tree / open_file_tree_entry_name(359)).is_file()
+        assert max(
+            len(open_file_tree_entry_name(index).encode("utf-8"))
+            for index in range(OPEN_FILE_TREE_ENTRY_COUNT)
+        ) < 255
+        assert directory_manifest_sha256(first_tree) == directory_manifest_sha256(
+            second_tree
+        )
 
         profile = temp_dir / "profile.log"
         profile.write_text(
@@ -546,6 +658,14 @@ def main() -> None:
     create_fixture(fixture, args.fixture_lines)
     settings_fixture = run_dir / "tuink.properties"
     create_settings_fixture(settings_fixture)
+    open_file_tree_fixture: Path | None = None
+    open_file_tree_manifest_sha256: str | None = None
+    if "open-file-tree" in scenarios:
+        open_file_tree_dir = run_dir / "open-file-tree-fixture"
+        open_file_tree_fixture = create_open_file_tree_fixture(
+            open_file_tree_dir, fixture
+        )
+        open_file_tree_manifest_sha256 = directory_manifest_sha256(open_file_tree_dir)
 
     scenario_summaries: dict[str, object] = {}
     for scenario in scenarios:
@@ -557,6 +677,7 @@ def main() -> None:
             elapsed = run_profile(
                 binary=binary,
                 fixture=fixture,
+                open_file_tree_fixture=open_file_tree_fixture,
                 settings_fixture=settings_fixture,
                 profile_path=profile_path,
                 scenario=scenario,
@@ -589,6 +710,7 @@ def main() -> None:
             "binary_sha256": sha256(binary),
             "fixture_sha256": sha256(fixture),
             "settings_sha256": sha256(settings_fixture),
+            "open_file_tree_manifest_sha256": open_file_tree_manifest_sha256,
             "platform": platform.platform(),
             "machine": platform.machine(),
             "processor": platform.processor(),

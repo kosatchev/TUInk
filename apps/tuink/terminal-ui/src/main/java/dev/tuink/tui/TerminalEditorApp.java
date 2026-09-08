@@ -84,7 +84,7 @@ import dev.tuink.tui.ui.CursorPolicy;
 import dev.tuink.tui.ui.SaveAsBarView;
 import dev.tuink.tui.ui.SearchBarView;
 import dev.tuink.tui.ui.TabBarView;
-import dev.tuink.tui.ui.TreeView;
+import dev.tuink.tui.ui.FileTreeView;
 import dev.tuink.tui.ui.ViewportController;
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -132,6 +132,8 @@ public class TerminalEditorApp {
     private final Theme monoTabBarWidgetTheme = key -> resolveTabBarWidgetStyle(key, false);
     private final Theme colorTopMenuWidgetTheme = key -> resolveTopMenuWidgetStyle(key, true);
     private final Theme monoTopMenuWidgetTheme = key -> resolveTopMenuWidgetStyle(key, false);
+    private final Theme colorFileTreeWidgetTheme = key -> resolveFileTreeWidgetStyle(key, true);
+    private final Theme monoFileTreeWidgetTheme = key -> resolveFileTreeWidgetStyle(key, false);
     private HelpOverlayPlacement helpOverlayCache;
     private boolean profileEnabled = false;
     private final FrameProfiler frameProfiler = new FrameProfiler();
@@ -229,10 +231,10 @@ public class TerminalEditorApp {
         TopMenuController topMenu = new TopMenuController();
         boolean openFileMode = false;
         Path initialOpenFileRoot = initialOpenRoot(state);
-        OpenFileDialogController.Focus openFileFocus = OpenFileDialogController.Focus.LIST;
+        OpenFileInputRouter.Focus openFileFocus = OpenFileInputRouter.Focus.LIST;
         EditorView.ScrollAxis editorScrollDrag = EditorView.ScrollAxis.NONE;
         int editorScrollDragThumbOffset = 0;
-        TreeView.ScrollAxis openFileScrollDrag = TreeView.ScrollAxis.NONE;
+        FileTreeView.ScrollbarPress openFileScrollDrag = null;
         try {
             RecoveryStore.LoadResult recoveryLoad = recoveryStore.loadAll();
             startupRecoveryEntries.addAll(recoveryLoad.entries());
@@ -270,7 +272,11 @@ public class TerminalEditorApp {
         }
 
         try (
-            TreeView openFileTree = new TreeView(initialOpenFileRoot, true, true);
+            OpenFileTreeController openFileTree = new OpenFileTreeController(
+                initialOpenFileRoot,
+                true,
+                true
+            );
             TerminalRuntime terminal = TerminalRuntime.open(
                 new TerminalSession.Options(
                     cli.altScreenEnabled(),
@@ -311,6 +317,7 @@ public class TerminalEditorApp {
                 TabBar.State tabBarState = TabBar.State.initial();
                 TabBarView.Placement tabBarPlacement = null;
                 TopMenuView.Placement topMenuPlacement = null;
+                FileTreeView.Placement openFileTreePlacement = null;
                 TabMatchCache tabMatchCache = new TabMatchCache();
                 SearchMatchCountCache searchMatchCountCache = new SearchMatchCountCache();
                 while (running && eventLoop.running()) {
@@ -451,6 +458,7 @@ public class TerminalEditorApp {
                         // modal prompt exclusively owns this frame's row,
                         // painter, and cursor.
                         SearchBarView activeSearchBar = searchOwnsInteractiveRow(modalState)
+                                && !openFileMode
                             ? searchBar
                             : null;
                         ConfirmBarView confirmBar = null;
@@ -626,6 +634,26 @@ public class TerminalEditorApp {
                         );
                         topMenuPlacement = topMenuView.place(new Rect(0, 0, cols, rows));
                         topMenu.adopt(topMenuPlacement.state());
+                        if (openFileMode) {
+                            OpenDialogLayout openLayout = OpenFileDialogController.layoutForTerminal(rows, cols);
+                            boolean treeVisible = rows >= 8 && cols >= 24;
+                            int treeLeft = openLayout.left() + 2;
+                            Rect treeBounds = new Rect(
+                                treeLeft,
+                                openLayout.listStartRow(),
+                                Math.max(0, openLayout.right() - treeLeft),
+                                openLayout.listRows()
+                            );
+                            openFileTreePlacement = openFileTree.place(
+                                treeBounds,
+                                new Rect(0, 0, cols, rows),
+                                openFileFocus == OpenFileInputRouter.Focus.LIST,
+                                treeVisible
+                            );
+                        } else {
+                            openFileTreePlacement = null;
+                            openFileScrollDrag = null;
+                        }
                         renderer.setHighlightActiveGutter(uiSessionState.highlightActiveGutterSetting);
                         renderer.setVisibleWhitespace(uiSessionState.visibleWhitespaceSetting);
                         renderer.setTabWidth(uiSessionState.tabWidthSetting);
@@ -702,6 +730,7 @@ public class TerminalEditorApp {
                             confirmBarPlacement,
                             openFileMode,
                             openFileTree,
+                            openFileTreePlacement,
                             openFileFocus,
                             helpHintsMode,
                             helpLicensesMode,
@@ -721,6 +750,7 @@ public class TerminalEditorApp {
                         continue;
                     }
                     if (inputEvent instanceof ResizeEvent) {
+                        openFileScrollDrag = null;
                         continue;
                     }
                     notification.clearErrorOnUserAction();
@@ -822,6 +852,102 @@ public class TerminalEditorApp {
                         if (routedConfirmDecision == null && confirmInput.consumed()) {
                             continue;
                         }
+                    }
+                    if (openFileMode) {
+                        if (inputEvent instanceof PointerEvent
+                            && (!uiSessionState.mouseModeSetting || !uiSessionState.mouseModeAvailable)) {
+                            continue;
+                        }
+                        if (openFileTreePlacement == null) {
+                            eventLoop.invalidate();
+                            continue;
+                        }
+                        OpenFileInputRouter.Result openInput = OpenFileInputRouter.route(
+                            openFileTreePlacement,
+                            openFileFocus,
+                            openFileScrollDrag,
+                            inputEvent,
+                            System.nanoTime(),
+                            OPEN_DIALOG_DOUBLE_CLICK_NANOS
+                        );
+                        openFileTree.adopt(openInput.state());
+                        openFileFocus = openInput.focus();
+                        openFileScrollDrag = openInput.scrollbarPress();
+                        if (inputEvent instanceof PointerEvent && openInput.consumed()) {
+                            editorView.cancelMouseSelection();
+                        }
+                        if (openInput.intent() != null) {
+                            OpenFileApplyResult applied = applyOpenFileIntent(
+                                openInput.intent(),
+                                openFileTree,
+                                tabs,
+                                activeTabIndex,
+                                notification
+                            );
+                            openFileMode = applied.openFileMode();
+                            if (applied.activeTabIndex() != activeTabIndex) {
+                                sessionContext.activate(applied.activeTabIndex());
+                            }
+                            if (!openFileMode) {
+                                openFileScrollDrag = null;
+                            }
+                            continue;
+                        }
+                        if (openInput.consumed()) {
+                            continue;
+                        }
+                        if (inputEvent instanceof PointerEvent pointer
+                            && pointer.kind() == PointerEvent.Kind.PRESS
+                            && pointer.button() == PointerEvent.Button.LEFT
+                            && pointer.modifiers().isEmpty()
+                            && rows >= 8
+                            && cols >= 24) {
+                            OpenDialogLayout layout = OpenFileDialogController.layoutForTerminal(rows, cols);
+                            Modal frame = openFileFrame(layout);
+                            OpenDialogButtons buttons = OpenFileDialogController.buttonsForLayout(layout);
+                            Button hiddenToggle = openFileHiddenToggleButton(
+                                layout,
+                                openFileTree.showHiddenFiles()
+                            );
+                            if (frame.closeButton().hit(pointer.row(), pointer.column())) {
+                                openFileMode = false;
+                                openFileScrollDrag = null;
+                            } else if (hiddenToggle.hit(pointer.row(), pointer.column())) {
+                                openFileTree.toggleHiddenFiles();
+                                openFileFocus = OpenFileInputRouter.Focus.LIST;
+                                openFileScrollDrag = null;
+                            } else if (buttons.ok().hit(pointer.row(), pointer.column())) {
+                                OpenFileInputRouter.Result confirmed = OpenFileInputRouter.route(
+                                    openFileTreePlacement,
+                                    OpenFileInputRouter.Focus.OK,
+                                    null,
+                                    KeyStroke.of(KeyStroke.Key.ENTER),
+                                    System.nanoTime(),
+                                    OPEN_DIALOG_DOUBLE_CLICK_NANOS
+                                );
+                                openFileTree.adopt(confirmed.state());
+                                openFileFocus = confirmed.focus();
+                                OpenFileApplyResult applied = applyOpenFileIntent(
+                                    confirmed.intent(),
+                                    openFileTree,
+                                    tabs,
+                                    activeTabIndex,
+                                    notification
+                                );
+                                openFileMode = applied.openFileMode();
+                                if (applied.activeTabIndex() != activeTabIndex) {
+                                    sessionContext.activate(applied.activeTabIndex());
+                                }
+                            } else if (buttons.cancel().hit(pointer.row(), pointer.column())) {
+                                openFileFocus = OpenFileInputRouter.Focus.CANCEL;
+                                openFileMode = false;
+                                openFileScrollDrag = null;
+                            }
+                        }
+                        // The open-file dialog is modal even when a pointer
+                        // misses every current-frame control.
+                        editorView.cancelMouseSelection();
+                        continue;
                     }
                     CommandInvocation routedMenuCommand = null;
                     LegacyCommandBridge.RoutedCommand routedMenuResult = null;
@@ -1040,10 +1166,6 @@ public class TerminalEditorApp {
                         KeyEvent remappedMouseKey = null;
                         switch (mouse.kind()) {
                             case SCROLL_UP -> {
-                                OpenFileDialogController.OpenDialogLayout layout = OpenFileDialogController.layoutForTerminal(rows, cols);
-                                if (OpenFileDialogController.handleScroll(openFileMode, openFileTree, layout.listRows(), false)) {
-                                    break;
-                                }
                                 if (modalState.isNone()) {
                                     int topBefore = state.getTopLine();
                                     int topWrapBefore = state.getTopWrapSegment();
@@ -1061,10 +1183,6 @@ public class TerminalEditorApp {
                                 }
                             }
                             case SCROLL_DOWN -> {
-                                OpenFileDialogController.OpenDialogLayout layout = OpenFileDialogController.layoutForTerminal(rows, cols);
-                                if (OpenFileDialogController.handleScroll(openFileMode, openFileTree, layout.listRows(), true)) {
-                                    break;
-                                }
                                 if (modalState.isNone()) {
                                     int topBefore = state.getTopLine();
                                     int topWrapBefore = state.getTopWrapSegment();
@@ -1085,55 +1203,7 @@ public class TerminalEditorApp {
                                 if (mouse.button() == KeyEvent.MouseButton.LEFT) {
                                     editorScrollDrag = EditorView.ScrollAxis.NONE;
                                     editorScrollDragThumbOffset = 0;
-                                    openFileScrollDrag = TreeView.ScrollAxis.NONE;
-                                    if (openFileMode) {
-                                        OpenFileDialogController.OpenDialogLayout layout = OpenFileDialogController.layoutForTerminal(rows, cols);
-                                        Modal frame = openFileFrame(layout);
-                                        OpenFileDialogController.OpenDialogButtons buttons = OpenFileDialogController.buttonsForLayout(layout);
-                                        Button hiddenToggle = openFileHiddenToggleButton(layout, openFileTree.showHiddenFiles());
-                                        if (hiddenToggle.hit(mouse.row(), mouse.col())) {
-                                            openFileTree.setShowHiddenFiles(!openFileTree.showHiddenFiles());
-                                            openFileFocus = OpenFileDialogController.Focus.LIST;
-                                            continue;
-                                        }
-                                        int openFileActiveTabIndex = activeTabIndex;
-                                        OpenFileDialogController.MousePressResult mouseResult =
-                                            OpenFileDialogController.handleMousePress(
-                                                openFileMode,
-                                                openFileFocus,
-                                                openFileTree,
-                                                openFileActiveTabIndex,
-                                                mouse.row(),
-                                                mouse.col(),
-                                                layout.left(),
-                                                layout.right(),
-                                                layout.listStartRow(),
-                                                layout.listRows(),
-                                                frame.closeButton().hit(mouse.row(), mouse.col()),
-                                                buttons.ok().hit(mouse.row(), mouse.col()),
-                                                buttons.cancel().hit(mouse.row(), mouse.col()),
-                                                System.nanoTime(),
-                                                OPEN_DIALOG_DOUBLE_CLICK_NANOS,
-                                                selected -> {
-                                                    return activateOpenFileSelection(
-                                                        selected,
-                                                        tabs,
-                                                        openFileActiveTabIndex,
-                                                        notification
-                                                    );
-                                                }
-                                            );
-                                        if (mouseResult.consumed()) {
-                                            openFileMode = mouseResult.openFileMode();
-                                            openFileFocus = mouseResult.focus();
-                                            openFileScrollDrag = mouseResult.dragAxis();
-                                            if (mouseResult.activeTabIndex() != activeTabIndex) {
-                                                sessionContext.activate(mouseResult.activeTabIndex());
-                                            }
-                                            continue;
-                                        }
-                                        continue;
-                                    }
+                                    openFileScrollDrag = null;
                                     if (confirmMode && !modalState.isCloseTabConfirm()) {
                                         editorView.cancelMouseSelection();
                                         continue;
@@ -1202,24 +1272,6 @@ public class TerminalEditorApp {
                                 }
                             }
                             case DRAG -> {
-                                if (openFileMode && mouse.button() == KeyEvent.MouseButton.LEFT
-                                    && openFileScrollDrag != TreeView.ScrollAxis.NONE) {
-                                    OpenFileDialogController.OpenDialogLayout layout = OpenFileDialogController.layoutForTerminal(rows, cols);
-                                    boolean consumed = OpenFileDialogController.handleMouseDrag(
-                                        openFileMode,
-                                        openFileTree,
-                                        openFileScrollDrag,
-                                        mouse.row(),
-                                        mouse.col(),
-                                        layout.left(),
-                                        layout.right(),
-                                        layout.listStartRow(),
-                                        layout.listRows()
-                                    );
-                                    if (consumed) {
-                                        continue;
-                                    }
-                                }
                                 if (modalState.isNone()) {
                                     if (mouse.button() == KeyEvent.MouseButton.LEFT
                                         && editorScrollDrag != EditorView.ScrollAxis.NONE) {
@@ -1268,7 +1320,7 @@ public class TerminalEditorApp {
                             case RELEASE -> {
                                 editorScrollDrag = EditorView.ScrollAxis.NONE;
                                 editorScrollDragThumbOffset = 0;
-                                openFileScrollDrag = TreeView.ScrollAxis.NONE;
+                                openFileScrollDrag = null;
                                 editorView.handleMouseRelease(engine);
                             }
                             default -> {
@@ -1279,37 +1331,6 @@ public class TerminalEditorApp {
                             continue;
                         }
                         key = remappedMouseKey;
-                    }
-
-                    if (openFileMode) {
-                        OpenFileDialogController.OpenDialogLayout layout = OpenFileDialogController.layoutForTerminal(rows, cols);
-                        if (isAction(key, KeyEvent.Action.CTRL_H)) {
-                            openFileTree.setShowHiddenFiles(!openFileTree.showHiddenFiles());
-                            openFileFocus = OpenFileDialogController.Focus.LIST;
-                            continue;
-                        }
-                        int openFileActiveTabIndex = activeTabIndex;
-                        OpenFileDialogController.HandleResult openFileResult = OpenFileDialogController.handleKey(
-                            key,
-                            openFileMode,
-                            openFileFocus,
-                            openFileTree,
-                            openFileActiveTabIndex,
-                            layout.listRows(),
-                            openFileTree.visibleTextWidth(layout.left(), layout.right(), layout.listRows()),
-                            selected -> activateOpenFileSelection(
-                                selected,
-                                tabs,
-                                openFileActiveTabIndex,
-                                notification
-                            )
-                        );
-                        openFileMode = openFileResult.openFileMode();
-                        openFileFocus = openFileResult.focus();
-                        if (openFileResult.activeTabIndex() != activeTabIndex) {
-                            sessionContext.activate(openFileResult.activeTabIndex());
-                        }
-                        continue;
                     }
 
                     if (modalState.isHelpHints()) {
@@ -1714,9 +1735,9 @@ public class TerminalEditorApp {
         EditorEngine engine,
         NotificationState notification,
         TopMenuController topMenu,
-        TreeView openFileTree,
+        OpenFileTreeController openFileTree,
         boolean openFileMode,
-        OpenFileDialogController.Focus openFileFocus,
+        OpenFileInputRouter.Focus openFileFocus,
         TextField saveAsInput,
         SaveAsSuggestionStore saveAsSuggestions,
         RenderRasterizer renderer
@@ -1724,7 +1745,7 @@ public class TerminalEditorApp {
         boolean running = editorAction.running();
         UiModalState modalState = editorAction.modalState();
         boolean nextOpenFileMode = openFileMode;
-        OpenFileDialogController.Focus nextOpenFileFocus = openFileFocus;
+        OpenFileInputRouter.Focus nextOpenFileFocus = openFileFocus;
 
         if (editorAction.clearNotification()) {
             notification.clear();
@@ -1745,7 +1766,7 @@ public class TerminalEditorApp {
             topMenu.close();
             nextOpenFileMode = true;
             openFileTree.setRoot(initialOpenRoot(state));
-            nextOpenFileFocus = OpenFileDialogController.Focus.LIST;
+            nextOpenFileFocus = OpenFileInputRouter.Focus.LIST;
         }
         if (editorAction.requestToggleTheme()) {
             applyTheme(theme.next());
@@ -1900,8 +1921,8 @@ public class TerminalEditorApp {
         SaveAsSuggestionStore saveAsSuggestions,
         NotificationState notification,
         boolean openFileMode,
-        TreeView openFileTree,
-        OpenFileDialogController.Focus openFileFocus,
+        OpenFileTreeController openFileTree,
+        OpenFileInputRouter.Focus openFileFocus,
         TopMenuController topMenu,
         Consumer<Boolean> mouseTrackingController,
         RenderRasterizer renderer
@@ -1918,7 +1939,7 @@ public class TerminalEditorApp {
         boolean nextRunning = running;
         UiModalState nextModalState = modalState;
         boolean nextOpenFileMode = openFileMode;
-        OpenFileDialogController.Focus nextOpenFileFocus = openFileFocus;
+        OpenFileInputRouter.Focus nextOpenFileFocus = openFileFocus;
 
         SearchFocus searchFocus = currentSearchFocus();
         if (key instanceof KeyEvent.CharInput charInput) {
@@ -2313,7 +2334,7 @@ public class TerminalEditorApp {
                 topMenu.close();
                 nextOpenFileMode = true;
                 openFileTree.setRoot(initialOpenRoot(nextState));
-                nextOpenFileFocus = OpenFileDialogController.Focus.LIST;
+                nextOpenFileFocus = OpenFileInputRouter.Focus.LIST;
                 statusMessage = "Open file";
             }
             case TOGGLE_THEME -> {
@@ -2430,7 +2451,7 @@ public class TerminalEditorApp {
         boolean running,
         UiModalState modalState,
         boolean openFileMode,
-        OpenFileDialogController.Focus openFileFocus
+        OpenFileInputRouter.Focus openFileFocus
     ) {
     }
 
@@ -2438,8 +2459,11 @@ public class TerminalEditorApp {
         boolean running,
         UiModalState modalState,
         boolean openFileMode,
-        OpenFileDialogController.Focus openFileFocus
+        OpenFileInputRouter.Focus openFileFocus
     ) {
+    }
+
+    private record OpenFileApplyResult(boolean openFileMode, int activeTabIndex) {
     }
 
     private record SaveFlowProgress(boolean running, UiModalState modalState) {
@@ -2658,8 +2682,9 @@ public class TerminalEditorApp {
         int rows,
         int cols,
         boolean visible,
-        TreeView tree,
-        OpenFileDialogController.Focus focus,
+        OpenFileTreeController tree,
+        FileTreeView.Placement treePlacement,
+        OpenFileInputRouter.Focus focus,
         boolean colorEnabled
     ) {
         if (!visible || rows < 8 || cols < 24) {
@@ -2684,32 +2709,23 @@ public class TerminalEditorApp {
                 ? (colorEnabled ? styles.menuSelected() : styles.dialogSelectedMono())
                 : styles.dialog()
         );
-        tree.draw(
-            canvas,
-            rows,
-            cols,
-            layout.left(),
-            layout.right(),
-            layout.listStartRow(),
-            layout.listRows(),
-            colorEnabled,
-            styles.dialog(),
-            styles.menuSelected(),
-            styles.dialogSelectedMono(),
-            styles.dialogScrollTrack(),
-            styles.dialogScrollThumb()
-        );
+        if (treePlacement != null) {
+            treePlacement.paint(
+                canvas,
+                colorEnabled ? colorFileTreeWidgetTheme : monoFileTreeWidgetTheme
+            );
+        }
 
         OpenFileDialogController.OpenDialogButtons buttons = OpenFileDialogController.buttonsForLayout(layout);
         buttons.ok().draw(
             canvas,
-            focus == OpenFileDialogController.Focus.OK
+            focus == OpenFileInputRouter.Focus.OK
                 ? (colorEnabled ? styles.menuSelected() : styles.dialogSelectedMono())
                 : styles.dialog()
         );
         buttons.cancel().draw(
             canvas,
-            focus == OpenFileDialogController.Focus.CANCEL
+            focus == OpenFileInputRouter.Focus.CANCEL
                 ? (colorEnabled ? styles.menuSelected() : styles.dialogSelectedMono())
                 : styles.dialog()
         );
@@ -2918,6 +2934,24 @@ public class TerminalEditorApp {
         return null;
     }
 
+    CellStyle resolveFileTreeWidgetStyle(WidgetStyleRole key, boolean colorEnabled) {
+        if (WidgetThemeKeys.LIST_ITEM_SELECTED.equals(key)
+            || WidgetThemeKeys.LIST_ITEM_SELECTED_FOCUSED.equals(key)) {
+            return colorEnabled ? styles.menuSelected() : styles.dialogSelectedMono();
+        }
+        if (WidgetThemeKeys.LIST_ITEM.equals(key)
+            || WidgetThemeKeys.LIST_ITEM_DISABLED.equals(key)) {
+            return styles.dialog();
+        }
+        if (WidgetThemeKeys.SCROLLBAR_TRACK.equals(key)) {
+            return styles.dialogScrollTrack();
+        }
+        if (WidgetThemeKeys.SCROLLBAR_THUMB.equals(key)) {
+            return styles.dialogScrollThumb();
+        }
+        return null;
+    }
+
     private ConfirmBarInputRouter.Policy confirmPolicy(UiModalState modalState) {
         if (modalState.isRecoveryConfirm()) {
             return ConfirmBarInputRouter.Policy.recovery();
@@ -2958,33 +2992,61 @@ public class TerminalEditorApp {
         return CellText.clip(text, 0, width);
     }
 
-    private OpenFileDialogController.ActivationResult activateOpenFileSelection(
-        TreeView.Item entry,
+    private OpenFileApplyResult applyOpenFileIntent(
+        OpenFileInputRouter.Intent intent,
+        OpenFileTreeController tree,
         List<EditorTab> tabs,
         int activeTabIndex,
         NotificationState notification
     ) {
-        if (entry == null) {
-            notification.warning("Select a file");
-            return new OpenFileDialogController.ActivationResult(true, activeTabIndex);
+        if (intent == null) {
+            return new OpenFileApplyResult(true, activeTabIndex);
         }
-        if (entry.parentLink() || entry.directory()) {
-            notification.warning("Select a file");
-            return new OpenFileDialogController.ActivationResult(true, activeTabIndex);
+        if (intent instanceof OpenFileInputRouter.ToggleDirectory toggle) {
+            tree.requestExpansion(toggle.id(), toggle.expand());
+            return new OpenFileApplyResult(true, activeTabIndex);
         }
-        Path target = entry.path();
-        try {
-            EditorTab tab = newEditorTab();
-            tab.engine().open(target);
-            tab = tab.withRenderPlanBuilder(new RenderPlanBuilder(resolveHighlighter(target), tab.textLayout()));
-            tabs.add(tab);
-            int newIndex = tabs.size() - 1;
-            notification.success("Opened " + target);
-            return new OpenFileDialogController.ActivationResult(false, newIndex);
-        } catch (IOException e) {
-            notification.error("Open failed: " + e.getMessage());
-            return new OpenFileDialogController.ActivationResult(true, activeTabIndex);
+        if (intent instanceof OpenFileInputRouter.ChangeRoot root) {
+            tree.setRoot(root.root());
+            return new OpenFileApplyResult(true, activeTabIndex);
         }
+        if (intent instanceof OpenFileInputRouter.MoveToParentRoot) {
+            tree.moveToParentRoot();
+            return new OpenFileApplyResult(true, activeTabIndex);
+        }
+        if (intent instanceof OpenFileInputRouter.ToggleHidden) {
+            tree.toggleHiddenFiles();
+            return new OpenFileApplyResult(true, activeTabIndex);
+        }
+        if (intent instanceof OpenFileInputRouter.CloseDialog) {
+            return new OpenFileApplyResult(false, activeTabIndex);
+        }
+        if (intent instanceof OpenFileInputRouter.SelectionRejected rejected) {
+            notification.warning(
+                rejected.reason() == OpenFileInputRouter.Rejection.ERROR
+                    ? "The selected tree entry cannot be opened"
+                    : "Select a file"
+            );
+            return new OpenFileApplyResult(true, activeTabIndex);
+        }
+        if (intent instanceof OpenFileInputRouter.OpenFile open) {
+            Path target = open.file();
+            try {
+                EditorTab tab = newEditorTab();
+                tab.engine().open(target);
+                tab = tab.withRenderPlanBuilder(
+                    new RenderPlanBuilder(resolveHighlighter(target), tab.textLayout())
+                );
+                tabs.add(tab);
+                int newIndex = tabs.size() - 1;
+                notification.success("Opened " + target);
+                return new OpenFileApplyResult(false, newIndex);
+            } catch (IOException e) {
+                notification.error("Open failed: " + e.getMessage());
+                return new OpenFileApplyResult(true, activeTabIndex);
+            }
+        }
+        throw new IllegalStateException("Unsupported open-file intent: " + intent);
     }
 
     private String buildBottomBar(
@@ -3086,8 +3148,9 @@ public class TerminalEditorApp {
         SearchBarView.Placement searchBarPlacement,
         ConfirmBarView.Placement confirmBarPlacement,
         boolean openFileMode,
-        TreeView openFileTree,
-        OpenFileDialogController.Focus openFileFocus,
+        OpenFileTreeController openFileTree,
+        FileTreeView.Placement openFileTreePlacement,
+        OpenFileInputRouter.Focus openFileFocus,
         boolean helpHintsMode,
         boolean helpLicensesMode,
         boolean helpAuthorMode,
@@ -3185,6 +3248,7 @@ public class TerminalEditorApp {
             cols,
             openFileMode,
             openFileTree,
+            openFileTreePlacement,
             openFileFocus,
             colorEnabled
         );
@@ -3263,19 +3327,6 @@ public class TerminalEditorApp {
                 desiredCursorRow = menuCursor.y() + 1;
                 desiredCursorCol = menuCursor.x() + 1;
             }
-        } else if (openFileMode) {
-            OpenFileDialogController.OpenDialogLayout layout = OpenFileDialogController.layoutForTerminal(rows, cols);
-            if (openFileFocus == OpenFileDialogController.Focus.LIST) {
-                int visibleIndex = openFileTree.visibleIndex(layout.listRows());
-                desiredCursorRow = layout.listStartRow() + visibleIndex + 1;
-                desiredCursorCol = layout.left() + 3;
-            } else {
-                OpenFileDialogController.OpenDialogButtons buttons = OpenFileDialogController.buttonsForLayout(layout);
-                desiredCursorCol = openFileFocus == OpenFileDialogController.Focus.OK
-                    ? buttons.ok().cursorCol()
-                    : buttons.cancel().cursorCol();
-                desiredCursorRow = layout.bottom() + 1;
-            }
         } else if (helpHintsMode || helpLicensesMode || helpAuthorMode) {
             HelpPage helpPage = activeHelpPage(helpHintsMode, helpLicensesMode, helpAuthorMode);
             Button close = helpOverlayPlacement(rows, cols, helpPage).close();
@@ -3302,18 +3353,18 @@ public class TerminalEditorApp {
         int diffRegionHeight = plan.contentRows();
         int textStartCol = plan.gutterWidth();
         int textEndCol = cols - plan.scrollbarWidth() - 1;
-        if (openFileMode) {
-            OpenFileDialogController.OpenDialogLayout layout = OpenFileDialogController.layoutForTerminal(rows, cols);
-            int listTextWidth = openFileTree.visibleRowWidth(layout.left(), layout.right(), layout.listRows());
-            diffRegionTop = layout.listStartRow();
-            diffRegionHeight = layout.listRows();
-            textStartCol = layout.left() + 1;
-            textEndCol = textStartCol + Math.max(0, listTextWidth) - 1;
+        if (openFileMode && openFileTreePlacement != null) {
+            Rect treeContent = openFileTreePlacement.contentBounds();
+            diffRegionTop = treeContent.y();
+            diffRegionHeight = treeContent.height();
+            textStartCol = treeContent.x();
+            textEndCol = treeContent.rightExclusive() - 1;
             textStartCol = Math.max(0, Math.min(cols - 1, textStartCol));
             textEndCol = Math.max(textStartCol, Math.min(cols - 1, textEndCol));
             canUseVerticalScrollFastPath = previousPlan != null
                 && lastOpenFileModeForDiff
-                && openFileTree.scrollOffset() != lastOpenFileScrollForDiff;
+                && openFileTree.state().widgetState().firstVisibleIndex()
+                    != lastOpenFileScrollForDiff;
             canUseHorizontalScrollFastPath = false;
             horizontalDeltaColumns = 0;
         }
@@ -3351,7 +3402,9 @@ public class TerminalEditorApp {
             frameProfiler.diffNanos = presentResult.patchNanos();
         }
         lastOpenFileModeForDiff = openFileMode;
-        lastOpenFileScrollForDiff = openFileMode ? openFileTree.scrollOffset() : 0;
+        lastOpenFileScrollForDiff = openFileMode
+            ? openFileTree.state().widgetState().firstVisibleIndex()
+            : 0;
         return new RenderFrameResult(plan, true);
     }
 
@@ -3515,8 +3568,9 @@ public class TerminalEditorApp {
             SearchBarView.Placement searchBarPlacement,
             ConfirmBarView.Placement confirmBarPlacement,
             boolean openFileMode,
-            TreeView openFileTree,
-            OpenFileDialogController.Focus openFileFocus,
+            OpenFileTreeController openFileTree,
+            FileTreeView.Placement openFileTreePlacement,
+            OpenFileInputRouter.Focus openFileFocus,
             boolean helpHintsMode,
             boolean helpLicensesMode,
             boolean helpAuthorMode,
@@ -3552,6 +3606,7 @@ public class TerminalEditorApp {
                 confirmBarPlacement,
                 openFileMode,
                 openFileTree,
+                openFileTreePlacement,
                 openFileFocus,
                 helpHintsMode,
                 helpLicensesMode,

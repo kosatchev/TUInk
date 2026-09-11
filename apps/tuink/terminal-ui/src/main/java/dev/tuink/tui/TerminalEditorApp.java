@@ -45,7 +45,6 @@ import dev.tuink.render.LineHighlighter;
 import dev.tuink.render.EditorLayout;
 import dev.tuink.render.RenderPlan;
 import dev.tuink.render.RenderPlanBuilder;
-import dev.tuink.render.Style;
 import dev.tuink.render.TerminalEditorTextLayout;
 import dev.tuink.tui.render.RenderRasterizer;
 import dev.tuink.terminal.runtime.TuiEventLoop;
@@ -137,8 +136,7 @@ public class TerminalEditorApp {
     private HelpOverlayPlacement helpOverlayCache;
     private boolean profileEnabled = false;
     private final FrameProfiler frameProfiler = new FrameProfiler();
-    private boolean lastOpenFileModeForDiff = false;
-    private int lastOpenFileScrollForDiff = 0;
+    private FrameComposition.OpenTreeDiffKey lastOpenTreeDiffKey;
 
     public static void main(String[] args) throws Exception {
         new TerminalEditorApp().run(args);
@@ -634,15 +632,16 @@ public class TerminalEditorApp {
                         );
                         topMenuPlacement = topMenuView.place(new Rect(0, 0, cols, rows));
                         topMenu.adopt(topMenuPlacement.state());
+                        OpenDialogLayout openFileLayout = null;
                         if (openFileMode) {
-                            OpenDialogLayout openLayout = OpenFileDialogController.layoutForTerminal(rows, cols);
+                            openFileLayout = OpenFileDialogController.layoutForTerminal(rows, cols);
                             boolean treeVisible = rows >= 8 && cols >= 24;
-                            int treeLeft = openLayout.left() + 2;
+                            int treeLeft = openFileLayout.left() + 2;
                             Rect treeBounds = new Rect(
                                 treeLeft,
-                                openLayout.listStartRow(),
-                                Math.max(0, openLayout.right() - treeLeft),
-                                openLayout.listRows()
+                                openFileLayout.listStartRow(),
+                                Math.max(0, openFileLayout.right() - treeLeft),
+                                openFileLayout.listRows()
                             );
                             openFileTreePlacement = openFileTree.place(
                                 treeBounds,
@@ -688,7 +687,6 @@ public class TerminalEditorApp {
                             cols,
                             uiSessionState.readingModeSetting
                         );
-                        String topBar = topMenuBar.text();
                         String bottomBar = buildBottomBar(
                             state,
                             model,
@@ -698,45 +696,50 @@ public class TerminalEditorApp {
                             tabs.size(),
                             searchSummary
                         );
-                        String interactiveBarText = inlinePromptBar.text();
-                        Style interactiveBarStyle = inlinePromptBar.style();
-                        RenderFrameResult frameResult = renderFrameController.renderFrameIfNeeded(
-                            renderPlanBuilder,
-                            model,
-                            state,
-                            rows,
-                            cols,
-                            contentTopRow,
-                            tabBarPlacement,
-                            topMenuPlacement,
-                            topMenuBar.menuPrefixWidth(),
-                            editorLayout,
-                            inlinePromptBar.height(),
-                            topBar,
-                            bottomBar,
-                            uiSessionState.searchMode,
-                            searchQuery,
-                            searchUi,
-                            interactiveBarText,
-                            interactiveBarStyle,
-                            notificationBar,
+                        FrameComposition composition = new FrameComposition(
+                            new FrameComposition.Document(
+                                renderPlanBuilder,
+                                model,
+                                state,
+                                editorLayout,
+                                plan
+                            ),
+                            new FrameComposition.Surface(
+                                topMenuBar,
+                                bottomBar,
+                                inlinePromptBar,
+                                notificationBar
+                            ),
+                            new FrameComposition.Search(
+                                uiSessionState.searchMode,
+                                searchQuery,
+                                searchOptions,
+                                uiSessionState.autoSelectionHighlightSetting,
+                                searchBarPlacement
+                            ),
+                            new FrameComposition.Layers(
+                                tabBarPlacement,
+                                topMenuPlacement,
+                                saveAsMode,
+                                saveAsBarPlacement,
+                                confirmBarPlacement,
+                                openFileMode
+                                    ? new FrameComposition.OpenFile(
+                                        true,
+                                        openFileLayout,
+                                        openFileTree.root().toString(),
+                                        openFileTree.showHiddenFiles(),
+                                        openFileTreePlacement,
+                                        openFileFocus
+                                    )
+                                    : FrameComposition.OpenFile.hidden(),
+                                activeHelpPage(helpHintsMode, helpLicensesMode, helpAuthorMode)
+                            ),
                             uiSessionState.wrapLinesSetting,
                             uiSessionState.wrapWordsSetting,
-                            uiSessionState.autoSelectionHighlightSetting,
-                            modalState,
-                            saveAsBarPlacement,
-                            tabs,
-                            searchBarPlacement,
-                            confirmBarPlacement,
-                            openFileMode,
-                            openFileTree,
-                            openFileTreePlacement,
-                            openFileFocus,
-                            helpHintsMode,
-                            helpLicensesMode,
-                            helpAuthorMode,
-                            plan
+                            frameTicket.fullRedraw()
                         );
+                        RenderFrameResult frameResult = renderFrameController.renderFrameIfNeeded(composition);
                         plan = frameResult.plan();
                         eventLoop.endFrame(frameTicket, frameResult.rendered());
                         if (profileEnabled) {
@@ -2681,21 +2684,18 @@ public class TerminalEditorApp {
         Canvas canvas,
         int rows,
         int cols,
-        boolean visible,
-        OpenFileTreeController tree,
-        FileTreeView.Placement treePlacement,
-        OpenFileInputRouter.Focus focus,
+        FrameComposition.OpenFile openFile,
         boolean colorEnabled
     ) {
-        if (!visible || rows < 8 || cols < 24) {
+        if (!openFile.visible() || rows < 8 || cols < 24) {
             return;
         }
-        OpenFileDialogController.OpenDialogLayout layout = OpenFileDialogController.layoutForTerminal(rows, cols);
+        OpenDialogLayout layout = openFile.layout();
         Modal frame = openFileFrame(layout);
         frame.draw(canvas);
-        Button hiddenToggle = openFileHiddenToggleButton(layout, tree.showHiddenFiles());
+        Button hiddenToggle = openFileHiddenToggleButton(layout, openFile.showHiddenFiles());
 
-        String pathLine = " " + tree.root();
+        String pathLine = " " + openFile.rootLabel();
         drawMenuLine(
             canvas,
             layout.top() + 1,
@@ -2705,10 +2705,11 @@ public class TerminalEditorApp {
         );
         hiddenToggle.draw(
             canvas,
-            tree.showHiddenFiles()
+            openFile.showHiddenFiles()
                 ? (colorEnabled ? styles.menuSelected() : styles.dialogSelectedMono())
                 : styles.dialog()
         );
+        FileTreeView.Placement treePlacement = openFile.placement();
         if (treePlacement != null) {
             treePlacement.paint(
                 canvas,
@@ -2719,13 +2720,13 @@ public class TerminalEditorApp {
         OpenFileDialogController.OpenDialogButtons buttons = OpenFileDialogController.buttonsForLayout(layout);
         buttons.ok().draw(
             canvas,
-            focus == OpenFileInputRouter.Focus.OK
+            openFile.focus() == OpenFileInputRouter.Focus.OK
                 ? (colorEnabled ? styles.menuSelected() : styles.dialogSelectedMono())
                 : styles.dialog()
         );
         buttons.cancel().draw(
             canvas,
-            focus == OpenFileInputRouter.Focus.CANCEL
+            openFile.focus() == OpenFileInputRouter.Focus.CANCEL
                 ? (colorEnabled ? styles.menuSelected() : styles.dialogSelectedMono())
                 : styles.dialog()
         );
@@ -2775,7 +2776,7 @@ public class TerminalEditorApp {
     }
 
     private HelpOverlayPlacement helpOverlayPlacement(int rows, int cols, HelpPage page) {
-        HelpDialogLayout layout = helpDialogLayout(rows, cols, page.rows().length);
+        HelpDialogLayout layout = helpDialogLayout(rows, cols, page.rows().size());
         HelpOverlayPlacement cached = helpOverlayCache;
         Rect viewport = new Rect(0, 0, cols, rows);
         if (cached != null
@@ -2811,16 +2812,13 @@ public class TerminalEditorApp {
 
     private void drawInfoOverlay(
         Canvas canvas,
-        int rows,
-        int cols,
-        boolean visible,
-        HelpPage page,
+        HelpOverlayPlacement overlay,
         boolean colorEnabled
     ) {
-        if (!visible || rows < 8 || cols < 24) {
+        if (overlay == null || overlay.viewport().height() < 8 || overlay.viewport().width() < 24) {
             return;
         }
-        HelpOverlayPlacement overlay = helpOverlayPlacement(rows, cols, page);
+        HelpPage page = overlay.page();
         HelpDialogLayout layout = overlay.layout();
         Theme widgetTheme = colorEnabled ? colorOverlayWidgetTheme : monoOverlayWidgetTheme;
         overlay.frame().paint(canvas, widgetTheme);
@@ -2828,12 +2826,12 @@ public class TerminalEditorApp {
         int textCol = layout.left() + 2;
         int textWidth = Math.max(0, layout.width() - 4);
         int maxRows = Math.max(0, layout.height() - 2);
-        for (int i = 0; i < page.rows().length && i < maxRows; i++) {
+        for (int i = 0; i < page.rows().size() && i < maxRows; i++) {
             drawMenuLine(
                 canvas,
                 textRow + i,
                 textCol,
-                clipText(page.rows()[i], textWidth),
+                clipText(page.rows().get(i), textWidth),
                 styles.dialog()
             );
         }
@@ -3119,56 +3117,51 @@ public class TerminalEditorApp {
         return ro + " | ENC:" + enc + " | EOL:" + eol + " | " + (readingMode ? "READ" : "INS");
     }
 
-    private RenderFrameResult doRenderFrameIfNeeded(
-        RenderPlanBuilder renderPlanBuilder,
-        TextModel model,
-        EditorState state,
-        int rows,
-        int cols,
-        int contentTopRow,
-        TabBarView.Placement tabBarPlacement,
-        TopMenuView.Placement topMenuPlacement,
-        int topMenuPrefixWidth,
-        EditorLayout editorLayout,
-        int inlinePromptBarHeight,
-        String topBar,
-        String bottomBar,
-        boolean searchMode,
-        String searchQuery,
-        SearchController.SearchUiOptions searchUi,
-        String interactiveBarText,
-        Style interactiveBarStyle,
-        NotificationBar notificationBar,
-        boolean wrapLinesSetting,
-        boolean wrapWordsSetting,
-        boolean autoSelectionHighlightSetting,
-        UiModalState modalState,
-        SaveAsBarView.Placement saveAsBarPlacement,
-        List<EditorTab> tabs,
-        SearchBarView.Placement searchBarPlacement,
-        ConfirmBarView.Placement confirmBarPlacement,
-        boolean openFileMode,
-        OpenFileTreeController openFileTree,
-        FileTreeView.Placement openFileTreePlacement,
-        OpenFileInputRouter.Focus openFileFocus,
-        boolean helpHintsMode,
-        boolean helpLicensesMode,
-        boolean helpAuthorMode,
-        RenderPlan previousPlan,
-        boolean colorEnabled,
-        ScreenPresenter screenPresenter,
-        RenderRasterizer renderer,
-        EditorView editorView
+    private RenderFrameResult renderFrame(
+        FrameComposition composition,
+        RenderFrameController services
     ) {
-        boolean saveAsMode = modalState.isSaveAs();
-        boolean saveOverwriteConfirmMode = modalState.isSaveOverwriteConfirm();
-        Path pendingOverwritePath = modalState.pendingOverwritePath();
-        boolean quitConfirmMode = modalState.isQuitConfirm();
-        boolean closeTabConfirmMode = modalState.isCloseTabConfirm();
-        int pendingCloseTabIndex = modalState.pendingCloseTabIndex();
+        FrameComposition.Document document = composition.document();
+        FrameComposition.Surface surface = composition.surface();
+        FrameComposition.Search search = composition.search();
+        FrameComposition.Layers layers = composition.layers();
+        FrameComposition.OpenFile openFile = layers.openFile();
+        RenderPlanBuilder renderPlanBuilder = document.planBuilder();
+        TextModel model = document.model();
+        EditorState state = document.state();
+        EditorLayout editorLayout = document.layout();
+        RenderPlan previousPlan = document.previousPlan();
+        int rows = editorLayout.rows();
+        int cols = editorLayout.cols();
+        int contentTopRow = editorLayout.contentTopRow();
+        int topMenuPrefixWidth = surface.topBar().menuPrefixWidth();
+        String topBar = surface.topBar().text();
+        String bottomBar = surface.bottomBar();
+        InlinePromptBar inlinePromptBar = surface.inlinePrompt();
+        NotificationBar notificationBar = surface.notification();
+        boolean searchMode = search.active();
+        String searchQuery = search.query();
+        boolean autoSelectionHighlightSetting = search.autoSelectionHighlight();
+        SearchBarView.Placement searchBarPlacement = search.placement();
+        TabBarView.Placement tabBarPlacement = layers.tabBar();
+        TopMenuView.Placement topMenuPlacement = layers.topMenu();
+        SaveAsBarView.Placement saveAsBarPlacement = layers.saveAs();
+        boolean saveAsMode = layers.saveAsMode();
+        ConfirmBarView.Placement confirmBarPlacement = layers.confirm();
+        boolean openFileMode = openFile.visible();
+        FileTreeView.Placement openFileTreePlacement = openFile.placement();
+        HelpPage helpPage = layers.helpPage();
+        boolean helpMode = helpPage != null;
+        HelpOverlayPlacement helpOverlay = helpPage == null
+            ? null
+            : helpOverlayPlacement(rows, cols, helpPage);
+        boolean colorEnabled = services.colorEnabled;
+        ScreenPresenter screenPresenter = services.screenPresenter;
+        RenderRasterizer renderer = services.renderer;
+        EditorView editorView = services.editorView;
         RenderPlan plan;
         SearchOptions renderSearchOptions = searchMode
-            ? SearchController.toSearchOptions(searchUi)
+            ? search.options()
             : SearchOptions.DEFAULT;
         String renderSearchQuery = resolveRenderSearchQuery(
             searchMode,
@@ -3189,12 +3182,12 @@ public class TerminalEditorApp {
                 bottomBar,
                 renderSearchQuery,
                 renderSearchOptions,
-                interactiveBarText,
-                interactiveBarStyle,
+                inlinePromptBar.text(),
+                inlinePromptBar.style(),
                 notificationBar.text(),
                 notificationBar.style(),
-                wrapLinesSetting,
-                wrapWordsSetting,
+                composition.wrapLines(),
+                composition.wrapWords(),
                 editorLayout
             );
             frameProfiler.buildNanos = System.nanoTime() - buildStart;
@@ -3208,12 +3201,12 @@ public class TerminalEditorApp {
                 bottomBar,
                 renderSearchQuery,
                 renderSearchOptions,
-                interactiveBarText,
-                interactiveBarStyle,
+                inlinePromptBar.text(),
+                inlinePromptBar.style(),
                 notificationBar.text(),
                 notificationBar.style(),
-                wrapLinesSetting,
-                wrapWordsSetting,
+                composition.wrapLines(),
+                composition.wrapWords(),
                 editorLayout
             );
         }
@@ -3246,36 +3239,12 @@ public class TerminalEditorApp {
             canvas,
             rows,
             cols,
-            openFileMode,
-            openFileTree,
-            openFileTreePlacement,
-            openFileFocus,
+            openFile,
             colorEnabled
         );
-        drawInfoOverlay(
-            canvas,
-            rows,
-            cols,
-            helpHintsMode,
-            HelpPages.KEYMAP,
-            colorEnabled
-        );
-        drawInfoOverlay(
-            canvas,
-            rows,
-            cols,
-            helpLicensesMode,
-            HelpPages.LICENSES,
-            colorEnabled
-        );
-        drawInfoOverlay(
-            canvas,
-            rows,
-            cols,
-            helpAuthorMode,
-            HelpPages.AUTHOR,
-            colorEnabled
-        );
+        if (helpOverlay != null) {
+            drawInfoOverlay(canvas, helpOverlay, colorEnabled);
+        }
 
         EditorView.CursorPosition editorCursor = editorView.cursorFromPlan(plan, contentTopRow);
         int desiredCursorRow = editorCursor.row();
@@ -3291,14 +3260,14 @@ public class TerminalEditorApp {
             confirmBarPlacement != null,
             topMenuOpen,
             openFileMode,
-            helpHintsMode || helpLicensesMode || helpAuthorMode
+            helpMode
         );
         boolean editorOwnsCursor = !saveAsMode
             && searchBarPlacement == null
             && confirmBarPlacement == null
             && !topMenuOpen
             && !openFileMode
-            && !(helpHintsMode || helpLicensesMode || helpAuthorMode);
+            && !helpMode;
         if (editorOwnsCursor && !plan.cursorInViewport()) {
             desiredCursorVisible = false;
         }
@@ -3327,20 +3296,21 @@ public class TerminalEditorApp {
                 desiredCursorRow = menuCursor.y() + 1;
                 desiredCursorCol = menuCursor.x() + 1;
             }
-        } else if (helpHintsMode || helpLicensesMode || helpAuthorMode) {
-            HelpPage helpPage = activeHelpPage(helpHintsMode, helpLicensesMode, helpAuthorMode);
-            Button close = helpOverlayPlacement(rows, cols, helpPage).close();
+        } else if (helpOverlay != null) {
+            Button close = helpOverlay.close();
             desiredCursorRow = Math.min(rows, close.row() + 1);
             desiredCursorCol = Math.min(cols, close.cursorCol() + 1);
         }
 
-        boolean canUseVerticalScrollFastPath = previousPlan != null
+        boolean canUseVerticalScrollFastPath = composition.allowsScrollHints()
+            && previousPlan != null
             && plan.wrapLines() == previousPlan.wrapLines()
             && plan.gutterWidth() == previousPlan.gutterWidth()
             && plan.scrollbarWidth() == previousPlan.scrollbarWidth()
             && plan.leftVisualColumn() == previousPlan.leftVisualColumn()
             && plan.topLine() != previousPlan.topLine();
-        boolean canUseHorizontalScrollFastPath = previousPlan != null
+        boolean canUseHorizontalScrollFastPath = composition.allowsScrollHints()
+            && previousPlan != null
             && !plan.wrapLines()
             && !state.hasSelection()
             && plan.wrapLines() == previousPlan.wrapLines()
@@ -3353,6 +3323,7 @@ public class TerminalEditorApp {
         int diffRegionHeight = plan.contentRows();
         int textStartCol = plan.gutterWidth();
         int textEndCol = cols - plan.scrollbarWidth() - 1;
+        FrameComposition.OpenTreeDiffKey openTreeDiffKey = openFile.diffKey();
         if (openFileMode && openFileTreePlacement != null) {
             Rect treeContent = openFileTreePlacement.contentBounds();
             diffRegionTop = treeContent.y();
@@ -3361,10 +3332,10 @@ public class TerminalEditorApp {
             textEndCol = treeContent.rightExclusive() - 1;
             textStartCol = Math.max(0, Math.min(cols - 1, textStartCol));
             textEndCol = Math.max(textStartCol, Math.min(cols - 1, textEndCol));
-            canUseVerticalScrollFastPath = previousPlan != null
-                && lastOpenFileModeForDiff
-                && openFileTree.state().widgetState().firstVisibleIndex()
-                    != lastOpenFileScrollForDiff;
+            canUseVerticalScrollFastPath = composition.allowsScrollHints()
+                && previousPlan != null
+                && openTreeDiffKey != null
+                && openTreeDiffKey.isVerticalScrollFrom(lastOpenTreeDiffKey);
             canUseHorizontalScrollFastPath = false;
             horizontalDeltaColumns = 0;
         }
@@ -3401,10 +3372,7 @@ public class TerminalEditorApp {
         if (profileEnabled) {
             frameProfiler.diffNanos = presentResult.patchNanos();
         }
-        lastOpenFileModeForDiff = openFileMode;
-        lastOpenFileScrollForDiff = openFileMode
-            ? openFileTree.state().widgetState().firstVisibleIndex()
-            : 0;
+        lastOpenTreeDiffKey = openTreeDiffKey;
         return new RenderFrameResult(plan, true);
     }
 
@@ -3539,84 +3507,8 @@ public class TerminalEditorApp {
             this.screenPresenter = screenPresenter;
         }
 
-        private RenderFrameResult renderFrameIfNeeded(
-            RenderPlanBuilder renderPlanBuilder,
-            TextModel model,
-            EditorState state,
-            int rows,
-            int cols,
-            int contentTopRow,
-            TabBarView.Placement tabBarPlacement,
-            TopMenuView.Placement topMenuPlacement,
-            int topMenuPrefixWidth,
-            EditorLayout editorLayout,
-            int inlinePromptBarHeight,
-            String topBar,
-            String bottomBar,
-            boolean searchMode,
-            String searchQuery,
-            SearchController.SearchUiOptions searchUi,
-            String interactiveBarText,
-            Style interactiveBarStyle,
-            NotificationBar notificationBar,
-            boolean wrapLinesSetting,
-            boolean wrapWordsSetting,
-            boolean autoSelectionHighlightSetting,
-            UiModalState modalState,
-            SaveAsBarView.Placement saveAsBarPlacement,
-            List<EditorTab> tabs,
-            SearchBarView.Placement searchBarPlacement,
-            ConfirmBarView.Placement confirmBarPlacement,
-            boolean openFileMode,
-            OpenFileTreeController openFileTree,
-            FileTreeView.Placement openFileTreePlacement,
-            OpenFileInputRouter.Focus openFileFocus,
-            boolean helpHintsMode,
-            boolean helpLicensesMode,
-            boolean helpAuthorMode,
-            RenderPlan previousPlan
-        ) {
-            return doRenderFrameIfNeeded(
-                renderPlanBuilder,
-                model,
-                state,
-                rows,
-                cols,
-                contentTopRow,
-                tabBarPlacement,
-                topMenuPlacement,
-                topMenuPrefixWidth,
-                editorLayout,
-                inlinePromptBarHeight,
-                topBar,
-                bottomBar,
-                searchMode,
-                searchQuery,
-                searchUi,
-                interactiveBarText,
-                interactiveBarStyle,
-                notificationBar,
-                wrapLinesSetting,
-                wrapWordsSetting,
-                autoSelectionHighlightSetting,
-                modalState,
-                saveAsBarPlacement,
-                tabs,
-                searchBarPlacement,
-                confirmBarPlacement,
-                openFileMode,
-                openFileTree,
-                openFileTreePlacement,
-                openFileFocus,
-                helpHintsMode,
-                helpLicensesMode,
-                helpAuthorMode,
-                previousPlan,
-                colorEnabled,
-                screenPresenter,
-                renderer,
-                editorView
-            );
+        private RenderFrameResult renderFrameIfNeeded(FrameComposition composition) {
+            return renderFrame(composition, this);
         }
     }
 

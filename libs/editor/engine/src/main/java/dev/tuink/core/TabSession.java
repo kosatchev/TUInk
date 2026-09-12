@@ -22,11 +22,14 @@ public record TabSession(
         }
     }
 
-    public static TabSession createEmpty(EditorTextLayout.Factory textLayoutFactory) {
+    public static TabSession createEmpty(
+        EditorTextLayout.Factory textLayoutFactory,
+        EditorClipboard clipboard
+    ) {
         TextModel model = new TextModel(new SimpleLineBuffer());
         EditorState state = new EditorState();
         EditorTextLayout textLayout = textLayoutFactory.create(model);
-        EditorEngine engine = new EditorEngine(model, state, textLayout);
+        EditorEngine engine = new EditorEngine(model, state, textLayout, clipboard);
         return new TabSession(model, state, textLayout, engine);
     }
 }

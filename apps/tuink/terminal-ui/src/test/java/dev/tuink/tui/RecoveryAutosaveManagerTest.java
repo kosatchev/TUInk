@@ -11,6 +11,7 @@ import dev.tuink.terminal.input.TextInput;
 import dev.tuink.terminal.input.TuiInputEvent;
 import dev.tuink.terminal.runtime.TuiApplicationRunner;
 import dev.tuink.terminal.runtime.TuiEventLoop;
+import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.Position;
 import dev.tuink.core.RecoverySnapshot;
 import dev.tuink.core.TabSession;
@@ -342,7 +343,7 @@ class RecoveryAutosaveManagerTest {
     }
 
     private static TabSession newSession() {
-        return TabSession.createEmpty(TerminalEditorTextLayout::new);
+        return TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
     }
 
     private static final class FakeFrontend implements TuiApplicationRunner.Frontend<TuiInputEvent> {

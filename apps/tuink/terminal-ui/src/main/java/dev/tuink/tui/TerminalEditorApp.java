@@ -1,5 +1,6 @@
 package dev.tuink.tui;
 
+import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.EditorTextLayout;
@@ -117,6 +118,7 @@ public class TerminalEditorApp {
     private static final int CTRL_F_SELECTION_MAX_CHARS = 256;
     private static final long RECOVERY_AUTOSAVE_DEBOUNCE_NANOS = 2_000_000_000L;
     private static final long RECOVERY_ERROR_NOTIFY_COOLDOWN_NANOS = 5_000_000_000L;
+    private final EditorClipboard clipboard = new EditorClipboard();
     private UiStyles.Theme theme = UiStyles.Theme.CYAN;
     private UiStyles.Palette styles = UiStyles.forTheme(theme);
     private final Theme colorOverlayWidgetTheme = key -> resolveOverlayWidgetStyle(key, true);
@@ -3765,7 +3767,7 @@ public class TerminalEditorApp {
             if (entry == null || entry.snapshot() == null) {
                 continue;
             }
-            TabSession tabSession = TabSession.createEmpty(TerminalEditorTextLayout::new);
+            TabSession tabSession = TabSession.createEmpty(TerminalEditorTextLayout::new, clipboard);
             tabSession.engine().restoreRecoverySnapshot(entry.snapshot());
             RenderPlanBuilder builder = new RenderPlanBuilder(
                 resolveHighlighter(tabSession.state().getCurrentFile()),
@@ -3928,7 +3930,7 @@ public class TerminalEditorApp {
     }
 
     private EditorTab newEditorTab() {
-        TabSession session = TabSession.createEmpty(TerminalEditorTextLayout::new);
+        TabSession session = TabSession.createEmpty(TerminalEditorTextLayout::new, clipboard);
         RenderPlanBuilder builder = new RenderPlanBuilder(RegexHighlighter.withDefaults(), session.textLayout());
         return new EditorTab(session, builder);
     }

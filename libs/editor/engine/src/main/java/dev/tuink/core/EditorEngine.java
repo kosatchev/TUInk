@@ -38,9 +38,9 @@ public class EditorEngine {
     private final TextModel model;
     private final EditorState state;
     private final EditorTextLayout textLayout;
+    private final EditorClipboard clipboard;
     private final Deque<HistoryEntry> undoStack = new ArrayDeque<>();
     private final Deque<HistoryEntry> redoStack = new ArrayDeque<>();
-    private String clipboard = "";
     private EditKind lastEditKind = EditKind.NONE;
     private long lastEditAtNanos;
     private Position lastEditCursorAfter;
@@ -67,12 +67,22 @@ public class EditorEngine {
     private long savedDocumentStateId;
 
     public EditorEngine(TextModel model, EditorState state, EditorTextLayout textLayout) {
+        this(model, state, textLayout, new EditorClipboard());
+    }
+
+    public EditorEngine(
+        TextModel model,
+        EditorState state,
+        EditorTextLayout textLayout,
+        EditorClipboard clipboard
+    ) {
         this.model = model;
         this.state = state;
         if (textLayout == null || textLayout.model() != model) {
             throw new IllegalArgumentException("textLayout must be bound to the engine model");
         }
         this.textLayout = textLayout;
+        this.clipboard = Objects.requireNonNull(clipboard, "clipboard");
         resetGutterDiffBaselinesOnOpen();
         if (state.isDirty()) {
             savedDocumentStateId = -1L;
@@ -831,8 +841,9 @@ public class EditorEngine {
         if (range == null) {
             return false;
         }
-        clipboard = model.getTextRange(range.start(), range.end());
-        return !clipboard.isEmpty();
+        String copied = model.getTextRange(range.start(), range.end());
+        clipboard.setText(copied);
+        return !copied.isEmpty();
     }
 
     public boolean copyCurrentLine() {
@@ -848,8 +859,9 @@ public class EditorEngine {
         } else {
             end = new Position(line, model.getLine(line).length());
         }
-        clipboard = model.getTextRange(start, end);
-        return !clipboard.isEmpty();
+        String copied = model.getTextRange(start, end);
+        clipboard.setText(copied);
+        return !copied.isEmpty();
     }
 
     public boolean cutSelection() {
@@ -858,7 +870,7 @@ public class EditorEngine {
         if (range == null) {
             return false;
         }
-        clipboard = model.getTextRange(range.start(), range.end());
+        clipboard.setText(model.getTextRange(range.start(), range.end()));
         applyEdit(EditKind.NONE, () -> {
             state.setCursor(model.deleteRange(range.start(), range.end()));
             state.clearSelection();
@@ -881,7 +893,7 @@ public class EditorEngine {
         } else {
             end = new Position(line, model.getLine(line).length());
         }
-        clipboard = model.getTextRange(start, end);
+        clipboard.setText(model.getTextRange(start, end));
         applyEdit(EditKind.NONE, () -> {
             state.setCursor(model.deleteRange(start, end));
             state.clearSelection();
@@ -891,12 +903,13 @@ public class EditorEngine {
 
     public boolean pasteClipboard() {
         preferredVisualColumn = -1;
-        if (clipboard == null || clipboard.isEmpty()) {
+        String pasted = clipboard.text();
+        if (pasted.isEmpty()) {
             return false;
         }
         applyEdit(EditKind.NONE, () -> {
             deleteSelectionIfAny();
-            state.setCursor(model.insertText(state.getCursor(), clipboard));
+            state.setCursor(model.insertText(state.getCursor(), pasted));
             state.clearSelection();
         });
         return true;

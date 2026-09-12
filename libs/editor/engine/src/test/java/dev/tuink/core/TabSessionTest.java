@@ -15,7 +15,7 @@ class TabSessionTest {
         TabSession session = TabSession.createEmpty(model -> {
             creations.incrementAndGet();
             return new TestEditorTextLayout(model);
-        });
+        }, new EditorClipboard());
 
         assertEquals(1, creations.get());
         assertSame(session.model(), session.textLayout().model());

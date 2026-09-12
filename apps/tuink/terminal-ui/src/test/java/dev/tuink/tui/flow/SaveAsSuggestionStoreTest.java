@@ -2,6 +2,7 @@ package dev.tuink.tui.flow;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.TabSession;
 import dev.tuink.render.TerminalEditorTextLayout;
 import java.io.IOException;
@@ -18,7 +19,7 @@ class SaveAsSuggestionStoreTest {
         SaveAsSuggestionStore store = new SaveAsSuggestionStore();
 
         String suggestion = store.suggestionFor(
-            TabSession.createEmpty(TerminalEditorTextLayout::new),
+            TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard()),
             null,
             preferred.toString()
         );
@@ -29,7 +30,7 @@ class SaveAsSuggestionStoreTest {
     @Test
     void rememberedDraftIsNotRenamedWhenItExists(@TempDir Path tempDir) throws IOException {
         Path existing = Files.createFile(tempDir.resolve("chosen.txt"));
-        TabSession tab = TabSession.createEmpty(TerminalEditorTextLayout::new);
+        TabSession tab = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
         SaveAsSuggestionStore store = new SaveAsSuggestionStore();
         store.rememberDraft(tab, existing.toString());
 

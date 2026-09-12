@@ -13,6 +13,7 @@ import dev.tuink.terminal.cell.CellBuffer;
 import dev.tuink.terminal.input.ResizeEvent;
 import dev.tuink.terminal.input.TextInput;
 import dev.tuink.terminal.input.TuiInputEvent;
+import dev.tuink.terminal.runtime.TuiApplicationRunner;
 import dev.tuink.terminal.runtime.TuiEventLoop;
 import dev.tuink.terminal.screen.Frame;
 import dev.tuink.terminal.screen.ScreenCursor;
@@ -23,6 +24,8 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.io.Writer;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.List;
 import org.jline.terminal.Attributes;
 import org.jline.terminal.Attributes.LocalFlag;
 import org.jline.utils.NonBlockingReader;
@@ -144,6 +147,87 @@ class TerminalSessionTest {
 
         assertFalse(runtime.eventLoop().running());
         assertEquals(1, backend.closeCount);
+    }
+
+    @Test
+    void runnerAndRuntimeRestoreTerminalOnceForEveryApplicationExitPath() throws Exception {
+        for (RunnerExit exit : RunnerExit.values()) {
+            verifyRunnerRuntimeCleanup(exit);
+        }
+    }
+
+    private static void verifyRunnerRuntimeCleanup(RunnerExit exit) throws Exception {
+        FakeBackend backend = new FakeBackend("xterm-256color");
+        FakeShutdownHooks hooks = new FakeShutdownHooks();
+        List<TuiEventLoop.Poll<TuiInputEvent>> polls = new ArrayList<>();
+        IllegalStateException frontendFailure = new IllegalStateException("frontend failed");
+        if (exit == RunnerExit.END_OF_INPUT) {
+            backend.enqueueEndOfInput();
+        } else {
+            backend.enqueueInput("x");
+        }
+
+        try (TerminalRuntime runtime = TerminalRuntime.start(
+            new TerminalSession.Options(true, true, false),
+            backend,
+            hooks,
+            true
+        )) {
+            if (exit == RunnerExit.INTERRUPT_WITH_EVENT) {
+                backend.interruptOnNextRead();
+            }
+            TuiApplicationRunner.Frontend<TuiInputEvent> frontend = new TuiApplicationRunner.Frontend<>() {
+                @Override
+                public boolean running() {
+                    return true;
+                }
+
+                @Override
+                public void prepareTurn() {
+                }
+
+                @Override
+                public boolean renderFrame(TuiEventLoop.FrameTicket frameTicket) {
+                    return true;
+                }
+
+                @Override
+                public long nanosUntilWakeup(long nowNanos) {
+                    return -1L;
+                }
+
+                @Override
+                public void handlePoll(TuiEventLoop.Poll<TuiInputEvent> poll) {
+                    polls.add(poll);
+                    if (exit == RunnerExit.FRONTEND_CALLBACK_EXCEPTION) {
+                        throw frontendFailure;
+                    }
+                }
+            };
+            TuiApplicationRunner<TuiInputEvent> runner = new TuiApplicationRunner<>(runtime.eventLoop());
+
+            if (exit == RunnerExit.FRONTEND_CALLBACK_EXCEPTION) {
+                assertSame(frontendFailure, assertThrows(IllegalStateException.class, () -> runner.run(frontend)));
+            } else {
+                runner.run(frontend);
+            }
+
+            assertEquals(1, polls.size(), exit.name());
+            if (exit == RunnerExit.END_OF_INPUT) {
+                assertTrue(polls.get(0).endOfInput(), exit.name());
+            } else {
+                assertEquals(new TextInput("x"), polls.get(0).event(), exit.name());
+            }
+            if (exit == RunnerExit.INTERRUPT_WITH_EVENT) {
+                assertFalse(runtime.eventLoop().running(), exit.name());
+            }
+        }
+
+        assertTrue(backend.currentAttributes.getLocalFlag(LocalFlag.ISIG), exit.name());
+        assertEquals(1, backend.attributesRestoreCount, exit.name());
+        assertEquals(1, backend.closeCount, exit.name());
+        assertEquals(1, hooks.removeCount, exit.name());
+        assertEquals(null, hooks.current, exit.name());
     }
 
     @Test
@@ -457,16 +541,23 @@ class TerminalSessionTest {
         private Attributes currentAttributes = new Attributes();
         private TerminalCapabilities capabilities = TerminalCapabilities.DEFAULT;
         private boolean enteredRawMode;
+        private int attributesRestoreCount;
         private int closeCount;
         private IOException closeFailure;
         private RuntimeException resizeRegistrationFailure;
         private Runnable resizeHandler;
         private Runnable interruptHandler;
+        private Runnable beforeNextRead;
         private int height = 24;
         private int width = 80;
         private final NonBlockingReader reader = new NonBlockingReader() {
             @Override
             protected int read(long timeout, boolean isPeek) {
+                Runnable beforeRead = beforeNextRead;
+                beforeNextRead = null;
+                if (beforeRead != null) {
+                    beforeRead.run();
+                }
                 Integer next = input.peekFirst();
                 if (next == null) {
                     return READ_EXPIRED;
@@ -501,6 +592,14 @@ class TerminalSessionTest {
             for (int index = 0; index < text.length(); index++) {
                 input.addLast((int) text.charAt(index));
             }
+        }
+
+        private void enqueueEndOfInput() {
+            input.addLast(-1);
+        }
+
+        private void interruptOnNextRead() {
+            beforeNextRead = interruptHandler;
         }
 
         private void failNextPrintAfter(int characterCount) {
@@ -570,6 +669,9 @@ class TerminalSessionTest {
         @Override
         public void attributes(Attributes attributes) {
             currentAttributes = new Attributes(attributes);
+            if (attributes.getLocalFlag(LocalFlag.ISIG)) {
+                attributesRestoreCount++;
+            }
         }
 
         @Override
@@ -602,6 +704,12 @@ class TerminalSessionTest {
                 throw closeFailure;
             }
         }
+    }
+
+    private enum RunnerExit {
+        END_OF_INPUT,
+        INTERRUPT_WITH_EVENT,
+        FRONTEND_CALLBACK_EXCEPTION
     }
 
     private static final class FakeShutdownHooks implements TerminalSession.ShutdownHooks {

@@ -20,19 +20,19 @@ class AppArgumentsTest {
 
     @Test
     void acceptsEqualsAndSeparatedUiForms() {
-        AppArguments equalsForm = AppArguments.parse(new String[] {"--ui=gui"});
-        AppArguments separatedForm = AppArguments.parse(new String[] {"--ui", "gui"});
+        AppArguments equalsForm = AppArguments.parse(new String[] {"--ui=tui"});
+        AppArguments separatedForm = AppArguments.parse(new String[] {"--ui", "tui"});
 
         assertAll(
-            () -> assertEquals(AppArguments.UiTarget.GUI, equalsForm.ui()),
-            () -> assertEquals(AppArguments.UiTarget.GUI, separatedForm.ui())
+            () -> assertEquals(AppArguments.UiTarget.TUI, equalsForm.ui()),
+            () -> assertEquals(AppArguments.UiTarget.TUI, separatedForm.ui())
         );
     }
 
     @Test
     void forwardsNonUiArgumentsInOriginalOrder() {
         AppArguments options = AppArguments.parse(
-            new String[] {"first.txt", "--ui=gui", "--line", "42", "second.txt"}
+            new String[] {"first.txt", "--ui=tui", "--line", "42", "second.txt"}
         );
 
         assertEquals(List.of("first.txt", "--line", "42", "second.txt"), options.forwarded());
@@ -45,7 +45,24 @@ class AppArgumentsTest {
             () -> AppArguments.parse(new String[] {"--ui=web"})
         );
 
-        assertEquals("Unknown UI target: web. Expected: tui, gui", error.getMessage());
+        assertEquals("Unknown UI target: web. Expected: tui", error.getMessage());
+    }
+
+    @Test
+    void rejectsUnimplementedGuiTargetInBothForms() {
+        IllegalArgumentException equalsError = assertThrows(
+            IllegalArgumentException.class,
+            () -> AppArguments.parse(new String[] {"--ui=gui"})
+        );
+        IllegalArgumentException separatedError = assertThrows(
+            IllegalArgumentException.class,
+            () -> AppArguments.parse(new String[] {"--ui", "gui"})
+        );
+
+        assertAll(
+            () -> assertEquals("Unknown UI target: gui. Expected: tui", equalsError.getMessage()),
+            () -> assertEquals("Unknown UI target: gui. Expected: tui", separatedError.getMessage())
+        );
     }
 
     @Test
@@ -59,9 +76,9 @@ class AppArgumentsTest {
     }
 
     @Test
-    void laterUiOptionOverridesEarlierOne() {
+    void acceptsRepeatedTuiOptionsCaseInsensitively() {
         AppArguments options = AppArguments.parse(
-            new String[] {"--ui=gui", "document.txt", "--ui", "tui"}
+            new String[] {"--ui=TUI", "document.txt", "--ui", "tui"}
         );
 
         assertAll(

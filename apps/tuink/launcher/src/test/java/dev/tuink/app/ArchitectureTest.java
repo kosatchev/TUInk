@@ -213,6 +213,24 @@ class ArchitectureTest {
             "dev.tuink.terminal.runtime.."
         );
 
+    static final ArchRule FRAME_LOOP_ORCHESTRATION_STAYS_IN_RUNTIME = noClasses()
+        .that().resideOutsideOfPackage("dev.tuink.terminal.runtime..")
+        .should().callMethod(
+            "dev.tuink.terminal.runtime.TuiEventLoop",
+            "beginFrame"
+        )
+        .orShould().callMethod(
+            "dev.tuink.terminal.runtime.TuiEventLoop",
+            "endFrame",
+            "dev.tuink.terminal.runtime.TuiEventLoop$FrameTicket",
+            "boolean"
+        )
+        .orShould().callMethod(
+            "dev.tuink.terminal.runtime.TuiEventLoop",
+            "poll",
+            "dev.tuink.terminal.runtime.TuiEventLoop$Deadline"
+        );
+
     static final ArchRule WIDGET_LAYER_STAYS_EDITOR_INDEPENDENT = classes()
         .that().resideInAPackage("dev.tuink.terminal.widget..")
         .should().onlyDependOnClassesThat().resideInAnyPackage(
@@ -313,6 +331,7 @@ class ArchitectureTest {
     void terminalFoundationStaysEditorIndependent() {
         JLINE_BACKEND_IS_EDITOR_INDEPENDENT.check(PRODUCTION_CLASSES);
         EVENT_LOOP_IS_EDITOR_INDEPENDENT.check(PRODUCTION_CLASSES);
+        FRAME_LOOP_ORCHESTRATION_STAYS_IN_RUNTIME.check(PRODUCTION_CLASSES);
         WIDGET_LAYER_STAYS_EDITOR_INDEPENDENT.check(PRODUCTION_CLASSES);
         WIDGET_LAYER_STAYS_FILESYSTEM_FREE.check(PRODUCTION_CLASSES);
         TUI_GEOMETRY_IS_SELF_CONTAINED.check(PRODUCTION_CLASSES);

@@ -9,11 +9,6 @@ public final class App {
     public static void main(String[] args) throws Exception {
         AppArguments options = AppArguments.parse(args);
 
-        switch (options.ui()) {
-            case TUI -> TerminalEditorApp.main(options.forwarded().toArray(String[]::new));
-            case GUI -> System.out.println(
-                "UI 'gui' is not implemented yet. Use --ui=tui for now."
-            );
-        }
+        TerminalEditorApp.main(options.forwarded().toArray(String[]::new));
     }
 }

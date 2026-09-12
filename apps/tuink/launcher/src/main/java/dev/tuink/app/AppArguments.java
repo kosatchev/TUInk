@@ -31,8 +31,7 @@ record AppArguments(UiTarget ui, List<String> forwarded) {
     }
 
     enum UiTarget {
-        TUI,
-        GUI;
+        TUI;
 
         private static UiTarget parse(String raw) {
             if (raw == null || raw.isBlank()) {
@@ -40,9 +39,8 @@ record AppArguments(UiTarget ui, List<String> forwarded) {
             }
             return switch (raw.trim().toLowerCase(Locale.ROOT)) {
                 case "tui" -> TUI;
-                case "gui" -> GUI;
                 default -> throw new IllegalArgumentException(
-                    "Unknown UI target: " + raw + ". Expected: tui, gui"
+                    "Unknown UI target: " + raw + ". Expected: tui"
                 );
             };
         }

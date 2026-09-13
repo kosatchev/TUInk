@@ -1,6 +1,5 @@
 package dev.tuink.core;
 
-import java.nio.charset.Charset;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
@@ -17,6 +16,7 @@ public record RecoverySnapshot(
     Path currentFile,
     SaveDisposition saveDisposition,
     DocumentFileMetadata fileMetadata,
+    FileBaseline fileBaseline,
     Instant createdAt
 ) {
     public RecoverySnapshot {
@@ -45,31 +45,11 @@ public record RecoverySnapshot(
                 "A recovery snapshot without a current path cannot replace an existing file"
             );
         }
+        if (fileBaseline != null
+            && (currentFile == null || saveDisposition != SaveDisposition.REPLACE_EXISTING)) {
+            throw new IllegalArgumentException("A file baseline requires an existing current file");
+        }
         createdAt = createdAt == null ? Instant.now() : createdAt;
-    }
-
-    /** Compatibility constructor for callers that already own an existing path. */
-    public RecoverySnapshot(
-        List<String> lines,
-        Position cursor,
-        ViewportState viewport,
-        Position selectionAnchor,
-        boolean dirty,
-        Path currentFile,
-        DocumentFileMetadata fileMetadata,
-        Instant createdAt
-    ) {
-        this(
-            lines,
-            cursor,
-            viewport,
-            selectionAnchor,
-            dirty,
-            currentFile,
-            currentFile == null ? SaveDisposition.CREATE_NEW : SaveDisposition.REPLACE_EXISTING,
-            fileMetadata,
-            createdAt
-        );
     }
 
     public static RecoverySnapshot capture(TextModel model, EditorState state) {
@@ -82,12 +62,15 @@ public record RecoverySnapshot(
             state.getCurrentFile(),
             state.getSaveDisposition(),
             model.fileMetadata(),
+            state.getCurrentFile() != null && state.getSaveDisposition() == SaveDisposition.REPLACE_EXISTING
+                ? model.fileBaseline() : null,
             Instant.now()
         );
     }
 
     public void restore(TextModel model, EditorState state) {
         model.replaceLines(lines, fileMetadata);
+        model.restoreFileBaseline(fileBaseline);
         state.setCurrentFile(currentFile);
         state.setSaveDisposition(saveDisposition);
         state.setFileEncoding(fileMetadata.charset());
@@ -96,14 +79,6 @@ public record RecoverySnapshot(
         state.setCursor(model.clamp(cursor));
         state.setSelectionAnchor(selectionAnchor);
         state.setDirty(dirty);
-    }
-
-    public Charset fileEncoding() {
-        return fileMetadata.charset();
-    }
-
-    public String lineSeparator() {
-        return fileMetadata.defaultLineSeparator();
     }
 
     private static void requirePositionInDocument(

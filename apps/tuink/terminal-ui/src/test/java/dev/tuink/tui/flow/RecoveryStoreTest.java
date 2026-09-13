@@ -1,18 +1,24 @@
 package dev.tuink.tui.flow;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import dev.tuink.core.BomKind;
 import dev.tuink.core.DocumentFileMetadata;
+import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.Position;
 import dev.tuink.core.RecoverySnapshot;
 import dev.tuink.core.SaveDisposition;
+import dev.tuink.core.TabSession;
 import dev.tuink.core.ViewportState;
+import dev.tuink.render.TerminalEditorTextLayout;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -21,6 +27,7 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -75,6 +82,7 @@ class RecoveryStoreTest {
             expectedAbsent,
             SaveDisposition.CREATE_NEW,
             DocumentFileMetadata.newDocument(1),
+            null,
             Instant.parse("2026-07-24T00:00:00Z")
         );
         RecoveryStore store = new RecoveryStore(directory);
@@ -82,6 +90,149 @@ class RecoveryStoreTest {
         store.save("expected-absent", snapshot);
 
         assertEquals(snapshot, store.loadAll().entries().get(0).snapshot());
+        Properties metadata = readMetadata(directory.resolve("expected-absent.meta.properties"));
+        assertEquals("false", metadata.getProperty("fileBaseline.present"));
+        assertEquals("", metadata.getProperty("fileBaseline.target"));
+        assertEquals("", metadata.getProperty("fileBaseline.sha256"));
+    }
+
+    @Test
+    void recoveryRoundTripRetainsFileBaselineAndRejectsExternalChanges() throws IOException {
+        Path directory = tempDir.resolve("recovery");
+        RecoverySnapshot snapshot = openedFileSnapshot();
+        assertNotNull(snapshot.fileBaseline());
+        RecoveryStore store = new RecoveryStore(directory);
+        store.save("session", snapshot);
+        Properties metadata = readMetadata(directory.resolve("session.meta.properties"));
+        assertEquals("5", metadata.getProperty("format"));
+        assertEquals("true", metadata.getProperty("fileBaseline.present"));
+        assertEquals(snapshot.fileBaseline().target().toString(), metadata.getProperty("fileBaseline.target"));
+        assertEquals(snapshot.fileBaseline().sha256(), metadata.getProperty("fileBaseline.sha256"));
+
+        Files.writeString(snapshot.currentFile(), "external edit", StandardCharsets.UTF_8);
+        RecoverySnapshot recovered = store.loadAll().entries().get(0).snapshot();
+        assertEquals(snapshot, recovered);
+        TabSession restored = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
+        restored.engine().restoreRecoverySnapshot(recovered);
+
+        assertThrows(IOException.class, restored.engine()::save);
+        assertEquals("external edit", Files.readString(snapshot.currentFile()));
+        assertTrue(restored.state().isDirty());
+    }
+
+    @Test
+    void restoredExistingFileWithoutKnownBaselineCannotOverwriteTheCurrentDiskContent() throws IOException {
+        RecoverySnapshot original = openedFileSnapshot();
+        RecoverySnapshot withoutBaseline = new RecoverySnapshot(
+            original.lines(),
+            original.cursor(),
+            original.viewport(),
+            original.selectionAnchor(),
+            original.dirty(),
+            original.currentFile(),
+            original.saveDisposition(),
+            original.fileMetadata(),
+            null,
+            original.createdAt()
+        );
+        RecoveryStore store = new RecoveryStore(tempDir.resolve("recovery"));
+        store.save("session", withoutBaseline);
+        RecoverySnapshot recovered = store.loadAll().entries().get(0).snapshot();
+        assertEquals(withoutBaseline, recovered);
+        TabSession restored = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
+        restored.engine().restoreRecoverySnapshot(recovered);
+
+        assertThrows(IOException.class, restored.engine()::save);
+        assertEquals("original", Files.readString(original.currentFile()));
+        assertTrue(restored.state().isDirty());
+    }
+
+    @Test
+    void rejectsNoncanonicalFileBaselineDigestsAndPreservesSnapshots() throws IOException {
+        Path directory = tempDir.resolve("recovery");
+        RecoveryStore store = new RecoveryStore(directory);
+        store.save("session", openedFileSnapshot());
+        Path metadata = directory.resolve("session.meta.properties");
+        Path text = currentText(directory, "session");
+        Properties valid = readMetadata(metadata);
+
+        for (String digest : List.of("", "a".repeat(63), "f".repeat(65), "A".repeat(64), "g".repeat(64))) {
+            Properties malformed = new Properties();
+            malformed.putAll(valid);
+            malformed.setProperty("fileBaseline.sha256", digest);
+            writeMetadata(metadata, malformed);
+
+            assertTrue(assertRejectedAndPreserved(store, metadata, text).contains("fileBaseline.sha256"));
+        }
+    }
+
+    @Test
+    void rejectsRelativeAndUnnormalizedFileBaselineTargets() throws IOException {
+        Path directory = tempDir.resolve("recovery");
+        RecoveryStore store = new RecoveryStore(directory);
+        store.save("session", openedFileSnapshot());
+        Path metadata = directory.resolve("session.meta.properties");
+        Path text = currentText(directory, "session");
+        Properties valid = readMetadata(metadata);
+
+        for (String target : List.of("relative.txt", tempDir.resolve(".").resolve("document.txt").toString())) {
+            Properties malformed = new Properties();
+            malformed.putAll(valid);
+            malformed.setProperty("fileBaseline.target", target);
+            writeMetadata(metadata, malformed);
+
+            assertTrue(assertRejectedAndPreserved(store, metadata, text).contains("absolute normalized path"));
+        }
+    }
+
+    @Test
+    void rejectsInconsistentFileBaselinePresenceAndSaveIntent() throws IOException {
+        Path directory = tempDir.resolve("recovery");
+        RecoveryStore store = new RecoveryStore(directory);
+        store.save("session", openedFileSnapshot());
+        Path metadata = directory.resolve("session.meta.properties");
+        Path text = currentText(directory, "session");
+        Properties valid = readMetadata(metadata);
+        List<Map<String, String>> changes = List.of(
+            Map.of("fileBaseline.present", "false"),
+            Map.of("fileBaseline.present", "false", "fileBaseline.sha256", ""),
+            Map.of("fileBaseline.present", "false", "fileBaseline.target", ""),
+            Map.of("fileBaseline.target", ""),
+            Map.of("fileBaseline.present", "TRUE"),
+            Map.of("saveDisposition", "CREATE_NEW"),
+            Map.of("currentFile.present", "false", "currentFile", "", "saveDisposition", "CREATE_NEW")
+        );
+
+        for (Map<String, String> change : changes) {
+            Properties malformed = new Properties();
+            malformed.putAll(valid);
+            malformed.putAll(change);
+            writeMetadata(metadata, malformed);
+
+            assertRejectedAndPreserved(store, metadata, text);
+        }
+    }
+
+    @Test
+    void rejectsMissingAndUnknownFileBaselineFields() throws IOException {
+        Path directory = tempDir.resolve("recovery");
+        RecoveryStore store = new RecoveryStore(directory);
+        store.save("session", openedFileSnapshot());
+        Path metadata = directory.resolve("session.meta.properties");
+        Path text = currentText(directory, "session");
+        Properties valid = readMetadata(metadata);
+
+        for (String key : List.of("fileBaseline.present", "fileBaseline.target", "fileBaseline.sha256")) {
+            Properties malformed = new Properties();
+            malformed.putAll(valid);
+            malformed.remove(key);
+            writeMetadata(metadata, malformed);
+
+            assertTrue(assertRejectedAndPreserved(store, metadata, text).contains("schema mismatch"));
+        }
+        valid.setProperty("fileBaseline.extra", "unknown");
+        writeMetadata(metadata, valid);
+        assertTrue(assertRejectedAndPreserved(store, metadata, text).contains("schema mismatch"));
     }
 
     @Test
@@ -103,7 +254,9 @@ class RecoveryStoreTest {
             null,
             true,
             null,
+            SaveDisposition.CREATE_NEW,
             DocumentFileMetadata.newDocument(1),
+            null,
             Instant.parse("2026-07-25T00:00:00Z")
         );
         store.save("session", replacement);
@@ -138,6 +291,26 @@ class RecoveryStoreTest {
     }
 
     @Test
+    void ignoresUnownedFilesWhenSavingAndDeletingSnapshots() throws IOException {
+        Path directory = tempDir.resolve("recovery");
+        Files.createDirectories(directory);
+        Path unownedText = directory.resolve("session.txt");
+        Path unrelated = directory.resolve("notes.txt");
+        Files.writeString(unownedText, "unowned text", StandardCharsets.UTF_8);
+        Files.writeString(unrelated, "unrelated text", StandardCharsets.UTF_8);
+        RecoveryStore store = new RecoveryStore(directory);
+
+        store.save("session", snapshot());
+
+        assertEquals(snapshot(), store.loadAll().entries().get(0).snapshot());
+        store.delete("session");
+
+        assertEquals("unowned text", Files.readString(unownedText));
+        assertEquals("unrelated text", Files.readString(unrelated));
+        assertEquals(List.of(), store.loadAll().entries());
+    }
+
+    @Test
     void partialDeleteLeavesARetryableMarkerInsteadOfDanglingLiveMetadata() throws IOException {
         Path directory = tempDir.resolve("recovery");
         RecoveryStore store = new RecoveryStore(directory);
@@ -169,11 +342,15 @@ class RecoveryStoreTest {
     void ignoresSnapshotSymlinksWithoutFollowingOrChangingTheirTargets() throws IOException {
         assumePosix();
         Path directory = tempDir.resolve("recovery");
-        Files.createDirectories(directory);
+        RecoveryStore store = new RecoveryStore(directory);
+        store.save("evil", snapshot());
+        Path snapshotText = currentText(directory, "evil");
+        Path snapshotMeta = directory.resolve("evil.meta.properties");
         Path externalText = tempDir.resolve("external.txt");
         Path externalMeta = tempDir.resolve("external.properties");
         Files.writeString(externalText, "secret", StandardCharsets.UTF_8);
-        Files.writeString(externalMeta, "dirty=true", StandardCharsets.UTF_8);
+        Files.copy(snapshotMeta, externalMeta);
+        String originalMetadata = Files.readString(externalMeta);
         Set<PosixFilePermission> externalPermissions = Set.of(
             PosixFilePermission.OWNER_READ,
             PosixFilePermission.OWNER_WRITE,
@@ -182,12 +359,14 @@ class RecoveryStoreTest {
         );
         Files.setPosixFilePermissions(externalText, externalPermissions);
         Files.setPosixFilePermissions(externalMeta, externalPermissions);
-        Files.createSymbolicLink(directory.resolve("evil.txt"), externalText);
-        Files.createSymbolicLink(directory.resolve("evil.meta.properties"), externalMeta);
-
-        RecoveryStore store = new RecoveryStore(directory);
+        Files.delete(snapshotText);
+        Files.delete(snapshotMeta);
+        Files.createSymbolicLink(snapshotText, externalText);
+        Files.createSymbolicLink(snapshotMeta, externalMeta);
 
         assertEquals(List.of(), store.loadAll().entries());
+        assertEquals("secret", Files.readString(externalText));
+        assertEquals(originalMetadata, Files.readString(externalMeta));
         assertEquals(externalPermissions, Files.getPosixFilePermissions(externalText));
         assertEquals(externalPermissions, Files.getPosixFilePermissions(externalMeta));
     }
@@ -212,57 +391,70 @@ class RecoveryStoreTest {
     @Test
     void skipsMarkerlessSnapshotAndLeavesFilesUnchanged() throws IOException {
         Path directory = tempDir.resolve("recovery");
-        Files.createDirectories(directory);
-        Path text = directory.resolve("old.txt");
-        Path meta = directory.resolve("old.meta.properties");
-        String originalText = "unsaved work";
-        String originalMeta = "dirty=true\n";
-        Files.writeString(text, originalText);
-        Files.writeString(meta, originalMeta);
+        RecoveryStore store = new RecoveryStore(directory);
+        store.save("session", snapshot());
+        Path text = currentText(directory, "session");
+        Path metadata = directory.resolve("session.meta.properties");
+        Properties markerless = readMetadata(metadata);
+        markerless.remove("format");
+        writeMetadata(metadata, markerless);
 
-        RecoveryStore.LoadResult result = new RecoveryStore(directory).loadAll();
-
-        assertEquals(List.of(), result.entries());
-        assertEquals(1, result.skipped().size());
-        assertEquals("old", result.skipped().get(0).id());
-        assertEquals(originalText, Files.readString(text));
-        assertEquals(originalMeta, Files.readString(meta));
+        assertTrue(assertRejectedAndPreserved(store, metadata, text).contains("unsupported or missing format marker"));
     }
 
     @Test
     void refusesToOverwriteIncompatibleSnapshot() throws IOException {
         Path directory = tempDir.resolve("recovery");
-        Files.createDirectories(directory);
-        Path text = directory.resolve("session.txt");
-        Path meta = directory.resolve("session.meta.properties");
-        Files.writeString(text, "old text");
-        Files.writeString(meta, "format=1\n");
-
         RecoveryStore store = new RecoveryStore(directory);
+        store.save("session", snapshot());
+        Path text = currentText(directory, "session");
+        Path metadata = directory.resolve("session.meta.properties");
+        Properties invalid = readMetadata(metadata);
+        invalid.setProperty("dirty", "invalid");
+        writeMetadata(metadata, invalid);
 
-        assertThrows(IOException.class, () -> store.save("session", snapshot()));
-        assertEquals("old text", Files.readString(text));
-        assertEquals("format=1\n", Files.readString(meta));
+        assertTrue(assertRejectedAndPreserved(store, metadata, text).contains("dirty must be true or false"));
     }
 
     @Test
-    void rejectsPreviousSchemaAndLeavesItUnchanged() throws IOException {
+    void rejectsMalformedCurrentMetadataAsAnIoErrorWithoutOverwritingSnapshotBytes() throws IOException {
         Path directory = tempDir.resolve("recovery");
-        Files.createDirectories(directory);
-        Path text = directory.resolve("old.txt");
-        Path meta = directory.resolve("old.meta.properties");
-        String originalText = "unsaved work";
-        String originalMeta = "format=1\n";
-        Files.writeString(text, originalText);
-        Files.writeString(meta, originalMeta);
+        RecoveryStore store = new RecoveryStore(directory);
+        store.save("session", snapshot());
+        Path text = currentText(directory, "session");
+        byte[] originalText = Files.readAllBytes(text);
+        Path metadata = directory.resolve("session.meta.properties");
+        String current = Files.readString(metadata, StandardCharsets.ISO_8859_1);
+        assertTrue(current.contains("dirty=true"));
+        byte[] malformedMetadata = current.replace("dirty=true", "dirty=\\u12xz")
+            .getBytes(StandardCharsets.ISO_8859_1);
+        Files.write(metadata, malformedMetadata);
 
-        RecoveryStore.LoadResult result = new RecoveryStore(directory).loadAll();
+        IOException failure = assertThrows(IOException.class, () -> store.save("session", snapshot()));
 
+        assertTrue(failure.getMessage().contains(metadata.toString()));
+        assertTrue(failure.getMessage().contains("Malformed recovery metadata"));
+        assertInstanceOf(IllegalArgumentException.class, failure.getCause());
+        RecoveryStore.LoadResult result = store.loadAll();
         assertEquals(List.of(), result.entries());
         assertEquals(1, result.skipped().size());
-        assertTrue(result.skipped().get(0).reason().contains("unsupported or missing format marker"));
-        assertEquals(originalText, Files.readString(text));
-        assertEquals(originalMeta, Files.readString(meta));
+        assertTrue(result.skipped().get(0).reason().contains("Malformed recovery metadata"));
+        assertArrayEquals(malformedMetadata, Files.readAllBytes(metadata));
+        assertArrayEquals(originalText, Files.readAllBytes(text));
+    }
+
+    @Test
+    void rejectsUnknownFormatMarkerAndLeavesSnapshotUnchanged() throws IOException {
+        Path directory = tempDir.resolve("recovery");
+        RecoveryStore store = new RecoveryStore(directory);
+        store.save("session", snapshot());
+        Path text = currentText(directory, "session");
+        Path metadata = directory.resolve("session.meta.properties");
+        Properties unsupported = readMetadata(metadata);
+        unsupported.setProperty("format", "unknown");
+        writeMetadata(metadata, unsupported);
+
+        assertTrue(assertRejectedAndPreserved(store, metadata, text).contains("unsupported or missing format marker"));
     }
 
     @Test
@@ -308,7 +500,9 @@ class RecoveryStoreTest {
             null,
             true,
             null,
+            SaveDisposition.CREATE_NEW,
             DocumentFileMetadata.newDocument(1),
+            null,
             Instant.parse("2026-07-24T00:00:00Z")
         );
         store.save("unicode", unicode);
@@ -358,11 +552,62 @@ class RecoveryStoreTest {
     }
 
     private static Path currentText(Path directory, String id) throws IOException {
+        Properties properties = readMetadata(directory.resolve(id + ".meta.properties"));
+        return directory.resolve(id + "." + properties.getProperty("textGeneration") + ".txt");
+    }
+
+    private static Properties readMetadata(Path metadata) throws IOException {
         Properties properties = new Properties();
-        try (InputStream in = Files.newInputStream(directory.resolve(id + ".meta.properties"))) {
+        try (InputStream in = Files.newInputStream(metadata)) {
             properties.load(in);
         }
-        return directory.resolve(id + "." + properties.getProperty("textGeneration") + ".txt");
+        return properties;
+    }
+
+    private static void writeMetadata(Path metadata, Properties properties) throws IOException {
+        try (var out = Files.newOutputStream(metadata)) {
+            properties.store(out, "test recovery metadata");
+        }
+    }
+
+    private static String assertRejectedAndPreserved(
+        RecoveryStore store,
+        Path metadata,
+        Path text
+    ) throws IOException {
+        String originalMetadata = Files.readString(metadata);
+        String originalText = Files.readString(text);
+
+        RecoveryStore.LoadResult result = store.loadAll();
+
+        assertEquals(List.of(), result.entries());
+        assertEquals(1, result.skipped().size());
+        assertFalse(result.skipped().get(0).reason().isBlank());
+        assertThrows(IOException.class, () -> store.save("session", snapshot()));
+        assertEquals(originalMetadata, Files.readString(metadata));
+        assertEquals(originalText, Files.readString(text));
+        return result.skipped().get(0).reason();
+    }
+
+    private RecoverySnapshot openedFileSnapshot() throws IOException {
+        Path file = tempDir.resolve("document.txt");
+        Files.writeString(file, "original", StandardCharsets.UTF_8);
+        TabSession session = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
+        session.engine().open(file);
+        session.engine().insertInput("edited ");
+        RecoverySnapshot captured = session.engine().captureRecoverySnapshot();
+        return new RecoverySnapshot(
+            captured.lines(),
+            captured.cursor(),
+            captured.viewport(),
+            captured.selectionAnchor(),
+            captured.dirty(),
+            captured.currentFile(),
+            captured.saveDisposition(),
+            captured.fileMetadata(),
+            captured.fileBaseline(),
+            Instant.parse("2026-07-24T00:00:00Z")
+        );
     }
 
     private static RecoverySnapshot snapshot() {
@@ -373,12 +618,14 @@ class RecoveryStoreTest {
             new Position(0, 2),
             true,
             Path.of("/tmp/example.txt"),
+            SaveDisposition.REPLACE_EXISTING,
             new DocumentFileMetadata(
                 StandardCharsets.UTF_8,
                 BomKind.UTF_8,
                 EditorState.LINE_SEPARATOR_CRLF,
                 List.of(EditorState.LINE_SEPARATOR_CRLF, EditorState.LINE_SEPARATOR_LF)
             ),
+            null,
             Instant.parse("2026-07-24T00:00:00Z")
         );
     }

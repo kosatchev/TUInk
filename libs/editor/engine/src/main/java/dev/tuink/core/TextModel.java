@@ -43,6 +43,7 @@ public class TextModel {
     private long contentEpoch = 0L;
     private final long cacheIdentity = NEXT_CACHE_ID.incrementAndGet();
     private DocumentFileMetadata fileMetadata;
+    private FileBaseline fileBaseline;
 
     public TextModel(TextBuffer sourceBuffer) {
         TextBuffer source = Objects.requireNonNull(sourceBuffer, "buffer");
@@ -261,7 +262,8 @@ public class TextModel {
     }
 
     public LoadMetadata load(Path path) throws IOException {
-        byte[] data = Files.readAllBytes(path);
+        Path target = path.toRealPath();
+        byte[] data = Files.readAllBytes(target);
         DecodedContent decoded = decodeWithDetectedCharset(data);
         ParsedContent parsed = parseContent(decoded.text());
         DocumentFileMetadata loadedMetadata = new DocumentFileMetadata(
@@ -276,6 +278,7 @@ public class TextModel {
             buffer.insertLine(i, parsed.lines().get(i));
         }
         fileMetadata = loadedMetadata;
+        fileBaseline = FileBaseline.fromBytes(target, data);
         markContentReplaced();
         return new LoadMetadata(loadedMetadata);
     }
@@ -301,11 +304,33 @@ public class TextModel {
         DocumentFileMetadata metadata,
         SaveDisposition disposition
     ) throws IOException {
+        save(path, metadata, disposition, false);
+    }
+
+    /** Saves an owned path only while its last loaded/saved bytes still match. */
+    public void saveIfUnchanged(
+        Path path,
+        DocumentFileMetadata metadata,
+        SaveDisposition disposition
+    ) throws IOException {
+        save(path, metadata, disposition, true);
+    }
+
+    private void save(
+        Path path,
+        DocumentFileMetadata metadata,
+        SaveDisposition disposition,
+        boolean checkBaseline
+    ) throws IOException {
         DocumentFileMetadata checkedMetadata = requireCompatibleMetadata(metadata, lineCount());
         SaveDisposition checkedDisposition = Objects.requireNonNull(disposition, "disposition");
-        byte[] content = encode(snapshotLines(), checkedMetadata);
         Path requestedTarget = path.toAbsolutePath().normalize();
+        if (checkBaseline && checkedDisposition == SaveDisposition.REPLACE_EXISTING) {
+            requireUnchangedFile(requestedTarget);
+        }
+        byte[] content = encode(snapshotLines(), checkedMetadata);
         Path target = resolveSaveTarget(requestedTarget);
+        FileBaseline savedBaseline = FileBaseline.fromBytes(target, content);
         boolean targetExists = Files.exists(target);
         Set<PosixFilePermission> targetPermissions = readPosixPermissions(target, targetExists);
         Path parent = target.getParent();
@@ -322,6 +347,10 @@ public class TextModel {
             Files.write(tempFile, content);
             if (targetPermissions != null) {
                 Files.setPosixFilePermissions(tempFile, targetPermissions);
+            }
+            if (checkBaseline && checkedDisposition == SaveDisposition.REPLACE_EXISTING) {
+                // Recheck after staging bytes, immediately before the filesystem commit.
+                requireUnchangedFile(requestedTarget);
             }
             if (checkedDisposition == SaveDisposition.CREATE_NEW) {
                 // No REPLACE_EXISTING: a target created after UI validation is
@@ -340,6 +369,7 @@ public class TextModel {
                 }
             }
             fileMetadata = checkedMetadata;
+            fileBaseline = savedBaseline;
             committed = true;
         } finally {
             try {
@@ -355,10 +385,21 @@ public class TextModel {
     }
 
     private static Path resolveSaveTarget(Path requestedTarget) throws IOException {
+        if (requestedTarget.getFileName() == null) {
+            throw new IOException("Save target must be a file: " + requestedTarget);
+        }
         if (Files.isSymbolicLink(requestedTarget)) {
             return requestedTarget.toRealPath();
         }
-        return requestedTarget;
+        return requestedTarget.getParent().toRealPath().resolve(requestedTarget.getFileName());
+    }
+
+    private void requireUnchangedFile(Path path) throws IOException {
+        if (fileBaseline == null) {
+            throw new IOException("Cannot verify the original file: " + path
+                + ". Use Save As with a different name, or reopen the file.");
+        }
+        fileBaseline.requireUnchanged(path);
     }
 
     private static Set<PosixFilePermission> readPosixPermissions(Path target, boolean targetExists)
@@ -400,6 +441,14 @@ public class TextModel {
         return fileMetadata;
     }
 
+    public FileBaseline fileBaseline() {
+        return fileBaseline;
+    }
+
+    void restoreFileBaseline(FileBaseline baseline) {
+        fileBaseline = baseline;
+    }
+
     /** Restores file metadata captured together with an undo/redo content state. */
     void restoreFileMetadata(DocumentFileMetadata metadata) {
         fileMetadata = requireCompatibleMetadata(metadata, lineCount());
@@ -408,6 +457,7 @@ public class TextModel {
     /** Resets persistence metadata for a new file without changing document text. */
     public void resetFileMetadata() {
         fileMetadata = DocumentFileMetadata.newDocument(lineCount());
+        fileBaseline = null;
     }
 
     public int maxLineLength() {

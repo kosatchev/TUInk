@@ -301,6 +301,7 @@ public class EditorEngine {
                 List.of(""),
                 DocumentFileMetadata.newDocument(1)
             );
+            model.restoreFileBaseline(null);
             state.setFileEncoding(StandardCharsets.UTF_8);
             state.setLineSeparator(EditorState.LINE_SEPARATOR_LF);
             openedDisposition = SaveDisposition.CREATE_NEW;
@@ -325,7 +326,7 @@ public class EditorEngine {
         if (state.getCurrentFile() == null) {
             throw new IOException("No file selected");
         }
-        model.save(
+        model.saveIfUnchanged(
             state.getCurrentFile(),
             model.fileMetadata(),
             state.getSaveDisposition()
@@ -346,13 +347,28 @@ public class EditorEngine {
             throw new IOException("No file selected");
         }
         Path normalizedPath = path.toAbsolutePath().normalize();
-        model.save(normalizedPath, model.fileMetadata(), disposition);
+        Path currentFile = state.getCurrentFile();
+        FileBaseline baseline = model.fileBaseline();
+        boolean sameFile = isSameSaveTarget(normalizedPath, currentFile)
+            || (baseline != null && isSameSaveTarget(normalizedPath, baseline.target()));
+        if (sameFile) {
+            model.saveIfUnchanged(normalizedPath, model.fileMetadata(), disposition);
+        } else {
+            model.save(normalizedPath, model.fileMetadata(), disposition);
+        }
         state.setCurrentFile(normalizedPath);
         state.setSaveDisposition(SaveDisposition.REPLACE_EXISTING);
         state.setDirty(false);
         breakCoalescing();
         resetGutterDiffSavedBaseline();
         markCurrentAsSaved();
+    }
+
+    private static boolean isSameSaveTarget(Path requested, Path known) throws IOException {
+        return known != null && (
+            requested.equals(known.toAbsolutePath().normalize())
+                || (Files.exists(requested) && Files.exists(known) && Files.isSameFile(requested, known))
+        );
     }
 
     public void moveLeft() {

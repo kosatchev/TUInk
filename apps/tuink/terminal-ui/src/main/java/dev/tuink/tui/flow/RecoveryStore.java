@@ -3,6 +3,7 @@ package dev.tuink.tui.flow;
 import dev.tuink.core.BomKind;
 import dev.tuink.core.DocumentFileMetadata;
 import dev.tuink.core.EditorState;
+import dev.tuink.core.FileBaseline;
 import dev.tuink.core.Position;
 import dev.tuink.core.RecoverySnapshot;
 import dev.tuink.core.SaveDisposition;
@@ -41,7 +42,7 @@ public final class RecoveryStore {
     private static final String META_SUFFIX = ".meta.properties";
     private static final String DELETE_SUFFIX = ".delete.properties";
     private static final String TEXT_SUFFIX = ".txt";
-    private static final String FORMAT = "4";
+    private static final String FORMAT = "5";
     private static final Set<PosixFilePermission> DIRECTORY_PERMISSIONS = Set.of(
         PosixFilePermission.OWNER_READ,
         PosixFilePermission.OWNER_WRITE,
@@ -62,6 +63,9 @@ public final class RecoveryStore {
     private static final String KEY_BOM_KIND = "bomKind";
     private static final String KEY_DEFAULT_LINE_SEPARATOR = "defaultLineSeparator";
     private static final String KEY_LINE_SEPARATORS = "lineSeparators";
+    private static final String KEY_FILE_BASELINE_PRESENT = "fileBaseline.present";
+    private static final String KEY_FILE_BASELINE_TARGET = "fileBaseline.target";
+    private static final String KEY_FILE_BASELINE_SHA256 = "fileBaseline.sha256";
     private static final String KEY_CURSOR_LINE = "cursor.line";
     private static final String KEY_CURSOR_COL = "cursor.col";
     private static final String KEY_TOP_LINE = "viewport.topLine";
@@ -83,6 +87,9 @@ public final class RecoveryStore {
         KEY_BOM_KIND,
         KEY_DEFAULT_LINE_SEPARATOR,
         KEY_LINE_SEPARATORS,
+        KEY_FILE_BASELINE_PRESENT,
+        KEY_FILE_BASELINE_TARGET,
+        KEY_FILE_BASELINE_SHA256,
         KEY_CURSOR_LINE,
         KEY_CURSOR_COL,
         KEY_TOP_LINE,
@@ -123,12 +130,10 @@ public final class RecoveryStore {
             // it before reusing the stable runtime id for a newly dirty document.
             delete(id);
         }
-        boolean metaExists = Files.exists(meta, LinkOption.NOFOLLOW_LINKS);
-        Path legacyText = dir.resolve(id + TEXT_SUFFIX);
         Path previousText = null;
-        if (metaExists || Files.exists(legacyText, LinkOption.NOFOLLOW_LINKS)) {
-            Entry existing = metaExists ? readEntry(id, meta) : null;
-            if (existing == null || Files.exists(legacyText, LinkOption.NOFOLLOW_LINKS)) {
+        if (Files.exists(meta, LinkOption.NOFOLLOW_LINKS)) {
+            Entry existing = readEntry(id, meta);
+            if (existing == null) {
                 throw invalid(meta, "existing snapshot is incomplete or incompatible and was left unchanged");
             }
             previousText = textPath(id, readTextGeneration(meta));
@@ -221,7 +226,6 @@ public final class RecoveryStore {
             // deleteIfExists removes a link itself; it never follows it to external data.
             Files.deleteIfExists(generationText);
         }
-        Files.deleteIfExists(dir.resolve(id + TEXT_SUFFIX));
         // The deletion marker is removed last. Any partial cleanup is therefore
         // visible on the next startup and retried without exposing a live snapshot
         // whose metadata points at already deleted text.
@@ -286,6 +290,8 @@ public final class RecoveryStore {
         Properties p = new Properties();
         try (InputStream in = Files.newInputStream(metaPath)) {
             p.load(in);
+        } catch (IllegalArgumentException malformed) {
+            throw new IOException("Malformed recovery metadata " + metaPath + ": " + malformed.getMessage(), malformed);
         }
         requireExactSchema(p, metaPath);
         Path textPath = textPath(id, parseTextGeneration(p, metaPath));
@@ -294,37 +300,40 @@ public final class RecoveryStore {
         }
         String text = decodeUtf8Strict(Files.readAllBytes(textPath));
         List<String> lines = Arrays.asList(text.split("\n", -1));
-        RecoverySnapshot snapshot = new RecoverySnapshot(
-            lines,
-            new Position(parseCoordinate(p, KEY_CURSOR_LINE, metaPath), parseCoordinate(p, KEY_CURSOR_COL, metaPath)),
-            new ViewportState(
-                parseCoordinate(p, KEY_TOP_LINE, metaPath),
-                parseCoordinate(p, KEY_TOP_WRAP_SEGMENT, metaPath),
-                parseCoordinate(p, KEY_LEFT_COLUMN, metaPath),
-                parseCoordinate(p, KEY_LEFT_VISUAL_COLUMN, metaPath)
-            ),
-            parseSelection(p, metaPath),
-            parseBoolean(p, KEY_DIRTY, metaPath),
-            parseCurrentFile(p, metaPath),
-            parseSaveDisposition(p, metaPath),
-            parseFileMetadata(p, metaPath, lines.size()),
-            parseInstant(p, metaPath)
-        );
-        return new Entry(id, snapshot);
+        try {
+            RecoverySnapshot snapshot = new RecoverySnapshot(
+                lines,
+                new Position(parseCoordinate(p, KEY_CURSOR_LINE, metaPath), parseCoordinate(p, KEY_CURSOR_COL, metaPath)),
+                new ViewportState(
+                    parseCoordinate(p, KEY_TOP_LINE, metaPath),
+                    parseCoordinate(p, KEY_TOP_WRAP_SEGMENT, metaPath),
+                    parseCoordinate(p, KEY_LEFT_COLUMN, metaPath),
+                    parseCoordinate(p, KEY_LEFT_VISUAL_COLUMN, metaPath)
+                ),
+                parseSelection(p, metaPath),
+                parseBoolean(p, KEY_DIRTY, metaPath),
+                parseCurrentFile(p, metaPath),
+                parseSaveDisposition(p, metaPath),
+                parseFileMetadata(p, metaPath, lines.size()),
+                parseFileBaseline(p, metaPath),
+                parseInstant(p, metaPath)
+            );
+            return new Entry(id, snapshot);
+        } catch (IllegalArgumentException e) {
+            throw invalid(metaPath, "invalid recovery snapshot: " + e.getMessage());
+        }
     }
 
     private static boolean isGenerationText(String id, String fileName) {
         String prefix = id + ".";
-        if (!fileName.startsWith(prefix) || !fileName.endsWith(TEXT_SUFFIX)) {
+        if (fileName.length() != prefix.length() + 32 + TEXT_SUFFIX.length()
+            || !fileName.startsWith(prefix) || !fileName.endsWith(TEXT_SUFFIX)) {
             return false;
         }
         String generation = fileName.substring(
             prefix.length(),
             fileName.length() - TEXT_SUFFIX.length()
         );
-        if (generation.length() != 32) {
-            return false;
-        }
         for (int i = 0; i < generation.length(); i++) {
             char c = generation.charAt(i);
             if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
@@ -381,6 +390,10 @@ public final class RecoveryStore {
                 .map(RecoveryStore::encodeLineSeparator)
                 .collect(java.util.stream.Collectors.joining(","))
         );
+        FileBaseline fileBaseline = snapshot.fileBaseline();
+        p.setProperty(KEY_FILE_BASELINE_PRESENT, Boolean.toString(fileBaseline != null));
+        p.setProperty(KEY_FILE_BASELINE_TARGET, fileBaseline == null ? "" : fileBaseline.target().toString());
+        p.setProperty(KEY_FILE_BASELINE_SHA256, fileBaseline == null ? "" : fileBaseline.sha256());
         p.setProperty(KEY_CURSOR_LINE, Integer.toString(snapshot.cursor().line()));
         p.setProperty(KEY_CURSOR_COL, Integer.toString(snapshot.cursor().col()));
         p.setProperty(KEY_TOP_LINE, Integer.toString(snapshot.viewport().topLine()));
@@ -546,6 +559,8 @@ public final class RecoveryStore {
         Properties properties = new Properties();
         try (InputStream in = Files.newInputStream(metaPath)) {
             properties.load(in);
+        } catch (IllegalArgumentException malformed) {
+            throw new IOException("Malformed recovery metadata " + metaPath + ": " + malformed.getMessage(), malformed);
         }
         requireExactSchema(properties, metaPath);
         return parseTextGeneration(properties, metaPath);
@@ -623,6 +638,33 @@ public final class RecoveryStore {
             return Path.of(raw).toAbsolutePath().normalize();
         } catch (RuntimeException e) {
             throw invalid(path, "invalid currentFile path");
+        }
+    }
+
+    private static FileBaseline parseFileBaseline(Properties p, Path path) throws IOException {
+        boolean present = parseBoolean(p, KEY_FILE_BASELINE_PRESENT, path);
+        String rawTarget = p.getProperty(KEY_FILE_BASELINE_TARGET);
+        String sha256 = p.getProperty(KEY_FILE_BASELINE_SHA256);
+        if (!present) {
+            if (!rawTarget.isEmpty() || !sha256.isEmpty()) {
+                throw invalid(path, "fileBaseline fields must be empty when fileBaseline.present=false");
+            }
+            return null;
+        }
+        if (rawTarget.isBlank()) {
+            throw invalid(path, KEY_FILE_BASELINE_TARGET + " is required when fileBaseline.present=true");
+        }
+        if (!sha256.matches("[0-9a-f]{64}")) {
+            throw invalid(path, KEY_FILE_BASELINE_SHA256 + " must be 64 lowercase hexadecimal characters");
+        }
+        try {
+            Path target = Path.of(rawTarget);
+            if (!target.isAbsolute() || !target.equals(target.normalize())) {
+                throw invalid(path, KEY_FILE_BASELINE_TARGET + " must be an absolute normalized path");
+            }
+            return new FileBaseline(target, sha256);
+        } catch (RuntimeException e) {
+            throw invalid(path, "invalid fileBaseline: " + e.getMessage());
         }
     }
 

@@ -341,6 +341,8 @@ class TextModelFileFidelityTest {
                 null,
                 true,
                 null,
+                SaveDisposition.CREATE_NEW,
+                null,
                 null,
                 null
             )

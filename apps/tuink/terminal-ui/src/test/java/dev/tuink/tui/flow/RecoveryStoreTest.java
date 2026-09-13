@@ -21,15 +21,22 @@ import dev.tuink.core.ViewportState;
 import dev.tuink.render.TerminalEditorTextLayout;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -46,12 +53,38 @@ class RecoveryStoreTest {
 
     @TempDir
     Path tempDir;
+    private final List<RecoveryStore> stores = new ArrayList<>();
+
+    @AfterEach
+    void closeStores() throws IOException {
+        IOException failure = null;
+        for (RecoveryStore store : stores) {
+            try {
+                store.close();
+            } catch (IOException e) {
+                if (failure == null) {
+                    failure = e;
+                } else {
+                    failure.addSuppressed(e);
+                }
+            }
+        }
+        if (failure != null) {
+            throw failure;
+        }
+    }
+
+    private RecoveryStore newStore(Path directory) {
+        RecoveryStore store = new RecoveryStore(directory);
+        stores.add(store);
+        return store;
+    }
 
     @Test
     void savesAndLoadsSnapshotWithPrivatePermissions() throws IOException {
         assumePosix();
         Path directory = tempDir.resolve("recovery");
-        RecoveryStore store = new RecoveryStore(directory);
+        RecoveryStore store = newStore(directory);
         RecoverySnapshot snapshot = snapshot();
 
         store.save("Session 01", snapshot);
@@ -61,6 +94,7 @@ class RecoveryStoreTest {
         assertEquals(PRIVATE_DIRECTORY, Files.getPosixFilePermissions(directory));
         assertEquals(PRIVATE_FILE, Files.getPosixFilePermissions(text));
         assertEquals(PRIVATE_FILE, Files.getPosixFilePermissions(meta));
+        assertEquals(PRIVATE_FILE, Files.getPosixFilePermissions(directory.resolve("session01.lock")));
         assertEquals(List.of(), temporaryFiles(directory));
 
         List<RecoveryStore.Entry> entries = store.loadAll().entries();
@@ -85,7 +119,7 @@ class RecoveryStoreTest {
             null,
             Instant.parse("2026-07-24T00:00:00Z")
         );
-        RecoveryStore store = new RecoveryStore(directory);
+        RecoveryStore store = newStore(directory);
 
         store.save("expected-absent", snapshot);
 
@@ -101,7 +135,7 @@ class RecoveryStoreTest {
         Path directory = tempDir.resolve("recovery");
         RecoverySnapshot snapshot = openedFileSnapshot();
         assertNotNull(snapshot.fileBaseline());
-        RecoveryStore store = new RecoveryStore(directory);
+        RecoveryStore store = newStore(directory);
         store.save("session", snapshot);
         Properties metadata = readMetadata(directory.resolve("session.meta.properties"));
         assertEquals("5", metadata.getProperty("format"));
@@ -135,7 +169,7 @@ class RecoveryStoreTest {
             null,
             original.createdAt()
         );
-        RecoveryStore store = new RecoveryStore(tempDir.resolve("recovery"));
+        RecoveryStore store = newStore(tempDir.resolve("recovery"));
         store.save("session", withoutBaseline);
         RecoverySnapshot recovered = store.loadAll().entries().get(0).snapshot();
         assertEquals(withoutBaseline, recovered);
@@ -150,7 +184,7 @@ class RecoveryStoreTest {
     @Test
     void rejectsNoncanonicalFileBaselineDigestsAndPreservesSnapshots() throws IOException {
         Path directory = tempDir.resolve("recovery");
-        RecoveryStore store = new RecoveryStore(directory);
+        RecoveryStore store = newStore(directory);
         store.save("session", openedFileSnapshot());
         Path metadata = directory.resolve("session.meta.properties");
         Path text = currentText(directory, "session");
@@ -169,7 +203,7 @@ class RecoveryStoreTest {
     @Test
     void rejectsRelativeAndUnnormalizedFileBaselineTargets() throws IOException {
         Path directory = tempDir.resolve("recovery");
-        RecoveryStore store = new RecoveryStore(directory);
+        RecoveryStore store = newStore(directory);
         store.save("session", openedFileSnapshot());
         Path metadata = directory.resolve("session.meta.properties");
         Path text = currentText(directory, "session");
@@ -188,7 +222,7 @@ class RecoveryStoreTest {
     @Test
     void rejectsInconsistentFileBaselinePresenceAndSaveIntent() throws IOException {
         Path directory = tempDir.resolve("recovery");
-        RecoveryStore store = new RecoveryStore(directory);
+        RecoveryStore store = newStore(directory);
         store.save("session", openedFileSnapshot());
         Path metadata = directory.resolve("session.meta.properties");
         Path text = currentText(directory, "session");
@@ -216,7 +250,7 @@ class RecoveryStoreTest {
     @Test
     void rejectsMissingAndUnknownFileBaselineFields() throws IOException {
         Path directory = tempDir.resolve("recovery");
-        RecoveryStore store = new RecoveryStore(directory);
+        RecoveryStore store = newStore(directory);
         store.save("session", openedFileSnapshot());
         Path metadata = directory.resolve("session.meta.properties");
         Path text = currentText(directory, "session");
@@ -238,7 +272,7 @@ class RecoveryStoreTest {
     @Test
     void generationMetadataIsTheAtomicCommitPoint() throws IOException {
         Path directory = tempDir.resolve("recovery");
-        RecoveryStore store = new RecoveryStore(directory);
+        RecoveryStore store = newStore(directory);
         RecoverySnapshot original = snapshot();
         store.save("session", original);
         Path originalText = currentText(directory, "session");
@@ -271,7 +305,7 @@ class RecoveryStoreTest {
     void deleteRemovesEveryOwnedGenerationWithoutFollowingLinks() throws IOException {
         assumePosix();
         Path directory = tempDir.resolve("recovery");
-        RecoveryStore store = new RecoveryStore(directory);
+        RecoveryStore store = newStore(directory);
         store.save("session", snapshot());
         Path current = currentText(directory, "session");
         Path orphan = directory.resolve("session.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.txt");
@@ -298,7 +332,7 @@ class RecoveryStoreTest {
         Path unrelated = directory.resolve("notes.txt");
         Files.writeString(unownedText, "unowned text", StandardCharsets.UTF_8);
         Files.writeString(unrelated, "unrelated text", StandardCharsets.UTF_8);
-        RecoveryStore store = new RecoveryStore(directory);
+        RecoveryStore store = newStore(directory);
 
         store.save("session", snapshot());
 
@@ -313,7 +347,7 @@ class RecoveryStoreTest {
     @Test
     void partialDeleteLeavesARetryableMarkerInsteadOfDanglingLiveMetadata() throws IOException {
         Path directory = tempDir.resolve("recovery");
-        RecoveryStore store = new RecoveryStore(directory);
+        RecoveryStore store = newStore(directory);
         store.save("session", snapshot());
         Path blocker = directory.resolve("session.dddddddddddddddddddddddddddddddd.txt");
         Files.createDirectory(blocker);
@@ -342,7 +376,7 @@ class RecoveryStoreTest {
     void ignoresSnapshotSymlinksWithoutFollowingOrChangingTheirTargets() throws IOException {
         assumePosix();
         Path directory = tempDir.resolve("recovery");
-        RecoveryStore store = new RecoveryStore(directory);
+        RecoveryStore store = newStore(directory);
         store.save("evil", snapshot());
         Path snapshotText = currentText(directory, "evil");
         Path snapshotMeta = directory.resolve("evil.meta.properties");
@@ -379,7 +413,7 @@ class RecoveryStoreTest {
         Files.createDirectories(targetDirectory);
         Files.createSymbolicLink(recoveryLink, targetDirectory);
 
-        RecoveryStore store = new RecoveryStore(recoveryLink);
+        RecoveryStore store = newStore(recoveryLink);
 
         assertThrows(IOException.class, () -> store.save("entry", snapshot()));
         assertTrue(Files.isSymbolicLink(recoveryLink));
@@ -391,7 +425,7 @@ class RecoveryStoreTest {
     @Test
     void skipsMarkerlessSnapshotAndLeavesFilesUnchanged() throws IOException {
         Path directory = tempDir.resolve("recovery");
-        RecoveryStore store = new RecoveryStore(directory);
+        RecoveryStore store = newStore(directory);
         store.save("session", snapshot());
         Path text = currentText(directory, "session");
         Path metadata = directory.resolve("session.meta.properties");
@@ -405,7 +439,7 @@ class RecoveryStoreTest {
     @Test
     void refusesToOverwriteIncompatibleSnapshot() throws IOException {
         Path directory = tempDir.resolve("recovery");
-        RecoveryStore store = new RecoveryStore(directory);
+        RecoveryStore store = newStore(directory);
         store.save("session", snapshot());
         Path text = currentText(directory, "session");
         Path metadata = directory.resolve("session.meta.properties");
@@ -419,7 +453,7 @@ class RecoveryStoreTest {
     @Test
     void rejectsMalformedCurrentMetadataAsAnIoErrorWithoutOverwritingSnapshotBytes() throws IOException {
         Path directory = tempDir.resolve("recovery");
-        RecoveryStore store = new RecoveryStore(directory);
+        RecoveryStore store = newStore(directory);
         store.save("session", snapshot());
         Path text = currentText(directory, "session");
         byte[] originalText = Files.readAllBytes(text);
@@ -446,7 +480,7 @@ class RecoveryStoreTest {
     @Test
     void rejectsUnknownFormatMarkerAndLeavesSnapshotUnchanged() throws IOException {
         Path directory = tempDir.resolve("recovery");
-        RecoveryStore store = new RecoveryStore(directory);
+        RecoveryStore store = newStore(directory);
         store.save("session", snapshot());
         Path text = currentText(directory, "session");
         Path metadata = directory.resolve("session.meta.properties");
@@ -460,7 +494,7 @@ class RecoveryStoreTest {
     @Test
     void rejectsInvalidCurrentFormatValues() throws IOException {
         Path directory = tempDir.resolve("recovery");
-        RecoveryStore store = new RecoveryStore(directory);
+        RecoveryStore store = newStore(directory);
         store.save("session", snapshot());
         Path meta = directory.resolve("session.meta.properties");
         String current = Files.readString(meta);
@@ -476,7 +510,7 @@ class RecoveryStoreTest {
     @Test
     void rejectsCoordinatesOutsideRecoveryDocument() throws IOException {
         Path directory = tempDir.resolve("recovery");
-        RecoveryStore store = new RecoveryStore(directory);
+        RecoveryStore store = newStore(directory);
         store.save("session", snapshot());
         Path meta = directory.resolve("session.meta.properties");
         String current = Files.readString(meta);
@@ -492,7 +526,7 @@ class RecoveryStoreTest {
     @Test
     void rejectsPersistedCursorInsideASurrogatePair() throws IOException {
         Path directory = tempDir.resolve("recovery");
-        RecoveryStore store = new RecoveryStore(directory);
+        RecoveryStore store = newStore(directory);
         RecoverySnapshot unicode = new RecoverySnapshot(
             List.of("A😀B"),
             new Position(0, 1),
@@ -520,7 +554,7 @@ class RecoveryStoreTest {
     @Test
     void rejectsSeparatorMetadataThatDoesNotMatchRecoveryText() throws IOException {
         Path directory = tempDir.resolve("recovery");
-        RecoveryStore store = new RecoveryStore(directory);
+        RecoveryStore store = newStore(directory);
         store.save("session", snapshot());
         Path meta = directory.resolve("session.meta.properties");
         String current = Files.readString(meta);
@@ -534,6 +568,216 @@ class RecoveryStoreTest {
         assertEquals(List.of(), result.entries());
         assertEquals(1, result.skipped().size());
         assertTrue(result.skipped().get(0).reason().contains("does not match recovery text line count"));
+    }
+
+    @Test
+    void activeSnapshotCannotBeLoadedOverwrittenOrDeletedByAnotherStore() throws IOException {
+        Path directory = tempDir.resolve("recovery");
+        RecoveryStore owner = newStore(directory);
+        RecoveryStore peer = newStore(directory);
+        RecoverySnapshot original = snapshot();
+        owner.save("session", original);
+        Path text = currentText(directory, "session");
+        String metadata = Files.readString(directory.resolve("session.meta.properties"));
+
+        assertEquals(new RecoveryStore.LoadResult(List.of(), List.of()), peer.loadAll());
+        assertThrows(IOException.class, () -> peer.save("session", original));
+        assertThrows(IOException.class, () -> peer.delete("session"));
+        assertEquals(metadata, Files.readString(directory.resolve("session.meta.properties")));
+        assertEquals(text, currentText(directory, "session"));
+        assertEquals(original, owner.loadAll().entries().get(0).snapshot());
+
+        owner.close();
+
+        assertTrue(Files.exists(directory.resolve("session.lock")));
+        assertEquals(original, peer.loadAll().entries().get(0).snapshot());
+        assertEquals(List.of(), newStore(directory).loadAll().entries());
+    }
+
+    @Test
+    void startupClaimRemainsExclusiveUntilTheClaimingStoreCloses() throws IOException {
+        Path directory = tempDir.resolve("recovery");
+        RecoveryStore writer = newStore(directory);
+        writer.save("session", snapshot());
+        writer.close();
+        RecoveryStore firstStartup = newStore(directory);
+        RecoveryStore secondStartup = newStore(directory);
+
+        List<RecoveryStore.Entry> claimed = firstStartup.loadAll().entries();
+
+        assertEquals(1, claimed.size());
+        assertEquals(new RecoveryStore.LoadResult(List.of(), List.of()), secondStartup.loadAll());
+        assertThrows(IOException.class, () -> secondStartup.deleteAll(claimed));
+        firstStartup.close();
+        assertEquals(claimed, secondStartup.loadAll().entries());
+    }
+
+    @Test
+    void peerDoesNotCleanAnActiveOwnersPendingDeletion() throws IOException {
+        Path directory = tempDir.resolve("recovery");
+        RecoveryStore owner = newStore(directory);
+        RecoveryStore peer = newStore(directory);
+        owner.save("session", snapshot());
+        Path blocker = directory.resolve("session.dddddddddddddddddddddddddddddddd.txt");
+        Files.createDirectory(blocker);
+        Path child = blocker.resolve("block-deletion");
+        Files.writeString(child, "blocked");
+        assertThrows(IOException.class, () -> owner.delete("session"));
+        Files.delete(child);
+        Files.delete(blocker);
+        Path marker = directory.resolve("session.delete.properties");
+
+        assertEquals(new RecoveryStore.LoadResult(List.of(), List.of()), peer.loadAll());
+        assertTrue(Files.exists(marker));
+
+        owner.close();
+
+        assertEquals(new RecoveryStore.LoadResult(List.of(), List.of()), peer.loadAll());
+        assertFalse(Files.exists(marker));
+        assertTrue(Files.exists(directory.resolve("session.lock")));
+    }
+
+    @Test
+    void successfulDeleteReleasesTheClaimAndRetainsItsStableSidecar() throws IOException {
+        Path directory = tempDir.resolve("recovery");
+        RecoveryStore owner = newStore(directory);
+        RecoveryStore peer = newStore(directory);
+        owner.save("session", snapshot());
+
+        owner.delete("session");
+
+        assertTrue(Files.exists(directory.resolve("session.lock")));
+        peer.save("session", snapshot());
+        assertEquals(List.of(), owner.loadAll().entries());
+        assertThrows(IOException.class, () -> owner.delete("session"));
+    }
+
+    @Test
+    void failedStartupReadReleasesItsNewClaimForAnotherStore() throws IOException {
+        Path directory = tempDir.resolve("recovery");
+        RecoveryStore writer = newStore(directory);
+        writer.save("session", snapshot());
+        writer.close();
+        Path metadata = directory.resolve("session.meta.properties");
+        String validMetadata = Files.readString(metadata);
+        Properties invalid = readMetadata(metadata);
+        invalid.setProperty("cursor.line", "-1");
+        writeMetadata(metadata, invalid);
+        RecoveryStore firstStartup = newStore(directory);
+
+        assertEquals(1, firstStartup.loadAll().skipped().size());
+        Files.writeString(metadata, validMetadata);
+
+        assertEquals(snapshot(), newStore(directory).loadAll().entries().get(0).snapshot());
+    }
+
+    @Test
+    void refusesLockSymlinksWithoutReadingOrChangingTheirTargets() throws IOException {
+        assumePosix();
+        Path directory = tempDir.resolve("recovery");
+        RecoveryStore writer = newStore(directory);
+        writer.save("session", snapshot());
+        writer.close();
+        Path lock = directory.resolve("session.lock");
+        Files.delete(lock);
+        Path external = tempDir.resolve("external.txt");
+        Files.writeString(external, "keep");
+        Set<PosixFilePermission> permissions = Set.of(
+            PosixFilePermission.OWNER_READ,
+            PosixFilePermission.OWNER_WRITE,
+            PosixFilePermission.GROUP_READ
+        );
+        Files.setPosixFilePermissions(external, permissions);
+        Files.createSymbolicLink(lock, external);
+        RecoveryStore store = newStore(directory);
+
+        RecoveryStore.LoadResult result = store.loadAll();
+
+        assertEquals(List.of(), result.entries());
+        assertEquals(1, result.skipped().size());
+        assertThrows(IOException.class, () -> store.save("session", snapshot()));
+        assertThrows(IOException.class, () -> store.delete("session"));
+        assertEquals("keep", Files.readString(external));
+        assertEquals(permissions, Files.getPosixFilePermissions(external));
+        assertTrue(Files.isSymbolicLink(lock));
+        assertTrue(Files.exists(directory.resolve("session.meta.properties")));
+    }
+
+    @Test
+    void noncanonicalMetadataFilenameCannotAliasACanonicalClaim() throws IOException {
+        Path directory = tempDir.resolve("recovery");
+        RecoveryStore writer = newStore(directory);
+        writer.save("session", snapshot());
+        writer.close();
+        Path noncanonical = directory.resolve("session!.meta.properties");
+        Files.copy(directory.resolve("session.meta.properties"), noncanonical);
+
+        RecoveryStore.LoadResult result = newStore(directory).loadAll();
+
+        assertEquals(List.of(new RecoveryStore.Entry("session", snapshot())), result.entries());
+        assertEquals(1, result.skipped().size());
+        assertTrue(result.skipped().get(0).reason().contains("noncanonical"));
+        assertTrue(Files.exists(noncanonical));
+        assertFalse(Files.exists(directory.resolve("session!.lock")));
+    }
+
+    @Test
+    void closedStoreRejectsOperationsAndCloseIsIdempotent() throws IOException {
+        RecoveryStore store = newStore(tempDir.resolve("recovery"));
+        store.save("session", snapshot());
+
+        store.close();
+        store.close();
+
+        assertThrows(IOException.class, store::loadAll);
+        assertThrows(IOException.class, () -> store.save("session", snapshot()));
+        assertThrows(IOException.class, () -> store.delete("session"));
+        assertThrows(IOException.class, () -> store.deleteAll(List.of()));
+        assertTrue(Files.exists(store.directory().resolve("session.meta.properties")));
+    }
+
+    @Test
+    void rejectedLocalContenderDoesNotReleaseTheOwnersCrossProcessLock() throws Exception {
+        Path directory = tempDir.resolve("recovery");
+        RecoveryStore owner = newStore(directory);
+        RecoveryStore peer = newStore(directory);
+        owner.save("session", snapshot());
+        assertEquals(List.of(), peer.loadAll().entries());
+        assertThrows(IOException.class, () -> peer.save("session", snapshot()));
+        assertThrows(IOException.class, () -> peer.delete("session"));
+
+        assertEquals("busy", probeLockInAnotherProcess(directory.resolve("session.lock")));
+
+        owner.close();
+
+        assertEquals("acquired", probeLockInAnotherProcess(directory.resolve("session.lock")));
+    }
+
+    private static String probeLockInAnotherProcess(Path lock) throws Exception {
+        Path java = Path.of(System.getProperty("java.home"), "bin", "java");
+        Path testClasses = Path.of(RecoveryStoreTest.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+        Process process = new ProcessBuilder(
+            java.toString(), "-cp", testClasses.toString(), LockProbe.class.getName(), lock.toString()
+        ).redirectErrorStream(true).start();
+        try {
+            assertTrue(process.waitFor(10, TimeUnit.SECONDS), "lock probe did not terminate");
+            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+            assertEquals(0, process.exitValue(), output);
+            return output;
+        } finally {
+            process.destroyForcibly();
+        }
+    }
+
+    /** JDK-only subprocess fixture: it deliberately needs no test-runtime dependencies. */
+    public static final class LockProbe {
+        public static void main(String[] args) throws IOException {
+            try (FileChannel channel = FileChannel.open(
+                Path.of(args[0]), StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS
+            ); FileLock lock = channel.tryLock()) {
+                System.out.println(lock == null ? "busy" : "acquired");
+            }
+        }
     }
 
     private void assumePosix() throws IOException {

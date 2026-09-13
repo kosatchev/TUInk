@@ -13,6 +13,9 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
+import java.nio.channels.OverlappingFileLockException;
 import java.nio.charset.Charset;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
@@ -20,15 +23,20 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.OpenOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
 import java.util.Set;
@@ -37,12 +45,16 @@ import java.util.UUID;
 /**
  * Filesystem store for recovery snapshots.
  */
-public final class RecoveryStore {
+public final class RecoveryStore implements AutoCloseable {
     private static final String RECOVERY_DIR = "recovery";
     private static final String META_SUFFIX = ".meta.properties";
     private static final String DELETE_SUFFIX = ".delete.properties";
     private static final String TEXT_SUFFIX = ".txt";
+    private static final String LOCK_SUFFIX = ".lock";
     private static final String FORMAT = "5";
+    // Some systems release process-wide locks when any descriptor for the same
+    // file closes. Avoid opening a second channel for a local owner's lock.
+    private static final Map<Path, RecoveryStore> LOCAL_OWNERS = new HashMap<>();
     private static final Set<PosixFilePermission> DIRECTORY_PERMISSIONS = Set.of(
         PosixFilePermission.OWNER_READ,
         PosixFilePermission.OWNER_WRITE,
@@ -101,6 +113,8 @@ public final class RecoveryStore {
         KEY_SELECTION_COL
     );
     private final Path recoveryDirectory;
+    private final Map<String, EntryLock> entryLocks = new LinkedHashMap<>();
+    private boolean closed;
 
     public RecoveryStore() {
         this(defaultDirectory());
@@ -116,19 +130,22 @@ public final class RecoveryStore {
         return recoveryDirectory;
     }
 
-    public void save(String entryId, RecoverySnapshot snapshot) throws IOException {
+    public synchronized void save(String entryId, RecoverySnapshot snapshot) throws IOException {
+        ensureOpen();
         if (entryId == null || entryId.isBlank() || snapshot == null) {
             return;
         }
         Path dir = directory();
         ensurePrivateDirectory(dir);
         String id = sanitize(entryId);
+        requireClaim(id);
         Path meta = dir.resolve(id + META_SUFFIX);
         Path deletionMarker = dir.resolve(id + DELETE_SUFFIX);
         if (Files.exists(deletionMarker, LinkOption.NOFOLLOW_LINKS)) {
             // A previous explicit cleanup committed but did not finish. Complete
             // it before reusing the stable runtime id for a newly dirty document.
             delete(id);
+            requireClaim(id);
         }
         Path previousText = null;
         if (Files.exists(meta, LinkOption.NOFOLLOW_LINKS)) {
@@ -160,7 +177,8 @@ public final class RecoveryStore {
         }
     }
 
-    public LoadResult loadAll() throws IOException {
+    public synchronized LoadResult loadAll() throws IOException {
+        ensureOpen();
         Path dir = directory();
         if (!Files.exists(dir, LinkOption.NOFOLLOW_LINKS)) {
             return new LoadResult(List.of(), List.of());
@@ -169,33 +187,52 @@ public final class RecoveryStore {
         List<Entry> out = new ArrayList<>();
         List<SkippedSnapshot> skipped = new ArrayList<>();
         retryPendingDeletions(dir, skipped);
+        List<Path> metadataFiles;
         try (var files = Files.list(dir)) {
-            files
+            metadataFiles = files
                 .filter(path ->
                     path.getFileName() != null
                         && path.getFileName().toString().endsWith(META_SUFFIX)
                         && Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
                 )
                 .sorted()
-                .forEach(meta -> {
-                    String name = meta.getFileName().toString();
-                    String id = name.substring(0, name.length() - META_SUFFIX.length());
-                    try {
-                        Entry entry = readEntry(id, meta);
-                        if (entry != null) {
-                            out.add(entry);
-                        } else {
-                            skipped.add(new SkippedSnapshot(id, "metadata or text file is missing or not a regular file"));
-                        }
-                    } catch (Exception e) {
-                        skipped.add(new SkippedSnapshot(id, messageOf(e)));
-                    }
-                });
+                .toList();
+        }
+        for (Path meta : metadataFiles) {
+            String name = meta.getFileName().toString();
+            String id = name.substring(0, name.length() - META_SUFFIX.length());
+            if (!isCanonicalId(id)) {
+                skipped.add(new SkippedSnapshot(id, "snapshot filename has a noncanonical entry id"));
+                continue;
+            }
+            boolean previouslyOwned = entryLocks.containsKey(id);
+            boolean loaded = false;
+            try {
+                if (!tryClaim(id)) {
+                    // This is unfinished work in a live editor, not a snapshot
+                    // that this instance should offer to restore or discard.
+                    continue;
+                }
+                Entry entry = readEntry(id, meta);
+                if (entry != null) {
+                    out.add(entry);
+                    loaded = true;
+                } else {
+                    skipped.add(new SkippedSnapshot(id, "metadata or text file is missing or not a regular file"));
+                }
+            } catch (Exception e) {
+                skipped.add(new SkippedSnapshot(id, messageOf(e)));
+            } finally {
+                if (!previouslyOwned && !loaded) {
+                    releaseClaim(id);
+                }
+            }
         }
         return new LoadResult(List.copyOf(out), List.copyOf(skipped));
     }
 
-    public void delete(String entryId) throws IOException {
+    public synchronized void delete(String entryId) throws IOException {
+        ensureOpen();
         if (entryId == null || entryId.isBlank()) {
             return;
         }
@@ -205,6 +242,7 @@ public final class RecoveryStore {
             return;
         }
         ensurePrivateDirectory(dir);
+        requireClaim(id);
         Path meta = dir.resolve(id + META_SUFFIX);
         Path deletionMarker = dir.resolve(id + DELETE_SUFFIX);
         if (Files.exists(meta, LinkOption.NOFOLLOW_LINKS)) {
@@ -230,9 +268,11 @@ public final class RecoveryStore {
         // visible on the next startup and retried without exposing a live snapshot
         // whose metadata points at already deleted text.
         Files.deleteIfExists(deletionMarker);
+        releaseClaim(id);
     }
 
-    public void deleteAll(List<Entry> entries) throws IOException {
+    public synchronized void deleteAll(List<Entry> entries) throws IOException {
+        ensureOpen();
         if (entries == null || entries.isEmpty()) {
             return;
         }
@@ -256,7 +296,7 @@ public final class RecoveryStore {
                         return false;
                     }
                     String id = name.substring(0, name.length() - DELETE_SUFFIX.length());
-                    return !id.isBlank() && sanitize(id).equals(id);
+                    return isCanonicalId(id);
                 })
                 .sorted()
                 .toList();
@@ -265,6 +305,9 @@ public final class RecoveryStore {
             String name = marker.getFileName().toString();
             String id = name.substring(0, name.length() - DELETE_SUFFIX.length());
             try {
+                if (!tryClaim(id)) {
+                    continue;
+                }
                 delete(id);
             } catch (IOException e) {
                 skipped.add(new SkippedSnapshot(
@@ -273,6 +316,118 @@ public final class RecoveryStore {
                 ));
             }
         }
+    }
+
+    private void ensureOpen() throws IOException {
+        if (closed) {
+            throw new IOException("Recovery store is closed");
+        }
+    }
+
+    private void requireClaim(String id) throws IOException {
+        if (!tryClaim(id)) {
+            throw new IOException("Recovery snapshot is owned by another editor: " + id);
+        }
+    }
+
+    private boolean tryClaim(String id) throws IOException {
+        if (entryLocks.containsKey(id)) {
+            return true;
+        }
+        Path lockPath = directory().toRealPath().resolve(id + LOCK_SUFFIX);
+        synchronized (LOCAL_OWNERS) {
+            if (LOCAL_OWNERS.containsKey(lockPath)) {
+                return false;
+            }
+            FileChannel channel = openLockChannel(lockPath);
+            boolean claimed = false;
+            try {
+                // Changing permissions may open and close another descriptor.
+                // Do it before locking: that close can release POSIX locks held
+                // by this process, even when our channel remains open.
+                try {
+                    Files.setAttribute(lockPath, "posix:permissions", FILE_PERMISSIONS, LinkOption.NOFOLLOW_LINKS);
+                } catch (UnsupportedOperationException ignored) {
+                    // Platforms without POSIX permissions use their default ACLs.
+                }
+                FileLock lock;
+                try {
+                    lock = channel.tryLock();
+                } catch (OverlappingFileLockException busy) {
+                    return false;
+                }
+                if (lock == null) {
+                    return false;
+                }
+                entryLocks.put(id, new EntryLock(lockPath, channel, lock));
+                LOCAL_OWNERS.put(lockPath, this);
+                claimed = true;
+                return true;
+            } finally {
+                if (!claimed) {
+                    channel.close();
+                }
+            }
+        }
+    }
+
+    private static FileChannel openLockChannel(Path lockPath) throws IOException {
+        if (Files.exists(lockPath, LinkOption.NOFOLLOW_LINKS)
+            && !Files.isRegularFile(lockPath, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("Recovery lock is not a regular file: " + lockPath);
+        }
+        Set<OpenOption> options = Set.of(
+            StandardOpenOption.CREATE,
+            StandardOpenOption.WRITE,
+            LinkOption.NOFOLLOW_LINKS
+        );
+        try {
+            return FileChannel.open(lockPath, options, PosixFilePermissions.asFileAttribute(FILE_PERMISSIONS));
+        } catch (UnsupportedOperationException ignored) {
+            return FileChannel.open(lockPath, options);
+        }
+    }
+
+    private void releaseClaim(String id) throws IOException {
+        EntryLock claimed = entryLocks.remove(id);
+        if (claimed == null) {
+            return;
+        }
+        synchronized (LOCAL_OWNERS) {
+            try (FileChannel channel = claimed.channel()) {
+                claimed.lock().release();
+            } finally {
+                LOCAL_OWNERS.remove(claimed.path(), this);
+            }
+        }
+        // Never unlink a lock sidecar: another process may already have its inode
+        // open, and replacing it would allow two owners to lock different files.
+    }
+
+    @Override
+    public synchronized void close() throws IOException {
+        if (closed) {
+            return;
+        }
+        closed = true;
+        IOException failure = null;
+        for (String id : List.copyOf(entryLocks.keySet())) {
+            try {
+                releaseClaim(id);
+            } catch (IOException e) {
+                if (failure == null) {
+                    failure = e;
+                } else {
+                    failure.addSuppressed(e);
+                }
+            }
+        }
+        if (failure != null) {
+            throw failure;
+        }
+    }
+
+    private record EntryLock(Path path, FileChannel channel, FileLock lock) {
     }
 
     private static void moveCommitMarker(Path source, Path target) throws IOException {
@@ -504,6 +659,10 @@ public final class RecoveryStore {
             return "snapshot";
         }
         return out.toString();
+    }
+
+    private static boolean isCanonicalId(String id) {
+        return !id.isBlank() && sanitize(id).equals(id);
     }
 
     private static void requireExactSchema(Properties p, Path path) throws IOException {

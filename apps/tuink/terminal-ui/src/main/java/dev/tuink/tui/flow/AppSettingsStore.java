@@ -79,6 +79,8 @@ public final class AppSettingsStore {
         Properties p = new Properties();
         try (InputStream in = Files.newInputStream(path)) {
             p.load(in);
+        } catch (IllegalArgumentException malformed) {
+            throw new IOException("Malformed settings file " + path + ": " + malformed.getMessage(), malformed);
         }
         requireExactSchema(p, path);
         return new AppSettings(
@@ -109,10 +111,12 @@ public final class AppSettingsStore {
     }
 
     static void save(Path path, AppSettings settings) throws IOException {
-        Path dir = path.getParent();
-        if (dir != null) {
-            Files.createDirectories(dir);
+        Path target = path.toAbsolutePath().normalize();
+        if (target.getFileName() == null) {
+            throw new IOException("Settings target must be a file: " + path);
         }
+        Path dir = target.getParent();
+        Files.createDirectories(dir);
         Properties p = new Properties();
         p.setProperty(KEY_FORMAT, FORMAT);
         p.setProperty(KEY_SHOW_TAB_BAR, Boolean.toString(settings.showTabBar()));
@@ -135,15 +139,15 @@ public final class AppSettingsStore {
         p.setProperty(KEY_TAB_INSERT_MODE, canonical(settings.tabInsertMode()));
         p.setProperty(KEY_THEME, canonical(settings.theme()));
 
-        Path tmp = path.resolveSibling(path.getFileName() + ".tmp");
+        Path tmp = Files.createTempFile(dir, "." + target.getFileName() + ".", ".tmp");
         try {
             try (OutputStream out = Files.newOutputStream(tmp)) {
                 p.store(out, "TUInk user settings");
             }
             try {
-                Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
             } catch (AtomicMoveNotSupportedException ignored) {
-                Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING);
+                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
             }
         } finally {
             Files.deleteIfExists(tmp);

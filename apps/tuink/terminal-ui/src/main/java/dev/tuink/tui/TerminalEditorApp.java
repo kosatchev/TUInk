@@ -158,14 +158,14 @@ public class TerminalEditorApp {
             printUsage();
             return;
         }
-        try {
-            run(cli);
+        try (RecoveryStore recoveryStore = new RecoveryStore()) {
+            run(cli, recoveryStore);
         } finally {
             frameProfiler.close();
         }
     }
 
-    private void run(TuiCliOptions cli) throws Exception {
+    private void run(TuiCliOptions cli, RecoveryStore recoveryStore) throws Exception {
         profileEnabled = cli.profileEnabled();
         if (cli.profileFile() != null) {
             PrintWriter profileWriter = ProfileLog.open(cli.profileFile(), cli.file());
@@ -196,7 +196,6 @@ public class TerminalEditorApp {
 
         NotificationState notification = new NotificationState();
         UiModalState modalState = UiModalState.none();
-        RecoveryStore recoveryStore = new RecoveryStore();
         RecoveryAutosaveManager recoveryAutosave = new RecoveryAutosaveManager(recoveryStore);
         List<RecoveryStore.Entry> startupRecoveryEntries = new ArrayList<>();
         TextField saveAsInput = new TextField();

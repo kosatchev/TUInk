@@ -36,7 +36,7 @@ graalvmNative {
             buildArgs.add("-march=${nativeMarch}")
             buildArgs.add('--static')
             buildArgs.add('--libc=musl')
-            buildArgs.add('-Ddev.tuink.terminal.provider=exec')
+            buildArgs.add('-Ddev.tuiframe.provider=exec')
             buildArgs.add('--pgo-instrument')
         }
         muslPgoOptimized {
@@ -47,7 +47,7 @@ graalvmNative {
             buildArgs.add("-march=${nativeMarch}")
             buildArgs.add('--static')
             buildArgs.add('--libc=musl')
-            buildArgs.add('-Ddev.tuink.terminal.provider=exec')
+            buildArgs.add('-Ddev.tuiframe.provider=exec')
             buildArgs.add("--pgo=${pgoProfilePath}")
         }
     }

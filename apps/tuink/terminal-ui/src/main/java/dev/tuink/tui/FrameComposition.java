@@ -6,7 +6,7 @@ import dev.tuink.core.TextModel;
 import dev.tuink.render.EditorLayout;
 import dev.tuink.render.RenderPlan;
 import dev.tuink.render.RenderPlanBuilder;
-import dev.tuink.terminal.geometry.Rect;
+import dev.tuiframe.geometry.Rect;
 import dev.tuink.tui.ui.ConfirmBarView;
 import dev.tuink.tui.ui.FileTreeView;
 import dev.tuink.tui.ui.HelpPage;

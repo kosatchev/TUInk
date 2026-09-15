@@ -2,7 +2,7 @@ package dev.tuink.tui.ui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import dev.tuink.terminal.cell.CellText;
+import dev.tuiframe.cell.CellText;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;

@@ -1,14 +1,14 @@
 package dev.tuink.tui.ui;
 
-import dev.tuink.terminal.cell.Canvas;
-import dev.tuink.terminal.geometry.Rect;
-import dev.tuink.terminal.input.PointerEvent;
-import dev.tuink.terminal.input.TuiInputEvent;
-import dev.tuink.terminal.widget.FocusContext;
-import dev.tuink.terminal.widget.FocusSpace;
-import dev.tuink.terminal.widget.InteractionResult;
-import dev.tuink.terminal.widget.TabBar;
-import dev.tuink.terminal.widget.Theme;
+import dev.tuiframe.cell.Canvas;
+import dev.tuiframe.geometry.Rect;
+import dev.tuiframe.input.PointerEvent;
+import dev.tuiframe.input.TuiInputEvent;
+import dev.tuiframe.widget.FocusContext;
+import dev.tuiframe.widget.FocusSpace;
+import dev.tuiframe.widget.InteractionResult;
+import dev.tuiframe.widget.TabBar;
+import dev.tuiframe.widget.Theme;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;

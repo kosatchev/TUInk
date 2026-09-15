@@ -6,15 +6,15 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.tuink.terminal.cell.CellBuffer;
-import dev.tuink.terminal.cell.Canvas;
-import dev.tuink.terminal.geometry.Rect;
-import dev.tuink.terminal.input.KeyStroke;
-import dev.tuink.terminal.input.PointerEvent;
-import dev.tuink.terminal.scroll.ScrollInteraction;
-import dev.tuink.terminal.style.CellStyle;
-import dev.tuink.terminal.widget.InteractionResult;
-import dev.tuink.terminal.widget.Theme;
+import dev.tuiframe.cell.CellBuffer;
+import dev.tuiframe.cell.Canvas;
+import dev.tuiframe.geometry.Rect;
+import dev.tuiframe.input.KeyStroke;
+import dev.tuiframe.input.PointerEvent;
+import dev.tuiframe.scroll.ScrollInteraction;
+import dev.tuiframe.style.CellStyle;
+import dev.tuiframe.widget.InteractionResult;
+import dev.tuiframe.widget.Theme;
 import dev.tuink.tui.file.FileTreeModel;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -59,7 +59,7 @@ class FileTreeViewTest {
             var widgetState = initial.state().widgetState();
             FileTreeView.State scrolledState = new FileTreeView.State(
                 selected.id(),
-                new dev.tuink.terminal.widget.TreeView.State(
+                new dev.tuiframe.widget.TreeView.State(
                     widgetState.selectedIndex(),
                     widgetState.firstVisibleIndex(),
                     12
@@ -400,7 +400,7 @@ class FileTreeViewTest {
         int index = snapshot.entries().indexOf(selected);
         return new FileTreeView.State(
             selected.id(),
-            new dev.tuink.terminal.widget.TreeView.State(index, firstVisible, horizontalOffset),
+            new dev.tuiframe.widget.TreeView.State(index, firstVisible, horizontalOffset),
             snapshot.revision(),
             null,
             0L

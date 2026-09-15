@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.editor.command.CommandId;
 import dev.tuink.editor.command.CommandInvocation;
-import dev.tuink.terminal.widget.MenuBar;
+import dev.tuiframe.widget.MenuBar;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 

@@ -14,7 +14,7 @@ import dev.tuink.render.EditorLayout;
 import dev.tuink.render.RenderPlanBuilder;
 import dev.tuink.render.Style;
 import dev.tuink.render.TerminalEditorTextLayout;
-import dev.tuink.terminal.geometry.Rect;
+import dev.tuiframe.geometry.Rect;
 import dev.tuink.tui.file.FileTreeModel;
 import dev.tuink.tui.ui.FileTreeView;
 import dev.tuink.tui.ui.HelpPages;
@@ -192,7 +192,7 @@ class FrameCompositionTest {
             FileTreeView view = FileTreeView.fromSnapshot(snapshot, false, false);
             FileTreeView.State initialState = new FileTreeView.State(
                 null,
-                new dev.tuink.terminal.widget.TreeView.State(0, 0, 0),
+                new dev.tuiframe.widget.TreeView.State(0, 0, 0),
                 snapshot.revision(),
                 null,
                 0L
@@ -200,7 +200,7 @@ class FrameCompositionTest {
             FileTreeView.Placement initial = view.place(bounds, initialState, clip, true);
             FileTreeView.State verticalState = new FileTreeView.State(
                 initial.state().selectedId(),
-                new dev.tuink.terminal.widget.TreeView.State(0, 1, 0),
+                new dev.tuiframe.widget.TreeView.State(0, 1, 0),
                 snapshot.revision(),
                 null,
                 0L
@@ -213,7 +213,7 @@ class FrameCompositionTest {
 
             FileTreeView.State horizontalState = new FileTreeView.State(
                 vertical.state().selectedId(),
-                new dev.tuink.terminal.widget.TreeView.State(0, 1, 6),
+                new dev.tuiframe.widget.TreeView.State(0, 1, 6),
                 snapshot.revision(),
                 null,
                 0L

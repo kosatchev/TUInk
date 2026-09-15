@@ -1,10 +1,10 @@
 package dev.tuink.tui;
 
-import dev.tuink.terminal.geometry.Rect;
-import dev.tuink.terminal.input.PointerEvent;
-import dev.tuink.terminal.input.TuiInputEvent;
-import dev.tuink.terminal.widget.InteractionResult;
-import dev.tuink.terminal.widget.TabBar;
+import dev.tuiframe.geometry.Rect;
+import dev.tuiframe.input.PointerEvent;
+import dev.tuiframe.input.TuiInputEvent;
+import dev.tuiframe.widget.InteractionResult;
+import dev.tuiframe.widget.TabBar;
 import dev.tuink.tui.ui.TabBarView;
 import java.util.Objects;
 

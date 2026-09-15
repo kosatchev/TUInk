@@ -1,14 +1,14 @@
 package dev.tuink.tui;
 
-import dev.tuink.terminal.geometry.Point;
-import dev.tuink.terminal.input.PointerEvent;
-import dev.tuink.terminal.input.TuiInputEvent;
-import dev.tuink.terminal.widget.Button;
-import dev.tuink.terminal.widget.FocusManager;
-import dev.tuink.terminal.widget.FocusRoute;
-import dev.tuink.terminal.widget.FocusScope;
-import dev.tuink.terminal.widget.InteractionResult;
-import dev.tuink.terminal.widget.PlacedModal;
+import dev.tuiframe.geometry.Point;
+import dev.tuiframe.input.PointerEvent;
+import dev.tuiframe.input.TuiInputEvent;
+import dev.tuiframe.widget.Button;
+import dev.tuiframe.widget.FocusManager;
+import dev.tuiframe.widget.FocusRoute;
+import dev.tuiframe.widget.FocusScope;
+import dev.tuiframe.widget.InteractionResult;
+import dev.tuiframe.widget.PlacedModal;
 import java.util.Objects;
 
 /** TUInk adapter for the reusable single-control help overlay scope. */

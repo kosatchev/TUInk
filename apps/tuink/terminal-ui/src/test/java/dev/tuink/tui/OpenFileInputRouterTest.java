@@ -6,11 +6,11 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.tuink.terminal.geometry.Rect;
-import dev.tuink.terminal.input.KeyStroke;
-import dev.tuink.terminal.input.PasteEvent;
-import dev.tuink.terminal.input.PointerEvent;
-import dev.tuink.terminal.input.TextInput;
+import dev.tuiframe.geometry.Rect;
+import dev.tuiframe.input.KeyStroke;
+import dev.tuiframe.input.PasteEvent;
+import dev.tuiframe.input.PointerEvent;
+import dev.tuiframe.input.TextInput;
 import dev.tuink.tui.file.FileTreeModel;
 import dev.tuink.tui.ui.FileTreeView;
 import java.io.IOException;
@@ -437,7 +437,7 @@ class OpenFileInputRouterTest {
         int index = snapshot.entries().indexOf(selected);
         FileTreeView.State state = new FileTreeView.State(
             selected.id(),
-            new dev.tuink.terminal.widget.TreeView.State(index, 0, 0),
+            new dev.tuiframe.widget.TreeView.State(index, 0, 0),
             snapshot.revision(),
             null,
             0L
@@ -456,7 +456,7 @@ class OpenFileInputRouterTest {
     private static OpenFileInputRouter.Result route(
         FileTreeView.Placement placement,
         OpenFileInputRouter.Focus focus,
-        dev.tuink.terminal.input.TuiInputEvent event
+        dev.tuiframe.input.TuiInputEvent event
     ) {
         return OpenFileInputRouter.route(
             placement,

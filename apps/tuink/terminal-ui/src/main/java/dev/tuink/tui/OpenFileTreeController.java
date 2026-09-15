@@ -1,6 +1,6 @@
 package dev.tuink.tui;
 
-import dev.tuink.terminal.geometry.Rect;
+import dev.tuiframe.geometry.Rect;
 import dev.tuink.tui.file.FileTreeModel;
 import dev.tuink.tui.ui.FileTreeView;
 import java.nio.file.Path;

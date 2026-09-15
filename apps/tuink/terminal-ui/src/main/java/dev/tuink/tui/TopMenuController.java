@@ -9,7 +9,7 @@ import static dev.tuink.tui.command.TuinkCommandIds.MENU_VIEW;
 
 import dev.tuink.editor.command.CommandId;
 import dev.tuink.editor.command.CommandInvocation;
-import dev.tuink.terminal.widget.MenuBar;
+import dev.tuiframe.widget.MenuBar;
 import java.util.Objects;
 
 /** Application-owned lifecycle for the reusable top-menu state. */

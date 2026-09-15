@@ -36,18 +36,23 @@ subprojects {
 }
 
 def allowedProjectDependencies = [
-    ':unicode-text'   : [] as Set,
-    ':tui-core'       : [':unicode-text'] as Set,
-    ':tui-jline'      : [':tui-core'] as Set,
-    ':tui-widgets'    : [':tui-core'] as Set,
-    ':editor-contract': [] as Set,
-    ':core'           : [':unicode-text'] as Set,
-    ':editor-session' : [':editor-contract', ':core'] as Set,
-    ':render'         : [':tui-core', ':editor-contract', ':core'] as Set,
-    ':highlight-regex': [':editor-contract', ':render'] as Set,
-    ':tui'            : [':tui-core', ':tui-jline', ':tui-widgets', ':editor-contract', ':core',
+    ':unicode-text'    : [] as Set,
+    ':tuiframe-core'   : [':unicode-text'] as Set,
+    ':tuiframe-jline'  : [':tuiframe-core'] as Set,
+    ':tuiframe-widgets': [':tuiframe-core'] as Set,
+    ':editor-contract' : [] as Set,
+    ':core'            : [':unicode-text'] as Set,
+    ':editor-session'  : [':editor-contract', ':core'] as Set,
+    ':render'          : [':tuiframe-core', ':editor-contract', ':core'] as Set,
+    ':highlight-regex' : [':editor-contract', ':render'] as Set,
+    ':tui'             : [':tuiframe-core', ':tuiframe-jline', ':tuiframe-widgets', ':editor-contract', ':core',
                          ':editor-session', ':render', ':highlight-regex'] as Set,
     ':app'            : [':tui'] as Set
+]
+def expectedProjectGroups = [
+    ':tuiframe-core'   : 'dev.tuiframe',
+    ':tuiframe-jline'  : 'dev.tuiframe',
+    ':tuiframe-widgets': 'dev.tuiframe'
 ]
 def externallyDependencyFreeProductionConfigurations = [
     'annotationProcessor',
@@ -74,6 +79,14 @@ def verifyProjectDependencies = tasks.register('verifyProjectDependencies') {
         }
 
         Set<String> violations = [] as Set
+        expectedProjectGroups.each { projectPath, expectedGroup ->
+            String actualGroup = project(projectPath).group.toString()
+            if (actualGroup != expectedGroup) {
+                violations.add(
+                    "${projectPath} has Maven group ${actualGroup}; expected ${expectedGroup}"
+                )
+            }
+        }
         subprojects.each { sourceProject ->
             Set<String> allowed = allowedProjectDependencies[sourceProject.path]
             sourceProject.configurations.each { configuration ->
@@ -89,13 +102,13 @@ def verifyProjectDependencies = tasks.register('verifyProjectDependencies') {
                 configuration.dependencies
                     .withType(org.gradle.api.artifacts.ExternalModuleDependency)
                     .each { dependency ->
-                        if (sourceProject.path != ':tui-jline' && dependency.group == 'org.jline') {
+                        if (sourceProject.path != ':tuiframe-jline' && dependency.group == 'org.jline') {
                             violations.add(
                                 "${sourceProject.path}:${configuration.name} -> "
                                     + "${dependency.group}:${dependency.name}"
                             )
                         }
-                        if ([':unicode-text', ':tui-core', ':tui-widgets', ':editor-contract',
+                        if ([':unicode-text', ':tuiframe-core', ':tuiframe-widgets', ':editor-contract',
                              ':editor-session'].contains(sourceProject.path)
                             && externallyDependencyFreeProductionConfigurations.contains(configuration.name)) {
                             violations.add(

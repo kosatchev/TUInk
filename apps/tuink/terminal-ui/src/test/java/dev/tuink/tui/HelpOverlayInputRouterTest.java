@@ -3,19 +3,19 @@ package dev.tuink.tui;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.tuink.terminal.geometry.Rect;
-import dev.tuink.terminal.input.KeyStroke;
-import dev.tuink.terminal.input.PointerEvent;
-import dev.tuink.terminal.input.TextInput;
-import dev.tuink.terminal.widget.Button;
-import dev.tuink.terminal.widget.FocusManager;
-import dev.tuink.terminal.widget.FocusResetPolicy;
-import dev.tuink.terminal.widget.FocusScope;
-import dev.tuink.terminal.widget.FocusSpace;
-import dev.tuink.terminal.widget.Modal;
-import dev.tuink.terminal.widget.PlacedInteractiveWidget;
-import dev.tuink.terminal.widget.PlacedModal;
-import dev.tuink.terminal.widget.RoutedTarget;
+import dev.tuiframe.geometry.Rect;
+import dev.tuiframe.input.KeyStroke;
+import dev.tuiframe.input.PointerEvent;
+import dev.tuiframe.input.TextInput;
+import dev.tuiframe.widget.Button;
+import dev.tuiframe.widget.FocusManager;
+import dev.tuiframe.widget.FocusResetPolicy;
+import dev.tuiframe.widget.FocusScope;
+import dev.tuiframe.widget.FocusSpace;
+import dev.tuiframe.widget.Modal;
+import dev.tuiframe.widget.PlacedInteractiveWidget;
+import dev.tuiframe.widget.PlacedModal;
+import dev.tuiframe.widget.RoutedTarget;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 
@@ -83,7 +83,7 @@ class HelpOverlayInputRouterTest {
         FocusScope<HelpOverlayInputRouter.Target, Button.Action> scope,
         PlacedModal frame
     ) {
-        private HelpOverlayInputRouter.Result route(dev.tuink.terminal.input.TuiInputEvent event) {
+        private HelpOverlayInputRouter.Result route(dev.tuiframe.input.TuiInputEvent event) {
             return HelpOverlayInputRouter.route(focus, scope, frame, event);
         }
     }

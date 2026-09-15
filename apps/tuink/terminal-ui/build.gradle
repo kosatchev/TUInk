@@ -1,7 +1,7 @@
 dependencies {
-    implementation project(':tui-core')
-    implementation project(':tui-jline')
-    implementation project(':tui-widgets')
+    implementation project(':tuiframe-core')
+    implementation project(':tuiframe-jline')
+    implementation project(':tuiframe-widgets')
     implementation project(':editor-contract')
     implementation project(':core')
     implementation project(':editor-session')

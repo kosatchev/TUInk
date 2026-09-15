@@ -2,12 +2,15 @@
 
 Minimal Java terminal text editor with clean multi-module architecture:
 
+The reusable terminal toolkit is branded **TUIframe**. TUInk remains the editor
+application, and `tui` remains its application-specific frontend module.
+
 - `unicode-text`: dependency-free grapheme boundaries and UTF-16 offset mapping
-- `tui-core`: editor-independent terminal text, cells, geometry, input, scrolling,
-  frame, capability, and event-loop contracts under `dev.tuink.terminal.*`
-- `tui-jline`: JLine lifecycle, composed terminal runtime, physical input
+- `tuiframe-core`: editor-independent terminal text, cells, geometry, input,
+  scrolling, frame, capability, and event-loop contracts under `dev.tuiframe.*`
+- `tuiframe-jline`: JLine lifecycle, composed terminal runtime, physical input
   decoder, capability detection, and ANSI screen presentation
-- `tui-widgets`: editor-independent layout/theme, typed interaction, flat focus,
+- `tuiframe-widgets`: editor-independent layout/theme, typed interaction, flat focus,
   and optional parent-local cursor contracts plus reusable `Button`, `Modal`,
   interactive Unicode-aware `TextField`, virtualized `ListView`, `TabBar`, and
   descriptor-driven `MenuBar` and flat generic `TreeView<V>` primitives

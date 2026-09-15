@@ -7,10 +7,10 @@ import dev.tuink.core.EditorViewportBehavior;
 import dev.tuink.core.Position;
 import dev.tuink.core.TextModel;
 import dev.tuink.render.RenderPlan;
-import dev.tuink.terminal.scroll.ScrollInteraction;
+import dev.tuiframe.scroll.ScrollInteraction;
 import dev.tuink.tui.input.KeyEvent;
-import dev.tuink.terminal.scroll.HorizontalScrollbar;
-import dev.tuink.terminal.scroll.VerticalScrollbar;
+import dev.tuiframe.scroll.HorizontalScrollbar;
+import dev.tuiframe.scroll.VerticalScrollbar;
 
 /**
  * UI helper for the main editor text area.

@@ -2,8 +2,8 @@ package dev.tuink.tui.render;
 
 import dev.tuink.render.Color;
 import dev.tuink.render.Style;
-import dev.tuink.terminal.style.CellColor;
-import dev.tuink.terminal.style.CellStyle;
+import dev.tuiframe.style.CellColor;
+import dev.tuiframe.style.CellStyle;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 

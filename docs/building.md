@@ -67,9 +67,9 @@ Build and test all modules:
 Run only a specific module's tests when iterating:
 
 ```bash
-./gradlew :tui-core:test
-./gradlew :tui-jline:test
-./gradlew :tui-widgets:test
+./gradlew :tuiframe-core:test
+./gradlew :tuiframe-jline:test
+./gradlew :tuiframe-widgets:test
 ./gradlew :editor-contract:test
 ./gradlew :core:test
 ./gradlew :editor-session:test
@@ -107,8 +107,8 @@ graph:
 ```bash
 ./gradlew --write-locks --write-verification-metadata sha256 \
   check :app:distZip :app:perfHarnessTest \
-  :unicode-text:dependencies :tui-core:dependencies \
-  :tui-jline:dependencies :tui-widgets:dependencies :core:dependencies \
+  :unicode-text:dependencies :tuiframe-core:dependencies \
+  :tuiframe-jline:dependencies :tuiframe-widgets:dependencies :core:dependencies \
   :render:dependencies :highlight-regex:dependencies \
   :tui:dependencies :app:dependencies
 ```

@@ -8,11 +8,11 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.editor.command.CommandInvocation;
-import dev.tuink.terminal.geometry.Rect;
-import dev.tuink.terminal.input.KeyStroke;
-import dev.tuink.terminal.input.PasteEvent;
-import dev.tuink.terminal.input.PointerEvent;
-import dev.tuink.terminal.widget.MenuBar;
+import dev.tuiframe.geometry.Rect;
+import dev.tuiframe.input.KeyStroke;
+import dev.tuiframe.input.PasteEvent;
+import dev.tuiframe.input.PointerEvent;
+import dev.tuiframe.widget.MenuBar;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Set;
@@ -193,7 +193,7 @@ class TopMenuInputRouterTest {
         LegacyCommandBridge bridge,
         List<TopMenuView.TabItem> tabs
     ) {
-        TopMenuInputRouter.Result route(dev.tuink.terminal.input.TuiInputEvent event) {
+        TopMenuInputRouter.Result route(dev.tuiframe.input.TuiInputEvent event) {
             return TopMenuInputRouter.route(controller, placement, bridge, event);
         }
     }

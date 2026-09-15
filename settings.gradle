@@ -14,10 +14,10 @@ def projectDirectories = [
     ':core': 'libs/editor/engine',
     ':editor-session': 'libs/editor/session',
     ':highlight-regex': 'libs/editor/highlight-regex',
-    ':unicode-text': 'libs/unicode-text',
-    ':tui-core': 'libs/tuiframe/core',
-    ':tui-jline': 'libs/tuiframe/jline',
-    ':tui-widgets': 'libs/tuiframe/widgets'
+    ':tuiframe-core': 'libs/tuiframe/core',
+    ':tuiframe-jline': 'libs/tuiframe/jline',
+    ':tuiframe-widgets': 'libs/tuiframe/widgets',
+    ':unicode-text': 'libs/unicode-text'
 ]
 projectDirectories.each { projectPath, directory ->
     include projectPath

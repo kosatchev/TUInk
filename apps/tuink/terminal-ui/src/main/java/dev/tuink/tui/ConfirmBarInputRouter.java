@@ -1,20 +1,21 @@
 package dev.tuink.tui;
 
-import dev.tuink.terminal.input.KeyStroke;
-import dev.tuink.terminal.input.PasteEvent;
-import dev.tuink.terminal.input.PointerEvent;
-import dev.tuink.terminal.input.TextInput;
-import dev.tuink.terminal.input.TuiInputEvent;
-import dev.tuink.terminal.widget.Button;
-import dev.tuink.terminal.widget.FocusManager;
-import dev.tuink.terminal.widget.FocusRoute;
-import dev.tuink.terminal.widget.FocusScope;
-import dev.tuink.terminal.widget.InteractionResult;
-import dev.tuink.terminal.widget.RoutedTarget;
+import dev.tuiframe.input.KeyStroke;
+import dev.tuiframe.input.PasteEvent;
+import dev.tuiframe.input.PointerEvent;
+import dev.tuiframe.input.TextInput;
+import dev.tuiframe.input.TuiInputEvent;
+import dev.tuiframe.widget.Button;
+import dev.tuiframe.widget.FocusManager;
+import dev.tuiframe.widget.FocusRoute;
+import dev.tuiframe.widget.FocusScope;
+import dev.tuiframe.widget.InteractionResult;
+import dev.tuiframe.widget.RoutedTarget;
 import dev.tuink.tui.flow.ConfirmChoice;
 import dev.tuink.tui.ui.ConfirmBarView;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /** TUInk policy adapter for one placed multi-target confirmation prompt. */
 final class ConfirmBarInputRouter {
@@ -160,9 +161,7 @@ final class ConfirmBarInputRouter {
         KeyStroke stroke
     ) {
         if (stroke.key() == KeyStroke.Key.Q
-            && stroke.modifiers().contains(KeyStroke.Modifier.CTRL)
-            && !stroke.modifiers().contains(KeyStroke.Modifier.ALT)
-            && !stroke.modifiers().contains(KeyStroke.Modifier.SUPER)) {
+            && stroke.modifiers().equals(Set.of(KeyStroke.Modifier.CTRL))) {
             return decide(focusManager, scope, policy.ctrlQDecision());
         }
         if (!stroke.modifiers().isEmpty()) {

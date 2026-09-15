@@ -1,19 +1,19 @@
 package dev.tuink.tui.ui;
 
-import dev.tuink.terminal.cell.Canvas;
-import dev.tuink.terminal.cell.CellText;
-import dev.tuink.terminal.geometry.Point;
-import dev.tuink.terminal.geometry.Rect;
-import dev.tuink.terminal.widget.FocusContext;
-import dev.tuink.terminal.widget.FocusManager;
-import dev.tuink.terminal.widget.FocusResetPolicy;
-import dev.tuink.terminal.widget.FocusScope;
-import dev.tuink.terminal.widget.FocusSpace;
-import dev.tuink.terminal.widget.PlacedCursorSource;
-import dev.tuink.terminal.widget.PlacedInteractiveWidget;
-import dev.tuink.terminal.widget.RoutedTarget;
-import dev.tuink.terminal.widget.TextField;
-import dev.tuink.terminal.widget.Theme;
+import dev.tuiframe.cell.Canvas;
+import dev.tuiframe.cell.CellText;
+import dev.tuiframe.geometry.Point;
+import dev.tuiframe.geometry.Rect;
+import dev.tuiframe.widget.FocusContext;
+import dev.tuiframe.widget.FocusManager;
+import dev.tuiframe.widget.FocusResetPolicy;
+import dev.tuiframe.widget.FocusScope;
+import dev.tuiframe.widget.FocusSpace;
+import dev.tuiframe.widget.PlacedCursorSource;
+import dev.tuiframe.widget.PlacedInteractiveWidget;
+import dev.tuiframe.widget.RoutedTarget;
+import dev.tuiframe.widget.TextField;
+import dev.tuiframe.widget.Theme;
 import java.util.Objects;
 import java.util.Optional;
 

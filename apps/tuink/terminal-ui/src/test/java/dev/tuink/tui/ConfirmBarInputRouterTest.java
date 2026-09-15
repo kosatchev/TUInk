@@ -5,18 +5,19 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.tuink.terminal.input.KeyStroke;
-import dev.tuink.terminal.input.PasteEvent;
-import dev.tuink.terminal.input.PointerEvent;
-import dev.tuink.terminal.input.TextInput;
-import dev.tuink.terminal.input.TuiInputEvent;
-import dev.tuink.terminal.geometry.Rect;
-import dev.tuink.terminal.widget.Button;
-import dev.tuink.terminal.widget.FocusManager;
-import dev.tuink.terminal.widget.FocusScope;
-import dev.tuink.terminal.widget.RoutedTarget;
+import dev.tuiframe.input.KeyStroke;
+import dev.tuiframe.input.PasteEvent;
+import dev.tuiframe.input.PointerEvent;
+import dev.tuiframe.input.TextInput;
+import dev.tuiframe.input.TuiInputEvent;
+import dev.tuiframe.geometry.Rect;
+import dev.tuiframe.widget.Button;
+import dev.tuiframe.widget.FocusManager;
+import dev.tuiframe.widget.FocusScope;
+import dev.tuiframe.widget.RoutedTarget;
 import dev.tuink.tui.flow.ConfirmChoice;
 import dev.tuink.tui.ui.ConfirmBarView;
+import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 
@@ -142,6 +143,49 @@ class ConfirmBarInputRouterTest {
     }
 
     @Test
+    void exactCtrlQKeepsTheIntendedDecisionInAllConfirmationModes() {
+        List<Fixture> fixtures = allConfirmationModes();
+        List<ConfirmChoice> expected = List.of(
+            ConfirmChoice.DISCARD, ConfirmChoice.CANCEL,
+            ConfirmChoice.DISCARD, ConfirmChoice.CANCEL
+        );
+
+        for (int index = 0; index < fixtures.size(); index++) {
+            ConfirmBarInputRouter.Result result = fixtures.get(index).route(
+                KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL)
+            );
+
+            assertTrue(result.consumed());
+            assertEquals(expected.get(index), result.decision());
+        }
+    }
+
+    @Test
+    void ctrlQWithAnyAdditionalModifierIsCapturedWithoutDecidingOrChangingFocus() {
+        List<Set<KeyStroke.Modifier>> chords = List.of(
+            Set.of(KeyStroke.Modifier.CTRL, KeyStroke.Modifier.SHIFT),
+            Set.of(KeyStroke.Modifier.CTRL, KeyStroke.Modifier.ALT),
+            Set.of(KeyStroke.Modifier.CTRL, KeyStroke.Modifier.SUPER),
+            Set.of(KeyStroke.Modifier.CTRL, KeyStroke.Modifier.SHIFT, KeyStroke.Modifier.ALT),
+            Set.of(KeyStroke.Modifier.CTRL, KeyStroke.Modifier.SHIFT, KeyStroke.Modifier.SUPER),
+            Set.of(KeyStroke.Modifier.CTRL, KeyStroke.Modifier.ALT, KeyStroke.Modifier.SUPER),
+            Set.of(
+                KeyStroke.Modifier.CTRL, KeyStroke.Modifier.SHIFT,
+                KeyStroke.Modifier.ALT, KeyStroke.Modifier.SUPER
+            )
+        );
+        for (Fixture fixture : allConfirmationModes()) {
+            ConfirmChoice originalFocus = fixture.focus.focused().orElseThrow();
+            for (Set<KeyStroke.Modifier> modifiers : chords) {
+                ConfirmBarInputRouter.Result result = fixture.route(new KeyStroke(KeyStroke.Key.Q, modifiers));
+
+                assertCapturedWithoutDecision(result);
+                assertEquals(originalFocus, fixture.focus.focused().orElseThrow());
+            }
+        }
+    }
+
+    @Test
     void pointerMissesBubbleOnlyForCloseTabPolicyAndPasteKeepsSanitizerPath() {
         Fixture overwrite = standard(ConfirmBarInputRouter.Policy.overwrite(), 80);
 
@@ -264,6 +308,20 @@ class ConfirmBarInputRouterTest {
 
     private static Fixture standard(ConfirmBarInputRouter.Policy policy, int cols) {
         return fixture(ConfirmBarView.build("Confirm?", cols), policy, cols, new Object());
+    }
+
+    private static List<Fixture> allConfirmationModes() {
+        return List.of(
+            fixture(
+                ConfirmBarView.buildRecovery("Recover?", 80),
+                ConfirmBarInputRouter.Policy.recovery(),
+                80,
+                new Object()
+            ),
+            standard(ConfirmBarInputRouter.Policy.overwrite(), 80),
+            standard(ConfirmBarInputRouter.Policy.quit(), 80),
+            standard(ConfirmBarInputRouter.Policy.closeTab(), 80)
+        );
     }
 
     private static Fixture fixture(

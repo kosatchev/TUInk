@@ -38,7 +38,7 @@ Notes:
 - Used by the TUI terminal frontend. The aggregate JLine artifact and its
   unused remote telnet/SSH modules are not included.
 - The backend-independent cell-width compatibility policy lives in
-  `tui-core` under `dev.tuink.terminal.text` and preserves the behavior of
+  `tuiframe-core` under `dev.tuiframe.text` and preserves the behavior of
   JLine 3.30.6. Reusable line wrapping and version-aware terminal layout
   caching also live there. The editor core reaches terminal layout only
   through its terminal-neutral `EditorTextLayout` port; the JLine-compatible

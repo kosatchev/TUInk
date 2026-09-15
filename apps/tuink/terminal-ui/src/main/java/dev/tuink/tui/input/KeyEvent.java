@@ -1,6 +1,6 @@
 package dev.tuink.tui.input;
 
-import dev.tuink.terminal.input.TuiInputEvent;
+import dev.tuiframe.input.TuiInputEvent;
 
 /**
  * Legacy application-oriented input used while TUInk migrates to

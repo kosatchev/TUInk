@@ -13,11 +13,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import dev.tuink.editor.command.CommandInvocation;
 import dev.tuink.tui.input.KeyEvent;
-import dev.tuink.terminal.geometry.Rect;
-import dev.tuink.terminal.input.KeyStroke;
+import dev.tuiframe.geometry.Rect;
+import dev.tuiframe.input.KeyStroke;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.keymap.Keymap;
-import dev.tuink.terminal.widget.MenuBar;
+import dev.tuiframe.widget.MenuBar;
 import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.Test;

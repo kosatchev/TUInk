@@ -3,9 +3,9 @@ package dev.tuink.tui;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
-import dev.tuink.terminal.widget.WidgetStyleRole;
-import dev.tuink.terminal.widget.WidgetThemeKeys;
-import dev.tuink.terminal.style.CellStyle;
+import dev.tuiframe.widget.WidgetStyleRole;
+import dev.tuiframe.widget.WidgetThemeKeys;
+import dev.tuiframe.style.CellStyle;
 import dev.tuink.tui.style.UiStyles;
 import org.junit.jupiter.api.Test;
 

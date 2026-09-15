@@ -1,16 +1,16 @@
 package dev.tuink.tui.ui;
 
-import dev.tuink.terminal.cell.Canvas;
-import dev.tuink.terminal.cell.CellText;
-import dev.tuink.terminal.geometry.Point;
-import dev.tuink.terminal.geometry.Rect;
-import dev.tuink.terminal.input.PointerEvent;
-import dev.tuink.terminal.input.TuiInputEvent;
-import dev.tuink.terminal.scroll.ScrollInteraction;
-import dev.tuink.terminal.widget.FocusContext;
-import dev.tuink.terminal.widget.FocusSpace;
-import dev.tuink.terminal.widget.InteractionResult;
-import dev.tuink.terminal.widget.Theme;
+import dev.tuiframe.cell.Canvas;
+import dev.tuiframe.cell.CellText;
+import dev.tuiframe.geometry.Point;
+import dev.tuiframe.geometry.Rect;
+import dev.tuiframe.input.PointerEvent;
+import dev.tuiframe.input.TuiInputEvent;
+import dev.tuiframe.scroll.ScrollInteraction;
+import dev.tuiframe.widget.FocusContext;
+import dev.tuiframe.widget.FocusSpace;
+import dev.tuiframe.widget.InteractionResult;
+import dev.tuiframe.widget.Theme;
 import dev.tuink.tui.file.FileTreeModel;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -47,7 +47,7 @@ public final class FileTreeView {
     private final boolean hasMetadataRows;
 
     // UI-thread-confined presentation caches. They contain no mutable widget state.
-    private final Map<MetadataColumns, dev.tuink.terminal.widget.TreeView<FileTreeModel.EntryId>>
+    private final Map<MetadataColumns, dev.tuiframe.widget.TreeView<FileTreeModel.EntryId>>
         treesByColumns = new HashMap<>();
     private final Map<BoundsSize, MetadataColumns> columnsByBounds =
         new LinkedHashMap<>(16, 0.75f, true) {
@@ -71,7 +71,7 @@ public final class FileTreeView {
             FileTreeModel.Entry entry = entries.get(index);
             indexes.put(entry.id(), index);
             long prefix = (long) widgetDepth(entry) * TREE_INDENT_WIDTH
-                + (widgetKind(entry) == dev.tuink.terminal.widget.TreeView.Kind.PLAIN
+                + (widgetKind(entry) == dev.tuiframe.widget.TreeView.Kind.PLAIN
                     ? 0L
                     : TREE_DISCLOSURE_WIDTH);
             long width = prefix + CellText.width(displayLabel(entry));
@@ -122,8 +122,8 @@ public final class FileTreeView {
         MetadataColumns columns = visible
             ? metadataColumnsFor(widgetBounds)
             : MetadataColumns.NONE;
-        dev.tuink.terminal.widget.TreeView<FileTreeModel.EntryId> tree = treeFor(columns);
-        dev.tuink.terminal.widget.TreeView.Placement<FileTreeModel.EntryId> placed =
+        dev.tuiframe.widget.TreeView<FileTreeModel.EntryId> tree = treeFor(columns);
+        dev.tuiframe.widget.TreeView.Placement<FileTreeModel.EntryId> placed =
             tree.layout(widgetBounds, reconciled.widgetState());
         State normalized = visible ? adopt(placed.state(), reconciled, false) : reconciled;
         boolean enabled = visible
@@ -156,8 +156,8 @@ public final class FileTreeView {
         } else {
             selectedIndex = Math.max(0, Math.min(entries.size() - 1, selectedIndex));
         }
-        dev.tuink.terminal.widget.TreeView.State widgetState =
-            new dev.tuink.terminal.widget.TreeView.State(
+        dev.tuiframe.widget.TreeView.State widgetState =
+            new dev.tuiframe.widget.TreeView.State(
                 selectedIndex,
                 state.widgetState().firstVisibleIndex(),
                 state.widgetState().horizontalOffset()
@@ -174,7 +174,7 @@ public final class FileTreeView {
     }
 
     private State adopt(
-        dev.tuink.terminal.widget.TreeView.State widgetState,
+        dev.tuiframe.widget.TreeView.State widgetState,
         State previous,
         boolean resetClick
     ) {
@@ -260,18 +260,18 @@ public final class FileTreeView {
         return List.copyOf(profiles);
     }
 
-    private dev.tuink.terminal.widget.TreeView<FileTreeModel.EntryId> treeFor(
+    private dev.tuiframe.widget.TreeView<FileTreeModel.EntryId> treeFor(
         MetadataColumns columns
     ) {
-        dev.tuink.terminal.widget.TreeView<FileTreeModel.EntryId> cached =
+        dev.tuiframe.widget.TreeView<FileTreeModel.EntryId> cached =
             treesByColumns.get(columns);
         if (cached != null) {
             return cached;
         }
-        ArrayList<dev.tuink.terminal.widget.TreeView.Item<FileTreeModel.EntryId>> projected =
+        ArrayList<dev.tuiframe.widget.TreeView.Item<FileTreeModel.EntryId>> projected =
             new ArrayList<>(entries.size());
         for (FileTreeModel.Entry entry : entries) {
-            projected.add(new dev.tuink.terminal.widget.TreeView.Item<>(
+            projected.add(new dev.tuiframe.widget.TreeView.Item<>(
                 entry.id(),
                 displayLabel(entry),
                 widgetDepth(entry),
@@ -279,10 +279,10 @@ public final class FileTreeView {
                 formatMetadata(entry, columns)
             ));
         }
-        dev.tuink.terminal.widget.TreeView<FileTreeModel.EntryId> tree =
-            new dev.tuink.terminal.widget.TreeView<>(
+        dev.tuiframe.widget.TreeView<FileTreeModel.EntryId> tree =
+            new dev.tuiframe.widget.TreeView<>(
             List.copyOf(projected),
-            dev.tuink.terminal.widget.TreeView.State.initial()
+            dev.tuiframe.widget.TreeView.State.initial()
         );
         treesByColumns.put(columns, tree);
         return tree;
@@ -306,19 +306,19 @@ public final class FileTreeView {
             : entry.name();
     }
 
-    private static dev.tuink.terminal.widget.TreeView.Kind widgetKind(
+    private static dev.tuiframe.widget.TreeView.Kind widgetKind(
         FileTreeModel.Entry entry
     ) {
         if (entry.kind() == FileTreeModel.Kind.PARENT
             || entry.kind() == FileTreeModel.Kind.ERROR) {
-            return dev.tuink.terminal.widget.TreeView.Kind.PLAIN;
+            return dev.tuiframe.widget.TreeView.Kind.PLAIN;
         }
         if (entry.kind() != FileTreeModel.Kind.DIRECTORY) {
-            return dev.tuink.terminal.widget.TreeView.Kind.LEAF;
+            return dev.tuiframe.widget.TreeView.Kind.LEAF;
         }
         return entry.expanded()
-            ? dev.tuink.terminal.widget.TreeView.Kind.EXPANDED
-            : dev.tuink.terminal.widget.TreeView.Kind.COLLAPSED;
+            ? dev.tuiframe.widget.TreeView.Kind.EXPANDED
+            : dev.tuiframe.widget.TreeView.Kind.COLLAPSED;
     }
 
     private static int widgetDepth(FileTreeModel.Entry entry) {
@@ -356,7 +356,7 @@ public final class FileTreeView {
     /** Application-owned viewport, stable selection and click tracker. */
     public record State(
         FileTreeModel.EntryId selectedId,
-        dev.tuink.terminal.widget.TreeView.State widgetState,
+        dev.tuiframe.widget.TreeView.State widgetState,
         long snapshotRevision,
         FileTreeModel.EntryId lastPressedId,
         long lastPressedAtNanos
@@ -374,7 +374,7 @@ public final class FileTreeView {
         public static State initial() {
             return new State(
                 null,
-                dev.tuink.terminal.widget.TreeView.State.initial(),
+                dev.tuiframe.widget.TreeView.State.initial(),
                 -1L,
                 null,
                 0L
@@ -443,13 +443,13 @@ public final class FileTreeView {
 
     /** Exact current-frame generic placement plus TUInk snapshot policy. */
     public final class Placement {
-        private final dev.tuink.terminal.widget.TreeView.Placement<FileTreeModel.EntryId> placed;
+        private final dev.tuiframe.widget.TreeView.Placement<FileTreeModel.EntryId> placed;
         private final FocusContext context;
         private final State state;
         private final MetadataColumns columns;
 
         private Placement(
-            dev.tuink.terminal.widget.TreeView.Placement<FileTreeModel.EntryId> placed,
+            dev.tuiframe.widget.TreeView.Placement<FileTreeModel.EntryId> placed,
             FocusContext context,
             State state,
             MetadataColumns columns
@@ -540,7 +540,7 @@ public final class FileTreeView {
             if (doubleClickWindowNanos < 0L) {
                 throw new IllegalArgumentException("doubleClickWindowNanos must not be negative");
             }
-            InteractionResult<dev.tuink.terminal.widget.TreeView.Action<FileTreeModel.EntryId>>
+            InteractionResult<dev.tuiframe.widget.TreeView.Action<FileTreeModel.EntryId>>
                 interaction = placed.handle(event, context);
             if (interaction.output().isEmpty()) {
                 return new InteractionResult<>(
@@ -590,7 +590,7 @@ public final class FileTreeView {
             }
             long localX = (long) event.column() - context.space().terminalOrigin().x();
             long localY = (long) event.row() - context.space().terminalOrigin().y();
-            dev.tuink.terminal.widget.TreeView.State widgetState = state.widgetState();
+            dev.tuiframe.widget.TreeView.State widgetState = state.widgetState();
             if (requiredPress.axis() == ScrollAxis.VERTICAL) {
                 Optional<Rect> track = placed.verticalScrollbarBounds();
                 if (track.isEmpty()) {
@@ -610,7 +610,7 @@ public final class FileTreeView {
                         rect.height(),
                         placed.itemCount()
                     );
-                widgetState = new dev.tuink.terminal.widget.TreeView.State(
+                widgetState = new dev.tuiframe.widget.TreeView.State(
                     widgetState.selectedIndex(),
                     first,
                     widgetState.horizontalOffset()
@@ -634,7 +634,7 @@ public final class FileTreeView {
                         rect.width(),
                         placed.horizontalExtent()
                     );
-                widgetState = new dev.tuink.terminal.widget.TreeView.State(
+                widgetState = new dev.tuiframe.widget.TreeView.State(
                     widgetState.selectedIndex(),
                     widgetState.firstVisibleIndex(),
                     offset
@@ -692,14 +692,14 @@ public final class FileTreeView {
         }
 
         private Action mapAction(
-            dev.tuink.terminal.widget.TreeView.Action<FileTreeModel.EntryId> action,
+            dev.tuiframe.widget.TreeView.Action<FileTreeModel.EntryId> action,
             long nowNanos,
             long doubleClickWindowNanos
         ) {
-            if (action instanceof dev.tuink.terminal.widget.TreeView.StateChanged<?> changed) {
+            if (action instanceof dev.tuiframe.widget.TreeView.StateChanged<?> changed) {
                 return new StateChanged(adopt(changed.state(), state, true));
             }
-            if (action instanceof dev.tuink.terminal.widget.TreeView.ExpansionRequested<?> request) {
+            if (action instanceof dev.tuiframe.widget.TreeView.ExpansionRequested<?> request) {
                 FileTreeModel.Entry entry = entryAt(request.itemIndex());
                 State next = adopt(request.state(), state, true);
                 if (entry == null || entry.kind() != FileTreeModel.Kind.DIRECTORY) {
@@ -707,11 +707,11 @@ public final class FileTreeView {
                 }
                 return new ToggleRequested(entry.id(), request.expand(), next);
             }
-            if (action instanceof dev.tuink.terminal.widget.TreeView.Activated<?> activated) {
+            if (action instanceof dev.tuiframe.widget.TreeView.Activated<?> activated) {
                 State next = state.resetClickTracking();
                 return keyboardActivation(entryAt(activated.itemIndex()), next);
             }
-            if (action instanceof dev.tuink.terminal.widget.TreeView.ItemPressed<?> pressed) {
+            if (action instanceof dev.tuiframe.widget.TreeView.ItemPressed<?> pressed) {
                 FileTreeModel.Entry entry = entryAt(pressed.itemIndex());
                 State selected = adopt(pressed.state(), state, false);
                 if (entry == null) {

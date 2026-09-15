@@ -7,10 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.tuink.terminal.input.TextInput;
-import dev.tuink.terminal.input.TuiInputEvent;
-import dev.tuink.terminal.runtime.TuiApplicationRunner;
-import dev.tuink.terminal.runtime.TuiEventLoop;
+import dev.tuiframe.input.TextInput;
+import dev.tuiframe.input.TuiInputEvent;
+import dev.tuiframe.runtime.TuiApplicationRunner;
+import dev.tuiframe.runtime.TuiEventLoop;
 import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.Position;
 import dev.tuink.core.RecoverySnapshot;

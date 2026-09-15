@@ -1,6 +1,6 @@
 package dev.tuink.tui.ui;
 
-import dev.tuink.terminal.cell.CellText;
+import dev.tuiframe.cell.CellText;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;

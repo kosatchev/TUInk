@@ -1,6 +1,6 @@
 package dev.tuink.tui.ui;
 
-import dev.tuink.terminal.widget.Button;
+import dev.tuiframe.widget.Button;
 
 /** Geometry-only composition helpers for TUInk's open-file dialog. */
 public final class OpenFileDialogController {

@@ -1,12 +1,12 @@
 package dev.tuink.tui;
 
-import dev.tuink.terminal.input.KeyStroke;
-import dev.tuink.terminal.input.PasteEvent;
-import dev.tuink.terminal.input.PointerEvent;
-import dev.tuink.terminal.input.ResizeEvent;
-import dev.tuink.terminal.input.TextInput;
-import dev.tuink.terminal.input.TuiInputEvent;
-import dev.tuink.terminal.widget.InteractionResult;
+import dev.tuiframe.input.KeyStroke;
+import dev.tuiframe.input.PasteEvent;
+import dev.tuiframe.input.PointerEvent;
+import dev.tuiframe.input.ResizeEvent;
+import dev.tuiframe.input.TextInput;
+import dev.tuiframe.input.TuiInputEvent;
+import dev.tuiframe.widget.InteractionResult;
 import dev.tuink.tui.file.FileTreeModel;
 import dev.tuink.tui.ui.FileTreeView;
 import java.nio.file.Path;

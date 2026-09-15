@@ -1,11 +1,11 @@
 package dev.tuink.tui;
 
 import dev.tuink.editor.command.CommandInvocation;
-import dev.tuink.terminal.input.KeyStroke;
-import dev.tuink.terminal.input.PointerEvent;
-import dev.tuink.terminal.input.TuiInputEvent;
-import dev.tuink.terminal.widget.InteractionResult;
-import dev.tuink.terminal.widget.MenuBar;
+import dev.tuiframe.input.KeyStroke;
+import dev.tuiframe.input.PointerEvent;
+import dev.tuiframe.input.TuiInputEvent;
+import dev.tuiframe.widget.InteractionResult;
+import dev.tuiframe.widget.MenuBar;
 import java.util.Objects;
 
 /** Raw input adapter from the generic menu widget to TUInk commands. */

@@ -2,8 +2,8 @@ package dev.tuink.render;
 
 import dev.tuink.core.EditorTextLayout;
 import dev.tuink.core.TextModel;
-import dev.tuink.terminal.text.TerminalText;
-import dev.tuink.terminal.text.TerminalTextLayoutCache;
+import dev.tuiframe.text.TerminalText;
+import dev.tuiframe.text.TerminalTextLayoutCache;
 import java.util.List;
 import java.util.Objects;
 

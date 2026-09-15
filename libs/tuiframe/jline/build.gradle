@@ -2,8 +2,10 @@ plugins {
     id 'java-library'
 }
 
+group = 'dev.tuiframe'
+
 dependencies {
-    api project(':tui-core')
+    api project(':tuiframe-core')
     api 'org.jline:jline-terminal:3.30.6'
     runtimeOnly 'org.jline:jline-terminal-jni:3.30.6'
 }

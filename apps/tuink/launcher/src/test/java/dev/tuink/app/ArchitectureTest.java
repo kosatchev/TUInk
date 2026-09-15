@@ -11,11 +11,11 @@ import com.tngtech.archunit.lang.ArchRule;
 import org.junit.jupiter.api.Test;
 
 class ArchitectureTest {
-    private static final String KEY_DECODER = "dev.tuink.terminal.jline.KeyDecoder";
+    private static final String KEY_DECODER = "dev.tuiframe.jline.KeyDecoder";
 
     private static final JavaClasses PRODUCTION_CLASSES = new ClassFileImporter()
         .withImportOption(new ImportOption.DoNotIncludeTests())
-        .importPackages("dev.tuink");
+        .importPackages("dev.tuink", "dev.tuiframe");
 
     static final ArchRule CORE_DOES_NOT_DEPEND_ON_OUTER_LAYERS = noClasses()
         .that().resideInAPackage("dev.tuink.core..")
@@ -34,18 +34,18 @@ class ArchitectureTest {
         );
 
     static final ArchRule TERMINAL_FOUNDATION_IS_SELF_CONTAINED = classes()
-        .that().resideInAPackage("dev.tuink.terminal..")
-        .and().resideOutsideOfPackage("dev.tuink.terminal.jline..")
+        .that().resideInAPackage("dev.tuiframe..")
+        .and().resideOutsideOfPackage("dev.tuiframe.jline..")
         .should().onlyDependOnClassesThat().resideInAnyPackage(
             "java..",
             "dev.tuink.unicode..",
-            "dev.tuink.terminal.."
+            "dev.tuiframe.."
         );
 
     static final ArchRule TERMINAL_FOUNDATION_DOES_NOT_DEPEND_ON_JLINE_BACKEND = noClasses()
-        .that().resideInAPackage("dev.tuink.terminal..")
-        .and().resideOutsideOfPackage("dev.tuink.terminal.jline..")
-        .should().dependOnClassesThat().resideInAPackage("dev.tuink.terminal.jline..");
+        .that().resideInAPackage("dev.tuiframe..")
+        .and().resideOutsideOfPackage("dev.tuiframe.jline..")
+        .should().dependOnClassesThat().resideInAPackage("dev.tuiframe.jline..");
 
     static final ArchRule CORE_IS_TERMINAL_INDEPENDENT = classes()
         .that().resideInAPackage("dev.tuink.core..")
@@ -110,7 +110,7 @@ class ArchitectureTest {
             "dev.tuink.core..",
             "dev.tuink.render..",
             "dev.tuink.highlight..",
-            "dev.tuink.terminal..",
+            "dev.tuiframe..",
             "dev.tuink.tui.flow..",
             "dev.tuink.tui.input..",
             "dev.tuink.tui.render..",
@@ -120,18 +120,18 @@ class ArchitectureTest {
         );
 
     static final ArchRule JLINE_BACKEND_IS_EDITOR_INDEPENDENT = classes()
-        .that().resideInAPackage("dev.tuink.terminal.jline..")
+        .that().resideInAPackage("dev.tuiframe.jline..")
         .should().onlyDependOnClassesThat().resideInAnyPackage(
             "java..",
             "org.jline..",
-            "dev.tuink.terminal.."
+            "dev.tuiframe.."
         );
 
     static final ArchRule PHYSICAL_INPUT_MODEL_IS_SELF_CONTAINED = classes()
-        .that().resideInAPackage("dev.tuink.terminal.input..")
+        .that().resideInAPackage("dev.tuiframe.input..")
         .should().onlyDependOnClassesThat().resideInAnyPackage(
             "java..",
-            "dev.tuink.terminal.input.."
+            "dev.tuiframe.input.."
         );
 
     static final ArchRule KEY_DECODER_IS_A_SELF_CONTAINED_JLINE_ADAPTER = classes()
@@ -139,8 +139,8 @@ class ArchitectureTest {
         .should().onlyDependOnClassesThat().resideInAnyPackage(
             "java..",
             "org.jline..",
-            "dev.tuink.terminal.input..",
-            "dev.tuink.terminal.jline.."
+            "dev.tuiframe.input..",
+            "dev.tuiframe.jline.."
         );
 
     static final ArchRule KEY_DECODER_DOES_NOT_DEPEND_ON_LEGACY_INPUT = noClasses()
@@ -151,7 +151,7 @@ class ArchitectureTest {
 
     static final ArchRule PHYSICAL_INPUT_EVENTS_DO_NOT_DEPEND_ON_THE_LEGACY_MODEL = noClasses()
         .that().haveNameMatching(
-            "dev\\.tuink\\.terminal\\.input\\.(?:TuiInputEvent|KeyStroke|TextInput|PasteEvent|PointerEvent|ResizeEvent)(\\$.*)?"
+            "dev\\.tuiframe\\.input\\.(?:TuiInputEvent|KeyStroke|TextInput|PasteEvent|PointerEvent|ResizeEvent)(\\$.*)?"
         )
         .should().dependOnClassesThat().haveNameMatching(
             "dev\\.tuink\\.tui\\.input\\.(?:KeyEvent|LegacyKeyEventAdapter)(\\$.*)?"
@@ -187,7 +187,7 @@ class ArchitectureTest {
             "java..",
             "dev.tuink.editor.command..",
             "dev.tuink.tui.command..",
-            "dev.tuink.terminal.input..",
+            "dev.tuiframe.input..",
             "dev.tuink.tui.keymap.."
         );
 
@@ -202,66 +202,66 @@ class ArchitectureTest {
     static final ArchRule TUINK_KEYMAP_DOES_NOT_IMPORT_DECODER_OR_LEGACY_EVENTS = noClasses()
         .that().haveFullyQualifiedName("dev.tuink.tui.keymap.TuinkKeymap")
         .should().dependOnClassesThat().haveNameMatching(
-            "dev\\.tuink\\.(?:terminal\\.jline\\.KeyDecoder|"
-                + "tui\\.input\\.(?:KeyEvent|LegacyKeyEventAdapter))(?:\\$.*)?"
+            "(?:dev\\.tuiframe\\.jline\\.KeyDecoder|"
+                + "dev\\.tuink\\.tui\\.input\\.(?:KeyEvent|LegacyKeyEventAdapter))(?:\\$.*)?"
         );
 
     static final ArchRule EVENT_LOOP_IS_EDITOR_INDEPENDENT = classes()
-        .that().resideInAPackage("dev.tuink.terminal.runtime..")
+        .that().resideInAPackage("dev.tuiframe.runtime..")
         .should().onlyDependOnClassesThat().resideInAnyPackage(
             "java..",
-            "dev.tuink.terminal.runtime.."
+            "dev.tuiframe.runtime.."
         );
 
     static final ArchRule FRAME_LOOP_ORCHESTRATION_STAYS_IN_RUNTIME = noClasses()
-        .that().resideOutsideOfPackage("dev.tuink.terminal.runtime..")
+        .that().resideOutsideOfPackage("dev.tuiframe.runtime..")
         .should().callMethod(
-            "dev.tuink.terminal.runtime.TuiEventLoop",
+            "dev.tuiframe.runtime.TuiEventLoop",
             "beginFrame"
         )
         .orShould().callMethod(
-            "dev.tuink.terminal.runtime.TuiEventLoop",
+            "dev.tuiframe.runtime.TuiEventLoop",
             "endFrame",
-            "dev.tuink.terminal.runtime.TuiEventLoop$FrameTicket",
+            "dev.tuiframe.runtime.TuiEventLoop$FrameTicket",
             "boolean"
         )
         .orShould().callMethod(
-            "dev.tuink.terminal.runtime.TuiEventLoop",
+            "dev.tuiframe.runtime.TuiEventLoop",
             "poll",
-            "dev.tuink.terminal.runtime.TuiEventLoop$Deadline"
+            "dev.tuiframe.runtime.TuiEventLoop$Deadline"
         );
 
     static final ArchRule WIDGET_LAYER_STAYS_EDITOR_INDEPENDENT = classes()
-        .that().resideInAPackage("dev.tuink.terminal.widget..")
+        .that().resideInAPackage("dev.tuiframe.widget..")
         .should().onlyDependOnClassesThat().resideInAnyPackage(
             "java..",
-            "dev.tuink.terminal.."
+            "dev.tuiframe.."
         );
 
     static final ArchRule WIDGET_LAYER_STAYS_FILESYSTEM_FREE = noClasses()
-        .that().resideInAPackage("dev.tuink.terminal.widget..")
+        .that().resideInAPackage("dev.tuiframe.widget..")
         .should().dependOnClassesThat().resideInAnyPackage(
             "java.io..",
             "java.nio.file.."
         );
 
     static final ArchRule TUI_GEOMETRY_IS_SELF_CONTAINED = classes()
-        .that().resideInAPackage("dev.tuink.terminal.geometry..")
+        .that().resideInAPackage("dev.tuiframe.geometry..")
         .should().onlyDependOnClassesThat().resideInAnyPackage(
             "java..",
-            "dev.tuink.terminal.geometry.."
+            "dev.tuiframe.geometry.."
         );
 
     static final ArchRule CELL_STYLE_IS_SELF_CONTAINED = classes()
-        .that().haveNameMatching("dev\\.tuink\\.terminal\\.style\\.Cell(?:Color|Style)(?:\\$.*)?")
+        .that().haveNameMatching("dev\\.tuiframe\\.style\\.Cell(?:Color|Style)(?:\\$.*)?")
         .should().onlyDependOnClassesThat().haveNameMatching(
-            "(?:\\[+[ZBCSIJFD]|\\[+Ldev\\.tuink\\.terminal\\.style\\.Cell(?:Color|Style);|"
-                + "java\\..*|dev\\.tuink\\.terminal\\.style\\.Cell(?:Color|Style)(?:\\$.*)?)"
+            "(?:\\[+[ZBCSIJFD]|\\[+Ldev\\.tuiframe\\.style\\.Cell(?:Color|Style);|"
+                + "java\\..*|dev\\.tuiframe\\.style\\.Cell(?:Color|Style)(?:\\$.*)?)"
         );
 
     static final ArchRule CELL_MODEL_DOES_NOT_DEPEND_ON_EDITOR_RENDER = noClasses()
         .that().haveNameMatching(
-            "dev\\.tuink\\.terminal\\.cell\\.(?:Cell|CellBuffer|CellText|Canvas)(?:\\$.*)?"
+            "dev\\.tuiframe\\.cell\\.(?:Cell|CellBuffer|CellText|Canvas)(?:\\$.*)?"
         )
         .should().dependOnClassesThat().resideInAnyPackage(
             "dev.tuink.core..",
@@ -270,29 +270,29 @@ class ArchitectureTest {
         );
 
     static final ArchRule SCREEN_MODEL_STAYS_FOUNDATION_ONLY = classes()
-        .that().resideInAPackage("dev.tuink.terminal.screen..")
+        .that().resideInAPackage("dev.tuiframe.screen..")
         .should().onlyDependOnClassesThat().haveNameMatching(
-            "(?:\\[+[ZBCSIJFD]|java\\..*|dev\\.tuink\\.terminal\\.geometry\\..*|"
-                + "dev\\.tuink\\.terminal\\.screen\\..*|dev\\.tuink\\.terminal\\.cell\\.CellBuffer(?:\\$.*)?)"
+            "(?:\\[+[ZBCSIJFD]|java\\..*|dev\\.tuiframe\\.geometry\\..*|"
+                + "dev\\.tuiframe\\.screen\\..*|dev\\.tuiframe\\.cell\\.CellBuffer(?:\\$.*)?)"
         );
 
     static final ArchRule SCREEN_PRESENTATION_STAYS_EDITOR_INDEPENDENT = classes()
-        .that().resideInAPackage("dev.tuink.terminal.jline.presentation..")
+        .that().resideInAPackage("dev.tuiframe.jline.presentation..")
         .should().onlyDependOnClassesThat().resideInAnyPackage(
             "java..",
-            "dev.tuink.terminal..",
-            "dev.tuink.terminal.jline.presentation.."
+            "dev.tuiframe..",
+            "dev.tuiframe.jline.presentation.."
         );
 
     static final ArchRule TERMINAL_EDITOR_APP_DOES_NOT_BYPASS_SCREEN_PRESENTER = noClasses()
         .that().haveFullyQualifiedName("dev.tuink.tui.TerminalEditorApp")
         .should().dependOnClassesThat().haveNameMatching(
-            "dev\\.tuink\\.(?:terminal\\.jline\\.presentation\\.AnsiDiff|"
-                + "tui\\.ui\\.TerminalCursorController)"
+            "(?:dev\\.tuiframe\\.jline\\.presentation\\.AnsiDiff|"
+                + "dev\\.tuink\\.tui\\.ui\\.TerminalCursorController)"
         );
 
     static final ArchRule JLINE_STAYS_IN_BACKEND = noClasses()
-        .that().resideOutsideOfPackage("dev.tuink.terminal.jline..")
+        .that().resideOutsideOfPackage("dev.tuiframe.jline..")
         .should().dependOnClassesThat().resideInAPackage("org.jline..");
 
     static final ArchRule TOP_LEVEL_SLICES_ARE_FREE_OF_CYCLES = slices()
@@ -304,7 +304,7 @@ class ArchitectureTest {
         .should().beFreeOfCycles();
 
     static final ArchRule TERMINAL_SUBPACKAGE_SLICES_ARE_FREE_OF_CYCLES = slices()
-        .matching("dev.tuink.terminal.(*)..")
+        .matching("dev.tuiframe.(*)..")
         .should().beFreeOfCycles();
 
     @Test

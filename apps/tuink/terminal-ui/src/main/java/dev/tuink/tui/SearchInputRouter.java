@@ -1,15 +1,15 @@
 package dev.tuink.tui;
 
-import dev.tuink.terminal.input.KeyStroke;
-import dev.tuink.terminal.input.PasteEvent;
-import dev.tuink.terminal.input.PointerEvent;
-import dev.tuink.terminal.input.TextInput;
-import dev.tuink.terminal.input.TuiInputEvent;
-import dev.tuink.terminal.widget.FocusManager;
-import dev.tuink.terminal.widget.FocusRoute;
-import dev.tuink.terminal.widget.FocusScope;
-import dev.tuink.terminal.widget.InteractionResult;
-import dev.tuink.terminal.widget.RoutedTarget;
+import dev.tuiframe.input.KeyStroke;
+import dev.tuiframe.input.PasteEvent;
+import dev.tuiframe.input.PointerEvent;
+import dev.tuiframe.input.TextInput;
+import dev.tuiframe.input.TuiInputEvent;
+import dev.tuiframe.widget.FocusManager;
+import dev.tuiframe.widget.FocusRoute;
+import dev.tuiframe.widget.FocusScope;
+import dev.tuiframe.widget.InteractionResult;
+import dev.tuiframe.widget.RoutedTarget;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.ui.SearchBarView;
 import java.util.Map;

@@ -8,7 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.editor.command.CommandInvocation;
-import dev.tuink.terminal.input.TextInput;
+import dev.tuiframe.input.TextInput;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.flow.UiModalState;
 import dev.tuink.tui.input.KeyEvent;

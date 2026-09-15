@@ -5,5 +5,5 @@ plugins {
 dependencies {
     api project(':editor-contract')
     api project(':core')
-    implementation project(':tui-core')
+    implementation project(':tuiframe-core')
 }

@@ -8,14 +8,49 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.editor.command.CommandInvocation;
+import dev.tuiframe.input.KeyStroke;
+import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.input.TextInput;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.flow.UiModalState;
 import dev.tuink.tui.input.KeyEvent;
 import dev.tuink.tui.ui.SearchBarView;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class TerminalEditorInputRoutingTest {
+    @Test
+    void onlyPhysicalShiftLeftPressExtendsEditorSelection() {
+        assertTrue(TerminalEditorApp.shouldExtendEditorSelection(new PointerEvent(
+            2,
+            4,
+            PointerEvent.Kind.PRESS,
+            PointerEvent.Button.LEFT,
+            Set.of(KeyStroke.Modifier.SHIFT)
+        )));
+        assertFalse(TerminalEditorApp.shouldExtendEditorSelection(new PointerEvent(
+            2,
+            4,
+            PointerEvent.Kind.PRESS,
+            PointerEvent.Button.LEFT,
+            Set.of()
+        )));
+        assertFalse(TerminalEditorApp.shouldExtendEditorSelection(new PointerEvent(
+            2,
+            4,
+            PointerEvent.Kind.RELEASE,
+            PointerEvent.Button.LEFT,
+            Set.of(KeyStroke.Modifier.SHIFT)
+        )));
+        assertFalse(TerminalEditorApp.shouldExtendEditorSelection(new PointerEvent(
+            2,
+            4,
+            PointerEvent.Kind.PRESS,
+            PointerEvent.Button.RIGHT,
+            Set.of(KeyStroke.Modifier.SHIFT)
+        )));
+    }
+
     @Test
     void typedSearchOutputsMapToApplicationOptionsAndCommands() {
         assertEquals(SearchFocus.CASE, TerminalEditorApp.toggleTarget(SearchBarView.Action.TOGGLE_CASE));

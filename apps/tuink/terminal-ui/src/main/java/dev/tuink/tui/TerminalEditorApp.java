@@ -1299,7 +1299,8 @@ public class TerminalEditorApp {
                                                 plan,
                                                 contentRows,
                                                 engine,
-                                                contentTopRow
+                                                contentTopRow,
+                                                shouldExtendEditorSelection(inputEvent)
                                             );
                                             if (uiSessionState.searchMode) {
                                                 if (selectedWordByDoubleClick) {
@@ -2627,6 +2628,13 @@ public class TerminalEditorApp {
             return false;
         }
         return text.text().codePointCount(0, text.text().length()) > 1;
+    }
+
+    static boolean shouldExtendEditorSelection(TuiInputEvent event) {
+        return event instanceof PointerEvent pointer
+            && pointer.kind() == PointerEvent.Kind.PRESS
+            && pointer.button() == PointerEvent.Button.LEFT
+            && pointer.modifiers().contains(KeyStroke.Modifier.SHIFT);
     }
 
     static KeyEvent.Action resolvePendingCommand(

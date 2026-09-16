@@ -8,7 +8,12 @@ import org.junit.jupiter.api.Test;
 class HelpPagesTest {
     @Test
     void versionComesFromGeneratedResource() {
-        assertEquals("0.12.0", HelpPages.appVersion());
+        assertEquals("0.12.1", HelpPages.appVersion());
+    }
+
+    @Test
+    void aboutPageUsesCanonicalApplicationName() {
+        assertEquals("Application: TUInk", HelpPages.AUTHOR.rows().get(0));
     }
 
     @Test

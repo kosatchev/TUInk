@@ -68,7 +68,7 @@ public final class EditorView {
         int contentRows,
         EditorEngine engine
     ) {
-        return handleMousePress(mouse, model, state, plan, contentRows, engine, contentTopRow);
+        return handleMousePress(mouse, model, state, plan, contentRows, engine, contentTopRow, false);
     }
 
     public boolean handleMousePress(
@@ -79,6 +79,19 @@ public final class EditorView {
         int contentRows,
         EditorEngine engine,
         int contentTopRow
+    ) {
+        return handleMousePress(mouse, model, state, plan, contentRows, engine, contentTopRow, false);
+    }
+
+    public boolean handleMousePress(
+        KeyEvent.MouseEvent mouse,
+        TextModel model,
+        EditorState state,
+        RenderPlan plan,
+        int contentRows,
+        EditorEngine engine,
+        int contentTopRow,
+        boolean extendSelection
     ) {
         boolean selectedWordByDoubleClick = false;
         Position hit = mouseToTextPosition(
@@ -93,7 +106,10 @@ public final class EditorView {
         if (hit != null) {
             mouseSelecting = true;
             edgeAutoScrollDuringSelection = false;
-            if (isDoubleClick(hit) && engine.selectWordAt(hit)) {
+            if (extendSelection) {
+                resetClickSequence();
+                engine.extendSelectionTo(hit);
+            } else if (isDoubleClick(hit) && engine.selectWordAt(hit)) {
                 selectedWordByDoubleClick = true;
             } else {
                 engine.beginSelectionAt(hit);
@@ -106,6 +122,11 @@ public final class EditorView {
         }
         ensureCursorVisible(engine, plan, contentRows);
         return selectedWordByDoubleClick;
+    }
+
+    private void resetClickSequence() {
+        lastClickPosition = null;
+        lastClickAtNanos = 0L;
     }
 
     public void handleMouseDrag(

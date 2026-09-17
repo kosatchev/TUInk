@@ -5,6 +5,7 @@
 *.iprof
 build/
 **/build/
+gradle/verification-metadata.dryrun.xml
 
 # Java
 *.class
@@ -37,3 +38,12 @@ SHA256SUMS
 # Local development files
 research/
 .local/
+
+# Local credentials and private keys
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx

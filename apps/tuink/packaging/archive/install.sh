@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LINK_NAME="tuink"
+DOCUMENTATION_REF='@TUINK_DOCUMENTATION_REF@'
 SOURCE_BIN="${1:-}"
 INSTALL_DIR="/opt/tuink"
 TARGET_BIN="${INSTALL_DIR}/${LINK_NAME}"
@@ -14,6 +15,9 @@ refuse() {
   echo "Refusing to install: $*" >&2
   exit 1
 }
+
+# Packaging pins online documentation to this archive source revision.
+[[ "${DOCUMENTATION_REF}" =~ ^([0-9a-f]{40}|v[0-9]+[.][0-9]+[.][0-9]+)$ ]] || refuse "invalid or unset archive documentation reference"
 
 if [[ -z "${SOURCE_BIN}" ]]; then
   if [[ -x "${SCRIPT_DIR}/tuink" ]]; then
@@ -69,22 +73,44 @@ else
   NEW_INSTALL=true
 fi
 
+for name in "${LINK_NAME}" install.sh uninstall.sh; do
+  [[ ! -d "${INSTALL_DIR}/${name}" ]] || refuse "managed file destination is a directory: ${INSTALL_DIR}/${name}"
+done
+
+README_INSTALL_SOURCE="${SCRIPT_DIR}/README.md"
+if [[ -f "${README_INSTALL_SOURCE}" ]]; then
+  README_TEMP="$(mktemp)"
+  trap 'rm -f -- "${README_TEMP}"' EXIT
+  # The system installation contains only the executable and top-level docs.
+  # Keep its README links usable after the extracted archive is removed.
+  sed -E \
+    -e "s@(\]\()(docs/assets/[^)]*)(\))@\1https://raw.githubusercontent.com/kosatchev/tuink/${DOCUMENTATION_REF}/\2\3@g" \
+    -e "s@(\]\()(docs/[^)]*/|verification/performance/[^)]*/)(\))@\1https://github.com/kosatchev/tuink/tree/${DOCUMENTATION_REF}/\2\3@g" \
+    -e "s@(\]\()(docs/[^)]*|verification/performance/[^)]*|CONTRIBUTING[.]md|SECURITY[.]md)(\))@\1https://github.com/kosatchev/tuink/blob/${DOCUMENTATION_REF}/\2\3@g" \
+    "${README_INSTALL_SOURCE}" > "${README_TEMP}"
+  README_INSTALL_SOURCE="${README_TEMP}"
+fi
+
 sudo mkdir -p "${INSTALL_DIR}"
 if [[ "${NEW_INSTALL}" == true ]]; then
   printf '%s\n' "${MARKER_VALUE}" | sudo tee "${MARKER_PATH}" >/dev/null
   sudo chmod 0644 "${MARKER_PATH}"
 fi
-sudo install -m 0755 "${APP_PATH}" "${TARGET_BIN}"
+sudo install -m 0755 -T -- "${APP_PATH}" "${TARGET_BIN}"
 
 for script in install.sh uninstall.sh; do
   if [[ -f "${SCRIPT_DIR}/${script}" ]]; then
-    sudo install -m 0755 "${SCRIPT_DIR}/${script}" "${INSTALL_DIR}/${script}"
+    sudo install -m 0755 -T -- "${SCRIPT_DIR}/${script}" "${INSTALL_DIR}/${script}"
   fi
 done
 
 for doc in README.md LICENSE THIRD_PARTY_NOTICES.md; do
-  if [[ -f "${SCRIPT_DIR}/${doc}" ]]; then
-    sudo install -m 0644 "${SCRIPT_DIR}/${doc}" "${INSTALL_DIR}/${doc}"
+  DOC_SOURCE="${SCRIPT_DIR}/${doc}"
+  if [[ "${doc}" == 'README.md' ]]; then
+    DOC_SOURCE="${README_INSTALL_SOURCE}"
+  fi
+  if [[ -f "${DOC_SOURCE}" ]]; then
+    sudo install -m 0644 -T "${DOC_SOURCE}" "${INSTALL_DIR}/${doc}"
   fi
 done
 

@@ -62,6 +62,8 @@ def externallyDependencyFreeProductionConfigurations = [
     'implementation',
     'runtimeOnly'
 ] as Set
+def projectsByPath = subprojects.collectEntries { [(it.path): it] }
+def rootVersionForHelp = rootProject.version.toString()
 
 def verifyProjectDependencies = tasks.register('verifyProjectDependencies') {
     group = 'verification'
@@ -80,7 +82,7 @@ def verifyProjectDependencies = tasks.register('verifyProjectDependencies') {
 
         Set<String> violations = [] as Set
         expectedProjectGroups.each { projectPath, expectedGroup ->
-            String actualGroup = project(projectPath).group.toString()
+            String actualGroup = projectsByPath[projectPath].group.toString()
             if (actualGroup != expectedGroup) {
                 violations.add(
                     "${projectPath} has Maven group ${actualGroup}; expected ${expectedGroup}"
@@ -120,7 +122,7 @@ def verifyProjectDependencies = tasks.register('verifyProjectDependencies') {
             }
         }
 
-        project(':editor-session').configurations
+        projectsByPath[':editor-session'].configurations
             .findAll { it.name in ['api', 'compileOnlyApi'] }
             .each { configuration ->
                 configuration.dependencies
@@ -152,7 +154,7 @@ tasks.register('buildHelp') {
 
     doLast {
         println """
-            TUInk ${rootProject.version} build help
+            TUInk ${rootVersionForHelp} build help
 
             JVM development
               ./gradlew check
@@ -166,9 +168,12 @@ tasks.register('buildHelp') {
               ./gradlew :app:installDist
                   Installed layout: apps/tuink/launcher/build/install/tuink/
               ./gradlew :app:distZip
-                  ZIP: build/releases/tuink-${rootProject.version}.zip
+                  ZIP: build/releases/tuink-${rootVersionForHelp}.zip
 
-            Native binaries (require GraalVM native-image and a C toolchain)
+            Native binaries (require the pinned GraalVM Community 25.2.4 / Java 25)
+              export GRAALVM_HOME=/absolute/path/to/graalvm-community-25.2.4+7.1
+              ./gradlew :app:verifyNativeToolchain
+                  Verify the explicit native toolchain before building.
               ./gradlew :app:nativeGlibc
                   Binary: apps/tuink/launcher/build/native/nativeCompile/tuink
               ./gradlew :app:nativeMusl

@@ -6,7 +6,7 @@ configurations {
     }
 }
 
-def jgitVersion = '6.10.0.202406032230-r'
+def jgitVersion = '6.10.1.202505221210-r'
 def jgitUnsignedDir = layout.buildDirectory.dir('generated/jgit-unsigned')
 
 tasks.register('prepareUnsignedJgit', Copy) {

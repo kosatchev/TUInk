@@ -1,0 +1,42 @@
+import groovy.io.FileType
+
+// Check the production staging outputs, including the complete upstream notice
+// trees. A developer document or unrelated runtime notice must not leak back in.
+Set<String> common = ['README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'SECURITY.md'] as Set
+Map<String, List<String>> requiredNotices = [
+    jvm: [],
+    glibc: [],
+    musl: []
+]
+assert bundles.keySet() == requiredNotices.keySet()
+bundles.each { String target, File directory ->
+    Set<String> expected = new HashSet<>(common)
+    requiredNotices[target].each { bundle ->
+        new File(sourceRoot, "licenses/${bundle}").eachFileRecurse(FileType.FILES) { file ->
+            expected.add(sourceRoot.toPath().relativize(file.toPath()).toString().replace(File.separator, '/'))
+        }
+    }
+    Set<String> actual = [] as Set
+    directory.eachFileRecurse(FileType.FILES) { file ->
+        actual.add(directory.toPath().relativize(file.toPath()).toString().replace(File.separator, '/'))
+    }
+    assert actual == expected : "${target}: missing ${expected - actual}; unexpected ${actual - expected}"
+    (expected - ['README.md', 'THIRD_PARTY_NOTICES.md']).each { name ->
+        assert new File(directory, name).bytes == new File(sourceRoot, name).bytes :
+            "${target}: changed source bytes in ${name}"
+    }
+    String readme = new File(directory, 'README.md').getText('UTF-8')
+    String sourceReadme = new File(sourceRoot, 'README.md').getText('UTF-8')
+    if (sourceReadme.contains("](docs/building.md")) assert readme.contains("https://github.com/kosatchev/tuink/blob/${documentationRef}/docs/building.md")
+    if (sourceReadme.contains('](LICENSE)')) assert readme.contains('](LICENSE)')
+    if (sourceReadme.contains('](THIRD_PARTY_NOTICES.md)')) assert readme.contains('](THIRD_PARTY_NOTICES.md)')
+    if (sourceReadme.contains('](SECURITY.md)')) assert readme.contains('](SECURITY.md)')
+    String notices = new File(directory, 'THIRD_PARTY_NOTICES.md').getText('UTF-8')
+    [].each { bundle ->
+        String destination = "licenses/${bundle}/README.md"
+        String rendered = requiredNotices[target].contains(bundle) ? destination
+            : "https://github.com/kosatchev/tuink/blob/${documentationRef}/${destination}"
+        assert notices.contains("](${rendered})") : "${target}: incorrect notice destination for ${bundle}"
+    }
+}
+println('Distribution documentation: all three payloads, pinned links and exact notice bytes passed.')

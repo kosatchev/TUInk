@@ -3,7 +3,7 @@
 ## Supported code
 
 Security fixes target the latest code on `main` and the latest published
-release. Experimental branches and TUInvoke do not carry compatibility or
+release. Experimental branches do not carry compatibility or
 production-support guarantees, but security reports about them are welcome.
 
 ## Reporting a vulnerability

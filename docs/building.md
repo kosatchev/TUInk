@@ -23,7 +23,9 @@ uses the checked-in wrapper version.
 
 Native builds additionally require:
 
-- GraalVM with `native-image`;
+- the pinned GraalVM Community release described in
+  [Native toolchain](#native-toolchain), selected explicitly with
+  `GRAALVM_HOME`;
 - a system C toolchain;
 - the platform libraries required by GraalVM;
 - a musl-capable toolchain for the static musl target.
@@ -140,6 +142,41 @@ Gradle also creates module JARs as internal build products. They are not
 standalone fat/executable JAR distributions and do not carry the complete
 runtime dependency set. Use `:app:distZip` when a portable JVM release is
 needed.
+
+## Native toolchain
+
+Native and release tasks require exactly GraalVM Community 25.2.4 with Java
+25. Automatic toolchain discovery is disabled: set `GRAALVM_HOME` to the
+absolute path of that distribution. This prevents a native release from being
+silently built with another local JDK or an outdated GraalVM.
+
+The pinned Linux x86_64 archive is:
+
+```text
+https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.2.4/graalvm-community-jdk-25i2-25.0.4_linux-x64_bin.tar.gz
+SHA-256: 3f4a89de8eaa96f2ed677f09957c7e872cd8467aad3537f8b5394c1b8c4b942e
+```
+
+Verify the downloaded archive before extracting it:
+
+```bash
+printf '%s  %s\n' \
+  3f4a89de8eaa96f2ed677f09957c7e872cd8467aad3537f8b5394c1b8c4b942e \
+  graalvm-community-jdk-25i2-25.0.4_linux-x64_bin.tar.gz \
+  | sha256sum -c -
+```
+
+After extraction, select the toolchain and run the same preflight used by every
+native-image build task:
+
+```bash
+export GRAALVM_HOME=/absolute/path/to/graalvm-community-25.2.4+7.1
+./gradlew :app:verifyNativeToolchain
+```
+
+The preflight checks the distribution's `release` metadata, both `java` and
+`native-image`, and rejects a missing, relative, non-Community, or mismatched
+toolchain.
 
 ## Native targets
 

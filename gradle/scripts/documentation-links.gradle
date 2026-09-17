@@ -1,0 +1,416 @@
+import java.nio.ByteBuffer
+import java.nio.charset.CodingErrorAction
+import java.nio.charset.StandardCharsets
+
+/** Local links in packaged Markdown, using archive addresses rather than host filesystem paths. */
+class DistributionDocumentationLinks {
+    /** Remap only explicitly omitted repository paths; all other links remain for validation. */
+    static String render(String text, String source, Map<String, Boolean> sourceOnlyPaths, String ref) {
+        if (!(ref ==~ /(?:[0-9a-f]{40}|v[0-9]+[.][0-9]+[.][0-9]+)/)) {
+            throw new IllegalArgumentException('Documentation reference must be a source revision or release tag')
+        }
+        String sourcePath = archivePath(source)
+        if (!sourcePath || !withinRoot(sourcePath, '') || sourcePath.contains('\\')) {
+            throw new IllegalArgumentException('Documentation source must be a relative repository path')
+        }
+        // Keep offsets identical to the original, including CRLF, while parsing Markdown lines.
+        String parsed = text.replace('\r\n', ' \n').replace('\r', '\n')
+        List<Map> replacements = []
+        targets(parsed).each { target ->
+            Map address = targetAddress(sourcePath, target.destination)
+            if (address.path != null && withinRoot(address.path, '') && sourceOnlyPaths.containsKey(address.path)) {
+                String kind = sourceOnlyPaths[address.path] ? 'tree' : 'blob'
+                replacements.add([
+                    start: target.destinationStart, end: target.destinationEnd,
+                    value: "https://github.com/kosatchev/tuink/${kind}/${ref}/${uriPath(address.path)}${address.suffix}".toString()
+                ])
+            }
+        }
+        StringBuilder rendered = new StringBuilder()
+        int cursor = 0
+        replacements.sort { it.start }.each { replacement ->
+            rendered.append(text, cursor, replacement.start as int)
+            rendered.append(replacement.value)
+            cursor = replacement.end
+        }
+        return rendered.append(text, cursor, text.length()).toString()
+    }
+
+    static List<String> problems(Map<String, String> markdownByArchivePath,
+                                 Set<String> availablePaths, String documentationRoot) {
+        String root = archivePath(documentationRoot)
+        if (root.startsWith('/') || root == '..' || root.startsWith('../')) {
+            throw new IllegalArgumentException('Documentation root must be a relative archive directory')
+        }
+        Set<String> paths = new HashSet<>()
+        paths.add(root)
+        availablePaths.each { supplied ->
+            String path = archivePath(supplied)
+            while (path) {
+                paths.add(path)
+                int slash = path.lastIndexOf('/')
+                path = slash < 0 ? '' : path.substring(0, slash)
+            }
+        }
+        Map<String, String> documents = new TreeMap<>()
+        markdownByArchivePath.each { path, text ->
+            String source = archivePath(path)
+            if (source && source != root && withinRoot(source, root)) documents[source] = text
+        }
+        List<String> failures = []
+        String readme = root ? root + '/README.md' : 'README.md'
+        if (!paths.contains(readme) || !documents.containsKey(readme)) {
+            failures.add("${readme}:1 -> README.md (distribution README is missing)".toString())
+        }
+        documents.each { source, text ->
+            String normalized = text.replace('\r\n', '\n').replace('\r', '\n')
+            targets(normalized).each { target ->
+                String reason = targetProblem(source, target.destination, root, paths)
+                if (reason != null) {
+                    failures.add("${source}:${lineNumber(normalized, target.offset)} -> ${target.destination} (${reason})".toString())
+                }
+            }
+        }
+        return failures
+    }
+
+    private static List<Map> targets(String text) {
+        char[] visible = withoutCode(text)
+        List<Map> targets = []
+        // A reference definition is the single location owning its destination.
+        // Validate every definition, including unused ones, without guessing that
+        // arbitrary [words] in prose are intended reference links.
+        int line = 0
+        String referenceSource = new String(visible)
+        while (line < visible.length) {
+            String source = referenceSource
+            int end = lineEnd(source, line)
+            int cursor = line
+            while (cursor < end && cursor - line < 3 && source.charAt(cursor) == ' ') cursor++
+            if (cursor < end && source.charAt(cursor) == '[') {
+                int labelEnd = cursor + 1
+                while (labelEnd < end && (source.charAt(labelEnd) != ']' || escaped(source, labelEnd))) labelEnd++
+                if (labelEnd > cursor + 1 && labelEnd + 1 < end && source.charAt(labelEnd + 1) == ':') {
+                    int start = spaces(source, labelEnd + 2)
+                    // A definition destination can also occupy the immediately following line.
+                    if (start == end && end < source.length()) start = spaces(source, end + 1)
+                    Map destination = destination(source, start)
+                    if (destination != null && destination.destination && definitionTail(source, destination.end)) {
+                        targets.add([destination: destination.destination, offset: cursor,
+                                     destinationStart: destination.start, destinationEnd: destination.destinationEnd])
+                        blank(visible, line, lineEnd(source, destination.end))
+                    }
+                }
+            }
+            line = end + 1
+        }
+        String source = new String(visible)
+        List<Integer> brackets = []
+        for (int cursor = 0; cursor < source.length(); cursor++) {
+            if (escaped(source, cursor)) continue
+            if (source.charAt(cursor) == '[') brackets.add(cursor)
+            else if (source.charAt(cursor) == ']' && !brackets.isEmpty()) {
+                int opening = brackets.remove(brackets.size() - 1)
+                if (cursor + 1 < source.length() && source.charAt(cursor + 1) == '(') {
+                    Map link = inlineLink(source, cursor + 2)
+                    if (link != null) {
+                        targets.add([destination: link.destination, offset: opening,
+                                     destinationStart: link.start, destinationEnd: link.destinationEnd])
+                        cursor = link.end
+                    }
+                }
+            }
+        }
+        return targets.sort { it.offset }
+    }
+
+    private static Map inlineLink(String text, int start) {
+        int cursor = whitespace(text, start)
+        Map value = destination(text, cursor)
+        if (value == null) return null
+        cursor = whitespace(text, value.end)
+        if (cursor > value.end && cursor < text.length() && text.charAt(cursor) != ')') {
+            cursor = titleEnd(text, cursor)
+            if (cursor < 0) return null
+            cursor = whitespace(text, cursor)
+        }
+        return cursor < text.length() && text.charAt(cursor) == ')'
+            ? [destination: value.destination, start: value.start, destinationEnd: value.destinationEnd, end: cursor] : null
+    }
+
+    /** Reads a destination without consuming its optional title or surrounding closing parenthesis. */
+    private static Map destination(String text, int start) {
+        if (start >= text.length() || text.charAt(start) == '\n') return null
+        int cursor = start
+        if (text.charAt(cursor) == '<') {
+            cursor++
+            while (cursor < text.length()) {
+                char current = text.charAt(cursor)
+                if (current == '\n' || current == '<') return null
+                if (current == '>' && !escaped(text, cursor)) {
+                    return [destination: text.substring(start + 1, cursor), start: start + 1,
+                            destinationEnd: cursor, end: cursor + 1]
+                }
+                cursor++
+            }
+            return null
+        }
+        int depth = 0
+        while (cursor < text.length()) {
+            char current = text.charAt(cursor)
+            if (Character.isWhitespace(current)) break
+            if (current == '\\' && cursor + 1 < text.length() && punctuation(text.charAt(cursor + 1))) {
+                cursor += 2
+                continue
+            }
+            if (current == '(') depth++
+            if (current == ')') {
+                if (depth == 0) break
+                depth--
+            }
+            cursor++
+        }
+        return depth == 0 ? [destination: text.substring(start, cursor), start: start,
+                            destinationEnd: cursor, end: cursor] : null
+    }
+
+    private static boolean definitionTail(String text, int start) {
+        int end = lineEnd(text, start)
+        int cursor = spaces(text, start)
+        if (cursor == end) return true
+        if (cursor == start) return false
+        int title = titleEnd(text, cursor)
+        return title >= 0 && title <= end && spaces(text, title) == end
+    }
+
+    private static int titleEnd(String text, int start) {
+        if (start >= text.length()) return -1
+        char opening = text.charAt(start)
+        if (opening != '"' && opening != '\'' && opening != '(') return -1
+        char closing = opening == '(' ? ')' : opening
+        for (int cursor = start + 1; cursor < text.length() && text.charAt(cursor) != '\n'; cursor++) {
+            if (text.charAt(cursor) == closing && !escaped(text, cursor)) return cursor + 1
+        }
+        return -1
+    }
+
+    /** Block and inline code are masked in place so reported source line numbers remain stable. */
+    private static char[] withoutCode(String text) {
+        char[] visible = text.toCharArray()
+        String fence = null
+        int fenceLength = 0
+        int cursor = 0
+        while (cursor < text.length()) {
+            if (cursor == 0 || text.charAt(cursor - 1) == '\n') {
+                int end = lineEnd(text, cursor)
+                String line = text.substring(cursor, end)
+                if (fence != null) {
+                    if (line ==~ ('^ {0,3}' + java.util.regex.Pattern.quote(fence) + '{' + fenceLength + ',}[ \\t]*$')) fence = null
+                    blank(visible, cursor, end)
+                    cursor = end + 1
+                    continue
+                }
+                def opening = line =~ /^ {0,3}(`{3,}|~{3,})(.*)$/
+                if (opening.matches() && !(opening.group(1).startsWith('`') && opening.group(2).contains('`'))) {
+                    fence = opening.group(1).substring(0, 1)
+                    fenceLength = opening.group(1).length()
+                    blank(visible, cursor, end)
+                    cursor = end + 1
+                    continue
+                }
+                if (line ==~ /^(?: {4}| {0,3}\t).*/) {
+                    blank(visible, cursor, end)
+                    cursor = end + 1
+                    continue
+                }
+            }
+            if (text.startsWith('<!--', cursor)) {
+                int end = text.indexOf('-->', cursor + 4)
+                end = end < 0 ? text.length() : end + 3
+                blank(visible, cursor, end)
+                cursor = end
+            } else if (text.charAt(cursor) == '`' && !escaped(text, cursor)) {
+                int runEnd = cursor + 1
+                while (runEnd < text.length() && text.charAt(runEnd) == '`') runEnd++
+                int end = codeSpanEnd(text, runEnd, runEnd - cursor)
+                if (end >= 0) blank(visible, cursor, end)
+                cursor = end < 0 ? runEnd : end
+            } else cursor++
+        }
+        return visible
+    }
+
+    private static int codeSpanEnd(String text, int start, int length) {
+        int cursor = start
+        while (cursor < text.length()) {
+            if (cursor > 0 && text.charAt(cursor - 1) == '\n') {
+                String line = text.substring(cursor, lineEnd(text, cursor))
+                if (line.trim().isEmpty() || line ==~ /^ {0,3}(`{3,}|~{3,}).*/) return -1
+            }
+            if (text.charAt(cursor) == '`') {
+                int end = cursor + 1
+                while (end < text.length() && text.charAt(end) == '`') end++
+                if (end - cursor == length) return end
+                cursor = end
+            } else cursor++
+        }
+        return -1
+    }
+
+    private static String targetProblem(String source, String raw, String root, Set<String> paths) {
+        Map address = targetAddress(source, raw)
+        if (address.problem != null) return address.problem
+        if (address.path == null) return null
+        if (!withinRoot(address.path, root)) return 'target leaves the documentation root'
+        return paths.contains(address.path) ? null : 'target is missing from the distribution'
+    }
+
+    private static Map targetAddress(String source, String raw) {
+        String target = markdownText(raw)
+        int suffix = target.length()
+        for (String separator : ['#', '?']) {
+            int found = target.indexOf(separator)
+            if (found >= 0) suffix = Math.min(suffix, found)
+        }
+        String queryAndFragment = target.substring(suffix)
+        target = target.substring(0, suffix)
+        if (!target) return [:]
+        if (target ==~ /(?i)^file:.*/ || target ==~ /^[A-Za-z]:.*/) return [problem: 'absolute file target is not portable']
+        if (target.startsWith('//') || target ==~ /^[A-Za-z][A-Za-z0-9+.-]*:.*/) return [:]
+        try {
+            target = percentDecoded(target)
+        } catch (IllegalArgumentException invalid) {
+            return [problem: invalid.message]
+        }
+        if (target.startsWith('/') || target.contains('\\') || target ==~ /(?i)^file:.*/
+            || target ==~ /^[A-Za-z]:.*/) return [problem: 'absolute or nonportable file target']
+        int slash = source.lastIndexOf('/')
+        String parent = slash < 0 ? '' : source.substring(0, slash)
+        return [path: archivePath((parent ? parent + '/' : '') + target), suffix: queryAndFragment]
+    }
+
+    private static String uriPath(String path) {
+        StringBuilder encoded = new StringBuilder()
+        final String hexadecimal = '0123456789ABCDEF'
+        for (byte octet : path.getBytes(StandardCharsets.UTF_8)) {
+            int value = octet & 0xFF
+            if (value >= 65 && value <= 90 || value >= 97 && value <= 122 || value >= 48 && value <= 57
+                || value == 45 || value == 46 || value == 95 || value == 126 || value == 47) {
+                encoded.append((char) value)
+            } else {
+                encoded.append('%').append(hexadecimal.charAt(value >> 4)).append(hexadecimal.charAt(value & 15))
+            }
+        }
+        return encoded.toString()
+    }
+
+    private static String markdownText(String raw) {
+        StringBuilder value = new StringBuilder()
+        for (int index = 0; index < raw.length(); index++) {
+            char current = raw.charAt(index)
+            if (current == '\\' && index + 1 < raw.length() && punctuation(raw.charAt(index + 1))) current = raw.charAt(++index)
+            value.append(current)
+        }
+        return value.toString().replaceAll(/&(?:amp|lt|gt|quot|apos|#[0-9]+|#[xX][0-9A-Fa-f]+);/) { String entity ->
+            Map named = ['&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "'"]
+            if (named.containsKey(entity)) return named[entity]
+            try {
+                boolean hexadecimal = entity.charAt(2) == 'x' || entity.charAt(2) == 'X'
+                int codePoint = Integer.parseInt(entity.substring(hexadecimal ? 3 : 2, entity.length() - 1), hexadecimal ? 16 : 10)
+                return codePoint > 0 && Character.isValidCodePoint(codePoint) && !(codePoint >= 0xD800 && codePoint <= 0xDFFF)
+                    ? new String(Character.toChars(codePoint)) : '\uFFFD'
+            } catch (NumberFormatException ignored) {
+                return '\uFFFD'
+            }
+        }
+    }
+
+    private static String percentDecoded(String text) {
+        StringBuilder result = new StringBuilder()
+        for (int index = 0; index < text.length();) {
+            if (text.charAt(index) != '%') {
+                result.append(text.charAt(index++))
+                continue
+            }
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream()
+            while (index < text.length() && text.charAt(index) == '%') {
+                if (index + 2 >= text.length()) throw new IllegalArgumentException('malformed percent escape')
+                int high = Character.digit(text.charAt(index + 1), 16)
+                int low = Character.digit(text.charAt(index + 2), 16)
+                if (high < 0 || low < 0) throw new IllegalArgumentException('malformed percent escape')
+                bytes.write((high << 4) | low)
+                index += 3
+            }
+            try {
+                result.append(StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes.toByteArray())))
+            } catch (java.nio.charset.CharacterCodingException invalid) {
+                throw new IllegalArgumentException('target is not valid percent-encoded UTF-8')
+            }
+        }
+        return result.toString()
+    }
+
+    private static String archivePath(String supplied) {
+        List<String> segments = []
+        supplied.split('/').each { segment ->
+            if (segment && segment != '.') {
+                if (segment == '..' && !segments.isEmpty() && segments.last() != '..') segments.remove(segments.size() - 1)
+                else segments.add(segment)
+            }
+        }
+        return (supplied.startsWith('/') ? '/' : '') + segments.join('/')
+    }
+
+    private static boolean withinRoot(String path, String root) {
+        return root ? path == root || path.startsWith(root + '/')
+            : !path.startsWith('/') && path != '..' && !path.startsWith('../')
+    }
+
+    private static boolean punctuation(char character) {
+        int value = character
+        return value >= 33 && value <= 47 || value >= 58 && value <= 64
+            || value >= 91 && value <= 96 || value >= 123 && value <= 126
+    }
+
+    private static boolean escaped(String text, int position) {
+        int slashes = 0
+        while (position > 0 && text.charAt(--position) == '\\') slashes++
+        return slashes % 2 != 0
+    }
+
+    private static int spaces(String text, int start) {
+        while (start < text.length() && (text.charAt(start) == ' ' || text.charAt(start) == '\t')) start++
+        return start
+    }
+
+    private static int whitespace(String text, int start) {
+        while (start < text.length() && Character.isWhitespace(text.charAt(start))) start++
+        return start
+    }
+
+    private static int lineEnd(String text, int start) {
+        int end = text.indexOf('\n', start)
+        return end < 0 ? text.length() : end
+    }
+
+    private static int lineNumber(String text, int offset) {
+        int line = 1
+        for (int index = 0; index < offset; index++) if (text.charAt(index) == '\n') line++
+        return line
+    }
+
+    private static void blank(char[] text, int start, int end) {
+        for (int index = start; index < end; index++) if (text[index] != '\n') text[index] = ' ' as char
+    }
+}
+
+ext.distributionDocumentationProblems = { Map<String, String> markdownByArchivePath,
+                                         Set<String> availablePaths, String documentationRoot ->
+    DistributionDocumentationLinks.problems(markdownByArchivePath, availablePaths, documentationRoot)
+}
+
+ext.renderDistributionDocumentation = { String text, String source,
+                                         Map<String, Boolean> sourceOnlyPaths, String ref ->
+    DistributionDocumentationLinks.render(text, source, sourceOnlyPaths, ref)
+}

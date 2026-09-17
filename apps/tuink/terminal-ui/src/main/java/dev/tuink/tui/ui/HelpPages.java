@@ -58,7 +58,7 @@ public final class HelpPages {
             "Bundled/runtime components:",
             "- Gradle Wrapper (Apache-2.0)",
             "- JLine 3.30.6 (BSD-3-Clause)",
-            "- JGit 6.10.0.202406032230-r (EDL-1.0, includes MIT component)",
+            "- JGit 6.10.1.202505221210-r (EDL-1.0, includes MIT component)",
             "",
             "GitHub: https://github.com/kosatchev/tuink",
             "License docs: /LICENSE, /THIRD_PARTY_NOTICES.md",

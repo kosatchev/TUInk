@@ -1,6 +1,18 @@
 # TUInk
 
-Minimal Java terminal text editor with clean multi-module architecture:
+TUInk is a keyboard- and mouse-friendly terminal text editor written in Java.
+It supports Unicode text, tabs, search and replace, syntax highlighting,
+file-tree navigation, configurable themes, native Linux builds, and safe
+terminal cleanup. This repository also incubates the reusable **TUIframe**
+toolkit.
+
+Quick start from an interactive terminal with Java 17 or newer:
+
+```bash
+./gradlew --console=plain :app:run
+```
+
+## Repository structure and architecture
 
 The reusable terminal toolkit is branded **TUIframe**. TUInk remains the editor
 application, and `tui` remains its application-specific frontend module.
@@ -36,17 +48,22 @@ These files are useful for:
 
 ## Gutter Diff
 
-- Переключаемые режимы в меню `View`: `Disabled`, `Histogram`, `Myers`, `Stable`.
-- Два слоя маркеров:
-- `saved -> current` показывается обычными цветными маркерами.
-- `open -> current` показывается серыми маркерами.
-- Режим сохраняется в `~/.config/tuink/tuink.properties` (`ui.gutterDiffMode`).
+- Switchable modes in the `View` menu: `Disabled`, `Histogram`, `Myers`, and `Stable`.
+- Two marker layers:
+
+    - `saved -> current` uses the regular colored markers.
+    - `open -> current` uses gray markers.
+
+- The selected mode is stored in `~/.config/tuink/tuink.properties` as
+  `ui.gutterDiffMode`.
 
 ## Requirements
 
 - Java 17
 - Gradle wrapper (`./gradlew`)
-- GraalVM with `native-image` and a C toolchain for native releases
+- the pinned GraalVM Community toolchain documented in
+  [Native toolchain](docs/building.md#native-toolchain), plus a C toolchain for
+  native releases
 - Python 3.10+ on a POSIX system for render benchmarks and complete releases
 
 ## Build and test
@@ -107,6 +124,7 @@ Detailed documentation:
 - [Render-loop profiling](docs/profiling.md)
 - [Render benchmarks](verification/performance/README.md)
 - [Compatibility policy](docs/compatibility.md)
+- [Security policy](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)
 
 ## MVP keybindings
@@ -126,18 +144,19 @@ Detailed documentation:
 - `Ctrl+/`: toggle line comments on the current line or selected lines
 - Menu shortcuts: `F1` = `File`, `F2` = `Edit`, `F3` = `View`, `F4` = `Tab`, `F5` = `Settings`, `F6` = `Help` (`Alt+I/E/V/T/S/H` also works); navigation with `←/→`, `↑/↓`, `Enter`, `Esc`
 - Mouse:
-- left click `File`/`Edit` in top bar to open/close corresponding menu
-- left click menu item to execute it
-- left click in text area to move cursor
-- hold left mouse button and drag in text area to select text
-- in `Find` panel, left click `Find/Replace` fields to change focus; click toggles (`Аа`, `word`, `*`) to switch options
-- mouse wheel scrolls the document
-- in open file dialog, item click only selects; click folder arrow to expand/collapse; double click item opens file / toggles folder / goes up on `..`; open selected file with `OK`; `Cancel` closes dialog
+  - left click `File`/`Edit` in top bar to open/close corresponding menu
+  - left click menu item to execute it
+  - left click in text area to move cursor
+  - `Shift` + left click in the text area selects from the previous cursor position
+  - hold left mouse button and drag in text area to select text
+  - in `Find` panel, left click `Find/Replace` fields to change focus; click toggles (`Аа`, `word`, `*`) to switch options
+  - mouse wheel scrolls the document
+  - in open file dialog, item click only selects; click folder arrow to expand/collapse; double click item opens file / toggles folder / goes up on `..`; open selected file with `OK`; `Cancel` closes dialog
 - in search mode:
-- `Enter`/`Ctrl+F` next, `Ctrl+G` previous, `Ctrl+R` replace, `Ctrl+A` replace all
-- `Tab` move focus between `Find`, `Replace`, and option toggles
-- `Space` toggles focused option (`i`, `word`, `*`)
-- visible matches are highlighted in the editor; current selected match is highlighted stronger
+  - `Enter`/`Ctrl+F` next, `Ctrl+G` previous, `Ctrl+R` replace, `Ctrl+A` replace all
+  - `Tab` move focus between `Find`, `Replace`, and option toggles
+  - `Space` toggles focused option (`i`, `word`, `*`)
+  - visible matches are highlighted in the editor; current selected match is highlighted stronger
 
 ## Save behavior
 

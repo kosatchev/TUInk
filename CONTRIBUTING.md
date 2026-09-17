@@ -6,7 +6,7 @@ Before changing build or packaging behavior, read [Build and native targets](doc
 
 ## Development setup
 
-TUInk requires Java 17 or newer. Use the checked-in Gradle wrapper so local and CI builds use the same Gradle version. GraalVM is required only for native-image work.
+TUInk requires Java 17 or newer. Use the checked-in Gradle wrapper so local and CI builds use the same Gradle version. Native-image work must use the exact GraalVM Community 25.2.4 / Java 25 distribution, selected with an absolute `GRAALVM_HOME`; see [Native toolchain](docs/building.md#native-toolchain) for the pinned Linux x86_64 download and checksum.
 
 ```bash
 ./gradlew check

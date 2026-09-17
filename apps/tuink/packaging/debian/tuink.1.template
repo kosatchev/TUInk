@@ -8,7 +8,7 @@ tuink \- terminal text editor
 .SH DESCRIPTION
 .B tuink
 is a terminal text editor with syntax highlighting, search, multiple tabs,
-and Git-aware gutter markers.
+and gutter markers for changes since opening or saving a file.
 .SH OPTIONS
 .TP
 .BR \-\-no\-mouse

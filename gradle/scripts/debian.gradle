@@ -12,22 +12,25 @@ def debArchitecture = [
     'i386': 'i386',
     'i686': 'i386'
 ].get(rawArch, rawArch.replaceAll('[^a-z0-9-]', '-'))
-def debRootName = "tuink_${project.version}_${debArchitecture}"
+def releaseVersion = project.version.toString()
+def debRootName = "tuink_${releaseVersion}_${debArchitecture}"
 def debStageDir = layout.buildDirectory.dir("debian/${debRootName}")
 def debOutput = rootProject.layout.buildDirectory.file("releases/${debRootName}.deb")
 def generatedDebianDir = layout.buildDirectory.dir('generated/debian')
 def generatedDebianDocsDir = layout.buildDirectory.dir('generated/debian-docs')
 def releaseEpochSeconds = providers.environmentVariable('SOURCE_DATE_EPOCH').orElse('946684800')
+def stagedDebTree = fileTree(debStageDir)
+def verifyDocumentationLinks = verifyDistributionDocumentationLinks
 
 tasks.register('generateDebianMetadata', Copy) {
     group = 'distribution'
     description = 'Generate Debian control metadata from project properties.'
-    inputs.property('version', project.version.toString())
+    inputs.property('version', releaseVersion)
     inputs.property('architecture', debArchitecture)
     from(rootProject.file('apps/tuink/packaging/debian/control.template')) {
         rename { 'control' }
         filter(ReplaceTokens, tokens: [
-            VERSION: project.version.toString(),
+            VERSION: releaseVersion,
             ARCHITECTURE: debArchitecture
         ])
     }
@@ -42,14 +45,14 @@ tasks.register('generateDebianDocs') {
     def changelogOutput = generatedDebianDocsDir.map { it.file('changelog') }
     def manPageOutput = generatedDebianDocsDir.map { it.file('tuink.1') }
     inputs.files(changelogTemplate, manPageTemplate)
-    inputs.property('version', project.version.toString())
+    inputs.property('version', releaseVersion)
     outputs.files(changelogOutput, manPageOutput)
 
     doLast {
         def renderTemplate = { File template, File output ->
             output.parentFile.mkdirs()
             output.setText(
-                template.getText('UTF-8').replace('@VERSION@', project.version.toString()),
+                template.getText('UTF-8').replace('@VERSION@', releaseVersion),
                 'UTF-8'
             )
         }
@@ -100,17 +103,8 @@ tasks.register('stageDeb', Sync) {
             unix('rwxr-xr-x')
         }
     }
-    from(rootProject.file('README.md')) {
-        into('usr/share/doc/tuink')
-        filePermissions {
-            unix('rw-r--r--')
-        }
-    }
-    from(rootProject.file('THIRD_PARTY_NOTICES.md')) {
-        into('usr/share/doc/tuink')
-        filePermissions {
-            unix('rw-r--r--')
-        }
+    into('usr/share/doc/tuink') {
+        with(releaseDocumentationFor.call('glibc'))
     }
     from(rootProject.file('apps/tuink/packaging/debian/copyright')) {
         into('usr/share/doc/tuink')
@@ -147,6 +141,9 @@ tasks.register('stageDeb', Sync) {
             throw new GradleException('nativeDeb requires the glibc target. Omit -Ptarget or use -Ptarget=all.')
         }
     }
+    doLast {
+        verifyDocumentationLinks.call(stagedDebTree, 'usr/share/doc/tuink')
+    }
 }
 
 def stagedDebBinary = debStageDir.map { it.file('usr/bin/tuink') }
@@ -162,7 +159,7 @@ def stripDebBinary = tasks.register('stripDebBinary', Exec) {
 
     doLast {
         long timestamp = releaseEpochSeconds.get().toLong() * 1000L
-        fileTree(debStageDir).visit { details ->
+        stagedDebTree.visit { details ->
             details.file.setLastModified(timestamp)
             if (details.directory) {
                 java.nio.file.Files.setPosixFilePermissions(
@@ -209,6 +206,6 @@ tasks.named('releaseChecksums') {
 tasks.register('release') {
     group = 'distribution'
     description = 'Build tested JVM/native archives, Debian package, and SHA-256 checksums.'
-    dependsOn(rootProject.subprojects.collect { "${it.path}:test" })
+    dependsOn(rootProject.tasks.named('check'))
     dependsOn(tasks.named('releaseChecksums'))
 }

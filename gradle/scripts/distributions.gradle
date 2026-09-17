@@ -1,4 +1,15 @@
 import org.apache.tools.ant.taskdefs.condition.Os
+import org.apache.tools.ant.filters.ReplaceTokens
+import org.gradle.api.file.ArchiveOperations
+import javax.inject.Inject
+
+abstract class DistributionArchiveServices {
+    @Inject
+    abstract ArchiveOperations getArchiveOperations()
+}
+
+def archiveOperations = objects.newInstance(DistributionArchiveServices).archiveOperations
+def releaseVersion = project.version.toString()
 
 def nativeTarget = (project.findProperty('target') ?: 'glibc').toString().toLowerCase()
 if (!(nativeTarget in ['glibc', 'musl', 'all'])) {
@@ -15,14 +26,32 @@ def archToken = {
     return raw.replaceAll('[^a-z0-9_\\-]', '_')
 }.call()
 
-def glibcReleaseName = "tuink-${project.version}-${osToken}-${archToken}"
+def glibcReleaseName = "tuink-${releaseVersion}-${osToken}-${archToken}"
 def muslReleaseName = "${glibcReleaseName}-musl"
 def distributionDir = rootProject.layout.buildDirectory.dir('releases')
-def releaseCommonFiles = files(
-    rootProject.file('README.md'),
-    rootProject.file('LICENSE'),
-    rootProject.file('THIRD_PARTY_NOTICES.md')
-)
+apply from: rootProject.file('gradle/scripts/distribution-documentation.gradle')
+def verifyDocumentationLinks = verifyDistributionDocumentationLinks
+def documentationLinksTest = tasks.named('documentationLinksTest')
+def documentationFor = releaseDocumentationFor
+def archiveDocumentationRef = distributionDocumentationRef
+
+def nativeExecutableNames = ['tuink', 'install.sh', 'uninstall.sh']
+def verifyNativeExecutablePermissions = { FileTree contents, String archiveRoot ->
+    Set<String> missing = nativeExecutableNames.collect { "${archiveRoot}/${it}".toString() } as Set
+    contents.visit { entry ->
+        def path = entry.relativePath.pathString
+        if (missing.contains(path)) {
+            if (entry.directory || entry.permissions.toUnixNumeric() != 0755) {
+                throw new GradleException("Native archive executable must have permissions 0755: ${path}")
+            }
+            missing.remove(path)
+        }
+    }
+    if (!missing.isEmpty()) {
+        throw new GradleException('Native archive executables not found: ' + missing.join(', '))
+    }
+}
+def jvmDocumentationRoot = "tuink-${releaseVersion}".toString()
 def releaseSamplesDir = rootProject.file('apps/tuink/samples')
 def archiveInstallScripts = rootProject.files(
     rootProject.file('apps/tuink/packaging/archive/install.sh'),
@@ -30,11 +59,12 @@ def archiveInstallScripts = rootProject.files(
 )
 
 ext.releaseArtifactFiles = objects.fileCollection()
+def releaseArtifacts = releaseArtifactFiles
 
 distributions {
     main {
         contents {
-            from(releaseCommonFiles)
+            with(documentationFor.call('jvm'))
             from(releaseSamplesDir) {
                 into('samples')
             }
@@ -44,6 +74,9 @@ distributions {
 
 def jvmDistZip = tasks.named('distZip', Zip) {
     destinationDirectory = distributionDir
+    doLast {
+        verifyDocumentationLinks.call(archiveOperations.zipTree(archiveFile.get()), jvmDocumentationRoot)
+    }
 }
 
 tasks.withType(AbstractArchiveTask).configureEach {
@@ -65,16 +98,14 @@ tasks.register('stageNativeGlibc', Sync) {
             unix('rwxr-xr-x')
         }
     }
+    inputs.property('documentationRef', archiveDocumentationRef)
     from(archiveInstallScripts) {
+        filter(ReplaceTokens, tokens: [TUINK_DOCUMENTATION_REF: archiveDocumentationRef.get()])
         filePermissions {
             unix('rwxr-xr-x')
         }
     }
-    from(releaseCommonFiles) {
-        filePermissions {
-            unix('rw-r--r--')
-        }
-    }
+    with(documentationFor.call('glibc'))
     from(releaseSamplesDir) {
         into('samples')
         filePermissions {
@@ -98,16 +129,14 @@ tasks.register('stageNativeMusl', Sync) {
             unix('rwxr-xr-x')
         }
     }
+    inputs.property('documentationRef', archiveDocumentationRef)
     from(archiveInstallScripts) {
+        filter(ReplaceTokens, tokens: [TUINK_DOCUMENTATION_REF: archiveDocumentationRef.get()])
         filePermissions {
             unix('rwxr-xr-x')
         }
     }
-    from(releaseCommonFiles) {
-        filePermissions {
-            unix('rw-r--r--')
-        }
-    }
+    with(documentationFor.call('musl'))
     from(releaseSamplesDir) {
         into('samples')
         filePermissions {
@@ -122,13 +151,26 @@ def nativeTarGz = tasks.register('nativeTarGz', Tar) {
     dependsOn(tasks.named('stageNativeGlibc'))
     compression = Compression.GZIP
     archiveBaseName = 'tuink'
-    archiveVersion = project.version.toString()
+    archiveVersion = releaseVersion
     archiveClassifier = "${osToken}-${archToken}"
     archiveExtension = 'tar.gz'
     destinationDirectory = distributionDir
 
     from(layout.buildDirectory.dir("staging/glibc/${glibcReleaseName}")) {
         into(glibcReleaseName)
+        exclude(nativeExecutableNames)
+    }
+    from(layout.buildDirectory.dir("staging/glibc/${glibcReleaseName}")) {
+        into(glibcReleaseName)
+        include(nativeExecutableNames)
+        filePermissions {
+            unix('rwxr-xr-x')
+        }
+    }
+    doLast {
+        def contents = archiveOperations.tarTree(archiveOperations.gzip(archiveFile.get()))
+        verifyDocumentationLinks.call(contents, glibcReleaseName)
+        verifyNativeExecutablePermissions.call(contents, glibcReleaseName)
     }
 }
 
@@ -138,13 +180,26 @@ def nativeMuslTarGz = tasks.register('nativeMuslTarGz', Tar) {
     dependsOn(tasks.named('stageNativeMusl'))
     compression = Compression.GZIP
     archiveBaseName = 'tuink'
-    archiveVersion = project.version.toString()
+    archiveVersion = releaseVersion
     archiveClassifier = "${osToken}-${archToken}-musl"
     archiveExtension = 'tar.gz'
     destinationDirectory = distributionDir
 
     from(layout.buildDirectory.dir("staging/musl/${muslReleaseName}")) {
         into(muslReleaseName)
+        exclude(nativeExecutableNames)
+    }
+    from(layout.buildDirectory.dir("staging/musl/${muslReleaseName}")) {
+        into(muslReleaseName)
+        include(nativeExecutableNames)
+        filePermissions {
+            unix('rwxr-xr-x')
+        }
+    }
+    doLast {
+        def contents = archiveOperations.tarTree(archiveOperations.gzip(archiveFile.get()))
+        verifyDocumentationLinks.call(contents, muslReleaseName)
+        verifyNativeExecutablePermissions.call(contents, muslReleaseName)
     }
 }
 
@@ -175,7 +230,7 @@ tasks.register('releaseChecksums') {
     outputs.file(checksumFile)
 
     doLast {
-        def lines = releaseArtifactFiles.files
+        def lines = releaseArtifacts.files
             .sort { left, right -> left.name <=> right.name }
             .collect { artifact ->
                 if (!artifact.isFile()) {
@@ -194,5 +249,12 @@ tasks.register('releaseChecksums') {
         def output = checksumFile.get().asFile
         output.parentFile.mkdirs()
         output.setText(lines.join(System.lineSeparator()) + System.lineSeparator(), 'UTF-8')
+    }
+}
+
+tasks.named('installDist', Sync) {
+    dependsOn(documentationLinksTest)
+    doLast {
+        verifyDocumentationLinks.call(fileTree(destinationDir), '')
     }
 }

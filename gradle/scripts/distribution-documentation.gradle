@@ -1,0 +1,140 @@
+def releaseVersion = project.version.toString()
+apply from: rootProject.file('gradle/scripts/documentation-links.gradle')
+def documentationProblems = distributionDocumentationProblems
+def renderDocumentation = renderDistributionDocumentation
+def documentationLinkScript = rootProject.file('gradle/scripts/documentation-links.gradle')
+def documentationLinkTests = rootProject.file('apps/tuink/packaging/documentation/test_links.groovy')
+def documentationRenderTests = rootProject.file('apps/tuink/packaging/documentation/test_render.groovy')
+def documentationContentsTests = rootProject.file('apps/tuink/packaging/documentation/test_contents.groovy')
+
+ext.verifyDistributionDocumentationLinks = { FileTree contents, String documentationRoot ->
+    Set<String> paths = [] as Set
+    Map<String, String> markdown = [:]
+    contents.visit { entry ->
+        def path = entry.relativePath.pathString
+        paths.add(path)
+        if (!entry.directory && path.toLowerCase(Locale.ROOT).endsWith('.md')) {
+            markdown[path] = entry.file.getText('UTF-8')
+        }
+    }
+    List<String> problems = documentationProblems.call(markdown, paths, documentationRoot)
+    if (!problems.isEmpty()) {
+        throw new GradleException('Distribution documentation contains invalid local links:\n  '
+            + problems.join('\n  '))
+    }
+}
+def verifyDocumentationLinks = verifyDistributionDocumentationLinks
+def documentationLinksTest = tasks.register('documentationLinksTest') {
+    group = 'verification'
+    description = 'Check the production distribution-link validator against Markdown fixtures.'
+    inputs.files(documentationLinkScript, documentationLinkTests, documentationRenderTests)
+    doLast {
+        new GroovyShell(getClass().classLoader, new Binding([findProblems: documentationProblems]))
+            .evaluate(documentationLinkTests)
+        new GroovyShell(getClass().classLoader, new Binding([renderDocumentation: renderDocumentation]))
+            .evaluate(documentationRenderTests)
+    }
+}
+// A version tag can precede a development snapshot's documentation.
+// Source archives without Git metadata retain their matching release tag.
+ext.distributionDocumentationRef = providers.gradleProperty('documentationRef').orElse(providers.provider {
+    if (rootProject.file('.git').exists()) {
+        def gitOutput = { List<String> arguments ->
+            providers.exec {
+                workingDir(rootProject.projectDir)
+                commandLine(['git'] + arguments)
+            }.standardOutput.asText.get().trim()
+        }
+        def gitRoot = new File(gitOutput(['rev-parse', '--show-toplevel']))
+        if (gitRoot.canonicalFile != rootProject.projectDir.canonicalFile) {
+            throw new GradleException('Archive documentation Git root does not match the project directory.')
+        }
+        return gitOutput(['rev-parse', 'HEAD'])
+    }
+    return "v${releaseVersion}".toString()
+}).map { ref ->
+    if (!(ref ==~ /([0-9a-f]{40}|v[0-9]+[.][0-9]+[.][0-9]+)/)) {
+        throw new GradleException('Archive documentation requires a full Git commit or v<major>.<minor>.<patch> tag.')
+    }
+    ref
+}
+def archiveDocumentationRef = distributionDocumentationRef
+
+// Binary distributions carry user documentation. Development documents stay
+// in the source tree and are linked at this build's immutable source revision.
+def sourceDocumentation = rootProject.fileTree(rootProject.projectDir) {
+    include('docs/**', 'verification/performance/README.md', 'ui-regression/README.md',
+        'verification/compatibility/android/README.md', 'licenses/**', 'CONTRIBUTING.md')
+    exclude('docs/assets/**')
+}
+def nativeLicenseBundles = [
+    jvm: [],
+    glibc: [],
+    musl: []
+]
+def documentationStages = [:]
+nativeLicenseBundles.each { String target, List<String> licenseBundles ->
+    documentationStages[target] = tasks.register("stage${target.capitalize()}DistributionDocumentation", Sync) {
+        description = "Stage ${target} user documentation and runtime notices without compiling an application."
+        into(layout.buildDirectory.dir("verification/distribution-documentation/${target}"))
+        from(rootProject.files('README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'SECURITY.md'))
+        licenseBundles.each { bundle ->
+            from(rootProject.file("licenses/${bundle}")) {
+                into("licenses/${bundle}")
+            }
+        }
+        filePermissions {
+            unix('rw-r--r--')
+        }
+        inputs.files(sourceDocumentation, documentationLinkScript)
+        inputs.property('documentationRef', archiveDocumentationRef)
+        inputs.property('licenseBundles', licenseBundles)
+        doLast {
+            Map<String, Boolean> sourceOnly = [:]
+            sourceDocumentation.visit { entry ->
+                String path = entry.relativePath.pathString
+                if (!licenseBundles.any { path == "licenses/${it}" || path.startsWith("licenses/${it}/") }) {
+                    sourceOnly[path] = entry.directory
+                }
+            }
+            ['README.md', 'THIRD_PARTY_NOTICES.md'].each { name ->
+                String original = rootProject.file(name).getText('UTF-8')
+                new File(destinationDir, name).setText(
+                    renderDocumentation.call(original, name, sourceOnly, archiveDocumentationRef.get()), 'UTF-8')
+            }
+        }
+    }
+}
+ext.releaseDocumentationFor = { String target ->
+    if (!documentationStages.containsKey(target)) {
+        throw new GradleException("Unknown documentation target: ${target}")
+    }
+    copySpec {
+        from(documentationStages[target])
+    }
+}
+def stageDistributionDocumentation = tasks.register('stageDistributionDocumentation') {
+    description = 'Stage the JVM, glibc and musl user documentation without native compilation.'
+    dependsOn(documentationStages.values())
+}
+def verifyDistributionDocumentation = tasks.register('verifyDistributionDocumentation') {
+    group = 'verification'
+    description = 'Verify the composition and local links of all three user documentation bundles.'
+    dependsOn(stageDistributionDocumentation, documentationLinksTest)
+    inputs.files(documentationStages.values(), documentationLinkScript, documentationContentsTests)
+    doLast {
+        Map<String, File> staged = documentationStages.collectEntries { target, task ->
+            [(target): task.get().destinationDir]
+        }
+        staged.each { target, directory ->
+            verifyDocumentationLinks.call(fileTree(directory), '')
+        }
+        new GroovyShell(getClass().classLoader, new Binding([
+            bundles: staged, sourceRoot: rootProject.projectDir, documentationRef: archiveDocumentationRef.get()
+        ])).evaluate(documentationContentsTests)
+    }
+}
+tasks.named('check') {
+    dependsOn(verifyDistributionDocumentation)
+}
+

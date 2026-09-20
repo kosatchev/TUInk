@@ -78,6 +78,10 @@ nativeLicenseBundles.each { String target, List<String> licenseBundles ->
         description = "Stage ${target} user documentation and runtime notices without compiling an application."
         into(layout.buildDirectory.dir("verification/distribution-documentation/${target}"))
         from(rootProject.files('README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'SECURITY.md'))
+        from(rootProject.file('docs/assets')) {
+            include('tuink-menus.gif', 'tuink-tabs.gif')
+            into('docs/assets')
+        }
         licenseBundles.each { bundle ->
             from(rootProject.file("licenses/${bundle}")) {
                 into("licenses/${bundle}")

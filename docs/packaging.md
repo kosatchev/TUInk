@@ -52,6 +52,7 @@ tuink-<version>-linux-<arch>/
 ├── LICENSE
 ├── THIRD_PARTY_NOTICES.md
 ├── SECURITY.md
+├── docs/assets/
 └── samples/
 ```
 

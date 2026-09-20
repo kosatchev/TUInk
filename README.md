@@ -1,242 +1,235 @@
 # TUInk
 
-TUInk is a keyboard- and mouse-friendly terminal text editor written in Java.
-It supports Unicode text, tabs, search and replace, syntax highlighting,
-file-tree navigation, configurable themes, native Linux builds, and safe
-terminal cleanup. This repository also incubates the reusable **TUIframe**
-toolkit.
+> **A familiar text editor that lives in your terminal.**
 
-Quick start from an interactive terminal with Java 17 or newer:
+TUInk is a non-modal editor for people who want to stay in the terminal
+without giving up familiar controls. Open a file and start typing: use ordinary
+keyboard shortcuts, the mouse, menus, tabs, search and replace, syntax
+highlighting, and a tree-based file picker without learning an editor command
+language.
 
-```bash
-./gradlew --console=plain :app:run
-```
+## TUInk in action
 
-## Repository structure and architecture
+### Files and menus
 
-The reusable terminal toolkit is branded **TUIframe**. TUInk remains the editor
-application, and `tui` remains its application-specific frontend module.
+![TUInk file picker and menu tour](docs/assets/tuink-menus.gif)
 
-- `unicode-text`: dependency-free grapheme boundaries and UTF-16 offset mapping
-- `tuiframe-core`: editor-independent terminal text, cells, geometry, input,
-  scrolling, frame, capability, and event-loop contracts under `dev.tuiframe.*`
-- `tuiframe-jline`: JLine lifecycle, composed terminal runtime, physical input
-  decoder, capability detection, and ANSI screen presentation
-- `tuiframe-widgets`: editor-independent layout/theme, typed interaction, flat focus,
-  and optional parent-local cursor contracts plus reusable `Button`, `Modal`,
-  interactive Unicode-aware `TextField`, virtualized `ListView`, `TabBar`, and
-  descriptor-driven `MenuBar` and flat generic `TreeView<V>` primitives
-- `editor-contract`: dependency-free immutable command/document contracts,
-  UTF-16 ranges, snapshots, and revision-guarded edits
-- `core`: editor engine and text model (`TextBuffer` + `SimpleLineBuffer`)
-- `editor-session`: frontend-neutral command registry, owner-thread document
-  sessions, atomic revision-guarded edits, and bounded asynchronous ingress
-- `render`: editor render planning, style spans, and terminal-aware layout
-- `highlight-regex`: regex-based syntax highlighter
-- `tui`: TUInk-specific widgets, controllers, layout, and editor rasterization
-- `app`: canonical entrypoint and release assembly
+### Tabs and syntax highlighting
 
-## Samples
+![TUInk tab tour](docs/assets/tuink-tabs.gif)
 
-Repository contains syntax and content samples in `apps/tuink/samples/`.
+## Why TUInk?
 
-These files are useful for:
+- **Start editing immediately.** TUInk is non-modal and uses conventional
+  shortcuts for opening, saving, searching, copying, undoing, and redoing.
+- **Use keyboard and mouse together.** Click, drag, Shift+Click, menus,
+  scrollbars, and keyboard navigation work side by side.
+- **Work with real-world Unicode.** Cursor movement and selection respect
+  extended grapheme clusters, including emoji, combining characters, and wide
+  CJK text.
+- **Find and navigate quickly.** Work in multiple tabs, browse files in a tree,
+  search across every tab, and replace matches in the active tab. Case,
+  whole-word, and wildcard options help narrow the result.
+- **Edit code comfortably.** TUInk provides syntax highlighting, line and word
+  wrapping, auto-indent, autopairs, automatic lists, visible whitespace,
+  rainbow brackets, and line-comment toggling.
+- **See what changed.** Gutter markers distinguish edits since the last save
+  from edits since the file was opened.
+- **Protect unfinished work.** Recovery snapshots and file-aware saves retain
+  detected encoding, BOM, line endings, and supported filesystem metadata.
+- **Choose how to run it.** Use Java 17, a native Linux archive, or a Debian
+  package.
 
-- quick manual checks of syntax highlighting
-- scroll/performance smoke checks on medium-size files
-- markdown fenced-code rendering checks
+## Try it
 
-## Gutter Diff
-
-- Switchable modes in the `View` menu: `Disabled`, `Histogram`, `Myers`, and `Stable`.
-- Two marker layers:
-
-    - `saved -> current` uses the regular colored markers.
-    - `open -> current` uses gray markers.
-
-- The selected mode is stored in `~/.config/tuink/tuink.properties` as
-  `ui.gutterDiffMode`.
-
-## Requirements
-
-- Java 17
-- Gradle wrapper (`./gradlew`)
-- the pinned GraalVM Community toolchain documented in
-  [Native toolchain](docs/building.md#native-toolchain), plus a C toolchain for
-  native releases
-- Python 3.10+ on a POSIX system for render benchmarks and complete releases
-
-## Build and test
-
-```bash
-./gradlew clean test build
-```
-
-## Run
-
-Run the canonical `app` module from the repository root:
+TUInk needs Java 17 or newer and an interactive terminal.
 
 ```bash
 ./gradlew --console=plain :app:run
 ```
 
-Run from an interactive TTY terminal. Non-interactive consoles may fall back to a dumb terminal and fail.
-
-Run with file and flags:
+Open a file directly:
 
 ```bash
-./gradlew --console=plain :app:run -PappArgs="file.txt"
-./gradlew --console=plain :app:run -PappArgs="--no-mouse file.txt"
-./gradlew --console=plain :app:run -PappArgs="--no-alt-screen file.txt"
-./gradlew --console=plain :app:run -PappArgs="--no-color file.txt"
-./gradlew --console=plain :app:run -PappArgs="--theme=light file.txt"
-./gradlew --console=plain :app:run -PappArgs="--read file.txt"
-./gradlew --console=plain :app:run -PappArgs="--profile --profile-file=profile-jvm.log file.txt"
-./gradlew --console=plain :app:run -PappArgs="--help"
+./gradlew --console=plain :app:run -PappArgs="README.md"
 ```
 
-## Release artifacts
+Run `./gradlew buildHelp` for the complete local build command reference.
 
-Build the tested JVM ZIP, glibc archive, Debian package, and SHA-256 manifest.
-The release task also runs the short native render benchmark:
+## Highlights
+
+### Familiar editing
+
+- multiple tabs with mouse and keyboard navigation;
+- selection by keyboard, mouse drag, or Shift+Click;
+- undo and redo;
+- search across all tabs, with replacement in the active tab;
+- menus, buttons, dialogs, text fields, trees, and scrollbars;
+- configurable Cyan, Blue, and Light themes.
+
+### Terminal-native behavior
+
+- mouse input can be enabled or disabled;
+- alternate-screen and monochrome modes are available;
+- terminal state is restored after normal exit and handled failures;
+- content is clipped safely when the terminal becomes very small;
+- the native build works without a JVM on the target machine.
+
+### Text and code
+
+- grapheme-aware cursor movement, deletion, selection, wrapping, and hit
+  testing;
+- syntax highlighting for common programming, markup, data, and configuration
+  formats;
+- bracket matching, rainbow brackets, and visible whitespace;
+- switchable line/word wrapping, auto-indent, autopairs, and automatic lists;
+- two gutter-diff layers: `saved -> current` and `open -> current`.
+
+### File safety
+
+- Save As validation and overwrite confirmation;
+- explicit handling of read-only files and dirty tabs;
+- recovery snapshots for unfinished edits;
+- preservation of detected charset, BOM, line-separator layout, and final-EOL
+  state;
+- preservation of existing POSIX permission bits;
+- safe saving through symbolic links without replacing the link itself.
+
+## Controls
+
+| Input | Action |
+|---|---|
+| `Ctrl+O` | Open the tree-based file picker |
+| `Ctrl+S` | Save the current file |
+| `Ctrl+K` | Save As |
+| `Ctrl+N` | Open a new tab |
+| `Ctrl+Tab` / `Ctrl+PageDown` | Select the next tab |
+| `Ctrl+PageUp` | Select the previous tab |
+| `Ctrl+F` | Open search and replace |
+| `Ctrl+Z` / `Ctrl+Y` | Undo / redo |
+| `Ctrl+/` | Toggle line comments |
+| `Ctrl+Q` | Quit, with confirmation for unsaved work |
+| `F1` … `F6` | Open File, Edit, View, Tab, Settings, and Help menus |
+| Arrows / Page Up / Page Down / Home / End | Navigate the document |
+| `Shift` + Arrow keys | Extend the selection |
+
+Mouse controls include click-to-position, drag selection, Shift+Click
+selection from the previous cursor position, wheel scrolling, tab and menu
+activation, scrollbar interaction, and file-picker navigation.
+
+In search mode, use `Enter` or `Ctrl+F` for the next match, `Ctrl+G` for the
+previous match, `Ctrl+R` to replace, and `Ctrl+A` to replace all. `Tab` moves
+between the fields and search options.
+
+## Install a packaged release
+
+### Debian package
+
+The native Debian package requires glibc 2.34 or newer and zlib 1.1.4 or newer.
+It does not require a JVM.
 
 ```bash
+sudo apt install ./tuink_<version>_<deb-arch>.deb
+tuink README.md
+```
+
+### Native Linux archive
+
+```bash
+tar -xzf tuink-<version>-linux-<arch>.tar.gz
+cd tuink-<version>-linux-<arch>
+./tuink README.md
+```
+
+The archive also includes `install.sh` and `uninstall.sh`. They manage only the
+marked TUInk installation under `/opt/tuink` and its
+`/usr/local/bin/tuink` link, and refuse to replace unrelated files.
+
+### JVM ZIP
+
+The portable ZIP requires Java 17 or newer.
+
+```bash
+unzip tuink-<version>.zip
+./tuink-<version>/bin/tuink README.md
+```
+
+## Options and configuration
+
+```text
+Usage: tuink [options] [file]
+
+  --no-mouse       Disable mouse tracking and mouse interactions
+  --no-alt-screen  Do not use the alternate screen buffer
+  --no-color       Render without ANSI colors
+  --theme=<name>   Select blue, cyan (default), or light
+  --read           Start in reading mode
+  --profile        Log render timings
+  --profile-file=<path>
+                   Write render timings to a file
+  --help, -h       Show command-line help
+```
+
+UI settings are stored in `~/.config/tuink/tuink.properties`. Recovery data is
+stored under `~/.config/tuink/recovery`; on POSIX systems the directory uses
+`0700` permissions and snapshot files use `0600`.
+
+<details>
+<summary>Supported syntax-highlighting formats</summary>
+
+TUInk detects syntax by extension for Java, C headers/sources, Arduino, Python, Markdown,
+JavaScript, TypeScript, Gradle, shell scripts, SQL, Go, Rust, PHP, Ruby, Perl,
+Kotlin, Protocol Buffers, HTML, CSS/SCSS, diff/patch, CSV, JSON, YAML, TOML,
+INI/properties, and XML.
+
+It also recognizes `Dockerfile`, `.env`, `.gitignore`, `Makefile`,
+`.editorconfig`, Docker Compose files, and Git commit-message files by name.
+
+</details>
+
+## Build and release
+
+Run the full JVM test and build suite:
+
+```bash
+./gradlew clean check build
+```
+
+Official native releases use a pinned GraalVM Community toolchain. Follow the
+[native toolchain instructions](docs/building.md#native-toolchain), then run:
+
+```bash
+export GRAALVM_HOME=/absolute/path/to/graalvm-community-25.2.4+7.1
 ./gradlew clean :app:release
 ```
 
-Artifacts are written to `build/releases/`.
+The release task builds the tested JVM ZIP, glibc archive, Debian package, and
+SHA-256 manifest under `build/releases/`. It also runs a short native render
+benchmark. The task does not install or publish anything.
 
-Install the Debian package:
+## Project family
 
-```bash
-sudo apt install ./build/releases/tuink_<version>_<arch>.deb
-```
+| Project | Purpose | Status |
+|---|---|---|
+| **TUInk** | Non-modal terminal text editor | Functional application |
+| **TUIframe** | Reusable terminal UI runtime and widgets | Internal, incubating API |
 
-Or extract the native archive and use its `install.sh`.
-The archive scripts manage `/opt/tuink` and `/usr/local/bin/tuink`; they refuse
-to replace unrelated files or remove unrecognized directory contents.
+TUIframe is split into `tuiframe-core`, `tuiframe-jline`, and
+`tuiframe-widgets`. TUInk deliberately keeps editor-specific state and policy
+outside those reusable modules.
 
-Detailed documentation:
+## Development and documentation
 
-- Print the local build command reference with `./gradlew buildHelp`.
-- [Build and native targets](docs/building.md)
+- [Build, test, and native targets](docs/building.md)
 - [Release archives and Debian packaging](docs/packaging.md)
+- [Architecture decisions](docs/adr/)
+- [Compatibility policy](docs/compatibility.md)
 - [Render-loop profiling](docs/profiling.md)
 - [Render benchmarks](verification/performance/README.md)
-- [Compatibility policy](docs/compatibility.md)
 - [Security policy](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)
 
-## MVP keybindings
-
-- `Ctrl+Q`: quit (asks confirmation if dirty)
-- `Ctrl+O`: open file dialog (scrollable tree view)
-- `Ctrl+S`: save
-- `Ctrl+K`: save as (recommended, terminal-safe)
-- `Ctrl+Shift+S`: save as (if terminal passes it through)
-- Arrows: move cursor
-- `PageUp` / `PageDown`: scroll by page
-- `Home` / `End`: line start/end
-- `Backspace` / `Delete`: edit
-- `Enter`: insert newline
-- Typing: insert character
-- `Ctrl+F`: search mode (`Esc` to return)
-- `Ctrl+/`: toggle line comments on the current line or selected lines
-- Menu shortcuts: `F1` = `File`, `F2` = `Edit`, `F3` = `View`, `F4` = `Tab`, `F5` = `Settings`, `F6` = `Help` (`Alt+I/E/V/T/S/H` also works); navigation with `←/→`, `↑/↓`, `Enter`, `Esc`
-- Mouse:
-  - left click `File`/`Edit` in top bar to open/close corresponding menu
-  - left click menu item to execute it
-  - left click in text area to move cursor
-  - `Shift` + left click in the text area selects from the previous cursor position
-  - hold left mouse button and drag in text area to select text
-  - in `Find` panel, left click `Find/Replace` fields to change focus; click toggles (`Аа`, `word`, `*`) to switch options
-  - mouse wheel scrolls the document
-  - in open file dialog, item click only selects; click folder arrow to expand/collapse; double click item opens file / toggles folder / goes up on `..`; open selected file with `OK`; `Cancel` closes dialog
-- in search mode:
-  - `Enter`/`Ctrl+F` next, `Ctrl+G` previous, `Ctrl+R` replace, `Ctrl+A` replace all
-  - `Tab` move focus between `Find`, `Replace`, and option toggles
-  - `Space` toggles focused option (`i`, `word`, `*`)
-  - visible matches are highlighted in the editor; current selected match is highlighted stronger
-
-## Save behavior
-
-- `Ctrl+S` saves current file and shows confirmation in status bar.
-- if current file is read-only, editor opens `Save As` prompt with suggested new name.
-- closing one modified unnamed/read-only tab offers `Save As` and closes it after a successful save.
-- quitting with multiple modified tabs lists their names and offers `Save All`, `Discard All`, or `Cancel`; `Save All` opens `Save As` in turn for tabs that need a path.
-- automatic `Save As` suggestions skip existing files by adding a numeric suffix.
-- `Save As` validates target path and asks overwrite confirmation when file exists (`y/N`).
-- `Save As`/overwrite prompt is shown in a separate bar above status bar (red).
-- all save failures are explained in the save notification bar (read-only file, no access to directory, invalid target path, etc).
-- non-interactive save notifications are shown in a separate bar above status: green for success, red for errors, auto-hide after ~3s.
-- save writes through a private temporary file and move; replacement is atomic
-  when the filesystem supports atomic move, while the portable fallback makes
-  no crash-atomicity claim.
-- existing POSIX permission bits are preserved, including executable bits.
-- saving through a symbolic link updates its resolved target without replacing the link.
-- an atomic replacement gives the saved path a new inode; other hard links keep their previous content.
-- UI settings are stored in `~/.config/tuink/tuink.properties`. Only the
-  current `format=1` schema is accepted; an incompatible file is left unchanged
-  and the editor starts with defaults after showing a warning.
-- recovery snapshots are stored under `~/.config/tuink/recovery`; on POSIX
-  systems the directory is restricted to `0700` and snapshot files to `0600`.
-  Only current `format=4` snapshots are restored; they retain charset, BOM,
-  final-EOL state, mixed line separators, and create-vs-replace save intent. A
-  generation-specific text file is committed by one metadata replacement. On
-  filesystems with atomic move, an interrupted editor process cannot combine
-  old metadata with new text; the fallback makes no power-loss guarantee. Incompatible snapshots are
-  reported and left unchanged. A symlink in place of the recovery directory
-  is rejected.
-
-## Status indicators
-
-Status bar shows mini indicators:
-
-- `RO`/`RW` (read-only/read-write)
-- `ENC:<charset>`
-- `INS`
-
-## Syntax highlighting
-
-Auto-detected by file extension for:
-
-- `java`
-- `c`, `h`, `ino`
-- `py`
-- `md`, `markdown`
-- `js`, `mjs`, `cjs`, `jsx`
-- `ts`, `tsx`
-- `gradle`
-- `sh`, `bash`, `zsh`
-- `sql`
-- `go`
-- `rs`
-- `php`, `phtml`, `php5`, `php7`, `php8`
-- `rb`, `rake`, `gemspec`
-- `pl`, `pm`, `perl`, `t`
-- `kt`, `kts`
-- `proto`
-- `html`, `htm`
-- `css`, `scss`
-- `diff`, `patch`
-- `csv`
-- `json`
-- `yaml`, `yml`
-- `toml`
-- `ini`, `cfg`, `conf`, `properties`
-- `xml`
-
-Also auto-detected by file name for:
-
-- `Dockerfile`
-- `.env` (including `.env.*`)
-- `.gitignore`
-- `Makefile`
-- `.editorconfig`
-- `docker-compose.yml`, `docker-compose.yaml`
-- `git-commit*`
-
 ## License
 
-- Project license: Apache License 2.0 (see `LICENSE`)
-- Third-party notices: `THIRD_PARTY_NOTICES.md`
+TUInk is distributed under the Apache License 2.0. See [LICENSE](LICENSE) and
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

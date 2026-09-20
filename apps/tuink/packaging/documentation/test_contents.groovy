@@ -2,7 +2,8 @@ import groovy.io.FileType
 
 // Check the production staging outputs, including the complete upstream notice
 // trees. A developer document or unrelated runtime notice must not leak back in.
-Set<String> common = ['README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'SECURITY.md'] as Set
+Set<String> common = ['README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'SECURITY.md',
+    'docs/assets/tuink-menus.gif', 'docs/assets/tuink-tabs.gif'] as Set
 Map<String, List<String>> requiredNotices = [
     jvm: [],
     glibc: [],
@@ -30,6 +31,7 @@ bundles.each { String target, File directory ->
     if (sourceReadme.contains("](docs/building.md")) assert readme.contains("https://github.com/kosatchev/tuink/blob/${documentationRef}/docs/building.md")
     if (sourceReadme.contains('](LICENSE)')) assert readme.contains('](LICENSE)')
     if (sourceReadme.contains('](THIRD_PARTY_NOTICES.md)')) assert readme.contains('](THIRD_PARTY_NOTICES.md)')
+    if (sourceReadme.contains('](docs/assets/tuink-menus.gif)')) assert readme.contains('](docs/assets/tuink-menus.gif)')
     if (sourceReadme.contains('](SECURITY.md)')) assert readme.contains('](SECURITY.md)')
     String notices = new File(directory, 'THIRD_PARTY_NOTICES.md').getText('UTF-8')
     [].each { bundle ->

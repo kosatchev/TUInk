@@ -6,7 +6,7 @@ Before changing build or packaging behavior, read [Build and native targets](doc
 
 ## Development setup
 
-TUInk requires Java 17 or newer. Use the checked-in Gradle wrapper so local and CI builds use the same Gradle version. Native-image work must use the exact GraalVM Community 25.2.4 / Java 25 distribution, selected with an absolute `GRAALVM_HOME`; see [Native toolchain](docs/building.md#native-toolchain) for the pinned Linux x86_64 download and checksum.
+Development requires a JDK 17 toolchain. Set `JAVA_HOME` to JDK 17 and use the checked-in Gradle wrapper so local and CI builds use the same Gradle version. Native-image work additionally requires the exact GraalVM Community 25.2.4 / Java 25 distribution, selected separately with an absolute `GRAALVM_HOME`; keep `JAVA_HOME` on JDK 17. See [Native toolchain](docs/building.md#native-toolchain) for the pinned Linux x86_64 download and checksum, or the [setup and transfer guide in Russian](docs/setup-ru.md) for a new computer.
 
 ```bash
 ./gradlew check
@@ -48,7 +48,7 @@ Prefer small, typed state transitions over boolean flag combinations. Keep parsi
 
 ## Compatibility and persistence
 
-TUInk targets the current release contract. Do not introduce migrations, historical readers, deprecated aliases, or old-path fallbacks without an approved exception described in the [Compatibility policy](docs/compatibility.md).
+TUInk targets only the current release contract. Do not introduce migrations, historical readers, deprecated aliases, or old-path fallbacks. See the [Compatibility policy](docs/compatibility.md).
 
 Every persisted schema change must update:
 
@@ -80,7 +80,7 @@ Packaging changes should also exercise the relevant archive, installer, or Debia
 
 ## Documentation
 
-Update documentation in the same commit when behavior, commands, configuration, key bindings, storage formats, build prerequisites, or packaging procedures change. Describe the current supported behavior and call out destructive or manual migration steps explicitly.
+Update documentation in the same commit when behavior, commands, configuration, key bindings, storage formats, build prerequisites, or packaging procedures change. Describe the current supported behavior and call out destructive actions explicitly.
 
 ## Packaging and releases
 

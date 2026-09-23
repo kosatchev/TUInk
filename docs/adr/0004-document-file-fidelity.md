@@ -25,6 +25,11 @@ The document also retains `CREATE_NEW` versus `REPLACE_EXISTING` filesystem
 intent: opening a missing path cannot overwrite a file that appears before the
 first save, and recovery preserves the same constraint across restart.
 Undo snapshots and recovery snapshots carry the same file metadata.
+The document retains a SHA-256 baseline of the exact bytes last loaded or saved,
+along with the resolved target path. Normal save and Save As to the current file
+reject changed, removed, retargeted, or unverifiable files before committing.
+Recovery retains this disk baseline separately from the edited document text.
+Save As to a different path remains the way to preserve both versions.
 Malformed BOM-declared input and text not representable in the retained charset
 fail explicitly; encoding never substitutes replacement characters silently.
 BOM-less UTF-16 is intentionally not auto-detected: UTF-16 input must declare

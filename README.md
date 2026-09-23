@@ -42,7 +42,9 @@ language.
 
 ## Try it
 
-TUInk needs Java 17 or newer and an interactive terminal.
+Building and running from sources needs JDK 17 and an interactive terminal.
+The packaged JVM ZIP runs on Java 17 or newer. See the
+[setup and transfer guide in Russian](docs/setup-ru.md) for a new computer.
 
 ```bash
 ./gradlew --console=plain :app:run
@@ -61,6 +63,7 @@ Run `./gradlew buildHelp` for the complete local build command reference.
 ### Familiar editing
 
 - multiple tabs with mouse and keyboard navigation;
+- a shared application clipboard for copying, cutting, and pasting between tabs;
 - selection by keyboard, mouse drag, or Shift+Click;
 - undo and redo;
 - search across all tabs, with replacement in the active tab;
@@ -94,6 +97,11 @@ Run `./gradlew buildHelp` for the complete local build command reference.
   state;
 - preservation of existing POSIX permission bits;
 - safe saving through symbolic links without replacing the link itself.
+
+Normal saves check that the file still matches the bytes last opened or saved.
+If another process changed or removed it, TUInk retains your edits and reports
+the conflict. Use Save As with a different name to keep both versions, or reopen
+the file. This check also applies to recovered documents.
 
 ## Controls
 
@@ -166,13 +174,16 @@ Usage: tuink [options] [file]
   --read           Start in reading mode
   --profile        Log render timings
   --profile-file=<path>
-                   Write render timings to a file
+                   Write render timings to a new file
   --help, -h       Show command-line help
 ```
 
 UI settings are stored in `~/.config/tuink/tuink.properties`. Recovery data is
 stored under `~/.config/tuink/recovery`; on POSIX systems the directory uses
 `0700` permissions and snapshot files use `0600`.
+Active recovery snapshots are isolated between editor instances. If input ends
+or the editor is interrupted, its snapshots remain available for recovery on
+the next start.
 
 <details>
 <summary>Supported syntax-highlighting formats</summary>
@@ -220,6 +231,7 @@ outside those reusable modules.
 
 ## Development and documentation
 
+- [Перенос на другой компьютер, сборка и запуск (русский)](docs/setup-ru.md)
 - [Build, test, and native targets](docs/building.md)
 - [Release archives and Debian packaging](docs/packaging.md)
 - [Architecture decisions](docs/adr/)

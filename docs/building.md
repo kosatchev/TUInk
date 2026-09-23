@@ -10,7 +10,10 @@ This task only prints help. It does not compile sources or create artifacts.
 
 ## Requirements
 
-JVM builds and `check` require Java 17 and use the checked-in Gradle wrapper.
+JVM builds and `check` require a JDK 17 toolchain and use the checked-in
+Gradle 8.14.5 wrapper. Use JDK 17 for `JAVA_HOME` as well; CI uses Temurin 17.
+The Java vendor is not pinned for JVM builds. A step-by-step guide for a new
+computer is available in Russian: [Перенос, сборка и запуск](setup-ru.md).
 
 Check the active JVM and Gradle environment:
 
@@ -149,6 +152,12 @@ Native and release tasks require exactly GraalVM Community 25.2.4 with Java
 25. Automatic toolchain discovery is disabled: set `GRAALVM_HOME` to the
 absolute path of that distribution. This prevents a native release from being
 silently built with another local JDK or an outdated GraalVM.
+
+Keep `JAVA_HOME` pointing to JDK 17 and set `GRAALVM_HOME` separately.
+The native-image builder uses Java 25, but Gradle itself should still run
+on JDK 17. Gradle 8.14.5 does not support running on Java 25; that support
+starts with Gradle 9.1.0, as documented in the
+[Gradle compatibility matrix](https://docs.gradle.org/current/userguide/compatibility.html#java_runtime).
 
 The pinned Linux x86_64 archive is:
 

@@ -1,6 +1,6 @@
 # TUInk Compatibility Policy
 
-TUInk supports the current release, the current storage formats, and the current installation layout. Backward compatibility is not guaranteed unless an exception is explicitly approved and documented.
+TUInk supports only the current release, the current storage formats, and the current installation layout. It does not maintain compatibility machinery for obsolete versions.
 
 This policy governs application storage and installation contracts. It does not
 define compatibility for future published Java toolkit APIs, plugin APIs, or an
@@ -13,12 +13,9 @@ All current toolkit, `editor-contract`, and `editor-session` APIs are internal
 and incubating. Repository releases do not yet promise source or binary
 compatibility for them.
 
-Before any Java or plugin API becomes public, it must have its own SemVer/API
-version policy, automated API baseline, compatibility fixture, and documented
-deprecation period. At that point the default rule below against retaining
-deprecated APIs does not apply to that published contract during its supported
-deprecation window. Storage schema versions and plugin/API versions remain
-independent.
+Before any Java or plugin API becomes public, it must have its own version
+policy and automated contract checks. Storage schema versions and plugin/API
+versions remain independent.
 
 ## Default rule
 
@@ -31,18 +28,6 @@ Do not add compatibility machinery for obsolete TUInk versions. In particular, a
 - deprecated APIs kept only for old callers;
 - silent repair or reinterpretation of incompatible data;
 - installer or uninstaller logic for layouts that TUInk no longer owns.
-
-Natural compatibility is acceptable when the current implementation already understands older data without extra branches, ambiguity, or maintenance cost.
-
-## Exceptions
-
-An exception requires an explicit maintainer decision. Before implementing one, document:
-
-1. Which released versions or external consumers need it?
-2. What user data or workflow would otherwise be lost?
-3. Why is safe rejection insufficient?
-4. What is the smallest bounded implementation?
-5. When and how will the exception be removed?
 
 Security invariants are not legacy support. Validation, path containment, ownership markers, permission checks, and safe failure remain mandatory even when old data is rejected.
 
@@ -93,12 +78,17 @@ ui.theme=...
 
 The reader accepts only the current schema. Unknown formats, malformed values, missing required fields, and unsupported combinations are incompatible. TUInk must preserve the incompatible file, use documented defaults for the running process, and emit a clear warning. It must not silently rewrite the file as though it had been read successfully.
 
+Each settings save stages a complete snapshot in its own unique temporary file
+in the settings directory, then replaces the settings file. Concurrent editor
+instances never write, move, or delete each other's temporary files. The last
+completed replacement wins; settings from different instances are not merged.
+
 ### Recovery snapshots
 
 Recovery snapshots are stored under `~/.config/tuink/recovery/`. The current schema is:
 
 ```properties
-format=4
+format=5
 createdAtEpochMillis=...
 textGeneration=0123456789abcdef0123456789abcdef
 dirty=true
@@ -109,6 +99,9 @@ fileEncoding=UTF-8
 bomKind=UTF_8
 defaultLineSeparator=CRLF
 lineSeparators=CRLF,LF,CRLF
+fileBaseline.present=false
+fileBaseline.target=
+fileBaseline.sha256=
 cursor.line=0
 cursor.col=0
 viewport.topLine=0
@@ -131,6 +124,16 @@ most frequent separator, with the first encountered separator breaking ties.
 whether the current path was observed absent and therefore must not be
 overwritten without a later explicit authorization.
 
+`fileBaseline` records the last successfully loaded or saved file's physical,
+absolute normalized target path and SHA-256 digest of its original bytes. It is
+preserved across recovery so saving a restored document can detect changes made
+by another process since that load or save. The digest is exactly 64 lowercase
+hexadecimal characters. When `fileBaseline.present=false`, both target and
+digest must be empty. A baseline requires `currentFile.present=true` and
+`saveDisposition=REPLACE_EXISTING`. An existing-path snapshot without a known
+baseline can be restored, but ordinary save refuses to overwrite its file; use
+Save As with a different name or reopen the original file.
+
 `textGeneration` selects `<entry>.<generation>.txt`; the stable
 `<entry>.meta.properties` file is the commit point. Text is written to a new
 generation before metadata is replaced. Where atomic move is supported,
@@ -145,10 +148,25 @@ removes generation files. Partial cleanup is retried on startup (and before the
 same runtime id is reused), so live metadata never points at text already
 removed by the discard operation.
 
-Recovery readers accept only the current `format=4` schema. Earlier snapshots
-do not provide both the complete file metadata and generation commit protocol,
-so they are reported as incompatible and left unchanged rather than being
-upgraded implicitly.
+Recovery readers accept only the current `format=5` schema. Missing or unknown
+markers and incomplete metadata are rejected before restoration. Rejected
+metadata and text remain unchanged.
+
+Each entry has a private `<entry>.lock` sidecar. A running editor holds an
+exclusive filesystem lock while it owns that entry, including while a startup
+restore/discard prompt is awaiting input. Other instances skip owned entries
+and cannot overwrite or delete them, including pending deletion cleanup.
+Closing the store or terminating its process releases ownership without
+deleting the snapshot. Lock sidecars remain on disk so competing processes
+always lock the same file; they contain no document data and do not change the
+`format=5` snapshot schema. A filesystem that cannot provide locking fails
+safely with a recovery warning.
+
+Only an application exit authorized by the editor's quit flow clears its
+remaining runtime snapshots. End of input, an external interrupt, or an
+application failure preserves recovery and attempts a final save of dirty
+tabs without the usual autosave delay. Abrupt process termination can retain
+only the last successfully committed snapshot.
 
 All fields must be validated before a snapshot is used. Incompatible snapshots must remain intact, must not be overwritten by autosave, and may be deleted only through an explicit user action. The recovery directory and files must use restrictive permissions where the platform supports them: `0700` for directories and `0600` for files. Symlinks must not be followed when reading, writing, or deleting recovery data.
 
@@ -174,8 +192,8 @@ Persistence changes must test current-format round trips, missing and unknown fo
 
 Installer and uninstaller changes must test a clean installation, replacement of a marked TUInk installation, refusal of markerless or foreign paths, path containment, and idempotent cleanup of owned files.
 
-Tests for obsolete TUInk formats should exist only when an approved exception requires them.
+Tests cover the current schema and rejection of missing, unknown, or malformed markers.
 
 ## Documentation and releases
 
-Documentation must describe the current contract rather than promise unspecified backward compatibility. When a release changes a persisted schema, installation marker, or owned path, its release notes must state that older state is rejected and explain how users can preserve or remove it manually.
+Documentation and release notes describe the current supported contract. They do not provide migration instructions for obsolete versions.

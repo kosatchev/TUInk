@@ -1,7 +1,9 @@
 # Render-loop profiling
 
 `--profile` enables frame timing logs. `--profile-file=<path>` writes those
-logs to a file and also enables profiling.
+logs to a new file and also enables profiling. The log must differ from the
+document being opened. Existing files and symlinks are rejected without
+changing their contents; choose a fresh log path for each run.
 
 JVM examples:
 

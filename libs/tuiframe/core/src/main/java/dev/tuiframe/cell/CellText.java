@@ -119,33 +119,6 @@ public final class CellText {
         }
     }
 
-    /** Draws complete graphemes only and returns the first cell after the text. */
-    public static int draw(CellBuffer buffer, int row, int startCol, String text, CellStyle style, int endCol) {
-        if (buffer == null || text == null || text.isEmpty()) {
-            return startCol;
-        }
-        int outCol = startCol;
-        for (TerminalText.Grapheme grapheme : TerminalText.graphemes(text)) {
-            int advance = grapheme.tab()
-                ? TAB_WIDTH - (Math.max(0, outCol) % TAB_WIDTH)
-                : Math.max(1, grapheme.width());
-            if (outCol + advance > endCol) {
-                break;
-            }
-            if (grapheme.tab()) {
-                for (int cell = 0; cell < advance; cell++) {
-                    if (outCol + cell >= 0) {
-                        buffer.set(row, outCol + cell, " ", style);
-                    }
-                }
-            } else if (outCol >= 0) {
-                buffer.set(row, outCol, TerminalText.sanitizeGrapheme(grapheme.text()), style);
-            }
-            outCol += advance;
-        }
-        return outCol;
-    }
-
     /** Returns a grapheme-safe cell slice. A clipped half of a wide glyph becomes blank. */
     public static String clip(String text, int leftCells, int maxCells) {
         if (text == null || text.isEmpty() || maxCells <= 0) {

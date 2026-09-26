@@ -24,20 +24,6 @@ final class AnsiDiff {
     String diff(
         CellBuffer previous,
         CellBuffer current,
-        boolean colorEnabled,
-        ScrollHint scrollHint
-    ) {
-        return diff(
-            previous,
-            current,
-            TerminalCapabilities.DEFAULT.withColorEnabled(colorEnabled),
-            scrollHint
-        );
-    }
-
-    String diff(
-        CellBuffer previous,
-        CellBuffer current,
         TerminalCapabilities capabilities,
         ScrollHint scrollHint
     ) {

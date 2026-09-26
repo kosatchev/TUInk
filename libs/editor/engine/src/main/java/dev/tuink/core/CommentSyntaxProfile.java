@@ -51,10 +51,6 @@ public enum CommentSyntaxProfile {
         return lineCommentPrefix;
     }
 
-    public boolean supportsLineComments() {
-        return lineCommentPrefix != null;
-    }
-
     public boolean hashLine() {
         return hashLine;
     }

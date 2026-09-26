@@ -6,12 +6,12 @@ import java.util.Set;
  * Editing behavior profile selected by file type.
  */
 public enum LanguageProfile {
-    PLAIN_TEXT(true, ColonIndentMode.NONE, Set.of(), false, false),
-    GENERIC_CODE(true, ColonIndentMode.NONE, Set.of("else", "catch", "finally", "case", "default"), false, false),
-    PYTHON(true, ColonIndentMode.PYTHON, Set.of("elif", "else", "except", "finally", "case"), false, false),
-    YAML(false, ColonIndentMode.YAML, Set.of(), true, false),
-    MARKDOWN(false, ColonIndentMode.NONE, Set.of(), false, true),
-    STRUCTURED_TEXT(true, ColonIndentMode.NONE, Set.of(), false, false);
+    PLAIN_TEXT(true, ColonIndentMode.NONE, Set.of()),
+    GENERIC_CODE(true, ColonIndentMode.NONE, Set.of("else", "catch", "finally", "case", "default")),
+    PYTHON(true, ColonIndentMode.PYTHON, Set.of("elif", "else", "except", "finally", "case")),
+    YAML(false, ColonIndentMode.YAML, Set.of()),
+    MARKDOWN(false, ColonIndentMode.NONE, Set.of()),
+    STRUCTURED_TEXT(true, ColonIndentMode.NONE, Set.of());
 
     public enum ColonIndentMode {
         NONE,
@@ -22,21 +22,15 @@ public enum LanguageProfile {
     private final boolean bracketIndentEnabled;
     private final ColonIndentMode colonIndentMode;
     private final Set<String> dedentKeywords;
-    private final boolean yamlAutoListEnabled;
-    private final boolean markdownAutoListEnabled;
 
     LanguageProfile(
         boolean bracketIndentEnabled,
         ColonIndentMode colonIndentMode,
-        Set<String> dedentKeywords,
-        boolean yamlAutoListEnabled,
-        boolean markdownAutoListEnabled
+        Set<String> dedentKeywords
     ) {
         this.bracketIndentEnabled = bracketIndentEnabled;
         this.colonIndentMode = colonIndentMode;
         this.dedentKeywords = dedentKeywords;
-        this.yamlAutoListEnabled = yamlAutoListEnabled;
-        this.markdownAutoListEnabled = markdownAutoListEnabled;
     }
 
     public boolean bracketIndentEnabled() {
@@ -53,13 +47,5 @@ public enum LanguageProfile {
 
     public boolean keywordDedentEnabled() {
         return !dedentKeywords.isEmpty();
-    }
-
-    public boolean yamlAutoListEnabled() {
-        return yamlAutoListEnabled;
-    }
-
-    public boolean markdownAutoListEnabled() {
-        return markdownAutoListEnabled;
     }
 }

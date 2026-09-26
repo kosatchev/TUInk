@@ -20,7 +20,7 @@ class ScrollbarTest {
     void horizontalPainterUsesSharedThumbGeometry() {
         CellBuffer buffer = new CellBuffer(1, 5);
 
-        HorizontalScrollbar.draw(buffer, 0, 0, 5, 10, 5, ".", TRACK, "#", THUMB);
+        HorizontalScrollbar.draw(new Canvas(buffer), new Rect(0, 0, 5, 1), 10, 5, ".", TRACK, "#", THUMB);
 
         assertEquals(".", buffer.get(0, 0).grapheme());
         assertEquals(".", buffer.get(0, 1).grapheme());
@@ -34,7 +34,7 @@ class ScrollbarTest {
     void verticalPainterUsesTheSameGeometry() {
         CellBuffer buffer = new CellBuffer(5, 1);
 
-        VerticalScrollbar.draw(buffer, 0, 0, 5, 10, 0, ".", TRACK, "#", THUMB);
+        VerticalScrollbar.draw(new Canvas(buffer), new Rect(0, 0, 1, 5), 10, 0, ".", TRACK, "#", THUMB);
 
         for (int row = 0; row < 3; row++) {
             assertEquals("#", buffer.get(row, 0).grapheme());

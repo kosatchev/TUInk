@@ -112,7 +112,7 @@ class EditorViewTest {
             state,
             textLayout,
             engine,
-            new EditorView(CONTENT_TOP_ROW),
+            new EditorView(),
             columns
         );
     }

@@ -17,10 +17,6 @@ public final class ViewportController {
         }
     }
 
-    public void onManualHorizontalPan() {
-        manualHorizontalPan = true;
-    }
-
     public void onManualVerticalPan() {
         manualVerticalPan = true;
     }

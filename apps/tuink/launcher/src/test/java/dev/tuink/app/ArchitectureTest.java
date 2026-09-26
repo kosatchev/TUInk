@@ -38,7 +38,6 @@ class ArchitectureTest {
         .and().resideOutsideOfPackage("dev.tuiframe.jline..")
         .should().onlyDependOnClassesThat().resideInAnyPackage(
             "java..",
-            "dev.tuink.unicode..",
             "dev.tuiframe.."
         );
 

@@ -22,15 +22,22 @@ class ButtonTest {
     private static final CellStyle ACCENT = CellStyle.fg(CellColor.BRIGHT_CYAN);
 
     @Test
-    void canvasPainterMatchesLegacyForAUnicodeProductionButton() {
+    void canvasPainterDrawsCompleteUnicodeLabelWithMatchingHitGeometry() {
         Button button = new Button(1, 2, "中e\u0301");
-        CellBuffer legacy = filled(3, 12);
         CellBuffer actual = filled(3, 12);
 
-        button.draw(legacy, legacy.cols(), ACCENT);
         button.draw(new Canvas(actual), ACCENT);
 
-        assertBuffersEqual(legacy, actual);
+        assertEquals("[", actual.get(1, 2).grapheme());
+        assertEquals("中", actual.get(1, 3).grapheme());
+        assertTrue(actual.get(1, 4).continuation());
+        assertEquals("e\u0301", actual.get(1, 5).grapheme());
+        assertEquals("]", actual.get(1, 6).grapheme());
+        for (int col = 2; col <= 6; col++) {
+            assertEquals(ACCENT, actual.get(1, col).style());
+        }
+        assertEquals(".", actual.get(1, 1).grapheme());
+        assertEquals(".", actual.get(1, 7).grapheme());
         assertEquals(5, button.width());
         assertEquals(3, button.cursorCol());
         assertTrue(button.hit(1, 2));
@@ -196,17 +203,5 @@ class ButtonTest {
         CellBuffer buffer = new CellBuffer(rows, cols);
         buffer.fill(new Cell(".", CellStyle.DEFAULT));
         return buffer;
-    }
-
-    private static void assertBuffersEqual(CellBuffer expected, CellBuffer actual) {
-        assertEquals(expected.rows(), actual.rows());
-        assertEquals(expected.cols(), actual.cols());
-        for (int row = 0; row < expected.rows(); row++) {
-            for (int col = 0; col < expected.cols(); col++) {
-                assertEquals(expected.get(row, col), actual.get(row, col), col + "," + row);
-            }
-            assertEquals(expected.rowSignature1(row), actual.rowSignature1(row));
-            assertEquals(expected.rowSignature2(row), actual.rowSignature2(row));
-        }
     }
 }

@@ -244,10 +244,6 @@ public class EditorEngine {
         return GutterDiffMarker.NONE;
     }
 
-    public GutterDiffFlag gutterDiffFlagForLine(int lineIndex) {
-        return gutterDiffMarkerForLine(lineIndex).flag();
-    }
-
     public void setTabWidth(int tabWidth) {
         this.tabWidth = tabWidth <= 2 ? 2 : 4;
     }
@@ -1441,13 +1437,6 @@ public class EditorEngine {
         }
         String selected = model.getTextRange(range.start(), range.end());
         return selected.indexOf('\'') < 0;
-    }
-
-    private void insertPair(char open) {
-        Position cursor = model.clamp(state.getCursor());
-        Position afterOpen = model.insertChar(cursor, open);
-        model.insertChar(afterOpen, closingPairFor(open));
-        state.setCursor(afterOpen);
     }
 
     private void wrapSelectionWithPair(char open) {

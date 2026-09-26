@@ -25,24 +25,10 @@ public final class EditorView {
         HORIZONTAL
     }
 
-    private final int contentTopRow;
     private boolean mouseSelecting;
-    private boolean edgeAutoScrollDuringSelection;
     private Position lastClickPosition;
     private long lastClickAtNanos;
     private int tabWidth = 4;
-
-    public EditorView() {
-        this(1);
-    }
-
-    public EditorView(int contentTopRow) {
-        this.contentTopRow = Math.max(1, contentTopRow);
-    }
-
-    public CursorPosition cursorFromPlan(RenderPlan plan) {
-        return new CursorPosition(plan.cursorRow() + contentTopRow + 1, plan.cursorCol() + 1);
-    }
 
     public CursorPosition cursorFromPlan(RenderPlan plan, int contentTopRow) {
         int top = Math.max(1, contentTopRow);
@@ -51,36 +37,12 @@ public final class EditorView {
 
     public void cancelMouseSelection() {
         mouseSelecting = false;
-        edgeAutoScrollDuringSelection = false;
         lastClickPosition = null;
         lastClickAtNanos = 0L;
     }
 
     public void setTabWidth(int tabWidth) {
         this.tabWidth = tabWidth <= 2 ? 2 : 4;
-    }
-
-    public boolean handleMousePress(
-        KeyEvent.MouseEvent mouse,
-        TextModel model,
-        EditorState state,
-        RenderPlan plan,
-        int contentRows,
-        EditorEngine engine
-    ) {
-        return handleMousePress(mouse, model, state, plan, contentRows, engine, contentTopRow, false);
-    }
-
-    public boolean handleMousePress(
-        KeyEvent.MouseEvent mouse,
-        TextModel model,
-        EditorState state,
-        RenderPlan plan,
-        int contentRows,
-        EditorEngine engine,
-        int contentTopRow
-    ) {
-        return handleMousePress(mouse, model, state, plan, contentRows, engine, contentTopRow, false);
     }
 
     public boolean handleMousePress(
@@ -105,7 +67,6 @@ public final class EditorView {
         );
         if (hit != null) {
             mouseSelecting = true;
-            edgeAutoScrollDuringSelection = false;
             if (extendSelection) {
                 resetClickSequence();
                 engine.extendSelectionTo(hit);
@@ -116,7 +77,6 @@ public final class EditorView {
             }
         } else {
             mouseSelecting = false;
-            edgeAutoScrollDuringSelection = false;
             lastClickPosition = null;
             lastClickAtNanos = 0L;
         }
@@ -135,17 +95,6 @@ public final class EditorView {
         EditorState state,
         RenderPlan plan,
         int contentRows,
-        EditorEngine engine
-    ) {
-        handleMouseDrag(mouse, model, state, plan, contentRows, engine, contentTopRow);
-    }
-
-    public void handleMouseDrag(
-        KeyEvent.MouseEvent mouse,
-        TextModel model,
-        EditorState state,
-        RenderPlan plan,
-        int contentRows,
         EditorEngine engine,
         int contentTopRow
     ) {
@@ -155,7 +104,7 @@ public final class EditorView {
         int top = Math.max(1, contentTopRow);
         int bottom = top + Math.max(0, contentRows) - 1;
         KeyEvent.MouseEvent effectiveMouse = mouse;
-        edgeAutoScrollDuringSelection = autoScrollVerticalOnDrag(
+        autoScrollVerticalOnDrag(
             mouse,
             model,
             engine.textLayout(),
@@ -191,7 +140,7 @@ public final class EditorView {
         engine.ensureCursorVisible(contentRows, contentColumns, plan.wrapLines(), plan.wrapByWords());
     }
 
-    private boolean autoScrollVerticalOnDrag(
+    private void autoScrollVerticalOnDrag(
         KeyEvent.MouseEvent mouse,
         TextModel model,
         EditorTextLayout textLayout,
@@ -201,13 +150,13 @@ public final class EditorView {
         int contentTopRow
     ) {
         if (contentRows <= 0) {
-            return false;
+            return;
         }
         int top = Math.max(1, contentTopRow);
         int bottom = top + contentRows - 1;
         int delta = autoScrollDeltaForMouseRow(mouse.row(), top, bottom);
         if (delta == 0) {
-            return false;
+            return;
         }
         if (plan.wrapLines()) {
             int visibleCols = Math.max(0, plan.cols() - plan.gutterWidth() - plan.scrollbarWidth());
@@ -215,7 +164,7 @@ public final class EditorView {
             int maxWrappedTop = Math.max(0, plan.totalLines() - Math.max(1, contentRows));
             int targetWrappedTop = Math.max(0, Math.min(maxWrappedTop, currentWrappedTop + delta));
             if (targetWrappedTop == currentWrappedTop) {
-                return false;
+                return;
             }
             EditorViewportBehavior.WrapTop targetTop = EditorViewportBehavior.wrapTopFromWrappedOffsetNear(
                 model,
@@ -229,16 +178,14 @@ public final class EditorView {
                 tabWidth
             );
             EditorViewportBehavior.applyWrapTop(state, targetTop);
-            return true;
+            return;
         }
         int currentTop = state.getTopLine();
         int maxTop = Math.max(0, model.lineCount() - Math.max(1, contentRows));
         int targetTop = Math.max(0, Math.min(maxTop, currentTop + delta));
         if (targetTop != currentTop) {
             state.setTopLine(targetTop);
-            return true;
         }
-        return false;
     }
 
     private int autoScrollDeltaForMouseRow(int mouseRow, int top, int bottom) {
@@ -273,27 +220,11 @@ public final class EditorView {
             return;
         }
         mouseSelecting = false;
-        edgeAutoScrollDuringSelection = false;
         engine.finishSelection();
-    }
-
-    public boolean isEdgeAutoScrollDuringSelection() {
-        return edgeAutoScrollDuringSelection;
     }
 
     public boolean isMouseSelecting() {
         return mouseSelecting;
-    }
-
-    public Position mouseToTextPosition(
-        KeyEvent.MouseEvent mouse,
-        TextModel model,
-        EditorTextLayout textLayout,
-        EditorState state,
-        RenderPlan plan,
-        int contentRows
-    ) {
-        return mouseToTextPosition(mouse, model, textLayout, state, plan, contentRows, contentTopRow);
     }
 
     public Position mouseToTextPosition(

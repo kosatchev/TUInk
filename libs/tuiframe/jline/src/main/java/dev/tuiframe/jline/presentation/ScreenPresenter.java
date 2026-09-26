@@ -26,10 +26,6 @@ public final class ScreenPresenter {
     private boolean cursorVisible;
     private boolean cursorKnown;
 
-    public ScreenPresenter(PrintWriter writer, boolean colorEnabled) {
-        this(writer, TerminalCapabilities.DEFAULT.withColorEnabled(colorEnabled));
-    }
-
     public ScreenPresenter(PrintWriter writer, TerminalCapabilities capabilities) {
         this.writer = Objects.requireNonNull(writer, "writer");
         this.capabilities = Objects.requireNonNull(capabilities, "capabilities");

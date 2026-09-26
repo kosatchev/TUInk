@@ -1,6 +1,5 @@
 package dev.tuiframe.scroll;
 
-import dev.tuiframe.cell.CellBuffer;
 import dev.tuiframe.cell.Cell;
 import dev.tuiframe.cell.Canvas;
 import dev.tuiframe.geometry.Rect;
@@ -8,14 +7,10 @@ import dev.tuiframe.style.CellStyle;
 import java.util.Objects;
 
 /**
- * Reusable horizontal scrollbar painter (track + thumb) for cell buffers.
+ * Reusable horizontal scrollbar painter (track + thumb) for a Canvas.
  */
 public final class HorizontalScrollbar {
     private HorizontalScrollbar() {
-    }
-
-    public static boolean hitTrack(int mouseRow, int mouseCol, int row, int leftCol, int visibleCols) {
-        return mouseRow == row && ScrollInteraction.hitTrack(mouseCol, leftCol, visibleCols);
     }
 
     public static int scrollFromPointer(int mouseCol, int leftCol, int visibleCols, int totalItems) {
@@ -51,33 +46,6 @@ public final class HorizontalScrollbar {
             visibleCols,
             totalItems
         );
-    }
-
-    public static void draw(
-        CellBuffer buffer,
-        int row,
-        int leftCol,
-        int visibleCols,
-        int totalItems,
-        int scroll,
-        String trackGrapheme,
-        CellStyle trackStyle,
-        String thumbGrapheme,
-        CellStyle thumbStyle
-    ) {
-        if (visibleCols <= 0 || totalItems <= 0) {
-            return;
-        }
-        for (int i = 0; i < visibleCols; i++) {
-            buffer.set(row, leftCol + i, trackGrapheme, trackStyle);
-        }
-
-        int thumbSize = ScrollInteraction.thumbSize(visibleCols, totalItems);
-        int thumbOffset = ScrollInteraction.thumbOffset(visibleCols, totalItems, scroll);
-
-        for (int i = 0; i < thumbSize; i++) {
-            buffer.set(row, leftCol + thumbOffset + i, thumbGrapheme, thumbStyle);
-        }
     }
 
     /** Draws into a one-row track, honoring the canvas clip. */

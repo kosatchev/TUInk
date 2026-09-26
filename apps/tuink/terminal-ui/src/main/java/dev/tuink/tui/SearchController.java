@@ -69,21 +69,6 @@ final class SearchController {
         };
     }
 
-    static SearchFocus nextSearchFocus(SearchFocus focus) {
-        return switch (focus) {
-            case FIND -> SearchFocus.CASE;
-            case CASE -> SearchFocus.WORD;
-            case WORD -> SearchFocus.WILDCARD;
-            case WILDCARD -> SearchFocus.ALL;
-            case ALL -> SearchFocus.REPLACE;
-            case REPLACE -> SearchFocus.NEXT_BUTTON;
-            case NEXT_BUTTON -> SearchFocus.PREV_BUTTON;
-            case PREV_BUTTON -> SearchFocus.REPLACE_BUTTON;
-            case REPLACE_BUTTON -> SearchFocus.ALL_BUTTON;
-            case ALL_BUTTON -> SearchFocus.FIND;
-        };
-    }
-
     static SearchFocus nextSearchFocusHorizontal(SearchFocus focus) {
         return switch (focus) {
             case FIND -> SearchFocus.CASE;

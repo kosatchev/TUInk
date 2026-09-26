@@ -20,7 +20,7 @@ import java.util.Optional;
  *
  * <p>The field owns its value and grapheme-boundary cursor offset. Focus,
  * submission policy, validation, and application commands remain external.
- * The compatibility {@link #insert(String)} and {@link #set(String)} methods
+ * The {@link #insert(String)} and {@link #set(String)} methods
  * accept trusted application text unchanged, including tabs and controls.
  * Raw {@link TextInput} is printable by contract, while raw paste is
  * normalized to safe single-line content before insertion.</p>
@@ -41,10 +41,6 @@ public final class TextField implements InteractiveWidget<TextField.Action> {
     private int cursor;
     private TerminalText.Metrics cachedMetrics = EMPTY_METRICS;
     private boolean metricsValid = true;
-
-    public void insert(char ch) {
-        insertValue(String.valueOf(ch));
-    }
 
     public void insert(String text) {
         insertValue(text);

@@ -1,6 +1,5 @@
 package dev.tuiframe.widget;
 
-import dev.tuiframe.cell.CellBuffer;
 import dev.tuiframe.cell.CellText;
 import dev.tuiframe.cell.Canvas;
 import dev.tuiframe.geometry.Rect;
@@ -76,14 +75,6 @@ public final class Button implements InteractiveWidget<Button.Action> {
 
     public boolean hit(int hitRow, int hitCol) {
         return hitRow == row && hitCol >= col && hitCol < col + width();
-    }
-
-    public void draw(CellBuffer buffer, int cols, CellStyle style) {
-        drawAt(buffer, row, cols, style);
-    }
-
-    public void drawAt(CellBuffer buffer, int drawRow, int cols, CellStyle style) {
-        CellText.draw(buffer, drawRow, col, renderedText(), style, cols);
     }
 
     /** Draws at the button's local Canvas coordinates with strict clipping. */

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuiframe.capability.TerminalCapabilities;
 import dev.tuiframe.geometry.Point;
 import dev.tuiframe.cell.CellBuffer;
 import dev.tuiframe.screen.Frame;
@@ -46,7 +47,10 @@ class AnsiDiffUnicodeSafetyTest {
         current.set(0, 1, "b", CellStyle.DEFAULT);
 
         StringWriter output = new StringWriter();
-        ScreenPresenter presenter = new ScreenPresenter(new PrintWriter(output), false);
+        ScreenPresenter presenter = new ScreenPresenter(
+            new PrintWriter(output),
+            TerminalCapabilities.DEFAULT.withColorEnabled(false)
+        );
         presenter.present(frame(previous));
         output.getBuffer().setLength(0);
 
@@ -59,7 +63,10 @@ class AnsiDiffUnicodeSafetyTest {
 
     private static String present(CellBuffer buffer) {
         StringWriter output = new StringWriter();
-        ScreenPresenter presenter = new ScreenPresenter(new PrintWriter(output), false);
+        ScreenPresenter presenter = new ScreenPresenter(
+            new PrintWriter(output),
+            TerminalCapabilities.DEFAULT.withColorEnabled(false)
+        );
         presenter.present(frame(buffer));
         return output.toString();
     }

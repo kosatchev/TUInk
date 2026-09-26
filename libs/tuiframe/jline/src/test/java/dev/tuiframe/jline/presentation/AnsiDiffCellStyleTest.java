@@ -69,7 +69,7 @@ class AnsiDiffCellStyleTest {
         );
         CellBuffer current = oneCell("x", changed);
 
-        String ansi = new AnsiDiff().diff(previous, current, true, ScrollHint.none());
+        String ansi = new AnsiDiff().diff(previous, current, TerminalCapabilities.DEFAULT, ScrollHint.none());
 
         assertEquals("\u001B[1;1H" + colorAnsi(changed) + "x" + RESET, ansi);
     }
@@ -82,7 +82,7 @@ class AnsiDiffCellStyleTest {
         CellBuffer current = oneCell("x", secondStyle);
 
         assertNotSame(firstStyle, secondStyle);
-        assertEquals("", new AnsiDiff().diff(previous, current, true, ScrollHint.none()));
+        assertEquals("", new AnsiDiff().diff(previous, current, TerminalCapabilities.DEFAULT, ScrollHint.none()));
     }
 
     @Test
@@ -93,7 +93,7 @@ class AnsiDiffCellStyleTest {
         current.set(0, 0, "x", firstStyle);
         current.set(0, 1, "y", secondStyle);
 
-        String ansi = new AnsiDiff().diff(null, current, true, ScrollHint.none());
+        String ansi = new AnsiDiff().diff(null, current, TerminalCapabilities.DEFAULT, ScrollHint.none());
 
         assertEquals(FULL_REDRAW_PREFIX + colorAnsi(firstStyle) + "xy" + RESET, ansi);
     }
@@ -120,7 +120,12 @@ class AnsiDiffCellStyleTest {
     }
 
     private static String fullRedraw(AnsiDiff diff, CellStyle style, boolean colorEnabled) {
-        return diff.diff(null, oneCell("x", style), colorEnabled, ScrollHint.none());
+        return diff.diff(
+            null,
+            oneCell("x", style),
+            TerminalCapabilities.DEFAULT.withColorEnabled(colorEnabled),
+            ScrollHint.none()
+        );
     }
 
     private static CellBuffer oneCell(String grapheme, CellStyle style) {

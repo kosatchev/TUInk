@@ -1,6 +1,5 @@
 package dev.tuiframe.text;
 
-import dev.tuink.unicode.GraphemeText;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -380,29 +379,6 @@ public final class TerminalText {
             end = next;
         }
         return end == value.length() ? value : value.substring(0, end);
-    }
-
-    public static int previousBoundary(String text, int offset) {
-        return GraphemeText.previousBoundary(text, offset);
-    }
-
-    public static int nextBoundary(String text, int offset) {
-        return GraphemeText.nextBoundary(text, offset);
-    }
-
-    public static int floorBoundary(String text, int offset) {
-        return GraphemeText.floorBoundary(text, offset);
-    }
-
-    public static boolean isBoundary(String text, int offset) {
-        String value = text == null ? "" : text;
-        // Preserve the legacy facade's endpoint-clamping semantics.
-        int safeOffset = Math.max(0, Math.min(offset, value.length()));
-        return GraphemeText.isBoundary(value, safeOffset);
-    }
-
-    public static int ceilBoundary(String text, int offset) {
-        return GraphemeText.ceilBoundary(text, offset);
     }
 
     public static int visualColumnAt(String text, int offset, int tabWidth) {

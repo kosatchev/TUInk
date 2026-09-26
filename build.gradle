@@ -37,7 +37,7 @@ subprojects {
 
 def allowedProjectDependencies = [
     ':unicode-text'    : [] as Set,
-    ':tuiframe-core'   : [':unicode-text'] as Set,
+    ':tuiframe-core'   : [] as Set,
     ':tuiframe-jline'  : [':tuiframe-core'] as Set,
     ':tuiframe-widgets': [':tuiframe-core'] as Set,
     ':editor-contract' : [] as Set,

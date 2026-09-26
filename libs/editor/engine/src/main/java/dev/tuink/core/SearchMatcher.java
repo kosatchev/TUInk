@@ -81,10 +81,6 @@ public final class SearchMatcher {
         return false;
     }
 
-    public boolean matchesEntire(String source) {
-        return source != null && matchesRange(source, 0, source.length());
-    }
-
     private boolean acceptsBoundaries(String source, int start, int end) {
         return matchMode != SearchOptions.MatchMode.WHOLE_WORD || isWholeWord(source, start, end);
     }

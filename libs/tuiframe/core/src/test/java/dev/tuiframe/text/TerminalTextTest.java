@@ -29,28 +29,6 @@ class TerminalTextTest {
     }
 
     @Test
-    void floorsAndCeilsOffsetsInsideCombiningAndEmojiClusters() {
-        String text = "A" + COMBINING_E + FAMILY + "B";
-
-        assertEquals(1, TerminalText.floorBoundary(text, 2));
-        assertEquals(3, TerminalText.ceilBoundary(text, 2));
-        assertEquals(1, TerminalText.previousBoundary(text, 2));
-        assertEquals(3, TerminalText.nextBoundary(text, 2));
-
-        assertEquals(3, TerminalText.floorBoundary(text, 8));
-        assertEquals(14, TerminalText.ceilBoundary(text, 8));
-        assertEquals(3, TerminalText.previousBoundary(text, 8));
-        assertEquals(14, TerminalText.nextBoundary(text, 8));
-
-        assertTrue(TerminalText.isBoundary(text, 3));
-        assertFalse(TerminalText.isBoundary(text, 8));
-        assertEquals(0, TerminalText.floorBoundary(text, -10));
-        assertEquals(text.length(), TerminalText.ceilBoundary(text, text.length() + 10));
-        assertTrue(TerminalText.isBoundary(text, -10));
-        assertTrue(TerminalText.isBoundary(text, text.length() + 10));
-    }
-
-    @Test
     void calculatesTerminalCellWidthsForTextAndEmojiClusters() {
         assertEquals(1, TerminalText.graphemeWidth("A"));
         assertEquals(1, TerminalText.graphemeWidth(COMBINING_E));

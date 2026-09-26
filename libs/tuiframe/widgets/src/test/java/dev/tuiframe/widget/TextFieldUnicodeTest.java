@@ -55,7 +55,7 @@ class TextFieldUnicodeTest {
 
         assertEquals("a\u0301x", inserted.text());
         assertEquals("a\u0301".length(), inserted.cursor());
-        assertTrue(TerminalText.isBoundary(inserted.text(), inserted.cursor()));
+        assertTrue(TerminalText.metrics(inserted.text(), 4).isBoundary(inserted.cursor()));
 
         TextField deleted = new TextField();
         deleted.set("🇦X🇧🇨");
@@ -63,11 +63,11 @@ class TextFieldUnicodeTest {
         deleted.backspace();
 
         assertEquals("🇦🇧🇨", deleted.text());
-        assertTrue(TerminalText.isBoundary(deleted.text(), deleted.cursor()));
+        assertTrue(TerminalText.metrics(deleted.text(), 4).isBoundary(deleted.cursor()));
     }
 
     @Test
-    void randomizedLegacyEditsNeverLeaveCursorInsideAGrapheme() {
+    void randomizedEditsNeverLeaveCursorInsideAGrapheme() {
         TextField field = new TextField();
         List<String> inputs = List.of("a", "\u0301", "中", "😀", "🇦", "🇧", "\u200D");
         Random random = new Random(0x54_45_58_54L);
@@ -85,7 +85,7 @@ class TextFieldUnicodeTest {
             }
             assertTrue(field.cursor() >= 0 && field.cursor() <= field.length());
             assertTrue(
-                TerminalText.isBoundary(field.text(), field.cursor()),
+                TerminalText.metrics(field.text(), 4).isBoundary(field.cursor()),
                 "cursor split a grapheme at step " + step
             );
             assertTrue(field.cursorCellColumn() <= field.displayWidth());

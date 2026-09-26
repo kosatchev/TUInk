@@ -3,7 +3,3 @@ plugins {
 }
 
 group = 'dev.tuiframe'
-
-dependencies {
-    implementation project(':unicode-text')
-}

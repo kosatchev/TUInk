@@ -1460,54 +1460,8 @@ public class RenderPlanBuilder {
         return ch == '(' || ch == ')' || ch == '[' || ch == ']' || ch == '{' || ch == '}';
     }
 
-    private int nestingDepthAt(TextModel model, Position pos, char bracket) {
-        int depth = 0;
-        int scanned = 0;
-        for (int line = 0; line <= pos.line(); line++) {
-            String text = model.getLine(line);
-            boolean[] quotedMask = quotedMaskForLine(model, line, text);
-            int endExclusive = line == pos.line() ? Math.min(pos.col(), text.length()) : text.length();
-            for (int col = 0; col < endExclusive; col++) {
-                if (quotedMask[col]) {
-                    continue;
-                }
-                char ch = text.charAt(col);
-                if (isOpeningBracket(ch)) {
-                    depth++;
-                } else if (isClosingBracket(ch)) {
-                    depth = Math.max(0, depth - 1);
-                }
-                scanned++;
-                if (scanned > MAX_BRACKET_SCAN_CHARS) {
-                    return fallbackDepthFor(bracket, depth);
-                }
-            }
-        }
-        if (isOpeningBracket(bracket)) {
-            return Math.max(1, depth + 1);
-        }
-        return Math.max(1, depth);
-    }
-
-    private static int fallbackDepthFor(char bracket, int depth) {
-        if (isOpeningBracket(bracket)) {
-            return Math.max(1, depth + 1);
-        }
-        return Math.max(1, depth);
-    }
-
     private static boolean isOpeningBracket(char ch) {
         return ch == '(' || ch == '[' || ch == '{';
-    }
-
-    private static boolean isClosingBracket(char ch) {
-        return ch == ')' || ch == ']' || ch == '}';
-    }
-
-    private static boolean isMatchingPair(char open, char close) {
-        return (open == '(' && close == ')')
-            || (open == '[' && close == ']')
-            || (open == '{' && close == '}');
     }
 
     private Style rainbowBracketStyle(int depth) {

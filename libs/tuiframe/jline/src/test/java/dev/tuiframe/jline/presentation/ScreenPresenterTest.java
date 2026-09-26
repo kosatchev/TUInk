@@ -19,12 +19,13 @@ import java.io.StringWriter;
 import org.junit.jupiter.api.Test;
 
 class ScreenPresenterTest {
+    private static final TerminalCapabilities MONOCHROME = TerminalCapabilities.DEFAULT.withColorEnabled(false);
     private static final String SHOW_CURSOR = "\u001B[?25h";
 
     @Test
     void firstFrameIsAFullRedrawAndAnIdenticalFrameWritesNothing() {
         RecordingPrintWriter writer = new RecordingPrintWriter();
-        ScreenPresenter presenter = new ScreenPresenter(writer, true);
+        ScreenPresenter presenter = new ScreenPresenter(writer, TerminalCapabilities.DEFAULT);
         Frame frame = frame(buffer("abc", 1, 4), 0, 0, true);
 
         ScreenPresenter.PresentResult first = presenter.present(frame);
@@ -50,7 +51,7 @@ class ScreenPresenterTest {
     @Test
     void cursorOnlyUpdateConvertsZeroBasedCoordinatesToAnsiCoordinates() {
         RecordingPrintWriter writer = new RecordingPrintWriter();
-        ScreenPresenter presenter = new ScreenPresenter(writer, false);
+        ScreenPresenter presenter = new ScreenPresenter(writer, MONOCHROME);
         CellBuffer cells = buffer("abc", 2, 4);
         presenter.present(frame(cells, 0, 0, false));
         writer.clearOutput();
@@ -67,7 +68,7 @@ class ScreenPresenterTest {
     @Test
     void cellPatchRestoresAnUnchangedVisibleCursorPosition() {
         RecordingPrintWriter writer = new RecordingPrintWriter();
-        ScreenPresenter presenter = new ScreenPresenter(writer, false);
+        ScreenPresenter presenter = new ScreenPresenter(writer, MONOCHROME);
         presenter.present(frame(buffer("abcde", 1, 5), 2, 0, true));
         writer.clearOutput();
 
@@ -87,7 +88,7 @@ class ScreenPresenterTest {
     @Test
     void invalidateAndDimensionChangesForceFullRedraws() {
         RecordingPrintWriter writer = new RecordingPrintWriter();
-        ScreenPresenter presenter = new ScreenPresenter(writer, true);
+        ScreenPresenter presenter = new ScreenPresenter(writer, TerminalCapabilities.DEFAULT);
         Frame original = frame(buffer("old", 1, 4), 0, 0, false);
         presenter.present(original);
         writer.clearOutput();
@@ -113,8 +114,8 @@ class ScreenPresenterTest {
     void presenterInstancesDoNotShareFrameOrCursorState() {
         RecordingPrintWriter firstWriter = new RecordingPrintWriter();
         RecordingPrintWriter secondWriter = new RecordingPrintWriter();
-        ScreenPresenter first = new ScreenPresenter(firstWriter, true);
-        ScreenPresenter second = new ScreenPresenter(secondWriter, false);
+        ScreenPresenter first = new ScreenPresenter(firstWriter, TerminalCapabilities.DEFAULT);
+        ScreenPresenter second = new ScreenPresenter(secondWriter, MONOCHROME);
         Frame frame = frame(buffer("shared", 1, 7), 3, 0, true);
 
         ScreenPresenter.PresentResult firstResult = first.present(frame);
@@ -136,7 +137,7 @@ class ScreenPresenterTest {
     @Test
     void wideGraphemesAreEmittedOnceAndControlPayloadsStaySanitized() {
         RecordingPrintWriter writer = new RecordingPrintWriter();
-        ScreenPresenter presenter = new ScreenPresenter(writer, false);
+        ScreenPresenter presenter = new ScreenPresenter(writer, MONOCHROME);
         CellBuffer cells = new CellBuffer(1, 8);
         cells.set(0, 0, "中", CellStyle.DEFAULT);
         cells.set(0, 2, "\u001B]52;c;secret\u0007", CellStyle.DEFAULT);
@@ -154,7 +155,7 @@ class ScreenPresenterTest {
     @Test
     void horizontalScrollHintFallsBackToSafeRowDrawingForWideCells() {
         RecordingPrintWriter writer = new RecordingPrintWriter();
-        ScreenPresenter presenter = new ScreenPresenter(writer, false);
+        ScreenPresenter presenter = new ScreenPresenter(writer, MONOCHROME);
         CellBuffer previous = new CellBuffer(1, 7);
         previous.set(0, 0, "A", CellStyle.DEFAULT);
         previous.set(0, 1, "中", CellStyle.DEFAULT);
@@ -182,7 +183,7 @@ class ScreenPresenterTest {
     @Test
     void horizontalScrollHintWithoutMatchingOverlapFallsBackToOrdinaryDiff() {
         RecordingPrintWriter writer = new RecordingPrintWriter();
-        ScreenPresenter presenter = new ScreenPresenter(writer, false);
+        ScreenPresenter presenter = new ScreenPresenter(writer, MONOCHROME);
         presenter.present(frame(buffer("abcde", 1, 5), 0, 0, false));
         writer.clearOutput();
 
@@ -204,7 +205,7 @@ class ScreenPresenterTest {
     @Test
     void validRightScrollHintUsesDeleteCharacterAndDrawsEnteringCells() {
         RecordingPrintWriter writer = new RecordingPrintWriter();
-        ScreenPresenter presenter = new ScreenPresenter(writer, false);
+        ScreenPresenter presenter = new ScreenPresenter(writer, MONOCHROME);
         presenter.present(frame(buffer("abcde", 1, 5), 0, 0, false));
         writer.clearOutput();
 
@@ -250,7 +251,7 @@ class ScreenPresenterTest {
     @Test
     void validVerticalScrollHintsUseTerminalScrollAndDrawEnteringRows() {
         RecordingPrintWriter writer = new RecordingPrintWriter();
-        ScreenPresenter presenter = new ScreenPresenter(writer, false);
+        ScreenPresenter presenter = new ScreenPresenter(writer, MONOCHROME);
         presenter.present(frame(rows("aaaaa", "bbbbb", "ccccc", "ddddd"), 0, 0, false));
         writer.clearOutput();
         Rect region = new Rect(0, 0, 5, 4);
@@ -307,7 +308,7 @@ class ScreenPresenterTest {
     @Test
     void failedOutputInvalidatesPhysicalStateAndRetryUsesAFullRedraw() {
         RecoverablePrintWriter writer = new RecoverablePrintWriter();
-        ScreenPresenter presenter = new ScreenPresenter(writer, true);
+        ScreenPresenter presenter = new ScreenPresenter(writer, TerminalCapabilities.DEFAULT);
         Frame initial = frame(buffer("first", 1, 6), 0, 0, false);
         Frame changed = frame(buffer("next", 1, 6), 0, 0, true);
         presenter.present(initial);
@@ -335,7 +336,7 @@ class ScreenPresenterTest {
     @Test
     void runtimeFailureAfterPartialWriteInvalidatesStateBeforeRetry() {
         RecoverablePrintWriter writer = new RecoverablePrintWriter();
-        ScreenPresenter presenter = new ScreenPresenter(writer, true);
+        ScreenPresenter presenter = new ScreenPresenter(writer, TerminalCapabilities.DEFAULT);
         Frame initial = frame(buffer("first", 1, 6), 0, 0, false);
         Frame changed = frame(buffer("later", 1, 6), 0, 0, true);
         presenter.present(initial);

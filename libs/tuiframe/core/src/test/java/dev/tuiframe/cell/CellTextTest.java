@@ -20,7 +20,7 @@ class CellTextTest {
     void drawExpandsTabsAndKeepsWideCellFootprintsIntact() {
         CellBuffer buffer = new CellBuffer(1, 8);
 
-        int end = CellText.draw(buffer, 0, 0, "a\t中", CellStyle.DEFAULT, 8);
+        int end = CellText.draw(new Canvas(buffer), 0, 0, "a\t中", CellStyle.DEFAULT);
 
         assertEquals(6, end);
         assertEquals("a", buffer.get(0, 0).grapheme());
@@ -33,9 +33,9 @@ class CellTextTest {
     void drawDoesNotEmitHalfOfAWideGrapheme() {
         CellBuffer buffer = new CellBuffer(1, 2);
 
-        int end = CellText.draw(buffer, 0, 1, "中", CellStyle.DEFAULT, 2);
+        int end = CellText.draw(new Canvas(buffer), 1, 0, "中", CellStyle.DEFAULT);
 
-        assertEquals(1, end);
+        assertEquals(3, end);
         assertEquals(Cell.EMPTY, buffer.get(0, 1));
     }
 
@@ -73,33 +73,6 @@ class CellTextTest {
         assertEquals(".", buffer.get(0, 1).grapheme());
         assertEquals("B", buffer.get(0, 2).grapheme());
         assertEquals(".", buffer.get(0, 3).grapheme());
-    }
-
-    @Test
-    void legacyAndCanvasOverloadsKeepTheirDocumentedTabPhases() {
-        CellBuffer legacy = new CellBuffer(1, 12);
-        CellBuffer canvasBuffer = new CellBuffer(1, 12);
-
-        int legacyEnd = CellText.draw(
-            legacy,
-            0,
-            3,
-            "a\tb",
-            CellStyle.DEFAULT,
-            12
-        );
-        int canvasEnd = CellText.draw(
-            new Canvas(canvasBuffer),
-            3,
-            0,
-            "a\tb",
-            CellStyle.DEFAULT
-        );
-
-        assertEquals(9, legacyEnd);
-        assertEquals("b", legacy.get(0, 8).grapheme());
-        assertEquals(8, canvasEnd);
-        assertEquals("b", canvasBuffer.get(0, 7).grapheme());
     }
 
     @Test

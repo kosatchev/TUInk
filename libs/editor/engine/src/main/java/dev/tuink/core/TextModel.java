@@ -454,20 +454,6 @@ public class TextModel {
         fileMetadata = requireCompatibleMetadata(metadata, lineCount());
     }
 
-    /** Resets persistence metadata for a new file without changing document text. */
-    public void resetFileMetadata() {
-        fileMetadata = DocumentFileMetadata.newDocument(lineCount());
-        fileBaseline = null;
-    }
-
-    public int maxLineLength() {
-        int max = 0;
-        for (int i = 0; i < lineCount(); i++) {
-            max = Math.max(max, getLine(i).length());
-        }
-        return max;
-    }
-
     /** Restores only separators reinserted by an undo/redo operation. */
     void restoreLineSeparators(int firstSeparator, List<String> restored) {
         if (restored.isEmpty()) {

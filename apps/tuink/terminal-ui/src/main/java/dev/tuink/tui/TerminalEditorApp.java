@@ -2586,10 +2586,6 @@ public class TerminalEditorApp {
         }
     }
 
-    private boolean isAction(KeyEvent key, KeyEvent.Action expected) {
-        return key instanceof KeyEvent.ActionEvent actionEvent && actionEvent.action() == expected;
-    }
-
     static SearchFocus toggleTarget(SearchBarView.Action action) {
         if (action == null) {
             return null;

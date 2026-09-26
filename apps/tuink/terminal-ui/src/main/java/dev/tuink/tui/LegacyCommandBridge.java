@@ -189,10 +189,6 @@ final class LegacyCommandBridge {
         return invoke(invocation).orElse(KeyEvent.Action.UNKNOWN);
     }
 
-    int commandCount() {
-        return registry.size();
-    }
-
     private void registerBuiltins() {
         bind(KeyEvent.Action.CTRL_Q, APP_QUIT, "Quit");
         bind(KeyEvent.Action.CTRL_O, DOCUMENT_OPEN, "Open document");

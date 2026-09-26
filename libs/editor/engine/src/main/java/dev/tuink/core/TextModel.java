@@ -468,6 +468,18 @@ public class TextModel {
         return max;
     }
 
+    /** Restores only separators reinserted by an undo/redo operation. */
+    void restoreLineSeparators(int firstSeparator, List<String> restored) {
+        if (restored.isEmpty()) {
+            return;
+        }
+        List<String> separators = new ArrayList<>(fileMetadata.lineSeparators());
+        for (int index = 0; index < restored.size(); index++) {
+            separators.set(firstSeparator + index, restored.get(index));
+        }
+        fileMetadata = fileMetadata.withLineSeparators(separators);
+    }
+
     public long revision() {
         return revision;
     }

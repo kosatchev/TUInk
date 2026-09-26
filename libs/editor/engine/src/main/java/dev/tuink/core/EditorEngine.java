@@ -2,6 +2,7 @@ package dev.tuink.core;
 
 import dev.tuink.unicode.GraphemeText;
 import java.io.IOException;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
@@ -134,7 +135,7 @@ public class EditorEngine {
         preferredVisualColumn = -1;
         breakCoalescing();
         applyEdit(EditKind.NONE, () -> {
-            List<EditOp.ReplaceRange> tracked = new ArrayList<>(effective.size());
+            List<TrackedEdit> tracked = new ArrayList<>(effective.size());
             Position earliestResult = state.getCursor();
             for (int index = effective.size() - 1; index >= 0; index--) {
                 TextReplacement replacement = effective.get(index);
@@ -651,7 +652,7 @@ public class EditorEngine {
         }
 
         ViewState before = captureViewState();
-        List<EditOp.ReplaceRange> ops = new ArrayList<>();
+        List<TrackedEdit> ops = new ArrayList<>();
         SelectionRange selection = currentSelection();
         Position rangeStart = selection == null ? model.clamp(state.getCursor()) : selection.start();
         Position rangeEnd = selection == null ? rangeStart : selection.end();
@@ -663,7 +664,7 @@ public class EditorEngine {
         } else {
             Position afterInsert = applyReplaceAndTrack(ops, rangeStart, rangeEnd, String.valueOf(ch));
             state.setCursor(afterInsert);
-            EditOp.ReplaceRange outdent = maybeAutoOutdentKeywordLineOp();
+            TrackedEdit outdent = maybeAutoOutdentKeywordLineOp();
             if (outdent != null) {
                 ops.add(outdent);
             }
@@ -686,13 +687,13 @@ public class EditorEngine {
         preferredVisualColumn = -1;
         boolean hadSelection = state.hasSelection();
         ViewState before = captureViewState();
-        List<EditOp.ReplaceRange> ops = new ArrayList<>();
+        List<TrackedEdit> ops = new ArrayList<>();
         SelectionRange selection = currentSelection();
         Position rangeStart = selection == null ? model.clamp(state.getCursor()) : selection.start();
         Position rangeEnd = selection == null ? rangeStart : selection.end();
         Position afterInsert = applyReplaceAndTrack(ops, rangeStart, rangeEnd, text);
         state.setCursor(afterInsert);
-        EditOp.ReplaceRange outdent = maybeAutoOutdentKeywordLineOp();
+        TrackedEdit outdent = maybeAutoOutdentKeywordLineOp();
         if (outdent != null) {
             ops.add(outdent);
         }
@@ -704,7 +705,7 @@ public class EditorEngine {
         preferredVisualColumn = -1;
         boolean hadSelection = state.hasSelection();
         ViewState before = captureViewState();
-        List<EditOp.ReplaceRange> ops = new ArrayList<>();
+        List<TrackedEdit> ops = new ArrayList<>();
         SelectionRange selection = currentSelection();
         Position rangeStart = selection == null ? model.clamp(state.getCursor()) : selection.start();
         Position rangeEnd = selection == null ? rangeStart : selection.end();
@@ -715,7 +716,7 @@ public class EditorEngine {
         String tabText = indentUnit(cursor.line(), indentPrefix);
         Position afterInsert = applyReplaceAndTrack(ops, rangeStart, rangeEnd, tabText);
         state.setCursor(afterInsert);
-        EditOp.ReplaceRange outdent = maybeAutoOutdentKeywordLineOp();
+        TrackedEdit outdent = maybeAutoOutdentKeywordLineOp();
         if (outdent != null) {
             ops.add(outdent);
         }
@@ -726,37 +727,75 @@ public class EditorEngine {
     public void backspace() {
         preferredVisualColumn = -1;
         boolean hadSelection = state.hasSelection();
-        applyEdit(hadSelection ? EditKind.NONE : EditKind.BACKSPACE, () -> {
-            if (state.hasSelection()) {
-                deleteSelectionIfAny();
-            } else if (isAutoPairsActive() && deletePairAroundCursor()) {
-                return;
-            } else if (deleteIndentUnitBackwardIfAny()) {
-                return;
-            } else {
-                state.setCursor(model.deleteBackward(state.getCursor()));
+        ViewState before = captureViewState();
+        List<TrackedEdit> ops = new ArrayList<>();
+        SelectionRange range = currentSelection();
+        if (range == null && isAutoPairsActive()) {
+            range = pairRangeAroundCursor();
+        }
+        if (range == null) {
+            range = indentUnitBackwardRange();
+        }
+        if (range == null) {
+            Position cursor = model.clamp(state.getCursor());
+            if (cursor.col() > 0) {
+                GraphemeText graphemes = GraphemeText.of(model.getLine(cursor.line()));
+                int end = graphemes.ceilBoundary(cursor.col());
+                range = new SelectionRange(
+                    new Position(cursor.line(), graphemes.previousBoundary(end)),
+                    new Position(cursor.line(), end)
+                );
+            } else if (cursor.line() > 0) {
+                int previousLine = cursor.line() - 1;
+                range = new SelectionRange(
+                    new Position(previousLine, model.getLine(previousLine).length()),
+                    cursor
+                );
             }
-            state.clearSelection();
-        });
+        }
+        deleteAndCommit(hadSelection ? EditKind.NONE : EditKind.BACKSPACE, before, ops, range);
     }
 
     public void deleteForward() {
         preferredVisualColumn = -1;
         boolean hadSelection = state.hasSelection();
-        applyEdit(hadSelection ? EditKind.NONE : EditKind.DELETE_FORWARD, () -> {
-            if (state.hasSelection()) {
-                deleteSelectionIfAny();
-            } else {
-                state.setCursor(model.deleteForward(state.getCursor()));
+        ViewState before = captureViewState();
+        List<TrackedEdit> ops = new ArrayList<>();
+        SelectionRange range = currentSelection();
+        if (range == null) {
+            Position cursor = model.clamp(state.getCursor());
+            String line = model.getLine(cursor.line());
+            if (cursor.col() < line.length()) {
+                GraphemeText graphemes = GraphemeText.of(line);
+                int start = graphemes.floorBoundary(cursor.col());
+                range = new SelectionRange(
+                    new Position(cursor.line(), start),
+                    new Position(cursor.line(), graphemes.nextBoundary(start))
+                );
+            } else if (cursor.line() < model.lineCount() - 1) {
+                range = new SelectionRange(cursor, new Position(cursor.line() + 1, 0));
             }
-            state.clearSelection();
-        });
+        }
+        deleteAndCommit(hadSelection ? EditKind.NONE : EditKind.DELETE_FORWARD, before, ops, range);
+    }
+
+    private void deleteAndCommit(
+        EditKind kind,
+        ViewState before,
+        List<TrackedEdit> ops,
+        SelectionRange range
+    ) {
+        if (range != null) {
+            state.setCursor(applyReplaceAndTrack(ops, range.start(), range.end(), ""));
+        }
+        state.clearSelection();
+        commitOperationEdit(kind, before, ops);
     }
 
     public void insertNewline() {
         preferredVisualColumn = -1;
         ViewState before = captureViewState();
-        List<EditOp.ReplaceRange> ops = new ArrayList<>();
+        List<TrackedEdit> ops = new ArrayList<>();
         SelectionRange selection = currentSelection();
         Position rangeStart = selection == null ? model.clamp(state.getCursor()) : selection.start();
         Position rangeEnd = selection == null ? rangeStart : selection.end();
@@ -812,7 +851,7 @@ public class EditorEngine {
         }
 
         ViewState before = captureViewState();
-        List<EditOp.ReplaceRange> ops = new ArrayList<>(nonBlankLines.size());
+        List<TrackedEdit> ops = new ArrayList<>(nonBlankLines.size());
         List<LineCommentEdit> positionEdits = new ArrayList<>(nonBlankLines.size());
         if (uncomment) {
             for (int lineIndex : nonBlankLines) {
@@ -1431,23 +1470,21 @@ public class EditorEngine {
         state.setCursor(wrappedEnd);
     }
 
-    private boolean deletePairAroundCursor() {
+    private SelectionRange pairRangeAroundCursor() {
         Position cursor = model.clamp(state.getCursor());
         if (cursor.col() <= 0) {
-            return false;
+            return null;
         }
         String line = model.getLine(cursor.line());
-        if (cursor.col() >= line.length()) {
-            return false;
+        if (cursor.col() >= line.length()
+            || !isMatchingPair(line.charAt(cursor.col() - 1), line.charAt(cursor.col()))) {
+            return null;
         }
-        char left = line.charAt(cursor.col() - 1);
-        char right = line.charAt(cursor.col());
-        if (!isMatchingPair(left, right)) {
-            return false;
-        }
-        Position afterRightDelete = model.deleteForward(cursor);
-        state.setCursor(model.deleteBackward(afterRightDelete));
-        return true;
+        GraphemeText graphemes = GraphemeText.of(line);
+        return new SelectionRange(
+            new Position(cursor.line(), graphemes.previousBoundary(cursor.col())),
+            new Position(cursor.line(), graphemes.nextBoundary(cursor.col()))
+        );
     }
 
     private static boolean isOpeningPair(char ch) {
@@ -1816,26 +1853,22 @@ public class EditorEngine {
         return spaces;
     }
 
-    private boolean deleteIndentUnitBackwardIfAny() {
+    private SelectionRange indentUnitBackwardRange() {
         Position cursor = model.clamp(state.getCursor());
         if (cursor.col() <= 0) {
-            return false;
+            return null;
         }
         String line = model.getLine(cursor.line());
-        int col = Math.min(cursor.col(), line.length());
+        int col = cursor.col();
         if (!isLeadingWhitespaceUntil(line, col)) {
-            return false;
+            return null;
         }
         String currentIndent = line.substring(0, col);
         String reduced = removeOneIndentUnit(currentIndent, cursor.line());
         int drop = currentIndent.length() - reduced.length();
-        if (drop <= 0) {
-            return false;
-        }
-        int fromCol = col - drop;
-        model.deleteRange(new Position(cursor.line(), fromCol), new Position(cursor.line(), col));
-        state.setCursor(new Position(cursor.line(), fromCol));
-        return true;
+        return drop <= 0 ? null : new SelectionRange(
+            new Position(cursor.line(), col - drop), cursor
+        );
     }
 
     private static boolean isLeadingWhitespaceUntil(String line, int col) {
@@ -1902,7 +1935,7 @@ public class EditorEngine {
         return indent.substring(0, end - 1);
     }
 
-    private EditOp.ReplaceRange maybeAutoOutdentKeywordLineOp() {
+    private TrackedEdit maybeAutoOutdentKeywordLineOp() {
         if (!isAutoIndentActive()) {
             return null;
         }
@@ -1944,7 +1977,7 @@ public class EditorEngine {
         String deleted = model.getTextRange(deleteStart, deleteEnd);
         model.deleteRange(deleteStart, deleteEnd);
         state.setCursor(new Position(lineIndex, Math.max(0, cursorCol - drop)));
-        return EditOp.delete(deleteStart, deleted);
+        return new TrackedEdit(EditOp.delete(deleteStart, deleted), List.of(), List.of());
     }
 
     private boolean startsWithDedentKeyword(String line, int leading, int cursorCol, LanguageProfile profile) {
@@ -2031,7 +2064,7 @@ public class EditorEngine {
         gutterDiffComputedRevision = Long.MIN_VALUE;
     }
 
-    private void commitOperationEdit(EditKind kind, ViewState before, List<EditOp.ReplaceRange> ops) {
+    private void commitOperationEdit(EditKind kind, ViewState before, List<TrackedEdit> ops) {
         if (ops == null || ops.isEmpty()) {
             return;
         }
@@ -2074,7 +2107,7 @@ public class EditorEngine {
     private boolean tryMergeOperationEntry(
         EditKind kind,
         ViewState after,
-        List<EditOp.ReplaceRange> ops,
+        List<TrackedEdit> ops,
         long afterStateId
     ) {
         HistoryEntry top = undoStack.peek();
@@ -2086,7 +2119,7 @@ public class EditorEngine {
     }
 
     private Position applyReplaceAndTrack(
-        List<EditOp.ReplaceRange> ops,
+        List<TrackedEdit> ops,
         Position start,
         Position end,
         String insertedText
@@ -2104,12 +2137,18 @@ public class EditorEngine {
         if (deletedText.isEmpty() && inserted.isEmpty()) {
             return a;
         }
+        List<String> deletedSeparators = List.copyOf(
+            model.fileMetadata().lineSeparators().subList(a.line(), b.line())
+        );
         Position cursor = model.deleteRange(a, b);
         if (!inserted.isEmpty()) {
             cursor = model.insertText(cursor, inserted);
         }
+        List<String> insertedSeparators = List.copyOf(
+            model.fileMetadata().lineSeparators().subList(a.line(), cursor.line())
+        );
         EditOp.ReplaceRange op = EditOp.replace(a, deletedText, inserted);
-        ops.add(op);
+        ops.add(new TrackedEdit(op, deletedSeparators, insertedSeparators));
         applyGutterDiffOp(op);
         return cursor;
     }
@@ -2434,8 +2473,11 @@ public class EditorEngine {
     }
 
     private ViewState captureViewState() {
+        DocumentFileMetadata metadata = model.fileMetadata();
         return new ViewState(
-            model.fileMetadata(),
+            metadata.charset(),
+            metadata.bomKind(),
+            metadata.defaultLineSeparator(),
             state.getCursor(),
             state.getTopLine(),
             state.getTopWrapSegment(),
@@ -2446,7 +2488,14 @@ public class EditorEngine {
     }
 
     private void restoreViewState(ViewState view) {
-        model.restoreFileMetadata(view.fileMetadata());
+        DocumentFileMetadata metadata = model.fileMetadata();
+        if (!metadata.charset().equals(view.charset())
+            || metadata.bomKind() != view.bomKind()
+            || !metadata.defaultLineSeparator().equals(view.defaultLineSeparator())) {
+            model.restoreFileMetadata(new DocumentFileMetadata(
+                view.charset(), view.bomKind(), view.defaultLineSeparator(), metadata.lineSeparators()
+            ));
+        }
         state.setCursor(model.clamp(view.cursor()));
         state.setTopLine(view.topLine());
         state.setTopWrapSegment(view.topWrapSegment());
@@ -2471,7 +2520,9 @@ public class EditorEngine {
     private void restoreSnapshot(Snapshot snapshot) {
         model.replaceLines(snapshot.lines(), snapshot.fileMetadata());
         restoreViewState(new ViewState(
-            snapshot.fileMetadata(),
+            snapshot.fileMetadata().charset(),
+            snapshot.fileMetadata().bomKind(),
+            snapshot.fileMetadata().defaultLineSeparator(),
             snapshot.cursor(),
             snapshot.topLine(),
             snapshot.topWrapSegment(),
@@ -2502,13 +2553,23 @@ public class EditorEngine {
     }
 
     private record ViewState(
-        DocumentFileMetadata fileMetadata,
+        Charset charset,
+        BomKind bomKind,
+        String defaultLineSeparator,
         Position cursor,
         int topLine,
         int topWrapSegment,
         int leftColumn,
         int leftVisualColumn,
         Position selectionAnchor
+    ) {
+    }
+
+    /** Separator slices are copied so history never retains whole metadata lists. */
+    private record TrackedEdit(
+        EditOp.ReplaceRange operation,
+        List<String> deletedSeparators,
+        List<String> insertedSeparators
     ) {
     }
 
@@ -2565,7 +2626,7 @@ public class EditorEngine {
         private final EditKind kind;
         private final ViewState beforeView;
         private ViewState afterView;
-        private final List<EditOp.ReplaceRange> ops;
+        private final List<TrackedEdit> ops;
         private final long beforeStateId;
         private long afterStateId;
 
@@ -2573,7 +2634,7 @@ public class EditorEngine {
             EditKind kind,
             ViewState beforeView,
             ViewState afterView,
-            List<EditOp.ReplaceRange> ops,
+            List<TrackedEdit> ops,
             long beforeStateId,
             long afterStateId
         ) {
@@ -2590,7 +2651,7 @@ public class EditorEngine {
         }
 
         void append(
-            List<EditOp.ReplaceRange> extraOps,
+            List<TrackedEdit> extraOps,
             ViewState mergedAfterView,
             long mergedAfterStateId
         ) {
@@ -2602,7 +2663,9 @@ public class EditorEngine {
         @Override
         public void undo() {
             for (int i = ops.size() - 1; i >= 0; i--) {
-                applyReplace(ops.get(i).start(), ops.get(i).insertedText(), ops.get(i).deletedText());
+                TrackedEdit edit = ops.get(i);
+                EditOp.ReplaceRange op = edit.operation();
+                applyReplace(op.start(), op.insertedText(), op.deletedText(), edit.deletedSeparators());
             }
             restoreViewState(beforeView);
             currentDocumentStateId = beforeStateId;
@@ -2610,20 +2673,27 @@ public class EditorEngine {
 
         @Override
         public void redo() {
-            for (EditOp.ReplaceRange op : ops) {
-                applyReplace(op.start(), op.deletedText(), op.insertedText());
+            for (TrackedEdit edit : ops) {
+                EditOp.ReplaceRange op = edit.operation();
+                applyReplace(op.start(), op.deletedText(), op.insertedText(), edit.insertedSeparators());
             }
             restoreViewState(afterView);
             currentDocumentStateId = afterStateId;
         }
 
-        private void applyReplace(Position start, String deletedText, String insertedText) {
+        private void applyReplace(
+            Position start,
+            String deletedText,
+            String insertedText,
+            List<String> insertedSeparators
+        ) {
             Position a = model.clamp(start);
             Position b = advancePosition(a, deletedText);
             Position cursor = model.deleteRange(a, b);
             if (insertedText != null && !insertedText.isEmpty()) {
                 model.insertText(cursor, insertedText);
             }
+            model.restoreLineSeparators(a.line(), insertedSeparators);
             applyGutterDiffOp(EditOp.replace(a, deletedText, insertedText));
         }
 

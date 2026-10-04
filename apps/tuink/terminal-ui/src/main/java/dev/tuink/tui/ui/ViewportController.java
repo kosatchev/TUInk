@@ -1,7 +1,8 @@
 package dev.tuink.tui.ui;
 
 import dev.tuink.core.EditorEngine;
-import dev.tuink.tui.input.KeyEvent;
+import dev.tuink.tui.input.EditorInput;
+import dev.tuiframe.input.PointerEvent;
 
 /**
  * Tracks viewport interaction mode and applies cursor visibility policy.
@@ -10,8 +11,8 @@ public final class ViewportController {
     private boolean manualHorizontalPan;
     private boolean manualVerticalPan;
 
-    public void onInput(KeyEvent key) {
-        if (!(key instanceof KeyEvent.MouseEvent)) {
+    public void onInput(EditorInput input) {
+        if (input.command() != null || !(input.event() instanceof PointerEvent)) {
             manualHorizontalPan = false;
             manualVerticalPan = false;
         }

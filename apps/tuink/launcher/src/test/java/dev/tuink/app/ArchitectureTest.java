@@ -142,18 +142,21 @@ class ArchitectureTest {
             "dev.tuiframe.jline.."
         );
 
-    static final ArchRule KEY_DECODER_DOES_NOT_DEPEND_ON_LEGACY_INPUT = noClasses()
-        .that().haveFullyQualifiedName(KEY_DECODER)
-        .should().dependOnClassesThat().haveNameMatching(
-            "dev\\.tuink\\.tui\\.input\\.(?:KeyEvent|LegacyKeyEventAdapter)(\\$.*)?"
+    static final ArchRule SEMANTIC_COMMANDS_DO_NOT_DEPEND_ON_PHYSICAL_INPUT = classes()
+        .that().haveFullyQualifiedName("dev.tuink.tui.command.TuinkCommand")
+        .should().onlyDependOnClassesThat().resideInAnyPackage(
+            "java..",
+            "dev.tuink.editor.command..",
+            "dev.tuink.tui.command.."
         );
 
-    static final ArchRule PHYSICAL_INPUT_EVENTS_DO_NOT_DEPEND_ON_THE_LEGACY_MODEL = noClasses()
-        .that().haveNameMatching(
-            "dev\\.tuiframe\\.input\\.(?:TuiInputEvent|KeyStroke|TextInput|PasteEvent|PointerEvent|ResizeEvent)(\\$.*)?"
-        )
-        .should().dependOnClassesThat().haveNameMatching(
-            "dev\\.tuink\\.tui\\.input\\.(?:KeyEvent|LegacyKeyEventAdapter)(\\$.*)?"
+    static final ArchRule EDITOR_INPUT_COMBINES_ONLY_PHYSICAL_EVENTS_AND_SEMANTIC_COMMANDS = classes()
+        .that().haveFullyQualifiedName("dev.tuink.tui.input.EditorInput")
+        .should().onlyDependOnClassesThat().resideInAnyPackage(
+            "java..",
+            "dev.tuiframe.input..",
+            "dev.tuink.tui.command..",
+            "dev.tuink.tui.input.."
         );
 
     static final ArchRule COMMAND_CONTRACT_IS_SELF_CONTAINED = classes()
@@ -190,7 +193,7 @@ class ArchitectureTest {
             "dev.tuink.tui.keymap.."
         );
 
-    static final ArchRule GENERIC_KEYMAP_DOES_NOT_IMPORT_PHYSICAL_OR_LEGACY_INPUT = classes()
+    static final ArchRule GENERIC_KEYMAP_DOES_NOT_IMPORT_PHYSICAL_INPUT = classes()
         .that().haveFullyQualifiedName("dev.tuink.tui.keymap.Keymap")
         .should().onlyDependOnClassesThat().resideInAnyPackage(
             "java..",
@@ -198,11 +201,11 @@ class ArchitectureTest {
             "dev.tuink.tui.keymap.."
         );
 
-    static final ArchRule TUINK_KEYMAP_DOES_NOT_IMPORT_DECODER_OR_LEGACY_EVENTS = noClasses()
+    static final ArchRule TUINK_KEYMAP_DOES_NOT_IMPORT_DECODER_OR_RESOLVED_INPUT = noClasses()
         .that().haveFullyQualifiedName("dev.tuink.tui.keymap.TuinkKeymap")
-        .should().dependOnClassesThat().haveNameMatching(
-            "(?:dev\\.tuiframe\\.jline\\.KeyDecoder|"
-                + "dev\\.tuink\\.tui\\.input\\.(?:KeyEvent|LegacyKeyEventAdapter))(?:\\$.*)?"
+        .should().dependOnClassesThat().resideInAnyPackage(
+            "dev.tuiframe.jline..",
+            "dev.tuink.tui.input.."
         );
 
     static final ArchRule EVENT_LOOP_IS_EDITOR_INDEPENDENT = classes()
@@ -346,13 +349,13 @@ class ArchitectureTest {
     void inputCommandsAndKeymapStayReusable() {
         PHYSICAL_INPUT_MODEL_IS_SELF_CONTAINED.check(PRODUCTION_CLASSES);
         KEY_DECODER_IS_A_SELF_CONTAINED_JLINE_ADAPTER.check(PRODUCTION_CLASSES);
-        KEY_DECODER_DOES_NOT_DEPEND_ON_LEGACY_INPUT.check(PRODUCTION_CLASSES);
-        PHYSICAL_INPUT_EVENTS_DO_NOT_DEPEND_ON_THE_LEGACY_MODEL.check(PRODUCTION_CLASSES);
+        SEMANTIC_COMMANDS_DO_NOT_DEPEND_ON_PHYSICAL_INPUT.check(PRODUCTION_CLASSES);
+        EDITOR_INPUT_COMBINES_ONLY_PHYSICAL_EVENTS_AND_SEMANTIC_COMMANDS.check(PRODUCTION_CLASSES);
         COMMAND_CONTRACT_IS_SELF_CONTAINED.check(PRODUCTION_CLASSES);
         DOCUMENT_CONTRACT_IS_SELF_CONTAINED.check(PRODUCTION_CLASSES);
         EDITOR_SESSION_STAYS_FRONTEND_INDEPENDENT.check(PRODUCTION_CLASSES);
         KEYMAP_LAYER_STAYS_EDITOR_INDEPENDENT.check(PRODUCTION_CLASSES);
-        GENERIC_KEYMAP_DOES_NOT_IMPORT_PHYSICAL_OR_LEGACY_INPUT.check(PRODUCTION_CLASSES);
-        TUINK_KEYMAP_DOES_NOT_IMPORT_DECODER_OR_LEGACY_EVENTS.check(PRODUCTION_CLASSES);
+        GENERIC_KEYMAP_DOES_NOT_IMPORT_PHYSICAL_INPUT.check(PRODUCTION_CLASSES);
+        TUINK_KEYMAP_DOES_NOT_IMPORT_DECODER_OR_RESOLVED_INPUT.check(PRODUCTION_CLASSES);
     }
 }

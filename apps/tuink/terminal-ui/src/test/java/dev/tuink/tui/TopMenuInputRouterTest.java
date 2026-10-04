@@ -1,7 +1,7 @@
 package dev.tuink.tui;
 
-import static dev.tuink.tui.command.TuinkCommandIds.EDIT_SELECT_ALL;
-import static dev.tuink.tui.command.TuinkCommandIds.TAB_NEW;
+import static dev.tuink.tui.command.TuinkCommand.EDIT_SELECT_ALL;
+import static dev.tuink.tui.command.TuinkCommand.TAB_NEW;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -51,7 +51,7 @@ class TopMenuInputRouterTest {
         TopMenuInputRouter.Result result = fixture.route(selectAll);
 
         assertTrue(result.consumed());
-        assertEquals(EDIT_SELECT_ALL, result.command().id());
+        assertEquals(EDIT_SELECT_ALL.id(), result.command().id());
         assertEquals(MenuBar.State.closed(), fixture.controller.state());
     }
 
@@ -75,7 +75,7 @@ class TopMenuInputRouterTest {
         TopMenuInputRouter.Result selected = fixture.route(KeyStroke.of(KeyStroke.Key.ENTER));
 
         assertTrue(selected.consumed());
-        assertEquals(1, fixture.bridge.invokeTabActivation(selected.command()).orElseThrow());
+        assertEquals(1, fixture.router.invokeTabActivation(selected.command()).orElseThrow());
         assertEquals(MenuBar.State.closed(), fixture.controller.state());
     }
 
@@ -92,7 +92,7 @@ class TopMenuInputRouterTest {
         TopMenuInputRouter.Result enter = selected.route(KeyStroke.of(KeyStroke.Key.ENTER));
 
         assertTrue(enter.consumed());
-        assertEquals(TAB_NEW, enter.command().id());
+        assertEquals(TAB_NEW.id(), enter.command().id());
         assertEquals(MenuBar.State.closed(), selected.controller.state());
     }
 
@@ -161,7 +161,7 @@ class TopMenuInputRouterTest {
     }
 
     private static Fixture fixture(MenuBar.State state, Rect bounds, List<TopMenuView.TabItem> tabs) {
-        LegacyCommandBridge bridge = new LegacyCommandBridge();
+        CommandRouter router = new CommandRouter();
         TopMenuController controller = new TopMenuController();
         controller.adopt(state);
         UiSessionState ui = new UiSessionState();
@@ -172,10 +172,10 @@ class TopMenuInputRouterTest {
             tabs,
             0,
             "Cyan",
-            bridge,
+            router,
             state
         );
-        return new Fixture(controller, view.place(bounds), bridge, tabs);
+        return new Fixture(controller, view.place(bounds), router, tabs);
     }
 
     private static PointerEvent pointer(
@@ -190,11 +190,11 @@ class TopMenuInputRouterTest {
     private record Fixture(
         TopMenuController controller,
         TopMenuView.Placement placement,
-        LegacyCommandBridge bridge,
+        CommandRouter router,
         List<TopMenuView.TabItem> tabs
     ) {
         TopMenuInputRouter.Result route(dev.tuiframe.input.TuiInputEvent event) {
-            return TopMenuInputRouter.route(controller, placement, bridge, event);
+            return TopMenuInputRouter.route(controller, placement, router, event);
         }
     }
 }

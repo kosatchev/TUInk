@@ -4,11 +4,87 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.tuink.tui.input.KeyEvent;
+import dev.tuink.core.EditorClipboard;
+import dev.tuink.core.TabSession;
+import dev.tuink.render.TerminalEditorTextLayout;
+import dev.tuink.tui.command.TuinkCommand;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 
 class InputActionDispatcherTest {
+    @Test
+    void readingModeRejectsEditingCommandsBeforeTheyReachTheEngine() {
+        UiSessionState ui = new UiSessionState();
+        ui.readingModeSetting = true;
+        List<TuinkCommand> edits = List.of(
+            TuinkCommand.EDIT_CUT,
+            TuinkCommand.EDIT_PASTE,
+            TuinkCommand.EDIT_UNDO,
+            TuinkCommand.EDIT_REDO,
+            TuinkCommand.EDIT_INSERT_TAB,
+            TuinkCommand.EDIT_INSERT_NEWLINE,
+            TuinkCommand.EDIT_BACKSPACE,
+            TuinkCommand.EDIT_DELETE_FORWARD,
+            TuinkCommand.EDIT_TOGGLE_LINE_COMMENT
+        );
+
+        for (TuinkCommand command : edits) {
+            InputActionDispatcher.DispatchResult result = InputActionDispatcher.dispatch(
+                command,
+                ui,
+                context(ignored -> {})
+            );
+
+            assertTrue(result.handled(), command.toString());
+            assertEquals("Reading mode: editing is disabled", result.statusMessage(), command.toString());
+        }
+    }
+
+    @Test
+    void readingModePreservesTextAndHistoryUntilEditingIsEnabledAgain() {
+        TabSession tab = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
+        UiSessionState ui = new UiSessionState();
+        InputActionDispatcher.DispatchContext context = new InputActionDispatcher.DispatchContext(
+            tab.engine(), tab.state(), null, ignored -> {}, 24
+        );
+        tab.engine().insertInput("abc");
+        long editedRevision = tab.model().revision();
+        ui.readingModeSetting = true;
+
+        InputActionDispatcher.dispatch(TuinkCommand.EDIT_UNDO, ui, context);
+
+        assertEquals("abc", tab.model().getLine(0));
+        assertEquals(editedRevision, tab.model().revision());
+        assertTrue(tab.state().isDirty());
+
+        ui.readingModeSetting = false;
+        InputActionDispatcher.dispatch(TuinkCommand.EDIT_UNDO, ui, context);
+        assertEquals("", tab.model().getLine(0));
+        assertFalse(tab.state().isDirty());
+        long undoneRevision = tab.model().revision();
+        ui.readingModeSetting = true;
+
+        InputActionDispatcher.dispatch(TuinkCommand.EDIT_REDO, ui, context);
+
+        assertEquals("", tab.model().getLine(0));
+        assertEquals(undoneRevision, tab.model().revision());
+        assertFalse(tab.state().isDirty());
+
+        ui.readingModeSetting = false;
+        InputActionDispatcher.dispatch(TuinkCommand.EDIT_REDO, ui, context);
+        assertEquals("abc", tab.model().getLine(0));
+        assertTrue(tab.state().isDirty());
+    }
+
+    @Test
+    void saveCommandsRemainAvailableForTheDocumentWorkflow() {
+        UiSessionState ui = new UiSessionState();
+
+        assertFalse(InputActionDispatcher.dispatch(TuinkCommand.DOCUMENT_SAVE, ui, context(ignored -> {})).handled());
+        assertFalse(InputActionDispatcher.dispatch(TuinkCommand.DOCUMENT_SAVE_AS, ui, context(ignored -> {})).handled());
+    }
+
     @Test
     void unavailableMouseModePreservesPreferenceAndReportsTheFallback() {
         UiSessionState ui = new UiSessionState();
@@ -17,7 +93,7 @@ class InputActionDispatcherTest {
         AtomicBoolean controllerCalled = new AtomicBoolean();
 
         InputActionDispatcher.DispatchResult result = InputActionDispatcher.dispatch(
-            KeyEvent.Action.TOGGLE_MOUSE_MODE,
+            TuinkCommand.SETTINGS_TOGGLE_MOUSE,
             ui,
             context(ignored -> controllerCalled.set(true))
         );
@@ -36,7 +112,7 @@ class InputActionDispatcherTest {
         AtomicBoolean enabled = new AtomicBoolean(true);
 
         InputActionDispatcher.DispatchResult result = InputActionDispatcher.dispatch(
-            KeyEvent.Action.TOGGLE_MOUSE_MODE,
+            TuinkCommand.SETTINGS_TOGGLE_MOUSE,
             ui,
             context(enabled::set)
         );

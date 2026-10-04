@@ -1,11 +1,12 @@
 package dev.tuink.tui;
 
-import static dev.tuink.tui.command.TuinkCommandIds.DOCUMENT_SAVE;
-import static dev.tuink.tui.command.TuinkCommandIds.EDIT_SELECT_ALL;
+import static dev.tuink.tui.command.TuinkCommand.DOCUMENT_SAVE;
+import static dev.tuink.tui.command.TuinkCommand.EDIT_SELECT_ALL;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 import dev.tuink.editor.command.CommandInvocation;
 import dev.tuiframe.input.KeyStroke;
@@ -13,7 +14,8 @@ import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.input.TextInput;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.flow.UiModalState;
-import dev.tuink.tui.input.KeyEvent;
+import dev.tuink.tui.input.EditorInput;
+import dev.tuink.tui.command.TuinkCommand;
 import dev.tuink.tui.ui.SearchBarView;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -55,12 +57,12 @@ class TerminalEditorInputRoutingTest {
     void typedSearchOutputsMapToApplicationOptionsAndCommands() {
         assertEquals(SearchFocus.CASE, TerminalEditorApp.toggleTarget(SearchBarView.Action.TOGGLE_CASE));
         assertEquals(SearchFocus.WORD, TerminalEditorApp.toggleTarget(SearchBarView.Action.TOGGLE_WORD));
-        assertEquals(KeyEvent.Action.CTRL_F, TerminalEditorApp.keyAction(SearchBarView.Action.FIND_NEXT));
-        assertEquals(KeyEvent.Action.CTRL_G, TerminalEditorApp.keyAction(SearchBarView.Action.FIND_PREVIOUS));
-        assertEquals(KeyEvent.Action.CTRL_R, TerminalEditorApp.keyAction(SearchBarView.Action.REPLACE));
-        assertEquals(KeyEvent.Action.CTRL_A, TerminalEditorApp.keyAction(SearchBarView.Action.REPLACE_ALL));
+        assertEquals(TuinkCommand.SEARCH_NEXT, TerminalEditorApp.searchCommand(SearchBarView.Action.FIND_NEXT));
+        assertEquals(TuinkCommand.SEARCH_PREVIOUS, TerminalEditorApp.searchCommand(SearchBarView.Action.FIND_PREVIOUS));
+        assertEquals(TuinkCommand.SEARCH_REPLACE, TerminalEditorApp.searchCommand(SearchBarView.Action.REPLACE));
+        assertEquals(TuinkCommand.SEARCH_REPLACE_ALL, TerminalEditorApp.searchCommand(SearchBarView.Action.REPLACE_ALL));
         assertNull(TerminalEditorApp.toggleTarget(SearchBarView.Action.FIND_NEXT));
-        assertNull(TerminalEditorApp.keyAction(SearchBarView.Action.QUERY_CHANGED));
+        assertNull(TerminalEditorApp.searchCommand(SearchBarView.Action.QUERY_CHANGED));
     }
 
     @Test
@@ -90,44 +92,81 @@ class TerminalEditorInputRoutingTest {
     }
 
     @Test
-    void typedMenuCommandWinsOverUnicodeTextFallbackAndRegistryResolutionRunsOnce() {
-        CommandInvocation selected = CommandInvocation.of(EDIT_SELECT_ALL);
+    void alreadyRoutedMenuCommandWinsOverUnicodeTextAndPendingKeyboardCommand() {
+        CommandRouter router = new CommandRouter();
+        CommandRouter.RoutedCommand selected = router.dispatch(
+            CommandInvocation.of(EDIT_SELECT_ALL.id())
+        ).orElseThrow();
         TextInput decomposedMnemonic = new TextInput("e\u0301");
 
-        assertTrue(TerminalEditorApp.shouldHandleMultiScalarTextFallback(
+        EditorInput input = TerminalEditorApp.resolveEditorInput(
+            router,
             decomposedMnemonic,
-            null
-        ));
-        assertFalse(TerminalEditorApp.shouldHandleMultiScalarTextFallback(
-            decomposedMnemonic,
-            selected
-        ));
+            CommandInvocation.of(DOCUMENT_SAVE.id()),
+            selected,
+            true,
+            SearchFocus.FIND
+        );
 
-        LegacyCommandBridge bridge = new LegacyCommandBridge();
-        LegacyCommandBridge.RoutedCommand routedSelection = bridge.dispatch(selected).orElseThrow();
-        LegacyCommandBridge.RoutedAction selectedAction =
-            (LegacyCommandBridge.RoutedAction) routedSelection;
-        KeyEvent.Action resolvedSelection = selectedAction.action();
-        assertEquals(KeyEvent.Action.CTRL_A, resolvedSelection);
-        assertEquals(
-            resolvedSelection,
-            TerminalEditorApp.resolvePendingCommand(
-                bridge,
-                CommandInvocation.of(DOCUMENT_SAVE),
-                resolvedSelection,
-                true
-            ),
-            "an already routed menu command must not invoke the pending registry entry again"
+        assertEquals(EDIT_SELECT_ALL, input.command());
+        assertSame(decomposedMnemonic, input.event());
+    }
+
+    @Test
+    void searchFocusResolvesSelectAllShortcutToReplaceAllWhileMenuKeepsSelectAll() {
+        CommandRouter router = new CommandRouter();
+        KeyStroke selectAll = KeyStroke.of(KeyStroke.Key.A, KeyStroke.Modifier.CTRL);
+        CommandInvocation invocation = router.invocationFor(selectAll).orElseThrow();
+
+        assertEquals(TuinkCommand.SEARCH_REPLACE_ALL, TerminalEditorApp.resolveEditorInput(
+            router, selectAll, invocation, null, true, SearchFocus.FIND
+        ).command());
+        assertEquals(EDIT_SELECT_ALL, TerminalEditorApp.resolveEditorInput(
+            router, selectAll, invocation, null, false, SearchFocus.FIND
+        ).command());
+    }
+
+    @Test
+    void unboundModifiedKeyAndUnregisteredCommandHaveNoPhysicalFallback() {
+        CommandRouter router = new CommandRouter();
+        KeyStroke extraModifier = KeyStroke.of(
+            KeyStroke.Key.S, KeyStroke.Modifier.CTRL, KeyStroke.Modifier.ALT
         );
-        assertEquals(
-            KeyEvent.Action.CTRL_S,
-            TerminalEditorApp.resolvePendingCommand(
-                bridge,
-                CommandInvocation.of(DOCUMENT_SAVE),
-                KeyEvent.Action.CTRL_A,
-                false
-            )
+        assertNull(TerminalEditorApp.resolveEditorInput(
+            router, extraModifier, router.invocationFor(extraModifier).orElse(null),
+            null, false, SearchFocus.FIND
+        ));
+        assertNull(TerminalEditorApp.resolveEditorInput(
+            router, KeyStroke.of(KeyStroke.Key.S, KeyStroke.Modifier.CTRL),
+            CommandInvocation.of("tuink.missing-command"), null, false, SearchFocus.FIND
+        ));
+        KeyStroke shiftedEnter = KeyStroke.of(KeyStroke.Key.ENTER, KeyStroke.Modifier.SHIFT);
+        assertNull(TerminalEditorApp.resolveEditorInput(
+            router, shiftedEnter, router.invocationFor(shiftedEnter).orElse(null),
+            null, true, SearchFocus.FIND
+        ));
+    }
+
+    @Test
+    void rawUnicodeTextAndPointerModifiersArePreservedThroughRouting() {
+        CommandRouter router = new CommandRouter();
+        for (String text : new String[] {"😀", "e\u0301", "аб"}) {
+            TextInput event = new TextInput(text);
+            EditorInput input = TerminalEditorApp.resolveEditorInput(
+                router, event, null, null, false, SearchFocus.FIND
+            );
+            assertSame(event, input.event());
+            assertNull(input.command());
+        }
+        PointerEvent event = new PointerEvent(
+            2, 4, PointerEvent.Kind.DRAG, PointerEvent.Button.LEFT,
+            Set.of(KeyStroke.Modifier.SHIFT, KeyStroke.Modifier.CTRL)
         );
+        EditorInput input = TerminalEditorApp.resolveEditorInput(
+            router, event, null, null, false, SearchFocus.FIND
+        );
+        assertSame(event, input.event());
+        assertNull(input.command());
     }
 
     @Test

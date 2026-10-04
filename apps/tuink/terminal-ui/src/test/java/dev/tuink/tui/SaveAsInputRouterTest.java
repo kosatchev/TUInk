@@ -20,7 +20,7 @@ import org.junit.jupiter.api.Test;
 
 class SaveAsInputRouterTest {
     @Test
-    void routesUnicodeTextCaretEditingAndSubmitBeforeLegacyInput() {
+    void routesUnicodeTextCaretEditingAndSubmitThroughTheField() {
         Fixture fixture = fixture(32, new Object());
 
         assertAction(TextField.Action.VALUE_CHANGED, fixture.route(new TextInput("A😀")));
@@ -64,11 +64,16 @@ class SaveAsInputRouterTest {
     }
 
     @Test
-    void applicationOwnedEscapeCtrlQAndModifiedKeysStillBubbleToLegacyPolicy() {
+    void applicationCancelAndUnownedCommandsBubbleToTheCommandRouter() {
         Fixture fixture = fixture(32, new Object());
+        fixture.field.set("draft");
 
         assertIgnored(fixture.route(KeyStroke.of(KeyStroke.Key.ESCAPE)));
         assertIgnored(fixture.route(KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL)));
+        assertIgnored(fixture.route(KeyStroke.of(KeyStroke.Key.ESCAPE, KeyStroke.Modifier.SHIFT)));
+        assertIgnored(fixture.route(
+            KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL, KeyStroke.Modifier.SHIFT)
+        ));
         assertIgnored(fixture.route(
             KeyStroke.of(KeyStroke.Key.ARROW_LEFT, KeyStroke.Modifier.SHIFT)
         ));
@@ -82,7 +87,8 @@ class SaveAsInputRouterTest {
 
         assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.TAB)));
         assertEquals(SaveAsBarView.Target.FIELD, fixture.focus.focused().orElseThrow());
-        assertEquals("", fixture.field.text());
+        assertEquals("draft", fixture.field.text());
+        assertEquals("draft".length(), fixture.field.cursor());
     }
 
     @Test
@@ -163,6 +169,10 @@ class SaveAsInputRouterTest {
         );
         assertIgnored(fixture.route(KeyStroke.of(KeyStroke.Key.ESCAPE)));
         assertIgnored(fixture.route(KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL)));
+        assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.ESCAPE, KeyStroke.Modifier.SHIFT)));
+        assertCaptured(fixture.route(
+            KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL, KeyStroke.Modifier.SHIFT)
+        ));
         assertEquals("draft", fixture.field.text());
         assertEquals("draft".length(), fixture.field.cursor());
         assertTrue(fixture.focus.focused().isEmpty());

@@ -1,47 +1,47 @@
 package dev.tuink.tui;
 
-import static dev.tuink.tui.command.TuinkCommandIds.APP_QUIT;
-import static dev.tuink.tui.command.TuinkCommandIds.DOCUMENT_OPEN;
-import static dev.tuink.tui.command.TuinkCommandIds.DOCUMENT_SAVE;
-import static dev.tuink.tui.command.TuinkCommandIds.DOCUMENT_SAVE_AS;
-import static dev.tuink.tui.command.TuinkCommandIds.EDIT_COPY;
-import static dev.tuink.tui.command.TuinkCommandIds.EDIT_CUT;
-import static dev.tuink.tui.command.TuinkCommandIds.EDIT_PASTE;
-import static dev.tuink.tui.command.TuinkCommandIds.EDIT_REDO;
-import static dev.tuink.tui.command.TuinkCommandIds.EDIT_SELECT_ALL;
-import static dev.tuink.tui.command.TuinkCommandIds.EDIT_TOGGLE_LINE_COMMENT;
-import static dev.tuink.tui.command.TuinkCommandIds.EDIT_UNDO;
-import static dev.tuink.tui.command.TuinkCommandIds.HELP_AUTHOR;
-import static dev.tuink.tui.command.TuinkCommandIds.HELP_KEY_HINTS;
-import static dev.tuink.tui.command.TuinkCommandIds.HELP_LICENSES;
-import static dev.tuink.tui.command.TuinkCommandIds.SEARCH_OPEN;
-import static dev.tuink.tui.command.TuinkCommandIds.SETTINGS_CYCLE_TAB_INSERT_MODE;
-import static dev.tuink.tui.command.TuinkCommandIds.SETTINGS_TOGGLE_AUTO_INDENT;
-import static dev.tuink.tui.command.TuinkCommandIds.SETTINGS_TOGGLE_AUTO_LIST;
-import static dev.tuink.tui.command.TuinkCommandIds.SETTINGS_TOGGLE_AUTO_PAIRS;
-import static dev.tuink.tui.command.TuinkCommandIds.SETTINGS_TOGGLE_CONFIRM_ON_CLOSE;
-import static dev.tuink.tui.command.TuinkCommandIds.SETTINGS_TOGGLE_MOUSE;
-import static dev.tuink.tui.command.TuinkCommandIds.SETTINGS_TOGGLE_READING_MODE;
-import static dev.tuink.tui.command.TuinkCommandIds.SETTINGS_TOGGLE_SMART_HOME_END;
-import static dev.tuink.tui.command.TuinkCommandIds.TAB_CLOSE;
-import static dev.tuink.tui.command.TuinkCommandIds.TAB_NEW;
-import static dev.tuink.tui.command.TuinkCommandIds.TAB_NEXT;
-import static dev.tuink.tui.command.TuinkCommandIds.TAB_PREVIOUS;
-import static dev.tuink.tui.command.TuinkCommandIds.VIEW_CYCLE_GUTTER_DIFF;
-import static dev.tuink.tui.command.TuinkCommandIds.VIEW_CYCLE_TAB_WIDTH;
-import static dev.tuink.tui.command.TuinkCommandIds.VIEW_CYCLE_THEME;
-import static dev.tuink.tui.command.TuinkCommandIds.VIEW_TOGGLE_ACTIVE_GUTTER;
-import static dev.tuink.tui.command.TuinkCommandIds.VIEW_TOGGLE_LINE_WRAP;
-import static dev.tuink.tui.command.TuinkCommandIds.VIEW_TOGGLE_RAINBOW_BRACKETS;
-import static dev.tuink.tui.command.TuinkCommandIds.VIEW_TOGGLE_SELECTION_HIGHLIGHT;
-import static dev.tuink.tui.command.TuinkCommandIds.VIEW_TOGGLE_SYNTAX;
-import static dev.tuink.tui.command.TuinkCommandIds.VIEW_TOGGLE_TAB_BAR;
-import static dev.tuink.tui.command.TuinkCommandIds.VIEW_TOGGLE_WHITESPACE;
-import static dev.tuink.tui.command.TuinkCommandIds.VIEW_TOGGLE_WORD_WRAP;
+import static dev.tuink.tui.command.TuinkCommand.APP_QUIT;
+import static dev.tuink.tui.command.TuinkCommand.DOCUMENT_OPEN;
+import static dev.tuink.tui.command.TuinkCommand.DOCUMENT_SAVE;
+import static dev.tuink.tui.command.TuinkCommand.DOCUMENT_SAVE_AS;
+import static dev.tuink.tui.command.TuinkCommand.EDIT_COPY;
+import static dev.tuink.tui.command.TuinkCommand.EDIT_CUT;
+import static dev.tuink.tui.command.TuinkCommand.EDIT_PASTE;
+import static dev.tuink.tui.command.TuinkCommand.EDIT_REDO;
+import static dev.tuink.tui.command.TuinkCommand.EDIT_SELECT_ALL;
+import static dev.tuink.tui.command.TuinkCommand.EDIT_TOGGLE_LINE_COMMENT;
+import static dev.tuink.tui.command.TuinkCommand.EDIT_UNDO;
+import static dev.tuink.tui.command.TuinkCommand.HELP_AUTHOR;
+import static dev.tuink.tui.command.TuinkCommand.HELP_KEY_HINTS;
+import static dev.tuink.tui.command.TuinkCommand.HELP_LICENSES;
+import static dev.tuink.tui.command.TuinkCommand.SEARCH_OPEN;
+import static dev.tuink.tui.command.TuinkCommand.SETTINGS_CYCLE_TAB_INSERT_MODE;
+import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_AUTO_INDENT;
+import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_AUTO_LIST;
+import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_AUTO_PAIRS;
+import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_CONFIRM_ON_CLOSE;
+import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_MOUSE;
+import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_READING_MODE;
+import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_SMART_HOME_END;
+import static dev.tuink.tui.command.TuinkCommand.TAB_CLOSE;
+import static dev.tuink.tui.command.TuinkCommand.TAB_NEW;
+import static dev.tuink.tui.command.TuinkCommand.TAB_NEXT;
+import static dev.tuink.tui.command.TuinkCommand.TAB_PREVIOUS;
+import static dev.tuink.tui.command.TuinkCommand.VIEW_CYCLE_GUTTER_DIFF;
+import static dev.tuink.tui.command.TuinkCommand.VIEW_CYCLE_TAB_WIDTH;
+import static dev.tuink.tui.command.TuinkCommand.VIEW_CYCLE_THEME;
+import static dev.tuink.tui.command.TuinkCommand.VIEW_TOGGLE_ACTIVE_GUTTER;
+import static dev.tuink.tui.command.TuinkCommand.VIEW_TOGGLE_LINE_WRAP;
+import static dev.tuink.tui.command.TuinkCommand.VIEW_TOGGLE_RAINBOW_BRACKETS;
+import static dev.tuink.tui.command.TuinkCommand.VIEW_TOGGLE_SELECTION_HIGHLIGHT;
+import static dev.tuink.tui.command.TuinkCommand.VIEW_TOGGLE_SYNTAX;
+import static dev.tuink.tui.command.TuinkCommand.VIEW_TOGGLE_TAB_BAR;
+import static dev.tuink.tui.command.TuinkCommand.VIEW_TOGGLE_WHITESPACE;
+import static dev.tuink.tui.command.TuinkCommand.VIEW_TOGGLE_WORD_WRAP;
 
 import dev.tuink.core.GutterDiffMode;
 import dev.tuink.core.TabInsertMode;
-import dev.tuink.editor.command.CommandId;
+import dev.tuink.tui.command.TuinkCommand;
 import dev.tuink.editor.command.CommandInvocation;
 import dev.tuiframe.cell.Canvas;
 import dev.tuiframe.cell.CellText;
@@ -79,7 +79,7 @@ final class TopMenuView {
         List<TabItem> tabs,
         int activeTabIndex,
         String themeLabel,
-        LegacyCommandBridge commandBridge,
+        CommandRouter commandRouter,
         MenuBar.State state
     ) {
         Objects.requireNonNull(ui, "ui");
@@ -94,7 +94,7 @@ final class TopMenuView {
         String normalizedTheme = themeLabel == null || themeLabel.isBlank()
             ? DEFAULT_THEME_LABEL
             : themeLabel;
-        LegacyCommandBridge requiredBridge = Objects.requireNonNull(commandBridge, "commandBridge");
+        CommandRouter requiredRouter = Objects.requireNonNull(commandRouter, "commandRouter");
         MenuBar.State requiredState = Objects.requireNonNull(state, "state");
         int openMenuIndex = requiredState.isOpen() ? requiredState.openMenuIndex() : -1;
         this.menus = List.of(
@@ -111,7 +111,7 @@ final class TopMenuView {
                 " Tab ",
                 1,
                 openMenuIndex == TopMenuController.TABS_INDEX
-                    ? tabEntries(tabSnapshot, activeTabIndex, requiredBridge)
+                    ? tabEntries(tabSnapshot, activeTabIndex, requiredRouter)
                     : List.of()
             ),
             menu(
@@ -130,10 +130,10 @@ final class TopMenuView {
         List<TabItem> tabs,
         int activeTabIndex,
         String themeLabel,
-        LegacyCommandBridge commandBridge,
+        CommandRouter commandRouter,
         MenuBar.State state
     ) {
-        return new TopMenuView(ui, tabs, activeTabIndex, themeLabel, commandBridge, state);
+        return new TopMenuView(ui, tabs, activeTabIndex, themeLabel, commandRouter, state);
     }
 
     Placement place(Rect fullLayerBounds) {
@@ -330,7 +330,7 @@ final class TopMenuView {
     private static List<EntrySpec> tabEntries(
         List<TabItem> tabs,
         int activeTabIndex,
-        LegacyCommandBridge commandBridge
+        CommandRouter commandRouter
     ) {
         ArrayList<EntrySpec> entries = new ArrayList<>(5 + tabs.size());
         entries.add(item(TAB_NEW, "New Tab"));
@@ -343,7 +343,7 @@ final class TopMenuView {
             String marker = index == activeTabIndex ? "> " : "   ";
             String title = TabBarView.formatTabTitle(tab.file(), tab.dirty(), tab.hasMatch());
             entries.add(new EntrySpec(
-                commandBridge.tabActivationInvocation(index),
+                commandRouter.tabActivationInvocation(index),
                 marker + title,
                 true,
                 false
@@ -386,12 +386,12 @@ final class TopMenuView {
         );
     }
 
-    private static EntrySpec item(CommandId id, String label) {
-        return item(id, label, true);
+    private static EntrySpec item(TuinkCommand command, String label) {
+        return item(command, label, true);
     }
 
-    private static EntrySpec item(CommandId id, String label, boolean enabled) {
-        return new EntrySpec(CommandInvocation.of(id), label, enabled, false);
+    private static EntrySpec item(TuinkCommand command, String label, boolean enabled) {
+        return new EntrySpec(CommandInvocation.of(command.id()), label, enabled, false);
     }
 
     private static EntrySpec separator() {

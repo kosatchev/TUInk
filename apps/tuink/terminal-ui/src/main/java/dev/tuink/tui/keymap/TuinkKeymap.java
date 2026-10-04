@@ -1,50 +1,50 @@
 package dev.tuink.tui.keymap;
 
-import static dev.tuink.tui.command.TuinkCommandIds.APP_QUIT;
-import static dev.tuink.tui.command.TuinkCommandIds.CURSOR_DOWN;
-import static dev.tuink.tui.command.TuinkCommandIds.CURSOR_END;
-import static dev.tuink.tui.command.TuinkCommandIds.CURSOR_HOME;
-import static dev.tuink.tui.command.TuinkCommandIds.CURSOR_LEFT;
-import static dev.tuink.tui.command.TuinkCommandIds.CURSOR_PAGE_DOWN;
-import static dev.tuink.tui.command.TuinkCommandIds.CURSOR_PAGE_UP;
-import static dev.tuink.tui.command.TuinkCommandIds.CURSOR_RIGHT;
-import static dev.tuink.tui.command.TuinkCommandIds.CURSOR_SELECT_DOWN;
-import static dev.tuink.tui.command.TuinkCommandIds.CURSOR_SELECT_LEFT;
-import static dev.tuink.tui.command.TuinkCommandIds.CURSOR_SELECT_RIGHT;
-import static dev.tuink.tui.command.TuinkCommandIds.CURSOR_SELECT_UP;
-import static dev.tuink.tui.command.TuinkCommandIds.CURSOR_UP;
-import static dev.tuink.tui.command.TuinkCommandIds.CURSOR_WORD_LEFT;
-import static dev.tuink.tui.command.TuinkCommandIds.CURSOR_WORD_RIGHT;
-import static dev.tuink.tui.command.TuinkCommandIds.DOCUMENT_OPEN;
-import static dev.tuink.tui.command.TuinkCommandIds.DOCUMENT_SAVE;
-import static dev.tuink.tui.command.TuinkCommandIds.DOCUMENT_SAVE_AS;
-import static dev.tuink.tui.command.TuinkCommandIds.EDIT_BACKSPACE;
-import static dev.tuink.tui.command.TuinkCommandIds.EDIT_COPY;
-import static dev.tuink.tui.command.TuinkCommandIds.EDIT_CUT;
-import static dev.tuink.tui.command.TuinkCommandIds.EDIT_DELETE_FORWARD;
-import static dev.tuink.tui.command.TuinkCommandIds.EDIT_INSERT_NEWLINE;
-import static dev.tuink.tui.command.TuinkCommandIds.EDIT_INSERT_TAB;
-import static dev.tuink.tui.command.TuinkCommandIds.EDIT_PASTE;
-import static dev.tuink.tui.command.TuinkCommandIds.EDIT_REDO;
-import static dev.tuink.tui.command.TuinkCommandIds.EDIT_SELECT_ALL;
-import static dev.tuink.tui.command.TuinkCommandIds.EDIT_TOGGLE_LINE_COMMENT;
-import static dev.tuink.tui.command.TuinkCommandIds.EDIT_UNDO;
-import static dev.tuink.tui.command.TuinkCommandIds.FILE_BROWSER_TOGGLE_HIDDEN;
-import static dev.tuink.tui.command.TuinkCommandIds.MENU_EDIT;
-import static dev.tuink.tui.command.TuinkCommandIds.MENU_FILE;
-import static dev.tuink.tui.command.TuinkCommandIds.MENU_HELP;
-import static dev.tuink.tui.command.TuinkCommandIds.MENU_SETTINGS;
-import static dev.tuink.tui.command.TuinkCommandIds.MENU_TABS;
-import static dev.tuink.tui.command.TuinkCommandIds.MENU_VIEW;
-import static dev.tuink.tui.command.TuinkCommandIds.SEARCH_OPEN;
-import static dev.tuink.tui.command.TuinkCommandIds.SEARCH_PREVIOUS;
-import static dev.tuink.tui.command.TuinkCommandIds.SEARCH_REPLACE;
-import static dev.tuink.tui.command.TuinkCommandIds.TAB_NEW;
-import static dev.tuink.tui.command.TuinkCommandIds.TAB_NEXT;
-import static dev.tuink.tui.command.TuinkCommandIds.TAB_PREVIOUS;
-import static dev.tuink.tui.command.TuinkCommandIds.UI_ESCAPE;
+import static dev.tuink.tui.command.TuinkCommand.APP_QUIT;
+import static dev.tuink.tui.command.TuinkCommand.CURSOR_DOWN;
+import static dev.tuink.tui.command.TuinkCommand.CURSOR_END;
+import static dev.tuink.tui.command.TuinkCommand.CURSOR_HOME;
+import static dev.tuink.tui.command.TuinkCommand.CURSOR_LEFT;
+import static dev.tuink.tui.command.TuinkCommand.CURSOR_PAGE_DOWN;
+import static dev.tuink.tui.command.TuinkCommand.CURSOR_PAGE_UP;
+import static dev.tuink.tui.command.TuinkCommand.CURSOR_RIGHT;
+import static dev.tuink.tui.command.TuinkCommand.CURSOR_SELECT_DOWN;
+import static dev.tuink.tui.command.TuinkCommand.CURSOR_SELECT_LEFT;
+import static dev.tuink.tui.command.TuinkCommand.CURSOR_SELECT_RIGHT;
+import static dev.tuink.tui.command.TuinkCommand.CURSOR_SELECT_UP;
+import static dev.tuink.tui.command.TuinkCommand.CURSOR_UP;
+import static dev.tuink.tui.command.TuinkCommand.CURSOR_WORD_LEFT;
+import static dev.tuink.tui.command.TuinkCommand.CURSOR_WORD_RIGHT;
+import static dev.tuink.tui.command.TuinkCommand.DOCUMENT_OPEN;
+import static dev.tuink.tui.command.TuinkCommand.DOCUMENT_SAVE;
+import static dev.tuink.tui.command.TuinkCommand.DOCUMENT_SAVE_AS;
+import static dev.tuink.tui.command.TuinkCommand.EDIT_BACKSPACE;
+import static dev.tuink.tui.command.TuinkCommand.EDIT_COPY;
+import static dev.tuink.tui.command.TuinkCommand.EDIT_CUT;
+import static dev.tuink.tui.command.TuinkCommand.EDIT_DELETE_FORWARD;
+import static dev.tuink.tui.command.TuinkCommand.EDIT_INSERT_NEWLINE;
+import static dev.tuink.tui.command.TuinkCommand.EDIT_INSERT_TAB;
+import static dev.tuink.tui.command.TuinkCommand.EDIT_PASTE;
+import static dev.tuink.tui.command.TuinkCommand.EDIT_REDO;
+import static dev.tuink.tui.command.TuinkCommand.EDIT_SELECT_ALL;
+import static dev.tuink.tui.command.TuinkCommand.EDIT_TOGGLE_LINE_COMMENT;
+import static dev.tuink.tui.command.TuinkCommand.EDIT_UNDO;
+import static dev.tuink.tui.command.TuinkCommand.FILE_BROWSER_TOGGLE_HIDDEN;
+import static dev.tuink.tui.command.TuinkCommand.MENU_EDIT;
+import static dev.tuink.tui.command.TuinkCommand.MENU_FILE;
+import static dev.tuink.tui.command.TuinkCommand.MENU_HELP;
+import static dev.tuink.tui.command.TuinkCommand.MENU_SETTINGS;
+import static dev.tuink.tui.command.TuinkCommand.MENU_TABS;
+import static dev.tuink.tui.command.TuinkCommand.MENU_VIEW;
+import static dev.tuink.tui.command.TuinkCommand.SEARCH_OPEN;
+import static dev.tuink.tui.command.TuinkCommand.SEARCH_PREVIOUS;
+import static dev.tuink.tui.command.TuinkCommand.SEARCH_REPLACE;
+import static dev.tuink.tui.command.TuinkCommand.TAB_NEW;
+import static dev.tuink.tui.command.TuinkCommand.TAB_NEXT;
+import static dev.tuink.tui.command.TuinkCommand.TAB_PREVIOUS;
+import static dev.tuink.tui.command.TuinkCommand.UI_ESCAPE;
 
-import dev.tuink.editor.command.CommandId;
+import dev.tuink.tui.command.TuinkCommand;
 import dev.tuink.editor.command.CommandInvocation;
 import dev.tuiframe.input.KeyStroke;
 
@@ -123,7 +123,7 @@ public final class TuinkKeymap {
         return KeyStroke.of(key, modifiers);
     }
 
-    private static void bind(Keymap<KeyStroke> keymap, KeyStroke key, CommandId commandId) {
-        keymap.bind(key, CommandInvocation.of(commandId));
+    private static void bind(Keymap<KeyStroke> keymap, KeyStroke key, TuinkCommand command) {
+        keymap.bind(key, CommandInvocation.of(command.id()));
     }
 }

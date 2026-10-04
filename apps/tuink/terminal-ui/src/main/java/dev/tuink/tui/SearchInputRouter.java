@@ -64,9 +64,7 @@ final class SearchInputRouter {
                 return routeTab(focusManager, placement, event);
             }
             if (!stroke.modifiers().isEmpty()) {
-                return losesMeaningInLegacyAdapter(stroke.key())
-                    ? Result.CAPTURED
-                    : Result.IGNORED;
+                return Result.IGNORED;
             }
             if (stroke.key() == KeyStroke.Key.TAB) {
                 return routeTab(focusManager, placement, event);
@@ -99,9 +97,8 @@ final class SearchInputRouter {
                 if (isField(focused)) {
                     return routeFocused(focusManager, placement, event, true);
                 }
-                // A real non-field target keeps legacy Home/End bubbling, but
-                // an entirely clipped scope must not fall through to the
-                // legacy FIND fallback and move an invisible caret.
+                // Home/End outside a field reach the editor command policy.
+                // A clipped scope captures them to protect invisible carets.
                 return focused == null ? Result.CAPTURED : Result.IGNORED;
             }
         }
@@ -250,17 +247,6 @@ final class SearchInputRouter {
     private static boolean isExactShiftTab(KeyStroke stroke) {
         return stroke.key() == KeyStroke.Key.TAB
             && stroke.modifiers().equals(Set.of(KeyStroke.Modifier.SHIFT));
-    }
-
-    /** Prevents the transitional adapter from discarding modifiers and editing/submitting. */
-    private static boolean losesMeaningInLegacyAdapter(KeyStroke.Key key) {
-        return key == KeyStroke.Key.ESCAPE
-            || key == KeyStroke.Key.ENTER
-            || key == KeyStroke.Key.SPACE
-            || key == KeyStroke.Key.BACKSPACE
-            || key == KeyStroke.Key.DELETE
-            || key == KeyStroke.Key.HOME
-            || key == KeyStroke.Key.END;
     }
 
     private static boolean isField(SearchFocus focus) {

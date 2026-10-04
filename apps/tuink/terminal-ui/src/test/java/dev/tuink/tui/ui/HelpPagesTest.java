@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 class HelpPagesTest {
     @Test
     void versionComesFromGeneratedResource() {
-        assertEquals("0.12.2", HelpPages.appVersion());
+        assertEquals("0.12.3", HelpPages.appVersion());
     }
 
     @Test

@@ -10,8 +10,8 @@ import java.util.Optional;
 /**
  * TUInk-owned mapping from physical key values to semantic command invocations.
  *
- * <p>The key type is generic so the mapping stays independent of JLine and can
- * adopt the physical {@code KeyStroke} contract without changing command APIs.</p>
+ * <p>The generic key type keeps this mapping independent of JLine and of
+ * frontend-specific event types.</p>
  */
 public final class Keymap<K> {
     private final Map<K, CommandInvocation> bindings = new LinkedHashMap<>();

@@ -13,6 +13,7 @@ import dev.tuiframe.widget.RoutedTarget;
 import dev.tuiframe.widget.TextField;
 import dev.tuink.tui.ui.SaveAsBarView;
 import java.util.Objects;
+import java.util.Set;
 
 /** Raw-input adapter for the application-owned single-field Save As prompt. */
 final class SaveAsInputRouter {
@@ -50,18 +51,9 @@ final class SaveAsInputRouter {
             .orElseThrow();
         boolean interactive = fieldTarget.enabled() && fieldTarget.focusable();
 
-        // Save/cancel policy belongs to the application gate, whether or not
-        // field geometry is visible.
+        // The application owns cancellation even when the field is hidden.
         if (event instanceof KeyStroke stroke && isApplicationOwnedCancel(stroke)) {
             return Result.IGNORED;
-        }
-        if (event instanceof KeyStroke stroke
-            && !stroke.modifiers().isEmpty()
-            && !isExactShiftTab(stroke)) {
-            // Preserve legacy modified-key behavior while a real field owns
-            // focus. A hidden field captures the same keys so fallback cannot
-            // mutate an invisible value.
-            return interactive ? Result.IGNORED : Result.CAPTURED;
         }
 
         FocusRoute<SaveAsBarView.Target, TextField.Action> route = focusManager.route(scope, event);
@@ -89,21 +81,15 @@ final class SaveAsInputRouter {
             return Result.CAPTURED;
         }
         if (event instanceof PointerEvent || isFieldOwned(event)) {
-            // A hidden/disabled field and caret-boundary no-ops must remain
-            // modal: capture them without mutating through the legacy path.
+            // Pointer misses and caret-boundary no-ops stay inside the prompt.
             return Result.CAPTURED;
         }
         return Result.IGNORED;
     }
 
     private static boolean isApplicationOwnedCancel(KeyStroke stroke) {
-        return stroke.key() == KeyStroke.Key.ESCAPE
-            || stroke.key() == KeyStroke.Key.Q && stroke.modifiers().contains(KeyStroke.Modifier.CTRL);
-    }
-
-    private static boolean isExactShiftTab(KeyStroke stroke) {
-        return stroke.key() == KeyStroke.Key.TAB
-            && stroke.modifiers().equals(java.util.Set.of(KeyStroke.Modifier.SHIFT));
+        return stroke.key() == KeyStroke.Key.ESCAPE && stroke.modifiers().isEmpty()
+            || stroke.key() == KeyStroke.Key.Q && stroke.modifiers().equals(Set.of(KeyStroke.Modifier.CTRL));
     }
 
     private static boolean isFieldOwned(TuiInputEvent event) {

@@ -110,7 +110,7 @@ class FrameCompositionGoldenTest {
             ),
             1,
             "Cyan",
-            new LegacyCommandBridge(),
+            new CommandRouter(),
             MenuBar.State.closed()
         );
         TopMenuView.TopBar topBar = menu.topBar(Path.of("中.txt"), true, COLS, false);

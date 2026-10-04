@@ -7,8 +7,8 @@ import dev.tuink.core.EditorViewportBehavior;
 import dev.tuink.core.Position;
 import dev.tuink.core.TextModel;
 import dev.tuink.render.RenderPlan;
+import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.scroll.ScrollInteraction;
-import dev.tuink.tui.input.KeyEvent;
 import dev.tuiframe.scroll.HorizontalScrollbar;
 import dev.tuiframe.scroll.VerticalScrollbar;
 
@@ -46,7 +46,7 @@ public final class EditorView {
     }
 
     public boolean handleMousePress(
-        KeyEvent.MouseEvent mouse,
+        PointerEvent mouse,
         TextModel model,
         EditorState state,
         RenderPlan plan,
@@ -90,7 +90,7 @@ public final class EditorView {
     }
 
     public void handleMouseDrag(
-        KeyEvent.MouseEvent mouse,
+        PointerEvent mouse,
         TextModel model,
         EditorState state,
         RenderPlan plan,
@@ -98,12 +98,12 @@ public final class EditorView {
         EditorEngine engine,
         int contentTopRow
     ) {
-        if (!mouseSelecting || mouse.button() != KeyEvent.MouseButton.LEFT) {
+        if (!mouseSelecting || mouse.button() != PointerEvent.Button.LEFT) {
             return;
         }
         int top = Math.max(1, contentTopRow);
         int bottom = top + Math.max(0, contentRows) - 1;
-        KeyEvent.MouseEvent effectiveMouse = mouse;
+        PointerEvent effectiveMouse = mouse;
         autoScrollVerticalOnDrag(
             mouse,
             model,
@@ -118,7 +118,13 @@ public final class EditorView {
                 top,
                 Math.min(mouse.row(), bottom)
             );
-            effectiveMouse = new KeyEvent.MouseEvent(clampedRow, mouse.col(), mouse.kind(), mouse.button());
+            effectiveMouse = new PointerEvent(
+                clampedRow,
+                mouse.column(),
+                mouse.kind(),
+                mouse.button(),
+                mouse.modifiers()
+            );
         }
         Position hit = mouseToTextPosition(
             effectiveMouse,
@@ -141,7 +147,7 @@ public final class EditorView {
     }
 
     private void autoScrollVerticalOnDrag(
-        KeyEvent.MouseEvent mouse,
+        PointerEvent mouse,
         TextModel model,
         EditorTextLayout textLayout,
         EditorState state,
@@ -228,7 +234,7 @@ public final class EditorView {
     }
 
     public Position mouseToTextPosition(
-        KeyEvent.MouseEvent mouse,
+        PointerEvent mouse,
         TextModel model,
         EditorTextLayout textLayout,
         EditorState state,
@@ -242,7 +248,7 @@ public final class EditorView {
                 return null;
             }
             int visibleCols = Math.max(0, plan.cols() - plan.gutterWidth() - plan.scrollbarWidth());
-            int targetVisualCol = mouse.col() < plan.gutterWidth() ? 0 : mouse.col() - plan.gutterWidth();
+            int targetVisualCol = mouse.column() < plan.gutterWidth() ? 0 : mouse.column() - plan.gutterWidth();
             EditorViewportBehavior.WrapTop wrapTop = EditorViewportBehavior.normalizeWrapTop(
                 model,
                 textLayout,
@@ -279,7 +285,7 @@ public final class EditorView {
             contentTopRow,
             contentRows,
             mouse.row(),
-            mouse.col(),
+            mouse.column(),
             plan.gutterWidth(),
             tabWidth
         );

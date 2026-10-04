@@ -24,16 +24,16 @@ final class TopMenuInputRouter {
     static Result route(
         TopMenuController controller,
         TopMenuView.Placement placement,
-        LegacyCommandBridge commandBridge,
+        CommandRouter commandRouter,
         TuiInputEvent event
     ) {
         Objects.requireNonNull(controller, "controller");
         Objects.requireNonNull(placement, "placement");
-        Objects.requireNonNull(commandBridge, "commandBridge");
+        Objects.requireNonNull(commandRouter, "commandRouter");
         Objects.requireNonNull(event, "event");
 
         if (event instanceof KeyStroke stroke
-            && commandBridge.invocationFor(stroke).filter(controller::openFor).isPresent()) {
+            && commandRouter.invocationFor(stroke).filter(controller::openFor).isPresent()) {
             // A keyboard menu shortcut opens or switches the menu directly.
             // Do not adopt the placement from the frame that preceded it.
             return captured();
@@ -63,8 +63,8 @@ final class TopMenuInputRouter {
             return captured();
         }
         if (event instanceof PointerEvent pointer && placement.contains(pointer)) {
-            // Modified/non-left input over closed menu chrome must not lose its
-            // modifiers in the legacy pointer adapter and accidentally open it.
+            // Modified/non-left input over closed menu chrome belongs to this
+            // placement and must not accidentally open a menu through another handler.
             return captured();
         }
         return ignored();

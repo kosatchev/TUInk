@@ -1,57 +1,57 @@
 package dev.tuink.tui;
 
-import static dev.tuink.tui.command.TuinkCommandIds.MENU_EDIT;
-import static dev.tuink.tui.command.TuinkCommandIds.MENU_FILE;
-import static dev.tuink.tui.command.TuinkCommandIds.MENU_HELP;
-import static dev.tuink.tui.command.TuinkCommandIds.MENU_SETTINGS;
-import static dev.tuink.tui.command.TuinkCommandIds.MENU_TABS;
-import static dev.tuink.tui.command.TuinkCommandIds.MENU_VIEW;
+import static dev.tuink.tui.command.TuinkCommand.MENU_EDIT;
+import static dev.tuink.tui.command.TuinkCommand.MENU_FILE;
+import static dev.tuink.tui.command.TuinkCommand.MENU_HELP;
+import static dev.tuink.tui.command.TuinkCommand.MENU_SETTINGS;
+import static dev.tuink.tui.command.TuinkCommand.MENU_TABS;
+import static dev.tuink.tui.command.TuinkCommand.MENU_VIEW;
 
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.GutterDiffMode;
 import dev.tuink.core.TabInsertMode;
 import dev.tuink.editor.command.CommandInvocation;
-import dev.tuink.tui.input.KeyEvent;
+import dev.tuink.tui.command.TuinkCommand;
 import java.util.function.Consumer;
 
 final class InputActionDispatcher {
     private InputActionDispatcher() {
     }
 
-    static DispatchResult dispatch(KeyEvent.Action action, UiSessionState ui, DispatchContext ctx) {
+    static DispatchResult dispatch(TuinkCommand command, UiSessionState ui, DispatchContext ctx) {
         String statusMessage = null;
-        switch (action) {
-            case CTRL_E -> {
-                ctx.topMenu().openFor(CommandInvocation.of(MENU_EDIT));
+        switch (command) {
+            case MENU_EDIT -> {
+                ctx.topMenu().openFor(CommandInvocation.of(MENU_EDIT.id()));
                 return DispatchResult.handled(null);
             }
-            case CTRL_T -> {
-                ctx.topMenu().openFor(CommandInvocation.of(MENU_TABS));
+            case MENU_TABS -> {
+                ctx.topMenu().openFor(CommandInvocation.of(MENU_TABS.id()));
                 return DispatchResult.handled(null);
             }
-            case OPEN_VIEW_MENU -> {
-                ctx.topMenu().openFor(CommandInvocation.of(MENU_VIEW));
+            case MENU_VIEW -> {
+                ctx.topMenu().openFor(CommandInvocation.of(MENU_VIEW.id()));
                 return DispatchResult.handled(null);
             }
-            case OPEN_HELP_MENU -> {
-                ctx.topMenu().openFor(CommandInvocation.of(MENU_HELP));
+            case MENU_HELP -> {
+                ctx.topMenu().openFor(CommandInvocation.of(MENU_HELP.id()));
                 return DispatchResult.handled(null);
             }
-            case F10 -> {
-                ctx.topMenu().openFor(CommandInvocation.of(MENU_FILE));
+            case MENU_FILE -> {
+                ctx.topMenu().openFor(CommandInvocation.of(MENU_FILE.id()));
                 return DispatchResult.handled(null);
             }
-            case F2 -> {
-                ctx.topMenu().openFor(CommandInvocation.of(MENU_SETTINGS));
+            case MENU_SETTINGS -> {
+                ctx.topMenu().openFor(CommandInvocation.of(MENU_SETTINGS.id()));
                 return DispatchResult.handled(null);
             }
-            case TOGGLE_TAB_BAR -> {
+            case VIEW_TOGGLE_TAB_BAR -> {
                 ui.showTabBarSetting = !ui.showTabBarSetting;
                 statusMessage = ui.showTabBarSetting ? "Tab bar shown" : "Tab bar hidden";
                 return DispatchResult.handled(statusMessage);
             }
-            case TOGGLE_WRAP_LINES -> {
+            case VIEW_TOGGLE_LINE_WRAP -> {
                 ui.wrapLinesSetting = !ui.wrapLinesSetting;
                 if (ui.wrapLinesSetting) {
                     ctx.state().setTopWrapSegment(0);
@@ -61,24 +61,24 @@ final class InputActionDispatcher {
                 statusMessage = ui.wrapLinesSetting ? "Wrap lines enabled" : "Wrap lines disabled";
                 return DispatchResult.handled(statusMessage);
             }
-            case TOGGLE_WORD_WRAP -> {
+            case VIEW_TOGGLE_WORD_WRAP -> {
                 ui.wrapWordsSetting = !ui.wrapWordsSetting;
                 statusMessage = ui.wrapWordsSetting ? "Word wrap enabled" : "Word wrap disabled";
                 return DispatchResult.handled(statusMessage);
             }
-            case TOGGLE_READING_MODE -> {
+            case SETTINGS_TOGGLE_READING_MODE -> {
                 ui.readingModeSetting = !ui.readingModeSetting;
                 statusMessage = ui.readingModeSetting ? "Reading mode enabled" : "Reading mode disabled";
                 return DispatchResult.handled(statusMessage);
             }
-            case TOGGLE_CONFIRM_ON_CLOSE -> {
+            case SETTINGS_TOGGLE_CONFIRM_ON_CLOSE -> {
                 ui.confirmOnCloseSetting = !ui.confirmOnCloseSetting;
                 statusMessage = ui.confirmOnCloseSetting
                     ? "Confirm on close enabled"
                     : "Confirm on close disabled";
                 return DispatchResult.handled(statusMessage);
             }
-            case TOGGLE_MOUSE_MODE -> {
+            case SETTINGS_TOGGLE_MOUSE -> {
                 if (!ui.mouseModeAvailable) {
                     return DispatchResult.handled(
                         "Mouse mode is unavailable in this terminal",
@@ -95,103 +95,103 @@ final class InputActionDispatcher {
                     StatusLevel.ERROR
                 );
             }
-            case TOGGLE_ACTIVE_GUTTER_HIGHLIGHT -> {
+            case VIEW_TOGGLE_ACTIVE_GUTTER -> {
                 ui.highlightActiveGutterSetting = !ui.highlightActiveGutterSetting;
                 statusMessage = ui.highlightActiveGutterSetting
                     ? "Current line number highlight enabled"
                     : "Current line number highlight disabled";
                 return DispatchResult.handled(statusMessage);
             }
-            case TOGGLE_SMART_HOME_END -> {
+            case SETTINGS_TOGGLE_SMART_HOME_END -> {
                 ui.smartHomeEndSetting = !ui.smartHomeEndSetting;
                 statusMessage = ui.smartHomeEndSetting
                     ? "Smart Home/End enabled"
                     : "Smart Home/End disabled";
                 return DispatchResult.handled(statusMessage);
             }
-            case TOGGLE_AUTO_INDENT -> {
+            case SETTINGS_TOGGLE_AUTO_INDENT -> {
                 ui.autoIndentSetting = !ui.autoIndentSetting;
                 statusMessage = ui.autoIndentSetting
                     ? "Auto indent enabled"
                     : "Auto indent disabled";
                 return DispatchResult.handled(statusMessage);
             }
-            case TOGGLE_AUTO_PAIRS -> {
+            case SETTINGS_TOGGLE_AUTO_PAIRS -> {
                 ui.autoPairsSetting = !ui.autoPairsSetting;
                 statusMessage = ui.autoPairsSetting
                     ? "Autopairs enabled"
                     : "Autopairs disabled";
                 return DispatchResult.handled(statusMessage);
             }
-            case TOGGLE_AUTO_LIST -> {
+            case SETTINGS_TOGGLE_AUTO_LIST -> {
                 ui.autoListSetting = !ui.autoListSetting;
                 statusMessage = ui.autoListSetting
                     ? "Auto list enabled"
                     : "Auto list disabled";
                 return DispatchResult.handled(statusMessage);
             }
-            case TOGGLE_VISIBLE_WHITESPACE -> {
+            case VIEW_TOGGLE_WHITESPACE -> {
                 ui.visibleWhitespaceSetting = !ui.visibleWhitespaceSetting;
                 statusMessage = ui.visibleWhitespaceSetting
                     ? "Visible whitespace enabled"
                     : "Visible whitespace disabled";
                 return DispatchResult.handled(statusMessage);
             }
-            case TOGGLE_SYNTAX_HIGHLIGHTING -> {
+            case VIEW_TOGGLE_SYNTAX -> {
                 ui.syntaxHighlightingSetting = !ui.syntaxHighlightingSetting;
                 statusMessage = ui.syntaxHighlightingSetting
                     ? "Syntax highlighting enabled"
                     : "Syntax highlighting disabled";
                 return DispatchResult.handled(statusMessage);
             }
-            case TOGGLE_RAINBOW_BRACKETS -> {
+            case VIEW_TOGGLE_RAINBOW_BRACKETS -> {
                 ui.rainbowBracketsSetting = !ui.rainbowBracketsSetting;
                 statusMessage = ui.rainbowBracketsSetting
                     ? "Rainbow brackets enabled"
                     : "Rainbow brackets disabled";
                 return DispatchResult.handled(statusMessage);
             }
-            case TOGGLE_AUTO_SELECTION_HIGHLIGHT -> {
+            case VIEW_TOGGLE_SELECTION_HIGHLIGHT -> {
                 ui.autoSelectionHighlightSetting = !ui.autoSelectionHighlightSetting;
                 statusMessage = ui.autoSelectionHighlightSetting
                     ? "Auto highlight selection enabled"
                     : "Auto highlight selection disabled";
                 return DispatchResult.handled(statusMessage);
             }
-            case TOGGLE_GUTTER_DIFF -> {
+            case VIEW_CYCLE_GUTTER_DIFF -> {
                 ui.gutterDiffModeSetting = nextGutterDiffMode(ui.gutterDiffModeSetting);
                 statusMessage = "Gutter diff: " + ui.gutterDiffModeSetting.label();
                 return DispatchResult.handled(statusMessage);
             }
-            case TOGGLE_TAB_WIDTH -> {
+            case VIEW_CYCLE_TAB_WIDTH -> {
                 ui.tabWidthSetting = ui.tabWidthSetting <= 2 ? 4 : 2;
                 statusMessage = ui.tabWidthSetting <= 2
                     ? "Thin tabs enabled (2)"
                     : "Thin tabs disabled (4)";
                 return DispatchResult.handled(statusMessage);
             }
-            case TOGGLE_TAB_INSERT_MODE -> {
+            case SETTINGS_CYCLE_TAB_INSERT_MODE -> {
                 ui.tabInsertModeSetting = nextTabInsertMode(ui.tabInsertModeSetting);
                 statusMessage = "Tab insert mode: " + ui.tabInsertModeSetting.label();
                 return DispatchResult.handled(statusMessage);
             }
-            case SHOW_KEY_HINTS -> {
+            case HELP_KEY_HINTS -> {
                 ui.helpHintsMode = true;
                 return DispatchResult.handled(null);
             }
-            case SHOW_LICENSES -> {
+            case HELP_LICENSES -> {
                 ui.helpLicensesMode = true;
                 return DispatchResult.handled(null);
             }
-            case SHOW_AUTHOR -> {
+            case HELP_AUTHOR -> {
                 ui.helpAuthorMode = true;
                 return DispatchResult.handled(null);
             }
-            case CTRL_F -> {
+            case SEARCH_OPEN -> {
                 ui.searchMode = true;
                 return DispatchResult.handled(null);
             }
-            case CTRL_C -> {
+            case EDIT_COPY -> {
                 if (ctx.engine().hasSelection()) {
                     statusMessage = ctx.engine().copySelection() ? "Copied selection" : "Nothing to copy";
                 } else {
@@ -199,7 +199,7 @@ final class InputActionDispatcher {
                 }
                 return DispatchResult.handled(statusMessage);
             }
-            case CTRL_X -> {
+            case EDIT_CUT -> {
                 if (ui.readingModeSetting) {
                     statusMessage = "Reading mode: editing is disabled";
                 } else {
@@ -211,7 +211,7 @@ final class InputActionDispatcher {
                 }
                 return DispatchResult.handled(statusMessage);
             }
-            case CTRL_V -> {
+            case EDIT_PASTE -> {
                 if (ui.readingModeSetting) {
                     statusMessage = "Reading mode: editing is disabled";
                 } else {
@@ -219,19 +219,25 @@ final class InputActionDispatcher {
                 }
                 return DispatchResult.handled(statusMessage);
             }
-            case CTRL_Z -> {
+            case EDIT_UNDO -> {
+                if (ui.readingModeSetting) {
+                    return DispatchResult.handled("Reading mode: editing is disabled");
+                }
                 statusMessage = ctx.engine().undo() ? "Undo" : "Nothing to undo";
                 return DispatchResult.handled(statusMessage);
             }
-            case CTRL_Y -> {
+            case EDIT_REDO -> {
+                if (ui.readingModeSetting) {
+                    return DispatchResult.handled("Reading mode: editing is disabled");
+                }
                 statusMessage = ctx.engine().redo() ? "Redo" : "Nothing to redo";
                 return DispatchResult.handled(statusMessage);
             }
-            case CTRL_A -> {
+            case EDIT_SELECT_ALL -> {
                 statusMessage = ctx.engine().selectAll() ? "Selected all" : "Nothing to select";
                 return DispatchResult.handled(statusMessage);
             }
-            case TOGGLE_LINE_COMMENT -> {
+            case EDIT_TOGGLE_LINE_COMMENT -> {
                 if (ui.readingModeSetting) {
                     return DispatchResult.handled("Reading mode: editing is disabled");
                 }
@@ -253,7 +259,7 @@ final class InputActionDispatcher {
                     );
                 };
             }
-            case TAB -> {
+            case EDIT_INSERT_TAB -> {
                 if (ui.readingModeSetting) {
                     statusMessage = "Reading mode: editing is disabled";
                 } else {
@@ -262,55 +268,55 @@ final class InputActionDispatcher {
                 }
                 return DispatchResult.handled(statusMessage);
             }
-            case ARROW_UP -> {
+            case CURSOR_UP -> {
                 ctx.engine().moveUp();
                 return DispatchResult.handled(null);
             }
-            case ARROW_DOWN -> {
+            case CURSOR_DOWN -> {
                 ctx.engine().moveDown();
                 return DispatchResult.handled(null);
             }
-            case ARROW_LEFT -> {
+            case CURSOR_LEFT -> {
                 ctx.engine().moveLeft();
                 return DispatchResult.handled(null);
             }
-            case ARROW_RIGHT -> {
+            case CURSOR_RIGHT -> {
                 ctx.engine().moveRight();
                 return DispatchResult.handled(null);
             }
-            case SHIFT_ARROW_UP -> {
+            case CURSOR_SELECT_UP -> {
                 ctx.engine().moveUp(true);
                 return DispatchResult.handled(null);
             }
-            case SHIFT_ARROW_DOWN -> {
+            case CURSOR_SELECT_DOWN -> {
                 ctx.engine().moveDown(true);
                 return DispatchResult.handled(null);
             }
-            case SHIFT_ARROW_LEFT -> {
+            case CURSOR_SELECT_LEFT -> {
                 ctx.engine().moveLeft(true);
                 return DispatchResult.handled(null);
             }
-            case SHIFT_ARROW_RIGHT -> {
+            case CURSOR_SELECT_RIGHT -> {
                 ctx.engine().moveRight(true);
                 return DispatchResult.handled(null);
             }
-            case WORD_LEFT -> {
+            case CURSOR_WORD_LEFT -> {
                 ctx.engine().moveWordLeft();
                 return DispatchResult.handled(null);
             }
-            case WORD_RIGHT -> {
+            case CURSOR_WORD_RIGHT -> {
                 ctx.engine().moveWordRight();
                 return DispatchResult.handled(null);
             }
-            case PAGE_UP -> {
+            case CURSOR_PAGE_UP -> {
                 ctx.engine().pageUp(ctx.contentRows());
                 return DispatchResult.handled(null);
             }
-            case PAGE_DOWN -> {
+            case CURSOR_PAGE_DOWN -> {
                 ctx.engine().pageDown(ctx.contentRows());
                 return DispatchResult.handled(null);
             }
-            case HOME -> {
+            case CURSOR_HOME -> {
                 if (ui.smartHomeEndSetting) {
                     ctx.engine().moveHomeSmart();
                 } else {
@@ -318,7 +324,7 @@ final class InputActionDispatcher {
                 }
                 return DispatchResult.handled(null);
             }
-            case END -> {
+            case CURSOR_END -> {
                 if (ui.smartHomeEndSetting) {
                     ctx.engine().moveEndSmart();
                 } else {
@@ -326,7 +332,7 @@ final class InputActionDispatcher {
                 }
                 return DispatchResult.handled(null);
             }
-            case BACKSPACE -> {
+            case EDIT_BACKSPACE -> {
                 if (ui.readingModeSetting) {
                     statusMessage = "Reading mode: editing is disabled";
                 } else {
@@ -334,7 +340,7 @@ final class InputActionDispatcher {
                 }
                 return DispatchResult.handled(statusMessage);
             }
-            case DELETE -> {
+            case EDIT_DELETE_FORWARD -> {
                 if (ui.readingModeSetting) {
                     statusMessage = "Reading mode: editing is disabled";
                 } else {
@@ -342,7 +348,7 @@ final class InputActionDispatcher {
                 }
                 return DispatchResult.handled(statusMessage);
             }
-            case ENTER -> {
+            case EDIT_INSERT_NEWLINE -> {
                 if (ui.readingModeSetting) {
                     statusMessage = "Reading mode: editing is disabled";
                 } else {
@@ -350,7 +356,7 @@ final class InputActionDispatcher {
                 }
                 return DispatchResult.handled(statusMessage);
             }
-            case ESCAPE, CTRL_R, UNKNOWN -> {
+            case UI_ESCAPE, SEARCH_REPLACE -> {
                 return DispatchResult.handled(null);
             }
             default -> {

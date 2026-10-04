@@ -2,7 +2,9 @@ package dev.tuink.tui;
 
 import dev.tuink.core.SaveDisposition;
 import dev.tuink.tui.flow.UiModalState;
-import dev.tuink.tui.input.KeyEvent;
+import dev.tuink.tui.command.TuinkCommand;
+import dev.tuink.tui.input.EditorInput;
+import dev.tuiframe.input.TextInput;
 import java.nio.file.Path;
 import java.util.function.BiPredicate;
 import java.util.function.Function;
@@ -13,7 +15,7 @@ final class SaveFlowController {
     }
 
     static SaveAsResult handleSaveAsInput(
-        KeyEvent key,
+        EditorInput input,
         UiModalState modalState,
         String saveAsText,
         Path currentFile,
@@ -27,14 +29,17 @@ final class SaveFlowController {
         if (!modalState.isSaveAs()) {
             return result(false, modalState, TextInputEffect.none(), false, null, null);
         }
-        if (key instanceof KeyEvent.CharInput charInput) {
-            return result(true, modalState, TextInputEffect.insert(charInput.text()), true, null, null);
+        if (input.event() instanceof TextInput textInput) {
+            return result(true, modalState, TextInputEffect.insert(textInput.text()), true, null, null);
         }
 
-        KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
-        return switch (action) {
-            case BACKSPACE -> result(true, modalState, TextInputEffect.backspace(), true, null, null);
-            case ENTER -> handleEnter(
+        TuinkCommand command = input.command();
+        if (command == null) {
+            return result(true, modalState, TextInputEffect.none(), false, null, null);
+        }
+        return switch (command) {
+            case EDIT_BACKSPACE -> result(true, modalState, TextInputEffect.backspace(), true, null, null);
+            case EDIT_INSERT_NEWLINE -> handleEnter(
                 modalState,
                 saveAsText,
                 currentFile,
@@ -45,7 +50,7 @@ final class SaveFlowController {
                 isSameFilePath,
                 suggestWritableName
             );
-            case ESCAPE, CTRL_Q -> result(
+            case UI_ESCAPE, APP_QUIT -> result(
                 true,
                 UiModalState.none(),
                 TextInputEffect.clear(),
@@ -53,11 +58,11 @@ final class SaveFlowController {
                 null,
                 null
             );
-            case ARROW_LEFT -> result(true, modalState, TextInputEffect.moveLeft(), false, null, null);
-            case ARROW_RIGHT -> result(true, modalState, TextInputEffect.moveRight(), false, null, null);
-            case HOME -> result(true, modalState, TextInputEffect.moveHome(), false, null, null);
-            case END -> result(true, modalState, TextInputEffect.moveEnd(), false, null, null);
-            case DELETE -> result(true, modalState, TextInputEffect.deleteForward(), false, null, null);
+            case CURSOR_LEFT -> result(true, modalState, TextInputEffect.moveLeft(), false, null, null);
+            case CURSOR_RIGHT -> result(true, modalState, TextInputEffect.moveRight(), false, null, null);
+            case CURSOR_HOME -> result(true, modalState, TextInputEffect.moveHome(), false, null, null);
+            case CURSOR_END -> result(true, modalState, TextInputEffect.moveEnd(), false, null, null);
+            case EDIT_DELETE_FORWARD -> result(true, modalState, TextInputEffect.deleteForward(), false, null, null);
             default -> result(true, modalState, TextInputEffect.none(), false, null, null);
         };
     }

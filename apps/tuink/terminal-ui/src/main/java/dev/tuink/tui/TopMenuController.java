@@ -1,11 +1,11 @@
 package dev.tuink.tui;
 
-import static dev.tuink.tui.command.TuinkCommandIds.MENU_EDIT;
-import static dev.tuink.tui.command.TuinkCommandIds.MENU_FILE;
-import static dev.tuink.tui.command.TuinkCommandIds.MENU_HELP;
-import static dev.tuink.tui.command.TuinkCommandIds.MENU_SETTINGS;
-import static dev.tuink.tui.command.TuinkCommandIds.MENU_TABS;
-import static dev.tuink.tui.command.TuinkCommandIds.MENU_VIEW;
+import static dev.tuink.tui.command.TuinkCommand.MENU_EDIT;
+import static dev.tuink.tui.command.TuinkCommand.MENU_FILE;
+import static dev.tuink.tui.command.TuinkCommand.MENU_HELP;
+import static dev.tuink.tui.command.TuinkCommand.MENU_SETTINGS;
+import static dev.tuink.tui.command.TuinkCommand.MENU_TABS;
+import static dev.tuink.tui.command.TuinkCommand.MENU_VIEW;
 
 import dev.tuink.editor.command.CommandId;
 import dev.tuink.editor.command.CommandInvocation;
@@ -56,22 +56,22 @@ final class TopMenuController {
     }
 
     private static int menuIndex(CommandId id) {
-        if (MENU_FILE.equals(id)) {
+        if (MENU_FILE.id().equals(id)) {
             return FILE_INDEX;
         }
-        if (MENU_EDIT.equals(id)) {
+        if (MENU_EDIT.id().equals(id)) {
             return EDIT_INDEX;
         }
-        if (MENU_VIEW.equals(id)) {
+        if (MENU_VIEW.id().equals(id)) {
             return VIEW_INDEX;
         }
-        if (MENU_TABS.equals(id)) {
+        if (MENU_TABS.id().equals(id)) {
             return TABS_INDEX;
         }
-        if (MENU_SETTINGS.equals(id)) {
+        if (MENU_SETTINGS.id().equals(id)) {
             return SETTINGS_INDEX;
         }
-        if (MENU_HELP.equals(id)) {
+        if (MENU_HELP.id().equals(id)) {
             return HELP_INDEX;
         }
         return -1;

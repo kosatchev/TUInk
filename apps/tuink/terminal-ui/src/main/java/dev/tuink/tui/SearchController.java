@@ -2,7 +2,7 @@ package dev.tuink.tui;
 
 import dev.tuink.core.SearchOptions;
 import dev.tuink.tui.flow.SearchFocus;
-import dev.tuink.tui.input.KeyEvent;
+import dev.tuink.tui.command.TuinkCommand;
 
 final class SearchController {
     private SearchController() {
@@ -59,13 +59,13 @@ final class SearchController {
         return focus == SearchFocus.FIND || focus == SearchFocus.REPLACE;
     }
 
-    static KeyEvent.Action actionForSearchFocus(SearchFocus focus) {
+    static TuinkCommand actionForSearchFocus(SearchFocus focus) {
         return switch (focus) {
-            case NEXT_BUTTON -> KeyEvent.Action.CTRL_F;
-            case PREV_BUTTON -> KeyEvent.Action.CTRL_G;
-            case REPLACE_BUTTON -> KeyEvent.Action.CTRL_R;
-            case ALL_BUTTON -> KeyEvent.Action.CTRL_A;
-            default -> null;
+            case NEXT_BUTTON -> TuinkCommand.SEARCH_NEXT;
+            case PREV_BUTTON -> TuinkCommand.SEARCH_PREVIOUS;
+            case REPLACE_BUTTON -> TuinkCommand.SEARCH_REPLACE;
+            case ALL_BUTTON -> TuinkCommand.SEARCH_REPLACE_ALL;
+            default -> TuinkCommand.SEARCH_NEXT;
         };
     }
 

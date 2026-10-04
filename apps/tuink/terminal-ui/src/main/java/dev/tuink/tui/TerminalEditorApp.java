@@ -27,9 +27,9 @@ import dev.tuink.tui.flow.SaveTargetSuggester;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.flow.UiModalState;
 import dev.tuink.editor.command.CommandInvocation;
-import dev.tuink.tui.input.KeyEvent;
+import dev.tuink.tui.input.EditorInput;
+import dev.tuink.tui.command.TuinkCommand;
 import dev.tuiframe.input.KeyStroke;
-import dev.tuink.tui.input.LegacyKeyEventAdapter;
 import dev.tuiframe.input.PasteEvent;
 import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.input.ResizeEvent;
@@ -286,7 +286,7 @@ public class TerminalEditorApp {
 
             ScreenPresenter screenPresenter = terminal.screenPresenter();
             try {
-                LegacyCommandBridge commandBridge = new LegacyCommandBridge();
+                CommandRouter commandRouter = new CommandRouter();
                 TuiEventLoop<TuiInputEvent> eventLoop = terminal.eventLoop();
                 RenderFrameController renderFrameController = new RenderFrameController(
                     renderer,
@@ -661,7 +661,7 @@ public class TerminalEditorApp {
                             toTopMenuTabs(tabs, tabMatchFlags),
                             activeTabIndex,
                             theme.label(),
-                            commandBridge,
+                            commandRouter,
                             topMenu.state()
                         );
                         topMenuPlacement = topMenuView.place(new Rect(0, 0, cols, rows));
@@ -845,8 +845,7 @@ public class TerminalEditorApp {
                                 saveAsBarPlacement,
                                 inputEvent
                             );
-                            boolean clearsSaveAsNotification = (inputEvent instanceof TextInput text
-                                    && text.text().codePointCount(0, text.text().length()) == 1)
+                            boolean clearsSaveAsNotification = inputEvent instanceof TextInput
                                 || (inputEvent instanceof KeyStroke stroke
                                     && stroke.modifiers().isEmpty()
                                     && stroke.key() == KeyStroke.Key.BACKSPACE);
@@ -997,7 +996,7 @@ public class TerminalEditorApp {
                             return;
                         }
                         CommandInvocation routedMenuCommand = null;
-                        LegacyCommandBridge.RoutedCommand routedMenuResult = null;
+                        CommandRouter.RoutedCommand routedMenuResult = null;
                         if (modalState.isNone() && !openFileMode) {
                             boolean pointerAllowed = !(inputEvent instanceof PointerEvent)
                                 || uiSessionState.mouseModeSetting && uiSessionState.mouseModeAvailable;
@@ -1014,7 +1013,7 @@ public class TerminalEditorApp {
                                     TopMenuInputRouter.Result menuInput = TopMenuInputRouter.route(
                                         topMenu,
                                         topMenuPlacement,
-                                        commandBridge,
+                                        commandRouter,
                                         inputEvent
                                     );
                                     if (inputEvent instanceof PointerEvent && menuInput.consumed()) {
@@ -1022,9 +1021,9 @@ public class TerminalEditorApp {
                                     }
                                     routedMenuCommand = menuInput.command();
                                     if (routedMenuCommand != null) {
-                                        routedMenuResult = commandBridge.dispatch(routedMenuCommand)
+                                        routedMenuResult = commandRouter.dispatch(routedMenuCommand)
                                             .orElse(null);
-                                        if (routedMenuResult instanceof LegacyCommandBridge.ActivateTab tab
+                                        if (routedMenuResult instanceof CommandRouter.ActivateTab tab
                                             && tab.tabIndex() >= 0
                                             && tab.tabIndex() < tabs.size()) {
                                             sessionContext.activate(tab.tabIndex());
@@ -1103,10 +1102,10 @@ public class TerminalEditorApp {
                             tabBarState = tabInput.state();
                             Integer activateIndex = tabInput.activateIndex();
                             if (activateIndex != null && activateIndex < tabs.size()) {
-                                CommandInvocation activation = commandBridge.tabActivationInvocation(
+                                CommandInvocation activation = commandRouter.tabActivationInvocation(
                                     activateIndex
                                 );
-                                int resolvedTab = commandBridge.invokeTabActivation(activation).orElse(-1);
+                                int resolvedTab = commandRouter.invokeTabActivation(activation).orElse(-1);
                                 if (resolvedTab >= 0 && resolvedTab < tabs.size()) {
                                     sessionContext.activate(resolvedTab);
                                 }
@@ -1133,15 +1132,15 @@ public class TerminalEditorApp {
                                 return;
                             }
                         }
-                        KeyEvent.Action routedSearchKeyAction = keyAction(routedSearchAction);
+                        TuinkCommand routedSearchCommand = searchCommand(routedSearchAction);
                         CommandInvocation pendingCommand = routedMenuCommand != null
                             ? routedMenuCommand
-                            : routedSearchKeyAction != null
-                            ? commandBridge.invocationFor(routedSearchKeyAction).orElse(null)
+                            : routedSearchCommand != null
+                            ? CommandInvocation.of(routedSearchCommand.id())
                             : routedConfirmDecision == null
                             && !routedSaveAsSubmit
                             && inputEvent instanceof KeyStroke stroke
-                            ? commandBridge.invocationFor(stroke).orElse(null)
+                            ? commandRouter.invocationFor(stroke).orElse(null)
                             : null;
 
                         if (routedMenuCommand == null && inputEvent instanceof PasteEvent paste) {
@@ -1162,55 +1161,51 @@ public class TerminalEditorApp {
                             return;
                         }
 
-                        if (shouldHandleMultiScalarTextFallback(inputEvent, routedMenuCommand)) {
-                            TextInput text = (TextInput) inputEvent;
-                            if (!modalState.isNone() || openFileMode || topMenu.isOpen()) {
-                                // Multi-scalar IME input is ignored by overlays that only accept keys.
-                            } else if (uiSessionState.readingModeSetting) {
-                                notification.warning("Reading mode: editing is disabled");
-                            } else {
-                                engine.insertInput(text.text());
-                                viewportController.onEditorTextInteraction();
-                            }
+                        if (routedMenuCommand != null
+                            && !(routedMenuResult instanceof CommandRouter.RoutedAction)) {
                             return;
                         }
-
-                        KeyEvent key;
-                        if (routedMenuCommand != null) {
-                            if (!(routedMenuResult instanceof LegacyCommandBridge.RoutedAction menuAction)) {
-                                return;
-                            }
-                            key = new KeyEvent.ActionEvent(menuAction.action());
-                        } else if (routedSearchKeyAction != null) {
-                            key = new KeyEvent.ActionEvent(routedSearchKeyAction);
-                        } else if (routedConfirmDecision != null || routedSaveAsSubmit) {
-                            key = new KeyEvent.ActionEvent(KeyEvent.Action.ENTER);
-                        } else {
-                            key = LegacyKeyEventAdapter.toLegacy(inputEvent).orElse(null);
-                        }
+                        EditorInput key = routedConfirmDecision != null || routedSaveAsSubmit
+                            ? EditorInput.command(TuinkCommand.EDIT_INSERT_NEWLINE)
+                            : resolveEditorInput(
+                                commandRouter,
+                                inputEvent,
+                                pendingCommand,
+                                routedMenuResult,
+                                searchOwnsRawInput(
+                                    uiSessionState.searchMode,
+                                    modalState,
+                                    openFileMode,
+                                    topMenu.isOpen(),
+                                    routedMenuCommand != null
+                                ),
+                                currentSearchFocus()
+                            );
                         if (key == null) {
                             return;
                         }
                         viewportController.onInput(key);
 
-                        if (key instanceof KeyEvent.MouseEvent mouse) {
+                        if (key.command() == null && key.event() instanceof PointerEvent mouse) {
+                            if (mouse.button() == PointerEvent.Button.OTHER) {
+                                return;
+                            }
                             if (!uiSessionState.mouseModeSetting || !uiSessionState.mouseModeAvailable) {
                                 return;
                             }
                             if (helpHintsMode || helpLicensesMode || helpAuthorMode) {
-                                if (mouse.kind() == KeyEvent.MouseKind.PRESS
-                                    && mouse.button() == KeyEvent.MouseButton.LEFT) {
+                                if (mouse.kind() == PointerEvent.Kind.PRESS
+                                    && mouse.button() == PointerEvent.Button.LEFT) {
                                     HelpPage helpPage = activeHelpPage(helpHintsMode, helpLicensesMode, helpAuthorMode);
                                     HelpOverlayPlacement overlay = helpOverlayPlacement(rows, cols, helpPage);
-                                    if (overlay.frame().closeHit(mouse.row(), mouse.col())
-                                        || overlay.close().hit(mouse.row(), mouse.col())) {
+                                    if (overlay.frame().closeHit(mouse.row(), mouse.column())
+                                        || overlay.close().hit(mouse.row(), mouse.column())) {
                                         helpFocusManager.deactivate(HelpOverlayInputRouter.Scope.HELP);
                                         modalState = UiModalState.none();
                                     }
                                 }
                                 return;
                             }
-                            KeyEvent remappedMouseKey = null;
                             switch (mouse.kind()) {
                                 case SCROLL_UP -> {
                                     if (modalState.isNone()) {
@@ -1247,7 +1242,7 @@ public class TerminalEditorApp {
                                     }
                                 }
                                 case PRESS -> {
-                                    if (mouse.button() == KeyEvent.MouseButton.LEFT) {
+                                    if (mouse.button() == PointerEvent.Button.LEFT) {
                                         editorScrollDrag = EditorView.ScrollAxis.NONE;
                                         editorScrollDragThumbOffset = 0;
                                         openFileScrollDrag = null;
@@ -1265,7 +1260,7 @@ public class TerminalEditorApp {
                                             int topWrapBeforeScrollPointer = state.getTopWrapSegment();
                                             EditorView.ScrollPointerResult scrollPointer = editorView.handleScrollbarPointer(
                                                 mouse.row(),
-                                                mouse.col(),
+                                                mouse.column(),
                                                 rows,
                                                 cols,
                                                 contentTopRow,
@@ -1319,16 +1314,16 @@ public class TerminalEditorApp {
                                         }
                                     }
                                 }
-                                case DRAG -> {
+                                case MOVE, DRAG -> {
                                     if (modalState.isNone()) {
-                                        if (mouse.button() == KeyEvent.MouseButton.LEFT
+                                        if (mouse.button() == PointerEvent.Button.LEFT
                                             && editorScrollDrag != EditorView.ScrollAxis.NONE) {
                                             int leftBeforeDragScroll = state.getLeftVisualColumn();
                                             int topBeforeDragScroll = state.getTopLine();
                                             int topWrapBeforeDragScroll = state.getTopWrapSegment();
                                             EditorView.ScrollPointerResult dragScrollPointer = editorView.handleScrollbarPointer(
                                                 mouse.row(),
-                                                mouse.col(),
+                                                mouse.column(),
                                                 rows,
                                                 cols,
                                                 contentTopRow,
@@ -1372,13 +1367,10 @@ public class TerminalEditorApp {
                                     editorView.handleMouseRelease(engine);
                                 }
                                 default -> {
-                                    // Ignore drag and release mouse events.
+                                    // Horizontal wheel and unknown pointer events have no editor action.
                                 }
                             }
-                            if (remappedMouseKey == null) {
-                                return;
-                            }
-                            key = remappedMouseKey;
+                            return;
                         }
 
                         if (modalState.isHelpHints()) {
@@ -1396,13 +1388,13 @@ public class TerminalEditorApp {
                         }
 
                         if (modalState.isHelpLicenses()) {
-                            if (key instanceof KeyEvent.CharInput) {
+                            if (key.command() == null && key.event() instanceof TextInput) {
                                 return;
                             }
-                            KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
-                            if (action == KeyEvent.Action.ESCAPE
-                                || action == KeyEvent.Action.ENTER
-                                || action == KeyEvent.Action.SHOW_LICENSES) {
+                            TuinkCommand action = key.command();
+                            if (action == TuinkCommand.UI_ESCAPE
+                                || action == TuinkCommand.EDIT_INSERT_NEWLINE
+                                || action == TuinkCommand.HELP_LICENSES) {
                                 helpFocusManager.deactivate(HelpOverlayInputRouter.Scope.HELP);
                                 modalState = UiModalState.none();
                             }
@@ -1410,13 +1402,13 @@ public class TerminalEditorApp {
                         }
 
                         if (modalState.isHelpAuthor()) {
-                            if (key instanceof KeyEvent.CharInput) {
+                            if (key.command() == null && key.event() instanceof TextInput) {
                                 return;
                             }
-                            KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
-                            if (action == KeyEvent.Action.ESCAPE
-                                || action == KeyEvent.Action.ENTER
-                                || action == KeyEvent.Action.SHOW_AUTHOR) {
+                            TuinkCommand action = key.command();
+                            if (action == TuinkCommand.UI_ESCAPE
+                                || action == TuinkCommand.EDIT_INSERT_NEWLINE
+                                || action == TuinkCommand.HELP_AUTHOR) {
                                 helpFocusManager.deactivate(HelpOverlayInputRouter.Scope.HELP);
                                 modalState = UiModalState.none();
                             }
@@ -1613,8 +1605,6 @@ public class TerminalEditorApp {
                         if (uiSessionState.searchMode && routedMenuCommand == null) {
                             SearchModeResult searchModeResult = handleSearchModeInput(
                                 key,
-                                pendingCommand,
-                                commandBridge,
                                 uiSessionState,
                                 searchUi,
                                 searchQueryInput,
@@ -1654,7 +1644,7 @@ public class TerminalEditorApp {
                             }
                         }
 
-                        if (key instanceof KeyEvent.CharInput charInput) {
+                        if (key.command() == null && key.event() instanceof TextInput charInput) {
                             if (uiSessionState.readingModeSetting) {
                                 notification.warning("Reading mode: editing is disabled");
                             } else {
@@ -1663,16 +1653,7 @@ public class TerminalEditorApp {
                             return;
                         }
 
-                        KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
-                        if (pendingCommand == null && routedMenuCommand == null) {
-                            pendingCommand = commandBridge.invocationFor(action).orElse(null);
-                        }
-                        action = resolvePendingCommand(
-                            commandBridge,
-                            pendingCommand,
-                            action,
-                            routedMenuCommand != null
-                        );
+                        TuinkCommand action = key.command();
                         InputActionDispatcher.DispatchResult dispatchResult = InputActionDispatcher.dispatch(
                             action,
                             uiSessionState,
@@ -1685,7 +1666,7 @@ public class TerminalEditorApp {
                             )
                         );
                         if (dispatchResult.handled()) {
-                            if (action == KeyEvent.Action.CTRL_F) {
+                            if (action == TuinkCommand.SEARCH_OPEN) {
                                 String selectedQuery = selectionQueryForCtrlF(model, state);
                                 if (selectedQuery != null) {
                                     searchQueryInput.set(selectedQuery);
@@ -1952,9 +1933,7 @@ public class TerminalEditorApp {
     }
 
     private SearchModeResult handleSearchModeInput(
-        KeyEvent key,
-        CommandInvocation pendingCommand,
-        LegacyCommandBridge commandBridge,
+        EditorInput key,
         UiSessionState uiSessionState,
         SearchController.SearchUiOptions searchUi,
         TextField searchQueryInput,
@@ -1995,8 +1974,8 @@ public class TerminalEditorApp {
         OpenFileInputRouter.Focus nextOpenFileFocus = openFileFocus;
 
         SearchFocus searchFocus = currentSearchFocus();
-        if (key instanceof KeyEvent.CharInput charInput) {
-            if (charInput.codePoint() == ' ' && SearchController.isToggleFocus(searchFocus)) {
+        if (key.command() == null && key.event() instanceof TextInput charInput) {
+            if (charInput.text().equals(" ") && SearchController.isToggleFocus(searchFocus)) {
                 SearchController.SearchUiOptions before = nextSearchUi;
                 nextSearchUi = SearchController.toggleFocusedSearchOption(nextSearchUi, searchFocus);
                 if (!nextSearchUi.equals(before)) {
@@ -2024,32 +2003,26 @@ public class TerminalEditorApp {
             );
         }
 
-        KeyEvent.Action action = ((KeyEvent.ActionEvent) key).action();
-        CommandInvocation focusedCommand = commandBridge.invocationForSearch(
-            action,
-            searchFocus,
-            pendingCommand
-        );
-        action = commandBridge.resolve(focusedCommand, action);
+        TuinkCommand action = key.command();
         switch (action) {
-            case ESCAPE -> {
+            case SEARCH_CLOSE -> {
                 uiSessionState.searchMode = false;
                 statusMessage = "";
             }
-            case TAB -> {
+            case SEARCH_FOCUS_NEXT -> {
                 if (searchBarPlacement != null) {
                     searchFocusManager.next(searchBarPlacement.focusScope());
                 }
             }
-            case BACKSPACE -> {
+            case SEARCH_FIELD_BACKSPACE -> {
                 TextField active = searchFocus == SearchFocus.REPLACE ? searchReplaceInput : searchQueryInput;
                 active.backspace();
             }
-            case DELETE -> {
+            case SEARCH_FIELD_DELETE -> {
                 TextField active = searchFocus == SearchFocus.REPLACE ? searchReplaceInput : searchQueryInput;
                 active.deleteForward();
             }
-            case ARROW_LEFT -> {
+            case SEARCH_NAVIGATE_LEFT -> {
                 if (searchFocus == SearchFocus.FIND) {
                     if (searchQueryInput.cursor() > 0) {
                         searchQueryInput.moveLeft();
@@ -2066,7 +2039,7 @@ public class TerminalEditorApp {
                     focusSearch(searchBarPlacement, SearchController.previousSearchFocusHorizontal(searchFocus));
                 }
             }
-            case ARROW_RIGHT -> {
+            case SEARCH_NAVIGATE_RIGHT -> {
                 if (searchFocus == SearchFocus.FIND) {
                     if (searchQueryInput.cursor() < searchQueryInput.text().length()) {
                         searchQueryInput.moveRight();
@@ -2083,9 +2056,9 @@ public class TerminalEditorApp {
                     focusSearch(searchBarPlacement, SearchController.nextSearchFocusHorizontal(searchFocus));
                 }
             }
-            case ARROW_UP -> focusSearch(searchBarPlacement, SearchController.verticalSearchFocus(searchFocus, true));
-            case ARROW_DOWN -> focusSearch(searchBarPlacement, SearchController.verticalSearchFocus(searchFocus, false));
-            case HOME -> {
+            case SEARCH_NAVIGATE_UP -> focusSearch(searchBarPlacement, SearchController.verticalSearchFocus(searchFocus, true));
+            case SEARCH_NAVIGATE_DOWN -> focusSearch(searchBarPlacement, SearchController.verticalSearchFocus(searchFocus, false));
+            case SEARCH_FIELD_HOME, CURSOR_HOME -> {
                 if (searchFocus == SearchFocus.FIND) {
                     searchQueryInput.moveHome();
                 } else if (searchFocus == SearchFocus.REPLACE) {
@@ -2098,7 +2071,7 @@ public class TerminalEditorApp {
                     }
                 }
             }
-            case END -> {
+            case SEARCH_FIELD_END, CURSOR_END -> {
                 if (searchFocus == SearchFocus.FIND) {
                     searchQueryInput.moveEnd();
                 } else if (searchFocus == SearchFocus.REPLACE) {
@@ -2111,117 +2084,7 @@ public class TerminalEditorApp {
                     }
                 }
             }
-            case ENTER -> {
-                KeyEvent.Action enterAction = SearchController.isSearchActionFocus(searchFocus)
-                    ? SearchController.actionForSearchFocus(searchFocus)
-                    : KeyEvent.Action.CTRL_F;
-                if (enterAction == KeyEvent.Action.CTRL_G) {
-                    boolean found;
-                    if (nextSearchUi.allTabs()) {
-                        int foundTab = TabSearch.findPreviousAcrossTabs(
-                            toTabSessions(tabs),
-                            nextActiveTabIndex,
-                            searchQueryInput.text(),
-                            SearchController.toSearchOptions(nextSearchUi)
-                        );
-                        found = foundTab >= 0;
-                        if (found) {
-                            nextActiveTabIndex = foundTab;
-                            nextModel = tabs.get(nextActiveTabIndex).model();
-                            nextState = tabs.get(nextActiveTabIndex).state();
-                            nextEngine = tabs.get(nextActiveTabIndex).engine();
-                            nextRenderPlanBuilder = tabs.get(nextActiveTabIndex).renderPlanBuilder();
-                        }
-                    } else {
-                        found = nextEngine.findPrevious(
-                            searchQueryInput.text(),
-                            SearchController.toSearchOptions(nextSearchUi)
-                        );
-                    }
-                    if (found) {
-                        nextEngine.ensureCursorVisible(
-                            contentRows,
-                            contentCols,
-                            uiSessionState.wrapLinesSetting,
-                            uiSessionState.wrapWordsSetting
-                        );
-                    }
-                    statusMessage = found ? "Found previous match" : "Not found";
-                } else if (enterAction == KeyEvent.Action.CTRL_R) {
-                    if (uiSessionState.readingModeSetting) {
-                        statusMessage = "Reading mode: replace is disabled";
-                    } else {
-                        boolean replaced = nextEngine.replaceCurrentOrNext(
-                            searchQueryInput.text(),
-                            searchReplaceInput.text(),
-                            SearchController.toSearchOptions(nextSearchUi)
-                        );
-                        statusMessage = replaced ? "Replaced match" : "Nothing to replace";
-                    }
-                } else if (enterAction == KeyEvent.Action.CTRL_A) {
-                    if (uiSessionState.readingModeSetting) {
-                        statusMessage = "Reading mode: replace is disabled";
-                    } else {
-                        int replaced = nextEngine.replaceAll(
-                            searchQueryInput.text(),
-                            searchReplaceInput.text(),
-                            SearchController.toSearchOptions(nextSearchUi)
-                        );
-                        statusMessage = replaced > 0
-                            ? "Replaced " + replaced + " occurrence(s). Undo available: Ctrl+Z"
-                            : "Nothing to replace";
-                        statusWarning = true;
-                    }
-                } else {
-                    boolean found;
-                    SearchOptions searchOptions = SearchController.toSearchOptions(nextSearchUi);
-                    boolean focusedCurrent = focusCurrentMatchIfOffscreen(
-                        nextModel,
-                        nextState,
-                        nextEngine,
-                        contentRows,
-                        contentCols,
-                        uiSessionState.wrapLinesSetting,
-                        uiSessionState.wrapWordsSetting,
-                        searchQueryInput.text(),
-                        searchOptions
-                    );
-                    if (focusedCurrent) {
-                        found = true;
-                    } else
-                    if (nextSearchUi.allTabs()) {
-                        int foundTab = TabSearch.findNextAcrossTabs(
-                            toTabSessions(tabs),
-                            nextActiveTabIndex,
-                            searchQueryInput.text(),
-                            searchOptions
-                        );
-                        found = foundTab >= 0;
-                        if (found) {
-                            nextActiveTabIndex = foundTab;
-                            nextModel = tabs.get(nextActiveTabIndex).model();
-                            nextState = tabs.get(nextActiveTabIndex).state();
-                            nextEngine = tabs.get(nextActiveTabIndex).engine();
-                            nextRenderPlanBuilder = tabs.get(nextActiveTabIndex).renderPlanBuilder();
-                        }
-                    } else {
-                        found = nextEngine.findNext(
-                            searchQueryInput.text(),
-                            searchOptions
-                        );
-                    }
-                    if (found) {
-                        nextEngine.ensureCursorVisible(
-                            contentRows,
-                            contentCols,
-                            uiSessionState.wrapLinesSetting,
-                            uiSessionState.wrapWordsSetting
-                        );
-                    }
-                    statusMessage = found ? "Found next match" : "Not found";
-                }
-            }
-            case CTRL_F -> {
+            case SEARCH_NEXT -> {
                 if (SearchController.isSearchActionFocus(searchFocus)) {
                     focusSearch(searchBarPlacement, SearchFocus.NEXT_BUTTON);
                 }
@@ -2272,7 +2135,7 @@ public class TerminalEditorApp {
                 }
                 statusMessage = found ? "Found next match" : "Not found";
             }
-            case CTRL_G -> {
+            case SEARCH_PREVIOUS -> {
                 if (SearchController.isSearchActionFocus(searchFocus)) {
                     focusSearch(searchBarPlacement, SearchFocus.PREV_BUTTON);
                 }
@@ -2308,7 +2171,7 @@ public class TerminalEditorApp {
                 }
                 statusMessage = found ? "Found previous match" : "Not found";
             }
-            case CTRL_R -> {
+            case SEARCH_REPLACE -> {
                 if (SearchController.isSearchActionFocus(searchFocus)) {
                     focusSearch(searchBarPlacement, SearchFocus.REPLACE_BUTTON);
                 }
@@ -2323,7 +2186,7 @@ public class TerminalEditorApp {
                     statusMessage = replaced ? "Replaced match" : "Nothing to replace";
                 }
             }
-            case CTRL_A -> {
+            case SEARCH_REPLACE_ALL -> {
                 if (SearchController.isSearchActionFocus(searchFocus)) {
                     focusSearch(searchBarPlacement, SearchFocus.ALL_BUTTON);
                 }
@@ -2341,7 +2204,7 @@ public class TerminalEditorApp {
                     statusWarning = true;
                 }
             }
-            case CTRL_Q -> {
+            case APP_QUIT -> {
                 if (uiSessionState.confirmOnCloseSetting && hasDirtyTabs(tabs)) {
                     uiSessionState.searchMode = false;
                     nextModalState = UiModalState.quitConfirm();
@@ -2349,7 +2212,7 @@ public class TerminalEditorApp {
                     nextRunning = false;
                 }
             }
-            case CTRL_S -> {
+            case DOCUMENT_SAVE -> {
                 if (nextState.getCurrentFile() == null) {
                     uiSessionState.searchMode = false;
                     nextModalState = UiModalState.saveAs();
@@ -2382,7 +2245,7 @@ public class TerminalEditorApp {
                     }
                 }
             }
-            case CTRL_O -> {
+            case DOCUMENT_OPEN -> {
                 uiSessionState.searchMode = false;
                 topMenu.close();
                 nextOpenFileMode = true;
@@ -2390,12 +2253,12 @@ public class TerminalEditorApp {
                 nextOpenFileFocus = OpenFileInputRouter.Focus.LIST;
                 statusMessage = "Open file";
             }
-            case TOGGLE_THEME -> {
+            case VIEW_CYCLE_THEME -> {
                 applyTheme(theme.next());
                 renderer.setTheme(theme);
                 statusMessage = "Theme: " + theme.label();
             }
-            case CTRL_N, TAB_NEW -> {
+            case TAB_NEW -> {
                 tabs.add(newEditorTab());
                 nextActiveTabIndex = tabs.size() - 1;
                 nextModel = tabs.get(nextActiveTabIndex).model();
@@ -2433,7 +2296,7 @@ public class TerminalEditorApp {
                     uiSessionState.searchMode = false;
                 }
             }
-            case CTRL_K, CTRL_W, CTRL_SHIFT_S -> {
+            case DOCUMENT_SAVE_AS -> {
                 uiSessionState.searchMode = false;
                 nextModalState = UiModalState.saveAs();
                 saveAsInput.set(
@@ -2599,31 +2462,21 @@ public class TerminalEditorApp {
         };
     }
 
-    static KeyEvent.Action keyAction(SearchBarView.Action action) {
+    static TuinkCommand searchCommand(SearchBarView.Action action) {
         if (action == null) {
             return null;
         }
         return switch (action) {
-            case FIND_NEXT -> KeyEvent.Action.CTRL_F;
-            case FIND_PREVIOUS -> KeyEvent.Action.CTRL_G;
-            case REPLACE -> KeyEvent.Action.CTRL_R;
-            case REPLACE_ALL -> KeyEvent.Action.CTRL_A;
+            case FIND_NEXT -> TuinkCommand.SEARCH_NEXT;
+            case FIND_PREVIOUS -> TuinkCommand.SEARCH_PREVIOUS;
+            case REPLACE -> TuinkCommand.SEARCH_REPLACE;
+            case REPLACE_ALL -> TuinkCommand.SEARCH_REPLACE_ALL;
             default -> null;
         };
     }
 
     static boolean searchOwnsInteractiveRow(UiModalState modalState) {
         return modalState != null && modalState.isNone();
-    }
-
-    static boolean shouldHandleMultiScalarTextFallback(
-        TuiInputEvent event,
-        CommandInvocation routedMenuCommand
-    ) {
-        if (routedMenuCommand != null || !(event instanceof TextInput text)) {
-            return false;
-        }
-        return text.text().codePointCount(0, text.text().length()) > 1;
     }
 
     static boolean shouldExtendEditorSelection(TuiInputEvent event) {
@@ -2633,17 +2486,33 @@ public class TerminalEditorApp {
             && pointer.modifiers().contains(KeyStroke.Modifier.SHIFT);
     }
 
-    static KeyEvent.Action resolvePendingCommand(
-        LegacyCommandBridge commandBridge,
+    static EditorInput resolveEditorInput(
+        CommandRouter commandRouter,
+        TuiInputEvent event,
         CommandInvocation pendingCommand,
-        KeyEvent.Action fallback,
-        boolean alreadyResolved
+        CommandRouter.RoutedCommand routedMenuResult,
+        boolean searchOwnsInput,
+        SearchFocus searchFocus
     ) {
-        Objects.requireNonNull(commandBridge, "commandBridge");
-        Objects.requireNonNull(fallback, "fallback");
-        return alreadyResolved
-            ? fallback
-            : commandBridge.resolve(pendingCommand, fallback);
+        Objects.requireNonNull(commandRouter, "commandRouter");
+        Objects.requireNonNull(event, "event");
+        if (routedMenuResult instanceof CommandRouter.RoutedAction selected) {
+            return new EditorInput(event, selected.action());
+        }
+        if (pendingCommand != null) {
+            if (searchOwnsInput) {
+                TuinkCommand command = TuinkCommand.fromId(pendingCommand.id()).orElse(null);
+                if (command == null) {
+                    return null;
+                }
+                pendingCommand = commandRouter.invocationForSearch(command, searchFocus, pendingCommand);
+            }
+            TuinkCommand command = commandRouter.invoke(pendingCommand).orElse(null);
+            return command == null ? null : new EditorInput(event, command);
+        }
+        return event instanceof TextInput || event instanceof PointerEvent
+            ? new EditorInput(event, null)
+            : null;
     }
 
     static boolean searchOwnsRawInput(

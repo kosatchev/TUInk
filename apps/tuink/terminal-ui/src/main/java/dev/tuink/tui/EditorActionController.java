@@ -1,7 +1,7 @@
 package dev.tuink.tui;
 
 import dev.tuink.tui.flow.UiModalState;
-import dev.tuink.tui.input.KeyEvent;
+import dev.tuink.tui.command.TuinkCommand;
 import java.nio.file.Path;
 
 final class EditorActionController {
@@ -9,7 +9,7 @@ final class EditorActionController {
     }
 
     static Result decide(
-        KeyEvent.Action action,
+        TuinkCommand command,
         boolean running,
         UiModalState modalState,
         boolean confirmOnCloseSetting,
@@ -29,15 +29,15 @@ final class EditorActionController {
         boolean requestOpenFile = false;
         boolean requestToggleTheme = false;
 
-        switch (action) {
-            case CTRL_Q -> {
+        switch (command) {
+            case APP_QUIT -> {
                 if (confirmOnCloseSetting && hasDirtyTabs) {
                     nextModalState = UiModalState.quitConfirm();
                 } else {
                     nextRunning = false;
                 }
             }
-            case CTRL_S -> {
+            case DOCUMENT_SAVE -> {
                 if (currentFile == null) {
                     nextModalState = UiModalState.saveAs();
                     saveAsPreset = SaveAsPreset.DEFAULT_FILE_NAME;
@@ -50,13 +50,13 @@ final class EditorActionController {
                     requestSaveCurrent = true;
                 }
             }
-            case CTRL_O -> {
+            case DOCUMENT_OPEN -> {
                 requestOpenFile = true;
             }
-            case TOGGLE_THEME -> {
+            case VIEW_CYCLE_THEME -> {
                 requestToggleTheme = true;
             }
-            case CTRL_N, TAB_NEW -> {
+            case TAB_NEW -> {
                 tabCommand = TabCommand.NEW_TAB;
             }
             case TAB_NEXT -> tabCommand = TabCommand.NEXT_TAB;
@@ -68,23 +68,10 @@ final class EditorActionController {
                     tabCommand = TabCommand.CLOSE_TAB;
                 }
             }
-            case CTRL_K, CTRL_W, CTRL_SHIFT_S -> {
+            case DOCUMENT_SAVE_AS -> {
                 nextModalState = UiModalState.saveAs();
                 saveAsPreset = SaveAsPreset.FROM_CURRENT_OR_DEFAULT;
                 clearNotification = true;
-            }
-            case CTRL_E, CTRL_T, OPEN_VIEW_MENU, OPEN_HELP_MENU, F10, F2,
-                CTRL_C, CTRL_X, CTRL_V, CTRL_Z, CTRL_Y,
-                TOGGLE_LINE_COMMENT,
-                TOGGLE_TAB_BAR, TOGGLE_WRAP_LINES, TOGGLE_WORD_WRAP,
-                TOGGLE_READING_MODE, TOGGLE_CONFIRM_ON_CLOSE, TOGGLE_MOUSE_MODE, SHOW_KEY_HINTS,
-                TOGGLE_GUTTER_DIFF,
-                CTRL_F, CTRL_A, CTRL_R, TAB, CTRL_G, ESCAPE,
-                ARROW_UP, ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT,
-                SHIFT_ARROW_UP, SHIFT_ARROW_DOWN, SHIFT_ARROW_LEFT, SHIFT_ARROW_RIGHT,
-                PAGE_UP, PAGE_DOWN, HOME, END, BACKSPACE, DELETE, ENTER,
-                UNKNOWN -> {
-                // Already handled by InputActionDispatcher or intentionally ignored.
             }
             default -> {
                 // Ignore unsupported input in editor mode.

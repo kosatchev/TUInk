@@ -12,8 +12,10 @@ import dev.tuink.core.SimpleLineBuffer;
 import dev.tuink.core.TextModel;
 import dev.tuink.render.RenderPlan;
 import dev.tuink.render.TerminalEditorTextLayout;
-import dev.tuink.tui.input.KeyEvent;
+import dev.tuiframe.input.KeyStroke;
+import dev.tuiframe.input.PointerEvent;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class EditorViewTest {
@@ -70,6 +72,41 @@ class EditorViewTest {
         assertEquals(new Position(0, 4), fixture.state().getCursor());
         assertNull(fixture.state().getSelectionAnchor());
         assertFalse(fixture.state().hasSelection());
+    }
+
+    @Test
+    void modifiedDragOutsideViewportScrollsAndExtendsSelectionAtTheClampedRow() {
+        String[] lines = new String[20];
+        for (int index = 0; index < lines.length; index++) {
+            lines[index] = "row-" + index;
+        }
+        Fixture fixture = fixture(lines);
+        fixture.press(1, 1, false);
+        PointerEvent drag = new PointerEvent(
+            CONTENT_TOP_ROW + CONTENT_ROWS + 10,
+            GUTTER_WIDTH + 1,
+            PointerEvent.Kind.DRAG,
+            PointerEvent.Button.LEFT,
+            Set.of(KeyStroke.Modifier.SHIFT, KeyStroke.Modifier.ALT)
+        );
+
+        fixture.view().handleMouseDrag(
+            drag,
+            fixture.model(),
+            fixture.state(),
+            fixture.plan(),
+            CONTENT_ROWS,
+            fixture.engine(),
+            CONTENT_TOP_ROW
+        );
+
+        assertEquals(6, fixture.state().getTopLine());
+        assertEquals(new Position(1, 1), fixture.state().getSelectionAnchor());
+        assertEquals(new Position(8, 1), fixture.state().getCursor());
+        assertEquals(Set.of(KeyStroke.Modifier.SHIFT, KeyStroke.Modifier.ALT), drag.modifiers());
+        fixture.release();
+        assertFalse(fixture.view().isMouseSelecting());
+        assertTrue(fixture.state().hasSelection());
     }
 
     @Test
@@ -138,11 +175,12 @@ class EditorViewTest {
         int columns
     ) {
         private boolean press(int viewportRow, int viewportColumn, boolean extendSelection) {
-            KeyEvent.MouseEvent press = new KeyEvent.MouseEvent(
+            PointerEvent press = new PointerEvent(
                 CONTENT_TOP_ROW + viewportRow,
                 GUTTER_WIDTH + viewportColumn,
-                KeyEvent.MouseKind.PRESS,
-                KeyEvent.MouseButton.LEFT
+                PointerEvent.Kind.PRESS,
+                PointerEvent.Button.LEFT,
+                extendSelection ? Set.of(KeyStroke.Modifier.SHIFT) : Set.of()
             );
             return view.handleMousePress(
                 press,

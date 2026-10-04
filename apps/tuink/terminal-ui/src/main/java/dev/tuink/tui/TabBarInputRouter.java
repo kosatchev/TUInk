@@ -58,7 +58,7 @@ final class TabBarInputRouter {
                 : ignored(current);
         }
 
-        PointerEvent routedPointer = legacyChromeWheel(placement, pointer);
+        PointerEvent routedPointer = routeChromeWheel(placement, pointer);
         InteractionResult<TabBar.Action> interaction = placement.handle(routedPointer);
         if (interaction.output().isPresent()) {
             TabBar.Action action = interaction.output().orElseThrow();
@@ -112,7 +112,7 @@ final class TabBarInputRouter {
             && pointer.column() < bounds.rightExclusive();
     }
 
-    private static PointerEvent legacyChromeWheel(
+    private static PointerEvent routeChromeWheel(
         TabBarView.Placement placement,
         PointerEvent pointer
     ) {

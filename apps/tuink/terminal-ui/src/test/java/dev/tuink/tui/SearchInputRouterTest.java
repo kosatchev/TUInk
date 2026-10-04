@@ -80,7 +80,7 @@ class SearchInputRouterTest {
     }
 
     @Test
-    void upAndDownUseTheFiveLegacyVerticalPairs() {
+    void upAndDownConnectEachSearchOptionToItsActionOrField() {
         Fixture fixture = fixture(80);
         SearchFocus[][] pairs = {
             {SearchFocus.FIND, SearchFocus.REPLACE},
@@ -210,16 +210,16 @@ class SearchInputRouterTest {
         assertIgnored(fixture.route(KeyStroke.of(KeyStroke.Key.END)));
 
         fixture.focus.focus(fixture.placement.focusScope(), SearchFocus.FIND);
-        assertCaptured(fixture.route(
+        assertIgnored(fixture.route(
             KeyStroke.of(KeyStroke.Key.BACKSPACE, KeyStroke.Modifier.SHIFT)
         ));
-        assertCaptured(fixture.route(
+        assertIgnored(fixture.route(
             KeyStroke.of(KeyStroke.Key.BACKSPACE, KeyStroke.Modifier.CTRL)
         ));
-        assertCaptured(fixture.route(
+        assertIgnored(fixture.route(
             KeyStroke.of(KeyStroke.Key.HOME, KeyStroke.Modifier.SHIFT)
         ));
-        assertCaptured(fixture.route(
+        assertIgnored(fixture.route(
             KeyStroke.of(KeyStroke.Key.ENTER, KeyStroke.Modifier.SHIFT)
         ));
         assertIgnored(fixture.route(KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL)));
@@ -227,10 +227,11 @@ class SearchInputRouterTest {
             KeyStroke.of(KeyStroke.Key.ARROW_LEFT, KeyStroke.Modifier.ALT)
         ));
         assertEquals("a", query.text());
+        assertEquals(1, query.cursor());
     }
 
     @Test
-    void typedIntentsPreserveMigrationEnterAndSpaceParity() {
+    void enterInvokesSearchActionsAndSpaceTogglesOptions() {
         Fixture fixture = fixture(80);
 
         assertAction(
@@ -278,7 +279,7 @@ class SearchInputRouterTest {
             SearchBarView.Action.CLOSE_REQUESTED,
             fixture.route(KeyStroke.of(KeyStroke.Key.ESCAPE))
         );
-        assertCaptured(fixture.route(
+        assertIgnored(fixture.route(
             KeyStroke.of(KeyStroke.Key.ESCAPE, KeyStroke.Modifier.SHIFT)
         ));
     }
@@ -366,10 +367,10 @@ class SearchInputRouterTest {
         assertCaptured(fixture.route(
             KeyStroke.of(KeyStroke.Key.TAB, KeyStroke.Modifier.SHIFT)
         ));
-        assertCaptured(fixture.route(
+        assertIgnored(fixture.route(
             KeyStroke.of(KeyStroke.Key.BACKSPACE, KeyStroke.Modifier.CTRL)
         ));
-        assertCaptured(fixture.route(
+        assertIgnored(fixture.route(
             KeyStroke.of(KeyStroke.Key.ENTER, KeyStroke.Modifier.SHIFT)
         ));
         assertIgnored(fixture.route(KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL)));

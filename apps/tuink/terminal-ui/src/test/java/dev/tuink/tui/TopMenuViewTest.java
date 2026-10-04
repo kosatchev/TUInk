@@ -1,8 +1,8 @@
 package dev.tuink.tui;
 
-import static dev.tuink.tui.command.TuinkCommandIds.EDIT_SELECT_ALL;
-import static dev.tuink.tui.command.TuinkCommandIds.SETTINGS_TOGGLE_MOUSE;
-import static dev.tuink.tui.command.TuinkCommandIds.VIEW_TOGGLE_WORD_WRAP;
+import static dev.tuink.tui.command.TuinkCommand.EDIT_SELECT_ALL;
+import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_MOUSE;
+import static dev.tuink.tui.command.TuinkCommand.VIEW_TOGGLE_WORD_WRAP;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -25,7 +25,7 @@ import org.junit.jupiter.api.Test;
 class TopMenuViewTest {
     @Test
     void buildsSixFixedMenusWithSemanticCommandsAndDynamicTabs() {
-        LegacyCommandBridge bridge = new LegacyCommandBridge();
+        CommandRouter router = new CommandRouter();
         TopMenuView tabView = TopMenuView.build(
             ui(),
             List.of(
@@ -34,7 +34,7 @@ class TopMenuViewTest {
             ),
             1,
             "Blue",
-            bridge,
+            router,
             MenuBar.State.open(TopMenuController.TABS_INDEX)
         );
         TopMenuView editView = view(ui(), MenuBar.State.open(TopMenuController.EDIT_INDEX));
@@ -52,7 +52,7 @@ class TopMenuViewTest {
             TopMenuController.EDIT_INDEX,
             6
         );
-        assertEquals(EDIT_SELECT_ALL, selectAll.value().id());
+        assertEquals(EDIT_SELECT_ALL.id(), selectAll.value().id());
         assertEquals("Select All", selectAll.label());
 
         MenuBar.Item<CommandInvocation> firstTab = item(
@@ -90,7 +90,7 @@ class TopMenuViewTest {
             TopMenuController.VIEW_INDEX,
             2
         );
-        assertEquals(VIEW_TOGGLE_WORD_WRAP, wordWrap.value().id());
+        assertEquals(VIEW_TOGGLE_WORD_WRAP.id(), wordWrap.value().id());
         assertEquals("[x] Wrap by words (disabled)", wordWrap.label());
         assertFalse(wordWrap.enabled());
         assertEquals(-1, wordWrap.mnemonicGraphemeIndex());
@@ -100,7 +100,7 @@ class TopMenuViewTest {
             TopMenuController.SETTINGS_INDEX,
             1
         );
-        assertEquals(SETTINGS_TOGGLE_MOUSE, mouse.value().id());
+        assertEquals(SETTINGS_TOGGLE_MOUSE.id(), mouse.value().id());
         assertEquals("[ ] Mouse mode", mouse.label());
         assertTrue(mouse.enabled());
     }
@@ -181,7 +181,7 @@ class TopMenuViewTest {
     }
 
     @Test
-    void topBarSnapshotMatchesLegacyPrefixDirtyAndReadAlignment() {
+    void topBarSnapshotPreservesPrefixDirtyAndReadAlignment() {
         TopMenuView closed = view(ui(), MenuBar.State.closed());
         TopMenuView.TopBar normal = closed.topBar(Path.of("demo.txt"), true, 64, false);
         String closedBase = " File   Edit   View   Tab   Settings   Help  | demo.txt *";
@@ -223,7 +223,7 @@ class TopMenuViewTest {
             List.of(),
             -1,
             "Cyan",
-            new LegacyCommandBridge(),
+            new CommandRouter(),
             MenuBar.State.closed()
         );
 
@@ -242,7 +242,7 @@ class TopMenuViewTest {
             List.of(new TopMenuView.TabItem(Path.of("demo.txt"), false, false)),
             0,
             "Cyan",
-            new LegacyCommandBridge(),
+            new CommandRouter(),
             state
         );
     }

@@ -16,7 +16,7 @@ class GraphemeTextTest {
     private static final String MODIFIED_EMOJI = "👍🏽";
 
     @Test
-    void frozenSegmentationCorpusPreservesUtf16BoundariesAndMetadata() {
+    void segmentationCorpusPreservesUtf16BoundariesAndMetadata() {
         List<CorpusCase> corpus = List.of(
             new CorpusCase("null", null, true, List.of(0), List.of(), List.of()),
             new CorpusCase("ascii", "A\t ", true, List.of(0, 1, 2, 3),
@@ -43,8 +43,8 @@ class GraphemeTextTest {
                 List.of(false), List.of(false)),
             new CorpusCase("indic spacing mark", "\u0915\u093F", false, List.of(0, 2),
                 List.of(false), List.of(false)),
-            new CorpusCase("indic conjunct", "\u0915\u094D\u0937", false, List.of(0, 2, 3),
-                List.of(false, false), List.of(false, false)),
+            new CorpusCase("indic conjunct", "\u0915\u094D\u0937", false, List.of(0, 3),
+                List.of(false), List.of(false)),
             new CorpusCase("unsafe ascii control", "\u001B", true, List.of(0, 1),
                 List.of(false), List.of(false)),
             new CorpusCase("unpaired high surrogate", "\uD83D", false, List.of(0, 1),
@@ -95,6 +95,21 @@ class GraphemeTextTest {
         assertEquals(text.length(), layout.nextBoundary(text.length() + 10));
         assertFalse(layout.isBoundary(-10));
         assertFalse(layout.isBoundary(text.length() + 10));
+    }
+
+    @Test
+    void navigationKeepsIndicConjunctsInOneExtendedCluster() {
+        // UAX #29 GB9c joins Devanagari consonants through a virama linker.
+        GraphemeText layout = GraphemeText.of("A\u0915\u094D\u0937B");
+
+        assertEquals(List.of(0, 1, 4, 5), boundaries(layout));
+        assertEquals(4, layout.nextBoundary(1));
+        assertEquals(1, layout.previousBoundary(4));
+        for (int offset : new int[] {2, 3}) {
+            assertFalse(layout.isBoundary(offset));
+            assertEquals(1, layout.floorBoundary(offset));
+            assertEquals(4, layout.ceilBoundary(offset));
+        }
     }
 
     @Test

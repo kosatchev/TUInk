@@ -10,9 +10,10 @@ This task only prints help. It does not compile sources or create artifacts.
 
 ## Requirements
 
-JVM builds and `check` require a JDK 17 toolchain and use the checked-in
-Gradle 8.14.5 wrapper. Use JDK 17 for `JAVA_HOME` as well; CI uses Temurin 17.
-The Java vendor is not pinned for JVM builds. A step-by-step guide for a new
+JVM builds and `check` require JDK 25 for the Gradle JVM, compiler, tests, and
+application runtime. Use the checked-in Gradle 9.8.1 wrapper and set
+`JAVA_HOME` to JDK 25; CI uses Temurin 25. The Java vendor is not pinned for JVM builds.
+The packaged JVM ZIP requires Java 25 or newer. A step-by-step guide for a new
 computer is available in Russian: [Перенос, сборка и запуск](setup-ru.md).
 
 Check the active JVM and Gradle environment:
@@ -28,7 +29,7 @@ Native builds additionally require:
 
 - the pinned GraalVM Community release described in
   [Native toolchain](#native-toolchain), selected explicitly with
-  `GRAALVM_HOME`;
+  both `JAVA_HOME` and `GRAALVM_HOME` pointing to the same installation;
 - a system C toolchain;
 - the platform libraries required by GraalVM;
 - a musl-capable toolchain for the static musl target.
@@ -138,7 +139,7 @@ Run the installed layout:
 ./apps/tuink/launcher/build/install/tuink/bin/tuink file.txt
 ```
 
-The JVM distribution requires Java 17 on the target machine. It includes
+The JVM distribution requires Java 25 or newer on the target machine. It includes
 `README.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, and `samples/`.
 
 Gradle also creates module JARs as internal build products. They are not
@@ -149,15 +150,10 @@ needed.
 ## Native toolchain
 
 Native and release tasks require exactly GraalVM Community 25.2.4 with Java
-25. Automatic toolchain discovery is disabled: set `GRAALVM_HOME` to the
-absolute path of that distribution. This prevents a native release from being
-silently built with another local JDK or an outdated GraalVM.
-
-Keep `JAVA_HOME` pointing to JDK 17 and set `GRAALVM_HOME` separately.
-The native-image builder uses Java 25, but Gradle itself should still run
-on JDK 17. Gradle 8.14.5 does not support running on Java 25; that support
-starts with Gradle 9.1.0, as documented in the
-[Gradle compatibility matrix](https://docs.gradle.org/current/userguide/compatibility.html#java_runtime).
+25. Set both `JAVA_HOME` and `GRAALVM_HOME` to the absolute path of that
+distribution. Gradle, compilation, tests, JVM runs, and native-image builds use
+this one JDK. Automatic native toolchain discovery is disabled, and the
+preflight verifies that both variables select the pinned installation.
 
 The pinned Linux x86_64 archive is:
 
@@ -180,6 +176,8 @@ native-image build task:
 
 ```bash
 export GRAALVM_HOME=/absolute/path/to/graalvm-community-25.2.4+7.1
+export JAVA_HOME="$GRAALVM_HOME"
+export PATH="$JAVA_HOME/bin:$PATH"
 ./gradlew :app:verifyNativeToolchain
 ```
 

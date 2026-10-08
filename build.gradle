@@ -21,7 +21,7 @@ subprojects {
 
     java {
         toolchain {
-            languageVersion = JavaLanguageVersion.of(17)
+            languageVersion = JavaLanguageVersion.of(25)
         }
     }
 
@@ -123,11 +123,11 @@ def verifyProjectDependencies = tasks.register('verifyProjectDependencies') {
         }
 
         projectsByPath[':editor-session'].configurations
-            .findAll { it.name in ['api', 'compileOnlyApi'] }
+            .matching { it.name in ['api', 'compileOnlyApi'] }
             .each { configuration ->
                 configuration.dependencies
                     .withType(org.gradle.api.artifacts.ProjectDependency)
-                    .findAll { it.path == ':core' }
+                    .matching { it.path == ':core' }
                     .each {
                         violations.add(
                             ":editor-session:${configuration.name} must not export :core"
@@ -157,6 +157,7 @@ tasks.register('buildHelp') {
             TUInk ${rootVersionForHelp} build help
 
             JVM development
+              Use JDK 25 for Gradle, compilation, and tests.
               ./gradlew check
                   Run all module tests and architecture checks.
               ./gradlew clean check build
@@ -171,7 +172,8 @@ tasks.register('buildHelp') {
                   ZIP: build/releases/tuink-${rootVersionForHelp}.zip
 
             Native binaries (require the pinned GraalVM Community 25.2.4 / Java 25)
-              export GRAALVM_HOME=/absolute/path/to/graalvm-community-25.2.4+7.1
+              export JAVA_HOME=/absolute/path/to/graalvm-community-25.2.4+7.1
+              export GRAALVM_HOME=\$JAVA_HOME
               ./gradlew :app:verifyNativeToolchain
                   Verify the explicit native toolchain before building.
               ./gradlew :app:nativeGlibc
@@ -191,7 +193,7 @@ tasks.register('buildHelp') {
 
             Debian package (Linux, glibc target)
               ./gradlew :app:nativeDeb
-                  Package: build/releases/tuink_${rootProject.version}_<deb-arch>.deb
+                  Package: build/releases/tuink_${rootVersionForHelp}_<deb-arch>.deb
 
             Render performance
               ./gradlew :app:perfHarnessTest

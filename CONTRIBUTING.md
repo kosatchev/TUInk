@@ -6,7 +6,14 @@ Before changing build or packaging behavior, read [Build and native targets](doc
 
 ## Development setup
 
-Development requires a JDK 17 toolchain. Set `JAVA_HOME` to JDK 17 and use the checked-in Gradle wrapper so local and CI builds use the same Gradle version. Native-image work additionally requires the exact GraalVM Community 25.2.4 / Java 25 distribution, selected separately with an absolute `GRAALVM_HOME`; keep `JAVA_HOME` on JDK 17. See [Native toolchain](docs/building.md#native-toolchain) for the pinned Linux x86_64 download and checksum, or the [setup and transfer guide in Russian](docs/setup-ru.md) for a new computer.
+Development requires JDK 25 for Gradle, compilation, tests, and the editor.
+Use the checked-in Gradle wrapper so local and CI builds use the same version.
+For native-image work, install the pinned GraalVM Community distribution and
+set both `JAVA_HOME` and `GRAALVM_HOME` to its absolute path; the same JDK builds
+and runs the JVM application and compiles the native binary. See
+[Native toolchain](docs/building.md#native-toolchain) for the exact version,
+Linux x86_64 download, and checksum, or the
+[setup and transfer guide in Russian](docs/setup-ru.md) for a new computer.
 
 ```bash
 ./gradlew check

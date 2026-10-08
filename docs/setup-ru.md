@@ -1,8 +1,10 @@
 # Перенос TUInk на другой компьютер, сборка и запуск
 
-Для разработки достаточно **JDK 17** и файлов проекта. Для сборки нативного
-исполняемого файла дополнительно нужен **GraalVM Community 25.2.4 с Java 25**.
-Это две отдельные установки Java, которые используются одновременно.
+Для JVM-сборки используется **Java 25** через Gradle Toolchains.
+Gradle можно запустить на совместимом JDK, например 17, 21 или 25.
+Для сборки нативного исполняемого файла закреплён
+**GraalVM Community 25.2.4 с Java 25**. Один этот дистрибутив подходит
+для всех задач; `JAVA_HOME` и `GRAALVM_HOME` указывают на одну установку.
 
 Основной пример ниже рассчитан на Linux, команды установки пакетов — на
 Ubuntu/Debian. Все команды `./gradlew` выполняются из корня проекта.
@@ -11,32 +13,28 @@ Ubuntu/Debian. Все команды `./gradlew` выполняются из к�
 
 | Задача | Требование |
 |---|---|
-| Сборка исходников, тесты, запуск через Gradle | JDK 17; для простого воспроизведения окружения укажите его в `JAVA_HOME` |
-| Сборка native-image и полного релиза | Дополнительно GraalVM **Community 25.2.4 / Java 25** в `GRAALVM_HOME` |
-| Запуск готового JVM ZIP | Java 17 или новее; Gradle и GraalVM не нужны |
+| Сборка исходников, тесты, запуск через Gradle | Java 25 toolchain; Gradle может работать на совместимом JDK 17, 21 или 25 |
+| Сборка native-image и полного релиза | GraalVM **Community 25.2.4 / Java 25**; `JAVA_HOME` и `GRAALVM_HOME` указывают на его каталог |
+| Запуск готового JVM ZIP | Java 25 или новее; Gradle и GraalVM не нужны |
 | Запуск готового нативного файла | Java не нужна; должны подходить ОС, архитектура и системные библиотеки |
 
-Для всех модулей выбран Java toolchain 17; см. [руководство по сборке](building.md).
-Поставщик JVM для обычной сборки не закреплён: подходят, например, OpenJDK 17
-и Eclipse Temurin 17. В CI используется Temurin 17. Устанавливайте **JDK**,
+Для всех модулей выбран Java toolchain 25; см. [руководство по сборке](building.md).
+Поставщик JVM для обычной сборки не закреплён: подходят, например, OpenJDK 25
+и Eclipse Temurin 25. В CI используется Temurin 25. Устанавливайте **JDK**,
 включающий `javac`, а не только JRE.
 
-У Gradle есть собственные ограничения: в проекте закреплён wrapper **8.14.5**.
-Запуск Gradle на Java 25 поддерживается начиная с Gradle 9.1.0, поэтому
-GraalVM на Java 25 не следует назначать в `JAVA_HOME` для этого проекта.
-См. [официальную таблицу совместимости Gradle](https://docs.gradle.org/current/userguide/compatibility.html#java_runtime).
+В проекте закреплён wrapper **Gradle 9.8.1**, поддерживающий запуск на Java 25.
+Системный Gradle устанавливать не требуется. См.
+[официальную таблицу совместимости Gradle](https://docs.gradle.org/current/userguide/compatibility.html#java_runtime).
 
-Рабочая схема:
+Рабочая схема для нативной сборки и полного релиза:
 
 ```text
-JAVA_HOME    -> JDK 17                        -> Gradle, компиляция Java, тесты
-GRAALVM_HOME -> GraalVM Community 25.2.4       -> native-image на Java 25
+JAVA_HOME = GRAALVM_HOME -> GraalVM Community 25.2.4 / Java 25
+                           Gradle, компиляция, тесты, JVM-запуск и native-image
 ```
 
-JDK 21 позволяет запустить текущий Gradle, но компиляция всё равно требует
-отдельный JDK 17. В `settings.gradle` подключён загрузчик toolchain через
-Foojay: Gradle может скачать недостающий JDK 17 при доступе к сети. Явная
-установка JDK 17 заранее делает настройку проще и предсказуемее.
+Установите закреплённый GraalVM из шага 3 перед нативной сборкой.
 
 ## 2. Перенести исходники
 
@@ -69,35 +67,63 @@ cd tuink
 Gradle, затем Gradle загружает плагины и зависимости. Обычную сборку не нужно
 запускать с `--write-locks` или отключать проверку зависимостей.
 
-## 3. Подготовить JDK 17
+## 3. Подготовить Java
 
-На Ubuntu/Debian:
+Для JVM-сборки установите JDK 25 любого поставщика или используйте уже
+установленный совместимый JDK 17 или 21 для запуска Gradle. Укажите его
+каталог в `JAVA_HOME` и проверьте `./gradlew --version`. При первом запуске
+сборки Gradle при необходимости скачает toolchain Java 25; нужен доступ к
+сети. Если нативная сборка не нужна, переходите к шагу 4.
+
+### SDK для нативной сборки
+
+На Ubuntu/Debian установите инструменты загрузки и распаковки:
 
 ```bash
 sudo apt update
-sudo apt install git openjdk-17-jdk unzip
+sudo apt install git curl ca-certificates tar unzip
 ```
 
-Пример пути для Linux x86_64; на другой системе укажите каталог своего JDK 17:
+Скачайте именно [GraalVM Community 25.2.4 / Java 25](https://github.com/graalvm/graalvm-ce-builds/releases/tag/graal-25.2.4).
+Следующие команды предназначены **только для Linux x86_64** (`uname -m`
+показывает `x86_64`). Контрольная сумма закреплена также в
+[документации сборки](building.md#native-toolchain).
 
 ```bash
-export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+mkdir -p "$HOME/.local/share/tuink-toolchains"
+curl -fL --output /tmp/tuink-graalvm-25.2.4-linux-x64.tar.gz \
+  https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.2.4/graalvm-community-jdk-25i2-25.0.4_linux-x64_bin.tar.gz
+
+printf '%s  %s\n' \
+  3f4a89de8eaa96f2ed677f09957c7e872cd8467aad3537f8b5394c1b8c4b942e \
+  /tmp/tuink-graalvm-25.2.4-linux-x64.tar.gz \
+  | sha256sum -c -
+```
+
+Продолжайте только если проверка завершилась с `OK`:
+
+```bash
+tar -xzf /tmp/tuink-graalvm-25.2.4-linux-x64.tar.gz \
+  -C "$HOME/.local/share/tuink-toolchains"
+export GRAALVM_HOME="$HOME/.local/share/tuink-toolchains/graalvm-community-25.2.4+7.1"
+export JAVA_HOME="$GRAALVM_HOME"
 export PATH="$JAVA_HOME/bin:$PATH"
 
-java -version
-javac -version
+java --version
+javac --version
+native-image --version
 ./gradlew --version
 ```
 
-Ожидаются Java/javac 17 и Gradle 8.14.5 с JVM 17. Если после копирования
-`./gradlew` сообщает `Permission denied`, выполните `chmod +x gradlew`.
-Отдельно устанавливать системный Gradle не требуется.
+Ожидаются Java/javac **25**, GraalVM Community **25.2.4** и Gradle **9.8.1**
+с JVM **25**. Если после копирования `./gradlew` сообщает `Permission denied`,
+выполните `chmod +x gradlew`.
 
 `export` действует в текущем терминале. Для постоянной настройки добавьте
 эти строки с правильным путём в конфигурацию своей оболочки, например
 `~/.bashrc`. Если пользуетесь SDKMAN или другим менеджером JDK, проверьте,
-что он не переключает Java после этих строк. В IDE выберите JDK 17 и для
-проекта, и для **Gradle JVM**: настройка IDE может отличаться от терминала.
+что он не переключает Java после этих строк. В IDE выберите эту же Java 25
+для проекта и для **Gradle JVM**: настройка IDE может отличаться от терминала.
 
 ## 4. Собрать и запустить JVM-версию
 
@@ -145,7 +171,7 @@ javac -version
 
 Перенесите `build/releases/tuink-<version>.zip`. Версия указана в
 `gradle.properties`; вместо `<version>` в командах подставьте её значение.
-На новом компьютере установите Java 17 или новее, затем:
+На новом компьютере установите Java 25 или новее, затем:
 
 ```bash
 unzip tuink-<version>.zip
@@ -159,53 +185,21 @@ unzip tuink-<version>.zip
 
 ## 6. Собрать нативную версию для Linux
 
-Этот вариант нужен для запуска без установленной Java. Сначала настройте
-JDK 17 из шага 3, затем установите зависимости C-компилятора:
+Этот вариант нужен для запуска без установленной Java. Используйте GraalVM
+из шага 3 и установите зависимости C-компилятора:
 
 ```bash
-sudo apt install build-essential zlib1g-dev curl ca-certificates
+sudo apt install build-essential zlib1g-dev
+./gradlew :app:verifyNativeToolchain
 ```
 
 Это зависимости для Ubuntu/Debian; для других систем см.
 [требования Native Image](https://www.graalvm.org/latest/reference-manual/native-image/#prerequisites).
 
-Скачайте именно [GraalVM Community 25.2.4 / Java 25](https://github.com/graalvm/graalvm-ce-builds/releases/tag/graal-25.2.4).
-Следующие команды предназначены **только для Linux x86_64** (`uname -m`
-показывает `x86_64`). Контрольная сумма закреплена также в
-[документации сборки](building.md#native-toolchain).
-
-```bash
-mkdir -p "$HOME/.local/share/tuink-toolchains"
-curl -fL --output /tmp/tuink-graalvm-25.2.4-linux-x64.tar.gz \
-  https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.2.4/graalvm-community-jdk-25i2-25.0.4_linux-x64_bin.tar.gz
-
-printf '%s  %s\n' \
-  3f4a89de8eaa96f2ed677f09957c7e872cd8467aad3537f8b5394c1b8c4b942e \
-  /tmp/tuink-graalvm-25.2.4-linux-x64.tar.gz \
-  | sha256sum -c -
-```
-
-Продолжайте только если проверка завершилась с `OK`:
-
-```bash
-tar -xzf /tmp/tuink-graalvm-25.2.4-linux-x64.tar.gz \
-  -C "$HOME/.local/share/tuink-toolchains"
-export GRAALVM_HOME="$HOME/.local/share/tuink-toolchains/graalvm-community-25.2.4+7.1"
-
-"$JAVA_HOME/bin/java" -version
-"$GRAALVM_HOME/bin/java" --version
-"$GRAALVM_HOME/bin/native-image" --version
-./gradlew :app:verifyNativeToolchain
-```
-
-`JAVA_HOME` по-прежнему указывает на **JDK 17**. Не заменяйте его на
-`GRAALVM_HOME`; добавлять GraalVM в `PATH` для этой сборки также не требуется.
-`GRAALVM_HOME` должен быть абсолютным путём к распакованному дистрибутиву.
-
-Проверка `verifyNativeToolchain` требует точного совпадения поставщика и
-версий. Обычный OpenJDK 25, Oracle GraalVM, старый GraalVM на Java 17 и другая
-версия GraalVM Community для текущей нативной сборки будут отклонены.
-Наличие команды `native-image` само по себе недостаточно.
+`JAVA_HOME` и `GRAALVM_HOME` должны указывать на один и тот же абсолютный путь
+к закреплённому GraalVM Community. Проверка `verifyNativeToolchain` требует
+точного совпадения поставщика и версий; наличие команды `native-image` само
+по себе недостаточно.
 
 Сборка и запуск:
 
@@ -271,16 +265,17 @@ tuink /путь/к/файлу.txt
 ./gradlew clean :app:release
 ```
 
-Результаты будут в `build/releases/`. Эта команда требует обоих JDK и всего
-нативного окружения; для обычной JVM-разработки достаточно шага 4.
+Результаты будут в `build/releases/`. Эта команда использует ту же установку
+GraalVM и требует всего нативного окружения; для обычной JVM-разработки
+достаточно шага 4.
 Упаковка и установка подробнее описаны в [packaging.md](packaging.md).
 
 ## 8. Windows, macOS и личные настройки
 
-Для JVM-сборки на Windows установите JDK 17 и используйте PowerShell:
+Для JVM-сборки на Windows установите JDK 25 и используйте PowerShell:
 
 ```powershell
-$env:JAVA_HOME = 'C:\path\to\jdk-17'
+$env:JAVA_HOME = 'C:\path\to\jdk-25'
 $env:Path = "$env:JAVA_HOME\bin;$env:Path"
 .\gradlew.bat --version
 .\gradlew.bat :app:installDist
@@ -288,7 +283,7 @@ $env:Path = "$env:JAVA_HOME\bin;$env:Path"
 ```
 
 Замените путь на фактический. На macOS используются `./gradlew` и Unix-скрипт
-`bin/tuink`; `JAVA_HOME` должен указывать на установленный JDK 17. Текущий CI
+`bin/tuink`; `JAVA_HOME` должен указывать на установленный JDK 25. Текущий CI
 проверяет Linux, поэтому работу терминала на Windows/macOS проверяйте отдельно.
 Описанная нативная сборка и DEB-пакет рассчитаны на Linux; на Windows этот путь
 можно выполнять внутри Linux-окружения WSL.
@@ -305,9 +300,9 @@ TUInk, предварительно сохранив имеющийся файл
 
 | Симптом | Что проверить |
 |---|---|
-| Gradle падает после переключения Java; ошибка `Unsupported class file major version` | Верните `JAVA_HOME` на JDK 17, проверьте `./gradlew --version`; текущий wrapper не поддерживает запуск на Java 25 |
-| Gradle не находит Java toolchain 17 | Установите полный JDK 17; выполните `./gradlew :app:javaToolchains`. Для нестандартного пути можно передать `-Porg.gradle.java.installations.paths=/absolute/path/to/jdk-17` |
-| `java -version` показывает 17, а Gradle использует другую JVM | Проверьте `JAVA_HOME`, `Gradle JVM` в IDE и `org.gradle.java.home` в `~/.gradle/gradle.properties`; при необходимости после исправления выполните `./gradlew --stop` |
+| Gradle падает после переключения Java; ошибка `Unsupported class file major version` | Укажите JDK 25 в `JAVA_HOME` и Gradle JVM в IDE; проверьте `./gradlew --version` и использование wrapper 9.8.1 |
+| Gradle не находит Java toolchain 25 | Установите полный JDK 25; выполните `./gradlew :app:javaToolchains`. Для нестандартного пути можно передать `-Porg.gradle.java.installations.paths=/absolute/path/to/jdk-25` |
+| `java -version` показывает 25, а Gradle использует другую JVM | Проверьте `JAVA_HOME`, `Gradle JVM` в IDE и `org.gradle.java.home` в `~/.gradle/gradle.properties`; при необходимости после исправления выполните `./gradlew --stop` |
 | `GRAALVM_HOME must explicitly select...` | Задайте абсолютный путь к нужному GraalVM и выполните `./gradlew :app:verifyNativeToolchain` |
 | `Unsupported native toolchain` | Сверьте Community/25.2.4/25.0.4 и файл `$GRAALVM_HOME/release`; другой выпуск не пройдёт проверку |
 | При native-image не найдены C-компилятор или zlib | Установите `build-essential zlib1g-dev` на Ubuntu/Debian |

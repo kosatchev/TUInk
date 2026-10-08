@@ -37,13 +37,13 @@ language.
   from edits since the file was opened.
 - **Protect unfinished work.** Recovery snapshots and file-aware saves retain
   detected encoding, BOM, line endings, and supported filesystem metadata.
-- **Choose how to run it.** Use Java 17, a native Linux archive, or a Debian
+- **Choose how to run it.** Use Java 25, a native Linux archive, or a Debian
   package.
 
 ## Try it
 
-Building and running from sources needs JDK 17 and an interactive terminal.
-The packaged JVM ZIP runs on Java 17 or newer. See the
+Building and running from sources needs JDK 25 and an interactive terminal.
+The packaged JVM ZIP runs on Java 25 or newer. See the
 [setup and transfer guide in Russian](docs/setup-ru.md) for a new computer.
 
 ```bash
@@ -155,7 +155,7 @@ marked TUInk installation under `/opt/tuink` and its
 
 ### JVM ZIP
 
-The portable ZIP requires Java 17 or newer.
+The portable ZIP requires Java 25 or newer.
 
 ```bash
 unzip tuink-<version>.zip
@@ -211,6 +211,8 @@ Official native releases use a pinned GraalVM Community toolchain. Follow the
 
 ```bash
 export GRAALVM_HOME=/absolute/path/to/graalvm-community-25.2.4+7.1
+export JAVA_HOME="$GRAALVM_HOME"
+export PATH="$JAVA_HOME/bin:$PATH"
 ./gradlew clean :app:release
 ```
 

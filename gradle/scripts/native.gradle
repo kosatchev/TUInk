@@ -51,6 +51,14 @@ def verifyNativeToolchain = tasks.register('verifyNativeToolchain') {
         }
         graalVmHome = graalVmHome.canonicalFile
 
+        File gradleJavaHome = new File(System.getProperty('java.home')).canonicalFile
+        if (graalVmHome != gradleJavaHome) {
+            throw new GradleException(
+                'Native builds require JAVA_HOME and GRAALVM_HOME to select the same pinned GraalVM SDK. '
+                    + "Gradle uses ${gradleJavaHome}; GRAALVM_HOME selects ${graalVmHome}."
+            )
+        }
+
         File releaseFile = new File(graalVmHome, 'release')
         if (!releaseFile.isFile()) {
             throw new GradleException("GRAALVM_HOME has no release metadata: ${releaseFile}")

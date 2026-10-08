@@ -14,7 +14,9 @@ import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.geometry.Size;
 import dev.tuiframe.input.KeyStroke;
 import dev.tuiframe.input.PointerEvent;
+import dev.tuiframe.input.ResizeEvent;
 import dev.tuiframe.input.TextInput;
+import dev.tuiframe.scroll.Scrollbar;
 import dev.tuiframe.style.CellColor;
 import dev.tuiframe.style.CellStyle;
 import java.util.ArrayList;
@@ -114,6 +116,12 @@ class MenuBarTest {
         assertThrows(IllegalArgumentException.class, () -> new MenuBar.State(0, -1, -1));
         assertThrows(IllegalArgumentException.class, () -> new MenuBar.State(-1, 0, 0));
         assertThrows(IllegalArgumentException.class, () -> new MenuBar.State(-1, -1, 1));
+        assertThrows(IllegalArgumentException.class, () -> new MenuBar.State(
+            0, 0, 0, new Scrollbar.Drag(Scrollbar.Axis.HORIZONTAL, 0)
+        ));
+        assertThrows(IllegalArgumentException.class, () -> new MenuBar.State(
+            -1, -1, 0, new Scrollbar.Drag(Scrollbar.Axis.VERTICAL, 0)
+        ));
         assertThrows(IllegalArgumentException.class, () -> MenuBar.State.open(-1));
         assertThrows(NullPointerException.class, () -> new MenuBar.StateChanged<String>(null));
         assertThrows(NullPointerException.class, () -> new MenuBar.Invoked<String>(null, MenuBar.State.closed()));
@@ -148,7 +156,8 @@ class MenuBarTest {
         placement.paint(new Canvas(buffer), THEME, WidgetState.FOCUSED);
 
         assertEquals("File", cellText(buffer, 1, 2, 4));
-        assertEquals(".", buffer.get(1, 6).grapheme(), "the inter-menu gap is not label text");
+        assertEquals(" ", buffer.get(1, 6).grapheme(), "the menu owns the background between headings");
+        assertEquals(BAR, buffer.get(1, 6).style());
         assertEquals("Edit", cellText(buffer, 1, 7, 4));
         assertEquals(ACTIVE_BAR, buffer.get(1, 2).style());
         assertEquals(underlined(ACTIVE_BAR), buffer.get(1, 3).style());
@@ -173,6 +182,21 @@ class MenuBarTest {
         assertEquals(underlined(DISABLED_ITEM), disabled.get(3, 4).style());
         assertEquals(underlined(DISABLED_ITEM), disabled.get(4, 4).style());
         assertEquals(POPUP, disabled.get(5, 3).style());
+    }
+
+    @Test
+    void headingWidthIncludesVisualLabelsAndGapsAndPaintingPreservesTheRemainder() {
+        MenuBar<String> bar = new MenuBar<>(List.of(
+            menu("中e\u0301", item("one", "One", 0, true)),
+            menu("More", item("two", "Two", 0, true))
+        ), MenuBar.State.closed());
+        assertEquals(8, bar.preferredBarWidth());
+        CellBuffer buffer = filled(5, 18);
+        bar.layout(new Rect(2, 1, 14, 4)).paint(new Canvas(buffer), THEME, WidgetState.NORMAL);
+        assertEquals(" ", buffer.get(1, 5).grapheme());
+        assertEquals(BAR, buffer.get(1, 5).style());
+        assertEquals(".", buffer.get(1, 10).grapheme(), "metadata after the last heading belongs to the caller");
+        assertEquals(".", buffer.get(2, 2).grapheme(), "a closed menu must not clear the document layer");
     }
 
     @Test
@@ -242,7 +266,7 @@ class MenuBarTest {
         MenuBar.Placement<String> first = placement(menus, MenuBar.State.open(0), shortBounds);
 
         assertEquals(new MenuBar.State(0, 0, 0), first.state());
-        assertEquals(new Rect(0, 1, 10, 4), first.popupBounds().orElseThrow());
+        assertEquals(new Rect(0, 1, 11, 4), first.popupBounds().orElseThrow());
         assertCaptured(first.handle(new TextInput("h"), FOCUSED));
 
         MenuBar.State revealFourth = stateChange(first.handle(new TextInput("4"), FOCUSED));
@@ -250,7 +274,7 @@ class MenuBarTest {
         assertEquals("zero", invokedValue(first.handle(key(KeyStroke.Key.ENTER), FOCUSED)));
 
         MenuBar.Placement<String> revealed = placement(menus, revealFourth, shortBounds);
-        assertEquals(new Rect(0, 1, 10, 4), revealed.popupBounds().orElseThrow());
+        assertEquals(new Rect(0, 1, 11, 4), revealed.popupBounds().orElseThrow());
         assertEquals("hidden", invokedValue(revealed.handle(new TextInput("4"), FOCUSED)));
         assertEquals("hidden", invokedValue(revealed.handle(key(KeyStroke.Key.ENTER), FOCUSED)));
 
@@ -501,6 +525,174 @@ class MenuBarTest {
         assertEquals("second", invokedValue(rebuilt.handle(key(KeyStroke.Key.ENTER), FOCUSED)));
         assertEquals("first", invokedValue(old.handle(new TextInput("f"), FOCUSED)));
         assertEquals("second", invokedValue(rebuilt.handle(new TextInput("s"), FOCUSED)));
+    }
+
+    @Test
+    void narrowLayoutRevealsTheActiveHeadingAfterKeyboardSwitchAndResize() {
+        List<MenuBar.Menu<String>> menus = List.of(
+            menu("File", item("file", "Open", 0, true)),
+            menu("Settings", item("settings", "Theme", 0, true)),
+            menu("Help", item("help", "Keys", 0, true))
+        );
+        Rect bounds = new Rect(2, 1, 10, 6);
+        MenuBar.Placement<String> first = placement(menus, MenuBar.State.open(0), bounds);
+        MenuBar.State switched = stateChange(first.handle(key(KeyStroke.Key.ARROW_RIGHT), FOCUSED));
+        MenuBar.Placement<String> settings = placement(menus, switched, bounds);
+        CellBuffer buffer = filled(8, 14);
+        settings.paint(new Canvas(buffer), THEME, WidgetState.FOCUSED);
+        assertEquals("Settings", cellText(buffer, 1, 2, 8));
+        assertTrue(settings.popupBounds().isPresent());
+        assertEquals("settings", invokedValue(settings.handle(key(KeyStroke.Key.ENTER), FOCUSED)));
+
+        MenuBar.Placement<String> resized = placement(menus, switched, new Rect(2, 1, 6, 6));
+        CellBuffer narrow = filled(8, 10);
+        resized.paint(new Canvas(narrow), THEME, WidgetState.FOCUSED);
+        assertEquals("Settin", cellText(narrow, 1, 2, 6));
+        assertEquals("settings", invokedValue(resized.handle(key(KeyStroke.Key.ENTER), FOCUSED)));
+        assertEquals(MenuBar.State.closed(), stateChange(resized.handle(press(1, 2), UNFOCUSED)));
+
+        MenuBar.State helpState = stateChange(settings.handle(key(KeyStroke.Key.ARROW_RIGHT), FOCUSED));
+        MenuBar.Placement<String> help = placement(menus, helpState, bounds);
+        assertEquals("help", invokedValue(help.handle(key(KeyStroke.Key.ENTER), FOCUSED)));
+        MenuBar.Placement<String> tiny = placement(
+            List.of(menu("中", item("item", "Item", 0, true))), MenuBar.State.open(0), new Rect(0, 0, 1, 4)
+        );
+        CellBuffer single = filled(4, 1);
+        tiny.paint(new Canvas(single), THEME, WidgetState.FOCUSED);
+        assertEquals("…", single.get(0, 0).grapheme());
+    }
+
+    @Test
+    void reservedTrailingChromeLimitsHeadingsAndHitsWhilePopupsUseTheFullLayer() {
+        List<MenuBar.Menu<String>> menus = List.of(
+            menu("File", item("file", "Open", 0, true)),
+            menu("Settings", item("settings", "A longer setting", 0, true))
+        );
+        Rect bounds = new Rect(2, 1, 14, 6);
+        MenuBar.Placement<String> closed = new MenuBar<>(menus, MenuBar.State.closed()).layout(bounds, 6);
+        CellBuffer closedBuffer = filled(8, 18);
+        closed.paint(new Canvas(closedBuffer), THEME, WidgetState.NORMAL);
+        assertEquals("File..........", cellText(closedBuffer, 1, 2, 14));
+        assertTrue(closed.hit(1, 2));
+        assertFalse(closed.hit(1, 10));
+        assertIgnored(closed.handle(press(1, 10), UNFOCUSED));
+
+        MenuBar.Placement<String> settings = new MenuBar<>(menus, MenuBar.State.open(1)).layout(bounds, 6);
+        CellBuffer openBuffer = filled(8, 18);
+        settings.paint(new Canvas(openBuffer), THEME, WidgetState.FOCUSED);
+        assertEquals("Settings......", cellText(openBuffer, 1, 2, 14));
+        assertEquals(new Rect(2, 2, 14, 3), settings.popupBounds().orElseThrow());
+        assertEquals("settings", invokedValue(settings.handle(key(KeyStroke.Key.ENTER), FOCUSED)));
+    }
+
+    @Test
+    void aFullyReservedHeadingRowStillAllowsKeyboardUseOfTheOpenPopup() {
+        List<MenuBar.Menu<String>> menus = List.of(menu("Menu", item("item", "Item", 0, true)));
+        Rect bounds = new Rect(0, 0, 6, 5);
+        for (int reserved : List.of(6, Integer.MAX_VALUE)) {
+            MenuBar.Placement<String> placement = new MenuBar<>(menus, MenuBar.State.open(0))
+                .layout(bounds, reserved);
+            CellBuffer buffer = filled(5, 6);
+            placement.paint(new Canvas(buffer), THEME, WidgetState.FOCUSED);
+
+            assertEquals("......", cellText(buffer, 0, 0, 6));
+            assertEquals(new Rect(0, 1, 6, 3), placement.popupBounds().orElseThrow());
+            assertEquals("item", invokedValue(placement.handle(key(KeyStroke.Key.ENTER), FOCUSED)));
+        }
+        assertThrows(IllegalArgumentException.class,
+            () -> new MenuBar<>(menus, MenuBar.State.closed()).layout(bounds, -1));
+    }
+
+    @Test
+    void popupWheelPreservesManualViewportAndKeyboardRevealsSelectionBeforeInvoking() {
+        List<MenuBar.Menu<String>> menus = longMenu();
+        Rect bounds = new Rect(1, 1, 20, 7);
+        MenuBar.Placement<String> initial = placement(menus, MenuBar.State.open(0), bounds);
+        Rect popup = initial.popupBounds().orElseThrow();
+        MenuBar.State scrolled = stateChange(initial.handle(
+            pointer(popup.y() + 1, popup.x() + 1, PointerEvent.Kind.SCROLL_DOWN, PointerEvent.Button.NONE),
+            UNFOCUSED
+        ));
+        assertEquals(3, scrolled.firstVisibleEntryIndex());
+        assertEquals(0, scrolled.selectedEntryIndex());
+        MenuBar.Placement<String> rebuilt = placement(menus, scrolled, bounds);
+        assertEquals(scrolled, rebuilt.state());
+        assertTrue(rebuilt.cursorPosition(FOCUSED).isEmpty());
+        MenuBar.State revealed = stateChange(rebuilt.handle(key(KeyStroke.Key.ENTER), FOCUSED));
+        assertEquals(new MenuBar.State(0, 0, 0), revealed);
+        assertEquals("item0", invokedValue(placement(menus, revealed, bounds).handle(
+            key(KeyStroke.Key.ENTER), FOCUSED
+        )));
+        MenuBar.State moved = stateChange(rebuilt.handle(key(KeyStroke.Key.ARROW_DOWN), FOCUSED));
+        assertEquals(new MenuBar.State(0, 1, 1), moved);
+        assertCaptured(initial.handle(
+            pointer(bounds.bottomExclusive() - 1, bounds.rightExclusive() - 1,
+                PointerEvent.Kind.SCROLL_DOWN, PointerEvent.Button.NONE), UNFOCUSED
+        ));
+    }
+
+    @Test
+    void popupScrollbarUsesSharedTrackDraggingAndReleasesOutsideClipOrWhileDisabled() {
+        List<MenuBar.Menu<String>> menus = longMenu();
+        Rect bounds = new Rect(1, 1, 20, 7);
+        MenuBar.Placement<String> initial = placement(menus, MenuBar.State.open(0), bounds);
+        Scrollbar bar = initial.scrollbar().orElseThrow();
+        MenuBar.State grabbed = stateChange(initial.handle(press(bar.track().y(), bar.track().x()), UNFOCUSED));
+        assertTrue(grabbed.drag() != null);
+        MenuBar.Placement<String> dragging = placement(menus, grabbed, bounds);
+        MenuBar.State stationary = stateChange(dragging.handle(
+            pointer(bar.track().y(), bar.track().x(), PointerEvent.Kind.DRAG, PointerEvent.Button.LEFT), UNFOCUSED
+        ));
+        assertEquals(grabbed, stationary);
+        MenuBar.State bottom = stateChange(dragging.handle(
+            pointer(100, 100, PointerEvent.Kind.DRAG, PointerEvent.Button.LEFT), UNFOCUSED
+        ));
+        assertEquals(8, bottom.firstVisibleEntryIndex());
+        MenuBar.Placement<String> bottomPlacement = placement(menus, bottom, bounds);
+        FocusContext disabled = new FocusContext(false, false, FocusSpace.root(ROOT_CLIP));
+        MenuBar.State released = stateChange(bottomPlacement.handle(
+            pointer(100, 100, PointerEvent.Kind.RELEASE, PointerEvent.Button.NONE), disabled
+        ));
+        assertEquals(new MenuBar.State(0, 0, 8), released);
+        assertEquals(released, bottom.cancelPointerInteraction());
+        assertSame(released, released.cancelPointerInteraction());
+        assertEquals(released, stateChange(bottomPlacement.handle(new ResizeEvent(20, 80), disabled)));
+        MenuBar.State page = stateChange(initial.handle(
+            press(bar.track().bottomExclusive() - 1, bar.track().x()), UNFOCUSED
+        ));
+        assertEquals(new MenuBar.State(0, 0, 3), page);
+        MenuBar.Placement<String> tiny = placement(menus, grabbed, new Rect(1, 1, 20, 4));
+        assertTrue(tiny.scrollbar().isEmpty());
+        assertTrue(tiny.state().drag() == null);
+    }
+
+    @Test
+    void scrollbarInheritsPopupBodyBackgroundAndFrameForeground() {
+        MenuBar.Placement<String> placement = placement(longMenu(), MenuBar.State.open(0), new Rect(0, 0, 20, 7));
+        CellStyle body = new CellStyle(CellColor.CYAN, CellColor.BLUE, false, false);
+        CellStyle frame = new CellStyle(CellColor.BRIGHT_WHITE, CellColor.RED, true, false);
+        CellStyle expected = new CellStyle(frame.fg(), body.bg(), frame.bold(), frame.underline());
+        Theme theme = role -> {
+            if (WidgetThemeKeys.MENU_ITEM.equals(role)) return body;
+            if (WidgetThemeKeys.MENU_POPUP.equals(role)) return frame;
+            return THEME.style(role);
+        };
+        CellBuffer buffer = filled(8, 22);
+        placement.paint(new Canvas(buffer), theme, WidgetState.FOCUSED);
+        Rect track = placement.scrollbar().orElseThrow().track();
+        assertEquals("█", buffer.get(track.y(), track.x()).grapheme());
+        assertEquals(expected, buffer.get(track.y(), track.x()).style());
+        assertEquals("│", buffer.get(track.bottomExclusive() - 1, track.x()).grapheme());
+        assertEquals(expected, buffer.get(track.bottomExclusive() - 1, track.x()).style());
+        assertEquals(frame, buffer.get(track.y(), track.x() + 1).style());
+    }
+
+    private static List<MenuBar.Menu<String>> longMenu() {
+        List<MenuBar.Entry<String>> entries = new ArrayList<>();
+        for (int index = 0; index < 12; index++) {
+            entries.add(item("item" + index, "Item " + index, 0, true));
+        }
+        return List.of(new MenuBar.Menu<>("Menu", 0, entries));
     }
 
     private static MenuBar.Placement<String> placement(

@@ -49,6 +49,29 @@ class TerminalTextTest {
     }
 
     @Test
+    void formattingMarksDoNotTurnOrdinaryTextIntoWideEmoji() {
+        for (String text : List.of("a\u200D", "a\uFE0F", "ل\u200D", "ل\uFE0F", "©\u200D")) {
+            assertEquals(1, TerminalText.graphemeWidth(text), text);
+            assertEquals(1, TerminalText.visualWidth(text, 4), text);
+            assertEquals(text, TerminalText.sanitizeGrapheme(text), text);
+            assertEquals(2, TerminalText.visualColumnAt(text + "B", text.length() + 1, 4), text);
+        }
+    }
+
+    @Test
+    void compatibleEmojiSequencesKeepTheirTwoCellWidth() {
+        for (String text : List.of(
+            FAMILY, FLAG, MODIFIED_EMOJI, "☝🏽", "👩\u200D💻", "♥\uFE0F", "©\uFE0F",
+            "1\uFE0F\u20E3", "#\u20E3", "*\uFE0F\u20E3", "⛹\u200D♀"
+        )) {
+            assertEquals(2, TerminalText.graphemeWidth(text), text);
+            assertEquals(2, TerminalText.visualWidth(text, 4), text);
+        }
+        assertEquals(1, TerminalText.graphemeWidth("♥\uFE0E"));
+        assertEquals(1, TerminalText.graphemeWidth(COMBINING_E));
+    }
+
+    @Test
     void keepsNonzeroWidthFormatCharactersVisible() {
         int[] codePoints = {0x00AD, 0x0890, 0x0891, 0x13439, 0x1343A, 0x1343B,
             0x1343C, 0x1343D, 0x1343E, 0x1343F};

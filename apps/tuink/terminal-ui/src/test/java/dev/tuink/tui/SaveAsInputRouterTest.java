@@ -74,7 +74,7 @@ class SaveAsInputRouterTest {
         assertIgnored(fixture.route(
             KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL, KeyStroke.Modifier.SHIFT)
         ));
-        assertIgnored(fixture.route(
+        assertCaptured(fixture.route(
             KeyStroke.of(KeyStroke.Key.ARROW_LEFT, KeyStroke.Modifier.SHIFT)
         ));
         assertCaptured(fixture.route(
@@ -88,7 +88,7 @@ class SaveAsInputRouterTest {
         assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.TAB)));
         assertEquals(SaveAsBarView.Target.FIELD, fixture.focus.focused().orElseThrow());
         assertEquals("draft", fixture.field.text());
-        assertEquals("draft".length(), fixture.field.cursor());
+        assertEquals("draf".length(), fixture.field.cursor());
     }
 
     @Test

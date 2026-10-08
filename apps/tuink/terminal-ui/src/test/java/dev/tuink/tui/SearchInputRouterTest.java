@@ -58,7 +58,7 @@ class SearchInputRouterTest {
     }
 
     @Test
-    void horizontalArrowsEditFieldsUntilBoundaryThenTraverseTheRing() {
+    void horizontalArrowsStayInFieldsAndTraverseButtons() {
         TextField query = new TextField();
         query.set("ab");
         Fixture fixture = fixture(query, new TextField(), 80, viewport(5, 80));
@@ -70,13 +70,16 @@ class SearchInputRouterTest {
         assertEquals(0, query.cursor());
 
         assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.ARROW_LEFT)));
-        assertEquals(SearchFocus.ALL_BUTTON, fixture.focus.focused().orElseThrow());
+        assertEquals(SearchFocus.FIND, fixture.focus.focused().orElseThrow());
         assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.ARROW_RIGHT)));
         assertEquals(SearchFocus.FIND, fixture.focus.focused().orElseThrow());
 
         fixture.focus.focus(fixture.placement.focusScope(), SearchFocus.REPLACE);
         assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.ARROW_RIGHT)));
-        assertEquals(SearchFocus.NEXT_BUTTON, fixture.focus.focused().orElseThrow());
+        assertEquals(SearchFocus.REPLACE, fixture.focus.focused().orElseThrow());
+        fixture.focus.focus(fixture.placement.focusScope(), SearchFocus.NEXT_BUTTON);
+        assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.ARROW_RIGHT)));
+        assertEquals(SearchFocus.PREV_BUTTON, fixture.focus.focused().orElseThrow());
     }
 
     @Test

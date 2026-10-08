@@ -13,6 +13,15 @@ public final class ScrollInteraction {
     private ScrollInteraction() {
     }
 
+    public static int clampOffset(int offset, int visibleItems, int totalItems) {
+        return clamp(offset, 0, maxScroll(Math.max(0, visibleItems), Math.max(0, totalItems)));
+    }
+
+    public static int scrollBy(int offset, int delta, int visibleItems, int totalItems) {
+        long target = (long) offset + delta;
+        return (int) Math.max(0, Math.min(maxScroll(Math.max(0, visibleItems), Math.max(0, totalItems)), target));
+    }
+
     public static Hit hit(int pointer, int trackStart, int visibleItems, int totalItems, int scroll) {
         if (!hitTrack(pointer, trackStart, visibleItems)) {
             return Hit.NONE;

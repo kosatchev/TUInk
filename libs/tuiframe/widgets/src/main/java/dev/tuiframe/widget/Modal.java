@@ -9,7 +9,12 @@ import dev.tuiframe.style.CellStyle;
 import java.util.Objects;
 
 /**
- * Reusable modal frame element with title and close button.
+ * Reusable visual dialog frame with title and close button.
+ *
+ * <p>The caller chooses a {@link DialogMode}, applies {@link DialogInputPolicy}
+ * to its own command classifications, and manages the controls/content focus
+ * ring through {@link DialogFocusTraversal}. These explicit input and focus
+ * contracts support both dialog modes; this frame supplies layout and painting.</p>
  */
 public final class Modal implements Widget {
     private final int top;
@@ -68,6 +73,11 @@ public final class Modal implements Widget {
 
     public Button closeButton() {
         return Button.plain(top, right() - 2, "X");
+    }
+
+    /** Supplies this legacy frame's surface to its child widgets. */
+    public Theme childTheme(Theme children) {
+        return Objects.requireNonNull(children, "children").withSurface(bodyStyle, borderStyle);
     }
 
     /**

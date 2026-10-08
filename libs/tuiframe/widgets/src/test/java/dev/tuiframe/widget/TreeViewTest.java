@@ -3,6 +3,7 @@ package dev.tuiframe.widget;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -14,7 +15,9 @@ import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.geometry.Size;
 import dev.tuiframe.input.KeyStroke;
 import dev.tuiframe.input.PointerEvent;
+import dev.tuiframe.input.ResizeEvent;
 import dev.tuiframe.input.TextInput;
+import dev.tuiframe.scroll.Scrollbar;
 import dev.tuiframe.style.CellColor;
 import dev.tuiframe.style.CellStyle;
 import java.util.AbstractList;
@@ -47,8 +50,9 @@ class TreeViewTest {
     private static final CellStyle SELECTED = CellStyle.fg(CellColor.CYAN);
     private static final CellStyle FOCUSED_SELECTED = CellStyle.fg(CellColor.BRIGHT_GREEN);
     private static final CellStyle DISABLED_STYLE = CellStyle.fg(CellColor.BRIGHT_BLACK);
-    private static final CellStyle TRACK = CellStyle.fg(CellColor.BLUE);
-    private static final CellStyle THUMB = CellStyle.fg(CellColor.MAGENTA);
+    private static final CellStyle PARENT_BODY = new CellStyle(CellColor.WHITE, CellColor.BLACK, false, false);
+    private static final CellStyle PARENT_BORDER = new CellStyle(CellColor.BLUE, CellColor.RED, true, false);
+    private static final CellStyle SCROLL_STYLE = new CellStyle(CellColor.BLUE, CellColor.BLACK, true, false);
     private static final Theme THEME = role -> {
         if (WidgetThemeKeys.LIST_ITEM_SELECTED_FOCUSED.equals(role)) {
             return FOCUSED_SELECTED;
@@ -59,11 +63,11 @@ class TreeViewTest {
         if (WidgetThemeKeys.LIST_ITEM_DISABLED.equals(role)) {
             return DISABLED_STYLE;
         }
-        if (WidgetThemeKeys.SCROLLBAR_TRACK.equals(role)) {
-            return TRACK;
+        if (WidgetThemeKeys.MODAL_BODY.equals(role)) {
+            return PARENT_BODY;
         }
-        if (WidgetThemeKeys.SCROLLBAR_THUMB.equals(role)) {
-            return THUMB;
+        if (WidgetThemeKeys.MODAL_BORDER.equals(role)) {
+            return PARENT_BORDER;
         }
         return NORMAL;
     };
@@ -147,8 +151,8 @@ class TreeViewTest {
         assertEquals("|META", cellText(leftBuffer, 0, 4, 5));
         assertEquals("|META", cellText(scrolledBuffer, 0, 4, 5));
         assertEquals(FOCUSED_SELECTED, scrolledBuffer.get(0, 8).style());
-        assertEquals(TRACK, scrolledBuffer.get(2, 9).style());
-        assertEquals(THUMB, scrolledBuffer.get(3, 1).style());
+        assertEquals(SCROLL_STYLE, scrolledBuffer.get(2, 9).style());
+        assertEquals(SCROLL_STYLE, scrolledBuffer.get(3, 1).style());
     }
 
     @Test
@@ -265,7 +269,7 @@ class TreeViewTest {
     }
 
     @Test
-    void wheelTrackAndInTrackDragUpdateBothApplicationOwnedViewports() {
+    void wheelAndTrackClicksUpdateBothApplicationOwnedViewports() {
         TreeView.Placement<String> vertical = placement(
             rows(10),
             new TreeView.State(0, 0, 0),
@@ -282,12 +286,10 @@ class TreeViewTest {
             new TreeView.State(0, 2, 0),
             vertical.handle(press(3, 9), FOCUSED)
         );
-        InteractionResult<TreeView.Action<String>> verticalDrag = vertical.handle(
+        assertIgnored(vertical.handle(
             pointer(3, 9, PointerEvent.Kind.DRAG, PointerEvent.Button.LEFT),
             FOCUSED
-        );
-        assertEquals(FocusRequest.SELF, verticalDrag.focusRequest());
-        assertState(new TreeView.State(0, 7, 0), verticalDrag);
+        ));
 
         List<TreeView.Item<String>> longRow = List.of(
             item("long", "abcdefghijklmnop", 0, TreeView.Kind.LEAF)
@@ -302,13 +304,10 @@ class TreeViewTest {
             new TreeView.State(0, 0, 7),
             horizontal.handle(press(3, 9), FOCUSED)
         );
-        assertState(
-            new TreeView.State(0, 0, 10),
-            horizontal.handle(
-                pointer(3, 9, PointerEvent.Kind.DRAG, PointerEvent.Button.LEFT),
-                FOCUSED
-            )
-        );
+        assertIgnored(horizontal.handle(
+            pointer(3, 9, PointerEvent.Kind.DRAG, PointerEvent.Button.LEFT),
+            FOCUSED
+        ));
         assertState(
             new TreeView.State(0, 0, 2),
             horizontal.handle(
@@ -316,6 +315,90 @@ class TreeViewTest {
                 FOCUSED
             )
         );
+    }
+
+    @Test
+    void capturedThumbDragPreservesGrabPointAndWorksOutsideParentClipUntilRelease() {
+        List<TreeView.Item<String>> items = rows(100);
+        Rect bounds = new Rect(2, 2, 10, 10);
+        TreeView.Placement<String> initial = placement(items, new TreeView.State(4, 37, 0), bounds);
+        Rect track = initial.verticalScrollbarBounds().orElseThrow();
+        Point thumb = new Point(track.x(), track.y() + 4);
+        TreeView.State captured = stateFrom(initial.handle(press(thumb.y(), thumb.x()), FOCUSED));
+        assertEquals(new Scrollbar.Drag(Scrollbar.Axis.VERTICAL, 0), captured.drag());
+        assertEquals(37, captured.firstVisibleIndex());
+
+        TreeView.Placement<String> dragging = placement(items, captured, bounds);
+        FocusContext narrowParent = new FocusContext(false, true, FocusSpace.root(bounds));
+        TreeView.State stationary = stateFrom(dragging.handle(
+            pointer(thumb.y(), thumb.x(), PointerEvent.Kind.DRAG, PointerEvent.Button.LEFT), narrowParent
+        ));
+        assertEquals(captured, stationary, "a stationary pointer must preserve the unrounded scroll offset");
+        TreeView.State bottom = stateFrom(dragging.handle(
+            pointer(40, 50, PointerEvent.Kind.DRAG, PointerEvent.Button.LEFT), narrowParent
+        ));
+        assertEquals(90, bottom.firstVisibleIndex());
+        assertEquals(captured.drag(), bottom.drag());
+        TreeView.State released = stateFrom(placement(items, bottom, bounds).handle(
+            pointer(40, 50, PointerEvent.Kind.RELEASE, PointerEvent.Button.LEFT), narrowParent
+        ));
+        assertEquals(new TreeView.State(4, 90, 0), released);
+        assertIgnored(placement(items, released, bounds).handle(
+            pointer(0, 0, PointerEvent.Kind.DRAG, PointerEvent.Button.LEFT), narrowParent
+        ));
+    }
+
+    @Test
+    void horizontalCaptureSurvivesPlacementsAndResetsWhenItsTrackDisappears() {
+        List<TreeView.Item<String>> items = List.of(item("long", "x".repeat(100), 0, TreeView.Kind.PLAIN));
+        Rect bounds = new Rect(2, 2, 10, 4);
+        TreeView.Placement<String> initial = placement(items, new TreeView.State(0, 0, 37), bounds);
+        Rect track = initial.horizontalScrollbarBounds().orElseThrow();
+        TreeView.State captured = stateFrom(initial.handle(press(track.y(), track.x() + 4), FOCUSED));
+        assertEquals(new Scrollbar.Drag(Scrollbar.Axis.HORIZONTAL, 0), captured.drag());
+        TreeView.State right = stateFrom(placement(items, captured, bounds).handle(
+            pointer(0, 50, PointerEvent.Kind.DRAG, PointerEvent.Button.LEFT), FOCUSED
+        ));
+        assertEquals(90, right.horizontalOffset());
+        assertEquals(captured.drag(), right.drag());
+        assertEquals(new TreeView.State(0, 0, 0), placement(items, captured, new Rect(0, 0, 100, 4)).state());
+    }
+
+    @Test
+    void releaseWhileDisabledAndResizeCancelCaptureBeforeFurtherDrags() {
+        List<TreeView.Item<String>> items = rows(100);
+        Rect bounds = new Rect(2, 2, 10, 10);
+        TreeView.State captured = new TreeView.State(4, 37, 0, new Scrollbar.Drag(Scrollbar.Axis.VERTICAL, 0));
+        TreeView.Placement<String> dragging = placement(items, captured, bounds);
+        TreeView.State released = stateFrom(dragging.handle(
+            pointer(40, 50, PointerEvent.Kind.RELEASE, PointerEvent.Button.LEFT), DISABLED
+        ));
+        assertEquals(new TreeView.State(4, 37, 0), released);
+        assertIgnored(placement(items, released, bounds).handle(
+            pointer(8, 11, PointerEvent.Kind.DRAG, PointerEvent.Button.LEFT), FOCUSED
+        ));
+
+        TreeView.State resized = stateFrom(dragging.handle(new ResizeEvent(20, 60), DISABLED));
+        assertEquals(released, resized);
+        TreeView.Placement<String> afterResize = placement(items, resized, new Rect(2, 2, 10, 8));
+        assertTrue(afterResize.verticalScrollbarBounds().isPresent());
+        assertIgnored(afterResize.handle(pointer(8, 11, PointerEvent.Kind.DRAG, PointerEvent.Button.LEFT), FOCUSED));
+        assertNull(stateFrom(dragging.handle(KeyStroke.of(KeyStroke.Key.ARROW_DOWN), FOCUSED)).drag());
+    }
+
+    @Test
+    void scrollbarsFollowParentBodyAndBorderAcrossFocusStates() {
+        TreeView.Placement<String> tree = placement(rows(100), new TreeView.State(0, 37, 0), new Rect(0, 0, 10, 10));
+        CellStyle body = new CellStyle(CellColor.YELLOW, CellColor.CYAN, false, false);
+        CellStyle border = new CellStyle(CellColor.MAGENTA, CellColor.RED, true, true);
+        CellStyle inherited = new CellStyle(CellColor.MAGENTA, CellColor.CYAN, true, true);
+        for (WidgetState state : List.of(WidgetState.FOCUSED, WidgetState.NORMAL, WidgetState.DISABLED)) {
+            CellBuffer buffer = filled(10, 10);
+            tree.paint(new Canvas(buffer), THEME.withSurface(body, border), state);
+            for (int row = 0; row < 10; row++) {
+                assertEquals(inherited, buffer.get(row, 9).style());
+            }
+        }
     }
 
     @Test
@@ -538,6 +621,11 @@ class TreeViewTest {
             result.output().orElseThrow()
         );
         assertEquals(expected, changed.state());
+    }
+
+    private static TreeView.State stateFrom(InteractionResult<TreeView.Action<String>> result) {
+        assertTrue(result.consumed());
+        return assertInstanceOf(TreeView.StateChanged.class, result.output().orElseThrow()).state();
     }
 
     private static void assertIgnored(InteractionResult<TreeView.Action<String>> result) {

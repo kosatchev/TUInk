@@ -14,7 +14,9 @@ import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.geometry.Size;
 import dev.tuiframe.input.KeyStroke;
 import dev.tuiframe.input.PointerEvent;
+import dev.tuiframe.input.ResizeEvent;
 import dev.tuiframe.input.TextInput;
+import dev.tuiframe.scroll.Scrollbar;
 import dev.tuiframe.style.CellColor;
 import dev.tuiframe.style.CellStyle;
 import java.util.ArrayList;
@@ -47,8 +49,9 @@ class ListViewTest {
     private static final CellStyle SELECTED = CellStyle.fg(CellColor.CYAN);
     private static final CellStyle FOCUSED_SELECTED = CellStyle.fg(CellColor.BRIGHT_GREEN);
     private static final CellStyle DISABLED_STYLE = CellStyle.fg(CellColor.BRIGHT_BLACK);
-    private static final CellStyle TRACK = CellStyle.fg(CellColor.BLUE);
-    private static final CellStyle THUMB = CellStyle.fg(CellColor.MAGENTA);
+    private static final CellStyle PARENT_BODY = new CellStyle(CellColor.WHITE, CellColor.BLACK, false, false);
+    private static final CellStyle PARENT_BORDER = new CellStyle(CellColor.BLUE, CellColor.RED, true, false);
+    private static final CellStyle SCROLL_STYLE = new CellStyle(CellColor.BLUE, CellColor.BLACK, true, false);
     private static final Theme THEME = role -> {
         if (WidgetThemeKeys.LIST_ITEM_SELECTED_FOCUSED.equals(role)) {
             return FOCUSED_SELECTED;
@@ -59,11 +62,11 @@ class ListViewTest {
         if (WidgetThemeKeys.LIST_ITEM_DISABLED.equals(role)) {
             return DISABLED_STYLE;
         }
-        if (WidgetThemeKeys.SCROLLBAR_TRACK.equals(role)) {
-            return TRACK;
+        if (WidgetThemeKeys.MODAL_BODY.equals(role)) {
+            return PARENT_BODY;
         }
-        if (WidgetThemeKeys.SCROLLBAR_THUMB.equals(role)) {
-            return THUMB;
+        if (WidgetThemeKeys.MODAL_BORDER.equals(role)) {
+            return PARENT_BORDER;
         }
         return NORMAL;
     };
@@ -105,7 +108,7 @@ class ListViewTest {
     }
 
     @Test
-    void translatedPaintIsUnicodeSafeAndUsesSelectionAndScrollbarRoles() {
+    void translatedPaintIsUnicodeSafeAndInheritsScrollbarStyleFromParent() {
         List<String> items = List.of("zero", "one", "A中B", "e\u0301-three", "four", "five");
         ListView.Placement placement = new ListView(
             items.size(),
@@ -127,9 +130,9 @@ class ListViewTest {
         assertEquals(FOCUSED_SELECTED, focused.get(3, 3).style());
 
         int scrollbarColumn = 8;
-        assertEquals(TRACK, focused.get(2, scrollbarColumn).style());
-        assertEquals(THUMB, focused.get(3, scrollbarColumn).style());
-        assertEquals(THUMB, focused.get(4, scrollbarColumn).style());
+        assertEquals(SCROLL_STYLE, focused.get(2, scrollbarColumn).style());
+        assertEquals(SCROLL_STYLE, focused.get(3, scrollbarColumn).style());
+        assertEquals(SCROLL_STYLE, focused.get(4, scrollbarColumn).style());
         assertTrue(focusedCanvas.put(0, 0, "z", NORMAL), "paint must restore Canvas translation state");
         assertEquals("z", focused.get(1, 2).grapheme());
 
@@ -468,7 +471,11 @@ class ListViewTest {
             FOCUSED
         );
         assertTrue(thumbPressed.consumed());
-        assertTrue(thumbPressed.output().isEmpty(), "thumb press must not jump without drag capture");
+        assertEquals(
+            new ListView.State(2, 2, new Scrollbar.Drag(Scrollbar.Axis.VERTICAL, 1)),
+            stateFrom(thumbPressed),
+            "thumb press must retain the original viewport and its grab point"
+        );
         assertEquals(FocusRequest.SELF, thumbPressed.focusRequest());
 
         assertIgnored(placement.handle(new PointerEvent(
@@ -491,6 +498,93 @@ class ListViewTest {
             pointer(2, 3, PointerEvent.Kind.SCROLL_DOWN, PointerEvent.Button.NONE),
             DISABLED
         ));
+    }
+
+    @Test
+    void thumbCaptureKeepsGrabOffsetAndRoutesOutsideParentUntilRelease() {
+        Rect bounds = new Rect(2, 2, 10, 10);
+        ListView.Placement initial = new ListView(20, index -> "row-" + index, new ListView.State(4, 4)).layout(bounds);
+        FocusContext narrow = new FocusContext(false, true, new FocusSpace(new Point(10, 5), bounds));
+        ListView.State captured = stateFrom(initial.handle(
+            pointer(12, 21, PointerEvent.Kind.PRESS, PointerEvent.Button.LEFT), narrow
+        ));
+        assertEquals(new ListView.State(4, 4, new Scrollbar.Drag(Scrollbar.Axis.VERTICAL, 3)), captured);
+
+        ListView.Placement dragging = new ListView(20, index -> "row-" + index, captured).layout(bounds);
+        assertEquals(captured, stateFrom(dragging.handle(
+            pointer(12, 21, PointerEvent.Kind.DRAG, PointerEvent.Button.LEFT), narrow
+        )));
+        ListView.State bottom = stateFrom(dragging.handle(
+            pointer(30, 50, PointerEvent.Kind.DRAG, PointerEvent.Button.LEFT), narrow
+        ));
+        assertEquals(new ListView.State(4, 10, captured.drag()), bottom);
+        ListView.State released = stateFrom(new ListView(20, index -> "row-" + index, bottom).layout(bounds).handle(
+            pointer(30, 50, PointerEvent.Kind.RELEASE, PointerEvent.Button.LEFT), narrow
+        ));
+        assertEquals(new ListView.State(4, 10), released);
+        assertEquals(new ListView.State(4, 0), new ListView(20, index -> "row-" + index, captured).layout(
+            new Rect(0, 0, 10, 20)
+        ).state());
+    }
+
+    @Test
+    void releaseWhileDisabledAndResizeCancelCaptureBeforeFurtherDrags() {
+        Rect bounds = new Rect(2, 2, 10, 10);
+        ListView.State captured = new ListView.State(4, 4, new Scrollbar.Drag(Scrollbar.Axis.VERTICAL, 3));
+        ListView.Placement dragging = new ListView(20, index -> "row-" + index, captured).layout(bounds);
+        ListView.State released = stateFrom(dragging.handle(
+            pointer(30, 50, PointerEvent.Kind.RELEASE, PointerEvent.Button.LEFT), DISABLED
+        ));
+        assertEquals(new ListView.State(4, 4), released);
+        assertIgnored(new ListView(20, index -> "row-" + index, released).layout(bounds).handle(
+            pointer(8, 11, PointerEvent.Kind.DRAG, PointerEvent.Button.LEFT), FOCUSED
+        ));
+
+        ListView.State resized = stateFrom(dragging.handle(new ResizeEvent(20, 60), DISABLED));
+        assertEquals(released, resized);
+        ListView.Placement afterResize = new ListView(20, index -> "row-" + index, resized).layout(new Rect(2, 2, 10, 8));
+        assertTrue(afterResize.scrollbarBounds().isPresent(), "resize cancellation must also work while a track remains");
+        assertIgnored(afterResize.handle(pointer(8, 11, PointerEvent.Kind.DRAG, PointerEvent.Button.LEFT), FOCUSED));
+    }
+
+    @Test
+    void textViewportScrollsWithoutSelectionOrActivation() {
+        Rect bounds = new Rect(2, 1, 8, 4);
+        ListView.Placement text = ListView.text(30, index -> "line-" + index, new ListView.State(8, 5)).layout(bounds);
+        assertEquals(new ListView.State(-1, 5), text.state());
+        assertState(new ListView.State(-1, 6), text.handle(KeyStroke.of(KeyStroke.Key.ARROW_DOWN), FOCUSED));
+        assertState(new ListView.State(-1, 4), text.handle(KeyStroke.of(KeyStroke.Key.ARROW_UP), FOCUSED));
+        assertState(new ListView.State(-1, 9), text.handle(KeyStroke.of(KeyStroke.Key.PAGE_DOWN), FOCUSED));
+        assertState(new ListView.State(-1, 1), text.handle(KeyStroke.of(KeyStroke.Key.PAGE_UP), FOCUSED));
+        assertState(new ListView.State(-1, 0), text.handle(KeyStroke.of(KeyStroke.Key.HOME), FOCUSED));
+        assertState(new ListView.State(-1, 26), text.handle(KeyStroke.of(KeyStroke.Key.END), FOCUSED));
+        assertState(new ListView.State(-1, 8), text.handle(pointer(2, 3, PointerEvent.Kind.SCROLL_DOWN, PointerEvent.Button.NONE), FOCUSED));
+        assertState(new ListView.State(-1, 2), text.handle(pointer(2, 3, PointerEvent.Kind.SCROLL_UP, PointerEvent.Button.NONE), FOCUSED));
+        assertIgnored(text.handle(KeyStroke.of(KeyStroke.Key.ENTER), FOCUSED));
+        InteractionResult<ListView.Action> press = text.handle(pointer(2, 3, PointerEvent.Kind.PRESS, PointerEvent.Button.LEFT), FOCUSED);
+        assertTrue(press.consumed());
+        assertTrue(press.output().isEmpty(), "clicking text must not select or activate a row");
+
+        CellBuffer buffer = filled(6, 12);
+        text.paint(new Canvas(buffer), THEME, WidgetState.FOCUSED);
+        for (int row = bounds.y(); row < bounds.bottomExclusive(); row++) {
+            assertEquals(NORMAL, buffer.get(row, bounds.x()).style());
+        }
+    }
+
+    @Test
+    void parentSurfaceControlsScrollbarBackgroundAndBorderColor() {
+        ListView.Placement list = new ListView(30, index -> "row-" + index, ListView.State.initial()).layout(new Rect(0, 0, 8, 4));
+        CellStyle body = new CellStyle(CellColor.WHITE, CellColor.CYAN, false, false);
+        CellStyle border = new CellStyle(CellColor.MAGENTA, CellColor.RED, true, true);
+        CellStyle inherited = new CellStyle(CellColor.MAGENTA, CellColor.CYAN, true, true);
+        for (WidgetState state : List.of(WidgetState.FOCUSED, WidgetState.NORMAL, WidgetState.DISABLED)) {
+            CellBuffer buffer = filled(4, 8);
+            list.paint(new Canvas(buffer), THEME.withSurface(body, border), state);
+            for (int row = 0; row < 4; row++) {
+                assertEquals(inherited, buffer.get(row, 7).style());
+            }
+        }
     }
 
     @Test

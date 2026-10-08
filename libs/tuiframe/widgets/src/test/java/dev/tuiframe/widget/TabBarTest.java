@@ -445,6 +445,118 @@ class TabBarTest {
         );
     }
 
+    @Test
+    void revealingActiveScrollsOnlyAsFarAsNeededInEitherDirection() {
+        List<TabBar.Item> items = simpleItems("a", "b", "c", "d");
+        TabBar.Placement right = new TabBar(items, 3, TabBar.State.initial())
+            .layoutRevealingActive(new Rect(0, 0, 14, 1));
+        CellBuffer buffer = filled(1, 14);
+        right.paint(new Canvas(buffer), THEME, WidgetState.NORMAL);
+
+        assertEquals(new TabBar.State(2), right.state());
+        assertEquals("<[c x] [d x]  ", cellText(buffer, 0, 0, 14));
+        assertEquals(ACTIVE, buffer.get(0, 7).style());
+
+        TabBar.Placement left = new TabBar(items, 1, right.state())
+            .layoutRevealingActive(new Rect(0, 0, 14, 1));
+        assertEquals(new TabBar.State(1), left.state());
+        assertEquals(
+            new TabBar.TabPressed(1, new TabBar.State(1)),
+            output(left.handle(press(0, 2), POINTER_CONTEXT), TabBar.TabPressed.class)
+        );
+    }
+
+    @Test
+    void ordinaryLayoutPreservesManualBrowsingAndRevealKeepsVisibleActiveTab() {
+        List<TabBar.Item> items = simpleItems("a", "b", "c", "d");
+        TabBar.State manuallyScrolled = new TabBar.State(2);
+        TabBar.Placement browsed = new TabBar(items, 0, manuallyScrolled)
+            .layout(new Rect(0, 0, 14, 1));
+        assertEquals(manuallyScrolled, browsed.state());
+
+        TabBar.Placement alreadyVisible = new TabBar(items, 3, manuallyScrolled)
+            .layoutRevealingActive(new Rect(0, 0, 14, 1));
+        assertEquals(manuallyScrolled, alreadyVisible.state());
+    }
+
+    @Test
+    void changingAnActiveOrPrecedingLabelKeepsTheActiveTabVisible() {
+        Rect bounds = new Rect(0, 0, 13, 1);
+        TabBar.Placement previous = new TabBar(simpleItems("a", "b", "c"), 1, TabBar.State.initial())
+            .layout(bounds);
+
+        for (List<TabBar.Item> changed : List.of(simpleItems("a", "b*", "c"), simpleItems("#a", "b", "c"))) {
+            TabBar.Placement next = new TabBar(changed, 1, previous.state())
+                .layoutKeepingActiveVisible(bounds, previous);
+
+            assertEquals(new TabBar.State(1), next.state());
+            assertEquals(
+                new TabBar.TabPressed(1, next.state()),
+                output(next.handle(press(0, 2), POINTER_CONTEXT), TabBar.TabPressed.class)
+            );
+        }
+    }
+
+    @Test
+    void simultaneousManualScrollAndLabelGrowthPreserveTheRequestedViewport() {
+        Rect bounds = new Rect(0, 0, 13, 1);
+        TabBar.Placement previous = new TabBar(simpleItems("a", "b", "c"), 0, TabBar.State.initial())
+            .layout(bounds);
+        TabBar.State manuallyScrolled = output(
+            previous.handle(scroll(0, 2, PointerEvent.Kind.SCROLL_DOWN), POINTER_CONTEXT),
+            TabBar.StateChanged.class
+        ).state();
+
+        TabBar.Placement next = new TabBar(simpleItems("a*", "b", "c"), 0, manuallyScrolled)
+            .layoutKeepingActiveVisible(bounds, previous);
+
+        assertEquals(manuallyScrolled, next.state());
+        assertEquals(
+            new TabBar.TabPressed(1, manuallyScrolled),
+            output(next.handle(press(0, 2), POINTER_CONTEXT), TabBar.TabPressed.class)
+        );
+
+        TabBar.Placement later = new TabBar(simpleItems("a**", "b", "c"), 0, next.state())
+            .layoutKeepingActiveVisible(bounds, next);
+        assertEquals(manuallyScrolled, later.state(), "later label updates must preserve an offscreen active tab");
+    }
+
+    @Test
+    void keepingVisibilityDoesNotRevealAnUnrelatedNewActiveTab() {
+        Rect bounds = new Rect(0, 0, 13, 1);
+        TabBar.Placement previous = new TabBar(simpleItems("a", "b", "c"), 0, TabBar.State.initial())
+            .layout(bounds);
+
+        TabBar.Placement next = new TabBar(simpleItems("a", "b", "c"), 2, previous.state())
+            .layoutKeepingActiveVisible(bounds, previous);
+
+        assertEquals(previous.state(), next.state(), "activation is an explicit reveal request");
+    }
+
+    @Test
+    void resizeCanRevealATabThatWasVisibleBeforeTheWidthShrank() {
+        List<TabBar.Item> items = simpleItems("a", "b", "c", "d");
+        TabBar.Placement wide = new TabBar(items, 2, TabBar.State.initial())
+            .layoutRevealingActive(new Rect(0, 0, 20, 1));
+        assertEquals(TabBar.State.initial(), wide.state());
+
+        TabBar.Placement narrow = new TabBar(items, 2, wide.state())
+            .layoutRevealingActive(new Rect(0, 0, 8, 1));
+        assertEquals(new TabBar.State(2), narrow.state());
+        assertEquals(
+            new TabBar.TabPressed(2, new TabBar.State(2)),
+            output(narrow.handle(press(0, 2), POINTER_CONTEXT), TabBar.TabPressed.class)
+        );
+
+        TabBar.Placement tiny = new TabBar(items, 3, narrow.state())
+            .layoutRevealingActive(new Rect(0, 0, 1, 1));
+        assertEquals(new TabBar.State(3), tiny.state());
+        assertEquals(
+            new TabBar.TabPressed(3, new TabBar.State(3)),
+            output(tiny.handle(press(0, 0), POINTER_CONTEXT), TabBar.TabPressed.class)
+        );
+    }
+
     private static List<TabBar.Item> simpleItems(String... labels) {
         List<TabBar.Item> items = new ArrayList<>(labels.length);
         for (String label : labels) {

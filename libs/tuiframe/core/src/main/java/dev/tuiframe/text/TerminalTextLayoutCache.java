@@ -1,5 +1,6 @@
 package dev.tuiframe.text;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -32,12 +33,30 @@ public final class TerminalTextLayoutCache {
         /** Generation changed for wholesale content replacement or source reset. */
         long contentEpoch();
 
+        /**
+         * Complete ordered line replacements after a revision, or {@code null}
+         * if unavailable. Coordinates follow each preceding replacement; line()
+         * always returns current text. Sources without history use full invalidation.
+         */
+        default List<LineChange> changesSince(long revision) {
+            return null;
+        }
+
         int lineCount();
 
         String line(int index);
     }
 
+    public record LineChange(int firstLine, int removedLineCount, int addedLineCount) {
+        public LineChange {
+            if (firstLine < 0 || removedLineCount < 0 || addedLineCount < 0) {
+                throw new IllegalArgumentException("Line change coordinates must be nonnegative");
+            }
+        }
+    }
+
     private final LineSource source;
+    private final boolean reserveLineEndCell;
     private final int maxMetricsLines;
     private final int maxMetricsWeight;
     private final int maxWrapLayouts;
@@ -46,19 +65,28 @@ public final class TerminalTextLayoutCache {
     private final Map<WrapLayoutKey, WrapLayout> wrapLayouts;
     private int metricsWeight;
     private int cachedVisualWidthTabWidth = -1;
-    private int cachedMaxVisualLineWidth;
-    private boolean maxVisualWidthDirty = true;
+    private LineLayoutIndex visualWidths;
     private boolean sourceObserved;
     private long observedCacheIdentity;
     private long observedRevision;
     private long observedContentEpoch;
+    private int observedLineCount;
 
     public TerminalTextLayoutCache(LineSource source) {
+        this(source, false);
+    }
+
+    /**
+     * When requested by an editor, include a trailing empty row if the final
+     * wrapped segment has no room for the insertion cursor after the text.
+     */
+    public TerminalTextLayoutCache(LineSource source, boolean reserveLineEndCell) {
         this(
             source,
             DEFAULT_MAX_METRICS_LINES,
             DEFAULT_MAX_METRICS_WEIGHT,
-            DEFAULT_MAX_WRAP_LAYOUTS
+            DEFAULT_MAX_WRAP_LAYOUTS,
+            reserveLineEndCell
         );
     }
 
@@ -72,7 +100,18 @@ public final class TerminalTextLayoutCache {
         int maxMetricsWeight,
         int maxWrapLayouts
     ) {
+        this(source, maxMetricsLines, maxMetricsWeight, maxWrapLayouts, false);
+    }
+
+    private TerminalTextLayoutCache(
+        LineSource source,
+        int maxMetricsLines,
+        int maxMetricsWeight,
+        int maxWrapLayouts,
+        boolean reserveLineEndCell
+    ) {
         this.source = Objects.requireNonNull(source, "source");
+        this.reserveLineEndCell = reserveLineEndCell;
         if (maxMetricsLines <= 0) {
             throw new IllegalArgumentException("maxMetricsLines must be positive");
         }
@@ -107,18 +146,15 @@ public final class TerminalTextLayoutCache {
     public int maxVisualLineWidth(int tabWidth) {
         synchronizeSource();
         int safeTabWidth = Math.max(1, tabWidth);
-        if (!maxVisualWidthDirty && cachedVisualWidthTabWidth == safeTabWidth) {
-            return cachedMaxVisualLineWidth;
+        if (visualWidths == null || cachedVisualWidthTabWidth != safeTabWidth) {
+            int[] widths = new int[safeLineCount()];
+            for (int line = 0; line < widths.length; line++) {
+                widths[line] = metricsSynchronized(line, safeTabWidth).visualWidth();
+            }
+            visualWidths = new LineLayoutIndex(widths, true);
+            cachedVisualWidthTabWidth = safeTabWidth;
         }
-        int max = 0;
-        int count = safeLineCount();
-        for (int line = 0; line < count; line++) {
-            max = Math.max(max, metricsSynchronized(line, safeTabWidth).visualWidth());
-        }
-        cachedVisualWidthTabWidth = safeTabWidth;
-        cachedMaxVisualLineWidth = max;
-        maxVisualWidthDirty = false;
-        return max;
+        return visualWidths.aggregate();
     }
 
     public List<Integer> wrapStarts(
@@ -142,16 +178,15 @@ public final class TerminalTextLayoutCache {
         if (count == 0) {
             return 0;
         }
-        int[] prefix = wrapPrefixSynchronized(width, wrapByWords, tabWidth, count);
+        LineLayoutIndex rows = wrapRowsSynchronized(width, wrapByWords, tabWidth, count);
         int limit = Math.max(0, Math.min(lineIndexExclusive, count));
-        return prefix[limit];
+        return rows.sumBefore(limit);
     }
 
     public int totalWrappedRows(int width, boolean wrapByWords, int tabWidth) {
         synchronizeSource();
         int count = safeLineCount();
-        int[] prefix = wrapPrefixSynchronized(width, wrapByWords, tabWidth, count);
-        return prefix[count];
+        return wrapRowsSynchronized(width, wrapByWords, tabWidth, count).aggregate();
     }
 
     public int lineIndexFromWrappedOffset(
@@ -165,24 +200,7 @@ public final class TerminalTextLayoutCache {
         if (count == 0) {
             return 0;
         }
-        int[] prefix = wrapPrefixSynchronized(width, wrapByWords, tabWidth, count);
-        int total = prefix[count];
-        int target = Math.max(0, Math.min(wrappedOffset, Math.max(0, total - 1)));
-        int low = 0;
-        int high = Math.max(0, count - 1);
-        while (low <= high) {
-            int middle = (low + high) >>> 1;
-            int start = prefix[middle];
-            int end = prefix[middle + 1];
-            if (target < start) {
-                high = middle - 1;
-            } else if (target >= end) {
-                low = middle + 1;
-            } else {
-                return middle;
-            }
-        }
-        return Math.max(0, count - 1);
+        return wrapRowsSynchronized(width, wrapByWords, tabWidth, count).lineAtOffset(wrappedOffset);
     }
 
     private TerminalText.Metrics metricsSynchronized(int line, int tabWidth) {
@@ -231,16 +249,12 @@ public final class TerminalTextLayoutCache {
         if (cached != null) {
             return cached;
         }
-        List<Integer> computed = TerminalLineLayout.wrapStarts(
-            metricsSynchronized(safeLine, key.tabWidth()),
-            key.width(),
-            key.wrapByWords()
-        );
+        List<Integer> computed = computeWrapStarts(safeLine, key);
         layout.wrapStarts.put(safeLine, computed);
         return computed;
     }
 
-    private int[] wrapPrefixSynchronized(
+    private LineLayoutIndex wrapRowsSynchronized(
         int width,
         boolean wrapByWords,
         int tabWidth,
@@ -252,24 +266,33 @@ public final class TerminalTextLayoutCache {
             Math.max(1, tabWidth)
         );
         WrapLayout layout = wrapLayout(key);
-        if (layout.prefix != null) {
-            return layout.prefix;
+        if (layout.rows != null) {
+            return layout.rows;
         }
-        int[] prefix = new int[lineCount + 1];
+        int[] rows = new int[lineCount];
         for (int line = 0; line < lineCount; line++) {
             List<Integer> starts = layout.wrapStarts.get(line);
             if (starts == null) {
-                starts = TerminalLineLayout.wrapStarts(
-                    metricsSynchronized(line, key.tabWidth()),
-                    key.width(),
-                    key.wrapByWords()
-                );
+                starts = computeWrapStarts(line, key);
                 layout.wrapStarts.put(line, starts);
             }
-            prefix[line + 1] = prefix[line] + starts.size();
+            rows[line] = starts.size();
         }
-        layout.prefix = prefix;
-        return prefix;
+        layout.rows = new LineLayoutIndex(rows, false);
+        return layout.rows;
+    }
+
+    private List<Integer> computeWrapStarts(int line, WrapLayoutKey key) {
+        TerminalText.Metrics metrics = metricsSynchronized(line, key.tabWidth());
+        List<Integer> starts = TerminalLineLayout.wrapStarts(metrics, key.width(), key.wrapByWords());
+        int lastStart = starts.get(starts.size() - 1);
+        if (reserveLineEndCell && key.width() > 0 && !metrics.text().isEmpty()
+            && metrics.visualWidth() - metrics.visualColumnAt(lastStart) >= key.width()) {
+            List<Integer> withLineEnd = new ArrayList<>(starts);
+            withLineEnd.add(metrics.text().length());
+            return List.copyOf(withLineEnd);
+        }
+        return starts;
     }
 
     private WrapLayout wrapLayout(WrapLayoutKey key) {
@@ -291,12 +314,91 @@ public final class TerminalTextLayoutCache {
             || observedContentEpoch != contentEpoch) {
             clearAllCaches();
         } else if (observedRevision != revision) {
-            clearLayoutCaches();
+            List<LineChange> changes = source.changesSince(observedRevision);
+            if (!updateChangedLines(changes)) {
+                clearLayoutCaches();
+            }
         }
         sourceObserved = true;
         observedCacheIdentity = cacheIdentity;
         observedContentEpoch = contentEpoch;
         observedRevision = revision;
+        observedLineCount = safeLineCount();
+    }
+
+    private boolean updateChangedLines(List<LineChange> changes) {
+        if (changes == null || changes.isEmpty()) {
+            return false;
+        }
+        long count = observedLineCount;
+        boolean changesLineCount = false;
+        for (LineChange change : changes) {
+            if (change == null || (long) change.firstLine() + change.removedLineCount() > count) {
+                return false;
+            }
+            count += (long) change.addedLineCount() - change.removedLineCount();
+            changesLineCount |= change.addedLineCount() != change.removedLineCount();
+        }
+        if (count != safeLineCount()) {
+            return false;
+        }
+        if (!changesLineCount) {
+            // Coordinates do not shift: read only the edited lines, even when
+            // several distant edits arrive before the next frame.
+            for (LineChange change : changes) {
+                updateLineRange(change);
+            }
+        } else {
+            // Coalesce splices in their final coordinates before reading text:
+            // the source no longer contains intermediate document versions.
+            int first = observedLineCount;
+            int end = 0;
+            int delta = 0;
+            for (LineChange change : changes) {
+                first = Math.min(first, change.firstLine());
+                int shift = change.addedLineCount() - change.removedLineCount();
+                end = Math.max(change.firstLine() + change.addedLineCount(), end + shift);
+                delta += shift;
+            }
+            updateLineRange(new LineChange(first, end - delta - first, end - first));
+        }
+        return true;
+    }
+
+    private void updateLineRange(LineChange change) {
+        int first = change.firstLine();
+        int added = change.addedLineCount();
+        boolean shifted = change.removedLineCount() != added;
+        if (shifted) {
+            metricsCache.clear();
+            metricsWeight = 0;
+        }
+        if (visualWidths != null) {
+            int[] widths = new int[added];
+            for (int offset = 0; offset < added; offset++) {
+                widths[offset] = metricsSynchronized(first + offset, cachedVisualWidthTabWidth).visualWidth();
+            }
+            visualWidths.replace(first, change.removedLineCount(), widths);
+        }
+        for (Map.Entry<WrapLayoutKey, WrapLayout> entry : wrapLayouts.entrySet()) {
+            WrapLayout layout = entry.getValue();
+            if (shifted) {
+                layout.wrapStarts.clear();
+            } else {
+                for (int line = first; line < first + added; line++) {
+                    layout.wrapStarts.remove(line);
+                }
+            }
+            if (layout.rows != null) {
+                int[] rows = new int[added];
+                for (int offset = 0; offset < added; offset++) {
+                    List<Integer> starts = computeWrapStarts(first + offset, entry.getKey());
+                    layout.wrapStarts.put(first + offset, starts);
+                    rows[offset] = starts.size();
+                }
+                layout.rows.replace(first, change.removedLineCount(), rows);
+            }
+        }
     }
 
     private void trimMetricsCache() {
@@ -317,7 +419,7 @@ public final class TerminalTextLayoutCache {
     }
 
     private void clearLayoutCaches() {
-        maxVisualWidthDirty = true;
+        visualWidths = null;
         wrapLayouts.clear();
     }
 
@@ -348,7 +450,7 @@ public final class TerminalTextLayoutCache {
     int wrapPrefixCacheSize() {
         int size = 0;
         for (WrapLayout layout : wrapLayouts.values()) {
-            if (layout.prefix != null) {
+            if (layout.rows != null) {
                 size++;
             }
         }
@@ -371,7 +473,7 @@ public final class TerminalTextLayoutCache {
 
     private static final class WrapLayout {
         private final Map<Integer, List<Integer>> wrapStarts = new HashMap<>();
-        private int[] prefix;
+        private LineLayoutIndex rows;
     }
 
     private record WrapLayoutKey(int width, boolean wrapByWords, int tabWidth) {

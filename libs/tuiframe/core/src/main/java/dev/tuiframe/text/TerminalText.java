@@ -469,6 +469,9 @@ public final class TerminalText {
         int maximum = 0;
         int regionalIndicators = 0;
         boolean emojiPresentation = false;
+        int previousCodePoint = -1;
+        int previousBase = -1;
+        boolean emojiJoinPending = false;
         boolean visibleBase = false;
         for (int i = start; i < end;) {
             int codePoint = text.codePointAt(i);
@@ -479,9 +482,16 @@ public final class TerminalText {
                 || codePoint == COMBINING_KEYCAP
                 || isEmojiModifier(codePoint)
                 || codePoint == ZERO_WIDTH_JOINER;
-            if (formatting) {
+            // Formatting marks also occur in ordinary text. They request a
+            // two-cell emoji only when attached to a compatible emoji base.
+            if (codePoint == VARIATION_SELECTOR_16 && Character.isEmoji(previousCodePoint)
+                || codePoint == COMBINING_KEYCAP && isKeycapBase(previousBase)
+                || isEmojiModifier(codePoint) && Character.isEmojiModifierBase(previousBase)
+                || emojiJoinPending && Character.isExtendedPictographic(codePoint)) {
                 emojiPresentation = true;
             }
+            emojiJoinPending = codePoint == ZERO_WIDTH_JOINER
+                && Character.isExtendedPictographic(previousBase);
             int type = Character.getType(codePoint);
             boolean combining = type == Character.NON_SPACING_MARK
                 || type == Character.COMBINING_SPACING_MARK
@@ -489,7 +499,9 @@ public final class TerminalText {
             if (!formatting && !combining) {
                 visibleBase = true;
                 maximum = Math.max(maximum, TerminalCellWidth.visibleBaseWidth(codePoint));
+                previousBase = codePoint;
             }
+            previousCodePoint = codePoint;
             i += Character.charCount(codePoint);
         }
         if (!visibleBase || maximum == 0) {
@@ -543,6 +555,10 @@ public final class TerminalText {
 
     private static boolean isEmojiModifier(int codePoint) {
         return codePoint >= 0x1F3FB && codePoint <= 0x1F3FF;
+    }
+
+    private static boolean isKeycapBase(int codePoint) {
+        return codePoint == '#' || codePoint == '*' || codePoint >= '0' && codePoint <= '9';
     }
 
     private static boolean isRegionalIndicator(int codePoint) {

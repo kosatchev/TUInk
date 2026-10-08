@@ -17,6 +17,7 @@ import dev.tuiframe.input.TextInput;
 import dev.tuiframe.input.TuiInputEvent;
 import dev.tuiframe.style.CellColor;
 import dev.tuiframe.style.CellStyle;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
@@ -40,6 +41,42 @@ class TextFieldInteractiveTest {
     );
 
     @Test
+    void bothSpaceRepresentationsInsertAtTheCaretAndReplaceTheLocalSelection() {
+        for (TuiInputEvent space : List.of(KeyStroke.of(KeyStroke.Key.SPACE), new TextInput(" "))) {
+            TextField field = new TextField();
+            field.set("A👩‍💻B");
+            field.moveLeft();
+
+            assertEquals(TextField.Action.VALUE_CHANGED, handle(field, space, FOCUSED).output().orElseThrow());
+            assertEquals("A👩‍💻 B", field.text());
+            assertEquals("A👩‍💻 ".length(), field.cursor());
+
+            field.selectAll();
+            assertEquals(TextField.Action.VALUE_CHANGED, handle(field, space, FOCUSED).output().orElseThrow());
+            assertEquals(" ", field.text());
+            assertEquals(1, field.cursor());
+            assertFalse(field.hasSelection());
+        }
+    }
+
+    @Test
+    void spaceRespectsFocusAndLeavesModifiedShortcutsForTheApplication() {
+        TextField field = new TextField();
+        field.set("keep");
+        field.selectAll();
+        for (FocusContext context : List.of(UNFOCUSED, DISABLED)) {
+            for (TuiInputEvent space : List.of(KeyStroke.of(KeyStroke.Key.SPACE), new TextInput(" "))) {
+                assertFalse(handle(field, space, context).consumed());
+            }
+        }
+        for (KeyStroke.Modifier modifier : KeyStroke.Modifier.values()) {
+            assertFalse(handle(field, KeyStroke.of(KeyStroke.Key.SPACE, modifier), FOCUSED).consumed());
+        }
+        assertEquals("keep", field.text());
+        assertEquals("keep", field.selectedText());
+    }
+
+    @Test
     void focusedRawTextAndExactKeysProduceTypedEffects() {
         TextField field = new TextField();
 
@@ -54,12 +91,14 @@ class TextFieldInteractiveTest {
         assertEquals("A😀e\u0301", field.text());
 
         int cursorBeforeModified = field.cursor();
-        assertFalse(handle(
+        assertTrue(handle(
             field,
             KeyStroke.of(KeyStroke.Key.ARROW_LEFT, KeyStroke.Modifier.SHIFT),
             FOCUSED
         ).consumed());
-        assertEquals(cursorBeforeModified, field.cursor());
+        assertEquals("A😀".length(), field.cursor());
+        assertEquals("e\u0301", field.selectedText());
+        assertTrue(field.cursor() < cursorBeforeModified);
         assertFalse(handle(field, KeyStroke.of(KeyStroke.Key.TAB), FOCUSED).consumed());
         assertFalse(handle(field, KeyStroke.of(KeyStroke.Key.ESCAPE), FOCUSED).consumed());
 
@@ -73,12 +112,12 @@ class TextFieldInteractiveTest {
     }
 
     @Test
-    void boundaryArrowsBubbleWhileEditingAndAbsoluteNavigationAreCaptured() {
+    void boundaryArrowsEditingAndAbsoluteNavigationStayInTheField() {
         TextField field = new TextField();
         field.set("e\u0301中");
         field.moveHome();
 
-        assertFalse(handle(field, KeyStroke.of(KeyStroke.Key.ARROW_LEFT), FOCUSED).consumed());
+        assertTrue(handle(field, KeyStroke.of(KeyStroke.Key.ARROW_LEFT), FOCUSED).consumed());
         assertTrue(handle(field, KeyStroke.of(KeyStroke.Key.BACKSPACE), FOCUSED).consumed());
         assertEquals("e\u0301中", field.text());
 
@@ -96,7 +135,7 @@ class TextFieldInteractiveTest {
         ).output().orElseThrow());
 
         assertTrue(handle(field, KeyStroke.of(KeyStroke.Key.END), FOCUSED).consumed());
-        assertFalse(handle(field, KeyStroke.of(KeyStroke.Key.ARROW_RIGHT), FOCUSED).consumed());
+        assertTrue(handle(field, KeyStroke.of(KeyStroke.Key.ARROW_RIGHT), FOCUSED).consumed());
         assertTrue(handle(field, KeyStroke.of(KeyStroke.Key.DELETE), FOCUSED).consumed());
         assertTrue(handle(field, KeyStroke.of(KeyStroke.Key.HOME), FOCUSED).consumed());
         assertEquals(0, field.cursor());

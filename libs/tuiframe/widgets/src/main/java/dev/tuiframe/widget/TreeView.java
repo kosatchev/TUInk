@@ -7,10 +7,11 @@ import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.geometry.Size;
 import dev.tuiframe.input.KeyStroke;
 import dev.tuiframe.input.PointerEvent;
+import dev.tuiframe.input.ResizeEvent;
 import dev.tuiframe.input.TuiInputEvent;
-import dev.tuiframe.scroll.HorizontalScrollbar;
 import dev.tuiframe.scroll.ScrollInteraction;
-import dev.tuiframe.scroll.VerticalScrollbar;
+import dev.tuiframe.scroll.ScrollLayout;
+import dev.tuiframe.scroll.Scrollbar;
 import dev.tuiframe.style.CellStyle;
 import java.util.ArrayList;
 import java.util.List;
@@ -37,9 +38,6 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
     private static final int SCROLL_STEP = 2;
     private static final String COLLAPSED_GLYPH = "▶";
     private static final String EXPANDED_GLYPH = "▼";
-    private static final String VERTICAL_TRACK_GLYPH = "│";
-    private static final String HORIZONTAL_TRACK_GLYPH = "─";
-    private static final String THUMB_GLYPH = "█";
     private static final Set<KeyStroke.Modifier> SHIFT_ONLY = Set.of(KeyStroke.Modifier.SHIFT);
 
     private final List<PreparedItem<V>> items;
@@ -84,7 +82,7 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
     public Placement<V> layout(Rect bounds, State state) {
         Rect requiredBounds = Objects.requireNonNull(bounds, "bounds");
         State requiredState = Objects.requireNonNull(state, "state");
-        Geometry geometry = computeGeometry(requiredBounds);
+        ScrollLayout geometry = ScrollLayout.calculate(requiredBounds, items.size(), horizontalExtent, trailingExtent);
         State normalized = normalize(
             requiredState,
             items.size(),
@@ -92,6 +90,12 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
             geometry.leadingBounds().width(),
             horizontalExtent
         );
+        if (normalized.drag() != null
+            && (normalized.drag().axis() == Scrollbar.Axis.VERTICAL
+                ? geometry.verticalScrollbarBounds() == null
+                : geometry.horizontalScrollbarBounds() == null)) {
+            normalized = new State(normalized.selectedIndex(), normalized.firstVisibleIndex(), normalized.horizontalOffset());
+        }
         int visibleCount = geometry.contentBounds().width() <= 0
             ? 0
             : Math.min(
@@ -105,70 +109,12 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
         }
         return new Placement<>(
             requiredBounds,
-            geometry.contentBounds(),
-            geometry.leadingBounds(),
-            geometry.trailingBounds(),
-            geometry.verticalScrollbarBounds(),
-            geometry.horizontalScrollbarBounds(),
+            geometry,
             items,
             List.copyOf(visible),
             normalized,
             horizontalExtent
         );
-    }
-
-    private Geometry computeGeometry(Rect bounds) {
-        // A one-cell track is all thumb and cannot map pointer movement. When
-        // both axes compete in a tiny rectangle, pre-existing vertical
-        // overflow wins; otherwise a useful horizontal track may reduce the
-        // rows and add a vertical track only when both remain at least two
-        // cells long.
-        boolean showVertical = bounds.width() >= 2
-            && bounds.height() >= 2
-            && items.size() > bounds.height();
-        int widthWithVertical = Math.max(0, bounds.width() - (showVertical ? 1 : 0));
-        int leadingWithVertical = leadingWidth(widthWithVertical);
-        boolean showHorizontal = bounds.height() >= 2
-            && (!showVertical || bounds.height() >= 3)
-            && leadingWithVertical >= 2
-            && horizontalExtent > leadingWithVertical;
-        if (!showVertical && showHorizontal) {
-            int rowsWithHorizontal = bounds.height() - 1;
-            boolean verticalInducedByHorizontal = bounds.width() >= 2
-                && rowsWithHorizontal >= 2
-                && items.size() > rowsWithHorizontal;
-            if (verticalInducedByHorizontal && leadingWidth(bounds.width() - 1) >= 2) {
-                showVertical = true;
-            }
-        }
-
-        int textRows = Math.max(0, bounds.height() - (showHorizontal ? 1 : 0));
-        int textWidth = Math.max(0, bounds.width() - (showVertical ? 1 : 0));
-        int detailWidth = trailingWidth(textWidth);
-        int leadingWidth = Math.max(0, textWidth - detailWidth);
-        Rect content = new Rect(bounds.x(), bounds.y(), textWidth, textRows);
-        Rect leading = new Rect(bounds.x(), bounds.y(), leadingWidth, textRows);
-        Rect trailing = detailWidth == 0
-            ? null
-            : new Rect(Math.addExact(bounds.x(), leadingWidth), bounds.y(), detailWidth, textRows);
-        Rect vertical = showVertical
-            ? new Rect(bounds.rightExclusive() - 1, bounds.y(), 1, textRows)
-            : null;
-        Rect horizontal = showHorizontal
-            ? new Rect(bounds.x(), Math.addExact(bounds.y(), textRows), leadingWidth, 1)
-            : null;
-        return new Geometry(content, leading, trailing, vertical, horizontal);
-    }
-
-    private int leadingWidth(int textWidth) {
-        return Math.max(0, textWidth - trailingWidth(textWidth));
-    }
-
-    private int trailingWidth(int textWidth) {
-        if (trailingExtent == 0 || textWidth <= 1) {
-            return 0;
-        }
-        return Math.min(trailingExtent, textWidth - 1);
     }
 
     private static int leadingWidth(Item<?> item) {
@@ -205,7 +151,7 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
     }
 
     /** Application-owned selection and vertical/horizontal viewport. */
-    public record State(int selectedIndex, int firstVisibleIndex, int horizontalOffset) {
+    public record State(int selectedIndex, int firstVisibleIndex, int horizontalOffset, Scrollbar.Drag drag) {
         public State {
             if (selectedIndex < -1) {
                 throw new IllegalArgumentException("selectedIndex must be -1 or greater");
@@ -216,6 +162,10 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
             if (horizontalOffset < 0) {
                 throw new IllegalArgumentException("horizontalOffset must not be negative");
             }
+        }
+
+        public State(int selectedIndex, int firstVisibleIndex, int horizontalOffset) {
+            this(selectedIndex, firstVisibleIndex, horizontalOffset, null);
         }
 
         public static State initial() {
@@ -272,6 +222,7 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
     public static final class Placement<V>
         implements PlacedInteractiveWidget<Action<V>>, PlacedCursorSource {
         private final Rect bounds;
+        private final ScrollLayout geometry;
         private final Rect contentBounds;
         private final Rect leadingBounds;
         private final Rect trailingBounds;
@@ -284,22 +235,19 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
 
         private Placement(
             Rect bounds,
-            Rect contentBounds,
-            Rect leadingBounds,
-            Rect trailingBounds,
-            Rect verticalScrollbarBounds,
-            Rect horizontalScrollbarBounds,
+            ScrollLayout geometry,
             List<PreparedItem<V>> items,
             List<VisibleItem<V>> visibleItems,
             State state,
             int horizontalExtent
         ) {
             this.bounds = bounds;
-            this.contentBounds = contentBounds;
-            this.leadingBounds = leadingBounds;
-            this.trailingBounds = trailingBounds;
-            this.verticalScrollbarBounds = verticalScrollbarBounds;
-            this.horizontalScrollbarBounds = horizontalScrollbarBounds;
+            this.geometry = geometry;
+            this.contentBounds = geometry.contentBounds();
+            this.leadingBounds = geometry.leadingBounds();
+            this.trailingBounds = geometry.trailingBounds();
+            this.verticalScrollbarBounds = geometry.verticalScrollbarBounds();
+            this.horizontalScrollbarBounds = geometry.horizontalScrollbarBounds();
             this.items = items;
             this.visibleItems = visibleItems;
             this.state = state;
@@ -331,9 +279,9 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
         }
 
         /**
-         * Exact track geometry is exposed so an application may own pointer
-         * capture and map drags that leave the track. The regular handler also
-         * supports bounded, stateless drag events while they remain on-track.
+         * Exact track geometry is exposed for consumer-owned presentation.
+         * The regular handler retains pointer capture in {@link State#drag()}
+         * and handles drags outside the widget until release.
          */
         public Optional<Rect> verticalScrollbarBounds() {
             return Optional.ofNullable(verticalScrollbarBounds);
@@ -341,6 +289,16 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
 
         public Optional<Rect> horizontalScrollbarBounds() {
             return Optional.ofNullable(horizontalScrollbarBounds);
+        }
+
+        public Optional<Scrollbar> verticalScrollbar() {
+            return Optional.ofNullable(verticalScrollbarBounds)
+                .map(track -> Scrollbar.vertical(track, items.size(), state.firstVisibleIndex()));
+        }
+
+        public Optional<Scrollbar> horizontalScrollbar() {
+            return Optional.ofNullable(horizontalScrollbarBounds)
+                .map(track -> Scrollbar.horizontal(track, horizontalExtent, state.horizontalOffset()));
         }
 
         public int itemCount() {
@@ -419,7 +377,7 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
                 }
                 canvas.fill(bounds, normalStyle);
                 paintRows(canvas, normalStyle, selectedStyle);
-                paintScrollbars(canvas, theme, normalStyle, selectedStyle);
+                paintScrollbars(canvas, theme, normalStyle);
             } finally {
                 canvas.restore(mark);
             }
@@ -497,41 +455,21 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
         private void paintScrollbars(
             Canvas canvas,
             Theme theme,
-            CellStyle normalStyle,
-            CellStyle selectedStyle
+            CellStyle normalStyle
         ) {
-            CellStyle trackStyle = theme.resolveStyle(WidgetThemeKeys.SCROLLBAR_TRACK, normalStyle);
-            CellStyle thumbStyle = theme.resolveStyle(WidgetThemeKeys.SCROLLBAR_THUMB, selectedStyle);
-            if (verticalScrollbarBounds != null) {
-                VerticalScrollbar.draw(
-                    canvas,
-                    verticalScrollbarBounds,
-                    items.size(),
-                    state.firstVisibleIndex(),
-                    VERTICAL_TRACK_GLYPH,
-                    trackStyle,
-                    THUMB_GLYPH,
-                    thumbStyle
-                );
-            }
-            if (horizontalScrollbarBounds != null && horizontalScrollbarBounds.width() > 0) {
-                HorizontalScrollbar.draw(
-                    canvas,
-                    horizontalScrollbarBounds,
-                    horizontalExtent,
-                    state.horizontalOffset(),
-                    HORIZONTAL_TRACK_GLYPH,
-                    trackStyle,
-                    THUMB_GLYPH,
-                    thumbStyle
-                );
-            }
+            geometry.paintCorner(canvas, theme.scrollStyle(normalStyle));
+            verticalScrollbar().ifPresent(bar -> bar.draw(canvas, theme.scrollStyle(normalStyle)));
+            horizontalScrollbar().ifPresent(bar -> bar.draw(canvas, theme.scrollStyle(normalStyle)));
         }
 
         @Override
         public InteractionResult<Action<V>> handle(TuiInputEvent event, FocusContext context) {
             Objects.requireNonNull(event, "event");
             Objects.requireNonNull(context, "context");
+            if (state.drag() != null && (event instanceof ResizeEvent
+                || event instanceof PointerEvent pointer && pointer.kind() == PointerEvent.Kind.RELEASE)) {
+                return stateChange(new State(state.selectedIndex(), state.firstVisibleIndex(), state.horizontalOffset()));
+            }
             if (!context.enabled() || bounds.isEmpty()) {
                 return InteractionResult.ignored();
             }
@@ -604,6 +542,21 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
         }
 
         private InteractionResult<Action<V>> handlePointer(PointerEvent pointer, FocusContext context) {
+            if (state.drag() != null) {
+                if (pointer.kind() == PointerEvent.Kind.DRAG && pointer.button() == PointerEvent.Button.LEFT) {
+                    Point point = capturedPoint(pointer, context);
+                    Optional<Scrollbar> bar = state.drag().axis() == Scrollbar.Axis.VERTICAL
+                        ? verticalScrollbar()
+                        : horizontalScrollbar();
+                    if (bar.isPresent()) {
+                        int offset = bar.orElseThrow().drag(point, state.drag());
+                        State next = state.drag().axis() == Scrollbar.Axis.VERTICAL
+                            ? new State(state.selectedIndex(), offset, state.horizontalOffset(), state.drag())
+                            : new State(state.selectedIndex(), state.firstVisibleIndex(), offset, state.drag());
+                        return withSelf(new StateChanged<>(next));
+                    }
+                }
+            }
             if (!pointer.modifiers().isEmpty()) {
                 return InteractionResult.ignored();
             }
@@ -620,57 +573,31 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
                 case PRESS -> pointer.button() == PointerEvent.Button.LEFT
                     ? handlePress(point)
                     : InteractionResult.ignored();
-                case DRAG -> pointer.button() == PointerEvent.Button.LEFT
-                    ? handleScrollbarDrag(point)
-                    : InteractionResult.ignored();
                 default -> InteractionResult.ignored();
             };
         }
 
+        private static Point capturedPoint(PointerEvent pointer, FocusContext context) {
+            return new Point(
+                signedInt((long) pointer.column() - context.space().terminalOrigin().x()),
+                signedInt((long) pointer.row() - context.space().terminalOrigin().y())
+            );
+        }
+
         private InteractionResult<Action<V>> handlePress(Point point) {
-            if (verticalScrollbarBounds != null && verticalScrollbarBounds.contains(point)) {
-                ScrollInteraction.Hit hit = VerticalScrollbar.hit(
-                    point.y(),
-                    point.x(),
-                    verticalScrollbarBounds.y(),
-                    verticalScrollbarBounds.x(),
-                    verticalScrollbarBounds.height(),
-                    items.size(),
-                    state.firstVisibleIndex()
-                );
-                if (hit == ScrollInteraction.Hit.TRACK) {
-                    int first = VerticalScrollbar.pageScrollFromTrackClick(
-                        state.firstVisibleIndex(),
-                        point.y(),
-                        verticalScrollbarBounds.y(),
-                        verticalScrollbarBounds.height(),
-                        items.size()
-                    );
-                    return withSelf(new StateChanged<>(withFirstVisible(first)));
-                }
-                return InteractionResult.focus(FocusRequest.SELF);
+            Optional<Scrollbar.Press> vertical = verticalScrollbar().flatMap(bar -> bar.press(point));
+            if (vertical.isPresent()) {
+                Scrollbar.Press press = vertical.orElseThrow();
+                return withSelf(new StateChanged<>(new State(
+                    state.selectedIndex(), press.offset(), state.horizontalOffset(), press.drag()
+                )));
             }
-            if (horizontalScrollbarBounds != null && horizontalScrollbarBounds.contains(point)) {
-                ScrollInteraction.Hit hit = HorizontalScrollbar.hit(
-                    point.y(),
-                    point.x(),
-                    horizontalScrollbarBounds.y(),
-                    horizontalScrollbarBounds.x(),
-                    horizontalScrollbarBounds.width(),
-                    horizontalExtent,
-                    state.horizontalOffset()
-                );
-                if (hit == ScrollInteraction.Hit.TRACK) {
-                    int offset = HorizontalScrollbar.pageScrollFromTrackClick(
-                        state.horizontalOffset(),
-                        point.x(),
-                        horizontalScrollbarBounds.x(),
-                        horizontalScrollbarBounds.width(),
-                        horizontalExtent
-                    );
-                    return withSelf(new StateChanged<>(withHorizontalOffset(offset)));
-                }
-                return InteractionResult.focus(FocusRequest.SELF);
+            Optional<Scrollbar.Press> horizontal = horizontalScrollbar().flatMap(bar -> bar.press(point));
+            if (horizontal.isPresent()) {
+                Scrollbar.Press press = horizontal.orElseThrow();
+                return withSelf(new StateChanged<>(new State(
+                    state.selectedIndex(), state.firstVisibleIndex(), press.offset(), press.drag()
+                )));
             }
             if (!contentBounds.contains(point)) {
                 return InteractionResult.focus(FocusRequest.SELF);
@@ -688,28 +615,6 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
             return withSelf(new ItemPressed<>(item.item().value(), itemIndex, pressedState));
         }
 
-        private InteractionResult<Action<V>> handleScrollbarDrag(Point point) {
-            if (verticalScrollbarBounds != null && verticalScrollbarBounds.contains(point)) {
-                int first = VerticalScrollbar.scrollFromPointer(
-                    point.y(),
-                    verticalScrollbarBounds.y(),
-                    verticalScrollbarBounds.height(),
-                    items.size()
-                );
-                return withSelf(new StateChanged<>(withFirstVisible(first)));
-            }
-            if (horizontalScrollbarBounds != null && horizontalScrollbarBounds.contains(point)) {
-                int offset = HorizontalScrollbar.scrollFromPointer(
-                    point.x(),
-                    horizontalScrollbarBounds.x(),
-                    horizontalScrollbarBounds.width(),
-                    horizontalExtent
-                );
-                return withSelf(new StateChanged<>(withHorizontalOffset(offset)));
-            }
-            return InteractionResult.ignored();
-        }
-
         private boolean disclosureHit(Item<V> item, Point point) {
             if (!hasDisclosure(item.kind()) || !leadingBounds.contains(point)) {
                 return false;
@@ -722,14 +627,12 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
 
         private InteractionResult<Action<V>> verticalBy(int delta) {
             int rows = Math.max(1, contentBounds.height());
-            long candidate = (long) state.firstVisibleIndex() + delta;
-            int first = (int) Math.max(0L, Math.min((long) maxScroll(items.size(), rows), candidate));
+            int first = ScrollInteraction.scrollBy(state.firstVisibleIndex(), delta, rows, items.size());
             return stateChange(withFirstVisible(first));
         }
 
         private InteractionResult<Action<V>> horizontalBy(int delta) {
-            long candidate = (long) state.horizontalOffset() + delta;
-            int offset = (int) Math.max(0L, Math.min((long) maxHorizontalOffset(), candidate));
+            int offset = ScrollInteraction.scrollBy(state.horizontalOffset(), delta, leadingBounds.width(), horizontalExtent);
             return stateChange(withHorizontalOffset(offset));
         }
 
@@ -833,7 +736,7 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
         int horizontal = visibleColumns <= 0
             ? 0
             : clamp(state.horizontalOffset(), 0, Math.max(0, horizontalExtent - visibleColumns));
-        return new State(selected, first, horizontal);
+        return new State(selected, first, horizontal, state.drag());
     }
 
     private static int maxScroll(int itemCount, int visibleRows) {
@@ -846,6 +749,10 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
 
     private static int saturatedInt(long value) {
         return (int) Math.max(0L, Math.min(Integer.MAX_VALUE, value));
+    }
+
+    private static int signedInt(long value) {
+        return (int) Math.max(Integer.MIN_VALUE, Math.min(Integer.MAX_VALUE, value));
     }
 
     private static boolean hasDisclosure(Kind kind) {
@@ -868,12 +775,4 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
     private record VisibleItem<V>(int itemIndex, PreparedItem<V> item) {
     }
 
-    private record Geometry(
-        Rect contentBounds,
-        Rect leadingBounds,
-        Rect trailingBounds,
-        Rect verticalScrollbarBounds,
-        Rect horizontalScrollbarBounds
-    ) {
-    }
 }

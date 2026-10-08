@@ -8,8 +8,13 @@ import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.geometry.Size;
 import dev.tuiframe.input.KeyStroke;
 import dev.tuiframe.input.PointerEvent;
+import dev.tuiframe.input.ResizeEvent;
 import dev.tuiframe.input.TextInput;
 import dev.tuiframe.input.TuiInputEvent;
+import dev.tuiframe.scroll.ScrollInteraction;
+import dev.tuiframe.scroll.ScrollLayout;
+import dev.tuiframe.scroll.ScrollStyle;
+import dev.tuiframe.scroll.Scrollbar;
 import dev.tuiframe.style.CellStyle;
 import dev.tuiframe.text.TerminalText;
 import java.text.Normalizer;
@@ -21,8 +26,9 @@ import java.util.Optional;
 /**
  * Immediate-mode descriptor-driven menu bar with one application-owned popup state.
  *
- * <p>Labels are presentation text and are painted verbatim. The widget inserts one
- * blank cell between top-level labels. Command registries, shortcuts, checked-marker
+ * <p>Labels are presentation text. The widget inserts one blank cell between
+ * top-level labels and reveals the active heading when they do not all fit.
+ * Command registries, shortcuts, checked-marker
  * formatting, application models, and modal capture policy remain consumer-owned.
  * Layout returns an immutable exact-frame snapshot used by paint, hit testing,
  * input, and optional cursor geometry.</p>
@@ -48,27 +54,71 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
         return Objects.requireNonNull(available, "available");
     }
 
+    /** Width of all complete headings and the gaps between them, before clipping. */
+    public int preferredBarWidth() {
+        long width = Math.max(0, menus.size() - 1) * (long) TOP_GAP;
+        for (Menu<C> menu : menus) {
+            width += TerminalText.metrics(menu.label(), TAB_WIDTH).visualWidth();
+        }
+        return (int) Math.min(Integer.MAX_VALUE, width);
+    }
+
     @Override
     public Placement<C> layout(Rect bounds) {
+        return layout(bounds, 0);
+    }
+
+    /**
+     * Reserves the trailing cells of the heading row for consumer-owned chrome.
+     * Popups keep the full layer bounds, including the columns below that chrome.
+     */
+    public Placement<C> layout(Rect bounds, int reservedTrailingColumns) {
         Rect required = Objects.requireNonNull(bounds, "bounds");
+        if (reservedTrailingColumns < 0) {
+            throw new IllegalArgumentException("reservedTrailingColumns must not be negative");
+        }
+        Rect barBounds = new Rect(required.x(), required.y(),
+            required.width() - Math.min(required.width(), reservedTrailingColumns), required.height());
         State base = normalizeMenu(state, menus);
-        List<PreparedTop> top = prepareTop(required);
+        List<PreparedTop> top = prepareTop(barBounds, base);
         PreparedTop activeTop = base.isOpen()
             ? findTop(top, base.openMenuIndex())
             : null;
-        int rowCapacity = popupRowCapacity(required, activeTop);
+        int rowCapacity = popupRowCapacity(required, base.isOpen());
         State normalized = normalizeViewport(base, menus, rowCapacity);
+        if (base.selectedEntryIndex() != state.selectedEntryIndex()) {
+            normalized = revealSelection(normalized, menus, rowCapacity);
+        }
         Popup<C> popup = preparePopup(required, activeTop, normalized, rowCapacity);
+        if (normalized.drag() != null && (popup == null || popup.scrollbar() == null)) {
+            normalized = new State(normalized.openMenuIndex(), normalized.selectedEntryIndex(),
+                normalized.firstVisibleEntryIndex());
+        }
         return new Placement<>(required, menus, normalized, top, popup, rowCapacity);
     }
 
-    private List<PreparedTop> prepareTop(Rect bounds) {
+    private List<PreparedTop> prepareTop(Rect bounds, State normalized) {
         if (bounds.width() <= 0 || bounds.height() <= 0 || menus.isEmpty()) {
             return List.of();
         }
+        int first = 0;
+        if (normalized.isOpen()) {
+            int active = normalized.openMenuIndex();
+            long requiredWidth = boundedVisualWidth(menus.get(active).label(), bounds.width());
+            first = active;
+            while (first > 0) {
+                String previous = menus.get(first - 1).label();
+                PreparedLabel label = prepareCompleteLabel(previous, -1, bounds.width());
+                if (label == null || requiredWidth + TOP_GAP + label.width() > bounds.width()) {
+                    break;
+                }
+                requiredWidth += TOP_GAP + label.width();
+                first--;
+            }
+        }
         List<PreparedTop> prepared = new ArrayList<>();
         int x = bounds.x();
-        for (int index = 0; index < menus.size(); index++) {
+        for (int index = first; index < menus.size(); index++) {
             int remaining = bounds.rightExclusive() - x;
             if (remaining <= 0) {
                 break;
@@ -79,6 +129,12 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
                 menu.mnemonicGraphemeIndex(),
                 remaining
             );
+            if (label == null && normalized.isOpen() && index == normalized.openMenuIndex()) {
+                label = prepareVisibleLabel(menu.label(), menu.mnemonicGraphemeIndex(), remaining);
+                if (label.width() == 0) {
+                    label = prepareLabel("\u2026", -1);
+                }
+            }
             if (label == null || label.width() <= 0) {
                 break;
             }
@@ -99,7 +155,7 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
         State normalized,
         int rowCapacity
     ) {
-        if (!normalized.isOpen() || activeTop == null || rowCapacity <= 0
+        if (!normalized.isOpen() || rowCapacity <= 0
             || bounds.width() < MIN_POPUP_WIDTH) {
             return null;
         }
@@ -107,7 +163,7 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
         if (entries.isEmpty()) {
             return null;
         }
-        int width = popupWidth(entries, bounds.width());
+        int width = popupWidth(entries, bounds.width(), entries.size() > rowCapacity && rowCapacity >= 2);
         if (width < MIN_POPUP_WIDTH) {
             return null;
         }
@@ -116,11 +172,13 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
         if (count <= 0) {
             return null;
         }
-        int x = Math.min(activeTop.bounds().x(), bounds.rightExclusive() - width);
+        int anchorX = activeTop == null ? bounds.x() : activeTop.bounds().x();
+        int x = Math.min(anchorX, bounds.rightExclusive() - width);
         x = Math.max(bounds.x(), x);
         int y = bounds.y() + 1;
         Rect popupBounds = new Rect(x, y, width, count + 2);
-        int contentWidth = width - POPUP_CHROME_WIDTH;
+        ScrollLayout geometry = ScrollLayout.vertical(new Rect(x + 1, y + 1, width - 2, count), entries.size());
+        int contentWidth = Math.max(0, geometry.contentBounds().width() - 2);
         List<PreparedRow<C>> rows = new ArrayList<>(count);
         for (int offset = 0; offset < count; offset++) {
             int entryIndex = first + offset;
@@ -137,18 +195,21 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
                 rows.add(new PreparedRow<>(entryIndex, rowY, entry, null));
             }
         }
-        return new Popup<>(popupBounds, List.copyOf(rows));
+        Scrollbar scrollbar = geometry.verticalScrollbarBounds() == null ? null
+            : Scrollbar.vertical(geometry.verticalScrollbarBounds(), entries.size(), first);
+        return new Popup<>(popupBounds, geometry.contentBounds(), List.copyOf(rows), scrollbar);
     }
 
-    private static int popupWidth(List<? extends Entry<?>> entries, int availableWidth) {
+    private static int popupWidth(List<? extends Entry<?>> entries, int availableWidth, boolean scrolling) {
         int maximum = Math.min(availableWidth, MIN_POPUP_WIDTH);
-        int labelLimit = Math.max(0, availableWidth - POPUP_CHROME_WIDTH);
+        int chrome = POPUP_CHROME_WIDTH + (scrolling ? 1 : 0);
+        int labelLimit = Math.max(0, availableWidth - chrome);
         for (Entry<?> entry : entries) {
             if (!(entry instanceof Item<?> item)) {
                 continue;
             }
             int labelWidth = boundedVisualWidth(item.label(), labelLimit);
-            maximum = Math.max(maximum, Math.min(availableWidth, labelWidth + POPUP_CHROME_WIDTH));
+            maximum = Math.max(maximum, Math.min(availableWidth, labelWidth + chrome));
             if (maximum == availableWidth) {
                 break;
             }
@@ -156,8 +217,8 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
         return maximum;
     }
 
-    private static int popupRowCapacity(Rect bounds, PreparedTop activeTop) {
-        if (activeTop == null || bounds.height() < 4 || bounds.width() < MIN_POPUP_WIDTH) {
+    private static int popupRowCapacity(Rect bounds, boolean open) {
+        if (!open || bounds.height() < 4 || bounds.width() < MIN_POPUP_WIDTH) {
             return 0;
         }
         return bounds.height() - 3;
@@ -172,7 +233,7 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
         if (!selectable(entries, selected)) {
             selected = firstSelectable(entries);
         }
-        return new State(requested.openMenuIndex(), selected, requested.firstVisibleEntryIndex());
+        return new State(requested.openMenuIndex(), selected, requested.firstVisibleEntryIndex(), requested.drag());
     }
 
     private static State normalizeViewport(
@@ -188,21 +249,28 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
         if (capacity > 0) {
             int maxFirst = Math.max(0, count - capacity);
             first = Math.min(first, maxFirst);
-            int selected = requested.selectedEntryIndex();
-            if (selected >= 0 && selected < first) {
+        }
+        return new State(requested.openMenuIndex(), requested.selectedEntryIndex(), first, requested.drag());
+    }
+
+    private static State revealSelection(State requested, List<? extends Menu<?>> menus, int capacity) {
+        State normalized = normalizeViewport(requested, menus, capacity);
+        int first = normalized.firstVisibleEntryIndex();
+        int selected = normalized.selectedEntryIndex();
+        if (capacity > 0 && selected >= 0) {
+            if (selected < first) {
                 first = selected;
-            } else if (selected >= 0 && selected >= first + capacity) {
+            } else if (selected >= first + capacity) {
                 first = selected - capacity + 1;
             }
-            first = Math.max(0, Math.min(first, maxFirst));
         }
-        return new State(requested.openMenuIndex(), requested.selectedEntryIndex(), first);
+        return new State(normalized.openMenuIndex(), selected, first);
     }
 
     private static State openState(int menuIndex, List<? extends Menu<?>> menus, int capacity) {
         List<? extends Entry<?>> entries = menus.get(menuIndex).entries();
         State state = new State(menuIndex, firstSelectable(entries), 0);
-        return normalizeViewport(state, menus, capacity);
+        return revealSelection(state, menus, capacity);
     }
 
     private static boolean selectable(List<? extends Entry<?>> entries, int index) {
@@ -350,8 +418,13 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
     public record Separator<C>() implements Entry<C> {
     }
 
-    /** Application-owned open menu, selection, and vertical popup viewport. */
-    public record State(int openMenuIndex, int selectedEntryIndex, int firstVisibleEntryIndex) {
+    /** Application-owned open menu, selection, vertical viewport, and scrollbar capture. */
+    public record State(
+        int openMenuIndex,
+        int selectedEntryIndex,
+        int firstVisibleEntryIndex,
+        Scrollbar.Drag drag
+    ) {
         public State {
             if (openMenuIndex < -1) {
                 throw new IllegalArgumentException("openMenuIndex must be -1 or greater");
@@ -362,9 +435,16 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
             if (firstVisibleEntryIndex < 0) {
                 throw new IllegalArgumentException("firstVisibleEntryIndex must not be negative");
             }
-            if (openMenuIndex == -1 && (selectedEntryIndex != -1 || firstVisibleEntryIndex != 0)) {
+            if (drag != null && drag.axis() != Scrollbar.Axis.VERTICAL) {
+                throw new IllegalArgumentException("a menu can only capture its vertical scrollbar");
+            }
+            if (openMenuIndex == -1 && (selectedEntryIndex != -1 || firstVisibleEntryIndex != 0 || drag != null)) {
                 throw new IllegalArgumentException("closed state must not retain selection or viewport");
             }
+        }
+
+        public State(int openMenuIndex, int selectedEntryIndex, int firstVisibleEntryIndex) {
+            this(openMenuIndex, selectedEntryIndex, firstVisibleEntryIndex, null);
         }
 
         public static State closed() {
@@ -380,6 +460,10 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
 
         public boolean isOpen() {
             return openMenuIndex >= 0;
+        }
+
+        public State cancelPointerInteraction() {
+            return drag == null ? this : new State(openMenuIndex, selectedEntryIndex, firstVisibleEntryIndex);
         }
     }
 
@@ -447,6 +531,10 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
             return popup == null ? Optional.empty() : Optional.of(popup.bounds());
         }
 
+        public Optional<Scrollbar> scrollbar() {
+            return popup == null ? Optional.empty() : Optional.ofNullable(popup.scrollbar());
+        }
+
         @Override
         public boolean hit(int row, int column) {
             if (state.isOpen()) {
@@ -486,6 +574,10 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
             try {
                 if (!canvas.clip(bounds)) {
                     return;
+                }
+                if (!top.isEmpty()) {
+                    int right = top.getLast().bounds().rightExclusive();
+                    canvas.fill(bounds.x(), bounds.y(), right - bounds.x(), 1, ordinaryTop);
                 }
                 for (PreparedTop item : top) {
                     CellStyle style = !widgetState.enabled()
@@ -538,7 +630,7 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
                 canvas.put(box.x(), row.y(), vertical);
                 canvas.put(box.rightExclusive() - 1, row.y(), vertical);
                 if (row.entry() instanceof Separator<?>) {
-                    canvas.fillCell(box.x() + 1, row.y(), box.width() - 2, 1, horizontal);
+                    canvas.fillCell(box.x() + 1, row.y(), popup.contentBounds().width(), 1, horizontal);
                     continue;
                 }
                 Item<C> item = row.item();
@@ -552,7 +644,7 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
                     : row.entryIndex() == state.selectedEntryIndex()
                         ? selectedMnemonic
                         : itemMnemonic;
-                canvas.fill(box.x() + 1, row.y(), box.width() - 2, 1, rowStyle);
+                canvas.fill(box.x() + 1, row.y(), popup.contentBounds().width(), 1, rowStyle);
                 paintLabel(
                     canvas,
                     box.x() + 2,
@@ -566,6 +658,7 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
             canvas.put(box.x(), bottom, "└", popupStyle);
             canvas.fillCell(box.x() + 1, bottom, box.width() - 2, 1, horizontal);
             canvas.put(box.rightExclusive() - 1, bottom, "┘", popupStyle);
+            scrollbar().ifPresent(bar -> bar.draw(canvas, ScrollStyle.fromParent(itemStyle, popupStyle)));
         }
 
         private static void paintLabel(
@@ -594,6 +687,10 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
         public InteractionResult<Action<C>> handle(TuiInputEvent event, FocusContext context) {
             Objects.requireNonNull(event, "event");
             Objects.requireNonNull(context, "context");
+            if (state.drag() != null && (event instanceof ResizeEvent
+                || event instanceof PointerEvent pointer && pointer.kind() == PointerEvent.Kind.RELEASE)) {
+                return InteractionResult.output(new StateChanged<>(state.cancelPointerInteraction()));
+            }
             if (!context.enabled() || bounds.isEmpty() || menus.isEmpty()) {
                 return InteractionResult.ignored();
             }
@@ -618,16 +715,36 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
             PointerEvent pointer,
             FocusContext context
         ) {
+            if (Scrollbar.captures(pointer, state.drag())) {
+                Point point = new Point(
+                    signedInt((long) pointer.column() - context.space().terminalOrigin().x()),
+                    signedInt((long) pointer.row() - context.space().terminalOrigin().y())
+                );
+                int first = scrollbar().orElseThrow().drag(point, state.drag());
+                return InteractionResult.output(new StateChanged<>(new State(
+                    state.openMenuIndex(), state.selectedEntryIndex(), first, state.drag()
+                )));
+            }
             Optional<Point> local = context.localPoint(pointer).filter(bounds::contains);
             if (local.isEmpty()) {
                 return InteractionResult.ignored();
+            }
+            Point point = local.orElseThrow();
+            if (pointer.modifiers().isEmpty() && popup != null && popup.bounds().contains(point)
+                && (pointer.kind() == PointerEvent.Kind.SCROLL_UP
+                    || pointer.kind() == PointerEvent.Kind.SCROLL_DOWN)) {
+                int delta = pointer.kind() == PointerEvent.Kind.SCROLL_UP ? -3 : 3;
+                int first = ScrollInteraction.scrollBy(state.firstVisibleEntryIndex(), delta, rowCapacity,
+                    menus.get(state.openMenuIndex()).entries().size());
+                State next = new State(state.openMenuIndex(), state.selectedEntryIndex(), first);
+                return next.equals(state) ? InteractionResult.handled()
+                    : InteractionResult.output(new StateChanged<>(next));
             }
             if (!pointer.modifiers().isEmpty()
                 || pointer.kind() != PointerEvent.Kind.PRESS
                 || pointer.button() != PointerEvent.Button.LEFT) {
                 return state.isOpen() ? InteractionResult.handled() : InteractionResult.ignored();
             }
-            Point point = local.orElseThrow();
             PreparedTop topHit = topAt(point);
             if (topHit != null) {
                 State next = state.isOpen() && state.openMenuIndex() == topHit.menuIndex()
@@ -637,6 +754,13 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
             }
             if (!state.isOpen()) {
                 return InteractionResult.ignored();
+            }
+            Optional<Scrollbar.Press> press = scrollbar().flatMap(bar -> bar.press(point));
+            if (press.isPresent()) {
+                Scrollbar.Press captured = press.orElseThrow();
+                return InteractionResult.output(new StateChanged<>(new State(
+                    state.openMenuIndex(), state.selectedEntryIndex(), captured.offset(), captured.drag()
+                )));
             }
             PreparedRow<C> row = popup == null ? null : popup.rowAt(point);
             if (row != null && row.entry() instanceof Item<?> raw) {
@@ -673,7 +797,7 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
         private InteractionResult<Action<C>> move(int delta) {
             List<Entry<C>> entries = menus.get(state.openMenuIndex()).entries();
             int selected = moveSelection(entries, state.selectedEntryIndex(), delta);
-            State next = normalizeViewport(
+            State next = revealSelection(
                 new State(state.openMenuIndex(), selected, state.firstVisibleEntryIndex()),
                 menus,
                 rowCapacity
@@ -687,6 +811,11 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
             PreparedRow<C> row = popup == null
                 ? null
                 : popup.rowForEntry(state.selectedEntryIndex());
+            if (row == null && rowCapacity > 0 && state.selectedEntryIndex() >= 0) {
+                State next = revealSelection(state, menus, rowCapacity);
+                return next.equals(state) ? InteractionResult.handled()
+                    : InteractionResult.output(new StateChanged<>(next));
+            }
             if (row == null || !(row.entry() instanceof Item<?> raw)) {
                 return InteractionResult.handled();
             }
@@ -744,7 +873,7 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
             if (rowCapacity <= 0) {
                 return InteractionResult.handled();
             }
-            State next = normalizeViewport(
+            State next = revealSelection(
                 new State(state.openMenuIndex(), target, state.firstVisibleEntryIndex()),
                 menus,
                 rowCapacity
@@ -824,10 +953,18 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
         }
     }
 
-    private record Popup<C>(Rect bounds, List<PreparedRow<C>> rows) {
+    private static int signedInt(long value) {
+        return (int) Math.max(Integer.MIN_VALUE, Math.min(Integer.MAX_VALUE, value));
+    }
+
+    private record Popup<C>(
+        Rect bounds,
+        Rect contentBounds,
+        List<PreparedRow<C>> rows,
+        Scrollbar scrollbar
+    ) {
         private PreparedRow<C> rowAt(Point point) {
-            if (!bounds.contains(point) || point.x() <= bounds.x()
-                || point.x() >= bounds.rightExclusive() - 1) {
+            if (!contentBounds.contains(point)) {
                 return null;
             }
             for (PreparedRow<C> row : rows) {

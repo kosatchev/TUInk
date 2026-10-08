@@ -53,6 +53,36 @@ public final class TabBar implements InteractiveWidget<TabBar.Action> {
 
     @Override
     public Placement layout(Rect bounds) {
+        return layout(bounds, false);
+    }
+
+    /**
+     * Reveals the active item with the smallest viewport shift needed. Call when
+     * the active item or available width changes; ordinary layout preserves a
+     * viewport that the user scrolled deliberately.
+     */
+    public Placement layoutRevealingActive(Rect bounds) {
+        return layout(bounds, true);
+    }
+
+    /**
+     * Keeps a previously visible active item visible when labels change. A
+     * changed viewport state takes precedence, so manually browsing away from
+     * the active item is preserved. Activation and resize can still request
+     * an unconditional reveal with {@link #layoutRevealingActive(Rect)}.
+     */
+    public Placement layoutKeepingActiveVisible(Rect bounds, Placement previous) {
+        Objects.requireNonNull(previous, "previous");
+        Placement placement = layout(bounds);
+        if (previous.activeIndex == activeIndex && previous.activeItemVisible()
+            && previous.state.equals(normalize(state, items.size()))
+            && !placement.activeItemVisible()) {
+            return layoutRevealingActive(bounds);
+        }
+        return placement;
+    }
+
+    private Placement layout(Rect bounds, boolean revealActive) {
         Rect requested = Objects.requireNonNull(bounds, "bounds");
         Rect barBounds = requested.height() == 0
             ? new Rect(requested.x(), requested.y(), requested.width(), 0)
@@ -93,9 +123,13 @@ public final class TabBar implements InteractiveWidget<TabBar.Action> {
             && barBounds.width() >= MIN_WIDTH_WITH_SCROLL_CONTROLS;
         int contentOffset = reserveControls ? 1 : 0;
         int contentWidth = barBounds.width() - (reserveControls ? SCROLL_CONTROL_COUNT : 0);
+        int startX = Math.addExact(barBounds.x(), contentOffset);
+        if (revealActive && activeIndex >= 0) {
+            normalized = revealActive(normalized, startX, contentWidth);
+        }
         Pack visible = pack(
             normalized.firstVisibleIndex(),
-            Math.addExact(barBounds.x(), contentOffset),
+            startX,
             contentWidth,
             true
         );
@@ -118,6 +152,26 @@ public final class TabBar implements InteractiveWidget<TabBar.Action> {
             canScrollLeft,
             canScrollRight
         );
+    }
+
+    private State revealActive(State normalized, int startX, int contentWidth) {
+        int first = normalized.firstVisibleIndex();
+        if (activeIndex < first) {
+            return new State(activeIndex);
+        }
+        if (pack(first, startX, contentWidth, true).nextItemIndex() > activeIndex) {
+            return normalized;
+        }
+        int last = activeIndex;
+        while (first < last) {
+            int candidate = first + (last - first) / 2;
+            if (pack(candidate, startX, contentWidth, true).nextItemIndex() > activeIndex) {
+                last = candidate;
+            } else {
+                first = candidate + 1;
+            }
+        }
+        return new State(first);
     }
 
     private Pack pack(int firstIndex, int startX, int maxWidth, boolean includeTruncatedFirst) {
@@ -322,6 +376,15 @@ public final class TabBar implements InteractiveWidget<TabBar.Action> {
 
         public State state() {
             return state;
+        }
+
+        private boolean activeItemVisible() {
+            for (PreparedItem item : items) {
+                if (item.index() == activeIndex) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         @Override

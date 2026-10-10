@@ -2,6 +2,7 @@
 """Exercise archive scripts entirely in temporary paths, without real sudo."""
 
 from pathlib import Path
+import hashlib
 import os
 import re
 import shutil
@@ -69,6 +70,7 @@ class ArchiveInstallTest(unittest.TestCase):
         self.binary.chmod(0o755)
         for name in ("README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"):
             shutil.copyfile(PROJECT_DIR / name, self.archive / name)
+        shutil.copytree(PROJECT_DIR / "licenses", self.archive / "licenses")
 
     def run_script(self, name, success=True):
         result = subprocess.run(
@@ -257,7 +259,6 @@ class ArchiveInstallTest(unittest.TestCase):
         self.run_script("uninstall.sh")
         self.assertEqual("keep me", outside.read_text(encoding="utf-8"))
 
-
     def test_managed_binary_or_script_symlink_to_foreign_directory_is_rejected(self):
         self.run_script("install.sh")
         original_binary = (self.install_dir / "tuink").read_bytes()
@@ -278,6 +279,96 @@ class ArchiveInstallTest(unittest.TestCase):
                 destination.unlink()
                 destination.write_bytes(original)
         self.assertEqual(original_binary, (self.install_dir / "tuink").read_bytes())
+
+    def test_license_bundle_is_installed_exactly_and_removed(self):
+        source = self.archive / "licenses"
+        self.run_script("install.sh")
+        marker, *manifest = (self.install_dir / ".tuink-license-files").read_text().splitlines()
+        self.assertEqual("# tuink-license-files-v1", marker)
+        expected = {path.relative_to(source).as_posix() for path in source.rglob("*") if path.is_file()}
+        self.assertEqual(expected, set(manifest))
+        for relative in manifest:
+            installed = self.install_dir / "licenses" / relative
+            self.assertEqual((source / relative).read_bytes(), installed.read_bytes())
+            self.assertEqual(0o644, installed.stat().st_mode & 0o777)
+        self.run_script("uninstall.sh")
+        self.assertFalse(self.install_dir.exists())
+
+    def test_foreign_license_files_survive_replacement_and_uninstall(self):
+        self.run_script("install.sh")
+        foreign = self.install_dir / "licenses" / "oracle-graalvm-25.0.4" / "personal-notes.txt"
+        foreign.write_text("keep me", encoding="utf-8")
+        self.run_script("install.sh")
+        self.run_script("uninstall.sh")
+        self.assertEqual("keep me", foreign.read_text())
+        self.assertFalse(self.link.is_symlink())
+        self.assertFalse((self.install_dir / "tuink").exists())
+        self.assertFalse((self.install_dir / ".tuink-archive-install").exists())
+        self.assertFalse((self.install_dir / ".tuink-license-files").exists())
+        self.assertEqual([foreign], list((self.install_dir / "licenses").rglob("*.txt")))
+
+    def test_archive_license_symlink_escape_is_rejected_before_install(self):
+        outside = self.root / "foreign"
+        outside.write_text("keep me")
+        source = self.archive / "licenses" / "oracle-graalvm-25.0.4" / "LICENSE.txt"
+        source.unlink()
+        source.symlink_to(outside)
+        self.run_script("install.sh", success=False)
+        self.assertFalse(self.install_dir.exists())
+        self.assertEqual("keep me", outside.read_text())
+
+    def test_foreign_empty_license_directories_survive_uninstall(self):
+        self.run_script("install.sh")
+        foreign = self.install_dir / "licenses" / "oracle-graalvm-25.0.4" / "personal" / "empty"
+        foreign.mkdir(parents=True)
+        self.run_script("uninstall.sh")
+        self.assertTrue(foreign.is_dir())
+        self.assertEqual([], list(foreign.iterdir()))
+        self.assertFalse(self.link.is_symlink())
+        self.assertFalse((self.install_dir / "tuink").exists())
+
+    def test_installed_license_directory_escape_is_rejected_without_mutation(self):
+        self.run_script("install.sh")
+        outside = self.root / "foreign"
+        outside.mkdir()
+        target = self.install_dir / "licenses" / "oracle-graalvm-25.0.4" / "legal" / "java.base"
+        shutil.rmtree(target)
+        target.symlink_to(outside, target_is_directory=True)
+        original_binary = (self.install_dir / "tuink").read_bytes()
+        self.binary.write_text("replacement")
+        self.run_script("install.sh", success=False)
+        self.run_script("uninstall.sh", success=False)
+        self.assertEqual([], list(outside.iterdir()))
+        self.assertEqual(original_binary, (self.install_dir / "tuink").read_bytes())
+        self.assertTrue(self.link.is_symlink())
+
+    def test_license_manifest_traversal_is_rejected_before_uninstall(self):
+        self.run_script("install.sh")
+        outside = self.install_dir / "foreign.txt"
+        outside.write_text("keep me")
+        manifest = self.install_dir / ".tuink-license-files"
+        manifest.write_text("# tuink-license-files-v1\n../foreign.txt\n")
+        self.run_script("uninstall.sh", success=False)
+        self.assertEqual("keep me", outside.read_text())
+        self.assertTrue(self.link.is_symlink())
+        self.assertTrue((self.install_dir / "tuink").exists())
+
+    def test_unknown_license_manifest_is_preserved(self):
+        self.run_script("install.sh")
+        manifest = self.install_dir / ".tuink-license-files"
+        manifest.write_text("unknown-format\n")
+        self.run_script("install.sh", success=False)
+        self.run_script("uninstall.sh", success=False)
+        self.assertEqual("unknown-format\n", manifest.read_text())
+        self.assertTrue(self.link.is_symlink())
+        self.assertTrue((self.install_dir / "tuink").exists())
+
+    def test_checked_in_notice_hashes(self):
+        for bundle_name in ("oracle-graalvm-25.0.4", "musl-1.2.6", "zlib-1.3.2"):
+            bundle = PROJECT_DIR / "licenses" / bundle_name
+            for line in (bundle / "SHA256SUMS").read_text().splitlines():
+                expected, relative = line.split("  ", 1)
+                self.assertEqual(expected, hashlib.sha256((bundle / relative).read_bytes()).hexdigest(), relative)
 
 
 if __name__ == "__main__":

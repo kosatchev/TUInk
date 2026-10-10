@@ -1,6 +1,22 @@
 # THIRD_PARTY_NOTICES
 
-This project includes third-party software components.
+TUInk's own source code is licensed under Apache License 2.0. Its distributions
+also include third-party software components under the terms listed below.
+The JVM distribution does not bundle a Java runtime or native-runtime license
+directories.
+
+Native executables include runtime components from Oracle GraalVM 25.0.4.
+These Oracle components are subject to the GraalVM Free Terms and Conditions
+(GFTC), including License for Early Adopter Versions, and the separate terms
+of bundled third-party components. GFTC redistribution is subject to its
+conditions, including the restriction on fees associated with distribution or
+use. Exact SDK licenses, notices, and attribution are bundled in
+[licenses/oracle-graalvm-25.0.4/](licenses/oracle-graalvm-25.0.4/README.md).
+These terms apply to the Oracle components of native executables; compiling
+the JVM ZIP with the SDK does not bundle those runtime components.
+Native archives and Debian packages include the complete Oracle notice bundle.
+Links to notice bundles absent from a packaged variant point to that package's
+source revision online.
 
 ## 1) Gradle Wrapper scripts and wrapper JAR
 
@@ -214,6 +230,24 @@ The Apache License, Version 2.0 is reproduced in `LICENSE`. The artifact's
 
     This product includes software developed at
     The Apache Software Foundation (https://www.apache.org/).
+
+---
+
+## 7) Static musl native target: musl and zlib
+
+The static musl native archive embeds musl 1.2.6 and standard zlib 1.3.2.
+Their exact pinned-source notices are bundled separately from the SDK's
+conservative license inventory:
+
+- [musl 1.2.6](licenses/musl-1.2.6/README.md): MIT and the compatible component
+  terms reproduced in `COPYRIGHT` and `THIRD_PARTY_NOTICES.txt`.
+- [zlib 1.3.2](licenses/zlib-1.3.2/README.md): the complete unmodified zlib
+  license and copyright notice in `LICENSE`.
+
+The glibc native archive and Debian package use the host's libc and zlib; they
+do not bundle these static library copies. The JVM ZIP also contains no such
+runtime libraries. Only the static musl archives include these two notice
+directories, with their versions, source URLs, SHA-256 hashes, and scope.
 
 ---
 

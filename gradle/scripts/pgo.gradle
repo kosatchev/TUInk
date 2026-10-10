@@ -20,9 +20,8 @@ def projectRootPath = rootProject.projectDir.toPath()
 def trainingRoot = layout.buildDirectory.dir("pgo-training/${nativeTarget}")
 def pgoLogger = logger
 def sdkHome = providers.environmentVariable('GRAALVM_HOME').map { new File(it.trim()).canonicalFile }
-def compilerLimits = ['--parallelism=2', '-J-Xmx3g', '-J-XX:ActiveProcessorCount=2']
 def pgoArgs = { String target ->
-    baseNativeBuildArgs('-O3') + ["-march=${nativeMarch}"] + compilerLimits +
+    baseNativeBuildArgs() + ["-march=${nativeMarch}"] +
         (target == 'musl' ? ['--static', '--libc=musl', '-Ddev.tuiframe.provider=exec'] : [])
 }
 
@@ -265,7 +264,7 @@ def train = tasks.register('nativeProfileTrain', Exec) {
 def verifyProfile = tasks.register('verifyPgoProfile') {
     group = 'verification'
     description = 'Reject missing, modified, or stale PGO profiles before native compilation.'
-    dependsOn(tasks.named('verifyPgoToolchain'), runtimeInputs, pgoCompilerFiles)
+    dependsOn(tasks.named('verifyNativeToolchain'), runtimeInputs, pgoCompilerFiles)
     mustRunAfter(train)
     notCompatibleWithConfigurationCache('Compares the current native inputs with the training receipt.')
     doLast {

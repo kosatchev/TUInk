@@ -6,16 +6,19 @@ Before changing build or packaging behavior, read [Build and native targets](doc
 
 ## Development setup
 
-Development requires JDK 25 for Gradle, compilation, tests, and the editor.
-Use the checked-in Gradle wrapper so local and CI builds use the same version.
-For native-image work, install the pinned GraalVM Community distribution and
-set both `JAVA_HOME` and `GRAALVM_HOME` to its absolute path; the same JDK builds
-and runs the JVM application and compiles the native binary. See
+JVM development uses Java 25 from any vendor. The checked-in Gradle wrapper
+can run on a compatible JDK, such as 17, 21 or 25, and finds or downloads a
+Java 25 toolchain for compilation, tests and application runs. No specific
+Java patch version or vendor is required for JVM builds.
+
+Native releases and optional PGO use the pinned Oracle GraalVM
+25.0.4+7.1 SDK with Java 25. Set both `JAVA_HOME` and `GRAALVM_HOME` to its
+absolute path when building native binaries. See
 [Native toolchain](docs/building.md#native-toolchain) for the exact version,
 Linux x86_64 download, and checksum, or the
 [setup and transfer guide in Russian](docs/setup-ru.md) for a new computer.
-The optional [PGO workflow](docs/building.md#pgo) uses Oracle GraalVM with the
-same Java version; regular native releases continue to use Community.
+The optional [PGO workflow](docs/building.md#pgo) uses the same SDK and
+`verifyNativeToolchain` preflight with a separately trained profile.
 
 ```bash
 ./gradlew check
@@ -83,7 +86,7 @@ For benchmark-harness changes, also run `./gradlew :app:perfHarnessTest` on a
 POSIX system with Python 3.10+ available as `python3`. CI runs this self-test
 explicitly, and native benchmark/release tasks retain it as a prerequisite.
 For PGO training changes, also run `./gradlew :app:pgoHarnessTest`; this
-self-test runs in CI without Oracle GraalVM or a native build.
+self-test needs only Python and runs in CI without a native build.
 When intentionally changing dependencies, also update and review the lockfiles
 and verification metadata as described in [Build and native targets](docs/building.md#dependency-integrity).
 

@@ -12,8 +12,9 @@ Run the PGO harness self-test without a native SDK or editor binary:
 ```
 
 It requires POSIX Python 3.10+ as `python3`, is available without `-PenablePgo`,
-and runs explicitly in ordinary CI. PGO native tasks require the separately
-pinned Oracle GraalVM SDK described in [PGO build instructions](../../docs/building.md#pgo).
+and runs explicitly in ordinary CI. PGO native tasks use the same pinned
+Oracle GraalVM SDK and `verifyNativeToolchain` preflight as ordinary builds;
+see [PGO build instructions](../../docs/building.md#pgo).
 
 `nativeProfileTrain` runs the current instrumented binary in five checked PTY
 sessions: Java/Python/YAML/Rust editing and mouse drag. The editing sessions
@@ -25,8 +26,8 @@ profiles and measurements are excluded from release contents.
 
 Training is not a timing comparison: instrumentation adds overhead. Evaluate
 optimized binaries on separate corpora and compare paired runs against Oracle
-O3 from the same SDK. Community vs Oracle also changes compiler branches and
-static profile inference, so that comparison does not isolate PGO.
+O3 from the same SDK. Community vs Oracle also changes compiler branches and static profile
+inference, so that comparison does not isolate PGO.
 
 PGO remains experimental. Keep CPU, wall time, RSS and sampled render
 diagnostics separate when evaluating a profile; results depend on the

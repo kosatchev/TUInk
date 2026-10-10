@@ -1,1 +1,7 @@
 gradlew.bat whitespace=cr-at-eol
+
+# Preserve exact license bytes and upstream final blank lines on every platform.
+licenses/** -text whitespace=-blank-at-eof
+
+# The upstream SDK manual also keeps its original trailing spaces.
+licenses/oracle-graalvm-25.0.4/license-information-user-manual.html -whitespace

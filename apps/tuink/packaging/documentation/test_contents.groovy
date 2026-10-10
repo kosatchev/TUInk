@@ -6,8 +6,8 @@ Set<String> common = ['README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'SECURIT
     'docs/assets/tuink-menus.gif', 'docs/assets/tuink-tabs.gif'] as Set
 Map<String, List<String>> requiredNotices = [
     jvm: [],
-    glibc: [],
-    musl: []
+    glibc: ['oracle-graalvm-25.0.4'],
+    musl: ['oracle-graalvm-25.0.4', 'musl-1.2.6', 'zlib-1.3.2']
 ]
 assert bundles.keySet() == requiredNotices.keySet()
 bundles.each { String target, File directory ->
@@ -34,7 +34,7 @@ bundles.each { String target, File directory ->
     if (sourceReadme.contains('](docs/assets/tuink-menus.gif)')) assert readme.contains('](docs/assets/tuink-menus.gif)')
     if (sourceReadme.contains('](SECURITY.md)')) assert readme.contains('](SECURITY.md)')
     String notices = new File(directory, 'THIRD_PARTY_NOTICES.md').getText('UTF-8')
-    [].each { bundle ->
+    ['oracle-graalvm-25.0.4', 'musl-1.2.6', 'zlib-1.3.2'].each { bundle ->
         String destination = "licenses/${bundle}/README.md"
         String rendered = requiredNotices[target].contains(bundle) ? destination
             : "https://github.com/kosatchev/tuink/blob/${documentationRef}/${destination}"

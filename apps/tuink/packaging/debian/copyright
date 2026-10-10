@@ -6,3 +6,34 @@ Copyright: 2025-2026 Dmitry Kosatchev
 License: Apache-2.0
  On Debian systems, the complete text of the Apache License, Version 2.0,
  can be found in /usr/share/common-licenses/Apache-2.0.
+Comment: This stanza covers TUInk-authored code and documentation. The native
+ executable's Oracle components and bundled third-party license documents
+ have the additional terms in the more specific stanzas below.
+
+Files: usr/bin/tuink
+Copyright: 2025-2026 Dmitry Kosatchev
+           Oracle and/or its affiliates and third-party licensors
+License: Apache-2.0 and Oracle-GFTC and other-third-party-terms
+ The native executable includes Oracle GraalVM 25.0.4 runtime components.
+ Their complete GraalVM Free Terms and Conditions, including License for
+ Early Adopter Versions, are in licenses/oracle-graalvm-25.0.4/LICENSE.txt
+ relative to this copyright file. Redistribution is subject to those terms,
+ including the restriction on fees associated with distribution or use.
+ The SDK NOTICE.txt, Licensing Information User Manual, and complete legal
+ notice tree are in the same directory. Separately licensed components keep
+ their respective terms, including the JDK module terms in legal/.
+ Application dependency notices and license texts are in THIRD_PARTY_NOTICES.md.
+
+Files: usr/share/doc/tuink/licenses/oracle-graalvm-25.0.4/*
+Copyright: Oracle and/or its affiliates and third-party licensors
+License: Oracle-GFTC and other-third-party-terms
+ These are unmodified SDK license and notice documents. See
+ licenses/oracle-graalvm-25.0.4/README.md and its SHA256SUMS for provenance,
+ scope, and exact copied files. Each document retains its upstream terms.
+
+Files: usr/share/doc/tuink/licenses/oracle-graalvm-25.0.4/README.md
+       usr/share/doc/tuink/licenses/oracle-graalvm-25.0.4/SHA256SUMS
+Copyright: 2026 Dmitry Kosatchev
+License: Apache-2.0
+ These provenance documents are authored by TUInk. The upstream license texts
+ remain unmodified under their own terms.

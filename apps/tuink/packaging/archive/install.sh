@@ -10,10 +10,31 @@ TARGET_BIN="${INSTALL_DIR}/${LINK_NAME}"
 LINK_PATH="/usr/local/bin/${LINK_NAME}"
 MARKER_PATH="${INSTALL_DIR}/.tuink-archive-install"
 MARKER_VALUE="tuink-archive-install-v1"
+LICENSE_SOURCE_DIR="${SCRIPT_DIR}/licenses"
+LICENSE_INSTALL_DIR="${INSTALL_DIR}/licenses"
+LICENSE_MANIFEST_PATH="${INSTALL_DIR}/.tuink-license-files"
+LICENSE_MANIFEST_VALUE="# tuink-license-files-v1"
 
 refuse() {
   echo "Refusing to install: $*" >&2
   exit 1
+}
+
+validate_license_path() {
+  local relative="$1" current="${LICENSE_INSTALL_DIR}" component
+  [[ "${relative}" =~ ^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$ ]] || refuse "invalid license path: ${relative}"
+  case "/${relative}/" in */../*|*/./*) refuse "invalid license path: ${relative}" ;; esac
+  local -a components
+  IFS='/' read -r -a components <<< "${relative}"
+  local index
+  for index in "${!components[@]}"; do
+    component="${components[${index}]}"
+    current="${current}/${component}"
+    [[ ! -L "${current}" ]] || refuse "license path is a symlink: ${current}"
+    if [[ ${index} -lt $((${#components[@]} - 1)) && -e "${current}" && ! -d "${current}" ]]; then
+      refuse "license parent is not a directory: ${current}"
+    fi
+  done
 }
 
 # Packaging pins online documentation to this archive source revision.
@@ -77,11 +98,55 @@ for name in "${LINK_NAME}" install.sh uninstall.sh; do
   [[ ! -d "${INSTALL_DIR}/${name}" ]] || refuse "managed file destination is a directory: ${INSTALL_DIR}/${name}"
 done
 
+[[ -d "${LICENSE_SOURCE_DIR}" && ! -L "${LICENSE_SOURCE_DIR}" ]] || refuse "archive licenses directory is missing or symlinked"
+INVALID_LICENSE_ENTRY="$(find "${LICENSE_SOURCE_DIR}" -mindepth 1 ! -type f ! -type d -print -quit)"
+[[ -z "${INVALID_LICENSE_ENTRY}" ]] || refuse "archive licenses contain an unsupported entry: ${INVALID_LICENSE_ENTRY}"
+[[ ! -L "${LICENSE_INSTALL_DIR}" ]] || refuse "${LICENSE_INSTALL_DIR} is a symlink"
+if [[ -e "${LICENSE_INSTALL_DIR}" && ! -d "${LICENSE_INSTALL_DIR}" ]]; then
+  refuse "${LICENSE_INSTALL_DIR} is not a directory"
+fi
+
+declare -A PREVIOUS_LICENSE_FILES=()
+if [[ -e "${LICENSE_INSTALL_DIR}" || -e "${LICENSE_MANIFEST_PATH}" || -L "${LICENSE_MANIFEST_PATH}" ]]; then
+  [[ -f "${LICENSE_MANIFEST_PATH}" && ! -L "${LICENSE_MANIFEST_PATH}" ]] || refuse "installed licenses have no regular ownership manifest"
+  {
+    IFS= read -r manifest_format || refuse "license ownership manifest is empty"
+    [[ "${manifest_format}" == "${LICENSE_MANIFEST_VALUE}" ]] || refuse "unknown license ownership manifest format"
+    while IFS= read -r relative || [[ -n "${relative}" ]]; do
+      validate_license_path "${relative}"
+      [[ ! -d "${LICENSE_INSTALL_DIR}/${relative}" ]] || refuse "managed license file became a directory: ${relative}"
+      PREVIOUS_LICENSE_FILES["${relative}"]=true
+    done
+  } < "${LICENSE_MANIFEST_PATH}"
+  [[ ${#PREVIOUS_LICENSE_FILES[@]} -gt 0 ]] || refuse "license ownership manifest has no files"
+fi
+
+README_TEMP=""
+LICENSE_FILES_TEMP="$(mktemp)"
+cleanup() {
+  [[ -z "${README_TEMP}" ]] || rm -f -- "${README_TEMP}"
+  rm -f -- "${LICENSE_FILES_TEMP}"
+}
+trap cleanup EXIT
+printf '%s\n' "${LICENSE_MANIFEST_VALUE}" > "${LICENSE_FILES_TEMP}"
+LICENSE_FILE_COUNT=0
+while IFS= read -r -d '' relative; do
+  validate_license_path "${relative}"
+  destination="${LICENSE_INSTALL_DIR}/${relative}"
+  if [[ -e "${destination}" && -z "${PREVIOUS_LICENSE_FILES[${relative}]+present}" ]]; then
+    refuse "license destination is not managed: ${destination}"
+  fi
+  [[ ! -d "${destination}" ]] || refuse "license file destination is a directory: ${destination}"
+  printf '%s\n' "${relative}" >> "${LICENSE_FILES_TEMP}"
+  LICENSE_FILE_COUNT=$((LICENSE_FILE_COUNT + 1))
+done < <(find "${LICENSE_SOURCE_DIR}" -type f -printf '%P\0')
+[[ ${LICENSE_FILE_COUNT} -gt 0 ]] || refuse "archive licenses directory is empty"
+LC_ALL=C sort -o "${LICENSE_FILES_TEMP}" "${LICENSE_FILES_TEMP}"
+
 README_INSTALL_SOURCE="${SCRIPT_DIR}/README.md"
 if [[ -f "${README_INSTALL_SOURCE}" ]]; then
   README_TEMP="$(mktemp)"
-  trap 'rm -f -- "${README_TEMP}"' EXIT
-  # The system installation contains only the executable and top-level docs.
+  # The system installation contains the executable, top-level docs, and licenses.
   # Keep its README links usable after the extracted archive is removed.
   sed -E \
     -e "s@(\]\()(docs/assets/[^)]*)(\))@\1https://raw.githubusercontent.com/kosatchev/tuink/${DOCUMENTATION_REF}/\2\3@g" \
@@ -103,6 +168,27 @@ for script in install.sh uninstall.sh; do
     sudo install -m 0755 -T -- "${SCRIPT_DIR}/${script}" "${INSTALL_DIR}/${script}"
   fi
 done
+
+for relative in "${!PREVIOUS_LICENSE_FILES[@]}"; do
+  sudo rm -f -- "${LICENSE_INSTALL_DIR}/${relative}"
+done
+sudo install -d -m 0755 -- "${LICENSE_INSTALL_DIR}"
+declare -A LICENSE_PARENTS=()
+{
+  IFS= read -r manifest_format
+  while IFS= read -r relative; do
+    parent="${LICENSE_INSTALL_DIR}"
+    if [[ "${relative}" == */* ]]; then
+      parent="${LICENSE_INSTALL_DIR}/${relative%/*}"
+    fi
+    if [[ -z "${LICENSE_PARENTS[${parent}]+present}" ]]; then
+      sudo install -d -m 0755 -- "${parent}"
+      LICENSE_PARENTS["${parent}"]=true
+    fi
+    sudo install -m 0644 -T -- "${LICENSE_SOURCE_DIR}/${relative}" "${LICENSE_INSTALL_DIR}/${relative}"
+  done
+} < "${LICENSE_FILES_TEMP}"
+sudo install -m 0644 -T -- "${LICENSE_FILES_TEMP}" "${LICENSE_MANIFEST_PATH}"
 
 for doc in README.md LICENSE THIRD_PARTY_NOTICES.md; do
   DOC_SOURCE="${SCRIPT_DIR}/${doc}"

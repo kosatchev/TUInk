@@ -1,0 +1,30 @@
+name: Set up the pinned Oracle GraalVM SDK
+description: Install the pinned Oracle GraalVM SDK with Java 25 for TUInk native and release tasks.
+
+runs:
+  using: composite
+  steps:
+    - name: Download and verify Oracle GraalVM
+      shell: bash
+      run: |
+        set -euo pipefail
+        [[ "$RUNNER_OS" == Linux && "$RUNNER_ARCH" == X64 ]]
+        toolchains="$RUNNER_TEMP/tuink-toolchains"
+        mkdir -p "$toolchains"
+        archive="$toolchains/graalvm-jdk-25.0.4_linux-x64_bin.tar.gz"
+        curl --fail --location --retry 3 --output "$archive" \
+          https://download.oracle.com/graalvm/25/archive/graalvm-jdk-25.0.4_linux-x64_bin.tar.gz
+        printf '%s  %s\n' \
+          76007c309f821aaf435bce63162ea0395587fc77350801c81643fe7feea37276 \
+          "$archive" | sha256sum --check --strict -
+        tar -xzf "$archive" -C "$toolchains"
+        graalvm_home="$toolchains/graalvm-jdk-25.0.4+7.1"
+        test -x "$graalvm_home/bin/java"
+        test -x "$graalvm_home/bin/javac"
+        test -x "$graalvm_home/bin/native-image"
+        grep -Fx 'IMPLEMENTOR="Oracle Corporation"' "$graalvm_home/release"
+        grep -Fx 'GRAALVM_VERSION="25.0.4"' "$graalvm_home/release"
+        grep -Fx 'JAVA_VERSION="25.0.4"' "$graalvm_home/release"
+        grep -Fx 'JAVA_RUNTIME_VERSION="25.0.4+7-LTS-jvmci-b01"' "$graalvm_home/release"
+        printf 'JAVA_HOME=%s\nGRAALVM_HOME=%s\n' "$graalvm_home" "$graalvm_home" >> "$GITHUB_ENV"
+        printf '%s\n' "$graalvm_home/bin" >> "$GITHUB_PATH"

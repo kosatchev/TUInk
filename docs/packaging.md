@@ -30,6 +30,26 @@ security information, available demo images and samples. Developer documentation
 remains in the source tree; packaged links use the build's source revision
 online. Runtime notice directories are selected for each artifact.
 
+Runtime notice bundles are selected from the checked-in `licenses/` directory
+without reading the build machine's SDK at packaging time. TUInk's own source
+code remains Apache-2.0. Native executables contain Oracle GraalVM 25.0.4
+runtime components under GFTC (including the Early Adopter license) and
+separately licensed components. GFTC redistribution is subject to its
+conditions, including its restriction on fees associated with distribution or
+use. Exact licenses, notices, SDK module texts, checksums, and scope are in
+[the versioned notice bundle](../licenses/oracle-graalvm-25.0.4/README.md).
+The complete Oracle bundle is included in every native archive and Debian
+package. The JVM directory and ZIP contain no Java runtime or native-runtime
+notice directories.
+
+The static musl archive additionally embeds musl 1.2.6 and zlib 1.3.2; their
+exact source notices and provenance are in
+[licenses/musl-1.2.6/](../licenses/musl-1.2.6/README.md) and
+[licenses/zlib-1.3.2/](../licenses/zlib-1.3.2/README.md).
+Only static musl archives include the musl and zlib notice directories. The
+glibc archive and Debian package use host libraries for libc and zlib and omit
+those two bundles. PGO does not change the notice selection.
+
 ## Native archives
 
 Build glibc, musl, or both:
@@ -53,6 +73,7 @@ tuink-<version>-linux-<arch>/
 ├── THIRD_PARTY_NOTICES.md
 ├── SECURITY.md
 ├── docs/assets/
+├── licenses/
 └── samples/
 ```
 
@@ -67,10 +88,12 @@ cd tuink-<version>-linux-<arch>
 The archive installer uses `/opt/tuink` and creates
 `/usr/local/bin/tuink`.
 
-The extracted archive's README provides the user reference and any bundled demo
-images offline. The system installer copies the executable, scripts, README, license,
-and third-party notices; its README links to documentation and images on the
-archive's source commit online, embedded during packaging. A source archive
+The extracted archive's README provides the user reference and bundled demo
+images offline. The system installer copies the executable, scripts, README,
+license, third-party notices, and all notice bundles selected for that native
+variant. It leaves images, samples and `SECURITY.md` in the extracted archive;
+its README links to images, the security policy and developer documentation on
+the archive's source commit online, embedded during packaging. A source archive
 without Git metadata uses its matching `v<version>` release tag; an explicit
 `-PdocumentationRef=<full-commit-or-version-tag>` supports exported snapshots.
 
@@ -80,9 +103,23 @@ refuses to replace an existing non-TUInk file or symlink at
 directory. Only the current marker format is supported; markerless and unknown
 installations are left unchanged.
 
+The installer records the copied license filenames in
+`/opt/tuink/.tuink-license-files`. License source files and destination paths
+must be regular contained paths; symlinked license files or parent directories
+are refused before installation changes. The manifest supports only the
+current format.
+
 The uninstaller removes only the managed symlink and the known files installed
 by the archive. It refuses to continue if the installation marker is missing,
 the symlink points elsewhere, or `/opt/tuink` contains unexpected entries.
+Under `licenses/`, it removes only the files recorded by the installer and
+empty parent directories belonging to those paths. Foreign files and empty
+foreign directories remain, together with their containing
+directories; the managed executable, launcher, and installation marker are
+still removed. Such remaining directories are unmarked and are not adopted
+by a later install.
+Executable and script destinations are treated as files: directories,
+including symlinks to foreign directories, are rejected before replacement.
 
 Test archive installation, replacement, link containment, refusal, and cleanup
 using temporary directories and a sandboxed `sudo` substitute:
@@ -105,6 +142,7 @@ Do not use `-Ptarget=musl` for this task. The package installs:
 /usr/bin/tuink
 /usr/share/doc/tuink/
 /usr/share/doc/tuink/examples/
+/usr/share/doc/tuink/licenses/oracle-graalvm-25.0.4/
 ```
 
 It does not execute the archive `install.sh`, use `/opt`, or invoke `sudo`

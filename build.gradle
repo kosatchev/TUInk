@@ -157,7 +157,7 @@ tasks.register('buildHelp') {
             TUInk ${rootVersionForHelp} build help
 
             JVM development
-              Use JDK 25 for Gradle, compilation, and tests.
+              Java 25 is selected through Gradle toolchains and downloaded when needed.
               ./gradlew check
                   Run all module tests and architecture checks.
               ./gradlew clean check build
@@ -171,8 +171,8 @@ tasks.register('buildHelp') {
               ./gradlew :app:distZip
                   ZIP: build/releases/tuink-${rootVersionForHelp}.zip
 
-            Native binaries (require the pinned GraalVM Community 25.2.4 / Java 25)
-              export JAVA_HOME=/absolute/path/to/graalvm-community-25.2.4+7.1
+            Native binaries (use the pinned Oracle GraalVM SDK with Java 25)
+              export JAVA_HOME=/absolute/path/to/graalvm-jdk-25.0.4+7.1
               export GRAALVM_HOME=\$JAVA_HOME
               ./gradlew :app:verifyNativeToolchain
                   Verify the explicit native toolchain before building.
@@ -183,11 +183,7 @@ tasks.register('buildHelp') {
               ./gradlew :app:nativeAll
                   Build both native binaries.
 
-            Optional PGO (Oracle GraalVM 25.0.4+7.1 / Java 25, POSIX Python 3.10+)
-              export JAVA_HOME=/absolute/path/to/graalvm-jdk-25.0.4+7.1
-              export GRAALVM_HOME=\$JAVA_HOME
-              ./gradlew :app:verifyPgoToolchain -PenablePgo
-                  Verify the separate pinned Oracle SDK.
+            Optional PGO (same Oracle SDK, POSIX Python 3.10+)
               ./gradlew :app:pgoHarnessTest
                   Validate the PGO harness without a native build.
               ./gradlew :app:nativeProfileInstrument -PenablePgo
@@ -200,7 +196,7 @@ tasks.register('buildHelp') {
                   Profile: .local/pgo/glibc/profile.iprof with adjacent .json receipt.
                   -PpgoProfile=<path> selects a custom profile and adjacent receipt.
                   Use -Ptarget=musl for a separate musl profile/binary; all is rejected.
-                  PGO is experimental. Return to Community for release packaging.
+                  PGO is experimental; release packaging uses the ordinary O3 binary.
 
             Native archives
               ./gradlew :app:nativeDistTarGz

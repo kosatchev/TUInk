@@ -69,8 +69,8 @@ def sourceDocumentation = rootProject.fileTree(rootProject.projectDir) {
 }
 def nativeLicenseBundles = [
     jvm: [],
-    glibc: [],
-    musl: []
+    glibc: ['oracle-graalvm-25.0.4'],
+    musl: ['oracle-graalvm-25.0.4', 'musl-1.2.6', 'zlib-1.3.2']
 ]
 def documentationStages = [:]
 nativeLicenseBundles.each { String target, List<String> licenseBundles ->

@@ -187,6 +187,22 @@ The supported system installation layout is `/opt/tuink` with the launcher at `/
 
 Installation must refuse markerless, unknown, or foreign directories. Uninstallation must remove only paths proven to be owned by TUInk and must not infer ownership from a familiar directory name alone.
 
+The current archive layout also installs third-party notices under
+`/opt/tuink/licenses/`. `/opt/tuink/.tuink-license-files` records ownership of
+those files: its first line is exactly `# tuink-license-files-v1`, followed by
+a nonempty list of paths relative to `licenses/`. Existing license data requires
+a regular manifest with this current format. Unknown or malformed manifests,
+absolute paths, `.`/`..` components, and symlinked files or parent directories
+are rejected before installation or removal changes.
+
+Replacement must not overwrite license destinations absent from the previous
+ownership manifest. Uninstallation removes only the recorded license files and
+their empty parent directories. Unlisted files and foreign empty directories
+remain intact; if they remain, the license directory and installation container
+are preserved after the managed executable, launcher, and ownership markers
+are removed. No historical manifest readers or directory-name ownership
+fallbacks are supported.
+
 ## Safe rejection
 
 When current code encounters incompatible data or state, it must:

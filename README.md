@@ -42,7 +42,9 @@ language.
 
 ## Try it
 
-Building and running from sources needs JDK 25 and an interactive terminal.
+Local JVM builds use Java 25 from any vendor and an interactive terminal.
+The Gradle wrapper can run on a compatible JDK, such as 17, 21 or 25, and
+automatically downloads a Java 25 toolchain when needed.
 The packaged JVM ZIP runs on Java 25 or newer. See the
 [setup and transfer guide in Russian](docs/setup-ru.md) for a new computer.
 
@@ -206,11 +208,11 @@ Run the full JVM test and build suite:
 ./gradlew clean check build
 ```
 
-Official native releases use a pinned GraalVM Community toolchain. Follow the
+Native releases use the pinned Oracle GraalVM toolchain. Follow the
 [native toolchain instructions](docs/building.md#native-toolchain), then run:
 
 ```bash
-export GRAALVM_HOME=/absolute/path/to/graalvm-community-25.2.4+7.1
+export GRAALVM_HOME=/absolute/path/to/graalvm-jdk-25.0.4+7.1
 export JAVA_HOME="$GRAALVM_HOME"
 export PATH="$JAVA_HOME/bin:$PATH"
 ./gradlew clean :app:release
@@ -219,6 +221,9 @@ export PATH="$JAVA_HOME/bin:$PATH"
 The release task builds the tested JVM ZIP, glibc archive, Debian package, and
 SHA-256 manifest under `build/releases/`. It also runs a short native render
 benchmark. The task does not install or publish anything.
+
+Optional [PGO training](docs/building.md#pgo) uses the same SDK and produces a
+separate local binary; release artifacts use the ordinary Oracle O3 build.
 
 ## Project family
 
@@ -245,5 +250,8 @@ outside those reusable modules.
 
 ## License
 
-TUInk is distributed under the Apache License 2.0. See [LICENSE](LICENSE) and
+TUInk's source code is licensed under the Apache License 2.0; see
+[LICENSE](LICENSE). Native distributions also contain Oracle GraalVM runtime
+components subject to Oracle's GFTC and separate third-party terms. See the
+[Oracle runtime notices](licenses/oracle-graalvm-25.0.4/README.md) and
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

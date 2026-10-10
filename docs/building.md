@@ -10,9 +10,12 @@ This task only prints help. It does not compile sources or create artifacts.
 
 ## Requirements
 
-JVM builds and `check` require JDK 25 for the Gradle JVM, compiler, tests, and
-application runtime. Use the checked-in Gradle 9.8.1 wrapper and set
-`JAVA_HOME` to JDK 25; CI uses Temurin 25. The Java vendor is not pinned for JVM builds.
+JVM builds use **Java 25** from any vendor, without a required patch version.
+Use the checked-in Gradle 9.8.1 wrapper with a compatible JDK, such as 17,
+21 or 25. The configured Java 25 toolchain handles compilation, tests and
+application runs; the Foojay resolver downloads a matching JDK if none is
+installed. The first download requires network access. `GRAALVM_HOME` is
+required only for native builds.
 The packaged JVM ZIP requires Java 25 or newer. A step-by-step guide for a new
 computer is available in Russian: [Перенос, сборка и запуск](setup-ru.md).
 
@@ -25,11 +28,9 @@ Check the active JVM and Gradle environment:
 Do not rely on a system Gradle installation: use `./gradlew` so the project
 uses the checked-in wrapper version.
 
-Regular native builds and release tasks additionally require:
+Native builds and release tasks additionally require:
 
-- the pinned GraalVM Community release described in
-  [Native toolchain](#native-toolchain), selected explicitly with
-  both `JAVA_HOME` and `GRAALVM_HOME` pointing to the same installation;
+- the explicitly selected SDK described in [Native toolchain](#native-toolchain);
 - a system C toolchain;
 - the platform libraries required by GraalVM;
 - a musl-capable toolchain for the static musl target.
@@ -40,8 +41,8 @@ harnesses without building or launching the native editor. They are separate
 from `check` and run explicitly in CI. `:app:perfSmoke` and `:app:perfCheck` also
 require a POSIX pseudo-terminal and the native toolchain; both run the harness self-test first.
 The short benchmark is part of the complete release task.
-Optional [PGO builds](#pgo) use a separately pinned Oracle GraalVM SDK and
-require a POSIX pseudo-terminal for training.
+Optional [PGO builds](#pgo) use the same SDK and require a POSIX pseudo-terminal
+for training.
 
 Debian packaging additionally requires Linux with `dpkg-deb`, `gzip`, and
 `strip`. `lintian` is optional and is used only for package validation.
@@ -153,8 +154,8 @@ needed.
 
 ## Native toolchain
 
-Regular native and release tasks require exactly GraalVM Community 25.2.4 with
-Java 25. Set both `JAVA_HOME` and `GRAALVM_HOME` to the absolute path of that
+Native and release tasks require exactly Oracle GraalVM 25.0.4+7.1 with Java
+25. Set both `JAVA_HOME` and `GRAALVM_HOME` to the absolute path of that
 distribution. Gradle, compilation, tests, JVM runs, and native-image builds use
 this one JDK. Automatic native toolchain discovery is disabled, and the
 preflight verifies that both variables select the pinned installation.
@@ -162,16 +163,16 @@ preflight verifies that both variables select the pinned installation.
 The pinned Linux x86_64 archive is:
 
 ```text
-https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.2.4/graalvm-community-jdk-25i2-25.0.4_linux-x64_bin.tar.gz
-SHA-256: 3f4a89de8eaa96f2ed677f09957c7e872cd8467aad3537f8b5394c1b8c4b942e
+https://download.oracle.com/graalvm/25/archive/graalvm-jdk-25.0.4_linux-x64_bin.tar.gz
+SHA-256: 76007c309f821aaf435bce63162ea0395587fc77350801c81643fe7feea37276
 ```
 
 Verify the downloaded archive before extracting it:
 
 ```bash
 printf '%s  %s\n' \
-  3f4a89de8eaa96f2ed677f09957c7e872cd8467aad3537f8b5394c1b8c4b942e \
-  graalvm-community-jdk-25i2-25.0.4_linux-x64_bin.tar.gz \
+  76007c309f821aaf435bce63162ea0395587fc77350801c81643fe7feea37276 \
+  graalvm-jdk-25.0.4_linux-x64_bin.tar.gz \
   | sha256sum -c -
 ```
 
@@ -179,15 +180,17 @@ After extraction, select the toolchain and run the same preflight used by every
 native-image build task:
 
 ```bash
-export GRAALVM_HOME=/absolute/path/to/graalvm-community-25.2.4+7.1
+export GRAALVM_HOME=/absolute/path/to/graalvm-jdk-25.0.4+7.1
 export JAVA_HOME="$GRAALVM_HOME"
 export PATH="$JAVA_HOME/bin:$PATH"
 ./gradlew :app:verifyNativeToolchain
 ```
 
 The preflight checks the distribution's `release` metadata, both `java` and
-`native-image`, and rejects a missing, relative, non-Community, or mismatched
+`native-image`, and rejects a missing, relative, non-Oracle, or mismatched
 toolchain.
+CI and the release workflow use the same download/checksum recipe through
+[the shared setup action](https://github.com/kosatchev/tuink/blob/main/.github/actions/setup-graalvm/action.yml).
 
 ## Native targets
 
@@ -221,6 +224,10 @@ older x86_64 CPUs. Override it only when the deployment CPU is known:
 Use `nativeMarch=native` only for a binary that will run on the same or a known
 compatible CPU generation. Release builds should keep the default
 `compatibility` value.
+
+All native variants use Oracle `-O3`, at most two compiler worker threads and
+a 3 GiB compiler heap. These build limits do not change the resulting binary's
+runtime heap defaults.
 
 ## Native release archives
 
@@ -277,36 +284,10 @@ outside the repository.
 ## PGO
 
 PGO is optional and experimental. Its native tasks are registered only with
-`-PenablePgo`. [GraalVM PGO](https://www.graalvm.org/jdk25/reference-manual/native-image/optimizations-and-performance/PGO/)
-requires Oracle GraalVM; it is unavailable in Community. Use exactly **Oracle
-GraalVM 25.0.4+7.1 with Java 25** for Gradle, compilation and native-image.
-The Java language/runtime contract remains Java 25. Ordinary native and release
-tasks continue to require Community 25.2.4.
-
-The pinned Oracle Linux x86_64 archive is:
-
-```text
-https://download.oracle.com/graalvm/25/archive/graalvm-jdk-25.0.4_linux-x64_bin.tar.gz
-SHA-256: 76007c309f821aaf435bce63162ea0395587fc77350801c81643fe7feea37276
-```
-
-Verify the archive before extraction, then select that installation in the
-current shell:
-
-```bash
-printf '%s  %s\n' \
-  76007c309f821aaf435bce63162ea0395587fc77350801c81643fe7feea37276 \
-  graalvm-jdk-25.0.4_linux-x64_bin.tar.gz \
-  | sha256sum -c -
-export GRAALVM_HOME=/absolute/path/to/graalvm-jdk-25.0.4+7.1
-export JAVA_HOME="$GRAALVM_HOME"
-export PATH="$JAVA_HOME/bin:$PATH"
-./gradlew :app:verifyPgoToolchain -PenablePgo
-```
-
-The PGO preflight verifies this exact Oracle SDK and requires Gradle to use the
-same installation. Training requires Python 3.10+ as `python3` on a POSIX
-system with a pseudo-terminal.
+`-PenablePgo` and use the same pinned SDK and `verifyNativeToolchain` preflight
+as ordinary native builds. [GraalVM PGO](https://www.graalvm.org/jdk25/reference-manual/native-image/optimizations-and-performance/PGO/)
+uses an instrumented training run to guide compilation. Training requires
+Python 3.10+ as `python3` on a POSIX system with a pseudo-terminal.
 
 Build the instrumented binary, train, and build the optimized glibc binary:
 
@@ -332,16 +313,15 @@ Java/Python/YAML/Rust editing and mouse drag. Each session must exit normally
 with code zero; saved bytes are verified in the editing sessions. Fresh
 profiles are merged using the selected Oracle SDK. Training is also guarded
 by the standalone `:app:pgoHarnessTest`.
-PGO compilation uses at most two worker threads and a 3 GiB compiler heap.
 Each training editor and the profile-merging utility have a 512 MiB heap cap;
 these limits do not change the resulting binary's runtime defaults.
 
 The default merged profile is `.local/pgo/<target>/profile.iprof`, with an
 adjacent `profile.iprof.json` receipt. `-PpgoProfile=<path>` selects another
 root-relative or absolute path for both training and the optimized build.
-The receipt binds the profile to its classpath, SDK, `nativeMarch`, target and
-training-harness SHA-256. The optimized build rejects missing, empty or
-mismatched profiles and receipts; retrain after changing these inputs.
+The receipt binds the profile to its classpath, SDK, compiler arguments,
+`nativeMarch`, target and training-harness SHA-256. The optimized build rejects
+missing, empty or mismatched profiles and receipts; retrain after changing these inputs.
 The default files are outside Gradle build directories, survive `clean` and
 are ignored by Git. For a custom path, choose an ignored location outside
 build directories. Do not commit profiles or receipts or copy a profile
@@ -354,9 +334,9 @@ apps/tuink/launcher/build/native/nativePgoOptimizedCompile/tuink-pgo
 apps/tuink/launcher/build/native/nativeMuslPgoOptimizedCompile/tuink-musl-pgo
 ```
 
-The regular archives, Debian package and release task package Community
-binaries. Switch both environment variables back to the Community installation
-before running those tasks.
+The regular archives, Debian package and release task package the ordinary
+Oracle O3 binaries. PGO profiles and optimized binaries remain separate local
+outputs.
 
 Evaluate PGO on representative editing and mouse workloads against the ordinary
 binary from the same SDK. Measure CPU, wall time, memory and frame latency

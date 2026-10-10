@@ -1,11 +1,13 @@
 # Перенос TUInk на другой компьютер, сборка и запуск
 
-Для JVM-сборки используется **Java 25** через Gradle Toolchains.
-Gradle можно запустить на совместимом JDK, например 17, 21 или 25.
-Для сборки нативного исполняемого файла закреплён
-**GraalVM Community 25.2.4 с Java 25**. Этот дистрибутив подходит для
-обычной разработки и релиза; `JAVA_HOME` и `GRAALVM_HOME` указывают на одну
-установку. Для необязательной PGO-сборки используется отдельный Oracle SDK.
+Для JVM-разработки используется **Java 25** любого поставщика, без требования
+к patch-версии. Gradle можно запустить на совместимом JDK, например 17, 21
+или 25; JDK 25 для компиляции, тестов и запуска приложения Gradle найдёт или
+скачает автоматически. Готовый JVM ZIP работает на Java 25 или новее.
+
+Для нативного релиза и необязательной PGO-сборки закреплён **Oracle GraalVM
+25.0.4+7.1 с Java 25**; в этом случае `JAVA_HOME` и `GRAALVM_HOME` указывают
+на одну установку.
 
 Основной пример ниже рассчитан на Linux, команды установки пакетов — на
 Ubuntu/Debian. Все команды `./gradlew` выполняются из корня проекта.
@@ -14,25 +16,29 @@ Ubuntu/Debian. Все команды `./gradlew` выполняются из к�
 
 | Задача | Требование |
 |---|---|
-| Сборка исходников, тесты, запуск через Gradle | Java 25 toolchain; Gradle может работать на совместимом JDK 17, 21 или 25 |
-| Обычная native-image-сборка и полный релиз | GraalVM **Community 25.2.4 / Java 25**; `JAVA_HOME` и `GRAALVM_HOME` указывают на его каталог |
-| Необязательная PGO-сборка | Oracle GraalVM **25.0.4+7.1 / Java 25**; оба пути указывают на этот Oracle SDK |
+| Разработка, тесты, native-image, релиз и PGO | Oracle GraalVM **25.0.4+7.1 / Java 25**; `JAVA_HOME` и `GRAALVM_HOME` указывают на его каталог |
 | Запуск готового JVM ZIP | Java 25 или новее; Gradle и GraalVM не нужны |
 | Запуск готового нативного файла | Java не нужна; должны подходить ОС, архитектура и системные библиотеки |
 
 Для всех модулей выбран Java toolchain 25; см. [руководство по сборке](building.md).
-Поставщик JVM для обычной сборки не закреплён: подходят, например, OpenJDK 25
-и Eclipse Temurin 25. В CI используется Temurin 25. Устанавливайте **JDK**,
-включающий `javac`, а не только JRE.
+Закреплённый Oracle SDK включает `javac` и `native-image`; он устанавливается
+одним общим шагом в CI и release workflow.
 
 В проекте закреплён wrapper **Gradle 9.8.1**, поддерживающий запуск на Java 25.
 Системный Gradle устанавливать не требуется. См.
 [официальную таблицу совместимости Gradle](https://docs.gradle.org/current/userguide/compatibility.html#java_runtime).
 
-Рабочая схема для нативной сборки и полного релиза:
+Рабочая схема для JVM-разработки:
 
 ```text
-JAVA_HOME = GRAALVM_HOME -> GraalVM Community 25.2.4 / Java 25
+JAVA_HOME -> совместимый JDK для Gradle (например, 17, 21 или 25)
+Gradle Java toolchain -> JDK 25: компиляция, тесты и JVM-запуск
+```
+
+Для нативного релиза:
+
+```text
+JAVA_HOME = GRAALVM_HOME -> Oracle GraalVM 25.0.4+7.1 / Java 25
                            Gradle, компиляция, тесты, JVM-запуск и native-image
 ```
 
@@ -86,28 +92,28 @@ sudo apt update
 sudo apt install git curl ca-certificates tar unzip
 ```
 
-Скачайте именно [GraalVM Community 25.2.4 / Java 25](https://github.com/graalvm/graalvm-ce-builds/releases/tag/graal-25.2.4).
+Скачайте закреплённый Oracle GraalVM 25.0.4+7.1 / Java 25.
 Следующие команды предназначены **только для Linux x86_64** (`uname -m`
 показывает `x86_64`). Контрольная сумма закреплена также в
 [документации сборки](building.md#native-toolchain).
 
 ```bash
 mkdir -p "$HOME/.local/share/tuink-toolchains"
-curl -fL --output /tmp/tuink-graalvm-25.2.4-linux-x64.tar.gz \
-  https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.2.4/graalvm-community-jdk-25i2-25.0.4_linux-x64_bin.tar.gz
+curl -fL --output /tmp/tuink-oracle-graalvm-25.0.4-linux-x64.tar.gz \
+  https://download.oracle.com/graalvm/25/archive/graalvm-jdk-25.0.4_linux-x64_bin.tar.gz
 
 printf '%s  %s\n' \
-  3f4a89de8eaa96f2ed677f09957c7e872cd8467aad3537f8b5394c1b8c4b942e \
-  /tmp/tuink-graalvm-25.2.4-linux-x64.tar.gz \
+  76007c309f821aaf435bce63162ea0395587fc77350801c81643fe7feea37276 \
+  /tmp/tuink-oracle-graalvm-25.0.4-linux-x64.tar.gz \
   | sha256sum -c -
 ```
 
 Продолжайте только если проверка завершилась с `OK`:
 
 ```bash
-tar -xzf /tmp/tuink-graalvm-25.2.4-linux-x64.tar.gz \
+tar -xzf /tmp/tuink-oracle-graalvm-25.0.4-linux-x64.tar.gz \
   -C "$HOME/.local/share/tuink-toolchains"
-export GRAALVM_HOME="$HOME/.local/share/tuink-toolchains/graalvm-community-25.2.4+7.1"
+export GRAALVM_HOME="$HOME/.local/share/tuink-toolchains/graalvm-jdk-25.0.4+7.1"
 export JAVA_HOME="$GRAALVM_HOME"
 export PATH="$JAVA_HOME/bin:$PATH"
 
@@ -117,7 +123,7 @@ native-image --version
 ./gradlew --version
 ```
 
-Ожидаются Java/javac **25**, GraalVM Community **25.2.4** и Gradle **9.8.1**
+Ожидаются Java/javac **25**, Oracle GraalVM **25.0.4+7.1** и Gradle **9.8.1**
 с JVM **25**. Если после копирования `./gradlew` сообщает `Permission denied`,
 выполните `chmod +x gradlew`.
 
@@ -199,7 +205,7 @@ sudo apt install build-essential zlib1g-dev
 [требования Native Image](https://www.graalvm.org/latest/reference-manual/native-image/#prerequisites).
 
 `JAVA_HOME` и `GRAALVM_HOME` должны указывать на один и тот же абсолютный путь
-к закреплённому GraalVM Community. Проверка `verifyNativeToolchain` требует
+к закреплённому Oracle GraalVM. Проверка `verifyNativeToolchain` требует
 точного совпадения поставщика и версий; наличие команды `native-image` само
 по себе недостаточно.
 
@@ -243,31 +249,12 @@ zlib (`zlib1g` на Ubuntu/Debian). Сборка на другой систем�
 
 ### Необязательная PGO-сборка
 
-PGO — экспериментальный вариант, включаемый через `-PenablePgo`. Для него
-нужен **Oracle GraalVM 25.0.4+7.1 с Java 25**: Community не поддерживает
-PGO. Версия языка и среды выполнения проекта остаётся Java 25. Потребуются
-те же C-зависимости и Python 3.10+ в POSIX-окружении с псевдотерминалом.
-
-Установите Oracle SDK отдельно. Команды относятся только к Linux x86_64:
+PGO — экспериментальный вариант, включаемый через `-PenablePgo`. Используйте
+ту же установку Oracle SDK из шага 3 и те же C-зависимости. Дополнительно нужен
+Python 3.10+ в POSIX-окружении с псевдотерминалом:
 
 ```bash
-curl -fL --output /tmp/tuink-oracle-graalvm-25.0.4-linux-x64.tar.gz \
-  https://download.oracle.com/graalvm/25/archive/graalvm-jdk-25.0.4_linux-x64_bin.tar.gz
-printf '%s  %s\n' \
-  76007c309f821aaf435bce63162ea0395587fc77350801c81643fe7feea37276 \
-  /tmp/tuink-oracle-graalvm-25.0.4-linux-x64.tar.gz \
-  | sha256sum -c -
-```
-
-После успешной проверки (`OK`):
-
-```bash
-tar -xzf /tmp/tuink-oracle-graalvm-25.0.4-linux-x64.tar.gz \
-  -C "$HOME/.local/share/tuink-toolchains"
-export GRAALVM_HOME="$HOME/.local/share/tuink-toolchains/graalvm-jdk-25.0.4+7.1"
-export JAVA_HOME="$GRAALVM_HOME"
-export PATH="$JAVA_HOME/bin:$PATH"
-./gradlew :app:verifyPgoToolchain -PenablePgo
+./gradlew :app:verifyNativeToolchain
 ./gradlew :app:nativeProfileInstrument -PenablePgo
 ./gradlew :app:nativeProfileTrain -PenablePgo
 ./gradlew :app:nativeProfileBuild -PenablePgo
@@ -278,8 +265,9 @@ export PATH="$JAVA_HOME/bin:$PATH"
 Обучение запускает пять проверяемых сессий: редактирование Java/Python/YAML/Rust
 и перетаскивание мышью. Профиль и его проверяемая квитанция сохраняются в
 `.local/pgo/glibc/profile.iprof` и `profile.iprof.json`; они переживают `clean`
-и не попадают в Git. Изменение classpath, SDK, `nativeMarch`, цели или harness
-требует нового обучения. Другой путь задаётся через `-PpgoProfile=<путь>`;
+и не попадают в Git. Изменение classpath, SDK, аргументов компилятора,
+`nativeMarch`, цели или harness требует нового обучения.
+Другой путь задаётся через `-PpgoProfile=<путь>`;
 выбирайте игнорируемый Git каталог вне `build/`, чтобы квитанция не попала
 в коммит, а `clean` не удалил профиль.
 
@@ -293,14 +281,9 @@ PGO-командам и установите musl toolchain; результат 
 выполнения, память и задержки отрисовки отдельно. Подробности проверки профилей:
 [PGO в building.md](building.md#pgo).
 
-Обычные архивы, DEB и полный релиз собираются с Community. Перед возвращением
-к ним переключите оба пути обратно:
-
-```bash
-export GRAALVM_HOME="$HOME/.local/share/tuink-toolchains/graalvm-community-25.2.4+7.1"
-export JAVA_HOME="$GRAALVM_HOME"
-export PATH="$JAVA_HOME/bin:$PATH"
-```
+Обычные архивы, DEB и полный релиз используют тот же Oracle SDK и обычный
+бинарник с `-O3`. PGO-профили и оптимизированные бинарники остаются отдельными
+локальными результатами сборки.
 
 ## 7. DEB и полный релиз
 
@@ -335,7 +318,8 @@ GraalVM и требует всего нативного окружения; дл
 
 ## 8. Windows, macOS и личные настройки
 
-Для JVM-сборки на Windows установите JDK 25 и используйте PowerShell:
+Для JVM-сборки на Windows установите JDK 25 любого поставщика
+и используйте PowerShell:
 
 ```powershell
 $env:JAVA_HOME = 'C:\path\to\jdk-25'
@@ -346,7 +330,7 @@ $env:Path = "$env:JAVA_HOME\bin;$env:Path"
 ```
 
 Замените путь на фактический. На macOS используются `./gradlew` и Unix-скрипт
-`bin/tuink`; `JAVA_HOME` должен указывать на установленный JDK 25. Текущий CI
+`bin/tuink`; для JVM-сборки подойдёт JDK 25 любого поставщика. Текущий CI
 проверяет Linux, поэтому работу терминала на Windows/macOS проверяйте отдельно.
 Описанная нативная сборка и DEB-пакет рассчитаны на Linux; на Windows этот путь
 можно выполнять внутри Linux-окружения WSL.
@@ -363,11 +347,11 @@ TUInk, предварительно сохранив имеющийся файл
 
 | Симптом | Что проверить |
 |---|---|
-| Gradle падает после переключения Java; ошибка `Unsupported class file major version` | Укажите JDK 25 в `JAVA_HOME` и Gradle JVM в IDE; проверьте `./gradlew --version` и использование wrapper 9.8.1 |
-| Gradle не находит Java toolchain 25 | Установите полный JDK 25; выполните `./gradlew :app:javaToolchains`. Для нестандартного пути можно передать `-Porg.gradle.java.installations.paths=/absolute/path/to/jdk-25` |
+| Gradle падает после переключения Java; ошибка `Unsupported class file major version` | Проверьте использование wrapper 9.8.1 и совместимого JDK, например 17, 21 или 25, в `JAVA_HOME` и Gradle JVM в IDE; выполните `./gradlew --version` |
+| Gradle не находит Java toolchain 25 | Проверьте доступ к Foojay для автоматического скачивания или установите полный JDK 25; выполните `./gradlew :app:javaToolchains`. Для нестандартного пути можно передать `-Porg.gradle.java.installations.paths=/absolute/path/to/jdk-25` |
 | `java -version` показывает 25, а Gradle использует другую JVM | Проверьте `JAVA_HOME`, `Gradle JVM` в IDE и `org.gradle.java.home` в `~/.gradle/gradle.properties`; при необходимости после исправления выполните `./gradlew --stop` |
 | `GRAALVM_HOME must explicitly select...` | Задайте абсолютный путь к нужному GraalVM и выполните `./gradlew :app:verifyNativeToolchain` |
-| `Unsupported native toolchain` | Сверьте Community/25.2.4/25.0.4 и файл `$GRAALVM_HOME/release`; другой выпуск не пройдёт проверку |
+| `Unsupported native toolchain` | Сверьте Oracle GraalVM 25.0.4+7.1 / Java 25 и файл `$GRAALVM_HOME/release`; другой выпуск не пройдёт проверку |
 | При native-image не найдены C-компилятор или zlib | Установите `build-essential zlib1g-dev` на Ubuntu/Debian |
 | Не скачиваются Gradle, плагины или зависимости | Проверьте доступ к сети и прокси; `--offline` работает только с заранее заполненным кэшем |
 | Нативный файл сообщает `GLIBC_* not found` или `Exec format error` | Проверьте библиотеки, ОС и архитектуру целевой машины; используйте подходящую нативную сборку или JVM ZIP |

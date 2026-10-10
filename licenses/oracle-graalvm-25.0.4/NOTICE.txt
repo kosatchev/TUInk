@@ -1,0 +1,7 @@
+End of support for Oracle GraalVM in Java SE products.
+
+Oracle GraalVM for JDK 24 was the final version of Oracle GraalVM licensed and supported as part of Oracle Java SE products.  Any entitled customers seeking patches or updates to previously released Oracle GraalVM versions should download them through MOS [1].  More information is available here [2].  Customers seeking additional information or assistance should contact MOS [1].
+
+[1] https://support.oracle.com/
+[2] https://blogs.oracle.com/java/post/detaching-graalvm-from-the-java-ecosystem-train
+

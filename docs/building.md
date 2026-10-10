@@ -75,6 +75,12 @@ Build and test all modules:
 ./gradlew clean check build
 ```
 
+To verify the JVM distribution along with tests:
+
+```bash
+./gradlew --console=plain clean check :app:distZip
+```
+
 Run only a specific module's tests when iterating:
 
 ```bash
@@ -86,12 +92,6 @@ Run only a specific module's tests when iterating:
 ./gradlew :editor-session:test
 ./gradlew :render:test
 ./gradlew :tui:test
-```
-
-Verify the JVM build and distribution:
-
-```bash
-./gradlew --console=plain clean check :app:distZip
 ```
 
 Run the canonical application entrypoint:
@@ -339,9 +339,9 @@ Oracle O3 binaries. PGO profiles and optimized binaries remain separate local
 outputs.
 
 Evaluate PGO on representative editing and mouse workloads against the ordinary
-binary from the same SDK. Measure CPU, wall time, memory and frame latency
-separately; a profile does not guarantee an improvement across all operations.
-See [benchmark guidance](../verification/performance/README.md#optional-pgo-training).
+Oracle O3 binary from the same SDK. Measure CPU, wall time, memory and frame
+latency separately; a profile does not guarantee an improvement across all
+operations. See [benchmark guidance](../verification/performance/README.md#optional-pgo-training).
 
 ## Output layout
 

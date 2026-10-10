@@ -43,5 +43,5 @@ in-process loading must never be documented as a sandbox.
 - Ordering, overload, wakeup, fairness, and shutdown have testable contracts.
 - Provider APIs require a deadline and cancellation token, but implementations
   must tolerate non-cooperative tasks surviving until process termination.
-- The plugin-host failure contract provides editor-state and session-thread isolation for
+- The plugin-host failure contract means editor-state and session-thread isolation for
   ordinary timeout/exception/stale-result cases, not process containment.

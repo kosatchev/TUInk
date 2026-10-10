@@ -241,6 +241,7 @@ outside those reusable modules.
 - [Перенос на другой компьютер, сборка и запуск (русский)](docs/setup-ru.md)
 - [Build, test, and native targets](docs/building.md)
 - [Release archives and Debian packaging](docs/packaging.md)
+- [Architecture roadmap](docs/architecture-roadmap.md)
 - [Architecture decisions](docs/adr/)
 - [Compatibility policy](docs/compatibility.md)
 - [Render-loop profiling](docs/profiling.md)

@@ -95,8 +95,8 @@ summary records binary, fixture, and settings SHA-256 values with host metadata.
 
 When completing an interface-related change reachable from a benchmarked
 application path, run `perfCheck` before and after on the same host and
-toolchain, and keep the accepted results in ignored local build output; see
-[benchmark guidance](../verification/performance/README.md). Treat a repeated
+toolchain. Keep the paired results in the local benchmark output directory;
+see [benchmark methodology](../verification/performance/README.md). Treat a repeated
 10–15% regression or increasing queue-drain time as a reason to investigate;
 do not gate arbitrary developer machines on small timing differences. A new
 standalone toolkit primitive with no runtime consumer is covered structurally

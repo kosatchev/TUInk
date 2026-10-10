@@ -11,6 +11,7 @@ dependencies {
 application {
     applicationName = 'tuink'
     mainClass = 'dev.tuink.app.App'
+    applicationDefaultJvmArgs = ['--enable-native-access=ALL-UNNAMED']
 }
 
 tasks.named('run', JavaExec) {

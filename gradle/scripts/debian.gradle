@@ -177,10 +177,26 @@ def stripDebBinary = tasks.register('stripDebBinary', Exec) {
     }
 }
 
+def verifyDebNativeDependencies = tasks.register('verifyDebNativeDependencies', Exec) {
+    group = 'verification'
+    description = 'Verify that Debian dependencies cover the staged native ELF requirements.'
+    dependsOn(stripDebBinary)
+    def control = generatedDebianDir.map { it.file('control') }
+    def checker = rootProject.file('apps/tuink/packaging/debian/verify_native_dependencies.py')
+    inputs.file(stagedDebBinary)
+    inputs.file(control)
+    inputs.file(checker)
+    commandLine(
+        'python3', '-B', checker.absolutePath,
+        '--binary', stagedDebBinary.get().asFile.absolutePath,
+        '--control', control.get().asFile.absolutePath
+    )
+}
+
 def nativeDeb = tasks.register('nativeDeb', Exec) {
     group = 'distribution'
     description = 'Build a Debian package from the glibc native binary.'
-    dependsOn(stripDebBinary)
+    dependsOn(verifyDebNativeDependencies)
     inputs.dir(debStageDir)
     outputs.file(debOutput)
     environment('SOURCE_DATE_EPOCH', releaseEpochSeconds.get())

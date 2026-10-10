@@ -145,7 +145,9 @@ Run the installed layout:
 ```
 
 The JVM distribution requires Java 25 or newer on the target machine. It includes
-`README.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, and `samples/`.
+`README.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `SECURITY.md`, available
+demo images and `samples/`. Developer documentation stays in the source tree;
+packaged links use the build's immutable source revision online.
 
 Gradle also creates module JARs as internal build products. They are not
 standalone fat/executable JAR distributions and do not carry the complete

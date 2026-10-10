@@ -50,6 +50,41 @@ Only static musl archives include the musl and zlib notice directories. The
 glibc archive and Debian package use host libraries for libc and zlib and omit
 those two bundles. PGO does not change the notice selection.
 
+## Publishing on GitHub
+
+Tagged snapshots that include `.github/workflows/release.yml` can publish the
+complete release through GitHub Actions. The workflow first appears in
+`v0.13.1`; earlier tags have no automated publisher. Each tag must match
+`version` in `gradle.properties` and include `docs/releases/<version>.md`.
+Pushing such a tag starts its own release workflow.
+
+To publish an existing tag that has no GitHub release yet, select that tag as
+the workflow ref:
+
+```bash
+gh workflow run release.yml --ref v0.13.1
+```
+
+The equivalent REST request through GitHub CLI is:
+
+```bash
+gh api --method POST repos/kosatchev/tuink/actions/workflows/release.yml/dispatches \
+  -f ref=v0.13.1
+```
+
+Both commands run the workflow stored at the release tag. There is no separate
+`tag` input. Running from `main` or another branch is rejected before checkout;
+a tag moved after the run started is rejected before building. This keeps each
+release's build steps and verification gates together with its source version.
+GitHub also requires the workflow to be present on the repository's default
+branch before it accepts manual dispatches. See the
+[GitHub CLI ref option](https://cli.github.com/manual/gh_workflow_run) and
+[workflow dispatch API](https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event).
+
+Publication refuses to replace an existing release, including a draft. It
+verifies every uploaded artifact before making the draft public; the highest
+published stable TUInk version remains Latest when older tags are published.
+
 ## Native archives
 
 Build glibc, musl, or both:

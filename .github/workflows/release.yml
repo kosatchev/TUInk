@@ -1,0 +1,305 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+  queue: max
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    outputs:
+      tag: ${{ steps.metadata.outputs.tag }}
+      version: ${{ steps.metadata.outputs.version }}
+      commit: ${{ steps.metadata.outputs.commit }}
+      manifest-sha256: ${{ steps.assets.outputs.manifest-sha256 }}
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+
+    steps:
+      - name: Require a release tag from this workflow version
+        run: |
+          set -euo pipefail
+          release_ref="${GITHUB_REF:-}"
+          if [[ ! "$release_ref" =~ ^refs/tags/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] \
+            || [[ "${GITHUB_WORKFLOW_REF:-}" != *"@$release_ref" ]]; then
+            echo '::error::Run Release from the release tag: gh workflow run release.yml --ref v0.13.1' >&2
+            exit 1
+          fi
+
+      - name: Check out the release tag
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify tag, version, commit, and release notes
+        id: metadata
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          version="$(sed -n 's/^version=//p' gradle.properties)"
+          [[ "$RELEASE_TAG" == "v$version" ]]
+          commit="$(git rev-parse HEAD)"
+          [[ "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" == "$commit" ]]
+          [[ "$(git rev-parse "$GITHUB_SHA^{commit}")" == "$commit" ]]
+          test -s "docs/releases/$version.md"
+          test -z "$(git status --porcelain)"
+          printf 'tag=%s\nversion=%s\ncommit=%s\n' "$RELEASE_TAG" "$version" "$commit" >> "$GITHUB_OUTPUT"
+          printf 'SOURCE_DATE_EPOCH=%s\n' "$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"
+
+      - name: Validate official Gradle wrapper
+        uses: gradle/actions/wrapper-validation@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+
+      - name: Validate Gradle wrapper JAR
+        run: sha256sum --check gradle/wrapper/gradle-wrapper.jar.sha256
+
+      - name: Install native and packaging prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes \
+            build-essential zlib1g-dev binutils gzip unzip curl python3 lintian acl
+
+      - name: Set up the pinned Oracle GraalVM SDK
+        uses: ./.github/actions/setup-graalvm
+
+      - name: Build pinned musl and static zlib
+        # Source recipe: https://www.graalvm.org/jdk25/reference-manual/native-image/guides/build-static-executables/
+        # musl SHA-256 (upstream PGP signature verified by Buildroot):
+        # https://gitlab.com/buildroot.org/buildroot/-/raw/2026.02.1/package/musl/musl.hash
+        # zlib SHA-256: https://zlib.net/
+        run: |
+          set -euo pipefail
+          toolchains="$RUNNER_TEMP/tuink-toolchains"
+          musl_home="$toolchains/musl"
+          cd "$toolchains"
+          curl --fail --location --retry 3 --output musl-1.2.6.tar.gz \
+            https://musl.libc.org/releases/musl-1.2.6.tar.gz
+          curl --fail --location --retry 3 --output zlib-1.3.2.tar.gz \
+            https://zlib.net/fossils/zlib-1.3.2.tar.gz
+          printf '%s  %s\n' \
+            d585fd3b613c66151fc3249e8ed44f77020cb5e6c1e635a616d3f9f82460512a musl-1.2.6.tar.gz \
+            bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16 zlib-1.3.2.tar.gz \
+            | sha256sum --check --strict -
+          tar -xzf musl-1.2.6.tar.gz
+          cd musl-1.2.6
+          ./configure --prefix="$musl_home" --disable-shared
+          make -j2
+          make install
+          ln -s musl-gcc "$musl_home/bin/x86_64-linux-musl-gcc"
+          cd "$toolchains"
+          tar -xzf zlib-1.3.2.tar.gz
+          cd zlib-1.3.2
+          CC="$musl_home/bin/musl-gcc -static" ./configure --prefix="$musl_home" --static
+          make -j2
+          make check
+          make install
+          test -s "$musl_home/lib/libc.a"
+          test -s "$musl_home/lib/libz.a"
+          printf '%s\n' "$musl_home/bin" >> "$GITHUB_PATH"
+
+      - name: Validate archive scripts and installation behavior
+        run: |
+          bash -n apps/tuink/packaging/archive/install.sh apps/tuink/packaging/archive/uninstall.sh
+          python3 -B apps/tuink/packaging/archive/test_archive_install.py
+          python3 -B apps/tuink/packaging/debian/test_native_dependencies.py
+          python3 -B .github/scripts/test_publish_release.py
+          python3 -B .github/scripts/test_release_dispatch.py
+
+      - name: Verify native toolchain and build the complete release
+        run: |
+          ./gradlew --no-daemon --no-parallel --max-workers=1 \
+            --stacktrace --warning-mode=fail \
+            '-Dorg.gradle.jvmargs=-Xmx768m -XX:MaxMetaspaceSize=384m' \
+            :app:verifyNativeToolchain
+          ./gradlew --no-daemon --no-parallel --max-workers=1 \
+            --stacktrace --warning-mode=fail \
+            '-Dorg.gradle.jvmargs=-Xmx768m -XX:MaxMetaspaceSize=384m' \
+            clean :app:release -Ptarget=all
+
+      - name: Verify the complete asset set and checksums
+        id: assets
+        env:
+          RELEASE_VERSION: ${{ steps.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          python3 - "$RELEASE_VERSION" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          version = sys.argv[1]
+          directory = pathlib.Path("build/releases")
+          artifacts = {
+              f"tuink-{version}.zip",
+              f"tuink-{version}-linux-x86_64.tar.gz",
+              f"tuink-{version}-linux-x86_64-musl.tar.gz",
+              f"tuink_{version}_amd64.deb",
+          }
+          actual = {entry.name for entry in directory.iterdir()}
+          if actual != artifacts | {"SHA256SUMS"}:
+              raise SystemExit(f"Unexpected release assets: {sorted(actual)}")
+          rows = (directory / "SHA256SUMS").read_text().splitlines()
+          matches = [re.fullmatch(r"[0-9a-f]{64}  (.+)", row) for row in rows]
+          if len(matches) != 4 or not all(matches):
+              raise SystemExit("Invalid checksum manifest")
+          if {match.group(1) for match in matches} != artifacts:
+              raise SystemExit("Checksum manifest does not cover the four release artifacts")
+          PY
+          cd build/releases
+          sha256sum --check --strict SHA256SUMS
+          printf 'manifest-sha256=%s\n' "$(sha256sum SHA256SUMS | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Inspect and lint the Debian package
+        env:
+          RELEASE_VERSION: ${{ steps.metadata.outputs.version }}
+        run: |
+          package="build/releases/tuink_${RELEASE_VERSION}_amd64.deb"
+          dpkg-deb --info "$package"
+          dpkg-deb --contents "$package"
+          [[ "$(dpkg-deb --field "$package" Version)" == "$RELEASE_VERSION" ]]
+          [[ "$(dpkg-deb --field "$package" Architecture)" == amd64 ]]
+          lintian --fail-on error "$package"
+
+      - name: Smoke test packaged launchers and the static musl editor
+        env:
+          RELEASE_VERSION: ${{ steps.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          smoke="$RUNNER_TEMP/tuink-release-smoke"
+          mkdir -p "$smoke"
+          unzip -q "build/releases/tuink-${RELEASE_VERSION}.zip" -d "$smoke"
+          tar -xzf "build/releases/tuink-${RELEASE_VERSION}-linux-x86_64.tar.gz" -C "$smoke"
+          tar -xzf "build/releases/tuink-${RELEASE_VERSION}-linux-x86_64-musl.tar.gz" -C "$smoke"
+          dpkg-deb --extract "build/releases/tuink_${RELEASE_VERSION}_amd64.deb" "$smoke/debian"
+          glibc_binary="$smoke/tuink-${RELEASE_VERSION}-linux-x86_64/tuink"
+          musl_binary="$smoke/tuink-${RELEASE_VERSION}-linux-x86_64-musl/tuink"
+          "$smoke/tuink-${RELEASE_VERSION}/bin/tuink" --help > "$smoke/jvm-help.txt"
+          "$glibc_binary" --help > "$smoke/glibc-help.txt"
+          "$musl_binary" --help > "$smoke/musl-help.txt"
+          "$smoke/debian/usr/bin/tuink" --help > "$smoke/debian-help.txt"
+          for output in "$smoke/"*-help.txt; do
+            grep -F 'Usage: tuink' "$output"
+          done
+          readelf --program-headers "$musl_binary" > "$smoke/musl-program-headers.txt"
+          readelf --dynamic "$musl_binary" > "$smoke/musl-dynamic.txt"
+          if grep -q INTERP "$smoke/musl-program-headers.txt" \
+            || grep -q '(NEEDED)' "$smoke/musl-dynamic.txt"; then
+            echo 'The musl release must be fully static.' >&2
+            exit 1
+          fi
+          python3 -B verification/performance/render_benchmark.py \
+            --binary "$musl_binary" \
+            --output-root build/performance/musl \
+            --label "${RELEASE_VERSION}-musl-smoke" \
+            --frames 60 --repeats 1 \
+            --scenarios down,shift-down,mouse-drag
+
+      - name: Preserve native smoke results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-smoke-${{ steps.metadata.outputs.tag }}
+          path: build/performance/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Transfer verified release assets to the publishing job
+        id: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-assets-${{ steps.metadata.outputs.tag }}
+          path: build/releases/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  publish:
+    needs: build
+    # Serialize the release listing and Latest update across all tags.
+    # Keep every completed build queued when several tags are backfilled.
+    concurrency:
+      group: release-publication
+      cancel-in-progress: false
+      queue: max
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out the verified release commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.build.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download this build's verified assets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact-id }}
+          path: build/releases
+          merge-multiple: true
+
+      - name: Create, verify, and publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.build.outputs.commit }}
+          MANIFEST_SHA256: ${{ needs.build.outputs.manifest-sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" == "v$RELEASE_VERSION" ]]
+          [[ "$(git rev-parse HEAD)" == "$RELEASE_COMMIT" ]]
+          [[ "$(sed -n 's/^version=//p' gradle.properties)" == "$RELEASE_VERSION" ]]
+          git fetch --no-tags origin "refs/tags/$RELEASE_TAG"
+          [[ "$(git rev-parse 'FETCH_HEAD^{commit}')" == "$RELEASE_COMMIT" ]]
+          printf '%s  %s\n' "$MANIFEST_SHA256" build/releases/SHA256SUMS | sha256sum --check --strict -
+          (cd build/releases && sha256sum --check --strict SHA256SUMS)
+          gh api --paginate --slurp "repos/$GH_REPO/releases?per_page=100" > "$RUNNER_TEMP/existing-releases.json"
+          existing="$(jq --arg tag "$RELEASE_TAG" '[.[][] | select(.tag_name == $tag)] | length' "$RUNNER_TEMP/existing-releases.json")"
+          if [[ "$existing" != 0 ]]; then
+            echo "Refusing to overwrite the existing release for $RELEASE_TAG (including a draft)." >&2
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" --repo "$GH_REPO" --verify-tag \
+            --target "$RELEASE_COMMIT" --draft \
+            --title "TUInk $RELEASE_TAG" --notes-file "docs/releases/$RELEASE_VERSION.md"
+          gh release upload "$RELEASE_TAG" build/releases/* --repo "$GH_REPO"
+          gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json assets,isDraft,tagName > "$RUNNER_TEMP/release.json"
+          jq --exit-status --arg tag "$RELEASE_TAG" --arg version "$RELEASE_VERSION" '
+            .isDraft == true and .tagName == $tag and
+            ([.assets[].name] | sort) == ([
+              "SHA256SUMS",
+              "tuink-" + $version + ".zip",
+              "tuink-" + $version + "-linux-x86_64.tar.gz",
+              "tuink-" + $version + "-linux-x86_64-musl.tar.gz",
+              "tuink_" + $version + "_amd64.deb"
+            ] | sort)
+          ' "$RUNNER_TEMP/release.json"
+          downloaded="$RUNNER_TEMP/tuink-published-assets"
+          gh release download "$RELEASE_TAG" --repo "$GH_REPO" --dir "$downloaded"
+          printf '%s  %s\n' "$MANIFEST_SHA256" "$downloaded/SHA256SUMS" | sha256sum --check --strict -
+          (cd "$downloaded" && sha256sum --check --strict SHA256SUMS)
+          git fetch --no-tags origin "refs/tags/$RELEASE_TAG"
+          [[ "$(git rev-parse 'FETCH_HEAD^{commit}')" == "$RELEASE_COMMIT" ]]
+          python3 -B .github/scripts/publish_release.py --repo "$GH_REPO" --tag "$RELEASE_TAG"
+          gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json isDraft,url \
+            --jq 'if .isDraft then error("Release is still a draft") else .url end'

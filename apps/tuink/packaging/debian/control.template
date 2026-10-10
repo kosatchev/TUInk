@@ -4,7 +4,7 @@ Section: editors
 Priority: optional
 Architecture: @ARCHITECTURE@
 Maintainer: Dmitry Kosatchev <kosatchev@yandex.com>
-Depends: libc6 (>= 2.34), zlib1g (>= 1:1.1.4)
+Depends: libc6 (>= 2.34), zlib1g (>= 1:1.2.2), acl
 Description: terminal text editor
  TUInk is a terminal text editor with syntax highlighting, search,
  multiple tabs, and gutter markers for changes since opening or saving a file.

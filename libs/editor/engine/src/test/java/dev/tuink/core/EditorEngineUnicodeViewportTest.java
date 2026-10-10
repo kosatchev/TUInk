@@ -42,6 +42,28 @@ class EditorEngineUnicodeViewportTest {
     }
 
     @Test
+    void navigationReusesOnlyTheCurrentImmutableTextAcrossModelEditsAndUndo() {
+        Fixture fixture = fixture("e\u0301x");
+        fixture.engine().moveRight();
+        assertEquals(new Position(0, 2), fixture.state().getCursor());
+
+        // Same line length, different grapheme boundaries, without recreating the engine.
+        fixture.model().replaceLines(List.of("яab"));
+        fixture.engine().moveHome();
+        fixture.engine().moveRight();
+        assertEquals(new Position(0, 1), fixture.state().getCursor());
+
+        fixture.engine().insertInput("\u0301");
+        fixture.engine().moveHome();
+        fixture.engine().moveRight();
+        assertEquals(new Position(0, 2), fixture.state().getCursor());
+        fixture.engine().undo();
+        fixture.engine().moveHome();
+        fixture.engine().moveRight();
+        assertEquals(new Position(0, 1), fixture.state().getCursor());
+    }
+
+    @Test
     void wrapAwareVisibilityScrollsToCursorSegmentWithinOneLine() {
         Fixture fixture = fixture("abcdefghi");
         fixture.state().setCursor(new Position(0, 9));
@@ -64,9 +86,9 @@ class EditorEngineUnicodeViewportTest {
 
         fixture.engine().ensureCursorVisible(1, 4, true, false);
 
-        assertEquals(List.of(0, 1), fixture.engine().textLayout().wrapStarts(0, 4, false, 4));
+        assertEquals(List.of(0, 1, 4), fixture.engine().textLayout().wrapStarts(0, 4, false, 4));
         assertEquals(0, fixture.state().getTopLine());
-        assertEquals(1, fixture.state().getTopWrapSegment());
+        assertEquals(2, fixture.state().getTopWrapSegment());
     }
 
     @Test

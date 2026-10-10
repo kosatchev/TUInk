@@ -2,6 +2,7 @@ package dev.tuink.render;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.core.EditorTextLayout;
 import dev.tuink.core.Position;
@@ -12,6 +13,42 @@ import org.junit.jupiter.api.Test;
 
 class TerminalEditorTextLayoutTest {
     private static final int TAB_WIDTH = 4;
+
+    @Test
+    void oneLineEditUpdatesModelBackedAggregatesWithoutReadingTheWholeDocument() {
+        SimpleLineBuffer buffer = new SimpleLineBuffer();
+        buffer.setLine(0, "some text");
+        for (int line = 1; line < 10_000; line++) {
+            buffer.insertLine(line, "some text");
+        }
+        class CountingModel extends TextModel {
+            private int reads;
+
+            CountingModel() {
+                super(buffer);
+            }
+
+            @Override
+            public String getLine(int line) {
+                reads++;
+                return super.getLine(line);
+            }
+        }
+        CountingModel model = new CountingModel();
+        TerminalEditorTextLayout layout = new TerminalEditorTextLayout(model);
+        assertEquals(9, layout.maxVisualLineWidth(4));
+        assertEquals(10_000, layout.totalWrappedRows(80, false, 4));
+        model.reads = 0;
+
+        model.insertText(new Position(5_000, 0), "x".repeat(160));
+
+        assertEquals(169, layout.maxVisualLineWidth(4));
+        assertEquals(10_002, layout.totalWrappedRows(80, false, 4));
+        assertEquals(5_003, layout.wrappedRowsBefore(5_001, 80, false, 4));
+        assertEquals(5_000, layout.lineIndexFromWrappedOffset(5_002, 80, false, 4));
+        assertEquals(5_001, layout.lineIndexFromWrappedOffset(5_003, 80, false, 4));
+        assertTrue(model.reads <= 4, "unchanged lines were read: " + model.reads);
+    }
 
     @Test
     void exposesTerminalCellMetricsThroughTheEditorLayoutPort() {
@@ -34,7 +71,7 @@ class TerminalEditorTextLayoutTest {
             layout.textOffsetAtVisualColumn(0, 2, 4, EditorTextLayout.Bias.CEIL)
         );
         assertEquals(List.of(0, 3), layout.wrapStarts(1, 4, false, 4));
-        assertEquals(3, layout.totalWrappedRows(4, false, 4));
+        assertEquals(4, layout.totalWrappedRows(4, false, 4));
         assertEquals(1, layout.lineIndexFromWrappedOffset(2, 4, false, 4));
         assertEquals(6, layout.maxVisualLineWidth(4));
         assertEquals(
@@ -70,8 +107,8 @@ class TerminalEditorTextLayoutTest {
         assertLayout(
             layout,
             2,
-            line("a\t中", 6, 0, 1, 2),
-            line("zzzz", 4, 0, 2)
+            line("a\t中", 6, 0, 1, 2, 3),
+            line("zzzz", 4, 0, 2, 4)
         );
 
         assertEquals(new Position(0, 4), model.insertChar(new Position(0, 3), 'x'));
@@ -80,7 +117,7 @@ class TerminalEditorTextLayoutTest {
             layout,
             2,
             line("a\t中x", 7, 0, 1, 2, 3),
-            line("zzzz", 4, 0, 2)
+            line("zzzz", 4, 0, 2, 4)
         );
     }
 
@@ -91,7 +128,7 @@ class TerminalEditorTextLayoutTest {
         assertLayout(
             layout,
             3,
-            line("ab中c", 5, 0, 2),
+            line("ab中c", 5, 0, 2, 4),
             line("q", 1, 0),
             line("12345", 5, 0, 3)
         );
@@ -102,7 +139,7 @@ class TerminalEditorTextLayoutTest {
             layout,
             3,
             line("ab", 2, 0),
-            line("中c", 3, 0),
+            line("中c", 3, 0, 2),
             line("q", 1, 0),
             line("12345", 5, 0, 3)
         );
@@ -165,7 +202,7 @@ class TerminalEditorTextLayoutTest {
             3,
             line("head", 4, 0, 3),
             line("a\t中", 6, 0, 1, 2),
-            line("tail中", 6, 0, 3),
+            line("tail中", 6, 0, 3, 5),
             line("z", 1, 0)
         );
 
@@ -181,7 +218,7 @@ class TerminalEditorTextLayoutTest {
             line("aX", 2, 0),
             line("中", 2, 0),
             line("YZ\t中", 6, 0, 2, 3),
-            line("tail中", 6, 0, 3),
+            line("tail中", 6, 0, 3, 5),
             line("z", 1, 0)
         );
     }
@@ -196,7 +233,7 @@ class TerminalEditorTextLayoutTest {
             line("pre中", 5, 0, 3),
             line("a\t中", 6, 0, 1, 2),
             line("BBBBB", 5, 0, 3),
-            line("tail中", 6, 0, 3),
+            line("tail中", 6, 0, 3, 5),
             line("z", 1, 0)
         );
 
@@ -208,8 +245,8 @@ class TerminalEditorTextLayoutTest {
         assertLayout(
             layout,
             3,
-            line("pBB", 3, 0),
-            line("tail中", 6, 0, 3),
+            line("pBB", 3, 0, 3),
+            line("tail中", 6, 0, 3, 5),
             line("z", 1, 0)
         );
     }

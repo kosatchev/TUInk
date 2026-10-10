@@ -17,8 +17,6 @@ import java.util.Objects;
 import org.eclipse.jgit.diff.DiffAlgorithm;
 import org.eclipse.jgit.diff.Edit;
 import org.eclipse.jgit.diff.EditList;
-import org.eclipse.jgit.diff.Sequence;
-import org.eclipse.jgit.diff.SequenceComparator;
 
 /**
  * Core editing commands and viewport management.
@@ -31,11 +29,11 @@ public class EditorEngine {
     private static final long GUTTER_DIFF_MIN_REBUILD_INTERVAL_LARGE_NANOS = 150_000_000L;
     private static final long GUTTER_DIFF_MAX_REBUILD_INTERVAL_NANOS = 350_000_000L;
     private static final int GUTTER_DIFF_DURATION_FACTOR = 2;
+    private static final long GUTTER_DIFF_MAX_WORK = 250_000L;
     private static final DiffAlgorithm GUTTER_DIFF_ALGORITHM_HISTOGRAM =
         DiffAlgorithm.getAlgorithm(DiffAlgorithm.SupportedAlgorithm.HISTOGRAM);
     private static final DiffAlgorithm GUTTER_DIFF_ALGORITHM_MYERS =
         DiffAlgorithm.getAlgorithm(DiffAlgorithm.SupportedAlgorithm.MYERS);
-    private static final LineSequenceComparator GUTTER_SEQUENCE_COMPARATOR = new LineSequenceComparator();
     private final TextModel model;
     private final EditorState state;
     private final EditorTextLayout textLayout;
@@ -46,6 +44,9 @@ public class EditorEngine {
     private long lastEditAtNanos;
     private Position lastEditCursorAfter;
     private int preferredVisualColumn = -1;
+    private GraphemeText cachedGraphemes;
+    private int preferredWrapWidth = -1;
+    private boolean preferredWrapByWords;
     private static final int H_SCROLL_MARGIN = 12;
     private int tabWidth = 4;
     private TabInsertMode tabInsertMode = TabInsertMode.AUTO;
@@ -109,7 +110,7 @@ public class EditorEngine {
      *
      * <p>Every range is checked against the same pre-edit model before any mutation.
      * Ranges use exact UTF-16 offsets, may not split surrogate pairs or overlap, and
-     * are applied from the end of the document towards the beginning. The cursor is
+     * are composed in one forward pass over the original document. The cursor is
      * moved to the end of the earliest applied replacement.</p>
      *
      * @return {@code true} when logical document content changed
@@ -135,21 +136,98 @@ public class EditorEngine {
         preferredVisualColumn = -1;
         breakCoalescing();
         applyEdit(EditKind.NONE, () -> {
-            List<TrackedEdit> tracked = new ArrayList<>(effective.size());
-            Position earliestResult = state.getCursor();
-            for (int index = effective.size() - 1; index >= 0; index--) {
-                TextReplacement replacement = effective.get(index);
-                earliestResult = applyReplaceAndTrack(
-                    tracked,
-                    replacement.start(),
-                    replacement.end(),
-                    replacement.replacement()
-                );
+            DocumentFileMetadata metadata = model.fileMetadata();
+            ReplacementBuilder builder = new ReplacementBuilder();
+            Position sourcePosition = new Position(0, 0);
+            Position earliestResult = null;
+            for (TextReplacement replacement : effective) {
+                appendOriginalRange(builder, sourcePosition, replacement.start(), metadata);
+                builder.appendReplacement(replacement.replacement(), metadata.defaultLineSeparator());
+                if (earliestResult == null) {
+                    earliestResult = builder.position();
+                }
+                sourcePosition = replacement.end();
             }
+            int lastLine = model.lineCount() - 1;
+            appendOriginalRange(
+                builder, sourcePosition, new Position(lastLine, model.getLine(lastLine).length()), metadata
+            );
+            builder.finishLine();
+            model.replaceLines(builder.lines, metadata.withLineSeparators(builder.separators));
             state.setCursor(earliestResult);
             state.clearSelection();
         });
         return true;
+    }
+
+    private void appendOriginalRange(
+        ReplacementBuilder builder,
+        Position start,
+        Position end,
+        DocumentFileMetadata metadata
+    ) {
+        int column = start.col();
+        for (int line = start.line(); line < end.line(); line++) {
+            String text = model.getLine(line);
+            builder.append(text, column, text.length());
+            builder.newline(metadata.lineSeparators().get(line));
+            column = 0;
+        }
+        builder.append(model.getLine(end.line()), column, end.col());
+    }
+
+    /** Reuses untouched line strings and copies each changed line only once. */
+    private static final class ReplacementBuilder {
+        private final List<String> lines = new ArrayList<>();
+        private final List<String> separators = new ArrayList<>();
+        private String wholeLine;
+        private StringBuilder pending;
+
+        private void append(String text, int start, int end) {
+            if (start == end) {
+                return;
+            }
+            if (pending == null && wholeLine == null && start == 0 && end == text.length()) {
+                wholeLine = text;
+                return;
+            }
+            if (pending == null) {
+                pending = new StringBuilder();
+                if (wholeLine != null) {
+                    pending.append(wholeLine);
+                    wholeLine = null;
+                }
+            }
+            pending.append(text, start, end);
+        }
+
+        private void appendReplacement(String text, String separator) {
+            int start = 0;
+            int end;
+            while ((end = text.indexOf('\n', start)) >= 0) {
+                append(text, start, end);
+                newline(separator);
+                start = end + 1;
+            }
+            append(text, start, text.length());
+        }
+
+        private Position position() {
+            return new Position(lines.size(), pending == null
+                ? wholeLine == null ? 0 : wholeLine.length()
+                : pending.length());
+        }
+
+        private void newline(String separator) {
+            finishLine();
+            separators.add(separator);
+        }
+
+        private void finishLine() {
+            lines.add(pending == null ? wholeLine == null ? "" : wholeLine : pending.toString());
+            pending = null;
+            wholeLine = null;
+        }
     }
 
     /** Moves the primary cursor through the engine-owned mutation boundary. */
@@ -202,6 +280,7 @@ public class EditorEngine {
             return;
         }
         snapshot.restore(model, state);
+        preferredVisualColumn = -1;
         undoStack.clear();
         redoStack.clear();
         breakCoalescing();
@@ -245,7 +324,11 @@ public class EditorEngine {
     }
 
     public void setTabWidth(int tabWidth) {
-        this.tabWidth = tabWidth <= 2 ? 2 : 4;
+        int nextWidth = tabWidth <= 2 ? 2 : 4;
+        if (this.tabWidth != nextWidth) {
+            preferredVisualColumn = -1;
+        }
+        this.tabWidth = nextWidth;
     }
 
     public void setTabInsertMode(TabInsertMode mode) {
@@ -306,6 +389,7 @@ public class EditorEngine {
         state.setCurrentFile(normalizedPath);
         state.setSaveDisposition(openedDisposition);
         state.setCursor(new Position(0, 0));
+        preferredVisualColumn = -1;
         state.setTopLine(0);
         state.setLeftColumn(0);
         state.setLeftVisualColumn(0);
@@ -377,10 +461,12 @@ public class EditorEngine {
         Position p = state.getCursor();
         if (p.col() > 0) {
             String line = model.getLine(p.line());
-            moveCursor(new Position(p.line(), GraphemeText.previousBoundary(line, p.col())), selecting, p);
+            moveCursor(new Position(p.line(), graphemes(line).previousBoundary(p.col())), selecting, p);
         } else if (p.line() > 0) {
             int prevLen = model.getLine(p.line() - 1).length();
             moveCursor(new Position(p.line() - 1, prevLen), selecting, p);
+        } else {
+            moveCursor(p, selecting, p);
         }
     }
 
@@ -394,9 +480,11 @@ public class EditorEngine {
         int len = model.getLine(p.line()).length();
         if (p.col() < len) {
             String line = model.getLine(p.line());
-            moveCursor(new Position(p.line(), GraphemeText.nextBoundary(line, p.col())), selecting, p);
+            moveCursor(new Position(p.line(), graphemes(line).nextBoundary(p.col())), selecting, p);
         } else if (p.line() < model.lineCount() - 1) {
             moveCursor(new Position(p.line() + 1, 0), selecting, p);
+        } else {
+            moveCursor(p, selecting, p);
         }
     }
 
@@ -407,6 +495,7 @@ public class EditorEngine {
         int line = p.line();
         int col = p.col();
         if (line == 0 && col == 0) {
+            moveCursor(p, false, previous);
             return;
         }
         if (col == 0 && line > 0) {
@@ -414,7 +503,7 @@ public class EditorEngine {
             col = model.getLine(line).length();
         }
         String text = model.getLine(line);
-        GraphemeText graphemes = GraphemeText.of(text);
+        GraphemeText graphemes = graphemes(text);
         int target = graphemes.floorBoundary(col);
         while (target > 0) {
             int previousBoundary = graphemes.previousBoundary(target);
@@ -446,6 +535,7 @@ public class EditorEngine {
         int col = p.col();
         int lastLine = model.lineCount() - 1;
         if (line == lastLine && col >= model.getLine(line).length()) {
+            moveCursor(p, false, previous);
             return;
         }
         String text = model.getLine(line);
@@ -454,7 +544,7 @@ public class EditorEngine {
             col = 0;
             text = model.getLine(line);
         }
-        GraphemeText graphemes = GraphemeText.of(text);
+        GraphemeText graphemes = graphemes(text);
         int target = graphemes.ceilBoundary(col);
         while (target < text.length()) {
             int nextBoundary = graphemes.nextBoundary(target);
@@ -489,7 +579,7 @@ public class EditorEngine {
             return false;
         }
         int requestedColumn = Math.min(Math.max(0, p.col()), text.length() - 1);
-        GraphemeText graphemes = GraphemeText.of(text);
+        GraphemeText graphemes = graphemes(text);
         int pivot = graphemes.floorBoundary(requestedColumn);
         int pivotEnd = graphemes.nextBoundary(pivot);
         int group = graphemeGroup(text, pivot, pivotEnd);
@@ -521,8 +611,13 @@ public class EditorEngine {
     }
 
     public void moveUp(boolean selecting) {
+        if (preferredWrapWidth > 0) {
+            preferredVisualColumn = -1;
+        }
+        preferredWrapWidth = -1;
         Position p = state.getCursor();
         if (p.line() == 0) {
+            moveCursor(p, selecting, p);
             return;
         }
         if (preferredVisualColumn < 0) {
@@ -538,8 +633,13 @@ public class EditorEngine {
     }
 
     public void moveDown(boolean selecting) {
+        if (preferredWrapWidth > 0) {
+            preferredVisualColumn = -1;
+        }
+        preferredWrapWidth = -1;
         Position p = state.getCursor();
         if (p.line() >= model.lineCount() - 1) {
+            moveCursor(p, selecting, p);
             return;
         }
         if (preferredVisualColumn < 0) {
@@ -548,6 +648,66 @@ public class EditorEngine {
         int targetLine = p.line() + 1;
         int col = columnForVisualColumn(targetLine, preferredVisualColumn);
         moveCursor(new Position(targetLine, col), selecting, p);
+    }
+
+    /** Moves one displayed row, using the same wrapping as the frontend. */
+    public void moveUp(boolean selecting, int contentColumns, boolean wrapLines, boolean wrapByWords) {
+        if (wrapLines) {
+            moveWrappedRows(-1, selecting, contentColumns, wrapByWords);
+        } else {
+            moveUp(selecting);
+        }
+    }
+
+    /** Moves one displayed row, using the same wrapping as the frontend. */
+    public void moveDown(boolean selecting, int contentColumns, boolean wrapLines, boolean wrapByWords) {
+        if (wrapLines) {
+            moveWrappedRows(1, selecting, contentColumns, wrapByWords);
+        } else {
+            moveDown(selecting);
+        }
+    }
+
+    private void moveWrappedRows(int delta, boolean selecting, int contentColumns, boolean wrapByWords) {
+        int width = Math.max(1, contentColumns);
+        Position previous = clampCursorBoundary(state.getCursor());
+        List<Integer> starts = textLayout.wrapStarts(previous.line(), width, wrapByWords, tabWidth);
+        int segment = wrapSegmentAt(starts, previous.col());
+        int segmentVisual = textLayout.visualColumnAt(previous.line(), starts.get(segment), tabWidth);
+        if (preferredVisualColumn < 0 || preferredWrapWidth != width || preferredWrapByWords != wrapByWords) {
+            preferredVisualColumn = textLayout.visualColumnAt(previous.line(), previous.col(), tabWidth)
+                - segmentVisual;
+        }
+        preferredWrapWidth = width;
+        preferredWrapByWords = wrapByWords;
+        int currentRow = textLayout.wrappedRowsBefore(previous.line(), width, wrapByWords, tabWidth) + segment;
+        int lastRow = Math.max(0, textLayout.totalWrappedRows(width, wrapByWords, tabWidth) - 1);
+        int targetRow = (int) Math.max(0, Math.min(lastRow, (long) currentRow + delta));
+        if (targetRow == currentRow) {
+            moveCursor(previous, selecting, previous);
+            return;
+        }
+        int line = textLayout.lineIndexFromWrappedOffset(targetRow, width, wrapByWords, tabWidth);
+        List<Integer> targetStarts = textLayout.wrapStarts(line, width, wrapByWords, tabWidth);
+        int targetSegment = targetRow - textLayout.wrappedRowsBefore(line, width, wrapByWords, tabWidth);
+        int start = targetStarts.get(targetSegment);
+        int end = targetSegment + 1 < targetStarts.size()
+            ? targetStarts.get(targetSegment + 1)
+            : model.getLine(line).length();
+        int targetVisual = textLayout.visualColumnAt(line, start, tabWidth) + preferredVisualColumn;
+        int col = textLayout.textOffsetAtVisualColumn(line, targetVisual, tabWidth, EditorTextLayout.Bias.NEAREST);
+        col = Math.max(start, Math.min(col, end));
+        // A boundary shared with the following segment belongs to that segment.
+        // Stay on the requested row even when its last grapheme spans many cells.
+        if (targetSegment + 1 < targetStarts.size() && col == end && end > start) {
+            col = graphemes(model.getLine(line)).previousBoundary(end);
+        }
+        moveCursor(new Position(line, col), selecting, previous);
+    }
+
+    private static int wrapSegmentAt(List<Integer> starts, int column) {
+        int index = java.util.Collections.binarySearch(starts, column);
+        return index >= 0 ? index : Math.max(0, -index - 2);
     }
 
     public void moveHome() {
@@ -603,7 +763,7 @@ public class EditorEngine {
         Position p = state.getCursor();
         int targetLine = Math.max(0, p.line() - step);
         String targetText = model.getLine(targetLine);
-        int col = GraphemeText.floorBoundary(targetText, Math.min(p.col(), targetText.length()));
+        int col = graphemes(targetText).floorBoundary(Math.min(p.col(), targetText.length()));
         breakCoalescing();
         state.clearSelection();
         state.setCursor(new Position(targetLine, col));
@@ -625,11 +785,46 @@ public class EditorEngine {
         Position p = state.getCursor();
         int targetLine = Math.min(model.lineCount() - 1, p.line() + step);
         String targetText = model.getLine(targetLine);
-        int col = GraphemeText.floorBoundary(targetText, Math.min(p.col(), targetText.length()));
+        int col = graphemes(targetText).floorBoundary(Math.min(p.col(), targetText.length()));
         breakCoalescing();
         state.clearSelection();
         state.setCursor(new Position(targetLine, col));
         state.setTopLine(Math.max(0, state.getTopLine() + step));
+    }
+
+    public void pageUp(int pageRows, int contentColumns, boolean wrapLines, boolean wrapByWords) {
+        if (wrapLines) {
+            pageWrapped(-Math.max(1, pageRows), contentColumns, wrapByWords);
+        } else {
+            pageUp(pageRows);
+        }
+    }
+
+    public void pageDown(int pageRows, int contentColumns, boolean wrapLines, boolean wrapByWords) {
+        if (wrapLines) {
+            pageWrapped(Math.max(1, pageRows), contentColumns, wrapByWords);
+        } else {
+            pageDown(pageRows);
+        }
+    }
+
+    private void pageWrapped(int delta, int contentColumns, boolean wrapByWords) {
+        int width = Math.max(1, contentColumns);
+        int top = EditorViewportBehavior.wrappedOffsetForWrapTop(
+            model, textLayout,
+            new EditorViewportBehavior.WrapTop(state.getTopLine(), state.getTopWrapSegment()),
+            width, wrapByWords, tabWidth
+        );
+        int maxTop = Math.max(0, textLayout.totalWrappedRows(width, wrapByWords, tabWidth) - Math.abs(delta));
+        int targetTop = (int) Math.max(0, Math.min(maxTop, (long) top + delta));
+        // Page keys scroll without changing an existing selection, as in the
+        // unwrapped editor. Otherwise move the cursor by the same visual rows.
+        if (!state.hasSelection()) {
+            moveWrappedRows(delta, false, width, wrapByWords);
+        }
+        EditorViewportBehavior.applyWrapTop(state, EditorViewportBehavior.wrapTopFromWrappedOffset(
+            model, textLayout, targetTop, width, wrapByWords, tabWidth
+        ));
     }
 
     public void insertChar(char ch) {
@@ -643,7 +838,7 @@ public class EditorEngine {
         }
         boolean hadSelection = state.hasSelection();
         if (isAutoPairsActive() && state.hasSelection() && shouldWrapSelectionWithPair(ch)) {
-            applyEdit(EditKind.NONE, () -> wrapSelectionWithPair(ch));
+            wrapSelectionWithPair(ch);
             return;
         }
 
@@ -735,7 +930,7 @@ public class EditorEngine {
         if (range == null) {
             Position cursor = model.clamp(state.getCursor());
             if (cursor.col() > 0) {
-                GraphemeText graphemes = GraphemeText.of(model.getLine(cursor.line()));
+                GraphemeText graphemes = graphemes(model.getLine(cursor.line()));
                 int end = graphemes.ceilBoundary(cursor.col());
                 range = new SelectionRange(
                     new Position(cursor.line(), graphemes.previousBoundary(end)),
@@ -762,7 +957,7 @@ public class EditorEngine {
             Position cursor = model.clamp(state.getCursor());
             String line = model.getLine(cursor.line());
             if (cursor.col() < line.length()) {
-                GraphemeText graphemes = GraphemeText.of(line);
+                GraphemeText graphemes = graphemes(line);
                 int start = graphemes.floorBoundary(cursor.col());
                 range = new SelectionRange(
                     new Position(cursor.line(), start),
@@ -922,10 +1117,9 @@ public class EditorEngine {
             return false;
         }
         clipboard.setText(model.getTextRange(range.start(), range.end()));
-        applyEdit(EditKind.NONE, () -> {
-            state.setCursor(model.deleteRange(range.start(), range.end()));
-            state.clearSelection();
-        });
+        ViewState before = captureViewState();
+        List<TrackedEdit> ops = new ArrayList<>(1);
+        deleteAndCommit(EditKind.NONE, before, ops, range);
         return true;
     }
 
@@ -945,10 +1139,9 @@ public class EditorEngine {
             end = new Position(line, model.getLine(line).length());
         }
         clipboard.setText(model.getTextRange(start, end));
-        applyEdit(EditKind.NONE, () -> {
-            state.setCursor(model.deleteRange(start, end));
-            state.clearSelection();
-        });
+        ViewState before = captureViewState();
+        List<TrackedEdit> ops = new ArrayList<>(1);
+        deleteAndCommit(EditKind.NONE, before, ops, new SelectionRange(start, end));
         return true;
     }
 
@@ -958,11 +1151,14 @@ public class EditorEngine {
         if (pasted.isEmpty()) {
             return false;
         }
-        applyEdit(EditKind.NONE, () -> {
-            deleteSelectionIfAny();
-            state.setCursor(model.insertText(state.getCursor(), pasted));
-            state.clearSelection();
-        });
+        ViewState before = captureViewState();
+        List<TrackedEdit> ops = new ArrayList<>(1);
+        SelectionRange selection = currentSelection();
+        Position start = selection == null ? model.clamp(state.getCursor()) : selection.start();
+        Position end = selection == null ? start : selection.end();
+        state.setCursor(applyReplaceAndTrack(ops, start, end, pasted));
+        state.clearSelection();
+        commitOperationEdit(EditKind.NONE, before, ops);
         return true;
     }
 
@@ -1097,11 +1293,12 @@ public class EditorEngine {
             // repeated Replace commands still make progress.
             return findNext(needle, options);
         }
-        applyEdit(EditKind.NONE, () -> {
-            state.setCursor(model.deleteRange(rangeStart, rangeEnd));
-            state.setCursor(model.insertText(state.getCursor(), replacementText));
-            state.setSelectionAnchor(rangeStart);
-        });
+        preferredVisualColumn = -1;
+        ViewState before = captureViewState();
+        List<TrackedEdit> ops = new ArrayList<>(1);
+        state.setCursor(applyReplaceAndTrack(ops, rangeStart, rangeEnd, replacementText));
+        state.setSelectionAnchor(rangeStart);
+        commitOperationEdit(EditKind.NONE, before, ops);
         return true;
     }
 
@@ -1154,7 +1351,7 @@ public class EditorEngine {
 
         Position p = model.clamp(state.getCursor());
         String cursorLine = model.getLine(p.line());
-        p = new Position(p.line(), GraphemeText.floorBoundary(cursorLine, p.col()));
+        p = new Position(p.line(), graphemes(cursorLine).floorBoundary(p.col()));
 
         if (wrapLines) {
             int width = Math.max(1, contentCols);
@@ -1260,10 +1457,11 @@ public class EditorEngine {
         );
     }
 
-    private static int firstNonWhitespaceColumn(String line) {
-        for (int i = 0; i < line.length(); i++) {
-            if (!Character.isWhitespace(line.charAt(i))) {
-                return i;
+    private int firstNonWhitespaceColumn(String line) {
+        GraphemeText graphemes = graphemes(line);
+        for (int index = 0; index < graphemes.graphemeCount(); index++) {
+            if (!graphemes.isWhitespace(index)) {
+                return graphemes.start(index);
             }
         }
         return 0;
@@ -1395,7 +1593,7 @@ public class EditorEngine {
         String line = model.getLine(cursor.line());
         int col = Math.max(0, Math.min(cursor.col(), line.length()));
 
-        if ((ch == '\'' || ch == '"') && col > 0 && line.charAt(col - 1) == '\\') {
+        if ((ch == '\'' || ch == '"') && isEscaped(line, col)) {
             return false;
         }
         if (ch == '\'' && ((col > 0 && isWordChar(line.charAt(col - 1)))
@@ -1423,7 +1621,16 @@ public class EditorEngine {
         if (col >= line.length()) {
             return false;
         }
-        return line.charAt(col) == ch;
+        return line.charAt(col) == ch
+            && ((ch != '\'' && ch != '"') || !isEscaped(line, col));
+    }
+
+    private static boolean isEscaped(String line, int column) {
+        int backslashes = 0;
+        for (int index = column - 1; index >= 0 && line.charAt(index) == '\\'; index--) {
+            backslashes++;
+        }
+        return (backslashes & 1) != 0;
     }
 
     private boolean shouldWrapSelectionWithPair(char ch) {
@@ -1445,18 +1652,20 @@ public class EditorEngine {
             return;
         }
         char close = closingPairFor(open);
-        String selected = model.getTextRange(range.start(), range.end());
-        if (selected.isEmpty()) {
-            return;
-        }
-        state.setCursor(model.deleteRange(range.start(), range.end()));
-        state.setCursor(model.insertChar(state.getCursor(), open));
-        Position wrappedStart = state.getCursor();
-        state.setCursor(model.insertText(state.getCursor(), selected));
-        Position wrappedEnd = state.getCursor();
-        state.setCursor(model.insertChar(state.getCursor(), close));
+        ViewState before = captureViewState();
+        List<TrackedEdit> ops = new ArrayList<>(2);
+        // Keep the selected content and its original line separators in place.
+        // Inserting from the end also keeps both original positions valid.
+        applyReplaceAndTrack(ops, range.end(), range.end(), String.valueOf(close));
+        Position wrappedStart = applyReplaceAndTrack(
+            ops, range.start(), range.start(), String.valueOf(open)
+        );
+        Position wrappedEnd = range.start().line() == range.end().line()
+            ? new Position(range.end().line(), range.end().col() + 1)
+            : range.end();
         state.setSelectionAnchor(wrappedStart);
         state.setCursor(wrappedEnd);
+        commitOperationEdit(EditKind.NONE, before, ops);
     }
 
     private SelectionRange pairRangeAroundCursor() {
@@ -1469,7 +1678,7 @@ public class EditorEngine {
             || !isMatchingPair(line.charAt(cursor.col() - 1), line.charAt(cursor.col()))) {
             return null;
         }
-        GraphemeText graphemes = GraphemeText.of(line);
+        GraphemeText graphemes = graphemes(line);
         return new SelectionRange(
             new Position(cursor.line(), graphemes.previousBoundary(cursor.col())),
             new Position(cursor.line(), graphemes.nextBoundary(cursor.col()))
@@ -1974,16 +2183,20 @@ public class EditorEngine {
         while (tokenEnd < line.length() && isWordChar(line.charAt(tokenEnd))) {
             tokenEnd++;
         }
-        if (tokenEnd <= leading || cursorCol < tokenEnd) {
+        // A token still being typed may grow into an identifier such as "elsewhere".
+        if (tokenEnd <= leading || cursorCol <= tokenEnd) {
             return false;
         }
-        String keyword = line.substring(leading, tokenEnd).toLowerCase(Locale.ROOT);
+        String keyword = line.substring(leading, tokenEnd);
         if (!profile.dedentKeywords().contains(keyword)) {
             return false;
         }
         for (int i = tokenEnd; i < cursorCol; i++) {
-            if (!Character.isWhitespace(line.charAt(i))) {
-                return false;
+            char ch = line.charAt(i);
+            if (!Character.isWhitespace(ch)) {
+                return i == cursorCol - 1 && (ch == ':' || ch == '('
+                    || (profile == LanguageProfile.GENERIC_CODE && ch == '{')
+                    || (profile == LanguageProfile.PYTHON && keyword.equals("except") && ch == '*'));
             }
         }
         return true;
@@ -2152,7 +2365,16 @@ public class EditorEngine {
     private Position clampCursorBoundary(Position requested) {
         Position clamped = model.clamp(requested);
         String line = model.getLine(clamped.line());
-        return new Position(clamped.line(), GraphemeText.floorBoundary(line, clamped.col()));
+        return new Position(clamped.line(), graphemes(line).floorBoundary(clamped.col()));
+    }
+
+    private GraphemeText graphemes(String text) {
+        // Strings are immutable: identity also makes direct model edits and undo safe,
+        // without retaining layouts for every line or for old document revisions.
+        if (cachedGraphemes == null || cachedGraphemes.text() != text) {
+            cachedGraphemes = GraphemeText.of(text);
+        }
+        return cachedGraphemes;
     }
 
     private Position requireTextBoundary(Position requested) {
@@ -2228,6 +2450,7 @@ public class EditorEngine {
     }
 
     private void resetGutterDiffBaselinesOnOpen() {
+        cachedGraphemes = null;
         List<String> snapshot = List.copyOf(model.snapshotLines());
         openBaselineLines = snapshot;
         savedBaselineLines = snapshot;
@@ -2295,18 +2518,14 @@ public class EditorEngine {
         initGutterDiffBuffers(openDiffFlags, openDeletedMarkers, lines);
 
         DiffAlgorithm algorithm = resolveGutterDiffAlgorithm();
-        EditList savedEdits = algorithm.diff(
-            GUTTER_SEQUENCE_COMPARATOR,
-            new LineSequence(savedBaselineLines),
-            new LineSequence(current)
+        EditList savedEdits = BoundedLineDiff.compute(
+            algorithm, savedBaselineLines, current, GUTTER_DIFF_MAX_WORK
         );
         applyDiffEdits(savedEdits, lines, savedDiffFlags, savedDeletedMarkers);
 
-        EditList openEdits = algorithm.diff(
-            GUTTER_SEQUENCE_COMPARATOR,
-            new LineSequence(openBaselineLines),
-            new LineSequence(current)
-        );
+        EditList openEdits = openBaselineLines.equals(savedBaselineLines)
+            ? savedEdits
+            : BoundedLineDiff.compute(algorithm, openBaselineLines, current, GUTTER_DIFF_MAX_WORK);
         applyDiffEdits(openEdits, lines, openDiffFlags, openDeletedMarkers);
 
         gutterDiffLastRebuildDurationNanos = System.nanoTime() - startedAt;
@@ -2429,35 +2648,6 @@ public class EditorEngine {
                     // EMPTY edit: no markers.
                 }
             }
-        }
-    }
-
-    private static final class LineSequence extends Sequence {
-        private final List<String> lines;
-
-        private LineSequence(List<String> lines) {
-            this.lines = lines == null ? List.of() : lines;
-        }
-
-        @Override
-        public int size() {
-            return lines.size();
-        }
-
-        private String line(int index) {
-            return lines.get(index);
-        }
-    }
-
-    private static final class LineSequenceComparator extends SequenceComparator<LineSequence> {
-        @Override
-        public boolean equals(LineSequence a, int ai, LineSequence b, int bi) {
-            return a.line(ai).equals(b.line(bi));
-        }
-
-        @Override
-        public int hash(LineSequence seq, int ptr) {
-            return seq.line(ptr).hashCode();
         }
     }
 
@@ -2800,13 +2990,6 @@ public class EditorEngine {
         return position;
     }
 
-    private void deleteSelectionIfAny() {
-        SelectionRange range = currentSelection();
-        if (range != null) {
-            state.setCursor(model.deleteRange(range.start(), range.end()));
-        }
-    }
-
     private record LineCommentEdit(int line, int column, int removedLength, int insertedLength) {
     }
 
@@ -2855,9 +3038,9 @@ public class EditorEngine {
         }
         for (int line = model.lineCount() - 1; line >= from.line(); line--) {
             String text = model.getLine(line);
-            int startExclusive = line == from.line() ? Math.min(from.col(), text.length()) : -1;
+            int startInclusive = line == from.line() ? Math.min(from.col(), text.length()) : 0;
             SearchMatch match = findInLineBackward(line, text, matcher, text.length());
-            if (match != null && match.start().col() > startExclusive) {
+            if (match != null && match.start().col() >= startInclusive) {
                 return match;
             }
         }
@@ -2881,25 +3064,15 @@ public class EditorEngine {
     }
 
     private SearchMatch findInLineForward(int line, String text, SearchMatcher matcher, int fromCol) {
-        for (SearchMatcher.Match match : matcher.findAll(text)) {
-            if (match.startUtf16() >= fromCol) {
-                return new SearchMatch(new Position(line, match.startUtf16()), match.lengthUtf16());
-            }
-        }
-        return null;
+        SearchMatcher.Match match = matcher.findFirstAtOrAfter(text, fromCol);
+        return match == null ? null
+            : new SearchMatch(new Position(line, match.startUtf16()), match.lengthUtf16());
     }
 
     private SearchMatch findInLineBackward(int line, String text, SearchMatcher matcher, int beforeCol) {
-        List<SearchMatcher.Match> matches = matcher.findAll(text);
-        SearchMatch found = null;
-        for (SearchMatcher.Match match : matches) {
-            if (match.startUtf16() < beforeCol) {
-                found = new SearchMatch(new Position(line, match.startUtf16()), match.lengthUtf16());
-            } else {
-                break;
-            }
-        }
-        return found;
+        SearchMatcher.Match match = matcher.findLastBefore(text, beforeCol);
+        return match == null ? null
+            : new SearchMatch(new Position(line, match.startUtf16()), match.lengthUtf16());
     }
 
     private static boolean isWordChar(char ch) {

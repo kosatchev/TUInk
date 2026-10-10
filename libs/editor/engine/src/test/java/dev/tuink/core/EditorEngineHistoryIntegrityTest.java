@@ -128,6 +128,67 @@ class EditorEngineHistoryIntegrityTest {
         assertEquals(new Position(0, 1), fixture.state.getCursor());
     }
 
+    @Test
+    void repeatedSmallReplacementsKeepDeltaHistoryInsteadOfWholeLineSnapshots() {
+        class SnapshotCountingModel extends TextModel {
+            private int snapshots;
+
+            SnapshotCountingModel() {
+                super(new SimpleLineBuffer());
+            }
+
+            @Override
+            public List<String> snapshotLines() {
+                snapshots++;
+                return super.snapshotLines();
+            }
+        }
+        SnapshotCountingModel model = new SnapshotCountingModel();
+        String original = "a0" + "x".repeat(100_000);
+        model.insertText(new Position(0, 0), original);
+        EditorEngine engine = new EditorEngine(model, new EditorState(), new LogicalEditorTextLayout(model));
+        engine.setGutterDiffMode(GutterDiffMode.DISABLED);
+        model.snapshots = 0;
+
+        for (int index = 0; index < 100; index++) {
+            assertTrue(engine.replaceCurrentOrNext(
+                index % 2 == 0 ? "a0" : "b0", index % 2 == 0 ? "b0" : "a0"
+            ));
+        }
+        for (int index = 0; index < 100; index++) {
+            assertTrue(engine.undo());
+        }
+        assertEquals(original, model.getLine(0));
+        assertFalse(engine.undo());
+        for (int index = 0; index < 100; index++) {
+            assertTrue(engine.redo());
+        }
+        assertEquals(original, model.getLine(0));
+        assertEquals(0, model.snapshots, "Small replacements must not retain complete line snapshots");
+    }
+
+    @Test
+    void wrappingASingleLineSelectionKeepsItsOffsetsAndOneUndoStep() {
+        for (boolean reverse : List.of(false, true)) {
+            Fixture fixture = fixture("L😀e\u0301R");
+            Position start = new Position(0, 1);
+            Position end = new Position(0, 5);
+            fixture.engine.restoreSelection(reverse ? start : end, reverse ? end : start);
+
+            fixture.engine.insertChar('[');
+            assertEquals("L[😀e\u0301]R", fixture.model.getLine(0));
+            assertEquals(new Position(0, 2), fixture.state.getSelectionAnchor());
+            assertEquals(new Position(0, 6), fixture.state.getCursor());
+            assertTrue(fixture.engine.undo());
+            assertEquals("L😀e\u0301R", fixture.model.getLine(0));
+            assertEquals(reverse ? start : end, fixture.state.getCursor());
+            assertEquals(reverse ? end : start, fixture.state.getSelectionAnchor());
+            assertFalse(fixture.engine.undo());
+            assertTrue(fixture.engine.redo());
+            assertEquals("L[😀e\u0301]R", fixture.model.getLine(0));
+        }
+    }
+
     private static Fixture fixture(String text) {
         TextModel model = new TextModel(new SimpleLineBuffer());
         if (!text.isEmpty()) {

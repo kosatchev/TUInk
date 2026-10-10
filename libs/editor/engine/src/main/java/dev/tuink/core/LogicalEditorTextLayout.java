@@ -75,6 +75,10 @@ public final class LogicalEditorTextLayout implements EditorTextLayout {
                 lastWhitespaceEnd = -1;
             }
         }
+        int lastStart = starts.get(starts.size() - 1);
+        if (metrics.visualWidth() - metrics.visualColumnAt(lastStart) >= width) {
+            starts.add(metrics.text().length());
+        }
         return List.copyOf(starts);
     }
 

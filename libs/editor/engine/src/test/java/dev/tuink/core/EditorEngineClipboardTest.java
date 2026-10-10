@@ -2,6 +2,8 @@ package dev.tuink.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -180,6 +182,111 @@ class EditorEngineClipboardTest {
         TabSession destination = tab(clipboard, "");
         assertTrue(destination.engine().pasteClipboard());
         assertEquals("copied", destination.model().getLine(0));
+    }
+
+    @Test
+    void multilinePasteRestoresMixedSeparatorsAndBothSelectionDirectionsAsOneUndoStep() throws IOException {
+        String original = "one\r\ntwo\nthree\rfour";
+        Path path = tempDir.resolve("mixed.txt");
+        for (boolean reverse : List.of(false, true)) {
+            Files.writeString(path, original);
+            EditorClipboard clipboard = new EditorClipboard();
+            clipboard.setText("😀\rnew\r\nx");
+            TabSession destination = tab(clipboard, "");
+            EditorEngine engine = destination.engine();
+            engine.open(path);
+            Position start = new Position(0, 1);
+            Position end = new Position(2, 2);
+            engine.restoreSelection(reverse ? start : end, reverse ? end : start);
+            DocumentFileMetadata beforeMetadata = destination.model().fileMetadata();
+
+            assertTrue(engine.pasteClipboard());
+
+            assertEquals(List.of("o😀", "new", "xree", "four"), destination.model().snapshotLines());
+            assertEquals(List.of("\r\n", "\r\n", "\r"), destination.model().fileMetadata().lineSeparators());
+            assertEquals(new Position(2, 1), destination.state().getCursor());
+            assertNull(destination.state().getSelectionAnchor());
+            assertTrue(destination.state().isDirty());
+            DocumentFileMetadata afterMetadata = destination.model().fileMetadata();
+
+            assertTrue(engine.undo());
+            assertEquals(List.of("one", "two", "three", "four"), destination.model().snapshotLines());
+            assertEquals(beforeMetadata, destination.model().fileMetadata());
+            assertEquals(reverse ? start : end, destination.state().getCursor());
+            assertEquals(reverse ? end : start, destination.state().getSelectionAnchor());
+            assertFalse(destination.state().isDirty());
+            assertFalse(engine.undo());
+
+            assertTrue(engine.redo());
+            assertEquals(List.of("o😀", "new", "xree", "four"), destination.model().snapshotLines());
+            assertEquals(afterMetadata, destination.model().fileMetadata());
+            assertEquals(new Position(2, 1), destination.state().getCursor());
+            assertNull(destination.state().getSelectionAnchor());
+            assertTrue(destination.state().isDirty());
+            assertFalse(engine.redo());
+        }
+    }
+
+    @Test
+    void malformedClipboardTextCannotDeleteTheSelectionBeforeRejection() {
+        EditorClipboard clipboard = new EditorClipboard();
+        TabSession destination = tab(clipboard, "keep selected text");
+        Position start = new Position(0, 5);
+        Position end = new Position(0, 13);
+        destination.engine().restoreSelection(end, start);
+        long revision = destination.model().revision();
+        clipboard.setText("bad\uD800");
+
+        assertThrows(IllegalArgumentException.class, destination.engine()::pasteClipboard);
+
+        assertEquals("keep selected text", destination.model().getLine(0));
+        assertEquals(revision, destination.model().revision());
+        assertEquals(end, destination.state().getCursor());
+        assertEquals(start, destination.state().getSelectionAnchor());
+    }
+
+    @Test
+    void repeatedSmallPastesKeepDeltaHistoryInsteadOfWholeLineSnapshots() {
+        class SnapshotCountingModel extends TextModel {
+            private int snapshots;
+
+            SnapshotCountingModel() {
+                super(new SimpleLineBuffer());
+            }
+
+            @Override
+            public List<String> snapshotLines() {
+                snapshots++;
+                return super.snapshotLines();
+            }
+        }
+        SnapshotCountingModel model = new SnapshotCountingModel();
+        String original = "a".repeat(100_000);
+        model.insertText(new Position(0, 0), original);
+        EditorClipboard clipboard = new EditorClipboard();
+        clipboard.setText("x");
+        EditorState state = new EditorState();
+        EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model), clipboard);
+        engine.setGutterDiffMode(GutterDiffMode.DISABLED);
+        model.snapshots = 0;
+
+        for (int index = 0; index < 100; index++) {
+            assertTrue(engine.pasteClipboard());
+        }
+        assertEquals("x".repeat(100) + original, model.getLine(0));
+        for (int index = 0; index < 100; index++) {
+            assertTrue(engine.undo());
+        }
+        assertEquals(original, model.getLine(0));
+        assertEquals(new Position(0, 0), state.getCursor());
+        assertFalse(engine.undo());
+        for (int index = 0; index < 100; index++) {
+            assertTrue(engine.redo());
+        }
+        assertEquals("x".repeat(100) + original, model.getLine(0));
+        assertEquals(new Position(0, 100), state.getCursor());
+        assertFalse(engine.redo());
+        assertEquals(0, model.snapshots, "Small pastes must not retain complete line snapshots");
     }
 
     private static TabSession tab(EditorClipboard clipboard, String text) {

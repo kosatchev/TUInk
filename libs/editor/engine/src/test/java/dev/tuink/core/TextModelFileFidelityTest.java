@@ -130,6 +130,40 @@ class TextModelFileFidelityTest {
     }
 
     @Test
+    void wrappingAMultilineSelectionPreservesItsMixedSeparatorsAcrossSaveUndoAndRedo() throws IOException {
+        for (boolean reverse : List.of(false, true)) {
+            Path source = tempDir.resolve("wrap-" + reverse + ".txt");
+            String original = "a\r\nb\nc";
+            Files.writeString(source, original, StandardCharsets.UTF_8);
+            TextModel model = new TextModel(new SimpleLineBuffer());
+            EditorState state = new EditorState();
+            EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model));
+            engine.open(source);
+            DocumentFileMetadata metadata = model.fileMetadata();
+            Position start = new Position(0, 0);
+            Position end = new Position(2, 1);
+            engine.restoreSelection(reverse ? start : end, reverse ? end : start);
+
+            engine.insertChar('(');
+            assertEquals(metadata, model.fileMetadata());
+            assertEquals(new Position(0, 1), state.getSelectionAnchor());
+            assertEquals(end, state.getCursor());
+            engine.save();
+            assertEquals("(a\r\nb\nc)", Files.readString(source, StandardCharsets.UTF_8));
+
+            assertTrue(engine.undo());
+            assertEquals(metadata, model.fileMetadata());
+            assertEquals(reverse ? start : end, state.getCursor());
+            assertEquals(reverse ? end : start, state.getSelectionAnchor());
+            engine.save();
+            assertEquals(original, Files.readString(source, StandardCharsets.UTF_8));
+            assertTrue(engine.redo());
+            engine.save();
+            assertEquals("(a\r\nb\nc)", Files.readString(source, StandardCharsets.UTF_8));
+        }
+    }
+
+    @Test
     void recoverySnapshotRestoresFileMetadataForSubsequentSave() throws IOException {
         byte[] original = withBom(
             BomKind.UTF_8,

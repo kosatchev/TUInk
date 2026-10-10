@@ -131,6 +131,26 @@ class EditorLayoutTest {
         );
     }
 
+    @Test
+    void horizontalScrollbarNeverTakesTheLastDocumentRow() {
+        TextModel longLines = model("long text ".repeat(20), "second line");
+        EditorLayout singleRow = resolve(longLines, 3, 100, 1, 0, false);
+        EditorLayout twoRows = resolve(longLines, 4, 100, 1, 0, false);
+        EditorLayout hiddenByOverlay = resolve(longLines, 5, 100, 1, 2, false);
+        EditorLayout noRows = resolve(longLines, 2, 100, 1, 0, false);
+
+        assertAll(
+            () -> assertEquals(1, singleRow.contentRows()),
+            () -> assertEquals(0, singleRow.horizontalScrollbarHeight()),
+            () -> assertEquals(1, twoRows.contentRows()),
+            () -> assertEquals(1, twoRows.horizontalScrollbarHeight()),
+            () -> assertEquals(1, hiddenByOverlay.contentRows()),
+            () -> assertEquals(0, hiddenByOverlay.horizontalScrollbarHeight()),
+            () -> assertEquals(0, noRows.contentRows()),
+            () -> assertEquals(0, noRows.horizontalScrollbarHeight())
+        );
+    }
+
     private static EditorLayout resolve(
         TextModel model,
         int rows,

@@ -54,6 +54,8 @@ public interface EditorTextLayout {
     /**
      * Returns immutable, ascending, grapheme-safe row starts. The result is
      * never empty and its first offset is always zero.
+     * If the last text segment fills the available width, a trailing start at
+     * the line length reserves an empty row for the insertion cursor.
      */
     List<Integer> wrapStarts(int line, int width, boolean wrapByWords, int tabWidth);
 

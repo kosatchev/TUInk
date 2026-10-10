@@ -19,7 +19,7 @@ public final class TabSearch {
         for (TabSession tab : tabs) {
             TextModel model = tab.model();
             for (int i = 0; i < model.lineCount(); i++) {
-                total += matcher.findAll(model.getLine(i)).size();
+                total += matcher.countMatches(model.getLine(i));
             }
         }
         return total;
@@ -33,7 +33,7 @@ public final class TabSearch {
         SearchMatcher matcher = SearchMatcher.compile(query, safe);
         int total = 0;
         for (int i = 0; i < model.lineCount(); i++) {
-            total += matcher.findAll(model.getLine(i)).size();
+            total += matcher.countMatches(model.getLine(i));
         }
         return total;
     }
@@ -51,7 +51,7 @@ public final class TabSearch {
         for (int tabIndex = 0; tabIndex < tabs.size(); tabIndex++) {
             TextModel model = tabs.get(tabIndex).model();
             for (int line = 0; line < model.lineCount(); line++) {
-                if (!matcher.findAll(model.getLine(line)).isEmpty()) {
+                if (matcher.findFirstAtOrAfter(model.getLine(line), 0) != null) {
                     flags[tabIndex] = 1;
                     break;
                 }
@@ -164,9 +164,8 @@ public final class TabSearch {
 
     private static MatchPosition firstMatch(TextModel model, SearchMatcher matcher) {
         for (int line = 0; line < model.lineCount(); line++) {
-            List<SearchMatcher.Match> matches = matcher.findAll(model.getLine(line));
-            if (!matches.isEmpty()) {
-                SearchMatcher.Match match = matches.get(0);
+            SearchMatcher.Match match = matcher.findFirstAtOrAfter(model.getLine(line), 0);
+            if (match != null) {
                 return new MatchPosition(line, match.startUtf16(), match.endUtf16());
             }
         }
@@ -175,9 +174,9 @@ public final class TabSearch {
 
     private static MatchPosition lastMatch(TextModel model, SearchMatcher matcher) {
         for (int line = model.lineCount() - 1; line >= 0; line--) {
-            List<SearchMatcher.Match> matches = matcher.findAll(model.getLine(line));
-            if (!matches.isEmpty()) {
-                SearchMatcher.Match match = matches.get(matches.size() - 1);
+            String text = model.getLine(line);
+            SearchMatcher.Match match = matcher.findLastBefore(text, text.length());
+            if (match != null) {
                 return new MatchPosition(line, match.startUtf16(), match.endUtf16());
             }
         }
@@ -190,10 +189,11 @@ public final class TabSearch {
         Position from
     ) {
         for (int line = from.line(); line < model.lineCount(); line++) {
-            for (SearchMatcher.Match match : matcher.findAll(model.getLine(line))) {
-                if (line > from.line() || match.startUtf16() >= from.col()) {
-                    return new MatchPosition(line, match.startUtf16(), match.endUtf16());
-                }
+            SearchMatcher.Match match = matcher.findFirstAtOrAfter(
+                model.getLine(line), line == from.line() ? from.col() : 0
+            );
+            if (match != null) {
+                return new MatchPosition(line, match.startUtf16(), match.endUtf16());
             }
         }
         return null;
@@ -205,10 +205,9 @@ public final class TabSearch {
         Position limit
     ) {
         for (int line = 0; line <= limit.line(); line++) {
-            for (SearchMatcher.Match match : matcher.findAll(model.getLine(line))) {
-                if (line < limit.line() || match.startUtf16() < limit.col()) {
-                    return new MatchPosition(line, match.startUtf16(), match.endUtf16());
-                }
+            SearchMatcher.Match match = matcher.findFirstAtOrAfter(model.getLine(line), 0);
+            if (match != null && (line < limit.line() || match.startUtf16() < limit.col())) {
+                return new MatchPosition(line, match.startUtf16(), match.endUtf16());
             }
         }
         return null;
@@ -219,15 +218,16 @@ public final class TabSearch {
         SearchMatcher matcher,
         Position limit
     ) {
-        MatchPosition found = null;
-        for (int line = 0; line <= limit.line(); line++) {
-            for (SearchMatcher.Match match : matcher.findAll(model.getLine(line))) {
-                if (line < limit.line() || match.startUtf16() < limit.col()) {
-                    found = new MatchPosition(line, match.startUtf16(), match.endUtf16());
-                }
+        for (int line = limit.line(); line >= 0; line--) {
+            String text = model.getLine(line);
+            SearchMatcher.Match match = matcher.findLastBefore(
+                text, line == limit.line() ? limit.col() : text.length()
+            );
+            if (match != null) {
+                return new MatchPosition(line, match.startUtf16(), match.endUtf16());
             }
         }
-        return found;
+        return null;
     }
 
     private static MatchPosition lastAtOrAfter(
@@ -236,12 +236,10 @@ public final class TabSearch {
         Position limit
     ) {
         for (int line = model.lineCount() - 1; line >= limit.line(); line--) {
-            List<SearchMatcher.Match> matches = matcher.findAll(model.getLine(line));
-            for (int index = matches.size() - 1; index >= 0; index--) {
-                SearchMatcher.Match match = matches.get(index);
-                if (line > limit.line() || match.startUtf16() >= limit.col()) {
-                    return new MatchPosition(line, match.startUtf16(), match.endUtf16());
-                }
+            String text = model.getLine(line);
+            SearchMatcher.Match match = matcher.findLastBefore(text, text.length());
+            if (match != null && (line > limit.line() || match.startUtf16() >= limit.col())) {
+                return new MatchPosition(line, match.startUtf16(), match.endUtf16());
             }
         }
         return null;

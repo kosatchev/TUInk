@@ -48,6 +48,7 @@ public record EditorLayout(
         int safeCols = Math.max(1, cols);
         int top = Math.max(1, contentTopRow);
         int overlays = Math.max(0, overlayRows);
+        int availableRows = Math.max(0, safeRows - top - 1 - overlays);
         int gutter = gutterWidth(model.lineCount());
         int verticalWidth = 0;
         int horizontalHeight = 0;
@@ -61,7 +62,7 @@ public record EditorLayout(
         int requiredColumns = Math.max(maxWidth, cursorExtent);
 
         for (int pass = 0; pass < 4; pass++) {
-            contentRows = Math.max(0, safeRows - top - 1 - overlays - horizontalHeight);
+            contentRows = Math.max(0, availableRows - horizontalHeight);
             contentColumns = Math.max(0, safeCols - gutter - verticalWidth);
             int layoutWidth = Math.max(1, contentColumns);
             int totalRows = wrapLines
@@ -74,6 +75,7 @@ public record EditorLayout(
             int nextVertical = safeCols >= 8 && (topOffset > 0 || totalRows > contentRows) ? 1 : 0;
             int nextColumns = Math.max(0, safeCols - gutter - nextVertical);
             int nextHorizontal = !wrapLines
+                && availableRows >= 2
                 && nextColumns > 0
                 && (state.getLeftVisualColumn() > 0 || requiredColumns > nextColumns)
                 ? 1
@@ -87,7 +89,7 @@ public record EditorLayout(
             horizontalHeight = nextHorizontal;
         }
 
-        contentRows = Math.max(0, safeRows - top - 1 - overlays - horizontalHeight);
+        contentRows = Math.max(0, availableRows - horizontalHeight);
         contentColumns = Math.max(0, safeCols - gutter - verticalWidth);
         return new EditorLayout(
             safeRows,

@@ -14,7 +14,7 @@ public final class TerminalEditorTextLayout implements EditorTextLayout {
 
     public TerminalEditorTextLayout(TextModel model) {
         this.model = Objects.requireNonNull(model, "model");
-        this.cache = new TerminalTextLayoutCache(new ModelLineSource(model));
+        this.cache = new TerminalTextLayoutCache(new ModelLineSource(model), true);
     }
 
     @Override
@@ -117,6 +117,16 @@ public final class TerminalEditorTextLayout implements EditorTextLayout {
         @Override
         public long contentEpoch() {
             return model.contentEpoch();
+        }
+
+        @Override
+        public List<TerminalTextLayoutCache.LineChange> changesSince(long revision) {
+            List<TextModel.LineChange> changes = model.lineChangesSince(revision);
+            return changes == null ? null : changes.stream()
+                .map(change -> new TerminalTextLayoutCache.LineChange(
+                    change.firstLine(), change.removedLineCount(), change.addedLineCount()
+                ))
+                .toList();
         }
 
         @Override

@@ -23,9 +23,9 @@ class TerminalEditorViewportIntegrationTest {
 
         engine.ensureCursorVisible(1, 4, true, false);
 
-        assertEquals(List.of(0, 1), layout.wrapStarts(0, 4, false, 4));
+        assertEquals(List.of(0, 1, 4), layout.wrapStarts(0, 4, false, 4));
         assertEquals(0, state.getTopLine());
-        assertEquals(1, state.getTopWrapSegment());
+        assertEquals(2, state.getTopWrapSegment());
     }
 
     @Test

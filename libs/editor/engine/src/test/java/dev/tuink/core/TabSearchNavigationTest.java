@@ -2,6 +2,7 @@ package dev.tuink.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -99,6 +100,54 @@ class TabSearchNavigationTest {
 
         assertEquals(new Position(0, 0), found.state().getSelectionAnchor());
         assertEquals(new Position(0, 1), found.state().getCursor());
+    }
+
+    @Test
+    void denseMatchesSupportCountsAndNavigationInBothDirections() {
+        int length = 2_000_000;
+        TabSession tab = tab("a".repeat(length));
+        List<TabSession> tabs = List.of(tab);
+
+        assertEquals(length, TabSearch.countMatches(tabs, "a", SearchOptions.DEFAULT));
+        assertEquals(length, TabSearch.countMatchesInModel(tab.model(), "a", SearchOptions.DEFAULT));
+        assertEquals(1, TabSearch.findMatchTabs(tabs, "a", SearchOptions.DEFAULT)[0]);
+        assertTrue(tab.engine().findNext("a"));
+        assertEquals(new Position(0, 0), tab.state().getSelectionAnchor());
+        assertTrue(tab.engine().findPrevious("a"));
+        assertEquals(new Position(0, length - 1), tab.state().getSelectionAnchor());
+        assertEquals(0, TabSearch.findNextAcrossTabs(tabs, 0, "a", SearchOptions.DEFAULT));
+        assertEquals(new Position(0, 0), tab.state().getSelectionAnchor());
+        assertEquals(0, TabSearch.findPreviousAcrossTabs(tabs, 0, "a", SearchOptions.DEFAULT));
+        assertEquals(new Position(0, length - 1), tab.state().getSelectionAnchor());
+    }
+
+    @Test
+    void wholeWordCountsNavigationAndReplacementIncludeOverlapsOfRejectedCandidates() {
+        SearchOptions options = new SearchOptions(false, SearchOptions.MatchMode.WHOLE_WORD);
+        TabSession absent = tab("nothing here");
+        TabSession found = tab("ba-a-a");
+        List<TabSession> tabs = List.of(absent, found);
+
+        assertEquals(1, TabSearch.countMatches(tabs, "a-a", options));
+        assertEquals(1, TabSearch.countMatchesInModel(found.model(), "a-a", options));
+        assertEquals(1, TabSearch.findMatchTabs(tabs, "a-a", options)[1]);
+        assertTrue(found.engine().findNext("a-a", options));
+        assertEquals(new Position(0, 3), found.state().getSelectionAnchor());
+        assertTrue(found.engine().findPrevious("a-a", options));
+        assertEquals(new Position(0, 3), found.state().getSelectionAnchor());
+        assertEquals(1, TabSearch.findNextAcrossTabs(tabs, 0, "a-a", options));
+        assertEquals(new Position(0, 3), found.state().getSelectionAnchor());
+        assertEquals(1, TabSearch.findPreviousAcrossTabs(tabs, 0, "a-a", options));
+        assertEquals(new Position(0, 3), found.state().getSelectionAnchor());
+
+        assertTrue(found.engine().replaceCurrentOrNext("a-a", "word", options));
+        assertEquals("ba-word", found.model().getLine(0));
+        assertTrue(found.engine().undo());
+        assertEquals("ba-a-a", found.model().getLine(0));
+        assertEquals(1, found.engine().replaceAll("a-a", "word", options));
+        assertEquals("ba-word", found.model().getLine(0));
+        assertTrue(found.engine().undo());
+        assertEquals("ba-a-a", found.model().getLine(0));
     }
 
     private static TabSession tab(String line) {

@@ -73,7 +73,7 @@ class TuiApplicationRunnerTest {
         assertEquals(2, frontend.prepareCount);
         assertEquals(1, frontend.frames.size());
         assertTrue(frontend.frames.get(0).fullRedraw());
-        assertEquals(List.of(2L, 0L), input.timeouts);
+        assertEquals(List.of(2L, 1L), input.timeouts);
         assertEquals(2, deadlines.get());
         assertEquals(2, frontend.polls.size());
         assertEquals(null, frontend.polls.get(0).event());

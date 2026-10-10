@@ -27,6 +27,7 @@ public final class KeyDecoder {
 
     private final NonBlockingReader reader;
     private final int maxPasteCodeUnits;
+    private final boolean backspaceSendsCtrlH;
     private final StringBuilder csiSequence = new StringBuilder();
     private final StringBuilder pasteBuffer = new StringBuilder();
     private final StringBuilder pasteEndWindow = new StringBuilder(BRACKETED_PASTE_END.length());
@@ -40,10 +41,18 @@ public final class KeyDecoder {
     private EscapeState escapeState = EscapeState.NONE;
 
     public KeyDecoder(NonBlockingReader reader) {
-        this(reader, DEFAULT_MAX_PASTE_CODE_UNITS);
+        this(reader, DEFAULT_MAX_PASTE_CODE_UNITS, false);
+    }
+
+    KeyDecoder(NonBlockingReader reader, boolean backspaceSendsCtrlH) {
+        this(reader, DEFAULT_MAX_PASTE_CODE_UNITS, backspaceSendsCtrlH);
     }
 
     KeyDecoder(NonBlockingReader reader, int maxPasteCodeUnits) {
+        this(reader, maxPasteCodeUnits, false);
+    }
+
+    private KeyDecoder(NonBlockingReader reader, int maxPasteCodeUnits, boolean backspaceSendsCtrlH) {
         if (reader == null) {
             throw new IllegalArgumentException("reader must not be null");
         }
@@ -52,6 +61,7 @@ public final class KeyDecoder {
         }
         this.reader = reader;
         this.maxPasteCodeUnits = maxPasteCodeUnits;
+        this.backspaceSendsCtrlH = backspaceSendsCtrlH;
     }
 
     public ReadResult read(long timeoutMs) throws IOException {
@@ -126,6 +136,9 @@ public final class KeyDecoder {
         }
         lastWasCarriageReturn = false;
 
+        if (ch == '\b' && backspaceSendsCtrlH) {
+            return KeyStroke.of(KeyStroke.Key.BACKSPACE);
+        }
         if (ch >= 1 && ch <= 26) {
             if (ch == '\t') {
                 return KeyStroke.of(KeyStroke.Key.TAB);

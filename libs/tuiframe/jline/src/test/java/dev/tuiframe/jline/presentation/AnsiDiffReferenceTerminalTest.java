@@ -100,6 +100,83 @@ class AnsiDiffReferenceTerminalTest {
     }
 
     @Test
+    void collidingEmojiHashesStillReplayTheChangedFrame() {
+        CellBuffer previous = rows("abcdefgh");
+        CellBuffer current = rows("abcdefgh");
+        previous.set(0, 2, "😀", CYAN);
+        current.set(0, 2, "🧡", CYAN);
+        assertEquals(previous.get(0, 2).hashCode(), current.get(0, 2).hashCode());
+        assertEquals(previous.rowSignature1(0), current.rowSignature1(0));
+        assertEquals(previous.rowSignature2(0), current.rowSignature2(0));
+
+        AnsiDiff diff = new AnsiDiff();
+        ReferenceTerminal terminal = terminalAt(previous, diff);
+        terminal.apply(diff.diff(
+            previous,
+            current,
+            TerminalCapabilities.DEFAULT,
+            ScrollHint.none()
+        ));
+
+        assertMatches(current, terminal);
+    }
+
+    @Test
+    void verticalScrollChecksCollidingRowsBeforeSkippingTheirText() {
+        CellBuffer previous = rows(
+            "00000000", "11111111", "22222222", "33333333", "44444444", "55555555"
+        );
+        previous.set(2, 2, "😀", CYAN);
+        CellBuffer current = new CellBuffer(6, 8);
+        copyRow(previous, 1, current, 0);
+        copyRow(previous, 2, current, 1);
+        copyRow(previous, 3, current, 2);
+        copyRow(previous, 4, current, 3);
+        copyRow(previous, 5, current, 4);
+        putAscii(current, 5, "EEEEEEEE");
+        current.set(1, 2, "🧡", CYAN);
+        assertEquals(previous.get(2, 2).hashCode(), current.get(1, 2).hashCode());
+
+        AnsiDiff diff = new AnsiDiff();
+        ReferenceTerminal terminal = terminalAt(previous, diff);
+        String patch = diff.diff(
+            previous,
+            current,
+            TerminalCapabilities.DEFAULT,
+            new ScrollHint.Vertical(new Rect(1, 0, 6, 6))
+        );
+
+        assertTrue(patch.contains("\u001B[1S"));
+        terminal.apply(patch);
+        assertMatches(current, terminal);
+    }
+
+    @Test
+    void collidingGraphemesCannotCreateAFalseScrollMatch() {
+        CellBuffer previous = rows("aaaa", "aaaa", "aaaa", "aaaa");
+        CellBuffer current = rows("aaaa", "aaaa", "aaaa", "aaaa");
+        for (int row = 0; row < previous.rows(); row++) {
+            previous.set(row, 1, "a\u0301\u0322", CYAN);
+            current.set(row, 1, "a\u0302\u0303", CYAN);
+        }
+        assertEquals(previous.get(0, 1).hashCode(), current.get(0, 1).hashCode());
+
+        AnsiDiff diff = new AnsiDiff();
+        ReferenceTerminal terminal = terminalAt(previous, diff);
+        String patch = diff.diff(
+            previous,
+            current,
+            TerminalCapabilities.DEFAULT,
+            new ScrollHint.Vertical(new Rect(0, 0, 4, 4))
+        );
+
+        assertFalse(patch.contains("\u001B[1S"));
+        assertFalse(patch.contains("\u001B[1T"));
+        terminal.apply(patch);
+        assertMatches(current, terminal);
+    }
+
+    @Test
     void horizontalDeleteAndInsertFastPathsReplayToTheirTargets() {
         CellBuffer previous = rows("0123456789", "ABabcdefCD", "9876543210");
         Rect region = new Rect(2, 1, 6, 1);

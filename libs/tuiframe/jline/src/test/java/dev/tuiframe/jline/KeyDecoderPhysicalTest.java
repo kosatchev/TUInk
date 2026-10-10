@@ -54,6 +54,27 @@ class KeyDecoderPhysicalTest {
     }
 
     @Test
+    void distinguishesCtrlHFromBackspaceUsingTheSessionConvention() throws IOException {
+        KeyDecoder ctrlHBackspace = new KeyDecoder(new QueueReader('\b', 127), true);
+        assertEquals(KeyStroke.of(KeyStroke.Key.BACKSPACE), event(ctrlHBackspace));
+        assertEquals(KeyStroke.of(KeyStroke.Key.BACKSPACE), event(ctrlHBackspace));
+
+        KeyDecoder delBackspace = new KeyDecoder(new QueueReader('\b', 127), false);
+        assertEquals(KeyStroke.of(KeyStroke.Key.H, KeyStroke.Modifier.CTRL), event(delBackspace));
+        assertEquals(KeyStroke.of(KeyStroke.Key.BACKSPACE), event(delBackspace));
+    }
+
+    @Test
+    void ctrlHBackspaceConventionAlsoHandlesAltBackspaceButKeepsExplicitCtrlH() throws IOException {
+        QueueReader reader = new QueueReader(27, '\b');
+        reader.add("\u001B[104;5u");
+        KeyDecoder decoder = new KeyDecoder(reader, true);
+
+        assertEquals(KeyStroke.of(KeyStroke.Key.BACKSPACE, KeyStroke.Modifier.ALT), event(decoder));
+        assertEquals(KeyStroke.of(KeyStroke.Key.H, KeyStroke.Modifier.CTRL), event(decoder));
+    }
+
+    @Test
     void readResultEnforcesStatusAndEventInvariant() {
         assertThrows(IllegalArgumentException.class, () -> new KeyDecoder.ReadResult(null, null));
         assertThrows(

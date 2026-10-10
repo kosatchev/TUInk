@@ -204,8 +204,10 @@ final class AnsiDiff {
                 activeStyleAnsi = rowWrite.activeStyleAnsi();
                 continue;
             }
+            // Signatures only filter candidates: distinct graphemes may share Cell.hashCode().
             if (previous.rowSignature1(r) == current.rowSignature1(r)
-                && previous.rowSignature2(r) == current.rowSignature2(r)) {
+                && previous.rowSignature2(r) == current.rowSignature2(r)
+                && firstDifferentColumn(previous, current, r, 0, current.cols() - 1) < 0) {
                 continue;
             }
             if (previous.rowHasWideCells(r) || current.rowHasWideCells(r)) {
@@ -406,7 +408,10 @@ final class AnsiDiff {
             for (int i = 0; i < overlap; i++) {
                 int curRow = curStart + i;
                 int prevRow = prevStart + i;
-                if (rowsEqual(prevTextSig, curTextSig, prevRow, curRow)) {
+                if (rowsEqual(prevTextSig, curTextSig, prevRow, curRow)
+                    && firstDifferentColumn(
+                        previous, current, prevRow, curRow, textStartCol, textEndCol
+                    ) < 0) {
                     matchedRows[curRow] = true;
                     matched++;
                 }

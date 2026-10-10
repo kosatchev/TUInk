@@ -150,7 +150,9 @@ public final class TuiEventLoop<E> {
         if (nanosUntilDeadline % 1_000_000L != 0L) {
             millisUntilDeadline++;
         }
-        return Math.max(0L, Math.min(MAX_DEADLINE_INPUT_POLL_TIMEOUT_MS, millisUntilDeadline));
+        // Physical terminal readers may interpret zero as an unbounded wait.
+        // Even an expired deadline must return control to the next application turn.
+        return Math.max(1L, Math.min(MAX_DEADLINE_INPUT_POLL_TIMEOUT_MS, millisUntilDeadline));
     }
 
     @FunctionalInterface

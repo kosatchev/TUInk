@@ -2,6 +2,7 @@ package dev.tuiframe.jline;
 
 import dev.tuiframe.capability.ColorDepth;
 import dev.tuiframe.capability.TerminalCapabilities;
+import java.io.IOError;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
@@ -9,9 +10,11 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.jline.terminal.Attributes;
+import org.jline.terminal.Attributes.ControlChar;
 import org.jline.terminal.Attributes.LocalFlag;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
+import org.jline.utils.Curses;
 import org.jline.utils.InfoCmp.Capability;
 import org.jline.utils.NonBlockingReader;
 
@@ -40,6 +43,7 @@ public final class TerminalSession implements AutoCloseable {
     private final Attributes originalAttributes;
     private final PrintWriter writer;
     private final TerminalCapabilities capabilities;
+    private final boolean backspaceSendsCtrlH;
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final Thread shutdownHook;
     private boolean mouseTrackingEnabled;
@@ -56,6 +60,7 @@ public final class TerminalSession implements AutoCloseable {
         this.originalAttributes = originalAttributes;
         this.writer = backend.writer();
         this.capabilities = Objects.requireNonNull(backend.capabilities(), "backend capabilities");
+        this.backspaceSendsCtrlH = detectCtrlHBackspace(backend.backspaceSequence(), originalAttributes);
         this.mouseTrackingEnabled = options.mouseTrackingEnabled() && capabilities.mouseTracking();
         this.shutdownHook = new Thread(this::closeQuietly, "terminal-session-cleanup");
     }
@@ -143,6 +148,30 @@ public final class TerminalSession implements AutoCloseable {
         return capabilities;
     }
 
+    boolean backspaceSendsCtrlH() {
+        return backspaceSendsCtrlH;
+    }
+
+    private static boolean detectCtrlHBackspace(String backspaceSequence, Attributes originalAttributes) {
+        String decoded;
+        try {
+            // JLine retains terminfo notation, including ^H, ^? and octal escapes.
+            decoded = "^?".equals(backspaceSequence) ? "\u007F" : Curses.tputs(backspaceSequence);
+        } catch (IOError malformedCapability) {
+            decoded = null;
+        }
+        if ("\b".equals(decoded)) {
+            return true;
+        }
+        if ("\u007F".equals(decoded)) {
+            return false;
+        }
+        // Prefer the physical key advertised by terminfo. When unavailable,
+        // retain the user's pre-raw-mode erase convention. On a ^H terminal
+        // its legacy Backspace and Ctrl+H bytes are inherently indistinguishable.
+        return originalAttributes.getControlChar(ControlChar.VERASE) == '\b';
+    }
+
     public int height() {
         return backend.height();
     }
@@ -196,8 +225,11 @@ public final class TerminalSession implements AutoCloseable {
             cleanup.append(SHOW_CURSOR);
             if (options.alternateScreenEnabled()) {
                 cleanup.append(LEAVE_ALTERNATE_SCREEN);
+            } else {
+                // Only clear frames painted onto the primary screen. Leaving
+                // the alternate screen restores the shell's content and cursor.
+                cleanup.append(CLEAR_AND_HOME);
             }
-            cleanup.append(CLEAR_AND_HOME);
             write(cleanup.toString());
         } catch (RuntimeException e) {
             failure = appendFailure(failure, "Failed to restore terminal output state", e);
@@ -272,6 +304,10 @@ public final class TerminalSession implements AutoCloseable {
             return TerminalCapabilities.DEFAULT;
         }
 
+        default String backspaceSequence() {
+            return null;
+        }
+
         PrintWriter writer();
 
         NonBlockingReader reader();
@@ -327,6 +363,11 @@ public final class TerminalSession implements AutoCloseable {
         @Override
         public TerminalCapabilities capabilities() {
             return capabilities;
+        }
+
+        @Override
+        public String backspaceSequence() {
+            return terminal.getStringCapability(Capability.key_backspace);
         }
 
         @Override

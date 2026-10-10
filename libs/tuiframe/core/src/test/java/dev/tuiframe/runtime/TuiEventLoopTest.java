@@ -49,7 +49,7 @@ class TuiEventLoopTest {
         loop.poll(now -> 1_000_001L);
         loop.poll(now -> 80_000_000L);
 
-        assertEquals(List.of(0L, 1L, 1L, 2L, 50L), input.timeouts);
+        assertEquals(List.of(1L, 1L, 1L, 2L, 50L), input.timeouts);
     }
 
     @Test

@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import dev.tuiframe.capability.TerminalCapabilities;
 import dev.tuiframe.geometry.Point;
 import dev.tuiframe.cell.CellBuffer;
+import dev.tuiframe.cell.CellText;
+import dev.tuiframe.cell.Canvas;
 import dev.tuiframe.screen.Frame;
 import dev.tuiframe.screen.ScreenCursor;
 import dev.tuiframe.screen.ScrollHint;
@@ -24,6 +26,26 @@ class AnsiDiffUnicodeSafetyTest {
         String ansi = present(current);
 
         assertEquals(1, occurrences(ansi, "中"));
+    }
+
+    @Test
+    void ordinaryTextWithJoinersKeepsFollowingTextAndCursorInTheirActualColumns() {
+        CellBuffer cells = new CellBuffer(1, 5);
+        int endColumn = CellText.draw(new Canvas(cells), 0, 0, "a\u200DB", CellStyle.DEFAULT);
+        StringWriter output = new StringWriter();
+        ScreenPresenter presenter = new ScreenPresenter(new PrintWriter(output), TerminalCapabilities.DEFAULT);
+
+        presenter.present(new Frame(
+            cells,
+            ScreenCursor.visibleAt(new Point(endColumn, 0)),
+            ScrollHint.none()
+        ));
+
+        assertEquals(2, endColumn);
+        assertEquals("B", cells.get(0, 1).grapheme());
+        assertFalse(cells.get(0, 1).continuation());
+        assertTrue(output.toString().contains("a\u200DB   "));
+        assertTrue(output.toString().endsWith("\u001B[1;3H"));
     }
 
     @Test

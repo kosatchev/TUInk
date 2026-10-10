@@ -140,6 +140,67 @@ class TextModelRevisionTest {
         assertEquals("", source.getLine(0));
     }
 
+    @Test
+    void changedSuffixStartsAtTheEarliestLineAcrossUnconsumedMutations() {
+        TextModel model = new TextModel(new SimpleLineBuffer());
+        model.replaceLines(List.of("one", "two", "three", "four"));
+        long before = model.revision();
+        assertEquals(model.lineCount(), model.firstChangedLineSince(before));
+
+        model.insertChar(new Position(3, 0), 'x');
+        assertEquals(3, model.firstChangedLineSince(before));
+        long afterFirst = model.revision();
+        model.insertNewline(new Position(2, 1));
+        assertEquals(2, model.firstChangedLineSince(before));
+        assertEquals(2, model.firstChangedLineSince(afterFirst));
+        model.deleteBackward(new Position(2, 0));
+        assertEquals(1, model.firstChangedLineSince(before));
+        model.deleteForward(new Position(0, 0));
+        assertEquals(0, model.firstChangedLineSince(before));
+    }
+
+    @Test
+    void changeHistoryCoversEveryMutationKindAndFallsBackWhenItsWindowIsLost() throws IOException {
+        TextModel model = new TextModel(new SimpleLineBuffer());
+        model.replaceLines(List.of("one", "two", "three"));
+        long before = model.revision();
+        model.insertText(new Position(2, 0), "x\ny");
+        assertEquals(2, model.firstChangedLineSince(before));
+        before = model.revision();
+        model.deleteRange(new Position(1, 1), new Position(2, 0));
+        assertEquals(1, model.firstChangedLineSince(before));
+        before = model.revision();
+        model.deleteBackward(new Position(1, 1));
+        assertEquals(1, model.firstChangedLineSince(before));
+        before = model.revision();
+        model.deleteForward(new Position(1, model.getLine(1).length()));
+        assertEquals(1, model.firstChangedLineSince(before));
+
+        before = model.revision();
+        for (int index = 0; index < 128; index++) {
+            model.insertChar(new Position(1, 0), 'x');
+        }
+        assertEquals(1, model.firstChangedLineSince(before));
+        model.insertChar(new Position(1, 0), 'x');
+        assertEquals(0, model.firstChangedLineSince(before));
+        assertEquals(1, model.firstChangedLineSince(before + 1));
+        assertEquals(0, model.firstChangedLineSince(-1));
+        assertEquals(0, model.firstChangedLineSince(model.revision() + 1));
+
+        before = model.revision();
+        model.replaceLines(List.of("replaced"));
+        assertEquals(0, model.firstChangedLineSince(before));
+        Path source = tempDir.resolve("loaded.txt");
+        Files.writeString(source, "loaded");
+        before = model.revision();
+        model.load(source);
+        assertEquals(0, model.firstChangedLineSince(before));
+        before = model.revision();
+        model.insertText(new Position(0, 0), "");
+        model.save(source);
+        assertEquals(model.lineCount(), model.firstChangedLineSince(before));
+    }
+
     private static final class StrategyObservedException extends RuntimeException {
     }
 }

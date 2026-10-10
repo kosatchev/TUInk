@@ -39,8 +39,18 @@ public class SimpleLineBuffer implements TextBuffer {
     }
 
     @Override
+    public void insertLines(int index, List<String> text) {
+        lines.addAll(index, text);
+    }
+
+    @Override
     public String removeLine(int index) {
         return lines.remove(index);
+    }
+
+    @Override
+    public void removeLines(int fromIndex, int toIndex) {
+        lines.subList(fromIndex, toIndex).clear();
     }
 
     @Override

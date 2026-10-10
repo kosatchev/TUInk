@@ -1,5 +1,8 @@
 package dev.tuink.core;
 
+import java.util.List;
+import java.util.Objects;
+
 /**
  * Replaceable line-based text storage abstraction.
  *
@@ -22,7 +25,24 @@ public interface TextBuffer {
 
     void insertLine(int index, String text);
 
+    /** Inserts a block in list order; storage strategies may avoid repeated suffix shifts. */
+    default void insertLines(int index, List<String> text) {
+        Objects.requireNonNull(text, "text");
+        Objects.checkFromToIndex(index, index, lineCount());
+        for (int line = 0; line < text.size(); line++) {
+            insertLine(index + line, text.get(line));
+        }
+    }
+
     String removeLine(int index);
+
+    /** Removes the half-open line range, preserving the order of all remaining lines. */
+    default void removeLines(int fromIndex, int toIndex) {
+        Objects.checkFromToIndex(fromIndex, toIndex, lineCount());
+        for (int line = toIndex - 1; line >= fromIndex; line--) {
+            removeLine(line);
+        }
+    }
 
     void clear();
 }

@@ -34,4 +34,9 @@ final class TextModelDocumentView implements DocumentView {
     public String line(int index) {
         return model.getLine(index);
     }
+
+    @Override
+    public int firstChangedLineSince(long earlierRevision) {
+        return model.firstChangedLineSince(earlierRevision);
+    }
 }

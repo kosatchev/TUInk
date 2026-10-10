@@ -17,6 +17,8 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,7 +31,10 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public class TextModel {
     private static final AtomicLong NEXT_CACHE_ID = new AtomicLong();
+    private static final int CHANGE_HISTORY_CAPACITY = 128;
     private final TextBuffer buffer;
+    private final int[] firstChangedLines = new int[CHANGE_HISTORY_CAPACITY];
+    private final LineChange[] lineChanges = new LineChange[CHANGE_HISTORY_CAPACITY];
     private static final Charset FALLBACK_CHARSET = Charset.forName("windows-1251");
     private static final Set<PosixFilePermission> NEW_FILE_PERMISSIONS = Set.of(
         PosixFilePermission.OWNER_READ,
@@ -41,6 +46,7 @@ public class TextModel {
     );
     private long revision = 0L;
     private long contentEpoch = 0L;
+    private long lastContentReplacementRevision;
     private final long cacheIdentity = NEXT_CACHE_ID.incrementAndGet();
     private DocumentFileMetadata fileMetadata;
     private FileBaseline fileBaseline;
@@ -87,7 +93,7 @@ public class TextModel {
         int col = at.col();
         String updated = line.substring(0, col) + ch + line.substring(col);
         buffer.setLine(at.line(), updated);
-        markChanged();
+        markChanged(at.line());
         return new Position(at.line(), col + 1);
     }
 
@@ -100,7 +106,7 @@ public class TextModel {
         buffer.setLine(at.line(), left);
         buffer.insertLine(at.line() + 1, right);
         insertDefaultLineSeparators(at.line(), 1);
-        markChanged();
+        markChanged(at.line(), 1, 2);
         return new Position(at.line() + 1, 0);
     }
 
@@ -113,7 +119,7 @@ public class TextModel {
             int previous = graphemes.previousBoundary(end);
             String updated = line.substring(0, previous) + line.substring(end);
             buffer.setLine(position.line(), updated);
-            markChanged();
+            markChanged(position.line());
             return new Position(position.line(), previous);
         }
 
@@ -126,7 +132,7 @@ public class TextModel {
         String prev = buffer.getLine(prevLineIndex);
         buffer.setLine(prevLineIndex, prev + current);
         removeLineSeparators(prevLineIndex, 1);
-        markChanged();
+        markChanged(prevLineIndex, 2, 1);
         return new Position(prevLineIndex, prev.length());
     }
 
@@ -140,7 +146,7 @@ public class TextModel {
             int next = graphemes.nextBoundary(start);
             String updated = line.substring(0, start) + line.substring(next);
             buffer.setLine(position.line(), updated);
-            markChanged();
+            markChanged(position.line());
             return new Position(position.line(), start);
         }
 
@@ -151,7 +157,7 @@ public class TextModel {
         String next = buffer.removeLine(position.line() + 1);
         buffer.setLine(position.line(), line + next);
         removeLineSeparators(position.line(), 1);
-        markChanged();
+        markChanged(position.line(), 2, 1);
         return new Position(position.line(), col);
     }
 
@@ -196,18 +202,16 @@ public class TextModel {
         if (a.line() == b.line()) {
             String line = buffer.getLine(a.line());
             buffer.setLine(a.line(), line.substring(0, a.col()) + line.substring(b.col()));
-            markChanged();
+            markChanged(a.line());
             return a;
         }
 
         String head = buffer.getLine(a.line()).substring(0, a.col());
         String tail = buffer.getLine(b.line()).substring(b.col());
         buffer.setLine(a.line(), head + tail);
-        for (int i = b.line(); i > a.line(); i--) {
-            buffer.removeLine(i);
-        }
+        buffer.removeLines(a.line() + 1, b.line() + 1);
         removeLineSeparators(a.line(), b.line() - a.line());
-        markChanged();
+        markChanged(a.line(), b.line() - a.line() + 1, 1);
         return a;
     }
 
@@ -227,18 +231,16 @@ public class TextModel {
 
         if (parts.length == 1) {
             buffer.setLine(at.line(), left + parts[0] + right);
-            markChanged();
+            markChanged(at.line());
             return new Position(at.line(), col + parts[0].length());
         }
 
         buffer.setLine(at.line(), left + parts[0]);
-        for (int i = 1; i < parts.length - 1; i++) {
-            buffer.insertLine(at.line() + i, parts[i]);
-        }
         String last = parts[parts.length - 1];
-        buffer.insertLine(at.line() + parts.length - 1, last + right);
+        parts[parts.length - 1] = last + right;
+        buffer.insertLines(at.line() + 1, Arrays.asList(parts).subList(1, parts.length));
         insertDefaultLineSeparators(at.line(), parts.length - 1);
-        markChanged();
+        markChanged(at.line(), 1, parts.length);
         return new Position(at.line() + parts.length - 1, last.length());
     }
 
@@ -471,6 +473,49 @@ public class TextModel {
     }
 
     /**
+     * Earliest logical line changed after {@code sinceRevision}.
+     *
+     * <p>A consumer may retain the prefix before this line and rebuild the suffix.
+     * The current revision returns {@link #lineCount()} because no lines changed.
+     * Unknown, future and older-than-retained revisions conservatively return zero.
+     * Only the most recent 128 mutations are retained.</p>
+     */
+    public int firstChangedLineSince(long sinceRevision) {
+        if (sinceRevision < 0 || sinceRevision > revision
+            || revision - sinceRevision > CHANGE_HISTORY_CAPACITY) {
+            return 0;
+        }
+        int firstLine = lineCount();
+        for (long changedRevision = sinceRevision + 1; changedRevision <= revision; changedRevision++) {
+            firstLine = Math.min(
+                firstLine, firstChangedLines[(int) (changedRevision % CHANGE_HISTORY_CAPACITY)]
+            );
+        }
+        return firstLine;
+    }
+
+    /**
+     * Ordered line replacements since a revision, or {@code null} when that
+     * history is unavailable or includes a whole-document replacement.
+     * Coordinates address the document after the preceding replacement.
+     */
+    public List<LineChange> lineChangesSince(long sinceRevision) {
+        if (sinceRevision < lastContentReplacementRevision || sinceRevision < 0
+            || sinceRevision > revision || revision - sinceRevision > CHANGE_HISTORY_CAPACITY) {
+            return null;
+        }
+        List<LineChange> changes = new ArrayList<>((int) (revision - sinceRevision));
+        for (long changedRevision = sinceRevision + 1; changedRevision <= revision; changedRevision++) {
+            changes.add(lineChanges[(int) (changedRevision % CHANGE_HISTORY_CAPACITY)]);
+        }
+        return List.copyOf(changes);
+    }
+
+    /** A replacement of complete logical lines, including the edited boundary lines. */
+    public record LineChange(int firstLine, int removedLineCount, int addedLineCount) {
+    }
+
+    /**
      * Generation of whole-document replacements such as load and recovery restore.
      */
     public long contentEpoch() {
@@ -506,13 +551,21 @@ public class TextModel {
         markContentReplaced();
     }
 
-    private void markChanged() {
+    private void markChanged(int firstLine) {
+        markChanged(firstLine, 1, 1);
+    }
+
+    private void markChanged(int firstLine, int removedLineCount, int addedLineCount) {
         revision++;
+        int slot = (int) (revision % CHANGE_HISTORY_CAPACITY);
+        firstChangedLines[slot] = firstLine;
+        lineChanges[slot] = new LineChange(firstLine, removedLineCount, addedLineCount);
     }
 
     private void markContentReplaced() {
         contentEpoch++;
-        markChanged();
+        markChanged(0);
+        lastContentReplacementRevision = revision;
     }
 
     private void insertDefaultLineSeparators(int index, int count) {
@@ -520,9 +573,7 @@ public class TextModel {
             return;
         }
         List<String> separators = new ArrayList<>(fileMetadata.lineSeparators());
-        for (int i = 0; i < count; i++) {
-            separators.add(index + i, fileMetadata.defaultLineSeparator());
-        }
+        separators.addAll(index, Collections.nCopies(count, fileMetadata.defaultLineSeparator()));
         fileMetadata = fileMetadata.withLineSeparators(separators);
     }
 
@@ -531,9 +582,7 @@ public class TextModel {
             return;
         }
         List<String> separators = new ArrayList<>(fileMetadata.lineSeparators());
-        for (int i = 0; i < count; i++) {
-            separators.remove(index);
-        }
+        separators.subList(index, index + count).clear();
         fileMetadata = fileMetadata.withLineSeparators(separators);
     }
 

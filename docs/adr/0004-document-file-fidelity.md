@@ -36,6 +36,21 @@ BOM-less UTF-16 is intentionally not auto-detected: UTF-16 input must declare
 its byte order with a BOM, avoiding heuristic corruption of arbitrary byte data.
 Explicit UTF-16LE/BE output therefore always writes the matching BOM.
 
+Existing-file replacement stages POSIX permissions and ownership, user-defined
+extended attributes, and ACLs exposed by the filesystem provider before commit.
+Failure to read or apply supported attributes leaves the original file intact.
+Providers exposing `unix:mode` also preserve `setuid`, `setgid`, and `sticky`
+after content and ownership changes. The staged mode is verified; restoring
+special bits must retain the access ACL's exact mask and named entries.
+On the default Linux filesystem provider, the `acl` package's `getfacl` and
+`setfacl` preserve POSIX access ACLs that Java's ACL view does not expose. The
+full ACL supplies permissions and replaces any inherited staged ACL in one operation;
+its entries and mask must match the source before replacement. Missing or failed
+tools abort the save while retaining the original.
+This does not promise preservation of security labels or other attributes not
+exposed by those Java views. Other hard links keep their original inode and
+contents after atomic replacement.
+
 ## Consequences
 
 - No-edit open/save preserves BOM, final EOL, and mixed separators.

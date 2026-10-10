@@ -79,6 +79,21 @@ class TextModelUnicodeEditingTest {
         assertEquals(revision, model.revision());
     }
 
+    @Test
+    void singleCharacterInsertionRejectsLineSeparatorsWithoutMutation() {
+        TextModel model = modelWith("hello");
+        long revision = model.revision();
+
+        for (char separator : new char[] {'\n', '\r'}) {
+            assertThrows(IllegalArgumentException.class,
+                () -> model.insertChar(new Position(0, 2), separator));
+        }
+
+        assertEquals(java.util.List.of("hello"), model.snapshotLines());
+        assertEquals(revision, model.revision());
+        assertEquals(model.snapshotLines(), RecoverySnapshot.capture(model, new EditorState()).lines());
+    }
+
     private static TextModel modelWith(String text) {
         TextModel model = new TextModel(new SimpleLineBuffer());
         model.insertText(new Position(0, 0), text);

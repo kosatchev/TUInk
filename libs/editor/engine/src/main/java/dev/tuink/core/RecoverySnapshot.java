@@ -53,10 +53,17 @@ public record RecoverySnapshot(
     }
 
     public static RecoverySnapshot capture(TextModel model, EditorState state) {
+        // Autosave can run after an edit and before the next frame adjusts the
+        // viewport. Keep the checkpoint valid without changing the live view.
+        ViewportState viewport = state.viewport();
+        int topLine = Math.min(viewport.topLine(), model.lineCount() - 1);
+        if (topLine != viewport.topLine()) {
+            viewport = new ViewportState(topLine, 0, viewport.leftColumn(), viewport.leftVisualColumn());
+        }
         return new RecoverySnapshot(
             model.snapshotLines(),
             state.getCursor(),
-            state.viewport(),
+            viewport,
             state.getSelectionAnchor(),
             state.isDirty(),
             state.getCurrentFile(),

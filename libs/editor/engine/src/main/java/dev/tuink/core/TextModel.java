@@ -4,6 +4,7 @@ import dev.tuink.unicode.GraphemeText;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
+import java.nio.channels.SeekableByteChannel;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
 import java.nio.charset.CharsetDecoder;
@@ -11,9 +12,12 @@ import java.nio.charset.CharsetEncoder;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
@@ -85,6 +89,9 @@ public class TextModel {
     }
 
     public Position insertChar(Position position, char ch) {
+        if (ch == '\n' || ch == '\r') {
+            throw new IllegalArgumentException("Use insertNewline or insertText for line separators");
+        }
         if (Character.isSurrogate(ch)) {
             throw new IllegalArgumentException("A standalone UTF-16 surrogate is not valid text");
         }
@@ -265,6 +272,9 @@ public class TextModel {
 
     public LoadMetadata load(Path path) throws IOException {
         Path target = path.toRealPath();
+        if (!Files.readAttributes(target, BasicFileAttributes.class).isRegularFile()) {
+            throw new IOException("Not a regular file: " + path);
+        }
         byte[] data = Files.readAllBytes(target);
         DecodedContent decoded = decodeWithDetectedCharset(data);
         ParsedContent parsed = parseContent(decoded.text());
@@ -334,7 +344,7 @@ public class TextModel {
         Path target = resolveSaveTarget(requestedTarget);
         FileBaseline savedBaseline = FileBaseline.fromBytes(target, content);
         boolean targetExists = Files.exists(target);
-        Set<PosixFilePermission> targetPermissions = readPosixPermissions(target, targetExists);
+        FileSaveAttributes targetAttributes = targetExists ? FileSaveAttributes.read(target) : null;
         Path parent = target.getParent();
         Path tempDir = parent != null ? parent : Path.of(".").toAbsolutePath().normalize();
         String fileName = target.getFileName() == null ? "tuink" : target.getFileName().toString();
@@ -347,17 +357,15 @@ public class TextModel {
         boolean committed = false;
         try {
             Files.write(tempFile, content);
-            if (targetPermissions != null) {
-                Files.setPosixFilePermissions(tempFile, targetPermissions);
+            if (targetAttributes != null) {
+                targetAttributes.apply(tempFile);
             }
             if (checkBaseline && checkedDisposition == SaveDisposition.REPLACE_EXISTING) {
                 // Recheck after staging bytes, immediately before the filesystem commit.
                 requireUnchangedFile(requestedTarget);
             }
             if (checkedDisposition == SaveDisposition.CREATE_NEW) {
-                // No REPLACE_EXISTING: a target created after UI validation is
-                // rejected by the filesystem at the commit boundary.
-                Files.move(tempFile, target);
+                publishNewFile(tempFile, target, content);
             } else {
                 try {
                     Files.move(
@@ -386,6 +394,62 @@ public class TextModel {
         }
     }
 
+    private static void publishNewFile(Path tempFile, Path target, byte[] content) throws IOException {
+        Throwable linkFailure;
+        try {
+            // Linking the fully staged inode publishes complete bytes without
+            // overwriting a name created concurrently. Files.move cannot offer
+            // that no-overwrite guarantee on Unix, even without REPLACE_EXISTING.
+            Files.createLink(target, tempFile);
+            return;
+        } catch (FileAlreadyExistsException conflict) {
+            throw conflict;
+        } catch (IOException | UnsupportedOperationException failure) {
+            linkFailure = failure;
+        }
+
+        SeekableByteChannel output;
+        try {
+            output = createNewSaveChannel(target);
+        } catch (IOException failure) {
+            failure.addSuppressed(linkFailure);
+            throw failure;
+        } catch (UnsupportedOperationException failure) {
+            IOException unsupported = new IOException("Cannot create a new file: " + target, failure);
+            unsupported.addSuppressed(linkFailure);
+            throw unsupported;
+        }
+        try (output) {
+            ByteBuffer bytes = ByteBuffer.wrap(content);
+            while (bytes.hasRemaining()) {
+                output.write(bytes);
+            }
+        } catch (IOException failure) {
+            // Keep the new path: another writer may have replaced it after the
+            // exclusive open, so deleting it by name could remove their file.
+            IOException incomplete = new IOException(
+                "Saving the new file failed: " + target
+                    + ". The file remains at this path and may contain incomplete data.",
+                failure
+            );
+            incomplete.addSuppressed(linkFailure);
+            throw incomplete;
+        }
+    }
+
+    private static SeekableByteChannel createNewSaveChannel(Path target) throws IOException {
+        Set<StandardOpenOption> options = Set.of(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+        try {
+            return Files.newByteChannel(
+                target,
+                options,
+                PosixFilePermissions.asFileAttribute(NEW_FILE_PERMISSIONS)
+            );
+        } catch (UnsupportedOperationException unsupportedAttributes) {
+            return Files.newByteChannel(target, options);
+        }
+    }
+
     private static Path resolveSaveTarget(Path requestedTarget) throws IOException {
         if (requestedTarget.getFileName() == null) {
             throw new IOException("Save target must be a file: " + requestedTarget);
@@ -402,18 +466,6 @@ public class TextModel {
                 + ". Use Save As with a different name, or reopen the file.");
         }
         fileBaseline.requireUnchanged(path);
-    }
-
-    private static Set<PosixFilePermission> readPosixPermissions(Path target, boolean targetExists)
-        throws IOException {
-        if (!targetExists) {
-            return null;
-        }
-        try {
-            return Files.getPosixFilePermissions(target);
-        } catch (UnsupportedOperationException ignored) {
-            return null;
-        }
     }
 
     private static Path createSaveTempFile(Path tempDir, String prefix, boolean targetExists)

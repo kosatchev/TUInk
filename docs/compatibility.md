@@ -45,6 +45,17 @@ Platform and environment support should not be removed merely because it introdu
 
 These branches support current environments rather than historical TUInk releases.
 
+## Document saves
+
+Saving to a new name never overwrites a file created concurrently. Where hard
+links are supported, TUInk atomically publishes the complete staged bytes and
+permissions. Otherwise it exclusively creates the destination with `CREATE_NEW`
+and writes through that open handle. This portable path can leave a partial new
+file if writing or closing fails; the error identifies that path, and document
+metadata and the saved-file baseline remain unchanged. TUInk does not delete the
+destination after such a failure because another writer may have replaced it.
+Existing-file replacement retains its atomic-move behavior and baseline checks.
+
 ## Storage formats
 
 Persisted files must have an explicit format marker, strict validation, complete current-schema serialization, and safe handling of incompatible content. A format change replaces the current contract; it does not imply a migration path.

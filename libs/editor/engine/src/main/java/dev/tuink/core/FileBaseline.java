@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -29,6 +30,9 @@ public record FileBaseline(Path target, String sha256) {
     void requireUnchanged(Path candidate) throws IOException {
         try {
             Path physicalTarget = candidate.toRealPath();
+            if (!Files.readAttributes(physicalTarget, BasicFileAttributes.class).isRegularFile()) {
+                throw new IOException("Not a regular file: " + candidate);
+            }
             boolean sameTarget = target.equals(physicalTarget);
             if (!sameTarget && target.equals(target.toRealPath())) {
                 // A hard-link alias has another canonical path but the same inode.

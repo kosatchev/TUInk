@@ -2,14 +2,19 @@ package dev.tuink.highlight.regex;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 import dev.tuink.editor.document.DocumentId;
 import dev.tuink.editor.document.DocumentSnapshot;
 import dev.tuink.render.Color;
 import dev.tuink.render.ContextualLineHighlighter;
+import dev.tuink.render.LineHighlighter;
 import dev.tuink.render.Style;
 import dev.tuink.render.StyleSpan;
+import java.lang.reflect.Field;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class MarkdownFenceHighlighterTest {
@@ -286,6 +291,52 @@ class MarkdownFenceHighlighterTest {
     }
 
     @Test
+    void rustRawStringsKeepTheirDelimiterWithinAFenceAndResetAtTheNextFence() {
+        for (String prefix : List.of("r", "br", "cr")) {
+            DocumentSnapshot document = document(
+                "Markdown outside r###\"",
+                "```rust",
+                prefix + "##\"open",
+                "\"# /* // quoted",
+                "\"##; return 7;",
+                prefix + "###\"never closed",
+                "```",
+                "# Outside",
+                "```rs",
+                "return 8;",
+                "```"
+            );
+            ContextualLineHighlighter highlighter = markdownHighlighter();
+            Style string = Style.fg(Color.BRIGHT_GREEN);
+            List<StyleSpan> visible = List.of(
+                span(document.line(9), "return", KEYWORD), span(document.line(9), "8", NUMBER)
+            );
+
+            assertEquals(visible, highlight(highlighter, document, 9), prefix);
+            assertEquals(
+                List.of(new StyleSpan(0, document.line(3).length(), string)),
+                highlight(highlighter, document, 3),
+                prefix
+            );
+            assertEquals(
+                List.of(
+                    new StyleSpan(0, 3, string),
+                    span(document.line(4), "return", KEYWORD),
+                    span(document.line(4), "7", NUMBER)
+                ),
+                highlight(highlighter, document, 4),
+                prefix
+            );
+            assertEquals(
+                List.of(new StyleSpan(0, document.line(7).length(), MARKUP)),
+                highlight(highlighter, document, 7),
+                prefix
+            );
+            assertEquals(visible, highlight(highlighter, document, 9), prefix);
+        }
+    }
+
+    @Test
     void changedRevisionResetsMultilineStringStateInsideAnUnchangedFence() {
         DocumentSnapshot quoted = document("```js", "const s = `", "return 7;", "```");
         DocumentSnapshot revised = new DocumentSnapshot(DOCUMENT_ID, 2, List.of("```js", "// closed", "return 7;", "```"));
@@ -297,6 +348,80 @@ class MarkdownFenceHighlighterTest {
             List.of(span(revised.line(2), "return", KEYWORD), span(revised.line(2), "7", NUMBER)),
             highlight(highlighter, revised, 2)
         );
+    }
+
+    @Test
+    void unnamedFencesReuseOneFallbackAcrossLinesBlocksAndRevisions() throws ReflectiveOperationException {
+        MarkdownFenceHighlighter highlighter = new MarkdownFenceHighlighter();
+        LineHighlighter fallback = null;
+        for (int revision = 1; revision <= 4; revision++) {
+            List<String> lines = new ArrayList<>();
+            lines.add("```");
+            for (int line = 0; line < 128; line++) {
+                lines.add("public value = " + revision + ";");
+            }
+            lines.add("```");
+            lines.add("~~~");
+            lines.add("return 7;");
+            lines.add("~~~");
+            DocumentSnapshot document = new DocumentSnapshot(DOCUMENT_ID, revision, lines);
+
+            // Computing a later line also retains the delegates for every earlier line.
+            assertEquals(
+                List.of(span(document.line(131), "return", KEYWORD), span(document.line(131), "7", NUMBER)),
+                highlight(highlighter, document, 131)
+            );
+            List<LineHighlighter> delegates = retainedDelegates(highlighter);
+            if (fallback == null) {
+                fallback = delegates.get(1);
+            }
+            for (int line = 1; line <= 128; line++) {
+                assertSame(fallback, delegates.get(line), "unnamed fence line " + line);
+            }
+            assertSame(fallback, delegates.get(131), "second fence in revision " + revision);
+        }
+    }
+
+    @Test
+    void unsupportedFenceTagsReuseFallbackWithoutAccumulatingAcrossRevisions() throws ReflectiveOperationException {
+        MarkdownFenceHighlighter highlighter = new MarkdownFenceHighlighter();
+        LineHighlighter fallback = null;
+        for (int revision = 1; revision <= 32; revision++) {
+            DocumentSnapshot document = new DocumentSnapshot(
+                DOCUMENT_ID,
+                revision,
+                List.of("```unsupported-" + revision, "return 7;", "```", "~~~", "return 8;", "~~~")
+            );
+
+            assertEquals(
+                List.of(span(document.line(4), "return", KEYWORD), span(document.line(4), "8", NUMBER)),
+                highlight(highlighter, document, 4)
+            );
+            List<LineHighlighter> delegates = retainedDelegates(highlighter);
+            if (fallback == null) {
+                fallback = delegates.get(4);
+            }
+            assertSame(fallback, delegates.get(1), "unsupported tag in revision " + revision);
+            assertSame(fallback, delegates.get(4), "unnamed fence in revision " + revision);
+        }
+        Field cache = MarkdownFenceHighlighter.class.getDeclaredField("languageCache");
+        cache.setAccessible(true);
+        assertEquals(0, ((Map<?, ?>) cache.get(highlighter)).size(), "unsupported tags must not grow the cache");
+    }
+
+    // Equal spans cannot distinguish shared rules from a newly compiled rule set per line.
+    private static List<LineHighlighter> retainedDelegates(MarkdownFenceHighlighter highlighter)
+        throws ReflectiveOperationException {
+        Field byLine = MarkdownFenceHighlighter.class.getDeclaredField("delegatesByLine");
+        byLine.setAccessible(true);
+        List<?> delegates = (List<?>) byLine.get(highlighter);
+        Field delegateHighlighter = delegates.get(0).getClass().getDeclaredField("highlighter");
+        delegateHighlighter.setAccessible(true);
+        List<LineHighlighter> result = new ArrayList<>(delegates.size());
+        for (Object delegate : delegates) {
+            result.add((LineHighlighter) delegateHighlighter.get(delegate));
+        }
+        return result;
     }
 
     private static ContextualLineHighlighter markdownHighlighter() {

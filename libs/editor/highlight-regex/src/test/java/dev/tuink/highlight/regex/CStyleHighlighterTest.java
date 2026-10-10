@@ -287,6 +287,144 @@ class CStyleHighlighterTest {
     }
 
     @Test
+    void rustRawStringPrefixesAndDelimitersRemainQuotedWithoutBackslashEscapes() {
+        for (String prefix : List.of("r", "br", "cr")) {
+            for (String hashes : List.of("", "#", "###")) {
+                String literal = prefix + hashes + "\"/* // \\\"" + hashes;
+                String line = "let value = " + literal + "; return 7; // actual";
+                assertEquals(
+                    List.of(
+                        span(line, "let", KEYWORD),
+                        span(line, literal, STRING),
+                        span(line, "return", KEYWORD),
+                        span(line, "7", NUMBER),
+                        new StyleSpan(line.lastIndexOf("//"), line.length(), COMMENT)
+                    ),
+                    highlighter("test.rs").highlight(line),
+                    prefix + hashes
+                );
+            }
+        }
+    }
+
+    @Test
+    void rustRawStringsCloseOnlyAfterTheirRequiredHashesAndLeaveAdditionalHashesOutside() {
+        for (String prefix : List.of("r", "br", "cr")) {
+            String literal = prefix + "###\"one \"# /* // two \"## end \"###";
+            String line = literal + "#; return 7;";
+            assertEquals(
+                List.of(span(line, literal, STRING), span(line, "return", KEYWORD), span(line, "7", NUMBER)),
+                highlighter("test.rs").highlight(line),
+                prefix
+            );
+        }
+
+        String hashes = "#".repeat(255);
+        String literal = "r" + hashes + "\"body\"" + hashes;
+        String line = literal + "#; return 7;";
+        assertEquals(
+            List.of(span(line, literal, STRING), span(line, "return", KEYWORD), span(line, "7", NUMBER)),
+            highlighter("test.rs").highlight(line)
+        );
+    }
+
+    @Test
+    void rustRawStringsCarryTheirDelimiterAcrossLinesAndResumeCodeWhenRequestedOutOfOrder() {
+        for (String prefix : List.of("r", "br", "cr")) {
+            for (String hashes : List.of("", "##")) {
+                String inside = hashes.isEmpty() ? "/* // return 7;" : "\"# /* // return 7;";
+                DocumentSnapshot document = document(
+                    "let value = " + prefix + hashes + "\"",
+                    inside,
+                    "\\\"" + hashes + "; return 8; // actual",
+                    "return 9;"
+                );
+                ContextualLineHighlighter highlighter = highlighter("test.rs");
+
+                assertEquals(code(document.line(3), "9"), highlight(highlighter, document, 3), prefix + hashes);
+                assertEquals(string(document.line(1)), highlight(highlighter, document, 1), prefix + hashes);
+                assertEquals(
+                    List.of(
+                        new StyleSpan(0, hashes.length() + 2, STRING),
+                        span(document.line(2), "return", KEYWORD),
+                        span(document.line(2), "8", NUMBER),
+                        new StyleSpan(document.line(2).indexOf("//"), document.line(2).length(), COMMENT)
+                    ),
+                    highlight(highlighter, document, 2),
+                    prefix + hashes
+                );
+                assertEquals(
+                    List.of(
+                        span(document.line(0), "let", KEYWORD),
+                        new StyleSpan(document.line(0).indexOf(prefix + hashes + "\""), document.line(0).length(), STRING)
+                    ),
+                    highlight(highlighter, document, 0),
+                    prefix + hashes
+                );
+            }
+        }
+    }
+
+    @Test
+    void revisionAndDocumentIdentityInvalidateTheCachedRustRawDelimiter() {
+        ContextualLineHighlighter highlighter = highlighter("test.rs");
+        DocumentSnapshot quoted = document("r##\"open", "\"#; return 7;", "return 8;");
+        DocumentSnapshot revised = new DocumentSnapshot(
+            DOCUMENT_ID, 2, List.of("r#\"open", quoted.line(1), quoted.line(2))
+        );
+        DocumentSnapshot different = new DocumentSnapshot(
+            new DocumentId("different-raw-string-document"), revised.revision(), quoted.lines()
+        );
+
+        assertEquals(string(quoted.line(2)), highlight(highlighter, quoted, 2));
+        assertEquals(code(revised.line(2), "8"), highlight(highlighter, revised, 2));
+        assertEquals(string(different.line(2)), highlight(highlighter, different, 2));
+        assertEquals(code(revised.line(2), "8"), highlighter.highlight(revised.line(2)));
+        assertEquals(string(different.line(2)), highlight(highlighter, different, 2));
+    }
+
+    @Test
+    void rustRawPrefixesRequireAnIdentifierBoundaryAndLeaveOrdinaryStringsAndLifetimesIntact() {
+        ContextualLineHighlighter highlighter = highlighter("test.rs");
+        for (String identifier : List.of("addr", "number", "_r", "αr", "identifierbr", "namecr")) {
+            String line = identifier + "#\"/* //\"#; return 7;";
+            assertEquals(
+                List.of(span(line, "\"/* //\"", STRING), span(line, "return", KEYWORD), span(line, "7", NUMBER)),
+                highlighter.highlight(line),
+                identifier
+            );
+        }
+
+        String literal = "\"r#\\\"// /*\\\"#\"";
+        String line = "'a " + literal + "; return 7; // actual";
+        assertEquals(
+            List.of(
+                span(line, literal, STRING),
+                span(line, "return", KEYWORD),
+                span(line, "7", NUMBER),
+                new StyleSpan(line.lastIndexOf("//"), line.length(), COMMENT)
+            ),
+            highlighter.highlight(line)
+        );
+    }
+
+    @Test
+    void rustRawPrefixesKeepTheirOrdinaryMeaningInOtherLanguages() {
+        String line = "r#\"/* quoted */\"#; return 7;";
+        for (String fileName : List.of("Test.java", "test.c", "test.go", "test.kt")) {
+            assertEquals(
+                List.of(span(line, "\"/* quoted */\"", STRING), span(line, "return", KEYWORD), span(line, "7", NUMBER)),
+                highlighter(fileName).highlight(line),
+                fileName
+            );
+        }
+        assertEquals(
+            List.of(new StyleSpan(line.indexOf('#'), line.length(), COMMENT)),
+            highlighter("test.php").highlight(line)
+        );
+    }
+
+    @Test
     void revisionAndDocumentIdentityInvalidateMultilineStringState() {
         ContextualLineHighlighter highlighter = highlighter("test.js");
         DocumentSnapshot quoted = document("const s = `", "return 7;", "`;");

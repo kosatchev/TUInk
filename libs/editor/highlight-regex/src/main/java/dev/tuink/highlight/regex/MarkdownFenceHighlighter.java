@@ -4,6 +4,7 @@ import dev.tuink.editor.document.DocumentId;
 import dev.tuink.editor.document.DocumentView;
 import dev.tuink.render.ContextualLineHighlighter;
 import dev.tuink.render.LineHighlighter;
+import dev.tuink.render.LineLexicalScanner;
 import dev.tuink.render.StyleSpan;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -17,6 +18,9 @@ import java.util.Objects;
  */
 final class MarkdownFenceHighlighter implements ContextualLineHighlighter {
     private final LineHighlighter markdown = RegexHighlighter.forMarkdown();
+    private final LineHighlighter fallback = RegexHighlighter.withDefaults();
+    private final LineLexicalScanner proseScanner = LineLexicalScanner.markdownProse();
+    private final LineLexicalScanner fallbackScanner = LineLexicalScanner.generic();
     private final Map<String, LineHighlighter> languageCache = new HashMap<>();
     private DocumentId cachedDocumentId;
     private long cachedRevision = Long.MIN_VALUE;
@@ -27,6 +31,58 @@ final class MarkdownFenceHighlighter implements ContextualLineHighlighter {
     @Override
     public List<StyleSpan> highlight(String line) {
         return markdown.highlight(line);
+    }
+
+    @Override
+    public LineLexicalScanner lexicalScanner() {
+        return this::scanLexically;
+    }
+
+    private record LexicalState(Fence fence, LineLexicalScanner.State delegateState)
+        implements LineLexicalScanner.State {
+    }
+
+    private LineLexicalScanner.Result scanLexically(
+        String line,
+        int maxCodeUnits,
+        LineLexicalScanner.State previous
+    ) {
+        Objects.requireNonNull(line, "line");
+        if (maxCodeUnits < 0) {
+            throw new IllegalArgumentException("maxCodeUnits must be non-negative");
+        }
+        int limit = Math.min(line.length(), maxCodeUnits);
+        String prefix = limit == line.length() ? line : line.substring(0, limit);
+        LexicalState state = previous instanceof LexicalState prior ? prior : new LexicalState(null, null);
+        FenceMarker marker = fenceMarker(prefix);
+        Fence fence = state.fence();
+        if (fence == null && marker != null) {
+            Fence opened = new Fence(marker.fenceChar(), marker.length(), normalizeLanguageTag(marker.info()), 0);
+            return fenceResult(limit, opened);
+        }
+        if (fence != null && marker != null && marker.fenceChar() == fence.fenceChar()
+            && marker.length() >= fence.length() && marker.info().isBlank()) {
+            return fenceResult(limit, null);
+        }
+        LineLexicalScanner scanner = proseScanner;
+        if (fence != null) {
+            LineHighlighter embedded = embeddedHighlighter(fence.languageTag());
+            scanner = embedded instanceof ContextualLineHighlighter contextual
+                ? contextual.lexicalScanner() : null;
+            if (scanner == null) {
+                scanner = fallbackScanner;
+            }
+        }
+        // The scanner sees the original line so it can distinguish truncation from a real EOL.
+        LineLexicalScanner.Result result = scanner.scan(line, limit, state.delegateState());
+        return new LineLexicalScanner.Result(result.scannedCodeUnits(),
+            new LexicalState(fence, result.endState()), result.excludedRanges(), result.quotes());
+    }
+
+    private static LineLexicalScanner.Result fenceResult(int limit, Fence fence) {
+        List<LineLexicalScanner.Range> ranges = limit == 0
+            ? List.of() : List.of(new LineLexicalScanner.Range(0, limit));
+        return new LineLexicalScanner.Result(limit, new LexicalState(fence, null), ranges, List.of());
     }
 
     @Override
@@ -51,12 +107,21 @@ final class MarkdownFenceHighlighter implements ContextualLineHighlighter {
     private void ensureComputed(DocumentView document, int targetLine) {
         DocumentId documentId = document.documentId();
         long revision = document.revision();
-        if (!Objects.equals(documentId, cachedDocumentId) || revision != cachedRevision) {
+        if (!Objects.equals(documentId, cachedDocumentId)) {
             cachedDocumentId = documentId;
             cachedRevision = revision;
             computedLine = -1;
             delegatesByLine.clear();
             activeFence = null;
+        } else if (revision != cachedRevision) {
+            int retainedLines = Math.min(
+                delegatesByLine.size(),
+                Math.max(0, document.firstChangedLineSince(cachedRevision))
+            );
+            delegatesByLine.subList(retainedLines, delegatesByLine.size()).clear();
+            computedLine = retainedLines - 1;
+            activeFence = retainedLines == 0 ? null : delegatesByLine.getLast().fenceAfter();
+            cachedRevision = revision;
         }
         if (targetLine <= computedLine) {
             return;
@@ -72,10 +137,10 @@ final class MarkdownFenceHighlighter implements ContextualLineHighlighter {
         FenceMarker marker = fenceMarker(line);
         if (activeFence == null) {
             if (marker == null) {
-                return new LineDelegate(markdown, 0);
+                return new LineDelegate(markdown, 0, null);
             }
             activeFence = new Fence(marker.fenceChar(), marker.length(), normalizeLanguageTag(marker.info()), lineIndex + 1);
-            return new LineDelegate(markdown, 0);
+            return new LineDelegate(markdown, 0, activeFence);
         }
 
         // Closing fence uses the same marker kind and at least the opening length.
@@ -84,17 +149,26 @@ final class MarkdownFenceHighlighter implements ContextualLineHighlighter {
             && marker.length() >= activeFence.length()
             && marker.info().isBlank()) {
             activeFence = null;
-            return new LineDelegate(markdown, 0);
+            return new LineDelegate(markdown, 0, null);
         }
 
-        return new LineDelegate(embeddedHighlighter(activeFence.languageTag()), activeFence.firstLine());
+        return new LineDelegate(embeddedHighlighter(activeFence.languageTag()), activeFence.firstLine(), activeFence);
     }
 
     private LineHighlighter embeddedHighlighter(String languageTag) {
         if (languageTag == null || languageTag.isEmpty()) {
-            return RegexHighlighter.withDefaults();
+            return fallback;
         }
-        return languageCache.computeIfAbsent(languageTag, this::createEmbeddedHighlighter);
+        LineHighlighter cached = languageCache.get(languageTag);
+        if (cached != null) {
+            return cached;
+        }
+        LineHighlighter created = createEmbeddedHighlighter(languageTag);
+        // Unknown tags can change on every edit; retain only the finite supported set.
+        if (created != fallback) {
+            languageCache.put(languageTag, created);
+        }
+        return created;
     }
 
     private LineHighlighter createEmbeddedHighlighter(String languageTag) {
@@ -120,12 +194,14 @@ final class MarkdownFenceHighlighter implements ContextualLineHighlighter {
             case "json" -> RegexHighlighter.forJson();
             case "yaml", "yml" -> RegexHighlighter.forYaml();
             case "toml" -> RegexHighlighter.forToml();
-            case "ini", "cfg", "conf", "properties", "editorconfig" -> RegexHighlighter.forIniLike();
+            case "ini", "cfg", "conf" -> RegexHighlighter.forIniLike();
+            case "properties" -> RegexHighlighter.forProperties();
+            case "editorconfig" -> RegexHighlighter.forEditorConfig();
             case "xml" -> RegexHighlighter.forXml();
             case "dockerfile", "docker" -> RegexHighlighter.forDockerfile();
             case "make", "makefile" -> RegexHighlighter.forMakefile();
             case "markdown", "md" -> RegexHighlighter.forMarkdown();
-            default -> RegexHighlighter.withDefaults();
+            default -> fallback;
         };
     }
 
@@ -150,14 +226,15 @@ final class MarkdownFenceHighlighter implements ContextualLineHighlighter {
         if (separator >= 0 && separator < token.length() - 1) {
             token = token.substring(separator + 1);
         }
-        while (!token.isEmpty()) {
-            char tail = token.charAt(token.length() - 1);
+        int end = token.length();
+        while (end > 0) {
+            char tail = token.charAt(end - 1);
             if (Character.isLetterOrDigit(tail) || tail == '+' || tail == '#') {
                 break;
             }
-            token = token.substring(0, token.length() - 1);
+            end--;
         }
-        return token;
+        return token.substring(0, end);
     }
 
     private static FenceMarker fenceMarker(String line) {
@@ -187,7 +264,7 @@ final class MarkdownFenceHighlighter implements ContextualLineHighlighter {
         return new FenceMarker(fenceChar, length, info);
     }
 
-    private record LineDelegate(LineHighlighter highlighter, int firstLine) {
+    private record LineDelegate(LineHighlighter highlighter, int firstLine, Fence fenceAfter) {
     }
 
     private record Fence(char fenceChar, int length, String languageTag, int firstLine) {

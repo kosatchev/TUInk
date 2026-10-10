@@ -3,11 +3,14 @@ package dev.tuink.highlight.regex;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 import dev.tuink.render.Color;
 import dev.tuink.render.ContextualLineHighlighter;
+import dev.tuink.render.LineHighlighter;
 import dev.tuink.render.Style;
 import dev.tuink.render.StyleSpan;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -224,6 +227,130 @@ class RegexHighlighterTest {
                 RegexHighlighter.forSql().highlight(sql)
             )
         );
+    }
+
+    @Test
+    void markupAttributesKeepTheirRangesAndStringAndCommentOverrides() {
+        String line = "<ns:item \talpha =\"value\" data-id='tail' ns:attr.name_1\t=7/> <!-- ignored=\"text\" -->";
+        List<StyleSpan> expected = List.of(
+            span(line, "<ns:item", KEYWORD),
+            span(line, " \talpha =", TYPE),
+            span(line, "\"value\"", STRING),
+            span(line, " data-id=", TYPE),
+            span(line, "'tail'", STRING),
+            span(line, " ns:attr.name_1\t=", TYPE),
+            new StyleSpan(line.indexOf("<!--"), line.length(), COMMENT)
+        );
+
+        for (String fileName : List.of("index.html", "settings.xml")) {
+            assertEquals(expected, RegexHighlighter.forFileName(fileName).highlight(line), fileName);
+        }
+
+        String colonName = " :name=value";
+        assertAll(
+            () -> assertEquals(List.of(new StyleSpan(0, 7, TYPE)), RegexHighlighter.forHtml().highlight(colonName)),
+            () -> assertEquals(List.of(), RegexHighlighter.forXml().highlight(colonName))
+        );
+    }
+
+    @Test
+    void markupAttributeScanningStaysResponsiveOnLongWhitespaceAndIdentifiers() {
+        String whitespace = " \t".repeat(30_000);
+        String identifier = "attribute".repeat(7_500);
+        List<String> unmatched = List.of(
+            whitespace,
+            whitespace + identifier,
+            " " + identifier,
+            " " + identifier + whitespace,
+            " missing attribute".repeat(4_000)
+        );
+        String assignment = whitespace + identifier + whitespace + "=value";
+
+        assertTimeoutPreemptively(Duration.ofSeconds(3), () -> {
+            for (String fileName : List.of("index.html", "settings.xml")) {
+                LineHighlighter highlighter = RegexHighlighter.forFileName(fileName);
+                for (String line : unmatched) {
+                    assertEquals(List.of(), highlighter.highlight(line), fileName);
+                }
+                assertEquals(
+                    List.of(new StyleSpan(0, assignment.length() - "value".length(), TYPE)),
+                    highlighter.highlight(assignment),
+                    fileName
+                );
+            }
+        });
+    }
+
+    @Test
+    void markdownLinksRetainSimpleDelimiterRangesAndRecoverAfterInvalidCandidates() {
+        for (String fileName : List.of("README.md", "notes.markdown")) {
+            LineHighlighter highlighter = RegexHighlighter.forFileName(fileName);
+            String line = "[](empty) [empty]() [missing] suffix [first](one) ![画像🦀](図.png) [second](two)";
+            assertEquals(
+                List.of(
+                    span(line, "[first](one)", DECORATOR),
+                    span(line, "[画像🦀](図.png)", DECORATOR),
+                    span(line, "[second](two)", DECORATOR)
+                ),
+                highlighter.highlight(line),
+                fileName
+            );
+        }
+
+        RegexHighlighter highlighter = RegexHighlighter.forMarkdown();
+        assertAll(
+            () -> assertEquals(List.of(), highlighter.highlight("[unclosed [label] without a destination")),
+            () -> assertEquals(List.of(), highlighter.highlight("[label](missing close")),
+            () -> assertEquals(List.of(), highlighter.highlight("[escaped\\]suffix](target)")),
+            () -> assertEquals(List.of(new StyleSpan(0, 17, DECORATOR)), highlighter.highlight("[[nested](target)")),
+            () -> assertEquals(List.of(new StyleSpan(0, 18, DECORATOR)), highlighter.highlight("[outer]([inner](u))")),
+            () -> assertEquals(List.of(new StyleSpan(0, 16, DECORATOR)), highlighter.highlight("[a](one)[b](two)"))
+        );
+    }
+
+    @Test
+    void markdownLinksKeepTheirLayerBetweenInlineFormattingAndBlockquotes() {
+        String inline = "`[code](url)` **[bold](target)**";
+        String quote = "> [quoted](url) **bold**";
+        assertAll(
+            () -> assertEquals(
+                List.of(
+                    new StyleSpan(0, 1, STRING),
+                    span(inline, "[code](url)", DECORATOR),
+                    new StyleSpan(12, 13, STRING),
+                    new StyleSpan(14, 16, TYPE),
+                    span(inline, "[bold](target)", DECORATOR),
+                    new StyleSpan(inline.length() - 2, inline.length(), TYPE)
+                ),
+                RegexHighlighter.forMarkdown().highlight(inline)
+            ),
+            () -> assertEquals(
+                List.of(new StyleSpan(0, quote.length(), COMMENT)),
+                RegexHighlighter.forMarkdown().highlight(quote)
+            )
+        );
+    }
+
+    @Test
+    void markdownLinksScanLongUnmatchedLabelsAndDestinationsWithoutRepeatedSuffixSearches() {
+        String brackets = "[".repeat(80_000);
+        String invalidLinks = "[empty]() [missing] ".repeat(4_000);
+        assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
+            for (LineHighlighter highlighter : List.of(
+                RegexHighlighter.forMarkdown(), RegexHighlighter.forFileName("README.md")
+            )) {
+                assertEquals(List.of(), highlighter.highlight(brackets));
+                assertEquals(List.of(), highlighter.highlight(brackets + "] without a destination"));
+                assertEquals(List.of(), highlighter.highlight("[target](" + brackets));
+                String valid = brackets + "](target)";
+                assertEquals(List.of(new StyleSpan(0, valid.length(), DECORATOR)), highlighter.highlight(valid));
+                String afterInvalid = invalidLinks + "[valid](target)";
+                assertEquals(
+                    List.of(new StyleSpan(invalidLinks.length(), afterInvalid.length(), DECORATOR)),
+                    highlighter.highlight(afterInvalid)
+                );
+            }
+        });
     }
 
     @Test

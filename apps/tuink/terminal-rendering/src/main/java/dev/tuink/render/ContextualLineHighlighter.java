@@ -8,4 +8,9 @@ import java.util.List;
  */
 public interface ContextualLineHighlighter extends LineHighlighter {
     List<StyleSpan> highlight(DocumentView document, int lineIndex, String line);
+
+    /** Semantic string/comment scanner, or null when only display styles are available. */
+    default LineLexicalScanner lexicalScanner() {
+        return null;
+    }
 }

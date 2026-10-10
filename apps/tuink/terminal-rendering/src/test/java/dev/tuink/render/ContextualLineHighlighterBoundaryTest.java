@@ -15,6 +15,22 @@ import org.junit.jupiter.api.Test;
 
 class ContextualLineHighlighterBoundaryTest {
     @Test
+    void documentViewReportsTheUnchangedPrefixAcrossSeveralEdits() {
+        TextModel model = new TextModel(new SimpleLineBuffer());
+        model.replaceLines(List.of("first", "second", "third"));
+        DocumentView view = new TextModelDocumentView(model);
+        long revision = view.revision();
+
+        model.insertChar(new Position(2, 0), '!');
+        model.insertChar(new Position(1, 0), '!');
+
+        assertEquals(1, view.firstChangedLineSince(revision));
+        assertEquals(model.lineCount(), view.firstChangedLineSince(view.revision()));
+        model.replaceLines(List.of("replacement"));
+        assertEquals(0, view.firstChangedLineSince(revision));
+    }
+
+    @Test
     void renderPassesAStableReadOnlyCapabilityInsteadOfTheMutableModel() {
         TextModel model = new TextModel(new SimpleLineBuffer());
         model.replaceLines(List.of("first"));

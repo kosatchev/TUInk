@@ -32,5 +32,5 @@ jobs:
 
       - name: Validate, test, and package
         run: >-
-          ./gradlew --no-daemon --stacktrace --warning-mode=fail
-          check :app:distZip :app:perfHarnessTest
+          ./gradlew --no-daemon --stacktrace --warning-mode=fail -PenablePgo
+          check :app:distZip :app:perfHarnessTest :app:pgoHarnessTest

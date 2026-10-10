@@ -25,6 +25,7 @@ import tempfile
 import termios
 import time
 import tty
+import unittest
 
 
 PROFILE_PATTERN = re.compile(
@@ -50,6 +51,9 @@ SEARCH_REPLACE_STRESS_TEXT = ("replace-segment-" * 128 + "中😀" * 64).encode(
 OPEN_FILE_TREE_ENTRY_COUNT = 360
 OPEN_FILE_TREE_FIRST_TOKEN = b"tree-row-000"
 OPEN_FILE_TREE_TIMESTAMP_NS = 946684800_000_000_000
+EXIT_TIMEOUT = 3.0
+TERMINATE_TIMEOUT = 1.0
+KILL_TIMEOUT = 1.0
 
 
 def create_settings_fixture(path: Path) -> None:
@@ -229,6 +233,15 @@ def event_sequence(scenario: str, index: int) -> bytes:
     raise ValueError(f"unsupported scenario: {scenario}")
 
 
+def require_normal_exit(status: int) -> None:
+    if os.WIFSIGNALED(status):
+        raise RuntimeError(f"application terminated by signal {os.WTERMSIG(status)}")
+    if not os.WIFEXITED(status):
+        raise RuntimeError(f"application did not exit normally (wait status {status})")
+    if os.WEXITSTATUS(status) != 0:
+        raise RuntimeError(f"application exited with code {os.WEXITSTATUS(status)}; expected 0")
+
+
 def run_profile(
     binary: Path,
     fixture: Path,
@@ -253,21 +266,24 @@ def run_profile(
 
     pid, master = pty.fork()
     if pid == 0:
-        fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
-        os.environ["TERM"] = "xterm-256color"
-        child_args = [
-            str(binary),
-            f"-Duser.home={runtime_home}",
-            f"--profile-file={profile_path}",
-            str(open_file_tree_fixture if scenario == "open-file-tree" else fixture),
-        ]
-        if scenario not in MOUSE_SCENARIOS:
-            child_args.insert(2, "--no-mouse")
-        os.execv(str(binary), child_args)
+        try:
+            fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+            os.environ["TERM"] = "xterm-256color"
+            os.environ["XDG_CONFIG_HOME"] = str(runtime_home / ".config")
+            child_args = [
+                str(binary),
+                f"-Duser.home={runtime_home}",
+                f"--profile-file={profile_path}",
+                str(open_file_tree_fixture if scenario == "open-file-tree" else fixture),
+            ]
+            if scenario not in MOUSE_SCENARIOS:
+                child_args.insert(2, "--no-mouse")
+            os.execv(str(binary), child_args)
+        except BaseException as error:
+            os.write(2, f"Cannot start editor: {error}\n".encode("utf-8", "replace"))
+            os._exit(127)
 
-    tty.setraw(master)
     selector = selectors.DefaultSelector()
-    selector.register(master, selectors.EVENT_READ)
     captured = bytearray()
     status: int | None = None
 
@@ -280,7 +296,34 @@ def run_profile(
             status = candidate
         return status
 
+    def wait_for_exit(timeout: float) -> int | None:
+        deadline = time.monotonic() + timeout
+        while poll() is None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            drain(selector, captured)
+            time.sleep(min(0.01, remaining))
+        return status
+
+    def terminate_child() -> None:
+        for child_signal, timeout in (
+            (signal.SIGTERM, TERMINATE_TIMEOUT),
+            (signal.SIGKILL, KILL_TIMEOUT),
+        ):
+            if poll() is not None:
+                return
+            try:
+                os.kill(pid, child_signal)
+            except ProcessLookupError:
+                pass
+            if wait_for_exit(timeout) is not None:
+                return
+        raise TimeoutError(f"application process {pid} could not be reaped after SIGKILL")
+
     try:
+        tty.setraw(master)
+        selector.register(master, selectors.EVENT_READ)
         startup_deadline = time.monotonic() + startup_delay
         while time.monotonic() < startup_deadline:
             drain(selector, captured)
@@ -417,32 +460,30 @@ def run_profile(
                 )
 
         if scenario == "open-file-tree":
-            os.write(master, b"\x1b")
+            # CSI-u Escape is unambiguous even when Ctrl+Q follows immediately;
+            # a bare ESC would combine with it during key disambiguation.
+            os.write(master, b"\x1b[27u")
             time.sleep(0.05)
             drain(selector, captured)
             os.write(master, b"\x11")
         else:
             os.write(master, b"\x11\x11" if scenario == "save-as-left" else b"\x11")
-        exit_deadline = time.monotonic() + 3.0
-        while poll() is None and time.monotonic() < exit_deadline:
-            drain(selector, captured)
-            time.sleep(0.01)
-        if poll() is None:
-            os.kill(pid, signal.SIGTERM)
-            os.waitpid(pid, 0)
-            status = 0
+        exit_status = wait_for_exit(EXIT_TIMEOUT)
+        if exit_status is None:
+            raise TimeoutError(f"application did not exit after Ctrl+Q within {EXIT_TIMEOUT:g}s")
+        require_normal_exit(exit_status)
     except Exception:
         terminal_tail = captured[-4000:].decode("utf-8", errors="replace")
         if terminal_tail:
             print(terminal_tail, file=sys.stderr)
         raise
     finally:
-        if poll() is None:
-            os.kill(pid, signal.SIGKILL)
-            os.waitpid(pid, 0)
-        selector.close()
-        os.close(master)
-        shutil.rmtree(runtime_home, ignore_errors=True)
+        try:
+            terminate_child()
+        finally:
+            selector.close()
+            os.close(master)
+            shutil.rmtree(runtime_home, ignore_errors=True)
 
     expected = frames // 30
     actual = profile_line_count(profile_path)
@@ -453,15 +494,128 @@ def run_profile(
     return input_elapsed
 
 
-def git_commit(project_dir: Path) -> str | None:
-    result = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=project_dir,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    return result.stdout.strip() if result.returncode == 0 else None
+def source_state(project_dir: Path) -> dict[str, object]:
+    """Identify tracked and non-ignored untracked contents, including dirty edits.
+
+    This describes the checkout running the harness. Only a compiler-written
+    receipt can associate a source state with the measured binary.
+    """
+    unknown = {"commit": None, "dirty": None, "tree_sha256": None}
+    try:
+        def git(*arguments: str) -> bytes:
+            return subprocess.run(
+                ["git", *arguments], cwd=project_dir, check=True,
+                capture_output=True,
+            ).stdout
+
+        commit = git("rev-parse", "HEAD").decode("ascii").strip()
+        paths = git("ls-files", "-z", "--cached", "--others", "--exclude-standard")
+        status = git("status", "--porcelain=v1", "-z", "--untracked-files=all")
+        digest = hashlib.sha256()
+        for raw_path in sorted(set(paths.split(b"\0")) - {b""}):
+            path = project_dir / os.fsdecode(raw_path)
+            if path.is_symlink():
+                kind = b"symlink"
+                content = hashlib.sha256(os.fsencode(os.readlink(path))).hexdigest()
+            elif path.is_file():
+                kind = b"executable" if os.access(path, os.X_OK) else b"file"
+                content = sha256(path)
+            else:
+                kind, content = b"missing", ""
+            digest.update(raw_path + b"\0" + kind + b"\0" + content.encode("ascii") + b"\0")
+        return {"commit": commit, "dirty": bool(status), "tree_sha256": digest.hexdigest()}
+    except (OSError, subprocess.CalledProcessError, UnicodeError):
+        return unknown
+
+
+def validate_build_receipt(receipt: object, binary_hash: str) -> dict[str, object]:
+    """Accept the complete compiler receipt schema, rather than a commit label."""
+    def is_hash(value: object) -> bool:
+        return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+    def string_list(value: object) -> bool:
+        return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+    def hash_map(value: object) -> bool:
+        return (isinstance(value, dict) and bool(value)
+                and all(isinstance(key, str) and is_hash(item) for key, item in value.items()))
+
+    if (not isinstance(receipt, dict) or type(receipt.get("schema")) is not int or receipt["schema"] != 1
+        or receipt.get("kind") != "tuink-native-build"):
+        raise ValueError("unsupported build receipt")
+    if not is_hash(receipt.get("binary_sha256")) or receipt["binary_sha256"] != binary_hash:
+        raise ValueError("build receipt SHA-256 does not match the measured binary")
+    if not isinstance(receipt.get("built_at_utc"), str) or not receipt["built_at_utc"]:
+        raise ValueError("incomplete build receipt: missing build time")
+    inputs = receipt.get("inputs")
+    if not isinstance(inputs, dict):
+        raise ValueError("incomplete build receipt: missing compiler inputs")
+    source = inputs.get("source")
+    if not isinstance(source, dict) or not {"commit", "dirty", "tree_sha256"}.issubset(source):
+        raise ValueError("incomplete build receipt: missing source state")
+    unknown_source = all(source[name] is None for name in ("commit", "dirty", "tree_sha256"))
+    if not unknown_source and not (
+        isinstance(source["commit"], str) and re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", source["commit"])
+        and type(source["dirty"]) is bool and is_hash(source["tree_sha256"])
+    ):
+        raise ValueError("invalid build receipt source state")
+    sdk = inputs.get("sdk")
+    if not (isinstance(sdk, dict) and isinstance(sdk.get("home"), str) and sdk["home"]
+            and isinstance(sdk.get("release"), str) and sdk["release"]
+            and is_hash(sdk.get("release_sha256")) and is_hash(sdk.get("native_image_sha256"))):
+        raise ValueError("incomplete build receipt: missing SDK identity")
+    if hashlib.sha256(sdk["release"].encode("utf-8")).hexdigest() != sdk["release_sha256"]:
+        raise ValueError("build receipt SDK release content does not match its hash")
+    flags = inputs.get("flags")
+    required_flags = {"debug", "fallback", "quick_build", "shared_library", "use_fat_jar", "pgo_instrument"}
+    environment = inputs.get("compiler_environment")
+    if (not all(string_list(inputs.get(name)) for name in ("build_args", "jvm_args", "exclude_config_args"))
+        or not all(isinstance(inputs.get(name), str) and inputs[name] for name in ("main_class", "image_name"))
+        or not isinstance(inputs.get("system_properties"), dict)
+        or not is_hash(inputs.get("environment_overrides_sha256"))
+        or not isinstance(flags, dict) or not required_flags.issubset(flags)
+        or not all(type(flags[name]) is bool for name in required_flags)
+        or not isinstance(environment, dict)
+        or not {"NATIVE_IMAGE_OPTIONS", "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS"}.issubset(environment)
+        or not all(value is None or isinstance(value, str) for value in environment.values())
+        or not hash_map(inputs.get("classpath")) or not hash_map(inputs.get("input_files"))):
+        raise ValueError("incomplete build receipt: missing compiler options or compiled input hashes")
+    return receipt
+
+
+def build_provenance(binary: Path, binary_hash: str, checkout: dict[str, object]) -> dict[str, object]:
+    """Read the sidecar without inventing build metadata for an arbitrary executable."""
+    receipt_path = Path(str(binary) + ".build.json")
+    result: dict[str, object] = {"status": "unknown", "receipt": str(receipt_path)}
+    if not receipt_path.is_file():
+        return result | {"reason": "No compiler build receipt; binary source, SDK and arguments are unknown"}
+    try:
+        receipt_bytes = receipt_path.read_bytes()
+        receipt = validate_build_receipt(json.loads(receipt_bytes), binary_hash)
+        source = receipt["inputs"]["source"]
+        source_known = bool(source.get("commit") and source.get("tree_sha256"))
+        return result | {
+            "status": "hash-matched",
+            "receipt_sha256": hashlib.sha256(receipt_bytes).hexdigest(),
+            "build": receipt,
+            "source_matches_run_checkout": source == checkout if source_known else None,
+        }
+    except (OSError, ValueError, UnicodeError) as error:
+        return result | {"reason": str(error)}
+
+
+def run_parameters(args: argparse.Namespace, scenarios: list[str]) -> dict[str, object]:
+    return {
+        "rows": args.rows, "cols": args.cols, "frames": args.frames,
+        "repeats": args.repeats, "scenarios": scenarios,
+        "fixture_lines": args.fixture_lines,
+        "startup_delay_s": args.startup_delay, "event_delay_s": args.event_delay,
+        "quiet_period_s": args.quiet_period, "completion_timeout_s": args.completion_timeout,
+        "exit_timeout_s": EXIT_TIMEOUT, "terminate_timeout_s": TERMINATE_TIMEOUT,
+        "kill_timeout_s": KILL_TIMEOUT, "term": "xterm-256color",
+        "inherited_environment": {name: os.environ.get(name) for name in ("COLORTERM", "LANG", "LC_ALL", "TZ")},
+        "mouse_scenarios": list(MOUSE_SCENARIOS), "profile_every_frames": 30,
+    }
 
 
 def summarize_scenario(
@@ -490,11 +644,30 @@ def summary_markdown(summary: dict[str, object]) -> str:
         f"# Render benchmark: {metadata['label']}",
         "",
         f"- Timestamp: `{metadata['timestamp_utc']}`",
-        f"- Commit: `{metadata.get('commit') or 'unknown'}`",
         f"- Binary SHA-256: `{metadata['binary_sha256']}`",
         f"- Fixture SHA-256: `{metadata['fixture_sha256']}`",
         f"- Settings SHA-256: `{metadata['settings_sha256']}`",
     ]
+    provenance = metadata["build_provenance"]
+    checkout = metadata["run_checkout"]
+    lines.append(f"- Build provenance: `{provenance['status']}`")
+    if provenance["status"] == "hash-matched":
+        source = provenance["build"]["inputs"]["source"]
+        lines.extend([
+            f"- Binary build commit: `{source.get('commit') or 'unknown'}`; dirty: `{source.get('dirty')}`",
+            f"- Binary build source SHA-256: `{source.get('tree_sha256') or 'unknown'}`",
+            f"- Build source matches run checkout: `{provenance['source_matches_run_checkout']}`",
+            f"- Build receipt SHA-256: `{provenance['receipt_sha256']}`",
+        ])
+    else:
+        lines.append(f"- Binary build origin: unknown ({provenance['reason']})")
+    lines.extend([
+        f"- Run checkout commit (harness context): `{checkout.get('commit') or 'unknown'}`; dirty: `{checkout.get('dirty')}`",
+        f"- Harness SHA-256: `{metadata['harness_sha256']}`",
+        f"- Startup / event delay / quiet period / completion timeout, s: "
+        f"`{metadata['startup_delay_s']} / {metadata['event_delay_s']} / "
+        f"{metadata['quiet_period_s']} / {metadata['completion_timeout_s']}`",
+    ])
     if metadata.get("open_file_tree_manifest_sha256"):
         lines.append(
             "- Open-file tree manifest SHA-256: "
@@ -593,6 +766,11 @@ def run_self_test() -> None:
         assert records[1]["frame"] == 60
         assert records[1]["total"] == 9.0
 
+    suite = unittest.defaultTestLoader.discover(
+        str(Path(__file__).parent), pattern="test_render_benchmark.py"
+    )
+    if suite.countTestCases() == 0 or not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful():
+        raise RuntimeError("render benchmark lifecycle self-tests failed")
     print("render benchmark self-test: OK")
 
 
@@ -643,6 +821,10 @@ def main() -> None:
         parser.error("terminal must be at least 4x20")
     if args.fixture_lines <= args.frames + args.rows:
         parser.error("--fixture-lines must exceed frames + terminal rows")
+    for name in ("startup_delay", "event_delay", "quiet_period", "completion_timeout"):
+        value = getattr(args, name)
+        if not math.isfinite(value) or value < 0 or (name in ("quiet_period", "completion_timeout") and value == 0):
+            parser.error(f"--{name.replace('_', '-')} must be finite and {'positive' if name in ('quiet_period', 'completion_timeout') else 'nonnegative'}")
     try:
         scenarios = parse_scenarios(args.scenarios)
     except ValueError as error:
@@ -650,6 +832,12 @@ def main() -> None:
 
     project_dir = next(parent for parent in Path(__file__).resolve().parents
                        if (parent / 'settings.gradle').is_file() and (parent / 'gradlew').is_file())
+    harness_hash = sha256(Path(__file__).resolve())
+    binary_hash = sha256(binary)
+    checkout = source_state(project_dir)
+    provenance = build_provenance(binary, binary_hash, checkout)
+    if provenance["status"] == "unknown":
+        print(f"Warning: {provenance['reason']}", file=sys.stderr)
     timestamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     safe_label = re.sub(r"[^A-Za-z0-9_.-]+", "-", args.label).strip("-") or "run"
     run_dir = args.output_root.resolve() / f"{timestamp}-{safe_label}"
@@ -700,14 +888,19 @@ def main() -> None:
             scenario_records, input_elapsed, args.repeats
         )
 
+    if sha256(binary) != binary_hash or sha256(Path(__file__).resolve()) != harness_hash:
+        raise RuntimeError("Binary or benchmark harness changed during the run; results were not accepted")
+
     summary: dict[str, object] = {
-        "schema": 1,
+        "schema": 2,
         "metadata": {
             "label": args.label,
             "timestamp_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
-            "commit": git_commit(project_dir),
+            "run_checkout": checkout,
+            "build_provenance": provenance,
+            "harness_sha256": harness_hash,
             "binary": str(binary),
-            "binary_sha256": sha256(binary),
+            "binary_sha256": binary_hash,
             "fixture_sha256": sha256(fixture),
             "settings_sha256": sha256(settings_fixture),
             "open_file_tree_manifest_sha256": open_file_tree_manifest_sha256,
@@ -715,13 +908,7 @@ def main() -> None:
             "machine": platform.machine(),
             "processor": platform.processor(),
             "python": platform.python_version(),
-            "rows": args.rows,
-            "cols": args.cols,
-            "frames": args.frames,
-            "repeats": args.repeats,
-            "scenarios": scenarios,
-            "fixture_lines": args.fixture_lines,
-            "event_delay_s": args.event_delay,
+            **run_parameters(args, scenarios),
         },
         "scenarios": scenario_summaries,
     }

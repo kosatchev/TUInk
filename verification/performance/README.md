@@ -1,6 +1,36 @@
 # Render benchmarks
 
-This directory contains the reproducible native PTY render benchmark.
+This directory contains the reproducible native PTY render benchmark and optional
+PGO training harness.
+
+## Optional PGO training
+
+Run the PGO harness self-test without a native SDK or editor binary:
+
+```bash
+./gradlew :app:pgoHarnessTest
+```
+
+It requires POSIX Python 3.10+ as `python3`, is available without `-PenablePgo`,
+and runs explicitly in ordinary CI. PGO native tasks require the separately
+pinned Oracle GraalVM SDK described in [PGO build instructions](../../docs/building.md#pgo).
+
+`nativeProfileTrain` runs the current instrumented binary in five checked PTY
+sessions: Java/Python/YAML/Rust editing and mouse drag. The editing sessions
+verify saved bytes, and all sessions require normal exit0 before their fresh
+profiles are merged. A profile receipt binds the merged result to the SDK,
+classpath, CPU target, libc target and harness. Separate glibc/musl profiles
+are required; `-Ptarget=all` is rejected. Profiles are local build inputs;
+profiles and measurements are excluded from release contents.
+
+Training is not a timing comparison: instrumentation adds overhead. Evaluate
+optimized binaries on separate corpora and compare paired runs against Oracle
+O3 from the same SDK. Community vs Oracle also changes compiler branches and
+static profile inference, so that comparison does not isolate PGO.
+
+PGO remains experimental. Keep CPU, wall time, RSS and sampled render
+diagnostics separate when evaluating a profile; results depend on the
+training corpus and operations.
 
 ## Current benchmark
 

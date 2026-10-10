@@ -12,6 +12,9 @@ gradle/verification-metadata.dryrun.xml
 out/
 **/bin/
 
+# Python benchmark tools
+__pycache__/
+
 # IDE
 .idea/
 *.iml

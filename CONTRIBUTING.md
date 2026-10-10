@@ -14,6 +14,8 @@ and runs the JVM application and compiles the native binary. See
 [Native toolchain](docs/building.md#native-toolchain) for the exact version,
 Linux x86_64 download, and checksum, or the
 [setup and transfer guide in Russian](docs/setup-ru.md) for a new computer.
+The optional [PGO workflow](docs/building.md#pgo) uses Oracle GraalVM with the
+same Java version; regular native releases continue to use Community.
 
 ```bash
 ./gradlew check
@@ -80,6 +82,8 @@ Run the focused test while developing, then the full suite before committing:
 For benchmark-harness changes, also run `./gradlew :app:perfHarnessTest` on a
 POSIX system with Python 3.10+ available as `python3`. CI runs this self-test
 explicitly, and native benchmark/release tasks retain it as a prerequisite.
+For PGO training changes, also run `./gradlew :app:pgoHarnessTest`; this
+self-test runs in CI without Oracle GraalVM or a native build.
 When intentionally changing dependencies, also update and review the lockfiles
 and verification metadata as described in [Build and native targets](docs/building.md#dependency-integrity).
 

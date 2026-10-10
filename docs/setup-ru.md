@@ -3,8 +3,9 @@
 Для JVM-сборки используется **Java 25** через Gradle Toolchains.
 Gradle можно запустить на совместимом JDK, например 17, 21 или 25.
 Для сборки нативного исполняемого файла закреплён
-**GraalVM Community 25.2.4 с Java 25**. Один этот дистрибутив подходит
-для всех задач; `JAVA_HOME` и `GRAALVM_HOME` указывают на одну установку.
+**GraalVM Community 25.2.4 с Java 25**. Этот дистрибутив подходит для
+обычной разработки и релиза; `JAVA_HOME` и `GRAALVM_HOME` указывают на одну
+установку. Для необязательной PGO-сборки используется отдельный Oracle SDK.
 
 Основной пример ниже рассчитан на Linux, команды установки пакетов — на
 Ubuntu/Debian. Все команды `./gradlew` выполняются из корня проекта.
@@ -14,7 +15,8 @@ Ubuntu/Debian. Все команды `./gradlew` выполняются из к�
 | Задача | Требование |
 |---|---|
 | Сборка исходников, тесты, запуск через Gradle | Java 25 toolchain; Gradle может работать на совместимом JDK 17, 21 или 25 |
-| Сборка native-image и полного релиза | GraalVM **Community 25.2.4 / Java 25**; `JAVA_HOME` и `GRAALVM_HOME` указывают на его каталог |
+| Обычная native-image-сборка и полный релиз | GraalVM **Community 25.2.4 / Java 25**; `JAVA_HOME` и `GRAALVM_HOME` указывают на его каталог |
+| Необязательная PGO-сборка | Oracle GraalVM **25.0.4+7.1 / Java 25**; оба пути указывают на этот Oracle SDK |
 | Запуск готового JVM ZIP | Java 25 или новее; Gradle и GraalVM не нужны |
 | Запуск готового нативного файла | Java не нужна; должны подходить ОС, архитектура и системные библиотеки |
 
@@ -238,6 +240,67 @@ zlib (`zlib1g` на Ubuntu/Debian). Сборка на другой систем�
 Статическая musl-сборка (`:app:nativeMusl`) требует отдельного C-toolchain
 с musl и соответствующих библиотек; установки GraalVM для неё недостаточно.
 Подробности целей сборки — в [building.md](building.md#native-targets).
+
+### Необязательная PGO-сборка
+
+PGO — экспериментальный вариант, включаемый через `-PenablePgo`. Для него
+нужен **Oracle GraalVM 25.0.4+7.1 с Java 25**: Community не поддерживает
+PGO. Версия языка и среды выполнения проекта остаётся Java 25. Потребуются
+те же C-зависимости и Python 3.10+ в POSIX-окружении с псевдотерминалом.
+
+Установите Oracle SDK отдельно. Команды относятся только к Linux x86_64:
+
+```bash
+curl -fL --output /tmp/tuink-oracle-graalvm-25.0.4-linux-x64.tar.gz \
+  https://download.oracle.com/graalvm/25/archive/graalvm-jdk-25.0.4_linux-x64_bin.tar.gz
+printf '%s  %s\n' \
+  76007c309f821aaf435bce63162ea0395587fc77350801c81643fe7feea37276 \
+  /tmp/tuink-oracle-graalvm-25.0.4-linux-x64.tar.gz \
+  | sha256sum -c -
+```
+
+После успешной проверки (`OK`):
+
+```bash
+tar -xzf /tmp/tuink-oracle-graalvm-25.0.4-linux-x64.tar.gz \
+  -C "$HOME/.local/share/tuink-toolchains"
+export GRAALVM_HOME="$HOME/.local/share/tuink-toolchains/graalvm-jdk-25.0.4+7.1"
+export JAVA_HOME="$GRAALVM_HOME"
+export PATH="$JAVA_HOME/bin:$PATH"
+./gradlew :app:verifyPgoToolchain -PenablePgo
+./gradlew :app:nativeProfileInstrument -PenablePgo
+./gradlew :app:nativeProfileTrain -PenablePgo
+./gradlew :app:nativeProfileBuild -PenablePgo
+./apps/tuink/launcher/build/native/nativePgoOptimizedCompile/tuink-pgo README.md
+```
+
+`:app:nativeProfileOptimize -PenablePgo` объединяет свежее обучение и сборку.
+Обучение запускает пять проверяемых сессий: редактирование Java/Python/YAML/Rust
+и перетаскивание мышью. Профиль и его проверяемая квитанция сохраняются в
+`.local/pgo/glibc/profile.iprof` и `profile.iprof.json`; они переживают `clean`
+и не попадают в Git. Изменение classpath, SDK, `nativeMarch`, цели или harness
+требует нового обучения. Другой путь задаётся через `-PpgoProfile=<путь>`;
+выбирайте игнорируемый Git каталог вне `build/`, чтобы квитанция не попала
+в коммит, а `clean` не удалил профиль.
+
+По умолчанию используется glibc. Для musl добавляйте `-Ptarget=musl` ко всем
+PGO-командам и установите musl toolchain; результат находится в
+`apps/tuink/launcher/build/native/nativeMuslPgoOptimizedCompile/tuink-musl-pgo`.
+`-Ptarget=all` для PGO запрещён: профили разных libc не смешиваются.
+
+Ускорение зависит от корпуса и операций. Сравнивайте PGO-бинарник с обычной
+нативной сборкой из того же SDK на одинаковых данных. Измеряйте CPU, время
+выполнения, память и задержки отрисовки отдельно. Подробности проверки профилей:
+[PGO в building.md](building.md#pgo).
+
+Обычные архивы, DEB и полный релиз собираются с Community. Перед возвращением
+к ним переключите оба пути обратно:
+
+```bash
+export GRAALVM_HOME="$HOME/.local/share/tuink-toolchains/graalvm-community-25.2.4+7.1"
+export JAVA_HOME="$GRAALVM_HOME"
+export PATH="$JAVA_HOME/bin:$PATH"
+```
 
 ## 7. DEB и полный релиз
 

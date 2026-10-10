@@ -13,13 +13,16 @@ def jlineNativeManualArgs = [
     '-H:JNIConfigurationResources=META-INF/native-image/org.jline/jline-native/jni-config.json'
 ]
 def nativeMarch = (project.findProperty('nativeMarch') ?: 'compatibility').toString()
-def requiredGraalVmVersion = '25.2.4'
 def requiredNativeJavaVersion = '25.0.4'
 def graalVmHomeEnvironment = providers.environmentVariable('GRAALVM_HOME')
-def baseNativeBuildArgs = {
+def javaHomeEnvironment = providers.environmentVariable('JAVA_HOME')
+def nativeProviders = providers
+def nativeToolchainLogger = logger
+def pgoEnabled = project.hasProperty('enablePgo')
+def baseNativeBuildArgs = { String optimization = '-O2' ->
     [
         '-H:+AddAllCharsets',
-        '-O2',
+        optimization,
         '--gc=serial',
         '-H:+UnlockExperimentalVMOptions'
     ] + jlineNativeExcludes + jlineNativeManualArgs + [
@@ -30,93 +33,118 @@ def baseNativeBuildArgs = {
 ext.tuinkNativeMarch = nativeMarch
 ext.tuinkBaseNativeBuildArgs = baseNativeBuildArgs
 
-def verifyNativeToolchain = tasks.register('verifyNativeToolchain') {
-    group = 'verification'
-    description = "Verify the pinned GraalVM Community ${requiredGraalVmVersion} native toolchain."
-    notCompatibleWithConfigurationCache('Runs the explicitly selected native toolchain executables.')
+def registerToolchainVerification = { String taskName, String sdkLabel, String requiredVersionMarker,
+                                      Map<String, String> expectedMetadata,
+                                      boolean requireProfileUtility ->
+    tasks.register(taskName) {
+        group = 'verification'
+        description = "Verify the pinned ${sdkLabel} native toolchain."
+        notCompatibleWithConfigurationCache('Runs the explicitly selected native toolchain executables.')
 
-    doLast {
-        String configuredHome = graalVmHomeEnvironment.orNull?.trim()
-        if (!configuredHome) {
-            throw new GradleException(
-                'GRAALVM_HOME must explicitly select GraalVM Community '
-                    + "${requiredGraalVmVersion} (Java ${requiredNativeJavaVersion}) for native builds. "
-                    + 'See docs/building.md#native-toolchain.'
-            )
-        }
-
-        File graalVmHome = new File(configuredHome)
-        if (!graalVmHome.isAbsolute()) {
-            throw new GradleException("GRAALVM_HOME must be an absolute path: ${configuredHome}")
-        }
-        graalVmHome = graalVmHome.canonicalFile
-
-        File gradleJavaHome = new File(System.getProperty('java.home')).canonicalFile
-        if (graalVmHome != gradleJavaHome) {
-            throw new GradleException(
-                'Native builds require JAVA_HOME and GRAALVM_HOME to select the same pinned GraalVM SDK. '
-                    + "Gradle uses ${gradleJavaHome}; GRAALVM_HOME selects ${graalVmHome}."
-            )
-        }
-
-        File releaseFile = new File(graalVmHome, 'release')
-        if (!releaseFile.isFile()) {
-            throw new GradleException("GRAALVM_HOME has no release metadata: ${releaseFile}")
-        }
-
-        Map<String, String> releaseMetadata = [:]
-        releaseFile.eachLine('UTF-8') { line ->
-            def match = line =~ /^([A-Z0-9_]+)="(.*)"$/
-            if (match.matches()) {
-                releaseMetadata[match.group(1)] = match.group(2)
-            }
-        }
-
-        Map<String, String> expectedMetadata = [
-            IMPLEMENTOR: 'GraalVM Community',
-            GRAALVM_VERSION: requiredGraalVmVersion,
-            JAVA_VERSION: requiredNativeJavaVersion
-        ]
-        expectedMetadata.each { key, expected ->
-            String actual = releaseMetadata[key]
-            if (actual != expected) {
+        doLast {
+            String configuredHome = graalVmHomeEnvironment.orNull?.trim()
+            if (!configuredHome) {
                 throw new GradleException(
-                    "Unsupported native toolchain at ${graalVmHome}: ${key}="
-                        + "${actual ?: '<missing>'}; expected ${expected}."
+                    "GRAALVM_HOME must explicitly select ${sdkLabel} "
+                        + "(Java ${requiredNativeJavaVersion}) for this native build. "
+                        + 'See docs/building.md#native-toolchain.'
                 )
             }
-        }
 
-        File javaExecutable = new File(graalVmHome, 'bin/java')
-        File nativeImageExecutable = new File(graalVmHome, 'bin/native-image')
-        [javaExecutable, nativeImageExecutable].each { executable ->
-            if (!executable.isFile() || !executable.canExecute()) {
-                throw new GradleException("Required executable is missing or not executable: ${executable}")
+            File graalVmHome = new File(configuredHome)
+            if (!graalVmHome.isAbsolute()) {
+                throw new GradleException("GRAALVM_HOME must be an absolute path: ${configuredHome}")
             }
-        }
+            graalVmHome = graalVmHome.canonicalFile
 
-        [javaExecutable, nativeImageExecutable].each { executable ->
-            def versionExecution = providers.exec {
-                commandLine executable.absolutePath, '--version'
-                ignoreExitValue = false
+            String configuredJavaHome = javaHomeEnvironment.orNull?.trim()
+            if (!configuredJavaHome) {
+                throw new GradleException("JAVA_HOME must explicitly select the same ${sdkLabel} SDK as GRAALVM_HOME.")
             }
-            String versionText = versionExecution.standardOutput.asText.get().concat(
-                versionExecution.standardError.asText.get()
-            )
-            if (!versionText.contains(requiredNativeJavaVersion)
-                || !versionText.contains('GraalVM')) {
+            File javaHome = new File(configuredJavaHome)
+            if (!javaHome.isAbsolute()) {
+                throw new GradleException("JAVA_HOME must be an absolute path: ${configuredJavaHome}")
+            }
+            javaHome = javaHome.canonicalFile
+            File gradleJavaHome = new File(System.getProperty('java.home')).canonicalFile
+            if (graalVmHome != javaHome || graalVmHome != gradleJavaHome) {
                 throw new GradleException(
-                    "Unexpected ${executable.name} --version output from ${graalVmHome}:\n${versionText.trim()}"
+                    'Native builds require JAVA_HOME, GRAALVM_HOME, and the running Gradle JVM '
+                        + "to select the same pinned ${sdkLabel} SDK. "
+                        + "Gradle uses ${gradleJavaHome}; JAVA_HOME selects ${javaHome}; "
+                        + "GRAALVM_HOME selects ${graalVmHome}."
                 )
             }
-        }
 
-        logger.lifecycle(
-            "Using GraalVM Community ${requiredGraalVmVersion} "
-                + "(Java ${requiredNativeJavaVersion}) from ${graalVmHome}"
-        )
+            File releaseFile = new File(graalVmHome, 'release')
+            if (!releaseFile.isFile()) {
+                throw new GradleException("GRAALVM_HOME has no release metadata: ${releaseFile}")
+            }
+
+            Map<String, String> releaseMetadata = [:]
+            releaseFile.eachLine('UTF-8') { line ->
+                def match = line =~ /^([A-Z0-9_]+)="(.*)"$/
+                if (match.matches()) {
+                    releaseMetadata[match.group(1)] = match.group(2)
+                }
+            }
+            expectedMetadata.each { key, expected ->
+                String actual = releaseMetadata[key]
+                if (actual != expected) {
+                    throw new GradleException(
+                        "Unsupported native toolchain at ${graalVmHome}: ${key}="
+                            + "${actual ?: '<missing>'}; expected ${expected}."
+                    )
+                }
+            }
+
+            File javaExecutable = new File(graalVmHome, 'bin/java')
+            File nativeImageExecutable = new File(graalVmHome, 'bin/native-image')
+            List<File> requiredExecutables = [javaExecutable, nativeImageExecutable]
+            if (requireProfileUtility) {
+                requiredExecutables.add(new File(graalVmHome, 'bin/native-image-configure'))
+            }
+            requiredExecutables.each { executable ->
+                if (!executable.isFile() || !executable.canExecute()) {
+                    throw new GradleException("Required executable is missing or not executable: ${executable}")
+                }
+            }
+
+            [javaExecutable, nativeImageExecutable].each { executable ->
+                def versionExecution = nativeProviders.exec {
+                    commandLine executable.absolutePath, '--version'
+                    ignoreExitValue = false
+                }
+                String versionText = versionExecution.standardOutput.asText.get().concat(
+                    versionExecution.standardError.asText.get()
+                )
+                if (!versionText.contains(requiredNativeJavaVersion)
+                    || !versionText.contains(requiredVersionMarker)) {
+                    throw new GradleException(
+                        "Unexpected ${executable.name} --version output from ${graalVmHome}:\n${versionText.trim()}"
+                    )
+                }
+            }
+
+            nativeToolchainLogger.lifecycle(
+                "Using ${sdkLabel} (Java ${requiredNativeJavaVersion}) from ${graalVmHome}"
+            )
+        }
     }
 }
+
+def verifyNativeToolchain = registerToolchainVerification('verifyNativeToolchain', 'GraalVM Community 25.2.4', 'GraalVM', [
+    IMPLEMENTOR: 'GraalVM Community',
+    GRAALVM_VERSION: '25.2.4',
+    JAVA_VERSION: requiredNativeJavaVersion
+], false)
+def verifyPgoToolchain = pgoEnabled
+    ? registerToolchainVerification('verifyPgoToolchain', 'Oracle GraalVM 25.0.4', 'Oracle GraalVM 25.0.4+7.1', [
+        IMPLEMENTOR: 'Oracle Corporation',
+        JAVA_VERSION: requiredNativeJavaVersion,
+        JAVA_RUNTIME_VERSION: '25.0.4+7-LTS-jvmci-b01'
+    ], true)
+    : null
 
 graalvmNative {
     toolchainDetection = false
@@ -143,9 +171,34 @@ graalvmNative {
     }
 }
 
+def pgoCompileTaskNames = [
+    'nativePgoInstrumentCompile',
+    'nativePgoOptimizedCompile',
+    'nativeMuslPgoInstrumentCompile',
+    'nativeMuslPgoOptimizedCompile'
+] as Set
+def nativeSdkHomeInput = graalVmHomeEnvironment.map { configuredHome ->
+    String path = configuredHome.trim()
+    path ? new File(path).canonicalPath : ''
+}.orElse('')
+def nativeSdkIdentityFiles = graalVmHomeEnvironment.map { configuredHome ->
+    String path = configuredHome.trim()
+    if (!path) {
+        return []
+    }
+    File sdkHome = new File(path).canonicalFile
+    [new File(sdkHome, 'release'), new File(sdkHome, 'bin/native-image')]
+}.orElse([])
+
 tasks.configureEach { task ->
     if (task.class.name.contains('BuildNativeImageTask')) {
-        task.dependsOn(verifyNativeToolchain)
+        task.dependsOn(pgoEnabled && pgoCompileTaskNames.contains(task.name)
+            ? verifyPgoToolchain : verifyNativeToolchain)
+        task.inputs.property('tuinkNativeSdkHome', nativeSdkHomeInput)
+        task.inputs.files(nativeSdkIdentityFiles)
+            .withPropertyName('tuinkNativeSdkIdentity')
+            .withPathSensitivity(org.gradle.api.tasks.PathSensitivity.ABSOLUTE)
+            .optional()
     }
 }
 

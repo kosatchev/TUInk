@@ -25,7 +25,7 @@ Check the active JVM and Gradle environment:
 Do not rely on a system Gradle installation: use `./gradlew` so the project
 uses the checked-in wrapper version.
 
-Native builds additionally require:
+Regular native builds and release tasks additionally require:
 
 - the pinned GraalVM Community release described in
   [Native toolchain](#native-toolchain), selected explicitly with
@@ -35,11 +35,13 @@ Native builds additionally require:
 - a musl-capable toolchain for the static musl target.
 
 Benchmark tasks require Python 3.10+ available as `python3` on a POSIX system.
-The standalone `:app:perfHarnessTest` validates the benchmark harness without
-building or launching the native editor. It is separate from `check` and runs
-explicitly in CI. `:app:perfSmoke` and `:app:perfCheck` also require a POSIX
-pseudo-terminal and the native toolchain; both run the harness self-test first.
+The standalone `:app:perfHarnessTest` and `:app:pgoHarnessTest` validate their
+harnesses without building or launching the native editor. They are separate
+from `check` and run explicitly in CI. `:app:perfSmoke` and `:app:perfCheck` also
+require a POSIX pseudo-terminal and the native toolchain; both run the harness self-test first.
 The short benchmark is part of the complete release task.
+Optional [PGO builds](#pgo) use a separately pinned Oracle GraalVM SDK and
+require a POSIX pseudo-terminal for training.
 
 Debian packaging additionally requires Linux with `dpkg-deb`, `gzip`, and
 `strip`. `lintian` is optional and is used only for package validation.
@@ -58,6 +60,8 @@ Debian packaging additionally requires Linux with `dpkg-deb`, `gzip`, and
 | Native archive | `./gradlew :app:nativeDistTarGz` | `build/releases/*.tar.gz` |
 | Debian package | `./gradlew :app:nativeDeb` | `build/releases/tuink_<version>_<arch>.deb` |
 | Benchmark harness self-test | `./gradlew :app:perfHarnessTest` | Python fixture, parser, and statistics checks |
+| PGO harness self-test | `./gradlew :app:pgoHarnessTest` | Python training-input and profile-merge checks |
+| Optional PGO glibc binary | `./gradlew :app:nativeProfileOptimize -PenablePgo` | `apps/tuink/launcher/build/native/nativePgoOptimizedCompile/tuink-pgo` |
 | Render smoke benchmark | `./gradlew :app:perfSmoke` | `build/performance/render/` |
 | Full render benchmark | `./gradlew :app:perfCheck` | `build/performance/render/` |
 | Complete release | `./gradlew clean :app:release` | ZIP, glibc archive, DEB, checksums |
@@ -149,8 +153,8 @@ needed.
 
 ## Native toolchain
 
-Native and release tasks require exactly GraalVM Community 25.2.4 with Java
-25. Set both `JAVA_HOME` and `GRAALVM_HOME` to the absolute path of that
+Regular native and release tasks require exactly GraalVM Community 25.2.4 with
+Java 25. Set both `JAVA_HOME` and `GRAALVM_HOME` to the absolute path of that
 distribution. Gradle, compilation, tests, JVM runs, and native-image builds use
 this one JDK. Automatic native toolchain discovery is disabled, and the
 preflight verifies that both variables select the pinned installation.
@@ -272,30 +276,92 @@ outside the repository.
 
 ## PGO
 
-PGO tasks are optional and are registered only when `-PenablePgo` is present.
+PGO is optional and experimental. Its native tasks are registered only with
+`-PenablePgo`. [GraalVM PGO](https://www.graalvm.org/jdk25/reference-manual/native-image/optimizations-and-performance/PGO/)
+requires Oracle GraalVM; it is unavailable in Community. Use exactly **Oracle
+GraalVM 25.0.4+7.1 with Java 25** for Gradle, compilation and native-image.
+The Java language/runtime contract remains Java 25. Ordinary native and release
+tasks continue to require Community 25.2.4.
 
-Build an instrumented binary:
+The pinned Oracle Linux x86_64 archive is:
 
-```bash
-./gradlew :app:nativeProfileInstrument -PenablePgo -Ptarget=glibc
-./gradlew :app:nativeProfileInstrument -PenablePgo -Ptarget=musl
+```text
+https://download.oracle.com/graalvm/25/archive/graalvm-jdk-25.0.4_linux-x64_bin.tar.gz
+SHA-256: 76007c309f821aaf435bce63162ea0395587fc77350801c81643fe7feea37276
 ```
 
-After collecting a profile, build the optimized binary:
+Verify the archive before extraction, then select that installation in the
+current shell:
 
 ```bash
-./gradlew :app:nativeProfileBuild \
-  -PenablePgo \
-  -Ptarget=glibc \
-  -PpgoProfile=/absolute/path/to/profile.iprof
+printf '%s  %s\n' \
+  76007c309f821aaf435bce63162ea0395587fc77350801c81643fe7feea37276 \
+  graalvm-jdk-25.0.4_linux-x64_bin.tar.gz \
+  | sha256sum -c -
+export GRAALVM_HOME=/absolute/path/to/graalvm-jdk-25.0.4+7.1
+export JAVA_HOME="$GRAALVM_HOME"
+export PATH="$JAVA_HOME/bin:$PATH"
+./gradlew :app:verifyPgoToolchain -PenablePgo
 ```
 
-If `-PpgoProfile` is omitted, the default profile location is
-`.local/pgo/default.iprof`. Local profiles are ignored by Git and survive
-`clean`.
+The PGO preflight verifies this exact Oracle SDK and requires Gradle to use the
+same installation. Training requires Python 3.10+ as `python3` on a POSIX
+system with a pseudo-terminal.
 
-PGO is an internal optimization step and does not create a separate release
-format.
+Build the instrumented binary, train, and build the optimized glibc binary:
+
+```bash
+./gradlew :app:nativeProfileInstrument -PenablePgo
+./gradlew :app:nativeProfileTrain -PenablePgo
+./gradlew :app:nativeProfileBuild -PenablePgo
+./apps/tuink/launcher/build/native/nativePgoOptimizedCompile/tuink-pgo file.txt
+```
+
+For a fresh train-and-build run, use the convenience task:
+
+```bash
+./gradlew :app:nativeProfileOptimize -PenablePgo
+```
+
+The default target is `glibc`. Pass `-Ptarget=musl` to every PGO command for a
+separate musl profile and binary; the musl C toolchain is also required.
+`-Ptarget=all` is rejected so glibc and musl profiles cannot be mixed.
+
+Training uses the current instrumented binary in five checked sessions:
+Java/Python/YAML/Rust editing and mouse drag. Each session must exit normally
+with code zero; saved bytes are verified in the editing sessions. Fresh
+profiles are merged using the selected Oracle SDK. Training is also guarded
+by the standalone `:app:pgoHarnessTest`.
+PGO compilation uses at most two worker threads and a 3 GiB compiler heap.
+Each training editor and the profile-merging utility have a 512 MiB heap cap;
+these limits do not change the resulting binary's runtime defaults.
+
+The default merged profile is `.local/pgo/<target>/profile.iprof`, with an
+adjacent `profile.iprof.json` receipt. `-PpgoProfile=<path>` selects another
+root-relative or absolute path for both training and the optimized build.
+The receipt binds the profile to its classpath, SDK, `nativeMarch`, target and
+training-harness SHA-256. The optimized build rejects missing, empty or
+mismatched profiles and receipts; retrain after changing these inputs.
+The default files are outside Gradle build directories, survive `clean` and
+are ignored by Git. For a custom path, choose an ignored location outside
+build directories. Do not commit profiles or receipts or copy a profile
+between libc targets.
+
+PGO binaries are separate build products:
+
+```text
+apps/tuink/launcher/build/native/nativePgoOptimizedCompile/tuink-pgo
+apps/tuink/launcher/build/native/nativeMuslPgoOptimizedCompile/tuink-musl-pgo
+```
+
+The regular archives, Debian package and release task package Community
+binaries. Switch both environment variables back to the Community installation
+before running those tasks.
+
+Evaluate PGO on representative editing and mouse workloads against the ordinary
+binary from the same SDK. Measure CPU, wall time, memory and frame latency
+separately; a profile does not guarantee an improvement across all operations.
+See [benchmark guidance](../verification/performance/README.md#optional-pgo-training).
 
 ## Output layout
 
@@ -327,8 +393,8 @@ Remove generated module output and public release artifacts:
 ```
 
 The project-local `.gradle/` cache is not a release artifact. The ignored
-`.local/pgo/default.iprof` profile is intentionally outside Gradle build
-directories and survives `clean`.
+`.local/pgo/<target>/` profiles and their receipts are intentionally outside
+Gradle build directories and survive `clean`.
 
 ## Inspect available tasks
 

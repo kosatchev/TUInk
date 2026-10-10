@@ -4,9 +4,17 @@ def performanceRoot = rootProject.layout.buildDirectory.dir('performance/render'
 
 def perfHarnessTest = tasks.register('perfHarnessTest', Exec) {
     group = 'verification'
-    description = 'Validate the deterministic render benchmark fixture, parser, and statistics.'
-    inputs.file(benchmarkScript)
+    description = 'Validate the render benchmark fixture, parser, statistics, and PTY shutdown.'
+    inputs.files(benchmarkScript, rootProject.file('verification/performance/test_render_benchmark.py'))
     commandLine('python3', benchmarkScript.absolutePath, '--self-test')
+}
+
+tasks.register('pgoHarnessTest', Exec) {
+    group = 'verification'
+    description = 'Validate the PGO training corpora and strict PTY protocol without a native build.'
+    def trainingScript = rootProject.file('verification/performance/pgo_training.py')
+    inputs.files(trainingScript, benchmarkScript, rootProject.file('verification/performance/test_pgo_training.py'))
+    commandLine('python3', trainingScript.absolutePath, '--self-test')
 }
 
 def configureNativeBenchmark = { task, String frames, String repeats, String label ->

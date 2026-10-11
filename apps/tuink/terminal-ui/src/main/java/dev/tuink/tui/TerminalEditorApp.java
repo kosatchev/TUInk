@@ -374,6 +374,7 @@ public class TerminalEditorApp {
                         );
                         if (recoveryWarning != null) {
                             notification.warning(recoveryWarning);
+                            eventLoop.invalidate();
                         }
                         if (notification.expireIfNeeded()) {
                             eventLoop.invalidate();
@@ -4267,11 +4268,10 @@ public class TerminalEditorApp {
                 if (!force && state.hasSnapshot() && revision == state.lastRevision()) {
                     continue;
                 }
-                boolean firstSnapshot = !state.hasSnapshot();
-                if (!force && !firstSnapshot
-                    && nowNanos - state.lastSavedAtNanos() < RECOVERY_AUTOSAVE_DEBOUNCE_NANOS) {
+                if (!force && !state.saveDue(nowNanos)) {
                     continue;
                 }
+                state.markSaveAttempt(nowNanos);
                 try {
                     store.save(state.entryId(), session.engine().captureRecoverySnapshot());
                     state.markSaved(revision, nowNanos);
@@ -4410,7 +4410,7 @@ public class TerminalEditorApp {
     private static final class RuntimeRecoveryState {
         private final String entryId;
         private long lastRevision = Long.MIN_VALUE;
-        private long lastSavedAtNanos = Long.MIN_VALUE;
+        private long lastSaveAttemptAtNanos = Long.MIN_VALUE;
         private long lastCleanupAttemptAtNanos = Long.MIN_VALUE;
         private boolean hasSnapshot;
 
@@ -4426,19 +4426,27 @@ public class TerminalEditorApp {
             return lastRevision;
         }
 
-        private long lastSavedAtNanos() {
-            return lastSavedAtNanos;
-        }
-
         private boolean hasSnapshot() {
             return hasSnapshot;
         }
 
         private void markSaved(long revision, long nowNanos) {
             lastRevision = revision;
-            lastSavedAtNanos = nowNanos;
+            lastSaveAttemptAtNanos = nowNanos;
             lastCleanupAttemptAtNanos = Long.MIN_VALUE;
             hasSnapshot = true;
+        }
+
+        private boolean saveDue(long nowNanos) {
+            return RecoveryAutosaveManager.delayElapsed(
+                nowNanos,
+                lastSaveAttemptAtNanos,
+                RECOVERY_AUTOSAVE_DEBOUNCE_NANOS
+            );
+        }
+
+        private void markSaveAttempt(long nowNanos) {
+            lastSaveAttemptAtNanos = nowNanos;
         }
 
         private boolean cleanupDue(long nowNanos) {
@@ -4455,7 +4463,7 @@ public class TerminalEditorApp {
 
         private void clearSnapshotState() {
             hasSnapshot = false;
-            lastSavedAtNanos = Long.MIN_VALUE;
+            lastSaveAttemptAtNanos = Long.MIN_VALUE;
             lastCleanupAttemptAtNanos = Long.MIN_VALUE;
         }
     }

@@ -30,6 +30,49 @@ import org.junit.jupiter.api.Test;
 
 class RecoveryAutosaveManagerTest {
     @Test
+    void autosaveCapturesDeletionBeforeTheNextFrameNormalizesTheViewport() {
+        TabSession session = scrolledSessionAfterDeletingAllText();
+        int liveTopLine = session.state().getTopLine();
+        FakeRecoveryPersistence persistence = new FakeRecoveryPersistence();
+        TerminalEditorApp.RecoveryAutosaveManager manager =
+            new TerminalEditorApp.RecoveryAutosaveManager(persistence);
+
+        assertNull(manager.autosaveDirtyTabs(List.of(session), 0L));
+
+        RecoverySnapshot saved = persistence.snapshots.values().iterator().next();
+        assertEquals(List.of(""), saved.lines());
+        assertEquals(new Position(0, 0), saved.cursor());
+        assertEquals(0, saved.viewport().topLine());
+        assertEquals(0, saved.viewport().topWrapSegment());
+        assertTrue(saved.dirty());
+        assertEquals(liveTopLine, session.state().getTopLine());
+        TabSession restored = newSession();
+        restored.engine().restoreRecoverySnapshot(saved);
+        assertEquals(List.of(""), restored.model().snapshotLines());
+        assertEquals(0, restored.state().getTopLine());
+    }
+
+    @Test
+    void endOfInputRecoversDeletionBeforeAnyViewportUpdateOrAutosave() throws IOException {
+        TabSession session = scrolledSessionAfterDeletingAllText();
+        FakeRecoveryPersistence persistence = new FakeRecoveryPersistence();
+        TerminalEditorApp.RecoveryAutosaveManager manager =
+            new TerminalEditorApp.RecoveryAutosaveManager(persistence);
+        TuiEventLoop<TuiInputEvent> loop = new TuiEventLoop<>(timeout -> TuiEventLoop.Read.end());
+        List<String> warnings = new ArrayList<>();
+
+        TerminalEditorApp.runWithRecovery(
+            loop, new FakeFrontend(), manager, () -> List.of(session), warnings::add
+        );
+
+        RecoverySnapshot saved = persistence.snapshots.values().iterator().next();
+        assertEquals(List.of(""), saved.lines());
+        assertEquals(0, saved.viewport().topLine());
+        assertEquals(List.of(), warnings);
+        assertEquals(List.of(), persistence.deleteAttempts);
+    }
+
+    @Test
     void endOfInputPreservesDirtyTextAndCapturesLatestCursorWithoutTextRevisionChange() throws IOException {
         FakeRecoveryPersistence persistence = new FakeRecoveryPersistence();
         TabSession session = dirtySession("draft");
@@ -218,7 +261,7 @@ class RecoveryAutosaveManagerTest {
         );
 
         assertSame(previous, persistence.snapshots.get("startup-entry"));
-        assertEquals(List.of("startup-entry", "startup-entry", "startup-entry"), persistence.saveAttempts);
+        assertEquals(List.of("startup-entry", "startup-entry"), persistence.saveAttempts);
         assertEquals(List.of(), persistence.deleteAttempts);
         assertEquals(1, warnings.size());
         assertTrue(warnings.get(0).contains("Recovery autosave failed"));
@@ -336,6 +379,68 @@ class RecoveryAutosaveManagerTest {
         assertFalse(persistence.snapshots.containsKey(second.id()));
     }
 
+    @Test
+    void firstFailedSaveWaitsBeforeRetryingAndCapturesTheLatestEdit() {
+        FakeRecoveryPersistence persistence = new FakeRecoveryPersistence();
+        persistence.failAllSaves = true;
+        TabSession session = dirtySession("draft");
+        TerminalEditorApp.RecoveryAutosaveManager manager =
+            new TerminalEditorApp.RecoveryAutosaveManager(persistence);
+
+        assertTrue(manager.autosaveDirtyTabs(List.of(session), 0L).contains("Recovery autosave failed"));
+        for (int turn = 1; turn < 100; turn++) {
+            assertNull(manager.autosaveDirtyTabs(List.of(session), turn * 16_000_000L));
+        }
+        assertEquals(1, persistence.saveAttempts.size());
+        assertTrue(persistence.snapshots.isEmpty());
+
+        session.engine().insertInput(" latest");
+        persistence.failAllSaves = false;
+        assertNull(manager.autosaveDirtyTabs(List.of(session), 2_000_000_000L));
+
+        assertEquals(2, persistence.saveAttempts.size());
+        assertEquals(List.of("draft latest"), persistence.snapshots.values().iterator().next().lines());
+        assertNull(manager.autosaveDirtyTabs(List.of(session), 4_000_000_000L));
+        assertEquals(2, persistence.saveAttempts.size());
+    }
+
+    @Test
+    void failedUpdateThrottlesRetriesAndKeepsTheLastCommittedSnapshot() {
+        FakeRecoveryPersistence persistence = new FakeRecoveryPersistence();
+        TabSession session = dirtySession("draft");
+        TerminalEditorApp.RecoveryAutosaveManager manager =
+            new TerminalEditorApp.RecoveryAutosaveManager(persistence);
+        assertNull(manager.autosaveDirtyTabs(List.of(session), 0L));
+        RecoverySnapshot committed = persistence.snapshots.values().iterator().next();
+        session.engine().insertInput(" latest");
+        persistence.failAllSaves = true;
+
+        assertTrue(manager.autosaveDirtyTabs(List.of(session), 2_000_000_000L)
+            .contains("Recovery autosave failed"));
+        assertNull(manager.autosaveDirtyTabs(List.of(session), 2_000_000_001L));
+        assertNull(manager.autosaveDirtyTabs(List.of(session), 3_999_999_999L));
+        assertEquals(2, persistence.saveAttempts.size());
+        assertSame(committed, persistence.snapshots.values().iterator().next());
+
+        persistence.failAllSaves = false;
+        assertNull(manager.autosaveDirtyTabs(List.of(session), 4_000_000_000L));
+        assertEquals(3, persistence.saveAttempts.size());
+        assertEquals(List.of("draft latest"), persistence.snapshots.values().iterator().next().lines());
+    }
+
+    private static TabSession scrolledSessionAfterDeletingAllText() {
+        TabSession session = newSession();
+        session.model().replaceLines(java.util.Collections.nCopies(100, "line"));
+        session.engine().moveCursorTo(new Position(99, 4));
+        session.engine().ensureCursorVisible(20, 80);
+        assertTrue(session.state().getTopLine() > 0);
+        session.engine().selectAll();
+        session.engine().deleteForward();
+        assertEquals(1, session.model().lineCount());
+        assertTrue(session.state().getTopLine() >= session.model().lineCount());
+        return session;
+    }
+
     private static TabSession dirtySession(String text) {
         TabSession session = newSession();
         session.engine().insertInput(text);
@@ -386,6 +491,7 @@ class RecoveryAutosaveManagerTest {
         private final List<String> saveAttempts = new ArrayList<>();
         private final List<String> deleteAttempts = new ArrayList<>();
         private RuntimeException uncheckedSaveFailure;
+        private boolean failAllSaves;
 
         @Override
         public void save(String entryId, RecoverySnapshot snapshot) throws IOException {
@@ -393,7 +499,7 @@ class RecoveryAutosaveManagerTest {
             if (uncheckedSaveFailure != null) {
                 throw uncheckedSaveFailure;
             }
-            if (failingSaves.contains(entryId)) {
+            if (failAllSaves || failingSaves.contains(entryId)) {
                 throw new IOException("simulated save failure for " + entryId);
             }
             snapshots.put(entryId, snapshot);

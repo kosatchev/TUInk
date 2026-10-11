@@ -15,11 +15,14 @@ Run from the repository root:
 ```
 
 The harness requires Python 3.10+ as `python3` on a POSIX system.
-`perfHarnessTest` checks the fixture, profile parser and statistics without a
-native SDK or editor binary. It runs explicitly in CI, separately from the JVM
+`perfHarnessTest` checks the fixture, profile parser, statistics, and PTY child
+shutdown using temporary test programs without a native SDK or editor binary.
+It runs explicitly in CI, separately from the JVM
 `check` task. `perfSmoke` and `perfCheck` depend on that self-test and build the
 glibc native binary; they also require the
 [native toolchain](../../docs/building.md#native-toolchain) and a pseudo-terminal.
+Native compiler tasks write a binary-adjacent `<binary>.build.json` receipt
+after a successful build. This adds no Python prerequisite to native compilation.
 
 | Task | Events per scenario | Repeats | Scenarios |
 |---|---:|---:|---|
@@ -36,7 +39,11 @@ The default workload uses deterministic ASCII Java source with 1,800 generated
 lines, a `42x140` pseudo-terminal, a two-second startup delay and one input event
 every 2 ms. After injection, the harness waits for terminal output to remain
 quiet for 500 ms. The built-in profiler logs one checkpoint every 30 frames;
-the harness checks the expected checkpoint count before accepting a run.
+the harness checks the expected checkpoint count before accepting a run. The
+editor must also exit normally with code zero within three seconds of Ctrl+Q.
+A crash, signal exit, or shutdown timeout fails the run even with a complete
+profile. Failed children are cleaned up with SIGTERM and then SIGKILL if needed,
+with bounded waits; forced termination never counts as successful shutdown.
 
 Each child receives a temporary `user.home` containing the same generated
 `tuink.properties`. The settings fixture enables the tab bar, mouse mode and
@@ -88,9 +95,34 @@ open-file-tree-fixture/   # only when selected
 ```
 
 The JSON summary records host/runtime metadata, run parameters and SHA-256
-values for the binary, text fixture and complete settings fixture. The file-tree
-scenario also records a directory-manifest hash. Retain raw logs, summaries and
-build details locally when comparing changes; build output is ignored by Git.
+values for the binary, benchmark harness, text fixture and complete settings
+fixture. Parameters include startup and event delays, the quiet period,
+completion and shutdown timeouts, terminal dimensions, event/repeat counts and
+scenario order. The file-tree scenario also records a directory-manifest hash.
+Retain raw logs, summaries and build details locally when comparing changes;
+build output is ignored by Git.
+
+Summary schema 2 separates `run_checkout` (the checkout running the harness)
+from `build_provenance` (the measured executable). A hash-matched build receipt
+records the binary's build commit, dirty status, content digest of tracked and
+non-ignored untracked files, SDK release and native-image hashes, configured
+compiler/JVM arguments and flags, and compiled classpath hashes. The receipt is
+written by the native compiler task, checked against its inputs before/after
+compilation, and preserved when the task is up to date. Its source digest also
+distinguishes subsequent edits to an already dirty tree. These local receipts
+are build records, not signed attestations.
+For published comparisons, build from a clean tagged checkout and retain the
+tag and receipt. A dirty-tree digest distinguishes local inputs but cannot let
+readers reconstruct uncommitted or untracked source contents.
+
+The harness checks the receipt's binary hash and embeds the receipt in the
+summary. `source_matches_run_checkout` reports whether the build source matches
+the checkout at run start; a historical binary retains its recorded origin.
+Without a matching complete receipt, the benchmark still runs but explicitly
+reports the binary's build origin as unknown. It never labels an arbitrary
+`--binary` with the current checkout's HEAD. Rebuild older binaries to generate
+a receipt, and keep that sidecar when copying a binary for comparison. Builds
+from source archives without Git record unknown commit/source provenance.
 
 `summary.md` reports build, raster, diff and total `mean/p50/p95` in
 milliseconds, aggregated over profiler checkpoints from all repeats.
@@ -99,7 +131,8 @@ elapsed-time distribution across repeats.
 
 These are sampled frame diagnostics, not input-to-paint latency or percentiles
 of all frames. The reported `Queue` time (`input_elapsed_s` in JSON) includes
-input injection, render backlog and the fixed 500 ms quiet window. Compare it
+input injection, render backlog and the configured quiet window (500 ms by
+default). Compare it
 between paired runs; its absolute value is not a per-event latency.
 
 Compare before/after runs on the same host with the same SDK, compiler options,

@@ -508,6 +508,10 @@ def source_state(project_dir: Path) -> dict[str, object]:
                 capture_output=True,
             ).stdout
 
+        # An exported source directory can inherit an unrelated enclosing repository.
+        git_root = Path(os.fsdecode(git("rev-parse", "--show-toplevel").removesuffix(b"\n")))
+        if git_root.resolve() != project_dir.resolve():
+            return unknown
         commit = git("rev-parse", "HEAD").decode("ascii").strip()
         paths = git("ls-files", "-z", "--cached", "--others", "--exclude-standard")
         status = git("status", "--porcelain=v1", "-z", "--untracked-files=all")

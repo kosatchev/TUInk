@@ -210,6 +210,67 @@ class RenderBenchmarkProvenanceTest(unittest.TestCase):
             self.assertTrue(first["dirty"] and second["dirty"] and untracked["dirty"])
             self.assertEqual(4, len({state["tree_sha256"] for state in (clean, first, second, untracked)}))
 
+    def test_linked_worktree_uses_its_own_source_state(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary)
+            root = parent / "checkout"
+            root.mkdir()
+            self.init_checkout(root)
+            worktree = parent / "linked worktree"
+            self.git(root, "worktree", "add", "-q", "--detach", str(worktree), "HEAD")
+            self.assertTrue((worktree / ".git").is_file())
+            clean = benchmark.source_state(root)
+            self.assertEqual(clean, benchmark.source_state(worktree))
+            (worktree / "source.java").write_text("worktree edit\n")
+            dirty = benchmark.source_state(worktree)
+            self.assertTrue(dirty["dirty"])
+            self.assertEqual(clean["commit"], dirty["commit"])
+            self.assertNotEqual(clean["tree_sha256"], dirty["tree_sha256"])
+            self.assertEqual(clean, benchmark.source_state(root))
+
+    def test_checkout_root_can_be_accessed_through_a_symlink(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary)
+            root = parent / "checkout"
+            root.mkdir()
+            self.init_checkout(root)
+            alias = parent / "checkout alias"
+            alias.symlink_to(root, target_is_directory=True)
+            self.assertEqual(benchmark.source_state(root), benchmark.source_state(alias))
+            self.assertIsNotNone(benchmark.source_state(alias)["commit"])
+
+    def test_source_export_without_git_has_unknown_origin(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "source.java").write_text("exported source\n")
+            unknown = {"commit": None, "dirty": None, "tree_sha256": None}
+            self.assertEqual(unknown, benchmark.source_state(root))
+            (root / "source.java").write_text("changed exported source\n")
+            self.assertEqual(unknown, benchmark.source_state(root))
+
+    def test_nested_source_exports_do_not_borrow_parent_checkout_provenance(self):
+        for ignored in (False, True):
+            with self.subTest(ignored=ignored), tempfile.TemporaryDirectory() as temporary:
+                parent = Path(temporary)
+                self.init_checkout(parent)
+                root = parent / "build" / "export" if ignored else parent / "export"
+                root.mkdir(parents=True)
+                (root / "source.java").write_text("exported source\n")
+                self.assertFalse((root / ".git").exists())
+                unknown = {"commit": None, "dirty": None, "tree_sha256": None}
+                self.assertEqual(unknown, benchmark.source_state(root))
+                (root / "source.java").write_text("changed exported source\n")
+                self.assertEqual(unknown, benchmark.source_state(root))
+                binary = root / "tuink"
+                binary.write_bytes(b"compiled exported source")
+                self.write_receipt(binary, benchmark.source_state(root))
+                provenance = benchmark.build_provenance(
+                    binary, benchmark.sha256(binary), benchmark.source_state(root)
+                )
+                self.assertEqual("hash-matched", provenance["status"])
+                self.assertEqual(unknown, provenance["build"]["inputs"]["source"])
+                self.assertIsNone(provenance["source_matches_run_checkout"])
+
     def test_hash_matched_old_binary_keeps_its_build_source_after_dirty_and_untracked_edits(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

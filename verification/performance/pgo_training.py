@@ -141,7 +141,7 @@ def require_profile(path: Path) -> None:
 
 
 class EditorSession:
-    def __init__(self, command: list[str], trace: Path):
+    def __init__(self, command: list[str], trace: Path, config_home: Path | None = None):
         self.deadline = time.monotonic() + SESSION_TIMEOUT
         self.status = None
         self.tail = bytearray()
@@ -156,6 +156,8 @@ class EditorSession:
             try:
                 fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLS, 0, 0))
                 os.environ["TERM"] = "xterm-256color"
+                if config_home is not None:
+                    os.environ["XDG_CONFIG_HOME"] = str(config_home)
                 os.execv(command[0], command)
             except BaseException as error:
                 os.write(2, f"Cannot start editor: {error}\n".encode("utf-8", "replace"))
@@ -295,7 +297,7 @@ def train_session(binary: Path, output: Path, name: str) -> dict:
     checkpoint()
     child = None
     try:
-        child = EditorSession(command, session_dir / "terminal.bin")
+        child = EditorSession(command, session_dir / "terminal.bin", home / ".config")
         child.wait_for_text(fixture.marker.encode("ascii"))
 
         def operation(label: str, data: bytes, expected: bytes | None = None, marker: bytes | None = None):

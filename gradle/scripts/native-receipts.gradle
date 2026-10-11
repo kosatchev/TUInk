@@ -1,0 +1,132 @@
+import groovy.json.JsonOutput
+import java.nio.file.Files
+import java.security.MessageDigest
+
+// Receipts are outputs of the compiler task itself. An up-to-date binary keeps
+// its original receipt; running a benchmark never relabels an existing binary.
+def receiptRoot = rootProject.projectDir
+def receiptProviders = providers
+def receiptSdkHome = providers.environmentVariable('GRAALVM_HOME')
+def hashBytes = { byte[] bytes -> MessageDigest.getInstance('SHA-256').digest(bytes).encodeHex().toString() }
+def hashFile = { File file ->
+    def hash = MessageDigest.getInstance('SHA-256')
+    file.withInputStream { stream ->
+        byte[] buffer = new byte[65536]
+        int count
+        while ((count = stream.read(buffer)) != -1) {
+            hash.update(buffer, 0, count)
+        }
+    }
+    hash.digest().encodeHex().toString()
+}
+def gitOutput = { List<String> arguments ->
+    try {
+        def result = receiptProviders.exec {
+            workingDir(receiptRoot)
+            commandLine(['git'] + arguments)
+            ignoreExitValue = true
+        }
+        result.result.get().exitValue == 0 ? result.standardOutput.asBytes.get() : null
+    } catch (Exception ignored) {
+        null // Source archives can still build without Git; origin stays unknown.
+    }
+}
+def sourceState = {
+    // Exported sources must not borrow the enclosing repository's identity.
+    byte[] root = gitOutput(['rev-parse', '--show-toplevel'])
+    if (root == null
+        || new File(new String(root, 'UTF-8').replaceFirst(/\n$/, '')).canonicalFile != receiptRoot.canonicalFile) {
+        return [commit: null, dirty: null, tree_sha256: null]
+    }
+    byte[] head = gitOutput(['rev-parse', 'HEAD'])
+    byte[] paths = gitOutput(['ls-files', '-z', '--cached', '--others', '--exclude-standard'])
+    byte[] status = gitOutput(['status', '--porcelain=v1', '-z', '--untracked-files=all'])
+    if (head == null || paths == null || status == null) {
+        return [commit: null, dirty: null, tree_sha256: null]
+    }
+    def digest = MessageDigest.getInstance('SHA-256')
+    def orderedPaths = new String(paths, 'UTF-8').split('\u0000').findAll { it }.toSet().sort { left, right ->
+        Arrays.compareUnsigned(left.getBytes('UTF-8'), right.getBytes('UTF-8'))
+    }
+    orderedPaths.each { path ->
+        File file = new File(receiptRoot, path)
+        String type
+        String content
+        if (Files.isSymbolicLink(file.toPath())) {
+            type = 'symlink'
+            content = hashBytes(Files.readSymbolicLink(file.toPath()).toString().getBytes('UTF-8'))
+        } else if (file.isFile()) {
+            type = file.canExecute() ? 'executable' : 'file'
+            content = hashFile(file)
+        } else {
+            type = 'missing'
+            content = ''
+        }
+        digest.update((path + '\u0000' + type + '\u0000' + content + '\u0000').getBytes('UTF-8'))
+    }
+    [commit: new String(head, 'UTF-8').trim(), dirty: status.length != 0,
+        tree_sha256: digest.digest().encodeHex().toString()]
+}
+def inputState = { task ->
+    def options = task.options.get()
+    File sdk = new File(receiptSdkHome.get().trim()).canonicalFile
+    def hashInputs = { collection ->
+        def hashes = [:]
+        collection.sort { it.absolutePath }.each { entry ->
+            if (entry.isDirectory()) {
+                Files.walk(entry.toPath()).withCloseable { stream ->
+                    stream.filter { Files.isRegularFile(it) }.sorted().forEach { path ->
+                        hashes[path.toString()] = hashFile(path.toFile())
+                    }
+                }
+            } else if (entry.isFile()) {
+                hashes[entry.absolutePath] = hashFile(entry)
+            }
+        }
+        hashes
+    }
+    [source: sourceState(), sdk: [home: sdk.absolutePath,
+        release: new File(sdk, 'release').getText('UTF-8'),
+        release_sha256: hashFile(new File(sdk, 'release')),
+        native_image_sha256: hashFile(new File(sdk, 'bin/native-image'))],
+        build_args: options.buildArgs.get().collect { it.toString() },
+        jvm_args: options.jvmArgs.get(), main_class: options.mainClass.get(),
+        image_name: options.imageName.get(), system_properties: options.systemProperties.get(),
+        exclude_config_args: options.excludeConfigArgs.get(),
+        environment_overrides_sha256: hashBytes(JsonOutput.toJson(options.environmentVariables.get()).getBytes('UTF-8')),
+        compiler_environment: ['NATIVE_IMAGE_OPTIONS', 'JAVA_TOOL_OPTIONS', 'JDK_JAVA_OPTIONS'].collectEntries {
+            def overrides = options.environmentVariables.get()
+            [(it): overrides.containsKey(it) ? overrides[it] : System.getenv(it)]
+        },
+        flags: [debug: options.debug.get(), fallback: options.fallback.get(),
+            quick_build: options.quickBuild.get(), shared_library: options.sharedLibrary.get(),
+            use_fat_jar: options.useFatJar.get(), pgo_instrument: options.pgoInstrument.get()],
+        classpath: hashInputs(options.classpath.files),
+        // Includes generated native configuration and PGO profile/receipt inputs.
+        input_files: hashInputs(task.inputs.files.files)]
+}
+
+tasks.configureEach { task ->
+    if (task.class.name.contains('BuildNativeImageTask')) {
+        // Resolve the path directly: mapping this task's output provider would
+        // require the producer to have completed before Gradle can snapshot its outputs.
+        def receiptFile = { new File(task.outputFile.get().asFile.absolutePath + '.build.json') }
+        def before = [:]
+        task.outputs.file(receiptFile).withPropertyName('tuinkNativeBuildReceipt')
+        task.notCompatibleWithConfigurationCache('Records the compiler inputs and source state of the native binary.')
+        task.doFirst {
+            // Remove a previous receipt before attempting a new compilation.
+            Files.deleteIfExists(receiptFile().toPath())
+            before.inputs = inputState(task)
+        }
+        task.doLast {
+            if (inputState(task) != before.inputs) {
+                throw new GradleException('Native build inputs changed during compilation; no build receipt was written. Rebuild before benchmarking.')
+            }
+            def receipt = [schema: 1, kind: 'tuink-native-build',
+                built_at_utc: java.time.Instant.now().toString(),
+                binary_sha256: hashFile(task.outputFile.get().asFile), inputs: before.inputs]
+            receiptFile().setText(JsonOutput.prettyPrint(JsonOutput.toJson(receipt)) + '\n', 'UTF-8')
+        }
+    }
+}

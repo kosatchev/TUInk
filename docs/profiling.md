@@ -2,8 +2,9 @@
 
 `--profile` enables frame timing logs. `--profile-file=<path>` writes those
 logs to a new file and also enables profiling. The log must differ from the
-document being opened. Existing files and symlinks are rejected without
-changing their contents; choose a fresh log path for each run.
+document being opened, including a document symlink whose target does not
+exist yet. Existing log files and symlinks are rejected without changing
+their contents; choose a fresh log path for each run.
 
 JVM examples:
 
@@ -91,7 +92,14 @@ The generated fixture, terminal size, injection interval, queue quiet window,
 isolated current-schema settings, and statistical aggregation are controlled by
 `verification/performance/render_benchmark.py`. Each child receives a temporary `user.home`,
 so saved mouse/tab preferences cannot silently change a scenario. The JSON
-summary records binary, fixture, and settings SHA-256 values with host metadata.
+summary records binary, harness, fixture, and settings SHA-256 values, host
+metadata, and all configurable delays/timeouts. Native builds produce an adjacent
+`.build.json` receipt with the binary hash, source commit and dirty-tree content
+digest, SDK identity, compiler arguments and compiled inputs. A matching receipt
+is embedded in the summary; missing or stale receipts report unknown build origin.
+The checkout running the harness is recorded separately and never substitutes
+for the origin of an arbitrary `--binary`. Keep the receipt with copied binaries;
+see [build provenance](../verification/performance/README.md#outputs-and-interpretation).
 
 When completing an interface-related change reachable from a benchmarked
 application path, run `perfCheck` before and after on the same host and

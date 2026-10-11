@@ -88,6 +88,7 @@ import dev.tuink.tui.ui.TabBarView;
 import dev.tuink.tui.ui.FileTreeView;
 import dev.tuink.tui.ui.ViewportController;
 import java.io.IOException;
+import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -142,27 +143,36 @@ public class TerminalEditorApp {
     private FrameComposition.OpenTreeDiffKey lastOpenTreeDiffKey;
 
     public static void main(String[] args) throws Exception {
-        new TerminalEditorApp().run(args);
+        int exitCode = launch(args);
+        if (exitCode != 0) {
+            System.exit(exitCode);
+        }
     }
 
-    private void run(String[] args) throws Exception {
+    /** Runs the frontend and returns zero on success or two for invalid CLI arguments. */
+    public static int launch(String[] args) throws Exception {
+        return new TerminalEditorApp().run(args);
+    }
+
+    private int run(String[] args) throws Exception {
         TuiCliOptions cli;
         try {
             cli = TuiCliOptions.parse(args);
         } catch (IllegalArgumentException e) {
             System.err.println(e.getMessage());
-            printUsage();
-            return;
+            printUsage(System.err);
+            return 2;
         }
         if (cli.showHelp()) {
-            printUsage();
-            return;
+            printUsage(System.out);
+            return 0;
         }
         try (RecoveryStore recoveryStore = new RecoveryStore()) {
             run(cli, recoveryStore);
         } finally {
             frameProfiler.close();
         }
+        return 0;
     }
 
     private void run(TuiCliOptions cli, RecoveryStore recoveryStore) throws Exception {
@@ -4459,18 +4469,18 @@ public class TerminalEditorApp {
         this.styles = UiStyles.forTheme(this.theme);
     }
 
-    private void printUsage() {
-        System.out.println("Usage: tuink [options] [file]");
-        System.out.println("Development: ./gradlew --console=plain :app:run -PappArgs=\"[options] [file]\"");
-        System.out.println("Options:");
-        System.out.println("  --no-mouse       Disable mouse tracking and mouse interactions");
-        System.out.println("  --no-alt-screen  Do not use alternate screen buffer");
-        System.out.println("  --no-color       Render in monochrome (no ANSI colors, keep text attributes)");
-        System.out.println("  --theme=<name>   UI palette: blue, cyan (default), light");
-        System.out.println("  --read           Start in reading mode (editing disabled)");
-        System.out.println("  --profile        Log render timings to stderr every " + PROFILE_LOG_EVERY_FRAMES + " frames");
-        System.out.println("  --profile-file   Create a new profile log file (also enables --profile)");
-        System.out.println("  --help, -h       Show this help");
+    private void printUsage(PrintStream output) {
+        output.println("Usage: tuink [options] [file]");
+        output.println("Development: ./gradlew --console=plain :app:run -PappArgs=\"[options] [file]\"");
+        output.println("Options:");
+        output.println("  --no-mouse       Disable mouse tracking and mouse interactions");
+        output.println("  --no-alt-screen  Do not use alternate screen buffer");
+        output.println("  --no-color       Render in monochrome (no ANSI colors, keep text attributes)");
+        output.println("  --theme=<name>   UI palette: blue, cyan (default), light");
+        output.println("  --read           Start in reading mode (editing disabled)");
+        output.println("  --profile        Log render timings to stderr every " + PROFILE_LOG_EVERY_FRAMES + " frames");
+        output.println("  --profile-file   Create a new profile log file (also enables --profile)");
+        output.println("  --help, -h       Show this help");
     }
 
     private boolean shouldForceExecTerminalProvider() {

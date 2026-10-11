@@ -3,16 +3,20 @@ package dev.tuink.tui.file;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -20,8 +24,8 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * <p>The model deliberately contains no terminal geometry, styles, selection,
  * scrolling, pointer state or tree glyphs. Structural entries are published as
- * a flat snapshot; optional metadata is enriched asynchronously and announces
- * a monotonic revision to the UI thread. Instance calls other than
+ * a flat snapshot; directory scans, sorting and optional metadata run
+ * asynchronously and announce a monotonic revision to the UI thread. Instance calls other than
  * {@link #snapshot()} are confined to the owning UI thread; returned snapshots
  * and the values reachable from them are immutable.</p>
  */
@@ -34,21 +38,27 @@ public final class FileTreeModel implements AutoCloseable {
         DateTimeFormatter.ofPattern("dd.MM.yy HH:mm", Locale.ROOT);
 
     private final Set<Path> expandedDirectories = new HashSet<>();
-    private final Object metadataLock = new Object();
-    private final AtomicLong metadataSignal = new AtomicLong();
+    private final Object loaderLock = new Object();
+    private final AtomicLong snapshotSignal = new AtomicLong();
+    private final DirectoryScanner directoryScanner;
 
     private Path root;
     private boolean showSizeColumn;
     private boolean showDateColumn;
     private boolean showHiddenFiles;
     private volatile Snapshot snapshot;
-    private long consumedMetadataSignal;
+    private long consumedSnapshotSignal;
     private long revision;
-    private long metadataGeneration;
-    private Thread metadataWorker;
+    private long loadGeneration;
+    private Thread loadWorker;
     private boolean closed;
 
     public FileTreeModel(Path root, boolean showSizeColumn, boolean showDateColumn) {
+        this(root, showSizeColumn, showDateColumn, FileTreeModel::scanDirectory);
+    }
+
+    FileTreeModel(Path root, boolean showSizeColumn, boolean showDateColumn, DirectoryScanner directoryScanner) {
+        this.directoryScanner = Objects.requireNonNull(directoryScanner, "directoryScanner");
         this.showSizeColumn = showSizeColumn;
         this.showDateColumn = showDateColumn;
         this.snapshot = new Snapshot(
@@ -114,6 +124,11 @@ public final class FileTreeModel implements AutoCloseable {
     }
 
     public boolean toggleDirectory(EntryId id) {
+        Objects.requireNonNull(id, "id");
+        return setDirectoryExpanded(id, !expandedDirectories.contains(id.path()));
+    }
+
+    public boolean setDirectoryExpanded(EntryId id, boolean expanded) {
         ensureOpen();
         Objects.requireNonNull(id, "id");
         Entry entry = findEntry(id);
@@ -121,34 +136,34 @@ public final class FileTreeModel implements AutoCloseable {
             return false;
         }
         Path key = entry.path().toAbsolutePath().normalize();
-        if (!expandedDirectories.remove(key)) {
-            expandedDirectories.add(key);
+        boolean changed = expanded ? expandedDirectories.add(key) : expandedDirectories.remove(key);
+        if (changed) {
+            rebuild();
         }
-        rebuild();
-        return true;
+        return changed;
     }
 
-    /** Returns true when one or more metadata snapshots were published since the previous call. */
+    /** Returns true when loading, structural or metadata snapshots changed since the previous call. */
     public boolean consumeMetadataChanged() {
-        long current = metadataSignal.get();
-        if (current == consumedMetadataSignal) {
+        long current = snapshotSignal.get();
+        if (current == consumedSnapshotSignal) {
             return false;
         }
-        consumedMetadataSignal = current;
+        consumedSnapshotSignal = current;
         return true;
     }
 
     @Override
     public void close() {
         Thread previous;
-        synchronized (metadataLock) {
+        synchronized (loaderLock) {
             if (closed) {
                 return;
             }
             closed = true;
-            metadataGeneration++;
-            previous = metadataWorker;
-            metadataWorker = null;
+            loadGeneration++;
+            previous = loadWorker;
+            loadWorker = null;
         }
         if (previous != null) {
             previous.interrupt();
@@ -156,7 +171,47 @@ public final class FileTreeModel implements AutoCloseable {
     }
 
     private void rebuild() {
-        long generation = beginMetadataGeneration();
+        Thread previous;
+        Thread worker;
+        synchronized (loaderLock) {
+            long generation = ++loadGeneration;
+            LoadRequest request = new LoadRequest(
+                root, Set.copyOf(expandedDirectories), showHiddenFiles, showSizeColumn, showDateColumn, generation
+            );
+            previous = loadWorker;
+            snapshot = new Snapshot(root, ++revision, loadingEntries(request), true);
+            snapshotSignal.incrementAndGet();
+            worker = new Thread(() -> load(request), "tuink-tree-loader");
+            worker.setDaemon(true);
+            loadWorker = worker;
+        }
+        if (previous != null) {
+            previous.interrupt();
+        }
+        worker.start();
+    }
+
+    private List<Entry> loadingEntries(LoadRequest request) {
+        if (!snapshot.root().equals(request.root()) || snapshot.entries().isEmpty()) {
+            return parentEntries(request.root());
+        }
+        List<Entry> retained = new ArrayList<>(snapshot.entries().size());
+        int collapsedDepth = Integer.MAX_VALUE;
+        for (Entry entry : snapshot.entries()) {
+            if (entry.depth() > collapsedDepth) {
+                continue;
+            }
+            collapsedDepth = Integer.MAX_VALUE;
+            boolean expanded = entry.kind() == Kind.DIRECTORY && request.expanded().contains(entry.path());
+            retained.add(entry.withExpanded(expanded));
+            if (entry.kind() == Kind.DIRECTORY && !expanded) {
+                collapsedDepth = entry.depth();
+            }
+        }
+        return retained;
+    }
+
+    private static List<Entry> parentEntries(Path root) {
         List<Entry> entries = new ArrayList<>();
         Path parent = root.getParent();
         if (parent != null) {
@@ -170,36 +225,49 @@ public final class FileTreeModel implements AutoCloseable {
                 ""
             ));
         }
-        appendTreeEntries(root, 0, entries);
-        List<Entry> publishedEntries = List.copyOf(entries);
-        synchronized (metadataLock) {
-            if (closed || metadataGeneration != generation) {
-                return;
-            }
-            snapshot = new Snapshot(root, ++revision, publishedEntries);
-        }
-        startMetadataEnrichment(publishedEntries, generation, showSizeColumn, showDateColumn);
+        return entries;
     }
 
-    private long beginMetadataGeneration() {
-        Thread previous;
-        long generation;
-        synchronized (metadataLock) {
-            metadataGeneration++;
-            generation = metadataGeneration;
-            previous = metadataWorker;
-            metadataWorker = null;
-        }
-        if (previous != null) {
-            previous.interrupt();
-        }
-        return generation;
-    }
-
-    private void appendTreeEntries(Path directory, int depth, List<Entry> entries) {
-        List<Path> children;
+    private void load(LoadRequest request) {
         try {
-            children = listDirectorySorted(directory);
+            List<Entry> entries = parentEntries(request.root());
+            Map<EntryId, BasicFileAttributes> attributes = new HashMap<>();
+            appendTreeEntries(request.root(), 0, entries, attributes, request);
+            checkCurrentGeneration(request.generation());
+            publishSnapshot(entries, request.generation());
+            enrichMetadata(entries, attributes, request);
+        } catch (CancellationException ignored) {
+            // A newer root/options/expansion request owns all future publications.
+        } finally {
+            synchronized (loaderLock) {
+                if (loadGeneration == request.generation() && loadWorker == Thread.currentThread()) {
+                    loadWorker = null;
+                }
+            }
+        }
+    }
+
+    private void appendTreeEntries(
+        Path directory,
+        int depth,
+        List<Entry> entries,
+        Map<EntryId, BasicFileAttributes> attributes,
+        LoadRequest request
+    ) {
+        checkCurrentGeneration(request.generation());
+        List<ScannedEntry> children;
+        try {
+            children = new ArrayList<>(directoryScanner.scan(directory, request.showHiddenFiles()));
+            checkCurrentGeneration(request.generation());
+            Comparator<ScannedEntry> order = Comparator.comparing((ScannedEntry child) -> !child.directory())
+                .thenComparing(ScannedEntry::sortName)
+                .thenComparing(ScannedEntry::name);
+            children.sort((left, right) -> {
+                checkInterrupted();
+                return order.compare(left, right);
+            });
+        } catch (CancellationException cancelled) {
+            throw cancelled;
         } catch (IOException | RuntimeException e) {
             String message = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
             entries.add(new Entry(
@@ -214,41 +282,59 @@ public final class FileTreeModel implements AutoCloseable {
             return;
         }
 
-        for (Path child : children) {
-            boolean directoryEntry = Files.isDirectory(child);
-            Path normalized = child.toAbsolutePath().normalize();
-            boolean expanded = directoryEntry && expandedDirectories.contains(normalized);
-            Kind kind = directoryEntry ? Kind.DIRECTORY : Kind.FILE;
-            String name = child.getFileName() == null ? child.toString() : child.getFileName().toString();
+        for (ScannedEntry child : children) {
+            checkCurrentGeneration(request.generation());
+            boolean directoryEntry = child.directory();
+            Path normalized = child.path().toAbsolutePath().normalize();
+            boolean expanded = directoryEntry && request.expanded().contains(normalized);
+            Kind kind = directoryEntry ? Kind.DIRECTORY
+                : child.attributes() != null && child.attributes().isRegularFile() ? Kind.FILE : Kind.ERROR;
+            String name = child.name();
+            if (kind == Kind.ERROR) {
+                name += " <not a regular file>";
+            }
+            EntryId id = new EntryId(normalized, kind);
             entries.add(new Entry(
-                new EntryId(normalized, kind),
+                id,
                 name,
                 kind,
                 expanded,
                 depth,
-                pendingSizeValue(),
-                pendingDateValue()
+                kind == Kind.ERROR || !request.showSizeColumn() ? "" : PENDING_META,
+                kind == Kind.ERROR || !request.showDateColumn() ? "" : PENDING_META
             ));
+            if (child.attributes() != null) {
+                attributes.put(id, child.attributes());
+            }
             if (directoryEntry && expanded) {
-                appendTreeEntries(child, depth + 1, entries);
+                appendTreeEntries(child.path(), depth + 1, entries, attributes, request);
             }
         }
     }
 
-    private List<Path> listDirectorySorted(Path directory) throws IOException {
+    static List<ScannedEntry> scanDirectory(Path directory, boolean showHiddenFiles) throws IOException {
+        List<ScannedEntry> children = new ArrayList<>();
         try (var stream = Files.list(directory)) {
-            return stream
-                .filter(this::isVisiblePath)
-                .sorted(
-                    Comparator
-                        .comparing((Path path) -> !Files.isDirectory(path))
-                        .thenComparing(path -> path.getFileName().toString().toLowerCase(Locale.ROOT))
-                )
-                .toList();
+            var iterator = stream.iterator();
+            while (iterator.hasNext()) {
+                checkInterrupted();
+                Path path = iterator.next();
+                if (!isVisiblePath(path, showHiddenFiles)) {
+                    continue;
+                }
+                BasicFileAttributes attributes;
+                try {
+                    attributes = Files.readAttributes(path, BasicFileAttributes.class);
+                } catch (IOException ignored) {
+                    attributes = null;
+                }
+                children.add(new ScannedEntry(path, attributes));
+            }
         }
+        return children;
     }
 
-    private boolean isVisiblePath(Path path) {
+    private static boolean isVisiblePath(Path path, boolean showHiddenFiles) {
         if (showHiddenFiles) {
             return true;
         }
@@ -263,35 +349,14 @@ public final class FileTreeModel implements AutoCloseable {
         }
     }
 
-    private void startMetadataEnrichment(
-        List<Entry> entries,
-        long generation,
-        boolean includeSize,
-        boolean includeDate
-    ) {
-        if ((!includeSize && !includeDate) || entries.isEmpty()) {
-            return;
-        }
-        Thread worker = new Thread(
-            () -> enrichMetadata(entries, generation, includeSize, includeDate),
-            "tuink-tree-meta-loader"
-        );
-        worker.setDaemon(true);
-        synchronized (metadataLock) {
-            if (closed || metadataGeneration != generation) {
-                return;
-            }
-            metadataWorker = worker;
-        }
-        worker.start();
-    }
-
     private void enrichMetadata(
         List<Entry> entries,
-        long generation,
-        boolean includeSize,
-        boolean includeDate
+        Map<EntryId, BasicFileAttributes> attributes,
+        LoadRequest request
     ) {
+        if (!request.showSizeColumn() && !request.showDateColumn()) {
+            return;
+        }
         List<Entry> updatedEntries = new ArrayList<>(entries);
         // Preserve progressive updates without making full-list publication quadratic.
         int publishBatchSize = Math.max(
@@ -300,49 +365,54 @@ public final class FileTreeModel implements AutoCloseable {
         );
         int changedBatch = 0;
         for (int index = 0; index < entries.size(); index++) {
-            if (Thread.currentThread().isInterrupted() || !isCurrentMetadataGeneration(generation)) {
-                return;
-            }
+            checkCurrentGeneration(request.generation());
             Entry entry = entries.get(index);
             if (entry.kind() == Kind.PARENT || entry.kind() == Kind.ERROR) {
                 continue;
             }
-            String size = buildSizeValue(entry.path(), entry.directory(), includeSize);
-            String date = buildDateValue(entry.path(), includeDate);
+            BasicFileAttributes entryAttributes = attributes.get(entry.id());
+            String size = !request.showSizeColumn() ? ""
+                : entry.directory() ? formatDirectoryChildCount(entry.path())
+                    : humanReadableSize(entryAttributes.size());
+            String date = buildDateValue(entryAttributes, request.showDateColumn());
             Entry updated = entry.withMetadata(size, date);
             if (updated != entry) {
                 updatedEntries.set(index, updated);
                 changedBatch++;
                 if (changedBatch >= publishBatchSize) {
-                    publishMetadataRevision(updatedEntries, generation);
+                    publishSnapshot(updatedEntries, request.generation());
                     changedBatch = 0;
                 }
             }
         }
         if (changedBatch > 0) {
-            publishMetadataRevision(updatedEntries, generation);
-        }
-        synchronized (metadataLock) {
-            if (metadataGeneration == generation && metadataWorker == Thread.currentThread()) {
-                metadataWorker = null;
-            }
+            publishSnapshot(updatedEntries, request.generation());
         }
     }
 
-    private void publishMetadataRevision(List<Entry> entries, long generation) {
+    private void publishSnapshot(List<Entry> entries, long generation) {
         List<Entry> publishedEntries = List.copyOf(entries);
-        synchronized (metadataLock) {
-            if (closed || metadataGeneration != generation) {
+        synchronized (loaderLock) {
+            if (closed || loadGeneration != generation) {
                 return;
             }
             snapshot = new Snapshot(snapshot.root(), ++revision, publishedEntries);
-            metadataSignal.incrementAndGet();
+            snapshotSignal.incrementAndGet();
         }
     }
 
-    private boolean isCurrentMetadataGeneration(long generation) {
-        synchronized (metadataLock) {
-            return !closed && metadataGeneration == generation;
+    private void checkCurrentGeneration(long generation) {
+        checkInterrupted();
+        synchronized (loaderLock) {
+            if (closed || loadGeneration != generation) {
+                throw new CancellationException();
+            }
+        }
+    }
+
+    private static void checkInterrupted() {
+        if (Thread.currentThread().isInterrupted()) {
+            throw new CancellationException();
         }
     }
 
@@ -355,50 +425,35 @@ public final class FileTreeModel implements AutoCloseable {
         return null;
     }
 
-    private String pendingSizeValue() {
-        return showSizeColumn ? PENDING_META : "";
-    }
-
-    private String pendingDateValue() {
-        return showDateColumn ? PENDING_META : "";
-    }
-
-    private static String buildDateValue(Path path, boolean includeDate) {
+    private static String buildDateValue(BasicFileAttributes attributes, boolean includeDate) {
         if (!includeDate) {
             return "";
         }
         try {
             LocalDateTime dateTime = LocalDateTime.ofInstant(
-                Files.getLastModifiedTime(path).toInstant(),
+                attributes.lastModifiedTime().toInstant(),
                 ZoneId.systemDefault()
             );
             return DATE_FORMATTER.format(dateTime);
-        } catch (IOException | RuntimeException ignored) {
+        } catch (RuntimeException ignored) {
             return UNKNOWN_DATE;
         }
     }
 
-    private static String buildSizeValue(Path path, boolean directory, boolean includeSize) {
-        if (!includeSize) {
-            return "";
-        }
-        return directory ? formatDirectoryChildCount(path) : formatFileSize(path);
-    }
-
     private static String formatDirectoryChildCount(Path path) {
         try (var stream = Files.list(path)) {
-            long count = stream.count();
+            long count = 0;
+            var iterator = stream.iterator();
+            while (iterator.hasNext()) {
+                checkInterrupted();
+                iterator.next();
+                count++;
+            }
             return count + " items";
+        } catch (CancellationException cancelled) {
+            throw cancelled;
         } catch (IOException | RuntimeException ignored) {
             return "? items";
-        }
-    }
-
-    private static String formatFileSize(Path path) {
-        try {
-            return humanReadableSize(Files.size(path));
-        } catch (IOException | RuntimeException ignored) {
-            return "?";
         }
     }
 
@@ -437,7 +492,34 @@ public final class FileTreeModel implements AutoCloseable {
         }
     }
 
-    public record Snapshot(Path root, long revision, List<Entry> entries) {
+    @FunctionalInterface
+    interface DirectoryScanner {
+        List<ScannedEntry> scan(Path directory, boolean showHiddenFiles) throws IOException;
+    }
+
+    record ScannedEntry(Path path, BasicFileAttributes attributes, String name, String sortName) {
+        ScannedEntry(Path path, BasicFileAttributes attributes) {
+            this(path, attributes,
+                path.getFileName() == null ? path.toString() : path.getFileName().toString(),
+                (path.getFileName() == null ? path.toString() : path.getFileName().toString()).toLowerCase(Locale.ROOT));
+        }
+
+        boolean directory() {
+            return attributes != null && attributes.isDirectory();
+        }
+    }
+
+    private record LoadRequest(
+        Path root, Set<Path> expanded, boolean showHiddenFiles,
+        boolean showSizeColumn, boolean showDateColumn, long generation
+    ) {
+    }
+
+    public record Snapshot(Path root, long revision, List<Entry> entries, boolean loading) {
+        public Snapshot(Path root, long revision, List<Entry> entries) {
+            this(root, revision, entries, false);
+        }
+
         public Snapshot {
             root = Objects.requireNonNull(root, "root").toAbsolutePath().normalize();
             if (revision < 0L) {
@@ -518,6 +600,11 @@ public final class FileTreeModel implements AutoCloseable {
                 return this;
             }
             return new Entry(id, name, kind, expanded, depth, nextSize, nextDate);
+        }
+
+        private Entry withExpanded(boolean expanded) {
+            return this.expanded == expanded ? this
+                : new Entry(id, name, kind, expanded, depth, sizeValue, dateValue);
         }
     }
 }

@@ -26,7 +26,7 @@ final class OpenFileTreeController implements AutoCloseable {
     }
 
     void toggleHiddenFiles() {
-        state = state.resetClickTracking();
+        state = state.cancelPointerInteraction();
         model.setShowHiddenFiles(!model.showHiddenFiles());
     }
 
@@ -41,24 +41,28 @@ final class OpenFileTreeController implements AutoCloseable {
         if (parent != null) {
             setRoot(parent);
         } else {
-            state = state.resetClickTracking();
+            state = state.cancelPointerInteraction();
         }
     }
 
     void requestExpansion(FileTreeModel.EntryId id, boolean expand) {
         Objects.requireNonNull(id, "id");
-        state = state.resetClickTracking();
+        state = state.cancelPointerInteraction();
         FileTreeModel.Entry entry = findEntry(id);
         if (entry == null || entry.kind() != FileTreeModel.Kind.DIRECTORY) {
             return;
         }
-        if (entry.expanded() != expand && model.toggleDirectory(id)) {
+        if (model.setDirectoryExpanded(id, expand)) {
             invalidatePresentation();
         }
     }
 
     boolean consumeMetadataChanged() {
         return model.consumeMetadataChanged();
+    }
+
+    boolean loading() {
+        return model.snapshot().loading();
     }
 
     FileTreeView.Placement place(

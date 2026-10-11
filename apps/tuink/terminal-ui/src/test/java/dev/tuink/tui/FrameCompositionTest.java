@@ -1,5 +1,6 @@
 package dev.tuink.tui;
 
+import static dev.tuink.tui.file.FileTreeTestSupport.awaitLoaded;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -188,7 +189,7 @@ class FrameCompositionTest {
         Rect bounds = new Rect(2, 3, 16, 4);
         Rect clip = new Rect(0, 0, 40, 12);
         try (FileTreeModel model = new FileTreeModel(root, false, false)) {
-            FileTreeModel.Snapshot snapshot = model.snapshot();
+            FileTreeModel.Snapshot snapshot = awaitLoaded(model);
             FileTreeView view = FileTreeView.fromSnapshot(snapshot, false, false);
             FileTreeView.State initialState = new FileTreeView.State(
                 null,
@@ -231,7 +232,7 @@ class FrameCompositionTest {
             assertFalse(openFile(layout, resized).diffKey().isVerticalScrollFrom(initialKey));
 
             model.setShowHiddenFiles(true);
-            FileTreeModel.Snapshot revisedSnapshot = model.snapshot();
+            FileTreeModel.Snapshot revisedSnapshot = awaitLoaded(model);
             FileTreeView.Placement revised = FileTreeView
                 .fromSnapshot(revisedSnapshot, false, false)
                 .place(bounds, vertical.state(), clip, true);

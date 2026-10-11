@@ -7,6 +7,7 @@ import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.input.TuiInputEvent;
 import dev.tuiframe.scroll.ScrollInteraction;
+import dev.tuiframe.scroll.ScrollLayout;
 import dev.tuiframe.widget.FocusContext;
 import dev.tuiframe.widget.FocusSpace;
 import dev.tuiframe.widget.InteractionResult;
@@ -129,6 +130,9 @@ public final class FileTreeView {
         boolean enabled = visible
             && !placed.bounds().isEmpty()
             && requiredClip.contains(placed.bounds());
+        if (!enabled) {
+            normalized = normalized.cancelPointerInteraction();
+        }
         FocusContext context = new FocusContext(
             focused && enabled,
             enabled,
@@ -160,7 +164,8 @@ public final class FileTreeView {
             new dev.tuiframe.widget.TreeView.State(
                 selectedIndex,
                 state.widgetState().firstVisibleIndex(),
-                state.widgetState().horizontalOffset()
+                state.widgetState().horizontalOffset(),
+                state.widgetState().drag()
             );
         boolean keepClick = state.lastPressedId() != null
             && findIndex(state.lastPressedId()) >= 0;
@@ -209,37 +214,13 @@ public final class FileTreeView {
         return selected;
     }
 
-    /** Mirrors the generic widget's bounded scrollbar negotiation without building row descriptors. */
     private int resolvedLeadingWidth(Rect bounds, MetadataColumns columns) {
-        int trailingExtent = hasMetadataRows ? columns.trailingWidth() : 0;
-        boolean showVertical = bounds.width() >= 2
-            && bounds.height() >= 2
-            && entries.size() > bounds.height();
-        int widthWithVertical = Math.max(0, bounds.width() - (showVertical ? 1 : 0));
-        int leadingWithVertical = leadingWidth(widthWithVertical, trailingExtent);
-        boolean showHorizontal = bounds.height() >= 2
-            && (!showVertical || bounds.height() >= 3)
-            && leadingWithVertical >= 2
-            && leadingExtent > leadingWithVertical;
-        if (!showVertical && showHorizontal) {
-            int rowsWithHorizontal = bounds.height() - 1;
-            boolean verticalInducedByHorizontal = bounds.width() >= 2
-                && rowsWithHorizontal >= 2
-                && entries.size() > rowsWithHorizontal;
-            if (verticalInducedByHorizontal
-                && leadingWidth(bounds.width() - 1, trailingExtent) >= 2) {
-                showVertical = true;
-            }
-        }
-        int textWidth = Math.max(0, bounds.width() - (showVertical ? 1 : 0));
-        return leadingWidth(textWidth, trailingExtent);
-    }
-
-    private static int leadingWidth(int textWidth, int trailingExtent) {
-        if (trailingExtent == 0 || textWidth <= 1) {
-            return Math.max(0, textWidth);
-        }
-        return Math.max(0, textWidth - Math.min(trailingExtent, textWidth - 1));
+        return ScrollLayout.calculate(
+            bounds,
+            entries.size(),
+            leadingExtent,
+            hasMetadataRows ? columns.trailingWidth() : 0
+        ).leadingBounds().width();
     }
 
     private List<MetadataColumns> metadataProfiles() {
@@ -387,6 +368,24 @@ public final class FileTreeView {
             }
             return new State(selectedId, widgetState, snapshotRevision, null, 0L);
         }
+
+        /** Cancels pointer capture when ownership moves to another control or model. */
+        public State cancelPointerInteraction() {
+            if (widgetState.drag() == null) {
+                return resetClickTracking();
+            }
+            return new State(
+                selectedId,
+                new dev.tuiframe.widget.TreeView.State(
+                    widgetState.selectedIndex(),
+                    widgetState.firstVisibleIndex(),
+                    widgetState.horizontalOffset()
+                ),
+                snapshotRevision,
+                null,
+                0L
+            );
+        }
     }
 
     /** TUInk semantic outputs; generic presentation never sees paths or file policy. */
@@ -510,6 +509,10 @@ public final class FileTreeView {
 
         public boolean enabled() {
             return context.enabled();
+        }
+
+        public boolean loading() {
+            return snapshot.loading();
         }
 
         public void paint(Canvas canvas, Theme theme) {

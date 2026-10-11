@@ -39,6 +39,7 @@ class OpenFileTreeControllerTest {
         }
 
         try (OpenFileTreeController controller = new OpenFileTreeController(root, true, true)) {
+            awaitLoaded(controller);
             FileTreeView.Placement placement = controller.place(NARROW_BOUNDS, CLIP, true, true);
             OpenFileInputRouter.Result end = route(
                 placement,
@@ -54,12 +55,12 @@ class OpenFileTreeControllerTest {
 
             // Rebuild the structural snapshot to restart metadata enrichment,
             // while keeping the selected stable ID and numeric viewports.
+            long pendingRevision = controller.state().snapshotRevision();
             controller.toggleHiddenFiles();
             FileTreeView.Placement pending = controller.place(NARROW_BOUNDS, CLIP, true, true);
             FileTreeModel.EntryId selectedId = pending.state().selectedId();
             int firstVisible = pending.state().widgetState().firstVisibleIndex();
             int horizontalOffset = pending.state().widgetState().horizontalOffset();
-            long pendingRevision = pending.state().snapshotRevision();
 
             assertTrue(firstVisible > 0);
             assertTrue(horizontalOffset > 0);
@@ -80,6 +81,7 @@ class OpenFileTreeControllerTest {
         Files.createFile(root.resolve("note.txt"));
 
         try (OpenFileTreeController controller = new OpenFileTreeController(root, false, false)) {
+            awaitLoaded(controller);
             FileTreeView.Placement placement = controller.place(BOUNDS, CLIP, true, true);
             OpenFileInputRouter.Result selectFolder = route(
                 placement,
@@ -154,6 +156,7 @@ class OpenFileTreeControllerTest {
             Files.createFile(root.resolve("long-file-name-" + index + "-0123456789.txt"));
         }
         OpenFileTreeController controller = new OpenFileTreeController(root, false, false);
+        awaitLoaded(controller);
         FileTreeView.Placement placement = controller.place(NARROW_BOUNDS, CLIP, true, true);
         OpenFileInputRouter.Result end = route(placement, KeyStroke.of(KeyStroke.Key.END));
         controller.adopt(end.state());
@@ -176,6 +179,16 @@ class OpenFileTreeControllerTest {
         controller.close();
     }
 
+    private static void awaitLoaded(OpenFileTreeController controller) {
+        long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        while (controller.loading()) {
+            if (System.nanoTime() >= deadline) {
+                throw new AssertionError("File tree did not finish loading");
+            }
+            java.util.concurrent.locks.LockSupport.parkNanos(1_000_000L);
+        }
+    }
+
     private static FileTreeView.Placement awaitMetadataRevision(
         OpenFileTreeController controller,
         long baselineRevision
@@ -186,7 +199,7 @@ class OpenFileTreeControllerTest {
         while (System.nanoTime() - startedAt < timeout) {
             if (controller.consumeMetadataChanged()) {
                 current = controller.place(NARROW_BOUNDS, CLIP, true, true);
-                if (current.state().snapshotRevision() > baselineRevision) {
+                if (!current.loading() && current.state().snapshotRevision() > baselineRevision) {
                     return current;
                 }
             }

@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import static dev.tuink.tui.file.FileTreeTestSupport.awaitLoaded;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -33,7 +35,7 @@ class OpenFileInputRouterTest {
         Path folder = Files.createDirectory(root.resolve("folder"));
         Path file = Files.createFile(root.resolve("note.txt"));
         try (FileTreeModel model = new FileTreeModel(root, false, false)) {
-            FileTreeModel.Snapshot snapshot = model.snapshot();
+            FileTreeModel.Snapshot snapshot = awaitLoaded(model);
             FileTreeView view = FileTreeView.fromSnapshot(snapshot, false, false);
             FileTreeView.Placement directory = placement(view, snapshot, entry(snapshot, folder), true);
 
@@ -96,7 +98,7 @@ class OpenFileInputRouterTest {
     void rawTextPasteModifiersAndFocusTraversalAreCaptured() throws IOException {
         Files.createFile(root.resolve("note.txt"));
         try (FileTreeModel model = new FileTreeModel(root, false, false)) {
-            FileTreeModel.Snapshot snapshot = model.snapshot();
+            FileTreeModel.Snapshot snapshot = awaitLoaded(model);
             FileTreeView view = FileTreeView.fromSnapshot(snapshot, false, false);
             FileTreeView.Placement placement = view.place(
                 BOUNDS,
@@ -159,7 +161,7 @@ class OpenFileInputRouterTest {
         Path folder = Files.createDirectory(root.resolve("folder"));
         Path file = Files.createFile(root.resolve("note.txt"));
         try (FileTreeModel model = new FileTreeModel(root, false, false)) {
-            FileTreeModel.Snapshot snapshot = model.snapshot();
+            FileTreeModel.Snapshot snapshot = awaitLoaded(model);
             FileTreeView view = FileTreeView.fromSnapshot(snapshot, false, false);
             FileTreeView.Placement directory = placement(view, snapshot, entry(snapshot, folder), true);
             OpenFileInputRouter.SelectionRejected rejected = assertInstanceOf(
@@ -193,7 +195,7 @@ class OpenFileInputRouterTest {
 
         Path plainFile = Files.createFile(root.resolve("plain-file"));
         try (FileTreeModel errorModel = new FileTreeModel(plainFile, false, false)) {
-            FileTreeModel.Snapshot snapshot = errorModel.snapshot();
+            FileTreeModel.Snapshot snapshot = awaitLoaded(errorModel);
             FileTreeModel.Entry error = snapshot.entries().stream()
                 .filter(entry -> entry.kind() == FileTreeModel.Kind.ERROR)
                 .findFirst()
@@ -217,7 +219,7 @@ class OpenFileInputRouterTest {
         Path folder = Files.createDirectory(root.resolve("folder"));
         Path file = Files.createFile(root.resolve("note.txt"));
         try (FileTreeModel model = new FileTreeModel(root, false, false)) {
-            FileTreeModel.Snapshot snapshot = model.snapshot();
+            FileTreeModel.Snapshot snapshot = awaitLoaded(model);
             FileTreeModel.Entry entry = entry(snapshot, folder);
             FileTreeView view = FileTreeView.fromSnapshot(snapshot, false, false);
             FileTreeView.Placement firstPlacement = placement(view, snapshot, entry, true);
@@ -334,7 +336,7 @@ class OpenFileInputRouterTest {
     void unrelatedPointerPressCancelsPendingDoubleClick() throws IOException {
         Path folder = Files.createDirectory(root.resolve("folder"));
         try (FileTreeModel model = new FileTreeModel(root, false, false)) {
-            FileTreeModel.Snapshot snapshot = model.snapshot();
+            FileTreeModel.Snapshot snapshot = awaitLoaded(model);
             FileTreeModel.Entry entry = entry(snapshot, folder);
             FileTreeView view = FileTreeView.fromSnapshot(snapshot, false, false);
             FileTreeView.Placement placement = placement(view, snapshot, entry, true);
@@ -390,7 +392,7 @@ class OpenFileInputRouterTest {
     void hiddenTinyPlacementCapturesEverythingExceptSafeClose() throws IOException {
         Files.createFile(root.resolve("note.txt"));
         try (FileTreeModel model = new FileTreeModel(root, false, false)) {
-            FileTreeModel.Snapshot snapshot = model.snapshot();
+            FileTreeModel.Snapshot snapshot = awaitLoaded(model);
             FileTreeView view = FileTreeView.fromSnapshot(snapshot, false, false);
             FileTreeView.Placement hidden = view.place(
                 BOUNDS,

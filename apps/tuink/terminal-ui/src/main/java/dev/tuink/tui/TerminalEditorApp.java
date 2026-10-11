@@ -2653,7 +2653,7 @@ public class TerminalEditorApp {
             return;
         }
         OpenDialogLayout layout = openFile.layout();
-        Modal frame = openFileFrame(layout);
+        Modal frame = openFileFrame(layout, openFile.placement() != null && openFile.placement().loading());
         frame.draw(canvas);
         Button hiddenToggle = openFileHiddenToggleButton(layout, openFile.showHiddenFiles());
 
@@ -2695,12 +2695,16 @@ public class TerminalEditorApp {
     }
 
     private Modal openFileFrame(OpenFileDialogController.OpenDialogLayout layout) {
+        return openFileFrame(layout, false);
+    }
+
+    private Modal openFileFrame(OpenFileDialogController.OpenDialogLayout layout, boolean loading) {
         return new Modal(
             layout.top(),
             layout.left(),
             layout.width(),
             layout.height(),
-            " Open File ",
+            loading ? " Open File (Loading...) " : " Open File ",
             styles.dialog(),
             styles.dialogBorder(),
             styles.dialogTitle()

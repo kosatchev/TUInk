@@ -1,26 +1,28 @@
 package dev.tuink.tui.file;
 
+import static dev.tuink.tui.file.FileTreeTestSupport.awaitLoaded;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.function.Predicate;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class FileTreeModelTest {
-    private static final String PENDING_METADATA = "...";
-
     @TempDir
     Path root;
 
@@ -34,7 +36,7 @@ class FileTreeModelTest {
         Path hiddenFile = Files.createFile(root.resolve(".secret.txt"));
 
         try (FileTreeModel model = new FileTreeModel(root, false, false)) {
-            FileTreeModel.Snapshot initial = model.snapshot();
+            FileTreeModel.Snapshot initial = awaitLoaded(model);
 
             assertParentEntry(initial, root.getParent());
             assertEquals(
@@ -59,7 +61,7 @@ class FileTreeModelTest {
 
             long initialRevision = initial.revision();
             model.setShowHiddenFiles(true);
-            FileTreeModel.Snapshot withHidden = model.snapshot();
+            FileTreeModel.Snapshot withHidden = awaitLoaded(model);
 
             assertTrue(withHidden.revision() > initialRevision);
             assertEquals(
@@ -75,7 +77,7 @@ class FileTreeModelTest {
             );
             long visibleRevision = withHidden.revision();
             model.setShowHiddenFiles(true);
-            assertEquals(visibleRevision, model.snapshot().revision(), "an unchanged option must not rebuild");
+            assertEquals(visibleRevision, awaitLoaded(model).revision(), "an unchanged option must not rebuild");
         }
     }
 
@@ -87,12 +89,12 @@ class FileTreeModelTest {
         Path rootFile = Files.createFile(root.resolve("root.txt"));
 
         try (FileTreeModel model = new FileTreeModel(root, false, false)) {
-            FileTreeModel.Entry folderEntry = entry(model.snapshot(), folder, FileTreeModel.Kind.DIRECTORY);
-            FileTreeModel.Entry rootFileEntry = entry(model.snapshot(), rootFile, FileTreeModel.Kind.FILE);
-            long collapsedRevision = model.snapshot().revision();
+            FileTreeModel.Entry folderEntry = entry(awaitLoaded(model), folder, FileTreeModel.Kind.DIRECTORY);
+            FileTreeModel.Entry rootFileEntry = entry(awaitLoaded(model), rootFile, FileTreeModel.Kind.FILE);
+            long collapsedRevision = awaitLoaded(model).revision();
 
             assertTrue(model.toggleDirectory(folderEntry.id()));
-            FileTreeModel.Snapshot expanded = model.snapshot();
+            FileTreeModel.Snapshot expanded = awaitLoaded(model);
             assertTrue(expanded.revision() > collapsedRevision);
             assertEquals(
                 List.of("folder", "nested", "child.txt", "root.txt"),
@@ -105,10 +107,10 @@ class FileTreeModelTest {
             assertTrue(entry(expanded, folder, FileTreeModel.Kind.DIRECTORY).expanded());
             assertFalse(entry(expanded, nestedDirectory, FileTreeModel.Kind.DIRECTORY).expanded());
             assertFalse(model.toggleDirectory(rootFileEntry.id()));
-            assertEquals(expanded.revision(), model.snapshot().revision());
+            assertEquals(expanded.revision(), awaitLoaded(model).revision());
 
             model.setRoot(folder.resolve("."));
-            FileTreeModel.Snapshot nestedRoot = model.snapshot();
+            FileTreeModel.Snapshot nestedRoot = awaitLoaded(model);
             assertEquals(folder.toAbsolutePath().normalize(), model.root());
             assertEquals(model.root(), nestedRoot.root());
             assertParentEntry(nestedRoot, root);
@@ -120,45 +122,198 @@ class FileTreeModelTest {
             assertEquals(0, entry(nestedRoot, childFile, FileTreeModel.Kind.FILE).depth());
 
             model.setRoot(root);
-            assertFalse(entry(model.snapshot(), folder, FileTreeModel.Kind.DIRECTORY).expanded());
-            assertFalse(containsPath(model.snapshot(), childFile));
+            assertFalse(entry(awaitLoaded(model), folder, FileTreeModel.Kind.DIRECTORY).expanded());
+            assertFalse(containsPath(awaitLoaded(model), childFile));
         }
     }
 
     @Test
-    void metadataPublicationAdvancesRevisionWithoutMutatingCapturedSnapshot() throws IOException {
-        for (int index = 0; index < 96; index++) {
-            Files.writeString(root.resolve("aa-filler-%03d.txt".formatted(index)), "x");
-        }
-        Path target = root.resolve("zz-target.txt");
-        Files.writeString(target, "target payload");
+    void loadingReturnsBeforeScanningAndPublishesAnImmutableSnapshotWithMetadata() throws Exception {
+        Path target = Files.writeString(root.resolve("target.txt"), "target payload");
         Files.setLastModifiedTime(target, FileTime.from(Instant.parse("2024-03-02T10:15:30Z")));
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        Thread owner = Thread.currentThread();
+        AtomicReference<Thread> scannerThread = new AtomicReference<>();
+        FileTreeModel.DirectoryScanner scanner = (directory, hidden) -> {
+            scannerThread.set(Thread.currentThread());
+            if (Thread.currentThread() == owner) {
+                throw new AssertionError("Directory scans must not run on the owning UI thread");
+            }
+            entered.countDown();
+            awaitIgnoringInterrupts(release);
+            return FileTreeModel.scanDirectory(directory, hidden);
+        };
 
-        try (FileTreeModel model = new FileTreeModel(root, true, true)) {
-            drainMetadataSignal(model);
-            FileTreeModel.Snapshot pending = capturePendingGeneration(model, target);
-            FileTreeModel.Entry pendingEntry = entry(pending, target, FileTreeModel.Kind.FILE);
-            long pendingRevision = pending.revision();
-
-            assertEquals(PENDING_METADATA, pendingEntry.sizeValue());
-            assertEquals(PENDING_METADATA, pendingEntry.dateValue());
+        try (FileTreeModel model = new FileTreeModel(root, true, true, scanner)) {
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            assertNotSame(owner, scannerThread.get());
+            FileTreeModel.Snapshot pending = model.snapshot();
+            assertTrue(pending.loading());
+            assertParentEntry(pending, root.getParent());
+            assertTrue(contentEntries(pending).isEmpty());
             assertThrows(UnsupportedOperationException.class, pending.entries()::clear);
+            release.countDown();
 
-            FileTreeModel.Snapshot enriched = awaitSnapshot(
-                model,
-                snapshot -> snapshot.revision() > pendingRevision
-                    && metadataReady(entry(snapshot, target, FileTreeModel.Kind.FILE))
-            );
+            FileTreeModel.Snapshot enriched = awaitLoaded(model);
             FileTreeModel.Entry enrichedEntry = entry(enriched, target, FileTreeModel.Kind.FILE);
-
             assertNotSame(pending, enriched);
-            assertTrue(enriched.revision() > pendingRevision);
+            assertTrue(enriched.revision() > pending.revision());
+            assertFalse(enriched.loading());
             assertEquals(Files.size(target) + "B", enrichedEntry.sizeValue());
             assertTrue(enrichedEntry.dateValue().matches("\\d{2}\\.\\d{2}\\.\\d{2} \\d{2}:\\d{2}"));
-            assertEquals(PENDING_METADATA, pendingEntry.sizeValue(), "an older snapshot must stay immutable");
-            assertEquals(PENDING_METADATA, pendingEntry.dateValue(), "metadata must publish with a new revision");
+            assertTrue(pending.loading(), "an older snapshot must stay immutable");
+            assertTrue(contentEntries(pending).isEmpty());
             assertTrue(model.consumeMetadataChanged());
             assertFalse(model.consumeMetadataChanged());
+        } finally {
+            release.countDown();
+        }
+    }
+
+    @Test
+    void supersededRootCannotPublishEvenWhenItsScannerIgnoresCancellation() throws Exception {
+        Path nextRoot = Files.createDirectory(root.resolve("next"));
+        Path nextFile = Files.createFile(nextRoot.resolve("next.txt"));
+        Files.createFile(root.resolve("old.txt"));
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicReference<Thread> oldWorker = new AtomicReference<>();
+        FileTreeModel.DirectoryScanner scanner = (directory, hidden) -> {
+            if (directory.equals(root)) {
+                oldWorker.set(Thread.currentThread());
+                entered.countDown();
+                awaitIgnoringInterrupts(release);
+            }
+            return FileTreeModel.scanDirectory(directory, hidden);
+        };
+        try (FileTreeModel model = new FileTreeModel(root, false, false, scanner)) {
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            model.setRoot(nextRoot);
+            FileTreeModel.Snapshot latest = awaitLoaded(model);
+            assertEquals(nextRoot, latest.root());
+            assertParentEntry(latest, root);
+            assertEquals(List.of(nextFile), contentEntries(latest).stream().map(FileTreeModel.Entry::path).toList());
+            drainMetadataSignal(model);
+            release.countDown();
+            oldWorker.get().join(5_000);
+            assertFalse(oldWorker.get().isAlive());
+            assertSame(latest, model.snapshot());
+            assertFalse(model.consumeMetadataChanged());
+        } finally {
+            release.countDown();
+        }
+    }
+
+    @Test
+    void changingRootImmediatelyRemovesOldEntriesWhileTheNewScanIsBlocked() throws Exception {
+        Path oldFile = Files.createFile(root.resolve("old.txt"));
+        Path nextRoot = Files.createDirectory(root.resolve("next"));
+        Path nextFile = Files.createFile(nextRoot.resolve("next.txt"));
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        try (FileTreeModel model = new FileTreeModel(root, false, false, (directory, hidden) -> {
+            if (directory.equals(nextRoot)) {
+                entered.countDown();
+                awaitIgnoringInterrupts(release);
+            }
+            return FileTreeModel.scanDirectory(directory, hidden);
+        })) {
+            assertTrue(containsPath(awaitLoaded(model), oldFile));
+            model.setRoot(nextRoot);
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            FileTreeModel.Snapshot loading = model.snapshot();
+            assertTrue(loading.loading());
+            assertEquals(nextRoot, loading.root());
+            assertParentEntry(loading, root);
+            assertTrue(contentEntries(loading).isEmpty());
+            assertFalse(containsPath(loading, oldFile));
+            release.countDown();
+            assertTrue(containsPath(awaitLoaded(model), nextFile));
+        } finally {
+            release.countDown();
+        }
+    }
+
+    @Test
+    void pendingExpansionCanBeCollapsedBeforeItsDirectoryScanCompletes() throws Exception {
+        Path folder = Files.createDirectory(root.resolve("folder"));
+        Path child = Files.createFile(folder.resolve("child.txt"));
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicReference<Thread> oldWorker = new AtomicReference<>();
+        FileTreeModel.DirectoryScanner scanner = (directory, hidden) -> {
+            if (directory.equals(folder)) {
+                oldWorker.set(Thread.currentThread());
+                entered.countDown();
+                awaitIgnoringInterrupts(release);
+            }
+            return FileTreeModel.scanDirectory(directory, hidden);
+        };
+        try (FileTreeModel model = new FileTreeModel(root, false, false, scanner)) {
+            FileTreeModel.EntryId id = entry(awaitLoaded(model), folder, FileTreeModel.Kind.DIRECTORY).id();
+            assertTrue(model.setDirectoryExpanded(id, true));
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            assertTrue(model.snapshot().loading());
+            assertTrue(entry(model.snapshot(), folder, FileTreeModel.Kind.DIRECTORY).expanded());
+            assertTrue(model.setDirectoryExpanded(id, false));
+            FileTreeModel.Snapshot collapsed = awaitLoaded(model);
+            assertFalse(entry(collapsed, folder, FileTreeModel.Kind.DIRECTORY).expanded());
+            assertFalse(containsPath(collapsed, child));
+            release.countDown();
+            oldWorker.get().join(5_000);
+            assertFalse(oldWorker.get().isAlive());
+            assertSame(collapsed, model.snapshot());
+        } finally {
+            release.countDown();
+        }
+    }
+
+    @Test
+    void closeCancelsAnInFlightScanAndPreventsAnyLaterPublication() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicReference<Thread> worker = new AtomicReference<>();
+        FileTreeModel model = new FileTreeModel(root, true, true, (directory, hidden) -> {
+            worker.set(Thread.currentThread());
+            entered.countDown();
+            awaitIgnoringInterrupts(release);
+            return FileTreeModel.scanDirectory(directory, hidden);
+        });
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            FileTreeModel.Snapshot loading = model.snapshot();
+            drainMetadataSignal(model);
+            model.close();
+            model.close();
+            release.countDown();
+            worker.get().join(5_000);
+            assertFalse(worker.get().isAlive());
+            assertSame(loading, model.snapshot());
+            assertFalse(model.consumeMetadataChanged());
+        } finally {
+            release.countDown();
+            model.close();
+        }
+    }
+
+    @Test
+    void typeSortingAndMetadataUseTheAttributesCapturedByTheScan() throws IOException {
+        Path directory = Files.createDirectory(root.resolve("z-directory"));
+        Path file = Files.writeString(root.resolve("a-file.txt"), "12345");
+        try (FileTreeModel model = new FileTreeModel(root, true, true, (path, hidden) -> {
+            List<FileTreeModel.ScannedEntry> scanned = FileTreeModel.scanDirectory(path, hidden);
+            Files.delete(directory);
+            Files.delete(file);
+            return scanned;
+        })) {
+            FileTreeModel.Snapshot loaded = awaitLoaded(model);
+            assertEquals(List.of("z-directory", "a-file.txt"), contentEntries(loaded).stream()
+                .map(FileTreeModel.Entry::name).toList());
+            assertEquals("5B", entry(loaded, file, FileTreeModel.Kind.FILE).sizeValue());
+            assertTrue(entry(loaded, file, FileTreeModel.Kind.FILE).dateValue()
+                .matches("\\d{2}\\.\\d{2}\\.\\d{2} \\d{2}:\\d{2}"));
+            assertEquals("? items", entry(loaded, directory, FileTreeModel.Kind.DIRECTORY).sizeValue());
         }
     }
 
@@ -167,18 +322,18 @@ class FileTreeModelTest {
         Path directory = Files.createDirectory(root.resolve("directory"));
         FileTreeModel model = new FileTreeModel(root, false, false);
         FileTreeModel.EntryId directoryId = entry(
-            model.snapshot(),
+            awaitLoaded(model),
             directory,
             FileTreeModel.Kind.DIRECTORY
         ).id();
-        FileTreeModel.Snapshot published = model.snapshot();
+        FileTreeModel.Snapshot published = awaitLoaded(model);
 
         model.close();
         model.close();
 
-        assertEquals(published.root(), model.snapshot().root());
-        assertEquals(published.revision(), model.snapshot().revision());
-        assertEquals(published.entries(), model.snapshot().entries());
+        assertEquals(published.root(), awaitLoaded(model).root());
+        assertEquals(published.revision(), awaitLoaded(model).revision());
+        assertEquals(published.entries(), awaitLoaded(model).entries());
         assertThrows(IllegalStateException.class, () -> model.setRoot(root));
         assertThrows(IllegalStateException.class, () -> model.setShowHiddenFiles(true));
         assertThrows(IllegalStateException.class, () -> model.setShowSizeColumn(true));
@@ -191,7 +346,7 @@ class FileTreeModelTest {
         Path regularFile = Files.createFile(root.resolve("not-a-directory.txt"));
 
         try (FileTreeModel model = new FileTreeModel(regularFile, true, true)) {
-            FileTreeModel.Snapshot snapshot = model.snapshot();
+            FileTreeModel.Snapshot snapshot = awaitLoaded(model);
             FileTreeModel.Entry error = entry(snapshot, regularFile, FileTreeModel.Kind.ERROR);
 
             assertEquals(FileTreeModel.Kind.ERROR, error.id().kind());
@@ -199,53 +354,65 @@ class FileTreeModelTest {
             assertTrue(error.name().startsWith("<cannot read directory:"));
             assertEquals("", error.sizeValue());
             assertEquals("", error.dateValue());
+            assertTrue(model.consumeMetadataChanged());
             assertFalse(model.consumeMetadataChanged());
         }
     }
 
-    private static FileTreeModel.Snapshot capturePendingGeneration(FileTreeModel model, Path target) {
-        for (int attempt = 0; attempt < 100; attempt++) {
-            model.setShowDateColumn(false);
-            model.setShowDateColumn(true);
-            FileTreeModel.Snapshot candidate = model.snapshot();
-            FileTreeModel.Entry targetEntry = entry(candidate, target, FileTreeModel.Kind.FILE);
-            if (PENDING_METADATA.equals(targetEntry.sizeValue())
-                && PENDING_METADATA.equals(targetEntry.dateValue())) {
-                return candidate;
+    @Test
+    void fifoEntriesAreUnavailableWhileRegularFilesAndSymlinksRemainOpenable() throws Exception {
+        assumeTrue(Files.getFileStore(root).supportsFileAttributeView("posix"));
+        Path fifo = root.resolve("input.fifo");
+        createFifo(fifo);
+        Path fifoLink = Files.createSymbolicLink(root.resolve("alias.fifo"), fifo.getFileName());
+        Path regular = Files.writeString(root.resolve("ordinary.txt"), "text");
+        Path regularLink = Files.createSymbolicLink(root.resolve("alias.txt"), regular.getFileName());
+
+        try (FileTreeModel model = new FileTreeModel(root, true, true)) {
+            for (Path special : List.of(fifo, fifoLink)) {
+                FileTreeModel.Entry unavailable = entry(awaitLoaded(model), special, FileTreeModel.Kind.ERROR);
+                assertEquals(special.getFileName() + " <not a regular file>", unavailable.name());
+                assertEquals("", unavailable.sizeValue());
+                assertEquals("", unavailable.dateValue());
+                assertFalse(model.toggleDirectory(unavailable.id()));
             }
-            Thread.onSpinWait();
+            assertEntryIdentity(awaitLoaded(model), regular, FileTreeModel.Kind.FILE);
+            assertEntryIdentity(awaitLoaded(model), regularLink, FileTreeModel.Kind.FILE);
         }
-        return fail("could not observe the synchronously published pending metadata snapshot");
     }
 
-    private static FileTreeModel.Snapshot awaitSnapshot(
-        FileTreeModel model,
-        Predicate<FileTreeModel.Snapshot> predicate
-    ) {
-        return org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(
-            Duration.ofSeconds(5),
-            () -> {
-                while (!Thread.currentThread().isInterrupted()) {
-                    FileTreeModel.Snapshot candidate = model.snapshot();
-                    if (predicate.test(candidate)) {
-                        return candidate;
-                    }
-                    Thread.onSpinWait();
-                }
-                throw new AssertionError("metadata wait was interrupted");
+    private static void createFifo(Path fifo) throws Exception {
+        Process process;
+        try {
+            process = new ProcessBuilder("mkfifo", fifo.toString()).redirectErrorStream(true).start();
+        } catch (IOException unavailable) {
+            assumeTrue(false, "mkfifo is unavailable: " + unavailable.getMessage());
+            return;
+        }
+        try {
+            assertTrue(process.waitFor(5, TimeUnit.SECONDS), "mkfifo did not terminate");
+            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            assumeTrue(process.exitValue() == 0, "FIFO creation is unsupported: " + output);
+        } finally {
+            process.destroyForcibly();
+        }
+    }
+
+    private static void awaitIgnoringInterrupts(CountDownLatch latch) {
+        while (true) {
+            try {
+                latch.await();
+                return;
+            } catch (InterruptedException ignored) {
+                // Simulate a filesystem provider which cannot abort a blocked directory read.
             }
-        );
+        }
     }
 
     private static void drainMetadataSignal(FileTreeModel model) {
         while (model.consumeMetadataChanged()) {
             Thread.onSpinWait();
         }
-    }
-
-    private static boolean metadataReady(FileTreeModel.Entry entry) {
-        return !PENDING_METADATA.equals(entry.sizeValue())
-            && !PENDING_METADATA.equals(entry.dateValue());
     }
 
     private static void assertParentEntry(FileTreeModel.Snapshot snapshot, Path expectedParent) {

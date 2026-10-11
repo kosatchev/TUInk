@@ -1,5 +1,6 @@
 package dev.tuink.tui.ui;
 
+import static dev.tuink.tui.file.FileTreeTestSupport.awaitLoaded;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -12,6 +13,7 @@ import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.input.KeyStroke;
 import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.scroll.ScrollInteraction;
+import dev.tuiframe.scroll.Scrollbar;
 import dev.tuiframe.style.CellStyle;
 import dev.tuiframe.widget.InteractionResult;
 import dev.tuiframe.widget.Theme;
@@ -35,7 +37,7 @@ class FileTreeViewTest {
         Path unicode = Files.createFile(root.resolve("very-long-中e\u0301-name-0123456789.txt"));
 
         try (FileTreeModel model = new FileTreeModel(root, true, true)) {
-            FileTreeModel.Snapshot snapshot = model.snapshot();
+            FileTreeModel.Snapshot snapshot = awaitLoaded(model);
             FileTreeModel.Entry selected = entry(snapshot, unicode);
             FileTreeView view = FileTreeView.fromSnapshot(snapshot, true, true);
             FileTreeView.State state = state(snapshot, selected, 0, 0);
@@ -104,7 +106,7 @@ class FileTreeViewTest {
             Files.createFile(root.resolve("123456" + index + ".txt"));
         }
         try (FileTreeModel model = new FileTreeModel(root, true, true)) {
-            FileTreeModel.Snapshot snapshot = model.snapshot();
+            FileTreeModel.Snapshot snapshot = awaitLoaded(model);
             assertEquals(5, snapshot.entries().size());
             FileTreeView view = FileTreeView.fromSnapshot(snapshot, true, true);
             FileTreeView.Placement placement = view.place(
@@ -148,7 +150,7 @@ class FileTreeViewTest {
         Path target = Files.createFile(root.resolve("zz-target.txt"));
 
         try (FileTreeModel model = new FileTreeModel(root, false, false)) {
-            FileTreeModel.Snapshot first = model.snapshot();
+            FileTreeModel.Snapshot first = awaitLoaded(model);
             FileTreeModel.Entry targetEntry = entry(first, target);
             FileTreeView firstView = FileTreeView.fromSnapshot(first, false, false);
             FileTreeView.Placement firstPlacement = firstView.place(
@@ -158,9 +160,18 @@ class FileTreeViewTest {
                 true
             );
             int originalIndex = firstPlacement.state().widgetState().selectedIndex();
+            FileTreeView.Placement loading = FileTreeView.fromSnapshot(
+                new FileTreeModel.Snapshot(first.root(), first.revision() + 1, first.entries(), true),
+                false,
+                false
+            ).place(new Rect(1, 1, 24, 5), firstPlacement.state(), new Rect(0, 0, 40, 10), true);
+            assertTrue(loading.loading());
+            assertEquals(firstPlacement.state().selectedId(), loading.state().selectedId());
+            assertEquals(firstPlacement.state().widgetState(), loading.state().widgetState());
+            assertFalse(firstPlacement.loading());
 
             model.setShowHiddenFiles(true);
-            FileTreeModel.Snapshot hidden = model.snapshot();
+            FileTreeModel.Snapshot hidden = awaitLoaded(model);
             FileTreeView.Placement hiddenPlacement = FileTreeView
                 .fromSnapshot(hidden, false, false)
                 .place(
@@ -174,7 +185,7 @@ class FileTreeViewTest {
 
             FileTreeModel.Entry folderEntry = entry(hidden, folder);
             assertTrue(model.toggleDirectory(folderEntry.id()));
-            FileTreeModel.Snapshot expanded = model.snapshot();
+            FileTreeModel.Snapshot expanded = awaitLoaded(model);
             FileTreeView.Placement expandedPlacement = FileTreeView
                 .fromSnapshot(expanded, false, false)
                 .place(
@@ -217,7 +228,7 @@ class FileTreeViewTest {
         Path file = Files.createFile(root.resolve("note.txt"));
 
         try (FileTreeModel model = new FileTreeModel(root, false, false)) {
-            FileTreeModel.Snapshot snapshot = model.snapshot();
+            FileTreeModel.Snapshot snapshot = awaitLoaded(model);
             FileTreeModel.Entry directory = entry(snapshot, folder);
             FileTreeView view = FileTreeView.fromSnapshot(snapshot, false, false);
             Rect bounds = new Rect(2, 1, 24, 5);
@@ -296,7 +307,7 @@ class FileTreeViewTest {
     void errorRowsAndInvisibleTinyPlacementsNeverActivate() throws IOException {
         Path notDirectory = Files.createFile(root.resolve("plain-file"));
         try (FileTreeModel model = new FileTreeModel(notDirectory, false, false)) {
-            FileTreeModel.Snapshot snapshot = model.snapshot();
+            FileTreeModel.Snapshot snapshot = awaitLoaded(model);
             FileTreeModel.Entry error = snapshot.entries().stream()
                 .filter(entry -> entry.kind() == FileTreeModel.Kind.ERROR)
                 .findFirst()
@@ -346,7 +357,7 @@ class FileTreeViewTest {
         }
 
         try (FileTreeModel model = new FileTreeModel(root, false, false)) {
-            FileTreeModel.Snapshot snapshot = model.snapshot();
+            FileTreeModel.Snapshot snapshot = awaitLoaded(model);
             FileTreeModel.Entry selected = snapshot.entries().get(2);
             FileTreeView view = FileTreeView.fromSnapshot(snapshot, false, false);
             Rect clip = new Rect(0, 0, 40, 20);
@@ -370,24 +381,77 @@ class FileTreeViewTest {
                 track.x(),
                 PointerEvent.Kind.PRESS
             );
-            FileTreeView.ScrollbarPress press = placement.scrollbarPress(pressEvent).orElseThrow();
+            FileTreeView.State pressed = assertInstanceOf(
+                FileTreeView.StateChanged.class,
+                output(placement.handle(pressEvent, 1L, DOUBLE_CLICK_NANOS))
+            ).state();
 
-            assertEquals(FileTreeView.ScrollAxis.VERTICAL, press.axis());
-            assertEquals(grab, press.grabOffset());
+            assertEquals(Scrollbar.Axis.VERTICAL, pressed.widgetState().drag().axis());
+            assertEquals(grab, pressed.widgetState().drag().grabOffset());
+            FileTreeView.Placement captured = view.place(placement.bounds(), pressed, clip, true);
             assertEquals(
                 first,
-                placement.drag(
-                    pointer(pressEvent.row(), pressEvent.column(), PointerEvent.Kind.DRAG),
-                    press
-                ).widgetState().firstVisibleIndex()
+                assertInstanceOf(
+                    FileTreeView.StateChanged.class,
+                    output(captured.handle(
+                        pointer(pressEvent.row(), pressEvent.column(), PointerEvent.Kind.DRAG),
+                        2L,
+                        DOUBLE_CLICK_NANOS
+                    ))
+                ).state().widgetState().firstVisibleIndex()
             );
             assertEquals(
                 placement.itemCount() - track.height(),
-                placement.drag(
-                    pointer(clip.bottomExclusive() + 20, track.x(), PointerEvent.Kind.DRAG),
-                    press
-                ).widgetState().firstVisibleIndex()
+                assertInstanceOf(
+                    FileTreeView.StateChanged.class,
+                    output(captured.handle(
+                        pointer(clip.bottomExclusive() + 20, track.x(), PointerEvent.Kind.DRAG),
+                        3L,
+                        DOUBLE_CLICK_NANOS
+                    ))
+                ).state().widgetState().firstVisibleIndex()
             );
+        }
+    }
+
+    @Test
+    void horizontalThumbCaptureUsesTheGenericTreeOutsideItsBounds() throws IOException {
+        Files.createFile(root.resolve("long-file-name-012345678901234567890123456789.txt"));
+        try (FileTreeModel model = new FileTreeModel(root, false, false)) {
+            FileTreeModel.Snapshot snapshot = awaitLoaded(model);
+            FileTreeView view = FileTreeView.fromSnapshot(snapshot, false, false);
+            Rect clip = new Rect(0, 0, 40, 20);
+            Rect bounds = new Rect(5, 3, 12, 5);
+            FileTreeView.Placement initial = view.place(
+                bounds,
+                FileTreeView.State.initial(),
+                clip,
+                true
+            );
+            Rect track = initial.horizontalScrollbarBounds().orElseThrow();
+            FileTreeView.State pressed = assertInstanceOf(
+                FileTreeView.StateChanged.class,
+                output(initial.handle(
+                    pointer(track.y(), track.x(), PointerEvent.Kind.PRESS),
+                    1L,
+                    DOUBLE_CLICK_NANOS
+                ))
+            ).state();
+            assertEquals(Scrollbar.Axis.HORIZONTAL, pressed.widgetState().drag().axis());
+            FileTreeView.Placement captured = view.place(bounds, pressed, clip, true);
+            FileTreeView.State dragged = assertInstanceOf(
+                FileTreeView.StateChanged.class,
+                output(captured.handle(
+                    pointer(track.y(), clip.rightExclusive() + 20, PointerEvent.Kind.DRAG),
+                    2L,
+                    DOUBLE_CLICK_NANOS
+                ))
+            ).state();
+            assertEquals(
+                captured.horizontalExtent() - track.width(),
+                dragged.widgetState().horizontalOffset()
+            );
+            assertEquals(pressed.selectedId(), dragged.selectedId());
         }
     }
 

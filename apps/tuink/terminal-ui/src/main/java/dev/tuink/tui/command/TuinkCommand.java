@@ -113,6 +113,16 @@ public enum TuinkCommand {
         return title;
     }
 
+    /** Whether this command requests a change to document text or its edit history. */
+    public boolean editsDocumentText() {
+        return switch (this) {
+            case EDIT_UNDO, EDIT_REDO, EDIT_CUT, EDIT_PASTE, EDIT_TOGGLE_LINE_COMMENT,
+                EDIT_INSERT_TAB, EDIT_INSERT_NEWLINE, EDIT_BACKSPACE, EDIT_DELETE_FORWARD,
+                SEARCH_REPLACE, SEARCH_REPLACE_ALL -> true;
+            default -> false;
+        };
+    }
+
     public static Optional<TuinkCommand> fromId(CommandId id) {
         Objects.requireNonNull(id, "id");
         for (TuinkCommand command : values()) {

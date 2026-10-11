@@ -69,10 +69,10 @@ final class TopMenuView {
     private static final String SEPARATOR = "----------------";
     private static final String DEFAULT_THEME_LABEL = "Cyan";
     private static final String MENU_SUFFIX = " | ";
+    private static final String READING_BADGE = " READ ";
 
     private final List<MenuBar.Menu<CommandInvocation>> menus;
     private final MenuBar<CommandInvocation> widget;
-    private final MenuBar.State state;
 
     private TopMenuView(
         UiSessionState ui,
@@ -121,8 +121,7 @@ final class TopMenuView {
             ),
             menu(" Help ", 1, openMenuIndex == TopMenuController.HELP_INDEX ? helpEntries() : List.of())
         );
-        this.state = requiredState;
-        this.widget = new MenuBar<>(menus, this.state);
+        this.widget = new MenuBar<>(menus, requiredState);
     }
 
     static TopMenuView build(
@@ -137,8 +136,14 @@ final class TopMenuView {
     }
 
     Placement place(Rect fullLayerBounds) {
+        return place(fullLayerBounds, false);
+    }
+
+    Placement place(Rect fullLayerBounds, boolean readingMode) {
         Rect bounds = Objects.requireNonNull(fullLayerBounds, "fullLayerBounds");
-        MenuBar.Placement<CommandInvocation> placed = widget.layout(bounds);
+        MenuBar.Placement<CommandInvocation> placed = widget.layout(
+            bounds, readingMode ? CellText.width(READING_BADGE) : 0
+        );
         boolean enabled = !placed.bounds().isEmpty();
         FocusContext context = new FocusContext(
             enabled && placed.state().isOpen(),
@@ -154,11 +159,11 @@ final class TopMenuView {
 
     /** Builds the raster-owned remainder of row zero without retained side effects. */
     TopBar topBar(Path currentFile, boolean dirty, int cols, boolean readingMode) {
-        String prefix = menuPrefix(state);
+        String prefix = " ".repeat(widget.preferredBarWidth()) + MENU_SUFFIX;
         int prefixWidth = CellText.width(prefix);
         String file = currentFile == null ? TabBarView.NO_NAME_LABEL : currentFile.toString();
         String base = prefix + file + (dirty ? " *" : "");
-        String read = readingMode ? " READ " : "";
+        String read = readingMode ? READING_BADGE : "";
         String text;
         if (read.isEmpty()) {
             text = CellText.fit(base, cols);
@@ -174,7 +179,7 @@ final class TopMenuView {
     }
 
     int menuPrefixWidth() {
-        return CellText.width(menuPrefix(state));
+        return widget.preferredBarWidth() + CellText.width(MENU_SUFFIX);
     }
 
     record TopBar(String text, int menuPrefixWidth) {
@@ -251,22 +256,6 @@ final class TopMenuView {
             mnemonicGraphemeIndex,
             prepareEntries(specs)
         );
-    }
-
-    private static String menuPrefix(MenuBar.State state) {
-        return topLabel("File", TopMenuController.FILE_INDEX, state)
-            + " " + topLabel("Edit", TopMenuController.EDIT_INDEX, state)
-            + " " + topLabel("View", TopMenuController.VIEW_INDEX, state)
-            + " " + topLabel("Tab", TopMenuController.TABS_INDEX, state)
-            + " " + topLabel("Settings", TopMenuController.SETTINGS_INDEX, state)
-            + " " + topLabel("Help", TopMenuController.HELP_INDEX, state)
-            + MENU_SUFFIX;
-    }
-
-    private static String topLabel(String label, int index, MenuBar.State state) {
-        return state.isOpen() && state.openMenuIndex() == index
-            ? "[" + label + "]"
-            : " " + label + " ";
     }
 
     private static List<EntrySpec> fileEntries() {

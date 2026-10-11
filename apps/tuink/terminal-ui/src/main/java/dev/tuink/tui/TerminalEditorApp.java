@@ -53,6 +53,7 @@ import dev.tuiframe.runtime.TuiEventLoop;
 import dev.tuiframe.screen.Frame;
 import dev.tuiframe.screen.ScreenCursor;
 import dev.tuiframe.screen.ScrollHint;
+import dev.tuiframe.scroll.ScrollInteraction;
 import dev.tuiframe.style.CellStyle;
 import dev.tuink.tui.style.UiStyles;
 import dev.tuiframe.jline.TerminalSession;
@@ -304,7 +305,6 @@ public class TerminalEditorApp {
                     colorEnabled,
                     screenPresenter
                 );
-                ViewportController viewportController = new ViewportController();
                 UiModalState initialModalState = modalState;
                 SearchController.SearchUiOptions initialSearchUi = searchUi;
 
@@ -323,6 +323,7 @@ public class TerminalEditorApp {
                     private EditorState state;
                     private EditorEngine engine;
                     private RenderPlanBuilder renderPlanBuilder;
+                    private ViewportController viewportController;
 
                     private RenderPlan plan;
                     private SearchBarView.Placement searchBarPlacement;
@@ -334,6 +335,9 @@ public class TerminalEditorApp {
                     private int contentRows;
                     private int contentCols;
                     private TabBar.State tabBarState = TabBar.State.initial();
+                    private EditorState tabBarActiveState;
+                    private int tabBarActiveIndex = -1;
+                    private int tabBarColumns = -1;
                     private TabBarView.Placement tabBarPlacement;
                     private TopMenuView.Placement topMenuPlacement;
                     private FileTreeView.Placement openFileTreePlacement;
@@ -366,6 +370,7 @@ public class TerminalEditorApp {
                         state = sessionContext.state();
                         engine = sessionContext.engine();
                         renderPlanBuilder = sessionContext.renderPlanBuilder();
+                        viewportController = tabs.get(activeTabIndex).viewportController();
                         List<TabSession> recoveryTabSessions = toTabSessions(tabs);
                         recoveryAutosave.syncTabs(recoveryTabSessions);
                         String recoveryWarning = recoveryAutosave.autosaveDirtyTabs(
@@ -624,7 +629,8 @@ public class TerminalEditorApp {
                                 editorLayout.contentRows(),
                                 editorLayout.contentColumns(),
                                 uiSessionState.wrapLinesSetting,
-                                uiSessionState.wrapWordsSetting
+                                uiSessionState.wrapWordsSetting,
+                                uiSessionState.tabWidthSetting
                             );
                             if (topBefore == state.getTopLine()
                                 && segmentBefore == state.getTopWrapSegment()
@@ -655,17 +661,24 @@ public class TerminalEditorApp {
                         );
                         List<TabBarView.TabItem> tabItems = toTabItems(tabs, tabMatchFlags);
                         if (showTabBar) {
-                            tabBarPlacement = TabBarView.build(
+                            TabBarView tabBarView = TabBarView.build(
                                 tabItems,
                                 activeTabIndex,
                                 tabBarState
-                            ).place(
-                                new Rect(0, 1, cols, 1),
-                                new Rect(0, 0, cols, rows)
                             );
+                            Rect tabBounds = new Rect(0, 1, cols, 1);
+                            Rect tabClip = new Rect(0, 0, cols, rows);
+                            tabBarPlacement = tabBarActiveState != state || tabBarActiveIndex != activeTabIndex
+                                || tabBarColumns != cols
+                                ? tabBarView.placeRevealingActive(tabBounds, tabClip)
+                                : tabBarView.placeKeepingActiveVisible(tabBounds, tabClip, tabBarPlacement);
+                            tabBarActiveState = state;
+                            tabBarActiveIndex = activeTabIndex;
+                            tabBarColumns = cols;
                             tabBarState = tabBarPlacement.state();
                         } else {
                             tabBarPlacement = null;
+                            tabBarActiveState = null;
                         }
                         TopMenuView topMenuView = TopMenuView.build(
                             uiSessionState,
@@ -675,7 +688,9 @@ public class TerminalEditorApp {
                             commandRouter,
                             topMenu.state()
                         );
-                        topMenuPlacement = topMenuView.place(new Rect(0, 0, cols, rows));
+                        topMenuPlacement = topMenuView.place(
+                            new Rect(0, 0, cols, rows), uiSessionState.readingModeSetting
+                        );
                         topMenu.adopt(topMenuPlacement.state());
                         OpenDialogLayout openFileLayout = null;
                         if (openFileMode) {
@@ -1195,7 +1210,7 @@ public class TerminalEditorApp {
                         if (key == null) {
                             return;
                         }
-                        viewportController.onInput(key);
+                        viewportController.onInput(key, engine.hasSelection(), !uiSessionState.readingModeSetting);
 
                         if (key.command() == null && key.event() instanceof PointerEvent mouse) {
                             if (mouse.button() == PointerEvent.Button.OTHER) {
@@ -1673,7 +1688,8 @@ public class TerminalEditorApp {
                                 state,
                                 topMenu,
                                 terminal::setMouseTracking,
-                                contentRows
+                                contentRows,
+                                contentCols
                             )
                         );
                         if (dispatchResult.handled()) {
@@ -1899,48 +1915,60 @@ public class TerminalEditorApp {
         int deltaRows,
         int tabWidth
     ) {
-        if (plan != null && plan.wrapLines()) {
-            int visibleCols = Math.max(0, plan.cols() - plan.gutterWidth() - plan.scrollbarWidth());
-            if (visibleCols > 0) {
-                EditorViewportBehavior.WrapTop normalized = EditorViewportBehavior.normalizeWrapTop(
-                    model,
-                    textLayout,
-                    state.getTopLine(),
-                    state.getTopWrapSegment(),
-                    visibleCols,
-                    plan.wrapByWords(),
-                    tabWidth
-                );
-                EditorViewportBehavior.applyWrapTop(state, normalized);
-                int topWrappedRow = EditorViewportBehavior.wrappedOffsetForWrapTop(
-                    model,
-                    textLayout,
-                    normalized,
-                    visibleCols,
-                    plan.wrapByWords(),
-                    tabWidth
-                );
-                int totalWrappedRows = Math.max(1, plan.totalLines());
-                int maxTopWrappedRow = Math.max(0, totalWrappedRows - Math.max(1, plan.contentRows()));
-                int targetWrappedRow = Math.max(0, Math.min(topWrappedRow + deltaRows, maxTopWrappedRow));
-                EditorViewportBehavior.WrapTop targetTop = EditorViewportBehavior.wrapTopFromWrappedOffset(
-                    model,
-                    textLayout,
-                    targetWrappedRow,
-                    visibleCols,
-                    plan.wrapByWords(),
-                    tabWidth
-                );
-                EditorViewportBehavior.applyWrapTop(state, targetTop);
-                return;
-            }
-        }
-        state.setTopWrapSegment(0);
-        EditorViewportBehavior.applyVerticalScrollKeepCursor(
-            state,
-            model,
-            Math.max(0, state.getTopLine() + deltaRows)
+        scrollDocumentViewport(
+            model, textLayout, state, plan == null ? 1 : plan.contentRows(),
+            plan == null ? 0 : Math.max(0, plan.cols() - plan.gutterWidth() - plan.scrollbarWidth()),
+            plan != null && plan.wrapLines(), plan != null && plan.wrapByWords(), deltaRows, tabWidth
         );
+    }
+
+    private static void scrollDocumentViewport(
+        TextModel model,
+        EditorTextLayout layout,
+        EditorState state,
+        int contentRows,
+        int contentCols,
+        boolean wrapLines,
+        boolean wrapByWords,
+        int delta,
+        int tabWidth
+    ) {
+        if (wrapLines && contentCols > 0) {
+            EditorViewportBehavior.WrapTop top = EditorViewportBehavior.normalizeWrapTop(
+                model, layout, state.getTopLine(), state.getTopWrapSegment(),
+                contentCols, wrapByWords, tabWidth
+            );
+            int offset = EditorViewportBehavior.wrappedOffsetForWrapTop(
+                model, layout, top, contentCols, wrapByWords, tabWidth
+            );
+            int total = layout.totalWrappedRows(contentCols, wrapByWords, tabWidth);
+            int target = ScrollInteraction.scrollBy(offset, delta, Math.max(1, contentRows), total);
+            EditorViewportBehavior.applyWrapTop(state, EditorViewportBehavior.wrapTopFromWrappedOffset(
+                model, layout, target, contentCols, wrapByWords, tabWidth
+            ));
+        } else {
+            state.setTopWrapSegment(0);
+            EditorViewportBehavior.applyVerticalScrollKeepCursor(state, model, ScrollInteraction.scrollBy(
+                state.getTopLine(), delta, Math.max(1, contentRows), model.lineCount()
+            ));
+        }
+    }
+
+    private static boolean isLocalSearchCommand(TuinkCommand action) {
+        if (action == null) {
+            return true;
+        }
+        return switch (action) {
+            case EDIT_COPY, EDIT_CUT, EDIT_PASTE, EDIT_UNDO, EDIT_REDO, EDIT_SELECT_ALL,
+                EDIT_BACKSPACE, EDIT_DELETE_FORWARD, EDIT_TOGGLE_LINE_COMMENT, EDIT_INSERT_TAB,
+                CURSOR_LEFT, CURSOR_RIGHT, CURSOR_UP, CURSOR_DOWN,
+                CURSOR_SELECT_LEFT, CURSOR_SELECT_RIGHT, CURSOR_SELECT_UP, CURSOR_SELECT_DOWN,
+                CURSOR_WORD_LEFT, CURSOR_WORD_RIGHT, CURSOR_HOME, CURSOR_END, CURSOR_PAGE_UP, CURSOR_PAGE_DOWN,
+                SEARCH_FIELD_BACKSPACE, SEARCH_FIELD_DELETE, SEARCH_FIELD_HOME, SEARCH_FIELD_END,
+                SEARCH_NAVIGATE_LEFT, SEARCH_NAVIGATE_RIGHT, SEARCH_NAVIGATE_UP, SEARCH_NAVIGATE_DOWN,
+                SEARCH_FOCUS_NEXT -> true;
+            default -> false;
+        };
     }
 
     private SearchModeResult handleSearchModeInput(
@@ -2328,7 +2356,8 @@ public class TerminalEditorApp {
                         nextState,
                         topMenu,
                         mouseTrackingController,
-                        contentRows
+                        contentRows,
+                        contentCols
                     )
                 );
                 if (dispatchResult.handled()) {
@@ -3922,11 +3951,17 @@ public class TerminalEditorApp {
 
     private record EditorTab(
         TabSession tabSession,
-        RenderPlanBuilder renderPlanBuilder
+        RenderPlanBuilder renderPlanBuilder,
+        ViewportController viewportController
     ) {
+        private EditorTab(TabSession tabSession, RenderPlanBuilder renderPlanBuilder) {
+            this(tabSession, renderPlanBuilder, new ViewportController());
+        }
+
         private EditorTab {
             if (tabSession == null
                 || renderPlanBuilder == null
+                || viewportController == null
                 || renderPlanBuilder.textLayout() != tabSession.textLayout()) {
                 throw new IllegalArgumentException("tab components must share one textLayout");
             }
@@ -3949,7 +3984,7 @@ public class TerminalEditorApp {
         }
 
         private EditorTab withRenderPlanBuilder(RenderPlanBuilder nextBuilder) {
-            return new EditorTab(tabSession, nextBuilder);
+            return new EditorTab(tabSession, nextBuilder, viewportController);
         }
     }
 

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.core.EditorClipboard;
+import dev.tuink.core.Position;
 import dev.tuink.core.TabSession;
 import dev.tuink.render.TerminalEditorTextLayout;
 import dev.tuink.tui.command.TuinkCommand;
@@ -13,6 +14,35 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 
 class InputActionDispatcherTest {
+    @Test
+    void verticalCommandsUseTheCurrentWrappedViewport() {
+        TabSession tab = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
+        tab.engine().insertInput("abcdefghijklmnopqrstuvwxyz1234");
+        tab.engine().moveHome();
+        UiSessionState ui = new UiSessionState();
+        ui.wrapLinesSetting = true;
+        InputActionDispatcher.DispatchContext context = new InputActionDispatcher.DispatchContext(
+            tab.engine(), tab.state(), null, ignored -> {}, 3, 4
+        );
+
+        InputActionDispatcher.dispatch(TuinkCommand.CURSOR_DOWN, ui, context);
+        assertEquals(new Position(0, 4), tab.state().getCursor());
+        InputActionDispatcher.dispatch(TuinkCommand.CURSOR_SELECT_DOWN, ui, context);
+        assertEquals(new Position(0, 8), tab.state().getCursor());
+        assertEquals(new Position(0, 4), tab.state().getSelectionAnchor());
+        InputActionDispatcher.dispatch(TuinkCommand.CURSOR_UP, ui, context);
+        assertEquals(new Position(0, 4), tab.state().getCursor());
+        assertFalse(tab.engine().hasSelection());
+        InputActionDispatcher.dispatch(TuinkCommand.CURSOR_PAGE_DOWN, ui, context);
+        assertEquals(new Position(0, 16), tab.state().getCursor());
+        InputActionDispatcher.dispatch(TuinkCommand.CURSOR_PAGE_UP, ui, context);
+        assertEquals(new Position(0, 4), tab.state().getCursor());
+
+        ui.wrapLinesSetting = false;
+        InputActionDispatcher.dispatch(TuinkCommand.CURSOR_DOWN, ui, context);
+        assertEquals(new Position(0, 4), tab.state().getCursor());
+    }
+
     @Test
     void readingModeRejectsEditingCommandsBeforeTheyReachTheEngine() {
         UiSessionState ui = new UiSessionState();
@@ -46,7 +76,7 @@ class InputActionDispatcherTest {
         TabSession tab = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
         UiSessionState ui = new UiSessionState();
         InputActionDispatcher.DispatchContext context = new InputActionDispatcher.DispatchContext(
-            tab.engine(), tab.state(), null, ignored -> {}, 24
+            tab.engine(), tab.state(), null, ignored -> {}, 24, 80
         );
         tab.engine().insertInput("abc");
         long editedRevision = tab.model().revision();
@@ -131,6 +161,7 @@ class InputActionDispatcherTest {
             null,
             null,
             mouseTrackingController,
+            0,
             0
         );
     }

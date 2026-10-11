@@ -11,12 +11,11 @@ import dev.tuink.render.Style;
 import dev.tuink.render.StyleSpan;
 import dev.tuiframe.cell.CellBuffer;
 import dev.tuiframe.cell.Canvas;
-import dev.tuiframe.geometry.Rect;
-import dev.tuiframe.scroll.HorizontalScrollbar;
-import dev.tuiframe.scroll.VerticalScrollbar;
+import dev.tuiframe.scroll.ScrollStyle;
 import dev.tuiframe.style.CellStyle;
 import dev.tuink.tui.style.UiStyles;
 import dev.tuink.tui.style.UiStyles.Palette;
+import dev.tuink.tui.ui.EditorScrollbars;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -124,8 +123,7 @@ public class RenderRasterizer {
 
         drawText(buffer, 0, 0, truncateOrPad(plan.topBarText(), cols), styles.renderTopbar(), cols);
         drawText(buffer, statusRow, 0, truncateOrPad(plan.bottomBarText(), cols), styles.renderStatus(), cols);
-        drawScrollbar(canvas, plan, rows, cols, topRow);
-        drawHorizontalScrollbar(canvas, plan, rows, cols, topRow);
+        drawScrollbars(canvas, plan, rows, cols, topRow);
         int overlayBottomRow = rows - 2;
         int overlayTopRow = overlayBottomRow;
         if (plan.interactiveBarText() != null && overlayBottomRow >= 0) {
@@ -159,57 +157,16 @@ public class RenderRasterizer {
         return buffer;
     }
 
-    private void drawScrollbar(Canvas canvas, RenderPlan plan, int rows, int cols, int contentTopRow) {
-        if (plan.scrollbarWidth() == 0 || cols <= 0 || rows <= 2) {
-            return;
+    private void drawScrollbars(Canvas canvas, RenderPlan plan, int rows, int cols, int contentTopRow) {
+        EditorScrollbars scrollbars = EditorScrollbars.from(plan, rows, cols, contentTopRow);
+        ScrollStyle scrollStyle = ScrollStyle.fromParent(styles.renderBody(), styles.renderBorder());
+        if (scrollbars.vertical() != null) {
+            scrollbars.vertical().draw(canvas, scrollStyle);
         }
-
-        int barCol = cols - 1;
-        int trackTop = contentTopRow;
-        int trackHeight = Math.min(plan.contentRows(), Math.max(0, rows - contentTopRow - 1));
-        if (trackHeight <= 0) {
-            return;
+        if (scrollbars.horizontal() != null) {
+            scrollbars.horizontal().draw(canvas, scrollStyle);
         }
-        VerticalScrollbar.draw(
-            canvas,
-            new Rect(barCol, trackTop, 1, trackHeight),
-            Math.max(1, plan.totalLines()),
-            Math.max(0, plan.topLine()),
-            "│",
-            styles.renderScrollTrack(),
-            "█",
-            styles.renderScrollThumb()
-        );
-    }
-
-    private void drawHorizontalScrollbar(Canvas canvas, RenderPlan plan, int rows, int cols, int contentTopRow) {
-        if (plan.wrapLines()) {
-            return;
-        }
-        if (rows <= 2 || cols <= 0) {
-            return;
-        }
-        int visibleCols = Math.max(0, cols - plan.gutterWidth() - plan.scrollbarWidth());
-        if (visibleCols <= 0) {
-            return;
-        }
-        if (plan.totalColumns() <= visibleCols && plan.leftVisualColumn() <= 0) {
-            return;
-        }
-        int row = contentTopRow + plan.contentRows();
-        if (row < contentTopRow || row >= rows - 1) {
-            return;
-        }
-        HorizontalScrollbar.draw(
-            canvas,
-            new Rect(plan.gutterWidth(), row, visibleCols, 1),
-            Math.max(visibleCols, plan.totalColumns()),
-            Math.max(0, plan.leftVisualColumn()),
-            "─",
-            styles.renderScrollTrack(),
-            "█",
-            styles.renderScrollThumb()
-        );
+        scrollbars.layout().paintCorner(canvas, scrollStyle);
     }
 
     private void drawHighlightedText(

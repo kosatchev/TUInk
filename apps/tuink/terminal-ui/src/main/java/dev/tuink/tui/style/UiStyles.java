@@ -99,10 +99,15 @@ public final class UiStyles {
         CellStyle renderStatus,
         CellStyle renderInteractive,
         CellStyle renderNotification,
-        CellStyle renderLeadingWhitespace,
-        CellStyle renderScrollTrack,
-        CellStyle renderScrollThumb
+        CellStyle renderLeadingWhitespace
     ) {
+        public CellStyle renderBody() {
+            return CellStyle.DEFAULT;
+        }
+
+        public CellStyle renderBorder() {
+            return renderGutter;
+        }
     }
 
     private static Palette cyanPalette() {
@@ -155,9 +160,7 @@ public final class UiStyles {
             cellStyle(CellColor.BLACK, CellColor.BRIGHT_WHITE),             // renderStatus
             cellStyle(CellColor.BLACK, CellColor.BRIGHT_YELLOW),            // renderInteractive
             cellStyle(CellColor.BLACK, CellColor.BRIGHT_GREEN),             // renderNotification
-            cellStyle(CellColor.BRIGHT_BLACK, CellColor.DEFAULT),           // renderLeadingWhitespace
-            cellStyle(CellColor.BRIGHT_BLACK, CellColor.DEFAULT),           // renderScrollTrack
-            cellStyle(CellColor.BRIGHT_WHITE, CellColor.DEFAULT)            // renderScrollThumb
+            cellStyle(CellColor.BRIGHT_BLACK, CellColor.DEFAULT)            // renderLeadingWhitespace
         );
     }
 
@@ -211,9 +214,7 @@ public final class UiStyles {
             cellStyle(CellColor.BLACK, CellColor.BRIGHT_WHITE),             // renderStatus
             cellStyle(CellColor.BLACK, CellColor.BRIGHT_YELLOW),            // renderInteractive
             cellStyle(CellColor.BLACK, CellColor.BRIGHT_GREEN),             // renderNotification
-            cellStyle(CellColor.BRIGHT_BLACK, CellColor.DEFAULT),           // renderLeadingWhitespace
-            cellStyle(CellColor.BRIGHT_BLACK, CellColor.DEFAULT),           // renderScrollTrack
-            cellStyle(CellColor.BRIGHT_WHITE, CellColor.DEFAULT)            // renderScrollThumb
+            cellStyle(CellColor.BRIGHT_BLACK, CellColor.DEFAULT)            // renderLeadingWhitespace
         );
     }
 
@@ -267,9 +268,7 @@ public final class UiStyles {
             cellStyle(CellColor.BLACK, CellColor.BRIGHT_WHITE),              // renderStatus
             cellStyle(CellColor.BLACK, CellColor.BRIGHT_YELLOW),             // renderInteractive
             cellStyle(CellColor.BLACK, CellColor.BRIGHT_GREEN),              // renderNotification
-            cellStyle(CellColor.BRIGHT_BLACK, CellColor.DEFAULT),            // renderLeadingWhitespace
-            cellStyle(CellColor.BRIGHT_BLACK, CellColor.DEFAULT),            // renderScrollTrack
-            cellStyle(CellColor.BRIGHT_WHITE, CellColor.DEFAULT)             // renderScrollThumb
+            cellStyle(CellColor.BRIGHT_BLACK, CellColor.DEFAULT)             // renderLeadingWhitespace
         );
     }
 

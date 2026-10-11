@@ -269,11 +269,11 @@ final class InputActionDispatcher {
                 return DispatchResult.handled(statusMessage);
             }
             case CURSOR_UP -> {
-                ctx.engine().moveUp();
+                ctx.engine().moveUp(false, ctx.contentColumns(), ui.wrapLinesSetting, ui.wrapWordsSetting);
                 return DispatchResult.handled(null);
             }
             case CURSOR_DOWN -> {
-                ctx.engine().moveDown();
+                ctx.engine().moveDown(false, ctx.contentColumns(), ui.wrapLinesSetting, ui.wrapWordsSetting);
                 return DispatchResult.handled(null);
             }
             case CURSOR_LEFT -> {
@@ -285,11 +285,11 @@ final class InputActionDispatcher {
                 return DispatchResult.handled(null);
             }
             case CURSOR_SELECT_UP -> {
-                ctx.engine().moveUp(true);
+                ctx.engine().moveUp(true, ctx.contentColumns(), ui.wrapLinesSetting, ui.wrapWordsSetting);
                 return DispatchResult.handled(null);
             }
             case CURSOR_SELECT_DOWN -> {
-                ctx.engine().moveDown(true);
+                ctx.engine().moveDown(true, ctx.contentColumns(), ui.wrapLinesSetting, ui.wrapWordsSetting);
                 return DispatchResult.handled(null);
             }
             case CURSOR_SELECT_LEFT -> {
@@ -309,11 +309,11 @@ final class InputActionDispatcher {
                 return DispatchResult.handled(null);
             }
             case CURSOR_PAGE_UP -> {
-                ctx.engine().pageUp(ctx.contentRows());
+                ctx.engine().pageUp(ctx.contentRows(), ctx.contentColumns(), ui.wrapLinesSetting, ui.wrapWordsSetting);
                 return DispatchResult.handled(null);
             }
             case CURSOR_PAGE_DOWN -> {
-                ctx.engine().pageDown(ctx.contentRows());
+                ctx.engine().pageDown(ctx.contentRows(), ctx.contentColumns(), ui.wrapLinesSetting, ui.wrapWordsSetting);
                 return DispatchResult.handled(null);
             }
             case CURSOR_HOME -> {
@@ -382,7 +382,8 @@ final class InputActionDispatcher {
         EditorState state,
         TopMenuController topMenu,
         Consumer<Boolean> mouseTrackingController,
-        int contentRows
+        int contentRows,
+        int contentColumns
     ) {
         DispatchContext {
             if (mouseTrackingController == null) {

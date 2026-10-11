@@ -12,6 +12,7 @@ import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.input.KeyStroke;
 import dev.tuiframe.input.PasteEvent;
 import dev.tuiframe.input.PointerEvent;
+import dev.tuiframe.input.ResizeEvent;
 import dev.tuiframe.widget.MenuBar;
 import java.nio.file.Path;
 import java.util.List;
@@ -128,6 +129,45 @@ class TopMenuInputRouterTest {
 
         assertTrue(result.consumed());
         assertNull(result.command());
+    }
+
+    @Test
+    void shortcutRevealsAnOffscreenMenuOnTheNextNarrowFrame() {
+        Rect bounds = new Rect(0, 0, 20, 10);
+        Fixture fixture = fixture(MenuBar.State.closed(), bounds);
+        TopMenuInputRouter.Result shortcut = fixture.route(KeyStroke.of(KeyStroke.Key.S, KeyStroke.Modifier.ALT));
+        assertTrue(shortcut.consumed());
+        assertNull(shortcut.command());
+        Fixture rebuilt = fixture(fixture.controller.state(), bounds);
+        assertEquals(TopMenuController.SETTINGS_INDEX, rebuilt.placement.state().openMenuIndex());
+        assertTrue(rebuilt.placement.popupBounds().isPresent());
+        TopMenuInputRouter.Result activated = rebuilt.route(KeyStroke.of(KeyStroke.Key.ENTER));
+        assertEquals("tuink.settings.toggle-reading-mode", activated.command().id().value());
+    }
+
+    @Test
+    void longMenuWheelRebuildAndScrollbarReleaseKeepTheEditorCaptured() {
+        Rect bounds = new Rect(0, 0, 30, 7);
+        Fixture fixture = fixture(MenuBar.State.open(TopMenuController.VIEW_INDEX), bounds);
+        Rect popup = fixture.placement.popupBounds().orElseThrow();
+        TopMenuInputRouter.Result wheel = fixture.route(pointer(
+            popup.y() + 1, popup.x() + 1, PointerEvent.Kind.SCROLL_DOWN, PointerEvent.Button.NONE
+        ));
+        assertTrue(wheel.consumed());
+        assertNull(wheel.command());
+        assertEquals(3, fixture.controller.state().firstVisibleEntryIndex());
+        Fixture rebuilt = fixture(fixture.controller.state(), bounds);
+        assertEquals(3, rebuilt.placement.state().firstVisibleEntryIndex());
+        int trackX = rebuilt.placement.popupBounds().orElseThrow().rightExclusive() - 2;
+        TopMenuInputRouter.Result grab = rebuilt.route(pointer(
+            popup.y() + 2, trackX, PointerEvent.Kind.PRESS, PointerEvent.Button.LEFT
+        ));
+        assertTrue(grab.consumed());
+        assertNull(grab.command());
+        assertTrue(rebuilt.controller.state().drag() != null);
+        Fixture dragging = fixture(rebuilt.controller.state(), bounds);
+        assertTrue(dragging.route(new ResizeEvent(10, 40)).consumed());
+        assertTrue(dragging.controller.state().drag() == null);
     }
 
     @Test

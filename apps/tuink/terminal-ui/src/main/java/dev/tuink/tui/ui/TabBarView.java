@@ -58,11 +58,33 @@ public final class TabBarView {
 
     /** Creates one immutable placement shared by painting and raw pointer routing. */
     public Placement place(Rect bounds, Rect interactionClip) {
+        return place(bounds, interactionClip, false);
+    }
+
+    /** Reveals the active tab after activation or resize while retaining nearby tabs. */
+    public Placement placeRevealingActive(Rect bounds, Rect interactionClip) {
+        return place(bounds, interactionClip, true);
+    }
+
+    /** Keeps a visible active tab in view when its label or preceding labels change. */
+    public Placement placeKeepingActiveVisible(Rect bounds, Rect interactionClip, Placement previous) {
+        Objects.requireNonNull(previous, "previous");
+        TabBar.Placement widgetPlacement = new TabBar(items, activeIndex, state)
+            .layoutKeepingActiveVisible(Objects.requireNonNull(bounds, "bounds"), previous.widgetPlacement);
+        return placement(widgetPlacement, interactionClip);
+    }
+
+    private Placement place(Rect bounds, Rect interactionClip, boolean revealActive) {
         Rect requiredBounds = Objects.requireNonNull(bounds, "bounds");
+        TabBar widget = new TabBar(items, activeIndex, state);
+        TabBar.Placement widgetPlacement = revealActive
+            ? widget.layoutRevealingActive(requiredBounds)
+            : widget.layout(requiredBounds);
+        return placement(widgetPlacement, interactionClip);
+    }
+
+    private Placement placement(TabBar.Placement widgetPlacement, Rect interactionClip) {
         Rect requiredClip = Objects.requireNonNull(interactionClip, "interactionClip");
-        TabBar.Placement widgetPlacement = new TabBar(items, activeIndex, state).layout(
-            requiredBounds
-        );
         boolean enabled = !widgetPlacement.bounds().isEmpty()
             && requiredClip.contains(widgetPlacement.bounds());
         FocusContext context = new FocusContext(

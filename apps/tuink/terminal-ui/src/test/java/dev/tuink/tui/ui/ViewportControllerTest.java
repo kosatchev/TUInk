@@ -1,16 +1,22 @@
 package dev.tuink.tui.ui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
+import dev.tuink.core.Position;
 import dev.tuink.core.SimpleLineBuffer;
 import dev.tuink.core.TextModel;
 import dev.tuink.render.TerminalEditorTextLayout;
 import dev.tuink.tui.command.TuinkCommand;
 import dev.tuink.tui.input.EditorInput;
 import dev.tuiframe.input.KeyStroke;
+import dev.tuiframe.input.PasteEvent;
 import dev.tuiframe.input.PointerEvent;
+import dev.tuiframe.input.ResizeEvent;
+import dev.tuiframe.input.TextInput;
+import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 
@@ -19,7 +25,7 @@ class ViewportControllerTest {
     void rawPointerPreservesManualViewportPanning() {
         Fixture fixture = manuallyPannedFixture();
 
-        fixture.controller().onInput(new EditorInput(pointer(), null));
+        fixture.controller().onInput(new EditorInput(pointer(), null), false);
         fixture.ensureCursorVisible();
 
         assertEquals(7, fixture.state().getTopLine());
@@ -27,21 +33,29 @@ class ViewportControllerTest {
     }
 
     @Test
-    void semanticCommandRestoresCursorFollowing() {
-        Fixture fixture = manuallyPannedFixture();
+    void documentNavigationAndEditingRestoreCursorFollowing() {
+        for (TuinkCommand command : List.of(
+            TuinkCommand.CURSOR_RIGHT, TuinkCommand.CURSOR_HOME, TuinkCommand.CURSOR_SELECT_DOWN,
+            TuinkCommand.EDIT_CUT, TuinkCommand.EDIT_PASTE, TuinkCommand.EDIT_UNDO,
+            TuinkCommand.EDIT_REDO, TuinkCommand.EDIT_TOGGLE_LINE_COMMENT,
+            TuinkCommand.SEARCH_NEXT, TuinkCommand.SEARCH_PREVIOUS,
+            TuinkCommand.SEARCH_REPLACE, TuinkCommand.SEARCH_REPLACE_ALL
+        )) {
+            Fixture fixture = manuallyPannedFixture();
 
-        fixture.controller().onInput(EditorInput.command(TuinkCommand.CURSOR_RIGHT));
-        fixture.ensureCursorVisible();
+            fixture.controller().onInput(EditorInput.command(command), false);
+            fixture.ensureCursorVisible();
 
-        assertEquals(0, fixture.state().getTopLine());
-        assertEquals(0, fixture.state().getLeftVisualColumn());
+            assertEquals(0, fixture.state().getTopLine(), command.name());
+            assertEquals(0, fixture.state().getLeftVisualColumn(), command.name());
+        }
     }
 
     @Test
     void pointerResolvedToACommandRestoresCursorFollowing() {
         Fixture fixture = manuallyPannedFixture();
 
-        fixture.controller().onInput(new EditorInput(pointer(), TuinkCommand.EDIT_SELECT_ALL));
+        fixture.controller().onInput(new EditorInput(pointer(), TuinkCommand.EDIT_SELECT_ALL), false);
         fixture.ensureCursorVisible();
 
         assertEquals(0, fixture.state().getTopLine());
@@ -49,17 +63,390 @@ class ViewportControllerTest {
     }
 
     @Test
-    void unboundRawKeyRestoresCursorFollowing() {
+    void unboundRawKeyPreservesManualViewportPanning() {
         Fixture fixture = manuallyPannedFixture();
 
         fixture.controller().onInput(new EditorInput(
             KeyStroke.of(KeyStroke.Key.ARROW_DOWN, KeyStroke.Modifier.CTRL),
             null
-        ));
+        ), false);
+        fixture.ensureCursorVisible();
+
+        assertEquals(7, fixture.state().getTopLine());
+        assertEquals(10, fixture.state().getLeftVisualColumn());
+    }
+
+    @Test
+    void saveCopyAndUiCommandsPreserveTheReadingPositionAndSelection() {
+        for (TuinkCommand command : List.of(
+            TuinkCommand.DOCUMENT_SAVE, TuinkCommand.DOCUMENT_SAVE_AS, TuinkCommand.EDIT_COPY,
+            TuinkCommand.TAB_NEXT, TuinkCommand.TAB_PREVIOUS, TuinkCommand.TAB_ACTIVATE,
+            TuinkCommand.MENU_FILE, TuinkCommand.HELP_KEY_HINTS, TuinkCommand.SEARCH_OPEN,
+            TuinkCommand.VIEW_CYCLE_THEME, TuinkCommand.SETTINGS_TOGGLE_READING_MODE,
+            TuinkCommand.UI_ESCAPE
+        )) {
+            Fixture fixture = manuallyPannedFixture();
+            Position cursor = new Position(0, 2);
+            Position anchor = new Position(1, 1);
+            fixture.state().setCursor(cursor);
+            fixture.state().setSelectionAnchor(anchor);
+
+            fixture.controller().onInput(EditorInput.command(command), true);
+            fixture.ensureCursorVisible();
+
+            assertEquals(7, fixture.state().getTopLine(), command.name());
+            assertEquals(10, fixture.state().getLeftVisualColumn(), command.name());
+            assertEquals(cursor, fixture.state().getCursor(), command.name());
+            assertEquals(anchor, fixture.state().getSelectionAnchor(), command.name());
+        }
+    }
+
+    @Test
+    void typedOrPastedDocumentTextRestoresCursorFollowing() {
+        for (EditorInput input : List.of(EditorInput.text("x"), new EditorInput(new PasteEvent("paste"), null))) {
+            Fixture fixture = manuallyPannedFixture();
+
+            fixture.controller().onInput(input, false);
+            fixture.ensureCursorVisible();
+
+            assertEquals(0, fixture.state().getTopLine());
+            assertEquals(0, fixture.state().getLeftVisualColumn());
+        }
+    }
+
+    @Test
+    void resizeAndRejectedOrEmptyPastePreserveManualPanning() {
+        for (EditorInput input : List.of(
+            new EditorInput(new ResizeEvent(24, 80), null),
+            new EditorInput(new PasteEvent(""), null),
+            new EditorInput(new PasteEvent("rejected", true), null)
+        )) {
+            Fixture fixture = manuallyPannedFixture();
+
+            fixture.controller().onInput(input, false);
+            fixture.ensureCursorVisible();
+
+            assertEquals(7, fixture.state().getTopLine());
+            assertEquals(10, fixture.state().getLeftVisualColumn());
+        }
+    }
+
+    @Test
+    void savePreservesHorizontalPanningWithoutDisablingVerticalCursorFollowing() {
+        Fixture fixture = manuallyPannedFixture();
+        fixture.controller().onEditorTextInteraction();
+        fixture.controller().onScrollbarInteraction(
+            new EditorView.ScrollPointerResult(true, EditorView.ScrollAxis.HORIZONTAL, 0),
+            0, 10, 7, 7
+        );
+
+        fixture.controller().onInput(EditorInput.command(TuinkCommand.DOCUMENT_SAVE), false);
         fixture.ensureCursorVisible();
 
         assertEquals(0, fixture.state().getTopLine());
+        assertEquals(10, fixture.state().getLeftVisualColumn());
+
+        fixture.controller().onInput(EditorInput.command(TuinkCommand.CURSOR_RIGHT), false);
+        fixture.ensureCursorVisible();
+
         assertEquals(0, fixture.state().getLeftVisualColumn());
+    }
+
+    @Test
+    void saveAndTabRoundTripPreserveWrappedViewportWhileAnotherTabFollowsItsCursor() {
+        TextModel model = new TextModel(new SimpleLineBuffer());
+        model.replaceLines(List.of("0123456789".repeat(8), "another line"));
+        EditorState state = new EditorState();
+        EditorEngine engine = new EditorEngine(model, state, new TerminalEditorTextLayout(model));
+        state.setTopWrapSegment(7);
+        ViewportController controller = new ViewportController();
+        controller.onManualVerticalPan();
+
+        controller.onInput(EditorInput.command(TuinkCommand.DOCUMENT_SAVE), false);
+        controller.ensureCursorVisible(engine, 3, 8, true, false);
+        assertEquals(7, state.getTopWrapSegment());
+
+        controller.onInput(EditorInput.command(TuinkCommand.TAB_NEXT), false);
+        Fixture anotherTab = manuallyPannedFixture();
+        anotherTab.controller().onInput(EditorInput.command(TuinkCommand.CURSOR_RIGHT), false);
+        anotherTab.ensureCursorVisible();
+        anotherTab.controller().onInput(EditorInput.command(TuinkCommand.TAB_PREVIOUS), false);
+        controller.ensureCursorVisible(engine, 3, 8, true, false);
+        assertEquals(0, state.getTopLine());
+        assertEquals(7, state.getTopWrapSegment());
+        assertEquals(0, anotherTab.state().getTopLine());
+        assertEquals(0, anotherTab.state().getLeftVisualColumn());
+
+        controller.onInput(EditorInput.command(TuinkCommand.CURSOR_RIGHT), false);
+        controller.ensureCursorVisible(engine, 3, 8, true, false);
+        assertEquals(0, state.getTopWrapSegment());
+    }
+
+    @Test
+    void pageScrollingWithASelectionSurvivesTheFollowingRenderAndResumesCursorFollowing() {
+        SimpleLineBuffer buffer = new SimpleLineBuffer();
+        buffer.setLine(0, "abcdefghijklmnopqrstuvwxyz1234");
+        TextModel model = new TextModel(buffer);
+        EditorState state = new EditorState();
+        EditorEngine engine = new EditorEngine(model, state, new TerminalEditorTextLayout(model));
+        ViewportController controller = new ViewportController();
+        engine.moveCursorTo(new Position(0, 1));
+        engine.moveDown(true, 4, true, false);
+
+        for (int expectedTop : new int[] {3, 5}) {
+            controller.onInput(EditorInput.command(TuinkCommand.CURSOR_PAGE_DOWN), engine.hasSelection());
+            engine.pageDown(3, 4, true, false);
+            controller.ensureCursorVisible(engine, 3, 4, true, false);
+            assertEquals(expectedTop, state.getTopWrapSegment());
+            assertEquals(new Position(0, 5), state.getCursor());
+            assertEquals(new Position(0, 1), state.getSelectionAnchor());
+        }
+
+        controller.onInput(EditorInput.command(TuinkCommand.CURSOR_RIGHT), engine.hasSelection());
+        engine.moveRight();
+        controller.ensureCursorVisible(engine, 3, 4, true, false);
+        assertEquals(1, state.getTopWrapSegment());
+    }
+
+    @Test
+    void growingTheViewportClampsManualPanningWithoutMovingTheTextCursorOrSelection() {
+        Fixture fixture = manuallyPannedFixture();
+        Position cursor = new Position(0, 2);
+        Position anchor = new Position(1, 1);
+        fixture.state().setCursor(cursor);
+        fixture.state().setSelectionAnchor(anchor);
+        fixture.state().setTopLine(17);
+        fixture.state().setLeftVisualColumn(72);
+
+        fixture.controller().ensureCursorVisible(fixture.engine(), 10, 75, false, false, 4);
+
+        assertEquals(10, fixture.state().getTopLine());
+        assertEquals(5, fixture.state().getLeftVisualColumn());
+        assertEquals(5, fixture.state().getLeftColumn());
+        assertEquals(cursor, fixture.state().getCursor());
+        assertEquals(anchor, fixture.state().getSelectionAnchor());
+    }
+
+    @Test
+    void growingAWrappedViewportUsesTheActiveTabWidthAndKeepsTheCursor() {
+        TextModel model = new TextModel(new SimpleLineBuffer());
+        model.replaceLines(java.util.List.of("\t".repeat(10)));
+        EditorState state = new EditorState();
+        EditorEngine engine = new EditorEngine(model, state, new TerminalEditorTextLayout(model));
+        engine.setTabWidth(2);
+        state.setTopWrapSegment(4);
+        Position cursor = new Position(0, 1);
+        state.setCursor(cursor);
+        ViewportController controller = new ViewportController();
+        controller.onManualVerticalPan();
+
+        controller.ensureCursorVisible(engine, 4, 4, true, false, 2);
+
+        assertEquals(0, state.getTopLine());
+        assertEquals(2, state.getTopWrapSegment());
+        assertEquals(cursor, state.getCursor());
+    }
+
+    @Test
+    void aHiddenViewportKeepsItsManualPositionUntilItBecomesVisible() {
+        Fixture fixture = manuallyPannedFixture();
+
+        fixture.controller().ensureCursorVisible(fixture.engine(), 0, 0, false, false, 4);
+
+        assertEquals(7, fixture.state().getTopLine());
+        assertEquals(10, fixture.state().getLeftVisualColumn());
+    }
+
+    @Test
+    void wrappedResizeKeepsTheTopTextAndRoundTripsWithoutDrifting() {
+        Fixture fixture = wrappedFixture("0123456789".repeat(100), 17);
+        Position cursor = new Position(0, 2);
+        Position anchor = new Position(0, 5);
+        fixture.state().setCursor(cursor);
+        fixture.state().setSelectionAnchor(anchor);
+        fixture.controller().ensureCursorVisible(fixture.engine(), 3, 8, true, false, 4);
+
+        for (int width : new int[] {12, 11, 19, 8}) {
+            fixture.controller().ensureCursorVisible(fixture.engine(), 3, width, true, false, 4);
+
+            assertEquals(136 / width, fixture.state().getTopWrapSegment());
+            assertEquals(0, fixture.state().getTopLine());
+            assertEquals(cursor, fixture.state().getCursor());
+            assertEquals(anchor, fixture.state().getSelectionAnchor());
+        }
+    }
+
+    @Test
+    void resizeUsesTheLatestManualScrollInsteadOfTheLastRenderedPosition() {
+        Fixture fixture = wrappedFixture("0123456789".repeat(100), 17);
+        fixture.controller().ensureCursorVisible(fixture.engine(), 3, 8, true, false, 4);
+        fixture.state().setTopWrapSegment(23);
+        fixture.controller().onManualVerticalPan();
+
+        fixture.controller().ensureCursorVisible(fixture.engine(), 3, 12, true, false, 4);
+        assertEquals(15, fixture.state().getTopWrapSegment());
+        fixture.controller().ensureCursorVisible(fixture.engine(), 3, 8, true, false, 4);
+        assertEquals(23, fixture.state().getTopWrapSegment());
+    }
+
+    @Test
+    void wideningDoesNotCarryAnObsoleteSegmentNumberIntoTheNextLogicalLine() {
+        Fixture fixture = wrappedFixture("prefix", 0);
+        fixture.engine().model().replaceLines(List.of(
+            "prefix", "abcdefghijklmnopqrst", "remaining document ".repeat(30)
+        ));
+        fixture.state().setTopLine(1);
+        fixture.state().setTopWrapSegment(3);
+        fixture.controller().ensureCursorVisible(fixture.engine(), 3, 4, true, false, 4);
+
+        fixture.controller().ensureCursorVisible(fixture.engine(), 3, 12, true, false, 4);
+
+        assertEquals(1, fixture.state().getTopLine());
+        assertEquals(1, fixture.state().getTopWrapSegment());
+    }
+
+    @Test
+    void wrapChangesKeepAGraphemeSafeTextAnchorWithWideCharactersAndTabs() {
+        for (boolean wrapWords : List.of(false, true)) {
+            Fixture fixture = wrappedFixture("e\u0301界\t👨‍👩‍👧‍👦 alpha beta\t界🌲 ".repeat(40), 12);
+            fixture.engine().setTabWidth(2);
+            fixture.controller().ensureCursorVisible(fixture.engine(), 3, 11, true, wrapWords, 2);
+            int textAnchor = fixture.engine().textLayout().wrapStarts(0, 11, wrapWords, 2).get(12);
+
+            fixture.engine().setTabWidth(4);
+            fixture.controller().ensureCursorVisible(fixture.engine(), 3, 17, true, !wrapWords, 4);
+
+            List<Integer> starts = fixture.engine().textLayout().wrapStarts(0, 17, !wrapWords, 4);
+            int segment = fixture.state().getTopWrapSegment();
+            assertTrue(starts.get(segment) <= textAnchor);
+            assertTrue(segment + 1 == starts.size() || starts.get(segment + 1) > textAnchor);
+
+            fixture.engine().setTabWidth(2);
+            fixture.controller().ensureCursorVisible(fixture.engine(), 3, 11, true, wrapWords, 2);
+            assertEquals(12, fixture.state().getTopWrapSegment());
+        }
+    }
+
+    @Test
+    void zeroSizedIntermediateFramesKeepTheLastVisibleWrapGeometry() {
+        Fixture fixture = wrappedFixture("0123456789".repeat(100), 17);
+        fixture.controller().ensureCursorVisible(fixture.engine(), 3, 8, true, false, 4);
+
+        for (int[] size : List.of(new int[] {0, 0}, new int[] {0, 5}, new int[] {3, 0})) {
+            fixture.controller().ensureCursorVisible(fixture.engine(), size[0], size[1], true, false, 4);
+            assertEquals(17, fixture.state().getTopWrapSegment());
+        }
+
+        fixture.controller().ensureCursorVisible(fixture.engine(), 3, 12, true, false, 4);
+        assertEquals(11, fixture.state().getTopWrapSegment());
+    }
+
+    @Test
+    void eachTabReanchorsUsingItsOwnLastVisibleGeometry() {
+        Fixture first = wrappedFixture("0123456789".repeat(100), 17);
+        Fixture second = wrappedFixture("0123456789".repeat(100), 20);
+        first.controller().ensureCursorVisible(first.engine(), 3, 8, true, false, 4);
+        second.controller().ensureCursorVisible(second.engine(), 3, 9, true, false, 4);
+
+        second.controller().ensureCursorVisible(second.engine(), 3, 13, true, false, 4);
+        first.controller().ensureCursorVisible(first.engine(), 3, 12, true, false, 4);
+
+        assertEquals(13, second.state().getTopWrapSegment());
+        assertEquals(11, first.state().getTopWrapSegment());
+    }
+
+    @Test
+    void clampingAfterResizeEstablishesANewAnchor() {
+        Fixture fixture = wrappedFixture("0123456789".repeat(100), 17);
+        fixture.controller().ensureCursorVisible(fixture.engine(), 3, 8, true, false, 4);
+
+        fixture.controller().ensureCursorVisible(fixture.engine(), 20, 80, true, false, 4);
+        assertEquals(0, fixture.state().getTopWrapSegment());
+        fixture.controller().ensureCursorVisible(fixture.engine(), 3, 8, true, false, 4);
+        assertEquals(0, fixture.state().getTopWrapSegment());
+    }
+
+    @Test
+    void navigationAfterResizeResumesCursorFollowingAndReplacesTheOldAnchor() {
+        Fixture fixture = wrappedFixture("0123456789".repeat(100), 17);
+        fixture.controller().ensureCursorVisible(fixture.engine(), 3, 8, true, false, 4);
+        fixture.controller().ensureCursorVisible(fixture.engine(), 3, 12, true, false, 4);
+
+        fixture.controller().onInput(EditorInput.command(TuinkCommand.CURSOR_RIGHT), false);
+        fixture.engine().moveRight();
+        fixture.controller().ensureCursorVisible(fixture.engine(), 3, 12, true, false, 4);
+        fixture.controller().ensureCursorVisible(fixture.engine(), 3, 8, true, false, 4);
+
+        assertEquals(0, fixture.state().getTopWrapSegment());
+        assertEquals(new Position(0, 1), fixture.state().getCursor());
+    }
+
+    @Test
+    void changedDocumentInvalidatesTheRetainedTextAnchor() {
+        Fixture fixture = wrappedFixture("0123456789".repeat(100), 17);
+        fixture.controller().ensureCursorVisible(fixture.engine(), 3, 8, true, false, 4);
+        fixture.controller().ensureCursorVisible(fixture.engine(), 3, 12, true, false, 4);
+        fixture.engine().model().replaceLines(List.of("new contents ".repeat(100)));
+
+        fixture.controller().ensureCursorVisible(fixture.engine(), 3, 4, true, false, 4);
+
+        assertEquals(33, fixture.state().getTopWrapSegment());
+    }
+
+    @Test
+    void readingModeRejectedEditsPreserveBothManualAxesAndSelection() {
+        for (TuinkCommand command : List.of(
+            TuinkCommand.EDIT_UNDO, TuinkCommand.EDIT_REDO, TuinkCommand.EDIT_CUT,
+            TuinkCommand.EDIT_PASTE, TuinkCommand.EDIT_TOGGLE_LINE_COMMENT,
+            TuinkCommand.EDIT_INSERT_TAB, TuinkCommand.EDIT_INSERT_NEWLINE,
+            TuinkCommand.EDIT_BACKSPACE, TuinkCommand.EDIT_DELETE_FORWARD,
+            TuinkCommand.SEARCH_REPLACE, TuinkCommand.SEARCH_REPLACE_ALL
+        )) {
+            Fixture fixture = manuallyPannedFixture();
+            Position cursor = new Position(0, 2);
+            Position anchor = new Position(1, 1);
+            fixture.state().setCursor(cursor);
+            fixture.state().setSelectionAnchor(anchor);
+
+            fixture.controller().onInput(EditorInput.command(command), true, false);
+            fixture.ensureCursorVisible();
+
+            assertEquals(7, fixture.state().getTopLine(), command.name());
+            assertEquals(10, fixture.state().getLeftVisualColumn(), command.name());
+            assertEquals(cursor, fixture.state().getCursor(), command.name());
+            assertEquals(anchor, fixture.state().getSelectionAnchor(), command.name());
+        }
+    }
+
+    @Test
+    void readingModeRejectedTypingAndPastePreserveManualPanning() {
+        for (EditorInput input : List.of(EditorInput.text("x"), new EditorInput(new PasteEvent("paste"), null))) {
+            Fixture fixture = manuallyPannedFixture();
+
+            fixture.controller().onInput(input, false, false);
+            fixture.ensureCursorVisible();
+
+            assertEquals(7, fixture.state().getTopLine());
+            assertEquals(10, fixture.state().getLeftVisualColumn());
+        }
+    }
+
+    @Test
+    void readingModeStillFollowsAllowedNavigationAndSelection() {
+        for (EditorInput input : List.of(
+            EditorInput.command(TuinkCommand.CURSOR_RIGHT),
+            EditorInput.command(TuinkCommand.EDIT_SELECT_ALL),
+            new EditorInput(new TextInput("a"), TuinkCommand.EDIT_SELECT_ALL),
+            new EditorInput(pointer(), TuinkCommand.CURSOR_RIGHT)
+        )) {
+            Fixture fixture = manuallyPannedFixture();
+
+            fixture.controller().onInput(input, false, false);
+            fixture.ensureCursorVisible();
+
+            assertEquals(0, fixture.state().getTopLine());
+            assertEquals(0, fixture.state().getLeftVisualColumn());
+        }
     }
 
     private static PointerEvent pointer() {
@@ -92,6 +479,17 @@ class ViewportControllerTest {
             0,
             7
         );
+        return new Fixture(state, engine, controller);
+    }
+
+    private static Fixture wrappedFixture(String text, int segment) {
+        TextModel model = new TextModel(new SimpleLineBuffer());
+        model.replaceLines(List.of(text));
+        EditorState state = new EditorState();
+        state.setTopWrapSegment(segment);
+        EditorEngine engine = new EditorEngine(model, state, new TerminalEditorTextLayout(model));
+        ViewportController controller = new ViewportController();
+        controller.onManualVerticalPan();
         return new Fixture(state, engine, controller);
     }
 

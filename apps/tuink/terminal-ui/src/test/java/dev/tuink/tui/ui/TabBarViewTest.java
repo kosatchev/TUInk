@@ -130,6 +130,68 @@ class TabBarViewTest {
         assertTrue(placement.handle(pointer(1, 3)).consumed());
     }
 
+    @Test
+    void revealingPlacementKeepsTheActiveTabPaintAndHitTargetTogether() {
+        TabBarView view = TabBarView.build(
+            List.of(
+                new TabBarView.TabItem(Path.of("file0.txt"), false, false),
+                new TabBarView.TabItem(Path.of("file1.txt"), false, false),
+                new TabBarView.TabItem(Path.of("file2.txt"), false, false),
+                new TabBarView.TabItem(Path.of("file3.txt"), false, false)
+            ),
+            3,
+            TabBar.State.initial()
+        );
+        Rect bounds = new Rect(0, 1, 24, 1);
+        TabBarView.Placement placement = view.placeRevealingActive(bounds, new Rect(0, 0, 24, 3));
+        CellBuffer buffer = filled(3, 24);
+        placement.paint(new Canvas(buffer), THEME);
+
+        assertEquals(new TabBar.State(3), placement.state());
+        assertTrue(row(buffer, 1, 0, 24).contains("[file3.txt x]"));
+        assertEquals(ACTIVE, buffer.get(1, 2).style());
+        assertEquals(
+            new TabBar.TabPressed(3, placement.state()),
+            placement.handle(pointer(1, 2)).output().orElseThrow()
+        );
+        assertEquals(TabBar.State.initial(), view.place(bounds, new Rect(0, 0, 24, 3)).state());
+    }
+
+    @Test
+    void dirtyAndSearchMarkersAndRenamesKeepTheVisibleActiveTabInView() {
+        Rect bounds = new Rect(0, 1, 33, 1);
+        Rect clip = new Rect(0, 0, 33, 3);
+        List<TabBarView.TabItem> originalItems = List.of(
+            new TabBarView.TabItem(null, false, false),
+            new TabBarView.TabItem(null, false, false),
+            new TabBarView.TabItem(null, false, false)
+        );
+        TabBarView.Placement previous = TabBarView.build(originalItems, 1, TabBar.State.initial())
+            .place(bounds, clip);
+
+        for (List<TabBarView.TabItem> changed : List.of(
+            List.of(originalItems.get(0), new TabBarView.TabItem(null, true, false), originalItems.get(2)),
+            List.of(new TabBarView.TabItem(null, false, true), originalItems.get(1), originalItems.get(2)),
+            List.of(originalItems.get(0), new TabBarView.TabItem(Path.of("longer-name.txt"), false, false), originalItems.get(2))
+        )) {
+            TabBarView.Placement next = TabBarView.build(changed, 1, previous.state())
+                .placeKeepingActiveVisible(bounds, clip, previous);
+
+            assertEquals(new TabBar.State(1), next.state());
+            assertEquals(
+                new TabBar.TabPressed(1, next.state()),
+                next.handle(pointer(1, 2)).output().orElseThrow()
+            );
+            CellBuffer buffer = filled(3, 33);
+            next.paint(new Canvas(buffer), THEME);
+            assertEquals(ACTIVE, buffer.get(1, 2).style());
+
+            TabBarView.Placement clean = TabBarView.build(originalItems, 1, next.state())
+                .placeKeepingActiveVisible(bounds, clip, next);
+            assertEquals(next.state(), clean.state(), "shrinking labels should retain the current viewport");
+        }
+    }
+
     private static PointerEvent pointer(int row, int column) {
         return new PointerEvent(
             row,

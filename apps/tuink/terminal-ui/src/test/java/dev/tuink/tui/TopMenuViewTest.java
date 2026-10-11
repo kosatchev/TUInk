@@ -15,11 +15,13 @@ import dev.tuiframe.cell.Canvas;
 import dev.tuiframe.cell.CellBuffer;
 import dev.tuiframe.cell.CellText;
 import dev.tuiframe.geometry.Rect;
+import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.style.CellStyle;
 import dev.tuiframe.widget.MenuBar;
 import dev.tuiframe.widget.Theme;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class TopMenuViewTest {
@@ -184,7 +186,7 @@ class TopMenuViewTest {
     void topBarSnapshotPreservesPrefixDirtyAndReadAlignment() {
         TopMenuView closed = view(ui(), MenuBar.State.closed());
         TopMenuView.TopBar normal = closed.topBar(Path.of("demo.txt"), true, 64, false);
-        String closedBase = " File   Edit   View   Tab   Settings   Help  | demo.txt *";
+        String closedBase = " ".repeat(44) + " | demo.txt *";
 
         assertEquals(CellText.fit(closedBase, 64), normal.text());
         assertEquals(47, normal.menuPrefixWidth());
@@ -192,9 +194,29 @@ class TopMenuViewTest {
 
         TopMenuView open = view(ui(), MenuBar.State.open(TopMenuController.FILE_INDEX));
         TopMenuView.TopBar reading = open.topBar(Path.of("demo.txt"), false, 64, true);
-        String openBase = "[File]  Edit   View   Tab   Settings   Help  | demo.txt";
+        String openBase = " ".repeat(44) + " | demo.txt";
         assertEquals(CellText.fit(openBase, 58) + " READ ", reading.text());
         assertEquals(47, reading.menuPrefixWidth());
+    }
+
+    @Test
+    void shiftedHeadingsHaveNoRasterCopiesOrPhantomLabelsInTheirGaps() {
+        TopMenuView help = view(ui(), MenuBar.State.open(TopMenuController.HELP_INDEX));
+        for (int width : List.of(15, 24, 40)) {
+            var placement = help.place(new Rect(0, 0, width, 12));
+            var topBar = help.topBar(Path.of("demo.txt"), false, width, false);
+            assertTrue(topBar.text().isBlank(), "raster chrome reserves space while the widget owns all headings");
+            CellBuffer buffer = new CellBuffer(12, width);
+            Canvas canvas = new Canvas(buffer);
+            CellText.drawClipped(canvas, 0, 0, topBar.text(), CellStyle.DEFAULT, width);
+            placement.paint(canvas, Theme.fixed(CellStyle.DEFAULT));
+            String expected = switch (width) {
+                case 15 -> " Help ";
+                case 24 -> " Tab   Settings   Help ";
+                default -> " Edit   View   Tab   Settings   Help ";
+            };
+            assertEquals(CellText.fit(expected, width), cells(buffer, 0, 0, width));
+        }
     }
 
     @Test
@@ -214,6 +236,34 @@ class TopMenuViewTest {
         assertEquals("demo.txt", cells(buffer, 0, topBar.menuPrefixWidth(), 8));
         assertEquals("Undo", cells(buffer, popup.y() + 1, popup.x() + 2, 4));
         assertEquals("Select All", cells(buffer, popup.y() + 7, popup.x() + 2, 10));
+    }
+
+    @Test
+    void readingBadgeSurvivesClosedAndShiftedMenuHeadingsOnNarrowFrames() {
+        for (MenuBar.State state : List.of(MenuBar.State.closed(),
+            MenuBar.State.open(TopMenuController.SETTINGS_INDEX),
+            MenuBar.State.open(TopMenuController.HELP_INDEX))) {
+            TopMenuView view = view(ui(), state);
+            for (int width : List.of(6, 10, 20, 40, 64)) {
+                TopMenuView.Placement placement = view.place(new Rect(0, 0, width, 12), true);
+                TopMenuView.TopBar topBar = view.topBar(Path.of("demo.txt"), true, width, true);
+                CellBuffer buffer = new CellBuffer(12, width);
+                Canvas canvas = new Canvas(buffer);
+                CellText.drawClipped(canvas, 0, 0, topBar.text(), CellStyle.DEFAULT, width);
+
+                placement.paint(canvas, Theme.fixed(CellStyle.DEFAULT));
+
+                assertEquals(" READ ", cells(buffer, 0, width - 6, 6), "width=" + width + " state=" + state);
+                if (state.isOpen()) {
+                    assertTrue(placement.popupBounds().isPresent());
+                } else {
+                    assertFalse(placement.contains(new PointerEvent(
+                        0, width - 3, PointerEvent.Kind.PRESS,
+                        PointerEvent.Button.LEFT, Set.of()
+                    )));
+                }
+            }
+        }
     }
 
     @Test

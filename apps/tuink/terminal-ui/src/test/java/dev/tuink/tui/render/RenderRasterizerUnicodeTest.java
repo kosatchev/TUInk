@@ -31,7 +31,33 @@ import org.junit.jupiter.api.Test;
 class RenderRasterizerUnicodeTest {
     @Test
     void rasterizesBothScrollbarsThroughTheCanvasPainter() {
-        RenderPlan plan = new RenderPlan(
+        RenderPlan plan = scrollbarPlan();
+
+        CellBuffer buffer = new RenderRasterizer().rasterize(plan, 6, 10);
+
+        assertEquals("  x      │", rowText(buffer, 1));
+        assertEquals("         █", rowText(buffer, 2));
+        assertEquals("         │", rowText(buffer, 3));
+        assertEquals("  ───████┘", rowText(buffer, 4));
+    }
+
+    @Test
+    void bothScrollbarsAndTheirJunctionInheritTheEditorSurfaceAndBorderInEveryTheme() {
+        for (UiStyles.Theme theme : UiStyles.Theme.values()) {
+            UiStyles.Palette palette = UiStyles.forTheme(theme);
+            CellBuffer buffer = new RenderRasterizer(1, theme).rasterize(scrollbarPlan(), 6, 10);
+            for (int[] position : new int[][] {{1, 9}, {2, 9}, {4, 2}, {4, 5}, {4, 9}}) {
+                CellStyle style = buffer.get(position[0], position[1]).style();
+                assertEquals(palette.renderBody().bg(), style.bg(), theme.label());
+                assertEquals(palette.renderBorder().fg(), style.fg(), theme.label());
+                assertEquals(palette.renderBorder().bold(), style.bold(), theme.label());
+                assertEquals(palette.renderBorder().underline(), style.underline(), theme.label());
+            }
+        }
+    }
+
+    private static RenderPlan scrollbarPlan() {
+        return new RenderPlan(
             List.of(line("x", List.of(), 0, 0, 0)),
             "",
             "",
@@ -54,13 +80,6 @@ class RenderRasterizerUnicodeTest {
             2,
             1
         );
-
-        CellBuffer buffer = new RenderRasterizer().rasterize(plan, 6, 10);
-
-        assertEquals("  x      │", rowText(buffer, 1));
-        assertEquals("         █", rowText(buffer, 2));
-        assertEquals("         │", rowText(buffer, 3));
-        assertEquals("  ───████ ", rowText(buffer, 4));
     }
 
     @Test

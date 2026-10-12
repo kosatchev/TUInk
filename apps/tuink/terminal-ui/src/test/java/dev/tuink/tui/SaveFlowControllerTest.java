@@ -1,7 +1,9 @@
 package dev.tuink.tui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.core.SaveDisposition;
@@ -12,6 +14,7 @@ import dev.tuink.tui.command.TuinkCommand;
 import dev.tuink.tui.input.EditorInput;
 import dev.tuiframe.input.KeyStroke;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class SaveFlowControllerTest {
@@ -67,6 +70,82 @@ class SaveFlowControllerTest {
         assertEquals(SaveDisposition.CREATE_NEW, result.saveDisposition());
         assertEquals(saveAs, result.modalState());
         assertEquals(SaveContinuation.CLOSE_TAB, result.modalState().saveContinuation());
+    }
+
+    @Test
+    void saveAsPreservesLeadingTrailingAndOnlySpacesInFileNames() {
+        for (String filename : new String[] {" report.txt", "report.txt ", " report.txt ", " "}) {
+            SaveFlowController.SaveAsResult result = enter(UiModalState.saveAs(), filename, false, null);
+
+            assertEquals(Path.of(filename), result.saveNowPath(), filename);
+            assertEquals(SaveDisposition.CREATE_NEW, result.saveDisposition(), filename);
+        }
+    }
+
+    @Test
+    void overwriteConfirmationKeepsTheExactWhitespaceInTheTargetName() {
+        String filename = " existing.txt ";
+
+        SaveFlowController.SaveAsResult result = enter(UiModalState.saveAs(), filename, true, null);
+
+        assertEquals(UiModalMode.SAVE_OVERWRITE_CONFIRM, result.modalState().mode());
+        assertEquals(Path.of(filename), result.modalState().pendingOverwritePath());
+    }
+
+    @Test
+    void emptyFilenameReportsValidationErrorWithoutClearingAnySaveWorkflow() {
+        for (UiModalState saveAs : saveAsStates()) {
+            SaveFlowController.SaveAsResult result = enter(saveAs, "", false, null);
+
+            assertTrue(result.consumed());
+            assertSame(saveAs, result.modalState());
+            assertEquals(UiModalMode.SAVE_AS, result.modalState().mode());
+            assertEquals(saveAs.saveContinuation(), result.modalState().saveContinuation());
+            assertEquals(saveAs.pendingCloseTabIndex(), result.modalState().pendingCloseTabIndex());
+            assertEquals("Save failed: file name is empty", result.errorMessage());
+            assertFalse(result.clearNotification());
+            assertEquals(SaveFlowController.TextInputEffectKind.NONE, result.textInputEffect().kind());
+            assertNull(result.textInputEffect().text());
+            assertNull(result.saveNowPath());
+            assertNull(result.saveDisposition());
+        }
+    }
+
+    @Test
+    void validFilenameAfterEmptySubmissionRetainsThePendingSaveContinuation() {
+        for (UiModalState saveAs : saveAsStates()) {
+            SaveFlowController.SaveAsResult rejected = enter(saveAs, "", false, null);
+
+            SaveFlowController.SaveAsResult corrected = enter(rejected.modalState(), "corrected-中.txt", false, null);
+
+            assertTrue(corrected.consumed());
+            assertSame(saveAs, corrected.modalState());
+            assertEquals(Path.of("corrected-中.txt"), corrected.saveNowPath());
+            assertEquals(SaveDisposition.CREATE_NEW, corrected.saveDisposition());
+            assertNull(corrected.errorMessage());
+            assertEquals(SaveFlowController.TextInputEffectKind.NONE, corrected.textInputEffect().kind());
+        }
+    }
+
+    @Test
+    void cancelAfterEmptySubmissionStillCancelsStandaloneQuitAndCloseTabFlows() {
+        for (UiModalState saveAs : saveAsStates()) {
+            for (TuinkCommand cancel : List.of(TuinkCommand.UI_ESCAPE, TuinkCommand.APP_QUIT)) {
+                SaveFlowController.SaveAsResult rejected = enter(saveAs, "", false, null);
+
+                SaveFlowController.SaveAsResult cancelled = input(EditorInput.command(cancel), rejected.modalState());
+
+                assertTrue(cancelled.consumed());
+                assertEquals(UiModalState.none(), cancelled.modalState());
+                assertEquals(SaveContinuation.NONE, cancelled.modalState().saveContinuation());
+                assertEquals(-1, cancelled.modalState().pendingCloseTabIndex());
+                assertEquals(SaveFlowController.TextInputEffectKind.CLEAR, cancelled.textInputEffect().kind());
+                assertTrue(cancelled.clearNotification());
+                assertNull(cancelled.errorMessage());
+                assertNull(cancelled.saveNowPath());
+                assertNull(cancelled.saveDisposition());
+            }
+        }
     }
 
     @Test
@@ -165,6 +244,10 @@ class SaveFlowControllerTest {
             (left, right) -> false,
             Path::toString
         );
+    }
+
+    private static List<UiModalState> saveAsStates() {
+        return List.of(UiModalState.saveAs(), UiModalState.saveAsForQuit(), UiModalState.saveAsForCloseTab(4));
     }
 
     private static SaveFlowController.SaveAsResult enter(

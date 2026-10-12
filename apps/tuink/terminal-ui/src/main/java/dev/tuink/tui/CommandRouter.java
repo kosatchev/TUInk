@@ -11,7 +11,6 @@ import static dev.tuink.tui.command.TuinkCommand.SEARCH_NAVIGATE_LEFT;
 import static dev.tuink.tui.command.TuinkCommand.SEARCH_NAVIGATE_RIGHT;
 import static dev.tuink.tui.command.TuinkCommand.SEARCH_NAVIGATE_UP;
 import static dev.tuink.tui.command.TuinkCommand.SEARCH_NEXT;
-import static dev.tuink.tui.command.TuinkCommand.SEARCH_REPLACE_ALL;
 import static dev.tuink.tui.command.TuinkCommand.TAB_ACTIVATE;
 
 import dev.tuink.editor.command.CommandArgumentDescriptor;
@@ -77,7 +76,6 @@ final class CommandRouter {
             case CURSOR_END -> SearchController.isSearchFieldFocus(focus) ? SEARCH_FIELD_END : null;
             case EDIT_INSERT_NEWLINE -> SearchController.actionForSearchFocus(focus);
             case SEARCH_OPEN -> SEARCH_NEXT;
-            case EDIT_SELECT_ALL -> SEARCH_REPLACE_ALL;
             default -> null;
         };
         if (focused != null) {

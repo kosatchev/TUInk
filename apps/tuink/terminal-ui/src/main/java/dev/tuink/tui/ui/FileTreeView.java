@@ -6,7 +6,6 @@ import dev.tuiframe.geometry.Point;
 import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.input.TuiInputEvent;
-import dev.tuiframe.scroll.ScrollInteraction;
 import dev.tuiframe.scroll.ScrollLayout;
 import dev.tuiframe.widget.FocusContext;
 import dev.tuiframe.widget.FocusSpace;
@@ -425,21 +424,6 @@ public final class FileTreeView {
         }
     }
 
-    public enum ScrollAxis {
-        VERTICAL,
-        HORIZONTAL
-    }
-
-    /** Application-owned pointer capture token preserving the thumb grab point. */
-    public record ScrollbarPress(ScrollAxis axis, int grabOffset) {
-        public ScrollbarPress {
-            Objects.requireNonNull(axis, "axis");
-            if (grabOffset < 0) {
-                throw new IllegalArgumentException("grabOffset must not be negative");
-            }
-        }
-    }
-
     /** Exact current-frame generic placement plus TUInk snapshot policy. */
     public final class Placement {
         private final dev.tuiframe.widget.TreeView.Placement<FileTreeModel.EntryId> placed;
@@ -564,136 +548,6 @@ public final class FileTreeView {
             );
         }
 
-        public Optional<ScrollbarPress> scrollbarPress(PointerEvent event) {
-            Objects.requireNonNull(event, "event");
-            if (!enabled()
-                || event.kind() != PointerEvent.Kind.PRESS
-                || event.button() != PointerEvent.Button.LEFT
-                || !event.modifiers().isEmpty()) {
-                return Optional.empty();
-            }
-            Optional<Point> local = context.localPoint(event).filter(placed.bounds()::contains);
-            if (local.isEmpty()) {
-                return Optional.empty();
-            }
-            Point point = local.orElseThrow();
-            Optional<ScrollbarPress> vertical = verticalPress(point);
-            return vertical.isPresent() ? vertical : horizontalPress(point);
-        }
-
-        /**
-         * Computes drag state from the captured thumb start, including pointer
-         * positions outside the track. The grab offset prevents a press jump.
-         */
-        public State drag(PointerEvent event, ScrollbarPress press) {
-            Objects.requireNonNull(event, "event");
-            ScrollbarPress requiredPress = Objects.requireNonNull(press, "press");
-            if (!enabled()) {
-                return state;
-            }
-            long localX = (long) event.column() - context.space().terminalOrigin().x();
-            long localY = (long) event.row() - context.space().terminalOrigin().y();
-            dev.tuiframe.widget.TreeView.State widgetState = state.widgetState();
-            if (requiredPress.axis() == ScrollAxis.VERTICAL) {
-                Optional<Rect> track = placed.verticalScrollbarBounds();
-                if (track.isEmpty()) {
-                    return state;
-                }
-                Rect rect = track.orElseThrow();
-                int thumbStart = saturatedInt(localY - rect.y() - requiredPress.grabOffset());
-                int currentThumbStart = ScrollInteraction.thumbOffset(
-                    rect.height(),
-                    placed.itemCount(),
-                    widgetState.firstVisibleIndex()
-                );
-                int first = thumbStart == currentThumbStart
-                    ? widgetState.firstVisibleIndex()
-                    : ScrollInteraction.scrollFromThumbStart(
-                        thumbStart,
-                        rect.height(),
-                        placed.itemCount()
-                    );
-                widgetState = new dev.tuiframe.widget.TreeView.State(
-                    widgetState.selectedIndex(),
-                    first,
-                    widgetState.horizontalOffset()
-                );
-            } else {
-                Optional<Rect> track = placed.horizontalScrollbarBounds();
-                if (track.isEmpty()) {
-                    return state;
-                }
-                Rect rect = track.orElseThrow();
-                int thumbStart = saturatedInt(localX - rect.x() - requiredPress.grabOffset());
-                int currentThumbStart = ScrollInteraction.thumbOffset(
-                    rect.width(),
-                    placed.horizontalExtent(),
-                    widgetState.horizontalOffset()
-                );
-                int offset = thumbStart == currentThumbStart
-                    ? widgetState.horizontalOffset()
-                    : ScrollInteraction.scrollFromThumbStart(
-                        thumbStart,
-                        rect.width(),
-                        placed.horizontalExtent()
-                    );
-                widgetState = new dev.tuiframe.widget.TreeView.State(
-                    widgetState.selectedIndex(),
-                    widgetState.firstVisibleIndex(),
-                    offset
-                );
-            }
-            return adopt(widgetState, state, true);
-        }
-
-        private Optional<ScrollbarPress> verticalPress(Point point) {
-            Optional<Rect> track = placed.verticalScrollbarBounds();
-            if (track.isEmpty() || !track.orElseThrow().contains(point)) {
-                return Optional.empty();
-            }
-            Rect rect = track.orElseThrow();
-            ScrollInteraction.Hit hit = ScrollInteraction.hit(
-                point.y(),
-                rect.y(),
-                rect.height(),
-                placed.itemCount(),
-                state.widgetState().firstVisibleIndex()
-            );
-            if (hit != ScrollInteraction.Hit.THUMB) {
-                return Optional.empty();
-            }
-            int thumbStart = rect.y() + ScrollInteraction.thumbOffset(
-                rect.height(),
-                placed.itemCount(),
-                state.widgetState().firstVisibleIndex()
-            );
-            return Optional.of(new ScrollbarPress(ScrollAxis.VERTICAL, point.y() - thumbStart));
-        }
-
-        private Optional<ScrollbarPress> horizontalPress(Point point) {
-            Optional<Rect> track = placed.horizontalScrollbarBounds();
-            if (track.isEmpty() || !track.orElseThrow().contains(point)) {
-                return Optional.empty();
-            }
-            Rect rect = track.orElseThrow();
-            ScrollInteraction.Hit hit = ScrollInteraction.hit(
-                point.x(),
-                rect.x(),
-                rect.width(),
-                placed.horizontalExtent(),
-                state.widgetState().horizontalOffset()
-            );
-            if (hit != ScrollInteraction.Hit.THUMB) {
-                return Optional.empty();
-            }
-            int thumbStart = rect.x() + ScrollInteraction.thumbOffset(
-                rect.width(),
-                placed.horizontalExtent(),
-                state.widgetState().horizontalOffset()
-            );
-            return Optional.of(new ScrollbarPress(ScrollAxis.HORIZONTAL, point.x() - thumbStart));
-        }
-
         private Action mapAction(
             dev.tuiframe.widget.TreeView.Action<FileTreeModel.EntryId> action,
             long nowNanos,
@@ -760,10 +614,6 @@ public final class FileTreeView {
             }
             return new RootRequested(entry.path(), next);
         }
-    }
-
-    private static int saturatedInt(long value) {
-        return (int) Math.max(Integer.MIN_VALUE, Math.min(Integer.MAX_VALUE, value));
     }
 
     private record MetadataColumns(int sizeWidth, int dateWidth) {

@@ -56,7 +56,9 @@ class InputActionDispatcherTest {
             TuinkCommand.EDIT_INSERT_NEWLINE,
             TuinkCommand.EDIT_BACKSPACE,
             TuinkCommand.EDIT_DELETE_FORWARD,
-            TuinkCommand.EDIT_TOGGLE_LINE_COMMENT
+            TuinkCommand.EDIT_TOGGLE_LINE_COMMENT,
+            TuinkCommand.SEARCH_REPLACE,
+            TuinkCommand.SEARCH_REPLACE_ALL
         );
 
         for (TuinkCommand command : edits) {

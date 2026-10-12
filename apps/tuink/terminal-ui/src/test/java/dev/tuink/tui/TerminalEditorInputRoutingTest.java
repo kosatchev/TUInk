@@ -113,17 +113,38 @@ class TerminalEditorInputRoutingTest {
     }
 
     @Test
-    void searchFocusResolvesSelectAllShortcutToReplaceAllWhileMenuKeepsSelectAll() {
+    void searchFocusKeepsSelectAllSeparateFromReplaceAll() {
         CommandRouter router = new CommandRouter();
         KeyStroke selectAll = KeyStroke.of(KeyStroke.Key.A, KeyStroke.Modifier.CTRL);
         CommandInvocation invocation = router.invocationFor(selectAll).orElseThrow();
 
-        assertEquals(TuinkCommand.SEARCH_REPLACE_ALL, TerminalEditorApp.resolveEditorInput(
+        assertEquals(EDIT_SELECT_ALL, TerminalEditorApp.resolveEditorInput(
             router, selectAll, invocation, null, true, SearchFocus.FIND
         ).command());
         assertEquals(EDIT_SELECT_ALL, TerminalEditorApp.resolveEditorInput(
             router, selectAll, invocation, null, false, SearchFocus.FIND
         ).command());
+    }
+
+    @Test
+    void semanticEditCommandsKeepSearchFocusWhileGlobalMenuCommandsKeepTheirApplicationRoute() {
+        for (TuinkCommand command : new TuinkCommand[] {
+            TuinkCommand.EDIT_COPY, TuinkCommand.EDIT_CUT, TuinkCommand.EDIT_PASTE,
+            TuinkCommand.EDIT_SELECT_ALL, TuinkCommand.EDIT_UNDO, TuinkCommand.EDIT_REDO,
+            TuinkCommand.EDIT_TOGGLE_LINE_COMMENT
+        }) {
+            assertTrue(TerminalEditorApp.searchOwnsCommand(true, false, true, command));
+            assertTrue(TerminalEditorApp.searchOwnsCommand(true, false, false, command));
+            assertFalse(TerminalEditorApp.searchOwnsCommand(true, true, true, command));
+            assertFalse(TerminalEditorApp.searchOwnsCommand(false, false, true, command));
+        }
+        for (TuinkCommand command : new TuinkCommand[] {
+            TuinkCommand.SEARCH_OPEN, TuinkCommand.DOCUMENT_SAVE, TuinkCommand.DOCUMENT_SAVE_AS,
+            TuinkCommand.TAB_NEW, TuinkCommand.TAB_NEXT, TuinkCommand.APP_QUIT,
+            TuinkCommand.VIEW_TOGGLE_LINE_WRAP, TuinkCommand.HELP_KEY_HINTS
+        }) {
+            assertFalse(TerminalEditorApp.searchOwnsCommand(true, false, true, command));
+        }
     }
 
     @Test

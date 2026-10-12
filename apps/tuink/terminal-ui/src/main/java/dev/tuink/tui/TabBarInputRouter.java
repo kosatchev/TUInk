@@ -20,7 +20,8 @@ final class TabBarInputRouter {
         TabBar.State state,
         Integer activateIndex,
         Integer closeIndex,
-        boolean consumed
+        boolean consumed,
+        boolean blocked
     ) {
         Result {
             Objects.requireNonNull(state, "state");
@@ -35,6 +36,9 @@ final class TabBarInputRouter {
             }
             if (!consumed && (activateIndex != null || closeIndex != null)) {
                 throw new IllegalArgumentException("an ignored event cannot request a tab decision");
+            }
+            if (blocked && (!consumed || activateIndex != null || closeIndex != null)) {
+                throw new IllegalArgumentException("blocked input must be consumed without a tab decision");
             }
         }
     }
@@ -71,12 +75,12 @@ final class TabBarInputRouter {
             if (action instanceof TabBar.TabPressed pressed) {
                 return requiredPolicy == Policy.NORMAL
                     ? activate(pressed.state(), pressed.tabIndex())
-                    : captured(pressed.state());
+                    : blocked(current);
             }
             if (action instanceof TabBar.ClosePressed pressed) {
                 return requiredPolicy == Policy.NORMAL
                     ? close(pressed.state(), pressed.tabIndex())
-                    : captured(pressed.state());
+                    : blocked(current);
             }
             throw new IllegalStateException("Unsupported tab-bar action: " + action);
         }
@@ -136,18 +140,22 @@ final class TabBarInputRouter {
     }
 
     private static Result ignored(TabBar.State state) {
-        return new Result(state, null, null, false);
+        return new Result(state, null, null, false, false);
     }
 
     private static Result captured(TabBar.State state) {
-        return new Result(state, null, null, true);
+        return new Result(state, null, null, true, false);
+    }
+
+    private static Result blocked(TabBar.State state) {
+        return new Result(state, null, null, true, true);
     }
 
     private static Result activate(TabBar.State state, int index) {
-        return new Result(state, index, null, true);
+        return new Result(state, index, null, true, false);
     }
 
     private static Result close(TabBar.State state, int index) {
-        return new Result(state, null, index, true);
+        return new Result(state, null, index, true, false);
     }
 }

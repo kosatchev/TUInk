@@ -1,12 +1,11 @@
 package dev.tuink.tui;
 
 import dev.tuiframe.input.KeyStroke;
-import dev.tuiframe.input.PasteEvent;
 import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.input.ResizeEvent;
-import dev.tuiframe.input.TextInput;
 import dev.tuiframe.input.TuiInputEvent;
 import dev.tuiframe.widget.InteractionResult;
+import dev.tuiframe.widget.Button;
 import dev.tuink.tui.file.FileTreeModel;
 import dev.tuink.tui.ui.FileTreeView;
 import java.nio.file.Path;
@@ -67,7 +66,6 @@ final class OpenFileInputRouter {
     record Result(
         FileTreeView.State state,
         Focus focus,
-        FileTreeView.ScrollbarPress scrollbarPress,
         Intent intent,
         boolean consumed
     ) {
@@ -84,15 +82,17 @@ final class OpenFileInputRouter {
     }
 
     static Result route(
-        FileTreeView.Placement placement,
-        Focus focus,
-        FileTreeView.ScrollbarPress scrollbarPress,
+        OpenFileDialogView.Placement dialog,
+        OpenFileDialogView.FocusState focusState,
         TuiInputEvent event,
         long nowNanos,
         long doubleClickWindowNanos
     ) {
-        Objects.requireNonNull(placement, "placement");
-        Focus requiredFocus = Objects.requireNonNull(focus, "focus");
+        Objects.requireNonNull(dialog, "dialog");
+        Objects.requireNonNull(focusState, "focusState");
+        dialog.activate(focusState);
+        FileTreeView.Placement placement = dialog.tree();
+        Focus requiredFocus = focusState.focus();
         Objects.requireNonNull(event, "event");
         if (doubleClickWindowNanos < 0L) {
             throw new IllegalArgumentException("doubleClickWindowNanos must not be negative");
@@ -100,89 +100,94 @@ final class OpenFileInputRouter {
 
         FileTreeView.State current = placement.state();
         if (event instanceof ResizeEvent) {
-            return ignored(current, requiredFocus, scrollbarPress);
+            return ignored(current, requiredFocus);
         }
-        if (event instanceof TextInput || event instanceof PasteEvent) {
-            return captured(current, requiredFocus, scrollbarPress);
+        if (event instanceof KeyStroke stroke
+            && stroke.modifiers().isEmpty() && stroke.key() == KeyStroke.Key.ESCAPE) {
+            return intent(current.resetClickTracking(), requiredFocus, new CloseDialog());
         }
-        if (event instanceof KeyStroke stroke) {
-            return routeKey(
-                placement,
-                requiredFocus,
-                scrollbarPress,
-                stroke,
-                nowNanos,
-                doubleClickWindowNanos
-            );
+        if (!placement.enabled()) {
+            return captured(current.resetClickTracking(), requiredFocus);
         }
-        if (event instanceof PointerEvent pointer) {
+        if (event instanceof PointerEvent pointer && current.widgetState().drag() != null) {
+            focusState.focus(Focus.LIST);
             return routePointer(
                 placement,
-                requiredFocus,
-                scrollbarPress,
+                Focus.LIST,
                 pointer,
                 nowNanos,
                 doubleClickWindowNanos
             );
         }
-        return captured(current, requiredFocus, scrollbarPress);
+        if (event instanceof PointerEvent pointer && !pointer.modifiers().isEmpty()) {
+            return captured(current.resetClickTracking(), requiredFocus);
+        }
+        if (event instanceof KeyStroke stroke) {
+            if (stroke.key() == KeyStroke.Key.H
+                && stroke.modifiers().equals(java.util.Set.of(KeyStroke.Modifier.CTRL))) {
+                focusState.focus(Focus.LIST);
+                return intent(current.resetClickTracking(), focusState.focus(), new ToggleHidden());
+            }
+            if (stroke.modifiers().isEmpty()
+                && (requiredFocus == Focus.OK && stroke.key() == KeyStroke.Key.ARROW_LEFT
+                    || requiredFocus == Focus.CANCEL && stroke.key() == KeyStroke.Key.ARROW_LEFT)) {
+                focusState.manager().previous(dialog.focusScope());
+                return captured(current.resetClickTracking(), focusState.focus());
+            }
+            if (stroke.modifiers().isEmpty() && requiredFocus == Focus.OK
+                && stroke.key() == KeyStroke.Key.ARROW_RIGHT) {
+                focusState.manager().next(dialog.focusScope());
+                return captured(current.resetClickTracking(), focusState.focus());
+            }
+        }
+        var routed = focusState.manager().route(dialog.focusScope(), event);
+        Focus focused = focusState.focus();
+        if (routed.navigationConsumed()) {
+            return captured(current.resetClickTracking(), focused);
+        }
+        if (routed.target().isPresent()) {
+            var target = routed.target().orElseThrow();
+            if (target.id() != OpenFileDialogView.Control.LIST) {
+                InteractionResult<Button.Action> interaction = target.placement().handle(
+                    event, routed.context().orElseThrow());
+                focusState.manager().apply(dialog.focusScope(), target.id(), interaction.focusRequest());
+                Focus buttonFocus = focusState.focus();
+                if (interaction.output().isPresent()) {
+                    return switch (target.id()) {
+                        case OK -> confirmSelection(placement, buttonFocus);
+                        case CANCEL, CLOSE -> intent(current.resetClickTracking(), buttonFocus, new CloseDialog());
+                        case HIDDEN -> {
+                            focusState.focus(Focus.LIST);
+                            yield intent(current.resetClickTracking(), focusState.focus(), new ToggleHidden());
+                        }
+                        case LIST -> throw new IllegalStateException("tree is not a button");
+                    };
+                }
+                return captured(current.resetClickTracking(), buttonFocus);
+            }
+        }
+        if (event instanceof KeyStroke stroke && focused == Focus.LIST) {
+            return routeTreeKey(placement, stroke, nowNanos, doubleClickWindowNanos);
+        }
+        if (event instanceof PointerEvent pointer) {
+            Result result = routePointer(placement, focused, pointer, nowNanos, doubleClickWindowNanos);
+            focusState.focus(result.focus());
+            return result;
+        }
+        return captured(current, focused);
     }
 
-    private static Result routeKey(
+    private static Result routeTreeKey(
         FileTreeView.Placement placement,
-        Focus focus,
-        FileTreeView.ScrollbarPress scrollbarPress,
         KeyStroke stroke,
         long nowNanos,
         long doubleClickWindowNanos
     ) {
         FileTreeView.State current = placement.state();
-        if (stroke.modifiers().isEmpty() && stroke.key() == KeyStroke.Key.ESCAPE) {
-            return intent(current.resetClickTracking(), focus, null, new CloseDialog());
-        }
-        if (!placement.enabled()) {
-            // The modal remains the raw owner while resize hides its controls.
-            // Only the always-safe close command is allowed above.
-            return captured(current.resetClickTracking(), focus, null);
-        }
-        if (stroke.key() == KeyStroke.Key.TAB
-            && (stroke.modifiers().isEmpty()
-                || stroke.modifiers().equals(java.util.Set.of(KeyStroke.Modifier.SHIFT)))) {
-            Focus next = stroke.modifiers().isEmpty() ? next(focus) : previous(focus);
-            return captured(current.resetClickTracking(), next, null);
-        }
-        if (stroke.key() == KeyStroke.Key.H
-            && stroke.modifiers().equals(java.util.Set.of(KeyStroke.Modifier.CTRL))) {
-            return intent(current.resetClickTracking(), Focus.LIST, null, new ToggleHidden());
-        }
-
-        if (focus == Focus.CANCEL) {
-            if (stroke.modifiers().isEmpty() && stroke.key() == KeyStroke.Key.ENTER) {
-                return intent(current.resetClickTracking(), focus, null, new CloseDialog());
-            }
-            if (stroke.modifiers().isEmpty() && stroke.key() == KeyStroke.Key.ARROW_LEFT) {
-                return captured(current.resetClickTracking(), Focus.OK, null);
-            }
-            return captured(current, focus, scrollbarPress);
-        }
-        if (focus == Focus.OK) {
-            if (stroke.modifiers().isEmpty() && stroke.key() == KeyStroke.Key.ENTER) {
-                return confirmSelection(placement, Focus.OK);
-            }
-            if (stroke.modifiers().isEmpty() && stroke.key() == KeyStroke.Key.ARROW_LEFT) {
-                return captured(current.resetClickTracking(), Focus.LIST, null);
-            }
-            if (stroke.modifiers().isEmpty() && stroke.key() == KeyStroke.Key.ARROW_RIGHT) {
-                return captured(current.resetClickTracking(), Focus.CANCEL, null);
-            }
-            return captured(current, focus, scrollbarPress);
-        }
-
         if (stroke.modifiers().isEmpty() && stroke.key() == KeyStroke.Key.BACKSPACE) {
             return intent(
                 current.resetClickTracking(),
                 Focus.LIST,
-                null,
                 new MoveToParentRoot()
             );
         }
@@ -193,7 +198,6 @@ final class OpenFileInputRouter {
                 return intent(
                     current.resetClickTracking(),
                     Focus.LIST,
-                    null,
                     new ChangeRoot(selected.orElseThrow().path())
                 );
             }
@@ -207,7 +211,6 @@ final class OpenFileInputRouter {
             placement,
             interaction,
             Focus.LIST,
-            scrollbarPress,
             true
         );
     }
@@ -215,46 +218,36 @@ final class OpenFileInputRouter {
     private static Result routePointer(
         FileTreeView.Placement placement,
         Focus focus,
-        FileTreeView.ScrollbarPress scrollbarPress,
         PointerEvent pointer,
         long nowNanos,
         long doubleClickWindowNanos
     ) {
         FileTreeView.State current = placement.state();
-        if (scrollbarPress != null) {
-            if (pointer.kind() == PointerEvent.Kind.RELEASE) {
-                return captured(current.resetClickTracking(), Focus.LIST, null);
-            }
-            if (pointer.kind() == PointerEvent.Kind.DRAG) {
-                return captured(placement.drag(pointer, scrollbarPress), Focus.LIST, scrollbarPress);
-            }
-            return captured(current.resetClickTracking(), Focus.LIST, scrollbarPress);
+        if (current.widgetState().drag() != null) {
+            return fromInteraction(
+                placement,
+                placement.handle(pointer, nowNanos, doubleClickWindowNanos),
+                Focus.LIST,
+                true
+            );
         }
         if (!pointer.modifiers().isEmpty()) {
-            return captured(current.resetClickTracking(), focus, scrollbarPress);
+            return captured(current.resetClickTracking(), focus);
         }
         if (!placement.enabled()) {
-            return captured(current.resetClickTracking(), focus, null);
+            return captured(current.resetClickTracking(), focus);
         }
         if (pointer.kind() == PointerEvent.Kind.DRAG) {
             FileTreeView.State reset = current.resetClickTracking();
             return placement.contains(pointer)
-                ? captured(reset, Focus.LIST, null)
-                : ignored(reset, focus, null);
+                ? captured(reset, focus)
+                : ignored(reset, focus);
         }
         if (pointer.kind() == PointerEvent.Kind.RELEASE) {
             return placement.contains(pointer)
-                ? captured(current, Focus.LIST, null)
-                : ignored(current.resetClickTracking(), focus, null);
+                ? captured(current, focus)
+                : ignored(current.resetClickTracking(), focus);
         }
-        if (pointer.kind() == PointerEvent.Kind.PRESS
-            && pointer.button() == PointerEvent.Button.LEFT) {
-            var press = placement.scrollbarPress(pointer);
-            if (press.isPresent()) {
-                return captured(current.resetClickTracking(), Focus.LIST, press.orElseThrow());
-            }
-        }
-
         InteractionResult<FileTreeView.Action> interaction = placement.handle(
             pointer,
             nowNanos,
@@ -264,14 +257,13 @@ final class OpenFileInputRouter {
             FileTreeView.State next = pointer.kind() == PointerEvent.Kind.PRESS
                 ? current.resetClickTracking()
                 : current;
-            return ignored(next, focus, scrollbarPress);
+            return ignored(next, focus);
         }
-        boolean treeHit = placement.contains(pointer);
+        // FocusManager already handles pointer presses; scrolling keeps that focus owner.
         return fromInteraction(
             placement,
             interaction,
-            treeHit ? Focus.LIST : focus,
-            scrollbarPress,
+            focus,
             true
         );
     }
@@ -280,31 +272,29 @@ final class OpenFileInputRouter {
         FileTreeView.Placement placement,
         InteractionResult<FileTreeView.Action> interaction,
         Focus focus,
-        FileTreeView.ScrollbarPress scrollbarPress,
         boolean captureWhenIgnored
     ) {
         if (interaction.output().isEmpty()) {
             return interaction.consumed() || captureWhenIgnored
-                ? captured(placement.state().resetClickTracking(), focus, scrollbarPress)
-                : ignored(placement.state(), focus, scrollbarPress);
+                ? captured(placement.state().resetClickTracking(), focus)
+                : ignored(placement.state(), focus);
         }
         FileTreeView.Action action = interaction.output().orElseThrow();
         if (action instanceof FileTreeView.StateChanged changed) {
-            return captured(changed.state(), focus, scrollbarPress);
+            return captured(changed.state(), focus);
         }
         if (action instanceof FileTreeView.ToggleRequested toggle) {
             return intent(
                 toggle.state(),
                 focus,
-                null,
                 new ToggleDirectory(toggle.id(), toggle.expand())
             );
         }
         if (action instanceof FileTreeView.RootRequested root) {
-            return intent(root.state(), focus, null, new ChangeRoot(root.root()));
+            return intent(root.state(), focus, new ChangeRoot(root.root()));
         }
         if (action instanceof FileTreeView.FileRequested file) {
-            return intent(file.state(), focus, null, new OpenFile(file.file()));
+            return intent(file.state(), focus, new OpenFile(file.file()));
         }
         throw new IllegalStateException("Unsupported file-tree action: " + action);
     }
@@ -313,63 +303,47 @@ final class OpenFileInputRouter {
         FileTreeView.State state = placement.state().resetClickTracking();
         var selected = placement.selectedEntry();
         if (selected.isEmpty()) {
-            return intent(state, focus, null, new SelectionRejected(Rejection.NO_SELECTION));
+            return intent(state, focus, new SelectionRejected(Rejection.NO_SELECTION));
         }
         FileTreeModel.Entry entry = selected.orElseThrow();
         return switch (entry.kind()) {
-            case FILE -> intent(state, focus, null, new OpenFile(entry.path()));
-            case ERROR -> intent(state, focus, null, new SelectionRejected(Rejection.ERROR));
+            case FILE -> intent(state, focus, new OpenFile(entry.path()));
+            case ERROR -> intent(state, focus, new SelectionRejected(Rejection.ERROR));
             case PARENT, DIRECTORY -> intent(
                 state,
                 focus,
-                null,
                 new SelectionRejected(Rejection.DIRECTORY)
             );
         };
     }
 
-    private static Focus next(Focus focus) {
-        return switch (focus) {
-            case LIST -> Focus.OK;
-            case OK -> Focus.CANCEL;
-            case CANCEL -> Focus.LIST;
-        };
-    }
-
-    private static Focus previous(Focus focus) {
-        return switch (focus) {
-            case LIST -> Focus.CANCEL;
-            case OK -> Focus.LIST;
-            case CANCEL -> Focus.OK;
-        };
-    }
-
     private static Result ignored(
         FileTreeView.State state,
-        Focus focus,
-        FileTreeView.ScrollbarPress scrollbarPress
+        Focus focus
     ) {
-        return new Result(state, focus, scrollbarPress, null, false);
+        return new Result(state, focus, null, false);
     }
 
     private static Result captured(
         FileTreeView.State state,
-        Focus focus,
-        FileTreeView.ScrollbarPress scrollbarPress
+        Focus focus
     ) {
-        return new Result(state, focus, scrollbarPress, null, true);
+        return new Result(
+            focus == Focus.LIST ? state : state.cancelPointerInteraction(),
+            focus,
+            null,
+            true
+        );
     }
 
     private static Result intent(
         FileTreeView.State state,
         Focus focus,
-        FileTreeView.ScrollbarPress scrollbarPress,
         Intent intent
     ) {
         return new Result(
-            state,
+            state.cancelPointerInteraction(),
             focus,
-            scrollbarPress,
             Objects.requireNonNull(intent, "intent"),
             true
         );

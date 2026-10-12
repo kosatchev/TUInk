@@ -5,32 +5,21 @@ import dev.tuiframe.input.PasteEvent;
 import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.input.TextInput;
 import dev.tuiframe.input.TuiInputEvent;
+import dev.tuiframe.widget.FocusContext;
 import dev.tuiframe.widget.FocusManager;
 import dev.tuiframe.widget.FocusRoute;
 import dev.tuiframe.widget.FocusScope;
 import dev.tuiframe.widget.InteractionResult;
 import dev.tuiframe.widget.RoutedTarget;
+import dev.tuiframe.widget.TextField;
 import dev.tuink.tui.flow.SearchFocus;
+import dev.tuink.tui.flow.SearchNavigation;
 import dev.tuink.tui.ui.SearchBarView;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
 /** Raw-input adapter for the application-owned multi-control search bar. */
 final class SearchInputRouter {
-    private static final Map<SearchFocus, SearchFocus> VERTICAL_TARGET = Map.of(
-        SearchFocus.FIND, SearchFocus.REPLACE,
-        SearchFocus.REPLACE, SearchFocus.FIND,
-        SearchFocus.CASE, SearchFocus.NEXT_BUTTON,
-        SearchFocus.NEXT_BUTTON, SearchFocus.CASE,
-        SearchFocus.WORD, SearchFocus.PREV_BUTTON,
-        SearchFocus.PREV_BUTTON, SearchFocus.WORD,
-        SearchFocus.WILDCARD, SearchFocus.REPLACE_BUTTON,
-        SearchFocus.REPLACE_BUTTON, SearchFocus.WILDCARD,
-        SearchFocus.ALL, SearchFocus.ALL_BUTTON,
-        SearchFocus.ALL_BUTTON, SearchFocus.ALL
-    );
-
     record Result(boolean consumed, SearchBarView.Action action) {
         private static final Result IGNORED = new Result(false, null);
         private static final Result CAPTURED = new Result(true, null);
@@ -58,13 +47,24 @@ final class SearchInputRouter {
         Objects.requireNonNull(placement, "placement");
         Objects.requireNonNull(event, "event");
         placement.activate(focusManager);
+        placement.retainMouseSelection(focusManager.focused().orElse(null));
+        if (!(event instanceof PointerEvent pointer) || pointer.kind() == PointerEvent.Kind.PRESS) {
+            placement.cancelMouseSelection();
+        }
 
         if (event instanceof KeyStroke stroke) {
             if (isExactShiftTab(stroke)) {
                 return routeTab(focusManager, placement, event);
             }
             if (!stroke.modifiers().isEmpty()) {
-                return Result.IGNORED;
+                if ((stroke.key() == KeyStroke.Key.PAGE_UP || stroke.key() == KeyStroke.Key.PAGE_DOWN)
+                    && stroke.has(KeyStroke.Modifier.SHIFT)) {
+                    return Result.CAPTURED;
+                }
+                return TextField.ownsEditingKey(stroke)
+                    ? isField(focusManager.focused().orElse(null))
+                        ? routeFocused(focusManager, placement, event, true) : Result.CAPTURED
+                    : Result.IGNORED;
             }
             if (stroke.key() == KeyStroke.Key.TAB) {
                 return routeTab(focusManager, placement, event);
@@ -74,17 +74,17 @@ final class SearchInputRouter {
             }
             if (stroke.key() == KeyStroke.Key.ARROW_UP
                 || stroke.key() == KeyStroke.Key.ARROW_DOWN) {
-                return routeVertical(focusManager, placement.focusScope());
+                return routeVertical(focusManager, placement.focusScope(), stroke.key());
             }
             if (stroke.key() == KeyStroke.Key.ARROW_LEFT
                 || stroke.key() == KeyStroke.Key.ARROW_RIGHT) {
                 return routeHorizontal(focusManager, placement, event, stroke.key());
             }
             if (stroke.key() == KeyStroke.Key.ENTER) {
-                return routeEnter(focusManager);
+                return routeFocused(focusManager, placement, event, true);
             }
             if (stroke.key() == KeyStroke.Key.SPACE) {
-                return routeSpace(focusManager);
+                return routeFocused(focusManager, placement, event, true);
             }
             if (stroke.key() == KeyStroke.Key.BACKSPACE
                 || stroke.key() == KeyStroke.Key.DELETE) {
@@ -97,9 +97,7 @@ final class SearchInputRouter {
                 if (isField(focused)) {
                     return routeFocused(focusManager, placement, event, true);
                 }
-                // Home/End outside a field reach the editor command policy.
-                // A clipped scope captures them to protect invisible carets.
-                return focused == null ? Result.CAPTURED : Result.IGNORED;
+                return Result.CAPTURED;
             }
         }
 
@@ -118,8 +116,8 @@ final class SearchInputRouter {
             if (isField(focused)) {
                 return routeFocused(focusManager, placement, event, true);
             }
-            if (" ".equals(text.text()) && isToggle(focused)) {
-                return Result.action(actionFor(focused));
+            if (" ".equals(text.text())) {
+                return routeFocused(focusManager, placement, event, true);
             }
             return Result.CAPTURED;
         }
@@ -142,16 +140,17 @@ final class SearchInputRouter {
 
     private static Result routeVertical(
         FocusManager<SearchFocus> focusManager,
-        FocusScope<SearchFocus, SearchBarView.Action> scope
+        FocusScope<SearchFocus, SearchBarView.Action> scope,
+        KeyStroke.Key key
     ) {
         SearchFocus current = focusManager.focused().orElse(null);
         if (current == null) {
             return Result.CAPTURED;
         }
-        SearchFocus target = VERTICAL_TARGET.get(current);
-        if (target != null) {
-            focusManager.focus(scope, target);
+        if (isField(current)) {
+            return Result.CAPTURED;
         }
+        focusManager.focus(scope, SearchNavigation.vertical(current, key == KeyStroke.Key.ARROW_UP));
         return Result.CAPTURED;
     }
 
@@ -173,33 +172,19 @@ final class SearchInputRouter {
         return Result.CAPTURED;
     }
 
-    private static Result routeEnter(FocusManager<SearchFocus> focusManager) {
-        SearchFocus focused = focusManager.focused().orElse(null);
-        if (focused == null) {
-            return Result.CAPTURED;
-        }
-        if (isActionButton(focused)) {
-            return Result.action(actionFor(focused));
-        }
-        // Enter on fields and option toggles means Find Next.
-        return Result.action(SearchBarView.Action.FIND_NEXT);
-    }
-
-    private static Result routeSpace(FocusManager<SearchFocus> focusManager) {
-        SearchFocus focused = focusManager.focused().orElse(null);
-        // Space toggles options; action buttons do not activate on Space.
-        // Enter activates the focused action button.
-        return isToggle(focused)
-            ? Result.action(actionFor(focused))
-            : Result.CAPTURED;
-    }
-
     private static Result routePointer(
         FocusManager<SearchFocus> focusManager,
         SearchBarView.Placement placement,
         TuiInputEvent event
     ) {
         FocusScope<SearchFocus, SearchBarView.Action> scope = placement.focusScope();
+        PointerEvent pointer = (PointerEvent) event;
+        SearchFocus captured = placement.capturedTarget(pointer).orElse(null);
+        if (captured != null) {
+            RoutedTarget<SearchFocus, SearchBarView.Action> target = scope.target(captured).orElseThrow();
+            FocusContext context = new FocusContext(true, target.enabled(), target.space());
+            return fromInteraction(target.placement().handle(event, context), true);
+        }
         FocusRoute<SearchFocus, SearchBarView.Action> route = focusManager.route(scope, event);
         if (route.target().isEmpty()) {
             return Result.IGNORED;
@@ -251,33 +236,5 @@ final class SearchInputRouter {
 
     private static boolean isField(SearchFocus focus) {
         return focus == SearchFocus.FIND || focus == SearchFocus.REPLACE;
-    }
-
-    private static boolean isToggle(SearchFocus focus) {
-        return focus == SearchFocus.CASE
-            || focus == SearchFocus.WORD
-            || focus == SearchFocus.WILDCARD
-            || focus == SearchFocus.ALL;
-    }
-
-    private static boolean isActionButton(SearchFocus focus) {
-        return focus == SearchFocus.NEXT_BUTTON
-            || focus == SearchFocus.PREV_BUTTON
-            || focus == SearchFocus.REPLACE_BUTTON
-            || focus == SearchFocus.ALL_BUTTON;
-    }
-
-    private static SearchBarView.Action actionFor(SearchFocus focus) {
-        return switch (Objects.requireNonNull(focus, "focus")) {
-            case CASE -> SearchBarView.Action.TOGGLE_CASE;
-            case WORD -> SearchBarView.Action.TOGGLE_WORD;
-            case WILDCARD -> SearchBarView.Action.TOGGLE_WILDCARD;
-            case ALL -> SearchBarView.Action.TOGGLE_ALL_TABS;
-            case NEXT_BUTTON -> SearchBarView.Action.FIND_NEXT;
-            case PREV_BUTTON -> SearchBarView.Action.FIND_PREVIOUS;
-            case REPLACE_BUTTON -> SearchBarView.Action.REPLACE;
-            case ALL_BUTTON -> SearchBarView.Action.REPLACE_ALL;
-            case FIND, REPLACE -> throw new IllegalArgumentException("field has no button action");
-        };
     }
 }

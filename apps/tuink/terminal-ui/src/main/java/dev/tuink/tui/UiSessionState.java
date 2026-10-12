@@ -5,6 +5,7 @@ import dev.tuink.core.TabInsertMode;
 
 final class UiSessionState {
     boolean searchMode;
+    boolean searchEditorFocused;
     boolean showTabBarSetting;
     boolean wrapLinesSetting;
     boolean wrapWordsSetting;

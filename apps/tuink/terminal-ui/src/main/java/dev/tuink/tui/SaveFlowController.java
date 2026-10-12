@@ -78,9 +78,9 @@ final class SaveFlowController {
         BiPredicate<Path, Path> isSameFilePath,
         Function<Path, String> suggestWritableName
     ) {
-        String target = saveAsText.trim();
+        String target = saveAsText;
         if (target.isEmpty()) {
-            return result(true, UiModalState.none(), TextInputEffect.clear(), true, null, null);
+            return result(true, modalState, TextInputEffect.none(), false, "Save failed: file name is empty", null);
         }
 
         final Path path;

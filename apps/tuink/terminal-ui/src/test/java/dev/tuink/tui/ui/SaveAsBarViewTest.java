@@ -18,6 +18,7 @@ import dev.tuiframe.widget.RoutedTarget;
 import dev.tuiframe.widget.TextField;
 import dev.tuiframe.widget.Theme;
 import dev.tuiframe.widget.WidgetThemeKeys;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class SaveAsBarViewTest {
@@ -35,6 +36,8 @@ class SaveAsBarViewTest {
         false
     );
     private static final CellStyle DISABLED = CellStyle.fg(CellColor.BRIGHT_BLACK);
+    private static final CellStyle BUTTON = CellStyle.fg(CellColor.GREEN);
+    private static final CellStyle BUTTON_FOCUSED = new CellStyle(CellColor.BRIGHT_WHITE, CellColor.BLUE, true, true);
     private static final Theme THEME = role -> {
         if (WidgetThemeKeys.TEXT_FIELD_FOCUSED.equals(role)) {
             return FOCUSED;
@@ -42,27 +45,109 @@ class SaveAsBarViewTest {
         if (WidgetThemeKeys.TEXT_FIELD_DISABLED.equals(role)) {
             return DISABLED;
         }
+        if (WidgetThemeKeys.BUTTON.equals(role)) {
+            return BUTTON;
+        }
+        if (WidgetThemeKeys.BUTTON_FOCUSED.equals(role)) {
+            return BUTTON_FOCUSED;
+        }
         return NORMAL;
     };
 
     @Test
-    void rasterRowContainsOnlyLabelAndScopeUsesTheExactRemainingPlacement() {
+    void rasterRowContainsOnlyLabelAndControlsShareOneRowWithoutOverlapping() {
         int columns = 30;
         TextField field = new TextField();
         field.set("secret.txt");
         SaveAsBarView view = SaveAsBarView.build(field, columns);
         SaveAsBarView.Placement placement = view.place(new Object(), 3, viewport(5, columns));
-        RoutedTarget<SaveAsBarView.Target, TextField.Action> target = target(placement);
+        RoutedTarget<SaveAsBarView.Target, SaveAsBarView.Action> target = target(placement);
 
         assertEquals(CellText.fit(SaveAsBarView.DEFAULT_LABEL, columns), view.row());
         assertEquals(view.row(), placement.row());
         assertFalse(view.row().contains(field.text()));
         assertEquals(CellText.width(SaveAsBarView.DEFAULT_LABEL), target.placement().bounds().x());
         assertEquals(3, target.placement().bounds().y());
-        assertEquals(columns - CellText.width(SaveAsBarView.DEFAULT_LABEL), target.placement().bounds().width());
+        assertEquals(4, target.placement().bounds().width());
         assertEquals(placement.fieldBounds(), target.placement().bounds());
         assertTrue(target.enabled());
         assertTrue(target.focusable());
+        assertEquals(new Rect(14, 3, 6, 1), placement.targetBounds(SaveAsBarView.Target.SAVE));
+        assertEquals(new Rect(21, 3, 8, 1), placement.targetBounds(SaveAsBarView.Target.CANCEL));
+        assertTrue(placement.fieldBounds().rightExclusive() < placement.targetBounds(SaveAsBarView.Target.SAVE).x());
+        assertEquals(List.of(SaveAsBarView.Target.FIELD, SaveAsBarView.Target.SAVE, SaveAsBarView.Target.CANCEL),
+            placement.focusScope().tabOrder());
+    }
+
+    @Test
+    void buttonsUseTheSuppliedThemeAndShowNoTextCursorWhenFocused() {
+        int columns = 48;
+        TextField field = new TextField();
+        field.set("draft.txt");
+        SaveAsBarView.Placement placement = SaveAsBarView.build(field, columns)
+            .place(new Object(), 2, viewport(4, columns));
+        FocusManager<SaveAsBarView.Target> focus = new FocusManager<>();
+        placement.activate(focus);
+        focus.focus(placement.focusScope(), SaveAsBarView.Target.SAVE);
+        CellBuffer buffer = new CellBuffer(4, columns);
+        Canvas canvas = new Canvas(buffer);
+        CellText.draw(canvas, 0, 2, placement.row(), PROMPT);
+        placement.paint(canvas, THEME, focus);
+
+        assertTrue(visibleCellRow(buffer, 2).endsWith("[Save] [Cancel] "));
+        assertEquals(BUTTON_FOCUSED, buffer.get(2, placement.targetBounds(SaveAsBarView.Target.SAVE).x()).style());
+        assertEquals(BUTTON, buffer.get(2, placement.targetBounds(SaveAsBarView.Target.CANCEL).x()).style());
+        assertEquals(NORMAL, buffer.get(2, placement.fieldBounds().x()).style());
+        assertTrue(placement.cursorPosition(focus).isEmpty());
+        focus.focus(placement.focusScope(), SaveAsBarView.Target.CANCEL);
+        assertTrue(placement.cursorPosition(focus).isEmpty());
+        focus.focus(placement.focusScope(), SaveAsBarView.Target.FIELD);
+        assertTrue(placement.cursorPosition(focus).isPresent());
+        assertTrue(canvas.put(0, 0, "Z", NORMAL), "all control painters must restore the parent clip");
+    }
+
+    @Test
+    void widthThresholdPreservesAUsableFieldBeforeShowingBothCompleteButtons() {
+        TextField field = new TextField();
+        int minimum = CellText.width(SaveAsBarView.DEFAULT_LABEL) + 1 + 1 + "[Save] [Cancel]".length() + 1;
+        var narrow = SaveAsBarView.build(field, minimum - 1).place(new Object(), 2, viewport(4, minimum - 1));
+        assertEquals(minimum - 1 - CellText.width(SaveAsBarView.DEFAULT_LABEL), narrow.fieldBounds().width());
+        for (SaveAsBarView.Target id : List.of(SaveAsBarView.Target.SAVE, SaveAsBarView.Target.CANCEL)) {
+            assertTrue(narrow.targetBounds(id).isEmpty());
+            assertFalse(narrow.focusScope().target(id).orElseThrow().enabled());
+            assertFalse(narrow.focusScope().target(id).orElseThrow().focusable());
+        }
+        var full = SaveAsBarView.build(field, minimum).place(new Object(), 2, viewport(4, minimum));
+        assertEquals(1, full.fieldBounds().width());
+        assertEquals(minimum - 1, full.targetBounds(SaveAsBarView.Target.CANCEL).rightExclusive());
+        assertTrue(full.focusScope().tabOrder().stream()
+            .map(id -> full.focusScope().target(id).orElseThrow()).allMatch(RoutedTarget::enabled));
+    }
+
+    @Test
+    void sameScopeKeepsButtonFocusUntilResizeHidesItAndPreservesExplicitContentOwnership() {
+        Object scope = new Object();
+        TextField field = new TextField();
+        field.set("draft-😀.txt");
+        field.moveLeft();
+        int caret = field.cursor();
+        var focus = new FocusManager<SaveAsBarView.Target>();
+        var wide = SaveAsBarView.build(field, 48).place(scope, 2, viewport(4, 48));
+        wide.activate(focus);
+        focus.focus(wide.focusScope(), SaveAsBarView.Target.CANCEL);
+        var resized = SaveAsBarView.build(field, 60).place(scope, 2, viewport(4, 60));
+        resized.activate(focus);
+        assertEquals(SaveAsBarView.Target.CANCEL, focus.focused().orElseThrow());
+        assertTrue(resized.cursorPosition(focus).isEmpty());
+
+        var narrow = SaveAsBarView.build(field, 24).place(scope, 2, viewport(4, 24));
+        narrow.activate(focus);
+        assertEquals(SaveAsBarView.Target.FIELD, focus.focused().orElseThrow());
+        assertEquals("draft-😀.txt", field.text());
+        assertEquals(caret, field.cursor());
+        focus.clear(narrow.focusScope());
+        resized.activate(focus);
+        assertTrue(focus.focused().isEmpty(), "reconciliation must not steal explicitly cleared document focus");
     }
 
     @Test
@@ -163,8 +248,9 @@ class SaveAsBarViewTest {
         assertTrue(empty.cursorPosition(emptyFocus).isEmpty());
 
         int columns = 30;
-        SaveAsBarView.Placement clipped = SaveAsBarView.build(field, columns)
-            .place(new Object(), 2, viewport(4, columns - 1));
+        SaveAsBarView full = SaveAsBarView.build(field, columns);
+        int fieldEnd = full.place(new Object(), 2, viewport(4, columns)).fieldBounds().rightExclusive();
+        SaveAsBarView.Placement clipped = full.place(new Object(), 2, viewport(4, fieldEnd - 1));
         FocusManager<SaveAsBarView.Target> clippedFocus = new FocusManager<>();
         clipped.activate(clippedFocus);
 
@@ -198,7 +284,7 @@ class SaveAsBarViewTest {
         assertTrue(visible.cursorPosition(focus).isPresent());
     }
 
-    private static RoutedTarget<SaveAsBarView.Target, TextField.Action> target(
+    private static RoutedTarget<SaveAsBarView.Target, SaveAsBarView.Action> target(
         SaveAsBarView.Placement placement
     ) {
         return placement.focusScope().target(SaveAsBarView.Target.FIELD).orElseThrow();

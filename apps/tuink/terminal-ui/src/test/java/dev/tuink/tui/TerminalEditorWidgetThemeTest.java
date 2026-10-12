@@ -44,13 +44,19 @@ class TerminalEditorWidgetThemeTest {
     }
 
     @Test
-    void saveAsFieldAdapterPreservesTheExistingPromptStyle() {
+    void saveAsAdapterUsesThePromptStyleAndHighlightsFocusedButtons() {
         TerminalEditorApp app = new TerminalEditorApp();
         CellStyle prompt = UiStyles.forTheme(UiStyles.Theme.CYAN).promptAlert();
 
         assertEquals(prompt, app.resolveSaveAsWidgetStyle(WidgetThemeKeys.TEXT_FIELD));
         assertEquals(prompt, app.resolveSaveAsWidgetStyle(WidgetThemeKeys.TEXT_FIELD_FOCUSED));
         assertEquals(prompt, app.resolveSaveAsWidgetStyle(WidgetThemeKeys.TEXT_FIELD_DISABLED));
+        assertEquals(prompt, app.resolveSaveAsWidgetStyle(WidgetThemeKeys.BUTTON));
+        assertEquals(prompt, app.resolveSaveAsWidgetStyle(WidgetThemeKeys.BUTTON_DISABLED));
+        assertEquals(
+            new CellStyle(prompt.bg(), prompt.fg(), true, prompt.underline()),
+            app.resolveSaveAsWidgetStyle(WidgetThemeKeys.BUTTON_FOCUSED)
+        );
         assertNull(app.resolveSaveAsWidgetStyle(new WidgetStyleRole("test.unknown")));
     }
 
@@ -146,14 +152,6 @@ class TerminalEditorWidgetThemeTest {
         assertEquals(
             palette.dialogSelectedMono(),
             app.resolveFileTreeWidgetStyle(WidgetThemeKeys.LIST_ITEM_SELECTED, false)
-        );
-        assertEquals(
-            palette.dialogScrollTrack(),
-            app.resolveFileTreeWidgetStyle(WidgetThemeKeys.SCROLLBAR_TRACK, true)
-        );
-        assertEquals(
-            palette.dialogScrollThumb(),
-            app.resolveFileTreeWidgetStyle(WidgetThemeKeys.SCROLLBAR_THUMB, false)
         );
         assertNull(app.resolveFileTreeWidgetStyle(new WidgetStyleRole("test.unknown"), true));
     }

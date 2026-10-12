@@ -54,7 +54,8 @@ record FrameComposition(
     }
 
     boolean allowsScrollHints() {
-        return !fullRedraw;
+        return !fullRedraw && !layers.blockedInputHighlight() && layers.helpPage() == null
+            && !(layers.contentFocused() && layers.openFile().visible());
     }
 
     record Document(
@@ -91,7 +92,8 @@ record FrameComposition(
         String query,
         SearchOptions options,
         boolean autoSelectionHighlight,
-        SearchBarView.Placement placement
+        SearchBarView.Placement placement,
+        boolean editorFocused
     ) {
         Search {
             Objects.requireNonNull(query, "query");
@@ -106,7 +108,9 @@ record FrameComposition(
         SaveAsBarView.Placement saveAs,
         ConfirmBarView.Placement confirm,
         OpenFile openFile,
-        HelpPage helpPage
+        HelpPage helpPage,
+        boolean blockedInputHighlight,
+        boolean contentFocused
     ) {
         Layers {
             Objects.requireNonNull(openFile, "openFile");

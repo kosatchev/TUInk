@@ -214,10 +214,9 @@ class OpenFileTreeControllerTest {
         FileTreeView.Placement placement,
         dev.tuiframe.input.TuiInputEvent event
     ) {
-        return OpenFileInputRouter.route(
+        return OpenFileDialogTestSupport.route(
             placement,
             OpenFileInputRouter.Focus.LIST,
-            null,
             event,
             System.nanoTime(),
             DOUBLE_CLICK_NANOS

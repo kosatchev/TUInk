@@ -15,28 +15,121 @@ import dev.tuiframe.input.TuiInputEvent;
 import dev.tuiframe.widget.FocusManager;
 import dev.tuiframe.widget.TextField;
 import dev.tuink.tui.ui.SaveAsBarView;
+import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class SaveAsInputRouterTest {
     @Test
+    void tabCyclesThroughFieldSaveAndCancelInBothDirectionsWhileNarrowRowsSkipButtons() {
+        Fixture fixture = fixture(48, new Object());
+        fixture.field.set("draft-😀.txt");
+        fixture.field.moveLeft();
+        int caret = fixture.field.cursor();
+        for (SaveAsBarView.Target expected : List.of(SaveAsBarView.Target.SAVE, SaveAsBarView.Target.CANCEL,
+            SaveAsBarView.Target.FIELD)) {
+            assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.TAB)));
+            assertEquals(expected, fixture.focus.focused().orElseThrow());
+        }
+        for (SaveAsBarView.Target expected : List.of(SaveAsBarView.Target.CANCEL, SaveAsBarView.Target.SAVE,
+            SaveAsBarView.Target.FIELD)) {
+            assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.TAB, KeyStroke.Modifier.SHIFT)));
+            assertEquals(expected, fixture.focus.focused().orElseThrow());
+        }
+        assertEquals("draft-😀.txt", fixture.field.text());
+        assertEquals(caret, fixture.field.cursor());
+
+        Fixture narrow = fixture(24, new Object());
+        for (KeyStroke stroke : List.of(KeyStroke.of(KeyStroke.Key.TAB),
+            KeyStroke.of(KeyStroke.Key.TAB, KeyStroke.Modifier.SHIFT))) {
+            assertCaptured(narrow.route(stroke));
+            assertEquals(SaveAsBarView.Target.FIELD, narrow.focus.focused().orElseThrow());
+        }
+    }
+
+    @Test
+    void visibleButtonsEmitSubmitOrCancelForEnterSpaceAndClickWithoutEditingTheFilename() {
+        for (SaveAsBarView.Target target : List.of(SaveAsBarView.Target.SAVE, SaveAsBarView.Target.CANCEL)) {
+            SaveAsBarView.Action expected = target == SaveAsBarView.Target.SAVE
+                ? SaveAsBarView.Action.SUBMITTED : SaveAsBarView.Action.CANCELLED;
+            for (TuiInputEvent event : List.of(KeyStroke.of(KeyStroke.Key.ENTER),
+                KeyStroke.of(KeyStroke.Key.SPACE), new TextInput(" "))) {
+                Fixture fixture = fixture(48, new Object());
+                fixture.field.set("draft-中.txt");
+                fixture.focus.focus(fixture.placement.focusScope(), target);
+                assertAction(expected, fixture.route(event));
+                assertEquals("draft-中.txt", fixture.field.text());
+            }
+            Fixture fixture = fixture(48, new Object());
+            fixture.field.set("clicked.txt");
+            Rect button = fixture.placement.targetBounds(target);
+            assertAction(expected, fixture.route(pointer(button.y(), button.x(),
+                PointerEvent.Kind.PRESS, PointerEvent.Button.LEFT)));
+            assertEquals(target, fixture.focus.focused().orElseThrow());
+            assertEquals("clicked.txt", fixture.field.text());
+        }
+    }
+
+    @Test
+    void buttonFocusCapturesTextPasteAndCaretKeysWithoutChangingTheField() {
+        for (SaveAsBarView.Target target : List.of(SaveAsBarView.Target.SAVE, SaveAsBarView.Target.CANCEL)) {
+            Fixture fixture = fixture(48, new Object());
+            fixture.field.set("draft-😀.txt");
+            fixture.field.moveLeft();
+            int caret = fixture.field.cursor();
+            fixture.focus.focus(fixture.placement.focusScope(), target);
+            for (TuiInputEvent event : List.of(new TextInput("accidental typing"), new PasteEvent("paste\nvalue"),
+                new PasteEvent("partial", true), KeyStroke.of(KeyStroke.Key.BACKSPACE),
+                KeyStroke.of(KeyStroke.Key.DELETE), KeyStroke.of(KeyStroke.Key.HOME), KeyStroke.of(KeyStroke.Key.END))) {
+                assertCaptured(fixture.route(event));
+                assertEquals(target, fixture.focus.focused().orElseThrow());
+                assertEquals("draft-😀.txt", fixture.field.text());
+                assertEquals(caret, fixture.field.cursor());
+            }
+        }
+        Fixture fixture = fixture(48, new Object());
+        assertAction(SaveAsBarView.Action.VALUE_CHANGED, fixture.route(KeyStroke.of(KeyStroke.Key.SPACE)));
+        assertEquals(" ", fixture.field.text(), "Space in the filename remains text rather than activating Save");
+    }
+
+    @Test
+    void partiallyClippedButtonsCannotBeActivatedOrFocusedThroughTheirVisibleFragment() {
+        for (SaveAsBarView.Target target : List.of(SaveAsBarView.Target.SAVE, SaveAsBarView.Target.CANCEL)) {
+            TextField field = new TextField();
+            field.set("draft.txt");
+            SaveAsBarView view = SaveAsBarView.build(field, 48);
+            Rect bounds = view.place(new Object(), 2, viewport(4, 48)).targetBounds(target);
+            var placement = view.place(new Object(), 2, viewport(4, bounds.rightExclusive() - 1));
+            var focus = new FocusManager<SaveAsBarView.Target>();
+            Fixture fixture = new Fixture(field, focus, placement);
+            placement.activate(focus);
+
+            assertCaptured(fixture.route(pointer(bounds.y(), bounds.x(), PointerEvent.Kind.PRESS,
+                PointerEvent.Button.LEFT)));
+            assertEquals(SaveAsBarView.Target.FIELD, focus.focused().orElseThrow());
+            assertEquals("draft.txt", field.text());
+            assertFalse(placement.focusScope().target(target).orElseThrow().enabled());
+        }
+    }
+
+    @Test
     void routesUnicodeTextCaretEditingAndSubmitThroughTheField() {
         Fixture fixture = fixture(32, new Object());
 
-        assertAction(TextField.Action.VALUE_CHANGED, fixture.route(new TextInput("A😀")));
+        assertAction(SaveAsBarView.Action.VALUE_CHANGED, fixture.route(new TextInput("A😀")));
         assertEquals("A😀", fixture.field.text());
         assertEquals(3, fixture.field.cursor());
 
         assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.ARROW_LEFT)));
         assertEquals(1, fixture.field.cursor());
         assertAction(
-            TextField.Action.VALUE_CHANGED,
+            SaveAsBarView.Action.VALUE_CHANGED,
             fixture.route(KeyStroke.of(KeyStroke.Key.BACKSPACE))
         );
         assertEquals("😀", fixture.field.text());
         assertEquals(0, fixture.field.cursor());
 
-        assertAction(TextField.Action.SUBMITTED, fixture.route(KeyStroke.of(KeyStroke.Key.ENTER)));
+        assertAction(SaveAsBarView.Action.SUBMITTED, fixture.route(KeyStroke.of(KeyStroke.Key.ENTER)));
         assertEquals("😀", fixture.field.text(), "submit must not mutate the field value");
     }
 
@@ -45,7 +138,7 @@ class SaveAsInputRouterTest {
         Fixture fixture = fixture(40, new Object());
 
         assertAction(
-            TextField.Action.VALUE_CHANGED,
+            SaveAsBarView.Action.VALUE_CHANGED,
             fixture.route(new PasteEvent("first\r\n\tsecond\u0000 😀\n", false))
         );
         assertEquals("first second 😀", fixture.field.text());
@@ -53,7 +146,7 @@ class SaveAsInputRouterTest {
         String before = fixture.field.text();
         int cursorBefore = fixture.field.cursor();
         assertAction(
-            TextField.Action.PASTE_REJECTED,
+            SaveAsBarView.Action.PASTE_REJECTED,
             fixture.route(new PasteEvent("partial", true))
         );
         assertEquals(before, fixture.field.text());
@@ -105,10 +198,65 @@ class SaveAsInputRouterTest {
     }
 
     @Test
+    void filenameFieldUsesSharedWordNavigationSelectionAndReplacement() {
+        Fixture fixture = fixture(48, new Object());
+        fixture.field.set("old name.txt");
+        assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.ARROW_LEFT, KeyStroke.Modifier.CTRL)));
+        assertEquals("old name.".length(), fixture.field.cursor());
+        assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.HOME, KeyStroke.Modifier.SHIFT)));
+        assertEquals("old name.", fixture.field.selectedText());
+        assertAction(SaveAsBarView.Action.VALUE_CHANGED, fixture.route(new TextInput("new.")));
+        assertEquals("new.txt", fixture.field.text());
+        assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.A, KeyStroke.Modifier.CTRL)));
+        assertEquals("new.txt", fixture.field.selectedText());
+        assertAction(SaveAsBarView.Action.VALUE_CHANGED, fixture.route(new TextInput("renamed.md")));
+        assertEquals("renamed.md", fixture.field.text());
+        assertEquals(SaveAsBarView.Target.FIELD, fixture.focus.focused().orElseThrow());
+    }
+
+    @Test
+    void draggingFilenameOverButtonsAndOutsideThePromptSelectsWithoutSubmitting() {
+        TextField field = new TextField();
+        field.set("draft-👩‍💻.txt");
+        Fixture fixture = fixture(field, 48, new Object());
+        Rect bounds = fixture.placement.fieldBounds();
+        assertCaptured(fixture.route(pointer(bounds.y(), bounds.x() + 6,
+            PointerEvent.Kind.PRESS, PointerEvent.Button.LEFT)));
+        Rect save = fixture.placement.targetBounds(SaveAsBarView.Target.SAVE);
+        assertCaptured(fixture.route(pointer(save.y(), save.x(),
+            PointerEvent.Kind.DRAG, PointerEvent.Button.LEFT)));
+        assertEquals("👩‍💻.txt", field.selectedText());
+        assertEquals(SaveAsBarView.Target.FIELD, fixture.focus.focused().orElseThrow());
+        assertTrue(fixture.placement.captures(pointer(23, 79,
+            PointerEvent.Kind.RELEASE, PointerEvent.Button.NONE)));
+        assertCaptured(fixture.route(pointer(23, 79, PointerEvent.Kind.RELEASE, PointerEvent.Button.NONE)));
+        assertFalse(field.mouseSelecting());
+        assertEquals("👩‍💻.txt", field.selectedText());
+    }
+
+    @Test
+    void shiftClickFilenameUsesSharedSelectionAndTabCancelsItsCapture() {
+        TextField field = new TextField();
+        field.set("draft.txt");
+        Fixture fixture = fixture(field, 48, new Object());
+        Rect bounds = fixture.placement.fieldBounds();
+        fixture.route(pointer(bounds.y(), bounds.x() + 2, PointerEvent.Kind.PRESS, PointerEvent.Button.LEFT));
+        fixture.route(pointer(bounds.y(), bounds.x() + 2, PointerEvent.Kind.RELEASE, PointerEvent.Button.LEFT));
+        assertCaptured(fixture.route(new PointerEvent(bounds.y(), bounds.x() + 5,
+            PointerEvent.Kind.PRESS, PointerEvent.Button.LEFT, Set.of(KeyStroke.Modifier.SHIFT))));
+        assertEquals("aft", field.selectedText());
+        assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.TAB)));
+        assertFalse(field.mouseSelecting());
+        assertEquals(SaveAsBarView.Target.SAVE, fixture.focus.focused().orElseThrow());
+        assertCaptured(fixture.route(pointer(0, 0, PointerEvent.Kind.DRAG, PointerEvent.Button.LEFT)));
+        assertEquals("aft", field.selectedText());
+    }
+
+    @Test
     void pointerHitAppliesSelfFocusAndEveryPointerMissRemainsModal() {
         TextField field = new TextField();
         field.set("abcd");
-        Fixture fixture = fixture(field, 30, new Object());
+        Fixture fixture = fixture(field, 48, new Object());
         fixture.focus.clear(fixture.placement.focusScope());
         int row = fixture.placement.fieldBounds().y();
         int start = fixture.placement.fieldBounds().x();
@@ -164,7 +312,7 @@ class SaveAsInputRouterTest {
         ));
         assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.F1)));
         assertAction(
-            TextField.Action.PASTE_REJECTED,
+            SaveAsBarView.Action.PASTE_REJECTED,
             fixture.route(new PasteEvent("partial", true))
         );
         assertIgnored(fixture.route(KeyStroke.of(KeyStroke.Key.ESCAPE)));
@@ -191,7 +339,7 @@ class SaveAsInputRouterTest {
             .place(scopeId, 2, viewport(4, 30));
         Fixture visible = new Fixture(field, hidden.focus, visiblePlacement);
 
-        assertAction(TextField.Action.VALUE_CHANGED, visible.route(new TextInput("visible")));
+        assertAction(SaveAsBarView.Action.VALUE_CHANGED, visible.route(new TextInput("visible")));
         assertEquals("visible", field.text());
         assertEquals(SaveAsBarView.Target.FIELD, visible.focus.focused().orElseThrow());
     }
@@ -221,7 +369,7 @@ class SaveAsInputRouterTest {
         return new PointerEvent(row, column, kind, button, Set.of());
     }
 
-    private static void assertAction(TextField.Action expected, SaveAsInputRouter.Result result) {
+    private static void assertAction(SaveAsBarView.Action expected, SaveAsInputRouter.Result result) {
         assertTrue(result.consumed());
         assertEquals(expected, result.action());
     }

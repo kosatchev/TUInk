@@ -9,7 +9,6 @@ import static dev.tuink.tui.command.TuinkCommand.EDIT_SELECT_ALL;
 import static dev.tuink.tui.command.TuinkCommand.EDIT_TOGGLE_LINE_COMMENT;
 import static dev.tuink.tui.command.TuinkCommand.SEARCH_NEXT;
 import static dev.tuink.tui.command.TuinkCommand.SEARCH_PREVIOUS;
-import static dev.tuink.tui.command.TuinkCommand.SEARCH_REPLACE_ALL;
 import static dev.tuink.tui.command.TuinkCommand.TAB_ACTIVATE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -132,7 +131,7 @@ class CommandRouterTest {
         CommandInvocation globalSelectAll = router.invocationFor(
             KeyStroke.of(KeyStroke.Key.A, KeyStroke.Modifier.CTRL)
         ).orElseThrow();
-        CommandInvocation searchReplaceAll = router.invocationForSearch(
+        CommandInvocation fieldSelectAll = router.invocationForSearch(
             EDIT_SELECT_ALL,
             SearchFocus.FIND,
             globalSelectAll
@@ -150,10 +149,10 @@ class CommandRouterTest {
         );
 
         assertEquals(EDIT_SELECT_ALL.id(), globalSelectAll.id());
-        assertEquals(SEARCH_REPLACE_ALL.id(), searchReplaceAll.id());
+        assertEquals(EDIT_SELECT_ALL.id(), fieldSelectAll.id());
         assertEquals(SEARCH_PREVIOUS.id(), searchEnter.id());
         assertEquals(SEARCH_NEXT.id(), fieldEnter.id());
-        assertEquals(SEARCH_REPLACE_ALL, router.invoke(searchReplaceAll).orElseThrow());
+        assertEquals(EDIT_SELECT_ALL, router.invoke(fieldSelectAll).orElseThrow());
         assertEquals(SEARCH_PREVIOUS, router.invoke(searchEnter).orElseThrow());
     }
 

@@ -136,7 +136,9 @@ class FrameCompositionTest {
             null,
             null,
             hidden,
-            HelpPages.KEYMAP
+            HelpPages.KEYMAP,
+            false,
+            false
         );
         assertThrows(
             IllegalArgumentException.class,
@@ -267,7 +269,7 @@ class FrameCompositionTest {
                 prompt,
                 NotificationBar.hidden()
             ),
-            new FrameComposition.Search(false, "", SearchOptions.DEFAULT, false, null),
+            new FrameComposition.Search(false, "", SearchOptions.DEFAULT, false, null, false),
             new FrameComposition.Layers(
                 null,
                 null,
@@ -275,7 +277,9 @@ class FrameCompositionTest {
                 null,
                 null,
                 FrameComposition.OpenFile.hidden(),
-                null
+                null,
+                false,
+                false
             ),
             false,
             false,

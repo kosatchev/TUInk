@@ -2,12 +2,6 @@ package dev.tuiframe.widget;
 
 /** Standard style roles used by the reusable widgets. */
 public final class WidgetThemeKeys {
-    public static final WidgetStyleRole SCROLLBAR_TRACK = new WidgetStyleRole(
-        "widget.scrollbar.track"
-    );
-    public static final WidgetStyleRole SCROLLBAR_THUMB = new WidgetStyleRole(
-        "widget.scrollbar.thumb"
-    );
     public static final WidgetStyleRole BUTTON = new WidgetStyleRole("widget.button");
     public static final WidgetStyleRole BUTTON_FOCUSED = new WidgetStyleRole("widget.button.focused");
     public static final WidgetStyleRole BUTTON_DISABLED = new WidgetStyleRole("widget.button.disabled");

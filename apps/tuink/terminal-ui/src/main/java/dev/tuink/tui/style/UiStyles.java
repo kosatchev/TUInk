@@ -72,8 +72,6 @@ public final class UiStyles {
         CellStyle dialogBorder,
         CellStyle dialogTitle,
         CellStyle dialogSelectedMono,
-        CellStyle dialogScrollTrack,
-        CellStyle dialogScrollThumb,
         CellStyle searchBar,
         CellStyle notifySuccess,
         CellStyle notifyInfo,
@@ -126,8 +124,6 @@ public final class UiStyles {
             cellStyle(CellColor.BLACK, CellColor.BRIGHT_WHITE, true, false), // dialogBorder
             cellStyle(CellColor.BRIGHT_WHITE, CellColor.CYAN, true, false), // dialogTitle
             cellStyle(CellColor.DEFAULT, CellColor.DEFAULT),                // dialogSelectedMono
-            cellStyle(CellColor.BRIGHT_BLACK, CellColor.BRIGHT_WHITE),      // dialogScrollTrack
-            cellStyle(CellColor.BLACK, CellColor.BRIGHT_YELLOW),            // dialogScrollThumb
             cellStyle(CellColor.BRIGHT_WHITE, CellColor.CYAN),              // searchBar
             cellStyle(CellColor.BLACK, CellColor.BRIGHT_GREEN),             // notifySuccess
             cellStyle(CellColor.BRIGHT_WHITE, CellColor.BLUE),              // notifyInfo
@@ -180,8 +176,6 @@ public final class UiStyles {
             cellStyle(CellColor.BLACK, CellColor.BRIGHT_WHITE, true, false), // dialogBorder
             cellStyle(CellColor.BRIGHT_WHITE, CellColor.BLUE, true, false), // dialogTitle
             cellStyle(CellColor.DEFAULT, CellColor.DEFAULT),                // dialogSelectedMono
-            cellStyle(CellColor.BRIGHT_BLACK, CellColor.BRIGHT_WHITE),      // dialogScrollTrack
-            cellStyle(CellColor.BLACK, CellColor.BRIGHT_YELLOW),            // dialogScrollThumb
             cellStyle(CellColor.BRIGHT_WHITE, CellColor.BLUE),              // searchBar
             cellStyle(CellColor.BLACK, CellColor.BRIGHT_GREEN),             // notifySuccess
             cellStyle(CellColor.BRIGHT_WHITE, CellColor.BLUE),              // notifyInfo
@@ -234,8 +228,6 @@ public final class UiStyles {
             cellStyle(CellColor.BLACK, CellColor.BRIGHT_WHITE, true, false), // dialogBorder
             cellStyle(CellColor.BLACK, CellColor.BRIGHT_WHITE, true, false), // dialogTitle
             cellStyle(CellColor.DEFAULT, CellColor.DEFAULT),                 // dialogSelectedMono
-            cellStyle(CellColor.BRIGHT_BLACK, CellColor.BRIGHT_WHITE),       // dialogScrollTrack
-            cellStyle(CellColor.BRIGHT_WHITE, CellColor.BLACK),              // dialogScrollThumb
             cellStyle(CellColor.BLACK, CellColor.BRIGHT_WHITE),              // searchBar
             cellStyle(CellColor.BLACK, CellColor.BRIGHT_GREEN),              // notifySuccess
             cellStyle(CellColor.BRIGHT_WHITE, CellColor.BLUE),               // notifyInfo

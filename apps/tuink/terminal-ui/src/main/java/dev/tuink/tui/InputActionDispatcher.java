@@ -20,6 +20,9 @@ final class InputActionDispatcher {
     }
 
     static DispatchResult dispatch(TuinkCommand command, UiSessionState ui, DispatchContext ctx) {
+        if (ui.readingModeSetting && command.editsDocumentText()) {
+            return DispatchResult.handled("Reading mode: editing is disabled");
+        }
         String statusMessage = null;
         switch (command) {
             case MENU_EDIT -> {
@@ -189,6 +192,7 @@ final class InputActionDispatcher {
             }
             case SEARCH_OPEN -> {
                 ui.searchMode = true;
+                ui.searchEditorFocused = false;
                 return DispatchResult.handled(null);
             }
             case EDIT_COPY -> {
@@ -200,36 +204,22 @@ final class InputActionDispatcher {
                 return DispatchResult.handled(statusMessage);
             }
             case EDIT_CUT -> {
-                if (ui.readingModeSetting) {
-                    statusMessage = "Reading mode: editing is disabled";
+                if (ctx.engine().hasSelection()) {
+                    statusMessage = ctx.engine().cutSelection() ? "Cut selection" : "Nothing to cut";
                 } else {
-                    if (ctx.engine().hasSelection()) {
-                        statusMessage = ctx.engine().cutSelection() ? "Cut selection" : "Nothing to cut";
-                    } else {
-                        statusMessage = ctx.engine().cutCurrentLine() ? "Cut line" : "Nothing to cut";
-                    }
+                    statusMessage = ctx.engine().cutCurrentLine() ? "Cut line" : "Nothing to cut";
                 }
                 return DispatchResult.handled(statusMessage);
             }
             case EDIT_PASTE -> {
-                if (ui.readingModeSetting) {
-                    statusMessage = "Reading mode: editing is disabled";
-                } else {
-                    statusMessage = ctx.engine().pasteClipboard() ? "Pasted" : "Clipboard empty";
-                }
+                statusMessage = ctx.engine().pasteClipboard() ? "Pasted" : "Clipboard empty";
                 return DispatchResult.handled(statusMessage);
             }
             case EDIT_UNDO -> {
-                if (ui.readingModeSetting) {
-                    return DispatchResult.handled("Reading mode: editing is disabled");
-                }
                 statusMessage = ctx.engine().undo() ? "Undo" : "Nothing to undo";
                 return DispatchResult.handled(statusMessage);
             }
             case EDIT_REDO -> {
-                if (ui.readingModeSetting) {
-                    return DispatchResult.handled("Reading mode: editing is disabled");
-                }
                 statusMessage = ctx.engine().redo() ? "Redo" : "Nothing to redo";
                 return DispatchResult.handled(statusMessage);
             }
@@ -238,9 +228,6 @@ final class InputActionDispatcher {
                 return DispatchResult.handled(statusMessage);
             }
             case EDIT_TOGGLE_LINE_COMMENT -> {
-                if (ui.readingModeSetting) {
-                    return DispatchResult.handled("Reading mode: editing is disabled");
-                }
                 EditorEngine.LineCommentResult result = ctx.engine().toggleLineComment();
                 return switch (result.action()) {
                     case COMMENTED -> DispatchResult.handled(
@@ -260,13 +247,8 @@ final class InputActionDispatcher {
                 };
             }
             case EDIT_INSERT_TAB -> {
-                if (ui.readingModeSetting) {
-                    statusMessage = "Reading mode: editing is disabled";
-                } else {
-                    ctx.engine().insertTab();
-                    statusMessage = "";
-                }
-                return DispatchResult.handled(statusMessage);
+                ctx.engine().insertTab();
+                return DispatchResult.handled("");
             }
             case CURSOR_UP -> {
                 ctx.engine().moveUp(false, ctx.contentColumns(), ui.wrapLinesSetting, ui.wrapWordsSetting);
@@ -333,27 +315,15 @@ final class InputActionDispatcher {
                 return DispatchResult.handled(null);
             }
             case EDIT_BACKSPACE -> {
-                if (ui.readingModeSetting) {
-                    statusMessage = "Reading mode: editing is disabled";
-                } else {
-                    ctx.engine().backspace();
-                }
+                ctx.engine().backspace();
                 return DispatchResult.handled(statusMessage);
             }
             case EDIT_DELETE_FORWARD -> {
-                if (ui.readingModeSetting) {
-                    statusMessage = "Reading mode: editing is disabled";
-                } else {
-                    ctx.engine().deleteForward();
-                }
+                ctx.engine().deleteForward();
                 return DispatchResult.handled(statusMessage);
             }
             case EDIT_INSERT_NEWLINE -> {
-                if (ui.readingModeSetting) {
-                    statusMessage = "Reading mode: editing is disabled";
-                } else {
-                    ctx.engine().insertNewline();
-                }
+                ctx.engine().insertNewline();
                 return DispatchResult.handled(statusMessage);
             }
             case UI_ESCAPE, SEARCH_REPLACE -> {

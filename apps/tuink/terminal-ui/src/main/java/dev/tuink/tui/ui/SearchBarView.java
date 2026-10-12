@@ -5,6 +5,7 @@ import dev.tuiframe.cell.Canvas;
 import dev.tuiframe.cell.CellText;
 import dev.tuiframe.geometry.Point;
 import dev.tuiframe.geometry.Rect;
+import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.widget.Button;
 import dev.tuiframe.widget.FocusContext;
 import dev.tuiframe.widget.FocusManager;
@@ -18,6 +19,7 @@ import dev.tuiframe.widget.RoutedTarget;
 import dev.tuiframe.widget.TextField;
 import dev.tuiframe.widget.Theme;
 import dev.tuink.tui.flow.SearchFocus;
+import dev.tuink.tui.flow.SearchNavigation;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -28,18 +30,6 @@ public final class SearchBarView {
     public static final String FIND_LABEL = "Find: ";
     public static final String REPLACE_LABEL = "Replace: ";
     private static final int RIGHT_MARGIN = 1;
-    private static final List<SearchFocus> TARGET_ORDER = List.of(
-        SearchFocus.FIND,
-        SearchFocus.CASE,
-        SearchFocus.WORD,
-        SearchFocus.WILDCARD,
-        SearchFocus.ALL,
-        SearchFocus.REPLACE,
-        SearchFocus.NEXT_BUTTON,
-        SearchFocus.PREV_BUTTON,
-        SearchFocus.REPLACE_BUTTON,
-        SearchFocus.ALL_BUTTON
-    );
 
     private final TextField queryField;
     private final TextField replacementField;
@@ -146,7 +136,7 @@ public final class SearchBarView {
     public Placement place(Object scopeId, int topRow, Rect interactionClip) {
         Objects.requireNonNull(scopeId, "scopeId");
         Rect safeClip = Objects.requireNonNull(interactionClip, "interactionClip");
-        ArrayList<RoutedTarget<SearchFocus, Action>> targets = new ArrayList<>(TARGET_ORDER.size());
+        ArrayList<RoutedTarget<SearchFocus, Action>> targets = new ArrayList<>(SearchNavigation.order().size());
 
         TextField.Placement queryPlacement = queryField.layout(
             new Rect(queryStart, topRow, queryWidth, 1)
@@ -182,8 +172,8 @@ public final class SearchBarView {
             scopeId,
             FocusResetPolicy.FIRST_FOCUSABLE,
             targets,
-            TARGET_ORDER,
-            TARGET_ORDER
+            SearchNavigation.order(),
+            SearchNavigation.order()
         );
         return new Placement(row1, row2, scope);
     }
@@ -236,6 +226,38 @@ public final class SearchBarView {
             return focusScope;
         }
 
+        public boolean captures(PointerEvent pointer) {
+            return capturedTarget(pointer).isPresent();
+        }
+
+        public Optional<SearchFocus> capturedTarget(PointerEvent pointer) {
+            Objects.requireNonNull(pointer, "pointer");
+            for (SearchFocus id : List.of(SearchFocus.FIND, SearchFocus.REPLACE)) {
+                RoutedTarget<SearchFocus, Action> target = focusScope.target(id).orElseThrow();
+                FieldPlacement field = (FieldPlacement) target.placement();
+                if (!target.enabled()) {
+                    field.delegate().cancelMouseSelection();
+                } else if (field.delegate().captures(pointer)) {
+                    return Optional.of(id);
+                }
+            }
+            return Optional.empty();
+        }
+
+        public void cancelMouseSelection() {
+            retainMouseSelection(null);
+        }
+
+        /** A field may keep its capture only while it remains the enabled focus owner. */
+        public void retainMouseSelection(SearchFocus focused) {
+            for (SearchFocus id : List.of(SearchFocus.FIND, SearchFocus.REPLACE)) {
+                RoutedTarget<SearchFocus, Action> target = focusScope.target(id).orElseThrow();
+                if (id != focused || !target.enabled()) {
+                    ((FieldPlacement) target.placement()).delegate().cancelMouseSelection();
+                }
+            }
+        }
+
         public Rect targetBounds(SearchFocus target) {
             return focusScope.target(Objects.requireNonNull(target, "target"))
                 .orElseThrow()
@@ -254,7 +276,7 @@ public final class SearchBarView {
             Objects.requireNonNull(canvas, "canvas");
             Objects.requireNonNull(theme, "theme");
             Objects.requireNonNull(focusManager, "focusManager");
-            for (SearchFocus id : TARGET_ORDER) {
+            for (SearchFocus id : SearchNavigation.order()) {
                 RoutedTarget<SearchFocus, Action> target = focusScope.target(id).orElseThrow();
                 FocusContext context = focusContext(focusManager, target);
                 target.placement().paint(canvas, theme, context.widgetState());

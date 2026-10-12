@@ -1,6 +1,8 @@
 package dev.tuink.tui;
 
+import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.SearchOptions;
+import dev.tuiframe.widget.TextField;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.command.TuinkCommand;
 
@@ -59,6 +61,25 @@ final class SearchController {
         return focus == SearchFocus.FIND || focus == SearchFocus.REPLACE;
     }
 
+    /** Fields copy/cut their local selection; other search controls consume clipboard commands. */
+    static boolean handleFieldClipboard(
+        TuinkCommand command,
+        SearchFocus focus,
+        TextField query,
+        TextField replacement,
+        EditorClipboard clipboard
+    ) {
+        if (command != TuinkCommand.EDIT_COPY
+            && command != TuinkCommand.EDIT_CUT
+            && command != TuinkCommand.EDIT_PASTE) {
+            return false;
+        }
+        if (!isSearchFieldFocus(focus)) {
+            return true;
+        }
+        return FieldClipboard.handle(command, focus == SearchFocus.FIND ? query : replacement, clipboard);
+    }
+
     static TuinkCommand actionForSearchFocus(SearchFocus focus) {
         return switch (focus) {
             case NEXT_BUTTON -> TuinkCommand.SEARCH_NEXT;
@@ -66,51 +87,6 @@ final class SearchController {
             case REPLACE_BUTTON -> TuinkCommand.SEARCH_REPLACE;
             case ALL_BUTTON -> TuinkCommand.SEARCH_REPLACE_ALL;
             default -> TuinkCommand.SEARCH_NEXT;
-        };
-    }
-
-    static SearchFocus nextSearchFocusHorizontal(SearchFocus focus) {
-        return switch (focus) {
-            case FIND -> SearchFocus.CASE;
-            case CASE -> SearchFocus.WORD;
-            case WORD -> SearchFocus.WILDCARD;
-            case WILDCARD -> SearchFocus.ALL;
-            case ALL -> SearchFocus.REPLACE;
-            case REPLACE -> SearchFocus.NEXT_BUTTON;
-            case NEXT_BUTTON -> SearchFocus.PREV_BUTTON;
-            case PREV_BUTTON -> SearchFocus.REPLACE_BUTTON;
-            case REPLACE_BUTTON -> SearchFocus.ALL_BUTTON;
-            case ALL_BUTTON -> SearchFocus.FIND;
-        };
-    }
-
-    static SearchFocus previousSearchFocusHorizontal(SearchFocus focus) {
-        return switch (focus) {
-            case FIND -> SearchFocus.ALL_BUTTON;
-            case CASE -> SearchFocus.FIND;
-            case WORD -> SearchFocus.CASE;
-            case WILDCARD -> SearchFocus.WORD;
-            case ALL -> SearchFocus.WILDCARD;
-            case REPLACE -> SearchFocus.ALL;
-            case NEXT_BUTTON -> SearchFocus.REPLACE;
-            case PREV_BUTTON -> SearchFocus.NEXT_BUTTON;
-            case REPLACE_BUTTON -> SearchFocus.PREV_BUTTON;
-            case ALL_BUTTON -> SearchFocus.REPLACE_BUTTON;
-        };
-    }
-
-    static SearchFocus verticalSearchFocus(SearchFocus focus, boolean up) {
-        return switch (focus) {
-            case FIND -> up ? SearchFocus.REPLACE : SearchFocus.REPLACE;
-            case CASE -> up ? SearchFocus.NEXT_BUTTON : SearchFocus.NEXT_BUTTON;
-            case WORD -> up ? SearchFocus.PREV_BUTTON : SearchFocus.PREV_BUTTON;
-            case WILDCARD -> up ? SearchFocus.REPLACE_BUTTON : SearchFocus.REPLACE_BUTTON;
-            case ALL -> up ? SearchFocus.ALL_BUTTON : SearchFocus.ALL_BUTTON;
-            case REPLACE -> up ? SearchFocus.FIND : SearchFocus.FIND;
-            case NEXT_BUTTON -> up ? SearchFocus.CASE : SearchFocus.CASE;
-            case PREV_BUTTON -> up ? SearchFocus.WORD : SearchFocus.WORD;
-            case REPLACE_BUTTON -> up ? SearchFocus.WILDCARD : SearchFocus.WILDCARD;
-            case ALL_BUTTON -> up ? SearchFocus.ALL : SearchFocus.ALL;
         };
     }
 }

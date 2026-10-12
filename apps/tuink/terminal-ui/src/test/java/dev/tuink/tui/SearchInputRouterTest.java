@@ -86,7 +86,6 @@ class SearchInputRouterTest {
     void upAndDownConnectEachSearchOptionToItsActionOrField() {
         Fixture fixture = fixture(80);
         SearchFocus[][] pairs = {
-            {SearchFocus.FIND, SearchFocus.REPLACE},
             {SearchFocus.CASE, SearchFocus.NEXT_BUTTON},
             {SearchFocus.WORD, SearchFocus.PREV_BUTTON},
             {SearchFocus.WILDCARD, SearchFocus.REPLACE_BUTTON},
@@ -120,6 +119,24 @@ class SearchInputRouterTest {
     }
 
     @Test
+    void partiallyClippedSearchKeepsVerticalFocusAndSkipsInvisibleControlsInTheRing() {
+        Fixture fixture = fixture(new TextField(), new TextField(), 80, viewport(3, 80));
+
+        assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.ARROW_DOWN)));
+        assertEquals(SearchFocus.FIND, fixture.focus.focused().orElseThrow());
+        for (SearchFocus expected : List.of(
+            SearchFocus.CASE, SearchFocus.WORD, SearchFocus.WILDCARD, SearchFocus.ALL, SearchFocus.FIND
+        )) {
+            assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.TAB)));
+            assertEquals(expected, fixture.focus.focused().orElseThrow());
+        }
+        assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.ARROW_LEFT)));
+        assertEquals(SearchFocus.FIND, fixture.focus.focused().orElseThrow());
+        assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.ARROW_UP)));
+        assertEquals(SearchFocus.FIND, fixture.focus.focused().orElseThrow());
+    }
+
+    @Test
     void verticalNavigationRecoversAfterResizeClipsAndRestoresTheSearchBar() {
         Fixture fixture = fixture(80);
         fixture.focus.focus(fixture.placement.focusScope(), SearchFocus.REPLACE);
@@ -147,7 +164,7 @@ class SearchInputRouterTest {
             restored,
             KeyStroke.of(KeyStroke.Key.ARROW_DOWN)
         ));
-        assertEquals(SearchFocus.REPLACE, fixture.focus.focused().orElseThrow());
+        assertEquals(SearchFocus.FIND, fixture.focus.focused().orElseThrow());
         assertCaptured(SearchInputRouter.route(
             fixture.focus,
             restored,
@@ -209,74 +226,62 @@ class SearchInputRouterTest {
         assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.BACKSPACE)));
         assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.DELETE)));
         assertEquals("a", query.text());
-        assertIgnored(fixture.route(KeyStroke.of(KeyStroke.Key.HOME)));
-        assertIgnored(fixture.route(KeyStroke.of(KeyStroke.Key.END)));
+        assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.HOME)));
+        assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.END)));
 
         fixture.focus.focus(fixture.placement.focusScope(), SearchFocus.FIND);
-        assertIgnored(fixture.route(
+        assertCaptured(fixture.route(
             KeyStroke.of(KeyStroke.Key.BACKSPACE, KeyStroke.Modifier.SHIFT)
         ));
-        assertIgnored(fixture.route(
-            KeyStroke.of(KeyStroke.Key.BACKSPACE, KeyStroke.Modifier.CTRL)
-        ));
-        assertIgnored(fixture.route(
+        assertCaptured(fixture.route(
             KeyStroke.of(KeyStroke.Key.HOME, KeyStroke.Modifier.SHIFT)
         ));
         assertIgnored(fixture.route(
             KeyStroke.of(KeyStroke.Key.ENTER, KeyStroke.Modifier.SHIFT)
         ));
         assertIgnored(fixture.route(KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL)));
-        assertIgnored(fixture.route(
+        assertCaptured(fixture.route(
             KeyStroke.of(KeyStroke.Key.ARROW_LEFT, KeyStroke.Modifier.ALT)
         ));
         assertEquals("a", query.text());
-        assertEquals(1, query.cursor());
+        assertEquals(0, query.cursor());
     }
 
     @Test
-    void enterInvokesSearchActionsAndSpaceTogglesOptions() {
+    void enterSubmitsFieldsAndEveryButtonUsesStandardActivationKeys() {
         Fixture fixture = fixture(80);
 
         assertAction(
             SearchBarView.Action.FIND_NEXT,
             fixture.route(KeyStroke.of(KeyStroke.Key.ENTER))
         );
-        fixture.focus.focus(fixture.placement.focusScope(), SearchFocus.CASE);
+        fixture.focus.focus(fixture.placement.focusScope(), SearchFocus.REPLACE);
         assertAction(
             SearchBarView.Action.FIND_NEXT,
             fixture.route(KeyStroke.of(KeyStroke.Key.ENTER))
         );
-        assertAction(
-            SearchBarView.Action.TOGGLE_CASE,
-            fixture.route(KeyStroke.of(KeyStroke.Key.SPACE))
+        List<SearchFocus> buttons = List.of(
+            SearchFocus.CASE, SearchFocus.WORD, SearchFocus.WILDCARD, SearchFocus.ALL,
+            SearchFocus.NEXT_BUTTON, SearchFocus.PREV_BUTTON,
+            SearchFocus.REPLACE_BUTTON, SearchFocus.ALL_BUTTON
         );
-        assertAction(
-            SearchBarView.Action.TOGGLE_CASE,
-            fixture.route(new TextInput(" "))
+        List<SearchBarView.Action> actions = List.of(
+            SearchBarView.Action.TOGGLE_CASE, SearchBarView.Action.TOGGLE_WORD,
+            SearchBarView.Action.TOGGLE_WILDCARD, SearchBarView.Action.TOGGLE_ALL_TABS,
+            SearchBarView.Action.FIND_NEXT, SearchBarView.Action.FIND_PREVIOUS,
+            SearchBarView.Action.REPLACE, SearchBarView.Action.REPLACE_ALL
         );
-
-        fixture.focus.focus(fixture.placement.focusScope(), SearchFocus.NEXT_BUTTON);
-        assertAction(
-            SearchBarView.Action.FIND_NEXT,
-            fixture.route(KeyStroke.of(KeyStroke.Key.ENTER))
-        );
-        assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.SPACE)));
-        assertCaptured(fixture.route(new TextInput(" ")));
-        fixture.focus.focus(fixture.placement.focusScope(), SearchFocus.PREV_BUTTON);
-        assertAction(
-            SearchBarView.Action.FIND_PREVIOUS,
-            fixture.route(KeyStroke.of(KeyStroke.Key.ENTER))
-        );
-        fixture.focus.focus(fixture.placement.focusScope(), SearchFocus.REPLACE_BUTTON);
-        assertAction(
-            SearchBarView.Action.REPLACE,
-            fixture.route(KeyStroke.of(KeyStroke.Key.ENTER))
-        );
-        fixture.focus.focus(fixture.placement.focusScope(), SearchFocus.ALL_BUTTON);
-        assertAction(
-            SearchBarView.Action.REPLACE_ALL,
-            fixture.route(KeyStroke.of(KeyStroke.Key.ENTER))
-        );
+        for (int index = 0; index < buttons.size(); index++) {
+            fixture.focus.focus(fixture.placement.focusScope(), buttons.get(index));
+            for (TuiInputEvent event : List.of(
+                KeyStroke.of(KeyStroke.Key.ENTER),
+                KeyStroke.of(KeyStroke.Key.SPACE),
+                new TextInput(" ")
+            )) {
+                assertAction(actions.get(index), fixture.route(event));
+            }
+            assertCaptured(fixture.route(new TextInput("not a button key")));
+        }
 
         assertAction(
             SearchBarView.Action.CLOSE_REQUESTED,
@@ -285,6 +290,87 @@ class SearchInputRouterTest {
         assertIgnored(fixture.route(
             KeyStroke.of(KeyStroke.Key.ESCAPE, KeyStroke.Modifier.SHIFT)
         ));
+    }
+
+    @Test
+    void bothSpaceEventFormsInsertIntoTheFocusedField() {
+        Fixture fixture = fixture(80);
+        List<SearchFocus> fields = List.of(SearchFocus.FIND, SearchFocus.REPLACE);
+        List<SearchBarView.Action> actions = List.of(
+            SearchBarView.Action.QUERY_CHANGED,
+            SearchBarView.Action.REPLACEMENT_CHANGED
+        );
+        for (int index = 0; index < fields.size(); index++) {
+            fixture.focus.focus(fixture.placement.focusScope(), fields.get(index));
+            assertAction(actions.get(index), fixture.route(KeyStroke.of(KeyStroke.Key.SPACE)));
+            assertAction(actions.get(index), fixture.route(new TextInput(" ")));
+        }
+        assertEquals("  ", fixture.query.text());
+        assertEquals("  ", fixture.replacement.text());
+    }
+
+    @Test
+    void fieldDragKeepsCaptureAcrossOtherControlsAndOutsideTheBar() {
+        for (SearchFocus id : List.of(SearchFocus.FIND, SearchFocus.REPLACE)) {
+            TextField query = new TextField();
+            query.set("abc👩‍💻def");
+            TextField replacement = new TextField();
+            replacement.set("abc👩‍💻def");
+            Fixture fixture = fixture(query, replacement, 80, viewport(5, 80));
+            TextField field = id == SearchFocus.FIND ? query : replacement;
+            Rect bounds = fixture.placement.targetBounds(id);
+            assertCaptured(fixture.route(pointer(bounds.y(), bounds.x() + 1,
+                PointerEvent.Kind.PRESS, PointerEvent.Button.LEFT)));
+            Rect button = fixture.placement.targetBounds(SearchFocus.CASE);
+            assertCaptured(fixture.route(pointer(button.y(), button.x(),
+                PointerEvent.Kind.DRAG, PointerEvent.Button.LEFT)));
+            assertEquals("bc👩‍💻def", field.selectedText());
+            assertEquals(id, fixture.focus.focused().orElseThrow());
+            assertTrue(fixture.placement.captures(pointer(23, 79,
+                PointerEvent.Kind.RELEASE, PointerEvent.Button.NONE)));
+            assertCaptured(fixture.route(pointer(23, 79,
+                PointerEvent.Kind.RELEASE, PointerEvent.Button.NONE)));
+            assertFalse(field.mouseSelecting());
+            assertEquals("bc👩‍💻def", field.selectedText());
+            assertIgnored(fixture.route(pointer(0, 0, PointerEvent.Kind.DRAG, PointerEvent.Button.LEFT)));
+        }
+    }
+
+    @Test
+    void shiftClickExtendsFieldSelectionAndFocusOrKeyboardChangesCancelCapture() {
+        TextField query = new TextField();
+        query.set("abcdef");
+        Fixture fixture = fixture(query, new TextField(), 80, viewport(5, 80));
+        Rect bounds = fixture.placement.targetBounds(SearchFocus.FIND);
+        fixture.route(pointer(bounds.y(), bounds.x() + 1, PointerEvent.Kind.PRESS, PointerEvent.Button.LEFT));
+        fixture.route(pointer(bounds.y(), bounds.x() + 1, PointerEvent.Kind.RELEASE, PointerEvent.Button.LEFT));
+        assertCaptured(fixture.route(new PointerEvent(bounds.y(), bounds.x() + 4,
+            PointerEvent.Kind.PRESS, PointerEvent.Button.LEFT, Set.of(KeyStroke.Modifier.SHIFT))));
+        assertEquals("bcd", query.selectedText());
+        assertAction(SearchBarView.Action.QUERY_CHANGED, fixture.route(new TextInput("X")));
+        assertEquals("aXef", query.text());
+        assertFalse(query.mouseSelecting());
+
+        fixture.route(pointer(bounds.y(), bounds.x() + 1, PointerEvent.Kind.PRESS, PointerEvent.Button.LEFT));
+        fixture.focus.focus(fixture.placement.focusScope(), SearchFocus.CASE);
+        fixture.route(pointer(0, 0, PointerEvent.Kind.DRAG, PointerEvent.Button.LEFT));
+        assertFalse(query.mouseSelecting());
+        assertEquals(1, query.cursor());
+    }
+
+    @Test
+    void clippingAnActiveFieldCancelsItsMouseCapture() {
+        TextField query = new TextField();
+        query.set("abcdef");
+        Fixture fixture = fixture(query, new TextField(), 80, viewport(5, 80));
+        Rect bounds = fixture.placement.targetBounds(SearchFocus.FIND);
+        fixture.route(pointer(bounds.y(), bounds.x() + 1, PointerEvent.Kind.PRESS, PointerEvent.Button.LEFT));
+        SearchBarView.Placement clipped = SearchBarView.build(query, fixture.replacement, 80,
+            false, SearchOptions.MatchMode.SUBSTRING, false)
+            .place(fixture.placement.focusScope().id(), 2, viewport(2, 80));
+        assertFalse(clipped.captures(pointer(0, 0, PointerEvent.Kind.DRAG, PointerEvent.Button.LEFT)));
+        assertFalse(query.mouseSelecting());
+        assertEquals(1, query.cursor());
     }
 
     @Test
@@ -366,11 +452,13 @@ class SearchInputRouterTest {
         assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.END)));
         assertEquals(hiddenCursor, query.cursor());
         assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.ENTER)));
+        assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.SPACE)));
+        assertCaptured(fixture.route(new TextInput(" ")));
         assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.TAB)));
         assertCaptured(fixture.route(
             KeyStroke.of(KeyStroke.Key.TAB, KeyStroke.Modifier.SHIFT)
         ));
-        assertIgnored(fixture.route(
+        assertCaptured(fixture.route(
             KeyStroke.of(KeyStroke.Key.BACKSPACE, KeyStroke.Modifier.CTRL)
         ));
         assertIgnored(fixture.route(

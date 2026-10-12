@@ -76,8 +76,8 @@ class TabBarInputRouterTest {
     void searchAllowsWheelViewportStateButCapturesPressDecisionsAndArrows() {
         Fixture fixture = fixture(TabBar.State.initial());
 
-        assertCapturedCurrent(fixture.route(TabBarInputRouter.Policy.SEARCH, press(1, 2)));
-        assertCapturedCurrent(fixture.route(TabBarInputRouter.Policy.SEARCH, press(1, 4)));
+        assertBlockedCurrent(fixture.route(TabBarInputRouter.Policy.SEARCH, press(1, 2)));
+        assertBlockedCurrent(fixture.route(TabBarInputRouter.Policy.SEARCH, press(1, 4)));
         assertCapturedCurrent(fixture.route(TabBarInputRouter.Policy.SEARCH, press(1, 13)));
 
         TabBarInputRouter.Result wheel = fixture.route(
@@ -91,11 +91,11 @@ class TabBarInputRouterTest {
     void closeConfirmationMayScrollButNeverReturnsAnActivateOrCloseDecision() {
         Fixture fixture = fixture(TabBar.State.initial());
 
-        assertCapturedCurrent(fixture.route(
+        assertBlockedCurrent(fixture.route(
             TabBarInputRouter.Policy.CLOSE_TAB_CONFIRM,
             press(1, 2)
         ));
-        assertCapturedCurrent(fixture.route(
+        assertBlockedCurrent(fixture.route(
             TabBarInputRouter.Policy.CLOSE_TAB_CONFIRM,
             press(1, 4)
         ));
@@ -149,6 +149,63 @@ class TabBarInputRouterTest {
         assertIgnored(result);
     }
 
+    @Test
+    void closeConfirmationKeepsWheelAndChevronScrollingUnblockedIncludingViewportBoundaries() {
+        Fixture middle = fixture(new TabBar.State(1));
+        TabBarInputRouter.Policy policy = TabBarInputRouter.Policy.CLOSE_TAB_CONFIRM;
+
+        assertDecision(middle.route(policy, press(1, 0)), null, null, TabBar.State.initial());
+        assertDecision(middle.route(policy, press(1, 13)), null, null, new TabBar.State(1));
+        assertDecision(middle.route(policy, wheel(1, 2, PointerEvent.Kind.SCROLL_UP)),
+            null, null, TabBar.State.initial());
+        assertDecision(middle.route(policy, wheel(1, 2, PointerEvent.Kind.SCROLL_DOWN)),
+            null, null, new TabBar.State(1));
+        assertEquals(new TabBar.State(1), middle.placement().state(), "routing cannot mutate the placement");
+
+        Fixture first = fixture(TabBar.State.initial());
+        assertDecision(first.route(policy, press(1, 13)), null, null, new TabBar.State(1));
+        assertDecision(first.route(policy, wheel(1, 2, PointerEvent.Kind.SCROLL_DOWN)),
+            null, null, new TabBar.State(1));
+        assertCapturedCurrent(first.route(policy, wheel(1, 2, PointerEvent.Kind.SCROLL_UP)));
+        assertCapturedCurrent(first.route(policy, wheel(0, 2, PointerEvent.Kind.SCROLL_UP)));
+    }
+
+    @Test
+    void suppressedTabAndClosePressesReportBlockingWithoutChangingMouseOrViewportState() {
+        for (TabBarInputRouter.Policy policy : List.of(
+            TabBarInputRouter.Policy.SEARCH,
+            TabBarInputRouter.Policy.CLOSE_TAB_CONFIRM
+        )) {
+            Fixture fixture = fixture(new TabBar.State(1));
+            for (int column : List.of(2, 4)) {
+                PointerEvent pointer = press(1, column);
+                TabBarInputRouter.Result result = fixture.route(policy, pointer);
+
+                assertDecision(result, null, null, new TabBar.State(1), true);
+                assertEquals(press(1, column), pointer);
+                assertEquals(new TabBar.State(1), fixture.placement().state());
+            }
+        }
+    }
+
+    @Test
+    void hoverReleaseUnsupportedPressAndEmptyStripCaptureDoNotReportBlocking() {
+        for (TabBarInputRouter.Policy policy : List.of(
+            TabBarInputRouter.Policy.SEARCH,
+            TabBarInputRouter.Policy.CLOSE_TAB_CONFIRM
+        )) {
+            Fixture fixture = fixture(TabBar.State.initial());
+            for (PointerEvent pointer : List.of(
+                new PointerEvent(1, 2, PointerEvent.Kind.MOVE, PointerEvent.Button.NONE, Set.of()),
+                new PointerEvent(1, 2, PointerEvent.Kind.RELEASE, PointerEvent.Button.LEFT, Set.of()),
+                new PointerEvent(1, 2, PointerEvent.Kind.PRESS, PointerEvent.Button.RIGHT, Set.of()),
+                press(1, 0)
+            )) {
+                assertCapturedCurrent(fixture.route(policy, pointer));
+            }
+        }
+    }
+
     private static Fixture fixture(TabBar.State state) {
         TabBarView.Placement placement = TabBarView.build(items(), 0, state)
             .place(new Rect(0, 1, 14, 1), new Rect(0, 0, 14, 3));
@@ -181,13 +238,28 @@ class TabBarInputRouterTest {
         assertDecision(result, null, null, TabBar.State.initial());
     }
 
+    private static void assertBlockedCurrent(TabBarInputRouter.Result result) {
+        assertDecision(result, null, null, TabBar.State.initial(), true);
+    }
+
     private static void assertDecision(
         TabBarInputRouter.Result result,
         Integer activateIndex,
         Integer closeIndex,
         TabBar.State state
     ) {
+        assertDecision(result, activateIndex, closeIndex, state, false);
+    }
+
+    private static void assertDecision(
+        TabBarInputRouter.Result result,
+        Integer activateIndex,
+        Integer closeIndex,
+        TabBar.State state,
+        boolean blocked
+    ) {
         assertTrue(result.consumed());
+        assertEquals(blocked, result.blocked());
         assertEquals(state, result.state());
         assertEquals(activateIndex, result.activateIndex());
         assertEquals(closeIndex, result.closeIndex());
@@ -195,6 +267,7 @@ class TabBarInputRouterTest {
 
     private static void assertIgnored(TabBarInputRouter.Result result) {
         assertFalse(result.consumed());
+        assertFalse(result.blocked());
         assertEquals(TabBar.State.initial(), result.state());
         assertNull(result.activateIndex());
         assertNull(result.closeIndex());

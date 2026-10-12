@@ -19,6 +19,10 @@ required only for native builds.
 The packaged JVM ZIP requires Java 25 or newer. A step-by-step guide for a new
 computer is available in Russian: [Перенос, сборка и запуск](setup-ru.md).
 
+On Linux, install the `acl` package (`getfacl` and `setfacl`) for the tests and
+for saving existing documents. This runtime requirement applies to both JVM
+and native distributions; the Debian package declares it as a dependency.
+
 Check the active JVM and Gradle environment:
 
 ```bash
@@ -44,8 +48,11 @@ The short benchmark is part of the complete release task.
 Optional [PGO builds](#pgo) use the same SDK and require a POSIX pseudo-terminal
 for training.
 
-Debian packaging additionally requires Linux with `dpkg-deb`, `gzip`, and
-`strip`. `lintian` is optional and is used only for package validation.
+Debian packaging additionally requires Linux with Python 3.10+ as `python3`,
+`dpkg-deb`, `dpkg`, `gzip`, and `strip`/`readelf` from `binutils`. Before package
+assembly, `readelf` inspects the staged binary and `dpkg --compare-versions`
+checks that the minimum versions in `Depends` cover its required glibc/zlib ABI.
+`lintian` is optional and is used only for package validation.
 
 ## Choose a build
 
@@ -215,6 +222,10 @@ The musl binary is written to:
 ```text
 apps/tuink/launcher/build/native/nativeMuslCompile/tuink-musl
 ```
+
+Interactive musl runs use JLine's `exec` provider and require external `tty`
+and `stty` commands in `PATH`, as well as the ACL tools for saving existing
+files. See [runtime dependencies and troubleshooting](packaging.md#complete-release).
 
 Native builds default to `-march=compatibility` so release binaries work on
 older x86_64 CPUs. Override it only when the deployment CPU is known:

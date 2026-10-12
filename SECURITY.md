@@ -21,8 +21,7 @@ from the report. Use only systems and endpoints you are authorized to test.
 
 Relevant reports include terminal-control injection or unsafe terminal
 restoration, path/symlink or installer ownership issues, unintended file
-disclosure or modification, HTTP request or redirect behavior that exposes
-secrets, and compromised dependency or release integrity.
+disclosure or modification, and compromised dependency or release integrity.
 
 The maintainer will assess the report privately, request details if needed,
 prepare a fix, and coordinate disclosure according to severity and available

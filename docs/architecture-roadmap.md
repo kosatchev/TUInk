@@ -74,6 +74,11 @@ layout и render planning. Editor-specific `EditorLayout`, `RenderPlan` и
   Bounded ingress и ограниченный batch на turn сохраняют порядок и fairness.
 - TUIframe предоставляет события, terminal runtime и рисование. Editor commands,
   file flows, palettes и plugin policy принадлежат приложению.
+- Документ, дерево, список и справка используют общие `Scrollbar` и
+  `ScrollInteraction`; `ScrollLayout` рассчитывает полосы и закреплённые колонки.
+  Полосы наследуют фон родительской поверхности и стиль её рамки через
+  `ScrollStyle.fromParent`. Справка использует `ListView.wrappedText` с переносом
+  строк и сохранением логической позиции при изменении ширины окна.
 - Portable plugin API использует semantic styles, ranges, diagnostics и
   declarative contributions. Terminal colors, cells, `Canvas`, widgets и
   terminal events остаются во frontend adapter.
@@ -107,7 +112,7 @@ alpha пример должен собираться отдельной nested b
 зависимостей от TUInk, editor, plugins или internal packages.
 
 Потребности второго consumer определят дальнейшее расширение widgets:
-horizontal list scrolling, thumb drag, custom rows и finer render invalidation.
+horizontal list scrolling, custom rows и finer render invalidation.
 Capability mapping и terminal matrix также требуют проверки вне TUInk.
 
 ### Editor-session и frontend view state

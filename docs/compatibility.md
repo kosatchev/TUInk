@@ -56,6 +56,25 @@ metadata and the saved-file baseline remain unchanged. TUInk does not delete the
 destination after such a failure because another writer may have replaced it.
 Existing-file replacement retains its atomic-move behavior and baseline checks.
 
+Before replacing an existing file, TUInk copies its POSIX permissions and
+owner/group, user-defined extended attributes, and ACLs available through the
+Java filesystem provider to the staged inode. An error reading or applying
+these attributes aborts the save before replacement and leaves the document's
+saved-file baseline unchanged. Attributes unavailable through these views,
+including platform-specific security labels, are outside this guarantee.
+On providers exposing `unix:mode`, this includes all rwx permissions and the
+`setuid`, `setgid`, and `sticky` bits. They are restored after writing contents
+and setting ownership, including on edited files, and verified before commit.
+If the filesystem refuses or silently clears a required bit, the original
+file and save baseline remain unchanged.
+On Linux's default filesystem provider, POSIX access ACLs are instead read with
+`getfacl` and copied with `setfacl` from the `acl` package. The complete ACL,
+including named entries and the exact mask, replaces any ACL inherited by the
+staged file and is verified before commit. Missing tools, failed commands or
+an ACL mismatch abort saving and retain the original. Other providers without
+an ACL view do not promise ACL preservation. Atomic replacement deliberately breaks
+hard links; other names continue to refer to the old inode.
+
 ## Storage formats
 
 Persisted files must have an explicit format marker, strict validation, complete current-schema serialization, and safe handling of incompatible content. A format change replaces the current contract; it does not imply a migration path.
@@ -178,6 +197,11 @@ remaining runtime snapshots. End of input, an external interrupt, or an
 application failure preserves recovery and attempts a final save of dirty
 tabs without the usual autosave delay. Abrupt process termination can retain
 only the last successfully committed snapshot.
+
+Automatic snapshot writes are spaced by at least two seconds after each
+attempt, including a failed attempt. A failed update retains the previously
+committed snapshot. The final save on end of input, interruption, or application
+failure bypasses this retry delay.
 
 All fields must be validated before a snapshot is used. Incompatible snapshots must remain intact, must not be overwritten by autosave, and may be deleted only through an explicit user action. The recovery directory and files must use restrictive permissions where the platform supports them: `0700` for directories and `0600` for files. Symlinks must not be followed when reading, writing, or deleting recovery data.
 

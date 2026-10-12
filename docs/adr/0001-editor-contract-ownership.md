@@ -22,11 +22,20 @@ paths with subtly different revision and range semantics.
 - `DocumentId`, `DocumentSnapshot`, `TextPosition`, `TextRange`, `TextEdit`, and
   `WorkspaceEdit`.
 
-`editor-session` owns executable behavior: command registry/handlers, workspace
-edit validation, revision gates, and external-event ingress. Frontends own
-keymaps and built-in presentation catalogs, but submit the same
-`CommandInvocation`. A future `plugin-api` may depend on `editor-contract`; it
-must not redefine these DTOs or depend on `editor-session` implementation.
+`editor-session` owns the reusable command registry and document execution
+boundary: workspace edit validation, revision gates, and external-event ingress.
+The TUInk frontend owns keymaps, built-in presentation catalogs, focus-based
+receiver selection, application/file operations, and view commands. A future
+`plugin-api` may depend on `editor-contract`; it must not redefine these DTOs or
+depend on `editor-session` implementation.
+
+Command identity does not determine its receiver: Copy or Undo may address a
+focused control or the document. The frontend selects that receiver before
+execution. TUIframe owns local control behavior without depending on TUInk
+command identifiers. Keyboard and menu commands must converge on the same
+receiver and execution path. The execution result, including rejection and
+view effects, governs cursor following; viewport code must not predict success
+from a second list of command identifiers.
 
 Command arguments remain serialized strings so invocations are recordable and
 transportable. Every registered command declares a schema. The session rejects
@@ -46,6 +55,16 @@ or changed. Accepted batches cross one narrow core replacement boundary and
 produce one undo entry.
 
 Both modules are internal/incubating until plugin compatibility fixtures exist.
+
+## Migration status (2026-10-12)
+
+The registry, argument schemas, revision gates, and workspace edit boundary are
+implemented. The TUInk built-in bridge still resolves many invocations back to
+its command enum for execution in frontend routers. Registering an invocation
+therefore does not yet mean that all built-in behavior executes inside the
+document session. Consolidating receiver selection and execution results is a
+separate migration; it must not move widget/view/file behavior into the document
+engine merely to remove that bridge.
 
 ## Consequences
 

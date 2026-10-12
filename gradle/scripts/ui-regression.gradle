@@ -1,0 +1,29 @@
+def uiRegressionRoot = rootProject.file('verification/ui')
+def uiScripts = rootProject.fileTree(uiRegressionRoot) { include '*.py' }
+def uiRegressionScript = new File(uiRegressionRoot, 'run.py').absolutePath
+def uiJavaLauncher = javaToolchains.launcherFor(java.toolchain)
+def uiInstalledLibraries = layout.buildDirectory.dir('install/tuink/lib')
+def uiOutputRoot = rootProject.layout.buildDirectory.dir('ui-regression')
+
+def uiHarnessTest = tasks.register('uiHarnessTest', Exec) {
+    group = 'verification'
+    description = 'Validate the UI regression screen parser and PTY process cleanup without starting Java.'
+    inputs.files(uiScripts)
+    commandLine('python3', '-B', new File(uiRegressionRoot, 'test_harness.py').absolutePath)
+}
+
+tasks.register('uiRegressionTest', Exec) {
+    group = 'verification'
+    description = 'Run Linux PTY regressions against the installed JVM editor.'
+    dependsOn(tasks.named('installDist'), uiHarnessTest)
+    inputs.files(uiScripts)
+    inputs.files(configurations.runtimeClasspath)
+    outputs.dir(uiOutputRoot)
+    outputs.upToDateWhen { false }
+    doFirst {
+        commandLine('python3', '-B', uiRegressionScript,
+            '--java', uiJavaLauncher.get().executablePath.asFile.absolutePath,
+            '--classpath', uiInstalledLibraries.get().asFile.absolutePath + '/*',
+            '--output-root', uiOutputRoot.get().asFile.absolutePath)
+    }
+}

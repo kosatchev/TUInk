@@ -46,3 +46,6 @@ jobs:
         run: >-
           ./gradlew --no-daemon --stacktrace --warning-mode=fail -PenablePgo
           :app:verifyNativeToolchain check :app:distZip :app:perfHarnessTest :app:pgoHarnessTest
+
+      - name: Check keyboard, pointer, viewport, history, and recovery in a PTY
+        run: ./gradlew --no-daemon --stacktrace --warning-mode=fail :app:uiRegressionTest

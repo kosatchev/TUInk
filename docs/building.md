@@ -69,6 +69,8 @@ checks that the minimum versions in `Depends` cover its required glibc/zlib ABI.
 | Debian package | `./gradlew :app:nativeDeb` | `build/releases/tuink_<version>_<arch>.deb` |
 | Benchmark harness self-test | `./gradlew :app:perfHarnessTest` | Python fixture, parser, and statistics checks |
 | PGO harness self-test | `./gradlew :app:pgoHarnessTest` | Python training-input and profile-merge checks |
+| UI harness self-test | `./gradlew :app:uiHarnessTest` | Screen parser and PTY cleanup checks |
+| Linux UI regressions | `./gradlew :app:uiRegressionTest` | Real JVM keyboard/pointer/resize/history/recovery checks |
 | Optional PGO glibc binary | `./gradlew :app:nativeProfileOptimize -PenablePgo` | `apps/tuink/launcher/build/native/nativePgoOptimizedCompile/tuink-pgo` |
 | Render smoke benchmark | `./gradlew :app:perfSmoke` | `build/performance/render/` |
 | Full render benchmark | `./gradlew :app:perfCheck` | `build/performance/render/` |
@@ -110,6 +112,10 @@ Run the canonical application entrypoint:
 
 The editor requires an interactive TTY. An IDE console or redirected stdin may
 be detected as a dumb terminal.
+
+Linux CI also runs the separate [terminal UI regression gate](../verification/ui/README.md).
+It requires Python 3.10+ and a POSIX PTY, launches the installed JVM distribution
+with isolated homes, and leaves diagnostic logs under `build/ui-regression/`.
 
 ## Dependency integrity
 

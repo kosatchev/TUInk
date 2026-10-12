@@ -30,8 +30,10 @@ TUIframe provides the shared behavior in `tuiframe-widgets`:
   disabled, clipped, and unavailable surfaces are skipped. It also focuses the
   first available dialog control.
 - `DialogInputPolicy` evaluates application-classified actions against the
-  current target and mode. Clipboard commands on buttons are ignored. Undo and
-  redo apply only to content. Blocking dialogs reject content modifications,
+  current target and mode. Clipboard commands on buttons are ignored. Local
+  command support belongs to the receiving control: a field with its own history
+  may handle Undo/Redo; unsupported local commands are consumed without falling
+  through to content. Blocking dialogs reject content modifications,
   cut, paste, undo, and redo while permitting navigation, selection, and copy.
   Exclusive dialogs reject every action directed at content, including
   navigation, selection, copy, and scrolling. Controls retain the same local
@@ -52,12 +54,23 @@ tab, and menu commands remain unavailable from a document behind a blocking
 or exclusive operation. Escape and the existing per-dialog Ctrl+Q actions
 continue through the dialog's cancellation policy.
 
-`TextField` owns its horizontal viewport as well as its pointer capture.
+`TextField` owns its text, selection gesture data, and horizontal viewport.
 Cancelling capture preserves the viewing position; Copy and other actions that
-leave the text and caret unchanged must not scroll the field. TUInk coordinates
-document pointer ownership and ends gestures before handling keyboard input or
-a new pointer press. Document wrapping anchors and reading-mode command effects
-belong to TUInk, which owns the text model and command semantics.
+leave the text and caret unchanged must not scroll the field. A shared TUIframe
+capture coordinator owns delivery of drag/release beyond the current hit box and
+termination on surface/focus/geometry changes. Capture identity is stable across
+frames; delivery resolves the current placement instead of retaining an obsolete
+placement. The widget owns the gesture data; the coordinator owns delivery.
+TUInk reports active-surface transitions and adapts its document gesture to this
+contract. Document wrapping anchors and reading-mode command effects belong to
+TUInk, which owns the text model and command semantics.
+
+These ownership rules are migration requirements. Existing per-dialog capture
+adapters and command exceptions are removed as consumers move to the shared
+contracts; they must not become a second persistent route. Until each consumer
+has migrated, real PTY regressions protect the existing focus and cancellation
+behavior. `KeyStroke.SPACE` and `TextInput(" ")` have identical local meaning in
+text fields, without application-specific event conversion.
 
 Search is non-blocking and includes the editable document in its focus cycle.
 Save As and confirmation prompts are blocking: their focus cycles include the

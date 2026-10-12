@@ -69,6 +69,7 @@ import dev.tuiframe.widget.DialogInputPolicy;
 import dev.tuiframe.widget.DialogMode;
 import dev.tuiframe.widget.FocusManager;
 import dev.tuiframe.widget.FocusContext;
+import dev.tuiframe.widget.ListView;
 import dev.tuiframe.widget.FocusResetPolicy;
 import dev.tuiframe.widget.FocusScope;
 import dev.tuiframe.widget.FocusSpace;
@@ -136,6 +137,9 @@ public class TerminalEditorApp {
     private final Theme colorOverlayWidgetTheme = key -> resolveOverlayWidgetStyle(key, true);
     private final Theme monoOverlayWidgetTheme = key -> resolveOverlayWidgetStyle(key, false);
     private final FocusManager<HelpOverlayInputRouter.Target> helpFocusManager = new FocusManager<>();
+    private HelpPage helpScrollPage;
+    private ListView.WrappedText helpText;
+    private ListView.State helpScrollState = ListView.State.initial();
     private final Theme confirmWidgetTheme = this::resolveConfirmWidgetStyle;
     private final FocusManager<ConfirmChoice> confirmFocusManager = new FocusManager<>();
     private final Theme saveAsWidgetTheme = this::resolveSaveAsWidgetStyle;
@@ -426,6 +430,9 @@ public class TerminalEditorApp {
                         helpHintsMode = modalState.isHelpHints();
                         helpLicensesMode = modalState.isHelpLicenses();
                         helpAuthorMode = modalState.isHelpAuthor();
+                        if (!helpHintsMode && !helpLicensesMode && !helpAuthorMode) {
+                            resetHelpScroll();
+                        }
                         pendingOverwritePath = modalState.pendingOverwritePath();
                         pendingCloseTabIndex = modalState.pendingCloseTabIndex();
                         confirmMode = recoveryConfirmMode
@@ -1014,8 +1021,11 @@ public class TerminalEditorApp {
                             if (!uiSessionState.mouseModeSetting || !uiSessionState.mouseModeAvailable) {
                                 return true;
                             }
-                            Scrollbar.Drag dialogDrag = kind == ModalInputPolicy.Kind.OPEN_FILE
-                                ? openFileTree.state().widgetState().drag() : null;
+                            Scrollbar.Drag dialogDrag = switch (kind) {
+                                case HELP -> helpScrollState.drag();
+                                case OPEN_FILE -> openFileTree.state().widgetState().drag();
+                                default -> null;
+                            };
                             if (Scrollbar.captures(mouse, dialogDrag)) {
                                 return false;
                             }
@@ -1288,6 +1298,7 @@ public class TerminalEditorApp {
                             cancelDocumentPointerInteraction();
                             cancelFieldMouseSelection();
                             tabBarColumns = -1;
+                            helpScrollState = new ListView.State(-1, helpScrollState.firstVisibleIndex());
                             openFileTree.adopt(openFileTree.state().cancelPointerInteraction());
                             topMenu.adopt(topMenu.state().cancelPointerInteraction());
                             return;
@@ -1344,12 +1355,8 @@ public class TerminalEditorApp {
                                     modalState.isHelpLicenses(),
                                     modalState.isHelpAuthor()
                                 );
-                                HelpOverlayPlacement overlay = helpOverlayPlacement(rows, cols, helpPage);
-                                HelpOverlayInputRouter.Result helpInput = HelpOverlayInputRouter.route(
-                                    helpFocusManager,
-                                    overlay.focusScope(),
-                                    overlay.frame(),
-                                    inputEvent
+                                HelpOverlayInputRouter.Result helpInput = routeHelpOverlayInput(
+                                    rows, cols, helpPage, inputEvent
                                 );
                                 if (helpInput.closeRequested()) {
                                     helpFocusManager.deactivate(HelpOverlayInputRouter.Scope.HELP);
@@ -3198,8 +3205,8 @@ public class TerminalEditorApp {
 
     private HelpDialogLayout helpDialogLayout(int rows, int cols, int contentRows) {
         int preferredWidth = 68;
-        // +2 = top/bottom frame borders; content fills the interior without an extra blank row.
-        int preferredHeight = contentRows + 2;
+        // Frame borders and one footer row surround the help viewport.
+        int preferredHeight = contentRows + 3;
         int width = Math.max(24, Math.min(preferredWidth, cols - 4));
         int height = Math.max(8, Math.min(preferredHeight, rows - 4));
         int left = Math.max(0, (cols - width) / 2);
@@ -3220,14 +3227,30 @@ public class TerminalEditorApp {
 
     private HelpOverlayPlacement helpOverlayPlacement(int rows, int cols, HelpPage page) {
         HelpDialogLayout layout = helpDialogLayout(rows, cols, page.rows().size());
+        int visibleRows = rows < 8 || cols < 24 ? 0 : Math.max(0, layout.height() - 3);
+        if (helpScrollPage != page) {
+            helpScrollPage = page;
+            helpScrollState = ListView.State.initial();
+            helpText = ListView.wrappedText(page.rows());
+        }
         HelpOverlayPlacement cached = helpOverlayCache;
         Rect viewport = new Rect(0, 0, cols, rows);
+        if (cached != null && !cached.viewport().equals(viewport) && helpScrollState.drag() != null) {
+            helpScrollState = new ListView.State(-1, helpScrollState.firstVisibleIndex());
+        }
         if (cached != null
             && cached.page() == page
+            && cached.content().state().equals(helpScrollState)
             && cached.layout().equals(layout)
             && cached.viewport().equals(viewport)) {
             return cached;
         }
+        ListView.Placement content = helpText.layout(
+            new Rect(layout.left() + 2, layout.top() + 1, Math.max(0, layout.width() - 4), visibleRows),
+            helpScrollState,
+            cached != null && cached.page() == page ? cached.content() : null
+        );
+        helpScrollState = content.state();
         Modal frame = infoDialogFrame(layout, page.title());
         Button close = helpCloseButton(layout);
         RoutedTarget<HelpOverlayInputRouter.Target, Button.Action> closeTarget = new RoutedTarget<>(
@@ -3241,6 +3264,8 @@ public class TerminalEditorApp {
         );
         HelpOverlayPlacement prepared = new HelpOverlayPlacement(
             page,
+            content,
+            helpFooter(content, Math.max(0, layout.width() - 4)),
             layout,
             viewport,
             frame.layout(new Rect(layout.left(), layout.top(), layout.width(), layout.height())),
@@ -3255,6 +3280,47 @@ public class TerminalEditorApp {
         return prepared;
     }
 
+    private void resetHelpScroll() {
+        helpScrollPage = null;
+        helpText = null;
+        helpScrollState = ListView.State.initial();
+        helpOverlayCache = null;
+    }
+
+    private static String helpFooter(ListView.Placement content, int textWidth) {
+        int visibleRows = content.contentBounds().height();
+        if (content.rowCount() <= visibleRows) {
+            return "Esc/Enter: close";
+        }
+        int firstRow = content.state().firstVisibleIndex();
+        int end = Math.min(content.rowCount(), firstRow + visibleRows);
+        String range = (firstRow + 1) + "-" + end + "/" + content.rowCount();
+        return range + (textWidth >= 44 ? "  Up/Down PgUp/PgDn Home/End" : " PgUp/PgDn");
+    }
+
+    HelpOverlayInputRouter.Result routeHelpOverlayInput(
+        int rows, int cols, HelpPage page, TuiInputEvent event
+    ) {
+        HelpOverlayPlacement overlay = helpOverlayPlacement(rows, cols, page);
+        boolean visible = overlay.content().bounds().height() > 0;
+        var scrolled = overlay.content().handle(
+            event, new FocusContext(visible, visible, FocusSpace.root(overlay.viewport()))
+        );
+        if (scrolled.output().orElse(null) instanceof ListView.StateChanged changed) {
+            helpScrollState = changed.state();
+        }
+        if (scrolled.consumed()) {
+            return new HelpOverlayInputRouter.Result(true, false);
+        }
+        HelpOverlayInputRouter.Result result = HelpOverlayInputRouter.route(
+            helpFocusManager, overlay.focusScope(), overlay.frame(), event
+        );
+        if (result.closeRequested()) {
+            resetHelpScroll();
+        }
+        return result;
+    }
+
     void paintHelpOverlay(Canvas canvas, int rows, int cols, HelpPage page, boolean colorEnabled) {
         paintHelpOverlay(canvas, rows, cols, page, colorEnabled, false);
     }
@@ -3263,7 +3329,7 @@ public class TerminalEditorApp {
         Canvas canvas, int rows, int cols, HelpPage page, boolean colorEnabled, boolean highlighted
     ) {
         if (page == null) {
-            helpOverlayCache = null;
+            resetHelpScroll();
             return;
         }
         drawInfoOverlay(canvas, helpOverlayPlacement(rows, cols, page), colorEnabled, highlighted);
@@ -3278,26 +3344,22 @@ public class TerminalEditorApp {
         if (overlay == null || overlay.viewport().height() < 8 || overlay.viewport().width() < 24) {
             return;
         }
-        HelpPage page = overlay.page();
         HelpDialogLayout layout = overlay.layout();
         Theme widgetTheme = colorEnabled ? colorOverlayWidgetTheme : monoOverlayWidgetTheme;
         if (highlighted) {
             widgetTheme = widgetTheme.withSurface(styles.dialog(), blockingAccent(colorEnabled));
         }
         overlay.frame().paint(canvas, widgetTheme);
-        int textRow = layout.top() + 1;
         int textCol = layout.left() + 2;
         int textWidth = Math.max(0, layout.width() - 4);
-        int maxRows = Math.max(0, layout.height() - 2);
-        for (int i = 0; i < page.rows().size() && i < maxRows; i++) {
-            drawMenuLine(
-                canvas,
-                textRow + i,
-                textCol,
-                clipText(page.rows().get(i), textWidth),
-                styles.dialog()
-            );
-        }
+        overlay.content().paint(canvas, widgetTheme);
+        drawMenuLine(
+            canvas,
+            layout.top() + layout.height() - 2,
+            textCol,
+            clipText(overlay.footer(), textWidth),
+            styles.dialog()
+        );
         RoutedTarget<HelpOverlayInputRouter.Target, Button.Action> closeTarget = overlay.focusScope()
             .target(HelpOverlayInputRouter.Target.CLOSE)
             .orElseThrow();
@@ -3311,7 +3373,9 @@ public class TerminalEditorApp {
     }
 
     CellStyle resolveOverlayWidgetStyle(WidgetStyleRole key, boolean colorEnabled) {
-        if (WidgetThemeKeys.MODAL_BODY.equals(key) || WidgetThemeKeys.BUTTON.equals(key)) {
+        if (WidgetThemeKeys.MODAL_BODY.equals(key)
+            || WidgetThemeKeys.BUTTON.equals(key)
+            || WidgetThemeKeys.LIST_ITEM.equals(key)) {
             return styles.dialog();
         }
         if (WidgetThemeKeys.MODAL_BORDER.equals(key)) {
@@ -4342,6 +4406,8 @@ public class TerminalEditorApp {
 
     private record HelpOverlayPlacement(
         HelpPage page,
+        ListView.Placement content,
+        String footer,
         HelpDialogLayout layout,
         Rect viewport,
         PlacedModal frame,

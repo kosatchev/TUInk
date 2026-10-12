@@ -29,6 +29,7 @@ import dev.tuink.tui.flow.ConfirmChoice;
 import dev.tuink.tui.input.EditorInput;
 import dev.tuink.tui.ui.ConfirmBarView;
 import dev.tuink.tui.ui.FileTreeView;
+import dev.tuink.tui.ui.HelpPage;
 import dev.tuink.tui.ui.SaveAsBarView;
 import java.nio.file.Path;
 import java.util.List;
@@ -178,7 +179,17 @@ class ModalInputPolicyTest {
     }
 
     @Test
-    void helpClosingDoesNotProduceFeedback() {
+    void helpScrollingIncludingBoundaryNoOpsAndClosingDoNotProduceFeedback() {
+        TerminalEditorApp app = new TerminalEditorApp();
+        HelpPage page = new HelpPage("Help", List.of("one", "two", "three", "four"));
+        for (KeyStroke.Key key : List.of(
+            KeyStroke.Key.HOME, KeyStroke.Key.ARROW_UP, KeyStroke.Key.PAGE_UP,
+            KeyStroke.Key.END, KeyStroke.Key.ARROW_DOWN, KeyStroke.Key.PAGE_DOWN
+        )) {
+            KeyStroke event = KeyStroke.of(key);
+            assertTrue(app.routeHelpOverlayInput(8, 24, page, event).consumed());
+            assertFalse(blocked(Kind.HELP, event));
+        }
         Rect clip = new Rect(0, 0, 30, 12);
         var frame = new Modal(20, 8, "Help").layout(new Rect(2, 2, 20, 8));
         var close = Button.plain("Close").layout(new Rect(4, 8, 5, 1));

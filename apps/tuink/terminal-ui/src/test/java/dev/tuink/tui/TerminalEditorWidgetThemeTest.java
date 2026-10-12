@@ -153,6 +153,7 @@ class TerminalEditorWidgetThemeTest {
             palette.dialogSelectedMono(),
             app.resolveFileTreeWidgetStyle(WidgetThemeKeys.LIST_ITEM_SELECTED, false)
         );
+        assertEquals(palette.dialog(), app.resolveOverlayWidgetStyle(WidgetThemeKeys.LIST_ITEM, true));
         assertNull(app.resolveFileTreeWidgetStyle(new WidgetStyleRole("test.unknown"), true));
     }
 }

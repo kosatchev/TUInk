@@ -1079,7 +1079,7 @@ public class TerminalEditorApp {
                             return false;
                         }
                         DialogInputPolicy.Action action = DialogCommandPolicy.action(event, command);
-                        DialogInputPolicy.Decision decision = DialogInputPolicy.decide(mode,
+                        DialogInputPolicy.Decision decision = DialogCommandPolicy.decide(mode,
                             DialogCommandPolicy.target(kind, openFileFocusState.focus(),
                                 saveAsFocusManager.focused().orElse(null), blockingContentFocused), action);
                         if (decision == DialogInputPolicy.Decision.BLOCK) {
@@ -1337,7 +1337,7 @@ public class TerminalEditorApp {
                         }
                         if (searchOwnsRawInput(uiSessionState.searchMode, modalState, openFileMode, topMenu.isOpen())
                             && !uiSessionState.searchEditorFocused
-                            && DialogInputPolicy.decide(DialogMode.NON_BLOCKING,
+                            && DialogCommandPolicy.decide(DialogMode.NON_BLOCKING,
                                 SearchController.isSearchFieldFocus(searchFocusManager.focused().orElse(null))
                                     ? DialogInputPolicy.Target.TEXT_INPUT : DialogInputPolicy.Target.BUTTON,
                                 DialogCommandPolicy.action(inputEvent, physicalCommand)).consumed()) {

@@ -4,7 +4,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuiframe.cell.Canvas;
 import dev.tuiframe.geometry.Rect;
+import dev.tuiframe.input.KeyStroke;
+import dev.tuiframe.input.TuiInputEvent;
 import dev.tuiframe.widget.DialogInputPolicy.Action;
 import dev.tuiframe.widget.DialogInputPolicy.Decision;
 import dev.tuiframe.widget.DialogInputPolicy.Target;
@@ -88,14 +91,36 @@ class DialogInputPolicyTest {
     }
 
     @Test
-    void historyCommandsOnDialogControlsNeverReachTheContentHistory() {
+    void localHistoryCommandsAreIndependentOfDialogModeAndControlRole() {
         for (DialogMode mode : DialogMode.values()) {
             for (Target target : List.of(Target.TEXT_INPUT, Target.BUTTON, Target.OTHER_CONTROL)) {
                 for (Action action : List.of(Action.UNDO, Action.REDO)) {
                     Decision decision = DialogInputPolicy.decide(mode, target, action);
-                    assertEquals(Decision.IGNORE, decision, mode + " " + target + " " + action);
-                    assertTrue(decision.consumed());
+                    assertEquals(Decision.ALLOW, decision, mode + " " + target + " " + action);
+                    assertFalse(decision.consumed());
                 }
+            }
+        }
+    }
+
+    @Test
+    void aControlWithItsOwnHistoryReceivesUndoAndRedoInEveryDialogMode() {
+        for (DialogMode mode : DialogMode.values()) {
+            HistoryControl control = new HistoryControl();
+            FocusScope<String, Integer> scope = FocusScope.single("local-history", FocusResetPolicy.FIRST_FOCUSABLE,
+                new RoutedTarget<>("control", control, FocusSpace.root(control.bounds())));
+            FocusManager<String> focus = new FocusManager<>();
+            focus.focus(scope, "control");
+            for (KeyStroke.Key key : List.of(KeyStroke.Key.Z, KeyStroke.Key.Y)) {
+                KeyStroke event = KeyStroke.of(key, KeyStroke.Modifier.CTRL);
+                Action action = key == KeyStroke.Key.Z ? Action.UNDO : Action.REDO;
+                Decision decision = DialogInputPolicy.decide(mode, Target.OTHER_CONTROL, action);
+                assertEquals(Decision.ALLOW, decision, mode + " " + action);
+                FocusRoute<String, Integer> route = focus.route(scope, event);
+                var result = route.target().orElseThrow().placement().handle(event, route.context().orElseThrow());
+                assertTrue(result.consumed());
+                assertEquals(key == KeyStroke.Key.Z ? 0 : 1, result.output().orElseThrow());
+                assertEquals("control", focus.focused().orElseThrow());
             }
         }
     }
@@ -160,5 +185,34 @@ class DialogInputPolicyTest {
             new RoutedTarget<>("first", Button.plain("First").layout(new Rect(1, 1, 5, 1)), space),
             new RoutedTarget<>("second", Button.plain("Second").layout(new Rect(8, 1, 6, 1)), space)
         ), List.of("first", "second"), List.of("first", "second"));
+    }
+
+    private static final class HistoryControl implements PlacedInteractiveWidget<Integer> {
+        private int value = 1;
+
+        @Override
+        public Rect bounds() {
+            return new Rect(0, 0, 10, 1);
+        }
+
+        @Override
+        public void paint(Canvas canvas, Theme theme, WidgetState state) {
+        }
+
+        @Override
+        public InteractionResult<Integer> handle(TuiInputEvent event, FocusContext context) {
+            if (!(event instanceof KeyStroke stroke) || !context.focused() || !context.enabled()
+                || !stroke.has(KeyStroke.Modifier.CTRL)) {
+                return InteractionResult.ignored();
+            }
+            if (stroke.key() == KeyStroke.Key.Z) {
+                value = 0;
+            } else if (stroke.key() == KeyStroke.Key.Y) {
+                value = 1;
+            } else {
+                return InteractionResult.ignored();
+            }
+            return InteractionResult.output(value);
+        }
     }
 }

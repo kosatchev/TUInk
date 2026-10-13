@@ -4,7 +4,9 @@ import dev.tuiframe.input.PasteEvent;
 import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.input.TextInput;
 import dev.tuiframe.input.TuiInputEvent;
+import dev.tuiframe.widget.DialogInputPolicy;
 import dev.tuiframe.widget.DialogInputPolicy.Action;
+import dev.tuiframe.widget.DialogInputPolicy.Decision;
 import dev.tuiframe.widget.DialogInputPolicy.Target;
 import dev.tuiframe.widget.DialogMode;
 import dev.tuink.tui.command.TuinkCommand;
@@ -13,6 +15,16 @@ import dev.tuink.tui.ui.SaveAsBarView;
 /** TUInk's classification of commands; TUIframe decides how dialog modes handle them. */
 final class DialogCommandPolicy {
     private DialogCommandPolicy() {
+    }
+
+    /** TUInk's current dialog and search controls have no local undo history. */
+    static Decision decide(DialogMode mode, Target target, Action action) {
+        Decision access = DialogInputPolicy.decide(mode, target, action);
+        if (access == Decision.ALLOW && target != Target.CONTENT
+            && (action == Action.UNDO || action == Action.REDO)) {
+            return Decision.IGNORE;
+        }
+        return access;
     }
 
     static DialogMode mode(ModalInputPolicy.Kind kind) {

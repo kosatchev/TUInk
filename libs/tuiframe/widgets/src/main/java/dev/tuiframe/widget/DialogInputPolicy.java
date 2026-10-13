@@ -2,7 +2,10 @@ package dev.tuiframe.widget;
 
 import java.util.Objects;
 
-/** Shared input policy. Applications classify their own commands before consulting it. */
+/**
+ * Dialog access policy. Applications classify their own commands before consulting it.
+ * Local controls own their history capabilities; a dialog mode only restricts the background content.
+ */
 public final class DialogInputPolicy {
     public enum Target {
         CONTENT,
@@ -43,9 +46,6 @@ public final class DialogInputPolicy {
             return Decision.BLOCK;
         }
         if (target == Target.BUTTON && (action == Action.COPY || action == Action.CUT || action == Action.PASTE)) {
-            return Decision.IGNORE;
-        }
-        if (target != Target.CONTENT && (action == Action.UNDO || action == Action.REDO)) {
             return Decision.IGNORE;
         }
         if (mode == DialogMode.BLOCKING && target == Target.CONTENT) {

@@ -415,7 +415,7 @@ class DialogBehaviorIntegrationTest {
             TuinkCommand command = event instanceof KeyStroke stroke
                 ? commands.invocationFor(stroke).flatMap(invocation -> TuinkCommand.fromId(invocation.id())).orElse(null)
                 : null;
-            Decision decision = DialogInputPolicy.decide(mode,
+            Decision decision = DialogCommandPolicy.decide(mode,
                 DialogCommandPolicy.target(kind, null,
                     focus.focused().filter(SaveAsBarView.Target.class::isInstance)
                         .map(SaveAsBarView.Target.class::cast).orElse(null), contentFocused), DialogCommandPolicy.action(event, command));

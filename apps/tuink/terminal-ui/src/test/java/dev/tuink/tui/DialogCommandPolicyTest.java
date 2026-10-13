@@ -20,6 +20,7 @@ import dev.tuiframe.widget.DialogInputPolicy.Action;
 import dev.tuiframe.widget.DialogInputPolicy.Decision;
 import dev.tuiframe.widget.DialogInputPolicy.Target;
 import dev.tuiframe.widget.DialogMode;
+import dev.tuiframe.widget.TextField;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -200,6 +201,61 @@ class DialogCommandPolicyTest {
     }
 
     @Test
+    void currentTuinkControlsConsumeUnsupportedHistoryWhileToolkitAllowsLocalHistory() {
+        for (DialogMode mode : DialogMode.values()) {
+            for (Target target : List.of(Target.TEXT_INPUT, Target.BUTTON, Target.OTHER_CONTROL)) {
+                for (TuinkCommand command : List.of(TuinkCommand.EDIT_UNDO, TuinkCommand.EDIT_REDO)) {
+                    Action action = DialogCommandPolicy.action(PHYSICAL_KEY, command);
+                    assertEquals(Decision.ALLOW, DialogInputPolicy.decide(mode, target, action));
+                    assertEquals(Decision.IGNORE, DialogCommandPolicy.decide(mode, target, action),
+                        mode + " " + target + " " + command);
+                }
+            }
+            for (Action action : Action.values()) {
+                assertEquals(DialogInputPolicy.decide(mode, Target.CONTENT, action),
+                    DialogCommandPolicy.decide(mode, Target.CONTENT, action), mode + " " + action);
+            }
+        }
+    }
+
+    @Test
+    void unsupportedFieldHistoryPreservesTheFieldDocumentSelectionClipboardAndHistory() {
+        for (DialogMode mode : DialogMode.values()) {
+            Fixture fixture = fixture();
+            fixture.tab.engine().beginSelectionAt(new Position(0, 0));
+            fixture.tab.engine().extendSelectionTo(new Position(0, "alpha".length()));
+            var modelBefore = fixture.tab.model().snapshotLines();
+            long revisionBefore = fixture.tab.model().revision();
+            Position cursorBefore = fixture.tab.state().getCursor();
+            Position anchorBefore = fixture.tab.state().getSelectionAnchor();
+            TextField field = new TextField();
+            field.set("local 👩‍💻");
+            field.selectAll();
+            for (TuinkCommand command : List.of(TuinkCommand.EDIT_UNDO, TuinkCommand.EDIT_REDO)) {
+                Decision decision = DialogCommandPolicy.decide(mode, Target.TEXT_INPUT,
+                    DialogCommandPolicy.action(PHYSICAL_KEY, command));
+                if (!decision.consumed()) {
+                    InputActionDispatcher.dispatch(command, fixture.ui,
+                        new InputActionDispatcher.DispatchContext(fixture.tab.engine(), fixture.tab.state(),
+                            fixture.topMenu, ignored -> {}, 3, 12));
+                }
+                assertTrue(decision.consumed(), mode + " " + command);
+                assertEquals(modelBefore, fixture.tab.model().snapshotLines());
+                assertEquals(revisionBefore, fixture.tab.model().revision());
+                assertEquals(cursorBefore, fixture.tab.state().getCursor());
+                assertEquals(anchorBefore, fixture.tab.state().getSelectionAnchor());
+                assertEquals("local 👩‍💻", field.text());
+                assertEquals("local 👩‍💻", field.selectedText());
+                assertEquals("clipboard seed", fixture.clipboard.text());
+            }
+            assertTrue(fixture.tab.engine().undo());
+            assertEquals(List.of(""), fixture.tab.model().snapshotLines());
+            assertTrue(fixture.tab.engine().redo());
+            assertEquals(modelBefore, fixture.tab.model().snapshotLines());
+        }
+    }
+
+    @Test
     void escapeCancelsEveryActiveDialogButCtrlQOnlyCancelsSaveAndConfirmationFlows() {
         for (ModalInputPolicy.Kind kind : List.of(ModalInputPolicy.Kind.SAVE_AS, ModalInputPolicy.Kind.CONFIRM,
             ModalInputPolicy.Kind.HELP, ModalInputPolicy.Kind.OPEN_FILE)) {
@@ -229,7 +285,7 @@ class DialogCommandPolicyTest {
 
     private static Decision routeContent(Fixture fixture, ModalInputPolicy.Kind kind,
         TuiInputEvent event, TuinkCommand command) {
-        Decision decision = DialogInputPolicy.decide(DialogCommandPolicy.mode(kind),
+        Decision decision = DialogCommandPolicy.decide(DialogCommandPolicy.mode(kind),
             DialogCommandPolicy.target(kind, null, null, true),
             DialogCommandPolicy.action(event, command));
         if (decision.consumed()) {

@@ -363,6 +363,15 @@ public class EditorEngine {
     }
 
     public void open(Path path) throws IOException {
+        open(path, true);
+    }
+
+    /** Opens an existing file without treating a missing target as a new document. */
+    public void openExisting(Path path) throws IOException {
+        open(path, false);
+    }
+
+    private void open(Path path, boolean createIfMissing) throws IOException {
         if (path == null) {
             throw new IOException("No file selected");
         }
@@ -374,7 +383,7 @@ public class EditorEngine {
             state.setLineSeparator(loaded.lineSeparator());
             openedDisposition = SaveDisposition.REPLACE_EXISTING;
         } catch (NoSuchFileException missing) {
-            if (Files.isSymbolicLink(normalizedPath)) {
+            if (!createIfMissing || Files.isSymbolicLink(normalizedPath)) {
                 throw missing;
             }
             model.replaceLines(

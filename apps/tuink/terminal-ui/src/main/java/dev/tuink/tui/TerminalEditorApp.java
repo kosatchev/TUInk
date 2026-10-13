@@ -101,6 +101,7 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
@@ -3566,7 +3567,7 @@ public class TerminalEditorApp {
             Path target = open.file();
             try {
                 EditorTab tab = newEditorTab();
-                tab.engine().open(target);
+                tab.engine().openExisting(target);
                 tab = tab.withRenderPlanBuilder(
                     new RenderPlanBuilder(resolveHighlighter(target), tab.textLayout())
                 );
@@ -3574,6 +3575,9 @@ public class TerminalEditorApp {
                 int newIndex = tabs.size() - 1;
                 notification.success("Opened " + target);
                 return new OpenFileApplyResult(false, newIndex);
+            } catch (NoSuchFileException e) {
+                notification.error("Open failed: file no longer exists: " + target);
+                return new OpenFileApplyResult(true, activeTabIndex);
             } catch (IOException e) {
                 notification.error("Open failed: " + e.getMessage());
                 return new OpenFileApplyResult(true, activeTabIndex);

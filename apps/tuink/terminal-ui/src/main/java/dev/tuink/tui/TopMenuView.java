@@ -287,8 +287,10 @@ final class TopMenuView {
         if (!wrapLines) {
             wrapWords += " (disabled)";
         }
-        boolean effectiveSyntax = ui.syntaxHighlightingSetting
-            && !"Light".equalsIgnoreCase(themeLabel);
+        String syntaxLabel = checked(ui.syntaxHighlightingSetting) + " Syntax highlighting";
+        if (!ui.syntaxHighlightingAvailable) {
+            syntaxLabel += " (unavailable in " + themeLabel + ")";
+        }
         GutterDiffMode gutterDiff = ui.gutterDiffModeSetting == null
             ? GutterDiffMode.MYERS
             : ui.gutterDiffModeSetting;
@@ -303,7 +305,7 @@ final class TopMenuView {
             ),
             item(VIEW_TOGGLE_WHITESPACE, checked(ui.visibleWhitespaceSetting) + " Visible tabs/spaces"),
             separator(),
-            item(VIEW_TOGGLE_SYNTAX, checked(effectiveSyntax) + " Syntax highlighting"),
+            item(VIEW_TOGGLE_SYNTAX, syntaxLabel, ui.syntaxHighlightingAvailable),
             item(VIEW_TOGGLE_RAINBOW_BRACKETS, checked(ui.rainbowBracketsSetting) + " Rainbow brackets"),
             item(
                 VIEW_TOGGLE_SELECTION_HIGHLIGHT,

@@ -385,6 +385,7 @@ public class TerminalEditorApp {
 
                     @Override
                     public void prepareTurn() {
+                        uiSessionState.syntaxHighlightingAvailable = syntaxHighlightingAvailable();
                         if (state != sessionContext.state()) {
                             cancelDocumentPointerInteraction();
                             cancelFieldMouseSelection();
@@ -5100,7 +5101,11 @@ public class TerminalEditorApp {
     }
 
     private boolean effectiveSyntaxHighlighting(boolean syntaxHighlightingSetting) {
-        return theme != UiStyles.Theme.LIGHT && syntaxHighlightingSetting;
+        return syntaxHighlightingAvailable() && syntaxHighlightingSetting;
+    }
+
+    private boolean syntaxHighlightingAvailable() {
+        return theme != UiStyles.Theme.LIGHT;
     }
 
     private void applyTheme(UiStyles.Theme theme) {

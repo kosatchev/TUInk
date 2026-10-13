@@ -141,6 +141,9 @@ final class InputActionDispatcher {
                 return DispatchResult.handled(statusMessage);
             }
             case VIEW_TOGGLE_SYNTAX -> {
+                if (!ui.syntaxHighlightingAvailable) {
+                    return DispatchResult.handled("Syntax highlighting is unavailable in the current theme");
+                }
                 ui.syntaxHighlightingSetting = !ui.syntaxHighlightingSetting;
                 statusMessage = ui.syntaxHighlightingSetting
                     ? "Syntax highlighting enabled"

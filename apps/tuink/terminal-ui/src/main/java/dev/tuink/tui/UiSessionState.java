@@ -20,6 +20,7 @@ final class UiSessionState {
     boolean autoListSetting;
     boolean visibleWhitespaceSetting;
     boolean syntaxHighlightingSetting;
+    boolean syntaxHighlightingAvailable = true;
     boolean rainbowBracketsSetting;
     boolean autoSelectionHighlightSetting;
     GutterDiffMode gutterDiffModeSetting;

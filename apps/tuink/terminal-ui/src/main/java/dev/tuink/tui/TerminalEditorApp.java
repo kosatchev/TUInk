@@ -2197,7 +2197,8 @@ public class TerminalEditorApp {
                 String suggestion = saveAsSuggestions.suggestionFor(
                     tabs.get(activeTabIndex).tabSession(),
                     null,
-                    suggestWritableName(state.getCurrentFile())
+                    suggestWritableName(state.getCurrentFile()),
+                    this::isSuitableSaveAsDraft
                 );
                 saveAsInput.set(suggestion);
                 saveAsSuggestions.rememberDraft(tabs.get(activeTabIndex).tabSession(), suggestion);
@@ -4152,11 +4153,21 @@ public class TerminalEditorApp {
             : saveAsSuggestions.suggestionFor(
                 tab.tabSession(),
                 null,
-                suggestWritableName(file)
+                suggestWritableName(file),
+                this::isSuitableSaveAsDraft
             );
         saveAsInput.set(suggestion);
         saveAsSuggestions.rememberDraft(tab.tabSession(), suggestion);
         notification.clear();
+    }
+
+    private boolean isSuitableSaveAsDraft(String draft) {
+        try {
+            Path path = Path.of(draft);
+            return validateSaveTarget(path) == null && !isReadOnlyFile(path);
+        } catch (java.nio.file.InvalidPathException invalid) {
+            return false;
+        }
     }
 
     private SaveFlowProgress continueQuitSaveFlow(

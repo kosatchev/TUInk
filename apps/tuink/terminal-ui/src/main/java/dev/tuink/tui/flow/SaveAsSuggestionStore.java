@@ -5,13 +5,22 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.IdentityHashMap;
 import java.util.Map;
+import java.util.Objects;
+import java.util.function.Predicate;
 
 public final class SaveAsSuggestionStore {
     private final Map<TabSession, String> draftsByTab = new IdentityHashMap<>();
 
     public String suggestionFor(TabSession tabSession, Path currentFile, String defaultFileName) {
+        return suggestionFor(tabSession, currentFile, defaultFileName, draft -> true);
+    }
+
+    /** Application policy may reject a draft which no longer offers a usable save target. */
+    public String suggestionFor(TabSession tabSession, Path currentFile, String defaultFileName,
+        Predicate<String> suitableDraft) {
+        Objects.requireNonNull(suitableDraft, "suitableDraft");
         String draft = draftsByTab.get(tabSession);
-        if (draft != null && !draft.isBlank()) {
+        if (draft != null && !draft.isBlank() && suitableDraft.test(draft)) {
             return draft;
         }
         if (currentFile != null) {

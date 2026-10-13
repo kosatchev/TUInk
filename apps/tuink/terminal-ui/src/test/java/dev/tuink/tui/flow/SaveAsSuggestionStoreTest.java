@@ -42,4 +42,28 @@ class SaveAsSuggestionStoreTest {
 
         assertEquals(existing.toString(), suggestion);
     }
+
+    @Test
+    void aRejectedSavedPathFallsBackWithoutErasingTheRememberedChoice(@TempDir Path tempDir) {
+        Path source = tempDir.resolve("source.txt");
+        Path copy = tempDir.resolve("source-copy.txt");
+        TabSession tab = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
+        SaveAsSuggestionStore store = new SaveAsSuggestionStore();
+        store.rememberSavedPath(tab, source);
+
+        assertEquals(copy.toString(), store.suggestionFor(tab, null, copy.toString(),
+            draft -> !draft.equals(source.toString())));
+        assertEquals(source.toString(), store.suggestionFor(tab, source, copy.toString()));
+    }
+
+    @Test
+    void aSuitableUserDraftKeepsItsExactNameEvenWhenTheTargetExists(@TempDir Path tempDir) throws IOException {
+        Path target = Files.createFile(tempDir.resolve("chosen.txt"));
+        TabSession tab = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
+        SaveAsSuggestionStore store = new SaveAsSuggestionStore();
+        store.rememberDraft(tab, target.toString());
+
+        assertEquals(target.toString(), store.suggestionFor(tab, null,
+            tempDir.resolve("source-copy.txt").toString(), draft -> draft.equals(target.toString())));
+    }
 }

@@ -120,33 +120,33 @@ import java.util.function.Supplier;
  */
 public class TerminalEditorApp {
     private static final String DEFAULT_FILE_NAME = "untitled.txt";
-    private static final Object SAVE_AS_SCOPE_ID = new Object();
-    private static final Object SEARCH_SCOPE_ID = new Object();
-    private static final Object OPEN_FILE_SCOPE_ID = new Object();
+    static final Object SAVE_AS_SCOPE_ID = new Object();
+    static final Object SEARCH_SCOPE_ID = new Object();
+    static final Object OPEN_FILE_SCOPE_ID = new Object();
     private static final long NOTIFY_DURATION_NANOS = 3_000_000_000L;
-    private static final long OPEN_DIALOG_DOUBLE_CLICK_NANOS = 450_000_000L;
+    static final long OPEN_DIALOG_DOUBLE_CLICK_NANOS = 450_000_000L;
     private static final int PROFILE_LOG_EVERY_FRAMES = 30;
     private static final int AUTO_SELECTION_HIGHLIGHT_MIN_CHARS = 2;
     private static final int AUTO_SELECTION_HIGHLIGHT_MAX_CHARS = 128;
     private static final int CTRL_F_SELECTION_MAX_CHARS = 256;
     private static final long RECOVERY_AUTOSAVE_DEBOUNCE_NANOS = 2_000_000_000L;
     private static final long RECOVERY_ERROR_NOTIFY_COOLDOWN_NANOS = 5_000_000_000L;
-    private final EditorClipboard clipboard = new EditorClipboard();
-    private final DialogAttention modalAttention = new DialogAttention();
-    private UiStyles.Theme theme = UiStyles.Theme.CYAN;
-    private UiStyles.Palette styles = UiStyles.forTheme(theme);
+    final EditorClipboard clipboard = new EditorClipboard();
+    final DialogAttention modalAttention = new DialogAttention();
+    UiStyles.Theme theme = UiStyles.Theme.CYAN;
+    UiStyles.Palette styles = UiStyles.forTheme(theme);
     private final Theme colorOverlayWidgetTheme = key -> resolveOverlayWidgetStyle(key, true);
     private final Theme monoOverlayWidgetTheme = key -> resolveOverlayWidgetStyle(key, false);
-    private final FocusManager<HelpOverlayInputRouter.Target> helpFocusManager = new FocusManager<>();
+    final FocusManager<HelpOverlayInputRouter.Target> helpFocusManager = new FocusManager<>();
     private HelpPage helpScrollPage;
     private ListView.WrappedText helpText;
-    private ListView.State helpScrollState = ListView.State.initial();
+    ListView.State helpScrollState = ListView.State.initial();
     private final Theme confirmWidgetTheme = this::resolveConfirmWidgetStyle;
-    private final FocusManager<ConfirmChoice> confirmFocusManager = new FocusManager<>();
+    final FocusManager<ConfirmChoice> confirmFocusManager = new FocusManager<>();
     private final Theme saveAsWidgetTheme = this::resolveSaveAsWidgetStyle;
-    private final FocusManager<SaveAsBarView.Target> saveAsFocusManager = new FocusManager<>();
+    final FocusManager<SaveAsBarView.Target> saveAsFocusManager = new FocusManager<>();
     private final Theme searchWidgetTheme = this::resolveSearchWidgetStyle;
-    private final FocusManager<SearchFocus> searchFocusManager = new FocusManager<>();
+    final FocusManager<SearchFocus> searchFocusManager = new FocusManager<>();
     private final Theme colorTabBarWidgetTheme = key -> resolveTabBarWidgetStyle(key, true);
     private final Theme monoTabBarWidgetTheme = key -> resolveTabBarWidgetStyle(key, false);
     private final Theme colorTopMenuWidgetTheme = key -> resolveTopMenuWidgetStyle(key, true);
@@ -154,8 +154,8 @@ public class TerminalEditorApp {
     private final Theme colorFileTreeWidgetTheme = key -> resolveFileTreeWidgetStyle(key, true);
     private final Theme monoFileTreeWidgetTheme = key -> resolveFileTreeWidgetStyle(key, false);
     private HelpOverlayPlacement helpOverlayCache;
-    private boolean profileEnabled = false;
-    private final FrameProfiler frameProfiler = new FrameProfiler();
+    boolean profileEnabled = false;
+    final FrameProfiler frameProfiler = new FrameProfiler();
     private FrameComposition.OpenTreeDiffKey lastOpenTreeDiffKey;
 
     public static void main(String[] args) throws Exception {
@@ -323,1771 +323,33 @@ public class TerminalEditorApp {
                 UiModalState initialModalState = modalState;
                 SearchController.SearchUiOptions initialSearchUi = searchUi;
 
-                final class FrontendSession implements TuiApplicationRunner.Frontend<TuiInputEvent> {
-                    private boolean running = true;
-                    private UiModalState modalState = initialModalState;
-                    private SearchController.SearchUiOptions searchUi = initialSearchUi;
-                    private boolean openFileMode;
-                    private final OpenFileDialogView.FocusState openFileFocusState = new OpenFileDialogView.FocusState();
-                    private EditorView.ScrollAxis editorScrollDrag = EditorView.ScrollAxis.NONE;
-                    private int editorScrollDragThumbOffset;
 
-                    private int activeTabIndex;
-                    private TextModel model;
-                    private EditorState state;
-                    private EditorEngine engine;
-                    private RenderPlanBuilder renderPlanBuilder;
-                    private ViewportController viewportController;
-
-                    private RenderPlan plan;
-                    private SearchBarView.Placement searchBarPlacement;
-                    private ConfirmBarView.Placement confirmBarPlacement;
-                    private SaveAsBarView.Placement saveAsBarPlacement;
-                    private Rect modalInputBounds = new Rect(0, 0, 0, 0);
-                    private Object blockingFocusOwner;
-                    private boolean blockingContentFocused;
-                    private UiModalState confirmPromptState;
-                    private Object confirmScopeId;
-                    private int contentTopRow = 1;
-                    private int contentRows;
-                    private int contentCols;
-                    private int contentLeft;
-                    private int editorPointerRows;
-                    private TabBar.State tabBarState = TabBar.State.initial();
-                    private EditorState tabBarActiveState;
-                    private int tabBarActiveIndex = -1;
-                    private int tabBarColumns = -1;
-                    private TabBarView.Placement tabBarPlacement;
-                    private TopMenuView.Placement topMenuPlacement;
-                    private FileTreeView.Placement openFileTreePlacement;
-                    private OpenFileDialogView.Placement openFileDialogPlacement;
-                    private final TabMatchCache tabMatchCache = new TabMatchCache();
-                    private final SearchMatchCountCache searchMatchCountCache = new SearchMatchCountCache();
-
-                    private int rows;
-                    private int cols;
-                    private boolean saveAsMode;
-                    private boolean saveOverwriteConfirmMode;
-                    private boolean recoveryConfirmMode;
-                    private boolean quitConfirmMode;
-                    private boolean closeTabConfirmMode;
-                    private boolean helpHintsMode;
-                    private boolean helpLicensesMode;
-                    private boolean helpAuthorMode;
-                    private Path pendingOverwritePath;
-                    private int pendingCloseTabIndex;
-                    private boolean confirmMode;
-
-                    @Override
-                    public boolean running() {
-                        return running;
-                    }
-
-                    @Override
-                    public void prepareTurn() {
-                        uiSessionState.syntaxHighlightingAvailable = syntaxHighlightingAvailable();
-                        if (state != sessionContext.state()) {
-                            cancelDocumentPointerInteraction();
-                            cancelFieldMouseSelection();
-                        }
-                        activeTabIndex = sessionContext.activeTabIndex();
-                        model = sessionContext.model();
-                        state = sessionContext.state();
-                        engine = sessionContext.engine();
-                        renderPlanBuilder = sessionContext.renderPlanBuilder();
-                        viewportController = tabs.get(activeTabIndex).viewportController();
-                        Object nextBlockingOwner = modalInputOwner(modalState, openFileMode);
-                        if (!Objects.equals(blockingFocusOwner, nextBlockingOwner)) {
-                            blockingFocusOwner = nextBlockingOwner;
-                            blockingContentFocused = false;
-                            cancelDocumentPointerInteraction();
-                            cancelFieldMouseSelection();
-                        }
-                        if (modalAttention.synchronize(modalInputOwner(modalState, openFileMode), System.nanoTime())) {
-                            eventLoop.invalidate();
-                        }
-                        List<TabSession> recoveryTabSessions = toTabSessions(tabs);
-                        recoveryAutosave.syncTabs(recoveryTabSessions);
-                        String recoveryWarning = recoveryAutosave.autosaveDirtyTabs(
-                            recoveryTabSessions,
-                            System.nanoTime()
-                        );
-                        if (recoveryWarning != null) {
-                            notification.warning(recoveryWarning);
-                            eventLoop.invalidate();
-                        }
-                        if (notification.expireIfNeeded()) {
-                            eventLoop.invalidate();
-                        }
-                        if (openFileMode && openFileTree.consumeMetadataChanged()) {
-                            eventLoop.invalidate();
-                        }
-                        rows = Math.max(2, terminal.height());
-                        cols = Math.max(1, terminal.width());
-                        saveAsMode = modalState.isSaveAs();
-                        saveOverwriteConfirmMode = modalState.isSaveOverwriteConfirm();
-                        recoveryConfirmMode = modalState.isRecoveryConfirm();
-                        quitConfirmMode = modalState.isQuitConfirm();
-                        closeTabConfirmMode = modalState.isCloseTabConfirm();
-                        helpHintsMode = modalState.isHelpHints();
-                        helpLicensesMode = modalState.isHelpLicenses();
-                        helpAuthorMode = modalState.isHelpAuthor();
-                        if (!helpHintsMode && !helpLicensesMode && !helpAuthorMode) {
-                            resetHelpScroll();
-                        }
-                        pendingOverwritePath = modalState.pendingOverwritePath();
-                        pendingCloseTabIndex = modalState.pendingCloseTabIndex();
-                        confirmMode = recoveryConfirmMode
-                            || saveOverwriteConfirmMode
-                            || quitConfirmMode
-                            || closeTabConfirmMode;
-                        if (!uiSessionState.searchMode) {
-                            uiSessionState.searchEditorFocused = false;
-                            searchFocusManager.deactivate(SEARCH_SCOPE_ID);
-                            searchBarPlacement = null;
-                        }
-                        if (!saveAsMode) {
-                            saveAsFocusManager.deactivate(SAVE_AS_SCOPE_ID);
-                            saveAsBarPlacement = null;
-                        }
-                        if (confirmMode) {
-                            if (confirmPromptState != modalState) {
-                                deactivateConfirmFocus();
-                                confirmPromptState = modalState;
-                                confirmScopeId = new Object();
-                                confirmBarPlacement = null;
-                            }
-                        } else {
-                            deactivateConfirmFocus();
-                            confirmPromptState = null;
-                            confirmScopeId = null;
-                            confirmBarPlacement = null;
-                        }
-                    }
-
-                    @Override
-                    public boolean renderFrame(TuiEventLoop.FrameTicket frameTicket) {
-                        if (frameTicket.fullRedraw()) {
-                            screenPresenter.invalidate();
-                        }
-                        if (profileEnabled) {
-                            frameProfiler.beginFrame();
-                        }
-                        String searchQuery = "";
-                        SearchOptions searchOptions = SearchOptions.DEFAULT;
-                        int searchMatchCount = 0;
-                        if (uiSessionState.searchMode) {
-                            searchQuery = searchQueryInput.text();
-                            searchOptions = SearchController.toSearchOptions(searchUi);
-                            if (!searchQuery.isEmpty()) {
-                                boolean searchAllTabs = searchUi.allTabs();
-                                TextModel searchCountModel = searchAllTabs ? null : model;
-                                List<EditorTab> searchCountTabs = searchAllTabs ? tabs : null;
-                                long searchSourceIdentity = searchSourceIdentity(
-                                    model,
-                                    tabs,
-                                    searchAllTabs
-                                );
-                                long searchSourceRevision = searchSourceRevision(
-                                    model,
-                                    tabs,
-                                    searchAllTabs
-                                );
-                                searchMatchCount = searchMatchCountCache.lookup(
-                                    true,
-                                    searchQuery,
-                                    searchOptions,
-                                    searchAllTabs,
-                                    searchSourceIdentity,
-                                    searchSourceRevision
-                                );
-                                if (searchMatchCount < 0) {
-                                    searchMatchCount = countSearchMatches(
-                                        searchCountModel,
-                                        searchCountTabs,
-                                        searchQuery,
-                                        searchOptions
-                                    );
-                                    searchMatchCountCache.store(
-                                        searchQuery,
-                                        searchOptions,
-                                        searchAllTabs,
-                                        searchSourceIdentity,
-                                        searchSourceRevision,
-                                        searchMatchCount
-                                    );
-                                }
-                            }
-                        }
-                        if (profileEnabled) {
-                            frameProfiler.searchNanos = frameProfiler.stopwatchNanos();
-                        }
-                        SearchBarView searchBar = uiSessionState.searchMode
-                            ? SearchBarView.build(
-                                searchQueryInput,
-                                searchReplaceInput,
-                                cols,
-                                searchUi.caseSensitive(),
-                                searchUi.matchMode(),
-                                searchUi.allTabs()
-                            )
-                            : null;
-                        String searchSummary = buildSearchSummary(
-                            uiSessionState.searchMode,
-                            searchQuery,
-                            searchUi,
-                            searchMatchCount,
-                            tabs.size()
-                        );
-                        boolean showTabBar = uiSessionState.showTabBarSetting && tabs.size() > 1;
-                        contentTopRow = showTabBar ? 2 : 1;
-                        // Keep the search model for resume-after-modal, but a
-                        // modal prompt exclusively owns this frame's row,
-                        // painter, and cursor.
-                        SearchBarView activeSearchBar = searchOwnsInteractiveRow(modalState)
-                                && !openFileMode
-                            ? searchBar
-                            : null;
-                        ConfirmBarView confirmBar = null;
-                        SaveAsBarView saveAsBar = null;
-                        InlinePromptBar inlinePromptBar = InlinePromptBar.hidden();
-                        if (saveAsMode) {
-                            saveAsBar = SaveAsBarView.build(saveAsInput, cols);
-                            inlinePromptBar = InlinePromptBar.of(
-                                saveAsBar.row(),
-                                EditorStyleAdapter.toEditor(styles.promptAlert()),
-                                1
-                            );
-                        } else if (saveOverwriteConfirmMode) {
-                            confirmBar = ConfirmBarView.build(
-                                buildOverwritePrompt(pendingOverwritePath),
-                                cols
-                            );
-                            inlinePromptBar = InlinePromptBar.of(
-                                confirmBar.row(),
-                                EditorStyleAdapter.toEditor(styles.promptAlert()),
-                                1,
-                                1
-                            );
-                        } else if (recoveryConfirmMode) {
-                            confirmBar = ConfirmBarView.buildRecovery(
-                                buildRecoveryPrompt(startupRecoveryEntries.size()),
-                                cols
-                            );
-                            inlinePromptBar = InlinePromptBar.of(
-                                confirmBar.row(),
-                                EditorStyleAdapter.toEditor(styles.promptAlert()),
-                                1,
-                                1
-                            );
-                        } else if (quitConfirmMode) {
-                            confirmBar = buildQuitConfirmBar(tabs, cols);
-                            inlinePromptBar = InlinePromptBar.of(
-                                confirmBar.row(),
-                                EditorStyleAdapter.toEditor(styles.promptAlert()),
-                                1,
-                                1
-                            );
-                        } else if (closeTabConfirmMode) {
-                            confirmBar = buildCloseTabConfirmBar(
-                                tabs,
-                                pendingCloseTabIndex,
-                                cols
-                            );
-                            inlinePromptBar = InlinePromptBar.of(
-                                confirmBar.row(),
-                                EditorStyleAdapter.toEditor(styles.promptAlert()),
-                                1,
-                                1
-                            );
-                        } else if (activeSearchBar != null) {
-                            inlinePromptBar = InlinePromptBar.of(
-                                activeSearchBar.text(),
-                                EditorStyleAdapter.toEditor(styles.searchBar()),
-                                1,
-                                1
-                            );
-                        }
-                        Rect promptInteractionClip = new Rect(
-                            0,
-                            contentTopRow,
-                            cols,
-                            Math.max(0, rows - contentTopRow)
-                        );
-                        if (saveAsBar != null) {
-                            saveAsBarPlacement = saveAsBar.place(
-                                SAVE_AS_SCOPE_ID,
-                                rows - 1 - inlinePromptBar.height(),
-                                promptInteractionClip
-                            );
-                            saveAsBarPlacement.activate(saveAsFocusManager);
-                        }
-                        if (confirmBar != null) {
-                            confirmBarPlacement = confirmBar.place(
-                                confirmScopeId,
-                                rows - 1 - inlinePromptBar.height(),
-                                promptInteractionClip
-                            );
-                            confirmBarPlacement.activate(confirmFocusManager);
-                        }
-                        if (activeSearchBar != null) {
-                            searchBarPlacement = activeSearchBar.place(
-                                SEARCH_SCOPE_ID,
-                                rows - 1 - inlinePromptBar.height(),
-                                promptInteractionClip
-                            );
-                            searchBarPlacement.activate(searchFocusManager);
-                            if (uiSessionState.searchEditorFocused) {
-                                searchFocusManager.clear(searchBarPlacement.focusScope());
-                            }
-                        } else {
-                            searchBarPlacement = null;
-                        }
-                        NotificationBar notificationBar = NotificationBar.of(
-                            notification.message,
-                            EditorStyleAdapter.toEditor(notification.style())
-                        );
-                        int overlayRows = inlinePromptBar.height();
-                        engine.setTabWidth(uiSessionState.tabWidthSetting);
-                        EditorLayout editorLayout = null;
-                        for (int i = 0; i < 3; i++) {
-                            editorLayout = EditorLayout.resolve(
-                                model,
-                                engine.textLayout(),
-                                state,
-                                rows,
-                                cols,
-                                contentTopRow,
-                                overlayRows,
-                                uiSessionState.wrapLinesSetting,
-                                uiSessionState.wrapWordsSetting,
-                                uiSessionState.tabWidthSetting
-                            );
-                            int topBefore = state.getTopLine();
-                            int segmentBefore = state.getTopWrapSegment();
-                            int leftBefore = state.getLeftVisualColumn();
-                            viewportController.ensureCursorVisible(
-                                engine,
-                                editorLayout.contentRows(),
-                                editorLayout.contentColumns(),
-                                uiSessionState.wrapLinesSetting,
-                                uiSessionState.wrapWordsSetting,
-                                uiSessionState.tabWidthSetting
-                            );
-                            if (topBefore == state.getTopLine()
-                                && segmentBefore == state.getTopWrapSegment()
-                                && leftBefore == state.getLeftVisualColumn()) {
-                                break;
-                            }
-                        }
-                        editorLayout = EditorLayout.resolve(
-                            model,
-                            engine.textLayout(),
-                            state,
-                            rows,
-                            cols,
-                            contentTopRow,
-                            overlayRows,
-                            uiSessionState.wrapLinesSetting,
-                            uiSessionState.wrapWordsSetting,
-                            uiSessionState.tabWidthSetting
-                        );
-                        contentRows = editorLayout.contentRows();
-                        contentCols = editorLayout.contentColumns();
-                        contentLeft = editorLayout.gutterWidth();
-                        editorPointerRows = contentRows + editorLayout.horizontalScrollbarHeight();
-                        if (uiSessionState.searchEditorFocused && searchBarPlacement != null
-                            && (contentRows == 0 || contentCols == 0)) {
-                            uiSessionState.searchEditorFocused = false;
-                            searchFocusManager.next(searchBarPlacement.focusScope());
-                        }
-                        boolean[] tabMatchFlags = resolveTabMatchFlags(
-                            tabs,
-                            uiSessionState.searchMode,
-                            searchQuery,
-                            searchOptions,
-                            tabMatchCache
-                        );
-                        List<TabBarView.TabItem> tabItems = toTabItems(tabs, tabMatchFlags);
-                        if (showTabBar) {
-                            TabBarView tabBarView = TabBarView.build(
-                                tabItems,
-                                activeTabIndex,
-                                tabBarState
-                            );
-                            Rect tabBounds = new Rect(0, 1, cols, 1);
-                            Rect tabClip = new Rect(0, 0, cols, rows);
-                            tabBarPlacement = tabBarActiveState != state || tabBarActiveIndex != activeTabIndex
-                                || tabBarColumns != cols
-                                ? tabBarView.placeRevealingActive(tabBounds, tabClip)
-                                : tabBarView.placeKeepingActiveVisible(tabBounds, tabClip, tabBarPlacement);
-                            tabBarActiveState = state;
-                            tabBarActiveIndex = activeTabIndex;
-                            tabBarColumns = cols;
-                            tabBarState = tabBarPlacement.state();
-                        } else {
-                            tabBarPlacement = null;
-                            tabBarActiveState = null;
-                        }
-                        TopMenuView topMenuView = TopMenuView.build(
-                            uiSessionState,
-                            toTopMenuTabs(tabs, tabMatchFlags),
-                            activeTabIndex,
-                            theme.label(),
-                            commandRouter,
-                            topMenu.state()
-                        );
-                        topMenuPlacement = topMenuView.place(
-                            new Rect(0, 0, cols, rows), uiSessionState.readingModeSetting
-                        );
-                        topMenu.adopt(topMenuPlacement.state());
-                        OpenDialogLayout openFileLayout = null;
-                        if (openFileMode) {
-                            openFileLayout = OpenFileDialogController.layoutForTerminal(rows, cols);
-                            boolean treeVisible = rows >= 8 && cols >= 24;
-                            int treeLeft = openFileLayout.left() + 2;
-                            Rect treeBounds = new Rect(
-                                treeLeft,
-                                openFileLayout.listStartRow(),
-                                Math.max(0, openFileLayout.right() - treeLeft),
-                                openFileLayout.listRows()
-                            );
-                            openFileTreePlacement = openFileTree.place(
-                                treeBounds,
-                                new Rect(0, 0, cols, rows),
-                                openFileFocusState.focus() == OpenFileInputRouter.Focus.LIST && !blockingContentFocused,
-                                treeVisible
-                            );
-                            openFileDialogPlacement = OpenFileDialogView.place(
-                                OPEN_FILE_SCOPE_ID, openFileLayout, openFileTreePlacement,
-                                openFileTree.showHiddenFiles(), new Rect(0, 0, cols, rows)
-                            );
-                            openFileDialogPlacement.activate(openFileFocusState);
-                        } else {
-                            openFileTreePlacement = null;
-                            openFileDialogPlacement = null;
-                        }
-                        renderer.setHighlightActiveGutter(uiSessionState.highlightActiveGutterSetting);
-                        renderer.setVisibleWhitespace(uiSessionState.visibleWhitespaceSetting);
-                        renderer.setTabWidth(uiSessionState.tabWidthSetting);
-                        renderPlanBuilder.setSyntaxHighlightingEnabled(
-                            effectiveSyntaxHighlighting(uiSessionState.syntaxHighlightingSetting)
-                        );
-                        renderPlanBuilder.setCommentSyntaxProfile(
-                            LanguageProfiles.resolveCommentSyntax(state.getCurrentFile())
-                        );
-                        renderPlanBuilder.setRainbowBracketsEnabled(uiSessionState.rainbowBracketsSetting);
-                        renderPlanBuilder.setTabWidth(uiSessionState.tabWidthSetting);
-                        renderPlanBuilder.setDecorationStyles(
-                            styles.renderSelection(),
-                            styles.renderSearchMatch(),
-                            styles.renderCurrentSearchMatch(),
-                            styles.renderBracketMatch(),
-                            styles.renderQuoteMatch(),
-                            styles.renderUnmatchedBracket(),
-                            styles.renderRainbowBrackets()
-                        );
-                        engine.setGutterDiffMode(uiSessionState.gutterDiffModeSetting);
-                        renderPlanBuilder.setGutterDiffResolver(engine::gutterDiffMarkerForLine);
-                        editorView.setTabWidth(uiSessionState.tabWidthSetting);
-                        engine.setTabInsertMode(uiSessionState.tabInsertModeSetting);
-                        engine.setAutoIndentEnabled(uiSessionState.autoIndentSetting);
-                        engine.setAutoPairsEnabled(uiSessionState.autoPairsSetting);
-                        engine.setAutoListEnabled(uiSessionState.autoListSetting);
-
-                        TopMenuView.TopBar topMenuBar = topMenuView.topBar(
-                            state.getCurrentFile(),
-                            state.isDirty(),
-                            cols,
-                            uiSessionState.readingModeSetting
-                        );
-                        String bottomBar = buildBottomBar(
-                            state,
-                            model,
-                            cols,
-                            uiSessionState.readingModeSetting,
-                            activeTabIndex,
-                            tabs.size(),
-                            searchSummary
-                        );
-                        modalInputBounds = blockingSurface(rows, cols, contentTopRow, inlinePromptBar.height(),
-                            saveAsMode || confirmMode, activeHelpPage(helpHintsMode, helpLicensesMode, helpAuthorMode),
-                            openFileMode ? openFileLayout : null);
-                        if (blockingContentFocused) {
-                            if (blockingContentAvailable()) {
-                                clearBlockingControlFocus();
-                            } else {
-                                focusFirstBlockingControl();
-                            }
-                        }
-                        FrameComposition composition = new FrameComposition(
-                            new FrameComposition.Document(
-                                renderPlanBuilder,
-                                model,
-                                state,
-                                editorLayout,
-                                plan
-                            ),
-                            new FrameComposition.Surface(
-                                topMenuBar,
-                                bottomBar,
-                                inlinePromptBar,
-                                notificationBar
-                            ),
-                            new FrameComposition.Search(
-                                uiSessionState.searchMode,
-                                searchQuery,
-                                searchOptions,
-                                uiSessionState.autoSelectionHighlightSetting,
-                                searchBarPlacement,
-                                uiSessionState.searchEditorFocused
-                            ),
-                            new FrameComposition.Layers(
-                                tabBarPlacement,
-                                topMenuPlacement,
-                                saveAsMode,
-                                saveAsBarPlacement,
-                                confirmBarPlacement,
-                                openFileMode
-                                    ? new FrameComposition.OpenFile(
-                                        true,
-                                        openFileLayout,
-                                        openFileTree.root().toString(),
-                                        openFileTree.showHiddenFiles(),
-                                        openFileTreePlacement,
-                                        openFileFocusState.focus()
-                                    )
-                                    : FrameComposition.OpenFile.hidden(),
-                                activeHelpPage(helpHintsMode, helpLicensesMode, helpAuthorMode),
-                                modalAttention.highlighted(),
-                                blockingContentFocused
-                            ),
-                            uiSessionState.wrapLinesSetting,
-                            uiSessionState.wrapWordsSetting,
-                            frameTicket.fullRedraw()
-                        );
-                        modalInputBounds = blockingSurface(composition);
-                        RenderFrameResult frameResult = renderFrameController.renderFrameIfNeeded(composition);
-                        plan = frameResult.plan();
-                        return frameResult.rendered();
-                    }
-
-                    @Override
-                    public void frameEnded(boolean rendered) {
-                        if (profileEnabled) {
-                            frameProfiler.endFrame(rendered);
-                        }
-                    }
-
-                    @Override
-                    public long nanosUntilWakeup(long nowNanos) {
-                        return earlierDeadline(
-                            notification.nanosUntilExpire(nowNanos),
-                            modalAttention.nanosUntilChange(nowNanos)
-                        );
-                    }
-
-                    private HelpOverlayPlacement currentHelpOverlay() {
-                        HelpPage page = activeHelpPage(helpHintsMode, helpLicensesMode, helpAuthorMode);
-                        return page == null ? null : helpOverlayPlacement(rows, cols, page);
-                    }
-
-                    private void cancelFieldMouseSelection() {
-                        searchQueryInput.cancelMouseSelection();
-                        searchReplaceInput.cancelMouseSelection();
-                        saveAsInput.cancelMouseSelection();
-                    }
-
-                    private void cancelDocumentPointerInteraction() {
-                        editorView.cancelMouseSelection();
-                        editorScrollDrag = EditorView.ScrollAxis.NONE;
-                        editorScrollDragThumbOffset = 0;
-                    }
-
-                    private boolean handleCapturedFieldPointer(PointerEvent pointer) {
-                        boolean saveAsCapture = saveAsMode && saveAsBarPlacement != null
-                            && saveAsBarPlacement.captures(pointer);
-                        boolean searchCapture = searchOwnsRawInput(
-                            uiSessionState.searchMode, modalState, openFileMode, topMenu.isOpen()
-                        ) && searchBarPlacement != null && searchBarPlacement.captures(pointer);
-                        if (!saveAsCapture && !searchCapture) {
-                            return false;
-                        }
-                        if (!uiSessionState.mouseModeSetting || !uiSessionState.mouseModeAvailable) {
-                            cancelFieldMouseSelection();
-                        } else if (saveAsCapture) {
-                            SaveAsInputRouter.route(saveAsFocusManager, saveAsBarPlacement, pointer);
-                        } else {
-                            SearchInputRouter.route(searchFocusManager, searchBarPlacement, pointer);
-                        }
-                        eventLoop.invalidate();
-                        return true;
-                    }
-
-                    private boolean documentPointerHit(PointerEvent mouse) {
-                        return new Rect(0, contentTopRow, cols, editorPointerRows)
-                            .contains(mouse.column(), mouse.row())
-                            && (modalInputKind(modalState, openFileMode) == ModalInputPolicy.Kind.NONE
-                                || blockingContentAvailable() && !modalInputBounds.contains(mouse.column(), mouse.row()));
-                    }
-
-                    private boolean blockingContentAvailable() {
-                        return DialogCommandPolicy.mode(modalInputKind(modalState, openFileMode)).permitsContentFocus()
-                            && contentRows > 0 && contentCols > 0
-                            && !modalInputBounds.contains(new Rect(contentLeft, contentTopRow, contentCols, contentRows));
-                    }
-
-                    private void clearBlockingControlFocus() {
-                        if (saveAsBarPlacement != null) {
-                            saveAsFocusManager.clear(saveAsBarPlacement.focusScope());
-                        }
-                        if (confirmBarPlacement != null) {
-                            confirmFocusManager.clear(confirmBarPlacement.focusScope());
-                        }
-                        HelpOverlayPlacement help = currentHelpOverlay();
-                        if (help != null) {
-                            helpFocusManager.clear(help.focusScope());
-                        }
-                    }
-
-                    private void focusDocument() {
-                        if (modalInputKind(modalState, openFileMode) != ModalInputPolicy.Kind.NONE) {
-                            blockingContentFocused = true;
-                            clearBlockingControlFocus();
-                        } else if (uiSessionState.searchMode) {
-                            uiSessionState.searchEditorFocused = true;
-                            if (searchBarPlacement != null) {
-                                searchFocusManager.clear(searchBarPlacement.focusScope());
-                            }
-                        }
-                    }
-
-                    private void focusFirstBlockingControl() {
-                        blockingContentFocused = false;
-                        if (saveAsMode && saveAsBarPlacement != null) {
-                            DialogFocusTraversal.focusFirst(saveAsFocusManager, saveAsBarPlacement.focusScope());
-                        } else if (confirmMode && confirmBarPlacement != null) {
-                            DialogFocusTraversal.focusFirst(confirmFocusManager, confirmBarPlacement.focusScope());
-                        } else if (openFileMode) {
-                            if (openFileDialogPlacement != null) {
-                                openFileTree.adopt(openFileTree.state().cancelPointerInteraction());
-                                openFileDialogPlacement.focusFirst(openFileFocusState);
-                            }
-                        } else {
-                            HelpOverlayPlacement help = currentHelpOverlay();
-                            if (help != null) {
-                                DialogFocusTraversal.focusFirst(helpFocusManager, help.focusScope());
-                            }
-                        }
-                    }
-
-                    private void advanceBlockingFocus(KeyStroke stroke) {
-                        boolean available = blockingContentAvailable();
-                        if (saveAsMode && saveAsBarPlacement != null) {
-                            blockingContentFocused = DialogFocusTraversal.advance(saveAsFocusManager,
-                                saveAsBarPlacement.focusScope(), blockingContentFocused, available, stroke);
-                        } else if (confirmMode && confirmBarPlacement != null) {
-                            blockingContentFocused = DialogFocusTraversal.advance(confirmFocusManager,
-                                confirmBarPlacement.focusScope(), blockingContentFocused, available, stroke);
-                        } else if (openFileMode) {
-                            if (openFileDialogPlacement != null) {
-                                OpenFileInputRouter.Result result = OpenFileInputRouter.route(
-                                    openFileDialogPlacement, openFileFocusState, stroke, System.nanoTime(),
-                                    OPEN_DIALOG_DOUBLE_CLICK_NANOS);
-                                openFileTree.adopt(result.state());
-                            }
-                            blockingContentFocused = false;
-                        } else {
-                            HelpOverlayPlacement help = currentHelpOverlay();
-                            if (help != null) {
-                                blockingContentFocused = DialogFocusTraversal.advance(helpFocusManager,
-                                    help.focusScope(), blockingContentFocused, available, stroke);
-                            }
-                        }
-                    }
-
-                    private void rejectDialogInput() {
-                        DialogInputPolicy.apply(DialogInputPolicy.Decision.BLOCK, this::focusFirstBlockingControl,
-                            () -> modalAttention.request(modalInputOwner(modalState, openFileMode), System.nanoTime()));
-                        editorView.cancelMouseSelection();
-                        editorScrollDrag = EditorView.ScrollAxis.NONE;
-                        eventLoop.invalidate();
-                    }
-
-                    private boolean routeBlockingInput(TuiInputEvent event, TuinkCommand command, ModalInputPolicy.Kind kind) {
-                        if (kind == ModalInputPolicy.Kind.NONE) {
-                            return false;
-                        }
-                        DialogMode mode = DialogCommandPolicy.mode(kind);
-                        if (event instanceof PointerEvent mouse) {
-                            if (!uiSessionState.mouseModeSetting || !uiSessionState.mouseModeAvailable) {
-                                return true;
-                            }
-                            Scrollbar.Drag dialogDrag = switch (kind) {
-                                case HELP -> helpScrollState.drag();
-                                case OPEN_FILE -> openFileTree.state().widgetState().drag();
-                                default -> null;
-                            };
-                            if (Scrollbar.captures(mouse, dialogDrag)) {
-                                return false;
-                            }
-                            boolean drag = mouse.kind() == PointerEvent.Kind.DRAG
-                                || mouse.kind() == PointerEvent.Kind.MOVE && mouse.button() == PointerEvent.Button.LEFT;
-                            if (mode.permitsContentFocus()
-                                && (documentPointerHit(mouse)
-                                    || (drag || mouse.kind() == PointerEvent.Kind.RELEASE)
-                                        && (blockingContentFocused || editorScrollDrag != EditorView.ScrollAxis.NONE))) {
-                                handleDocumentPointer(mouse);
-                                eventLoop.invalidate();
-                                return true;
-                            }
-                            if (modalInputBounds.contains(mouse.column(), mouse.row())) {
-                                if (mouse.kind() == PointerEvent.Kind.PRESS && mouse.button() == PointerEvent.Button.LEFT
-                                    && blockingContentFocused) {
-                                    focusFirstBlockingControl();
-                                }
-                                return false;
-                            }
-                            if (!mode.permitsContentFocus()) {
-                                if (mouse.kind() == PointerEvent.Kind.PRESS && mouse.button() != PointerEvent.Button.NONE
-                                    || mouse.kind() == PointerEvent.Kind.SCROLL_UP
-                                    || mouse.kind() == PointerEvent.Kind.SCROLL_DOWN
-                                    || mouse.kind() == PointerEvent.Kind.SCROLL_LEFT
-                                    || mouse.kind() == PointerEvent.Kind.SCROLL_RIGHT) {
-                                    rejectDialogInput();
-                                }
-                                return true;
-                            }
-                            if (tabBarPlacement != null && tabBarPlacement.enabled()
-                                && belongsToTabChrome(event, tabBarPlacement.bounds())) {
-                                if (modalState.isCloseTabConfirm()) {
-                                    return false;
-                                }
-                                if (mouse.kind() == PointerEvent.Kind.PRESS && mouse.button() == PointerEvent.Button.LEFT) {
-                                    rejectDialogInput();
-                                }
-                            }
-                            return true;
-                        }
-                        if (DialogFocusTraversal.isTraversal(event)) {
-                            advanceBlockingFocus((KeyStroke) event);
-                            editorView.cancelMouseSelection();
-                            eventLoop.invalidate();
-                            return true;
-                        }
-                        if (blockingContentFocused && DialogCommandPolicy.cancels(kind, command)) {
-                            focusFirstBlockingControl();
-                            return false;
-                        }
-                        DialogInputPolicy.Action action = DialogCommandPolicy.action(event, command);
-                        DialogInputPolicy.Decision decision = DialogCommandPolicy.decide(mode,
-                            DialogCommandPolicy.target(kind, openFileFocusState.focus(),
-                                saveAsFocusManager.focused().orElse(null), blockingContentFocused), action);
-                        if (decision == DialogInputPolicy.Decision.BLOCK) {
-                            rejectDialogInput();
-                            return true;
-                        }
-                        if (decision.consumed()) {
-                            return true;
-                        }
-                        if (blockingContentFocused) {
-                            EditorInput input = resolveEditorInput(commandRouter, event,
-                                event instanceof KeyStroke stroke ? commandRouter.invocationFor(stroke).orElse(null) : null,
-                                null, false, SearchFocus.FIND);
-                            if (input != null && input.command() != null) {
-                                viewportController.onInput(input, engine.hasSelection(), !uiSessionState.readingModeSetting);
-                                InputActionDispatcher.dispatch(input.command(), uiSessionState,
-                                    new InputActionDispatcher.DispatchContext(engine, state, topMenu,
-                                        terminal::setMouseTracking, contentRows, contentCols));
-                            }
-                            eventLoop.invalidate();
-                            return true;
-                        }
-                        if (saveAsMode && (action == DialogInputPolicy.Action.COPY
-                            || action == DialogInputPolicy.Action.CUT || action == DialogInputPolicy.Action.PASTE)
-                            && event instanceof KeyStroke) {
-                            if (saveAsFocusManager.focused().filter(SaveAsBarView.Target.FIELD::equals).isPresent()) {
-                                String filenameBefore = saveAsInput.text();
-                                FieldClipboard.handle(command, saveAsInput, clipboard);
-                                if (!filenameBefore.equals(saveAsInput.text())) {
-                                    notification.clear();
-                                }
-                                saveAsSuggestions.rememberDraft(tabs.get(activeTabIndex).tabSession(), saveAsInput.text());
-                            }
-                            eventLoop.invalidate();
-                            return true;
-                        }
-                        if (ModalInputPolicy.blocked(kind, event, command)) {
-                            rejectDialogInput();
-                            return true;
-                        }
-                        return false;
-                    }
-
-                    private void handleDocumentPointer(PointerEvent mouse) {
-                        if (mouse.kind() == PointerEvent.Kind.RELEASE) {
-                            editorScrollDrag = EditorView.ScrollAxis.NONE;
-                            editorScrollDragThumbOffset = 0;
-                            editorView.handleMouseRelease(engine);
-                            return;
-                        }
-                        if (mouse.button() == PointerEvent.Button.OTHER
-                            || !uiSessionState.mouseModeSetting || !uiSessionState.mouseModeAvailable) {
-                            return;
-                        }
-                        switch (mouse.kind()) {
-                            case SCROLL_UP -> {
-                                int topBefore = state.getTopLine();
-                                int topWrapBefore = state.getTopWrapSegment();
-                                applyWheelVerticalScroll(
-                                    model,
-                                    engine.textLayout(),
-                                    state,
-                                    plan,
-                                    -3,
-                                    uiSessionState.tabWidthSetting
-                                );
-                                if (state.getTopLine() != topBefore || state.getTopWrapSegment() != topWrapBefore) {
-                                    viewportController.onManualVerticalPan();
-                                }
-                            }
-                            case SCROLL_DOWN -> {
-                                int topBefore = state.getTopLine();
-                                int topWrapBefore = state.getTopWrapSegment();
-                                applyWheelVerticalScroll(
-                                    model,
-                                    engine.textLayout(),
-                                    state,
-                                    plan,
-                                    3,
-                                    uiSessionState.tabWidthSetting
-                                );
-                                if (state.getTopLine() != topBefore || state.getTopWrapSegment() != topWrapBefore) {
-                                    viewportController.onManualVerticalPan();
-                                }
-                            }
-                            case SCROLL_LEFT, SCROLL_RIGHT -> {
-                                if (!plan.wrapLines()) {
-                                    int previousLeft = state.getLeftVisualColumn();
-                                    int visibleCols = Math.max(0, cols - plan.gutterWidth() - plan.scrollbarWidth());
-                                    int nextLeft = ScrollInteraction.scrollBy(
-                                        previousLeft, mouse.kind() == PointerEvent.Kind.SCROLL_LEFT ? -3 : 3,
-                                        visibleCols, plan.totalColumns()
-                                    );
-                                    EditorViewportBehavior.applyHorizontalScrollVisual(
-                                        state, model, engine.textLayout(), nextLeft, uiSessionState.tabWidthSetting
-                                    );
-                                    viewportController.onScrollbarInteraction(
-                                        new EditorView.ScrollPointerResult(true, EditorView.ScrollAxis.NONE, 0),
-                                        previousLeft, state.getLeftVisualColumn(), state.getTopLine(), state.getTopLine()
-                                    );
-                                }
-                            }
-                            case PRESS -> {
-                                if (mouse.button() == PointerEvent.Button.LEFT) {
-                                    editorScrollDrag = EditorView.ScrollAxis.NONE;
-                                    editorScrollDragThumbOffset = 0;
-                                    int leftBeforeScrollPointer = state.getLeftVisualColumn();
-                                    int topBeforeScrollPointer = state.getTopLine();
-                                    int topWrapBeforeScrollPointer = state.getTopWrapSegment();
-                                    EditorView.ScrollPointerResult scrollPointer = editorView.handleScrollbarPointer(
-                                        mouse.row(),
-                                        mouse.column(),
-                                        rows,
-                                        cols,
-                                        contentTopRow,
-                                        plan,
-                                        model,
-                                        engine.textLayout(),
-                                        state
-                                    );
-                                    if (scrollPointer.consumed()) {
-                                        editorScrollDrag = scrollPointer.dragAxis();
-                                        editorScrollDragThumbOffset = scrollPointer.dragThumbOffset();
-                                        viewportController.onScrollbarInteraction(
-                                            scrollPointer,
-                                            leftBeforeScrollPointer,
-                                            state.getLeftVisualColumn(),
-                                            topBeforeScrollPointer,
-                                            state.getTopLine()
-                                        );
-                                        if (state.getTopWrapSegment() != topWrapBeforeScrollPointer) {
-                                            viewportController.onManualVerticalPan();
-                                        }
-                                        editorView.cancelMouseSelection();
-                                        return;
-                                    }
-                                    if (!documentPointerHit(mouse)) {
-                                        editorView.cancelMouseSelection();
-                                        return;
-                                    }
-                                    focusDocument();
-                                    editorView.handleMousePress(
-                                        mouse,
-                                        model,
-                                        state,
-                                        plan,
-                                        contentRows,
-                                        engine,
-                                        contentTopRow,
-                                        shouldExtendEditorSelection(mouse)
-                                    );
-                                    viewportController.onEditorTextInteraction();
-                                }
-                            }
-                            case MOVE, DRAG -> {
-                                if (mouse.button() == PointerEvent.Button.LEFT
-                                    && editorScrollDrag != EditorView.ScrollAxis.NONE) {
-                                    int leftBeforeDragScroll = state.getLeftVisualColumn();
-                                    int topBeforeDragScroll = state.getTopLine();
-                                    int topWrapBeforeDragScroll = state.getTopWrapSegment();
-                                    EditorView.ScrollPointerResult dragScrollPointer = editorView.handleScrollbarPointer(
-                                        mouse.row(),
-                                        mouse.column(),
-                                        rows,
-                                        cols,
-                                        contentTopRow,
-                                        plan,
-                                        model,
-                                        engine.textLayout(),
-                                        state,
-                                        editorScrollDrag,
-                                        editorScrollDragThumbOffset
-                                    );
-                                    if (!dragScrollPointer.consumed()) {
-                                        editorScrollDrag = EditorView.ScrollAxis.NONE;
-                                        editorScrollDragThumbOffset = 0;
-                                    }
-                                    viewportController.onScrollbarInteraction(
-                                        dragScrollPointer,
-                                        leftBeforeDragScroll,
-                                        state.getLeftVisualColumn(),
-                                        topBeforeDragScroll,
-                                        state.getTopLine()
-                                    );
-                                    if (state.getTopWrapSegment() != topWrapBeforeDragScroll) {
-                                        viewportController.onManualVerticalPan();
-                                    }
-                                    return;
-                                }
-                                if (!editorView.isMouseSelecting() || mouse.button() != PointerEvent.Button.LEFT) {
-                                    return;
-                                }
-                                editorView.handleMouseDrag(
-                                    mouse,
-                                    model,
-                                    state,
-                                    plan,
-                                    contentRows,
-                                    engine,
-                                    contentTopRow
-                                );
-                                viewportController.onEditorTextInteraction();
-                            }
-                            default -> {
-                                // Unknown pointer events have no editor action.
-                            }
-                        }
-                    }
-
-                    @Override
-                    public void handlePoll(TuiEventLoop.Poll<TuiInputEvent> pollResult) {
-                        TuiInputEvent inputEvent = pollResult.event();
-                        if (inputEvent == null) {
-                            return;
-                        }
-                        if (inputEvent instanceof ResizeEvent) {
-                            cancelDocumentPointerInteraction();
-                            cancelFieldMouseSelection();
-                            tabBarColumns = -1;
-                            helpScrollState = new ListView.State(-1, helpScrollState.firstVisibleIndex());
-                            openFileTree.adopt(openFileTree.state().cancelPointerInteraction());
-                            topMenu.adopt(topMenu.state().cancelPointerInteraction());
-                            return;
-                        }
-                        if (inputEvent instanceof PointerEvent pointer && handleCapturedFieldPointer(pointer)) {
-                            return;
-                        }
-                        if (!(inputEvent instanceof PointerEvent pointer)
-                            || pointer.kind() == PointerEvent.Kind.PRESS) {
-                            cancelFieldMouseSelection();
-                            cancelDocumentPointerInteraction();
-                        }
-                        if (inputEvent instanceof PointerEvent pointer
-                            && (editorScrollDrag != EditorView.ScrollAxis.NONE
-                                && Scrollbar.captures(pointer, new Scrollbar.Drag(
-                                    editorScrollDrag == EditorView.ScrollAxis.VERTICAL
-                                        ? Scrollbar.Axis.VERTICAL : Scrollbar.Axis.HORIZONTAL,
-                                    editorScrollDragThumbOffset
-                                ))
-                                || editorView.isMouseSelecting()
-                                    && (pointer.kind() == PointerEvent.Kind.RELEASE
-                                        || pointer.kind() == PointerEvent.Kind.DRAG
-                                            && pointer.button() == PointerEvent.Button.LEFT))) {
-                            handleDocumentPointer(pointer);
-                            eventLoop.invalidate();
-                            return;
-                        }
-                        ModalInputPolicy.Kind blocker = modalInputKind(modalState, openFileMode);
-                        TuinkCommand physicalCommand = inputEvent instanceof KeyStroke stroke
-                            ? commandRouter.invocationFor(stroke)
-                                .flatMap(invocation -> TuinkCommand.fromId(invocation.id())).orElse(null)
-                            : null;
-                        if (routeBlockingInput(inputEvent, physicalCommand, blocker)) {
-                            return;
-                        }
-                        if (searchOwnsRawInput(uiSessionState.searchMode, modalState, openFileMode, topMenu.isOpen())
-                            && !uiSessionState.searchEditorFocused
-                            && DialogCommandPolicy.decide(DialogMode.NON_BLOCKING,
-                                SearchController.isSearchFieldFocus(searchFocusManager.focused().orElse(null))
-                                    ? DialogInputPolicy.Target.TEXT_INPUT : DialogInputPolicy.Target.BUTTON,
-                                DialogCommandPolicy.action(inputEvent, physicalCommand)).consumed()) {
-                            return;
-                        }
-                        if (!saveAsMode && !confirmMode) {
-                            notification.clearErrorOnUserAction();
-                        }
-                        eventLoop.invalidate();
-                        if (modalState.isHelpHints() || modalState.isHelpLicenses() || modalState.isHelpAuthor()) {
-                            boolean pointerAllowed = !(inputEvent instanceof PointerEvent)
-                                || uiSessionState.mouseModeSetting && uiSessionState.mouseModeAvailable;
-                            if (pointerAllowed) {
-                                HelpPage helpPage = activeHelpPage(
-                                    modalState.isHelpHints(),
-                                    modalState.isHelpLicenses(),
-                                    modalState.isHelpAuthor()
-                                );
-                                HelpOverlayInputRouter.Result helpInput = routeHelpOverlayInput(
-                                    rows, cols, helpPage, inputEvent
-                                );
-                                if (helpInput.closeRequested()) {
-                                    helpFocusManager.deactivate(HelpOverlayInputRouter.Scope.HELP);
-                                    modalState = UiModalState.none();
-                                    return;
-                                }
-                                if (helpInput.consumed()) {
-                                    return;
-                                }
-                            }
-                        }
-                        TuinkCommand routedSaveAsCommand = null;
-                        if (saveAsMode) {
-                            if (inputEvent instanceof PointerEvent
-                                && (!uiSessionState.mouseModeSetting || !uiSessionState.mouseModeAvailable)) {
-                                return;
-                            }
-                            if (saveAsBarPlacement == null) {
-                                // Entering the modal always schedules a frame; keep
-                                // a malformed/custom runtime from leaking input.
-                                eventLoop.invalidate();
-                                return;
-                            }
-                            String filenameBefore = saveAsInput.text();
-                            SaveAsInputRouter.Result saveAsInputResult = SaveAsInputRouter.route(
-                                saveAsFocusManager,
-                                saveAsBarPlacement,
-                                inputEvent
-                            );
-                            SaveAsBarView.Action fieldAction = saveAsInputResult.action();
-                            if (fieldAction == SaveAsBarView.Action.PASTE_REJECTED) {
-                                notification.error("Paste is too large and was not inserted");
-                                return;
-                            }
-                            if (fieldAction == SaveAsBarView.Action.VALUE_CHANGED) {
-                                if (!filenameBefore.equals(saveAsInput.text())) {
-                                    notification.clear();
-                                }
-                                saveAsSuggestions.rememberDraft(
-                                    tabs.get(activeTabIndex).tabSession(),
-                                    saveAsInput.text()
-                                );
-                                return;
-                            }
-                            if (fieldAction == SaveAsBarView.Action.SUBMITTED) {
-                                routedSaveAsCommand = TuinkCommand.EDIT_INSERT_NEWLINE;
-                            } else if (fieldAction == SaveAsBarView.Action.CANCELLED) {
-                                routedSaveAsCommand = TuinkCommand.UI_ESCAPE;
-                            }
-                            if (inputEvent instanceof PointerEvent && saveAsInputResult.consumed()) {
-                                editorView.cancelMouseSelection();
-                            }
-                            if (routedSaveAsCommand == null && saveAsInputResult.consumed()) {
-                                return;
-                            }
-                        }
-                        ConfirmChoice routedConfirmDecision = null;
-                        if (confirmMode) {
-                            if (inputEvent instanceof PointerEvent
-                                && (!uiSessionState.mouseModeSetting || !uiSessionState.mouseModeAvailable)) {
-                                return;
-                            }
-                            if (confirmBarPlacement == null) {
-                                // A modal transition always schedules a frame before
-                                // input. Capture defensively if a custom runtime
-                                // violates that ordering.
-                                eventLoop.invalidate();
-                                return;
-                            }
-                            ConfirmBarInputRouter.Result confirmInput = ConfirmBarInputRouter.route(
-                                confirmFocusManager,
-                                confirmBarPlacement,
-                                confirmPolicy(modalState),
-                                inputEvent
-                            );
-                            routedConfirmDecision = confirmInput.decision();
-                            if (routedConfirmDecision != null) {
-                                notification.clearErrorOnUserAction();
-                            }
-                            if (routedConfirmDecision != null && inputEvent instanceof PointerEvent) {
-                                editorView.cancelMouseSelection();
-                            }
-                            if (routedConfirmDecision == null && confirmInput.consumed()) {
-                                return;
-                            }
-                        }
-                        if (openFileMode) {
-                            if (inputEvent instanceof PointerEvent
-                                && (!uiSessionState.mouseModeSetting || !uiSessionState.mouseModeAvailable)) {
-                                return;
-                            }
-                            if (openFileDialogPlacement == null) {
-                                eventLoop.invalidate();
-                                return;
-                            }
-                            OpenFileInputRouter.Result openInput = OpenFileInputRouter.route(
-                                openFileDialogPlacement,
-                                openFileFocusState,
-                                inputEvent,
-                                System.nanoTime(),
-                                OPEN_DIALOG_DOUBLE_CLICK_NANOS
-                            );
-                            openFileTree.adopt(openInput.state());
-                            if (inputEvent instanceof PointerEvent && openInput.consumed()) {
-                                editorView.cancelMouseSelection();
-                            }
-                            if (openInput.intent() != null) {
-                                OpenFileApplyResult applied = applyOpenFileIntent(
-                                    openInput.intent(),
-                                    openFileTree,
-                                    tabs,
-                                    activeTabIndex,
-                                    notification
-                                );
-                                openFileMode = applied.openFileMode();
-                                if (applied.activeTabIndex() != activeTabIndex) {
-                                    sessionContext.activate(applied.activeTabIndex());
-                                }
-                                return;
-                            }
-                            if (openInput.consumed()) {
-                                return;
-                            }
-                            // The open-file dialog is modal even when a pointer
-                            // misses every current-frame control.
-                            editorView.cancelMouseSelection();
-                            return;
-                        }
-                        CommandInvocation routedMenuCommand = null;
-                        CommandRouter.RoutedCommand routedMenuResult = null;
-                        if (modalState.isNone() && !openFileMode) {
-                            boolean pointerAllowed = !(inputEvent instanceof PointerEvent)
-                                || uiSessionState.mouseModeSetting && uiSessionState.mouseModeAvailable;
-                            if (!pointerAllowed && topMenu.isOpen()) {
-                                return;
-                            }
-                            if (pointerAllowed) {
-                                if (topMenuPlacement == null) {
-                                    if (topMenu.isOpen()) {
-                                        eventLoop.invalidate();
-                                        return;
-                                    }
-                                } else {
-                                    TopMenuInputRouter.Result menuInput = TopMenuInputRouter.route(
-                                        topMenu,
-                                        topMenuPlacement,
-                                        commandRouter,
-                                        inputEvent
-                                    );
-                                    if (inputEvent instanceof PointerEvent && menuInput.consumed()) {
-                                        editorView.cancelMouseSelection();
-                                    }
-                                    routedMenuCommand = menuInput.command();
-                                    if (routedMenuCommand != null) {
-                                        routedMenuResult = commandRouter.dispatch(routedMenuCommand)
-                                            .orElse(null);
-                                        if (routedMenuResult instanceof CommandRouter.ActivateTab tab
-                                            && tab.tabIndex() >= 0
-                                            && tab.tabIndex() < tabs.size()) {
-                                            sessionContext.activate(tab.tabIndex());
-                                            return;
-                                        }
-                                    } else if (menuInput.consumed()) {
-                                        return;
-                                    }
-                                }
-                            }
-                        }
-                        SearchBarView.Action routedSearchAction = null;
-                        if (searchOwnsRawInput(
-                            uiSessionState.searchMode,
-                            modalState,
-                            openFileMode,
-                            topMenu.isOpen(),
-                            routedMenuCommand != null
-                        )) {
-                            if (inputEvent instanceof PointerEvent
-                                && (!uiSessionState.mouseModeSetting || !uiSessionState.mouseModeAvailable)) {
-                                return;
-                            }
-                            if (searchBarPlacement == null) {
-                                // Search activation schedules a frame before input;
-                                // capture defensively if a custom runtime violates it.
-                                eventLoop.invalidate();
-                                return;
-                            }
-                            if (DialogFocusTraversal.isTraversal(inputEvent)) {
-                                uiSessionState.searchEditorFocused = DialogFocusTraversal.advance(
-                                    searchFocusManager, searchBarPlacement.focusScope(),
-                                    uiSessionState.searchEditorFocused, contentRows > 0 && contentCols > 0,
-                                    (KeyStroke) inputEvent
-                                );
-                                editorView.cancelMouseSelection();
-                                return;
-                            }
-                            SearchInputRouter.Result searchInput = !uiSessionState.searchEditorFocused
-                                || inputEvent instanceof PointerEvent
-                                ? SearchInputRouter.route(searchFocusManager, searchBarPlacement, inputEvent)
-                                : new SearchInputRouter.Result(false, null);
-                            if (inputEvent instanceof PointerEvent pointer
-                                && pointer.kind() == PointerEvent.Kind.PRESS
-                                && pointer.button() == PointerEvent.Button.LEFT
-                                && searchInput.consumed()
-                                && searchFocusManager.focused().isPresent()) {
-                                uiSessionState.searchEditorFocused = false;
-                            }
-                            if (inputEvent instanceof PointerEvent && searchInput.consumed()) {
-                                editorView.cancelMouseSelection();
-                            }
-                            SearchBarView.Action searchAction = searchInput.action();
-                            if (searchAction == SearchBarView.Action.CLOSE_REQUESTED) {
-                                uiSessionState.searchMode = false;
-                                searchFocusManager.deactivate(SEARCH_SCOPE_ID);
-                                return;
-                            }
-                            if (searchAction == SearchBarView.Action.PASTE_REJECTED) {
-                                notification.error("Paste is too large and was not inserted");
-                                return;
-                            }
-                            SearchFocus toggleTarget = toggleTarget(searchAction);
-                            if (toggleTarget != null) {
-                                searchUi = SearchController.toggleFocusedSearchOption(searchUi, toggleTarget);
-                                return;
-                            }
-                            if (searchAction == SearchBarView.Action.QUERY_CHANGED
-                                || searchAction == SearchBarView.Action.REPLACEMENT_CHANGED) {
-                                return;
-                            }
-                            routedSearchAction = searchAction;
-                            if (routedSearchAction == null && searchInput.consumed()) {
-                                return;
-                            }
-                        }
-                        TabBarInputRouter.Policy tabPolicy = routedMenuCommand == null ? tabBarInputPolicy(
-                            tabBarPlacement != null,
-                            uiSessionState.mouseModeSetting && uiSessionState.mouseModeAvailable,
-                            modalState,
-                            openFileMode,
-                            topMenu.isOpen(),
-                            uiSessionState.searchMode
-                        ) : null;
-                        if (inputEvent instanceof PointerEvent pointer && tabPolicy != null) {
-                            TabBarInputRouter.Result tabInput = TabBarInputRouter.route(
-                                tabBarPlacement,
-                                tabPolicy,
-                                pointer
-                            );
-                            if (modalState.isCloseTabConfirm() && tabInput.blocked()) {
-                                rejectDialogInput();
-                            }
-                            tabBarState = tabInput.state();
-                            Integer activateIndex = tabInput.activateIndex();
-                            if (activateIndex != null && activateIndex < tabs.size()) {
-                                CommandInvocation activation = commandRouter.tabActivationInvocation(
-                                    activateIndex
-                                );
-                                int resolvedTab = commandRouter.invokeTabActivation(activation).orElse(-1);
-                                if (resolvedTab >= 0 && resolvedTab < tabs.size()) {
-                                    sessionContext.activate(resolvedTab);
-                                }
-                                topMenu.close();
-                                editorView.cancelMouseSelection();
-                                return;
-                            }
-                            Integer closeIndex = tabInput.closeIndex();
-                            if (closeIndex != null && closeIndex < tabs.size()) {
-                                if (tabs.get(closeIndex).state().isDirty()
-                                    && uiSessionState.confirmOnCloseSetting) {
-                                    modalState = UiModalState.closeTabConfirm(closeIndex);
-                                } else {
-                                    sessionContext.activate(
-                                        closeTab(tabs, activeTabIndex, closeIndex, saveAsSuggestions)
-                                    );
-                                }
-                                topMenu.close();
-                                editorView.cancelMouseSelection();
-                                return;
-                            }
-                            if (tabInput.consumed()) {
-                                editorView.cancelMouseSelection();
-                                return;
-                            }
-                        }
-                        TuinkCommand routedSearchCommand = searchCommand(routedSearchAction);
-                        CommandInvocation pendingCommand = routedMenuCommand != null
-                            ? routedMenuCommand
-                            : routedSearchCommand != null
-                            ? CommandInvocation.of(routedSearchCommand.id())
-                            : routedConfirmDecision == null
-                            && routedSaveAsCommand == null
-                            && inputEvent instanceof KeyStroke stroke
-                            ? commandRouter.invocationFor(stroke).orElse(null)
-                            : null;
-
-                        if (routedMenuCommand == null && inputEvent instanceof PasteEvent paste) {
-                            if (paste.truncated()) {
-                                notification.error("Paste is too large and was not inserted");
-                                return;
-                            }
-                            if (!modalState.isNone() || openFileMode || topMenu.isOpen()) {
-                                // The focused overlay owns input; paste cannot leak through it.
-                            } else {
-                                if (uiSessionState.readingModeSetting) {
-                                    notification.warning("Reading mode: editing is disabled");
-                                } else {
-                                    engine.insertInput(paste.text());
-                                    viewportController.onEditorTextInteraction();
-                                }
-                            }
-                            return;
-                        }
-
-                        if (routedMenuCommand != null
-                            && !(routedMenuResult instanceof CommandRouter.RoutedAction)) {
-                            return;
-                        }
-                        EditorInput key = routedSaveAsCommand != null
-                            ? EditorInput.command(routedSaveAsCommand)
-                            : routedConfirmDecision != null
-                            ? EditorInput.command(TuinkCommand.EDIT_INSERT_NEWLINE)
-                            : resolveEditorInput(
-                                commandRouter,
-                                inputEvent,
-                                pendingCommand,
-                                routedMenuResult,
-                                searchOwnsRawInput(
-                                    uiSessionState.searchMode,
-                                    modalState,
-                                    openFileMode,
-                                    topMenu.isOpen(),
-                                    routedMenuCommand != null
-                                ) && !uiSessionState.searchEditorFocused,
-                                currentSearchFocus()
-                            );
-                        if (key == null) {
-                            return;
-                        }
-                        if (uiSessionState.searchMode && !uiSessionState.searchEditorFocused
-                            && isHistoryCommand(key.command())) {
-                            return;
-                        }
-                        if (searchOwnsRawInput(uiSessionState.searchMode, modalState, openFileMode, topMenu.isOpen())
-                            && uiSessionState.searchEditorFocused
-                            && key.command() == TuinkCommand.UI_ESCAPE) {
-                            uiSessionState.searchMode = false;
-                            searchFocusManager.deactivate(SEARCH_SCOPE_ID);
-                            return;
-                        }
-                        boolean searchPanelFocused = uiSessionState.searchMode && !uiSessionState.searchEditorFocused;
-                        boolean searchOperation = isSearchOperation(key.command()) && searchOwnsCommand(
-                            uiSessionState.searchMode, uiSessionState.searchEditorFocused,
-                            routedMenuCommand != null, key.command()
-                        );
-                        if (!searchOperation && (!searchPanelFocused || !isLocalSearchCommand(key.command()))) {
-                            viewportController.onInput(key, engine.hasSelection(), !uiSessionState.readingModeSetting);
-                        }
-                        if (searchPanelFocused && (key.command() == TuinkCommand.CURSOR_PAGE_UP
-                            || key.command() == TuinkCommand.CURSOR_PAGE_DOWN)) {
-                            viewportController.onManualVerticalPan();
-                        }
-
-                        if (key.command() == null && key.event() instanceof PointerEvent mouse) {
-                            if (modalInputKind(modalState, openFileMode) == ModalInputPolicy.Kind.NONE) {
-                                handleDocumentPointer(mouse);
-                            }
-                            return;
-                        }
-
-                        if (modalState.isHelpHints()) {
-                            HelpHintsController.Result helpHintsResult = HelpHintsController.handle(
-                                key,
-                                true
-                            );
-                            if (helpHintsResult.consumed()) {
-                                if (!helpHintsResult.helpHintsMode()) {
-                                    helpFocusManager.deactivate(HelpOverlayInputRouter.Scope.HELP);
-                                }
-                                modalState = helpHintsResult.helpHintsMode() ? UiModalState.helpHints() : UiModalState.none();
-                                return;
-                            }
-                        }
-
-                        if (modalState.isHelpLicenses()) {
-                            if (key.command() == null && key.event() instanceof TextInput) {
-                                return;
-                            }
-                            TuinkCommand action = key.command();
-                            if (action == TuinkCommand.UI_ESCAPE
-                                || action == TuinkCommand.EDIT_INSERT_NEWLINE
-                                || action == TuinkCommand.HELP_LICENSES) {
-                                helpFocusManager.deactivate(HelpOverlayInputRouter.Scope.HELP);
-                                modalState = UiModalState.none();
-                            }
-                            return;
-                        }
-
-                        if (modalState.isHelpAuthor()) {
-                            if (key.command() == null && key.event() instanceof TextInput) {
-                                return;
-                            }
-                            TuinkCommand action = key.command();
-                            if (action == TuinkCommand.UI_ESCAPE
-                                || action == TuinkCommand.EDIT_INSERT_NEWLINE
-                                || action == TuinkCommand.HELP_AUTHOR) {
-                                helpFocusManager.deactivate(HelpOverlayInputRouter.Scope.HELP);
-                                modalState = UiModalState.none();
-                            }
-                            return;
-                        }
-
-                        if (modalState.isRecoveryConfirm()) {
-                            if (routedConfirmDecision != null) {
-                                if (routedConfirmDecision == ConfirmChoice.SAVE) {
-                                    int restoredCount = restoreRecoveredTabs(
-                                        startupRecoveryEntries,
-                                        tabs,
-                                        sessionContext,
-                                        recoveryAutosave,
-                                        System.nanoTime()
-                                    );
-                                    startupRecoveryEntries.clear();
-                                    if (restoredCount > 0) {
-                                        activeTabIndex = sessionContext.activeTabIndex();
-                                        state = sessionContext.state();
-                                        openFileTree.setRoot(initialOpenRoot(state));
-                                        notification.info("Recovered " + restoredCount + " tab(s)");
-                                    } else {
-                                        notification.info("No recovery snapshots restored");
-                                    }
-                                } else if (routedConfirmDecision == ConfirmChoice.DISCARD) {
-                                    RecoveryAutosaveManager.DeletionResult deletion =
-                                        recoveryAutosave.deleteEntries(startupRecoveryEntries);
-                                    startupRecoveryEntries.clear();
-                                    startupRecoveryEntries.addAll(deletion.failedEntries());
-                                    if (!deletion.successful()) {
-                                        notification.error(deletion.failureMessage());
-                                        return;
-                                    }
-                                    notification.info("Recovery snapshots discarded");
-                                }
-                                modalState = UiModalState.none();
-                                return;
-                            }
-                        }
-
-                        if (modalState.isSaveAs()) {
-                            UiModalState saveAsState = modalState;
-                            String saveAsDraftBefore = saveAsInput.text();
-                            SaveFlowController.SaveAsResult saveAsResult = SaveFlowController.handleSaveAsInput(
-                                key,
-                                modalState,
-                                saveAsInput.text(),
-                                state.getCurrentFile(),
-                                state.getSaveDisposition(),
-                                TerminalEditorApp.this::validateSaveTarget,
-                                path -> Files.exists(path),
-                                TerminalEditorApp.this::isReadOnlyFile,
-                                TerminalEditorApp.this::isSameFilePath,
-                                TerminalEditorApp.this::suggestWritableName
-                            );
-                            if (saveAsResult.consumed()) {
-                                modalState = saveAsResult.modalState();
-                                if (saveAsResult.clearNotification()) {
-                                    notification.clear();
-                                }
-                                if (saveAsResult.errorMessage() != null) {
-                                    notification.error(saveAsResult.errorMessage());
-                                    focusFirstBlockingControl();
-                                }
-                                applySaveAsTextInputEffect(saveAsInput, saveAsResult.textInputEffect());
-                                if (saveAsResult.modalState().isSaveAs()) {
-                                    saveAsSuggestions.rememberDraft(tabs.get(activeTabIndex).tabSession(), saveAsInput.text());
-                                } else {
-                                    saveAsSuggestions.rememberDraft(tabs.get(activeTabIndex).tabSession(), saveAsDraftBefore);
-                                }
-                                if (saveAsResult.saveNowPath() != null) {
-                                    try {
-                                        engine.saveAs(
-                                            saveAsResult.saveNowPath(),
-                                            saveAsResult.saveDisposition()
-                                        );
-                                        renderPlanBuilder = new RenderPlanBuilder(
-                                            resolveHighlighter(state.getCurrentFile()),
-                                            engine.textLayout()
-                                        );
-                                        sessionContext.replaceActiveRenderPlanBuilder(renderPlanBuilder);
-                                        saveAsSuggestions.rememberSavedPath(tabs.get(activeTabIndex).tabSession(), state.getCurrentFile());
-                                        notification.success(savedMessage(state));
-                                        saveAsInput.clear();
-                                        SaveFlowProgress progress = continueAfterSuccessfulSave(
-                                            saveAsState,
-                                            sessionContext,
-                                            tabs,
-                                            saveAsInput,
-                                            saveAsSuggestions,
-                                            notification
-                                        );
-                                        running = progress.running();
-                                        modalState = progress.modalState();
-                                    } catch (IOException e) {
-                                        modalState = saveAsState;
-                                        notification.error(saveErrorMessage(e));
-                                        focusFirstBlockingControl();
-                                    }
-                                }
-                                return;
-                            }
-                        }
-
-                        if (modalState.isSaveOverwriteConfirm()) {
-                            UiModalState overwriteState = modalState;
-                            if (routedConfirmDecision != null) {
-                                if (routedConfirmDecision == ConfirmChoice.SAVE) {
-                                    try {
-                                        engine.saveAs(
-                                            modalState.pendingOverwritePath(),
-                                            SaveDisposition.REPLACE_EXISTING
-                                        );
-                                        renderPlanBuilder = new RenderPlanBuilder(
-                                            resolveHighlighter(state.getCurrentFile()),
-                                            engine.textLayout()
-                                        );
-                                        sessionContext.replaceActiveRenderPlanBuilder(renderPlanBuilder);
-                                        saveAsSuggestions.rememberSavedPath(tabs.get(activeTabIndex).tabSession(), state.getCurrentFile());
-                                        notification.success(savedMessage(state));
-                                        saveAsInput.clear();
-                                        SaveFlowProgress progress = continueAfterSuccessfulSave(
-                                            overwriteState,
-                                            sessionContext,
-                                            tabs,
-                                            saveAsInput,
-                                            saveAsSuggestions,
-                                            notification
-                                        );
-                                        running = progress.running();
-                                        modalState = progress.modalState();
-                                    } catch (IOException e) {
-                                        notification.error(saveErrorMessage(e));
-                                    }
-                                } else if (routedConfirmDecision == ConfirmChoice.DISCARD) {
-                                    modalState = modalState.backToSaveAs();
-                                    notification.clear();
-                                } else {
-                                    modalState = UiModalState.none();
-                                    notification.clear();
-                                }
-                                return;
-                            }
-                        }
-
-                        if (modalState.isQuitConfirm()) {
-                            if (routedConfirmDecision != null) {
-                                if (routedConfirmDecision == ConfirmChoice.SAVE) {
-                                    SaveFlowProgress progress = continueQuitSaveFlow(
-                                        sessionContext,
-                                        tabs,
-                                        saveAsInput,
-                                        saveAsSuggestions,
-                                        notification
-                                    );
-                                    running = progress.running();
-                                    modalState = progress.modalState();
-                                } else if (routedConfirmDecision == ConfirmChoice.DISCARD) {
-                                    running = false;
-                                    modalState = UiModalState.none();
-                                } else {
-                                    modalState = UiModalState.none();
-                                }
-                                return;
-                            }
-                        }
-
-                        if (modalState.isCloseTabConfirm()) {
-                            if (routedConfirmDecision != null) {
-                                int closeIndex = modalState.pendingCloseTabIndex();
-                                if (closeIndex < 0 || closeIndex >= tabs.size()) {
-                                    modalState = UiModalState.none();
-                                    return;
-                                }
-                                if (routedConfirmDecision == ConfirmChoice.SAVE) {
-                                    EditorTab pendingTab = tabs.get(closeIndex);
-                                    if (requiresSaveAs(pendingTab)) {
-                                        sessionContext.activate(closeIndex);
-                                        prepareSaveAs(pendingTab, saveAsInput, saveAsSuggestions, notification);
-                                        modalState = UiModalState.saveAsForCloseTab(closeIndex);
-                                    } else if (saveDirtyTab(pendingTab, notification, saveAsSuggestions)) {
-                                        sessionContext.activate(closeTab(tabs, activeTabIndex, closeIndex, saveAsSuggestions));
-                                        modalState = UiModalState.none();
-                                    }
-                                } else if (routedConfirmDecision == ConfirmChoice.DISCARD) {
-                                    sessionContext.activate(closeTab(tabs, activeTabIndex, closeIndex, saveAsSuggestions));
-                                    modalState = UiModalState.none();
-                                } else {
-                                    modalState = UiModalState.none();
-                                }
-                                return;
-                            }
-                        }
-
-                        if (searchOwnsCommand(
-                            uiSessionState.searchMode,
-                            uiSessionState.searchEditorFocused,
-                            routedMenuCommand != null,
-                            key.command()
-                        )) {
-                            SearchModeResult searchModeResult = handleSearchModeInput(
-                                key,
-                                uiSessionState,
-                                searchUi,
-                                searchQueryInput,
-                                searchReplaceInput,
-                                searchBarPlacement,
-                                tabs,
-                                activeTabIndex,
-                                model,
-                                state,
-                                engine,
-                                renderPlanBuilder,
-                                contentRows,
-                                contentCols,
-                                running,
-                                modalState,
-                                saveAsInput,
-                                saveAsSuggestions,
-                                notification,
-                                openFileMode,
-                                openFileTree,
-                                openFileFocusState.focus(),
-                                topMenu,
-                                terminal::setMouseTracking,
-                                renderer
-                            );
-                            if (searchModeResult.consumed()) {
-                                searchUi = searchModeResult.searchUi();
-                                if (isSearchOperation(key.command())
-                                    && (!uiSessionState.readingModeSetting || !key.command().editsDocumentText())) {
-                                    tabs.get(searchModeResult.activeTabIndex()).viewportController().onEditorTextInteraction();
-                                }
-                                if (searchModeResult.activeTabIndex() != activeTabIndex) {
-                                    sessionContext.activate(searchModeResult.activeTabIndex());
-                                }
-                                running = searchModeResult.running();
-                                modalState = searchModeResult.modalState();
-                                openFileMode = searchModeResult.openFileMode();
-                                openFileFocusState.focus(searchModeResult.openFileFocus());
-                                modalState = consumeRequestedHelpModal(uiSessionState, modalState);
-                                return;
-                            }
-                        }
-
-                        if (key.command() == null && key.event() instanceof TextInput charInput) {
-                            if (uiSessionState.readingModeSetting) {
-                                notification.warning("Reading mode: editing is disabled");
-                            } else {
-                                engine.insertInput(charInput.text());
-                            }
-                            return;
-                        }
-
-                        TuinkCommand action = key.command();
-                        InputActionDispatcher.DispatchResult dispatchResult = InputActionDispatcher.dispatch(
-                            action,
-                            uiSessionState,
-                            new InputActionDispatcher.DispatchContext(
-                                engine,
-                                state,
-                                topMenu,
-                                terminal::setMouseTracking,
-                                contentRows,
-                                contentCols
-                            )
-                        );
-                        if (dispatchResult.handled()) {
-                            if (action == TuinkCommand.SEARCH_OPEN) {
-                                String selectedQuery = selectionQueryForCtrlF(model, state);
-                                if (selectedQuery != null) {
-                                    searchQueryInput.set(selectedQuery);
-                                }
-                                focusSearch(searchBarPlacement, SearchFocus.FIND);
-                            }
-                            modalState = consumeRequestedHelpModal(uiSessionState, modalState);
-                            if (dispatchResult.statusMessage() != null && !dispatchResult.statusMessage().isBlank()) {
-                                if (dispatchResult.statusLevel() == InputActionDispatcher.StatusLevel.ERROR) {
-                                    notification.error(dispatchResult.statusMessage());
-                                } else if (dispatchResult.statusLevel() == InputActionDispatcher.StatusLevel.WARNING) {
-                                    notification.warning(dispatchResult.statusMessage());
-                                } else {
-                                    notification.info(dispatchResult.statusMessage());
-                                }
-                            }
-                            return;
-                        }
-                        EditorActionController.Result editorAction = EditorActionController.decide(
-                            action,
-                            running,
-                            modalState,
-                            uiSessionState.confirmOnCloseSetting,
-                            hasDirtyTabs(tabs),
-                            state.isDirty(),
-                            activeTabIndex,
-                            state.getCurrentFile(),
-                            state.getCurrentFile() != null && isReadOnlyFile(state.getCurrentFile())
-                        );
-                        EditorActionApplyResult editorActionApplyResult = applyEditorActionResult(
-                            editorAction,
-                            sessionContext,
-                            tabs,
-                            activeTabIndex,
-                            state,
-                            engine,
-                            notification,
-                            topMenu,
-                            openFileTree,
-                            openFileMode,
-                            openFileFocusState.focus(),
-                            saveAsInput,
-                            saveAsSuggestions,
-                            renderer
-                        );
-                        running = editorActionApplyResult.running();
-                        modalState = editorActionApplyResult.modalState();
-                        openFileMode = editorActionApplyResult.openFileMode();
-                        openFileFocusState.focus(editorActionApplyResult.openFileFocus());
-                    }
-                }
 
                 runWithRecovery(
                     eventLoop,
-                    new FrontendSession(),
+                    new EditorWindowController(this, new EditorWindowController.Resources(
+                        commandRouter,
+                        editorView,
+                        eventLoop,
+                        initialModalState,
+                        initialSearchUi,
+                        notification,
+                        openFileTree,
+                        recoveryAutosave,
+                        renderFrameController,
+                        renderer,
+                        saveAsInput,
+                        saveAsSuggestions,
+                        screenPresenter,
+                        searchQueryInput,
+                        searchReplaceInput,
+                        sessionContext,
+                        startupRecoveryEntries,
+                        tabs,
+                        new EditorWindowController.TerminalAccess(terminal::width, terminal::height, terminal::setMouseTracking),
+                        topMenu,
+                        uiSessionState
+                    )),
                     recoveryAutosave,
                     () -> toTabSessions(tabs),
                     warning -> System.err.println("Warning: " + warning)
@@ -2127,7 +389,7 @@ public class TerminalEditorApp {
         }
     }
 
-    private EditorActionApplyResult applyEditorActionResult(
+    EditorActionApplyResult applyEditorActionResult(
         EditorActionController.Result editorAction,
         SessionContext sessionContext,
         List<EditorTab> tabs,
@@ -2229,7 +491,7 @@ public class TerminalEditorApp {
         );
     }
 
-    private void applySaveAsTextInputEffect(TextField saveAsInput, SaveFlowController.TextInputEffect effect) {
+    void applySaveAsTextInputEffect(TextField saveAsInput, SaveFlowController.TextInputEffect effect) {
         if (effect == null) {
             return;
         }
@@ -2248,7 +510,7 @@ public class TerminalEditorApp {
         }
     }
 
-    private static void applyWheelVerticalScroll(
+    static void applyWheelVerticalScroll(
         TextModel model,
         EditorTextLayout textLayout,
         EditorState state,
@@ -2295,7 +557,7 @@ public class TerminalEditorApp {
         }
     }
 
-    private static boolean isLocalSearchCommand(TuinkCommand action) {
+    static boolean isLocalSearchCommand(TuinkCommand action) {
         if (action == null) {
             return true;
         }
@@ -2312,7 +574,7 @@ public class TerminalEditorApp {
         };
     }
 
-    private SearchModeResult handleSearchModeInput(
+    SearchModeResult handleSearchModeInput(
         EditorInput key,
         UiSessionState uiSessionState,
         SearchController.SearchUiOptions searchUi,
@@ -2773,7 +1035,7 @@ public class TerminalEditorApp {
         );
     }
 
-    private record SearchModeResult(
+    record SearchModeResult(
         boolean consumed,
         SearchController.SearchUiOptions searchUi,
         int activeTabIndex,
@@ -2788,7 +1050,7 @@ public class TerminalEditorApp {
     ) {
     }
 
-    private record EditorActionApplyResult(
+    record EditorActionApplyResult(
         boolean running,
         UiModalState modalState,
         boolean openFileMode,
@@ -2796,10 +1058,10 @@ public class TerminalEditorApp {
     ) {
     }
 
-    private record OpenFileApplyResult(boolean openFileMode, int activeTabIndex) {
+    record OpenFileApplyResult(boolean openFileMode, int activeTabIndex) {
     }
 
-    private record SaveFlowProgress(boolean running, UiModalState modalState) {
+    record SaveFlowProgress(boolean running, UiModalState modalState) {
     }
 
     private void drawTopFileNameBold(
@@ -2856,20 +1118,20 @@ public class TerminalEditorApp {
         placement.paint(canvas, searchWidgetTheme, searchFocusManager);
     }
 
-    private SearchFocus currentSearchFocus() {
+    SearchFocus currentSearchFocus() {
         return searchFocusManager.focused().orElse(SearchFocus.FIND);
     }
 
-    private static boolean isHistoryCommand(TuinkCommand command) {
+    static boolean isHistoryCommand(TuinkCommand command) {
         return command == TuinkCommand.EDIT_UNDO || command == TuinkCommand.EDIT_REDO;
     }
 
-    private static boolean isSearchOperation(TuinkCommand command) {
+    static boolean isSearchOperation(TuinkCommand command) {
         return command == TuinkCommand.SEARCH_NEXT || command == TuinkCommand.SEARCH_PREVIOUS
             || command == TuinkCommand.SEARCH_REPLACE || command == TuinkCommand.SEARCH_REPLACE_ALL;
     }
 
-    private void focusSearch(SearchBarView.Placement placement, SearchFocus target) {
+    void focusSearch(SearchBarView.Placement placement, SearchFocus target) {
         if (placement != null && target != null) {
             searchFocusManager.focus(placement.focusScope(), target);
         }
@@ -3031,7 +1293,7 @@ public class TerminalEditorApp {
         return modal.isNone() ? openFileMode ? ModalInputPolicy.Kind.OPEN_FILE : null : modal;
     }
 
-    private static boolean belongsToTabChrome(TuiInputEvent event, Rect bounds) {
+    static boolean belongsToTabChrome(TuiInputEvent event, Rect bounds) {
         if (!(event instanceof PointerEvent pointer)) {
             return false;
         }
@@ -3056,7 +1318,7 @@ public class TerminalEditorApp {
             layers.helpPage(), layers.openFile().visible() ? layers.openFile().layout() : null);
     }
 
-    private Rect blockingSurface(int rows, int cols, int contentTop, int promptHeight,
+    Rect blockingSurface(int rows, int cols, int contentTop, int promptHeight,
                                 boolean inline, HelpPage help, OpenDialogLayout open) {
         if (help != null || open != null) {
             if (rows < 8 || cols < 24) {
@@ -3120,7 +1382,7 @@ public class TerminalEditorApp {
         return CellText.fit(text, width);
     }
 
-    private Path initialOpenRoot(EditorState state) {
+    Path initialOpenRoot(EditorState state) {
         if (state.getCurrentFile() != null) {
             Path parent = state.getCurrentFile().toAbsolutePath().normalize().getParent();
             if (parent != null) {
@@ -3228,7 +1490,7 @@ public class TerminalEditorApp {
         return new Button(row, col, closeText);
     }
 
-    private HelpOverlayPlacement helpOverlayPlacement(int rows, int cols, HelpPage page) {
+    HelpOverlayPlacement helpOverlayPlacement(int rows, int cols, HelpPage page) {
         HelpDialogLayout layout = helpDialogLayout(rows, cols, page.rows().size());
         int visibleRows = rows < 8 || cols < 24 ? 0 : Math.max(0, layout.height() - 3);
         if (helpScrollPage != page) {
@@ -3283,7 +1545,7 @@ public class TerminalEditorApp {
         return prepared;
     }
 
-    private void resetHelpScroll() {
+    void resetHelpScroll() {
         helpScrollPage = null;
         helpText = null;
         helpScrollState = ListView.State.initial();
@@ -3488,7 +1750,7 @@ public class TerminalEditorApp {
         return null;
     }
 
-    private ConfirmBarInputRouter.Policy confirmPolicy(UiModalState modalState) {
+    ConfirmBarInputRouter.Policy confirmPolicy(UiModalState modalState) {
         if (modalState.isRecoveryConfirm()) {
             return ConfirmBarInputRouter.Policy.recovery();
         }
@@ -3504,11 +1766,11 @@ public class TerminalEditorApp {
         throw new IllegalArgumentException("Modal is not a confirmation prompt: " + modalState.mode());
     }
 
-    private void deactivateConfirmFocus() {
+    void deactivateConfirmFocus() {
         confirmFocusManager.activeScopeId().ifPresent(confirmFocusManager::deactivate);
     }
 
-    private HelpPage activeHelpPage(boolean helpHintsMode, boolean helpLicensesMode, boolean helpAuthorMode) {
+    HelpPage activeHelpPage(boolean helpHintsMode, boolean helpLicensesMode, boolean helpAuthorMode) {
         if (helpHintsMode) {
             return HelpPages.KEYMAP;
         }
@@ -3528,7 +1790,7 @@ public class TerminalEditorApp {
         return CellText.clip(text, 0, width);
     }
 
-    private OpenFileApplyResult applyOpenFileIntent(
+    OpenFileApplyResult applyOpenFileIntent(
         OpenFileInputRouter.Intent intent,
         OpenFileTreeController tree,
         List<EditorTab> tabs,
@@ -3588,7 +1850,7 @@ public class TerminalEditorApp {
         throw new IllegalStateException("Unsupported open-file intent: " + intent);
     }
 
-    private String buildBottomBar(
+    String buildBottomBar(
         EditorState state,
         TextModel model,
         int cols,
@@ -3631,7 +1893,7 @@ public class TerminalEditorApp {
         return left + " ".repeat(free - rightWidth) + rightBlock;
     }
 
-    private String buildSearchSummary(
+    String buildSearchSummary(
         boolean searchMode,
         String query,
         SearchController.SearchUiOptions searchUi,
@@ -3964,7 +2226,7 @@ public class TerminalEditorApp {
         return selected;
     }
 
-    private String selectionQueryForCtrlF(TextModel model, EditorState state) {
+    String selectionQueryForCtrlF(TextModel model, EditorState state) {
         if (!state.hasSelection()) {
             return null;
         }
@@ -4036,13 +2298,13 @@ public class TerminalEditorApp {
         return matcher.matchesRange(model.getLine(start.line()), start.col(), end.col());
     }
 
-    private final class RenderFrameController {
+    final class RenderFrameController {
         private final RenderRasterizer renderer;
         private final EditorView editorView;
         private final boolean colorEnabled;
         private final ScreenPresenter screenPresenter;
 
-        private RenderFrameController(
+        RenderFrameController(
             RenderRasterizer renderer,
             EditorView editorView,
             boolean colorEnabled,
@@ -4054,16 +2316,16 @@ public class TerminalEditorApp {
             this.screenPresenter = screenPresenter;
         }
 
-        private RenderFrameResult renderFrameIfNeeded(FrameComposition composition) {
+        RenderFrameResult renderFrameIfNeeded(FrameComposition composition) {
             return renderFrame(composition, this);
         }
     }
 
-    private String buildOverwritePrompt(Path path) {
+    String buildOverwritePrompt(Path path) {
         return "Overwrite existing file: " + path + " ? (y/N)";
     }
 
-    private ConfirmBarView buildQuitConfirmBar(
+    ConfirmBarView buildQuitConfirmBar(
         List<EditorTab> tabs,
         int cols
     ) {
@@ -4102,7 +2364,7 @@ public class TerminalEditorApp {
         );
     }
 
-    private ConfirmBarView buildCloseTabConfirmBar(
+    ConfirmBarView buildCloseTabConfirmBar(
         List<EditorTab> tabs,
         int closeTabIndex,
         int cols
@@ -4121,7 +2383,7 @@ public class TerminalEditorApp {
         );
     }
 
-    private String buildRecoveryPrompt(int count) {
+    String buildRecoveryPrompt(int count) {
         return "Recovery snapshots found: " + count + ". Restore now? (Y/n)";
     }
 
@@ -4134,7 +2396,7 @@ public class TerminalEditorApp {
         return "Close modified tab: " + name + " ? (y/N)";
     }
 
-    private boolean requiresSaveAs(EditorTab tab) {
+    boolean requiresSaveAs(EditorTab tab) {
         if (tab == null) {
             return false;
         }
@@ -4142,7 +2404,7 @@ public class TerminalEditorApp {
         return file == null || isReadOnlyFile(file);
     }
 
-    private void prepareSaveAs(
+    void prepareSaveAs(
         EditorTab tab,
         TextField saveAsInput,
         SaveAsSuggestionStore saveAsSuggestions,
@@ -4171,7 +2433,7 @@ public class TerminalEditorApp {
         }
     }
 
-    private SaveFlowProgress continueQuitSaveFlow(
+    SaveFlowProgress continueQuitSaveFlow(
         SessionContext sessionContext,
         List<EditorTab> tabs,
         TextField saveAsInput,
@@ -4199,7 +2461,7 @@ public class TerminalEditorApp {
         return new SaveFlowProgress(false, UiModalState.none());
     }
 
-    private SaveFlowProgress continueAfterSuccessfulSave(
+    SaveFlowProgress continueAfterSuccessfulSave(
         UiModalState completedSaveState,
         SessionContext sessionContext,
         List<EditorTab> tabs,
@@ -4232,7 +2494,7 @@ public class TerminalEditorApp {
         return new SaveFlowProgress(true, UiModalState.none());
     }
 
-    private boolean saveDirtyTab(
+    boolean saveDirtyTab(
         EditorTab tab,
         NotificationState notification,
         SaveAsSuggestionStore saveAsSuggestions
@@ -4259,7 +2521,7 @@ public class TerminalEditorApp {
         }
     }
 
-    private int restoreRecoveredTabs(
+    int restoreRecoveredTabs(
         List<RecoveryStore.Entry> entries,
         List<EditorTab> tabs,
         SessionContext sessionContext,
@@ -4295,11 +2557,11 @@ public class TerminalEditorApp {
         return restored.size();
     }
 
-    private String savedMessage(EditorState state) {
+    String savedMessage(EditorState state) {
         return "Saved " + state.getCurrentFile() + " [" + state.getFileEncoding().displayName() + "]";
     }
 
-    private String saveErrorMessage(IOException e) {
+    String saveErrorMessage(IOException e) {
         String msg = e.getMessage() == null ? "Unknown I/O error" : e.getMessage();
         String lower = msg.toLowerCase();
         if (lower.contains("permission denied") || lower.contains("access denied")) {
@@ -4318,7 +2580,7 @@ public class TerminalEditorApp {
         return "File is read-only. Use Save As. " + path;
     }
 
-    private String validateSaveTarget(Path path) {
+    String validateSaveTarget(Path path) {
         Path normalized = path.toAbsolutePath().normalize();
         Path parent = normalized.getParent();
         if (parent != null) {
@@ -4338,7 +2600,7 @@ public class TerminalEditorApp {
         return null;
     }
 
-    private boolean isReadOnlyFile(Path path) {
+    boolean isReadOnlyFile(Path path) {
         if (path == null) {
             return false;
         }
@@ -4349,11 +2611,11 @@ public class TerminalEditorApp {
         }
     }
 
-    private boolean hasDirtyTabs(List<EditorTab> tabs) {
+    boolean hasDirtyTabs(List<EditorTab> tabs) {
         return TabSessions.hasDirtyTabs(toTabSessions(tabs));
     }
 
-    private String suggestWritableName(Path path) {
+    String suggestWritableName(Path path) {
         String fileName = path.getFileName() == null ? DEFAULT_FILE_NAME : path.getFileName().toString();
         int dot = fileName.lastIndexOf('.');
         String base = dot > 0 ? fileName.substring(0, dot) : fileName;
@@ -4364,7 +2626,7 @@ public class TerminalEditorApp {
         return SaveTargetSuggester.firstAvailable(preferred, Files::exists).toString();
     }
 
-    private boolean isSameFilePath(Path a, Path b) {
+    boolean isSameFilePath(Path a, Path b) {
         if (a == null || b == null) {
             return false;
         }
@@ -4375,7 +2637,7 @@ public class TerminalEditorApp {
         }
     }
 
-    private int countSearchMatches(TextModel model, List<EditorTab> tabs, String query, SearchOptions options) {
+    int countSearchMatches(TextModel model, List<EditorTab> tabs, String query, SearchOptions options) {
         if (query == null || query.isEmpty()) {
             return 0;
         }
@@ -4389,7 +2651,7 @@ public class TerminalEditorApp {
         return TabSearch.countMatchesInModel(model, query, safe);
     }
 
-    private long searchSourceIdentity(TextModel model, List<EditorTab> tabs, boolean allTabs) {
+    long searchSourceIdentity(TextModel model, List<EditorTab> tabs, boolean allTabs) {
         if (!allTabs) {
             return model == null ? 0L : model.cacheIdentity();
         }
@@ -4402,7 +2664,7 @@ public class TerminalEditorApp {
         return hash;
     }
 
-    private long searchSourceRevision(TextModel model, List<EditorTab> tabs, boolean allTabs) {
+    long searchSourceRevision(TextModel model, List<EditorTab> tabs, boolean allTabs) {
         if (!allTabs) {
             return model == null ? 0L : model.revision();
         }
@@ -4420,7 +2682,7 @@ public class TerminalEditorApp {
     private record HelpDialogLayout(int top, int left, int width, int height) {
     }
 
-    private record HelpOverlayPlacement(
+    record HelpOverlayPlacement(
         HelpPage page,
         ListView.Placement content,
         String footer,
@@ -4432,13 +2694,13 @@ public class TerminalEditorApp {
     ) {
     }
 
-    private record RenderFrameResult(
+    record RenderFrameResult(
         RenderPlan plan,
         boolean rendered
     ) {
     }
 
-    private EditorTab newEditorTab() {
+    EditorTab newEditorTab() {
         TabSession session = TabSession.createEmpty(TerminalEditorTextLayout::new, clipboard);
         RenderPlanBuilder builder = new RenderPlanBuilder(RegexHighlighter.withDefaults(), session.textLayout());
         return new EditorTab(session, builder);
@@ -4459,7 +2721,7 @@ public class TerminalEditorApp {
         return TabSessions.closeIndex(size, activeTabIndex, activeTabIndex);
     }
 
-    private int closeTab(
+    int closeTab(
         List<EditorTab> tabs,
         int activeTabIndex,
         int closeTabIndex,
@@ -4475,7 +2737,7 @@ public class TerminalEditorApp {
         return TabSessions.closeIndex(size, activeTabIndex, closeTabIndex);
     }
 
-    private List<TabSession> toTabSessions(List<EditorTab> tabs) {
+    List<TabSession> toTabSessions(List<EditorTab> tabs) {
         List<TabSession> sessions = new ArrayList<>(tabs.size());
         for (EditorTab tab : tabs) {
             sessions.add(tab.tabSession());
@@ -4492,7 +2754,7 @@ public class TerminalEditorApp {
         return hash;
     }
 
-    private List<TabBarView.TabItem> toTabItems(List<EditorTab> tabs, boolean[] matchFlags) {
+    List<TabBarView.TabItem> toTabItems(List<EditorTab> tabs, boolean[] matchFlags) {
         List<TabBarView.TabItem> out = new ArrayList<>(tabs.size());
         for (int i = 0; i < tabs.size(); i++) {
             EditorTab tab = tabs.get(i);
@@ -4518,7 +2780,7 @@ public class TerminalEditorApp {
         return flags;
     }
 
-    private boolean[] resolveTabMatchFlags(
+    boolean[] resolveTabMatchFlags(
         List<EditorTab> tabs,
         boolean searchMode,
         String query,
@@ -4532,7 +2794,7 @@ public class TerminalEditorApp {
         return cache.resolve(tabs, query, options, revisionFingerprint, () -> findTabsWithMatches(tabs, query, options));
     }
 
-    private List<TopMenuView.TabItem> toTopMenuTabs(List<EditorTab> tabs, boolean[] matchFlags) {
+    List<TopMenuView.TabItem> toTopMenuTabs(List<EditorTab> tabs, boolean[] matchFlags) {
         List<TopMenuView.TabItem> out = new ArrayList<>(tabs.size());
         for (int i = 0; i < tabs.size(); i++) {
             EditorTab tab = tabs.get(i);
@@ -4546,16 +2808,16 @@ public class TerminalEditorApp {
         return out;
     }
 
-    private record EditorTab(
+    record EditorTab(
         TabSession tabSession,
         RenderPlanBuilder renderPlanBuilder,
         ViewportController viewportController
     ) {
-        private EditorTab(TabSession tabSession, RenderPlanBuilder renderPlanBuilder) {
+        EditorTab(TabSession tabSession, RenderPlanBuilder renderPlanBuilder) {
             this(tabSession, renderPlanBuilder, new ViewportController());
         }
 
-        private EditorTab {
+        EditorTab {
             if (tabSession == null
                 || renderPlanBuilder == null
                 || viewportController == null
@@ -4568,7 +2830,7 @@ public class TerminalEditorApp {
             return tabSession.model();
         }
 
-        private EditorState state() {
+        EditorState state() {
             return tabSession.state();
         }
 
@@ -4585,7 +2847,7 @@ public class TerminalEditorApp {
         }
     }
 
-    private static final class TabMatchCache {
+    static final class TabMatchCache {
         private String query;
         private SearchOptions options;
         private long tabsFingerprint = Long.MIN_VALUE;
@@ -4614,7 +2876,7 @@ public class TerminalEditorApp {
         }
     }
 
-    private static final class SessionContext {
+    static final class SessionContext {
         private final List<EditorTab> tabs;
         private int activeTabIndex;
         private TextModel model;
@@ -4622,12 +2884,12 @@ public class TerminalEditorApp {
         private EditorEngine engine;
         private RenderPlanBuilder renderPlanBuilder;
 
-        private SessionContext(List<EditorTab> tabs, int activeTabIndex) {
+        SessionContext(List<EditorTab> tabs, int activeTabIndex) {
             this.tabs = tabs;
             activate(activeTabIndex);
         }
 
-        private void activate(int nextActiveTabIndex) {
+        void activate(int nextActiveTabIndex) {
             this.activeTabIndex = Math.max(0, Math.min(nextActiveTabIndex, tabs.size() - 1));
             EditorTab active = tabs.get(this.activeTabIndex);
             this.model = active.model();
@@ -4641,33 +2903,33 @@ public class TerminalEditorApp {
             activate(tabs.size() - 1);
         }
 
-        private void replaceActiveRenderPlanBuilder(RenderPlanBuilder nextRenderPlanBuilder) {
+        void replaceActiveRenderPlanBuilder(RenderPlanBuilder nextRenderPlanBuilder) {
             tabs.set(activeTabIndex, tabs.get(activeTabIndex).withRenderPlanBuilder(nextRenderPlanBuilder));
             this.renderPlanBuilder = nextRenderPlanBuilder;
         }
 
-        private int activeTabIndex() {
+        int activeTabIndex() {
             return activeTabIndex;
         }
 
-        private TextModel model() {
+        TextModel model() {
             return model;
         }
 
-        private EditorState state() {
+        EditorState state() {
             return state;
         }
 
-        private EditorEngine engine() {
+        EditorEngine engine() {
             return engine;
         }
 
-        private RenderPlanBuilder renderPlanBuilder() {
+        RenderPlanBuilder renderPlanBuilder() {
             return renderPlanBuilder;
         }
     }
 
-    private final class NotificationState {
+    final class NotificationState {
         private enum Kind {
             SUCCESS,
             INFO,
@@ -4675,7 +2937,7 @@ public class TerminalEditorApp {
             ERROR
         }
 
-        private String message;
+        String message;
         private Kind kind;
         private long expiresAtNanos;
 
@@ -4683,43 +2945,43 @@ public class TerminalEditorApp {
             return message != null;
         }
 
-        private void success(String message) {
+        void success(String message) {
             this.message = message;
             this.kind = Kind.SUCCESS;
             this.expiresAtNanos = System.nanoTime() + NOTIFY_DURATION_NANOS;
         }
 
-        private void info(String message) {
+        void info(String message) {
             this.message = message;
             this.kind = Kind.INFO;
             this.expiresAtNanos = System.nanoTime() + NOTIFY_DURATION_NANOS;
         }
 
-        private void warning(String message) {
+        void warning(String message) {
             this.message = message;
             this.kind = Kind.WARNING;
             this.expiresAtNanos = System.nanoTime() + NOTIFY_DURATION_NANOS;
         }
 
-        private void error(String message) {
+        void error(String message) {
             this.message = message;
             this.kind = Kind.ERROR;
             this.expiresAtNanos = 0L;
         }
 
-        private void clearErrorOnUserAction() {
+        void clearErrorOnUserAction() {
             if (kind == Kind.ERROR) {
                 clear();
             }
         }
 
-        private void clear() {
+        void clear() {
             this.message = null;
             this.kind = null;
             this.expiresAtNanos = 0L;
         }
 
-        private CellStyle style() {
+        CellStyle style() {
             if (kind == null) {
                 return null;
             }
@@ -4731,7 +2993,7 @@ public class TerminalEditorApp {
             };
         }
 
-        private boolean expireIfNeeded() {
+        boolean expireIfNeeded() {
             if (message != null && expiresAtNanos > 0L && System.nanoTime() >= expiresAtNanos) {
                 clear();
                 return true;
@@ -4739,7 +3001,7 @@ public class TerminalEditorApp {
             return false;
         }
 
-        private long nanosUntilExpire(long nowNanos) {
+        long nanosUntilExpire(long nowNanos) {
             if (message == null || expiresAtNanos <= 0L) {
                 return -1L;
             }
@@ -4747,7 +3009,7 @@ public class TerminalEditorApp {
         }
     }
 
-    private LineHighlighter resolveHighlighter(Path file) {
+    LineHighlighter resolveHighlighter(Path file) {
         return file == null ? RegexHighlighter.withDefaults() : RegexHighlighter.forFileName(file.getFileName().toString());
     }
 
@@ -5100,11 +3362,11 @@ public class TerminalEditorApp {
         }
     }
 
-    private boolean effectiveSyntaxHighlighting(boolean syntaxHighlightingSetting) {
+    boolean effectiveSyntaxHighlighting(boolean syntaxHighlightingSetting) {
         return syntaxHighlightingAvailable() && syntaxHighlightingSetting;
     }
 
-    private boolean syntaxHighlightingAvailable() {
+    boolean syntaxHighlightingAvailable() {
         return theme != UiStyles.Theme.LIGHT;
     }
 
@@ -5131,9 +3393,9 @@ public class TerminalEditorApp {
         return "exec".equalsIgnoreCase(System.getProperty("dev.tuiframe.provider", ""));
     }
 
-    private final class FrameProfiler {
+    final class FrameProfiler {
         private long frameStartNanos;
-        private long searchNanos;
+        long searchNanos;
         private long buildNanos;
         private long rasterNanos;
         private long diffNanos;
@@ -5151,7 +3413,7 @@ public class TerminalEditorApp {
             this.closeOut = closeOut;
         }
 
-        private void beginFrame() {
+        void beginFrame() {
             frameStartNanos = System.nanoTime();
             stopwatchStartNanos = frameStartNanos;
             searchNanos = 0L;
@@ -5160,14 +3422,14 @@ public class TerminalEditorApp {
             diffNanos = 0L;
         }
 
-        private long stopwatchNanos() {
+        long stopwatchNanos() {
             long now = System.nanoTime();
             long delta = now - stopwatchStartNanos;
             stopwatchStartNanos = now;
             return delta;
         }
 
-        private void endFrame(boolean rendered) {
+        void endFrame(boolean rendered) {
             if (!rendered) {
                 return;
             }

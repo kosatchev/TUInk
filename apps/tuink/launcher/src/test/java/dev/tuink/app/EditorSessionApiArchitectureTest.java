@@ -1,6 +1,7 @@
 package dev.tuink.app;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.Test;
 
 class EditorSessionApiArchitectureTest {
     private static final String CORE_PACKAGE = "dev.tuink.core.";
+    private static final String CORE_BRIDGE = "dev.tuink.editor.session.document.CoreSessionBridge";
 
     @Test
     void editorSessionPublicApiDoesNotExposeMutableCoreTypes() throws ClassNotFoundException {
@@ -28,7 +30,7 @@ class EditorSessionApiArchitectureTest {
 
         for (var imported : production) {
             Class<?> type = Class.forName(imported.getName(), false, getClass().getClassLoader());
-            if (!Modifier.isPublic(type.getModifiers())) {
+            if (!Modifier.isPublic(type.getModifiers()) || type.getName().equals(CORE_BRIDGE)) {
                 continue;
             }
             inspectType(type.getName() + " extends", type.getGenericSuperclass(), violations);
@@ -59,9 +61,23 @@ class EditorSessionApiArchitectureTest {
 
         assertTrue(
             violations.isEmpty(),
-            () -> "editor-session public API exposes core types:\n  "
+            () -> "editor-session portable API exposes mutable core types or its composition bridge:\n  "
                 + String.join("\n  ", violations)
         );
+    }
+
+    @Test
+    void mutableCoreBridgeIsRestrictedToDocumentInternalsAndTheTuiCompositionAdapter() {
+        JavaClasses production = new ClassFileImporter()
+            .withImportOption(new ImportOption.DoNotIncludeTests())
+            .importPackages("dev.tuink");
+        noClasses()
+            .that().resideOutsideOfPackage("dev.tuink.editor.session.document..")
+            .and().doNotHaveFullyQualifiedName("dev.tuink.tui.TuiDocumentSession")
+            .should().dependOnClassesThat()
+            .haveNameMatching("dev\\.tuink\\.editor\\.session\\.document\\.CoreSessionBridge(?:\\$.*)?")
+            .because("only the composition adapter may attach core views; portable clients use snapshots and edits")
+            .check(production);
     }
 
     private static void inspect(Member member, Type type, List<String> violations) {
@@ -83,7 +99,7 @@ class EditorSessionApiArchitectureTest {
 
     private static boolean mentionsCore(Type type) {
         if (type instanceof Class<?> raw) {
-            return raw.getName().startsWith(CORE_PACKAGE)
+            return raw.getName().startsWith(CORE_PACKAGE) || raw.getName().equals(CORE_BRIDGE)
                 || raw.isArray() && mentionsCore(raw.getComponentType());
         }
         if (type instanceof ParameterizedType parameterized) {

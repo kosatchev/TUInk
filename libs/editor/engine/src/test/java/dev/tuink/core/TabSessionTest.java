@@ -31,8 +31,7 @@ class TabSessionTest {
         TextModel foreignModel = new TextModel(new SimpleLineBuffer());
         EditorState foreignState = new EditorState();
         EditorTextLayout foreignLayout = new TestEditorTextLayout(foreignModel);
-        EditorTextLayout secondLayout = new TestEditorTextLayout(model);
-        EditorEngine secondEngine = new EditorEngine(model, state, secondLayout);
+        TabSession secondView = engine.document().attach(TestEditorTextLayout::new, new EditorClipboard());
 
         assertThrows(
             IllegalArgumentException.class,
@@ -48,7 +47,7 @@ class TabSessionTest {
         );
         assertThrows(
             IllegalArgumentException.class,
-            () -> new TabSession(model, state, layout, secondEngine)
+            () -> new TabSession(model, secondView.state(), layout, secondView.engine())
         );
     }
 }

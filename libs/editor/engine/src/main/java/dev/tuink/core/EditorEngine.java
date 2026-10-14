@@ -9,18 +9,20 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.ArrayDeque;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.function.IntFunction;
+import java.util.function.LongSupplier;
 import org.eclipse.jgit.diff.DiffAlgorithm;
 import org.eclipse.jgit.diff.Edit;
 import org.eclipse.jgit.diff.EditList;
 
 /**
- * Core document editing, selection and history commands.
+ * Editing adapter for one attached view of an {@link EditorDocument}.
+ * The document owns text, file state and history; this adapter applies its view's editing commands.
  */
 public class EditorEngine {
     private static final int MAX_HISTORY = 500;
@@ -37,36 +39,20 @@ public class EditorEngine {
         DiffAlgorithm.getAlgorithm(DiffAlgorithm.SupportedAlgorithm.HISTOGRAM);
     private static final DiffAlgorithm GUTTER_DIFF_ALGORITHM_MYERS =
         DiffAlgorithm.getAlgorithm(DiffAlgorithm.SupportedAlgorithm.MYERS);
+    private final EditorDocument document;
+    private final EditorDocumentHistory history;
+    private final EditorGutterDiffState gutterDiff = new EditorGutterDiffState();
     private final TextModel model;
     private final EditorState state;
     private final EditorTextLayout textLayout;
     private final EditorClipboard clipboard;
-    private final Deque<HistoryEntry> undoStack = new ArrayDeque<>();
-    private final Deque<HistoryEntry> redoStack = new ArrayDeque<>();
-    private EditKind lastEditKind = EditKind.NONE;
-    private long lastEditAtNanos;
-    private Position lastEditCursorAfter;
-    private long navigationRevision;
+    private final LongSupplier gutterDiffClock;
     private GraphemeText cachedGraphemes;
     private int tabWidth = 4;
     private TabInsertMode tabInsertMode = TabInsertMode.AUTO;
     private boolean autoIndentEnabled = true;
     private boolean autoPairsEnabled = true;
     private boolean autoListEnabled = true;
-    private GutterDiffMode gutterDiffMode = GutterDiffMode.MYERS;
-    private List<String> openBaselineLines = List.of("");
-    private List<String> savedBaselineLines = List.of("");
-    private final List<GutterDiffFlag> savedDiffFlags = new ArrayList<>();
-    private final List<Boolean> savedDeletedMarkers = new ArrayList<>();
-    private final List<GutterDiffFlag> openDiffFlags = new ArrayList<>();
-    private final List<Boolean> openDeletedMarkers = new ArrayList<>();
-    private long gutterDiffComputedRevision = Long.MIN_VALUE;
-    private long gutterDiffLastRebuildAtNanos;
-    private long gutterDiffLastRebuildDurationNanos;
-    private boolean gutterDiffPendingRebuild;
-    private long nextDocumentStateId;
-    private long currentDocumentStateId;
-    private long savedDocumentStateId;
 
     public EditorEngine(TextModel model, EditorState state, EditorTextLayout textLayout) {
         this(model, state, textLayout, new EditorClipboard());
@@ -78,19 +64,59 @@ public class EditorEngine {
         EditorTextLayout textLayout,
         EditorClipboard clipboard
     ) {
-        this.model = model;
-        this.state = state;
+        this(initialDocument(model, state, textLayout, clipboard), state, textLayout, clipboard);
+    }
+
+    EditorEngine(EditorDocument document, EditorState state, EditorTextLayout textLayout, EditorClipboard clipboard) {
+        this(document, state, textLayout, clipboard, System::nanoTime);
+    }
+
+    EditorEngine(TextModel model, EditorState state, EditorTextLayout textLayout,
+        EditorClipboard clipboard, LongSupplier gutterDiffClock) {
+        this(initialDocument(model, state, textLayout, clipboard, gutterDiffClock),
+            state, textLayout, clipboard, gutterDiffClock);
+    }
+
+    private EditorEngine(EditorDocument document, EditorState state, EditorTextLayout textLayout,
+        EditorClipboard clipboard, LongSupplier gutterDiffClock) {
+        this.document = Objects.requireNonNull(document, "document");
+        this.history = document.history;
+        this.model = document.model();
+        this.state = Objects.requireNonNull(state, "state");
         if (textLayout == null || textLayout.model() != model) {
             throw new IllegalArgumentException("textLayout must be bound to the engine model");
         }
         this.textLayout = textLayout;
         this.clipboard = Objects.requireNonNull(clipboard, "clipboard");
-        resetGutterDiffBaselinesOnOpen();
-        if (state.isDirty()) {
-            savedDocumentStateId = -1L;
-        } else {
-            markCurrentAsSaved();
+        this.gutterDiffClock = Objects.requireNonNull(gutterDiffClock, "gutterDiffClock");
+        if (document.register(state)) {
+            resetGutterDiffBaselinesOnOpen();
+            if (state.isDirty()) {
+                history.savedDocumentStateId = -1L;
+            } else {
+                markCurrentAsSaved();
+            }
         }
+    }
+
+    private static EditorDocument initialDocument(
+        TextModel model, EditorState state, EditorTextLayout layout, EditorClipboard clipboard
+    ) {
+        Objects.requireNonNull(clipboard, "clipboard");
+        if (model == null || state == null || layout == null || layout.model() != model) {
+            throw new IllegalArgumentException("textLayout must be bound to the engine model");
+        }
+        return new EditorDocument(model, state.documentState());
+    }
+
+    private static EditorDocument initialDocument(TextModel model, EditorState state, EditorTextLayout layout,
+        EditorClipboard clipboard, LongSupplier gutterDiffClock) {
+        Objects.requireNonNull(gutterDiffClock, "gutterDiffClock");
+        return initialDocument(model, state, layout, clipboard);
+    }
+
+    public EditorDocument document() {
+        return document;
     }
 
     public TextModel model() {
@@ -107,7 +133,7 @@ public class EditorEngine {
 
     /** Invalidates frontend navigation context after a document or cursor interaction. */
     public long navigationRevision() {
-        return navigationRevision;
+        return state.navigationRevision();
     }
 
     public int tabWidth() {
@@ -142,7 +168,7 @@ public class EditorEngine {
             return false;
         }
 
-        navigationRevision++;
+        state.invalidateNavigation();
         breakCoalescing();
         applyEdit(EditKind.NONE, () -> {
             DocumentFileMetadata metadata = model.fileMetadata();
@@ -249,14 +275,14 @@ public class EditorEngine {
      * Even a boundary no-op clears an unextended selection and separates consecutive typing edits.
      */
     public void navigateTo(Position requested, boolean selecting) {
-        navigationRevision++;
+        state.invalidateNavigation();
         Position previous = clampCursorBoundary(state.getCursor());
         moveCursor(clampCursorBoundary(requested), selecting, previous);
     }
 
     /** Starts a pointer selection without exposing mutable cursor state to a frontend. */
     public void beginSelectionAt(Position requested) {
-        navigationRevision++;
+        state.invalidateNavigation();
         breakCoalescing();
         Position next = clampCursorBoundary(requested);
         state.setSelectionAnchor(next);
@@ -265,7 +291,7 @@ public class EditorEngine {
 
     /** Extends the current selection to a frontend-resolved text position. */
     public void extendSelectionTo(Position requested) {
-        navigationRevision++;
+        state.invalidateNavigation();
         breakCoalescing();
         if (state.getSelectionAnchor() == null) {
             state.setSelectionAnchor(state.getCursor());
@@ -275,7 +301,7 @@ public class EditorEngine {
 
     /** Restores a cursor/selection snapshot after speculative frontend routing. */
     public void restoreSelection(Position cursor, Position anchor) {
-        navigationRevision++;
+        state.invalidateNavigation();
         breakCoalescing();
         state.setCursor(requireTextBoundary(cursor));
         state.setSelectionAnchor(anchor == null ? null : requireTextBoundary(anchor));
@@ -297,42 +323,53 @@ public class EditorEngine {
             return;
         }
         snapshot.restore(model, state);
-        navigationRevision++;
-        undoStack.clear();
-        redoStack.clear();
+        state.invalidateNavigation();
+        history.undoStack.clear();
+        history.redoStack.clear();
         breakCoalescing();
         resetGutterDiffBaselinesOnOpen();
         beginNewDocumentState();
         if (snapshot.dirty()) {
-            savedDocumentStateId = -1L;
+            history.savedDocumentStateId = -1L;
             state.setDirty(true);
         } else {
             markCurrentAsSaved();
         }
+        document.changed();
     }
 
     public GutterDiffMarker gutterDiffMarkerForLine(int lineIndex) {
-        if (gutterDiffMode == GutterDiffMode.DISABLED) {
+        refreshGutterDiffIfDue();
+        return cachedGutterDiffMarkerForLine(lineIndex);
+    }
+
+    /** Prepares owner-thread reads without recomputing the diff between lines of a frame. */
+    public IntFunction<GutterDiffMarker> gutterDiffMarkers() {
+        refreshGutterDiffIfDue();
+        return this::cachedGutterDiffMarkerForLine;
+    }
+
+    private GutterDiffMarker cachedGutterDiffMarkerForLine(int lineIndex) {
+        if (gutterDiff.gutterDiffMode == GutterDiffMode.DISABLED) {
             return GutterDiffMarker.NONE;
         }
-        ensureGutterDiffUpToDate();
         if (lineIndex < 0 || lineIndex >= model.lineCount()) {
             return GutterDiffMarker.NONE;
         }
-        if (lineIndex < savedDeletedMarkers.size() && Boolean.TRUE.equals(savedDeletedMarkers.get(lineIndex))) {
+        if (lineIndex < gutterDiff.savedDeletedMarkers.size() && Boolean.TRUE.equals(gutterDiff.savedDeletedMarkers.get(lineIndex))) {
             return new GutterDiffMarker(GutterDiffFlag.DELETED, false);
         }
-        if (lineIndex < savedDiffFlags.size()) {
-            GutterDiffFlag direct = savedDiffFlags.get(lineIndex);
+        if (lineIndex < gutterDiff.savedDiffFlags.size()) {
+            GutterDiffFlag direct = gutterDiff.savedDiffFlags.get(lineIndex);
             if (direct != null && direct != GutterDiffFlag.NONE) {
                 return new GutterDiffMarker(direct, false);
             }
         }
-        if (lineIndex < openDeletedMarkers.size() && Boolean.TRUE.equals(openDeletedMarkers.get(lineIndex))) {
+        if (lineIndex < gutterDiff.openDeletedMarkers.size() && Boolean.TRUE.equals(gutterDiff.openDeletedMarkers.get(lineIndex))) {
             return new GutterDiffMarker(GutterDiffFlag.DELETED, true);
         }
-        if (lineIndex < openDiffFlags.size()) {
-            GutterDiffFlag direct = openDiffFlags.get(lineIndex);
+        if (lineIndex < gutterDiff.openDiffFlags.size()) {
+            GutterDiffFlag direct = gutterDiff.openDiffFlags.get(lineIndex);
             if (direct != null && direct != GutterDiffFlag.NONE) {
                 return new GutterDiffMarker(direct, true);
             }
@@ -340,10 +377,37 @@ public class EditorEngine {
         return GutterDiffMarker.NONE;
     }
 
+    /** Time until this view's deferred diff is ready, or a negative value when no update is pending. */
+    public long nanosUntilGutterDiffRefresh(long nowNanos) {
+        if (!needsGutterDiffRefresh()) {
+            return -1L;
+        }
+        if (!gutterDiff.gutterDiffPendingRebuild || gutterDiff.gutterDiffLastRebuildAtNanos == 0L) {
+            return 0L;
+        }
+        long minInterval = model.lineCount() >= GUTTER_DIFF_LARGE_FILE_THRESHOLD_LINES
+            ? GUTTER_DIFF_MIN_REBUILD_INTERVAL_LARGE_NANOS
+            : GUTTER_DIFF_MIN_REBUILD_INTERVAL_NANOS;
+        if (gutterDiff.gutterDiffLastRebuildDurationNanos > 0L) {
+            long adaptive = gutterDiff.gutterDiffLastRebuildDurationNanos * GUTTER_DIFF_DURATION_FACTOR;
+            minInterval = Math.max(minInterval, Math.min(adaptive, GUTTER_DIFF_MAX_REBUILD_INTERVAL_NANOS));
+        }
+        return Math.max(0L, minInterval - (nowNanos - gutterDiff.gutterDiffLastRebuildAtNanos));
+    }
+
+    /** Completes due derived work; the frontend decides whether a new frame is needed. */
+    public boolean refreshGutterDiffIfDue() {
+        if (nanosUntilGutterDiffRefresh(gutterDiffClock.getAsLong()) != 0L) {
+            return false;
+        }
+        rebuildGutterDiffFromCurrentState();
+        return true;
+    }
+
     public void setTabWidth(int tabWidth) {
         int nextWidth = tabWidth <= 2 ? 2 : 4;
         if (this.tabWidth != nextWidth) {
-            navigationRevision++;
+            state.invalidateNavigation();
         }
         this.tabWidth = nextWidth;
     }
@@ -366,16 +430,16 @@ public class EditorEngine {
 
     public void setGutterDiffMode(GutterDiffMode mode) {
         GutterDiffMode nextMode = mode == null ? GutterDiffMode.MYERS : mode;
-        if (gutterDiffMode == nextMode) {
+        if (gutterDiff.gutterDiffMode == nextMode) {
             return;
         }
-        gutterDiffMode = nextMode;
-        if (gutterDiffMode == GutterDiffMode.DISABLED) {
-            gutterDiffComputedRevision = model.revision();
-            gutterDiffPendingRebuild = false;
+        gutterDiff.gutterDiffMode = nextMode;
+        if (gutterDiff.gutterDiffMode == GutterDiffMode.DISABLED) {
+            gutterDiff.gutterDiffComputedRevision = model.revision();
+            gutterDiff.gutterDiffPendingRebuild = false;
         } else {
-            gutterDiffComputedRevision = Long.MIN_VALUE;
-            gutterDiffPendingRebuild = true;
+            gutterDiff.gutterDiffComputedRevision = Long.MIN_VALUE;
+            gutterDiff.gutterDiffPendingRebuild = true;
         }
     }
 
@@ -415,14 +479,14 @@ public class EditorEngine {
         state.setCurrentFile(normalizedPath);
         state.setSaveDisposition(openedDisposition);
         state.setCursor(new Position(0, 0));
-        navigationRevision++;
+        state.invalidateNavigation();
         state.setTopLine(0);
         state.setLeftColumn(0);
         state.setLeftVisualColumn(0);
         state.setDirty(false);
         state.clearSelection();
-        undoStack.clear();
-        redoStack.clear();
+        history.undoStack.clear();
+        history.redoStack.clear();
         breakCoalescing();
         resetGutterDiffBaselinesOnOpen();
         beginNewDocumentState();
@@ -483,8 +547,13 @@ public class EditorEngine {
     }
 
     public void moveLeft(boolean selecting) {
-        navigationRevision++;
+        state.invalidateNavigation();
         Position p = state.getCursor();
+        SelectionRange selection = selecting ? null : currentSelection();
+        if (selection != null) {
+            moveCursor(clampCursorBoundary(selection.start()), false, p);
+            return;
+        }
         if (p.col() > 0) {
             String line = model.getLine(p.line());
             moveCursor(new Position(p.line(), graphemes(line).previousBoundary(p.col())), selecting, p);
@@ -501,8 +570,15 @@ public class EditorEngine {
     }
 
     public void moveRight(boolean selecting) {
-        navigationRevision++;
+        state.invalidateNavigation();
         Position p = state.getCursor();
+        SelectionRange selection = selecting ? null : currentSelection();
+        if (selection != null) {
+            Position end = model.clamp(selection.end());
+            int endColumn = graphemes(model.getLine(end.line())).ceilBoundary(end.col());
+            moveCursor(new Position(end.line(), endColumn), false, p);
+            return;
+        }
         int len = model.getLine(p.line()).length();
         if (p.col() < len) {
             String line = model.getLine(p.line());
@@ -515,7 +591,7 @@ public class EditorEngine {
     }
 
     public void moveWordLeft() {
-        navigationRevision++;
+        state.invalidateNavigation();
         Position previous = state.getCursor();
         Position p = model.clamp(previous);
         int line = p.line();
@@ -554,7 +630,7 @@ public class EditorEngine {
     }
 
     public void moveWordRight() {
-        navigationRevision++;
+        state.invalidateNavigation();
         Position previous = state.getCursor();
         Position p = model.clamp(previous);
         int line = p.line();
@@ -595,7 +671,7 @@ public class EditorEngine {
     }
 
     public boolean selectWordAt(Position requested) {
-        navigationRevision++;
+        state.invalidateNavigation();
         breakCoalescing();
         Position p = model.clamp(requested);
         String text = model.getLine(p.line());
@@ -633,14 +709,14 @@ public class EditorEngine {
     }
 
     public void moveHome() {
-        navigationRevision++;
+        state.invalidateNavigation();
         breakCoalescing();
         state.clearSelection();
         state.setCursor(new Position(state.getCursor().line(), 0));
     }
 
     public void moveEnd() {
-        navigationRevision++;
+        state.invalidateNavigation();
         Position p = state.getCursor();
         breakCoalescing();
         state.clearSelection();
@@ -648,7 +724,7 @@ public class EditorEngine {
     }
 
     public void moveHomeSmart() {
-        navigationRevision++;
+        state.invalidateNavigation();
         breakCoalescing();
         state.clearSelection();
         Position p = state.getCursor();
@@ -659,7 +735,7 @@ public class EditorEngine {
     }
 
     public void moveEndSmart() {
-        navigationRevision++;
+        state.invalidateNavigation();
         breakCoalescing();
         state.clearSelection();
         Position p = state.getCursor();
@@ -674,7 +750,7 @@ public class EditorEngine {
         if (Character.isSurrogate(ch)) {
             throw new IllegalArgumentException("A standalone UTF-16 surrogate is not valid input");
         }
-        navigationRevision++;
+        state.invalidateNavigation();
         if (isAutoPairsActive() && shouldSkipOverClosing(ch)) {
             moveRight();
             return;
@@ -718,7 +794,7 @@ public class EditorEngine {
             return;
         }
 
-        navigationRevision++;
+        state.invalidateNavigation();
         boolean hadSelection = state.hasSelection();
         ViewState before = captureViewState();
         List<TrackedEdit> ops = new ArrayList<>();
@@ -736,7 +812,7 @@ public class EditorEngine {
     }
 
     public void insertTab() {
-        navigationRevision++;
+        state.invalidateNavigation();
         boolean hadSelection = state.hasSelection();
         ViewState before = captureViewState();
         List<TrackedEdit> ops = new ArrayList<>();
@@ -759,7 +835,7 @@ public class EditorEngine {
     }
 
     public void backspace() {
-        navigationRevision++;
+        state.invalidateNavigation();
         boolean hadSelection = state.hasSelection();
         ViewState before = captureViewState();
         List<TrackedEdit> ops = new ArrayList<>();
@@ -791,7 +867,7 @@ public class EditorEngine {
     }
 
     public void deleteForward() {
-        navigationRevision++;
+        state.invalidateNavigation();
         boolean hadSelection = state.hasSelection();
         ViewState before = captureViewState();
         List<TrackedEdit> ops = new ArrayList<>();
@@ -827,7 +903,7 @@ public class EditorEngine {
     }
 
     public void insertNewline() {
-        navigationRevision++;
+        state.invalidateNavigation();
         ViewState before = captureViewState();
         List<TrackedEdit> ops = new ArrayList<>();
         SelectionRange selection = currentSelection();
@@ -852,7 +928,7 @@ public class EditorEngine {
     }
 
     public LineCommentResult toggleLineComment() {
-        navigationRevision++;
+        state.invalidateNavigation();
         CommentSyntaxProfile syntax = LanguageProfiles.resolveCommentSyntax(state.getCurrentFile());
         String marker = syntax.lineCommentPrefix();
         if (marker == null) {
@@ -962,7 +1038,7 @@ public class EditorEngine {
     }
 
     public boolean cutSelection() {
-        navigationRevision++;
+        state.invalidateNavigation();
         SelectionRange range = currentSelection();
         if (range == null) {
             return false;
@@ -975,7 +1051,7 @@ public class EditorEngine {
     }
 
     public boolean cutCurrentLine() {
-        navigationRevision++;
+        state.invalidateNavigation();
         Position cursor = model.clamp(state.getCursor());
         int line = cursor.line();
         if (line < 0 || line >= model.lineCount()) {
@@ -997,7 +1073,7 @@ public class EditorEngine {
     }
 
     public boolean pasteClipboard() {
-        navigationRevision++;
+        state.invalidateNavigation();
         String pasted = clipboard.text();
         if (pasted.isEmpty()) {
             return false;
@@ -1014,7 +1090,7 @@ public class EditorEngine {
     }
 
     public boolean selectAll() {
-        navigationRevision++;
+        state.invalidateNavigation();
         int lines = model.lineCount();
         if (lines <= 0) {
             return false;
@@ -1034,27 +1110,27 @@ public class EditorEngine {
     }
 
     public boolean undo() {
-        navigationRevision++;
-        if (undoStack.isEmpty()) {
+        state.invalidateNavigation();
+        if (history.undoStack.isEmpty()) {
             return false;
         }
         breakCoalescing();
-        HistoryEntry previous = undoStack.pop();
-        previous.undo();
-        pushWithLimit(redoStack, previous);
+        HistoryEntry previous = history.undoStack.pop();
+        previous.undo(this);
+        pushWithLimit(history.redoStack, previous);
         updateDirtyFromSavepoint();
         return true;
     }
 
     public boolean redo() {
-        navigationRevision++;
-        if (redoStack.isEmpty()) {
+        state.invalidateNavigation();
+        if (history.redoStack.isEmpty()) {
             return false;
         }
         breakCoalescing();
-        HistoryEntry next = redoStack.pop();
-        next.redo();
-        pushWithLimit(undoStack, next);
+        HistoryEntry next = history.redoStack.pop();
+        next.redo(this);
+        pushWithLimit(history.undoStack, next);
         updateDirtyFromSavepoint();
         return true;
     }
@@ -1144,7 +1220,7 @@ public class EditorEngine {
             // repeated Replace commands still make progress.
             return findNext(needle, options);
         }
-        navigationRevision++;
+        state.invalidateNavigation();
         ViewState before = captureViewState();
         List<TrackedEdit> ops = new ArrayList<>(1);
         state.setCursor(applyReplaceAndTrack(ops, rangeStart, rangeEnd, replacementText));
@@ -2268,7 +2344,7 @@ public class EditorEngine {
     }
 
     private void applyEdit(EditKind kind, Runnable editOperation) {
-        long beforeStateId = currentDocumentStateId;
+        long beforeStateId = history.currentDocumentStateId;
         Snapshot before = captureSnapshot();
         editOperation.run();
         Snapshot after = captureSnapshot();
@@ -2276,38 +2352,39 @@ public class EditorEngine {
             return;
         }
         long afterStateId = nextDocumentStateId();
-        currentDocumentStateId = afterStateId;
+        history.currentDocumentStateId = afterStateId;
         long now = System.nanoTime();
         boolean merged = shouldCoalesce(kind, before.cursor(), before.selectionAnchor(), now)
             && tryMergeSnapshotEntry(kind, after, afterStateId);
         if (!merged) {
             pushWithLimit(
-                undoStack,
+                history.undoStack,
                 new SnapshotHistoryEntry(kind, before, after, beforeStateId, afterStateId)
             );
         }
-        redoStack.clear();
+        history.redoStack.clear();
         updateDirtyFromSavepoint();
-        lastEditKind = kind;
-        lastEditAtNanos = now;
-        lastEditCursorAfter = after.cursor();
-        gutterDiffComputedRevision = Long.MIN_VALUE;
+        history.lastEditKind = kind;
+        history.lastEditAtNanos = now;
+        history.lastEditCursorAfter = after.cursor();
+        history.lastEditViewId = state.viewId();
+        gutterDiff.gutterDiffComputedRevision = Long.MIN_VALUE;
     }
 
     private void commitOperationEdit(EditKind kind, ViewState before, List<TrackedEdit> ops) {
         if (ops == null || ops.isEmpty()) {
             return;
         }
-        long beforeStateId = currentDocumentStateId;
+        long beforeStateId = history.currentDocumentStateId;
         ViewState after = captureViewState();
         long afterStateId = nextDocumentStateId();
-        currentDocumentStateId = afterStateId;
+        history.currentDocumentStateId = afterStateId;
         long now = System.nanoTime();
         boolean merged = shouldCoalesce(kind, before.cursor(), before.selectionAnchor(), now)
             && tryMergeOperationEntry(kind, after, ops, afterStateId);
         if (!merged) {
             pushWithLimit(
-                undoStack,
+                history.undoStack,
                 new OperationHistoryEntry(
                     kind,
                     before,
@@ -2318,15 +2395,16 @@ public class EditorEngine {
                 )
             );
         }
-        redoStack.clear();
+        history.redoStack.clear();
         updateDirtyFromSavepoint();
-        lastEditKind = kind;
-        lastEditAtNanos = now;
-        lastEditCursorAfter = after.cursor();
+        history.lastEditKind = kind;
+        history.lastEditAtNanos = now;
+        history.lastEditCursorAfter = after.cursor();
+        history.lastEditViewId = state.viewId();
     }
 
     private boolean tryMergeSnapshotEntry(EditKind kind, Snapshot after, long afterStateId) {
-        HistoryEntry top = undoStack.peek();
+        HistoryEntry top = history.undoStack.peek();
         if (!(top instanceof SnapshotHistoryEntry entry) || entry.kind() != kind) {
             return false;
         }
@@ -2340,7 +2418,7 @@ public class EditorEngine {
         List<TrackedEdit> ops,
         long afterStateId
     ) {
-        HistoryEntry top = undoStack.peek();
+        HistoryEntry top = history.undoStack.peek();
         if (!(top instanceof OperationHistoryEntry entry) || entry.kind() != kind) {
             return false;
         }
@@ -2480,46 +2558,52 @@ public class EditorEngine {
     private void resetGutterDiffBaselinesOnOpen() {
         cachedGraphemes = null;
         List<String> snapshot = List.copyOf(model.snapshotLines());
-        openBaselineLines = snapshot;
-        savedBaselineLines = snapshot;
+        document.baselines.openLines = snapshot;
+        document.baselines.savedLines = snapshot;
+        document.baselines.generation++;
+        gutterDiff.baselineGeneration = document.baselines.generation;
         clearAllGutterDiffBuffers(model.lineCount());
-        gutterDiffComputedRevision = model.revision();
-        gutterDiffPendingRebuild = false;
-        gutterDiffLastRebuildAtNanos = 0L;
-        gutterDiffLastRebuildDurationNanos = 0L;
+        gutterDiff.gutterDiffComputedRevision = model.revision();
+        gutterDiff.gutterDiffPendingRebuild = false;
+        gutterDiff.gutterDiffLastRebuildAtNanos = 0L;
+        gutterDiff.gutterDiffLastRebuildDurationNanos = 0L;
     }
 
     private void resetGutterDiffSavedBaseline() {
-        savedBaselineLines = List.copyOf(model.snapshotLines());
-        if (gutterDiffMode == GutterDiffMode.DISABLED) {
+        document.baselines.savedLines = List.copyOf(model.snapshotLines());
+        document.baselines.generation++;
+        gutterDiff.baselineGeneration = document.baselines.generation;
+        if (gutterDiff.gutterDiffMode == GutterDiffMode.DISABLED) {
             clearAllGutterDiffBuffers(model.lineCount());
-            gutterDiffComputedRevision = model.revision();
-            gutterDiffPendingRebuild = false;
+            gutterDiff.gutterDiffComputedRevision = model.revision();
+            gutterDiff.gutterDiffPendingRebuild = false;
             return;
         }
         rebuildGutterDiffFromCurrentState();
     }
 
     private long nextDocumentStateId() {
-        return ++nextDocumentStateId;
+        return ++history.nextDocumentStateId;
     }
 
     private void beginNewDocumentState() {
-        currentDocumentStateId = nextDocumentStateId();
+        history.currentDocumentStateId = nextDocumentStateId();
     }
 
     private void markCurrentAsSaved() {
-        savedDocumentStateId = currentDocumentStateId;
+        history.savedDocumentStateId = history.currentDocumentStateId;
         state.setDirty(false);
+        document.changed();
     }
 
     private void updateDirtyFromSavepoint() {
-        state.setDirty(savedDocumentStateId < 0L || currentDocumentStateId != savedDocumentStateId);
+        state.setDirty(history.savedDocumentStateId < 0L || history.currentDocumentStateId != history.savedDocumentStateId);
+        document.changed();
     }
 
     private void clearAllGutterDiffBuffers(int lineCount) {
-        initGutterDiffBuffers(savedDiffFlags, savedDeletedMarkers, lineCount);
-        initGutterDiffBuffers(openDiffFlags, openDeletedMarkers, lineCount);
+        initGutterDiffBuffers(gutterDiff.savedDiffFlags, gutterDiff.savedDeletedMarkers, lineCount);
+        initGutterDiffBuffers(gutterDiff.openDiffFlags, gutterDiff.openDeletedMarkers, lineCount);
     }
 
     private void initGutterDiffBuffers(List<GutterDiffFlag> flags, List<Boolean> deleted, int lineCount) {
@@ -2533,89 +2617,71 @@ public class EditorEngine {
     }
 
     private void rebuildGutterDiffFromCurrentState() {
-        if (gutterDiffMode == GutterDiffMode.DISABLED) {
+        if (gutterDiff.gutterDiffMode == GutterDiffMode.DISABLED) {
             clearAllGutterDiffBuffers(model.lineCount());
-            gutterDiffComputedRevision = model.revision();
-            gutterDiffPendingRebuild = false;
+            gutterDiff.gutterDiffComputedRevision = model.revision();
+            gutterDiff.gutterDiffPendingRebuild = false;
             return;
         }
-        long startedAt = System.nanoTime();
+        long startedAt = gutterDiffClock.getAsLong();
         List<String> current = model.snapshotLines();
         int lines = Math.max(1, current.size());
-        initGutterDiffBuffers(savedDiffFlags, savedDeletedMarkers, lines);
-        initGutterDiffBuffers(openDiffFlags, openDeletedMarkers, lines);
+        initGutterDiffBuffers(gutterDiff.savedDiffFlags, gutterDiff.savedDeletedMarkers, lines);
+        initGutterDiffBuffers(gutterDiff.openDiffFlags, gutterDiff.openDeletedMarkers, lines);
 
         DiffAlgorithm algorithm = resolveGutterDiffAlgorithm();
         EditList savedEdits = BoundedLineDiff.compute(
-            algorithm, savedBaselineLines, current, GUTTER_DIFF_MAX_WORK
+            algorithm, document.baselines.savedLines, current, GUTTER_DIFF_MAX_WORK
         );
-        applyDiffEdits(savedEdits, lines, savedDiffFlags, savedDeletedMarkers);
+        applyDiffEdits(savedEdits, lines, gutterDiff.savedDiffFlags, gutterDiff.savedDeletedMarkers);
 
-        EditList openEdits = openBaselineLines.equals(savedBaselineLines)
+        EditList openEdits = document.baselines.openLines.equals(document.baselines.savedLines)
             ? savedEdits
-            : BoundedLineDiff.compute(algorithm, openBaselineLines, current, GUTTER_DIFF_MAX_WORK);
-        applyDiffEdits(openEdits, lines, openDiffFlags, openDeletedMarkers);
+            : BoundedLineDiff.compute(algorithm, document.baselines.openLines, current, GUTTER_DIFF_MAX_WORK);
+        applyDiffEdits(openEdits, lines, gutterDiff.openDiffFlags, gutterDiff.openDeletedMarkers);
 
-        gutterDiffLastRebuildDurationNanos = System.nanoTime() - startedAt;
-        gutterDiffComputedRevision = model.revision();
-        gutterDiffPendingRebuild = false;
-        gutterDiffLastRebuildAtNanos = System.nanoTime();
+        gutterDiff.gutterDiffLastRebuildDurationNanos = gutterDiffClock.getAsLong() - startedAt;
+        gutterDiff.gutterDiffComputedRevision = model.revision();
+        gutterDiff.gutterDiffPendingRebuild = false;
+        gutterDiff.gutterDiffLastRebuildAtNanos = gutterDiffClock.getAsLong();
     }
 
     private void applyGutterDiffOp(EditOp.ReplaceRange op) {
         if (op == null) {
             return;
         }
-        if (gutterDiffMode == GutterDiffMode.DISABLED) {
+        if (gutterDiff.gutterDiffMode == GutterDiffMode.DISABLED) {
             return;
         }
-        gutterDiffComputedRevision = Long.MIN_VALUE;
-        gutterDiffPendingRebuild = true;
+        gutterDiff.gutterDiffComputedRevision = Long.MIN_VALUE;
+        gutterDiff.gutterDiffPendingRebuild = true;
     }
 
-    private void ensureGutterDiffUpToDate() {
-        if (gutterDiffMode == GutterDiffMode.DISABLED) {
-            return;
+    private boolean needsGutterDiffRefresh() {
+        if (gutterDiff.baselineGeneration != document.baselines.generation) {
+            gutterDiff.baselineGeneration = document.baselines.generation;
+            gutterDiff.gutterDiffComputedRevision = Long.MIN_VALUE;
+            gutterDiff.gutterDiffPendingRebuild = true;
         }
-        if (gutterDiffComputedRevision == model.revision()
-            && savedDiffFlags.size() == model.lineCount()
-            && savedDeletedMarkers.size() == model.lineCount()
-            && openDiffFlags.size() == model.lineCount()
-            && openDeletedMarkers.size() == model.lineCount()) {
-            return;
+        if (gutterDiff.gutterDiffMode == GutterDiffMode.DISABLED) {
+            return false;
         }
-        if (!shouldRebuildGutterDiffNow()) {
-            return;
+        if (gutterDiff.gutterDiffComputedRevision == model.revision()
+            && gutterDiff.savedDiffFlags.size() == model.lineCount()
+            && gutterDiff.savedDeletedMarkers.size() == model.lineCount()
+            && gutterDiff.openDiffFlags.size() == model.lineCount()
+            && gutterDiff.openDeletedMarkers.size() == model.lineCount()) {
+            return false;
         }
-        rebuildGutterDiffFromCurrentState();
+        return true;
     }
 
     private DiffAlgorithm resolveGutterDiffAlgorithm() {
-        return switch (gutterDiffMode) {
+        return switch (gutterDiff.gutterDiffMode) {
             case DISABLED -> GUTTER_DIFF_ALGORITHM_MYERS;
             case HISTOGRAM -> GUTTER_DIFF_ALGORITHM_HISTOGRAM;
             case MYERS, STABLE -> GUTTER_DIFF_ALGORITHM_MYERS;
         };
-    }
-
-    private boolean shouldRebuildGutterDiffNow() {
-        if (!gutterDiffPendingRebuild && gutterDiffComputedRevision == Long.MIN_VALUE) {
-            return true;
-        }
-        if (!gutterDiffPendingRebuild) {
-            return true;
-        }
-        long now = System.nanoTime();
-        long minInterval = model.lineCount() >= GUTTER_DIFF_LARGE_FILE_THRESHOLD_LINES
-            ? GUTTER_DIFF_MIN_REBUILD_INTERVAL_LARGE_NANOS
-            : GUTTER_DIFF_MIN_REBUILD_INTERVAL_NANOS;
-        if (gutterDiffLastRebuildDurationNanos > 0L) {
-            long adaptive = gutterDiffLastRebuildDurationNanos * GUTTER_DIFF_DURATION_FACTOR;
-            if (adaptive > minInterval) {
-                minInterval = Math.min(adaptive, GUTTER_DIFF_MAX_REBUILD_INTERVAL_NANOS);
-            }
-        }
-        return gutterDiffLastRebuildAtNanos == 0L || now - gutterDiffLastRebuildAtNanos >= minInterval;
     }
 
     private void applyDiffEdits(
@@ -2647,7 +2713,7 @@ public class EditorEngine {
                     }
                 }
                 case REPLACE -> {
-                    if (gutterDiffMode == GutterDiffMode.STABLE) {
+                    if (gutterDiff.gutterDiffMode == GutterDiffMode.STABLE) {
                         for (int i = 0; i < added; i++) {
                             int line = beginCurrent + i;
                             if (line >= 0 && line < flags.size()) {
@@ -2680,64 +2746,35 @@ public class EditorEngine {
     }
 
     private ViewState captureViewState() {
-        DocumentFileMetadata metadata = model.fileMetadata();
-        return new ViewState(
-            metadata.charset(),
-            metadata.bomKind(),
-            metadata.defaultLineSeparator(),
-            state.getCursor(),
-            state.getTopLine(),
-            state.getTopWrapSegment(),
-            state.getLeftColumn(),
-            state.getLeftVisualColumn(),
-            state.getSelectionAnchor()
-        );
+        return new ViewState(DocumentPreferences.from(model.fileMetadata()), state.viewMemento());
     }
 
     private void restoreViewState(ViewState view) {
         DocumentFileMetadata metadata = model.fileMetadata();
-        if (!metadata.charset().equals(view.charset())
-            || metadata.bomKind() != view.bomKind()
-            || !metadata.defaultLineSeparator().equals(view.defaultLineSeparator())) {
+        DocumentPreferences preferences = view.document();
+        if (!metadata.charset().equals(preferences.charset())
+            || metadata.bomKind() != preferences.bomKind()
+            || !metadata.defaultLineSeparator().equals(preferences.defaultLineSeparator())) {
             model.restoreFileMetadata(new DocumentFileMetadata(
-                view.charset(), view.bomKind(), view.defaultLineSeparator(), metadata.lineSeparators()
+                preferences.charset(), preferences.bomKind(), preferences.defaultLineSeparator(), metadata.lineSeparators()
             ));
         }
-        state.setCursor(model.clamp(view.cursor()));
-        state.setTopLine(view.topLine());
-        state.setTopWrapSegment(view.topWrapSegment());
-        state.setLeftColumn(view.leftColumn());
-        state.setLeftVisualColumn(view.leftVisualColumn());
-        state.setSelectionAnchor(view.selectionAnchor());
+        EditorViewMemento memento = view.view();
+        if (memento.viewId() == state.viewId()) {
+            state.setCursor(model.clamp(memento.cursor()));
+            state.setViewport(memento.viewport());
+            state.setSelectionAnchor(memento.selectionAnchor());
+        }
     }
 
     private Snapshot captureSnapshot() {
-        return new Snapshot(
-            model.snapshotLines(),
-            model.fileMetadata(),
-            state.getCursor(),
-            state.getTopLine(),
-            state.getTopWrapSegment(),
-            state.getLeftColumn(),
-            state.getLeftVisualColumn(),
-            state.getSelectionAnchor()
-        );
+        return new Snapshot(model.snapshotLines(), model.fileMetadata(), state.viewMemento());
     }
 
     private void restoreSnapshot(Snapshot snapshot) {
         model.replaceLines(snapshot.lines(), snapshot.fileMetadata());
-        restoreViewState(new ViewState(
-            snapshot.fileMetadata().charset(),
-            snapshot.fileMetadata().bomKind(),
-            snapshot.fileMetadata().defaultLineSeparator(),
-            snapshot.cursor(),
-            snapshot.topLine(),
-            snapshot.topWrapSegment(),
-            snapshot.leftColumn(),
-            snapshot.leftVisualColumn(),
-            snapshot.selectionAnchor()
-        ));
-        gutterDiffComputedRevision = Long.MIN_VALUE;
+        restoreViewState(new ViewState(DocumentPreferences.from(snapshot.fileMetadata()), snapshot.view()));
+        gutterDiff.gutterDiffComputedRevision = Long.MIN_VALUE;
     }
 
     private static <T> void pushWithLimit(Deque<T> stack, T entry) {
@@ -2747,29 +2784,30 @@ public class EditorEngine {
         }
     }
 
-    private record Snapshot(
-        List<String> lines,
-        DocumentFileMetadata fileMetadata,
-        Position cursor,
-        int topLine,
-        int topWrapSegment,
-        int leftColumn,
-        int leftVisualColumn,
-        Position selectionAnchor
-    ) {
+    private record Snapshot(List<String> lines, DocumentFileMetadata fileMetadata, EditorViewMemento view) {
+        Position cursor() {
+            return view.cursor();
+        }
+
+        Position selectionAnchor() {
+            return view.selectionAnchor();
+        }
     }
 
-    private record ViewState(
-        Charset charset,
-        BomKind bomKind,
-        String defaultLineSeparator,
-        Position cursor,
-        int topLine,
-        int topWrapSegment,
-        int leftColumn,
-        int leftVisualColumn,
-        Position selectionAnchor
-    ) {
+    private record DocumentPreferences(Charset charset, BomKind bomKind, String defaultLineSeparator) {
+        static DocumentPreferences from(DocumentFileMetadata metadata) {
+            return new DocumentPreferences(metadata.charset(), metadata.bomKind(), metadata.defaultLineSeparator());
+        }
+    }
+
+    private record ViewState(DocumentPreferences document, EditorViewMemento view) {
+        Position cursor() {
+            return view.cursor();
+        }
+
+        Position selectionAnchor() {
+            return view.selectionAnchor();
+        }
     }
 
     /** Separator slices are copied so history never retains whole metadata lists. */
@@ -2780,13 +2818,13 @@ public class EditorEngine {
     ) {
     }
 
-    private interface HistoryEntry {
-        void undo();
+    interface HistoryEntry {
+        void undo(EditorEngine engine);
 
-        void redo();
+        void redo(EditorEngine engine);
     }
 
-    private final class SnapshotHistoryEntry implements HistoryEntry {
+    private static final class SnapshotHistoryEntry implements HistoryEntry {
         private final EditKind kind;
         private final Snapshot before;
         private Snapshot after;
@@ -2817,19 +2855,19 @@ public class EditorEngine {
         }
 
         @Override
-        public void undo() {
-            restoreSnapshot(before);
-            currentDocumentStateId = beforeStateId;
+        public void undo(EditorEngine engine) {
+            engine.restoreSnapshot(before);
+            engine.history.currentDocumentStateId = beforeStateId;
         }
 
         @Override
-        public void redo() {
-            restoreSnapshot(after);
-            currentDocumentStateId = afterStateId;
+        public void redo(EditorEngine engine) {
+            engine.restoreSnapshot(after);
+            engine.history.currentDocumentStateId = afterStateId;
         }
     }
 
-    private final class OperationHistoryEntry implements HistoryEntry {
+    private static final class OperationHistoryEntry implements HistoryEntry {
         private final EditKind kind;
         private final ViewState beforeView;
         private ViewState afterView;
@@ -2868,43 +2906,45 @@ public class EditorEngine {
         }
 
         @Override
-        public void undo() {
+        public void undo(EditorEngine engine) {
             for (int i = ops.size() - 1; i >= 0; i--) {
                 TrackedEdit edit = ops.get(i);
                 EditOp.ReplaceRange op = edit.operation();
-                applyReplace(op.start(), op.insertedText(), op.deletedText(), edit.deletedSeparators());
+                applyReplace(engine, op.start(), op.insertedText(), op.deletedText(), edit.deletedSeparators());
             }
-            restoreViewState(beforeView);
-            currentDocumentStateId = beforeStateId;
+            engine.restoreViewState(beforeView);
+            engine.history.currentDocumentStateId = beforeStateId;
         }
 
         @Override
-        public void redo() {
+        public void redo(EditorEngine engine) {
             for (TrackedEdit edit : ops) {
                 EditOp.ReplaceRange op = edit.operation();
-                applyReplace(op.start(), op.deletedText(), op.insertedText(), edit.insertedSeparators());
+                applyReplace(engine, op.start(), op.deletedText(), op.insertedText(), edit.insertedSeparators());
             }
-            restoreViewState(afterView);
-            currentDocumentStateId = afterStateId;
+            engine.restoreViewState(afterView);
+            engine.history.currentDocumentStateId = afterStateId;
         }
 
         private void applyReplace(
+            EditorEngine engine,
             Position start,
             String deletedText,
             String insertedText,
             List<String> insertedSeparators
         ) {
+            TextModel model = engine.model;
             Position a = model.clamp(start);
-            Position b = advancePosition(a, deletedText);
+            Position b = advancePosition(model, a, deletedText);
             Position cursor = model.deleteRange(a, b);
             if (insertedText != null && !insertedText.isEmpty()) {
                 model.insertText(cursor, insertedText);
             }
             model.restoreLineSeparators(a.line(), insertedSeparators);
-            applyGutterDiffOp(EditOp.replace(a, deletedText, insertedText));
+            engine.applyGutterDiffOp(EditOp.replace(a, deletedText, insertedText));
         }
 
-        private Position advancePosition(Position start, String text) {
+        private Position advancePosition(TextModel model, Position start, String text) {
             int line = start.line();
             int col = start.col();
             if (text == null || text.isEmpty()) {
@@ -2936,7 +2976,7 @@ public class EditorEngine {
     public record LineCommentResult(LineCommentAction action, int lineCount) {
     }
 
-    private enum EditKind {
+    enum EditKind {
         NONE,
         INSERT_CHAR,
         BACKSPACE,
@@ -3149,19 +3189,21 @@ public class EditorEngine {
         Position beforeSelectionAnchor,
         long nowNanos
     ) {
-        if (kind == EditKind.NONE || lastEditKind != kind || lastEditCursorAfter == null) {
+        if (kind == EditKind.NONE || history.lastEditKind != kind || history.lastEditCursorAfter == null
+            || history.lastEditViewId != state.viewId()) {
             return false;
         }
-        if (nowNanos - lastEditAtNanos > COALESCE_WINDOW_NANOS) {
+        if (nowNanos - history.lastEditAtNanos > COALESCE_WINDOW_NANOS) {
             return false;
         }
-        return beforeCursor.equals(lastEditCursorAfter)
+        return beforeCursor.equals(history.lastEditCursorAfter)
             && beforeSelectionAnchor == null;
     }
 
     private void breakCoalescing() {
-        lastEditKind = EditKind.NONE;
-        lastEditAtNanos = 0L;
-        lastEditCursorAfter = null;
+        history.lastEditKind = EditKind.NONE;
+        history.lastEditAtNanos = 0L;
+        history.lastEditCursorAfter = null;
+        history.lastEditViewId = -1;
     }
 }

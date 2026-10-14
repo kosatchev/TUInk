@@ -1,7 +1,8 @@
 package dev.tuink.core;
 
 /**
- * Core tab session containing editor model, mutable state, layout port and engine.
+ * Attached core editing view: its position, layout and command adapter reference one document.
+ * The document reached through {@link EditorEngine#document()} owns text, file state and history.
  */
 public record TabSession(
     TextModel model,

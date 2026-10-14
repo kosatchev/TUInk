@@ -1,7 +1,8 @@
 package dev.tuink.editor.session.document;
 
 import dev.tuink.core.EditorEngine;
-import dev.tuink.core.EditorState;
+import dev.tuink.core.EditorDocument;
+import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.LogicalEditorTextLayout;
 import dev.tuink.core.Position;
 import dev.tuink.core.SimpleLineBuffer;
@@ -18,21 +19,24 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Single-threaded owner of one mutable headless editor document.
+ * Single-threaded session for one document with headless and attached editing views.
  *
  * <p>Only the thread that creates a session may mutate it. Immutable snapshots
  * are safely published and may be read by background providers; their results
- * return as revision-guarded {@link WorkspaceEdit}s.</p>
+ * return as revision-guarded {@link WorkspaceEdit}s. Headless workspace commands and
+ * attached frontend commands use the same underlying document and history.</p>
  */
 public final class EditorDocumentSession {
     private final DocumentId documentId;
+    private final EditorDocument document;
     private final EditorEngine engine;
     private final Thread ownerThread;
     private volatile DocumentSnapshot publishedSnapshot;
 
-    private EditorDocumentSession(DocumentId documentId, EditorEngine engine) {
+    EditorDocumentSession(DocumentId documentId, EditorDocument document) {
         this.documentId = Objects.requireNonNull(documentId, "documentId");
-        this.engine = Objects.requireNonNull(engine, "engine");
+        this.document = Objects.requireNonNull(document, "document");
+        this.engine = document.attach(LogicalEditorTextLayout::new, new EditorClipboard()).engine();
         this.ownerThread = Thread.currentThread();
         this.publishedSnapshot = captureSnapshot();
     }
@@ -46,19 +50,22 @@ public final class EditorDocumentSession {
             buffer.insertLine(line, checked.line(line));
         }
         TextModel model = new TextModel(buffer);
-        EditorState state = new EditorState();
-        EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model));
-        return new EditorDocumentSession(documentId, engine);
+        return new EditorDocumentSession(documentId, new EditorDocument(model));
     }
 
-    /** Returns the latest immutable snapshot; this read is safe from any thread. */
+    /**
+     * On the owner thread, returns and publishes the current document on demand.
+     * Unchanged revisions reuse the same immutable snapshot. Background callers receive the
+     * last published snapshot without reading mutable document state; it may precede recent UI edits.
+     */
     public DocumentSnapshot snapshot() {
-        return publishedSnapshot;
+        return isOwnerThread() ? publishIfChanged() : publishedSnapshot;
     }
 
     /**
      * Validates and atomically applies an edit on the owner thread.
-     * Rejections never access or mutate the underlying editor model.
+     * Owner-thread validation first publishes the current revision. Rejected edits never mutate
+     * document content; foreign-thread rejections use only the last published snapshot.
      */
     public WorkspaceEditResult applyWorkspaceEdit(WorkspaceEdit proposed) {
         Objects.requireNonNull(proposed, "proposed");
@@ -70,6 +77,7 @@ public final class EditorDocumentSession {
                 List.of()
             );
         }
+        current = publishIfChanged();
 
         List<WorkspaceEditValidator.Violation> violations =
             WorkspaceEditValidator.validate(current, proposed);
@@ -90,8 +98,7 @@ public final class EditorDocumentSession {
             ));
         }
         boolean changed = engine.applyTextReplacements(replacements);
-        DocumentSnapshot after = captureSnapshot();
-        publishedSnapshot = after;
+        DocumentSnapshot after = publishIfChanged();
         return new WorkspaceEditResult.Applied(after, changed);
     }
 
@@ -100,9 +107,31 @@ public final class EditorDocumentSession {
         requireOwnerThread();
         boolean undone = engine.undo();
         if (undone) {
-            publishedSnapshot = captureSnapshot();
+            publishIfChanged();
         }
         return undone;
+    }
+
+    /** Redoes exactly one mutation from the same document history as every attached view. */
+    public boolean redo() {
+        requireOwnerThread();
+        boolean redone = engine.redo();
+        if (redone) {
+            publishIfChanged();
+        }
+        return redone;
+    }
+
+    EditorDocument document() {
+        return document;
+    }
+
+    DocumentSnapshot publishIfChanged() {
+        requireOwnerThread();
+        if (publishedSnapshot.revision() != document.model().revision()) {
+            publishedSnapshot = captureSnapshot();
+        }
+        return publishedSnapshot;
     }
 
     private DocumentSnapshot captureSnapshot() {
@@ -114,7 +143,7 @@ public final class EditorDocumentSession {
         return Thread.currentThread() == ownerThread;
     }
 
-    private void requireOwnerThread() {
+    void requireOwnerThread() {
         if (!isOwnerThread()) {
             throw new IllegalStateException("Editor document session mutation requires its owner thread");
         }

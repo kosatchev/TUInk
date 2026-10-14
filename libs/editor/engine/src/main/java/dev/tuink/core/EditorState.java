@@ -5,27 +5,47 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 
 /**
- * Mutable editor state independent from terminal specifics.
+ * Compatibility facade over one document state and one independent view state.
  */
 public class EditorState {
     public static final String LINE_SEPARATOR_LF = "\n";
     public static final String LINE_SEPARATOR_CRLF = "\r\n";
     public static final String LINE_SEPARATOR_CR = "\r";
 
-    private Position cursor = new Position(0, 0);
-    private int topLine;
-    private int topWrapSegment;
-    private int leftColumn;
-    private int leftVisualColumn;
-    private boolean dirty;
-    private Path currentFile;
-    private SaveDisposition saveDisposition = SaveDisposition.CREATE_NEW;
-    private Charset fileEncoding = StandardCharsets.UTF_8;
-    private String lineSeparator = LINE_SEPARATOR_LF;
-    private Position selectionAnchor;
+    private final EditorDocumentState document;
+    private final EditorViewState view;
+
+    public EditorState() {
+        this(new EditorDocumentState(), new EditorViewState());
+    }
+
+    EditorState(EditorDocumentState document, EditorViewState view) {
+        this.document = java.util.Objects.requireNonNull(document, "document");
+        this.view = java.util.Objects.requireNonNull(view, "view");
+    }
+
+    EditorDocumentState documentState() {
+        return document;
+    }
+
+    public long viewId() {
+        return view.id;
+    }
+
+    public EditorViewMemento viewMemento() {
+        return new EditorViewMemento(view.id, view.cursor, viewport(), view.selectionAnchor);
+    }
+
+    void invalidateNavigation() {
+        view.navigationRevision++;
+    }
+
+    long navigationRevision() {
+        return view.navigationRevision;
+    }
 
     public Position getCursor() {
-        return cursor;
+        return view.cursor;
     }
 
     /**
@@ -33,44 +53,44 @@ public class EditorState {
      * must use {@link EditorEngine} so movement/coalescing state stays coherent.
      */
     public void setCursor(Position cursor) {
-        this.cursor = cursor;
+        view.cursor = cursor;
     }
 
     public int getTopLine() {
-        return topLine;
+        return view.topLine;
     }
 
     public void setTopLine(int topLine) {
-        this.topLine = Math.max(0, topLine);
-        this.topWrapSegment = 0;
+        view.topLine = Math.max(0, topLine);
+        view.topWrapSegment = 0;
     }
 
     public int getTopWrapSegment() {
-        return topWrapSegment;
+        return view.topWrapSegment;
     }
 
     public void setTopWrapSegment(int topWrapSegment) {
-        this.topWrapSegment = Math.max(0, topWrapSegment);
+        view.topWrapSegment = Math.max(0, topWrapSegment);
     }
 
     public int getLeftColumn() {
-        return leftColumn;
+        return view.leftColumn;
     }
 
     public void setLeftColumn(int leftColumn) {
-        this.leftColumn = Math.max(0, leftColumn);
+        view.leftColumn = Math.max(0, leftColumn);
     }
 
     public int getLeftVisualColumn() {
-        return leftVisualColumn;
+        return view.leftVisualColumn;
     }
 
     public void setLeftVisualColumn(int leftVisualColumn) {
-        this.leftVisualColumn = Math.max(0, leftVisualColumn);
+        view.leftVisualColumn = Math.max(0, leftVisualColumn);
     }
 
     public ViewportState viewport() {
-        return new ViewportState(topLine, topWrapSegment, leftColumn, leftVisualColumn);
+        return new ViewportState(view.topLine, view.topWrapSegment, view.leftColumn, view.leftVisualColumn);
     }
 
     public void setViewport(ViewportState viewport) {
@@ -84,71 +104,71 @@ public class EditorState {
     }
 
     public boolean isDirty() {
-        return dirty;
+        return document.dirty;
     }
 
     public void setDirty(boolean dirty) {
-        this.dirty = dirty;
+        document.dirty = dirty;
     }
 
     public Path getCurrentFile() {
-        return currentFile;
+        return document.currentFile;
     }
 
     public void setCurrentFile(Path currentFile) {
-        this.currentFile = currentFile;
+        document.currentFile = currentFile;
     }
 
     /** Filesystem commit intent retained until this document successfully owns its path. */
     public SaveDisposition getSaveDisposition() {
-        return saveDisposition;
+        return document.saveDisposition;
     }
 
     public void setSaveDisposition(SaveDisposition saveDisposition) {
-        this.saveDisposition = saveDisposition == null
+        document.saveDisposition = saveDisposition == null
             ? SaveDisposition.CREATE_NEW
             : saveDisposition;
     }
 
     public Charset getFileEncoding() {
-        return fileEncoding;
+        return document.fileEncoding;
     }
 
     public void setFileEncoding(Charset fileEncoding) {
-        this.fileEncoding = fileEncoding == null ? StandardCharsets.UTF_8 : fileEncoding;
+        document.fileEncoding = fileEncoding == null ? StandardCharsets.UTF_8 : fileEncoding;
     }
 
     public String getLineSeparator() {
-        return lineSeparator;
+        return document.lineSeparator;
     }
 
     public void setLineSeparator(String lineSeparator) {
         if (LINE_SEPARATOR_CRLF.equals(lineSeparator)) {
-            this.lineSeparator = LINE_SEPARATOR_CRLF;
+            document.lineSeparator = LINE_SEPARATOR_CRLF;
             return;
         }
         if (LINE_SEPARATOR_CR.equals(lineSeparator)) {
-            this.lineSeparator = LINE_SEPARATOR_CR;
+            document.lineSeparator = LINE_SEPARATOR_CR;
             return;
         }
-        this.lineSeparator = LINE_SEPARATOR_LF;
+        document.lineSeparator = LINE_SEPARATOR_LF;
     }
 
     public Position getSelectionAnchor() {
-        return selectionAnchor;
+        return view.selectionAnchor;
     }
 
     /** Core-internal mutation hook; outer layers route selection through {@link EditorEngine}. */
     public void setSelectionAnchor(Position selectionAnchor) {
-        this.selectionAnchor = selectionAnchor;
+        view.selectionAnchor = selectionAnchor;
     }
 
     /** Core-internal mutation hook; outer layers route selection through {@link EditorEngine}. */
     public void clearSelection() {
-        this.selectionAnchor = null;
+        view.selectionAnchor = null;
     }
 
     public boolean hasSelection() {
-        return selectionAnchor != null && !selectionAnchor.equals(cursor);
+        return view.selectionAnchor != null && !view.selectionAnchor.equals(view.cursor);
     }
 }

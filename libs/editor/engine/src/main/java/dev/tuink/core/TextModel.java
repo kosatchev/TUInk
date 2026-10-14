@@ -54,6 +54,14 @@ public class TextModel {
     private final long cacheIdentity = NEXT_CACHE_ID.incrementAndGet();
     private DocumentFileMetadata fileMetadata;
     private FileBaseline fileBaseline;
+    private EditorDocument documentOwner;
+
+    void claimDocument(EditorDocument owner) {
+        if (documentOwner != null && documentOwner != owner) {
+            throw new IllegalArgumentException("a text model already belongs to an editor document; attach a view instead");
+        }
+        documentOwner = Objects.requireNonNull(owner, "owner");
+    }
 
     public TextModel(TextBuffer sourceBuffer) {
         TextBuffer source = Objects.requireNonNull(sourceBuffer, "buffer");

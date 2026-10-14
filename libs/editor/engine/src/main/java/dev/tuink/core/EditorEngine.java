@@ -1073,11 +1073,16 @@ public class EditorEngine {
     }
 
     public boolean pasteClipboard() {
-        state.invalidateNavigation();
-        String pasted = clipboard.text();
-        if (pasted.isEmpty()) {
+        return pasteText(clipboard.text());
+    }
+
+    /** Pastes literal text as one undo step without typing assists or changing the workspace clipboard. */
+    public boolean pasteText(String pasted) {
+        if (pasted == null || pasted.isEmpty()) {
             return false;
         }
+        LogicalDocumentLines.requireWellFormedUtf16(pasted);
+        state.invalidateNavigation();
         ViewState before = captureViewState();
         List<TrackedEdit> ops = new ArrayList<>(1);
         SelectionRange selection = currentSelection();
@@ -2136,7 +2141,7 @@ public class EditorEngine {
         String deleted = model.getTextRange(deleteStart, deleteEnd);
         model.deleteRange(deleteStart, deleteEnd);
         state.setCursor(new Position(lineIndex, Math.max(0, cursorCol - drop)));
-        return new TrackedEdit(EditOp.delete(deleteStart, deleted), List.of(), List.of());
+        return new TrackedEdit(EditOp.delete(deleteStart, deleted), 0, List.of(), List.of());
     }
 
     private boolean shouldDedentPythonClause(int lineIndex, String keyword, String currentIndent, String reduced) {
@@ -2445,18 +2450,22 @@ public class EditorEngine {
         if (deletedText.isEmpty() && inserted.isEmpty()) {
             return a;
         }
+        int firstSeparator = Math.max(0, a.line() - 1);
+        List<String> beforeSeparators = model.fileMetadata().lineSeparators();
         List<String> deletedSeparators = List.copyOf(
-            model.fileMetadata().lineSeparators().subList(a.line(), b.line())
+            beforeSeparators.subList(firstSeparator, Math.min(beforeSeparators.size(), b.line() + 1))
         );
         Position cursor = model.deleteRange(a, b);
         if (!inserted.isEmpty()) {
             cursor = model.insertText(cursor, inserted);
         }
+        model.normalizeLineSeparators(a.line(), cursor.line());
+        List<String> afterSeparators = model.fileMetadata().lineSeparators();
         List<String> insertedSeparators = List.copyOf(
-            model.fileMetadata().lineSeparators().subList(a.line(), cursor.line())
+            afterSeparators.subList(firstSeparator, Math.min(afterSeparators.size(), cursor.line() + 1))
         );
         EditOp.ReplaceRange op = EditOp.replace(a, deletedText, inserted);
-        ops.add(new TrackedEdit(op, deletedSeparators, insertedSeparators));
+        ops.add(new TrackedEdit(op, firstSeparator, deletedSeparators, insertedSeparators));
         applyGutterDiffOp(op);
         return cursor;
     }
@@ -2813,6 +2822,7 @@ public class EditorEngine {
     /** Separator slices are copied so history never retains whole metadata lists. */
     private record TrackedEdit(
         EditOp.ReplaceRange operation,
+        int firstSeparator,
         List<String> deletedSeparators,
         List<String> insertedSeparators
     ) {
@@ -2910,7 +2920,7 @@ public class EditorEngine {
             for (int i = ops.size() - 1; i >= 0; i--) {
                 TrackedEdit edit = ops.get(i);
                 EditOp.ReplaceRange op = edit.operation();
-                applyReplace(engine, op.start(), op.insertedText(), op.deletedText(), edit.deletedSeparators());
+                applyReplace(engine, op.start(), op.insertedText(), op.deletedText(), edit.firstSeparator(), edit.deletedSeparators());
             }
             engine.restoreViewState(beforeView);
             engine.history.currentDocumentStateId = beforeStateId;
@@ -2920,7 +2930,7 @@ public class EditorEngine {
         public void redo(EditorEngine engine) {
             for (TrackedEdit edit : ops) {
                 EditOp.ReplaceRange op = edit.operation();
-                applyReplace(engine, op.start(), op.deletedText(), op.insertedText(), edit.insertedSeparators());
+                applyReplace(engine, op.start(), op.deletedText(), op.insertedText(), edit.firstSeparator(), edit.insertedSeparators());
             }
             engine.restoreViewState(afterView);
             engine.history.currentDocumentStateId = afterStateId;
@@ -2931,6 +2941,7 @@ public class EditorEngine {
             Position start,
             String deletedText,
             String insertedText,
+            int firstSeparator,
             List<String> insertedSeparators
         ) {
             TextModel model = engine.model;
@@ -2940,7 +2951,7 @@ public class EditorEngine {
             if (insertedText != null && !insertedText.isEmpty()) {
                 model.insertText(cursor, insertedText);
             }
-            model.restoreLineSeparators(a.line(), insertedSeparators);
+            model.restoreLineSeparators(firstSeparator, insertedSeparators);
             engine.applyGutterDiffOp(EditOp.replace(a, deletedText, insertedText));
         }
 

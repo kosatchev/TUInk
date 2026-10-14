@@ -1590,7 +1590,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 if (uiSessionState.readingModeSetting) {
                     notification.warning("Reading mode: editing is disabled");
                 } else {
-                    engine.insertInput(paste.text());
+                    engine.pasteText(paste.text());
                     viewportController.onEditorTextInteraction();
                 }
             }

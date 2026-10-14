@@ -342,7 +342,9 @@ public class TextModel {
         SaveDisposition disposition,
         boolean checkBaseline
     ) throws IOException {
-        DocumentFileMetadata checkedMetadata = requireCompatibleMetadata(metadata, lineCount());
+        DocumentFileMetadata checkedMetadata = unambiguousLineSeparators(
+            requireCompatibleMetadata(metadata, lineCount()), 1, lineCount() - 2
+        );
         SaveDisposition checkedDisposition = Objects.requireNonNull(disposition, "disposition");
         Path requestedTarget = path.toAbsolutePath().normalize();
         if (checkBaseline && checkedDisposition == SaveDisposition.REPLACE_EXISTING) {
@@ -516,16 +518,45 @@ public class TextModel {
         fileMetadata = requireCompatibleMetadata(metadata, lineCount());
     }
 
-    /** Restores only separators reinserted by an undo/redo operation. */
+    /** Restores the separator slice captured for an undo/redo operation. */
     void restoreLineSeparators(int firstSeparator, List<String> restored) {
         if (restored.isEmpty()) {
             return;
         }
-        List<String> separators = new ArrayList<>(fileMetadata.lineSeparators());
+        List<String> current = fileMetadata.lineSeparators();
+        if (current.subList(firstSeparator, firstSeparator + restored.size()).equals(restored)) {
+            return;
+        }
+        List<String> separators = new ArrayList<>(current);
         for (int index = 0; index < restored.size(); index++) {
             separators.set(firstSeparator + index, restored.get(index));
         }
         fileMetadata = fileMetadata.withLineSeparators(separators);
+    }
+
+    /** Called after a complete replacement, once its resulting logical lines are known. */
+    void normalizeLineSeparators(int firstLine, int lastLine) {
+        fileMetadata = unambiguousLineSeparators(fileMetadata, firstLine, lastLine);
+    }
+
+    private DocumentFileMetadata unambiguousLineSeparators(
+        DocumentFileMetadata metadata, int firstLine, int lastLine
+    ) {
+        List<String> separators = metadata.lineSeparators();
+        List<String> normalized = null;
+        for (int line = Math.max(1, firstLine); line <= Math.min(lineCount() - 2, lastLine); line++) {
+            if (buffer.getLine(line).isEmpty()
+                && EditorState.LINE_SEPARATOR_CR.equals(separators.get(line - 1))
+                && EditorState.LINE_SEPARATOR_LF.equals(separators.get(line))) {
+                if (normalized == null) {
+                    normalized = new ArrayList<>(separators);
+                }
+                // CR + an empty line + LF would otherwise serialize as one CRLF.
+                // Keep the preceding line's separator and disambiguate the empty line's own EOL.
+                normalized.set(line, EditorState.LINE_SEPARATOR_CRLF);
+            }
+        }
+        return normalized == null ? metadata : metadata.withLineSeparators(normalized);
     }
 
     public long revision() {
@@ -608,6 +639,7 @@ public class TextModel {
             buffer.insertLine(i, replacement.get(i));
         }
         fileMetadata = checkedMetadata;
+        normalizeLineSeparators(1, lineCount() - 2);
         markContentReplaced();
     }
 

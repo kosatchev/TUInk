@@ -108,6 +108,9 @@ to keep editing responsive; unchanged lines inside that range may also be marked
   attributes, Linux POSIX access ACLs, and ACLs exposed by the filesystem provider;
 - safe saving through symbolic links without replacing the link itself.
 
+If an edit leaves an empty line between bare CR and LF endings, that empty
+line's ending becomes CRLF so saving and reopening retain both line breaks.
+
 Normal saves check that the file still matches the bytes last opened or saved.
 If another process changed or removed it, TUInk retains your edits and reports
 the conflict. Use Save As with a different name to keep both versions, or reopen

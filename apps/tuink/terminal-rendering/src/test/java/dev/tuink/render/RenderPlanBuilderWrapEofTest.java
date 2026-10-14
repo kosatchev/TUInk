@@ -48,15 +48,16 @@ class RenderPlanBuilderWrapEofTest {
 
     @Test
     void scrolledViewportIncludesTheEofRowInItsWrappedOffset() {
-        TextModel model = model("abcdefgh");
-        EditorState state = eofState("abcdefgh");
-        state.setTopWrapSegment(1);
+        TextModel model = model("abcdefghijkl");
+        EditorState state = eofState("abcdefghijkl");
+        state.setTopWrapSegment(2);
 
-        RenderPlan plan = build(builder(model), model, state, 4, 7);
+        RenderPlan plan = build(builder(model), model, state, 4, 8);
 
-        assertEquals(1, plan.topLine());
-        assertEquals(3, plan.totalLines());
-        assertEquals("efgh", plan.lines().getFirst().text());
+        assertEquals(4, plan.scrollLayout().contentBounds().width());
+        assertEquals(2, plan.topLine());
+        assertEquals(4, plan.totalLines());
+        assertEquals("ijkl", plan.lines().getFirst().text());
         assertEquals("", plan.lines().get(1).text());
         assertTrue(plan.cursorInViewport());
         assertEquals(1, plan.cursorRow());

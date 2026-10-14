@@ -220,7 +220,7 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
      * bounds change; an older placement intentionally keeps its old snapshot.
      */
     public static final class Placement<V>
-        implements PlacedInteractiveWidget<Action<V>>, PlacedCursorSource {
+        implements PlacedPointerCapture<Action<V>>, PlacedCursorSource {
         private final Rect bounds;
         private final ScrollLayout geometry;
         private final Rect contentBounds;
@@ -463,12 +463,25 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
         }
 
         @Override
+        public boolean pointerCaptureActive() {
+            return state.drag() != null;
+        }
+
+        @Override
+        public InteractionResult<Action<V>> cancelPointerCapture(PointerCaptureCancellation reason) {
+            Objects.requireNonNull(reason, "reason");
+            return stateChange(new State(state.selectedIndex(), state.firstVisibleIndex(), state.horizontalOffset()))
+                .withPointerCapture(PointerCaptureRequest.RELEASE);
+        }
+
+        @Override
         public InteractionResult<Action<V>> handle(TuiInputEvent event, FocusContext context) {
             Objects.requireNonNull(event, "event");
             Objects.requireNonNull(context, "context");
             if (state.drag() != null && (event instanceof ResizeEvent
                 || event instanceof PointerEvent pointer && pointer.kind() == PointerEvent.Kind.RELEASE)) {
-                return stateChange(new State(state.selectedIndex(), state.firstVisibleIndex(), state.horizontalOffset()));
+                return cancelPointerCapture(event instanceof ResizeEvent
+                    ? PointerCaptureCancellation.RESIZE : PointerCaptureCancellation.RELEASE);
             }
             if (!context.enabled() || bounds.isEmpty()) {
                 return InteractionResult.ignored();
@@ -553,7 +566,7 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
                         State next = state.drag().axis() == Scrollbar.Axis.VERTICAL
                             ? new State(state.selectedIndex(), offset, state.horizontalOffset(), state.drag())
                             : new State(state.selectedIndex(), state.firstVisibleIndex(), offset, state.drag());
-                        return withSelf(new StateChanged<>(next));
+                        return InteractionResult.output(new StateChanged<>(next));
                     }
                 }
             }
@@ -590,14 +603,16 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
                 Scrollbar.Press press = vertical.orElseThrow();
                 return withSelf(new StateChanged<>(new State(
                     state.selectedIndex(), press.offset(), state.horizontalOffset(), press.drag()
-                )));
+                ))).withPointerCapture(press.drag() == null
+                    ? PointerCaptureRequest.NONE : PointerCaptureRequest.ACQUIRE);
             }
             Optional<Scrollbar.Press> horizontal = horizontalScrollbar().flatMap(bar -> bar.press(point));
             if (horizontal.isPresent()) {
                 Scrollbar.Press press = horizontal.orElseThrow();
                 return withSelf(new StateChanged<>(new State(
                     state.selectedIndex(), state.firstVisibleIndex(), press.offset(), press.drag()
-                )));
+                ))).withPointerCapture(press.drag() == null
+                    ? PointerCaptureRequest.NONE : PointerCaptureRequest.ACQUIRE);
             }
             if (!contentBounds.contains(point)) {
                 return InteractionResult.focus(FocusRequest.SELF);

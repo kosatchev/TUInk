@@ -1,6 +1,8 @@
 package dev.tuink.render;
 
+import dev.tuiframe.scroll.ScrollLayout;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Full frame description independent from specific terminal APIs.
@@ -26,6 +28,10 @@ public record RenderPlan(
     int totalColumns,
     int cols,
     int gutterWidth,
-    int scrollbarWidth
+    int scrollbarWidth,
+    ScrollLayout scrollLayout
 ) {
+    public RenderPlan {
+        Objects.requireNonNull(scrollLayout, "scrollLayout");
+    }
 }

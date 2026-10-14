@@ -2,44 +2,41 @@ package dev.tuink.tui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.input.KeyStroke;
-import dev.tuiframe.input.TuiInputEvent;
 import dev.tuiframe.widget.FocusManager;
-import dev.tuiframe.widget.MenuBar;
 import dev.tuiframe.widget.TextField;
 import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
-import dev.tuink.core.LogicalEditorTextLayout;
 import dev.tuink.core.Position;
-import dev.tuink.core.SearchOptions;
-import dev.tuink.core.SimpleLineBuffer;
 import dev.tuink.core.TextModel;
-import dev.tuink.tui.flow.SearchFocus;
-import dev.tuink.tui.flow.UiModalState;
 import dev.tuink.tui.command.TuinkCommand;
-import dev.tuink.tui.input.EditorInput;
-import dev.tuink.tui.ui.SearchBarView;
-import dev.tuink.editor.command.CommandInvocation;
-import java.lang.reflect.Constructor;
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
-import java.util.Arrays;
+import dev.tuink.tui.flow.SearchFocus;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.Consumer;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.NullSource;
 
-/** Exercises physical routing and the real search-mode dispatcher together. */
+/** Exercises search and clipboard behavior through the production window event route. */
 class SearchClipboardIntegrationTest {
+    @TempDir
+    Path directory;
+    private final List<EditorWindowFixture> windows = new ArrayList<>();
+
+    @AfterEach
+    void closeWindows() {
+        windows.forEach(EditorWindowFixture::close);
+    }
+
     @ParameterizedTest
     @EnumSource(value = SearchFocus.class, names = {"FIND", "REPLACE"}, mode = EnumSource.Mode.EXCLUDE)
     @NullSource
@@ -90,8 +87,10 @@ class SearchClipboardIntegrationTest {
         Fixture fixture = new Fixture(SearchFocus.FIND, false);
         fixture.clipboard.setText("clipboard");
 
+        fixture.window.resize(2, 100);
+        assertTrue(fixture.focus.focused().isEmpty());
         for (KeyStroke.Key key : List.of(KeyStroke.Key.C, KeyStroke.Key.X, KeyStroke.Key.V)) {
-            fixture.dispatch(key, new Rect(0, 0, 100, 2));
+            fixture.window.event(KeyStroke.of(key, KeyStroke.Modifier.CTRL));
             assertEquals("find😀", fixture.query.text());
             assertEquals("replace😀", fixture.replacement.text());
             assertEquals("clipboard", fixture.clipboard.text());
@@ -188,8 +187,7 @@ class SearchClipboardIntegrationTest {
             TuinkCommand.CURSOR_SELECT_UP, TuinkCommand.CURSOR_SELECT_DOWN,
             TuinkCommand.CURSOR_HOME, TuinkCommand.CURSOR_END, TuinkCommand.EDIT_SELECT_ALL
         )) {
-            fixture.preparePlacement(new Rect(0, 0, 100, 24));
-            fixture.invokeSearch(EditorInput.command(command));
+            fixture.dispatchCommand(command);
             fixture.assertDocumentUnchanged();
         }
         if (target == SearchFocus.FIND || target == SearchFocus.REPLACE) {
@@ -289,7 +287,7 @@ class SearchClipboardIntegrationTest {
     @Test
     void editMenuUsesDocumentSelectionWhenTheDocumentOwnsSearchFocus() throws Exception {
         Fixture fixture = new Fixture(SearchFocus.FIND, false);
-        fixture.ui.searchEditorFocused = true;
+        fixture.focusDocument();
         fixture.dispatchMenu(TuinkCommand.EDIT_SELECT_ALL);
         fixture.dispatchMenu(TuinkCommand.EDIT_CUT);
         assertEquals(List.of(""), fixture.model.snapshotLines());
@@ -300,53 +298,43 @@ class SearchClipboardIntegrationTest {
         assertEquals(List.of("document"), fixture.model.snapshotLines());
     }
 
-    private static final class Fixture {
-        private final TerminalEditorApp app = new TerminalEditorApp();
-        private final TextField query = new TextField();
-        private final TextField replacement = new TextField();
-        private final UiSessionState ui = new UiSessionState();
-        private final CommandRouter commandRouter = new CommandRouter();
+    private final class Fixture {
+        private final EditorWindowFixture window;
+        private final TextField query;
+        private final TextField replacement;
+        private final UiSessionState ui;
         private final EditorClipboard clipboard;
         private final FocusManager<SearchFocus> focus;
         private final SearchFocus target;
         private final TextModel model;
-        private final EditorState state = new EditorState();
+        private final EditorState state;
         private final EditorEngine engine;
-        private final Object notification;
-        private final Method searchHandler;
-        private final Method consumedAccessor;
         private final List<String> initialLines;
         private final long initialRevision;
         private final boolean initiallyDirty;
-        private SearchBarView.Placement currentPlacement;
+        private boolean documentFocused;
 
         private Fixture(SearchFocus target, boolean readingMode) throws Exception {
             this(target, readingMode, false);
         }
 
-        @SuppressWarnings("unchecked")
         private Fixture(SearchFocus target, boolean readingMode, boolean primeHistory) throws Exception {
             this(target, readingMode, primeHistory, List.of("document"));
         }
 
-        @SuppressWarnings("unchecked")
-        private Fixture(
-            SearchFocus target, boolean readingMode, boolean primeHistory, List<String> document
-        ) throws Exception {
+        private Fixture(SearchFocus target, boolean readingMode, boolean primeHistory, List<String> document)
+            throws Exception {
             this.target = target;
-            clipboard = (EditorClipboard) appField("clipboard");
-            focus = (FocusManager<SearchFocus>) appField("searchFocusManager");
-            query.set("find😀");
-            replacement.set("replace😀");
-            ui.searchMode = true;
-            ui.readingModeSetting = readingMode;
-            SimpleLineBuffer buffer = new SimpleLineBuffer();
-            buffer.setLine(0, document.getFirst());
-            for (int line = 1; line < document.size(); line++) {
-                buffer.insertLine(line, document.get(line));
-            }
-            model = new TextModel(buffer);
-            engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model), clipboard);
+            window = new EditorWindowFixture(Files.createTempDirectory(directory, "window-"), readingMode, document);
+            windows.add(window);
+            query = window.query;
+            replacement = window.replacement;
+            ui = window.ui;
+            clipboard = window.host.clipboard;
+            focus = window.host.searchFocusManager;
+            model = window.active().tabSession().model();
+            state = window.active().state();
+            engine = window.active().tabSession().engine();
             if (primeHistory) {
                 engine.restoreSelection(new Position(0, "document".length()), null);
                 engine.insertInput("1");
@@ -354,27 +342,15 @@ class SearchClipboardIntegrationTest {
                 assertTrue(engine.undo());
             }
             engine.restoreSelection(new Position(0, 3), new Position(0, 0));
+            window.frame();
+            window.event(KeyStroke.of(KeyStroke.Key.F, KeyStroke.Modifier.CTRL));
+            query.set("find😀");
+            replacement.set("replace😀");
+            window.frame();
+            window.focusSearch(target);
             initialLines = model.snapshotLines();
             initialRevision = model.revision();
             initiallyDirty = state.isDirty();
-            Class<?> notificationType = Class.forName(
-                "dev.tuink.tui.TerminalEditorApp$NotificationState"
-            );
-            Constructor<?> constructor = notificationType.getDeclaredConstructor(TerminalEditorApp.class);
-            constructor.setAccessible(true);
-            notification = constructor.newInstance(app);
-            searchHandler = Arrays.stream(TerminalEditorApp.class.getDeclaredMethods())
-                .filter(method -> method.getName().equals("handleSearchModeInput"))
-                .findFirst().orElseThrow();
-            searchHandler.setAccessible(true);
-            consumedAccessor = searchHandler.getReturnType().getDeclaredMethod("consumed");
-            consumedAccessor.setAccessible(true);
-        }
-
-        private Object appField(String name) throws Exception {
-            Field field = TerminalEditorApp.class.getDeclaredField(name);
-            field.setAccessible(true);
-            return field.get(app);
         }
 
         private TextField field() {
@@ -385,103 +361,48 @@ class SearchClipboardIntegrationTest {
             return target == SearchFocus.FIND ? replacement : query;
         }
 
-        private void dispatch(KeyStroke.Key key) throws Exception {
-            dispatch(key, new Rect(0, 0, 100, 24));
+        private void dispatch(KeyStroke.Key key) {
+            dispatchStroke(KeyStroke.of(key, KeyStroke.Modifier.CTRL));
         }
 
-        private void dispatch(KeyStroke.Key key, Rect clip) throws Exception {
-            SearchBarView.Placement placement = preparePlacement(clip);
-            KeyStroke stroke = KeyStroke.of(key, KeyStroke.Modifier.CTRL);
-            assertFalse(SearchInputRouter.route(focus, placement, stroke).consumed());
-            EditorInput input = TerminalEditorApp.resolveEditorInput(
-                commandRouter, stroke, commandRouter.invocationFor(stroke).orElseThrow(),
-                null, true, target
-            );
-            assertNotNull(input);
-            invokeSearch(input);
+        private void dispatchStroke(KeyStroke stroke) {
+            window.focusSearch(target);
+            window.frame();
+            window.event(stroke);
         }
 
-        private SearchBarView.Placement preparePlacement(Rect clip) {
-            SearchBarView.Placement placement = SearchBarView.build(
-                query, replacement, 100, false, SearchOptions.MatchMode.SUBSTRING, false
-            ).place("search", 20, clip);
-            placement.activate(focus);
-            if (target == null) {
-                focus.clear(placement.focusScope());
+        private void dispatchCommand(TuinkCommand command) {
+            window.focusSearch(target);
+            window.frame();
+            window.command(command);
+        }
+
+        private void dispatchMenu(TuinkCommand command) {
+            if (documentFocused) {
+                window.focusDocument();
             } else {
-                focus.focus(placement.focusScope(), target);
+                window.focusSearch(target);
             }
-            currentPlacement = placement;
-            return placement;
-        }
-
-        private void dispatchStroke(KeyStroke stroke) throws Exception {
-            SearchBarView.Placement placement = preparePlacement(new Rect(0, 0, 100, 24));
-            SearchInputRouter.Result raw = SearchInputRouter.route(focus, placement, stroke);
-            if (raw.consumed()) {
-                assertEquals(null, raw.action(), "navigation must not accidentally activate a search action");
-                return;
-            }
-            EditorInput input = TerminalEditorApp.resolveEditorInput(
-                commandRouter, stroke, commandRouter.invocationFor(stroke).orElseThrow(),
-                null, true, target
-            );
-            assertNotNull(input);
-            invokeSearch(input);
-        }
-
-        private void dispatchMenu(TuinkCommand command) throws Exception {
-            preparePlacement(new Rect(0, 0, 100, 24));
+            window.frame();
             List<TuinkCommand> editEntries = List.of(
                 TuinkCommand.EDIT_UNDO, TuinkCommand.EDIT_REDO, TuinkCommand.EDIT_CUT,
                 TuinkCommand.EDIT_COPY, TuinkCommand.EDIT_PASTE, TuinkCommand.EDIT_TOGGLE_LINE_COMMENT,
                 TuinkCommand.EDIT_SELECT_ALL, TuinkCommand.SEARCH_OPEN
             );
-            TopMenuController menu = new TopMenuController();
-            TopMenuInputRouter.Result opened = routeMenu(menu, KeyStroke.of(KeyStroke.Key.F2));
-            assertTrue(opened.consumed());
-            assertEquals(null, opened.command());
-            for (int i = 0; i < editEntries.indexOf(command); i++) {
-                TopMenuInputRouter.Result moved = routeMenu(menu, KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
-                assertTrue(moved.consumed());
-                assertEquals(null, moved.command());
+            int index = editEntries.indexOf(command);
+            assertTrue(index >= 0, "command must appear in Edit menu");
+            window.event(KeyStroke.of(KeyStroke.Key.F2));
+            assertTrue(window.menu.isOpen());
+            for (int step = 0; step < index; step++) {
+                window.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
             }
-            KeyStroke enter = KeyStroke.of(KeyStroke.Key.ENTER);
-            CommandInvocation selected = routeMenu(menu, enter).command();
-            assertNotNull(selected);
-            assertEquals(command.id(), selected.id());
-            assertEquals(MenuBar.State.closed(), menu.state());
-            EditorInput input = TerminalEditorApp.resolveEditorInput(
-                commandRouter, enter, selected, commandRouter.dispatch(selected).orElseThrow(), false, target
-            );
-            assertEquals(command, input.command(), "the menu's Enter must retain its semantic command");
-            if (TerminalEditorApp.searchOwnsCommand(
-                ui.searchMode, ui.searchEditorFocused, true, input.command()
-            )) {
-                invokeSearch(input);
-            } else {
-                assertTrue(InputActionDispatcher.dispatch(input.command(), ui,
-                    new InputActionDispatcher.DispatchContext(engine, state, menu, enabled -> { }, 20, 100)
-                ).handled());
-            }
+            window.event(KeyStroke.of(KeyStroke.Key.ENTER));
+            assertFalse(window.menu.isOpen());
         }
 
-        private TopMenuInputRouter.Result routeMenu(TopMenuController menu, TuiInputEvent event) {
-            TopMenuView.Placement placement = TopMenuView.build(
-                ui, List.of(), -1, "Cyan", commandRouter, menu.state()
-            ).place(new Rect(0, 0, 100, 24));
-            return TopMenuInputRouter.route(menu, placement, commandRouter, event);
-        }
-
-        private void invokeSearch(EditorInput input) throws Exception {
-            Object result = searchHandler.invoke(
-                app, input, ui, SearchController.SearchUiOptions.DEFAULT,
-                query, replacement, currentPlacement, List.of(), 0, model, state, engine,
-                null, 20, 100, true, UiModalState.none(), new TextField(), null,
-                notification, false, null, OpenFileInputRouter.Focus.LIST, null,
-                (Consumer<Boolean>) enabled -> { }, null
-            );
-            assertEquals(Boolean.TRUE, consumedAccessor.invoke(result), "the search panel must consume the input");
+        private void focusDocument() {
+            window.focusDocument();
+            documentFocused = true;
         }
 
         private void assertDocumentUnchanged() {
@@ -493,13 +414,20 @@ class SearchClipboardIntegrationTest {
         }
 
         private void assertHistoryUnchanged() {
-            assertTrue(engine.undo(), "the existing undo entry must survive clipboard input");
+            // Leave search through the production route, then inspect history
+            // with the same Undo/Redo bindings available to the user.
+            window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
+            ui.readingModeSetting = false;
+            window.frame();
+            window.event(KeyStroke.of(KeyStroke.Key.Z, KeyStroke.Modifier.CTRL));
             assertEquals(List.of("document"), model.snapshotLines());
-            assertTrue(engine.redo());
+            window.event(KeyStroke.of(KeyStroke.Key.Y, KeyStroke.Modifier.CTRL));
             assertEquals(List.of("document1"), model.snapshotLines());
-            assertTrue(engine.redo(), "the existing redo entry must survive clipboard input");
+            window.event(KeyStroke.of(KeyStroke.Key.Y, KeyStroke.Modifier.CTRL));
             assertEquals(List.of("document1", ""), model.snapshotLines());
-            assertFalse(engine.redo());
+            long revision = model.revision();
+            window.event(KeyStroke.of(KeyStroke.Key.Y, KeyStroke.Modifier.CTRL));
+            assertEquals(revision, model.revision(), "the original redo chain must end here");
         }
     }
 }

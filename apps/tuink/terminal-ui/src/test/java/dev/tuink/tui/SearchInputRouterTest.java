@@ -326,8 +326,7 @@ class SearchInputRouterTest {
                 PointerEvent.Kind.DRAG, PointerEvent.Button.LEFT)));
             assertEquals("bc👩‍💻def", field.selectedText());
             assertEquals(id, fixture.focus.focused().orElseThrow());
-            assertTrue(fixture.placement.captures(pointer(23, 79,
-                PointerEvent.Kind.RELEASE, PointerEvent.Button.NONE)));
+            assertTrue(fixture.capture.active());
             assertCaptured(fixture.route(pointer(23, 79,
                 PointerEvent.Kind.RELEASE, PointerEvent.Button.NONE)));
             assertFalse(field.mouseSelecting());
@@ -368,7 +367,10 @@ class SearchInputRouterTest {
         SearchBarView.Placement clipped = SearchBarView.build(query, fixture.replacement, 80,
             false, SearchOptions.MatchMode.SUBSTRING, false)
             .place(fixture.placement.focusScope().id(), 2, viewport(2, 80));
-        assertFalse(clipped.captures(pointer(0, 0, PointerEvent.Kind.DRAG, PointerEvent.Button.LEFT)));
+        fixture.capture.beforeInput(WindowPointerCapture.frame(fixture)
+            .addScope(clipped.focusScope(), fixture.focus, action -> { }),
+            pointer(0, 0, PointerEvent.Kind.DRAG, PointerEvent.Button.LEFT));
+        assertFalse(fixture.capture.active());
         assertFalse(query.mouseSelecting());
         assertEquals(1, query.cursor());
     }
@@ -552,10 +554,22 @@ class SearchInputRouterTest {
         TextField query,
         TextField replacement,
         FocusManager<SearchFocus> focus,
-        SearchBarView.Placement placement
+        SearchBarView.Placement placement,
+        WindowPointerCapture capture
     ) {
+        private Fixture(TextField query, TextField replacement, FocusManager<SearchFocus> focus,
+            SearchBarView.Placement placement) {
+            this(query, replacement, focus, placement, new WindowPointerCapture());
+        }
+
         private SearchInputRouter.Result route(TuiInputEvent event) {
-            return SearchInputRouter.route(focus, placement, event);
+            WindowPointerCapture.Frame frame = WindowPointerCapture.frame(this)
+                .addScope(placement.focusScope(), focus, action -> { });
+            capture.beforeInput(frame, event);
+            if (event instanceof PointerEvent pointer && capture.dispatch(frame, pointer)) {
+                return new SearchInputRouter.Result(true, null);
+            }
+            return SearchInputRouter.route(focus, placement, event, capture, this);
         }
     }
 }

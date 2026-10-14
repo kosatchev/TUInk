@@ -227,8 +227,7 @@ class SaveAsInputRouterTest {
             PointerEvent.Kind.DRAG, PointerEvent.Button.LEFT)));
         assertEquals("👩‍💻.txt", field.selectedText());
         assertEquals(SaveAsBarView.Target.FIELD, fixture.focus.focused().orElseThrow());
-        assertTrue(fixture.placement.captures(pointer(23, 79,
-            PointerEvent.Kind.RELEASE, PointerEvent.Button.NONE)));
+        assertTrue(fixture.capture.active());
         assertCaptured(fixture.route(pointer(23, 79, PointerEvent.Kind.RELEASE, PointerEvent.Button.NONE)));
         assertFalse(field.mouseSelecting());
         assertEquals("👩‍💻.txt", field.selectedText());
@@ -387,10 +386,22 @@ class SaveAsInputRouterTest {
     private record Fixture(
         TextField field,
         FocusManager<SaveAsBarView.Target> focus,
-        SaveAsBarView.Placement placement
+        SaveAsBarView.Placement placement,
+        WindowPointerCapture capture
     ) {
+        private Fixture(TextField field, FocusManager<SaveAsBarView.Target> focus,
+            SaveAsBarView.Placement placement) {
+            this(field, focus, placement, new WindowPointerCapture());
+        }
+
         private SaveAsInputRouter.Result route(TuiInputEvent event) {
-            return SaveAsInputRouter.route(focus, placement, event);
+            WindowPointerCapture.Frame frame = WindowPointerCapture.frame(this)
+                .addScope(placement.focusScope(), focus, action -> { });
+            capture.beforeInput(frame, event);
+            if (event instanceof PointerEvent pointer && capture.dispatch(frame, pointer)) {
+                return new SaveAsInputRouter.Result(true, null);
+            }
+            return SaveAsInputRouter.route(focus, placement, event, capture, this);
         }
     }
 }

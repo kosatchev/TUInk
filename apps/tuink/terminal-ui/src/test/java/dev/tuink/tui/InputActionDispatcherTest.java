@@ -8,12 +8,35 @@ import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.Position;
 import dev.tuink.core.TabSession;
 import dev.tuink.render.TerminalEditorTextLayout;
+import dev.tuink.render.EditorViewNavigation;
 import dev.tuink.tui.command.TuinkCommand;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 
 class InputActionDispatcherTest {
+    @Test
+    void successiveDispatchContextsReuseTheViewColumnAndRejectedEditsDoNotResetIt() {
+        TabSession tab = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
+        tab.engine().insertInput("0123456789\nx\nabcdefghij");
+        tab.engine().moveCursorTo(new Position(0, 8));
+        var navigation = new EditorViewNavigation(tab.engine());
+        UiSessionState ui = new UiSessionState();
+        var firstFrame = new InputActionDispatcher.DispatchContext(tab.engine(), tab.state(), null,
+            ignored -> {}, 3, 20, navigation);
+        InputActionDispatcher.dispatch(TuinkCommand.CURSOR_DOWN, ui, firstFrame);
+        assertEquals(new Position(1, 1), tab.state().getCursor());
+        ui.readingModeSetting = true;
+        InputActionDispatcher.dispatch(TuinkCommand.EDIT_CUT, ui, firstFrame);
+
+        var nextFrame = new InputActionDispatcher.DispatchContext(tab.engine(), tab.state(), null,
+            ignored -> {}, 3, 40, navigation);
+        InputActionDispatcher.dispatch(TuinkCommand.CURSOR_DOWN, ui, nextFrame);
+
+        assertEquals(new Position(2, 8), tab.state().getCursor());
+        assertEquals(List.of("0123456789", "x", "abcdefghij"), tab.model().snapshotLines());
+    }
+
     @Test
     void verticalCommandsUseTheCurrentWrappedViewport() {
         TabSession tab = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());

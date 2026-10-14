@@ -19,7 +19,7 @@ import org.eclipse.jgit.diff.Edit;
 import org.eclipse.jgit.diff.EditList;
 
 /**
- * Core editing commands and viewport management.
+ * Core document editing, selection and history commands.
  */
 public class EditorEngine {
     private static final int MAX_HISTORY = 500;
@@ -43,11 +43,8 @@ public class EditorEngine {
     private EditKind lastEditKind = EditKind.NONE;
     private long lastEditAtNanos;
     private Position lastEditCursorAfter;
-    private int preferredVisualColumn = -1;
+    private long navigationRevision;
     private GraphemeText cachedGraphemes;
-    private int preferredWrapWidth = -1;
-    private boolean preferredWrapByWords;
-    private static final int H_SCROLL_MARGIN = 12;
     private int tabWidth = 4;
     private TabInsertMode tabInsertMode = TabInsertMode.AUTO;
     private boolean autoIndentEnabled = true;
@@ -105,6 +102,15 @@ public class EditorEngine {
         return textLayout;
     }
 
+    /** Invalidates frontend navigation context after a document or cursor interaction. */
+    public long navigationRevision() {
+        return navigationRevision;
+    }
+
+    public int tabWidth() {
+        return tabWidth;
+    }
+
     /**
      * Applies a prevalidated batch of document replacements as one atomic undo step.
      *
@@ -133,7 +139,7 @@ public class EditorEngine {
             return false;
         }
 
-        preferredVisualColumn = -1;
+        navigationRevision++;
         breakCoalescing();
         applyEdit(EditKind.NONE, () -> {
             DocumentFileMetadata metadata = model.fileMetadata();
@@ -232,14 +238,22 @@ public class EditorEngine {
 
     /** Moves the primary cursor through the engine-owned mutation boundary. */
     public void moveCursorTo(Position requested) {
-        preferredVisualColumn = -1;
-        Position previous = state.getCursor();
-        moveCursor(clampCursorBoundary(requested), false, previous);
+        navigateTo(requested, false);
+    }
+
+    /**
+     * Applies a frontend-resolved navigation target through the selection and history boundary.
+     * Even a boundary no-op clears an unextended selection and separates consecutive typing edits.
+     */
+    public void navigateTo(Position requested, boolean selecting) {
+        navigationRevision++;
+        Position previous = clampCursorBoundary(state.getCursor());
+        moveCursor(clampCursorBoundary(requested), selecting, previous);
     }
 
     /** Starts a pointer selection without exposing mutable cursor state to a frontend. */
     public void beginSelectionAt(Position requested) {
-        preferredVisualColumn = -1;
+        navigationRevision++;
         breakCoalescing();
         Position next = clampCursorBoundary(requested);
         state.setSelectionAnchor(next);
@@ -248,7 +262,7 @@ public class EditorEngine {
 
     /** Extends the current selection to a frontend-resolved text position. */
     public void extendSelectionTo(Position requested) {
-        preferredVisualColumn = -1;
+        navigationRevision++;
         breakCoalescing();
         if (state.getSelectionAnchor() == null) {
             state.setSelectionAnchor(state.getCursor());
@@ -258,7 +272,7 @@ public class EditorEngine {
 
     /** Restores a cursor/selection snapshot after speculative frontend routing. */
     public void restoreSelection(Position cursor, Position anchor) {
-        preferredVisualColumn = -1;
+        navigationRevision++;
         breakCoalescing();
         state.setCursor(requireTextBoundary(cursor));
         state.setSelectionAnchor(anchor == null ? null : requireTextBoundary(anchor));
@@ -280,7 +294,7 @@ public class EditorEngine {
             return;
         }
         snapshot.restore(model, state);
-        preferredVisualColumn = -1;
+        navigationRevision++;
         undoStack.clear();
         redoStack.clear();
         breakCoalescing();
@@ -326,7 +340,7 @@ public class EditorEngine {
     public void setTabWidth(int tabWidth) {
         int nextWidth = tabWidth <= 2 ? 2 : 4;
         if (this.tabWidth != nextWidth) {
-            preferredVisualColumn = -1;
+            navigationRevision++;
         }
         this.tabWidth = nextWidth;
     }
@@ -398,7 +412,7 @@ public class EditorEngine {
         state.setCurrentFile(normalizedPath);
         state.setSaveDisposition(openedDisposition);
         state.setCursor(new Position(0, 0));
-        preferredVisualColumn = -1;
+        navigationRevision++;
         state.setTopLine(0);
         state.setLeftColumn(0);
         state.setLeftVisualColumn(0);
@@ -466,7 +480,7 @@ public class EditorEngine {
     }
 
     public void moveLeft(boolean selecting) {
-        preferredVisualColumn = -1;
+        navigationRevision++;
         Position p = state.getCursor();
         if (p.col() > 0) {
             String line = model.getLine(p.line());
@@ -484,7 +498,7 @@ public class EditorEngine {
     }
 
     public void moveRight(boolean selecting) {
-        preferredVisualColumn = -1;
+        navigationRevision++;
         Position p = state.getCursor();
         int len = model.getLine(p.line()).length();
         if (p.col() < len) {
@@ -498,7 +512,7 @@ public class EditorEngine {
     }
 
     public void moveWordLeft() {
-        preferredVisualColumn = -1;
+        navigationRevision++;
         Position previous = state.getCursor();
         Position p = model.clamp(previous);
         int line = p.line();
@@ -537,7 +551,7 @@ public class EditorEngine {
     }
 
     public void moveWordRight() {
-        preferredVisualColumn = -1;
+        navigationRevision++;
         Position previous = state.getCursor();
         Position p = model.clamp(previous);
         int line = p.line();
@@ -578,7 +592,7 @@ public class EditorEngine {
     }
 
     public boolean selectWordAt(Position requested) {
-        preferredVisualColumn = -1;
+        navigationRevision++;
         breakCoalescing();
         Position p = model.clamp(requested);
         String text = model.getLine(p.line());
@@ -615,119 +629,15 @@ public class EditorEngine {
         return start < end;
     }
 
-    public void moveUp() {
-        moveUp(false);
-    }
-
-    public void moveUp(boolean selecting) {
-        if (preferredWrapWidth > 0) {
-            preferredVisualColumn = -1;
-        }
-        preferredWrapWidth = -1;
-        Position p = state.getCursor();
-        if (p.line() == 0) {
-            moveCursor(p, selecting, p);
-            return;
-        }
-        if (preferredVisualColumn < 0) {
-            preferredVisualColumn = visualColumn(p.line(), 0, p.col());
-        }
-        int targetLine = p.line() - 1;
-        int col = columnForVisualColumn(targetLine, preferredVisualColumn);
-        moveCursor(new Position(targetLine, col), selecting, p);
-    }
-
-    public void moveDown() {
-        moveDown(false);
-    }
-
-    public void moveDown(boolean selecting) {
-        if (preferredWrapWidth > 0) {
-            preferredVisualColumn = -1;
-        }
-        preferredWrapWidth = -1;
-        Position p = state.getCursor();
-        if (p.line() >= model.lineCount() - 1) {
-            moveCursor(p, selecting, p);
-            return;
-        }
-        if (preferredVisualColumn < 0) {
-            preferredVisualColumn = visualColumn(p.line(), 0, p.col());
-        }
-        int targetLine = p.line() + 1;
-        int col = columnForVisualColumn(targetLine, preferredVisualColumn);
-        moveCursor(new Position(targetLine, col), selecting, p);
-    }
-
-    /** Moves one displayed row, using the same wrapping as the frontend. */
-    public void moveUp(boolean selecting, int contentColumns, boolean wrapLines, boolean wrapByWords) {
-        if (wrapLines) {
-            moveWrappedRows(-1, selecting, contentColumns, wrapByWords);
-        } else {
-            moveUp(selecting);
-        }
-    }
-
-    /** Moves one displayed row, using the same wrapping as the frontend. */
-    public void moveDown(boolean selecting, int contentColumns, boolean wrapLines, boolean wrapByWords) {
-        if (wrapLines) {
-            moveWrappedRows(1, selecting, contentColumns, wrapByWords);
-        } else {
-            moveDown(selecting);
-        }
-    }
-
-    private void moveWrappedRows(int delta, boolean selecting, int contentColumns, boolean wrapByWords) {
-        int width = Math.max(1, contentColumns);
-        Position previous = clampCursorBoundary(state.getCursor());
-        List<Integer> starts = textLayout.wrapStarts(previous.line(), width, wrapByWords, tabWidth);
-        int segment = wrapSegmentAt(starts, previous.col());
-        int segmentVisual = textLayout.visualColumnAt(previous.line(), starts.get(segment), tabWidth);
-        if (preferredVisualColumn < 0 || preferredWrapWidth != width || preferredWrapByWords != wrapByWords) {
-            preferredVisualColumn = textLayout.visualColumnAt(previous.line(), previous.col(), tabWidth)
-                - segmentVisual;
-        }
-        preferredWrapWidth = width;
-        preferredWrapByWords = wrapByWords;
-        int currentRow = textLayout.wrappedRowsBefore(previous.line(), width, wrapByWords, tabWidth) + segment;
-        int lastRow = Math.max(0, textLayout.totalWrappedRows(width, wrapByWords, tabWidth) - 1);
-        int targetRow = (int) Math.max(0, Math.min(lastRow, (long) currentRow + delta));
-        if (targetRow == currentRow) {
-            moveCursor(previous, selecting, previous);
-            return;
-        }
-        int line = textLayout.lineIndexFromWrappedOffset(targetRow, width, wrapByWords, tabWidth);
-        List<Integer> targetStarts = textLayout.wrapStarts(line, width, wrapByWords, tabWidth);
-        int targetSegment = targetRow - textLayout.wrappedRowsBefore(line, width, wrapByWords, tabWidth);
-        int start = targetStarts.get(targetSegment);
-        int end = targetSegment + 1 < targetStarts.size()
-            ? targetStarts.get(targetSegment + 1)
-            : model.getLine(line).length();
-        int targetVisual = textLayout.visualColumnAt(line, start, tabWidth) + preferredVisualColumn;
-        int col = textLayout.textOffsetAtVisualColumn(line, targetVisual, tabWidth, EditorTextLayout.Bias.NEAREST);
-        col = Math.max(start, Math.min(col, end));
-        // A boundary shared with the following segment belongs to that segment.
-        // Stay on the requested row even when its last grapheme spans many cells.
-        if (targetSegment + 1 < targetStarts.size() && col == end && end > start) {
-            col = graphemes(model.getLine(line)).previousBoundary(end);
-        }
-        moveCursor(new Position(line, col), selecting, previous);
-    }
-
-    private static int wrapSegmentAt(List<Integer> starts, int column) {
-        int index = java.util.Collections.binarySearch(starts, column);
-        return index >= 0 ? index : Math.max(0, -index - 2);
-    }
-
     public void moveHome() {
-        preferredVisualColumn = -1;
+        navigationRevision++;
         breakCoalescing();
         state.clearSelection();
         state.setCursor(new Position(state.getCursor().line(), 0));
     }
 
     public void moveEnd() {
-        preferredVisualColumn = -1;
+        navigationRevision++;
         Position p = state.getCursor();
         breakCoalescing();
         state.clearSelection();
@@ -735,7 +645,7 @@ public class EditorEngine {
     }
 
     public void moveHomeSmart() {
-        preferredVisualColumn = -1;
+        navigationRevision++;
         breakCoalescing();
         state.clearSelection();
         Position p = state.getCursor();
@@ -746,7 +656,7 @@ public class EditorEngine {
     }
 
     public void moveEndSmart() {
-        preferredVisualColumn = -1;
+        navigationRevision++;
         breakCoalescing();
         state.clearSelection();
         Position p = state.getCursor();
@@ -757,90 +667,11 @@ public class EditorEngine {
         state.setCursor(new Position(p.line(), target));
     }
 
-    public void pageUp(int pageRows) {
-        preferredVisualColumn = -1;
-        int step = Math.max(pageRows, 1);
-        if (state.hasSelection()) {
-            state.setTopWrapSegment(0);
-            EditorViewportBehavior.applyVerticalScrollKeepCursor(
-                state,
-                model,
-                Math.max(0, state.getTopLine() - step)
-            );
-            return;
-        }
-        Position p = state.getCursor();
-        int targetLine = Math.max(0, p.line() - step);
-        String targetText = model.getLine(targetLine);
-        int col = graphemes(targetText).floorBoundary(Math.min(p.col(), targetText.length()));
-        breakCoalescing();
-        state.clearSelection();
-        state.setCursor(new Position(targetLine, col));
-        state.setTopLine(Math.max(0, state.getTopLine() - step));
-    }
-
-    public void pageDown(int pageRows) {
-        preferredVisualColumn = -1;
-        int step = Math.max(pageRows, 1);
-        if (state.hasSelection()) {
-            state.setTopWrapSegment(0);
-            EditorViewportBehavior.applyVerticalScrollKeepCursor(
-                state,
-                model,
-                Math.max(0, state.getTopLine() + step)
-            );
-            return;
-        }
-        Position p = state.getCursor();
-        int targetLine = Math.min(model.lineCount() - 1, p.line() + step);
-        String targetText = model.getLine(targetLine);
-        int col = graphemes(targetText).floorBoundary(Math.min(p.col(), targetText.length()));
-        breakCoalescing();
-        state.clearSelection();
-        state.setCursor(new Position(targetLine, col));
-        state.setTopLine(Math.max(0, state.getTopLine() + step));
-    }
-
-    public void pageUp(int pageRows, int contentColumns, boolean wrapLines, boolean wrapByWords) {
-        if (wrapLines) {
-            pageWrapped(-Math.max(1, pageRows), contentColumns, wrapByWords);
-        } else {
-            pageUp(pageRows);
-        }
-    }
-
-    public void pageDown(int pageRows, int contentColumns, boolean wrapLines, boolean wrapByWords) {
-        if (wrapLines) {
-            pageWrapped(Math.max(1, pageRows), contentColumns, wrapByWords);
-        } else {
-            pageDown(pageRows);
-        }
-    }
-
-    private void pageWrapped(int delta, int contentColumns, boolean wrapByWords) {
-        int width = Math.max(1, contentColumns);
-        int top = EditorViewportBehavior.wrappedOffsetForWrapTop(
-            model, textLayout,
-            new EditorViewportBehavior.WrapTop(state.getTopLine(), state.getTopWrapSegment()),
-            width, wrapByWords, tabWidth
-        );
-        int maxTop = Math.max(0, textLayout.totalWrappedRows(width, wrapByWords, tabWidth) - Math.abs(delta));
-        int targetTop = (int) Math.max(0, Math.min(maxTop, (long) top + delta));
-        // Page keys scroll without changing an existing selection, as in the
-        // unwrapped editor. Otherwise move the cursor by the same visual rows.
-        if (!state.hasSelection()) {
-            moveWrappedRows(delta, false, width, wrapByWords);
-        }
-        EditorViewportBehavior.applyWrapTop(state, EditorViewportBehavior.wrapTopFromWrappedOffset(
-            model, textLayout, targetTop, width, wrapByWords, tabWidth
-        ));
-    }
-
     public void insertChar(char ch) {
         if (Character.isSurrogate(ch)) {
             throw new IllegalArgumentException("A standalone UTF-16 surrogate is not valid input");
         }
-        preferredVisualColumn = -1;
+        navigationRevision++;
         if (isAutoPairsActive() && shouldSkipOverClosing(ch)) {
             moveRight();
             return;
@@ -884,7 +715,7 @@ public class EditorEngine {
             return;
         }
 
-        preferredVisualColumn = -1;
+        navigationRevision++;
         boolean hadSelection = state.hasSelection();
         ViewState before = captureViewState();
         List<TrackedEdit> ops = new ArrayList<>();
@@ -902,7 +733,7 @@ public class EditorEngine {
     }
 
     public void insertTab() {
-        preferredVisualColumn = -1;
+        navigationRevision++;
         boolean hadSelection = state.hasSelection();
         ViewState before = captureViewState();
         List<TrackedEdit> ops = new ArrayList<>();
@@ -925,7 +756,7 @@ public class EditorEngine {
     }
 
     public void backspace() {
-        preferredVisualColumn = -1;
+        navigationRevision++;
         boolean hadSelection = state.hasSelection();
         ViewState before = captureViewState();
         List<TrackedEdit> ops = new ArrayList<>();
@@ -957,7 +788,7 @@ public class EditorEngine {
     }
 
     public void deleteForward() {
-        preferredVisualColumn = -1;
+        navigationRevision++;
         boolean hadSelection = state.hasSelection();
         ViewState before = captureViewState();
         List<TrackedEdit> ops = new ArrayList<>();
@@ -993,7 +824,7 @@ public class EditorEngine {
     }
 
     public void insertNewline() {
-        preferredVisualColumn = -1;
+        navigationRevision++;
         ViewState before = captureViewState();
         List<TrackedEdit> ops = new ArrayList<>();
         SelectionRange selection = currentSelection();
@@ -1010,7 +841,7 @@ public class EditorEngine {
     }
 
     public LineCommentResult toggleLineComment() {
-        preferredVisualColumn = -1;
+        navigationRevision++;
         CommentSyntaxProfile syntax = LanguageProfiles.resolveCommentSyntax(state.getCurrentFile());
         String marker = syntax.lineCommentPrefix();
         if (marker == null) {
@@ -1120,7 +951,7 @@ public class EditorEngine {
     }
 
     public boolean cutSelection() {
-        preferredVisualColumn = -1;
+        navigationRevision++;
         SelectionRange range = currentSelection();
         if (range == null) {
             return false;
@@ -1133,7 +964,7 @@ public class EditorEngine {
     }
 
     public boolean cutCurrentLine() {
-        preferredVisualColumn = -1;
+        navigationRevision++;
         Position cursor = model.clamp(state.getCursor());
         int line = cursor.line();
         if (line < 0 || line >= model.lineCount()) {
@@ -1155,7 +986,7 @@ public class EditorEngine {
     }
 
     public boolean pasteClipboard() {
-        preferredVisualColumn = -1;
+        navigationRevision++;
         String pasted = clipboard.text();
         if (pasted.isEmpty()) {
             return false;
@@ -1172,7 +1003,7 @@ public class EditorEngine {
     }
 
     public boolean selectAll() {
-        preferredVisualColumn = -1;
+        navigationRevision++;
         int lines = model.lineCount();
         if (lines <= 0) {
             return false;
@@ -1192,7 +1023,7 @@ public class EditorEngine {
     }
 
     public boolean undo() {
-        preferredVisualColumn = -1;
+        navigationRevision++;
         if (undoStack.isEmpty()) {
             return false;
         }
@@ -1205,7 +1036,7 @@ public class EditorEngine {
     }
 
     public boolean redo() {
-        preferredVisualColumn = -1;
+        navigationRevision++;
         if (redoStack.isEmpty()) {
             return false;
         }
@@ -1302,7 +1133,7 @@ public class EditorEngine {
             // repeated Replace commands still make progress.
             return findNext(needle, options);
         }
-        preferredVisualColumn = -1;
+        navigationRevision++;
         ViewState before = captureViewState();
         List<TrackedEdit> ops = new ArrayList<>(1);
         state.setCursor(applyReplaceAndTrack(ops, rangeStart, rangeEnd, replacementText));
@@ -1338,132 +1169,6 @@ public class EditorEngine {
         }
         applyTextReplacements(replacements);
         return replacements.size();
-    }
-
-    public void ensureCursorVisible(int contentRows) {
-        ensureCursorVisible(contentRows, -1, false, false);
-    }
-
-    public void ensureCursorVisible(int contentRows, int contentCols) {
-        ensureCursorVisible(contentRows, contentCols, false, false);
-    }
-
-    public void ensureCursorVisible(
-        int contentRows,
-        int contentCols,
-        boolean wrapLines,
-        boolean wrapByWords
-    ) {
-        if (contentRows <= 0) {
-            return;
-        }
-
-        Position p = model.clamp(state.getCursor());
-        String cursorLine = model.getLine(p.line());
-        p = new Position(p.line(), graphemes(cursorLine).floorBoundary(p.col()));
-
-        if (wrapLines) {
-            int width = Math.max(1, contentCols);
-            List<Integer> starts = textLayout.wrapStarts(p.line(), width, wrapByWords, tabWidth);
-            int cursorSegment = 0;
-            for (int i = 1; i < starts.size(); i++) {
-                if (p.col() < starts.get(i)) {
-                    break;
-                }
-                cursorSegment = i;
-            }
-            int cursorWrappedOffset = textLayout.wrappedRowsBefore(p.line(), width, wrapByWords, tabWidth)
-                + cursorSegment;
-            EditorViewportBehavior.WrapTop normalizedTop = EditorViewportBehavior.normalizeWrapTop(
-                model,
-                textLayout,
-                state.getTopLine(),
-                state.getTopWrapSegment(),
-                width,
-                wrapByWords,
-                tabWidth
-            );
-            int topWrappedOffset = EditorViewportBehavior.wrappedOffsetForWrapTop(
-                model,
-                textLayout,
-                normalizedTop,
-                width,
-                wrapByWords,
-                tabWidth
-            );
-            int totalWrappedRows = textLayout.totalWrappedRows(width, wrapByWords, tabWidth);
-            int maxTop = Math.max(0, totalWrappedRows - contentRows);
-            int targetTop = topWrappedOffset;
-            if (cursorWrappedOffset < topWrappedOffset) {
-                targetTop = cursorWrappedOffset;
-            } else if (cursorWrappedOffset >= topWrappedOffset + contentRows) {
-                targetTop = cursorWrappedOffset - contentRows + 1;
-            }
-            targetTop = Math.max(0, Math.min(targetTop, maxTop));
-            EditorViewportBehavior.applyWrapTop(
-                state,
-                EditorViewportBehavior.wrapTopFromWrappedOffset(
-                    model,
-                    textLayout,
-                    targetTop,
-                    width,
-                    wrapByWords,
-                    tabWidth
-                )
-            );
-            state.setLeftColumn(0);
-            state.setLeftVisualColumn(0);
-            return;
-        }
-
-        if (p.line() < state.getTopLine()) {
-            state.setTopLine(p.line());
-        } else if (p.line() >= state.getTopLine() + contentRows) {
-            state.setTopLine(p.line() - contentRows + 1);
-        }
-
-        if (contentCols <= 0) {
-            return;
-        }
-        int safeMargin = Math.max(0, Math.min(H_SCROLL_MARGIN, Math.max(0, contentCols / 3)));
-        int cursorVisual = visualColumn(p.line(), 0, p.col());
-        int requiredVisualWidth = Math.max(textLayout.maxVisualLineWidth(tabWidth), cursorVisual + 1);
-        int maxLeftVisual = Math.max(0, requiredVisualWidth - Math.max(1, contentCols));
-        int leftVisual = Math.min(state.getLeftVisualColumn(), maxLeftVisual);
-        state.setLeftVisualColumn(leftVisual);
-        state.setLeftColumn(columnForVisualColumn(p.line(), leftVisual));
-
-        int leftVisibleBound = leftVisual + safeMargin;
-        if (cursorVisual < leftVisibleBound) {
-            int targetLeftVisual = Math.max(0, cursorVisual - safeMargin);
-            targetLeftVisual = Math.min(targetLeftVisual, maxLeftVisual);
-            state.setLeftVisualColumn(targetLeftVisual);
-            state.setLeftColumn(columnForVisualColumn(p.line(), targetLeftVisual));
-            return;
-        }
-
-        int rightVisibleBound = leftVisual + Math.max(0, contentCols - 1 - safeMargin);
-        if (cursorVisual > rightVisibleBound) {
-            int targetLeftVisual = Math.max(0, cursorVisual - Math.max(0, contentCols - 1 - safeMargin));
-            targetLeftVisual = Math.min(targetLeftVisual, maxLeftVisual);
-            state.setLeftVisualColumn(targetLeftVisual);
-            state.setLeftColumn(columnForVisualColumn(p.line(), targetLeftVisual));
-        }
-    }
-
-    private int visualColumn(int line, int startCol, int endCol) {
-        int start = textLayout.visualColumnAt(line, startCol, tabWidth);
-        int end = textLayout.visualColumnAt(line, endCol, tabWidth);
-        return Math.max(0, end - start);
-    }
-
-    private int columnForVisualColumn(int line, int targetVisual) {
-        return textLayout.textOffsetAtVisualColumn(
-            line,
-            Math.max(0, targetVisual),
-            tabWidth,
-            EditorTextLayout.Bias.NEAREST
-        );
     }
 
     private int firstNonWhitespaceColumn(String line) {

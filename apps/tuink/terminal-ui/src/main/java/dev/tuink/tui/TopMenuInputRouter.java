@@ -27,6 +27,17 @@ final class TopMenuInputRouter {
         CommandRouter commandRouter,
         TuiInputEvent event
     ) {
+        return route(controller, placement, commandRouter, event, null, null);
+    }
+
+    static Result route(
+        TopMenuController controller,
+        TopMenuView.Placement placement,
+        CommandRouter commandRouter,
+        TuiInputEvent event,
+        WindowPointerCapture capture,
+        Object surfaceId
+    ) {
         Objects.requireNonNull(controller, "controller");
         Objects.requireNonNull(placement, "placement");
         Objects.requireNonNull(commandRouter, "commandRouter");
@@ -42,6 +53,9 @@ final class TopMenuInputRouter {
         // Layout may normalize a stale dynamic-item selection or viewport.
         controller.adopt(placement.state());
         InteractionResult<MenuBar.Action<CommandInvocation>> interaction = placement.handle(event);
+        if (capture != null) {
+            capture.observe(surfaceId, placement.captureScope(), "menu", interaction);
+        }
         if (interaction.output().isPresent()) {
             MenuBar.Action<CommandInvocation> action = interaction.output().orElseThrow();
             if (action instanceof MenuBar.StateChanged<CommandInvocation> changed) {

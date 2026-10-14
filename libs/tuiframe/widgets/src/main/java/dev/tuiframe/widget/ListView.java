@@ -278,7 +278,7 @@ public final class ListView implements InteractiveWidget<ListView.Action> {
     }
 
     /** Immutable exact-frame placement; rebuild it after data or state changes. */
-    public static final class Placement implements PlacedInteractiveWidget<Action> {
+    public static final class Placement implements PlacedPointerCapture<Action> {
         private final Rect bounds;
         private final Rect contentBounds;
         private final Rect scrollbarBounds;
@@ -424,14 +424,27 @@ public final class ListView implements InteractiveWidget<ListView.Action> {
         }
 
         @Override
+        public boolean pointerCaptureActive() {
+            return state.drag() != null;
+        }
+
+        @Override
+        public InteractionResult<Action> cancelPointerCapture(PointerCaptureCancellation reason) {
+            Objects.requireNonNull(reason, "reason");
+            return (state.drag() == null ? InteractionResult.<Action>handled()
+                : InteractionResult.<Action>output(new StateChanged(
+                    new State(state.selectedIndex(), state.firstVisibleIndex()))))
+                .withPointerCapture(PointerCaptureRequest.RELEASE);
+        }
+
+        @Override
         public InteractionResult<Action> handle(TuiInputEvent event, FocusContext context) {
             Objects.requireNonNull(event, "event");
             Objects.requireNonNull(context, "context");
             if (state.drag() != null && (event instanceof ResizeEvent
                 || event instanceof PointerEvent pointer && pointer.kind() == PointerEvent.Kind.RELEASE)) {
-                return InteractionResult.output(new StateChanged(
-                    new State(state.selectedIndex(), state.firstVisibleIndex())
-                ));
+                return cancelPointerCapture(event instanceof ResizeEvent
+                    ? PointerCaptureCancellation.RESIZE : PointerCaptureCancellation.RELEASE);
             }
             if (!context.enabled() || bounds.isEmpty()) {
                 return InteractionResult.ignored();
@@ -500,7 +513,8 @@ public final class ListView implements InteractiveWidget<ListView.Action> {
                         signedInt((long) pointer.row() - context.space().terminalOrigin().y())
                     );
                     int first = scrollbar().orElseThrow().drag(point, state.drag());
-                    return withSelf(new StateChanged(new State(state.selectedIndex(), first, state.drag())));
+                    return InteractionResult.output(new StateChanged(
+                        new State(state.selectedIndex(), first, state.drag())));
                 }
             }
             if (!pointer.modifiers().isEmpty()) {
@@ -526,7 +540,9 @@ public final class ListView implements InteractiveWidget<ListView.Action> {
             Optional<Scrollbar.Press> scrollbarPress = scrollbar().flatMap(bar -> bar.press(point));
             if (scrollbarPress.isPresent()) {
                 Scrollbar.Press press = scrollbarPress.orElseThrow();
-                return withSelf(new StateChanged(new State(state.selectedIndex(), press.offset(), press.drag())));
+                return withSelf(new StateChanged(new State(state.selectedIndex(), press.offset(), press.drag())))
+                    .withPointerCapture(press.drag() == null
+                        ? PointerCaptureRequest.NONE : PointerCaptureRequest.ACQUIRE);
             }
             if (!contentBounds.contains(point)) {
                 return InteractionResult.focus(FocusRequest.SELF);

@@ -3,7 +3,6 @@ package dev.tuink.render;
 import dev.tuink.core.CommentSyntaxProfile;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.EditorTextLayout;
-import dev.tuink.core.EditorViewportBehavior;
 import dev.tuink.core.GutterDiffFlag;
 import dev.tuink.core.GutterDiffMarker;
 import dev.tuink.core.Position;
@@ -386,16 +385,11 @@ public class RenderPlanBuilder {
         int gutterWidth = resolvedLayout.gutterWidth();
         int textWidth = resolvedLayout.contentColumns();
         int layoutWidth = Math.max(1, textWidth);
-        WrapViewport wrapViewport = null;
-        if (wrapLines) {
-            wrapViewport = resolveWrapViewport(
-                model,
-                state.getTopLine(),
-                state.getTopWrapSegment(),
-                layoutWidth,
-                wrapByWords
-            );
-        }
+        EditorViewCoordinates coordinates = new EditorViewCoordinates(
+            textLayout, layoutWidth, wrapLines, wrapByWords, tabWidth
+        );
+        EditorViewCoordinates.Top viewportTop = coordinates.normalizeTop(EditorViewCoordinates.Top.from(state));
+        int topVisualRow = coordinates.rowOffset(viewportTop);
         // Reuse the injected per-model layout cache instead of scanning all lines on every frame.
         Position layoutCursor = model.clamp(state.getCursor());
         int cursorExtent = textLayout.visualColumnAt(
@@ -483,8 +477,8 @@ public class RenderPlanBuilder {
                 }
             }
         } else {
-            int lineIndex = wrapViewport == null ? state.getTopLine() : wrapViewport.lineIndex();
-            int firstSegmentOffset = wrapViewport == null ? 0 : wrapViewport.segmentOffset();
+            int lineIndex = viewportTop.line();
+            int firstSegmentOffset = viewportTop.segment();
             while (lines.size() < contentRows) {
                 if (lineIndex >= model.lineCount()) {
                     lines.add(new LineVisual(tildeGutter(gutterWidth), "", List.of(), GutterDiffMarker.NONE));
@@ -561,41 +555,11 @@ public class RenderPlanBuilder {
         }
 
         Position cursor = model.clamp(state.getCursor());
-        String cursorLine = model.getLine(cursor.line());
-        int cursorRow;
         int leftVisualColumn = Math.max(0, state.getLeftVisualColumn());
         int cursorLineLeftColumn = columnForVisualColumn(cursor.line(), leftVisualColumn);
-        int cursorCol;
-        if (!wrapLines) {
-            cursorRow = cursor.line() - state.getTopLine();
-            cursorCol = gutterWidth
-                + textLayout.visualColumnAt(cursor.line(), cursor.col(), tabWidth)
-                - leftVisualColumn;
-        } else {
-            List<Integer> starts = wrapStarts(cursor.line(), layoutWidth, wrapByWords);
-            int segIndex = 0;
-            int segStart = 0;
-            for (int i = 0; i < starts.size(); i++) {
-                int s = starts.get(i);
-                int e = i + 1 < starts.size() ? starts.get(i + 1) : cursorLine.length();
-                if (cursor.col() < e || (cursor.col() == e && i + 1 == starts.size())) {
-                    segIndex = i;
-                    segStart = s;
-                    break;
-                }
-                if (cursor.col() == e && i + 1 < starts.size()) {
-                    segIndex = i + 1;
-                    segStart = starts.get(i + 1);
-                    break;
-                }
-            }
-            int cursorAbsoluteWrapped = wrappedRowsBefore(cursor.line(), layoutWidth, wrapByWords) + segIndex;
-            int topWrapped = wrapViewport == null ? 0 : wrapViewport.topWrappedOffset();
-            cursorRow = cursorAbsoluteWrapped - topWrapped;
-            cursorCol = gutterWidth
-                + textLayout.visualColumnAt(cursor.line(), cursor.col(), tabWidth)
-                - textLayout.visualColumnAt(cursor.line(), segStart, tabWidth);
-        }
+        EditorViewCoordinates.VisualPosition cursorVisual = coordinates.inViewport(cursor, state);
+        int cursorRow = cursorVisual.row();
+        int cursorCol = gutterWidth + cursorVisual.column();
         int maxCursorCol = Math.max(0, safeCols - 1 - scrollbarWidth);
         boolean cursorInViewport = contentRows > 0
             && textWidth > 0
@@ -621,49 +585,16 @@ public class RenderPlanBuilder {
             wrapLines,
             wrapByWords,
             contentRows,
-            wrapLines
-                ? (wrapViewport == null ? 0 : wrapViewport.topWrappedOffset())
-                : state.getTopLine(),
-            wrapLines
-                ? totalWrappedRows(layoutWidth, wrapByWords)
-                : model.lineCount(),
+            topVisualRow,
+            coordinates.totalRows(),
             cursorLineLeftColumn,
             leftVisualColumn,
             totalColumns,
             safeCols,
             gutterWidth,
-            scrollbarWidth
+            scrollbarWidth,
+            resolvedLayout.scrollLayout()
         );
-    }
-
-    private WrapViewport resolveWrapViewport(
-        TextModel model,
-        int topLine,
-        int segmentOffset,
-        int width,
-        boolean wrapByWords
-    ) {
-        EditorViewportBehavior.WrapTop normalized = EditorViewportBehavior.normalizeWrapTop(
-            model,
-            textLayout,
-            topLine,
-            segmentOffset,
-            width,
-            wrapByWords,
-            tabWidth
-        );
-        int topWrapped = EditorViewportBehavior.wrappedOffsetForWrapTop(
-            model,
-            textLayout,
-            normalized,
-            width,
-            wrapByWords,
-            tabWidth
-        );
-        return new WrapViewport(normalized.line(), normalized.segmentOffset(), topWrapped);
-    }
-
-    private record WrapViewport(int lineIndex, int segmentOffset, int topWrappedOffset) {
     }
 
     private static int lineCount(String text) {
@@ -831,14 +762,6 @@ public class RenderPlanBuilder {
             : List.copyOf(highlighter.highlight(line));
         syntaxSpanCache.put(lineIndex, new SyntaxSpans(line, spans));
         return spans;
-    }
-
-    private int wrappedRowsBefore(int lineIndexExclusive, int width, boolean wrapByWords) {
-        return textLayout.wrappedRowsBefore(lineIndexExclusive, width, wrapByWords, tabWidth);
-    }
-
-    private int totalWrappedRows(int width, boolean wrapByWords) {
-        return textLayout.totalWrappedRows(width, wrapByWords, tabWidth);
     }
 
     private void requireBoundModel(TextModel model) {

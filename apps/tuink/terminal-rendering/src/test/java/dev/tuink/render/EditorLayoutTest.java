@@ -2,6 +2,9 @@ package dev.tuink.render;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.core.EditorState;
 import dev.tuink.core.Position;
@@ -149,6 +152,69 @@ class EditorLayoutTest {
             () -> assertEquals(0, noRows.contentRows()),
             () -> assertEquals(0, noRows.horizontalScrollbarHeight())
         );
+    }
+
+    @Test
+    void oneCellContentColumnAndOneRowViewportDoNotReserveInvisibleTracks() {
+        EditorLayout narrow = resolve(model("long text", "second", "third"), 4, 4, 1, 0, false);
+        assertAll(
+            () -> assertEquals(2, narrow.contentRows()),
+            () -> assertEquals(1, narrow.contentColumns()),
+            () -> assertNull(narrow.scrollLayout().horizontalScrollbarBounds()),
+            () -> assertEquals(0, narrow.horizontalScrollbarHeight())
+        );
+
+        for (boolean wrapped : new boolean[] {false, true}) {
+            EditorLayout singleRow = resolve(model("long text", "second", "third"), 3, 20, 1, 0, wrapped);
+            assertAll(
+                () -> assertEquals(1, singleRow.contentRows()),
+                () -> assertEquals(17, singleRow.contentColumns()),
+                () -> assertNull(singleRow.scrollLayout().verticalScrollbarBounds()),
+                () -> assertEquals(0, singleRow.scrollbarWidth())
+            );
+        }
+    }
+
+    @Test
+    void competingTracksUseTheCommonTinyViewportPriority() {
+        EditorLayout tiny = resolve(model("long text", "second", "third"), 4, 8, 1, 0, false);
+        assertAll(
+            () -> assertEquals(2, tiny.contentRows()),
+            () -> assertEquals(4, tiny.contentColumns()),
+            () -> assertNotNull(tiny.scrollLayout().verticalScrollbarBounds()),
+            () -> assertNull(tiny.scrollLayout().horizontalScrollbarBounds())
+        );
+    }
+
+    @Test
+    void reservedDimensionsMatchSharedGeometryThroughTinySizesAndOverlays() {
+        TextModel model = model("long text ".repeat(5), "second", "third");
+        for (boolean wrapped : new boolean[] {false, true}) {
+            for (int rows = 0; rows <= 8; rows++) {
+                for (int columns = 0; columns <= 12; columns++) {
+                    for (int overlays : new int[] {0, 2}) {
+                        EditorLayout layout = resolve(model, rows, columns, 1, overlays, wrapped);
+                        var scroll = layout.scrollLayout();
+                        assertEquals(layout.contentRows(), scroll.contentBounds().height());
+                        assertEquals(layout.contentColumns(), scroll.contentBounds().width());
+                        assertEquals(layout.scrollbarWidth() != 0, scroll.verticalScrollbarBounds() != null);
+                        assertEquals(layout.horizontalScrollbarHeight() != 0, scroll.horizontalScrollbarBounds() != null);
+                        assertEquals(Math.max(0, Math.max(1, rows) - 2 - overlays),
+                            layout.contentRows() + layout.horizontalScrollbarHeight());
+                        if (scroll.verticalScrollbarBounds() != null) {
+                            assertTrue(scroll.verticalScrollbarBounds().height() >= 2);
+                        }
+                        if (scroll.horizontalScrollbarBounds() != null) {
+                            assertTrue(scroll.horizontalScrollbarBounds().width() >= 2);
+                            assertTrue(layout.contentRows() >= 1);
+                        }
+                        if (wrapped) {
+                            assertNull(scroll.horizontalScrollbarBounds());
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private static EditorLayout resolve(

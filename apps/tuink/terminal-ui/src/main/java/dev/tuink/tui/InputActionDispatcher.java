@@ -12,6 +12,7 @@ import dev.tuink.core.EditorState;
 import dev.tuink.core.GutterDiffMode;
 import dev.tuink.core.TabInsertMode;
 import dev.tuink.editor.command.CommandInvocation;
+import dev.tuink.render.EditorViewNavigation;
 import dev.tuink.tui.command.TuinkCommand;
 import java.util.function.Consumer;
 
@@ -254,11 +255,11 @@ final class InputActionDispatcher {
                 return DispatchResult.handled("");
             }
             case CURSOR_UP -> {
-                ctx.engine().moveUp(false, ctx.contentColumns(), ui.wrapLinesSetting, ui.wrapWordsSetting);
+                ctx.navigation().moveUp(false, ctx.contentColumns(), ui.wrapLinesSetting, ui.wrapWordsSetting);
                 return DispatchResult.handled(null);
             }
             case CURSOR_DOWN -> {
-                ctx.engine().moveDown(false, ctx.contentColumns(), ui.wrapLinesSetting, ui.wrapWordsSetting);
+                ctx.navigation().moveDown(false, ctx.contentColumns(), ui.wrapLinesSetting, ui.wrapWordsSetting);
                 return DispatchResult.handled(null);
             }
             case CURSOR_LEFT -> {
@@ -270,11 +271,11 @@ final class InputActionDispatcher {
                 return DispatchResult.handled(null);
             }
             case CURSOR_SELECT_UP -> {
-                ctx.engine().moveUp(true, ctx.contentColumns(), ui.wrapLinesSetting, ui.wrapWordsSetting);
+                ctx.navigation().moveUp(true, ctx.contentColumns(), ui.wrapLinesSetting, ui.wrapWordsSetting);
                 return DispatchResult.handled(null);
             }
             case CURSOR_SELECT_DOWN -> {
-                ctx.engine().moveDown(true, ctx.contentColumns(), ui.wrapLinesSetting, ui.wrapWordsSetting);
+                ctx.navigation().moveDown(true, ctx.contentColumns(), ui.wrapLinesSetting, ui.wrapWordsSetting);
                 return DispatchResult.handled(null);
             }
             case CURSOR_SELECT_LEFT -> {
@@ -294,11 +295,11 @@ final class InputActionDispatcher {
                 return DispatchResult.handled(null);
             }
             case CURSOR_PAGE_UP -> {
-                ctx.engine().pageUp(ctx.contentRows(), ctx.contentColumns(), ui.wrapLinesSetting, ui.wrapWordsSetting);
+                ctx.navigation().pageUp(ctx.contentRows(), ctx.contentColumns(), ui.wrapLinesSetting, ui.wrapWordsSetting);
                 return DispatchResult.handled(null);
             }
             case CURSOR_PAGE_DOWN -> {
-                ctx.engine().pageDown(ctx.contentRows(), ctx.contentColumns(), ui.wrapLinesSetting, ui.wrapWordsSetting);
+                ctx.navigation().pageDown(ctx.contentRows(), ctx.contentColumns(), ui.wrapLinesSetting, ui.wrapWordsSetting);
                 return DispatchResult.handled(null);
             }
             case CURSOR_HOME -> {
@@ -356,11 +357,22 @@ final class InputActionDispatcher {
         TopMenuController topMenu,
         Consumer<Boolean> mouseTrackingController,
         int contentRows,
-        int contentColumns
+        int contentColumns,
+        EditorViewNavigation navigation
     ) {
+        DispatchContext(EditorEngine engine, EditorState state, TopMenuController topMenu,
+            Consumer<Boolean> mouseTrackingController, int contentRows, int contentColumns) {
+            this(engine, state, topMenu, mouseTrackingController, contentRows, contentColumns,
+                engine == null ? null : new EditorViewNavigation(engine));
+        }
+
         DispatchContext {
             if (mouseTrackingController == null) {
                 throw new IllegalArgumentException("mouseTrackingController must not be null");
+            }
+            if (engine == null ? navigation != null || state != null
+                : navigation == null || navigation.engine() != engine || engine.state() != state) {
+                throw new IllegalArgumentException("navigation must belong to the context's editor view");
             }
         }
     }

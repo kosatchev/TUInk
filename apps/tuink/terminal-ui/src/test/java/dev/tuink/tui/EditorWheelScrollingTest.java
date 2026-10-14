@@ -2,6 +2,8 @@ package dev.tuink.tui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import dev.tuiframe.geometry.Rect;
+import dev.tuiframe.scroll.ScrollLayout;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.EditorTextLayout;
 import dev.tuink.core.Position;
@@ -86,7 +88,8 @@ class EditorWheelScrollingTest {
             int total = wrapped ? textLayout.totalWrappedRows(textWidth, false, 4) : model.lineCount();
             RenderPlan plan = new RenderPlan(
                 List.of(), "", "", null, null, null, null, 0, 0, true, wrapped, false,
-                visibleRows, top, total, state.getLeftColumn(), state.getLeftVisualColumn(), 20, 14, 3, 1
+                visibleRows, top, total, state.getLeftColumn(), state.getLeftVisualColumn(), 20, 14, 3, 1,
+                ScrollLayout.vertical(new Rect(3, 1, textWidth, visibleRows), total)
             );
             Method handler = TerminalEditorApp.class.getDeclaredMethod(
                 "applyWheelVerticalScroll", TextModel.class, EditorTextLayout.class, EditorState.class,

@@ -14,6 +14,8 @@ import dev.tuiframe.input.PasteEvent;
 import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.input.ResizeEvent;
 import dev.tuiframe.widget.MenuBar;
+import dev.tuiframe.widget.InteractionResult;
+import dev.tuiframe.widget.PointerCaptureRequest;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Set;
@@ -231,10 +233,35 @@ class TopMenuInputRouterTest {
         TopMenuController controller,
         TopMenuView.Placement placement,
         CommandRouter router,
-        List<TopMenuView.TabItem> tabs
+        List<TopMenuView.TabItem> tabs,
+        WindowPointerCapture capture
     ) {
+        private Fixture(TopMenuController controller, TopMenuView.Placement placement, CommandRouter router,
+            List<TopMenuView.TabItem> tabs) {
+            this(controller, placement, router, tabs, new WindowPointerCapture());
+        }
+
         TopMenuInputRouter.Result route(dev.tuiframe.input.TuiInputEvent event) {
-            return TopMenuInputRouter.route(controller, placement, router, event);
+            if (placement.pointerCaptureActive() && !capture.active()) {
+                capture.observe(this, placement.captureScope(), "menu",
+                    InteractionResult.<MenuBar.Action<dev.tuink.editor.command.CommandInvocation>>handled()
+                        .withPointerCapture(PointerCaptureRequest.ACQUIRE));
+            }
+            WindowPointerCapture.Frame frame = WindowPointerCapture.frame(this)
+                .addScope(placement.captureScope(), action -> {
+                    if (action instanceof MenuBar.StateChanged<dev.tuink.editor.command.CommandInvocation> changed) {
+                        controller.adopt(changed.state());
+                    } else {
+                        throw new AssertionError("captured scrollbar invoked a command");
+                    }
+                });
+            boolean cancelled = capture.beforeInput(frame, event);
+            if (event instanceof PointerEvent pointer && capture.dispatch(frame, pointer)) {
+                return new TopMenuInputRouter.Result(null, true);
+            }
+            TopMenuView.Placement current = cancelled
+                ? fixture(controller.state(), placement.bounds(), tabs).placement : placement;
+            return TopMenuInputRouter.route(controller, current, router, event, capture, this);
         }
     }
 }

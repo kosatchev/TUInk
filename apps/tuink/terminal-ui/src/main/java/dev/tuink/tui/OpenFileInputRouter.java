@@ -6,6 +6,7 @@ import dev.tuiframe.input.ResizeEvent;
 import dev.tuiframe.input.TuiInputEvent;
 import dev.tuiframe.widget.InteractionResult;
 import dev.tuiframe.widget.Button;
+import dev.tuiframe.widget.PointerCaptureRequest;
 import dev.tuink.tui.file.FileTreeModel;
 import dev.tuink.tui.ui.FileTreeView;
 import java.nio.file.Path;
@@ -67,14 +68,24 @@ final class OpenFileInputRouter {
         FileTreeView.State state,
         Focus focus,
         Intent intent,
-        boolean consumed
+        boolean consumed,
+        PointerCaptureRequest pointerCaptureRequest
     ) {
         Result {
             Objects.requireNonNull(state, "state");
             Objects.requireNonNull(focus, "focus");
+            Objects.requireNonNull(pointerCaptureRequest, "pointerCaptureRequest");
             if (intent != null && !consumed) {
                 throw new IllegalArgumentException("an ignored event cannot request an intent");
             }
+        }
+
+        Result(FileTreeView.State state, Focus focus, Intent intent, boolean consumed) {
+            this(state, focus, intent, consumed, PointerCaptureRequest.NONE);
+        }
+
+        private Result withPointerCapture(PointerCaptureRequest request) {
+            return new Result(state, focus, intent, consumed, request);
         }
     }
 
@@ -82,6 +93,33 @@ final class OpenFileInputRouter {
     }
 
     static Result route(
+        OpenFileDialogView.Placement dialog,
+        OpenFileDialogView.FocusState focusState,
+        TuiInputEvent event,
+        long nowNanos,
+        long doubleClickWindowNanos
+    ) {
+        return route(dialog, focusState, event, nowNanos, doubleClickWindowNanos, null, null);
+    }
+
+    static Result route(
+        OpenFileDialogView.Placement dialog,
+        OpenFileDialogView.FocusState focusState,
+        TuiInputEvent event,
+        long nowNanos,
+        long doubleClickWindowNanos,
+        WindowPointerCapture capture,
+        Object surfaceId
+    ) {
+        Result result = routeInput(dialog, focusState, event, nowNanos, doubleClickWindowNanos);
+        if (capture != null) {
+            capture.observe(surfaceId, dialog.captureScope(), OpenFileDialogView.Control.LIST,
+                InteractionResult.<FileTreeView.Action>handled().withPointerCapture(result.pointerCaptureRequest()));
+        }
+        return result;
+    }
+
+    private static Result routeInput(
         OpenFileDialogView.Placement dialog,
         OpenFileDialogView.FocusState focusState,
         TuiInputEvent event,
@@ -106,20 +144,10 @@ final class OpenFileInputRouter {
             && stroke.modifiers().isEmpty() && stroke.key() == KeyStroke.Key.ESCAPE) {
             return intent(current.resetClickTracking(), requiredFocus, new CloseDialog());
         }
-        if (!placement.enabled()) {
+        if (event instanceof PointerEvent pointer && !pointer.modifiers().isEmpty()) {
             return captured(current.resetClickTracking(), requiredFocus);
         }
-        if (event instanceof PointerEvent pointer && current.widgetState().drag() != null) {
-            focusState.focus(Focus.LIST);
-            return routePointer(
-                placement,
-                Focus.LIST,
-                pointer,
-                nowNanos,
-                doubleClickWindowNanos
-            );
-        }
-        if (event instanceof PointerEvent pointer && !pointer.modifiers().isEmpty()) {
+        if (!placement.enabled()) {
             return captured(current.resetClickTracking(), requiredFocus);
         }
         if (event instanceof KeyStroke stroke) {
@@ -223,14 +251,6 @@ final class OpenFileInputRouter {
         long doubleClickWindowNanos
     ) {
         FileTreeView.State current = placement.state();
-        if (current.widgetState().drag() != null) {
-            return fromInteraction(
-                placement,
-                placement.handle(pointer, nowNanos, doubleClickWindowNanos),
-                Focus.LIST,
-                true
-            );
-        }
         if (!pointer.modifiers().isEmpty()) {
             return captured(current.resetClickTracking(), focus);
         }
@@ -269,6 +289,16 @@ final class OpenFileInputRouter {
     }
 
     private static Result fromInteraction(
+        FileTreeView.Placement placement,
+        InteractionResult<FileTreeView.Action> interaction,
+        Focus focus,
+        boolean captureWhenIgnored
+    ) {
+        return fromWidgetOutput(placement, interaction, focus, captureWhenIgnored)
+            .withPointerCapture(interaction.pointerCaptureRequest());
+    }
+
+    private static Result fromWidgetOutput(
         FileTreeView.Placement placement,
         InteractionResult<FileTreeView.Action> interaction,
         Focus focus,

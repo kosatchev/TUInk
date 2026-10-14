@@ -4,6 +4,9 @@ import dev.tuink.core.EditorTextLayout;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.Position;
 import dev.tuink.core.TextModel;
+import dev.tuiframe.geometry.Rect;
+import dev.tuiframe.scroll.ScrollLayout;
+import java.util.Objects;
 
 /** A single authoritative layout calculation for the editor viewport. */
 public record EditorLayout(
@@ -15,7 +18,8 @@ public record EditorLayout(
     int contentRows,
     int contentColumns,
     int scrollbarWidth,
-    int horizontalScrollbarHeight
+    int horizontalScrollbarHeight,
+    ScrollLayout scrollLayout
 ) {
     public EditorLayout {
         rows = Math.max(1, rows);
@@ -27,6 +31,7 @@ public record EditorLayout(
         contentColumns = Math.max(0, contentColumns);
         scrollbarWidth = Math.max(0, scrollbarWidth);
         horizontalScrollbarHeight = Math.max(0, horizontalScrollbarHeight);
+        Objects.requireNonNull(scrollLayout, "scrollLayout");
     }
 
     public static EditorLayout resolve(
@@ -50,10 +55,7 @@ public record EditorLayout(
         int overlays = Math.max(0, overlayRows);
         int availableRows = Math.max(0, safeRows - top - 1 - overlays);
         int gutter = gutterWidth(model.lineCount());
-        int verticalWidth = 0;
-        int horizontalHeight = 0;
-        int contentRows = 0;
-        int contentColumns = 0;
+        Rect viewport = new Rect(Math.min(gutter, safeCols), top, Math.max(0, safeCols - gutter), availableRows);
         Position cursor = model.clamp(state.getCursor());
         int maxWidth = wrapLines ? 0 : textLayout.maxVisualLineWidth(tabWidth);
         int cursorExtent = wrapLines
@@ -61,46 +63,33 @@ public record EditorLayout(
             : textLayout.visualColumnAt(cursor.line(), cursor.col(), tabWidth) + 1;
         int requiredColumns = Math.max(maxWidth, cursorExtent);
 
-        for (int pass = 0; pass < 4; pass++) {
-            contentRows = Math.max(0, availableRows - horizontalHeight);
-            contentColumns = Math.max(0, safeCols - gutter - verticalWidth);
-            int layoutWidth = Math.max(1, contentColumns);
-            int totalRows = wrapLines
-                ? textLayout.totalWrappedRows(layoutWidth, wrapByWords, tabWidth)
-                : model.lineCount();
-            int topOffset = wrapLines
-                ? textLayout.wrappedRowsBefore(state.getTopLine(), layoutWidth, wrapByWords, tabWidth)
-                    + state.getTopWrapSegment()
-                : state.getTopLine();
-            int nextVertical = safeCols >= 8 && (topOffset > 0 || totalRows > contentRows) ? 1 : 0;
-            int nextColumns = Math.max(0, safeCols - gutter - nextVertical);
-            int nextHorizontal = !wrapLines
-                && availableRows >= 2
-                && nextColumns > 0
-                && (state.getLeftVisualColumn() > 0 || requiredColumns > nextColumns)
-                ? 1
-                : 0;
-            if (nextVertical == verticalWidth && nextHorizontal == horizontalHeight) {
-                verticalWidth = nextVertical;
-                horizontalHeight = nextHorizontal;
-                break;
+        ScrollLayout scrollLayout;
+        if (wrapLines) {
+            // The shared scrollbar policy negotiates the space. Document wrapping
+            // then uses that content width, including its EOF insertion rows.
+            int totalRows = textLayout.totalWrappedRows(Math.max(1, viewport.width()), wrapByWords, tabWidth);
+            scrollLayout = ScrollLayout.vertical(viewport, totalRows);
+            if (scrollLayout.contentBounds().width() != viewport.width()) {
+                totalRows = textLayout.totalWrappedRows(
+                    Math.max(1, scrollLayout.contentBounds().width()), wrapByWords, tabWidth);
+                scrollLayout = ScrollLayout.vertical(viewport, totalRows);
             }
-            verticalWidth = nextVertical;
-            horizontalHeight = nextHorizontal;
+        } else {
+            scrollLayout = ScrollLayout.calculate(viewport, model.lineCount(), requiredColumns, 0);
         }
-
-        contentRows = Math.max(0, availableRows - horizontalHeight);
-        contentColumns = Math.max(0, safeCols - gutter - verticalWidth);
+        int verticalWidth = scrollLayout.verticalScrollbarBounds() == null ? 0 : 1;
+        int horizontalHeight = scrollLayout.horizontalScrollbarBounds() == null ? 0 : 1;
         return new EditorLayout(
             safeRows,
             safeCols,
             top,
             overlays,
             gutter,
-            contentRows,
-            contentColumns,
+            scrollLayout.contentBounds().height(),
+            scrollLayout.contentBounds().width(),
             verticalWidth,
-            horizontalHeight
+            horizontalHeight,
+            scrollLayout
         );
     }
 

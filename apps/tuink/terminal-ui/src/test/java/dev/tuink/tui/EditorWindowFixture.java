@@ -1,0 +1,259 @@
+package dev.tuink.tui;
+
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import dev.tuiframe.capability.TerminalCapabilities;
+import dev.tuiframe.cell.CellBuffer;
+import dev.tuiframe.geometry.Point;
+import dev.tuiframe.input.KeyStroke;
+import dev.tuiframe.input.PointerEvent;
+import dev.tuiframe.input.ResizeEvent;
+import dev.tuiframe.input.TuiInputEvent;
+import dev.tuiframe.jline.presentation.ScreenPresenter;
+import dev.tuiframe.runtime.TuiEventLoop;
+import dev.tuiframe.widget.FocusResetPolicy;
+import dev.tuiframe.widget.FocusScope;
+import dev.tuiframe.widget.TextField;
+import dev.tuink.core.RecoverySnapshot;
+import dev.tuink.editor.command.CommandInvocation;
+import dev.tuink.render.RenderPlan;
+import dev.tuink.tui.command.TuinkCommand;
+import dev.tuink.tui.flow.AppSettings;
+import dev.tuink.tui.flow.SaveAsSuggestionStore;
+import dev.tuink.tui.flow.SearchFocus;
+import dev.tuink.tui.flow.UiModalState;
+import dev.tuink.tui.keymap.Keymap;
+import dev.tuink.tui.keymap.TuinkKeymap;
+import dev.tuink.tui.render.RenderRasterizer;
+import dev.tuink.tui.style.UiStyles;
+import dev.tuink.tui.ui.EditorView;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.BooleanSupplier;
+import java.util.stream.IntStream;
+
+/** Real editor event/frame pipeline with an in-memory terminal and recovery port. */
+final class EditorWindowFixture implements AutoCloseable {
+    final TerminalEditorApp host = new TerminalEditorApp();
+    final List<TerminalEditorApp.EditorTab> tabs = new ArrayList<>();
+    final TerminalEditorApp.SessionContext context;
+    final TerminalEditorApp.NotificationState notification = host.new NotificationState();
+    final TextField query = new TextField();
+    final TextField replacement = new TextField();
+    final TextField filename = new TextField();
+    final EditorView editorView = new EditorView();
+    final TopMenuController menu = new TopMenuController();
+    final Keymap<KeyStroke> keymap = TuinkKeymap.defaults();
+    final TuiEventLoop<TuiInputEvent> loop = new TuiEventLoop<>(timeout -> TuiEventLoop.Read.idle());
+    final OpenFileTreeController tree;
+    final UiSessionState ui;
+    final EditorWindowController controller;
+    final Path document;
+    final ObservedRasterizer renderer;
+    int width = 80;
+    int height = 24;
+
+    EditorWindowFixture(Path directory, boolean reading) throws IOException {
+        this(directory, reading, IntStream.range(0, 120)
+            .mapToObj(index -> "ROW%04d|".formatted(index) + "abcdefgh ".repeat(30)).toList());
+    }
+
+    EditorWindowFixture(Path directory, boolean reading, List<String> lines) throws IOException {
+        Files.createDirectories(directory);
+        document = directory.resolve("document.txt");
+        Files.writeString(document, String.join("\n", lines));
+        tabs.add(host.newEditorTab());
+        tabs.getFirst().tabSession().engine().open(document);
+        context = new TerminalEditorApp.SessionContext(tabs, 0);
+        tree = new OpenFileTreeController(directory, true, false);
+        AppSettings settings = AppSettings.defaults();
+        ui = UiSessionState.from(false, settings.showTabBar(), settings.wrapLines(), settings.wrapWords(),
+            reading, settings.confirmOnClose(), settings.mouseMode(), settings.highlightActiveGutter(),
+            settings.smartHomeEnd(), settings.autoIndent(), settings.autoPairs(), settings.autoList(),
+            settings.visibleWhitespace(), settings.syntaxHighlighting(), settings.rainbowBrackets(),
+            settings.autoSelectionHighlight(), settings.gutterDiffMode(), settings.tabWidth(),
+            settings.tabInsertMode(), false, false, false);
+        renderer = new ObservedRasterizer(host.theme);
+        ScreenPresenter presenter = new ScreenPresenter(new PrintWriter(new StringWriter()), TerminalCapabilities.DEFAULT);
+        Map<String, RecoverySnapshot> recovery = new HashMap<>();
+        var recoveryManager = new TerminalEditorApp.RecoveryAutosaveManager(new TerminalEditorApp.RecoveryPersistence() {
+            @Override
+            public void save(String entryId, RecoverySnapshot snapshot) {
+                recovery.put(entryId, snapshot);
+            }
+
+            @Override
+            public void delete(String entryId) {
+                recovery.remove(entryId);
+            }
+        });
+        controller = new EditorWindowController(host, new EditorWindowController.Resources(
+            new CommandRouter(keymap), editorView, loop, UiModalState.none(), SearchController.SearchUiOptions.DEFAULT,
+            notification, tree, recoveryManager, host.new RenderFrameController(renderer, editorView, true, presenter),
+            renderer, filename, new SaveAsSuggestionStore(), presenter, query, replacement, context,
+            new ArrayList<>(), tabs, new EditorWindowController.TerminalAccess(() -> width, () -> height, enabled -> {}),
+            menu, ui));
+        try {
+            frame();
+        } catch (RuntimeException | Error failure) {
+            tree.close();
+            throw failure;
+        }
+    }
+
+    TerminalEditorApp.EditorTab active() {
+        return tabs.get(context.activeTabIndex());
+    }
+
+    void event(TuiInputEvent event) {
+        controller.handlePoll(new TuiEventLoop.Poll<>(event, event instanceof ResizeEvent, false));
+        frame();
+    }
+
+    void pointer(PointerEvent.Kind kind, int row, int column) {
+        event(new PointerEvent(row, column, kind, PointerEvent.Button.LEFT, Set.of()));
+    }
+
+    void wheel(PointerEvent.Kind kind, int count) {
+        for (int index = 0; index < count; index++) {
+            event(new PointerEvent(10, 15, kind, PointerEvent.Button.NONE, Set.of()));
+        }
+    }
+
+    void resize(int rows, int columns) {
+        height = rows;
+        width = columns;
+        event(new ResizeEvent(rows, columns));
+    }
+
+    void frame() {
+        controller.prepareTurn();
+        loop.invalidate();
+        TuiEventLoop.FrameTicket ticket = loop.beginFrame();
+        assertNotNull(ticket);
+        boolean rendered = false;
+        boolean completed = false;
+        try {
+            rendered = controller.renderFrame(ticket);
+            completed = true;
+        } finally {
+            loop.endFrame(ticket, completed && rendered);
+        }
+        controller.frameEnded(rendered);
+    }
+
+    /** Exercise semantic commands through a user key binding and the real router. */
+    void command(TuinkCommand command) {
+        KeyStroke alias = KeyStroke.of(KeyStroke.Key.F12);
+        keymap.rebind(alias, CommandInvocation.of(command.id()));
+        event(alias);
+    }
+
+    void focusSearch(SearchFocus target) {
+        if (target == null) {
+            // Explicitly cleared focus is a public FocusManager state. Only the
+            // stable scope identity is needed; no production geometry is copied.
+            host.searchFocusManager.clear(new FocusScope<SearchFocus, Object>(
+                TerminalEditorApp.SEARCH_SCOPE_ID, FocusResetPolicy.CLEARED, List.of(), List.of(), List.of()));
+            frame();
+            return;
+        }
+        for (int step = 0; step <= SearchFocus.values().length; step++) {
+            if (!ui.searchEditorFocused && host.searchFocusManager.focused().orElse(null) == target) {
+                return;
+            }
+            event(KeyStroke.of(KeyStroke.Key.TAB));
+        }
+        throw new AssertionError("Search focus not reachable: " + target);
+    }
+
+    void focusDocument() {
+        for (int step = 0; step <= SearchFocus.values().length; step++) {
+            if (ui.searchEditorFocused) {
+                return;
+            }
+            event(KeyStroke.of(KeyStroke.Key.TAB));
+        }
+        throw new AssertionError("Document focus not reachable from search");
+    }
+
+    String screenRow(int row) {
+        CellBuffer frame = renderer.frame;
+        assertNotNull(frame);
+        StringBuilder text = new StringBuilder();
+        for (int column = 0; column < frame.cols(); column++) {
+            text.append(frame.get(row, column).grapheme());
+        }
+        return text.toString();
+    }
+
+    int rowStartingWith(String label) {
+        for (int row = 0; row < height; row++) {
+            if (screenRow(row).startsWith(label)) {
+                return row;
+            }
+        }
+        throw new AssertionError("No visible row starts with " + label);
+    }
+
+    /** Locate a painted scrollbar rather than reproducing its layout math. */
+    Point verticalThumb(boolean documentScrollbar) {
+        CellBuffer frame = renderer.frame;
+        assertNotNull(frame);
+        int lastColumn = documentScrollbar ? width - 1 : width - 2;
+        int firstColumn = documentScrollbar ? lastColumn : 1;
+        for (int column = lastColumn; column >= firstColumn; column--) {
+            int thumbRow = -1;
+            boolean track = false;
+            for (int row = 1; row < height - 1; row++) {
+                String cell = frame.get(row, column).grapheme();
+                if (cell.equals("█") && thumbRow < 0) {
+                    thumbRow = row;
+                }
+                track |= cell.equals("│");
+            }
+            if (thumbRow >= 0 && track) {
+                return new Point(column, thumbRow);
+            }
+        }
+        throw new AssertionError("No visible vertical scrollbar thumb");
+    }
+
+    void await(BooleanSupplier ready) throws InterruptedException {
+        long deadline = System.nanoTime() + 5_000_000_000L;
+        while (!ready.getAsBoolean() && System.nanoTime() < deadline) {
+            frame();
+            Thread.sleep(5L);
+        }
+        assertTrue(ready.getAsBoolean(), "asynchronous fixture did not become ready");
+        frame();
+    }
+
+    @Override
+    public void close() {
+        tree.close();
+    }
+
+    private static final class ObservedRasterizer extends RenderRasterizer {
+        private CellBuffer frame;
+
+        private ObservedRasterizer(UiStyles.Theme theme) {
+            super(1, theme);
+        }
+
+        @Override
+        public CellBuffer rasterize(RenderPlan plan, int rows, int columns, int contentTopRow) {
+            frame = super.rasterize(plan, rows, columns, contentTopRow);
+            return frame;
+        }
+    }
+}

@@ -10,7 +10,10 @@ import dev.tuiframe.scroll.ScrollLayout;
 import dev.tuiframe.widget.FocusContext;
 import dev.tuiframe.widget.FocusSpace;
 import dev.tuiframe.widget.InteractionResult;
+import dev.tuiframe.widget.PlacedPointerCapture;
+import dev.tuiframe.widget.PointerCaptureCancellation;
 import dev.tuiframe.widget.Theme;
+import dev.tuiframe.widget.WidgetState;
 import dev.tuink.tui.file.FileTreeModel;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -447,6 +450,57 @@ public final class FileTreeView {
             return placed.bounds();
         }
 
+        /**
+         * Gesture-only binding for common pointer delivery. Entry presses keep
+         * using {@link #handle(TuiInputEvent, long, long)} with the event's clock;
+         * drag/release and cancellation cannot activate entries or double-click.
+         */
+        public PlacedPointerCapture<Action> captureTarget() {
+            return new PlacedPointerCapture<>() {
+                @Override
+                public Rect bounds() {
+                    return placed.bounds();
+                }
+
+                @Override
+                public void paint(Canvas canvas, Theme theme, WidgetState widgetState) {
+                    placed.paint(canvas, theme, widgetState);
+                }
+
+                @Override
+                public boolean pointerCaptureActive() {
+                    return placed.pointerCaptureActive();
+                }
+
+                @Override
+                public InteractionResult<Action> cancelPointerCapture(PointerCaptureCancellation reason) {
+                    return captureResult(placed.cancelPointerCapture(reason));
+                }
+
+                @Override
+                public InteractionResult<Action> handle(TuiInputEvent event, FocusContext ignored) {
+                    if (!(event instanceof PointerEvent pointer)
+                        || !(pointer.kind() == PointerEvent.Kind.RELEASE
+                            || pointer.kind() == PointerEvent.Kind.DRAG
+                                && pointer.button() == PointerEvent.Button.LEFT)) {
+                        return InteractionResult.ignored();
+                    }
+                    return captureResult(placed.handle(event, context));
+                }
+            };
+        }
+
+        private InteractionResult<Action> captureResult(
+            InteractionResult<dev.tuiframe.widget.TreeView.Action<FileTreeModel.EntryId>> result
+        ) {
+            return result.mapOutput(action -> {
+                if (action instanceof dev.tuiframe.widget.TreeView.StateChanged<?> changed) {
+                    return new StateChanged(adopt(changed.state(), state, true));
+                }
+                throw new IllegalStateException("captured pointer delivery cannot activate file entries");
+            });
+        }
+
         public Rect contentBounds() {
             return placed.contentBounds();
         }
@@ -529,23 +583,7 @@ public final class FileTreeView {
             }
             InteractionResult<dev.tuiframe.widget.TreeView.Action<FileTreeModel.EntryId>>
                 interaction = placed.handle(event, context);
-            if (interaction.output().isEmpty()) {
-                return new InteractionResult<>(
-                    interaction.consumed(),
-                    interaction.focusRequest(),
-                    Optional.empty()
-                );
-            }
-            Action action = mapAction(
-                interaction.output().orElseThrow(),
-                nowNanos,
-                doubleClickWindowNanos
-            );
-            return new InteractionResult<>(
-                true,
-                interaction.focusRequest(),
-                Optional.of(action)
-            );
+            return interaction.mapOutput(action -> mapAction(action, nowNanos, doubleClickWindowNanos));
         }
 
         private Action mapAction(

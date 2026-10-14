@@ -3,16 +3,17 @@ package dev.tuink.tui.ui;
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.EditorTextLayout;
-import dev.tuink.core.EditorViewportBehavior;
 import dev.tuink.core.Position;
 import dev.tuink.core.TextModel;
+import dev.tuink.render.EditorViewCoordinates;
+import dev.tuink.render.EditorViewCoordinates.Geometry;
+import dev.tuink.render.EditorViewCoordinates.Top;
+import dev.tuink.render.EditorViewNavigation;
 import dev.tuink.tui.command.TuinkCommand;
 import dev.tuink.tui.input.EditorInput;
 import dev.tuiframe.input.PasteEvent;
 import dev.tuiframe.input.TextInput;
 import dev.tuiframe.scroll.ScrollInteraction;
-import java.util.Collections;
-import java.util.List;
 
 /**
  * Tracks viewport interaction mode and applies cursor visibility policy.
@@ -112,20 +113,21 @@ public final class ViewportController {
         EditorState state = engine.state();
         EditorTextLayout layout = engine.textLayout();
         int safeTabWidth = tabWidth <= 2 ? 2 : 4;
-        ViewportGeometry geometry = new ViewportGeometry(contentCols, wrapLines, wrapByWords, safeTabWidth);
+        Geometry geometry = new Geometry(contentCols, wrapLines, wrapByWords, safeTabWidth);
+        EditorViewCoordinates coordinates = new EditorViewCoordinates(layout, geometry);
         Position anchor = null;
         if (previousViewport != null && previousViewport.model() == model && previousViewport.state() == state) {
             // Mouse scrolling changes state between render passes. Read that
             // position using the geometry in which the gesture took place.
-            anchor = previousViewport.revision() == model.revision() && previousViewport.top().equals(currentTop(state))
+            anchor = previousViewport.revision() == model.revision() && previousViewport.top().equals(Top.from(state))
                 ? previousViewport.anchor()
-                : textAnchor(model, layout, state, previousViewport.geometry());
+                : new EditorViewCoordinates(layout, previousViewport.geometry()).anchor(Top.from(state));
             if (!geometry.equals(previousViewport.geometry())) {
-                EditorViewportBehavior.applyWrapTop(state, topForAnchor(model, layout, anchor, geometry));
+                coordinates.applyTop(state, coordinates.topForAnchor(anchor));
             }
         }
         if (!manualVerticalPan) {
-            engine.ensureCursorVisible(
+            EditorViewNavigation.ensureCursorVisible(engine,
                 contentRows,
                 wrapLines ? contentCols : (manualHorizontalPan ? -1 : contentCols),
                 wrapLines,
@@ -133,24 +135,14 @@ public final class ViewportController {
             );
         }
         if (wrapLines) {
-            EditorViewportBehavior.WrapTop top = EditorViewportBehavior.normalizeWrapTop(
-                model, layout, state.getTopLine(), state.getTopWrapSegment(),
-                contentCols, wrapByWords, safeTabWidth
-            );
-            int offset = EditorViewportBehavior.wrappedOffsetForWrapTop(
-                model, layout, top, contentCols, wrapByWords, safeTabWidth
-            );
-            int total = layout.totalWrappedRows(contentCols, wrapByWords, safeTabWidth);
+            Top top = coordinates.normalizeTop(Top.from(state));
+            int offset = coordinates.rowOffset(top);
+            int total = coordinates.totalRows();
             int bounded = ScrollInteraction.clampOffset(offset, contentRows, total);
-            EditorViewportBehavior.applyWrapTop(
-                state,
-                bounded == offset ? top : EditorViewportBehavior.wrapTopFromWrappedOffset(
-                    model, layout, bounded, contentCols, wrapByWords, safeTabWidth
-                )
-            );
+            coordinates.applyTop(state, bounded == offset ? top : coordinates.topAtRow(bounded));
             state.setLeftColumn(0);
             state.setLeftVisualColumn(0);
-            rememberViewport(model, layout, state, geometry, anchor);
+            rememberViewport(model, coordinates, state, geometry, anchor);
             return;
         }
 
@@ -163,78 +155,34 @@ public final class ViewportController {
         );
         int left = ScrollInteraction.clampOffset(state.getLeftVisualColumn(), contentCols, requiredColumns);
         if (left != state.getLeftVisualColumn()) {
-            EditorViewportBehavior.applyHorizontalScrollVisual(state, model, layout, left, safeTabWidth);
+            coordinates.applyHorizontalOffset(state, left);
         }
-        rememberViewport(model, layout, state, geometry, anchor);
+        rememberViewport(model, coordinates, state, geometry, anchor);
     }
 
     private void rememberViewport(
         TextModel model,
-        EditorTextLayout layout,
+        EditorViewCoordinates coordinates,
         EditorState state,
-        ViewportGeometry geometry,
+        Geometry geometry,
         Position anchor
     ) {
-        EditorViewportBehavior.WrapTop top = currentTop(state);
+        Top top = Top.from(state);
         // Keep the original text offset when a wider row starts before it.
         // Repeated resizes can then return to the same text without drift.
         // Cursor following and EOF clamping establish a new visible anchor.
-        if (anchor == null || !top.equals(topForAnchor(model, layout, anchor, geometry))) {
-            anchor = textAnchor(model, layout, state, geometry);
+        if (anchor == null || !top.equals(coordinates.topForAnchor(anchor))) {
+            anchor = coordinates.anchor(top);
         }
         previousViewport = new ViewportSnapshot(model, state, model.revision(), geometry, top, anchor);
-    }
-
-    private static Position textAnchor(
-        TextModel model,
-        EditorTextLayout layout,
-        EditorState state,
-        ViewportGeometry geometry
-    ) {
-        if (!geometry.wrapLines()) {
-            return model.clamp(new Position(state.getTopLine(), 0));
-        }
-        EditorViewportBehavior.WrapTop top = EditorViewportBehavior.normalizeWrapTop(
-            model, layout, state.getTopLine(), state.getTopWrapSegment(),
-            geometry.columns(), geometry.wrapByWords(), geometry.tabWidth()
-        );
-        int offset = layout.wrapStarts(
-            top.line(), geometry.columns(), geometry.wrapByWords(), geometry.tabWidth()
-        ).get(top.segmentOffset());
-        return new Position(top.line(), offset);
-    }
-
-    private static EditorViewportBehavior.WrapTop topForAnchor(
-        TextModel model,
-        EditorTextLayout layout,
-        Position anchor,
-        ViewportGeometry geometry
-    ) {
-        Position bounded = model.clamp(anchor);
-        if (!geometry.wrapLines()) {
-            return new EditorViewportBehavior.WrapTop(bounded.line(), 0);
-        }
-        List<Integer> starts = layout.wrapStarts(
-            bounded.line(), geometry.columns(), geometry.wrapByWords(), geometry.tabWidth()
-        );
-        int index = Collections.binarySearch(starts, bounded.col());
-        int segment = index >= 0 ? index : Math.max(0, -index - 2);
-        return new EditorViewportBehavior.WrapTop(bounded.line(), segment);
-    }
-
-    private static EditorViewportBehavior.WrapTop currentTop(EditorState state) {
-        return new EditorViewportBehavior.WrapTop(state.getTopLine(), state.getTopWrapSegment());
-    }
-
-    private record ViewportGeometry(int columns, boolean wrapLines, boolean wrapByWords, int tabWidth) {
     }
 
     private record ViewportSnapshot(
         TextModel model,
         EditorState state,
         long revision,
-        ViewportGeometry geometry,
-        EditorViewportBehavior.WrapTop top,
+        Geometry geometry,
+        Top top,
         Position anchor
     ) {
     }

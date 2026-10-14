@@ -6,9 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.Position;
+import dev.tuink.core.SearchOptions;
 import dev.tuink.core.SimpleLineBuffer;
 import dev.tuink.core.TextModel;
 import dev.tuink.render.TerminalEditorTextLayout;
+import dev.tuink.render.EditorViewCoordinates;
+import dev.tuink.render.EditorViewNavigation;
+import dev.tuink.render.RenderPlanBuilder;
 import dev.tuink.tui.command.TuinkCommand;
 import dev.tuink.tui.input.EditorInput;
 import dev.tuiframe.input.KeyStroke;
@@ -191,11 +195,12 @@ class ViewportControllerTest {
         EditorEngine engine = new EditorEngine(model, state, new TerminalEditorTextLayout(model));
         ViewportController controller = new ViewportController();
         engine.moveCursorTo(new Position(0, 1));
-        engine.moveDown(true, 4, true, false);
+        EditorViewNavigation navigation = new EditorViewNavigation(engine);
+        navigation.moveDown(true, 4, true, false);
 
         for (int expectedTop : new int[] {3, 5}) {
             controller.onInput(EditorInput.command(TuinkCommand.CURSOR_PAGE_DOWN), engine.hasSelection());
-            engine.pageDown(3, 4, true, false);
+            navigation.pageDown(3, 4, true, false);
             controller.ensureCursorVisible(engine, 3, 4, true, false);
             assertEquals(expectedTop, state.getTopWrapSegment());
             assertEquals(new Position(0, 5), state.getCursor());
@@ -274,6 +279,50 @@ class ViewportControllerTest {
             assertEquals(cursor, fixture.state().getCursor());
             assertEquals(anchor, fixture.state().getSelectionAnchor());
         }
+    }
+
+    @Test
+    void resizedTopRowIsTheSameForPointerHitsRenderingAndTheRetainedTextAnchor() {
+        TextModel model = new TextModel(new SimpleLineBuffer());
+        model.replaceLines(List.of("prefix", "e\u0301界\t👩‍💻 alpha beta ".repeat(50)));
+        EditorState state = new EditorState();
+        var layout = new TerminalEditorTextLayout(model);
+        EditorEngine engine = new EditorEngine(model, state, layout);
+        engine.setTabWidth(2);
+        state.setTopLine(1);
+        state.setTopWrapSegment(13);
+        Position cursor = new Position(0, 2);
+        state.setCursor(cursor);
+        ViewportController controller = new ViewportController();
+        controller.onManualVerticalPan();
+        controller.ensureCursorVisible(engine, 4, 11, true, true, 2);
+        var initial = new EditorViewCoordinates(layout, 11, true, true, 2);
+        Position anchor = initial.anchor(EditorViewCoordinates.Top.from(state));
+        var builder = new RenderPlanBuilder(line -> List.of(), layout);
+        builder.setTabWidth(2);
+        builder.setSyntaxHighlightingEnabled(false);
+        builder.setBracketMatchingEnabled(false);
+        builder.setRainbowBracketsEnabled(false);
+        EditorView view = new EditorView();
+        view.setTabWidth(2);
+
+        for (int width : new int[] {17, 1, 12, 11}) {
+            controller.ensureCursorVisible(engine, 4, width, true, true, 2);
+            var coordinates = new EditorViewCoordinates(layout, width, true, true, 2);
+            int columns = width + 3 + (width + 3 >= 8 ? 1 : 0);
+            var plan = builder.build(model, state, 6, columns, "", "", null, SearchOptions.DEFAULT,
+                null, null, null, null, true, true);
+            assertEquals(width, plan.cols() - plan.gutterWidth() - plan.scrollbarWidth());
+            Position hit = view.mouseToTextPosition(new PointerEvent(1, plan.gutterWidth(),
+                PointerEvent.Kind.PRESS, PointerEvent.Button.LEFT, Set.of()), model, layout, state, plan, 4, 1);
+
+            assertEquals(coordinates.anchor(EditorViewCoordinates.Top.from(state)), hit);
+            assertEquals(coordinates.toVisual(hit).row(), plan.topLine());
+            assertEquals(0, coordinates.inViewport(anchor, state).row());
+            assertTrue(model.getLine(hit.line()).substring(hit.col()).startsWith(plan.lines().getFirst().text()));
+            assertEquals(cursor, state.getCursor());
+        }
+        assertEquals(13, state.getTopWrapSegment());
     }
 
     @Test

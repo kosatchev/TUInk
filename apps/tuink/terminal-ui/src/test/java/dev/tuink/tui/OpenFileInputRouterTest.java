@@ -781,8 +781,7 @@ class OpenFileInputRouterTest {
         OpenFileDialogView.FocusState focus, TuiInputEvent event, long nowNanos) {
         FileTreeView.Placement tree = view.place(BOUNDS, state, CLIP,
             focus.focus() == OpenFileInputRouter.Focus.LIST);
-        return OpenFileInputRouter.route(OpenFileDialogTestSupport.placement(tree), focus, event,
-            nowNanos, DOUBLE_CLICK_NANOS);
+        return OpenFileDialogTestSupport.route(tree, focus, event, nowNanos, DOUBLE_CLICK_NANOS);
     }
 
     private static void assertCapturedWithoutIntent(OpenFileInputRouter.Result result) {

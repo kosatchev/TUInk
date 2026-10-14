@@ -52,9 +52,15 @@ import dev.tuiframe.input.TuiInputEvent;
 import dev.tuiframe.text.TerminalText;
 import dev.tuiframe.widget.FocusContext;
 import dev.tuiframe.widget.FocusSpace;
+import dev.tuiframe.widget.FocusScope;
+import dev.tuiframe.widget.FocusResetPolicy;
 import dev.tuiframe.widget.InteractionResult;
 import dev.tuiframe.widget.MenuBar;
+import dev.tuiframe.widget.PlacedPointerCapture;
+import dev.tuiframe.widget.PointerCaptureCancellation;
+import dev.tuiframe.widget.RoutedTarget;
 import dev.tuiframe.widget.Theme;
+import dev.tuiframe.widget.WidgetState;
 import dev.tuink.tui.ui.TabBarView;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -195,7 +201,7 @@ final class TopMenuView {
     }
 
     /** One immutable placement shared by paint, hit routing, state and cursor. */
-    static final class Placement {
+    static final class Placement implements PlacedPointerCapture<MenuBar.Action<CommandInvocation>> {
         private final MenuBar.Placement<CommandInvocation> widgetPlacement;
         private final FocusContext context;
 
@@ -207,8 +213,26 @@ final class TopMenuView {
             this.context = Objects.requireNonNull(context, "context");
         }
 
-        Rect bounds() {
+        @Override
+        public Rect bounds() {
             return widgetPlacement.bounds();
+        }
+
+        FocusScope<String, MenuBar.Action<CommandInvocation>> captureScope() {
+            return FocusScope.single(TopMenuView.class, FocusResetPolicy.CLEARED,
+                new RoutedTarget<>("menu", this, context.space(), false, context.enabled()));
+        }
+
+        @Override
+        public boolean pointerCaptureActive() {
+            return widgetPlacement.pointerCaptureActive();
+        }
+
+        @Override
+        public InteractionResult<MenuBar.Action<CommandInvocation>> cancelPointerCapture(
+            PointerCaptureCancellation reason
+        ) {
+            return widgetPlacement.cancelPointerCapture(reason);
         }
 
         MenuBar.State state() {
@@ -223,7 +247,8 @@ final class TopMenuView {
             return context.enabled();
         }
 
-        void paint(Canvas canvas, Theme theme) {
+        @Override
+        public void paint(Canvas canvas, Theme theme) {
             widgetPlacement.paint(
                 Objects.requireNonNull(canvas, "canvas"),
                 Objects.requireNonNull(theme, "theme"),
@@ -231,8 +256,18 @@ final class TopMenuView {
             );
         }
 
+        @Override
+        public void paint(Canvas canvas, Theme theme, WidgetState state) {
+            widgetPlacement.paint(canvas, theme, state);
+        }
+
         InteractionResult<MenuBar.Action<CommandInvocation>> handle(TuiInputEvent event) {
             return widgetPlacement.handle(Objects.requireNonNull(event, "event"), context);
+        }
+
+        @Override
+        public InteractionResult<MenuBar.Action<CommandInvocation>> handle(TuiInputEvent event, FocusContext ignored) {
+            return handle(event);
         }
 
         boolean contains(PointerEvent event) {

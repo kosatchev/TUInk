@@ -14,6 +14,8 @@ import dev.tuink.render.RenderPlan;
 import dev.tuink.render.TerminalEditorTextLayout;
 import dev.tuiframe.input.KeyStroke;
 import dev.tuiframe.input.PointerEvent;
+import dev.tuiframe.geometry.Rect;
+import dev.tuiframe.scroll.ScrollLayout;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -220,7 +222,9 @@ class EditorViewTest {
                 textLayout.maxVisualLineWidth(4),
                 columns,
                 GUTTER_WIDTH,
-                0
+                0,
+                ScrollLayout.vertical(new Rect(GUTTER_WIDTH, CONTENT_TOP_ROW,
+                    Math.max(0, columns - GUTTER_WIDTH), CONTENT_ROWS), 0)
             );
         }
     }

@@ -5,7 +5,6 @@ import dev.tuiframe.input.PasteEvent;
 import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.input.TextInput;
 import dev.tuiframe.input.TuiInputEvent;
-import dev.tuiframe.widget.FocusContext;
 import dev.tuiframe.widget.FocusManager;
 import dev.tuiframe.widget.FocusRoute;
 import dev.tuiframe.widget.FocusScope;
@@ -41,24 +40,22 @@ final class SaveAsInputRouter {
         SaveAsBarView.Placement placement,
         TuiInputEvent event
     ) {
+        return route(focusManager, placement, event, null, null);
+    }
+
+    static Result route(
+        FocusManager<SaveAsBarView.Target> focusManager,
+        SaveAsBarView.Placement placement,
+        TuiInputEvent event,
+        WindowPointerCapture capture,
+        Object surfaceId
+    ) {
         Objects.requireNonNull(focusManager, "focusManager");
         Objects.requireNonNull(placement, "placement");
         Objects.requireNonNull(event, "event");
         placement.activate(focusManager);
-        placement.retainMouseSelection(focusManager.focused().orElse(null));
-        if (!(event instanceof PointerEvent pointer) || pointer.kind() == PointerEvent.Kind.PRESS) {
-            placement.cancelMouseSelection();
-        }
 
         FocusScope<SaveAsBarView.Target, SaveAsBarView.Action> scope = placement.focusScope();
-        if (event instanceof PointerEvent pointer) {
-            SaveAsBarView.Target captured = placement.capturedTarget(pointer).orElse(null);
-            if (captured != null) {
-                RoutedTarget<SaveAsBarView.Target, SaveAsBarView.Action> target = scope.target(captured).orElseThrow();
-                target.placement().handle(pointer, new FocusContext(true, target.enabled(), target.space()));
-                return Result.CAPTURED;
-            }
-        }
         boolean interactive = scope.tabOrder().stream().map(id -> scope.target(id).orElseThrow())
             .anyMatch(target -> target.enabled() && target.focusable());
 
@@ -81,6 +78,9 @@ final class SaveAsInputRouter {
             InteractionResult<SaveAsBarView.Action> interaction = target.placement()
                 .handle(event, route.context().orElseThrow());
             focusManager.apply(scope, target.id(), interaction.focusRequest());
+            if (capture != null) {
+                capture.observe(surfaceId, scope, target.id(), interaction);
+            }
             if (interaction.output().isPresent()) {
                 return Result.action(interaction.output().orElseThrow());
             }

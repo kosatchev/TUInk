@@ -494,7 +494,7 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
      * bounds change; an older placement intentionally keeps its old snapshot.
      */
     public static final class Placement<C>
-        implements PlacedInteractiveWidget<Action<C>>, PlacedCursorSource {
+        implements PlacedPointerCapture<Action<C>>, PlacedCursorSource {
         private final Rect bounds;
         private final List<Menu<C>> menus;
         private final State state;
@@ -684,12 +684,26 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
         }
 
         @Override
+        public boolean pointerCaptureActive() {
+            return state.drag() != null;
+        }
+
+        @Override
+        public InteractionResult<Action<C>> cancelPointerCapture(PointerCaptureCancellation reason) {
+            Objects.requireNonNull(reason, "reason");
+            return (state.drag() == null ? InteractionResult.<Action<C>>handled()
+                : InteractionResult.<Action<C>>output(new StateChanged<>(state.cancelPointerInteraction())))
+                .withPointerCapture(PointerCaptureRequest.RELEASE);
+        }
+
+        @Override
         public InteractionResult<Action<C>> handle(TuiInputEvent event, FocusContext context) {
             Objects.requireNonNull(event, "event");
             Objects.requireNonNull(context, "context");
             if (state.drag() != null && (event instanceof ResizeEvent
                 || event instanceof PointerEvent pointer && pointer.kind() == PointerEvent.Kind.RELEASE)) {
-                return InteractionResult.output(new StateChanged<>(state.cancelPointerInteraction()));
+                return cancelPointerCapture(event instanceof ResizeEvent
+                    ? PointerCaptureCancellation.RESIZE : PointerCaptureCancellation.RELEASE);
             }
             if (!context.enabled() || bounds.isEmpty() || menus.isEmpty()) {
                 return InteractionResult.ignored();
@@ -758,9 +772,10 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
             Optional<Scrollbar.Press> press = scrollbar().flatMap(bar -> bar.press(point));
             if (press.isPresent()) {
                 Scrollbar.Press captured = press.orElseThrow();
-                return InteractionResult.output(new StateChanged<>(new State(
+                return InteractionResult.<Action<C>>output(new StateChanged<>(new State(
                     state.openMenuIndex(), state.selectedEntryIndex(), captured.offset(), captured.drag()
-                )));
+                ))).withPointerCapture(captured.drag() == null
+                    ? PointerCaptureRequest.NONE : PointerCaptureRequest.ACQUIRE);
             }
             PreparedRow<C> row = popup == null ? null : popup.rowAt(point);
             if (row != null && row.entry() instanceof Item<?> raw) {

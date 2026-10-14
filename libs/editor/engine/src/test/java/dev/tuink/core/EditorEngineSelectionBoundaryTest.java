@@ -13,7 +13,7 @@ class EditorEngineSelectionBoundaryTest {
     @Test
     void forwardNavigationAtTheDocumentBoundaryClearsSelectionBeforeTyping() {
         for (Consumer<EditorEngine> navigate : List.<Consumer<EditorEngine>>of(
-            EditorEngine::moveRight, EditorEngine::moveWordRight, EditorEngine::moveDown
+            EditorEngine::moveRight, EditorEngine::moveWordRight, target -> target.navigateTo(target.state().getCursor(), false)
         )) {
             Fixture fixture = fixture();
             Position end = new Position(1, 4);
@@ -35,7 +35,7 @@ class EditorEngineSelectionBoundaryTest {
     @Test
     void backwardNavigationAtTheDocumentBoundaryClearsSelectionBeforeTyping() {
         for (Consumer<EditorEngine> navigate : List.<Consumer<EditorEngine>>of(
-            EditorEngine::moveLeft, EditorEngine::moveWordLeft, EditorEngine::moveUp
+            EditorEngine::moveLeft, EditorEngine::moveWordLeft, target -> target.navigateTo(target.state().getCursor(), false)
         )) {
             Fixture fixture = fixture();
             Position start = new Position(0, 0);
@@ -55,17 +55,17 @@ class EditorEngineSelectionBoundaryTest {
     }
 
     @Test
-    void verticalNavigationClearsSelectionAtFirstAndLastLinesAwayFromTheirEnds() {
+    void aRepeatedNavigationTargetClearsSelectionWithoutMovingTheCursor() {
         Fixture fixture = fixture();
         fixture.engine.restoreSelection(new Position(0, 2), new Position(0, 4));
 
-        fixture.engine.moveUp();
+        fixture.engine.navigateTo(fixture.state.getCursor(), false);
 
         assertEquals(new Position(0, 2), fixture.state.getCursor());
         assertNull(fixture.state.getSelectionAnchor());
         fixture.engine.restoreSelection(new Position(1, 2), new Position(1, 0));
 
-        fixture.engine.moveDown();
+        fixture.engine.navigateTo(fixture.state.getCursor(), false);
 
         assertEquals(new Position(1, 2), fixture.state.getCursor());
         assertNull(fixture.state.getSelectionAnchor());
@@ -79,7 +79,7 @@ class EditorEngineSelectionBoundaryTest {
         fixture.engine.restoreSelection(start, end);
 
         fixture.engine.moveLeft(true);
-        fixture.engine.moveUp(true);
+        fixture.engine.navigateTo(fixture.state.getCursor(), true);
 
         assertEquals(start, fixture.state.getCursor());
         assertEquals(end, fixture.state.getSelectionAnchor());
@@ -87,7 +87,7 @@ class EditorEngineSelectionBoundaryTest {
         fixture.engine.restoreSelection(end, start);
 
         fixture.engine.moveRight(true);
-        fixture.engine.moveDown(true);
+        fixture.engine.navigateTo(fixture.state.getCursor(), true);
 
         assertEquals(end, fixture.state.getCursor());
         assertEquals(start, fixture.state.getSelectionAnchor());
@@ -99,7 +99,7 @@ class EditorEngineSelectionBoundaryTest {
     @Test
     void navigationAtABoundaryStillSeparatesTypingHistory() {
         for (Consumer<EditorEngine> navigate : List.<Consumer<EditorEngine>>of(
-            EditorEngine::moveRight, EditorEngine::moveWordRight, EditorEngine::moveUp, EditorEngine::moveDown
+            EditorEngine::moveRight, EditorEngine::moveWordRight, target -> target.navigateTo(target.state().getCursor(), false)
         )) {
             TextModel model = new TextModel(new SimpleLineBuffer());
             EditorEngine engine = new EditorEngine(model, new EditorState(), new LogicalEditorTextLayout(model));

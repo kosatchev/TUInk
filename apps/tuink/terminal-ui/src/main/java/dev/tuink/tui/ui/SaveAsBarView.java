@@ -4,7 +4,6 @@ import dev.tuiframe.cell.Canvas;
 import dev.tuiframe.cell.CellText;
 import dev.tuiframe.geometry.Point;
 import dev.tuiframe.geometry.Rect;
-import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.input.TuiInputEvent;
 import dev.tuiframe.widget.Button;
 import dev.tuiframe.widget.FocusContext;
@@ -15,6 +14,8 @@ import dev.tuiframe.widget.FocusSpace;
 import dev.tuiframe.widget.InteractionResult;
 import dev.tuiframe.widget.PlacedCursorSource;
 import dev.tuiframe.widget.PlacedInteractiveWidget;
+import dev.tuiframe.widget.PlacedPointerCapture;
+import dev.tuiframe.widget.PointerCaptureCancellation;
 import dev.tuiframe.widget.RoutedTarget;
 import dev.tuiframe.widget.TextField;
 import dev.tuiframe.widget.Theme;
@@ -129,32 +130,6 @@ public final class SaveAsBarView {
             return focusScope;
         }
 
-        public boolean captures(PointerEvent pointer) {
-            return capturedTarget(pointer).isPresent();
-        }
-
-        public Optional<Target> capturedTarget(PointerEvent pointer) {
-            Objects.requireNonNull(pointer, "pointer");
-            RoutedTarget<Target, Action> target = focusScope.target(Target.FIELD).orElseThrow();
-            TextField.Placement field = ((FieldPlacement) target.placement()).delegate();
-            if (!target.enabled()) {
-                field.cancelMouseSelection();
-                return Optional.empty();
-            }
-            return field.captures(pointer) ? Optional.of(Target.FIELD) : Optional.empty();
-        }
-
-        public void cancelMouseSelection() {
-            ((FieldPlacement) focusScope.target(Target.FIELD).orElseThrow().placement())
-                .delegate().cancelMouseSelection();
-        }
-
-        public void retainMouseSelection(Target focused) {
-            if (focused != Target.FIELD || !focusScope.target(Target.FIELD).orElseThrow().enabled()) {
-                cancelMouseSelection();
-            }
-        }
-
         public Rect fieldBounds() {
             return targetBounds(Target.FIELD);
         }
@@ -209,12 +184,11 @@ public final class SaveAsBarView {
     }
 
     private static InteractionResult<Action> mapped(InteractionResult<?> result, Action action) {
-        return new InteractionResult<>(result.consumed(), result.focusRequest(),
-            result.output().isPresent() ? Optional.of(action) : Optional.empty());
+        return result.mapOutput(value -> action);
     }
 
     private record FieldPlacement(TextField.Placement delegate)
-        implements PlacedInteractiveWidget<Action>, PlacedCursorSource {
+        implements PlacedPointerCapture<Action>, PlacedCursorSource {
         @Override
         public Rect bounds() {
             return delegate.bounds();
@@ -223,6 +197,16 @@ public final class SaveAsBarView {
         @Override
         public void paint(Canvas canvas, Theme theme, WidgetState state) {
             delegate.paint(canvas, theme, state);
+        }
+
+        @Override
+        public boolean pointerCaptureActive() {
+            return delegate.pointerCaptureActive();
+        }
+
+        @Override
+        public InteractionResult<Action> cancelPointerCapture(PointerCaptureCancellation reason) {
+            return delegate.cancelPointerCapture(reason).mapOutput(value -> Action.VALUE_CHANGED);
         }
 
         @Override

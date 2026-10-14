@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
-import dev.tuink.core.EditorViewportBehavior;
 import dev.tuink.core.Position;
 import dev.tuink.core.SimpleLineBuffer;
 import dev.tuink.core.TextModel;
@@ -21,7 +20,7 @@ class TerminalEditorViewportIntegrationTest {
         engine.setTabWidth(4);
         state.setCursor(new Position(0, 4));
 
-        engine.ensureCursorVisible(1, 4, true, false);
+        EditorViewNavigation.ensureCursorVisible(engine, 1, 4, true, false);
 
         assertEquals(List.of(0, 1, 4), layout.wrapStarts(0, 4, false, 4));
         assertEquals(0, state.getTopLine());
@@ -48,17 +47,8 @@ class TerminalEditorViewportIntegrationTest {
         EditorState state = new EditorState();
         state.setLeftVisualColumn(2);
 
-        Position hit = EditorViewportBehavior.pointerToTextPosition(
-            model,
-            layout,
-            state,
-            1,
-            2,
-            1,
-            5,
-            3,
-            4
-        );
+        Position hit = new EditorViewCoordinates(layout, 10, false, false, 4)
+            .positionInViewport(state, 2, 0, 2);
 
         assertEquals(new Position(0, 1), hit);
     }
@@ -69,17 +59,8 @@ class TerminalEditorViewportIntegrationTest {
         EditorState state,
         int mouseColumn
     ) {
-        return EditorViewportBehavior.pointerToTextPosition(
-            model,
-            layout,
-            state,
-            1,
-            2,
-            1,
-            mouseColumn,
-            3,
-            4
-        );
+        return new EditorViewCoordinates(layout, 10, false, false, 4)
+            .positionInViewport(state, 2, 0, mouseColumn - 3);
     }
 
     private static TextModel model(String text) {

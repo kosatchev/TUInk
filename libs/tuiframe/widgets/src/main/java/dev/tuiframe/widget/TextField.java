@@ -25,10 +25,10 @@ import java.util.Optional;
  * Raw {@link TextInput} is printable by contract, while raw paste is
  * normalized to safe single-line content before insertion.</p>
  *
- * <p>During mouse selection, route {@link #captures(PointerEvent) captured}
- * drags and releases before ordinary hit testing. Cancel that capture with
- * {@link #cancelMouseSelection()} when the active focus or surface changes.
- * A geometry change and keyboard interaction also cancel capture. Cancelling
+ * <p>The placement implements {@link PlacedPointerCapture}: apply its capture
+ * effects through {@link PointerCaptureManager}, which delivers drag/release
+ * beyond hit bounds and ends gestures at lifecycle boundaries. The field owns
+ * selection and viewport data; the manager retains only its stable identity. Cancelling
  * capture preserves the visible text window; changes to the value, caret or
  * selection resume the normal caret-following layout.</p>
  */
@@ -447,7 +447,7 @@ public final class TextField implements InteractiveWidget<TextField.Action> {
      * cursor query.</p>
      */
     public static final class Placement
-        implements PlacedInteractiveWidget<Action>, PlacedCursorSource {
+        implements PlacedPointerCapture<Action>, PlacedCursorSource {
         private final TextField owner;
         private final Rect bounds;
         private final String visibleText;
@@ -543,6 +543,18 @@ public final class TextField implements InteractiveWidget<TextField.Action> {
             } finally {
                 canvas.restore(mark);
             }
+        }
+
+        @Override
+        public boolean pointerCaptureActive() {
+            return owner.mouseSelecting();
+        }
+
+        @Override
+        public InteractionResult<Action> cancelPointerCapture(PointerCaptureCancellation reason) {
+            Objects.requireNonNull(reason, "reason");
+            owner.cancelMouseSelection();
+            return InteractionResult.<Action>handled().withPointerCapture(PointerCaptureRequest.RELEASE);
         }
 
         @Override
@@ -656,7 +668,9 @@ public final class TextField implements InteractiveWidget<TextField.Action> {
                         .offsetForVisualColumn(left, TerminalText.Bias.CEIL));
                     owner.mouseViewportBounds = bounds;
                 }
-                return InteractionResult.handled();
+                return InteractionResult.<Action>handled().withPointerCapture(
+                    pointer.kind() == PointerEvent.Kind.RELEASE
+                        ? PointerCaptureRequest.RELEASE : PointerCaptureRequest.NONE);
             }
             if (pointer.kind() != PointerEvent.Kind.PRESS
                 || pointer.button() != PointerEvent.Button.LEFT) {
@@ -673,7 +687,7 @@ public final class TextField implements InteractiveWidget<TextField.Action> {
             owner.mouseSelecting = true;
             owner.mouseViewportBounds = bounds;
             owner.mouseViewportLeft = viewportLeft;
-            return FOCUS_SELF_RESULT;
+            return FOCUS_SELF_RESULT.withPointerCapture(PointerCaptureRequest.ACQUIRE);
         }
 
         public boolean captures(PointerEvent pointer) {

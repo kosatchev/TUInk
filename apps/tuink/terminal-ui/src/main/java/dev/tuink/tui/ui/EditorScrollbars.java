@@ -9,27 +9,18 @@ import dev.tuink.render.RenderPlan;
 public record EditorScrollbars(ScrollLayout layout, Scrollbar vertical, Scrollbar horizontal) {
     public static EditorScrollbars from(RenderPlan plan, int rows, int cols, int contentTopRow) {
         int top = Math.max(1, contentTopRow);
-        int contentLeft = Math.min(Math.max(0, cols), Math.max(0, plan.gutterWidth()));
-        int contentWidth = Math.max(0, cols - plan.gutterWidth() - plan.scrollbarWidth());
-        int contentHeight = Math.min(Math.max(0, plan.contentRows()), Math.max(0, rows - top - 1));
-        Rect content = new Rect(contentLeft, top, contentWidth, contentHeight);
-
-        Rect verticalTrack = plan.scrollbarWidth() > 0 && cols > 0 && rows > 2 && contentHeight >= 2
-            ? new Rect(cols - 1, top, 1, contentHeight)
-            : null;
-        int horizontalRow = top + Math.max(0, plan.contentRows());
-        boolean hasHorizontal = !plan.wrapLines()
-            && rows > 2
-            && contentHeight > 0
-            && contentWidth >= 2
-            && (plan.totalColumns() > contentWidth || plan.leftVisualColumn() > 0)
-            && horizontalRow >= top
-            && horizontalRow < rows - 1;
-        Rect horizontalTrack = hasHorizontal
-            ? new Rect(contentLeft, horizontalRow, contentWidth, 1)
-            : null;
-
-        ScrollLayout layout = new ScrollLayout(content, content, null, verticalTrack, horizontalTrack);
+        Rect surface = new Rect(0, top, Math.max(0, cols), Math.max(0, rows - top - 1));
+        ScrollLayout planned = plan.scrollLayout();
+        Rect content = planned.contentBounds().intersection(surface);
+        // Placements belong to one frame. A resized surface may hide a whole
+        // track, but must not negotiate a different viewport from this plan.
+        Rect verticalTrack = visibleTrack(planned.verticalScrollbarBounds(), surface);
+        Rect horizontalTrack = visibleTrack(planned.horizontalScrollbarBounds(), surface);
+        ScrollLayout layout = content.equals(planned.contentBounds())
+            && verticalTrack == planned.verticalScrollbarBounds()
+            && horizontalTrack == planned.horizontalScrollbarBounds()
+            ? planned
+            : new ScrollLayout(content, content, null, verticalTrack, horizontalTrack);
         Scrollbar vertical = verticalTrack == null ? null : Scrollbar.vertical(
             verticalTrack,
             Math.max(1, plan.totalLines()),
@@ -37,9 +28,13 @@ public record EditorScrollbars(ScrollLayout layout, Scrollbar vertical, Scrollba
         );
         Scrollbar horizontal = horizontalTrack == null ? null : Scrollbar.horizontal(
             horizontalTrack,
-            Math.max(contentWidth, plan.totalColumns()),
+            Math.max(content.width(), plan.totalColumns()),
             Math.max(0, plan.leftVisualColumn())
         );
         return new EditorScrollbars(layout, vertical, horizontal);
+    }
+
+    private static Rect visibleTrack(Rect track, Rect surface) {
+        return track != null && surface.contains(track) ? track : null;
     }
 }

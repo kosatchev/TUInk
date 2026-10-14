@@ -67,6 +67,11 @@ public final class FocusScope<K, A> {
         return resetPolicy;
     }
 
+    /** All current-frame bindings in their declaration order. */
+    public List<RoutedTarget<K, A>> targets() {
+        return List.copyOf(targets.values());
+    }
+
     public List<K> tabOrder() {
         return tabOrder;
     }

@@ -2,12 +2,14 @@ package dev.tuiframe.widget;
 
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Function;
 
 /** Typed, application-independent result of handling one physical input event. */
 public record InteractionResult<A>(
     boolean consumed,
     FocusRequest focusRequest,
-    Optional<A> output
+    Optional<A> output,
+    PointerCaptureRequest pointerCaptureRequest
 ) {
     private static final InteractionResult<?> IGNORED = new InteractionResult<>(
         false,
@@ -23,9 +25,27 @@ public record InteractionResult<A>(
     public InteractionResult {
         Objects.requireNonNull(focusRequest, "focusRequest");
         output = Objects.requireNonNull(output, "output");
-        if (!consumed && (focusRequest != FocusRequest.NONE || output.isPresent())) {
+        Objects.requireNonNull(pointerCaptureRequest, "pointerCaptureRequest");
+        if (!consumed && (focusRequest != FocusRequest.NONE || output.isPresent()
+            || pointerCaptureRequest != PointerCaptureRequest.NONE)) {
             throw new IllegalArgumentException("an ignored result cannot request effects or produce output");
         }
+    }
+
+    public InteractionResult(boolean consumed, FocusRequest focusRequest, Optional<A> output) {
+        this(consumed, focusRequest, output, PointerCaptureRequest.NONE);
+    }
+
+    public InteractionResult<A> withPointerCapture(PointerCaptureRequest request) {
+        PointerCaptureRequest required = Objects.requireNonNull(request, "request");
+        return new InteractionResult<>(consumed || required != PointerCaptureRequest.NONE,
+            focusRequest, output, required);
+    }
+
+    /** Adapts a child's typed output while retaining its independent UI effects. */
+    public <B> InteractionResult<B> mapOutput(Function<? super A, ? extends B> mapper) {
+        return new InteractionResult<>(consumed, focusRequest,
+            output.map(Objects.requireNonNull(mapper, "mapper")), pointerCaptureRequest);
     }
 
     @SuppressWarnings("unchecked")
@@ -82,10 +102,20 @@ public record InteractionResult<A>(
         if (!mergedConsumed) {
             return ignored();
         }
+        PointerCaptureRequest mergedCapture;
+        if (pointerCaptureRequest == PointerCaptureRequest.NONE) {
+            mergedCapture = other.pointerCaptureRequest;
+        } else if (other.pointerCaptureRequest == PointerCaptureRequest.NONE
+            || pointerCaptureRequest == other.pointerCaptureRequest) {
+            mergedCapture = pointerCaptureRequest;
+        } else {
+            throw new IllegalArgumentException("cannot merge different pointer capture requests");
+        }
         return new InteractionResult<>(
             true,
             mergedFocus,
-            mergedOutput
+            mergedOutput,
+            mergedCapture
         );
     }
 }

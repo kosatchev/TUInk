@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuiframe.text.TerminalText;
+import dev.tuiframe.geometry.Rect;
+import dev.tuiframe.scroll.ScrollLayout;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.GutterDiffMarker;
 import dev.tuink.core.Position;
@@ -78,7 +80,8 @@ class RenderRasterizerUnicodeTest {
             14,
             10,
             2,
-            1
+            1,
+            ScrollLayout.calculate(new Rect(2, 1, 8, 4), 12, 14, 0)
         );
     }
 
@@ -481,7 +484,8 @@ class RenderRasterizerUnicodeTest {
             cols,
             cols,
             0,
-            0
+            0,
+            ScrollLayout.vertical(new Rect(0, 1, cols, 1), 1)
         );
     }
 

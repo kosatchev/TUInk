@@ -4,7 +4,6 @@ import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.EditorTextLayout;
-import dev.tuink.core.EditorViewportBehavior;
 import dev.tuink.core.LanguageProfiles;
 import dev.tuink.core.Position;
 import dev.tuink.core.RecoverySnapshot;
@@ -45,6 +44,8 @@ import dev.tuiframe.cell.Canvas;
 import dev.tuink.tui.render.EditorStyleAdapter;
 import dev.tuink.render.LineHighlighter;
 import dev.tuink.render.EditorLayout;
+import dev.tuink.render.EditorViewCoordinates;
+import dev.tuink.render.EditorViewNavigation;
 import dev.tuink.render.RenderPlan;
 import dev.tuink.render.RenderPlanBuilder;
 import dev.tuink.render.TerminalEditorTextLayout;
@@ -536,25 +537,14 @@ public class TerminalEditorApp {
         int delta,
         int tabWidth
     ) {
-        if (wrapLines && contentCols > 0) {
-            EditorViewportBehavior.WrapTop top = EditorViewportBehavior.normalizeWrapTop(
-                model, layout, state.getTopLine(), state.getTopWrapSegment(),
-                contentCols, wrapByWords, tabWidth
-            );
-            int offset = EditorViewportBehavior.wrappedOffsetForWrapTop(
-                model, layout, top, contentCols, wrapByWords, tabWidth
-            );
-            int total = layout.totalWrappedRows(contentCols, wrapByWords, tabWidth);
-            int target = ScrollInteraction.scrollBy(offset, delta, Math.max(1, contentRows), total);
-            EditorViewportBehavior.applyWrapTop(state, EditorViewportBehavior.wrapTopFromWrappedOffset(
-                model, layout, target, contentCols, wrapByWords, tabWidth
-            ));
-        } else {
-            state.setTopWrapSegment(0);
-            EditorViewportBehavior.applyVerticalScrollKeepCursor(state, model, ScrollInteraction.scrollBy(
-                state.getTopLine(), delta, Math.max(1, contentRows), model.lineCount()
-            ));
-        }
+        EditorViewCoordinates coordinates = new EditorViewCoordinates(
+            layout, Math.max(1, contentCols), wrapLines && contentCols > 0, wrapByWords, tabWidth
+        );
+        int target = ScrollInteraction.scrollBy(
+            coordinates.rowOffset(EditorViewCoordinates.Top.from(state)), delta,
+            Math.max(1, contentRows), coordinates.totalRows()
+        );
+        coordinates.applyTop(state, coordinates.topAtRow(target));
     }
 
     static boolean isLocalSearchCommand(TuinkCommand action) {
@@ -804,7 +794,7 @@ public class TerminalEditorApp {
                     );
                 }
                 if (found) {
-                    nextEngine.ensureCursorVisible(
+                    EditorViewNavigation.ensureCursorVisible(nextEngine,
                         contentRows,
                         contentCols,
                         uiSessionState.wrapLinesSetting,
@@ -840,7 +830,7 @@ public class TerminalEditorApp {
                     );
                 }
                 if (found) {
-                    nextEngine.ensureCursorVisible(
+                    EditorViewNavigation.ensureCursorVisible(nextEngine,
                         contentRows,
                         contentCols,
                         uiSessionState.wrapLinesSetting,
@@ -996,7 +986,8 @@ public class TerminalEditorApp {
                         topMenu,
                         mouseTrackingController,
                         contentRows,
-                        contentCols
+                        contentCols,
+                        tabs.get(nextActiveTabIndex).navigation()
                     )
                 );
                 if (dispatchResult.handled()) {
@@ -1566,6 +1557,13 @@ public class TerminalEditorApp {
     HelpOverlayInputRouter.Result routeHelpOverlayInput(
         int rows, int cols, HelpPage page, TuiInputEvent event
     ) {
+        return routeHelpOverlayInput(rows, cols, page, event, null, null);
+    }
+
+    HelpOverlayInputRouter.Result routeHelpOverlayInput(
+        int rows, int cols, HelpPage page, TuiInputEvent event,
+        WindowPointerCapture capture, Object surfaceId
+    ) {
         HelpOverlayPlacement overlay = helpOverlayPlacement(rows, cols, page);
         boolean visible = overlay.content().bounds().height() > 0;
         var scrolled = overlay.content().handle(
@@ -1573,6 +1571,9 @@ public class TerminalEditorApp {
         );
         if (scrolled.output().orElse(null) instanceof ListView.StateChanged changed) {
             helpScrollState = changed.state();
+        }
+        if (capture != null) {
+            capture.observe(surfaceId, EditorWindowController.helpContentScope(overlay), "content", scrolled);
         }
         if (scrolled.consumed()) {
             return new HelpOverlayInputRouter.Result(true, false);
@@ -1900,7 +1901,7 @@ public class TerminalEditorApp {
         int matchCount,
         int totalTabs
     ) {
-        if (!searchMode || query == null || query.isBlank()) {
+        if (!searchMode || query == null || query.isEmpty()) {
             return "";
         }
         if (searchUi != null && searchUi.allTabs() && totalTabs > 1) {
@@ -2245,7 +2246,7 @@ public class TerminalEditorApp {
             return null;
         }
         String selected = model.getTextRange(a, b);
-        return selected.isBlank() ? null : selected;
+        return selected;
     }
 
     private boolean focusCurrentMatchIfOffscreen(
@@ -2259,7 +2260,7 @@ public class TerminalEditorApp {
         String query,
         SearchOptions options
     ) {
-        if (query == null || query.isBlank()) {
+        if (query == null || query.isEmpty()) {
             return false;
         }
         String selected = selectionQueryForCtrlF(model, state);
@@ -2269,7 +2270,7 @@ public class TerminalEditorApp {
         int topBefore = state.getTopLine();
         int wrapBefore = state.getTopWrapSegment();
         int leftBefore = state.getLeftVisualColumn();
-        engine.ensureCursorVisible(contentRows, contentCols, wrapLines, wrapByWords);
+        EditorViewNavigation.ensureCursorVisible(engine, contentRows, contentCols, wrapLines, wrapByWords);
         return topBefore != state.getTopLine()
             || wrapBefore != state.getTopWrapSegment()
             || leftBefore != state.getLeftVisualColumn();
@@ -2770,7 +2771,7 @@ public class TerminalEditorApp {
 
     private boolean[] findTabsWithMatches(List<EditorTab> tabs, String query, SearchOptions options) {
         boolean[] flags = new boolean[tabs.size()];
-        if (query == null || query.isBlank()) {
+        if (query == null || query.isEmpty()) {
             return flags;
         }
         int[] match = TabSearch.findMatchTabs(toTabSessions(tabs), query, options);
@@ -2787,7 +2788,7 @@ public class TerminalEditorApp {
         SearchOptions options,
         TabMatchCache cache
     ) {
-        if (!searchMode || query == null || query.isBlank()) {
+        if (!searchMode || query == null || query.isEmpty()) {
             return new boolean[tabs.size()];
         }
         long revisionFingerprint = tabsRevisionFingerprint(tabs);
@@ -2811,16 +2812,18 @@ public class TerminalEditorApp {
     record EditorTab(
         TabSession tabSession,
         RenderPlanBuilder renderPlanBuilder,
-        ViewportController viewportController
+        ViewportController viewportController,
+        EditorViewNavigation navigation
     ) {
         EditorTab(TabSession tabSession, RenderPlanBuilder renderPlanBuilder) {
-            this(tabSession, renderPlanBuilder, new ViewportController());
+            this(tabSession, renderPlanBuilder, new ViewportController(), new EditorViewNavigation(tabSession.engine()));
         }
 
         EditorTab {
             if (tabSession == null
                 || renderPlanBuilder == null
                 || viewportController == null
+                || navigation == null || navigation.engine() != tabSession.engine()
                 || renderPlanBuilder.textLayout() != tabSession.textLayout()) {
                 throw new IllegalArgumentException("tab components must share one textLayout");
             }
@@ -2843,7 +2846,7 @@ public class TerminalEditorApp {
         }
 
         private EditorTab withRenderPlanBuilder(RenderPlanBuilder nextBuilder) {
-            return new EditorTab(tabSession, nextBuilder, viewportController);
+            return new EditorTab(tabSession, nextBuilder, viewportController, navigation);
         }
     }
 

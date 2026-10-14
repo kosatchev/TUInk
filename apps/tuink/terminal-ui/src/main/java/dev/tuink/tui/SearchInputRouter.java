@@ -5,7 +5,6 @@ import dev.tuiframe.input.PasteEvent;
 import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.input.TextInput;
 import dev.tuiframe.input.TuiInputEvent;
-import dev.tuiframe.widget.FocusContext;
 import dev.tuiframe.widget.FocusManager;
 import dev.tuiframe.widget.FocusRoute;
 import dev.tuiframe.widget.FocusScope;
@@ -43,14 +42,20 @@ final class SearchInputRouter {
         SearchBarView.Placement placement,
         TuiInputEvent event
     ) {
+        return route(focusManager, placement, event, null, null);
+    }
+
+    static Result route(
+        FocusManager<SearchFocus> focusManager,
+        SearchBarView.Placement placement,
+        TuiInputEvent event,
+        WindowPointerCapture capture,
+        Object surfaceId
+    ) {
         Objects.requireNonNull(focusManager, "focusManager");
         Objects.requireNonNull(placement, "placement");
         Objects.requireNonNull(event, "event");
         placement.activate(focusManager);
-        placement.retainMouseSelection(focusManager.focused().orElse(null));
-        if (!(event instanceof PointerEvent pointer) || pointer.kind() == PointerEvent.Kind.PRESS) {
-            placement.cancelMouseSelection();
-        }
 
         if (event instanceof KeyStroke stroke) {
             if (isExactShiftTab(stroke)) {
@@ -123,7 +128,7 @@ final class SearchInputRouter {
         }
 
         if (event instanceof PointerEvent) {
-            return routePointer(focusManager, placement, event);
+            return routePointer(focusManager, placement, event, capture, surfaceId);
         }
 
         return Result.IGNORED;
@@ -175,16 +180,11 @@ final class SearchInputRouter {
     private static Result routePointer(
         FocusManager<SearchFocus> focusManager,
         SearchBarView.Placement placement,
-        TuiInputEvent event
+        TuiInputEvent event,
+        WindowPointerCapture capture,
+        Object surfaceId
     ) {
         FocusScope<SearchFocus, SearchBarView.Action> scope = placement.focusScope();
-        PointerEvent pointer = (PointerEvent) event;
-        SearchFocus captured = placement.capturedTarget(pointer).orElse(null);
-        if (captured != null) {
-            RoutedTarget<SearchFocus, SearchBarView.Action> target = scope.target(captured).orElseThrow();
-            FocusContext context = new FocusContext(true, target.enabled(), target.space());
-            return fromInteraction(target.placement().handle(event, context), true);
-        }
         FocusRoute<SearchFocus, SearchBarView.Action> route = focusManager.route(scope, event);
         if (route.target().isEmpty()) {
             return Result.IGNORED;
@@ -193,6 +193,9 @@ final class SearchInputRouter {
         InteractionResult<SearchBarView.Action> interaction = target.placement()
             .handle(event, route.context().orElseThrow());
         focusManager.apply(scope, target.id(), interaction.focusRequest());
+        if (capture != null) {
+            capture.observe(surfaceId, scope, target.id(), interaction);
+        }
         // A pointer miss may reach the editor, but every search-control hit is
         // modal, including a disabled partial target or an ignored release.
         return fromInteraction(interaction, true);

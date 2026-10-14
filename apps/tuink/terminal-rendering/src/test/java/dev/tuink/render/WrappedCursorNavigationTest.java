@@ -19,14 +19,15 @@ class WrappedCursorNavigationTest {
     @Test
     void arrowsTraverseDisplayedRowsWithinOneLogicalLineInBothDirections() {
         EditorEngine engine = engine("abcdefghij");
+        EditorViewNavigation navigation = new EditorViewNavigation(engine);
         engine.moveCursorTo(new Position(0, 1));
 
         for (int col : new int[] {5, 9, 9}) {
-            engine.moveDown(false, 4, true, false);
+            navigation.moveDown(false, 4, true, false);
             assertEquals(new Position(0, col), engine.state().getCursor());
         }
         for (int col : new int[] {5, 1, 1}) {
-            engine.moveUp(false, 4, true, false);
+            navigation.moveUp(false, 4, true, false);
             assertEquals(new Position(0, col), engine.state().getCursor());
         }
     }
@@ -34,16 +35,17 @@ class WrappedCursorNavigationTest {
     @Test
     void fullyFilledFinalSegmentHasANavigableInsertionRow() {
         EditorEngine engine = engine("abcdefgh");
+        EditorViewNavigation navigation = new EditorViewNavigation(engine);
         assertEquals(List.of(0, 4, 8), engine.textLayout().wrapStarts(0, 4, false, 4));
 
-        engine.moveDown(true, 4, true, false);
-        engine.moveDown(true, 4, true, false);
+        navigation.moveDown(true, 4, true, false);
+        navigation.moveDown(true, 4, true, false);
 
         assertEquals(new Position(0, 8), engine.state().getCursor());
         assertEquals(new Position(0, 0), engine.state().getSelectionAnchor());
-        engine.ensureCursorVisible(1, 4, true, false);
+        navigation.ensureCursorVisible(1, 4, true, false);
         assertEquals(2, engine.state().getTopWrapSegment());
-        engine.moveDown(false, 4, true, false);
+        navigation.moveDown(false, 4, true, false);
         assertFalse(engine.hasSelection());
         engine.insertInput("X");
         assertEquals("abcdefghX", engine.model().getLine(0));
@@ -52,16 +54,17 @@ class WrappedCursorNavigationTest {
     @Test
     void preferredColumnSurvivesShortWrappedAndLogicalRows() {
         EditorEngine engine = engine("abcdefghij\nx\nabcdefghij");
+        EditorViewNavigation navigation = new EditorViewNavigation(engine);
         engine.moveCursorTo(new Position(0, 3));
         List<Position> expected = List.of(
             new Position(0, 7), new Position(0, 10), new Position(1, 1), new Position(2, 3)
         );
         for (Position position : expected) {
-            engine.moveDown(false, 4, true, false);
+            navigation.moveDown(false, 4, true, false);
             assertEquals(position, engine.state().getCursor());
         }
         for (Position position : List.of(new Position(1, 1), new Position(0, 10), new Position(0, 7))) {
-            engine.moveUp(false, 4, true, false);
+            navigation.moveUp(false, 4, true, false);
             assertEquals(position, engine.state().getCursor());
         }
     }
@@ -69,57 +72,62 @@ class WrappedCursorNavigationTest {
     @Test
     void wordWrappingUsesTheSameSegmentsAsRendering() {
         EditorEngine engine = engine("one two three four");
+        EditorViewNavigation navigation = new EditorViewNavigation(engine);
         assertEquals(List.of(0, 8, 14), engine.textLayout().wrapStarts(0, 8, true, 4));
         engine.moveCursorTo(new Position(0, 2));
-        engine.moveDown(false, 8, true, true);
+        navigation.moveDown(false, 8, true, true);
         assertEquals(new Position(0, 10), engine.state().getCursor());
-        engine.moveDown(false, 8, true, true);
+        navigation.moveDown(false, 8, true, true);
         assertEquals(new Position(0, 16), engine.state().getCursor());
-        engine.moveUp(false, 8, true, true);
+        navigation.moveUp(false, 8, true, true);
         assertEquals(new Position(0, 10), engine.state().getCursor());
     }
 
     @Test
     void verticalMovementKeepsCombiningSequencesAndWideGraphemesIntact() {
         EditorEngine engine = engine("Ae\u0301😀中B");
+        EditorViewNavigation navigation = new EditorViewNavigation(engine);
         assertEquals(List.of(0, 5), engine.textLayout().wrapStarts(0, 4, false, 4));
         engine.moveCursorTo(new Position(0, 1));
-        engine.moveDown(false, 4, true, false);
+        navigation.moveDown(false, 4, true, false);
         assertEquals(new Position(0, 5), engine.state().getCursor());
-        engine.moveUp(false, 4, true, false);
+        navigation.moveUp(false, 4, true, false);
         assertEquals(new Position(0, 1), engine.state().getCursor());
     }
 
     @Test
     void anOversizedTabDoesNotTrapVerticalNavigationInOneSegment() {
         EditorEngine engine = engine("\tX");
+        EditorViewNavigation navigation = new EditorViewNavigation(engine);
         assertEquals(List.of(0, 1, 2), engine.textLayout().wrapStarts(0, 1, false, 4));
-        engine.moveDown(false, 1, true, false);
+        navigation.moveDown(false, 1, true, false);
         assertEquals(new Position(0, 1), engine.state().getCursor());
-        engine.moveDown(false, 1, true, false);
+        navigation.moveDown(false, 1, true, false);
         assertEquals(new Position(0, 2), engine.state().getCursor());
-        engine.moveUp(false, 1, true, false);
+        navigation.moveUp(false, 1, true, false);
         assertEquals(new Position(0, 1), engine.state().getCursor());
     }
 
     @Test
     void changingWidthRecomputesThePreferredColumnFromTheNewSegment() {
         EditorEngine engine = engine("abcdefghijklmnop");
+        EditorViewNavigation navigation = new EditorViewNavigation(engine);
         engine.moveCursorTo(new Position(0, 3));
-        engine.moveDown(false, 4, true, false);
+        navigation.moveDown(false, 4, true, false);
         assertEquals(new Position(0, 7), engine.state().getCursor());
-        engine.moveDown(false, 6, true, false);
+        navigation.moveDown(false, 6, true, false);
         assertEquals(new Position(0, 13), engine.state().getCursor());
     }
 
     @Test
     void pageKeysMoveAndScrollByDisplayedRows() {
         EditorEngine engine = engine("abcdefghijklmnopqrstuvwxyz1234");
+        EditorViewNavigation navigation = new EditorViewNavigation(engine);
         engine.moveCursorTo(new Position(0, 1));
-        engine.pageDown(3, 4, true, false);
+        navigation.pageDown(3, 4, true, false);
         assertEquals(new Position(0, 13), engine.state().getCursor());
         assertEquals(3, engine.state().getTopWrapSegment());
-        engine.pageUp(3, 4, true, false);
+        navigation.pageUp(3, 4, true, false);
         assertEquals(new Position(0, 1), engine.state().getCursor());
         assertEquals(0, engine.state().getTopWrapSegment());
     }
@@ -127,9 +135,10 @@ class WrappedCursorNavigationTest {
     @Test
     void pageKeysPreserveExistingSelectionWhileScrollingWrappedRows() {
         EditorEngine engine = engine("abcdefghijklmnopqrstuvwxyz1234");
+        EditorViewNavigation navigation = new EditorViewNavigation(engine);
         engine.moveCursorTo(new Position(0, 1));
-        engine.moveDown(true, 4, true, false);
-        engine.pageDown(3, 4, true, false);
+        navigation.moveDown(true, 4, true, false);
+        navigation.pageDown(3, 4, true, false);
 
         assertEquals(new Position(0, 5), engine.state().getCursor());
         assertEquals(new Position(0, 1), engine.state().getSelectionAnchor());
@@ -139,33 +148,36 @@ class WrappedCursorNavigationTest {
     @Test
     void disablingWrappingRestoresLogicalRowNavigation() {
         EditorEngine engine = engine("abcdefghij\nabcdefghij");
+        EditorViewNavigation navigation = new EditorViewNavigation(engine);
         engine.moveCursorTo(new Position(0, 5));
-        engine.moveDown(false, 4, true, false);
+        navigation.moveDown(false, 4, true, false);
         assertEquals(new Position(0, 9), engine.state().getCursor());
-        engine.moveDown(false, 4, false, false);
+        navigation.moveDown(false, 4, false, false);
         assertEquals(new Position(1, 9), engine.state().getCursor());
     }
 
     @Test
     void changingTabWidthRecomputesThePreferredVisualColumn() {
         EditorEngine engine = engine("abcde\n\tZ\nabcdefgh");
+        EditorViewNavigation navigation = new EditorViewNavigation(engine);
         engine.moveCursorTo(new Position(0, 3));
-        engine.moveDown(false, 8, true, false);
+        navigation.moveDown(false, 8, true, false);
         assertEquals(new Position(1, 1), engine.state().getCursor());
         engine.setTabWidth(2);
-        engine.moveDown(false, 8, true, false);
+        navigation.moveDown(false, 8, true, false);
         assertEquals(new Position(2, 2), engine.state().getCursor());
     }
 
     @Test
     void openingAnotherFileResetsThePreferredColumn(@TempDir Path directory) throws IOException {
         EditorEngine engine = engine("abcdefghij");
+        EditorViewNavigation navigation = new EditorViewNavigation(engine);
         engine.moveCursorTo(new Position(0, 3));
-        engine.moveDown(false, 4, true, false);
+        navigation.moveDown(false, 4, true, false);
         Path file = directory.resolve("next.txt");
         Files.writeString(file, "abcde");
         engine.open(file);
-        engine.moveDown(false, 4, true, false);
+        navigation.moveDown(false, 4, true, false);
         assertEquals(new Position(0, 4), engine.state().getCursor());
     }
 

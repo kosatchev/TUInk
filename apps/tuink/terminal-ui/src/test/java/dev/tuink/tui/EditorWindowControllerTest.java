@@ -3,40 +3,28 @@ package dev.tuink.tui;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.tuiframe.capability.TerminalCapabilities;
+import dev.tuiframe.geometry.Point;
 import dev.tuiframe.input.KeyStroke;
 import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.input.ResizeEvent;
 import dev.tuiframe.input.TextInput;
 import dev.tuiframe.input.TuiInputEvent;
-import dev.tuiframe.jline.presentation.ScreenPresenter;
-import dev.tuiframe.runtime.TuiEventLoop;
 import dev.tuiframe.widget.TextField;
 import dev.tuink.core.Position;
-import dev.tuink.core.RecoverySnapshot;
 import dev.tuink.core.ViewportState;
-import dev.tuink.tui.flow.AppSettings;
-import dev.tuink.tui.flow.SaveAsSuggestionStore;
 import dev.tuink.tui.flow.SearchFocus;
-import dev.tuink.tui.flow.UiModalState;
-import dev.tuink.tui.render.RenderRasterizer;
-import dev.tuink.tui.ui.EditorView;
-import java.io.IOException;
-import java.io.PrintWriter;
-import java.io.StringWriter;
+import dev.tuink.tui.ui.SaveAsBarView;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
-import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /** Uses the production event entry point and production frame composition. */
@@ -46,7 +34,7 @@ class EditorWindowControllerTest {
 
     @Test
     void rejectedReadingCommandsPreserveTheManualViewportThroughTheRealEventRoute() throws Exception {
-        try (Fixture fixture = new Fixture(directory, true)) {
+        try (EditorWindowFixture fixture = new EditorWindowFixture(directory, true)) {
             fixture.wheel(PointerEvent.Kind.SCROLL_DOWN, 4);
             fixture.wheel(PointerEvent.Kind.SCROLL_RIGHT, 2);
             ViewportState before = fixture.active().state().viewport();
@@ -72,7 +60,7 @@ class EditorWindowControllerTest {
 
     @Test
     void openingSearchEndsDocumentCaptureBeforeLaterDragDelivery() throws Exception {
-        try (Fixture fixture = new Fixture(directory, false)) {
+        try (EditorWindowFixture fixture = new EditorWindowFixture(directory, false)) {
             fixture.pointer(PointerEvent.Kind.PRESS, 3, 15);
             assertTrue(fixture.editorView.isMouseSelecting());
 
@@ -104,7 +92,7 @@ class EditorWindowControllerTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void editMenuCutUsesTheFocusedSearchFieldInEditAndReadingModes(boolean reading) throws Exception {
-        try (Fixture fixture = new Fixture(directory, reading)) {
+        try (EditorWindowFixture fixture = new EditorWindowFixture(directory, reading)) {
             List<String> document = fixture.active().tabSession().model().snapshotLines();
             fixture.event(ctrl(KeyStroke.Key.F));
             fixture.event(new TextInput("field value😀"));
@@ -128,7 +116,7 @@ class EditorWindowControllerTest {
 
     @Test
     void keyboardTabSwitchingRestoresEachIndependentViewportAndEndsCapture() throws Exception {
-        try (Fixture fixture = new Fixture(directory, false)) {
+        try (EditorWindowFixture fixture = new EditorWindowFixture(directory, false)) {
             fixture.event(ctrl(KeyStroke.Key.N));
             assertEquals(2, fixture.tabs.size());
             fixture.active().tabSession().engine().open(fixture.document);
@@ -162,7 +150,7 @@ class EditorWindowControllerTest {
 
     @Test
     void resizeAndHelpTerminateFieldCaptureWithoutReplayingTheOldDrag() throws Exception {
-        try (Fixture fixture = new Fixture(directory, false)) {
+        try (EditorWindowFixture fixture = new EditorWindowFixture(directory, false)) {
             fixture.event(ctrl(KeyStroke.Key.F));
             fixture.event(new TextInput("0123456789".repeat(15)));
             fixture.event(KeyStroke.of(KeyStroke.Key.HOME));
@@ -193,99 +181,223 @@ class EditorWindowControllerTest {
         }
     }
 
+    @ParameterizedTest
+    @EnumSource(FieldTarget.class)
+    void fieldDragCrossesMenuAndDocumentBoundsThenReleaseEndsDelivery(FieldTarget target) throws Exception {
+        try (EditorWindowFixture fixture = new EditorWindowFixture(directory, false)) {
+            FieldInteraction interaction = prepareField(fixture, target);
+            TextField field = interaction.field();
+            int row = fixture.rowStartingWith(interaction.label());
+            Position documentCaret = fixture.active().state().getCursor();
+            fixture.pointer(PointerEvent.Kind.PRESS, row, interaction.label().length() + 2);
+            int pressedCaret = field.cursor();
+            assertTrue(field.mouseSelecting());
+
+            fixture.pointer(PointerEvent.Kind.DRAG, 0, fixture.width + 15);
+            assertTrue(field.mouseSelecting());
+            assertTrue(field.cursor() > pressedCaret);
+            assertFalse(field.selectedText().isEmpty());
+            assertFieldFocus(fixture, target);
+            assertFalse(fixture.menu.isOpen());
+            assertEquals(documentCaret, fixture.active().state().getCursor());
+
+            fixture.event(new PointerEvent(0, 0, PointerEvent.Kind.RELEASE, PointerEvent.Button.OTHER, Set.of()));
+            assertFalse(field.mouseSelecting());
+            int releasedCaret = field.cursor();
+            String selection = field.selectedText();
+            fixture.pointer(PointerEvent.Kind.DRAG, fixture.height + 5, fixture.width + 15);
+            assertEquals(releasedCaret, field.cursor());
+            assertEquals(selection, field.selectedText());
+            assertEquals(documentCaret, fixture.active().state().getCursor());
+            assertFalse(fixture.editorView.isMouseSelecting());
+            assertFalse(fixture.active().state().isDirty());
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(FieldTarget.class)
+    void copyEndsFieldCaptureAndRetainsItsSelectionCaretAndViewport(FieldTarget target) throws Exception {
+        try (EditorWindowFixture fixture = new EditorWindowFixture(directory, false)) {
+            FieldInteraction interaction = prepareField(fixture, target);
+            TextField field = interaction.field();
+            int row = fixture.rowStartingWith(interaction.label());
+            fixture.pointer(PointerEvent.Kind.PRESS, row, interaction.label().length() + 2);
+            fixture.pointer(PointerEvent.Kind.DRAG, row, fixture.width + 15);
+            assertTrue(field.mouseSelecting());
+            String selection = field.selectedText();
+            int caret = field.cursor();
+            String visible = fixture.screenRow(row);
+            assertFalse(selection.isEmpty());
+
+            fixture.event(ctrl(KeyStroke.Key.C));
+            assertFalse(field.mouseSelecting());
+            assertEquals(selection, fixture.host.clipboard.text());
+            assertEquals(selection, field.selectedText());
+            assertEquals(caret, field.cursor());
+            assertEquals(visible, fixture.screenRow(row));
+
+            fixture.pointer(PointerEvent.Kind.DRAG, 0, 0);
+            fixture.pointer(PointerEvent.Kind.RELEASE, 0, 0);
+            assertEquals(selection, field.selectedText());
+            assertEquals(caret, field.cursor());
+            assertFieldFocus(fixture, target);
+            assertFalse(fixture.active().state().isDirty());
+        }
+    }
+
+    @Test
+    void documentScrollbarCrossesMenuAndReleaseOrKeyboardEndsTheDrag() throws Exception {
+        try (EditorWindowFixture fixture = new EditorWindowFixture(directory, false)) {
+            Point thumb = fixture.verticalThumb(true);
+            Position caret = fixture.active().state().getCursor();
+            fixture.pointer(PointerEvent.Kind.PRESS, thumb.y(), thumb.x());
+            fixture.pointer(PointerEvent.Kind.DRAG, fixture.height + 10, 0);
+            int draggedTop = fixture.active().state().getTopLine();
+            assertTrue(draggedTop > 80);
+            assertEquals(caret, fixture.active().state().getCursor());
+
+            fixture.pointer(PointerEvent.Kind.RELEASE, 0, 0);
+            fixture.pointer(PointerEvent.Kind.DRAG, 0, fixture.width - 1);
+            assertEquals(draggedTop, fixture.active().state().getTopLine());
+
+            thumb = fixture.verticalThumb(true);
+            fixture.pointer(PointerEvent.Kind.PRESS, thumb.y(), thumb.x());
+            fixture.event(ctrl(KeyStroke.Key.C));
+            fixture.pointer(PointerEvent.Kind.DRAG, 0, fixture.width - 1);
+            assertEquals(draggedTop, fixture.active().state().getTopLine());
+            assertEquals(caret, fixture.active().state().getCursor());
+            assertFalse(fixture.active().state().isDirty());
+        }
+    }
+
+    @Test
+    void helpScrollbarDeliversOutsideDragAndCancelsOnReleaseAndKeyboard() throws Exception {
+        try (EditorWindowFixture fixture = new EditorWindowFixture(directory, false)) {
+            fixture.event(KeyStroke.of(KeyStroke.Key.F6));
+            fixture.event(KeyStroke.of(KeyStroke.Key.ENTER));
+            Point thumb = fixture.verticalThumb(false);
+            fixture.pointer(PointerEvent.Kind.PRESS, thumb.y(), thumb.x());
+            assertNotNull(fixture.host.helpScrollState.drag());
+            fixture.pointer(PointerEvent.Kind.DRAG, fixture.height + 5, 0);
+            int draggedTop = fixture.host.helpScrollState.firstVisibleIndex();
+            assertTrue(draggedTop > 0);
+            fixture.pointer(PointerEvent.Kind.RELEASE, 0, 0);
+            assertNull(fixture.host.helpScrollState.drag());
+            fixture.pointer(PointerEvent.Kind.DRAG, 0, fixture.width - 1);
+            assertEquals(draggedTop, fixture.host.helpScrollState.firstVisibleIndex());
+
+            thumb = fixture.verticalThumb(false);
+            fixture.pointer(PointerEvent.Kind.PRESS, thumb.y(), thumb.x());
+            assertNotNull(fixture.host.helpScrollState.drag());
+            fixture.event(KeyStroke.of(KeyStroke.Key.HOME));
+            assertNull(fixture.host.helpScrollState.drag());
+            assertEquals(0, fixture.host.helpScrollState.firstVisibleIndex());
+            fixture.pointer(PointerEvent.Kind.DRAG, fixture.height + 5, 0);
+            assertEquals(0, fixture.host.helpScrollState.firstVisibleIndex());
+            assertFalse(fixture.active().state().isDirty());
+        }
+    }
+
+    @Test
+    void tinySettingsMenuScrollbarKeepsCaptureOutsidePopupAndCancelsItBeforeKeyboard() throws Exception {
+        try (EditorWindowFixture fixture = new EditorWindowFixture(directory, false)) {
+            fixture.resize(8, 80);
+            fixture.event(KeyStroke.of(KeyStroke.Key.F5));
+            Point thumb = fixture.verticalThumb(false);
+            fixture.pointer(PointerEvent.Kind.PRESS, thumb.y(), thumb.x());
+            assertNotNull(fixture.menu.state().drag());
+            fixture.pointer(PointerEvent.Kind.DRAG, fixture.height + 5, 0);
+            int draggedTop = fixture.menu.state().firstVisibleEntryIndex();
+            assertTrue(draggedTop > 0);
+            fixture.pointer(PointerEvent.Kind.RELEASE, 0, fixture.width - 1);
+            assertNull(fixture.menu.state().drag());
+            fixture.pointer(PointerEvent.Kind.DRAG, 0, 0);
+            assertEquals(draggedTop, fixture.menu.state().firstVisibleEntryIndex());
+
+            thumb = fixture.verticalThumb(false);
+            fixture.pointer(PointerEvent.Kind.PRESS, thumb.y(), thumb.x());
+            assertNotNull(fixture.menu.state().drag());
+            fixture.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
+            assertNull(fixture.menu.state().drag());
+            int keyboardTop = fixture.menu.state().firstVisibleEntryIndex();
+            fixture.pointer(PointerEvent.Kind.DRAG, fixture.height + 5, 0);
+            assertEquals(keyboardTop, fixture.menu.state().firstVisibleEntryIndex());
+            assertTrue(fixture.menu.isOpen());
+            assertFalse(fixture.active().state().isDirty());
+        }
+    }
+
+    @Test
+    void filePickerScrollbarDeliversOutsideDragAndCancelsItBeforeKeyboardNavigation() throws Exception {
+        for (int index = 0; index < 80; index++) {
+            Files.writeString(directory.resolve("file-%03d.txt".formatted(index)), "fixture");
+        }
+        try (EditorWindowFixture fixture = new EditorWindowFixture(directory, false)) {
+            fixture.event(ctrl(KeyStroke.Key.O));
+            fixture.await(() -> !fixture.tree.loading());
+            Point thumb = fixture.verticalThumb(false);
+            var selected = fixture.tree.state().selectedId();
+            Position caret = fixture.active().state().getCursor();
+            fixture.pointer(PointerEvent.Kind.PRESS, thumb.y(), thumb.x());
+            assertNotNull(fixture.tree.state().widgetState().drag());
+            fixture.pointer(PointerEvent.Kind.DRAG, fixture.height + 5, 0);
+            int draggedTop = fixture.tree.state().widgetState().firstVisibleIndex();
+            assertTrue(draggedTop > 0);
+            assertEquals(selected, fixture.tree.state().selectedId());
+            fixture.pointer(PointerEvent.Kind.RELEASE, 0, 0);
+            assertNull(fixture.tree.state().widgetState().drag());
+            fixture.pointer(PointerEvent.Kind.DRAG, 0, fixture.width - 1);
+            assertEquals(draggedTop, fixture.tree.state().widgetState().firstVisibleIndex());
+
+            thumb = fixture.verticalThumb(false);
+            fixture.pointer(PointerEvent.Kind.PRESS, thumb.y(), thumb.x());
+            assertNotNull(fixture.tree.state().widgetState().drag());
+            fixture.event(KeyStroke.of(KeyStroke.Key.HOME));
+            assertNull(fixture.tree.state().widgetState().drag());
+            assertEquals(0, fixture.tree.state().widgetState().firstVisibleIndex());
+            fixture.pointer(PointerEvent.Kind.DRAG, fixture.height + 5, 0);
+            assertEquals(0, fixture.tree.state().widgetState().firstVisibleIndex());
+            assertEquals(caret, fixture.active().state().getCursor());
+            assertEquals(1, fixture.tabs.size());
+            assertFalse(fixture.active().state().isDirty());
+        }
+    }
+
+    private static FieldInteraction prepareField(EditorWindowFixture fixture, FieldTarget target) {
+        TextField field;
+        String label;
+        if (target == FieldTarget.SAVE_AS) {
+            fixture.event(ctrl(KeyStroke.Key.K));
+            field = fixture.filename;
+            label = "Save As: ";
+        } else {
+            fixture.event(ctrl(KeyStroke.Key.F));
+            fixture.focusSearch(target == FieldTarget.FIND ? SearchFocus.FIND : SearchFocus.REPLACE);
+            field = target == FieldTarget.FIND ? fixture.query : fixture.replacement;
+            label = target == FieldTarget.FIND ? "Find: " : "Replace: ";
+        }
+        fixture.event(ctrl(KeyStroke.Key.A));
+        fixture.event(new TextInput("0123456789".repeat(15)));
+        fixture.event(KeyStroke.of(KeyStroke.Key.HOME));
+        return new FieldInteraction(field, label);
+    }
+
+    private static void assertFieldFocus(EditorWindowFixture fixture, FieldTarget target) {
+        if (target == FieldTarget.SAVE_AS) {
+            assertEquals(SaveAsBarView.Target.FIELD, fixture.host.saveAsFocusManager.focused().orElseThrow());
+        } else {
+            assertFalse(fixture.ui.searchEditorFocused);
+            assertEquals(target == FieldTarget.FIND ? SearchFocus.FIND : SearchFocus.REPLACE,
+                fixture.host.searchFocusManager.focused().orElseThrow());
+        }
+    }
+
+    private enum FieldTarget { FIND, REPLACE, SAVE_AS }
+
+    private record FieldInteraction(TextField field, String label) {}
+
     private static KeyStroke ctrl(KeyStroke.Key key) {
         return KeyStroke.of(key, KeyStroke.Modifier.CTRL);
     }
 
-    private static final class Fixture implements AutoCloseable {
-        final TerminalEditorApp host = new TerminalEditorApp();
-        final List<TerminalEditorApp.EditorTab> tabs = new ArrayList<>();
-        final TerminalEditorApp.SessionContext context;
-        final TerminalEditorApp.NotificationState notification = host.new NotificationState();
-        final TextField query = new TextField();
-        final TextField replacement = new TextField();
-        final TextField filename = new TextField();
-        final EditorView editorView = new EditorView();
-        final TopMenuController menu = new TopMenuController();
-        final TuiEventLoop<TuiInputEvent> loop = new TuiEventLoop<>(timeout -> TuiEventLoop.Read.idle());
-        final OpenFileTreeController tree;
-        final UiSessionState ui;
-        final EditorWindowController controller;
-        final Path document;
-        int width = 80;
-        int height = 24;
-
-        Fixture(Path directory, boolean reading) throws IOException {
-            document = directory.resolve("document.txt");
-            Files.writeString(document, IntStream.range(0, 120)
-                .mapToObj(index -> "ROW%04d|".formatted(index) + "abcdefgh ".repeat(30))
-                .collect(java.util.stream.Collectors.joining("\n")));
-            tabs.add(host.newEditorTab());
-            tabs.getFirst().tabSession().engine().open(document);
-            context = new TerminalEditorApp.SessionContext(tabs, 0);
-            tree = new OpenFileTreeController(directory, true, false);
-            AppSettings settings = AppSettings.defaults();
-            ui = UiSessionState.from(false, settings.showTabBar(), settings.wrapLines(), settings.wrapWords(),
-                reading, settings.confirmOnClose(), settings.mouseMode(), settings.highlightActiveGutter(),
-                settings.smartHomeEnd(), settings.autoIndent(), settings.autoPairs(), settings.autoList(),
-                settings.visibleWhitespace(), settings.syntaxHighlighting(), settings.rainbowBrackets(),
-                settings.autoSelectionHighlight(), settings.gutterDiffMode(), settings.tabWidth(),
-                settings.tabInsertMode(), false, false, false);
-            RenderRasterizer renderer = new RenderRasterizer(1, host.theme);
-            ScreenPresenter presenter = new ScreenPresenter(new PrintWriter(new StringWriter()), TerminalCapabilities.DEFAULT);
-            Map<String, RecoverySnapshot> recovery = new HashMap<>();
-            var recoveryManager = new TerminalEditorApp.RecoveryAutosaveManager(new TerminalEditorApp.RecoveryPersistence() {
-                @Override
-                public void save(String entryId, RecoverySnapshot snapshot) {
-                    recovery.put(entryId, snapshot);
-                }
-
-                @Override
-                public void delete(String entryId) {
-                    recovery.remove(entryId);
-                }
-            });
-            controller = new EditorWindowController(host, new EditorWindowController.Resources(
-                new CommandRouter(), editorView, loop, UiModalState.none(), SearchController.SearchUiOptions.DEFAULT,
-                notification, tree, recoveryManager, host.new RenderFrameController(renderer, editorView, true, presenter),
-                renderer, filename, new SaveAsSuggestionStore(), presenter, query, replacement, context,
-                new ArrayList<>(), tabs, new EditorWindowController.TerminalAccess(() -> width, () -> height, enabled -> {}),
-                menu, ui));
-            frame();
-        }
-
-        TerminalEditorApp.EditorTab active() {
-            return tabs.get(context.activeTabIndex());
-        }
-
-        void event(TuiInputEvent event) {
-            controller.handlePoll(new TuiEventLoop.Poll<>(event, event instanceof ResizeEvent, false));
-            frame();
-        }
-
-        void pointer(PointerEvent.Kind kind, int row, int column) {
-            event(new PointerEvent(row, column, kind, PointerEvent.Button.LEFT, Set.of()));
-        }
-
-        void wheel(PointerEvent.Kind kind, int count) {
-            for (int index = 0; index < count; index++) {
-                event(new PointerEvent(10, 15, kind, PointerEvent.Button.NONE, Set.of()));
-            }
-        }
-
-        void frame() {
-            controller.prepareTurn();
-            loop.invalidate();
-            TuiEventLoop.FrameTicket ticket = loop.beginFrame();
-            assertNotNull(ticket);
-            boolean rendered = controller.renderFrame(ticket);
-            loop.endFrame(ticket, rendered);
-            controller.frameEnded(rendered);
-        }
-
-        @Override
-        public void close() {
-            tree.close();
-        }
-    }
 }

@@ -115,6 +115,13 @@ final class OpenFileDialogView {
             Objects.requireNonNull(focus, "focus").bind(this);
         }
 
+        /** Tree gesture delivery has its own output type and no keyboard-focus side effects. */
+        FocusScope<Control, FileTreeView.Action> captureScope() {
+            RoutedTarget<Control, Button.Action> list = focusScope.target(Control.LIST).orElseThrow();
+            return FocusScope.single(new TreeCaptureScopeId(focusScope.id()), FocusResetPolicy.CLEARED,
+                new RoutedTarget<>(Control.LIST, tree.captureTarget(), list.space(), false, tree.enabled()));
+        }
+
         void focusFirst(FocusState focus) {
             activate(focus);
             DialogFocusTraversal.focusFirst(focus.manager(), focusScope);
@@ -139,6 +146,9 @@ final class OpenFileDialogView {
                 target.placement().paint(canvas, theme, new WidgetState(highlighted, target.enabled()));
             }
         }
+    }
+
+    private record TreeCaptureScopeId(Object dialogScopeId) {
     }
 
     private static Control control(OpenFileInputRouter.Focus focus) {

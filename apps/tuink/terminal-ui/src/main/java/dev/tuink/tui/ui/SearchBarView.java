@@ -5,7 +5,6 @@ import dev.tuiframe.cell.Canvas;
 import dev.tuiframe.cell.CellText;
 import dev.tuiframe.geometry.Point;
 import dev.tuiframe.geometry.Rect;
-import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.widget.Button;
 import dev.tuiframe.widget.FocusContext;
 import dev.tuiframe.widget.FocusManager;
@@ -15,6 +14,8 @@ import dev.tuiframe.widget.FocusSpace;
 import dev.tuiframe.widget.InteractionResult;
 import dev.tuiframe.widget.PlacedCursorSource;
 import dev.tuiframe.widget.PlacedInteractiveWidget;
+import dev.tuiframe.widget.PlacedPointerCapture;
+import dev.tuiframe.widget.PointerCaptureCancellation;
 import dev.tuiframe.widget.RoutedTarget;
 import dev.tuiframe.widget.TextField;
 import dev.tuiframe.widget.Theme;
@@ -226,38 +227,6 @@ public final class SearchBarView {
             return focusScope;
         }
 
-        public boolean captures(PointerEvent pointer) {
-            return capturedTarget(pointer).isPresent();
-        }
-
-        public Optional<SearchFocus> capturedTarget(PointerEvent pointer) {
-            Objects.requireNonNull(pointer, "pointer");
-            for (SearchFocus id : List.of(SearchFocus.FIND, SearchFocus.REPLACE)) {
-                RoutedTarget<SearchFocus, Action> target = focusScope.target(id).orElseThrow();
-                FieldPlacement field = (FieldPlacement) target.placement();
-                if (!target.enabled()) {
-                    field.delegate().cancelMouseSelection();
-                } else if (field.delegate().captures(pointer)) {
-                    return Optional.of(id);
-                }
-            }
-            return Optional.empty();
-        }
-
-        public void cancelMouseSelection() {
-            retainMouseSelection(null);
-        }
-
-        /** A field may keep its capture only while it remains the enabled focus owner. */
-        public void retainMouseSelection(SearchFocus focused) {
-            for (SearchFocus id : List.of(SearchFocus.FIND, SearchFocus.REPLACE)) {
-                RoutedTarget<SearchFocus, Action> target = focusScope.target(id).orElseThrow();
-                if (id != focused || !target.enabled()) {
-                    ((FieldPlacement) target.placement()).delegate().cancelMouseSelection();
-                }
-            }
-        }
-
         public Rect targetBounds(SearchFocus target) {
             return focusScope.target(Objects.requireNonNull(target, "target"))
                 .orElseThrow()
@@ -372,16 +341,13 @@ public final class SearchBarView {
         InteractionResult<?> source,
         Action output
     ) {
-        Optional<Action> mappedOutput = source.output().isPresent()
-            ? Optional.of(Objects.requireNonNull(output, "output"))
-            : Optional.empty();
-        return new InteractionResult<>(source.consumed(), source.focusRequest(), mappedOutput);
+        return source.mapOutput(value -> Objects.requireNonNull(output, "output"));
     }
 
     private record FieldPlacement(
         TextField.Placement delegate,
         Action changedAction
-    ) implements PlacedInteractiveWidget<Action>, PlacedCursorSource {
+    ) implements PlacedPointerCapture<Action>, PlacedCursorSource {
         private FieldPlacement {
             Objects.requireNonNull(delegate, "delegate");
             if (changedAction != Action.QUERY_CHANGED
@@ -398,6 +364,16 @@ public final class SearchBarView {
         @Override
         public void paint(Canvas canvas, Theme theme, dev.tuiframe.widget.WidgetState state) {
             delegate.paint(canvas, theme, state);
+        }
+
+        @Override
+        public boolean pointerCaptureActive() {
+            return delegate.pointerCaptureActive();
+        }
+
+        @Override
+        public InteractionResult<Action> cancelPointerCapture(PointerCaptureCancellation reason) {
+            return delegate.cancelPointerCapture(reason).mapOutput(value -> changedAction);
         }
 
         @Override

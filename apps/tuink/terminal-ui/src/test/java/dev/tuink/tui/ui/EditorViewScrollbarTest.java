@@ -4,12 +4,18 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
+import dev.tuiframe.geometry.Rect;
+import dev.tuiframe.scroll.ScrollLayout;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.Position;
+import dev.tuink.core.SearchOptions;
 import dev.tuink.core.SimpleLineBuffer;
 import dev.tuink.core.TextModel;
 import dev.tuink.render.RenderPlan;
+import dev.tuink.render.EditorLayout;
+import dev.tuink.render.RenderPlanBuilder;
 import dev.tuink.render.TerminalEditorTextLayout;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -184,10 +190,44 @@ class EditorViewScrollbarTest {
     void horizontalTrackIsAbsentWhenTheRenderPlanHasNoDocumentRows() {
         RenderPlan plan = new RenderPlan(
             List.of(), "", "", null, null, null, null, 0, 0, true, false, false,
-            0, 0, 20, 0, 7, 200, COLS, GUTTER, 1
+            0, 0, 20, 0, 7, 200, COLS, GUTTER, 1,
+            ScrollLayout.vertical(new Rect(GUTTER, CONTENT_TOP, COLS - GUTTER - 1, 0), 20)
         );
 
         assertNull(EditorScrollbars.from(plan, 3, COLS, CONTENT_TOP).horizontal());
+    }
+
+    @Test
+    void rendererAndPointerUseTheResolvedGeometryThroughResizeAndOverlayFrames() {
+        Fixture fixture = fixture(3, "long text ".repeat(5));
+        RenderPlanBuilder builder = new RenderPlanBuilder(ignored -> List.of(), fixture.textLayout());
+        for (boolean wrapped : new boolean[] {false, true}) {
+            for (int rows = 1; rows <= 8; rows++) {
+                for (int columns = 1; columns <= 14; columns++) {
+                    for (int overlays : new int[] {0, 2}) {
+                        EditorLayout layout = EditorLayout.resolve(fixture.model(), fixture.textLayout(), fixture.state(),
+                            rows, columns, CONTENT_TOP, overlays, wrapped, true, 4);
+                        RenderPlan plan = builder.build(fixture.model(), fixture.state(), rows, columns, "", "",
+                            null, SearchOptions.DEFAULT, overlays == 0 ? null : "prompt\ncontrols",
+                            null, null, null, wrapped, true, layout);
+                        EditorScrollbars bars = EditorScrollbars.from(plan, rows, columns, CONTENT_TOP);
+                        assertSame(layout.scrollLayout(), plan.scrollLayout());
+                        assertSame(plan.scrollLayout(), bars.layout());
+                        assertEquals(layout.scrollbarWidth() != 0, bars.vertical() != null);
+                        assertEquals(layout.horizontalScrollbarHeight() != 0, bars.horizontal() != null);
+                        assertEquals(layout.contentRows(), bars.layout().contentBounds().height());
+                        assertEquals(layout.contentColumns(), bars.layout().contentBounds().width());
+                        for (var bar : new dev.tuiframe.scroll.Scrollbar[] {bars.vertical(), bars.horizontal()}) {
+                            if (bar != null) {
+                                var track = bar.track();
+                                assertTrue(fixture.view().handleScrollbarPointer(track.y(), track.x(), rows,
+                                    columns, CONTENT_TOP, plan, fixture.model(), fixture.textLayout(), fixture.state()).consumed());
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private static Fixture fixture(int lineCount) {
@@ -229,8 +269,16 @@ class EditorViewScrollbarTest {
             return new RenderPlan(
                 List.of(), "", "", null, null, null, null, 0, 0, true, wrapped, false,
                 CONTENT_ROWS, topRow, totalRows, state.getLeftColumn(),
-                state.getLeftVisualColumn(), 20, COLS, GUTTER, 1
+                state.getLeftVisualColumn(), 20, COLS, GUTTER, 1,
+                scrollLayout(wrapped)
             );
+        }
+
+        private ScrollLayout scrollLayout(boolean wrapped) {
+            Rect content = new Rect(GUTTER, CONTENT_TOP, COLS - GUTTER - 1, CONTENT_ROWS);
+            return new ScrollLayout(content, content, null,
+                new Rect(COLS - 1, CONTENT_TOP, 1, CONTENT_ROWS),
+                wrapped ? null : new Rect(GUTTER, CONTENT_TOP + CONTENT_ROWS, content.width(), 1));
         }
     }
 }

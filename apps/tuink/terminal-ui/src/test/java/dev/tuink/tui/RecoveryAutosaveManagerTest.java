@@ -16,6 +16,7 @@ import dev.tuink.core.Position;
 import dev.tuink.core.RecoverySnapshot;
 import dev.tuink.core.TabSession;
 import dev.tuink.render.TerminalEditorTextLayout;
+import dev.tuink.render.EditorViewNavigation;
 import dev.tuink.tui.flow.RecoveryStore;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -432,7 +433,7 @@ class RecoveryAutosaveManagerTest {
         TabSession session = newSession();
         session.model().replaceLines(java.util.Collections.nCopies(100, "line"));
         session.engine().moveCursorTo(new Position(99, 4));
-        session.engine().ensureCursorVisible(20, 80);
+        EditorViewNavigation.ensureCursorVisible(session.engine(), 20, 80, false, false);
         assertTrue(session.state().getTopLine() > 0);
         session.engine().selectAll();
         session.engine().deleteForward();

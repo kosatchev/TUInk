@@ -44,24 +44,36 @@ class EditorEngineTypingAssistTest {
             "else:", "finally:", "elif condition:", "elif(condition):", "except:",
             "except Error:", "except(Error):", "except* Error:", "case value:", "else\t"
         )) {
-            Fixture fixture = indentedFixture("test.py");
+            boolean matchCase = clause.startsWith("case ");
+            String owner = clause.startsWith("except") || clause.startsWith("finally") ? "try:" : "if ready:";
+            Fixture fixture = fixture("test.py", matchCase
+                ? List.of("match value:", "    case 0:", "        x = 1", "        ")
+                : List.of(owner, "    x = 1", "    "));
+            int lineIndex = matchCase ? 3 : 2;
+            fixture.engine.moveCursorTo(new Position(lineIndex, matchCase ? 8 : 4));
             fixture.engine.setAutoPairsEnabled(false);
 
             type(fixture.engine, clause);
 
-            assertEquals(clause, fixture.model.getLine(2), clause);
+            assertEquals((matchCase ? "    " : "") + clause, fixture.model.getLine(lineIndex), clause);
         }
     }
 
     @Test
     void genericCodeClausesKeepTheirDelimiterTriggeredDedent() {
         for (String clause : List.of("else ", "else{", "catch(", "finally {", "case ", "default:")) {
-            Fixture fixture = indentedFixture("Test.java");
+            boolean label = clause.startsWith("case") || clause.startsWith("default");
+            String owner = clause.startsWith("else") ? "if (ready) {" : "try {";
+            Fixture fixture = fixture("Test.java", label
+                ? List.of("switch (value) {", "    case 0:", "        break;", "        ")
+                : List.of(owner, "    }", "    "));
+            int lineIndex = label ? 3 : 2;
+            fixture.engine.moveCursorTo(new Position(lineIndex, label ? 8 : 4));
             fixture.engine.setAutoPairsEnabled(false);
 
             type(fixture.engine, clause);
 
-            assertEquals(clause, fixture.model.getLine(2), clause);
+            assertEquals((label ? "    " : "") + clause, fixture.model.getLine(lineIndex), clause);
         }
     }
 
@@ -156,7 +168,8 @@ class EditorEngineTypingAssistTest {
     }
 
     private static Fixture indentedFixture(String fileName) {
-        Fixture fixture = fixture(fileName, List.of("def f():", "    x = 1", "    "));
+        String owner = fileName.endsWith(".py") ? "if ready:" : "if (ready) {";
+        Fixture fixture = fixture(fileName, List.of(owner, "    x = 1", "    "));
         fixture.engine.moveCursorTo(new Position(2, 4));
         return fixture;
     }

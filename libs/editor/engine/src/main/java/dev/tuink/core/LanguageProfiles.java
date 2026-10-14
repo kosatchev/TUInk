@@ -27,6 +27,12 @@ public final class LanguageProfiles {
         "log",
         "csv"
     );
+    private static final Set<String> SLASH_REGEX_EXTENSIONS = Set.of(
+        "js", "mjs", "cjs", "jsx", "ts", "tsx"
+    );
+    private static final Set<String> AMBIGUOUS_SLASH_EXTENSIONS = Set.of(
+        "gradle", "groovy", "rb", "rake", "gemspec", "pl", "pm", "perl", "t"
+    );
     private static final Set<String> HASH_COMMENT_EXTENSIONS = Set.of(
         "py", "pyi", "pyw", "pyx",
         "sh", "bash", "zsh",
@@ -108,6 +114,16 @@ public final class LanguageProfiles {
             return CommentSyntaxProfile.NONE;
         }
         return CommentSyntaxProfile.GENERIC;
+    }
+
+    static boolean supportsSlashRegex(Path path) {
+        String extension = extensionOf(path);
+        return extension != null && SLASH_REGEX_EXTENSIONS.contains(extension);
+    }
+
+    static boolean hasAmbiguousSlashSyntax(Path path) {
+        String extension = extensionOf(path);
+        return extension != null && AMBIGUOUS_SLASH_EXTENSIONS.contains(extension);
     }
 
     private static String extensionOf(Path path) {

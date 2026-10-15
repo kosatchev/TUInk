@@ -244,6 +244,51 @@ class Regressions:
                 assert document.read_text(encoding="utf-8") == expected
             session.finish()
 
+    def settings(self):
+        document = self.fixture("settings", "abcdefghijklmnopqrstuvwxyz\nsecond line\n")
+        original = document.read_bytes()
+        home = self.root / "settings-home"
+        path = home / ".config/tuink/tuink.properties"
+        overrides = ("--read", "--no-mouse", "--theme=light")
+        with self.session("settings-cli-only", document, home=home, options=overrides) as session:
+            assert "READ" in session.screen.text
+            session.send(b"X")
+            assert "Reading mode: editing is disabled" in session.screen.text
+            session.finish()
+        assert not path.exists(), "temporary CLI options created saved preferences"
+
+        def preferences():
+            return dict(line.split("=", 1) for line in path.read_text().splitlines()
+                        if line and not line.startswith("#"))
+
+        with self.session("settings-unrelated", document, home=home, options=overrides) as session:
+            session.send(b"\x1bOR\r")  # F3, first View item: Show Tab Bar
+            assert "Tab bar hidden" in session.screen.text, session.screen.text
+            session.finish()
+        saved = preferences()
+        assert saved["ui.showTabBar"] == "false", saved
+        assert saved["ui.readingMode"] == "false", saved
+        assert saved["ui.mouseMode"] == "true", saved
+        assert saved["ui.theme"] == "cyan", saved
+
+        with self.session("settings-explicit", document, home=home, options=overrides) as session:
+            # Two explicit changes return to the CLI value, which is now a preference.
+            session.send(b"\x1bs\r\x1bs\r")
+            assert "Reading mode enabled" in session.screen.text, session.screen.text
+            session.finish()
+        saved = preferences()
+        assert saved["ui.readingMode"] == "true", saved
+        assert saved["ui.mouseMode"] == "true", saved
+        assert saved["ui.theme"] == "cyan", saved
+        unchanged = path.read_bytes()
+        with self.session("settings-next-launch", document, home=home, options=()) as session:
+            assert "READ" in session.screen.text, session.screen.text
+            session.mouse(0, 2, 15)
+            assert "Col 1/" not in status(session), session.screen.text
+            session.finish()
+        assert path.read_bytes() == unchanged, "unchanged preferences were rewritten"
+        assert document.read_bytes() == original
+
     def recovery(self):
         original = "original\n"
         document = self.fixture("recovery", original)
@@ -265,7 +310,7 @@ class Regressions:
         assert not list((home / ".config/tuink/recovery").glob("*.meta.properties")), "normal saved exit left recovery entries"
 
 
-SCENARIOS = ("reading", "focus", "field", "resize", "tabs", "history", "gutter-idle", "paste", "recovery")
+SCENARIOS = ("reading", "focus", "field", "resize", "tabs", "history", "gutter-idle", "paste", "settings", "recovery")
 
 
 def classpath_manifest(classpath):

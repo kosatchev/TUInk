@@ -101,6 +101,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     private final TerminalAccess terminal;
     private final TopMenuController topMenu;
     private final UiSessionState uiSessionState;
+    private final AppSettingsSession settingsSession;
 
     EditorWindowController(TerminalEditorApp host, Resources resources) {
         this.host = Objects.requireNonNull(host, "host");
@@ -123,6 +124,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         this.terminal = resources.terminal();
         this.topMenu = resources.topMenu();
         this.uiSessionState = resources.uiSessionState();
+        this.settingsSession = resources.settingsSession();
         this.modalState = resources.initialModalState();
         this.searchUi = resources.initialSearchUi();
     }
@@ -148,7 +150,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         List<TerminalEditorApp.EditorTab> tabs,
         TerminalAccess terminal,
         TopMenuController topMenu,
-        UiSessionState uiSessionState
+        UiSessionState uiSessionState,
+        AppSettingsSession settingsSession
     ) {}
 
     record TerminalAccess(IntSupplier widthSource, IntSupplier heightSource,
@@ -991,9 +994,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 event instanceof KeyStroke stroke ? commandRouter.invocationFor(stroke).orElse(null) : null,
                 null, false, SearchFocus.FIND);
             if (input != null && input.command() != null) {
-                InputActionDispatcher.DispatchResult result = InputActionDispatcher.dispatch(input.command(), uiSessionState,
-                    new InputActionDispatcher.DispatchContext(engine, state, topMenu,
-                        terminal::setMouseTracking, contentRows, contentCols, navigation));
+                InputActionDispatcher.DispatchResult result = dispatchInputAction(input.command());
                 viewportController.onCommandResult(result.viewportPolicy());
             }
             eventLoop.invalidate();
@@ -1877,19 +1878,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         }
 
         TuinkCommand action = key.command();
-        InputActionDispatcher.DispatchResult dispatchResult = InputActionDispatcher.dispatch(
-            action,
-            uiSessionState,
-            new InputActionDispatcher.DispatchContext(
-                engine,
-                state,
-                topMenu,
-                terminal::setMouseTracking,
-                contentRows,
-                contentCols,
-                navigation
-            )
-        );
+        InputActionDispatcher.DispatchResult dispatchResult = dispatchInputAction(action);
         if (dispatchResult.handled()) {
             viewportController.onCommandResult(dispatchResult.viewportPolicy());
             if (action == TuinkCommand.SEARCH_OPEN) {
@@ -1922,6 +1911,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             state.getCurrentFile(),
             state.getCurrentFile() != null && host.isReadOnlyFile(state.getCurrentFile())
         );
+        var themeBefore = host.theme;
         TerminalEditorApp.EditorActionApplyResult editorActionApplyResult = host.applyEditorActionResult(
             editorAction,
             sessionContext,
@@ -1938,6 +1928,9 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             saveAsSuggestions,
             renderer
         );
+        if (host.theme != themeBefore) {
+            settingsSession.themeChanged();
+        }
         if (editorAction.tabCommand() != EditorActionController.TabCommand.NONE
             || editorAction.requestOpenFile() || !editorActionApplyResult.modalState().isNone()) {
             uiSessionState.searchMode = false;
@@ -1946,5 +1939,20 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         modalState = editorActionApplyResult.modalState();
         openFileMode = editorActionApplyResult.openFileMode();
         openFileFocusState.focus(editorActionApplyResult.openFileFocus());
+    }
+
+    private InputActionDispatcher.DispatchResult dispatchInputAction(TuinkCommand command) {
+        boolean readingBefore = uiSessionState.readingModeSetting;
+        boolean mouseBefore = uiSessionState.mouseModeSetting;
+        InputActionDispatcher.DispatchResult result = InputActionDispatcher.dispatch(command, uiSessionState,
+            new InputActionDispatcher.DispatchContext(engine, state, topMenu,
+                terminal::setMouseTracking, contentRows, contentCols, navigation));
+        if (uiSessionState.readingModeSetting != readingBefore) {
+            settingsSession.readingModeChanged();
+        }
+        if (uiSessionState.mouseModeSetting != mouseBefore) {
+            settingsSession.mouseModeChanged();
+        }
+        return result;
     }
 }

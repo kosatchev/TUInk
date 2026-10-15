@@ -312,7 +312,10 @@ Usage: tuink [options] [file]
 Help exits with status `0`. Invalid command-line arguments exit with status `2`
 and write diagnostics to standard error.
 
-UI settings are stored in `~/.config/tuink/tuink.properties`. Recovery data is
+UI settings are stored in `~/.config/tuink/tuink.properties`. The `--read`,
+`--no-mouse`, and `--theme` options apply only to the current session. Explicit
+changes through the menus or their key bindings are saved as preferences.
+Recovery data is
 stored under `~/.config/tuink/recovery`; on POSIX systems the directory uses
 `0700` permissions and snapshot files use `0600`.
 Active recovery snapshots are isolated between editor instances. If input ends

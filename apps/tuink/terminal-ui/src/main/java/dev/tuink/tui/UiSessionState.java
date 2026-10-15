@@ -2,6 +2,8 @@ package dev.tuink.tui;
 
 import dev.tuink.core.GutterDiffMode;
 import dev.tuink.core.TabInsertMode;
+import dev.tuink.tui.flow.AppSettings;
+import dev.tuink.tui.style.UiStyles;
 
 final class UiSessionState {
     boolean searchMode;
@@ -29,6 +31,15 @@ final class UiSessionState {
     boolean helpHintsMode;
     boolean helpLicensesMode;
     boolean helpAuthorMode;
+
+    AppSettings settingsSnapshot(UiStyles.Theme theme) {
+        return new AppSettings(showTabBarSetting, wrapLinesSetting, wrapWordsSetting,
+            readingModeSetting, confirmOnCloseSetting, mouseModeSetting, highlightActiveGutterSetting,
+            smartHomeEndSetting, autoIndentSetting, autoPairsSetting, autoListSetting,
+            visibleWhitespaceSetting, syntaxHighlightingSetting, rainbowBracketsSetting,
+            autoSelectionHighlightSetting, gutterDiffModeSetting, tabWidthSetting,
+            tabInsertModeSetting, theme);
+    }
 
     static UiSessionState from(
         boolean searchMode,

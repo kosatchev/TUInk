@@ -15,7 +15,7 @@ from vt import Screen
 
 
 class Session:
-    def __init__(self, root, java, classpath, document=None, home=None, mono=False):
+    def __init__(self, root, java, classpath, document=None, home=None, mono=False, options=None):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         home = Path(home) if home else self.root / "home"
@@ -27,7 +27,8 @@ class Session:
         self.closed = False
         self.deadline = time.monotonic() + 45
         args = [str(java), "--enable-native-access=ALL-UNNAMED", "-Xmx192m",
-                f"-Duser.home={home}", "-cp", classpath, "dev.tuink.app.App", "--theme=cyan"]
+                f"-Duser.home={home}", "-cp", classpath, "dev.tuink.app.App"]
+        args.extend(("--theme=cyan",) if options is None else options)
         if mono:
             args.append("--no-color")
         if document:

@@ -196,8 +196,9 @@ public class TerminalEditorApp {
             System.err.println("Warning: failed to load settings from " + AppSettingsStore.path() + ": " + e.getMessage());
         }
 
-        UiStyles.Theme initialTheme = cli.themeOverride() != null ? cli.themeOverride() : loadedSettings.theme();
-        applyTheme(initialTheme);
+        AppSettingsSession settingsSession = new AppSettingsSession(loadedSettings, cli);
+        AppSettings initialSettings = settingsSession.initialSettings();
+        applyTheme(initialSettings.theme());
         List<EditorTab> tabs = new ArrayList<>();
         tabs.add(newEditorTab());
         SessionContext sessionContext = new SessionContext(tabs, 0);
@@ -217,24 +218,24 @@ public class TerminalEditorApp {
         SaveAsSuggestionStore saveAsSuggestions = new SaveAsSuggestionStore();
         UiSessionState uiSessionState = UiSessionState.from(
             false,
-            loadedSettings.showTabBar(),
-            loadedSettings.wrapLines(),
-            loadedSettings.wrapWords(),
-            cli.readModeOverride() != null ? cli.readModeOverride() : loadedSettings.readingMode(),
-            loadedSettings.confirmOnClose(),
-            cli.mouseEnabledOverride() != null ? cli.mouseEnabledOverride() : loadedSettings.mouseMode(),
-            loadedSettings.highlightActiveGutter(),
-            loadedSettings.smartHomeEnd(),
-            loadedSettings.autoIndent(),
-            loadedSettings.autoPairs(),
-            loadedSettings.autoList(),
-            loadedSettings.visibleWhitespace(),
-            loadedSettings.syntaxHighlighting(),
-            loadedSettings.rainbowBrackets(),
-            loadedSettings.autoSelectionHighlight(),
-            loadedSettings.gutterDiffMode(),
-            loadedSettings.tabWidth(),
-            loadedSettings.tabInsertMode(),
+            initialSettings.showTabBar(),
+            initialSettings.wrapLines(),
+            initialSettings.wrapWords(),
+            initialSettings.readingMode(),
+            initialSettings.confirmOnClose(),
+            initialSettings.mouseMode(),
+            initialSettings.highlightActiveGutter(),
+            initialSettings.smartHomeEnd(),
+            initialSettings.autoIndent(),
+            initialSettings.autoPairs(),
+            initialSettings.autoList(),
+            initialSettings.visibleWhitespace(),
+            initialSettings.syntaxHighlighting(),
+            initialSettings.rainbowBrackets(),
+            initialSettings.autoSelectionHighlight(),
+            initialSettings.gutterDiffMode(),
+            initialSettings.tabWidth(),
+            initialSettings.tabInsertMode(),
             false,
             false,
             false
@@ -337,7 +338,8 @@ public class TerminalEditorApp {
                         tabs,
                         new EditorWindowController.TerminalAccess(terminal::width, terminal::height, terminal::setMouseTracking),
                         topMenu,
-                        uiSessionState
+                        uiSessionState,
+                        settingsSession
                     )),
                     recoveryAutosave,
                     () -> toTabSessions(tabs),
@@ -348,30 +350,10 @@ public class TerminalEditorApp {
             }
         }
 
-        AppSettings effectiveSettings = new AppSettings(
-            uiSessionState.showTabBarSetting,
-            uiSessionState.wrapLinesSetting,
-            uiSessionState.wrapWordsSetting,
-            uiSessionState.readingModeSetting,
-            uiSessionState.confirmOnCloseSetting,
-            uiSessionState.mouseModeSetting,
-            uiSessionState.highlightActiveGutterSetting,
-            uiSessionState.smartHomeEndSetting,
-            uiSessionState.autoIndentSetting,
-            uiSessionState.autoPairsSetting,
-            uiSessionState.autoListSetting,
-            uiSessionState.visibleWhitespaceSetting,
-            uiSessionState.syntaxHighlightingSetting,
-            uiSessionState.rainbowBracketsSetting,
-            uiSessionState.autoSelectionHighlightSetting,
-            uiSessionState.gutterDiffModeSetting,
-            uiSessionState.tabWidthSetting,
-            uiSessionState.tabInsertModeSetting,
-            theme
-        );
-        if (settingsFileAccepted && !effectiveSettings.equals(loadedSettings)) {
+        AppSettings preferences = settingsSession.preferences(uiSessionState.settingsSnapshot(theme));
+        if (settingsFileAccepted && !preferences.equals(loadedSettings)) {
             try {
-                AppSettingsStore.save(effectiveSettings);
+                AppSettingsStore.save(preferences);
             } catch (IOException e) {
                 System.err.println("Warning: failed to save settings to " + AppSettingsStore.path() + ": " + e.getMessage());
             }

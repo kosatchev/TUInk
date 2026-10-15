@@ -57,6 +57,7 @@ final class EditorWindowFixture implements AutoCloseable {
     final TuiEventLoop<TuiInputEvent> loop = new TuiEventLoop<>(timeout -> TuiEventLoop.Read.idle());
     final OpenFileTreeController tree;
     final UiSessionState ui;
+    final AppSettingsSession settingsSession;
     final EditorWindowController controller;
     final Path document;
     final ObservedRasterizer renderer;
@@ -71,6 +72,16 @@ final class EditorWindowFixture implements AutoCloseable {
     }
 
     EditorWindowFixture(Path directory, boolean reading, List<String> lines) throws IOException {
+        this(directory, reading, lines, new AppSettingsSession(AppSettings.defaults(), TuiCliOptions.parse(new String[0])));
+    }
+
+    EditorWindowFixture(Path directory, List<String> lines, AppSettingsSession settingsSession) throws IOException {
+        this(directory, settingsSession.initialSettings().readingMode(), lines, settingsSession);
+    }
+
+    private EditorWindowFixture(Path directory, boolean reading, List<String> lines,
+                                AppSettingsSession settingsSession) throws IOException {
+        this.settingsSession = settingsSession;
         Files.createDirectories(directory);
         document = directory.resolve("document.txt");
         Files.writeString(document, String.join("\n", lines));
@@ -78,7 +89,9 @@ final class EditorWindowFixture implements AutoCloseable {
         tabs.getFirst().tabSession().engine().open(document);
         context = new TerminalEditorApp.SessionContext(tabs, 0);
         tree = new OpenFileTreeController(directory, true, false);
-        AppSettings settings = AppSettings.defaults();
+        AppSettings settings = settingsSession.initialSettings();
+        host.theme = settings.theme();
+        host.styles = UiStyles.forTheme(host.theme);
         ui = UiSessionState.from(false, settings.showTabBar(), settings.wrapLines(), settings.wrapWords(),
             reading, settings.confirmOnClose(), settings.mouseMode(), settings.highlightActiveGutter(),
             settings.smartHomeEnd(), settings.autoIndent(), settings.autoPairs(), settings.autoList(),
@@ -103,7 +116,7 @@ final class EditorWindowFixture implements AutoCloseable {
             notification, tree, recoveryManager, host.new RenderFrameController(renderer, editorView, true, presenter),
             renderer, filename, new SaveAsSuggestionStore(), presenter, query, replacement, context,
             new ArrayList<>(), tabs, new EditorWindowController.TerminalAccess(() -> width, () -> height, enabled -> {}),
-            menu, ui));
+            menu, ui, settingsSession));
         try {
             frame();
         } catch (RuntimeException | Error failure) {

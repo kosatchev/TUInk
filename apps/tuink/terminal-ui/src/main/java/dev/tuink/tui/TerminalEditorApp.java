@@ -1,5 +1,6 @@
 package dev.tuink.tui;
 
+import dev.tuink.core.DocumentEncodingException;
 import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
@@ -2019,6 +2020,11 @@ public class TerminalEditorApp {
     }
 
     String saveErrorMessage(IOException e) {
+        if (e instanceof DocumentEncodingException encoding) {
+            return "Save failed: " + encoding.charsetName() + " cannot encode U+"
+                + String.format(Locale.ROOT, "%04X", encoding.codePoint())
+                + ". Copy to a new UTF-8 tab.";
+        }
         String msg = e.getMessage() == null ? "Unknown I/O error" : e.getMessage();
         String lower = msg.toLowerCase();
         if (lower.contains("permission denied") || lower.contains("access denied")) {

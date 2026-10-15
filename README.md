@@ -111,10 +111,12 @@ to keep editing responsive; unchanged lines inside that range may also be marked
 If an edit leaves an empty line between bare CR and LF endings, that empty
 line's ending becomes CRLF so saving and reopening retain both line breaks.
 
-Normal saves check that the file still matches the bytes last opened or saved.
-If another process changed or removed it, TUInk retains your edits and reports
-the conflict. Use Save As with a different name to keep both versions, or reopen
-the file. This check also applies to recovered documents.
+Normal saves compare the destination with the bytes last opened or saved.
+A change detected during these checks retains your edits and reports a
+conflict. Use Save As with a different name to keep both versions, or reopen
+the file. This check also applies to recovered documents. Locks coordinate
+TUInk instances of the same user across configuration profiles. Other editors
+do not use these locks: a change after the final check can still be overwritten.
 
 Existing-file saves copy supported filesystem attributes to the staged file
 before replacing the original. If those attributes cannot be preserved, saving

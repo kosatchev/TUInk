@@ -47,6 +47,21 @@ These branches support current environments rather than historical TUInk release
 
 ## Document saves
 
+Documents and settings share persistent locks in
+`${user.home}/.local/state/tuink/save-locks-v1`, independently of configuration
+profiles. The key identifies the canonical directory entry; symbolic aliases
+use the same lock. Unix providers also lock the entry identified by its parent
+device/inode and exact filename bytes, coordinating bind-mounted aliases of the
+same entry. Different hardlink filenames remain independent destinations.
+The original URI lock is retained for compatibility with older versions at the
+same canonical path; bind-alias protection requires updated writers on both paths.
+A busy, unsafe, or unsupported lock leaves the target intact
+and causes a settings conflict or an unsaved document. Lock files remain after
+unlocking so a later writer cannot acquire a different inode while another
+writer still owns it. No new lock files are created beside edited documents.
+Other applications do not participate in this protocol and can still race a save
+after its final check.
+
 Saving to a new name never overwrites a file created concurrently. Where hard
 links are supported, TUInk atomically publishes the complete staged bytes and
 permissions. Otherwise it exclusively creates the destination with `CREATE_NEW`

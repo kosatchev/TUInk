@@ -11,6 +11,7 @@ import java.nio.charset.CharsetDecoder;
 import java.nio.charset.CharsetEncoder;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.nio.charset.UnmappableCharacterException;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
@@ -787,7 +788,19 @@ public class TextModel {
         CharsetEncoder encoder = metadata.charset().newEncoder()
             .onMalformedInput(CodingErrorAction.REPORT)
             .onUnmappableCharacter(CodingErrorAction.REPORT);
-        ByteBuffer encodedBuffer = encoder.encode(CharBuffer.wrap(content));
+        CharBuffer input = CharBuffer.wrap(content);
+        final ByteBuffer encodedBuffer;
+        try {
+            encodedBuffer = encoder.encode(input);
+        } catch (UnmappableCharacterException failure) {
+            // An encoder leaves the input at the first unrepresentable character.
+            // Keep the diagnostic independent of the surrounding document text.
+            if (!input.hasRemaining()) {
+                throw failure;
+            }
+            throw new DocumentEncodingException(metadata.charset(),
+                Character.codePointAt(content, input.position()), failure);
+        }
         byte[] encodedText = new byte[encodedBuffer.remaining()];
         encodedBuffer.get(encodedText);
         byte[] bom = metadata.bomKind().bytes();

@@ -133,17 +133,16 @@ class TerminalEditorInputRoutingTest {
             TuinkCommand.EDIT_SELECT_ALL, TuinkCommand.EDIT_UNDO, TuinkCommand.EDIT_REDO,
             TuinkCommand.EDIT_TOGGLE_LINE_COMMENT
         }) {
-            assertTrue(TerminalEditorApp.searchOwnsCommand(true, false, true, command));
-            assertTrue(TerminalEditorApp.searchOwnsCommand(true, false, false, command));
-            assertFalse(TerminalEditorApp.searchOwnsCommand(true, true, true, command));
-            assertFalse(TerminalEditorApp.searchOwnsCommand(false, false, true, command));
+            assertEquals(CommandRecipient.SEARCH_CONTROL, CommandRecipient.resolve(command, true, false));
+            assertEquals(CommandRecipient.EDITOR, CommandRecipient.resolve(command, true, true));
+            assertEquals(CommandRecipient.EDITOR, CommandRecipient.resolve(command, false, false));
         }
         for (TuinkCommand command : new TuinkCommand[] {
             TuinkCommand.SEARCH_OPEN, TuinkCommand.DOCUMENT_SAVE, TuinkCommand.DOCUMENT_SAVE_AS,
             TuinkCommand.TAB_NEW, TuinkCommand.TAB_NEXT, TuinkCommand.APP_QUIT,
             TuinkCommand.VIEW_TOGGLE_LINE_WRAP, TuinkCommand.HELP_KEY_HINTS
         }) {
-            assertFalse(TerminalEditorApp.searchOwnsCommand(true, false, true, command));
+            assertEquals(CommandRecipient.EDITOR, CommandRecipient.resolve(command, true, false));
         }
     }
 

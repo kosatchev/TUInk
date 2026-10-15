@@ -13,6 +13,7 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 import traceback
 
 from terminal import Session
@@ -190,6 +191,59 @@ class Regressions:
             assert document.read_text(encoding="utf-8") == "draft 中e\u0301base\n"
             session.finish()
 
+    def gutter_idle(self):
+        # A large fixture gives the gutter's coalescing window enough room
+        # between observing one completed diff and delivering the next edit.
+        original = "\n".join(f"LINE{i:05d}| unchanged" for i in range(20_000))
+        document = self.fixture("gutter-idle", original)
+        with self.session("gutter-idle", document, mono=True) as session:
+            def document_row(text):
+                return next((line for line in session.screen.lines if text in line), "")
+
+            # Start outside the initial diff window, then observe the exact
+            # frame that first paints a modification marker. A short drain
+            # avoids adding the ordinary expect/send polling delay here.
+            session.drain(0.4)
+            session.send(b"X", 0)
+            deadline = time.monotonic() + 3
+            while not document_row("XLINE00000|").startswith("~") and time.monotonic() < deadline:
+                session.drain(0.001)
+            assert document_row("XLINE00000|").startswith("~"), session.screen.text
+
+            session.send(b"\x1b[BY", 0)
+            session.expect(lambda: bool(document_row("LYINE00001|")), "the second rapid edit")
+            # No input follows this edit: deferred diff work must schedule
+            # its own frame instead of waiting for another key or mouse event.
+            session.expect(lambda: document_row("LYINE00001|").startswith("~"),
+                           "the deferred gutter marker while idle")
+            session.snapshot("idle-modification-marker")
+
+            session.send(b"\x1a", 0)
+            session.expect(lambda: bool(document_row("LINE00001|")), "undo of the second edit")
+            session.expect(lambda: not document_row("LINE00001|").startswith("~"),
+                           "the undone gutter marker clearing while idle")
+            assert document_row("XLINE00000|").startswith("~"), session.screen.text
+            session.snapshot("idle-undo-marker-cleared")
+            session.send(b"\x13")
+            session.finish()
+        assert document.read_text(encoding="utf-8") == "X" + original
+
+    def paste(self):
+        for name, original, inserted in (("open", "", "("), ("close", ")", ")")):
+            document = self.fixture("paste-" + name, original)
+            with self.session("paste-" + name, document) as session:
+                session.send(b"\x1b[200~" + inserted.encode("utf-8") + b"\x1b[201~")
+                session.send(b"\x13")
+                assert document.read_text(encoding="utf-8") == inserted + original
+                session.finish()
+        document = self.fixture("paste-history", "")
+        with self.session("paste-history", document) as session:
+            session.send(b"a\x1b[200~PASTED\x1b[201~b")
+            for expected in ("aPASTED", "a", ""):
+                session.send(b"\x1a\x13")
+                assert document.read_text(encoding="utf-8") == expected
+            session.finish()
+
     def recovery(self):
         original = "original\n"
         document = self.fixture("recovery", original)
@@ -211,7 +265,7 @@ class Regressions:
         assert not list((home / ".config/tuink/recovery").glob("*.meta.properties")), "normal saved exit left recovery entries"
 
 
-SCENARIOS = ("reading", "focus", "field", "resize", "tabs", "history", "recovery")
+SCENARIOS = ("reading", "focus", "field", "resize", "tabs", "history", "gutter-idle", "paste", "recovery")
 
 
 def classpath_manifest(classpath):
@@ -245,7 +299,7 @@ def main():
     failed = []
     for name in args.scenarios or SCENARIOS:
         try:
-            getattr(regression, name)()
+            getattr(regression, name.replace("-", "_"))()
             print("PASS " + name, flush=True)
         except Exception:
             failed.append(name)

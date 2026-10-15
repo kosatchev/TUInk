@@ -93,7 +93,7 @@ public final class SaveAsBarView {
             ORDER,
             ORDER
         );
-        return new Placement(row, focusScope);
+        return new Placement(row, focusScope, field);
     }
 
     public enum Target {
@@ -113,13 +113,16 @@ public final class SaveAsBarView {
     public static final class Placement {
         private final String row;
         private final FocusScope<Target, Action> focusScope;
+        private final TextField field;
 
         private Placement(
             String row,
-            FocusScope<Target, Action> focusScope
+            FocusScope<Target, Action> focusScope,
+            TextField field
         ) {
             this.row = Objects.requireNonNull(row, "row");
             this.focusScope = Objects.requireNonNull(focusScope, "focusScope");
+            this.field = Objects.requireNonNull(field, "field");
         }
 
         public String row() {
@@ -128,6 +131,11 @@ public final class SaveAsBarView {
 
         public FocusScope<Target, Action> focusScope() {
             return focusScope;
+        }
+
+        public Optional<TextField> field(Target targetId) {
+            return targetId == Target.FIELD && focusScope.target(Target.FIELD).orElseThrow().enabled()
+                ? Optional.of(field) : Optional.empty();
         }
 
         public Rect fieldBounds() {

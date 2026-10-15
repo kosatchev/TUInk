@@ -1,0 +1,162 @@
+package dev.tuink.tui;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import dev.tuiframe.input.KeyStroke;
+import dev.tuiframe.input.PointerEvent;
+import dev.tuiframe.input.TextInput;
+import dev.tuink.core.Position;
+import dev.tuink.tui.flow.SearchFocus;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+
+/** Replacement feedback follows document changes while unchanged single matches still advance. */
+class SearchReplaceFeedbackIntegrationTest {
+    @TempDir
+    Path directory;
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void identicalReplaceAllPreservesSelectionManualViewportAndCleanHistory(boolean wrapped) throws Exception {
+        List<String> lines = new ArrayList<>(Collections.nCopies(120, "alpha " + "x".repeat(240)));
+        try (EditorWindowFixture window = window(lines)) {
+            window.ui.wrapLinesSetting = wrapped;
+            window.ui.wrapWordsSetting = false;
+            search(window, "alpha", "alpha");
+            window.event(KeyStroke.of(KeyStroke.Key.ENTER));
+            Position cursor = window.active().state().getCursor();
+            Position anchor = window.active().state().getSelectionAnchor();
+            long revision = window.active().tabSession().model().revision();
+            window.wheel(PointerEvent.Kind.SCROLL_DOWN, 8);
+            if (!wrapped) {
+                window.wheel(PointerEvent.Kind.SCROLL_RIGHT, 8);
+            }
+            int top = window.active().state().getTopLine();
+            int segment = window.active().state().getTopWrapSegment();
+            int left = window.active().state().getLeftVisualColumn();
+            assertTrue(top > 0 || segment > 0);
+            assertTrue(wrapped || left > 0);
+
+            replace(window, SearchFocus.ALL_BUTTON);
+
+            assertEquals(revision, window.active().tabSession().model().revision());
+            assertEquals(cursor, window.active().state().getCursor());
+            assertEquals(anchor, window.active().state().getSelectionAnchor());
+            assertEquals(top, window.active().state().getTopLine());
+            assertEquals(segment, window.active().state().getTopWrapSegment());
+            assertEquals(left, window.active().state().getLeftVisualColumn());
+            assertEquals("Found 120 occurrence(s); text unchanged", window.notification.message);
+            assertEquals(window.host.styles.notifyInfo(), window.notification.style());
+            assertFalse(window.active().state().isDirty());
+            assertFalse(window.active().tabSession().engine().undo());
+            assertEquals(lines, window.active().tabSession().model().snapshotLines());
+        }
+    }
+
+    @Test
+    void anIdenticalSingleReplacementAdvancesWithoutClaimingAChange() throws Exception {
+        try (EditorWindowFixture window = window(List.of("alpha middle alpha"))) {
+            search(window, "alpha", "alpha");
+            window.event(KeyStroke.of(KeyStroke.Key.ENTER));
+            assertEquals(new Position(0, 5), window.active().state().getCursor());
+            long revision = window.active().tabSession().model().revision();
+
+            replace(window, SearchFocus.REPLACE_BUTTON);
+
+            assertEquals("Match found; text unchanged", window.notification.message);
+            assertEquals(new Position(0, 18), window.active().state().getCursor());
+            assertEquals(new Position(0, 13), window.active().state().getSelectionAnchor());
+            assertEquals(revision, window.active().tabSession().model().revision());
+            assertFalse(window.active().state().isDirty());
+            assertFalse(window.active().tabSession().engine().undo());
+        }
+    }
+
+    @Test
+    void mixedIdenticalAndChangedMatchesReportTheMatchedCountAndUndoOnlyTheReplacement() throws Exception {
+        try (EditorWindowFixture window = window(List.of("Alpha alpha ALPHA"))) {
+            window.event(new TextInput("X"));
+            search(window, "alpha", "alpha");
+
+            replace(window, SearchFocus.ALL_BUTTON);
+
+            assertEquals("Matched 3 occurrence(s); replacement applied. Undo available: Ctrl+Z", window.notification.message);
+            assertEquals("Xalpha alpha alpha", window.active().tabSession().model().getLine(0));
+            assertTrue(window.active().state().isDirty());
+            assertTrue(window.active().tabSession().engine().undo());
+            assertEquals("XAlpha alpha ALPHA", window.active().tabSession().model().getLine(0));
+            assertTrue(window.active().state().isDirty(), "the earlier unrelated edit must remain");
+            assertTrue(window.active().tabSession().engine().undo());
+            assertEquals("Alpha alpha ALPHA", window.active().tabSession().model().getLine(0));
+            assertFalse(window.active().state().isDirty());
+            assertFalse(window.active().tabSession().engine().undo());
+        }
+    }
+
+    @Test
+    void identicalReplaceAllKeepsAnExistingRedoChainAndSavepoint() throws Exception {
+        try (EditorWindowFixture window = window(List.of("alpha"))) {
+            var engine = window.active().tabSession().engine();
+            engine.insertInput("X");
+            engine.insertNewline();
+            assertTrue(engine.undo());
+            engine.save();
+            window.frame();
+            search(window, "alpha", "alpha");
+            long revision = window.active().tabSession().model().revision();
+
+            replace(window, SearchFocus.ALL_BUTTON);
+
+            assertEquals("Found 1 occurrence(s); text unchanged", window.notification.message);
+            assertEquals(revision, window.active().tabSession().model().revision());
+            assertFalse(window.active().state().isDirty());
+            assertEquals("Xalpha", Files.readString(window.document));
+            assertTrue(engine.redo());
+            assertEquals(List.of("X", "alpha"), window.active().tabSession().model().snapshotLines());
+            assertTrue(window.active().state().isDirty());
+            assertTrue(engine.undo());
+            assertEquals(List.of("Xalpha"), window.active().tabSession().model().snapshotLines());
+            assertFalse(window.active().state().isDirty());
+        }
+    }
+
+    @Test
+    void anUnmatchedReplaceAllReportsAnInformationalNoOp() throws Exception {
+        try (EditorWindowFixture window = window(List.of("alpha"))) {
+            search(window, "absent", "replacement");
+            long revision = window.active().tabSession().model().revision();
+
+            replace(window, SearchFocus.ALL_BUTTON);
+
+            assertEquals("Nothing to replace", window.notification.message);
+            assertEquals(window.host.styles.notifyInfo(), window.notification.style());
+            assertEquals(revision, window.active().tabSession().model().revision());
+            assertFalse(window.active().state().isDirty());
+        }
+    }
+
+    private EditorWindowFixture window(List<String> lines) throws Exception {
+        return new EditorWindowFixture(directory, false, lines);
+    }
+
+    private static void search(EditorWindowFixture window, String query, String replacement) {
+        window.event(KeyStroke.of(KeyStroke.Key.F, KeyStroke.Modifier.CTRL));
+        window.query.set(query);
+        window.replacement.set(replacement);
+        window.frame();
+    }
+
+    private static void replace(EditorWindowFixture window, SearchFocus target) {
+        window.focusSearch(target);
+        window.event(KeyStroke.of(KeyStroke.Key.ENTER));
+    }
+}

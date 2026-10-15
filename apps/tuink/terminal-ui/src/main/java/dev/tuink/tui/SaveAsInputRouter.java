@@ -12,6 +12,8 @@ import dev.tuiframe.widget.InteractionResult;
 import dev.tuiframe.widget.RoutedTarget;
 import dev.tuiframe.widget.TextField;
 import dev.tuink.tui.ui.SaveAsBarView;
+import dev.tuink.tui.command.TuinkCommand;
+import dev.tuink.core.EditorClipboard;
 import java.util.Objects;
 import java.util.Set;
 
@@ -33,6 +35,28 @@ final class SaveAsInputRouter {
     }
 
     private SaveAsInputRouter() {
+    }
+
+    static Result routeCommand(FocusManager<SaveAsBarView.Target> focusManager, SaveAsBarView.Placement placement,
+        TuinkCommand command, EditorClipboard clipboard) {
+        Objects.requireNonNull(focusManager, "focusManager");
+        Objects.requireNonNull(placement, "placement");
+        Objects.requireNonNull(command, "command");
+        placement.activate(focusManager);
+        ControlCommandRouter.ClipboardResult copied = ControlCommandRouter.clipboard(command,
+            placement.field(focusManager.focused().orElse(null)).orElse(null), clipboard);
+        if (copied.handled()) {
+            return copied.valueChanged() ? Result.action(SaveAsBarView.Action.VALUE_CHANGED) : Result.CAPTURED;
+        }
+        if (command == TuinkCommand.UI_ESCAPE || command == TuinkCommand.SEARCH_CLOSE) {
+            return Result.action(SaveAsBarView.Action.CANCELLED);
+        }
+        KeyStroke event = ControlCommandRouter.eventFor(command).orElse(null);
+        if (event != null) {
+            Result routed = route(focusManager, placement, event);
+            return routed.consumed() ? routed : Result.CAPTURED;
+        }
+        return ControlCommandRouter.unsupportedLocally(command) ? Result.CAPTURED : Result.IGNORED;
     }
 
     static Result route(

@@ -1,30 +1,17 @@
 package dev.tuink.tui;
 
-import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
-import dev.tuink.core.EditorTextLayout;
 import dev.tuink.core.LanguageProfiles;
 import dev.tuink.core.Position;
-import dev.tuink.core.RecoverySnapshot;
 import dev.tuink.core.SaveDisposition;
-import dev.tuink.core.SearchMatcher;
 import dev.tuink.core.SearchOptions;
 import dev.tuink.core.TabSession;
-import dev.tuink.core.TabSearch;
-import dev.tuink.core.TabSessions;
 import dev.tuink.core.TextModel;
-import dev.tuink.highlight.regex.RegexHighlighter;
-import dev.tuiframe.capability.TerminalCapabilities;
-import dev.tuink.tui.flow.AppSettings;
-import dev.tuink.tui.flow.AppSettingsStore;
 import dev.tuink.tui.flow.ConfirmChoice;
 import dev.tuink.tui.flow.RecoveryStore;
 import dev.tuink.tui.flow.SaveAsSuggestionStore;
-import dev.tuink.tui.flow.SaveContinuation;
-import dev.tuink.tui.flow.SaveTargetSuggester;
 import dev.tuink.tui.flow.SearchFocus;
-import dev.tuink.tui.flow.SearchNavigation;
 import dev.tuink.tui.flow.UiModalState;
 import dev.tuink.editor.command.CommandInvocation;
 import dev.tuink.tui.input.EditorInput;
@@ -35,33 +22,20 @@ import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.input.ResizeEvent;
 import dev.tuiframe.input.TextInput;
 import dev.tuiframe.input.TuiInputEvent;
-import dev.tuiframe.geometry.Point;
 import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.jline.presentation.ScreenPresenter;
-import dev.tuiframe.cell.CellBuffer;
-import dev.tuiframe.cell.CellText;
 import dev.tuiframe.cell.Canvas;
 import dev.tuink.tui.render.EditorStyleAdapter;
-import dev.tuink.render.LineHighlighter;
 import dev.tuink.render.EditorLayout;
 import dev.tuink.render.EditorViewNavigation;
 import dev.tuink.render.EditorViewCoordinates;
 import dev.tuink.render.RenderPlan;
 import dev.tuink.render.RenderPlanBuilder;
-import dev.tuink.render.TerminalEditorTextLayout;
 import dev.tuink.tui.render.RenderRasterizer;
 import dev.tuiframe.runtime.TuiApplicationRunner;
 import dev.tuiframe.runtime.TuiEventLoop;
 import dev.tuiframe.screen.Frame;
-import dev.tuiframe.screen.ScreenCursor;
-import dev.tuiframe.screen.ScrollHint;
 import dev.tuiframe.scroll.ScrollInteraction;
-import dev.tuiframe.scroll.Scrollbar;
-import dev.tuiframe.style.CellStyle;
-import dev.tuiframe.style.CellColor;
-import dev.tuink.tui.style.UiStyles;
-import dev.tuiframe.jline.TerminalSession;
-import dev.tuiframe.jline.TerminalRuntime;
 import dev.tuiframe.widget.Button;
 import dev.tuiframe.widget.InteractionResult;
 import dev.tuiframe.widget.PlacedPointerCapture;
@@ -69,58 +43,37 @@ import dev.tuiframe.widget.PointerCaptureRequest;
 import dev.tuiframe.widget.PointerCaptureCancellation;
 import dev.tuiframe.widget.WidgetState;
 import dev.tuiframe.widget.MenuBar;
-import dev.tuiframe.widget.DialogAttention;
-import dev.tuiframe.widget.DialogAttentionPainter;
 import dev.tuiframe.widget.DialogFocusTraversal;
 import dev.tuiframe.widget.DialogInputPolicy;
 import dev.tuiframe.widget.DialogMode;
-import dev.tuiframe.widget.FocusManager;
 import dev.tuiframe.widget.FocusContext;
 import dev.tuiframe.widget.ListView;
 import dev.tuiframe.widget.FocusResetPolicy;
 import dev.tuiframe.widget.FocusScope;
 import dev.tuiframe.widget.FocusSpace;
-import dev.tuiframe.widget.Modal;
-import dev.tuiframe.widget.PlacedModal;
-import dev.tuiframe.widget.PlacedWidget;
 import dev.tuiframe.widget.RoutedTarget;
 import dev.tuiframe.widget.TabBar;
-import dev.tuiframe.widget.WidgetStyleRole;
 import dev.tuiframe.widget.TextField;
 import dev.tuiframe.widget.Theme;
-import dev.tuiframe.widget.WidgetThemeKeys;
 import dev.tuink.tui.ui.ConfirmBarView;
-import dev.tuink.tui.ui.DirtyTabSummary;
 import dev.tuink.tui.ui.EditorView;
 import dev.tuink.tui.ui.InlinePromptBar;
 import dev.tuink.tui.ui.NotificationBar;
 import dev.tuink.tui.ui.HelpPage;
-import dev.tuink.tui.ui.HelpPages;
 import dev.tuink.tui.ui.OpenFileDialogController.OpenDialogLayout;
 import dev.tuink.tui.ui.OpenFileDialogController;
-import dev.tuink.tui.ui.CursorPolicy;
 import dev.tuink.tui.ui.SaveAsBarView;
 import dev.tuink.tui.ui.SearchBarView;
 import dev.tuink.tui.ui.TabBarView;
 import dev.tuink.tui.ui.FileTreeView;
 import dev.tuink.tui.ui.ViewportController;
 import java.io.IOException;
-import java.io.PrintStream;
-import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.IdentityHashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
-import java.util.Map;
 import java.util.Objects;
-import java.util.UUID;
 import java.util.function.Consumer;
-import java.util.function.LongSupplier;
 import java.util.function.IntSupplier;
-import java.util.function.Supplier;
 
 /** Owns frame preparation and event handling for one terminal editor window. */
 final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiInputEvent> {
@@ -278,6 +231,10 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         renderPlanBuilder = sessionContext.renderPlanBuilder();
         viewportController = tabs.get(activeTabIndex).viewportController();
         navigation = tabs.get(activeTabIndex).navigation();
+        engine.setGutterDiffMode(uiSessionState.gutterDiffModeSetting);
+        if (engine.refreshGutterDiffIfDue()) {
+            eventLoop.invalidate();
+        }
         Object nextBlockingOwner = TerminalEditorApp.modalInputOwner(modalState, openFileMode);
         if (!Objects.equals(blockingFocusOwner, nextBlockingOwner)) {
             blockingFocusOwner = nextBlockingOwner;
@@ -676,8 +633,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             host.styles.renderUnmatchedBracket(),
             host.styles.renderRainbowBrackets()
         );
-        engine.setGutterDiffMode(uiSessionState.gutterDiffModeSetting);
-        renderPlanBuilder.setGutterDiffResolver(engine::gutterDiffMarkerForLine);
+        renderPlanBuilder.setGutterDiffResolver(engine.gutterDiffMarkers());
         editorView.setTabWidth(uiSessionState.tabWidthSetting);
         engine.setTabInsertMode(uiSessionState.tabInsertModeSetting);
         engine.setAutoIndentEnabled(uiSessionState.autoIndentSetting);
@@ -769,8 +725,9 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     @Override
     public long nanosUntilWakeup(long nowNanos) {
         return TerminalEditorApp.earlierDeadline(
-            notification.nanosUntilExpire(nowNanos),
-            host.modalAttention.nanosUntilChange(nowNanos)
+            TerminalEditorApp.earlierDeadline(notification.nanosUntilExpire(nowNanos),
+                host.modalAttention.nanosUntilChange(nowNanos)),
+            engine.nanosUntilGutterDiffRefresh(nowNanos)
         );
     }
 
@@ -1006,8 +963,10 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             }
             return true;
         }
-        if (DialogFocusTraversal.isTraversal(event)) {
-            advanceBlockingFocus((KeyStroke) event);
+        TuiInputEvent focusEvent = command == TuinkCommand.EDIT_INSERT_TAB
+            ? KeyStroke.of(KeyStroke.Key.TAB) : event;
+        if (DialogFocusTraversal.isTraversal(focusEvent)) {
+            advanceBlockingFocus((KeyStroke) focusEvent);
             editorView.cancelMouseSelection();
             eventLoop.invalidate();
             return true;
@@ -1032,33 +991,58 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 event instanceof KeyStroke stroke ? commandRouter.invocationFor(stroke).orElse(null) : null,
                 null, false, SearchFocus.FIND);
             if (input != null && input.command() != null) {
-                viewportController.onInput(input, engine.hasSelection(), !uiSessionState.readingModeSetting);
-                InputActionDispatcher.dispatch(input.command(), uiSessionState,
+                InputActionDispatcher.DispatchResult result = InputActionDispatcher.dispatch(input.command(), uiSessionState,
                     new InputActionDispatcher.DispatchContext(engine, state, topMenu,
                         terminal::setMouseTracking, contentRows, contentCols, navigation));
+                viewportController.onCommandResult(result.viewportPolicy());
             }
             eventLoop.invalidate();
             return true;
         }
-        if (saveAsMode && (action == DialogInputPolicy.Action.COPY
-            || action == DialogInputPolicy.Action.CUT || action == DialogInputPolicy.Action.PASTE)
-            && event instanceof KeyStroke) {
-            if (host.saveAsFocusManager.focused().filter(SaveAsBarView.Target.FIELD::equals).isPresent()) {
-                String filenameBefore = saveAsInput.text();
-                FieldClipboard.handle(command, saveAsInput, host.clipboard);
-                if (!filenameBefore.equals(saveAsInput.text())) {
-                    notification.clear();
-                }
-                saveAsSuggestions.rememberDraft(tabs.get(activeTabIndex).tabSession(), saveAsInput.text());
-            }
-            eventLoop.invalidate();
-            return true;
+        if (saveAsMode && ControlCommandRouter.owns(command)) {
+            return false;
         }
         if (ModalInputPolicy.blocked(kind, event, command)) {
             rejectDialogInput();
             return true;
         }
         return false;
+    }
+
+    private void advanceSearchFocus(KeyStroke event) {
+        uiSessionState.searchEditorFocused = DialogFocusTraversal.advance(host.searchFocusManager,
+            searchBarPlacement.focusScope(), uiSessionState.searchEditorFocused,
+            contentRows > 0 && contentCols > 0, event);
+    }
+
+    private boolean consumeSearchControlAction(SearchBarView.Action action) {
+        if (action == SearchBarView.Action.CLOSE_REQUESTED) {
+            uiSessionState.searchMode = false;
+            host.searchFocusManager.deactivate(TerminalEditorApp.SEARCH_SCOPE_ID);
+            return true;
+        }
+        if (action == SearchBarView.Action.PASTE_REJECTED) {
+            notification.error("Paste is too large and was not inserted");
+            return true;
+        }
+        SearchFocus toggle = TerminalEditorApp.toggleTarget(action);
+        if (toggle != null) {
+            searchUi = SearchController.toggleFocusedSearchOption(searchUi, toggle);
+            return true;
+        }
+        return action == SearchBarView.Action.QUERY_CHANGED || action == SearchBarView.Action.REPLACEMENT_CHANGED;
+    }
+
+    private void executeSearchDocumentCommand(TuinkCommand command) {
+        SearchCommandHandler.Result result = SearchCommandHandler.execute(command,
+            new SearchCommandHandler.Context(host, tabs, activeTabIndex, uiSessionState, searchUi,
+                searchQueryInput.text(), searchReplaceInput.text(), searchBarPlacement, contentRows, contentCols));
+        tabs.get(result.activeTabIndex()).viewportController().onCommandResult(result.cursorPolicy());
+        if (result.activeTabIndex() != activeTabIndex) sessionContext.activate(result.activeTabIndex());
+        if (result.status() != null && !result.status().isBlank()) {
+            if (result.statusLevel() == InputActionDispatcher.StatusLevel.WARNING) notification.warning(result.status());
+            else notification.info(result.status());
+        }
     }
 
     private void handleDocumentPointer(PointerEvent mouse) {
@@ -1314,6 +1298,10 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 saveAsBarPlacement,
                 inputEvent, pointerCapture, this
             );
+            if (!saveAsInputResult.consumed() && physicalCommand != null) {
+                saveAsInputResult = SaveAsInputRouter.routeCommand(host.saveAsFocusManager,
+                    saveAsBarPlacement, physicalCommand, host.clipboard);
+            }
             SaveAsBarView.Action fieldAction = saveAsInputResult.action();
             if (fieldAction == SaveAsBarView.Action.PASTE_REJECTED) {
                 notification.error("Paste is too large and was not inserted");
@@ -1472,11 +1460,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 return;
             }
             if (DialogFocusTraversal.isTraversal(inputEvent)) {
-                uiSessionState.searchEditorFocused = DialogFocusTraversal.advance(
-                    host.searchFocusManager, searchBarPlacement.focusScope(),
-                    uiSessionState.searchEditorFocused, contentRows > 0 && contentCols > 0,
-                    (KeyStroke) inputEvent
-                );
+                advanceSearchFocus((KeyStroke) inputEvent);
                 editorView.cancelMouseSelection();
                 return;
             }
@@ -1495,22 +1479,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 editorView.cancelMouseSelection();
             }
             SearchBarView.Action searchAction = searchInput.action();
-            if (searchAction == SearchBarView.Action.CLOSE_REQUESTED) {
-                uiSessionState.searchMode = false;
-                host.searchFocusManager.deactivate(TerminalEditorApp.SEARCH_SCOPE_ID);
-                return;
-            }
-            if (searchAction == SearchBarView.Action.PASTE_REJECTED) {
-                notification.error("Paste is too large and was not inserted");
-                return;
-            }
-            SearchFocus toggleTarget = TerminalEditorApp.toggleTarget(searchAction);
-            if (toggleTarget != null) {
-                searchUi = SearchController.toggleFocusedSearchOption(searchUi, toggleTarget);
-                return;
-            }
-            if (searchAction == SearchBarView.Action.QUERY_CHANGED
-                || searchAction == SearchBarView.Action.REPLACEMENT_CHANGED) {
+            if (consumeSearchControlAction(searchAction)) {
                 return;
             }
             routedSearchAction = searchAction;
@@ -1590,8 +1559,12 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 if (uiSessionState.readingModeSetting) {
                     notification.warning("Reading mode: editing is disabled");
                 } else {
+                    long revisionBefore = model.revision();
+                    Position cursorBefore = state.getCursor();
                     engine.pasteText(paste.text());
-                    viewportController.onEditorTextInteraction();
+                    if (revisionBefore != model.revision() || !cursorBefore.equals(state.getCursor())) {
+                        viewportController.onEditorTextInteraction();
+                    }
                 }
             }
             return;
@@ -1622,10 +1595,6 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         if (key == null) {
             return;
         }
-        if (uiSessionState.searchMode && !uiSessionState.searchEditorFocused
-            && TerminalEditorApp.isHistoryCommand(key.command())) {
-            return;
-        }
         if (TerminalEditorApp.searchOwnsRawInput(uiSessionState.searchMode, modalState, openFileMode, topMenu.isOpen())
             && uiSessionState.searchEditorFocused
             && key.command() == TuinkCommand.UI_ESCAPE) {
@@ -1633,19 +1602,6 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             host.searchFocusManager.deactivate(TerminalEditorApp.SEARCH_SCOPE_ID);
             return;
         }
-        boolean searchPanelFocused = uiSessionState.searchMode && !uiSessionState.searchEditorFocused;
-        boolean searchOperation = TerminalEditorApp.isSearchOperation(key.command()) && TerminalEditorApp.searchOwnsCommand(
-            uiSessionState.searchMode, uiSessionState.searchEditorFocused,
-            routedMenuCommand != null, key.command()
-        );
-        if (!searchOperation && (!searchPanelFocused || !TerminalEditorApp.isLocalSearchCommand(key.command()))) {
-            viewportController.onInput(key, engine.hasSelection(), !uiSessionState.readingModeSetting);
-        }
-        if (searchPanelFocused && (key.command() == TuinkCommand.CURSOR_PAGE_UP
-            || key.command() == TuinkCommand.CURSOR_PAGE_DOWN)) {
-            viewportController.onManualVerticalPan();
-        }
-
         if (key.command() == null && key.event() instanceof PointerEvent mouse) {
             if (TerminalEditorApp.modalInputKind(modalState, openFileMode) == ModalInputPolicy.Kind.NONE) {
                 routeDocumentPointer(mouse);
@@ -1734,7 +1690,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             UiModalState saveAsState = modalState;
             String saveAsDraftBefore = saveAsInput.text();
             SaveFlowController.SaveAsResult saveAsResult = SaveFlowController.handleSaveAsInput(
-                key,
+                key.command(),
                 modalState,
                 saveAsInput.text(),
                 state.getCurrentFile(),
@@ -1884,62 +1840,38 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             }
         }
 
-        if (TerminalEditorApp.searchOwnsCommand(
-            uiSessionState.searchMode,
-            uiSessionState.searchEditorFocused,
-            routedMenuCommand != null,
-            key.command()
-        )) {
-            TerminalEditorApp.SearchModeResult searchModeResult = host.handleSearchModeInput(
-                key,
-                uiSessionState,
-                searchUi,
-                searchQueryInput,
-                searchReplaceInput,
-                searchBarPlacement,
-                tabs,
-                activeTabIndex,
-                model,
-                state,
-                engine,
-                renderPlanBuilder,
-                contentRows,
-                contentCols,
-                running,
-                modalState,
-                saveAsInput,
-                saveAsSuggestions,
-                notification,
-                openFileMode,
-                openFileTree,
-                openFileFocusState.focus(),
-                topMenu,
-                terminal::setMouseTracking,
-                renderer
-            );
-            if (searchModeResult.consumed()) {
-                searchUi = searchModeResult.searchUi();
-                if (TerminalEditorApp.isSearchOperation(key.command())
-                    && (!uiSessionState.readingModeSetting || !key.command().editsDocumentText())) {
-                    tabs.get(searchModeResult.activeTabIndex()).viewportController().onEditorTextInteraction();
+        CommandRecipient recipient = CommandRecipient.resolve(key.command(),
+            uiSessionState.searchMode, uiSessionState.searchEditorFocused);
+        if (recipient == CommandRecipient.SEARCH_CONTROL) {
+            if (searchBarPlacement != null) {
+                if (key.command() == TuinkCommand.EDIT_INSERT_TAB || key.command() == TuinkCommand.SEARCH_FOCUS_NEXT) {
+                    advanceSearchFocus(KeyStroke.of(KeyStroke.Key.TAB));
+                    return;
                 }
-                if (searchModeResult.activeTabIndex() != activeTabIndex) {
-                    sessionContext.activate(searchModeResult.activeTabIndex());
+                SearchInputRouter.Result result = SearchInputRouter.routeCommand(host.searchFocusManager,
+                    searchBarPlacement, key.command(), host.clipboard);
+                if (!consumeSearchControlAction(result.action())) {
+                    TuinkCommand intent = TerminalEditorApp.searchCommand(result.action());
+                    if (intent != null) executeSearchDocumentCommand(intent);
                 }
-                running = searchModeResult.running();
-                modalState = searchModeResult.modalState();
-                openFileMode = searchModeResult.openFileMode();
-                openFileFocusState.focus(searchModeResult.openFileFocus());
-                modalState = TerminalEditorApp.consumeRequestedHelpModal(uiSessionState, modalState);
-                return;
             }
+            return;
+        }
+        if (recipient == CommandRecipient.SEARCH_DOCUMENT) {
+            executeSearchDocumentCommand(key.command());
+            return;
         }
 
         if (key.command() == null && key.event() instanceof TextInput charInput) {
             if (uiSessionState.readingModeSetting) {
                 notification.warning("Reading mode: editing is disabled");
             } else {
+                long revisionBefore = model.revision();
+                Position cursorBefore = state.getCursor();
                 engine.insertInput(charInput.text());
+                if (revisionBefore != model.revision() || !cursorBefore.equals(state.getCursor())) {
+                    viewportController.onEditorTextInteraction();
+                }
             }
             return;
         }
@@ -1959,6 +1891,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             )
         );
         if (dispatchResult.handled()) {
+            viewportController.onCommandResult(dispatchResult.viewportPolicy());
             if (action == TuinkCommand.SEARCH_OPEN) {
                 String selectedQuery = host.selectionQueryForCtrlF(model, state);
                 if (selectedQuery != null) {
@@ -2005,6 +1938,10 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             saveAsSuggestions,
             renderer
         );
+        if (editorAction.tabCommand() != EditorActionController.TabCommand.NONE
+            || editorAction.requestOpenFile() || !editorActionApplyResult.modalState().isNone()) {
+            uiSessionState.searchMode = false;
+        }
         running = editorActionApplyResult.running();
         modalState = editorActionApplyResult.modalState();
         openFileMode = editorActionApplyResult.openFileMode();

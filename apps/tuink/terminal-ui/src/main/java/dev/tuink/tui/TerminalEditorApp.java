@@ -4,10 +4,8 @@ import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.EditorTextLayout;
-import dev.tuink.core.LanguageProfiles;
 import dev.tuink.core.Position;
 import dev.tuink.core.RecoverySnapshot;
-import dev.tuink.core.SaveDisposition;
 import dev.tuink.core.SearchMatcher;
 import dev.tuink.core.SearchOptions;
 import dev.tuink.core.TabSession;
@@ -24,15 +22,12 @@ import dev.tuink.tui.flow.SaveAsSuggestionStore;
 import dev.tuink.tui.flow.SaveContinuation;
 import dev.tuink.tui.flow.SaveTargetSuggester;
 import dev.tuink.tui.flow.SearchFocus;
-import dev.tuink.tui.flow.SearchNavigation;
 import dev.tuink.tui.flow.UiModalState;
 import dev.tuink.editor.command.CommandInvocation;
 import dev.tuink.tui.input.EditorInput;
 import dev.tuink.tui.command.TuinkCommand;
 import dev.tuiframe.input.KeyStroke;
-import dev.tuiframe.input.PasteEvent;
 import dev.tuiframe.input.PointerEvent;
-import dev.tuiframe.input.ResizeEvent;
 import dev.tuiframe.input.TextInput;
 import dev.tuiframe.input.TuiInputEvent;
 import dev.tuiframe.geometry.Point;
@@ -41,14 +36,12 @@ import dev.tuiframe.jline.presentation.ScreenPresenter;
 import dev.tuiframe.cell.CellBuffer;
 import dev.tuiframe.cell.CellText;
 import dev.tuiframe.cell.Canvas;
-import dev.tuink.tui.render.EditorStyleAdapter;
 import dev.tuink.render.LineHighlighter;
 import dev.tuink.render.EditorLayout;
 import dev.tuink.render.EditorViewCoordinates;
 import dev.tuink.render.EditorViewNavigation;
 import dev.tuink.render.RenderPlan;
 import dev.tuink.render.RenderPlanBuilder;
-import dev.tuink.render.TerminalEditorTextLayout;
 import dev.tuink.tui.render.RenderRasterizer;
 import dev.tuiframe.runtime.TuiApplicationRunner;
 import dev.tuiframe.runtime.TuiEventLoop;
@@ -56,7 +49,6 @@ import dev.tuiframe.screen.Frame;
 import dev.tuiframe.screen.ScreenCursor;
 import dev.tuiframe.screen.ScrollHint;
 import dev.tuiframe.scroll.ScrollInteraction;
-import dev.tuiframe.scroll.Scrollbar;
 import dev.tuiframe.style.CellStyle;
 import dev.tuiframe.style.CellColor;
 import dev.tuink.tui.style.UiStyles;
@@ -65,9 +57,6 @@ import dev.tuiframe.jline.TerminalRuntime;
 import dev.tuiframe.widget.Button;
 import dev.tuiframe.widget.DialogAttention;
 import dev.tuiframe.widget.DialogAttentionPainter;
-import dev.tuiframe.widget.DialogFocusTraversal;
-import dev.tuiframe.widget.DialogInputPolicy;
-import dev.tuiframe.widget.DialogMode;
 import dev.tuiframe.widget.FocusManager;
 import dev.tuiframe.widget.FocusContext;
 import dev.tuiframe.widget.ListView;
@@ -76,9 +65,7 @@ import dev.tuiframe.widget.FocusScope;
 import dev.tuiframe.widget.FocusSpace;
 import dev.tuiframe.widget.Modal;
 import dev.tuiframe.widget.PlacedModal;
-import dev.tuiframe.widget.PlacedWidget;
 import dev.tuiframe.widget.RoutedTarget;
-import dev.tuiframe.widget.TabBar;
 import dev.tuiframe.widget.WidgetStyleRole;
 import dev.tuiframe.widget.TextField;
 import dev.tuiframe.widget.Theme;
@@ -499,14 +486,7 @@ public class TerminalEditorApp {
         switch (effect.kind()) {
             case NONE -> {
             }
-            case INSERT -> saveAsInput.insert(effect.text());
             case SET_TEXT -> saveAsInput.set(effect.text());
-            case BACKSPACE -> saveAsInput.backspace();
-            case MOVE_LEFT -> saveAsInput.moveLeft();
-            case MOVE_RIGHT -> saveAsInput.moveRight();
-            case MOVE_HOME -> saveAsInput.moveHome();
-            case MOVE_END -> saveAsInput.moveEnd();
-            case DELETE_FORWARD -> saveAsInput.deleteForward();
             case CLEAR -> saveAsInput.clear();
         }
     }
@@ -526,7 +506,7 @@ public class TerminalEditorApp {
         );
     }
 
-    private static void scrollDocumentViewport(
+    static void scrollDocumentViewport(
         TextModel model,
         EditorTextLayout layout,
         EditorState state,
@@ -545,500 +525,6 @@ public class TerminalEditorApp {
             Math.max(1, contentRows), coordinates.totalRows()
         );
         coordinates.applyTop(state, coordinates.topAtRow(target));
-    }
-
-    static boolean isLocalSearchCommand(TuinkCommand action) {
-        if (action == null) {
-            return true;
-        }
-        return switch (action) {
-            case EDIT_COPY, EDIT_CUT, EDIT_PASTE, EDIT_UNDO, EDIT_REDO, EDIT_SELECT_ALL,
-                EDIT_BACKSPACE, EDIT_DELETE_FORWARD, EDIT_TOGGLE_LINE_COMMENT, EDIT_INSERT_TAB,
-                CURSOR_LEFT, CURSOR_RIGHT, CURSOR_UP, CURSOR_DOWN,
-                CURSOR_SELECT_LEFT, CURSOR_SELECT_RIGHT, CURSOR_SELECT_UP, CURSOR_SELECT_DOWN,
-                CURSOR_WORD_LEFT, CURSOR_WORD_RIGHT, CURSOR_HOME, CURSOR_END, CURSOR_PAGE_UP, CURSOR_PAGE_DOWN,
-                SEARCH_FIELD_BACKSPACE, SEARCH_FIELD_DELETE, SEARCH_FIELD_HOME, SEARCH_FIELD_END,
-                SEARCH_NAVIGATE_LEFT, SEARCH_NAVIGATE_RIGHT, SEARCH_NAVIGATE_UP, SEARCH_NAVIGATE_DOWN,
-                SEARCH_FOCUS_NEXT -> true;
-            default -> false;
-        };
-    }
-
-    SearchModeResult handleSearchModeInput(
-        EditorInput key,
-        UiSessionState uiSessionState,
-        SearchController.SearchUiOptions searchUi,
-        TextField searchQueryInput,
-        TextField searchReplaceInput,
-        SearchBarView.Placement searchBarPlacement,
-        List<EditorTab> tabs,
-        int activeTabIndex,
-        TextModel model,
-        EditorState state,
-        EditorEngine engine,
-        RenderPlanBuilder renderPlanBuilder,
-        int contentRows,
-        int contentCols,
-        boolean running,
-        UiModalState modalState,
-        TextField saveAsInput,
-        SaveAsSuggestionStore saveAsSuggestions,
-        NotificationState notification,
-        boolean openFileMode,
-        OpenFileTreeController openFileTree,
-        OpenFileInputRouter.Focus openFileFocus,
-        TopMenuController topMenu,
-        Consumer<Boolean> mouseTrackingController,
-        RenderRasterizer renderer
-    ) {
-        String statusMessage = null;
-        boolean statusError = false;
-        boolean statusWarning = false;
-        int nextActiveTabIndex = activeTabIndex;
-        TextModel nextModel = model;
-        EditorState nextState = state;
-        EditorEngine nextEngine = engine;
-        RenderPlanBuilder nextRenderPlanBuilder = renderPlanBuilder;
-        SearchController.SearchUiOptions nextSearchUi = searchUi;
-        boolean nextRunning = running;
-        UiModalState nextModalState = modalState;
-        boolean nextOpenFileMode = openFileMode;
-        OpenFileInputRouter.Focus nextOpenFileFocus = openFileFocus;
-
-        SearchFocus searchFocus = searchFocusManager.focused().orElse(null);
-        if (key.command() == null && key.event() instanceof TextInput charInput
-            && !(" ".equals(charInput.text()) && SearchController.isSearchActionFocus(searchFocus))) {
-            if (charInput.text().equals(" ") && SearchController.isToggleFocus(searchFocus)) {
-                SearchController.SearchUiOptions before = nextSearchUi;
-                nextSearchUi = SearchController.toggleFocusedSearchOption(nextSearchUi, searchFocus);
-                if (!nextSearchUi.equals(before)) {
-                    statusMessage = "";
-                }
-            } else if (searchFocus == SearchFocus.REPLACE) {
-                searchReplaceInput.insert(charInput.text());
-                statusMessage = "";
-            } else if (searchFocus == SearchFocus.FIND) {
-                searchQueryInput.insert(charInput.text());
-                statusMessage = "";
-            }
-            return new SearchModeResult(
-                true,
-                nextSearchUi,
-                nextActiveTabIndex,
-                nextModel,
-                nextState,
-                nextEngine,
-                nextRenderPlanBuilder,
-                nextRunning,
-                nextModalState,
-                nextOpenFileMode,
-                nextOpenFileFocus
-            );
-        }
-
-        TuinkCommand action = key.command();
-        if (action == null && key.event() instanceof TextInput charInput
-            && " ".equals(charInput.text()) && SearchController.isSearchActionFocus(searchFocus)) {
-            action = SearchController.actionForSearchFocus(searchFocus);
-        }
-        if (action == TuinkCommand.EDIT_INSERT_NEWLINE) {
-            action = searchFocus == null ? null : SearchController.actionForSearchFocus(searchFocus);
-        }
-        if (action == null || isHistoryCommand(action) || SearchController.handleFieldClipboard(
-            action,
-            searchFocusManager.focused().orElse(null),
-            searchQueryInput,
-            searchReplaceInput,
-            clipboard
-        )) {
-            return new SearchModeResult(
-                true,
-                nextSearchUi,
-                nextActiveTabIndex,
-                nextModel,
-                nextState,
-                nextEngine,
-                nextRenderPlanBuilder,
-                nextRunning,
-                nextModalState,
-                nextOpenFileMode,
-                nextOpenFileFocus
-            );
-        }
-        switch (action) {
-            case SEARCH_CLOSE -> {
-                uiSessionState.searchMode = false;
-                statusMessage = "";
-            }
-            case SEARCH_FOCUS_NEXT, EDIT_INSERT_TAB -> {
-                if (searchBarPlacement != null) {
-                    searchFocusManager.next(searchBarPlacement.focusScope());
-                }
-            }
-            case SEARCH_FIELD_BACKSPACE, EDIT_BACKSPACE -> {
-                if (SearchController.isSearchFieldFocus(searchFocus)) {
-                    TextField active = searchFocus == SearchFocus.REPLACE ? searchReplaceInput : searchQueryInput;
-                    active.backspace();
-                }
-            }
-            case SEARCH_FIELD_DELETE, EDIT_DELETE_FORWARD -> {
-                if (SearchController.isSearchFieldFocus(searchFocus)) {
-                    TextField active = searchFocus == SearchFocus.REPLACE ? searchReplaceInput : searchQueryInput;
-                    active.deleteForward();
-                }
-            }
-            case SEARCH_NAVIGATE_LEFT, CURSOR_LEFT -> {
-                if (searchFocus == SearchFocus.FIND) {
-                    searchQueryInput.moveLeft();
-                } else if (searchFocus == SearchFocus.REPLACE) {
-                    searchReplaceInput.moveLeft();
-                } else {
-                    moveSearchFocus(searchBarPlacement, false);
-                }
-            }
-            case SEARCH_NAVIGATE_RIGHT, CURSOR_RIGHT -> {
-                if (searchFocus == SearchFocus.FIND) {
-                    searchQueryInput.moveRight();
-                } else if (searchFocus == SearchFocus.REPLACE) {
-                    searchReplaceInput.moveRight();
-                } else {
-                    moveSearchFocus(searchBarPlacement, true);
-                }
-            }
-            case SEARCH_NAVIGATE_UP, CURSOR_UP -> {
-                if (searchFocus != null && !SearchController.isSearchFieldFocus(searchFocus)) {
-                    focusSearch(searchBarPlacement, SearchNavigation.vertical(searchFocus, true));
-                }
-            }
-            case SEARCH_NAVIGATE_DOWN, CURSOR_DOWN -> {
-                if (searchFocus != null && !SearchController.isSearchFieldFocus(searchFocus)) {
-                    focusSearch(searchBarPlacement, SearchNavigation.vertical(searchFocus, false));
-                }
-            }
-            case CURSOR_WORD_LEFT, CURSOR_WORD_RIGHT, CURSOR_SELECT_LEFT, CURSOR_SELECT_RIGHT -> {
-                if (SearchController.isSearchFieldFocus(searchFocus)) {
-                    TextField active = searchFocus == SearchFocus.REPLACE ? searchReplaceInput : searchQueryInput;
-                    active.navigate(action == TuinkCommand.CURSOR_WORD_LEFT || action == TuinkCommand.CURSOR_SELECT_LEFT
-                            ? KeyStroke.Key.ARROW_LEFT : KeyStroke.Key.ARROW_RIGHT,
-                        action == TuinkCommand.CURSOR_WORD_LEFT || action == TuinkCommand.CURSOR_WORD_RIGHT,
-                        action == TuinkCommand.CURSOR_SELECT_LEFT || action == TuinkCommand.CURSOR_SELECT_RIGHT);
-                }
-            }
-            case EDIT_SELECT_ALL -> {
-                if (SearchController.isSearchFieldFocus(searchFocus)) {
-                    (searchFocus == SearchFocus.REPLACE ? searchReplaceInput : searchQueryInput).selectAll();
-                }
-            }
-            case CURSOR_SELECT_UP, CURSOR_SELECT_DOWN, EDIT_TOGGLE_LINE_COMMENT -> {
-                // Single-line field controls own these commands even without a local action.
-            }
-            case CURSOR_PAGE_UP, CURSOR_PAGE_DOWN -> scrollDocumentViewport(
-                nextModel, nextEngine.textLayout(), nextState, contentRows, contentCols,
-                uiSessionState.wrapLinesSetting, uiSessionState.wrapWordsSetting,
-                (action == TuinkCommand.CURSOR_PAGE_UP ? -1 : 1) * Math.max(1, contentRows),
-                uiSessionState.tabWidthSetting
-            );
-            case SEARCH_FIELD_HOME, CURSOR_HOME -> {
-                if (searchFocus == SearchFocus.FIND) {
-                    searchQueryInput.moveHome();
-                } else if (searchFocus == SearchFocus.REPLACE) {
-                    searchReplaceInput.moveHome();
-                }
-            }
-            case SEARCH_FIELD_END, CURSOR_END -> {
-                if (searchFocus == SearchFocus.FIND) {
-                    searchQueryInput.moveEnd();
-                } else if (searchFocus == SearchFocus.REPLACE) {
-                    searchReplaceInput.moveEnd();
-                }
-            }
-            case SEARCH_NEXT -> {
-                if (SearchController.isSearchActionFocus(searchFocus)) {
-                    focusSearch(searchBarPlacement, SearchFocus.NEXT_BUTTON);
-                }
-                boolean found;
-                SearchOptions searchOptions = SearchController.toSearchOptions(nextSearchUi);
-                boolean focusedCurrent = focusCurrentMatchIfOffscreen(
-                    nextModel,
-                    nextState,
-                    nextEngine,
-                    contentRows,
-                    contentCols,
-                    uiSessionState.wrapLinesSetting,
-                    uiSessionState.wrapWordsSetting,
-                    searchQueryInput.text(),
-                    searchOptions
-                );
-                if (focusedCurrent) {
-                    found = true;
-                } else
-                if (nextSearchUi.allTabs()) {
-                    int foundTab = TabSearch.findNextAcrossTabs(
-                        toTabSessions(tabs),
-                        nextActiveTabIndex,
-                        searchQueryInput.text(),
-                        searchOptions
-                    );
-                    found = foundTab >= 0;
-                    if (found) {
-                        nextActiveTabIndex = foundTab;
-                        nextModel = tabs.get(nextActiveTabIndex).model();
-                        nextState = tabs.get(nextActiveTabIndex).state();
-                        nextEngine = tabs.get(nextActiveTabIndex).engine();
-                        nextRenderPlanBuilder = tabs.get(nextActiveTabIndex).renderPlanBuilder();
-                    }
-                } else {
-                    found = nextEngine.findNext(
-                        searchQueryInput.text(),
-                        searchOptions
-                    );
-                }
-                if (found) {
-                    EditorViewNavigation.ensureCursorVisible(nextEngine,
-                        contentRows,
-                        contentCols,
-                        uiSessionState.wrapLinesSetting,
-                        uiSessionState.wrapWordsSetting
-                    );
-                }
-                statusMessage = found ? "Found next match" : "Not found";
-            }
-            case SEARCH_PREVIOUS -> {
-                if (SearchController.isSearchActionFocus(searchFocus)) {
-                    focusSearch(searchBarPlacement, SearchFocus.PREV_BUTTON);
-                }
-                boolean found;
-                if (nextSearchUi.allTabs()) {
-                    int foundTab = TabSearch.findPreviousAcrossTabs(
-                        toTabSessions(tabs),
-                        nextActiveTabIndex,
-                        searchQueryInput.text(),
-                        SearchController.toSearchOptions(nextSearchUi)
-                    );
-                    found = foundTab >= 0;
-                    if (found) {
-                        nextActiveTabIndex = foundTab;
-                        nextModel = tabs.get(nextActiveTabIndex).model();
-                        nextState = tabs.get(nextActiveTabIndex).state();
-                        nextEngine = tabs.get(nextActiveTabIndex).engine();
-                        nextRenderPlanBuilder = tabs.get(nextActiveTabIndex).renderPlanBuilder();
-                    }
-                } else {
-                    found = nextEngine.findPrevious(
-                        searchQueryInput.text(),
-                        SearchController.toSearchOptions(nextSearchUi)
-                    );
-                }
-                if (found) {
-                    EditorViewNavigation.ensureCursorVisible(nextEngine,
-                        contentRows,
-                        contentCols,
-                        uiSessionState.wrapLinesSetting,
-                        uiSessionState.wrapWordsSetting
-                    );
-                }
-                statusMessage = found ? "Found previous match" : "Not found";
-            }
-            case SEARCH_REPLACE -> {
-                if (SearchController.isSearchActionFocus(searchFocus)) {
-                    focusSearch(searchBarPlacement, SearchFocus.REPLACE_BUTTON);
-                }
-                if (uiSessionState.readingModeSetting) {
-                    statusMessage = "Reading mode: replace is disabled";
-                } else {
-                    boolean replaced = nextEngine.replaceCurrentOrNext(
-                        searchQueryInput.text(),
-                        searchReplaceInput.text(),
-                        SearchController.toSearchOptions(nextSearchUi)
-                    );
-                    statusMessage = replaced ? "Replaced match" : "Nothing to replace";
-                }
-            }
-            case SEARCH_REPLACE_ALL -> {
-                if (SearchController.isSearchActionFocus(searchFocus)) {
-                    focusSearch(searchBarPlacement, SearchFocus.ALL_BUTTON);
-                }
-                if (uiSessionState.readingModeSetting) {
-                    statusMessage = "Reading mode: replace is disabled";
-                } else {
-                    int replaced = nextEngine.replaceAll(
-                        searchQueryInput.text(),
-                        searchReplaceInput.text(),
-                        SearchController.toSearchOptions(nextSearchUi)
-                    );
-                    statusMessage = replaced > 0
-                        ? "Replaced " + replaced + " occurrence(s). Undo available: Ctrl+Z"
-                        : "Nothing to replace";
-                    statusWarning = true;
-                }
-            }
-            case APP_QUIT -> {
-                if (uiSessionState.confirmOnCloseSetting && hasDirtyTabs(tabs)) {
-                    uiSessionState.searchMode = false;
-                    nextModalState = UiModalState.quitConfirm();
-                } else {
-                    nextRunning = false;
-                }
-            }
-            case DOCUMENT_SAVE -> {
-                if (nextState.getCurrentFile() == null) {
-                    uiSessionState.searchMode = false;
-                    nextModalState = UiModalState.saveAs();
-                    saveAsInput.set(
-                        saveAsSuggestions.suggestionFor(
-                            tabs.get(nextActiveTabIndex).tabSession(),
-                            nextState.getCurrentFile(),
-                            DEFAULT_FILE_NAME
-                        )
-                    );
-                    notification.clear();
-                } else if (isReadOnlyFile(nextState.getCurrentFile())) {
-                    uiSessionState.searchMode = false;
-                    nextModalState = UiModalState.saveAs();
-                    String suggestion = saveAsSuggestions.suggestionFor(
-                        tabs.get(nextActiveTabIndex).tabSession(),
-                        null,
-                        suggestWritableName(nextState.getCurrentFile())
-                    );
-                    saveAsInput.set(suggestion);
-                    saveAsSuggestions.rememberDraft(tabs.get(nextActiveTabIndex).tabSession(), suggestion);
-                    notification.error(readOnlySaveAsMessage(nextState.getCurrentFile()));
-                } else {
-                    try {
-                        nextEngine.save();
-                        saveAsSuggestions.rememberSavedPath(tabs.get(nextActiveTabIndex).tabSession(), nextState.getCurrentFile());
-                        notification.success(savedMessage(nextState));
-                    } catch (IOException e) {
-                        notification.error(saveErrorMessage(e));
-                    }
-                }
-            }
-            case DOCUMENT_OPEN -> {
-                uiSessionState.searchMode = false;
-                topMenu.close();
-                nextOpenFileMode = true;
-                openFileTree.setRoot(initialOpenRoot(nextState));
-                nextOpenFileFocus = OpenFileInputRouter.Focus.LIST;
-                statusMessage = "Open file";
-            }
-            case VIEW_CYCLE_THEME -> {
-                applyTheme(theme.next());
-                renderer.setTheme(theme);
-                statusMessage = "Theme: " + theme.label();
-            }
-            case TAB_NEW -> {
-                tabs.add(newEditorTab());
-                nextActiveTabIndex = tabs.size() - 1;
-                nextModel = tabs.get(nextActiveTabIndex).model();
-                nextState = tabs.get(nextActiveTabIndex).state();
-                nextEngine = tabs.get(nextActiveTabIndex).engine();
-                nextRenderPlanBuilder = tabs.get(nextActiveTabIndex).renderPlanBuilder();
-                uiSessionState.searchMode = false;
-                statusMessage = "New tab";
-            }
-            case TAB_NEXT -> {
-                nextActiveTabIndex = switchTab(tabs, nextActiveTabIndex, 1);
-                nextModel = tabs.get(nextActiveTabIndex).model();
-                nextState = tabs.get(nextActiveTabIndex).state();
-                nextEngine = tabs.get(nextActiveTabIndex).engine();
-                nextRenderPlanBuilder = tabs.get(nextActiveTabIndex).renderPlanBuilder();
-                uiSessionState.searchMode = false;
-            }
-            case TAB_PREVIOUS -> {
-                nextActiveTabIndex = switchTab(tabs, nextActiveTabIndex, -1);
-                nextModel = tabs.get(nextActiveTabIndex).model();
-                nextState = tabs.get(nextActiveTabIndex).state();
-                nextEngine = tabs.get(nextActiveTabIndex).engine();
-                nextRenderPlanBuilder = tabs.get(nextActiveTabIndex).renderPlanBuilder();
-                uiSessionState.searchMode = false;
-            }
-            case TAB_CLOSE -> {
-                if (nextState.isDirty() && uiSessionState.confirmOnCloseSetting) {
-                    nextModalState = UiModalState.closeTabConfirm(nextActiveTabIndex);
-                } else {
-                    nextActiveTabIndex = closeCurrentTab(tabs, nextActiveTabIndex, saveAsSuggestions);
-                    nextModel = tabs.get(nextActiveTabIndex).model();
-                    nextState = tabs.get(nextActiveTabIndex).state();
-                    nextEngine = tabs.get(nextActiveTabIndex).engine();
-                    nextRenderPlanBuilder = tabs.get(nextActiveTabIndex).renderPlanBuilder();
-                    uiSessionState.searchMode = false;
-                }
-            }
-            case DOCUMENT_SAVE_AS -> {
-                uiSessionState.searchMode = false;
-                nextModalState = UiModalState.saveAs();
-                saveAsInput.set(
-                    saveAsSuggestions.suggestionFor(
-                        tabs.get(nextActiveTabIndex).tabSession(),
-                        nextState.getCurrentFile(),
-                        DEFAULT_FILE_NAME
-                    )
-                );
-                notification.clear();
-            }
-            default -> {
-                InputActionDispatcher.DispatchResult dispatchResult = InputActionDispatcher.dispatch(
-                    action,
-                    uiSessionState,
-                    new InputActionDispatcher.DispatchContext(
-                        nextEngine,
-                        nextState,
-                        topMenu,
-                        mouseTrackingController,
-                        contentRows,
-                        contentCols,
-                        tabs.get(nextActiveTabIndex).navigation()
-                    )
-                );
-                if (dispatchResult.handled()) {
-                    statusMessage = dispatchResult.statusMessage();
-                    statusError = dispatchResult.statusLevel() == InputActionDispatcher.StatusLevel.ERROR;
-                    if (!statusError) {
-                        statusWarning = statusWarning
-                            || dispatchResult.statusLevel() == InputActionDispatcher.StatusLevel.WARNING;
-                    }
-                }
-            }
-        }
-
-        if (statusMessage != null && !statusMessage.isBlank()) {
-            if (statusError) {
-                notification.error(statusMessage);
-            } else if (statusWarning) {
-                notification.warning(statusMessage);
-            } else {
-                notification.info(statusMessage);
-            }
-        }
-
-        return new SearchModeResult(
-            true,
-            nextSearchUi,
-            nextActiveTabIndex,
-            nextModel,
-            nextState,
-            nextEngine,
-            nextRenderPlanBuilder,
-            nextRunning,
-            nextModalState,
-            nextOpenFileMode,
-            nextOpenFileFocus
-        );
-    }
-
-    record SearchModeResult(
-        boolean consumed,
-        SearchController.SearchUiOptions searchUi,
-        int activeTabIndex,
-        TextModel model,
-        EditorState state,
-        EditorEngine engine,
-        RenderPlanBuilder renderPlanBuilder,
-        boolean running,
-        UiModalState modalState,
-        boolean openFileMode,
-        OpenFileInputRouter.Focus openFileFocus
-    ) {
     }
 
     record EditorActionApplyResult(
@@ -1113,29 +599,9 @@ public class TerminalEditorApp {
         return searchFocusManager.focused().orElse(SearchFocus.FIND);
     }
 
-    static boolean isHistoryCommand(TuinkCommand command) {
-        return command == TuinkCommand.EDIT_UNDO || command == TuinkCommand.EDIT_REDO;
-    }
-
-    static boolean isSearchOperation(TuinkCommand command) {
-        return command == TuinkCommand.SEARCH_NEXT || command == TuinkCommand.SEARCH_PREVIOUS
-            || command == TuinkCommand.SEARCH_REPLACE || command == TuinkCommand.SEARCH_REPLACE_ALL;
-    }
-
     void focusSearch(SearchBarView.Placement placement, SearchFocus target) {
         if (placement != null && target != null) {
             searchFocusManager.focus(placement.focusScope(), target);
-        }
-    }
-
-    private void moveSearchFocus(SearchBarView.Placement placement, boolean forward) {
-        if (placement == null) {
-            return;
-        }
-        if (forward) {
-            searchFocusManager.next(placement.focusScope());
-        } else {
-            searchFocusManager.previous(placement.focusScope());
         }
     }
 
@@ -1167,18 +633,6 @@ public class TerminalEditorApp {
 
     static boolean searchOwnsInteractiveRow(UiModalState modalState) {
         return modalState != null && modalState.isNone();
-    }
-
-    /** A menu borrows raw input, while local edit commands retain the underlying focus. */
-    static boolean searchOwnsCommand(
-        boolean searchMode,
-        boolean searchEditorFocused,
-        boolean menuCommandSelected,
-        TuinkCommand command
-    ) {
-        return searchMode
-            && (!menuCommandSelected || isLocalSearchCommand(command))
-            && (!searchEditorFocused || isSearchOperation(command));
     }
 
     static boolean shouldExtendEditorSelection(TuiInputEvent event) {
@@ -2249,7 +1703,7 @@ public class TerminalEditorApp {
         return selected;
     }
 
-    private boolean focusCurrentMatchIfOffscreen(
+    boolean focusCurrentMatchIfOffscreen(
         TextModel model,
         EditorState state,
         EditorEngine engine,
@@ -2263,8 +1717,7 @@ public class TerminalEditorApp {
         if (query == null || query.isEmpty()) {
             return false;
         }
-        String selected = selectionQueryForCtrlF(model, state);
-        if (selected == null || !searchSelectionMatchesQuery(model, state, query, options)) {
+        if (!searchSelectionMatchesQuery(model, state, query, options)) {
             return false;
         }
         int topBefore = state.getTopLine();
@@ -2537,7 +1990,8 @@ public class TerminalEditorApp {
             if (entry == null || entry.snapshot() == null) {
                 continue;
             }
-            TabSession tabSession = TabSession.createEmpty(TerminalEditorTextLayout::new, clipboard);
+            TuiDocumentSession documentSession = TuiDocumentSession.create(clipboard);
+            TabSession tabSession = documentSession.view();
             tabSession.engine().restoreRecoverySnapshot(entry.snapshot());
             RenderPlanBuilder builder = new RenderPlanBuilder(
                 resolveHighlighter(tabSession.state().getCurrentFile()),
@@ -2547,7 +2001,9 @@ public class TerminalEditorApp {
             // for this tab. The next autosave updates the same entry instead of
             // creating a gap in which neither the old nor a new snapshot exists.
             recoveryAutosave.adoptSnapshot(tabSession, entry.id(), nowNanos);
-            restored.add(new EditorTab(tabSession, builder));
+            EditorTab tab = new EditorTab(documentSession, builder);
+            tab.viewportController().onRecoveredViewport();
+            restored.add(tab);
         }
         if (restored.isEmpty()) {
             return 0;
@@ -2702,8 +2158,8 @@ public class TerminalEditorApp {
     }
 
     EditorTab newEditorTab() {
-        TabSession session = TabSession.createEmpty(TerminalEditorTextLayout::new, clipboard);
-        RenderPlanBuilder builder = new RenderPlanBuilder(RegexHighlighter.withDefaults(), session.textLayout());
+        TuiDocumentSession session = TuiDocumentSession.create(clipboard);
+        RenderPlanBuilder builder = new RenderPlanBuilder(RegexHighlighter.withDefaults(), session.view().textLayout());
         return new EditorTab(session, builder);
     }
 
@@ -2810,43 +2266,47 @@ public class TerminalEditorApp {
     }
 
     record EditorTab(
-        TabSession tabSession,
+        TuiDocumentSession documentSession,
         RenderPlanBuilder renderPlanBuilder,
         ViewportController viewportController,
         EditorViewNavigation navigation
     ) {
-        EditorTab(TabSession tabSession, RenderPlanBuilder renderPlanBuilder) {
-            this(tabSession, renderPlanBuilder, new ViewportController(), new EditorViewNavigation(tabSession.engine()));
+        EditorTab(TuiDocumentSession documentSession, RenderPlanBuilder renderPlanBuilder) {
+            this(documentSession, renderPlanBuilder, new ViewportController(), new EditorViewNavigation(documentSession.view().engine()));
         }
 
         EditorTab {
-            if (tabSession == null
+            if (documentSession == null
                 || renderPlanBuilder == null
                 || viewportController == null
-                || navigation == null || navigation.engine() != tabSession.engine()
-                || renderPlanBuilder.textLayout() != tabSession.textLayout()) {
+                || navigation == null || navigation.engine() != documentSession.view().engine()
+                || renderPlanBuilder.textLayout() != documentSession.view().textLayout()) {
                 throw new IllegalArgumentException("tab components must share one textLayout");
             }
         }
 
+        TabSession tabSession() {
+            return documentSession.view();
+        }
+
         private TextModel model() {
-            return tabSession.model();
+            return tabSession().model();
         }
 
         EditorState state() {
-            return tabSession.state();
+            return tabSession().state();
         }
 
         private EditorEngine engine() {
-            return tabSession.engine();
+            return tabSession().engine();
         }
 
         private EditorTextLayout textLayout() {
-            return tabSession.textLayout();
+            return tabSession().textLayout();
         }
 
         private EditorTab withRenderPlanBuilder(RenderPlanBuilder nextBuilder) {
-            return new EditorTab(tabSession, nextBuilder, viewportController, navigation);
+            return new EditorTab(documentSession, nextBuilder, viewportController, navigation);
         }
     }
 

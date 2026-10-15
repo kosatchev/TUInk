@@ -176,7 +176,7 @@ public final class SearchBarView {
             SearchNavigation.order(),
             SearchNavigation.order()
         );
-        return new Placement(row1, row2, scope);
+        return new Placement(row1, row2, scope, queryField, replacementField);
     }
 
     /** Typed application intents emitted by the composed reusable controls. */
@@ -200,15 +200,21 @@ public final class SearchBarView {
         private final String row1;
         private final String row2;
         private final FocusScope<SearchFocus, Action> focusScope;
+        private final TextField queryField;
+        private final TextField replacementField;
 
         private Placement(
             String row1,
             String row2,
-            FocusScope<SearchFocus, Action> focusScope
+            FocusScope<SearchFocus, Action> focusScope,
+            TextField queryField,
+            TextField replacementField
         ) {
             this.row1 = Objects.requireNonNull(row1, "row1");
             this.row2 = Objects.requireNonNull(row2, "row2");
             this.focusScope = Objects.requireNonNull(focusScope, "focusScope");
+            this.queryField = Objects.requireNonNull(queryField, "queryField");
+            this.replacementField = Objects.requireNonNull(replacementField, "replacementField");
         }
 
         public String text() {
@@ -225,6 +231,18 @@ public final class SearchBarView {
 
         public FocusScope<SearchFocus, Action> focusScope() {
             return focusScope;
+        }
+
+        /** The enabled buffer for an explicitly selected recipient; never falls back to Find. */
+        public Optional<TextField> field(SearchFocus targetId) {
+            if (targetId == null || !focusScope.target(targetId).map(RoutedTarget::enabled).orElse(false)) {
+                return Optional.empty();
+            }
+            return switch (targetId) {
+                case FIND -> Optional.of(queryField);
+                case REPLACE -> Optional.of(replacementField);
+                default -> Optional.empty();
+            };
         }
 
         public Rect targetBounds(SearchFocus target) {

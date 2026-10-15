@@ -21,6 +21,7 @@ The scenarios protect the following user behavior:
 | `resize` | Wrapped text retains its textual anchor when terminal width/height change |
 | `tabs` | Save, Copy, and returning to a tab preserve its independent viewport |
 | `history` | Undo/Redo through the real keymap preserve Unicode text and grouping |
+| `gutter-idle` | Deferred change markers appear after rapid edits and clear after Undo without another input event |
 | `recovery` | After autosave and a forced crash, a second process restores and saves unsaved edits |
 
 For an already built install layout, select scenarios directly:

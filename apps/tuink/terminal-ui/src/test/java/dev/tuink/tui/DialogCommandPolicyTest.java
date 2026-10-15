@@ -8,6 +8,7 @@ import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.Position;
 import dev.tuink.core.TabSession;
 import dev.tuink.render.TerminalEditorTextLayout;
+import dev.tuink.render.EditorViewNavigation;
 import dev.tuink.tui.command.TuinkCommand;
 import dev.tuink.tui.ui.SaveAsBarView;
 import dev.tuiframe.input.KeyStroke;
@@ -237,7 +238,7 @@ class DialogCommandPolicyTest {
                 if (!decision.consumed()) {
                     InputActionDispatcher.dispatch(command, fixture.ui,
                         new InputActionDispatcher.DispatchContext(fixture.tab.engine(), fixture.tab.state(),
-                            fixture.topMenu, ignored -> {}, 3, 12));
+                            fixture.topMenu, ignored -> {}, 3, 12, fixture.navigation));
                 }
                 assertTrue(decision.consumed(), mode + " " + command);
                 assertEquals(modelBefore, fixture.tab.model().snapshotLines());
@@ -276,7 +277,7 @@ class DialogCommandPolicyTest {
         TabSession tab = TabSession.createEmpty(TerminalEditorTextLayout::new, clipboard);
         tab.engine().insertInput("alpha 👩‍💻 e\u0301\nsecond 中🦀\nthird line");
         tab.state().setCursor(new Position(1, 3));
-        return new Fixture(tab, clipboard, new UiSessionState(), new TopMenuController());
+        return new Fixture(tab, clipboard, new UiSessionState(), new TopMenuController(), new EditorViewNavigation(tab.engine()));
     }
 
     private static Decision routeContent(Fixture fixture, TuiInputEvent event, TuinkCommand command) {
@@ -298,11 +299,12 @@ class DialogCommandPolicyTest {
         } else if (command != null) {
             assertTrue(InputActionDispatcher.dispatch(command, fixture.ui,
                 new InputActionDispatcher.DispatchContext(fixture.tab.engine(), fixture.tab.state(),
-                    fixture.topMenu, ignored -> {}, 3, 12)).handled(), command.toString());
+                    fixture.topMenu, ignored -> {}, 3, 12, fixture.navigation)).handled(), command.toString());
         }
         return decision;
     }
 
-    private record Fixture(TabSession tab, EditorClipboard clipboard, UiSessionState ui, TopMenuController topMenu) {
+    private record Fixture(TabSession tab, EditorClipboard clipboard, UiSessionState ui, TopMenuController topMenu,
+        EditorViewNavigation navigation) {
     }
 }

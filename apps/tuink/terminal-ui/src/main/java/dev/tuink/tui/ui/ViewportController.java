@@ -9,10 +9,6 @@ import dev.tuink.render.EditorViewCoordinates;
 import dev.tuink.render.EditorViewCoordinates.Geometry;
 import dev.tuink.render.EditorViewCoordinates.Top;
 import dev.tuink.render.EditorViewNavigation;
-import dev.tuink.tui.command.TuinkCommand;
-import dev.tuink.tui.input.EditorInput;
-import dev.tuiframe.input.PasteEvent;
-import dev.tuiframe.input.TextInput;
 import dev.tuiframe.scroll.ScrollInteraction;
 
 /**
@@ -23,39 +19,32 @@ public final class ViewportController {
     private boolean manualVerticalPan;
     private ViewportSnapshot previousViewport;
 
-    public void onInput(EditorInput input, boolean selectionPresent) {
-        onInput(input, selectionPresent, true);
+    /** Applied by a completed command's recipient, after local policy and mutation. */
+    public enum CursorPolicy {
+        PRESERVE,
+        FOLLOW_CURSOR,
+        PAGE_SCROLL
     }
 
-    public void onInput(EditorInput input, boolean selectionPresent, boolean documentEditingAllowed) {
-        TuinkCommand command = input.command();
-        boolean textInput = input.event() instanceof TextInput
-            || input.event() instanceof PasteEvent paste && !paste.truncated() && !paste.text().isEmpty();
-        if (!documentEditingAllowed && (command == null ? textInput : command.editsDocumentText())) {
-            return;
+    public void onCommandResult(CursorPolicy policy) {
+        switch (policy) {
+            case PRESERVE -> { }
+            case FOLLOW_CURSOR -> {
+                manualHorizontalPan = false;
+                manualVerticalPan = false;
+            }
+            case PAGE_SCROLL -> {
+                manualHorizontalPan = false;
+                manualVerticalPan = true;
+            }
         }
-        if (command == null ? !textInput : !interactsWithDocumentText(command)) {
-            return;
-        }
-        manualHorizontalPan = false;
-        manualVerticalPan = selectionPresent && (
-            command == TuinkCommand.CURSOR_PAGE_UP || command == TuinkCommand.CURSOR_PAGE_DOWN
-        );
     }
 
-    private static boolean interactsWithDocumentText(TuinkCommand command) {
-        // Saving, copying and UI commands leave a manually chosen reading position intact.
-        return switch (command) {
-            case EDIT_UNDO, EDIT_REDO, EDIT_CUT, EDIT_PASTE, EDIT_SELECT_ALL,
-                EDIT_TOGGLE_LINE_COMMENT, EDIT_INSERT_TAB, EDIT_INSERT_NEWLINE,
-                EDIT_BACKSPACE, EDIT_DELETE_FORWARD,
-                CURSOR_UP, CURSOR_DOWN, CURSOR_LEFT, CURSOR_RIGHT,
-                CURSOR_SELECT_UP, CURSOR_SELECT_DOWN, CURSOR_SELECT_LEFT, CURSOR_SELECT_RIGHT,
-                CURSOR_WORD_LEFT, CURSOR_WORD_RIGHT, CURSOR_PAGE_UP, CURSOR_PAGE_DOWN,
-                CURSOR_HOME, CURSOR_END,
-                SEARCH_NEXT, SEARCH_PREVIOUS, SEARCH_REPLACE, SEARCH_REPLACE_ALL -> true;
-            default -> false;
-        };
+    /** Recovery restores a reading position before the first visible frame. */
+    public void onRecoveredViewport() {
+        manualHorizontalPan = true;
+        manualVerticalPan = true;
+        previousViewport = null;
     }
 
     public void onManualVerticalPan() {
@@ -64,8 +53,7 @@ public final class ViewportController {
 
     public void onEditorTextInteraction() {
         // Returning focus to the text area should restore cursor-follow behavior.
-        manualHorizontalPan = false;
-        manualVerticalPan = false;
+        onCommandResult(CursorPolicy.FOLLOW_CURSOR);
     }
 
     public void onScrollbarInteraction(

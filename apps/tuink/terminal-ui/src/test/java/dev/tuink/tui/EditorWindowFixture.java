@@ -20,6 +20,7 @@ import dev.tuink.editor.command.CommandInvocation;
 import dev.tuink.render.RenderPlan;
 import dev.tuink.tui.command.TuinkCommand;
 import dev.tuink.tui.flow.AppSettings;
+import dev.tuink.tui.flow.RecoveryStore;
 import dev.tuink.tui.flow.SaveAsSuggestionStore;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.flow.UiModalState;
@@ -59,6 +60,8 @@ final class EditorWindowFixture implements AutoCloseable {
     final EditorWindowController controller;
     final Path document;
     final ObservedRasterizer renderer;
+    final Map<String, RecoverySnapshot> recoverySnapshots = new HashMap<>();
+    final TerminalEditorApp.RecoveryAutosaveManager recoveryManager;
     int width = 80;
     int height = 24;
 
@@ -84,16 +87,15 @@ final class EditorWindowFixture implements AutoCloseable {
             settings.tabInsertMode(), false, false, false);
         renderer = new ObservedRasterizer(host.theme);
         ScreenPresenter presenter = new ScreenPresenter(new PrintWriter(new StringWriter()), TerminalCapabilities.DEFAULT);
-        Map<String, RecoverySnapshot> recovery = new HashMap<>();
-        var recoveryManager = new TerminalEditorApp.RecoveryAutosaveManager(new TerminalEditorApp.RecoveryPersistence() {
+        recoveryManager = new TerminalEditorApp.RecoveryAutosaveManager(new TerminalEditorApp.RecoveryPersistence() {
             @Override
             public void save(String entryId, RecoverySnapshot snapshot) {
-                recovery.put(entryId, snapshot);
+                recoverySnapshots.put(entryId, snapshot);
             }
 
             @Override
             public void delete(String entryId) {
-                recovery.remove(entryId);
+                recoverySnapshots.remove(entryId);
             }
         });
         controller = new EditorWindowController(host, new EditorWindowController.Resources(
@@ -112,6 +114,13 @@ final class EditorWindowFixture implements AutoCloseable {
 
     TerminalEditorApp.EditorTab active() {
         return tabs.get(context.activeTabIndex());
+    }
+
+    int restore(List<RecoveryStore.Entry> entries) {
+        for (RecoveryStore.Entry entry : entries) {
+            recoverySnapshots.put(entry.id(), entry.snapshot());
+        }
+        return host.restoreRecoveredTabs(entries, tabs, context, recoveryManager, 0L);
     }
 
     void event(TuiInputEvent event) {

@@ -14,6 +14,8 @@ import dev.tuiframe.widget.TextField;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.flow.SearchNavigation;
 import dev.tuink.tui.ui.SearchBarView;
+import dev.tuink.tui.command.TuinkCommand;
+import dev.tuink.core.EditorClipboard;
 import java.util.Objects;
 import java.util.Set;
 
@@ -35,6 +37,41 @@ final class SearchInputRouter {
     }
 
     private SearchInputRouter() {
+    }
+
+    static Result routeCommand(FocusManager<SearchFocus> focusManager, SearchBarView.Placement placement,
+        TuinkCommand command, EditorClipboard clipboard) {
+        Objects.requireNonNull(focusManager, "focusManager");
+        Objects.requireNonNull(placement, "placement");
+        Objects.requireNonNull(command, "command");
+        placement.activate(focusManager);
+        SearchFocus focused = focusManager.focused().orElse(null);
+        ControlCommandRouter.ClipboardResult copied = ControlCommandRouter.clipboard(command,
+            placement.field(focused).orElse(null), clipboard);
+        if (copied.handled()) {
+            return copied.valueChanged() ? Result.action(focused == SearchFocus.REPLACE
+                ? SearchBarView.Action.REPLACEMENT_CHANGED : SearchBarView.Action.QUERY_CHANGED) : Result.CAPTURED;
+        }
+        // Search page keys belong to the document viewport, independently of field focus.
+        if (command == TuinkCommand.CURSOR_PAGE_UP || command == TuinkCommand.CURSOR_PAGE_DOWN) {
+            return Result.IGNORED;
+        }
+        SearchBarView.Action intent = switch (command) {
+            case SEARCH_NEXT -> SearchBarView.Action.FIND_NEXT;
+            case SEARCH_PREVIOUS -> SearchBarView.Action.FIND_PREVIOUS;
+            case SEARCH_REPLACE -> SearchBarView.Action.REPLACE;
+            case SEARCH_REPLACE_ALL -> SearchBarView.Action.REPLACE_ALL;
+            default -> null;
+        };
+        if (intent != null) {
+            return Result.action(intent);
+        }
+        KeyStroke event = ControlCommandRouter.eventFor(command).orElse(null);
+        if (event != null) {
+            Result routed = route(focusManager, placement, event);
+            return routed.consumed() ? routed : Result.CAPTURED;
+        }
+        return ControlCommandRouter.unsupportedLocally(command) ? Result.CAPTURED : Result.IGNORED;
     }
 
     static Result route(

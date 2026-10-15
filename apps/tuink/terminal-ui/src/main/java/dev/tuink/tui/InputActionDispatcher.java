@@ -14,6 +14,9 @@ import dev.tuink.core.TabInsertMode;
 import dev.tuink.editor.command.CommandInvocation;
 import dev.tuink.render.EditorViewNavigation;
 import dev.tuink.tui.command.TuinkCommand;
+import dev.tuink.tui.ui.ViewportController.CursorPolicy;
+import dev.tuink.core.Position;
+import java.util.Objects;
 import java.util.function.Consumer;
 
 final class InputActionDispatcher {
@@ -21,6 +24,14 @@ final class InputActionDispatcher {
     }
 
     static DispatchResult dispatch(TuinkCommand command, UiSessionState ui, DispatchContext ctx) {
+        DocumentInteraction before = DocumentInteraction.capture(ctx.engine());
+        DispatchResult result = execute(command, ui, ctx);
+        return result.handled() && before.changed(ctx.engine())
+            && result.viewportPolicy() == CursorPolicy.PRESERVE
+            ? result.withViewportPolicy(CursorPolicy.FOLLOW_CURSOR) : result;
+    }
+
+    private static DispatchResult execute(TuinkCommand command, UiSessionState ui, DispatchContext ctx) {
         if (ui.readingModeSetting && command.editsDocumentText()) {
             return DispatchResult.handled("Reading mode: editing is disabled");
         }
@@ -256,51 +267,53 @@ final class InputActionDispatcher {
             }
             case CURSOR_UP -> {
                 ctx.navigation().moveUp(false, ctx.contentColumns(), ui.wrapLinesSetting, ui.wrapWordsSetting);
-                return DispatchResult.handled(null);
+                return DispatchResult.followCursor();
             }
             case CURSOR_DOWN -> {
                 ctx.navigation().moveDown(false, ctx.contentColumns(), ui.wrapLinesSetting, ui.wrapWordsSetting);
-                return DispatchResult.handled(null);
+                return DispatchResult.followCursor();
             }
             case CURSOR_LEFT -> {
                 ctx.engine().moveLeft();
-                return DispatchResult.handled(null);
+                return DispatchResult.followCursor();
             }
             case CURSOR_RIGHT -> {
                 ctx.engine().moveRight();
-                return DispatchResult.handled(null);
+                return DispatchResult.followCursor();
             }
             case CURSOR_SELECT_UP -> {
                 ctx.navigation().moveUp(true, ctx.contentColumns(), ui.wrapLinesSetting, ui.wrapWordsSetting);
-                return DispatchResult.handled(null);
+                return DispatchResult.followCursor();
             }
             case CURSOR_SELECT_DOWN -> {
                 ctx.navigation().moveDown(true, ctx.contentColumns(), ui.wrapLinesSetting, ui.wrapWordsSetting);
-                return DispatchResult.handled(null);
+                return DispatchResult.followCursor();
             }
             case CURSOR_SELECT_LEFT -> {
                 ctx.engine().moveLeft(true);
-                return DispatchResult.handled(null);
+                return DispatchResult.followCursor();
             }
             case CURSOR_SELECT_RIGHT -> {
                 ctx.engine().moveRight(true);
-                return DispatchResult.handled(null);
+                return DispatchResult.followCursor();
             }
             case CURSOR_WORD_LEFT -> {
                 ctx.engine().moveWordLeft();
-                return DispatchResult.handled(null);
+                return DispatchResult.followCursor();
             }
             case CURSOR_WORD_RIGHT -> {
                 ctx.engine().moveWordRight();
-                return DispatchResult.handled(null);
+                return DispatchResult.followCursor();
             }
             case CURSOR_PAGE_UP -> {
                 ctx.navigation().pageUp(ctx.contentRows(), ctx.contentColumns(), ui.wrapLinesSetting, ui.wrapWordsSetting);
-                return DispatchResult.handled(null);
+                return DispatchResult.handled(null).withViewportPolicy(ctx.engine().hasSelection()
+                    ? CursorPolicy.PAGE_SCROLL : CursorPolicy.FOLLOW_CURSOR);
             }
             case CURSOR_PAGE_DOWN -> {
                 ctx.navigation().pageDown(ctx.contentRows(), ctx.contentColumns(), ui.wrapLinesSetting, ui.wrapWordsSetting);
-                return DispatchResult.handled(null);
+                return DispatchResult.handled(null).withViewportPolicy(ctx.engine().hasSelection()
+                    ? CursorPolicy.PAGE_SCROLL : CursorPolicy.FOLLOW_CURSOR);
             }
             case CURSOR_HOME -> {
                 if (ui.smartHomeEndSetting) {
@@ -308,7 +321,7 @@ final class InputActionDispatcher {
                 } else {
                     ctx.engine().moveHome();
                 }
-                return DispatchResult.handled(null);
+                return DispatchResult.followCursor();
             }
             case CURSOR_END -> {
                 if (ui.smartHomeEndSetting) {
@@ -316,7 +329,7 @@ final class InputActionDispatcher {
                 } else {
                     ctx.engine().moveEnd();
                 }
-                return DispatchResult.handled(null);
+                return DispatchResult.followCursor();
             }
             case EDIT_BACKSPACE -> {
                 ctx.engine().backspace();
@@ -360,12 +373,6 @@ final class InputActionDispatcher {
         int contentColumns,
         EditorViewNavigation navigation
     ) {
-        DispatchContext(EditorEngine engine, EditorState state, TopMenuController topMenu,
-            Consumer<Boolean> mouseTrackingController, int contentRows, int contentColumns) {
-            this(engine, state, topMenu, mouseTrackingController, contentRows, contentColumns,
-                engine == null ? null : new EditorViewNavigation(engine));
-        }
-
         DispatchContext {
             if (mouseTrackingController == null) {
                 throw new IllegalArgumentException("mouseTrackingController must not be null");
@@ -383,17 +390,40 @@ final class InputActionDispatcher {
         ERROR
     }
 
-    record DispatchResult(boolean handled, String statusMessage, StatusLevel statusLevel) {
+    /** Result of the selected recipient; viewport policy follows executed effects. */
+    record DispatchResult(boolean handled, String statusMessage, StatusLevel statusLevel, CursorPolicy viewportPolicy) {
         static DispatchResult handled(String statusMessage) {
             return handled(statusMessage, StatusLevel.INFO);
         }
 
         static DispatchResult handled(String statusMessage, StatusLevel statusLevel) {
-            return new DispatchResult(true, statusMessage, statusLevel);
+            return new DispatchResult(true, statusMessage, statusLevel, CursorPolicy.PRESERVE);
+        }
+
+        static DispatchResult followCursor() {
+            return handled(null).withViewportPolicy(CursorPolicy.FOLLOW_CURSOR);
+        }
+
+        DispatchResult withViewportPolicy(CursorPolicy policy) {
+            return new DispatchResult(handled, statusMessage, statusLevel, Objects.requireNonNull(policy));
         }
 
         static DispatchResult notHandled() {
-            return new DispatchResult(false, null, StatusLevel.INFO);
+            return new DispatchResult(false, null, StatusLevel.INFO, CursorPolicy.PRESERVE);
+        }
+    }
+
+    private record DocumentInteraction(long revision, Position cursor, Position selection) {
+        static DocumentInteraction capture(EditorEngine engine) {
+            return engine == null ? new DocumentInteraction(-1, null, null)
+                : new DocumentInteraction(engine.model().revision(), engine.state().getCursor(),
+                    engine.state().getSelectionAnchor());
+        }
+
+        boolean changed(EditorEngine engine) {
+            return engine != null && (revision != engine.model().revision()
+                || !Objects.equals(cursor, engine.state().getCursor())
+                || !Objects.equals(selection, engine.state().getSelectionAnchor()));
         }
     }
 }

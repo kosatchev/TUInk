@@ -10,6 +10,7 @@ import dev.tuink.core.TabSession;
 import dev.tuink.render.TerminalEditorTextLayout;
 import dev.tuink.render.EditorViewNavigation;
 import dev.tuink.tui.command.TuinkCommand;
+import dev.tuink.tui.ui.ViewportController.CursorPolicy;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
@@ -45,7 +46,7 @@ class InputActionDispatcherTest {
         UiSessionState ui = new UiSessionState();
         ui.wrapLinesSetting = true;
         InputActionDispatcher.DispatchContext context = new InputActionDispatcher.DispatchContext(
-            tab.engine(), tab.state(), null, ignored -> {}, 3, 4
+            tab.engine(), tab.state(), null, ignored -> {}, 3, 4, new EditorViewNavigation(tab.engine())
         );
 
         InputActionDispatcher.dispatch(TuinkCommand.CURSOR_DOWN, ui, context);
@@ -92,6 +93,7 @@ class InputActionDispatcherTest {
             );
 
             assertTrue(result.handled(), command.toString());
+            assertEquals(CursorPolicy.PRESERVE, result.viewportPolicy(), command.toString());
             assertEquals("Reading mode: editing is disabled", result.statusMessage(), command.toString());
         }
     }
@@ -101,7 +103,7 @@ class InputActionDispatcherTest {
         TabSession tab = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
         UiSessionState ui = new UiSessionState();
         InputActionDispatcher.DispatchContext context = new InputActionDispatcher.DispatchContext(
-            tab.engine(), tab.state(), null, ignored -> {}, 24, 80
+            tab.engine(), tab.state(), null, ignored -> {}, 24, 80, new EditorViewNavigation(tab.engine())
         );
         tab.engine().insertInput("abc");
         long editedRevision = tab.model().revision();
@@ -178,6 +180,48 @@ class InputActionDispatcherTest {
         assertFalse(enabled.get());
     }
 
+    @Test
+    void viewportPolicyComesFromExecutedMutationRatherThanCommandName() {
+        EditorClipboard clipboard = new EditorClipboard();
+        TabSession tab = TabSession.createEmpty(TerminalEditorTextLayout::new, clipboard);
+        UiSessionState ui = new UiSessionState();
+        var context = new InputActionDispatcher.DispatchContext(tab.engine(), tab.state(), null,
+            ignored -> {}, 3, 8, new EditorViewNavigation(tab.engine()));
+        for (TuinkCommand noEffect : List.of(TuinkCommand.EDIT_PASTE, TuinkCommand.EDIT_UNDO,
+            TuinkCommand.EDIT_REDO, TuinkCommand.EDIT_DELETE_FORWARD, TuinkCommand.EDIT_BACKSPACE,
+            TuinkCommand.EDIT_COPY)) {
+            assertEquals(CursorPolicy.PRESERVE,
+                InputActionDispatcher.dispatch(noEffect, ui, context).viewportPolicy(), noEffect.name());
+        }
+        clipboard.setText("inserted");
+        assertEquals(CursorPolicy.FOLLOW_CURSOR,
+            InputActionDispatcher.dispatch(TuinkCommand.EDIT_PASTE, ui, context).viewportPolicy());
+        assertEquals("inserted", tab.model().getLine(0));
+        assertEquals(CursorPolicy.PRESERVE,
+            InputActionDispatcher.dispatch(TuinkCommand.EDIT_COPY, ui, context).viewportPolicy());
+        assertEquals(CursorPolicy.FOLLOW_CURSOR,
+            InputActionDispatcher.dispatch(TuinkCommand.EDIT_UNDO, ui, context).viewportPolicy());
+    }
+
+    @Test
+    void pageWithSelectionReturnsTheVerticalPanEffectAfterNavigation() {
+        TabSession tab = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
+        tab.engine().insertInput("abcdefghijklmnopqrstuvwxyz1234");
+        tab.engine().moveHome();
+        UiSessionState ui = new UiSessionState();
+        ui.wrapLinesSetting = true;
+        var context = new InputActionDispatcher.DispatchContext(tab.engine(), tab.state(), null,
+            ignored -> {}, 3, 4, new EditorViewNavigation(tab.engine()));
+        InputActionDispatcher.dispatch(TuinkCommand.CURSOR_SELECT_DOWN, ui, context);
+        Position cursor = tab.state().getCursor();
+
+        var result = InputActionDispatcher.dispatch(TuinkCommand.CURSOR_PAGE_DOWN, ui, context);
+
+        assertEquals(CursorPolicy.PAGE_SCROLL, result.viewportPolicy());
+        assertEquals(cursor, tab.state().getCursor());
+        assertTrue(tab.state().getTopWrapSegment() > 0);
+    }
+
     private static InputActionDispatcher.DispatchContext context(
         java.util.function.Consumer<Boolean> mouseTrackingController
     ) {
@@ -187,7 +231,8 @@ class InputActionDispatcherTest {
             null,
             mouseTrackingController,
             0,
-            0
+            0,
+            null
         );
     }
 }

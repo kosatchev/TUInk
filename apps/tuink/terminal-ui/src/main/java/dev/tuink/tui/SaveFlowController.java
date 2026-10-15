@@ -3,8 +3,6 @@ package dev.tuink.tui;
 import dev.tuink.core.SaveDisposition;
 import dev.tuink.tui.flow.UiModalState;
 import dev.tuink.tui.command.TuinkCommand;
-import dev.tuink.tui.input.EditorInput;
-import dev.tuiframe.input.TextInput;
 import java.nio.file.Path;
 import java.util.function.BiPredicate;
 import java.util.function.Function;
@@ -15,7 +13,7 @@ final class SaveFlowController {
     }
 
     static SaveAsResult handleSaveAsInput(
-        EditorInput input,
+        TuinkCommand command,
         UiModalState modalState,
         String saveAsText,
         Path currentFile,
@@ -29,16 +27,10 @@ final class SaveFlowController {
         if (!modalState.isSaveAs()) {
             return result(false, modalState, TextInputEffect.none(), false, null, null);
         }
-        if (input.event() instanceof TextInput textInput) {
-            return result(true, modalState, TextInputEffect.insert(textInput.text()), true, null, null);
-        }
-
-        TuinkCommand command = input.command();
         if (command == null) {
             return result(true, modalState, TextInputEffect.none(), false, null, null);
         }
         return switch (command) {
-            case EDIT_BACKSPACE -> result(true, modalState, TextInputEffect.backspace(), true, null, null);
             case EDIT_INSERT_NEWLINE -> handleEnter(
                 modalState,
                 saveAsText,
@@ -58,11 +50,6 @@ final class SaveFlowController {
                 null,
                 null
             );
-            case CURSOR_LEFT -> result(true, modalState, TextInputEffect.moveLeft(), false, null, null);
-            case CURSOR_RIGHT -> result(true, modalState, TextInputEffect.moveRight(), false, null, null);
-            case CURSOR_HOME -> result(true, modalState, TextInputEffect.moveHome(), false, null, null);
-            case CURSOR_END -> result(true, modalState, TextInputEffect.moveEnd(), false, null, null);
-            case EDIT_DELETE_FORWARD -> result(true, modalState, TextInputEffect.deleteForward(), false, null, null);
             default -> result(true, modalState, TextInputEffect.none(), false, null, null);
         };
     }
@@ -190,36 +177,8 @@ final class SaveFlowController {
             return new TextInputEffect(TextInputEffectKind.NONE, null);
         }
 
-        static TextInputEffect insert(String text) {
-            return new TextInputEffect(TextInputEffectKind.INSERT, text == null ? "" : text);
-        }
-
         static TextInputEffect setText(String text) {
             return new TextInputEffect(TextInputEffectKind.SET_TEXT, text);
-        }
-
-        static TextInputEffect backspace() {
-            return new TextInputEffect(TextInputEffectKind.BACKSPACE, null);
-        }
-
-        static TextInputEffect moveLeft() {
-            return new TextInputEffect(TextInputEffectKind.MOVE_LEFT, null);
-        }
-
-        static TextInputEffect moveRight() {
-            return new TextInputEffect(TextInputEffectKind.MOVE_RIGHT, null);
-        }
-
-        static TextInputEffect moveHome() {
-            return new TextInputEffect(TextInputEffectKind.MOVE_HOME, null);
-        }
-
-        static TextInputEffect moveEnd() {
-            return new TextInputEffect(TextInputEffectKind.MOVE_END, null);
-        }
-
-        static TextInputEffect deleteForward() {
-            return new TextInputEffect(TextInputEffectKind.DELETE_FORWARD, null);
         }
 
         static TextInputEffect clear() {
@@ -229,14 +188,7 @@ final class SaveFlowController {
 
     enum TextInputEffectKind {
         NONE,
-        INSERT,
         SET_TEXT,
-        BACKSPACE,
-        MOVE_LEFT,
-        MOVE_RIGHT,
-        MOVE_HOME,
-        MOVE_END,
-        DELETE_FORWARD,
         CLEAR
     }
 }

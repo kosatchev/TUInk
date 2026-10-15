@@ -1,8 +1,6 @@
 package dev.tuink.tui;
 
-import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.SearchOptions;
-import dev.tuiframe.widget.TextField;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.command.TuinkCommand;
 
@@ -59,25 +57,6 @@ final class SearchController {
 
     static boolean isSearchFieldFocus(SearchFocus focus) {
         return focus == SearchFocus.FIND || focus == SearchFocus.REPLACE;
-    }
-
-    /** Fields copy/cut their local selection; other search controls consume clipboard commands. */
-    static boolean handleFieldClipboard(
-        TuinkCommand command,
-        SearchFocus focus,
-        TextField query,
-        TextField replacement,
-        EditorClipboard clipboard
-    ) {
-        if (command != TuinkCommand.EDIT_COPY
-            && command != TuinkCommand.EDIT_CUT
-            && command != TuinkCommand.EDIT_PASTE) {
-            return false;
-        }
-        if (!isSearchFieldFocus(focus)) {
-            return true;
-        }
-        return FieldClipboard.handle(command, focus == SearchFocus.FIND ? query : replacement, clipboard);
     }
 
     static TuinkCommand actionForSearchFocus(SearchFocus focus) {

@@ -29,6 +29,7 @@ import dev.tuink.core.Position;
 import dev.tuink.core.SearchOptions;
 import dev.tuink.core.TabSession;
 import dev.tuink.render.TerminalEditorTextLayout;
+import dev.tuink.render.EditorViewNavigation;
 import dev.tuink.tui.command.TuinkCommand;
 import dev.tuink.tui.file.FileTreeModel;
 import dev.tuink.tui.flow.ConfirmChoice;
@@ -433,7 +434,7 @@ class DialogBehaviorIntegrationTest {
                 } else if (command != null) {
                     assertTrue(InputActionDispatcher.dispatch(command, document.ui,
                         new InputActionDispatcher.DispatchContext(document.tab.engine(), document.tab.state(),
-                            new TopMenuController(), ignored -> {}, 6, 30)).handled());
+                            new TopMenuController(), ignored -> {}, 6, 30, document.navigation)).handled());
                 }
             }
             return decision;
@@ -443,6 +444,7 @@ class DialogBehaviorIntegrationTest {
     private static final class Document {
         private final EditorClipboard clipboard = new EditorClipboard();
         private final TabSession tab = TabSession.createEmpty(TerminalEditorTextLayout::new, clipboard);
+        private final EditorViewNavigation navigation = new EditorViewNavigation(tab.engine());
         private final UiSessionState ui = new UiSessionState();
         private final List<String> beforeEdit;
         private final List<String> original;

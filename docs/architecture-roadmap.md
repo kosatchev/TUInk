@@ -12,11 +12,11 @@ TUInk развивается как приложение-редактор пов
 | `unicode-text` | grapheme boundaries, UTF-16 mapping и Unicode text operations |
 | `tuiframe-core` | geometry, physical events, cell metrics, line layout/cache, `Canvas`, `CellBuffer`, `Frame`, capabilities и event loop |
 | `tuiframe-jline` | JLine lifecycle, decoder, raw mode, signals, ANSI presenter и cleanup |
-| `tuiframe-widgets` | layout, focus, hit testing, theme и reusable widgets |
+| `tuiframe-widgets` | layout, focus, hit testing, общий захват мыши, theme и reusable widgets |
 | `editor-contract` | immutable command/document DTO, argument schemas, UTF-16 ranges и `WorkspaceEdit` |
-| `core` | text model, history, search, editor operations и terminal-neutral `EditorTextLayout` port |
+| `core` | общий документ/history, отдельные позиции views, search, editor operations и terminal-neutral `EditorTextLayout` port |
 | `editor-session` | command registry, owner-thread `EditorDocumentSession`, validation и bounded async ingress |
-| `render` | `EditorTextLayout` adapter, editor layout и render planning |
+| `render` | `EditorTextLayout` adapter, координаты/навигация представления, editor layout и render planning |
 | `highlight-regex` | встроенная regex-based подсветка |
 | `tui` | TUInk keymap, controllers, palettes, editor rasterization и widget adapters |
 | `app` | CLI target selection, composition и release assembly |
@@ -30,13 +30,17 @@ implementation dependency; его runtime пока включает зависи
 
 TUIframe использует namespace `dev.tuiframe.*` и не зависит от TUInk, editor или
 plugin model. `TuiApplicationRunner` управляет event loop и порядком кадров;
-private frontend session TUInk выполняет application maintenance, input
-routing и composition. `TerminalSession` владеет terminal resources и
+`EditorWindowController` выполняет application maintenance, input routing и
+composition через настоящий event-loop handler. `TerminalSession` владеет terminal resources и
 восстанавливает их после выхода, EOF, interrupt и исключений.
 
 Widgets получают presentation-only данные и immutable placements. Один
 placement задаёт рисование, hit testing, focus routing и cursor geometry.
 `FocusManager` управляет focus в переданном приложением `FocusScope`.
+`PointerCaptureManager` хранит только стабильный адрес surface/scope/target,
+а текущий placement и результат отмены получает из переданного snapshot.
+TUInk связывает разные типы scopes через `WindowPointerCapture.Frame` одного
+события; callbacks и placements не сохраняются менеджером между кадрами.
 `Button`, `Modal`, `TextField`, `ListView`, `TabBar`, `MenuBar` и `TreeView`
 остаются независимыми от editor state и filesystem. TUInk владеет file tree
 model, metadata worker, selection/viewport state и open/save/search/recovery
@@ -45,26 +49,47 @@ flows. `FrameComposition` объединяет geometry и placements одног
 render на owner thread.
 
 `core` сохраняет terminal-neutral layout port. `render` реализует его через
-`TerminalEditorTextLayout`; один adapter/cache на tab используется editing,
+`TerminalEditorTextLayout`; один adapter/cache на attached view используется editing,
 layout и render planning. Editor-specific `EditorLayout`, `RenderPlan` и
 `RenderRasterizer` принадлежат TUInk. Reusable painters используют clipped
 `Canvas`, а editor raster hot path работает с `CellBuffer`.
+`EditorViewCoordinates` объединяет hit testing, переносы, EOF и resize anchors;
+`EditorViewNavigation` владеет предпочтительной визуальной колонкой и использует
+логические navigation targets движка.
 
-`EditorDocumentSession` владеет headless document state, публикует immutable
-`DocumentSnapshot` и принимает revision-guarded `WorkspaceEdit`. Физическое
-разделение document state и frontend view state остаётся незавершённым:
-`EditorState` и прямые вызовы engine в TUI требуют дальнейшей миграции.
+`EditorDocumentSession` владеет общим `EditorDocument`, публикует immutable
+`DocumentSnapshot` и принимает revision-guarded `WorkspaceEdit`. У документа
+одни text model, file state, history и savepoint chain. `EditorDocumentState`
+хранит общие metadata, `EditorViewState` — отдельные cursor/selection/viewport,
+а `EditorState` служит compatibility facade над этими двумя компонентами.
+History связывает изменения текста с memento инициирующего view; derived gutter
+cache и layout принадлежат отдельному view, saved/open baselines — документу.
+Snapshot создаётся по запросу owner thread, а background read получает последний
+опубликованный immutable snapshot. Обычный ввод не копирует весь документ после
+каждой клавиши; перед запуском background work owner запрашивает текущую версию.
+
+`TuiDocumentSession` присоединяет terminal view через внутренний
+`CoreSessionBridge` и сохраняет его `TabSession` identity для recovery и Save As.
+Публичность bridge нужна для внутренней границы Java-модулей; архитектурные
+тесты запрещают его использование другими frontend-классами и утечку через
+portable facade. Перенос всех действий в frontend-neutral typed command/effect
+API остаётся следующей работой; прямые core-вызовы этого внутреннего адаптера не
+являются стабильным plugin API.
 
 Владение общими DTO описывает [ADR 0001](adr/0001-editor-contract-ownership.md),
 разделение document/session и frontend view state —
 [ADR 0002](adr/0002-session-and-frontend-view-state.md), async/failure model —
 [ADR 0003](adr/0003-async-and-plugin-failure-model.md), сохранение file metadata —
-[ADR 0004](adr/0004-document-file-fidelity.md).
+[ADR 0004](adr/0004-document-file-fidelity.md), focus/input/capture —
+[ADR 0005](adr/0005-dialog-input-and-focus.md).
 
 ## Архитектурные границы
 
 - Decoder выдаёт physical events. TUInk keymap и focus routing разрешают
   `CommandInvocation`; keyboard и menu используют один registry path.
+  `CommandRecipient` выбирает semantic получателя, `ControlCommandRouter`
+  приводит локальные команды к общему input path контролов. Viewport применяет
+  policy из результата исполнения, включая отклонённые команды.
 - Mutable editor state принадлежит session/engine thread. `WorkspaceEdit`
   проходит полную проверку document ID, revision, диапазонов и surrogate
   boundaries до atomic mutation с одной undo-операцией. Text ranges используют
@@ -117,15 +142,18 @@ Capability mapping и terminal matrix также требуют проверки
 
 ### Editor-session и frontend view state
 
-Session должна стать единственной точкой изменения editor state для обычного
-редактирования, menu, recovery и внешних providers. Для этого нужны:
+Общий документ и независимые core views уже разделены, TUInk подключён к
+`EditorDocumentSession`, а viewport и навигация принадлежат представлению.
+Следующий этап — сделать session единственной portable точкой изменения editor
+state для обычного редактирования, menu, recovery и внешних providers. Для
+этого нужны:
 
 - typed commands, `StateDelta`, `ChangeSet`, effects и revision-tagged events;
 - effect ports для file I/O, clipboard, settings и async work;
-- immutable editor/document snapshots и физическое разделение document state
-  от cursor/selection/viewport/focus каждого frontend view;
-- operation-based undo/redo для обычных editing paths;
-- перенос прямых вызовов `EditorEngine` из input/widget controllers в session;
+- frontend-neutral view snapshots и управление views поверх существующего
+  физического разделения document/view state;
+- перенос оставшихся прямых вызовов `EditorEngine` за portable session ports
+  с сохранением общей history и origin-view mementos;
 - детерминированная layout/view-model preparation из state, viewport и
   decorations.
 
@@ -224,5 +252,5 @@ alpha и появления независимого consumer.
 
 Terminal conformance определяется конечным экраном, корректными событиями и
 cleanup; конкретные ANSI bytes могут меняться при улучшении presenter.
-Ближайшие приоритеты — независимый log viewer и session/state separation,
-затем общие registries и plugin host.
+Ближайшие приоритеты — независимый log viewer и portable session command/effect
+API поверх разделённого state, затем общие registries и plugin host.

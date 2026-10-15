@@ -11,33 +11,17 @@ import dev.tuink.tui.flow.SaveContinuation;
 import dev.tuink.tui.flow.UiModalMode;
 import dev.tuink.tui.flow.UiModalState;
 import dev.tuink.tui.command.TuinkCommand;
-import dev.tuink.tui.input.EditorInput;
-import dev.tuiframe.input.KeyStroke;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class SaveFlowControllerTest {
     @Test
-    void printableUnicodeInputPreservesTheCompleteFilenameTextAndContinuation() {
-        UiModalState saveAs = UiModalState.saveAsForCloseTab(4);
-        String filename = "café中😀.txt";
-
-        SaveFlowController.SaveAsResult result = input(EditorInput.text(filename), saveAs);
-
-        assertTrue(result.consumed());
-        assertEquals(saveAs, result.modalState());
-        assertEquals(SaveFlowController.TextInputEffectKind.INSERT, result.textInputEffect().kind());
-        assertEquals(filename, result.textInputEffect().text());
-        assertNull(result.saveNowPath());
-    }
-
-    @Test
-    void unboundPhysicalInputKeepsTheSaveAsWorkflowWithoutEditingText() {
+    void absentSaveIntentKeepsTheWorkflowWithoutEditingText() {
         UiModalState saveAs = UiModalState.saveAsForQuit();
 
         SaveFlowController.SaveAsResult result = input(
-            new EditorInput(KeyStroke.of(KeyStroke.Key.F1), null),
+            null,
             saveAs
         );
 
@@ -50,7 +34,7 @@ class SaveFlowControllerTest {
     @Test
     void quitCommandCancelsSaveAsWithoutExecutingThePendingContinuation() {
         SaveFlowController.SaveAsResult result = input(
-            EditorInput.command(TuinkCommand.APP_QUIT),
+            TuinkCommand.APP_QUIT,
             UiModalState.saveAsForQuit()
         );
 
@@ -133,7 +117,7 @@ class SaveFlowControllerTest {
             for (TuinkCommand cancel : List.of(TuinkCommand.UI_ESCAPE, TuinkCommand.APP_QUIT)) {
                 SaveFlowController.SaveAsResult rejected = enter(saveAs, "", false, null);
 
-                SaveFlowController.SaveAsResult cancelled = input(EditorInput.command(cancel), rejected.modalState());
+                SaveFlowController.SaveAsResult cancelled = input(cancel, rejected.modalState());
 
                 assertTrue(cancelled.consumed());
                 assertEquals(UiModalState.none(), cancelled.modalState());
@@ -162,7 +146,7 @@ class SaveFlowControllerTest {
     @Test
     void existingCurrentFileCarriesExplicitReplaceAuthorization() {
         SaveFlowController.SaveAsResult result = SaveFlowController.handleSaveAsInput(
-            EditorInput.command(TuinkCommand.EDIT_INSERT_NEWLINE),
+            TuinkCommand.EDIT_INSERT_NEWLINE,
             UiModalState.saveAs(),
             "current.txt",
             Path.of("current.txt"),
@@ -181,7 +165,7 @@ class SaveFlowControllerTest {
     @Test
     void externallyCreatedExpectedAbsentPathStillRequiresOverwriteConfirmation() {
         SaveFlowController.SaveAsResult result = SaveFlowController.handleSaveAsInput(
-            EditorInput.command(TuinkCommand.EDIT_INSERT_NEWLINE),
+            TuinkCommand.EDIT_INSERT_NEWLINE,
             UiModalState.saveAs(),
             "current.txt",
             Path.of("current.txt"),
@@ -215,7 +199,7 @@ class SaveFlowControllerTest {
     @Test
     void escapeCancelsPendingContinuation() {
         SaveFlowController.SaveAsResult result = SaveFlowController.handleSaveAsInput(
-            EditorInput.command(TuinkCommand.UI_ESCAPE),
+            TuinkCommand.UI_ESCAPE,
             UiModalState.saveAsForQuit(),
             "saved.txt",
             null,
@@ -231,7 +215,7 @@ class SaveFlowControllerTest {
         assertEquals(SaveContinuation.NONE, result.modalState().saveContinuation());
     }
 
-    private static SaveFlowController.SaveAsResult input(EditorInput input, UiModalState modalState) {
+    private static SaveFlowController.SaveAsResult input(TuinkCommand input, UiModalState modalState) {
         return SaveFlowController.handleSaveAsInput(
             input,
             modalState,
@@ -257,7 +241,7 @@ class SaveFlowControllerTest {
         String validationError
     ) {
         return SaveFlowController.handleSaveAsInput(
-            EditorInput.command(TuinkCommand.EDIT_INSERT_NEWLINE),
+            TuinkCommand.EDIT_INSERT_NEWLINE,
             modalState,
             text,
             null,

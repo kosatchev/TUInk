@@ -5,31 +5,34 @@
 
 ## Context
 
-The current `EditorState` combines document-adjacent editing state with terminal
-viewport fields, and `TabSession` binds one terminal layout/cache to that state.
-That works for the current single TUI, but it cannot be the portable session
-contract promised to future frontends. A terminal viewport, focus, and cell
-layout are neither document state nor safely shareable between frontends.
+`EditorState` originally combined document-adjacent editing state with terminal
+viewport fields, and `TabSession` bound one terminal layout/cache to that state.
+This could not be the portable session contract promised to future frontends.
+A terminal viewport, focus, and cell layout are neither document state nor
+safely shareable between frontends.
 
 ## Decision
 
-The target model has two explicit lifetimes:
+The model has two explicit lifetimes:
 
-1. `DocumentSession` owns text, file metadata, revision, history, dirty state,
+1. `EditorDocumentSession` owns text, file metadata, revision, history, dirty state,
    workspace effects, and serialized mutation on the session thread.
-2. Each attached `FrontendViewSession` owns cursor/selection, viewport, focus,
-   layout/cache, presentation preferences, and a presentation revision.
+2. Each attached frontend view owns cursor/selection, viewport, focus,
+   layout/cache, presentation preferences, and its navigation revision.
 
 View-local commands identify their frontend view. Text mutations are still
 serialized by the document session and increment the shared document revision.
-No frontend receives mutable `TextModel`, `EditorState`, or `EditorEngine`; it
-observes immutable editor/document snapshots.
+Portable clients observe immutable editor/document snapshots and do not receive
+mutable `TextModel`, `EditorState`, or `EditorEngine`. TUInk's internal composition
+adapter is an explicit exception described below; it is not the portable API.
 
 Terminal line layout and terminal-width caches therefore remain owned by the
-TUI view. A GUI or another TUI view may use a different layout policy over the
-same document snapshot. Recovery serialization separates document/file fields
-from an optional frontend-view section instead of treating viewport geometry as
-portable editor state.
+TUI view. `TerminalEditorTextLayout` is the single TUInk adapter to TUIframe's
+terminal text cache. A GUI or another TUI view may use a different layout policy over the
+same document snapshot. Recovery distinguishes document/file data from the
+target view's saved position instead of treating viewport geometry as portable
+editor state. The existing format-5 checkpoint remains an application
+compatibility format.
 
 Within a TUInk view, one coordinate service owns text-to-screen and
 screen-to-text mapping, wrap boundaries, EOF hit testing, and the textual anchor
@@ -43,40 +46,75 @@ Document history owns text mutations. A view's cursor/selection snapshot can be
 associated with an undo entry to preserve current Undo/Redo behavior, but this
 does not give the shared document ownership of every attached view's cursor.
 
-Until `EditorState` separates document and frontend state, all cursor
-and selection changes must pass through `EditorEngine` so its hidden movement
-state cannot become stale. New portable contracts must not expose viewport,
-terminal style, layout-cache keys, or mutable core objects.
+All cursor and selection changes pass through the logical target API of
+`EditorEngine`, preserving edit grouping and navigation invalidation. The
+engine does not offer viewport navigation entry points. `EditorViewNavigation`
+owns preferred visual columns, and `EditorViewCoordinates` supplies the shared
+mapping used by navigation, pointer input, render planning, and resize anchors.
+New portable contracts must not expose viewport, terminal style, layout-cache
+keys, or mutable core objects.
 
-`EditorDocumentSession` constructs and owns a
-headless core internally, publishes immutable `DocumentSnapshot`s, and accepts
-revision-guarded `WorkspaceEdit`s only on its owner thread. Its internal
-`EditorState` is a temporary core implementation detail; no cursor, viewport,
-layout, model, or engine object escapes through the session API.
+`EditorDocumentSession` owns one `EditorDocument`, publishes immutable
+`DocumentSnapshot`s, and accepts revision-guarded `WorkspaceEdit`s only on its
+owner thread. Its logical headless view and attached TUI views use the same text,
+file state, history, and savepoint chain. Snapshot publication is demand driven:
+an owner-thread `snapshot()` refreshes by text revision, while a background read
+returns the last published volatile immutable snapshot without reading mutable
+core state. Unchanged revisions reuse the previous snapshot. Ordinary typing
+does not copy and revalidate the whole document after each key. Before starting
+background work, the owner captures a current snapshot; workspace-edit
+validation also refreshes on the owner thread before checking revision gates.
+
+`CoreSessionBridge` is a public Java class solely to cross internal module
+boundaries. Architecture tests exclude that exact class from the portable API
+scan and restrict its production consumers to `session.document` internals and
+`TuiDocumentSession`. Other public session types cannot expose either mutable
+core objects or the bridge. `TuiDocumentSession` owns the terminal attachment and
+its stable `TabSession` identity. Explicit publication and owner-thread snapshot
+requests cross its document boundary; background readers are not promised an
+unpublished UI revision.
 
 For now `editor-session` has an implementation dependency on the existing
 `core`, so its runtime also inherits current core dependencies such as JGit. It
 is not yet a lightweight standalone artifact. The dependency must remain
-non-exported; extracting a smaller `editor-core` is part of the physical state
-split.
+non-exported; extracting a smaller `editor-core` remains a separate dependency
+reduction.
 
-## Migration constraints (2026-10-12)
+## Implementation and compatibility (2026-10-15)
 
-The physical state split remains a target until all consumers are switched.
-Moving fields into a new class without removing the previous mutable owner is
-not completion. Migrate coordinates and view navigation before splitting
-history/recovery, keep one document model and one history throughout, and
-preserve reading of existing recovery snapshots. A second view must have an
-independent viewport/cursor while observing the same document revision. The
-frontend event controller must be testable through the actual event entry point
-without reflective calls to private routers.
+The core's `EditorDocument` owns its `TextModel`, `EditorDocumentState`,
+`EditorDocumentHistory`, and saved/open diff baselines. `EditorViewState` owns
+one view's positions and navigation revision. `EditorState` is the compatibility
+facade over these two components; it no longer retains a second copy of their
+fields. Each attached engine has its own derived `EditorGutterDiffState` and
+layout; attaching a view does not initialize another history or reset document
+savepoint baselines.
+
+History entries associate document changes with an `EditorViewMemento` carrying
+the initiating view identity. Undo/Redo restores that memento only for that view;
+other views retain their own positions and clamp invalid positions after text
+changes. Edit coalescing also observes view identity.
+
+Recovery format 5 is retained. A checkpoint contains document/file data and the
+position of the view being recovered. Restoring through that view applies its
+position, resets the shared history/savepoint baseline as before, and leaves
+other attached views with independent positions subject to document clamping.
+The checkpoint is not reused as the portable document snapshot contract.
+
+`EditorWindowController` implements the real event-loop handler. Tests enter
+through `prepareTurn`, frame composition, and `handlePoll` instead of reflecting
+private routers. Terminal acquisition, application construction, and reusable
+application services remain outside that event controller.
 
 ## Consequences
 
 - Simultaneous frontends do not fight over scroll position, focus, or preferred
   cursor column.
-- Render preparation consumes immutable snapshots plus one view state.
+- TUInk render preparation reads the shared model and one view's state on the
+  owner thread through its layout adapter. It produces an immutable `RenderPlan`
+  for painting; `FrameComposition` borrows mutable core references only for that
+  synchronous preparation and is not the portable snapshot API.
 - Existing recovery format remains an application storage contract while its
   fields are migrated; it is not reused as plugin/editor API.
-- `TabSession` and direct engine calls are acknowledged migration surfaces, not
-  stable platform contracts.
+- `TabSession`, `EditorState`, and the internal core bridge remain composition
+  compatibility surfaces rather than stable plugin contracts.

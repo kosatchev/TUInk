@@ -56,15 +56,21 @@ produce one undo entry.
 
 Both modules are internal/incubating until plugin compatibility fixtures exist.
 
-## Migration status (2026-10-12)
+## Migration status (2026-10-15)
 
 The registry, argument schemas, revision gates, and workspace edit boundary are
-implemented. The TUInk built-in bridge still resolves many invocations back to
-its command enum for execution in frontend routers. Registering an invocation
-therefore does not yet mean that all built-in behavior executes inside the
-document session. Consolidating receiver selection and execution results is a
-separate migration; it must not move widget/view/file behavior into the document
-engine merely to remove that bridge.
+implemented. TUInk's `CommandRecipient` selects the document, search controls, or
+search operation after overlay access policy. `ControlCommandRouter` translates
+semantic local commands to the same control input route used by keyboard events;
+`FieldClipboard` supplies the application clipboard. `SearchCommandHandler`
+executes document search operations; file flows remain application intents.
+`InputActionDispatcher.DispatchResult` reports
+the resulting viewport policy, including rejected commands, instead of asking
+the viewport to predict success before execution.
+
+The built-in bridge still resolves registered invocations to TUInk's command enum
+for frontend execution. Registration does not imply execution inside the
+document session. Widget, view, and file behavior stays in its owning layer.
 
 ## Consequences
 
@@ -74,5 +80,6 @@ engine merely to remove that bridge.
   dispatch semantics no longer belong to that frontend.
 - Adding another shared DTO requires an explicit contract decision, not waiting
   for a Gradle cycle to appear.
-- The current legacy action bridge remains transitional; handlers move behind
-  the session registry incrementally.
+- The registry-to-built-in bridge remains internal. Document handlers may move
+  behind the session registry incrementally; frontend behavior retains frontend
+  receivers and does not become document-engine behavior.

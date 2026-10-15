@@ -65,12 +65,24 @@ TUInk reports active-surface transitions and adapts its document gesture to this
 contract. Document wrapping anchors and reading-mode command effects belong to
 TUInk, which owns the text model and command semantics.
 
-These ownership rules are migration requirements. Existing per-dialog capture
-adapters and command exceptions are removed as consumers move to the shared
-contracts; they must not become a second persistent route. Until each consumer
-has migrated, real PTY regressions protect the existing focus and cancellation
-behavior. `KeyStroke.SPACE` and `TextInput(" ")` have identical local meaning in
-text fields, without application-specific event conversion.
+`PlacedPointerCapture` and `InteractionResult` capture effects are implemented
+by TextField, ListView, TreeView, and MenuBar. `PointerCaptureManager` stores only
+the stable surface/scope/target address. TUInk's `WindowPointerCapture` supplies
+an ephemeral current-input frame containing typed bindings and result adopters;
+it does not retain placements or callbacks between frames. One delivery path
+serves search, Save As, help, menus, the file tree, and the document adapter.
+
+Cancellation runs while the owner binding still exists and adopts its ordinary
+widget output. An immutable placement is rebuilt after cancellation before
+normal routing continues. Focus and capture are independent, so dragging a
+scrollbar does not require keyboard focus. The file-tree capture adapter handles
+only drag/release/cancellation; normal entry presses keep the current event's
+double-click clock and TUInk activation policy.
+
+Semantic local commands use `ControlCommandRouter` and the same Search/Save As
+raw-control routes as keyboard input. Unsupported local commands stay consumed
+by TUInk's control adapter. `KeyStroke.SPACE` and `TextInput(" ")` have identical
+local meaning in text fields, without application-specific event conversion.
 
 Search is non-blocking and includes the editable document in its focus cycle.
 Save As and confirmation prompts are blocking: their focus cycles include the
@@ -87,9 +99,9 @@ during focus traversal even when its mode permits content focus.
 
 ## Consequences
 
-Common focus, rejection, clipboard, timing, and painting contracts are tested
-without a TUInk dependency. Application tests cover command classification and
-dispatch against the editor model. PTY checks cover real keyboard, mouse,
+Common focus, rejection, capture, local buffer, timing, and painting contracts
+are tested without a TUInk dependency. Application tests cover its clipboard
+adapter, command recipients, and dispatch against the editor model. PTY checks cover real keyboard, mouse,
 resize, focus transitions, and color and monochrome rendering.
 
 TUIframe does not define editor commands, execute document operations, own a

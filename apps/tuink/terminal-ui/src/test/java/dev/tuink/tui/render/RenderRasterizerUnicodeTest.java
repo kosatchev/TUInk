@@ -24,13 +24,77 @@ import dev.tuiframe.cell.Cell;
 import dev.tuiframe.cell.CellBuffer;
 import dev.tuiframe.cell.CellText;
 import dev.tuiframe.style.CellStyle;
+import dev.tuiframe.capability.TerminalCapabilities;
+import dev.tuiframe.geometry.Point;
+import dev.tuiframe.jline.presentation.ScreenPresenter;
+import dev.tuiframe.screen.Frame;
+import dev.tuiframe.screen.ScreenCursor;
+import dev.tuiframe.screen.ScrollHint;
 import dev.tuink.tui.style.UiStyles;
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class RenderRasterizerUnicodeTest {
+    @Test
+    void directionalIsolatesKeepEditorTextAndCursorAlignedWithoutChangingTheDocument() {
+        for (String control : List.of("\u061C", "\u2064", "\u2066", "\u2067", "\u2068", "\u2069")) {
+            String original = "a" + control + "bZ";
+            EditorState state = new EditorState();
+            state.setCursor(new Position(0, original.length()));
+            RenderPlan plan = plan(original, state, 5, 16);
+
+            CellBuffer cells = new RenderRasterizer().rasterize(plan, 5, 16);
+            int start = plan.gutterWidth();
+            assertEquals("a", cells.get(1, start).grapheme());
+            assertEquals("�", cells.get(1, start + 1).grapheme());
+            assertEquals("b", cells.get(1, start + 2).grapheme());
+            assertEquals("Z", cells.get(1, start + 3).grapheme());
+            assertEquals(start + 4, plan.cursorCol());
+            assertEquals(original, plan.lines().getFirst().text());
+
+            StringWriter output = new StringWriter();
+            new ScreenPresenter(new PrintWriter(output), TerminalCapabilities.DEFAULT).present(new Frame(
+                cells, ScreenCursor.visibleAt(new Point(plan.cursorCol(), plan.cursorRow() + 1)), ScrollHint.none()
+            ));
+            assertFalse(output.toString().contains(control));
+            assertTrue(output.toString().contains("a�bZ"));
+            assertTrue(output.toString().endsWith("\u001B[2;" + (start + 5) + "H"));
+        }
+    }
+
+    @Test
+    void oversizedClustersProduceBoundedOutputWithoutChangingTheDocument(@TempDir Path directory) throws Exception {
+        for (String base : List.of("a", "中")) {
+            String original = base + "\u0301".repeat(1_000_000) + "B";
+            Path file = directory.resolve(base + ".txt");
+            Files.writeString(file, original);
+            TextModel model = new TextModel(new SimpleLineBuffer());
+            model.load(file);
+            RenderPlanBuilder builder = new RenderPlanBuilder(ignored -> List.of(), new TerminalEditorTextLayout(model));
+            RenderPlan plan = builder.build(model, new EditorState(), 8, 80, "top", "bottom", null,
+                SearchOptions.DEFAULT, null, null, null, null, false, false);
+
+            CellBuffer cells = new RenderRasterizer().rasterize(plan, 8, 80);
+            int width = TerminalText.graphemeWidth(base);
+            assertEquals(width, cells.get(1, plan.gutterWidth()).width());
+            assertEquals("B", cells.get(1, plan.gutterWidth() + width).grapheme());
+            StringWriter output = new StringWriter();
+            new ScreenPresenter(new PrintWriter(output), TerminalCapabilities.DEFAULT).present(
+                new Frame(cells, new ScreenCursor(new Point(0, 0), false), ScrollHint.none()));
+
+            assertTrue(output.toString().length() < 4096);
+            assertEquals(original, model.getLine(0));
+            assertEquals(original, Files.readString(file));
+        }
+    }
+
     @Test
     void rasterizesBothScrollbarsThroughTheCanvasPainter() {
         RenderPlan plan = scrollbarPlan();

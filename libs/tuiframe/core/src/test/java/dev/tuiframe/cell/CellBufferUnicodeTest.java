@@ -11,6 +11,37 @@ import org.junit.jupiter.api.Test;
 
 class CellBufferUnicodeTest {
     @Test
+    void oversizedClustersUseBoundedPlaceholdersWithoutMovingFollowingText() {
+        String marks = "\u0301".repeat(1_000_000);
+        for (String base : new String[] {"a", "中", "😀"}) {
+            String cluster = base + marks;
+            int width = TerminalText.graphemeWidth(cluster);
+            CellBuffer buffer = new CellBuffer(1, 4);
+
+            buffer.set(0, 0, cluster, CellStyle.DEFAULT);
+            buffer.set(0, width, "B", CellStyle.DEFAULT);
+
+            assertTrue(buffer.get(0, 0).grapheme().length() <= TerminalText.MAX_DISPLAY_GRAPHEME_LENGTH);
+            assertEquals(width, buffer.get(0, 0).width());
+            assertEquals("B", buffer.get(0, width).grapheme());
+            if (width == 2) assertTrue(buffer.get(0, 1).continuation());
+        }
+    }
+
+    @Test
+    void addingADottedCircleCannotExceedTheCellPayloadBudget() {
+        Cell cell = new Cell("\u0301".repeat(TerminalText.MAX_DISPLAY_GRAPHEME_LENGTH), CellStyle.DEFAULT);
+        assertTrue(cell.grapheme().length() <= TerminalText.MAX_DISPLAY_GRAPHEME_LENGTH);
+        assertEquals(1, cell.width());
+    }
+
+    @Test
+    void oversizedOrdinaryTextStillCannotBeStoredAsOneCell() {
+        assertThrows(IllegalArgumentException.class,
+            () -> new Cell("a".repeat(1000), CellStyle.DEFAULT));
+    }
+
+    @Test
     void wideCellOwnsAContinuationAndOverwriteClearsTheWholeFootprint() {
         CellBuffer buffer = new CellBuffer(1, 4);
         buffer.set(0, 1, "中", CellStyle.DEFAULT);

@@ -6,8 +6,11 @@ import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.input.TextInput;
 import dev.tuiframe.input.TuiInputEvent;
 import java.io.IOException;
+import java.util.ArrayDeque;
 import java.util.EnumSet;
+import java.util.Objects;
 import java.util.Set;
+import java.util.function.LongSupplier;
 import org.jline.utils.NonBlockingReader;
 
 /**
@@ -21,6 +24,10 @@ import org.jline.utils.NonBlockingReader;
 public final class KeyDecoder {
     private static final int REPLACEMENT_CHARACTER = 0xFFFD;
     private static final long SEQUENCE_TIMEOUT_MS = 5L;
+    // ESC is also the prefix of Alt chords and terminal keys. Only this
+    // ambiguous first byte expires; a recognized sequence survives idle polls.
+    private static final long ESCAPE_AMBIGUITY_NANOS = 500_000_000L;
+    private static final int MAX_SEQUENCE_READ_CODE_UNITS = 128;
     private static final int MAX_CSI_LENGTH = 64;
     private static final String BRACKETED_PASTE_END = "\u001B[201~";
     static final int DEFAULT_MAX_PASTE_CODE_UNITS = 1_048_576;
@@ -28,13 +35,20 @@ public final class KeyDecoder {
     private final NonBlockingReader reader;
     private final int maxPasteCodeUnits;
     private final boolean backspaceSendsCtrlH;
+    private final TerminalKeyMap terminalKeys;
+    private final LongSupplier nanoClock;
+    private final StringBuilder terminalSequence = new StringBuilder();
+    private final ArrayDeque<Integer> replayCodeUnits = new ArrayDeque<>();
+    private boolean matchingTerminalKey;
+    private KeyStroke matchedTerminalKey;
+    private int matchedTerminalLength;
     private final StringBuilder csiSequence = new StringBuilder();
     private final StringBuilder pasteBuffer = new StringBuilder();
     private final StringBuilder pasteEndWindow = new StringBuilder(BRACKETED_PASTE_END.length());
     private boolean lastWasCarriageReturn;
     private boolean bracketedPaste;
     private boolean endPending;
-    private boolean sequenceExpiryPending;
+    private long lastEscapeByteAtNanos;
     private long pasteCodeUnitsSeen;
     private int pendingCodeUnit = -1;
     private TuiInputEvent pendingEvent;
@@ -53,6 +67,29 @@ public final class KeyDecoder {
     }
 
     private KeyDecoder(NonBlockingReader reader, int maxPasteCodeUnits, boolean backspaceSendsCtrlH) {
+        this(reader, maxPasteCodeUnits, backspaceSendsCtrlH, TerminalKeyMap.EMPTY);
+    }
+
+    KeyDecoder(NonBlockingReader reader, boolean backspaceSendsCtrlH, TerminalKeyMap terminalKeys) {
+        this(reader, DEFAULT_MAX_PASTE_CODE_UNITS, backspaceSendsCtrlH, terminalKeys);
+    }
+
+    private KeyDecoder(
+        NonBlockingReader reader, int maxPasteCodeUnits, boolean backspaceSendsCtrlH,
+        TerminalKeyMap terminalKeys
+    ) {
+        this(reader, maxPasteCodeUnits, backspaceSendsCtrlH, terminalKeys, System::nanoTime);
+    }
+
+    KeyDecoder(NonBlockingReader reader, boolean backspaceSendsCtrlH, TerminalKeyMap terminalKeys,
+        LongSupplier nanoClock) {
+        this(reader, DEFAULT_MAX_PASTE_CODE_UNITS, backspaceSendsCtrlH, terminalKeys, nanoClock);
+    }
+
+    private KeyDecoder(
+        NonBlockingReader reader, int maxPasteCodeUnits, boolean backspaceSendsCtrlH,
+        TerminalKeyMap terminalKeys, LongSupplier nanoClock
+    ) {
         if (reader == null) {
             throw new IllegalArgumentException("reader must not be null");
         }
@@ -62,6 +99,8 @@ public final class KeyDecoder {
         this.reader = reader;
         this.maxPasteCodeUnits = maxPasteCodeUnits;
         this.backspaceSendsCtrlH = backspaceSendsCtrlH;
+        this.terminalKeys = Objects.requireNonNull(terminalKeys, "terminalKeys");
+        this.nanoClock = Objects.requireNonNull(nanoClock, "nanoClock");
     }
 
     public ReadResult read(long timeoutMs) throws IOException {
@@ -168,6 +207,9 @@ public final class KeyDecoder {
             pendingCodeUnit = -1;
             return pending;
         }
+        if (!replayCodeUnits.isEmpty()) {
+            return replayCodeUnits.removeFirst();
+        }
         return reader.read(timeoutMs);
     }
 
@@ -183,7 +225,7 @@ public final class KeyDecoder {
             return new TextInput(String.valueOf(first));
         }
 
-        int second = reader.read(SEQUENCE_TIMEOUT_MS);
+        int second = readCodeUnit(SEQUENCE_TIMEOUT_MS);
         if (second == NonBlockingReader.READ_EXPIRED) {
             return replacementText();
         }
@@ -201,23 +243,92 @@ public final class KeyDecoder {
     private void beginEscapeSequence() {
         lastWasCarriageReturn = false;
         escapeState = EscapeState.AFTER_ESCAPE;
-        sequenceExpiryPending = false;
+        lastEscapeByteAtNanos = nanoClock.getAsLong();
         csiSequence.setLength(0);
+        terminalSequence.setLength(0);
+        terminalSequence.append('\u001B');
+        matchingTerminalKey = terminalKeys.hasLongerSequence("\u001B");
+        matchedTerminalKey = null;
+        matchedTerminalLength = 0;
     }
 
     private TuiInputEvent continueEscapeSequence(long timeoutMs) throws IOException {
         long nextTimeout = timeoutMs;
-        while (true) {
-            int next = reader.read(nextTimeout);
+        for (int reads = 0; reads < MAX_SEQUENCE_READ_CODE_UNITS; reads++) {
+            TuiInputEvent expired = expireEscapeSequence();
+            if (expired != null) return expired;
+            int next = readCodeUnit(nextTimeout);
             nextTimeout = SEQUENCE_TIMEOUT_MS;
             if (next == NonBlockingReader.READ_EXPIRED) {
                 return expireEscapeSequence();
             }
             if (next < 0) {
+                if (matchingTerminalKey && terminalSequence.length() > 1) {
+                    // Decode buffered bytes before reporting end of input.
+                    replayCodeUnits.addFirst(next);
+                    TuiInputEvent matched = finishTerminalMatch();
+                    if (matched != null) return matched;
+                    continue;
+                }
                 return endEscapeSequence();
             }
-            sequenceExpiryPending = false;
+            lastEscapeByteAtNanos = nanoClock.getAsLong();
 
+            if (next != 27 && (next <= 0x1F || next == 0x7F)
+                && (escapeState != EscapeState.AFTER_ESCAPE
+                    || matchingTerminalKey && terminalSequence.length() > 1)) {
+                // A damaged/incomplete sequence must not capture editing and
+                // exit controls indefinitely. A bare ESC still forms Alt chords.
+                if (matchedTerminalKey != null) {
+                    replayCodeUnits.addFirst(next);
+                    return finishTerminalMatch();
+                }
+                clearEscapeSequence();
+                return decodeCodeUnit(next);
+            }
+            if (next == 27 && escapeState == EscapeState.AFTER_ESCAPE
+                && (!matchingTerminalKey || terminalSequence.length() == 1)) {
+                // A second ESC starts another key. Treating the pair as Alt+Esc
+                // would leave a following CSI/SS3 tail to be inserted as text.
+                beginEscapeSequence();
+                return KeyStroke.of(KeyStroke.Key.ESCAPE);
+            }
+            if (next == 27 && matchingTerminalKey && terminalSequence.length() > 1 && matchedTerminalKey == null) {
+                beginEscapeSequence();
+                continue;
+            }
+            if (matchingTerminalKey) {
+                if (next > Character.MAX_VALUE) {
+                    replayCodeUnits.addFirst(next);
+                    TuiInputEvent matched = finishTerminalMatch();
+                    if (matched != null) return matched;
+                    continue;
+                }
+                terminalSequence.append((char) next);
+                String sequence = terminalSequence.toString();
+                KeyStroke key = terminalKeys.key(sequence);
+                if (key != null) {
+                    matchedTerminalKey = key;
+                    matchedTerminalLength = sequence.length();
+                }
+                if (terminalKeys.hasLongerSequence(sequence)) continue;
+                TuiInputEvent matched = finishTerminalMatch();
+                if (matched != null) return matched;
+                continue;
+            }
+
+            if (next == 27 && escapeState != EscapeState.AFTER_ESCAPE) {
+                // ESC cancels an incomplete sequence without exposing its tail as text.
+                beginEscapeSequence();
+                continue;
+            }
+            if (escapeState == EscapeState.DISCARD_CSI) {
+                if (next >= 0x40 && next <= 0x7E) {
+                    clearEscapeSequence();
+                    return KeyStroke.of(KeyStroke.Key.UNKNOWN);
+                }
+                continue;
+            }
             if (escapeState == EscapeState.AFTER_ESCAPE) {
                 if (next == 'O') {
                     escapeState = EscapeState.SS3;
@@ -237,37 +348,52 @@ public final class KeyDecoder {
             }
 
             char c = (char) next;
-            if (c == 27) {
-                // ECMA-48 ESC cancels an incomplete CSI and starts a new sequence.
-                beginEscapeSequence();
-                continue;
-            }
             csiSequence.append(c);
             if (c >= 0x40 && c <= 0x7E) {
                 return finishCsiSequence();
             }
             if (csiSequence.length() >= MAX_CSI_LENGTH) {
-                clearEscapeSequence();
-                return KeyStroke.of(KeyStroke.Key.UNKNOWN);
+                csiSequence.setLength(0);
+                escapeState = EscapeState.DISCARD_CSI;
             }
         }
+        // Even a continuously arriving malformed sequence must yield to the UI.
+        return null;
+    }
+
+    /** Prefer the longest terminfo match; replay a mismatch through the generic protocols. */
+    private TuiInputEvent finishTerminalMatch() {
+        KeyStroke key = matchedTerminalKey;
+        int replayFrom = key == null ? 1 : matchedTerminalLength;
+        for (int index = terminalSequence.length() - 1; index >= replayFrom; index--) {
+            replayCodeUnits.addFirst((int) terminalSequence.charAt(index));
+        }
+        matchingTerminalKey = false;
+        terminalSequence.setLength(0);
+        if (key != null) {
+            clearEscapeSequence();
+            return key;
+        }
+        // Buffered bytes will immediately resolve the generic ESC prefix, even
+        // when EOF ends a terminfo attempt that survived a long idle period.
+        lastEscapeByteAtNanos = nanoClock.getAsLong();
+        return null;
     }
 
     private TuiInputEvent expireEscapeSequence() {
-        if (!sequenceExpiryPending) {
-            sequenceExpiryPending = true;
+        if (nanoClock.getAsLong() - lastEscapeByteAtNanos < ESCAPE_AMBIGUITY_NANOS) {
             return null;
         }
-
+        if (matchingTerminalKey && terminalSequence.length() > 1) {
+            // A complete key can also prefix a longer terminfo key. Unfinished
+            // prefixes retain their bytes until a match, mismatch, cancellation or EOF.
+            return matchedTerminalKey == null ? null : finishTerminalMatch();
+        }
         if (escapeState == EscapeState.AFTER_ESCAPE) {
             clearEscapeSequence();
             return KeyStroke.of(KeyStroke.Key.ESCAPE);
         }
-        if (escapeState == EscapeState.CSI) {
-            return finishCsiSequence();
-        }
-        clearEscapeSequence();
-        return KeyStroke.of(KeyStroke.Key.UNKNOWN);
+        return null;
     }
 
     private TuiInputEvent endEscapeSequence() {
@@ -291,8 +417,11 @@ public final class KeyDecoder {
 
     private void clearEscapeSequence() {
         escapeState = EscapeState.NONE;
-        sequenceExpiryPending = false;
         csiSequence.setLength(0);
+        matchingTerminalKey = false;
+        terminalSequence.setLength(0);
+        matchedTerminalKey = null;
+        matchedTerminalLength = 0;
     }
 
     private static TuiInputEvent decodeSs3Code(int code) {
@@ -431,7 +560,10 @@ public final class KeyDecoder {
         if (!Character.isValidCodePoint(codePoint)) {
             return new KeyStroke(KeyStroke.Key.UNKNOWN, modifiers);
         }
-        if (modifiers.isEmpty() && isPrintable(codePoint)) {
+        // These protocols already carry the produced character. Shift alone
+        // still enters text; command modifiers retain their physical chords.
+        if (isPrintable(codePoint)
+            && (modifiers.isEmpty() || modifiers.equals(Set.of(KeyStroke.Modifier.SHIFT)))) {
             return new TextInput(new String(Character.toChars(codePoint)));
         }
 
@@ -529,7 +661,7 @@ public final class KeyDecoder {
     private ReadResult readBracketedPaste(long timeoutMs) throws IOException {
         long nextTimeout = timeoutMs;
         while (true) {
-            int next = reader.read(nextTimeout);
+            int next = readCodeUnit(nextTimeout);
             nextTimeout = SEQUENCE_TIMEOUT_MS;
             if (next == NonBlockingReader.READ_EXPIRED) {
                 return ReadResult.idle();
@@ -746,7 +878,8 @@ public final class KeyDecoder {
         NONE,
         AFTER_ESCAPE,
         SS3,
-        CSI
+        CSI,
+        DISCARD_CSI
     }
 
     private record PhysicalKey(KeyStroke.Key key, boolean shifted) {

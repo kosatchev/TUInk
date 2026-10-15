@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuiframe.style.CellStyle;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class CellTextTest {
@@ -14,6 +15,38 @@ class CellTextTest {
         assertEquals("A😀 ", CellText.fit("A😀中", 4));
         assertEquals(" 中", CellText.clip("A😀中", 2, 3));
         assertEquals("  中", CellText.alignRight("中", 4));
+    }
+
+    @Test
+    void clippingPreparesOrphanGraphemesBeforeTheyCanJoinExpandedTabs() {
+        assertEquals("    ◌\u0301X", CellText.clip("\t\u0301X", 0, 8));
+        assertEquals("    �X", CellText.clip("\t\u200DX", 0, 8));
+        assertEquals(" ◌\u0301X", CellText.clip("\t\u0301X", 3, 3));
+        assertEquals("  ◌\u0301X", CellText.clip("A😀\t\u0301X", 2, 4));
+        assertEquals("◌\u0301X", CellText.fit("\u0301X", 2));
+        assertEquals(" ◌\u0301X", CellText.alignRight("\u0301X", 3));
+        assertEquals("         X", CellText.alignRight("\tX", 10));
+    }
+
+    @Test
+    void redrawingEveryClippedSliceMatchesDrawingTheOriginalDisplayCells() {
+        for (String source : List.of("\t\u0301X", "\t\u200DX", "\t\uFE0FX", "\t🏽X",
+            "\u0301X", "\u200DX", "A😀\t\u0301X", "e\u0301\t👩‍💻X")) {
+            int width = CellText.width(source);
+            assertEquals(width, CellText.width(CellText.clip(source, 0, width + 1)), source);
+            for (int left = 0; left <= width; left++) {
+                for (int cells = 1; cells <= width + 1; cells++) {
+                    CellBuffer expected = new CellBuffer(1, cells);
+                    CellText.draw(new Canvas(expected), -left, 0, source, CellStyle.DEFAULT);
+                    CellBuffer actual = new CellBuffer(1, cells);
+                    CellText.draw(new Canvas(actual), 0, 0, CellText.clip(source, left, cells), CellStyle.DEFAULT);
+                    for (int column = 0; column < cells; column++) {
+                        assertEquals(expected.get(0, column), actual.get(0, column),
+                            "left=" + left + ", cells=" + cells + ", column=" + column + ", source=" + source);
+                    }
+                }
+            }
+        }
     }
 
     @Test

@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.ArrayList;
+import java.util.Random;
 import org.junit.jupiter.api.Test;
 
 class TerminalTextTest {
@@ -98,6 +100,33 @@ class TerminalTextTest {
     }
 
     @Test
+    void invisibleAndDirectionalControlsUseVisibleOneCellPlaceholders() {
+        int[] codePoints = {0x061C, 0x200E, 0x200F, 0x202A, 0x202B, 0x202C, 0x202D, 0x202E,
+            0x2060, 0x2061, 0x2062, 0x2063, 0x2064, 0x2066, 0x2067, 0x2068, 0x2069,
+            0x206A, 0x206B, 0x206C, 0x206D, 0x206E, 0x206F};
+        for (int codePoint : codePoints) {
+            String control = Character.toString(codePoint);
+            String text = "a" + control + "b";
+            assertAll(
+                "U+%04X".formatted(codePoint),
+                () -> assertEquals(0, TerminalText.graphemeWidth(control)),
+                () -> assertEquals("�", TerminalText.sanitizeGrapheme(control)),
+                () -> assertEquals(3, TerminalText.visualWidth(text, 4)),
+                () -> assertEquals(2, TerminalText.visualColumnAt(text, 2, 4)),
+                () -> assertEquals(2, TerminalText.offsetForVisualColumn(text, 2, 4, TerminalText.Bias.NEAREST))
+            );
+        }
+    }
+
+    @Test
+    void shapingJoinersRemainAttachedToTheirVisibleArabicOrEmojiBase() {
+        for (String text : List.of("ل\u200C", "ل\u200D", FAMILY, "👩\u200D💻")) {
+            assertEquals(text, TerminalText.sanitizeGrapheme(text));
+            assertEquals(TerminalText.graphemeWidth(text), TerminalText.visualWidth(text, 4));
+        }
+    }
+
+    @Test
     void recognizesExactlyOneExtendedGraphemeWithoutSplittingEmoji() {
         assertTrue(TerminalText.isSingleGrapheme("A"));
         assertTrue(TerminalText.isSingleGrapheme("中"));
@@ -186,8 +215,77 @@ class TerminalTextTest {
             () -> assertEquals(2, tabbed.offsetForVisualColumn(2, TerminalText.Bias.CEIL)),
             () -> assertEquals(1, plain.storageWeight()),
             () -> assertEquals(4, tabbed.storageWeight()),
-            () -> assertEquals(6, TerminalText.metrics("中", 4).storageWeight())
+            () -> assertEquals(4, TerminalText.metrics("中", 4).storageWeight())
         );
+    }
+
+    @Test
+    void mostlyOrdinaryUnicodeLinesStoreOnlyExceptionalClusters() {
+        String prefix = "a".repeat(100_000);
+        TerminalText.Metrics ordinary = TerminalText.metrics(prefix + "Ā", 4);
+        TerminalText.Metrics exceptional = TerminalText.metrics(prefix + "e\u0301\t中👩‍💻tail", 4);
+
+        assertEquals(1, ordinary.storageWeight());
+        assertEquals(prefix.length() + 1, ordinary.graphemeCount());
+        assertEquals(prefix.length() + 1, ordinary.visualWidth());
+        assertEquals(16, exceptional.storageWeight());
+        assertEquals(prefix.length(), exceptional.floorBoundary(prefix.length() + 1));
+        assertEquals(prefix.length() + 2, exceptional.ceilBoundary(prefix.length() + 1));
+    }
+
+    @Test
+    void compactAndDenseMetricsMatchStreamingGraphemesInBothCoordinateDirections() {
+        Random random = new Random(184_930L);
+        List<String> pieces = List.of("a", "x", " ", "\t", "Ā", "中", "e\u0301", "👩‍💻", "🇷🇺", "\u0301", "\u200D",
+            "\r\n", "\u0600", "\u001B", "\uD800");
+        for (int example = 0; example < 200; example++) {
+            StringBuilder text = new StringBuilder();
+            for (int size = random.nextInt(20); size > 0; size--) {
+                text.append(pieces.get(random.nextInt(pieces.size())));
+            }
+            String source = text.toString();
+            int tabWidth = random.nextBoolean() ? 2 : 4;
+            List<TerminalText.Grapheme> graphemes = TerminalText.graphemes(source);
+            TerminalText.Metrics metrics = TerminalText.metrics(source, tabWidth);
+            List<Integer> boundaries = new ArrayList<>(List.of(0));
+            List<Integer> columns = new ArrayList<>(List.of(0));
+            int visual = 0;
+            assertEquals(graphemes.size(), metrics.graphemeCount(), source);
+            for (int index = 0; index < graphemes.size(); index++) {
+                var grapheme = graphemes.get(index);
+                assertEquals(grapheme.start(), metrics.start(index), source);
+                assertEquals(grapheme.end(), metrics.end(index), source);
+                assertEquals(grapheme.width(), metrics.width(index), source);
+                assertEquals(grapheme.whitespace(), metrics.isWhitespace(index), source);
+                assertEquals(grapheme.tab(), metrics.isTab(index), source);
+                visual += grapheme.tab() ? tabWidth - visual % tabWidth : Math.max(1, grapheme.width());
+                boundaries.add(grapheme.end());
+                columns.add(visual);
+                assertEquals(visual, metrics.visualColumnAtBoundary(index + 1), source);
+            }
+            for (int offset = 0, floor = 0; offset <= source.length(); offset++) {
+                while (floor + 1 < boundaries.size() && boundaries.get(floor + 1) <= offset) {
+                    floor++;
+                }
+                boolean exact = boundaries.get(floor) == offset;
+                assertEquals(boundaries.get(floor), metrics.floorBoundary(offset), source);
+                assertEquals(boundaries.get(exact ? floor : floor + 1), metrics.ceilBoundary(offset), source);
+                assertEquals(boundaries.get(Math.max(0, exact ? floor - 1 : floor)), metrics.previousBoundary(offset), source);
+                assertEquals(boundaries.get(Math.min(graphemes.size(), floor + 1)), metrics.nextBoundary(offset), source);
+                assertEquals(exact, metrics.isBoundary(offset), source);
+                assertEquals(columns.get(floor), metrics.visualColumnAt(offset), source);
+            }
+            for (int column = 0, left = 0; column <= visual; column++) {
+                while (left + 1 < columns.size() && columns.get(left + 1) <= column) {
+                    left++;
+                }
+                int right = columns.get(left) == column ? left : left + 1;
+                int nearest = column - columns.get(left) <= columns.get(right) - column ? left : right;
+                assertEquals(boundaries.get(left), metrics.offsetForVisualColumn(column, TerminalText.Bias.FLOOR), source);
+                assertEquals(boundaries.get(right), metrics.offsetForVisualColumn(column, TerminalText.Bias.CEIL), source);
+                assertEquals(boundaries.get(nearest), metrics.offsetForVisualColumn(column, TerminalText.Bias.NEAREST), source);
+            }
+        }
     }
 
     @Test

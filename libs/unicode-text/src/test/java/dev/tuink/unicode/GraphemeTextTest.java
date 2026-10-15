@@ -64,11 +64,8 @@ class GraphemeTextTest {
             assertEquals(sample.boundaries(), boundaries(layout), sample.name());
             assertEquals(sample.tabs(), flags(layout, true), sample.name());
             assertEquals(sample.whitespace(), flags(layout, false), sample.name());
-            assertEquals(
-                sample.simpleAscii() ? 1 : sample.boundaries().size() + layout.graphemeCount(),
-                layout.storageWeight(),
-                sample.name()
-            );
+            assertTrue(layout.storageWeight() >= 1, sample.name());
+            assertTrue(layout.storageWeight() <= sample.boundaries().size(), sample.name());
         }
     }
 
@@ -122,6 +119,9 @@ class GraphemeTextTest {
         assertEquals(12, GraphemeText.nextBoundary(text, 5));
         assertFalse(GraphemeText.isBoundary(text, 5));
         assertFalse(GraphemeText.isBoundary(null, 10));
+        assertEquals(0, GraphemeText.ceilBoundary(null, 10));
+        assertEquals(0, GraphemeText.ceilBoundary(text, -1));
+        assertEquals(text.length(), GraphemeText.ceilBoundary(text, Integer.MAX_VALUE));
     }
 
     @Test
@@ -137,6 +137,34 @@ class GraphemeTextTest {
         assertEquals(1, layout.storageWeight());
         assertEquals(1, layout.previousBoundary(2));
         assertEquals(3, layout.nextBoundary(2));
+    }
+
+    @Test
+    void ordinaryUnicodeUsesArithmeticBoundariesAndRareClustersUseSparseExceptions() {
+        String prefix = "a".repeat(100_000);
+        GraphemeText ordinary = GraphemeText.of(prefix + "Ā中");
+        GraphemeText sparse = GraphemeText.of(prefix + COMBINING_E + FAMILY + "tail");
+
+        assertFalse(ordinary.simpleAscii());
+        assertEquals(prefix.length() + 2, ordinary.graphemeCount());
+        assertEquals(1, ordinary.storageWeight());
+        assertEquals(prefix.length() + 1, ordinary.nextBoundary(prefix.length()));
+        assertEquals(4, sparse.storageWeight());
+        assertEquals(prefix.length(), sparse.floorBoundary(prefix.length() + 1));
+        assertEquals(prefix.length() + COMBINING_E.length(), sparse.ceilBoundary(prefix.length() + 1));
+        assertEquals(prefix.length() + COMBINING_E.length(), sparse.floorBoundary(prefix.length() + 3));
+        assertEquals(prefix.length() + COMBINING_E.length() + FAMILY.length(),
+            sparse.ceilBoundary(prefix.length() + 3));
+    }
+
+    @Test
+    void denseClustersAllocateOneBoundaryPerGraphemeRatherThanPerUtf16Unit() {
+        GraphemeText dense = GraphemeText.of(FAMILY.repeat(100));
+
+        assertEquals(100, dense.graphemeCount());
+        assertEquals(101, dense.storageWeight());
+        assertEquals(99 * FAMILY.length(), dense.start(99));
+        assertEquals(100 * FAMILY.length(), dense.end(99));
     }
 
     @Test

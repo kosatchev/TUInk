@@ -10,7 +10,7 @@ class TerminalTextWidthCompatibilityTest {
     private static final int COMBINING_KEYCAP = 0x20E3;
 
     @Test
-    void localWidthPolicyPreservesJLineBehaviorForEveryUnicodeCodePoint() {
+    void localWidthPolicyMatchesJLineWithExplicitInvisibleControlCorrections() {
         for (int codePoint = Character.MIN_CODE_POINT;
              codePoint <= Character.MAX_CODE_POINT;
              codePoint++) {
@@ -27,6 +27,12 @@ class TerminalTextWidthCompatibilityTest {
     }
 
     private static int expectedSingleCodePointWidth(int codePoint) {
+        // These zero-width controls are absent from the table bundled with JLine 3.30.6.
+        // They become one-cell replacement glyphs when sanitized for display.
+        if (codePoint == 0x061C || codePoint == 0x2064
+            || codePoint >= 0x2066 && codePoint <= 0x2069) {
+            return 0;
+        }
         if (codePoint <= Character.MAX_VALUE
             && Character.isSurrogate((char) codePoint)) {
             return 1;

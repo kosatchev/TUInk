@@ -44,6 +44,7 @@ public final class TerminalSession implements AutoCloseable {
     private final PrintWriter writer;
     private final TerminalCapabilities capabilities;
     private final boolean backspaceSendsCtrlH;
+    private final TerminalKeyMap keyMap;
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final Thread shutdownHook;
     private boolean mouseTrackingEnabled;
@@ -61,6 +62,7 @@ public final class TerminalSession implements AutoCloseable {
         this.writer = backend.writer();
         this.capabilities = Objects.requireNonNull(backend.capabilities(), "backend capabilities");
         this.backspaceSendsCtrlH = detectCtrlHBackspace(backend.backspaceSequence(), originalAttributes);
+        this.keyMap = TerminalKeyMap.fromCapabilities(backend::keySequence);
         this.mouseTrackingEnabled = options.mouseTrackingEnabled() && capabilities.mouseTracking();
         this.shutdownHook = new Thread(this::closeQuietly, "terminal-session-cleanup");
     }
@@ -150,6 +152,10 @@ public final class TerminalSession implements AutoCloseable {
 
     boolean backspaceSendsCtrlH() {
         return backspaceSendsCtrlH;
+    }
+
+    TerminalKeyMap keyMap() {
+        return keyMap;
     }
 
     private static boolean detectCtrlHBackspace(String backspaceSequence, Attributes originalAttributes) {
@@ -308,6 +314,10 @@ public final class TerminalSession implements AutoCloseable {
             return null;
         }
 
+        default String keySequence(Capability capability) {
+            return null;
+        }
+
         PrintWriter writer();
 
         NonBlockingReader reader();
@@ -368,6 +378,11 @@ public final class TerminalSession implements AutoCloseable {
         @Override
         public String backspaceSequence() {
             return terminal.getStringCapability(Capability.key_backspace);
+        }
+
+        @Override
+        public String keySequence(Capability capability) {
+            return terminal.getStringCapability(capability);
         }
 
         @Override

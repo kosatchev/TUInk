@@ -6,7 +6,7 @@
 package dev.tuiframe.text;
 
 /**
- * JLine 3.30.6-compatible width policy for a visible grapheme base.
+ * JLine 3.30.6-derived width policy for a visible grapheme base.
  *
  * <p>The caller filters controls, malformed UTF-16, combining marks and the
  * grapheme formatting code points handled by {@link TerminalText}.</p>
@@ -23,20 +23,24 @@ final class TerminalCellWidth {
     }
 
     /**
-     * Non-combining zero-width bases from JLine 3.30.6's fixed width table.
+     * Non-combining zero-width bases from JLine 3.30.6's fixed width table,
+     * completed with Arabic letter mark, invisible plus and directional isolates.
+     * Standalone zero-width clusters are displayed as visible placeholders by
+     * TerminalText instead of being emitted with the terminal's zero advance.
      * Keep these ranges independent of the JDK's Unicode character categories;
      * new format characters do not change the terminal backend's width policy.
      */
     private static boolean isZeroWidthBase(int codePoint) {
         return codePoint >= 0x0600
             && (codePoint <= 0x0603
+                || codePoint == 0x061C
                 || codePoint >= 0x06DD && codePoint <= 0x06DE
                 || codePoint == 0x070F
                 || codePoint >= 0x1160 && codePoint <= 0x11FF
                 || codePoint >= 0x200B && codePoint <= 0x200F
                 || codePoint >= 0x202A && codePoint <= 0x202E
-                || codePoint >= 0x2060 && codePoint <= 0x2063
-                || codePoint >= 0x206A && codePoint <= 0x206F
+                || codePoint >= 0x2060 && codePoint <= 0x2064
+                || codePoint >= 0x2066 && codePoint <= 0x206F
                 || codePoint == 0xFEFF
                 || codePoint >= 0xFFF9 && codePoint <= 0xFFFB
                 || codePoint >= 0x1D173 && codePoint <= 0x1D17A

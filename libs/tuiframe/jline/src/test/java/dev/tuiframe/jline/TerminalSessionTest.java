@@ -27,10 +27,12 @@ import java.io.Writer;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.jline.terminal.Attributes;
 import org.jline.terminal.Attributes.ControlChar;
 import org.jline.terminal.Attributes.LocalFlag;
 import org.jline.utils.NonBlockingReader;
+import org.jline.utils.InfoCmp.Capability;
 import org.junit.jupiter.api.Test;
 
 class TerminalSessionTest {
@@ -183,6 +185,21 @@ class TerminalSessionTest {
         assertFalse(runtime.eventLoop().running());
         runtime.close();
         assertEquals(1, backend.closeCount);
+    }
+
+    @Test
+    void runtimeUsesBackendTerminfoKeysWithoutAssumingATerminalName() throws Exception {
+        FakeBackend backend = new FakeBackend("custom-terminal");
+        backend.keySequences = Map.of(Capability.key_f1, "\\E[[A", Capability.key_btab, "\\E^I");
+        backend.enqueueInput("\u001B[[A\u001B\tx");
+        try (TerminalRuntime runtime = TerminalRuntime.start(
+            new TerminalSession.Options(false, false, false), backend, new FakeShutdownHooks(), false
+        )) {
+            assertEquals(KeyStroke.of(KeyStroke.Key.F1), runtime.eventLoop().poll(now -> -1L).event());
+            assertEquals(KeyStroke.of(KeyStroke.Key.TAB, KeyStroke.Modifier.SHIFT),
+                runtime.eventLoop().poll(now -> -1L).event());
+            assertEquals(new TextInput("x"), runtime.eventLoop().poll(now -> -1L).event());
+        }
     }
 
     @Test
@@ -702,6 +719,7 @@ class TerminalSessionTest {
         private Attributes currentAttributes = new Attributes();
         private TerminalCapabilities capabilities = TerminalCapabilities.DEFAULT;
         private String backspaceSequence;
+        private Map<Capability, String> keySequences = Map.of();
         private boolean enteredRawMode;
         private int attributesRestoreCount;
         private int closeCount;
@@ -810,6 +828,11 @@ class TerminalSessionTest {
         @Override
         public String backspaceSequence() {
             return backspaceSequence;
+        }
+
+        @Override
+        public String keySequence(Capability capability) {
+            return keySequences.get(capability);
         }
 
         @Override

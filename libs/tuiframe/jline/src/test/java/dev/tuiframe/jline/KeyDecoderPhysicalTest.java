@@ -19,6 +19,7 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Queue;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicLong;
 import org.jline.utils.NonBlockingReader;
 import org.junit.jupiter.api.Test;
 
@@ -100,29 +101,42 @@ class KeyDecoderPhysicalTest {
     }
 
     @Test
-    void delaysStandaloneEscapeForOneIdlePoll() throws IOException {
-        KeyDecoder decoder = new KeyDecoder(new QueueReader(27));
+    void standaloneEscapeUsesElapsedTimeRatherThanTheNumberOfIdlePolls() throws IOException {
+        AtomicLong clock = new AtomicLong();
+        KeyDecoder decoder = timedDecoder(new QueueReader(27), clock);
 
         KeyDecoder.ReadResult first = decoder.read(1);
 
         assertEquals(KeyDecoder.ReadStatus.IDLE, first.status());
         assertNull(first.event());
+        for (int poll = 0; poll < 100; poll++) {
+            assertEquals(KeyDecoder.ReadStatus.IDLE, decoder.read(1).status());
+        }
+        clock.set(499_000_000L);
+        assertEquals(KeyDecoder.ReadStatus.IDLE, decoder.read(1).status());
+        clock.set(500_000_000L);
         assertEquals(KeyStroke.of(KeyStroke.Key.ESCAPE), event(decoder));
     }
 
     @Test
     void capsPendingEscapeWaitInsteadOfInheritingTheApplicationPollTimeout() throws IOException {
         QueueReader reader = new QueueReader(27);
-        KeyDecoder decoder = new KeyDecoder(reader);
+        AtomicLong clock = new AtomicLong();
+        KeyDecoder decoder = timedDecoder(reader, clock);
 
         assertEquals(KeyDecoder.ReadStatus.IDLE, decoder.read(50).status());
+        assertEquals(KeyDecoder.ReadStatus.IDLE, decoder.read(50).status());
+        clock.set(500_000_000L);
         assertEquals(KeyStroke.of(KeyStroke.Key.ESCAPE), decoder.read(50).event());
 
         assertEquals(List.of(50L, 5L, 5L), reader.requestedTimeouts());
 
         QueueReader expiredDeadlineReader = new QueueReader(27);
-        KeyDecoder expiredDeadlineDecoder = new KeyDecoder(expiredDeadlineReader);
+        clock.set(0L);
+        KeyDecoder expiredDeadlineDecoder = timedDecoder(expiredDeadlineReader, clock);
         assertEquals(KeyDecoder.ReadStatus.IDLE, expiredDeadlineDecoder.read(50).status());
+        assertEquals(KeyDecoder.ReadStatus.IDLE, expiredDeadlineDecoder.read(0).status());
+        clock.set(500_000_000L);
         assertEquals(KeyStroke.of(KeyStroke.Key.ESCAPE), expiredDeadlineDecoder.read(0).event());
         assertEquals(List.of(50L, 5L, 5L), expiredDeadlineReader.requestedTimeouts());
     }
@@ -246,6 +260,52 @@ class KeyDecoderPhysicalTest {
         assertSequence("\u001B[5;5~", KeyStroke.of(KeyStroke.Key.PAGE_UP, KeyStroke.Modifier.CTRL));
         assertSequence("\u001B[6;5~", KeyStroke.of(KeyStroke.Key.PAGE_DOWN, KeyStroke.Modifier.CTRL));
         assertSequence("\u001B[1;5I", KeyStroke.of(KeyStroke.Key.TAB, KeyStroke.Modifier.CTRL));
+    }
+
+    @Test
+    void shiftOnlyEnhancedPrintableInputPreservesTheProducedUnicodeText() throws IOException {
+        for (String text : List.of("A", "Z", "!", "?", "{", " ", "Ж", "Ё", "😀", "𐐀")) {
+            assertEnhancedCodePoint(text.codePointAt(0), 2, new TextInput(text));
+        }
+    }
+
+    @Test
+    void enhancedCommandModifiersRemainPhysicalChords() throws IOException {
+        assertEnhancedCodePoint('a', 3, KeyStroke.of(KeyStroke.Key.A, KeyStroke.Modifier.ALT));
+        assertEnhancedCodePoint('a', 5, KeyStroke.of(KeyStroke.Key.A, KeyStroke.Modifier.CTRL));
+        assertEnhancedCodePoint('a', 9, KeyStroke.of(KeyStroke.Key.A, KeyStroke.Modifier.SUPER));
+        assertEnhancedCodePoint('A', 4,
+            KeyStroke.of(KeyStroke.Key.A, KeyStroke.Modifier.ALT, KeyStroke.Modifier.SHIFT));
+        assertEnhancedCodePoint('?', 6,
+            KeyStroke.of(KeyStroke.Key.SLASH, KeyStroke.Modifier.CTRL, KeyStroke.Modifier.SHIFT));
+        assertEnhancedCodePoint('A', 10,
+            KeyStroke.of(KeyStroke.Key.A, KeyStroke.Modifier.SUPER, KeyStroke.Modifier.SHIFT));
+        assertEnhancedCodePoint('a', 16, new KeyStroke(KeyStroke.Key.A,
+            Set.of(KeyStroke.Modifier.SHIFT, KeyStroke.Modifier.ALT,
+                KeyStroke.Modifier.CTRL, KeyStroke.Modifier.SUPER)));
+        assertEnhancedCodePoint('Ж', 6,
+            KeyStroke.of(KeyStroke.Key.UNKNOWN, KeyStroke.Modifier.CTRL, KeyStroke.Modifier.SHIFT));
+        assertEnhancedCodePoint(0x1F600, 10,
+            KeyStroke.of(KeyStroke.Key.UNKNOWN, KeyStroke.Modifier.SUPER, KeyStroke.Modifier.SHIFT));
+    }
+
+    @Test
+    void shiftOnlyEnhancedSpecialKeysRemainPhysicalKeys() throws IOException {
+        assertEnhancedCodePoint(9, 2, KeyStroke.of(KeyStroke.Key.TAB, KeyStroke.Modifier.SHIFT));
+        assertEnhancedCodePoint(13, 2, KeyStroke.of(KeyStroke.Key.ENTER, KeyStroke.Modifier.SHIFT));
+        assertEnhancedCodePoint(27, 2, KeyStroke.of(KeyStroke.Key.ESCAPE, KeyStroke.Modifier.SHIFT));
+        assertEnhancedCodePoint(127, 2, KeyStroke.of(KeyStroke.Key.BACKSPACE, KeyStroke.Modifier.SHIFT));
+    }
+
+    @Test
+    void enhancedInvalidScalarsNeverProduceText() throws IOException {
+        for (int codePoint : new int[] {-1, 0xD800, 0xDFFF, 0x110000}) {
+            assertEnhancedCodePoint(codePoint, 1, KeyStroke.of(KeyStroke.Key.UNKNOWN));
+            assertEnhancedCodePoint(codePoint, 2,
+                KeyStroke.of(KeyStroke.Key.UNKNOWN, KeyStroke.Modifier.SHIFT));
+            assertEnhancedCodePoint(codePoint, 6,
+                KeyStroke.of(KeyStroke.Key.UNKNOWN, KeyStroke.Modifier.CTRL, KeyStroke.Modifier.SHIFT));
+        }
     }
 
     @Test
@@ -404,6 +464,12 @@ class KeyDecoderPhysicalTest {
         assertEquals(expected, event(decoder(sequence)), sequence);
     }
 
+    private static void assertEnhancedCodePoint(int codePoint, int modifier, TuiInputEvent expected)
+        throws IOException {
+        assertSequence("\u001B[" + codePoint + ";" + modifier + "u", expected);
+        assertSequence("\u001B[27;" + modifier + ";" + codePoint + "~", expected);
+    }
+
     private static TuiInputEvent event(KeyDecoder decoder) throws IOException {
         KeyDecoder.ReadResult result = decoder.read(1);
         assertEquals(KeyDecoder.ReadStatus.EVENT, result.status());
@@ -412,6 +478,10 @@ class KeyDecoderPhysicalTest {
 
     private static KeyDecoder decoder(String sequence) {
         return new KeyDecoder(new QueueReader(chars(sequence)));
+    }
+
+    private static KeyDecoder timedDecoder(QueueReader reader, AtomicLong clock) {
+        return new KeyDecoder(reader, false, TerminalKeyMap.EMPTY, clock::get);
     }
 
     private static int[] chars(String value) {

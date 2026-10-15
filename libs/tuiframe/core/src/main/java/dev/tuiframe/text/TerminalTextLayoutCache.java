@@ -1,7 +1,5 @@
 package dev.tuiframe.text;
 
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -14,13 +12,17 @@ import java.util.Objects;
  * thread. A source revision must change after every visible content mutation.
  * A source content epoch must additionally change after a wholesale content
  * replacement for which retained line metrics should be discarded. Per-line
- * metrics are weight-bounded and wrap layouts retain a small access-order set
- * of recent width/word-wrap/tab-width combinations.</p>
+ * metrics and explicit wrap-start lists are weight-bounded. Wrap layouts retain
+ * a small access-order set of compact row-count indices for recent
+ * width/word-wrap/tab-width combinations; indexing offscreen lines does not
+ * retain their wrap-start lists.</p>
  */
 public final class TerminalTextLayoutCache {
     private static final int DEFAULT_MAX_METRICS_LINES = 200_000;
     private static final int DEFAULT_MAX_METRICS_WEIGHT = 8_388_608;
     private static final int DEFAULT_MAX_WRAP_LAYOUTS = 4;
+    private static final int DEFAULT_MAX_WRAP_STARTS_LINES = 4_096;
+    private static final int DEFAULT_MAX_WRAP_STARTS_WEIGHT = 262_144;
 
     /** Versioned random-access source of non-null text lines. */
     public interface LineSource {
@@ -60,10 +62,14 @@ public final class TerminalTextLayoutCache {
     private final int maxMetricsLines;
     private final int maxMetricsWeight;
     private final int maxWrapLayouts;
+    private final int maxWrapStartsLines;
+    private final int maxWrapStartsWeight;
     private final Map<Integer, MetricsEntry> metricsCache =
         new LinkedHashMap<>(256, 0.75f, true);
     private final Map<WrapLayoutKey, WrapLayout> wrapLayouts;
     private int metricsWeight;
+    private int wrapStartsCount;
+    private long wrapStartsWeight;
     private int cachedVisualWidthTabWidth = -1;
     private LineLayoutIndex visualWidths;
     private boolean sourceObserved;
@@ -110,6 +116,31 @@ public final class TerminalTextLayoutCache {
         int maxWrapLayouts,
         boolean reserveLineEndCell
     ) {
+        this(source, maxMetricsLines, maxMetricsWeight, maxWrapLayouts,
+            DEFAULT_MAX_WRAP_STARTS_LINES, DEFAULT_MAX_WRAP_STARTS_WEIGHT, reserveLineEndCell);
+    }
+
+    TerminalTextLayoutCache(
+        LineSource source,
+        int maxMetricsLines,
+        int maxMetricsWeight,
+        int maxWrapLayouts,
+        int maxWrapStartsLines,
+        int maxWrapStartsWeight
+    ) {
+        this(source, maxMetricsLines, maxMetricsWeight, maxWrapLayouts,
+            maxWrapStartsLines, maxWrapStartsWeight, false);
+    }
+
+    private TerminalTextLayoutCache(
+        LineSource source,
+        int maxMetricsLines,
+        int maxMetricsWeight,
+        int maxWrapLayouts,
+        int maxWrapStartsLines,
+        int maxWrapStartsWeight,
+        boolean reserveLineEndCell
+    ) {
         this.source = Objects.requireNonNull(source, "source");
         this.reserveLineEndCell = reserveLineEndCell;
         if (maxMetricsLines <= 0) {
@@ -121,13 +152,22 @@ public final class TerminalTextLayoutCache {
         if (maxWrapLayouts <= 0) {
             throw new IllegalArgumentException("maxWrapLayouts must be positive");
         }
+        if (maxWrapStartsLines <= 0 || maxWrapStartsWeight <= 0) {
+            throw new IllegalArgumentException("Wrap-start cache limits must be positive");
+        }
         this.maxMetricsLines = maxMetricsLines;
         this.maxMetricsWeight = maxMetricsWeight;
         this.maxWrapLayouts = maxWrapLayouts;
+        this.maxWrapStartsLines = maxWrapStartsLines;
+        this.maxWrapStartsWeight = maxWrapStartsWeight;
         this.wrapLayouts = new LinkedHashMap<>(8, 0.75f, true) {
             @Override
             protected boolean removeEldestEntry(Map.Entry<WrapLayoutKey, WrapLayout> eldest) {
-                return size() > TerminalTextLayoutCache.this.maxWrapLayouts;
+                if (size() > TerminalTextLayoutCache.this.maxWrapLayouts) {
+                    clearWrapStarts(eldest.getValue());
+                    return true;
+                }
+                return false;
             }
         };
     }
@@ -250,7 +290,7 @@ public final class TerminalTextLayoutCache {
             return cached;
         }
         List<Integer> computed = computeWrapStarts(safeLine, key);
-        layout.wrapStarts.put(safeLine, computed);
+        cacheWrapStarts(layout, safeLine, computed);
         return computed;
     }
 
@@ -272,11 +312,7 @@ public final class TerminalTextLayoutCache {
         int[] rows = new int[lineCount];
         for (int line = 0; line < lineCount; line++) {
             List<Integer> starts = layout.wrapStarts.get(line);
-            if (starts == null) {
-                starts = computeWrapStarts(line, key);
-                layout.wrapStarts.put(line, starts);
-            }
-            rows[line] = starts.size();
+            rows[line] = starts == null ? computeWrapRowCount(line, key) : starts.size();
         }
         layout.rows = new LineLayoutIndex(rows, false);
         return layout.rows;
@@ -284,15 +320,55 @@ public final class TerminalTextLayoutCache {
 
     private List<Integer> computeWrapStarts(int line, WrapLayoutKey key) {
         TerminalText.Metrics metrics = metricsSynchronized(line, key.tabWidth());
-        List<Integer> starts = TerminalLineLayout.wrapStarts(metrics, key.width(), key.wrapByWords());
-        int lastStart = starts.get(starts.size() - 1);
-        if (reserveLineEndCell && key.width() > 0 && !metrics.text().isEmpty()
-            && metrics.visualWidth() - metrics.visualColumnAt(lastStart) >= key.width()) {
-            List<Integer> withLineEnd = new ArrayList<>(starts);
-            withLineEnd.add(metrics.text().length());
-            return List.copyOf(withLineEnd);
+        return TerminalLineLayout.wrapStarts(metrics, key.width(), key.wrapByWords(), reserveLineEndCell);
+    }
+
+    private int computeWrapRowCount(int line, WrapLayoutKey key) {
+        TerminalText.Metrics metrics = metricsSynchronized(line, key.tabWidth());
+        TerminalLineLayout.WrapSummary summary = TerminalLineLayout.wrapSummary(metrics, key.width(), key.wrapByWords());
+        boolean lineEndRow = reserveLineEndCell && key.width() > 0 && !metrics.text().isEmpty()
+            && metrics.visualWidth() - metrics.visualColumnAt(summary.lastStartOffset()) >= key.width();
+        return summary.rowCount() + (lineEndRow ? 1 : 0);
+    }
+
+    private void cacheWrapStarts(WrapLayout layout, int line, List<Integer> starts) {
+        int weight = TerminalLineLayout.retainedWeight(starts);
+        if (weight > maxWrapStartsWeight) {
+            return;
         }
-        return starts;
+        removeWrapStarts(layout, line);
+        layout.wrapStarts.put(line, starts);
+        wrapStartsCount++;
+        wrapStartsWeight += weight;
+        // Retain recent layouts first, and recent lines within each layout.
+        for (WrapLayout candidate : wrapLayouts.values()) {
+            var entries = candidate.wrapStarts.entrySet().iterator();
+            while (entries.hasNext()
+                && (wrapStartsCount > maxWrapStartsLines || wrapStartsWeight > maxWrapStartsWeight)) {
+                wrapStartsWeight -= TerminalLineLayout.retainedWeight(entries.next().getValue());
+                wrapStartsCount--;
+                entries.remove();
+            }
+            if (wrapStartsCount <= maxWrapStartsLines && wrapStartsWeight <= maxWrapStartsWeight) {
+                break;
+            }
+        }
+    }
+
+    private void removeWrapStarts(WrapLayout layout, int line) {
+        List<Integer> removed = layout.wrapStarts.remove(line);
+        if (removed != null) {
+            wrapStartsCount--;
+            wrapStartsWeight -= TerminalLineLayout.retainedWeight(removed);
+        }
+    }
+
+    private void clearWrapStarts(WrapLayout layout) {
+        wrapStartsCount -= layout.wrapStarts.size();
+        for (List<Integer> starts : layout.wrapStarts.values()) {
+            wrapStartsWeight -= TerminalLineLayout.retainedWeight(starts);
+        }
+        layout.wrapStarts.clear();
     }
 
     private WrapLayout wrapLayout(WrapLayoutKey key) {
@@ -383,18 +459,16 @@ public final class TerminalTextLayoutCache {
         for (Map.Entry<WrapLayoutKey, WrapLayout> entry : wrapLayouts.entrySet()) {
             WrapLayout layout = entry.getValue();
             if (shifted) {
-                layout.wrapStarts.clear();
+                clearWrapStarts(layout);
             } else {
                 for (int line = first; line < first + added; line++) {
-                    layout.wrapStarts.remove(line);
+                    removeWrapStarts(layout, line);
                 }
             }
             if (layout.rows != null) {
                 int[] rows = new int[added];
                 for (int offset = 0; offset < added; offset++) {
-                    List<Integer> starts = computeWrapStarts(first + offset, entry.getKey());
-                    layout.wrapStarts.put(first + offset, starts);
-                    rows[offset] = starts.size();
+                    rows[offset] = computeWrapRowCount(first + offset, entry.getKey());
                 }
                 layout.rows.replace(first, change.removedLineCount(), rows);
             }
@@ -421,6 +495,8 @@ public final class TerminalTextLayoutCache {
     private void clearLayoutCaches() {
         visualWidths = null;
         wrapLayouts.clear();
+        wrapStartsCount = 0;
+        wrapStartsWeight = 0;
     }
 
     private int safeLineCount() {
@@ -440,11 +516,12 @@ public final class TerminalTextLayoutCache {
     }
 
     int wrapStartsCacheSize() {
-        int size = 0;
-        for (WrapLayout layout : wrapLayouts.values()) {
-            size += layout.wrapStarts.size();
-        }
-        return size;
+        return wrapStartsCount;
+    }
+
+    /** Retained index and metrics storage units, across every width and wrapping mode. */
+    long wrapStartsCacheWeight() {
+        return wrapStartsWeight;
     }
 
     int wrapPrefixCacheSize() {
@@ -472,7 +549,7 @@ public final class TerminalTextLayoutCache {
     }
 
     private static final class WrapLayout {
-        private final Map<Integer, List<Integer>> wrapStarts = new HashMap<>();
+        private final Map<Integer, List<Integer>> wrapStarts = new LinkedHashMap<>(16, 0.75f, true);
         private LineLayoutIndex rows;
     }
 

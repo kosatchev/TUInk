@@ -3,11 +3,15 @@ package dev.tuiframe.text;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /** Grapheme-aware terminal cell metrics shared by terminal frontends. */
 public final class TerminalText {
+    /** Maximum UTF-16 payload emitted for one physical cell, including visible orphan marks. */
+    public static final int MAX_DISPLAY_GRAPHEME_LENGTH = 256;
+
     public enum Bias {
         FLOOR,
         NEAREST,
@@ -24,6 +28,52 @@ public final class TerminalText {
     }
 
     /**
+     * Streaming segmentation over the original string. Each successful {@link #advance()} exposes
+     * the next cluster's UTF-16 range without allocating a substring or a Grapheme object.
+     * Accessors describe that cluster until the next advance.
+     */
+    public static final class GraphemeCursor {
+        private final String text;
+        private Matcher matcher;
+        private int start;
+        private int end;
+        private int width;
+        private boolean tab;
+
+        private GraphemeCursor(String text) {
+            this.text = text;
+        }
+
+        public boolean advance() {
+            if (end >= text.length()) return false;
+            start = end;
+            char ch = text.charAt(start);
+            if (isSimpleAsciiChar(ch)
+                && (start + 1 == text.length() || isSimpleAsciiChar(text.charAt(start + 1)))) {
+                end = start + 1;
+            } else {
+                if (matcher == null) matcher = GRAPHEME_PATTERN.matcher(text);
+                matcher.region(start, text.length());
+                end = matcher.lookingAt() ? matcher.end() : start + 1;
+            }
+            tab = end == start + 1 && ch == '\t';
+            width = tab ? 0 : end == start + 1 && isSimpleAsciiChar(ch) ? 1
+                : graphemeWidth(text, start, end);
+            return true;
+        }
+
+        public int start() { return start; }
+        public int end() { return end; }
+        public int width() { return width; }
+        public boolean isTab() { return tab; }
+        public boolean isWhitespace() { return isWhitespaceCluster(text, start, end); }
+    }
+
+    public static GraphemeCursor graphemeCursor(String text) {
+        return new GraphemeCursor(text == null ? "" : text);
+    }
+
+    /**
      * Immutable grapheme boundaries and terminal-cell prefix columns for one
      * string and tab width.
      */
@@ -31,20 +81,15 @@ public final class TerminalText {
         private final String text;
         private final int tabWidth;
         private final boolean simpleAscii;
+        private final int graphemeCount;
         private final int[] boundaries;
         private final int[] visualColumns;
         private final byte[] widths;
         private final boolean[] whitespace;
+        private final SparseIndex sparse;
 
-        private Metrics(
-            String text,
-            int tabWidth,
-            boolean simpleAscii,
-            int[] boundaries,
-            int[] visualColumns,
-            byte[] widths,
-            boolean[] whitespace
-        ) {
+        private Metrics(String text, int tabWidth, boolean simpleAscii,
+            int[] boundaries, int[] visualColumns, byte[] widths, boolean[] whitespace, SparseIndex sparse) {
             this.text = text;
             this.tabWidth = tabWidth;
             this.simpleAscii = simpleAscii;
@@ -52,6 +97,9 @@ public final class TerminalText {
             this.visualColumns = visualColumns;
             this.widths = widths;
             this.whitespace = whitespace;
+            this.sparse = sparse;
+            this.graphemeCount = simpleAscii ? text.length()
+                : sparse == null ? boundaries.length - 1 : sparse.floorIndex(text.length(), sparse.offsets);
         }
 
         public String text() {
@@ -63,7 +111,7 @@ public final class TerminalText {
         }
 
         public int graphemeCount() {
-            return simpleAscii ? text.length() : boundaries.length - 1;
+            return graphemeCount;
         }
 
         public int start(int graphemeIndex) {
@@ -81,135 +129,108 @@ public final class TerminalText {
             if (simpleAscii) {
                 return text.charAt(graphemeIndex) == '\t' ? 0 : 1;
             }
-            return widths[graphemeIndex];
+            return sparse == null ? widths[graphemeIndex] : sparse.width(graphemeIndex);
         }
 
         public boolean isTab(int graphemeIndex) {
             checkGraphemeIndex(graphemeIndex);
             int start = boundary(graphemeIndex);
-            int end = boundary(graphemeIndex + 1);
-            return end == start + 1 && text.charAt(start) == '\t';
+            return boundary(graphemeIndex + 1) == start + 1 && text.charAt(start) == '\t';
         }
 
         public boolean isWhitespace(int graphemeIndex) {
             checkGraphemeIndex(graphemeIndex);
-            return simpleAscii
-                ? Character.isWhitespace(text.charAt(graphemeIndex))
-                : whitespace[graphemeIndex];
+            if (simpleAscii) {
+                return Character.isWhitespace(text.charAt(graphemeIndex));
+            }
+            return sparse == null ? whitespace[graphemeIndex] : sparse.isWhitespace(graphemeIndex, text);
         }
 
         public int visualColumnAtBoundary(int boundaryIndex) {
-            int safe = Math.max(0, Math.min(boundaryIndex, graphemeCount()));
-            if (visualColumns == null) {
-                return safe;
-            }
-            return visualColumns[safe];
+            int safe = Math.max(0, Math.min(boundaryIndex, graphemeCount));
+            return sparse != null ? sparse.positionAt(safe, sparse.columns)
+                : visualColumns == null ? safe : visualColumns[safe];
         }
 
         public int previousBoundary(int offset) {
             int safe = clampOffset(offset);
-            if (safe <= 0) {
-                return 0;
-            }
-            if (simpleAscii) {
-                return safe - 1;
-            }
-            int found = Arrays.binarySearch(boundaries, safe);
-            int index = found >= 0 ? found - 1 : -found - 2;
-            return boundaries[Math.max(0, index)];
+            int floor = floorBoundaryIndex(safe);
+            return boundary(Math.max(0, boundary(floor) == safe ? floor - 1 : floor));
         }
 
         public int nextBoundary(int offset) {
             int safe = clampOffset(offset);
-            if (safe >= text.length()) {
-                return text.length();
-            }
-            if (simpleAscii) {
-                return safe + 1;
-            }
-            int found = Arrays.binarySearch(boundaries, safe);
-            int index = found >= 0 ? found + 1 : -found - 1;
-            return boundaries[Math.min(boundaries.length - 1, index)];
+            return boundary(Math.min(graphemeCount, floorBoundaryIndex(safe) + 1));
         }
 
         public int floorBoundary(int offset) {
-            int safe = clampOffset(offset);
-            if (simpleAscii) {
-                return safe;
-            }
-            int found = Arrays.binarySearch(boundaries, safe);
-            return found >= 0 ? boundaries[found] : boundaries[Math.max(0, -found - 2)];
+            return boundary(floorBoundaryIndex(clampOffset(offset)));
         }
 
         public int ceilBoundary(int offset) {
             int safe = clampOffset(offset);
-            if (simpleAscii) {
-                return safe;
-            }
-            int found = Arrays.binarySearch(boundaries, safe);
-            return found >= 0
-                ? boundaries[found]
-                : boundaries[Math.min(boundaries.length - 1, -found - 1)];
+            int floor = floorBoundaryIndex(safe);
+            return boundary(boundary(floor) == safe ? floor : floor + 1);
         }
 
         public boolean isBoundary(int offset) {
             int safe = clampOffset(offset);
-            return simpleAscii || Arrays.binarySearch(boundaries, safe) >= 0;
+            return boundary(floorBoundaryIndex(safe)) == safe;
         }
 
         public int visualColumnAt(int offset) {
-            int safe = clampOffset(offset);
-            if (simpleAscii && visualColumns == null) {
-                return safe;
-            }
-            int boundaryIndex = floorBoundaryIndex(safe);
-            return visualColumns == null ? boundaryIndex : visualColumns[boundaryIndex];
+            return visualColumnAtBoundary(floorBoundaryIndex(clampOffset(offset)));
         }
 
         public int visualWidth() {
-            return visualColumnAtBoundary(graphemeCount());
+            return visualColumnAtBoundary(graphemeCount);
         }
 
         public int storageWeight() {
-            if (simpleAscii) {
-                return visualColumns == null ? 1 : visualColumns.length;
+            if (sparse != null) {
+                return (int) Math.max(1, Math.min(Integer.MAX_VALUE, 4L * sparse.indices.length));
             }
-            return boundaries.length + visualColumns.length + widths.length + whitespace.length;
+            return simpleAscii ? visualColumns == null ? 1 : visualColumns.length
+                : boundaries.length + visualColumns.length + widths.length + whitespace.length;
         }
 
         public int offsetForVisualColumn(int targetVisualColumn, Bias bias) {
             int target = Math.max(0, targetVisualColumn);
-            int count = graphemeCount();
-            int total = visualColumnAtBoundary(count);
-            if (target >= total) {
+            if (target >= visualWidth()) {
                 return text.length();
             }
-            if (visualColumns == null) {
-                return Math.min(target, text.length());
+            int left;
+            if (sparse != null) {
+                left = sparse.floorIndex(target, sparse.columns);
+            } else if (visualColumns == null) {
+                return target;
+            } else {
+                int found = Arrays.binarySearch(visualColumns, target);
+                left = found >= 0 ? found : -found - 2;
             }
-
-            int found = Arrays.binarySearch(visualColumns, target);
-            if (found >= 0) {
-                return boundary(found);
+            int leftColumn = visualColumnAtBoundary(left);
+            if (leftColumn == target) {
+                return boundary(left);
             }
-            int right = -found - 1;
-            int left = Math.max(0, right - 1);
+            int right = left + 1;
             return switch (bias == null ? Bias.NEAREST : bias) {
                 case FLOOR -> boundary(left);
                 case CEIL -> boundary(right);
-                case NEAREST -> target - visualColumns[left] <= visualColumns[right] - target
-                    ? boundary(left)
-                    : boundary(right);
+                case NEAREST -> target - leftColumn <= visualColumnAtBoundary(right) - target
+                    ? boundary(left) : boundary(right);
             };
         }
 
         private int boundary(int index) {
-            return simpleAscii ? index : boundaries[index];
+            return simpleAscii ? index : sparse == null ? boundaries[index] : sparse.positionAt(index, sparse.offsets);
         }
 
         private int floorBoundaryIndex(int safeOffset) {
             if (simpleAscii) {
                 return safeOffset;
+            }
+            if (sparse != null) {
+                return sparse.floorIndex(safeOffset, sparse.offsets);
             }
             int found = Arrays.binarySearch(boundaries, safeOffset);
             return found >= 0 ? found : Math.max(0, -found - 2);
@@ -220,9 +241,120 @@ public final class TerminalText {
         }
 
         private void checkGraphemeIndex(int index) {
-            if (index < 0 || index >= graphemeCount()) {
+            if (index < 0 || index >= graphemeCount) {
                 throw new IndexOutOfBoundsException("grapheme index: " + index);
             }
+        }
+    }
+
+    /**
+     * Ordinary one-unit, one-cell graphemes form arithmetic runs. Only the end
+     * boundary of a tab, wide/zero-width glyph or multi-unit cluster needs an
+     * entry. The three sorted coordinates support searches in either direction.
+     */
+    private static final class SparseIndex {
+        private static final int WHITESPACE = 4;
+        private static final SparseIndex EMPTY = new SparseIndex(0);
+        private final int[] indices;
+        private final int[] offsets;
+        private final int[] columns;
+        private final byte[] attributes;
+
+        private SparseIndex(int size) {
+            indices = new int[size];
+            offsets = new int[size];
+            columns = new int[size];
+            attributes = new byte[size];
+        }
+
+        private int positionAt(int index, int[] positions) {
+            int found = Arrays.binarySearch(indices, index);
+            if (found >= 0) {
+                return positions[found];
+            }
+            int previous = -found - 2;
+            return previous < 0 ? index : positions[previous] + index - indices[previous];
+        }
+
+        private int floorIndex(int position, int[] positions) {
+            int found = Arrays.binarySearch(positions, position);
+            if (found >= 0) {
+                return indices[found];
+            }
+            int next = -found - 1;
+            int previous = next - 1;
+            int index = previous < 0 ? position : indices[previous] + position - positions[previous];
+            // Extrapolation through a multi-unit or multi-cell exception stops
+            // at its starting boundary, rather than inventing an inner boundary.
+            return next == indices.length ? index : Math.min(index, indices[next] - 1);
+        }
+
+        private int width(int index) {
+            int found = Arrays.binarySearch(indices, index + 1);
+            return found < 0 ? 1 : attributes[found] & 3;
+        }
+
+        private boolean isWhitespace(int index, String text) {
+            int found = Arrays.binarySearch(indices, index + 1);
+            return found < 0 ? Character.isWhitespace(text.charAt(positionAt(index, offsets)))
+                : (attributes[found] & WHITESPACE) != 0;
+        }
+    }
+
+    private record MetricCounts(int graphemes, int exceptions) {}
+
+    /** Allocates the smaller representation once, after a streaming count pass. */
+    private static final class MetricsBuilder {
+        private final String text;
+        private final int tabWidth;
+        private final boolean ascii;
+        private final int[] boundaries;
+        private final int[] columns;
+        private final byte[] widths;
+        private final boolean[] whitespace;
+        private final SparseIndex sparse;
+        private int exception;
+
+        private MetricsBuilder(String text, int tabWidth, boolean ascii, MetricCounts counts) {
+            this.text = text;
+            this.tabWidth = tabWidth;
+            this.ascii = ascii;
+            long denseBytes = ascii ? 4L * (counts.graphemes() + 1) : 10L * counts.graphemes() + 8;
+            if (13L * counts.exceptions() < denseBytes) {
+                sparse = counts.exceptions() == 0 ? SparseIndex.EMPTY : new SparseIndex(counts.exceptions());
+                boundaries = null;
+                columns = null;
+                widths = null;
+                whitespace = null;
+            } else {
+                sparse = null;
+                boundaries = ascii ? null : new int[counts.graphemes() + 1];
+                columns = new int[counts.graphemes() + 1];
+                widths = ascii ? null : new byte[counts.graphemes()];
+                whitespace = ascii ? null : new boolean[counts.graphemes()];
+            }
+        }
+
+        private void accept(int index, int end, int column, int width, boolean blank, boolean exceptional) {
+            if (sparse != null) {
+                if (exceptional) {
+                    sparse.indices[exception] = index;
+                    sparse.offsets[exception] = end;
+                    sparse.columns[exception] = column;
+                    sparse.attributes[exception++] = (byte) (width | (blank ? SparseIndex.WHITESPACE : 0));
+                }
+            } else {
+                columns[index] = column;
+                if (!ascii) {
+                    boundaries[index] = end;
+                    widths[index - 1] = (byte) width;
+                    whitespace[index - 1] = blank;
+                }
+            }
+        }
+
+        private Metrics finish() {
+            return new Metrics(text, tabWidth, ascii, boundaries, columns, widths, whitespace, sparse);
         }
     }
 
@@ -239,56 +371,49 @@ public final class TerminalText {
     public static Metrics metrics(String text, int tabWidth) {
         String value = text == null ? "" : text;
         int safeTabWidth = Math.max(1, tabWidth);
-        if (isSimpleAscii(value)) {
-            int[] visualColumns = null;
-            if (value.indexOf('\t') >= 0) {
-                visualColumns = new int[value.length() + 1];
-                int visual = 0;
-                for (int i = 0; i < value.length(); i++) {
-                    visual += value.charAt(i) == '\t'
-                        ? safeTabWidth - (visual % safeTabWidth)
-                        : 1;
-                    visualColumns[i + 1] = visual;
-                }
-            }
-            return new Metrics(value, safeTabWidth, true, null, visualColumns, null, null);
+        boolean ascii = isSimpleAscii(value);
+        if (ascii && value.indexOf('\t') < 0) {
+            return new Metrics(value, safeTabWidth, true, null, null, null, null, null);
         }
+        MetricCounts counts = scanMetrics(value, safeTabWidth, null);
+        MetricsBuilder builder = new MetricsBuilder(value, safeTabWidth, ascii, counts);
+        scanMetrics(value, safeTabWidth, builder);
+        return builder.finish();
+    }
 
-        int maximumClusters = Math.max(1, value.length());
-        int[] boundaries = new int[maximumClusters + 1];
-        int[] visualColumns = new int[maximumClusters + 1];
-        byte[] widths = new byte[maximumClusters];
-        boolean[] whitespace = new boolean[maximumClusters];
-        Matcher matcher = GRAPHEME_PATTERN.matcher(value);
+    /**
+     * Estimates additional heap for the index arrays built by {@link #metrics}, without
+     * allocating those arrays or copying the source. The caller still owns the source
+     * string and must budget any copies separately. Includes space for array headers
+     * and the metrics/scanner objects.
+     */
+    public static long estimatedMetricsBytes(String text, int tabWidth) {
+        String value = text == null ? "" : text;
+        boolean ascii = isSimpleAscii(value);
+        if (ascii && value.indexOf('\t') < 0) return 512;
+        MetricCounts counts = scanMetrics(value, Math.max(1, tabWidth), null);
+        long denseBytes = ascii ? 4L * (counts.graphemes() + 1L) : 10L * counts.graphemes() + 8;
+        return 512 + Math.min(denseBytes, 13L * counts.exceptions());
+    }
+
+    private static MetricCounts scanMetrics(String value, int tabWidth, MetricsBuilder builder) {
         int count = 0;
+        int exceptions = 0;
         int visual = 0;
-        int start = 0;
-        boundaries[0] = 0;
-        while (start < value.length()) {
-            matcher.region(start, value.length());
-            int end = matcher.lookingAt() ? matcher.end() : Math.min(value.length(), start + 1);
-            boolean tab = end == start + 1 && value.charAt(start) == '\t';
-            int width = tab ? 0 : graphemeWidth(value, start, end);
-            int advance = tab
-                ? safeTabWidth - (visual % safeTabWidth)
-                : Math.max(1, width);
-            widths[count] = (byte) width;
-            whitespace[count] = isWhitespaceCluster(value, start, end);
-            visual += advance;
+        GraphemeCursor cursor = graphemeCursor(value);
+        while (cursor.advance()) {
+            int width = cursor.width();
+            visual += cursor.isTab() ? tabWidth - visual % tabWidth : Math.max(1, width);
             count++;
-            boundaries[count] = end;
-            visualColumns[count] = visual;
-            start = end;
+            boolean exceptional = cursor.end() != cursor.start() + 1 || width != 1;
+            if (exceptional) {
+                exceptions++;
+            }
+            if (builder != null) {
+                builder.accept(count, cursor.end(), visual, width, cursor.isWhitespace(), exceptional);
+            }
         }
-        return new Metrics(
-            value,
-            safeTabWidth,
-            false,
-            Arrays.copyOf(boundaries, count + 1),
-            Arrays.copyOf(visualColumns, count + 1),
-            Arrays.copyOf(widths, count),
-            Arrays.copyOf(whitespace, count)
-        );
+        return new MetricCounts(count, exceptions);
     }
 
     public static List<Grapheme> graphemes(String text) {
@@ -297,41 +422,10 @@ public final class TerminalText {
             return List.of();
         }
         List<Grapheme> out = new ArrayList<>(value.length());
-        if (isSimpleAscii(value)) {
-            for (int index = 0; index < value.length(); index++) {
-                char ch = value.charAt(index);
-                boolean tab = ch == '\t';
-                out.add(
-                    new Grapheme(
-                        index,
-                        index + 1,
-                        String.valueOf(ch),
-                        tab ? 0 : 1,
-                        tab,
-                        Character.isWhitespace(ch)
-                    )
-                );
-            }
-            return out;
-        }
-
-        Matcher matcher = GRAPHEME_PATTERN.matcher(value);
-        int start = 0;
-        while (start < value.length()) {
-            matcher.region(start, value.length());
-            int end = matcher.lookingAt() ? matcher.end() : Math.min(value.length(), start + 1);
-            boolean tab = end == start + 1 && value.charAt(start) == '\t';
-            out.add(
-                new Grapheme(
-                    start,
-                    end,
-                    value.substring(start, end),
-                    tab ? 0 : graphemeWidth(value, start, end),
-                    tab,
-                    isWhitespaceCluster(value, start, end)
-                )
-            );
-            start = end;
+        GraphemeCursor cursor = graphemeCursor(value);
+        while (cursor.advance()) {
+            out.add(new Grapheme(cursor.start(), cursor.end(), value.substring(cursor.start(), cursor.end()),
+                cursor.width(), cursor.isTab(), cursor.isWhitespace()));
         }
         return out;
     }
@@ -351,32 +445,13 @@ public final class TerminalText {
         int end = 0;
         long visual = 0L;
         long limit = maxCells;
-        while (end < value.length() && visual < limit) {
-            char ch = value.charAt(end);
-            if (!isSimpleAsciiChar(ch)
-                || end + 1 < value.length() && !isSimpleAsciiChar(value.charAt(end + 1))) {
-                break;
-            }
-            long advance = ch == '\t'
+        GraphemeCursor cursor = graphemeCursor(value);
+        while (visual < limit && cursor.advance()) {
+            long advance = cursor.isTab()
                 ? safeTabWidth - (visual % safeTabWidth)
-                : 1L;
+                : Math.max(1, cursor.width());
             visual += advance;
-            end++;
-        }
-        if (end == value.length() || visual >= limit) {
-            return end == value.length() ? value : value.substring(0, end);
-        }
-
-        Matcher matcher = GRAPHEME_PATTERN.matcher(value);
-        while (end < value.length() && visual < limit) {
-            matcher.region(end, value.length());
-            int next = matcher.lookingAt() ? matcher.end() : Math.min(value.length(), end + 1);
-            boolean tab = next == end + 1 && value.charAt(end) == '\t';
-            long advance = tab
-                ? safeTabWidth - (visual % safeTabWidth)
-                : Math.max(1, graphemeWidth(value, end, next));
-            visual += advance;
-            end = next;
+            end = cursor.end();
         }
         return end == value.length() ? value : value.substring(0, end);
     }
@@ -424,6 +499,9 @@ public final class TerminalText {
         if (grapheme == null || grapheme.isEmpty()) {
             return " ";
         }
+        if (grapheme.length() > MAX_DISPLAY_GRAPHEME_LENGTH) {
+            return oversizedGrapheme(grapheme, 0, grapheme.length());
+        }
         if (containsUnpairedSurrogate(grapheme, 0, grapheme.length())) {
             return Character.toString(REPLACEMENT_CHARACTER);
         }
@@ -445,11 +523,27 @@ public final class TerminalText {
             if (type == Character.NON_SPACING_MARK
                 || type == Character.COMBINING_SPACING_MARK
                 || type == Character.ENCLOSING_MARK) {
+                if (grapheme.length() == MAX_DISPLAY_GRAPHEME_LENGTH) {
+                    return Character.toString(REPLACEMENT_CHARACTER);
+                }
                 return Character.toString(DOTTED_CIRCLE) + grapheme;
             }
             return Character.toString(REPLACEMENT_CHARACTER);
         }
         return grapheme;
+    }
+
+    /** Sanitizes an original grapheme range without copying an oversized payload. */
+    public static String sanitizeGrapheme(String text, int start, int end) {
+        Objects.checkFromToIndex(start, end, text.length());
+        return end - start > MAX_DISPLAY_GRAPHEME_LENGTH
+            ? oversizedGrapheme(text, start, end)
+            : sanitizeGrapheme(text.substring(start, end));
+    }
+
+    private static String oversizedGrapheme(String text, int start, int end) {
+        // A fullwidth question mark preserves a wide cluster's two-cell geometry.
+        return graphemeWidth(text, start, end) == 2 ? "\uFF1F" : Character.toString(REPLACEMENT_CHARACTER);
     }
 
     public static boolean containsUnsafeControl(String text) {

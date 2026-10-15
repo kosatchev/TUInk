@@ -129,7 +129,11 @@ public final class ListView implements InteractiveWidget<ListView.Action> {
                             // Preserve its source anchor and show a replacement.
                             rendered.append('\uFFFD');
                         } else {
-                            rendered.append(metrics.text(), metrics.start(grapheme), metrics.end(grapheme));
+                            // The expanded tab is no longer a grapheme boundary.
+                            // Prepare orphan marks/formats as display cells before
+                            // concatenation, just like CellText clipping and Canvas.
+                            rendered.append(TerminalText.sanitizeGrapheme(
+                                metrics.text().substring(metrics.start(grapheme), metrics.end(grapheme))));
                         }
                         grapheme++;
                     }

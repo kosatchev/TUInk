@@ -4,8 +4,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuiframe.text.TerminalText;
+import dev.tuiframe.cell.Canvas;
+import dev.tuiframe.cell.CellBuffer;
+import dev.tuiframe.geometry.Point;
+import dev.tuiframe.geometry.Rect;
+import dev.tuiframe.input.PointerEvent;
+import dev.tuiframe.style.CellStyle;
 import java.util.List;
 import java.util.Random;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class TextFieldUnicodeTest {
@@ -32,6 +39,41 @@ class TextFieldUnicodeTest {
         assertEquals(6, field.cursorCellColumn());
         assertEquals(6, field.displayWidth());
         assertEquals(6, field.cursor());
+    }
+
+    @Test
+    void tabAndOrphanMarksKeepPaintMouseSelectionAndScrolledCaretAligned() {
+        Rect bounds = new Rect(0, 0, 10, 1);
+        FocusContext focused = new FocusContext(true, true, FocusSpace.root(bounds));
+        for (String orphan : List.of("\u0301", "\u200D", "\uFE0F", "🏽")) {
+            String display = orphan.equals("\u0301") ? "◌\u0301" : "�";
+            String source = "\t" + orphan + "X";
+            TextField field = new TextField();
+            field.set(source);
+            CellBuffer wide = paint(field.layout(bounds));
+            assertEquals(display, wide.get(0, 4).grapheme());
+            assertEquals("X", wide.get(0, 5).grapheme());
+            assertEquals(new Point(6, 0), field.layout(bounds).cursorPosition(focused).orElseThrow());
+
+            field.layout(bounds).handle(new PointerEvent(0, 4, PointerEvent.Kind.PRESS,
+                PointerEvent.Button.LEFT, Set.of()), focused);
+            assertEquals(1, field.cursor());
+            field.layout(bounds).handle(new PointerEvent(0, 5, PointerEvent.Kind.DRAG,
+                PointerEvent.Button.LEFT, Set.of()), focused);
+            assertEquals(orphan, field.selectedText());
+            field.layout(bounds).handle(new PointerEvent(0, 5, PointerEvent.Kind.RELEASE,
+                PointerEvent.Button.LEFT, Set.of()), focused);
+            assertEquals(new Point(5, 0), field.layout(bounds).cursorPosition(focused).orElseThrow());
+
+            field.moveEnd();
+            Rect narrowBounds = new Rect(0, 0, 4, 1);
+            TextField.Placement narrow = field.layout(narrowBounds);
+            CellBuffer scrolled = paint(narrow);
+            assertEquals(display, scrolled.get(0, 0).grapheme());
+            assertEquals("X", scrolled.get(0, 1).grapheme());
+            assertEquals(new Point(2, 0), narrow.cursorPosition(focused).orElseThrow());
+            assertEquals(source, field.text(), "display preparation must preserve the editable value");
+        }
     }
 
     @Test
@@ -93,5 +135,11 @@ class TextFieldUnicodeTest {
                 field.clear();
             }
         }
+    }
+
+    private static CellBuffer paint(TextField.Placement placement) {
+        CellBuffer buffer = new CellBuffer(1, placement.bounds().width());
+        placement.paint(new Canvas(buffer), role -> CellStyle.DEFAULT, WidgetState.FOCUSED);
+        return buffer;
     }
 }

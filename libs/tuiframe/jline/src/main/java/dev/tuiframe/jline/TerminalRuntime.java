@@ -25,7 +25,7 @@ public final class TerminalRuntime implements AutoCloseable {
     private TerminalRuntime(TerminalSession session, boolean colorEnabled) {
         this.session = Objects.requireNonNull(session, "session");
         this.capabilities = session.capabilities().withColorEnabled(colorEnabled);
-        KeyDecoder decoder = new KeyDecoder(session.reader(), session.backspaceSendsCtrlH());
+        KeyDecoder decoder = new KeyDecoder(session.reader(), session.backspaceSendsCtrlH(), session.keyMap());
         this.eventLoop = new TuiEventLoop<>(timeoutMillis -> {
             KeyDecoder.ReadResult result = decoder.read(timeoutMillis);
             return switch (result.status()) {

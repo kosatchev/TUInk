@@ -76,6 +76,23 @@ class WrappedTextViewportTest {
     }
 
     @Test
+    void tabExpansionPreservesOrphanDisplayCellsAcrossWrappingAndReflow() {
+        for (String orphan : List.of("\u0301", "\u200D", "\uFE0F", "🏽")) {
+            String display = orphan.equals("\u0301") ? "◌\u0301" : "�";
+            ListView.WrappedText source = ListView.wrappedText(List.of("a\t" + orphan + "X"));
+            ListView.Placement wide = source.layout(new Rect(0, 0, 8, 3), ListView.State.initial());
+            assertEquals(List.of("a   " + display + "X  ", "        ", "        "), paint(wide));
+
+            ListView.Placement wrapped = source.layout(new Rect(0, 0, 5, 3), wide.state(), wide);
+            assertEquals(2, wrapped.rowCount());
+            assertEquals(List.of("a    ", display + "X   ", "     "), paint(wrapped));
+
+            ListView.Placement narrow = source.layout(new Rect(0, 0, 2, 4), wrapped.state(), wrapped);
+            assertEquals(List.of("a ", "  ", display + "X", "  "), paint(narrow));
+        }
+    }
+
+    @Test
     void resizingReflowsTheSuppliedScrollOffsetToItsLogicalPositionAndCancelsCapture() {
         ListView.WrappedText source = ListView.wrappedText(List.of("abcdefghijklmnopqrstuvwxyz0123"));
         ListView.Placement previous = source.layout(new Rect(0, 0, 6, 3), new ListView.State(-1, 2));

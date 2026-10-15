@@ -21,6 +21,10 @@ public record Cell(String grapheme, CellStyle style, int width, boolean continua
             grapheme = " ";
             width = 0;
         } else {
+            if (grapheme != null && grapheme.length() > TerminalText.MAX_DISPLAY_GRAPHEME_LENGTH
+                && !TerminalText.isSingleGrapheme(grapheme)) {
+                throw new IllegalArgumentException("cell payload must contain exactly one grapheme");
+            }
             grapheme = TerminalText.sanitizeGrapheme(grapheme);
             if (!TerminalText.isSingleGrapheme(grapheme)) {
                 throw new IllegalArgumentException("cell payload must contain exactly one grapheme");

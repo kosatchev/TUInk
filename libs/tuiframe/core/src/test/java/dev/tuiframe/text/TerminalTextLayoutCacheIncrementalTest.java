@@ -120,7 +120,7 @@ class TerminalTextLayoutCacheIncrementalTest {
     @Test
     void batchedRandomEditsMatchFreshLayoutsWhenUnicodeMetricsAreEvicted() {
         MutableLineSource source = source("first", "中\twide", "a\u0301 text", "tail");
-        TerminalTextLayoutCache cache = new TerminalTextLayoutCache(source, 3, 24, 4);
+        TerminalTextLayoutCache cache = new TerminalTextLayoutCache(source, 3, 24, 4, 3, 6);
         List<String> texts = List.of("", "\tab", "中中", "a\u0301 text", "👩‍💻foo",
             "one two three", "1234567890", "tail");
         int[] tabWidths = {1, 2, 4, 8};
@@ -144,6 +144,8 @@ class TerminalTextLayoutCacheIncrementalTest {
             assertTrue(cache.metricsCacheSize() <= 3, "Metrics line limit after step " + step);
             assertTrue(cache.metricsCacheWeight() <= 24 || cache.metricsCacheSize() <= 1,
                 "Metrics weight limit after step " + step);
+            assertTrue(cache.wrapStartsCacheSize() <= 3, "Wrap-start line limit after step " + step);
+            assertTrue(cache.wrapStartsCacheWeight() <= 6, "Wrap-start offset limit after step " + step);
         }
     }
 

@@ -19,6 +19,42 @@ import org.junit.jupiter.api.Test;
 
 class AnsiDiffUnicodeSafetyTest {
     @Test
+    void invisibleDirectionalControlsCannotShiftFollowingTextOrReachTheTerminal() {
+        int[] codePoints = {0x061C, 0x200E, 0x200F, 0x202A, 0x202B, 0x202C, 0x202D, 0x202E,
+            0x2060, 0x2061, 0x2062, 0x2063, 0x2064, 0x2066, 0x2067, 0x2068, 0x2069,
+            0x206A, 0x206B, 0x206C, 0x206D, 0x206E, 0x206F};
+        for (int codePoint : codePoints) {
+            String control = Character.toString(codePoint);
+            CellBuffer cells = new CellBuffer(1, 6);
+            int endColumn = CellText.draw(new Canvas(cells), 0, 0, "a" + control + "bZ", CellStyle.DEFAULT);
+            StringWriter output = new StringWriter();
+            new ScreenPresenter(new PrintWriter(output), TerminalCapabilities.DEFAULT).present(new Frame(
+                cells, ScreenCursor.visibleAt(new Point(endColumn, 0)), ScrollHint.none()
+            ));
+
+            String ansi = output.toString();
+            assertEquals(4, endColumn);
+            assertEquals("�", cells.get(0, 1).grapheme());
+            assertEquals("b", cells.get(0, 2).grapheme());
+            assertEquals("Z", cells.get(0, 3).grapheme());
+            assertFalse(ansi.contains(control), "raw U+%04X".formatted(codePoint));
+            assertTrue(ansi.contains("a�bZ  "));
+            assertTrue(ansi.endsWith("\u001B[1;5H"));
+        }
+    }
+
+    @Test
+    void aSingleCellCannotExpandToMegabytesOfTerminalOutput() {
+        CellBuffer current = new CellBuffer(1, 80);
+        current.set(0, 0, "a" + "\u0301".repeat(1_000_000), CellStyle.DEFAULT);
+
+        String ansi = present(current);
+
+        assertTrue(ansi.length() < 1024);
+        assertTrue(ansi.contains("�"));
+    }
+
+    @Test
     void emitsWideGraphemeOnceAndNeverEmitsContinuationPayload() {
         CellBuffer current = new CellBuffer(1, 4);
         current.set(0, 1, "中", CellStyle.DEFAULT);

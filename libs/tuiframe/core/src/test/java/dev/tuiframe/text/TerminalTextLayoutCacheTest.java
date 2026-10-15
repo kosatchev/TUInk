@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -108,14 +109,14 @@ class TerminalTextLayoutCacheTest {
         cache.wrappedRowsBefore(2, 2, false, 4);
         cache.lineIndexFromWrappedOffset(4, 2, false, 4);
         assertEquals(callsAfterPrefixBuild, source.lineCalls());
-        assertEquals(3, cache.wrapStartsCacheSize());
+        assertEquals(1, cache.wrapStartsCacheSize(), "Prefix queries retain only explicitly requested starts");
         assertEquals(1, cache.wrapPrefixCacheSize());
 
         source.setLine(1, "wxyz");
 
         assertEquals(6, cache.totalWrappedRows(2, false, 4));
         assertTrue(source.lineCalls() > callsAfterPrefixBuild);
-        assertEquals(3, cache.wrapStartsCacheSize());
+        assertEquals(0, cache.wrapStartsCacheSize());
         assertEquals(1, cache.wrapPrefixCacheSize());
     }
 
@@ -161,12 +162,12 @@ class TerminalTextLayoutCacheTest {
     @Test
     void metricsCacheUsesWeightLimitAndRetainsOneOversizedEntry() {
         MutableLineSource oversizedSource = source("中", "a");
-        TerminalTextLayoutCache oversizedCache = new TerminalTextLayoutCache(oversizedSource, 10, 5);
+        TerminalTextLayoutCache oversizedCache = new TerminalTextLayoutCache(oversizedSource, 10, 3);
 
         TerminalText.Metrics oversized = oversizedCache.metrics(0, 4);
-        assertEquals(6, oversized.storageWeight());
+        assertEquals(4, oversized.storageWeight());
         assertEquals(1, oversizedCache.metricsCacheSize());
-        assertEquals(6, oversizedCache.metricsCacheWeight());
+        assertEquals(4, oversizedCache.metricsCacheWeight());
 
         oversizedCache.metrics(1, 4);
         assertEquals(1, oversizedCache.metricsCacheSize());
@@ -210,6 +211,105 @@ class TerminalTextLayoutCacheTest {
     }
 
     @Test
+    void offscreenRowIndicesDoNotRetainExpandedWrapStartsAcrossResizes() {
+        MutableLineSource source = new MutableLineSource(Collections.nCopies(20_000, "word"));
+        TerminalTextLayoutCache cache = new TerminalTextLayoutCache(source, 2, 16, 4, 4, 8);
+
+        for (int width = 80; width < 85; width++) {
+            assertEquals(20_000, cache.totalWrappedRows(width, false, 4));
+            assertEquals(0, cache.wrapStartsCacheSize());
+            assertEquals(0, cache.wrapStartsCacheWeight());
+            assertTrue(cache.wrapLayoutCacheSize() <= 4);
+            assertTrue(cache.metricsCacheSize() <= 2);
+        }
+        List<Integer> visible = cache.wrapStarts(10_000, 84, false, 4);
+        assertEquals(List.of(0), visible);
+        assertSame(visible, cache.wrapStarts(10_000, 84, false, 4));
+        assertEquals(1, cache.wrapStartsCacheSize());
+    }
+
+    @Test
+    void explicitWrapStartsShareOneEntryAndOffsetBudgetAcrossLayouts() {
+        MutableLineSource source = source("abcdefgh", "ijklmnop", "qrstuvwx");
+        TerminalTextLayoutCache cache = new TerminalTextLayoutCache(source, 10, 100, 4, 3, 6);
+        List<Integer> first = cache.wrapStarts(0, 4, false, 4);
+        List<Integer> eldest = cache.wrapStarts(1, 4, false, 4);
+        cache.wrapStarts(0, 5, false, 4);
+        assertEquals(3, cache.wrapStartsCacheSize());
+        assertEquals(6, cache.wrapStartsCacheWeight());
+
+        assertSame(first, cache.wrapStarts(0, 4, false, 4));
+        cache.wrapStarts(1, 5, false, 4);
+
+        assertEquals(3, cache.wrapStartsCacheSize());
+        assertEquals(6, cache.wrapStartsCacheWeight());
+        assertSame(first, cache.wrapStarts(0, 4, false, 4));
+        assertNotSame(eldest, cache.wrapStarts(1, 4, false, 4));
+        assertTrue(cache.wrapStartsCacheSize() <= 3);
+        assertTrue(cache.wrapStartsCacheWeight() <= 6);
+
+        List<Integer> oversized = cache.wrapStarts(2, 1, false, 4);
+        assertEquals(List.of(0, 1, 2, 3, 4, 5, 6, 7), oversized);
+        assertNotSame(oversized, cache.wrapStarts(2, 1, false, 4));
+        assertTrue(cache.wrapStartsCacheSize() <= 3);
+        assertTrue(cache.wrapStartsCacheWeight() <= 6);
+    }
+
+    @Test
+    void aSparseLongLineReusesItsIndexWithinTheRetainedStorageBudget() {
+        MutableLineSource source = source("a".repeat(1_000_000));
+        TerminalTextLayoutCache cache = new TerminalTextLayoutCache(source, 10, 100, 4, 3, 5000);
+        List<Integer> starts = cache.wrapStarts(0, 1, false, 4);
+
+        assertEquals(1_000_000, starts.size());
+        assertEquals(1, cache.wrapStartsCacheSize());
+        assertTrue(cache.wrapStartsCacheWeight() <= 5000);
+        assertSame(starts, cache.wrapStarts(0, 1, false, 4));
+        assertEquals(800_000, starts.get(800_000).intValue());
+        long weight = cache.wrapStartsCacheWeight();
+        assertSame(starts, cache.wrapStarts(0, 1, false, 4));
+        assertEquals(weight, cache.wrapStartsCacheWeight());
+
+        source.setLine(0, "changed");
+        assertEquals(List.of(0), cache.wrapStarts(0, 80, false, 4));
+        assertEquals(1, cache.wrapStartsCacheSize());
+        assertEquals(1, cache.wrapStartsCacheWeight());
+    }
+
+    @Test
+    void layoutEvictionAndRevisionResetReleaseTheWrapStartBudget() {
+        MutableLineSource source = source("abcdefgh");
+        TerminalTextLayoutCache cache = new TerminalTextLayoutCache(source, 10, 100, 2, 10, 100);
+        cache.wrapStarts(0, 3, false, 4);
+        cache.wrapStarts(0, 4, false, 4);
+        assertEquals(5, cache.wrapStartsCacheWeight());
+
+        cache.wrapStarts(0, 5, false, 4);
+        assertEquals(2, cache.wrapStartsCacheSize());
+        assertEquals(4, cache.wrapStartsCacheWeight());
+
+        source.setLine(0, "changed");
+        cache.metrics(0, 4);
+        assertEquals(0, cache.wrapStartsCacheSize());
+        assertEquals(0, cache.wrapStartsCacheWeight());
+    }
+
+    @Test
+    void wrapStartEntryAndOffsetLimitsApplyIndependently() {
+        MutableLineSource source = source("abcdefgh", "ijklmnop", "qrstuvwx");
+        TerminalTextLayoutCache entryLimited = new TerminalTextLayoutCache(source, 10, 100, 4, 2, 100);
+        TerminalTextLayoutCache offsetLimited = new TerminalTextLayoutCache(source, 10, 100, 4, 10, 3);
+        for (int line = 0; line < 3; line++) {
+            entryLimited.wrapStarts(line, 4, false, 4);
+            offsetLimited.wrapStarts(line, 4, false, 4);
+        }
+        assertEquals(2, entryLimited.wrapStartsCacheSize());
+        assertEquals(4, entryLimited.wrapStartsCacheWeight());
+        assertEquals(1, offsetLimited.wrapStartsCacheSize());
+        assertEquals(2, offsetLimited.wrapStartsCacheWeight());
+    }
+
+    @Test
     void emptySourcePreservesEmptyModelClampsWithoutRetainingEntries() {
         MutableLineSource source = source();
         TerminalTextLayoutCache cache = new TerminalTextLayoutCache(source);
@@ -234,6 +334,8 @@ class TerminalTextLayoutCacheTest {
         assertThrows(IllegalArgumentException.class, () -> new TerminalTextLayoutCache(source, 0, 1));
         assertThrows(IllegalArgumentException.class, () -> new TerminalTextLayoutCache(source, 1, 0));
         assertThrows(IllegalArgumentException.class, () -> new TerminalTextLayoutCache(source, 1, 1, 0));
+        assertThrows(IllegalArgumentException.class, () -> new TerminalTextLayoutCache(source, 1, 1, 1, 0, 1));
+        assertThrows(IllegalArgumentException.class, () -> new TerminalTextLayoutCache(source, 1, 1, 1, 1, 0));
 
         source.setLineWithoutRevision(0, null);
         TerminalTextLayoutCache cache = new TerminalTextLayoutCache(source);

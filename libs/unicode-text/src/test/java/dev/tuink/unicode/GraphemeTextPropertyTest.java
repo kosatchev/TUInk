@@ -5,15 +5,19 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.HashSet;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Random;
 import java.util.Set;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
 class GraphemeTextPropertyTest {
     private static final String[] TOKENS = {
         "a", "Z", "0", " ", "\t", "\r", "\n", "e\u0301", "\u0301", "中", "😀",
         "👨‍👩‍👧‍👦", "🇷🇺", "👍🏽", "1\uFE0F\u20E3", "\u1100\u1161",
-        "\u200D", "\uD83D", "\uDC4D"
+        "\u200D", "\uD83D", "\uDC4D", "\u0600", "\u0915\u094D\u0937", "\u2003", "Ā"
     };
 
     @Test
@@ -21,9 +25,13 @@ class GraphemeTextPropertyTest {
         Random random = new Random(0x4752415048454D45L);
 
         for (int sample = 0; sample < 500; sample++) {
-            String text = randomText(random);
+            // Long arithmetic runs exercise the sparse representation; clusters
+            // without a prefix also exercise the dense representation.
+            String text = (sample % 4 == 0 ? "a".repeat(100) : "") + randomText(random);
             String message = context(sample, text);
             GraphemeText layout = GraphemeText.of(text);
+            List<Integer> reference = referenceBoundaries(text);
+            assertEquals(reference.size() - 1, layout.graphemeCount(), message);
             StringBuilder reconstructed = new StringBuilder(text.length());
             Set<Integer> boundaries = new HashSet<>();
             boundaries.add(0);
@@ -32,6 +40,8 @@ class GraphemeTextPropertyTest {
             for (int index = 0; index < layout.graphemeCount(); index++) {
                 int start = layout.start(index);
                 int end = layout.end(index);
+                assertEquals(reference.get(index), start, message);
+                assertEquals(reference.get(index + 1), end, message);
                 assertEquals(previousEnd, start, message);
                 assertTrue(end > start, message);
                 String cluster = text.substring(start, end);
@@ -45,11 +55,8 @@ class GraphemeTextPropertyTest {
             assertEquals(text, reconstructed.toString(), message);
             assertEquals(text.length(), previousEnd, message);
             assertEquals(isSimpleAscii(text), layout.simpleAscii(), message);
-            assertEquals(
-                layout.simpleAscii() ? 1 : layout.graphemeCount() * 2 + 1,
-                layout.storageWeight(),
-                message
-            );
+            assertTrue(layout.storageWeight() >= 1, message);
+            assertTrue(layout.storageWeight() <= layout.graphemeCount() + 1, message);
 
             for (int offset = -2; offset <= text.length() + 2; offset++) {
                 int safe = Math.max(0, Math.min(offset, text.length()));
@@ -57,6 +64,16 @@ class GraphemeTextPropertyTest {
                 int ceil = layout.ceilBoundary(offset);
                 int previous = layout.previousBoundary(offset);
                 int next = layout.nextBoundary(offset);
+                int found = Collections.binarySearch(reference, safe);
+                int floorIndex = found >= 0 ? found : -found - 2;
+                int ceilIndex = found >= 0 ? found : -found - 1;
+
+                assertEquals(reference.get(floorIndex), floor, message);
+                assertEquals(reference.get(ceilIndex), ceil, message);
+                assertEquals(ceil, GraphemeText.ceilBoundary(text, offset), message);
+                assertEquals(reference.get(Math.max(0, found >= 0 ? found - 1 : floorIndex)), previous, message);
+                assertEquals(reference.get(Math.min(reference.size() - 1,
+                    found >= 0 ? found + 1 : ceilIndex)), next, message);
 
                 assertTrue(boundaries.contains(floor), message);
                 assertTrue(boundaries.contains(ceil), message);
@@ -86,6 +103,16 @@ class GraphemeTextPropertyTest {
                 }
             }
         }
+    }
+
+    private static List<Integer> referenceBoundaries(String text) {
+        var matcher = Pattern.compile("\\X").matcher(text);
+        List<Integer> boundaries = new ArrayList<>();
+        boundaries.add(0);
+        while (matcher.find()) {
+            boundaries.add(matcher.end());
+        }
+        return boundaries;
     }
 
     private static String randomText(Random random) {

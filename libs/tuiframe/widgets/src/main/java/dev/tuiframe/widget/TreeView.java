@@ -124,7 +124,11 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
     }
 
     /** Flat presentation descriptor. The opaque value remains consumer-owned. */
-    public record Item<V>(V value, String label, int depth, Kind kind, String trailingText) {
+    public record Item<V>(V value, String label, int depth, Kind kind, String trailingText, LabelPolicy labelPolicy) {
+        public Item(V value, String label, int depth, Kind kind, String trailingText) {
+            this(value, label, depth, kind, trailingText, LabelPolicy.DEFAULT);
+        }
+
         public Item {
             Objects.requireNonNull(value, "value");
             Objects.requireNonNull(label, "label");
@@ -133,6 +137,7 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
             }
             Objects.requireNonNull(kind, "kind");
             Objects.requireNonNull(trailingText, "trailingText");
+            Objects.requireNonNull(labelPolicy, "labelPolicy");
         }
 
         public Item(V value, String label, int depth, Kind kind) {
@@ -430,9 +435,7 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
                 ? saturatedInt((long) leadingBounds.x() - labelX)
                 : 0;
             int available = (int) (visibleRight - visibleLeft);
-            String text = hiddenCells == 0
-                ? item.label()
-                : CellText.clip(item.label(), hiddenCells, available);
+            String text = item.labelPolicy().clip(item.label(), hiddenCells, available);
             CellText.drawClipped(canvas, (int) visibleLeft, row, text, style, available);
         }
 

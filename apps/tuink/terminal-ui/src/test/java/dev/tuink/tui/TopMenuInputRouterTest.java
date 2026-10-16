@@ -144,7 +144,13 @@ class TopMenuInputRouterTest {
         assertEquals(TopMenuController.SETTINGS_INDEX, rebuilt.placement.state().openMenuIndex());
         assertTrue(rebuilt.placement.popupBounds().isPresent());
         TopMenuInputRouter.Result activated = rebuilt.route(KeyStroke.of(KeyStroke.Key.ENTER));
-        assertEquals("tuink.settings.toggle-reading-mode", activated.command().id().value());
+        assertTrue(activated.consumed());
+        assertNull(activated.command(), "The scrollbar leaves one character of the item label hidden");
+        assertTrue(rebuilt.controller.isOpen());
+
+        Fixture expanded = fixture(rebuilt.controller.state(), new Rect(0, 0, 21, 10));
+        TopMenuInputRouter.Result readable = expanded.route(KeyStroke.of(KeyStroke.Key.ENTER));
+        assertEquals("tuink.settings.toggle-reading-mode", readable.command().id().value());
     }
 
     @Test

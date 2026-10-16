@@ -35,13 +35,22 @@ record TuiCliOptions(
         Path profileFile = null;
         UiStyles.Theme themeOverride = null;
         Path file = null;
+        boolean endOfOptions = false;
 
         for (int i = 0; i < args.length; i++) {
             String arg = args[i];
             if (arg == null) {
                 throw new IllegalArgumentException("Command-line arguments must not be null");
             }
+            if (endOfOptions) {
+                if (file != null) {
+                    throw new IllegalArgumentException("Only one file path is supported.");
+                }
+                file = CommandLinePaths.literal(arg, true);
+                continue;
+            }
             switch (arg) {
+                case "--" -> endOfOptions = true;
                 case "--no-mouse" -> mouseEnabledOverride = false;
                 case "--no-alt-screen" -> altScreenEnabled = false;
                 case "--no-color" -> colorEnabled = false;
@@ -49,11 +58,25 @@ record TuiCliOptions(
                 case "--profile" -> profileEnabled = true;
                 case "--help", "-h" -> showHelp = true;
                 default -> {
+                    if ("--file-uri".equals(arg) || arg.startsWith("--file-uri=")) {
+                        if (file != null) {
+                            throw new IllegalArgumentException("Only one file path is supported.");
+                        }
+                        if ("--file-uri".equals(arg) && i + 1 >= args.length) {
+                            throw new IllegalArgumentException("Missing value after --file-uri");
+                        }
+                        String value = "--file-uri".equals(arg) ? args[++i] : arg.substring("--file-uri=".length());
+                        file = CommandLinePaths.fileUri(value);
+                        continue;
+                    }
                     if ("--profile-file".equals(arg)) {
                         if (i + 1 >= args.length) {
                             throw new IllegalArgumentException("Missing value after --profile-file");
                         }
-                        profileFile = Path.of(args[++i]);
+                        if (args[i + 1] == null) {
+                            throw new IllegalArgumentException("Command-line arguments must not be null");
+                        }
+                        profileFile = CommandLinePaths.literal(args[++i], false);
                         profileEnabled = true;
                         continue;
                     }
@@ -62,7 +85,7 @@ record TuiCliOptions(
                         continue;
                     }
                     if (arg.startsWith("--profile-file=")) {
-                        profileFile = Path.of(arg.substring("--profile-file=".length()));
+                        profileFile = CommandLinePaths.literal(arg.substring("--profile-file=".length()), false);
                         profileEnabled = true;
                         continue;
                     }
@@ -72,7 +95,7 @@ record TuiCliOptions(
                     if (file != null) {
                         throw new IllegalArgumentException("Only one file path is supported.");
                     }
-                    file = Path.of(arg);
+                    file = CommandLinePaths.literal(arg, true);
                 }
             }
         }

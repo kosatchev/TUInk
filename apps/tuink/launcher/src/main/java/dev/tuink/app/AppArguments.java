@@ -10,10 +10,35 @@ record AppArguments(UiTarget ui, List<String> forwarded) {
     }
 
     static AppArguments parse(String[] args) {
+        if (args == null) {
+            throw new IllegalArgumentException("args must not be null");
+        }
+        for (String arg : args) {
+            if (arg == null) {
+                throw new IllegalArgumentException("Command-line arguments must not be null");
+            }
+        }
         UiTarget ui = UiTarget.TUI;
         List<String> forwarded = new ArrayList<>(args.length);
+        boolean endOfOptions = false;
         for (int i = 0; i < args.length; i++) {
             String arg = args[i];
+            if (endOfOptions) {
+                forwarded.add(arg);
+                continue;
+            }
+            if ("--".equals(arg)) {
+                endOfOptions = true;
+                forwarded.add(arg);
+                continue;
+            }
+            if ("--profile-file".equals(arg) || "--file-uri".equals(arg)) {
+                forwarded.add(arg);
+                if (i + 1 < args.length) {
+                    forwarded.add(args[++i]);
+                }
+                continue;
+            }
             if (arg.startsWith("--ui=")) {
                 ui = UiTarget.parse(arg.substring("--ui=".length()));
                 continue;

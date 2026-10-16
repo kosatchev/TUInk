@@ -224,40 +224,41 @@ public final class TabBar implements InteractiveWidget<TabBar.Action> {
         if (maxWidth <= 0) {
             return PreparedText.EMPTY;
         }
-        int suffixWidth = item.closable() ? CLOSE_SUFFIX.length() : CLOSE.length();
+        boolean hasAffixes = !item.prefix().isEmpty() || !item.suffix().isEmpty();
+        CellText.FittedText fittedPrefix = CellText.fitMiddle(item.prefix(), maxWidth, 0, OPEN.length());
+        CellText.FittedText fittedSuffix = CellText.fitMiddle(item.suffix(), maxWidth, 0, 0);
+        String prefix = fittedPrefix.text();
+        String suffix = fittedSuffix.text();
+        int affixWidth = CellText.width(prefix) + CellText.width(suffix);
+        boolean showClose = item.closable();
+        if (hasAffixes && maxWidth < OPEN.length() + CLOSE_SUFFIX.length() + affixWidth + 1) {
+            showClose = false;
+        }
+        int suffixWidth = showClose ? CLOSE_SUFFIX.length() : CLOSE.length();
         int chromeWidth = OPEN.length() + suffixWidth;
         if (maxWidth < chromeWidth) {
-            return compact(item.closable(), maxWidth);
+            return hasAffixes ? compactAffixes(prefix, suffix, maxWidth) : compact(item.closable(), maxWidth);
         }
-
-        int labelCapacity = maxWidth - chromeWidth;
-        int probeWidth = (int) Math.min(
-            Integer.MAX_VALUE,
-            (long) labelCapacity + TAB_WIDTH + OPEN.length()
-        );
-        String labelProbe = TerminalText.prefixForVisualWidth(
-            item.label(),
-            probeWidth,
-            TAB_WIDTH
-        );
-        String withOpen = OPEN + labelProbe;
-        TerminalText.Metrics metrics = TerminalText.metrics(withOpen, TAB_WIDTH);
-        int labelLimit = maxWidth - suffixWidth;
-        int endOffset = OPEN.length();
-        for (int grapheme = 0; grapheme < metrics.graphemeCount(); grapheme++) {
-            int nextVisual = metrics.visualColumnAtBoundary(grapheme + 1);
-            if (nextVisual > labelLimit) {
-                break;
-            }
-            endOffset = metrics.end(grapheme);
+        if (hasAffixes && maxWidth < chromeWidth + affixWidth) {
+            return compactAffixes(prefix, suffix, maxWidth);
         }
-        boolean complete = endOffset == withOpen.length()
-            && labelProbe.length() == item.label().length();
-        String suffix = item.closable() ? CLOSE_SUFFIX : CLOSE;
-        String rendered = withOpen.substring(0, endOffset) + suffix;
+        int labelCapacity = maxWidth - chromeWidth - affixWidth;
+        CellText.FittedText label = item.labelPolicy().fitMiddle(item.label(), labelCapacity, item.preferredTailCells(),
+            OPEN.length() + CellText.width(prefix));
+        boolean complete = label.complete() && fittedPrefix.complete() && fittedSuffix.complete()
+            && (!item.closable() || showClose);
+        String rendered = OPEN + prefix + label.text() + suffix + (showClose ? CLOSE_SUFFIX : CLOSE);
         int width = TerminalText.visualWidth(rendered, TAB_WIDTH);
-        int closeOffset = item.closable() ? width - 2 : -1;
+        int closeOffset = showClose ? width - 2 : -1;
         return new PreparedText(rendered, width, closeOffset, complete);
+    }
+
+    private static PreparedText compactAffixes(String prefix, String suffix, int maxWidth) {
+        // Trailing affixes have priority when the viewport cannot hold both.
+        String trailing = CellText.ellipsizeMiddle(suffix, maxWidth, 0);
+        String leading = CellText.ellipsizeMiddle(prefix, maxWidth - CellText.width(trailing), 0);
+        String text = leading + trailing;
+        return new PreparedText(text, CellText.width(text), -1, false);
     }
 
     private static PreparedText compact(boolean closable, int maxWidth) {
@@ -281,10 +282,30 @@ public final class TabBar implements InteractiveWidget<TabBar.Action> {
         return new State(Math.min(state.firstVisibleIndex(), itemCount - 1));
     }
 
-    /** Generic presentation for one tab. Application status markers belong in {@code label}. */
-    public record Item(String label, boolean closable) {
+    /**
+     * Generic presentation. Affixes remain outside the shortened label. The tail preference
+     * reserves trailing label cells where possible, without interpreting their content.
+     */
+    public record Item(String label, boolean closable, String prefix, String suffix, int preferredTailCells,
+                       LabelPolicy labelPolicy) {
+        public Item(String label, boolean closable, String prefix, String suffix, int preferredTailCells) {
+            this(label, closable, prefix, suffix, preferredTailCells, LabelPolicy.DEFAULT);
+        }
+
+        public Item(String label, boolean closable) {
+            this(label, closable, "", "", 0);
+        }
+
+        public Item(String label, boolean closable, String prefix, String suffix) {
+            this(label, closable, prefix, suffix, 0);
+        }
+
         public Item {
             Objects.requireNonNull(label, "label");
+            Objects.requireNonNull(prefix, "prefix");
+            Objects.requireNonNull(suffix, "suffix");
+            Objects.requireNonNull(labelPolicy, "labelPolicy");
+            if (preferredTailCells < 0) throw new IllegalArgumentException("Tail preference must be non-negative");
         }
     }
 

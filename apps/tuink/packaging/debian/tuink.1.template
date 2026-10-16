@@ -4,6 +4,7 @@ tuink \- terminal text editor
 .SH SYNOPSIS
 .B tuink
 .RI [ options ]
+.RB [ \-\- ]
 .RI [ file ]
 .SH DESCRIPTION
 .B tuink
@@ -32,14 +33,27 @@ Log render timings to standard error.
 .BR \-\-profile\-file= path
 Write render timings to a file and enable profiling.
 .TP
+.BR \-\-file\-uri= uri
+Open an absolute ASCII file URI with percent-encoded filename bytes.
+Use this option or the file picker for non-UTF-8 Unix filenames and literal U+FFFD names.
+Ordinary command-line file and profile paths containing U+FFFD are rejected to avoid selecting another file after native argument decoding.
+.TP
 .BR \-\-ui= tui
 Select the terminal interface. The GUI target is not implemented.
 .TP
 .BR \-h ", " \-\-help
 Show command-line help.
+.TP
+.BR \-\-
+End option parsing. The following argument is a literal file path, even if it starts with a dash.
 .SH FILES
 .TP
 .I ~/.config/tuink/tuink.properties
-Per-user UI settings.
+Per-user UI settings by default. An absolute, nonempty XDG_CONFIG_HOME selects
+XDG_CONFIG_HOME/tuink/tuink.properties instead. Recovery data is kept in the
+same profile's tuink/recovery directory.
+.TP
+.I ~/.local/state/tuink/save-locks-v1
+Persistent per-user locks coordinating document and settings saves across profiles.
 .SH AUTHORS
 Dmitry Kosatchev.

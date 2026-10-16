@@ -134,7 +134,7 @@ class SearchClipboardIntegrationTest {
 
     @ParameterizedTest
     @CsvSource({"FIND,false", "FIND,true", "REPLACE,false", "REPLACE,true"})
-    void focusedPasteNormalizesMultilineClipboardAtTheFieldCaret(
+    void focusedPasteJoinsLinesAndPreservesTabsAtTheFieldCaret(
         SearchFocus target, boolean readingMode
     ) throws Exception {
         Fixture fixture = new Fixture(target, readingMode);
@@ -145,8 +145,8 @@ class SearchClipboardIntegrationTest {
 
         fixture.dispatch(KeyStroke.Key.V);
 
-        assertEquals("a😀x y zb", fixture.field().text());
-        assertEquals("a😀x y z".length(), fixture.field().cursor());
+        assertEquals("a😀x \ty zb", fixture.field().text());
+        assertEquals("a😀x \ty z".length(), fixture.field().cursor());
         assertEquals(otherValue, fixture.otherField().text());
         fixture.assertDocumentUnchanged();
     }

@@ -17,7 +17,7 @@ application {
 tasks.named('run', JavaExec) {
     standardInput = System.in
     if (project.hasProperty('appArgs')) {
-        args(project.property('appArgs').toString().split('\\s+').findAll { !it.isBlank() })
+        setArgsString(project.property('appArgs').toString())
     }
 }
 

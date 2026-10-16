@@ -46,15 +46,15 @@ class EditorCommandRoutingIntegrationTest {
             assertEquals("ac", fixture.filename.text());
             fixture.host.clipboard.setText("x\r\n\ty\u0001\nz");
             fixture.command(TuinkCommand.EDIT_PASTE);
-            assertEquals("ax y zc", fixture.filename.text());
+            assertEquals("ax \ty zc", fixture.filename.text());
             fixture.command(TuinkCommand.EDIT_SELECT_ALL);
             fixture.command(TuinkCommand.EDIT_COPY);
-            assertEquals("ax y zc", fixture.host.clipboard.text());
+            assertEquals("ax \ty zc", fixture.host.clipboard.text());
             fixture.command(TuinkCommand.CURSOR_END);
             fixture.command(TuinkCommand.EDIT_DELETE_FORWARD);
             fixture.command(TuinkCommand.EDIT_UNDO);
             fixture.command(TuinkCommand.EDIT_REDO);
-            assertEquals("ax y zc", fixture.filename.text());
+            assertEquals("ax \ty zc", fixture.filename.text());
             assertEquals(SaveAsBarView.Target.FIELD, fixture.host.saveAsFocusManager.focused().orElseThrow());
 
             fixture.command(TuinkCommand.UI_ESCAPE);

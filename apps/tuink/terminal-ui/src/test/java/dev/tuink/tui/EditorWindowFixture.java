@@ -48,9 +48,9 @@ final class EditorWindowFixture implements AutoCloseable {
     final List<TerminalEditorApp.EditorTab> tabs = new ArrayList<>();
     final TerminalEditorApp.SessionContext context;
     final TerminalEditorApp.NotificationState notification = host.new NotificationState();
-    final TextField query = new TextField();
-    final TextField replacement = new TextField();
-    final TextField filename = new TextField();
+    final TextField query = new TextField(TextField.PastePolicy.PRESERVE_TABS);
+    final TextField replacement = new TextField(TextField.PastePolicy.PRESERVE_TABS);
+    final TextField filename = new TextField(TextField.PastePolicy.PRESERVE_TABS);
     final EditorView editorView = new EditorView();
     final TopMenuController menu = new TopMenuController();
     final Keymap<KeyStroke> keymap = TuinkKeymap.defaults();

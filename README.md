@@ -201,6 +201,7 @@ With Find or Replace focused, Left/Right and Home/End move within the field;
 cuts it; without a selection both leave the field and clipboard unchanged.
 Dragging the mouse selects field text; Shift+Click extends the selection.
 Typing and `Ctrl+V` replace selected text, joining pasted lines with spaces.
+Pasting into Find, Replace, or Save As preserves tabs.
 `Ctrl+Backspace/Delete` delete by word. Up/Down stay in the single-line field;
 use `Tab` / `Shift+Tab` or a click to move focus. Page Up/Page Down and the mouse
 wheel scroll the document while preserving its caret, selection, and field focus.

@@ -16,6 +16,7 @@ import dev.tuiframe.input.KeyStroke;
 import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.input.ResizeEvent;
 import dev.tuiframe.input.TextInput;
+import dev.tuiframe.input.TuiInputEvent;
 import dev.tuiframe.scroll.Scrollbar;
 import dev.tuiframe.style.CellColor;
 import dev.tuiframe.style.CellStyle;
@@ -290,6 +291,104 @@ class MenuBarTest {
     }
 
     @Test
+    void clippedItemsUseDisabledStylesAndCannotActivateUntilTheirFullLabelFits() {
+        List<MenuBar.Menu<String>> menus = List.of(menu("Menu",
+            item("confirm", "Confirm on close", 0, true),
+            item("go", "Go", 0, true),
+            item("off", "Off", 0, false)
+        ));
+        MenuBar.Placement<String> narrow = placement(menus, MenuBar.State.open(0), new Rect(0, 0, 8, 6));
+        List<TuiInputEvent> confirmInputs = List.of(
+            key(KeyStroke.Key.ENTER), new TextInput("1"), new TextInput("c"), press(2, 2)
+        );
+
+        for (TuiInputEvent event : confirmInputs) {
+            assertCaptured(narrow.handle(event, FOCUSED));
+        }
+        assertTrue(narrow.cursorPosition(FOCUSED).isEmpty());
+        CellBuffer clipped = filled(6, 8);
+        narrow.paint(new Canvas(clipped), THEME, WidgetState.FOCUSED);
+        assertEquals("Conf", cellText(clipped, 2, 2, 4));
+        assertEquals(underlined(DISABLED_ITEM), clipped.get(2, 2).style());
+        assertEquals(DISABLED_ITEM, clipped.get(2, 3).style());
+        assertEquals(underlined(ITEM), clipped.get(3, 2).style());
+        assertEquals(underlined(DISABLED_ITEM), clipped.get(4, 2).style());
+
+        MenuBar.State down = stateChange(narrow.handle(key(KeyStroke.Key.ARROW_DOWN), FOCUSED));
+        assertEquals(1, down.selectedEntryIndex());
+        MenuBar.Placement<String> go = placement(menus, down, narrow.bounds());
+        for (TuiInputEvent event : List.of(
+            key(KeyStroke.Key.ENTER), new TextInput("2"), new TextInput("g"), press(3, 2)
+        )) {
+            assertEquals("go", invokedValue(go.handle(event, FOCUSED)));
+        }
+        assertEquals(MenuBar.State.closed(), stateChange(narrow.handle(key(KeyStroke.Key.ESCAPE), FOCUSED)));
+
+        MenuBar.Placement<String> expanded = placement(menus, narrow.state(), new Rect(0, 0, 24, 6));
+        for (TuiInputEvent event : confirmInputs) {
+            assertEquals("confirm", invokedValue(expanded.handle(event, FOCUSED)));
+        }
+        assertEquals(new Point(2, 2), expanded.cursorPosition(FOCUSED).orElseThrow());
+        CellBuffer restored = filled(6, 24);
+        expanded.paint(new Canvas(restored), THEME, WidgetState.FOCUSED);
+        assertEquals(underlined(SELECTED), restored.get(2, 2).style());
+        assertEquals(underlined(DISABLED_ITEM), restored.get(4, 2).style());
+        assertCaptured(expanded.handle(new TextInput("o"), FOCUSED));
+        assertCaptured(expanded.handle(press(4, 2), FOCUSED));
+    }
+
+    @Test
+    void activationRequiresCompleteGraphemesAndTabExpansionInsideThePopup() {
+        record Label(String text, int mnemonic, String input, int width) {}
+        for (Label label : List.of(
+            new Label("中e\u0301Z", 1, "É", 4),
+            new Label("😀Z", 0, "😀", 3),
+            new Label("A\tB", 0, "a", 5)
+        )) {
+            List<MenuBar.Menu<String>> menus = List.of(menu("M",
+                item("value", label.text(), label.mnemonic(), true)));
+            MenuBar.Placement<String> clipped = placement(menus, MenuBar.State.open(0),
+                new Rect(0, 0, label.width() + 3, 5));
+            MenuBar.Placement<String> complete = placement(menus, clipped.state(),
+                new Rect(0, 0, label.width() + 4, 5));
+            for (TuiInputEvent event : List.of(
+                key(KeyStroke.Key.ENTER), new TextInput("1"), new TextInput(label.input()), press(2, 2)
+            )) {
+                assertCaptured(clipped.handle(event, FOCUSED));
+                assertEquals("value", invokedValue(complete.handle(event, FOCUSED)));
+            }
+            assertTrue(clipped.cursorPosition(FOCUSED).isEmpty());
+            assertTrue(complete.cursorPosition(FOCUSED).isPresent());
+        }
+    }
+
+    @Test
+    void aScrollbarCanMakeAnOtherwiseFittingLabelUnavailableAndOrdinalsOnlyRevealIt() {
+        List<MenuBar.Menu<String>> menus = List.of(menu("M",
+            item("four", "Four", 0, true), item("go", "Go", 0, true),
+            item("no", "No", 0, true), item("last", "Last", 0, true)
+        ));
+        Rect shortBounds = new Rect(0, 0, 8, 5);
+        MenuBar.Placement<String> initial = placement(menus, MenuBar.State.open(0), shortBounds);
+        assertTrue(initial.scrollbar().isPresent());
+        assertCaptured(initial.handle(key(KeyStroke.Key.ENTER), FOCUSED));
+        assertCaptured(initial.handle(new TextInput("f"), FOCUSED));
+
+        MenuBar.State reveal = stateChange(initial.handle(new TextInput("4"), FOCUSED));
+        assertEquals(3, reveal.selectedEntryIndex());
+        MenuBar.Placement<String> last = placement(menus, reveal, shortBounds);
+        for (TuiInputEvent event : List.of(
+            key(KeyStroke.Key.ENTER), new TextInput("4"), new TextInput("l"), press(3, 2)
+        )) {
+            assertCaptured(last.handle(event, FOCUSED));
+        }
+
+        MenuBar.Placement<String> taller = placement(menus, reveal, new Rect(0, 0, 8, 7));
+        assertTrue(taller.scrollbar().isEmpty());
+        assertEquals("last", invokedValue(taller.handle(key(KeyStroke.Key.ENTER), FOCUSED)));
+    }
+
+    @Test
     void pointerUsesExactTopPopupAndFrameGeometryAndOpenMenuCapturesTheWholeBounds() {
         List<MenuBar.Menu<String>> menus = List.of(
             menu(
@@ -548,7 +647,7 @@ class MenuBarTest {
         CellBuffer narrow = filled(8, 10);
         resized.paint(new Canvas(narrow), THEME, WidgetState.FOCUSED);
         assertEquals("Settin", cellText(narrow, 1, 2, 6));
-        assertEquals("settings", invokedValue(resized.handle(key(KeyStroke.Key.ENTER), FOCUSED)));
+        assertCaptured(resized.handle(key(KeyStroke.Key.ENTER), FOCUSED));
         assertEquals(MenuBar.State.closed(), stateChange(resized.handle(press(1, 2), UNFOCUSED)));
 
         MenuBar.State helpState = stateChange(settings.handle(key(KeyStroke.Key.ARROW_RIGHT), FOCUSED));
@@ -566,7 +665,7 @@ class MenuBarTest {
     void reservedTrailingChromeLimitsHeadingsAndHitsWhilePopupsUseTheFullLayer() {
         List<MenuBar.Menu<String>> menus = List.of(
             menu("File", item("file", "Open", 0, true)),
-            menu("Settings", item("settings", "A longer setting", 0, true))
+            menu("Settings", item("settings", "A setting!", 0, true))
         );
         Rect bounds = new Rect(2, 1, 14, 6);
         MenuBar.Placement<String> closed = new MenuBar<>(menus, MenuBar.State.closed()).layout(bounds, 6);
@@ -587,7 +686,7 @@ class MenuBarTest {
 
     @Test
     void aFullyReservedHeadingRowStillAllowsKeyboardUseOfTheOpenPopup() {
-        List<MenuBar.Menu<String>> menus = List.of(menu("Menu", item("item", "Item", 0, true)));
+        List<MenuBar.Menu<String>> menus = List.of(menu("Menu", item("item", "Go", 0, true)));
         Rect bounds = new Rect(0, 0, 6, 5);
         for (int reserved : List.of(6, Integer.MAX_VALUE)) {
             MenuBar.Placement<String> placement = new MenuBar<>(menus, MenuBar.State.open(0))

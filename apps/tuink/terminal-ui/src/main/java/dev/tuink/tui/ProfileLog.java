@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
@@ -15,11 +16,11 @@ final class ProfileLog {
     }
 
     static PrintWriter open(Path file, Path document) throws IOException {
-        Path target = file.toAbsolutePath().normalize();
+        Path target = file.toAbsolutePath();
         if (document != null) {
-            Path documentTarget = document.toAbsolutePath().normalize();
+            Path documentTarget = document.toAbsolutePath();
             if (target.equals(documentTarget)
-                || resolveParent(target).equals(resolveParent(documentTarget))) {
+                || resolveParent(target).equals(resolveDocumentTarget(documentTarget))) {
                 throw new IOException("Profile log must differ from the document: " + file);
             }
         }
@@ -36,6 +37,20 @@ final class ProfileLog {
         } catch (FileAlreadyExistsException e) {
             throw new FileAlreadyExistsException(target.toString(), null, "Profile log must be a new file");
         }
+    }
+
+    private static Path resolveDocumentTarget(Path document) throws IOException {
+        Path current = document;
+        for (int links = 0; links <= 40; links++) {
+            // Resolve existing parents before interpreting either '..' or a relative
+            // link target. Lexical normalization would change symlink/.. semantics.
+            Path resolved = resolveParent(current);
+            if (!Files.isSymbolicLink(resolved)) return resolved;
+            if (links == 40) break;
+            Path link = Files.readSymbolicLink(resolved);
+            current = link.isAbsolute() ? link : resolved.getParent().resolve(link);
+        }
+        throw new FileSystemException(document.toString(), null, "Too many symbolic links in document path");
     }
 
     private static Path resolveParent(Path file) throws IOException {

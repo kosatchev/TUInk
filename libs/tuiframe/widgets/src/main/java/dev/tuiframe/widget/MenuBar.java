@@ -188,7 +188,8 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
                 PreparedLabel label = prepareVisibleLabel(
                     item.label(),
                     item.mnemonicGraphemeIndex(),
-                    contentWidth
+                    contentWidth,
+                    item.labelPolicy()
                 );
                 rows.add(new PreparedRow<>(entryIndex, rowY, item, label));
             } else {
@@ -336,10 +337,16 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
     }
 
     private static PreparedLabel prepareVisibleLabel(String text, int mnemonic, int capacity) {
+        return prepareVisibleLabel(text, mnemonic, capacity, LabelPolicy.DEFAULT);
+    }
+
+    private static PreparedLabel prepareVisibleLabel(String text, int mnemonic, int capacity, LabelPolicy labelPolicy) {
         if (capacity <= 0) {
             return new PreparedLabel("", 0, -1, null);
         }
-        String prefix = TerminalText.prefixForVisualWidth(text, capacity, TAB_WIDTH);
+        String prefix = labelPolicy == LabelPolicy.DEFAULT
+            ? TerminalText.prefixForVisualWidth(text, capacity, TAB_WIDTH)
+            : labelPolicy.clip(text, 0, capacity);
         TerminalText.Metrics metrics = TerminalText.metrics(prefix, TAB_WIDTH);
         int end = 0;
         for (int index = 0; index < metrics.graphemeCount(); index++) {
@@ -403,11 +410,17 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
         C value,
         String label,
         int mnemonicGraphemeIndex,
-        boolean enabled
+        boolean enabled,
+        LabelPolicy labelPolicy
     ) implements Entry<C> {
+        public Item(C value, String label, int mnemonicGraphemeIndex, boolean enabled) {
+            this(value, label, mnemonicGraphemeIndex, enabled, LabelPolicy.DEFAULT);
+        }
+
         public Item {
             Objects.requireNonNull(value, "value");
             requireLabel(label, "label");
+            Objects.requireNonNull(labelPolicy, "labelPolicy");
             if (mnemonicGraphemeIndex < -1) {
                 throw new IllegalArgumentException("mnemonicGraphemeIndex must be -1 or greater");
             }
@@ -633,13 +646,12 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
                     canvas.fillCell(box.x() + 1, row.y(), popup.contentBounds().width(), 1, horizontal);
                     continue;
                 }
-                Item<C> item = row.item();
-                CellStyle rowStyle = !widgetState.enabled() || !item.enabled()
+                CellStyle rowStyle = !widgetState.enabled() || !row.activatable()
                     ? disabledStyle
                     : row.entryIndex() == state.selectedEntryIndex()
                         ? selectedStyle
                         : itemStyle;
-                CellStyle mnemonicStyle = !widgetState.enabled() || !item.enabled()
+                CellStyle mnemonicStyle = !widgetState.enabled() || !row.activatable()
                     ? disabledMnemonic
                     : row.entryIndex() == state.selectedEntryIndex()
                         ? selectedMnemonic
@@ -781,7 +793,7 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
             if (row != null && row.entry() instanceof Item<?> raw) {
                 @SuppressWarnings("unchecked")
                 Item<C> item = (Item<C>) raw;
-                if (item.enabled()) {
+                if (row.activatable()) {
                     return invoke(item.value());
                 }
                 return InteractionResult.handled();
@@ -836,7 +848,7 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
             }
             @SuppressWarnings("unchecked")
             Item<C> item = (Item<C>) raw;
-            return item.enabled() ? invoke(item.value()) : InteractionResult.handled();
+            return row.activatable() ? invoke(item.value()) : InteractionResult.handled();
         }
 
         private InteractionResult<Action<C>> handleMnemonic(String text) {
@@ -859,7 +871,7 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
                 }
                 @SuppressWarnings("unchecked")
                 Item<C> item = (Item<C>) raw;
-                if (item.enabled() && mnemonicEquals(row.label().mnemonicText(), grapheme)) {
+                if (row.activatable() && mnemonicEquals(row.label().mnemonicText(), grapheme)) {
                     return invoke(item.value());
                 }
             }
@@ -883,7 +895,7 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
             if (visible != null && visible.entry() instanceof Item<?> raw) {
                 @SuppressWarnings("unchecked")
                 Item<C> item = (Item<C>) raw;
-                return invoke(item.value());
+                return visible.activatable() ? invoke(item.value()) : InteractionResult.handled();
             }
             if (rowCapacity <= 0) {
                 return InteractionResult.handled();
@@ -918,7 +930,7 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
                 return Optional.empty();
             }
             PreparedRow<C> row = popup.rowForEntry(state.selectedEntryIndex());
-            if (row == null || !(row.entry() instanceof Item<?> item) || !item.enabled()) {
+            if (row == null || !row.activatable()) {
                 return Optional.empty();
             }
             int offset = row.label() != null && row.label().mnemonicVisual() >= 0
@@ -962,9 +974,9 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
     }
 
     private record PreparedRow<C>(int entryIndex, int y, Entry<C> entry, PreparedLabel label) {
-        @SuppressWarnings("unchecked")
-        private Item<C> item() {
-            return (Item<C>) entry;
+        private boolean activatable() {
+            return entry instanceof Item<?> item && item.enabled() && label != null
+                && label.text().equals(item.label());
         }
     }
 

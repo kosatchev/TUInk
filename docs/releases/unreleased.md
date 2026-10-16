@@ -1,8 +1,3 @@
 # Unreleased
 
-Changes on the development branch after [v0.14.0](0.14.0.md).
-
-## Fixes and improvements
-
-- If an edit leaves an empty line between bare CR and LF endings, that empty line's ending becomes CRLF so saving and reopening retain both line breaks.
-- The `--read`, `--no-mouse`, and `--theme` options apply only to the current session. Explicit changes through the menus or their key bindings are saved as preferences.
+Changes on the development branch after [v0.15.0](0.15.0.md).

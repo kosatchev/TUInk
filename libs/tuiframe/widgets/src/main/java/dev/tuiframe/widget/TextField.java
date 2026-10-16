@@ -23,7 +23,8 @@ import java.util.Optional;
  * The {@link #insert(String)} and {@link #set(String)} methods
  * accept trusted application text unchanged, including tabs and controls.
  * Raw {@link TextInput} is printable by contract, while raw paste is
- * normalized to safe single-line content before insertion.</p>
+ * normalized to safe single-line content before insertion. {@link PastePolicy}
+ * controls whether pasted tabs are retained.</p>
  *
  * <p>The placement implements {@link PlacedPointerCapture}: apply its capture
  * effects through {@link PointerCaptureManager}, which delivers drag/release
@@ -33,6 +34,14 @@ import java.util.Optional;
  * selection resume the normal caret-following layout.</p>
  */
 public final class TextField implements InteractiveWidget<TextField.Action> {
+    /** Tab handling for both clipboard and raw paste; ordinary spaces are retained unchanged. */
+    public enum PastePolicy {
+        /** Treat tabs like line breaks when joining pasted content into one line. */
+        NORMALIZE_TABS,
+        /** Retain every tab, including leading, repeated and trailing tabs. */
+        PRESERVE_TABS
+    }
+
     private static final int TAB_WIDTH = 4;
     private static final TerminalText.Metrics EMPTY_METRICS = TerminalText.metrics("", TAB_WIDTH);
     private static final InteractionResult<Action> VALUE_CHANGED_RESULT =
@@ -45,6 +54,7 @@ public final class TextField implements InteractiveWidget<TextField.Action> {
         InteractionResult.focus(FocusRequest.SELF);
 
     private final StringBuilder value = new StringBuilder();
+    private final PastePolicy pastePolicy;
     private int cursor;
     private int selectionAnchor = -1;
     private boolean mouseSelecting;
@@ -52,6 +62,22 @@ public final class TextField implements InteractiveWidget<TextField.Action> {
     private int mouseViewportLeft;
     private TerminalText.Metrics cachedMetrics = EMPTY_METRICS;
     private boolean metricsValid = true;
+
+    /** Creates a field that normalizes pasted tabs with the existing single-line policy. */
+    public TextField() {
+        this(PastePolicy.NORMALIZE_TABS);
+    }
+
+    /**
+     * Creates a field with the given tab paste policy. In both policies, internal CR/LF runs
+     * join content with one space, leading/trailing CR/LF runs are omitted, and other ISO
+     * controls are filtered. A preserved tab counts as content when joining lines.
+     * Trusted {@link #set(String)}, {@link #insert(String)} and printable {@link TextInput}
+     * retain their existing behavior.
+     */
+    public TextField(PastePolicy pastePolicy) {
+        this.pastePolicy = Objects.requireNonNull(pastePolicy, "pastePolicy");
+    }
 
     public void insert(String text) {
         insertValue(text);
@@ -262,7 +288,7 @@ public final class TextField implements InteractiveWidget<TextField.Action> {
     }
 
     private boolean pasteValue(String text) {
-        return insertValue(normalizeSingleLinePaste(text));
+        return insertValue(normalizeSingleLinePaste(text, pastePolicy));
     }
 
     private boolean backspaceValue() {
@@ -414,7 +440,7 @@ public final class TextField implements InteractiveWidget<TextField.Action> {
         mouseViewportBounds = null;
     }
 
-    private static String normalizeSingleLinePaste(String text) {
+    private static String normalizeSingleLinePaste(String text, PastePolicy pastePolicy) {
         if (text == null || text.isEmpty()) {
             return "";
         }
@@ -423,11 +449,12 @@ public final class TextField implements InteractiveWidget<TextField.Action> {
         for (int offset = 0; offset < text.length();) {
             int codePoint = text.codePointAt(offset);
             offset += Character.charCount(codePoint);
-            if (codePoint == '\r' || codePoint == '\n' || codePoint == '\t') {
+            if (codePoint == '\r' || codePoint == '\n'
+                || codePoint == '\t' && pastePolicy == PastePolicy.NORMALIZE_TABS) {
                 separatorPending = !normalized.isEmpty();
                 continue;
             }
-            if (Character.isISOControl(codePoint)) {
+            if (Character.isISOControl(codePoint) && codePoint != '\t') {
                 continue;
             }
             if (separatorPending) {

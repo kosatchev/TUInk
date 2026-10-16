@@ -214,7 +214,7 @@ public class TerminalEditorApp {
         UiModalState modalState = UiModalState.none();
         RecoveryAutosaveManager recoveryAutosave = new RecoveryAutosaveManager(recoveryStore);
         List<RecoveryStore.Entry> startupRecoveryEntries = new ArrayList<>();
-        TextField saveAsInput = new TextField();
+        TextField saveAsInput = new TextField(TextField.PastePolicy.PRESERVE_TABS);
         SaveAsSuggestionStore saveAsSuggestions = new SaveAsSuggestionStore();
         UiSessionState uiSessionState = UiSessionState.from(
             false,
@@ -240,8 +240,8 @@ public class TerminalEditorApp {
             false,
             false
         );
-        TextField searchQueryInput = new TextField();
-        TextField searchReplaceInput = new TextField();
+        TextField searchQueryInput = new TextField(TextField.PastePolicy.PRESERVE_TABS);
+        TextField searchReplaceInput = new TextField(TextField.PastePolicy.PRESERVE_TABS);
         SearchController.SearchUiOptions searchUi = SearchController.SearchUiOptions.DEFAULT;
         TopMenuController topMenu = new TopMenuController();
         Path initialOpenFileRoot = initialOpenRoot(state);
@@ -1759,7 +1759,7 @@ public class TerminalEditorApp {
     }
 
     String buildOverwritePrompt(Path path) {
-        return "Overwrite existing file: " + path + " ? (y/N)";
+        return "Overwrite existing file: " + dev.tuink.tui.ui.PathPresentation.name(path) + " ? (y/N)";
     }
 
     ConfirmBarView buildQuitConfirmBar(
@@ -1829,7 +1829,7 @@ public class TerminalEditorApp {
             return "Close modified tab? (y/N)";
         }
         Path path = tabs.get(closeTabIndex).state().getCurrentFile();
-        String name = path == null ? "--no name--" : path.toString();
+        String name = path == null ? "--no name--" : dev.tuink.tui.ui.PathPresentation.name(path);
         return "Close modified tab: " + name + " ? (y/N)";
     }
 

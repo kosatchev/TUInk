@@ -283,7 +283,7 @@ class TabBarTest {
 
         oversized.paint(new Canvas(large), THEME, WidgetState.FOCUSED);
 
-        assertEquals("[aaaa x]", cellText(large, 0, 0, 8));
+        assertEquals("[a…中 x]", cellText(large, 0, 0, 8));
         assertEquals(
             new TabBar.ClosePressed(0, TabBar.State.initial()),
             output(oversized.handle(press(0, 6), POINTER_CONTEXT), TabBar.ClosePressed.class)
@@ -297,7 +297,7 @@ class TabBarTest {
         ).layout(new Rect(0, 0, 5, 1));
         CellBuffer wide = filled(2, 7);
         crossingWide.paint(new Canvas(wide), THEME, WidgetState.FOCUSED);
-        assertEquals("[ x] ", cellText(wide, 0, 0, 5));
+        assertEquals("[… x]", cellText(wide, 0, 0, 5));
         for (int col = 0; col < 5; col++) {
             assertFalse(wide.get(0, col).continuation());
         }
@@ -319,6 +319,58 @@ class TabBarTest {
             1,
             oneCell.handle(scroll(0, 0, PointerEvent.Kind.SCROLL_DOWN), POINTER_CONTEXT)
         );
+    }
+
+    @Test
+    void affixesSurviveShorteningAndPointerTargetsFollowThePreparedCloseCell() {
+        TabBar.Item item = new TabBar.Item("e\u0301👩‍💻界-very-long-label.java", true, "#", "*", 5);
+        for (int width = 1; width <= 35; width++) {
+            TabBar.Placement placement = new TabBar(List.of(item), 0, TabBar.State.initial())
+                .layout(new Rect(0, 0, width, 1));
+            CellBuffer buffer = filled(1, width);
+            placement.paint(new Canvas(buffer), THEME, WidgetState.NORMAL);
+            String rendered = cellText(buffer, 0, 0, width);
+            assertTrue(rendered.contains("*"), "width=" + width + " " + rendered);
+            if (width >= 2) assertTrue(rendered.contains("#"), rendered);
+            if (width >= 13) assertTrue(rendered.contains(".java"), rendered);
+            for (int col = 0; col < width; col++) {
+                TabBar.Action action = placement.handle(press(0, col), POINTER_CONTEXT).output().orElse(null);
+                if (buffer.get(0, col).grapheme().equals("x")) {
+                    assertInstanceOf(TabBar.ClosePressed.class, action, rendered);
+                } else if (action instanceof TabBar.ClosePressed) {
+                    throw new AssertionError("Phantom close target at " + col + " in " + rendered);
+                }
+            }
+        }
+    }
+
+    @Test
+    void preparedCompletenessIncludesSanitizedLabelsAffixesAndCloseControl() throws Exception {
+        var prepare = TabBar.class.getDeclaredMethod("prepare", TabBar.Item.class, int.class);
+        prepare.setAccessible(true);
+        record Example(TabBar.Item item, int width, boolean complete) {}
+        for (Example example : List.of(
+            new Example(new TabBar.Item("\u0301abcd", true), 8, false),
+            new Example(new TabBar.Item("\u0301abcd", true), 9, true),
+            new Example(new TabBar.Item("\u0301a.java", true), 10, false),
+            new Example(new TabBar.Item("", true, "#", "*"), 4, false),
+            new Example(new TabBar.Item("a", true, "long prefix", "long suffix"), 8, false),
+            new Example(new TabBar.Item("a", true, "#", "*"), 8, true)
+        )) {
+            Object prepared = prepare.invoke(null, example.item(), example.width());
+            var complete = prepared.getClass().getDeclaredMethod("complete");
+            complete.setAccessible(true);
+            assertEquals(example.complete(), complete.invoke(prepared), example.toString());
+        }
+    }
+
+    @Test
+    void aTightLabelCanRetainTheWholePreferredTailWithoutAnInitialLetter() {
+        var placement = new TabBar(List.of(new TabBar.Item("a-long-file.txt", true, "", "*", 4)),
+            0, TabBar.State.initial()).layout(new Rect(0, 0, 10, 1));
+        CellBuffer buffer = filled(1, 10);
+        placement.paint(new Canvas(buffer), THEME, WidgetState.NORMAL);
+        assertEquals("[….txt* x]", cellText(buffer, 0, 0, 10));
     }
 
     @Test

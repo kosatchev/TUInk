@@ -76,6 +76,40 @@ class AppArgumentsTest {
     }
 
     @Test
+    void forwardsTheSeparatorAndAllFollowingArgumentsWithoutParsingUiSelectors() {
+        AppArguments options = AppArguments.parse(new String[] {"--ui", "tui", "--", "--ui=gui", "--ui", "--"});
+
+        assertEquals(AppArguments.UiTarget.TUI, options.ui());
+        assertEquals(List.of("--", "--ui=gui", "--ui", "--"), options.forwarded());
+    }
+
+    @Test
+    void forwardsPathValuesWithoutInterpretingThemAsUiSelectorsOrSeparators() {
+        for (String flag : List.of("--profile-file", "--file-uri")) {
+            for (String value : List.of("--ui=gui", "--ui", "--")) {
+                AppArguments options = AppArguments.parse(new String[] {flag, value, "--ui=tui", "--help"});
+
+                assertEquals(AppArguments.UiTarget.TUI, options.ui());
+                assertEquals(List.of(flag, value, "--help"), options.forwarded());
+            }
+        }
+    }
+
+    @Test
+    void leavesAMissingProfileValueForTheFrontendToDiagnose() {
+        assertEquals(List.of("--profile-file"), AppArguments.parse(new String[] {"--profile-file"}).forwarded());
+        assertEquals(List.of("--file-uri"), AppArguments.parse(new String[] {"--file-uri"}).forwarded());
+    }
+
+    @Test
+    void nullArgumentsCannotBypassValidationAfterTheSeparatorOrAsValues() {
+        assertThrows(IllegalArgumentException.class, () -> AppArguments.parse(null));
+        for (String[] args : new String[][] {{null}, {"--", null}, {"--ui", null}, {"--profile-file", null}}) {
+            assertThrows(IllegalArgumentException.class, () -> AppArguments.parse(args));
+        }
+    }
+
+    @Test
     void acceptsRepeatedTuiOptionsCaseInsensitively() {
         AppArguments options = AppArguments.parse(
             new String[] {"--ui=TUI", "document.txt", "--ui", "tui"}

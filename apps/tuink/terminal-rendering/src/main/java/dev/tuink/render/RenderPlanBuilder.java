@@ -10,9 +10,9 @@ import dev.tuink.core.SearchMatcher;
 import dev.tuink.core.SearchOptions;
 import dev.tuink.core.TextModel;
 import dev.tuink.editor.document.DocumentView;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.BitSet;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -26,10 +26,17 @@ import java.util.function.IntFunction;
  */
 public class RenderPlanBuilder {
     private static final AtomicLong NEXT_BASE_STYLE_OWNER_ID = new AtomicLong();
-    private static final int MAX_SYNTAX_CACHE_LINES = 1024;
+    private static final int MAX_SYNTAX_CACHE_ENTRIES = 1024;
+    static final int MAX_SYNTAX_CACHE_WEIGHT = 65_536;
+    private static final int MAX_SYNTAX_SCAN_CODE_UNITS = 65_536;
+    private static final int MAX_SYNTAX_SPANS = 4096;
+    private static final long MAX_SYNTAX_WORK = 1_048_576L;
     private static final int MAX_BRACKET_SCAN_CHARS = 200_000;
     private static final int MAX_UNMATCHED_SCAN_CHARS = 1_000_000;
     private static final int MAX_LEXICAL_SCAN_LINES = 32_768;
+    static final int MAX_LEXICAL_CACHE_OUTPUTS = 32_768;
+    static final int MAX_BRACKET_DEPTH = 32_768;
+    static final int MAX_BRACKET_FACTS = 131_072;
     private final LineHighlighter highlighter;
     private final LineLexicalScanner lexicalScanner;
     private final EditorTextLayout textLayout;
@@ -43,26 +50,22 @@ public class RenderPlanBuilder {
     private IntFunction<GutterDiffMarker> gutterDiffResolver = line -> GutterDiffMarker.NONE;
     private CommentSyntaxProfile commentSyntaxProfile = CommentSyntaxProfile.GENERIC;
     private long syntaxCacheRevision = Long.MIN_VALUE;
-    private final Map<Integer, SyntaxSpans> syntaxSpanCache = new LinkedHashMap<>(256, 0.75f, true) {
-        @Override
-        protected boolean removeEldestEntry(Map.Entry<Integer, SyntaxSpans> eldest) {
-            return size() > MAX_SYNTAX_CACHE_LINES;
-        }
-    };
+    private final Map<SyntaxKey, SyntaxSpans> syntaxSpanCache = new LinkedHashMap<>(256, 0.75f, true);
+    private int syntaxCacheWeight;
+    private boolean pendingSyntaxWork;
     private long quoteMaskCacheRevision = Long.MIN_VALUE;
     private CommentSyntaxProfile quoteMaskCacheProfile = CommentSyntaxProfile.GENERIC;
     private final Map<Integer, QuoteMask> quoteMaskCache = new HashMap<>();
     private int quoteMaskComputedUntil = -1;
     private LineLexicalScanner.State lexicalContinuationState;
     private int remainingLexicalScanChars;
+    private int remainingLexicalOutputs;
     private boolean lexicalScanExhausted;
     private long bracketCacheRevision = Long.MIN_VALUE;
     private Position bracketCacheCursor;
     private BracketPair bracketCachePair;
-    private boolean bracketCacheRainbowEnabled;
-    private long unmatchedCacheRevision = Long.MIN_VALUE;
-    private Map<Integer, List<Integer>> unmatchedBracketColumnsByLine = Map.of();
-    private Map<Integer, List<StyleSpan>> rainbowBracketSpansByLine = Map.of();
+    private long bracketFactsRevision = Long.MIN_VALUE;
+    private BracketFacts bracketFacts;
     private Style selectionStyle = Style.DEFAULT;
     private Style searchMatchStyle = Style.DEFAULT;
     private Style currentSearchMatchStyle = Style.DEFAULT;
@@ -82,6 +85,11 @@ public class RenderPlanBuilder {
     /** Returns the shared layout instance used by this builder. */
     public EditorTextLayout textLayout() {
         return textLayout;
+    }
+
+    /** Whether the last build retained syntax context work that needs another bounded frame. */
+    public boolean hasPendingSyntaxWork() {
+        return pendingSyntaxWork;
     }
 
     public void setTabWidth(int tabWidth) {
@@ -105,6 +113,7 @@ public class RenderPlanBuilder {
             return;
         }
         this.bracketMatchingEnabled = enabled;
+        releaseDisabledBracketCaches();
         baseStyleGeneration++;
     }
 
@@ -113,8 +122,21 @@ public class RenderPlanBuilder {
             return;
         }
         this.rainbowBracketsEnabled = enabled;
-        this.bracketCacheRevision = Long.MIN_VALUE;
+        releaseDisabledBracketCaches();
         baseStyleGeneration++;
+    }
+
+    private void releaseDisabledBracketCaches() {
+        if (bracketMatchingEnabled || rainbowBracketsEnabled) return;
+        bracketFacts = null;
+        bracketFactsRevision = Long.MIN_VALUE;
+        bracketCachePair = null;
+        bracketCacheCursor = null;
+        bracketCacheRevision = Long.MIN_VALUE;
+        quoteMaskCache.clear();
+        quoteMaskCacheRevision = Long.MIN_VALUE;
+        lexicalContinuationState = null;
+        remainingLexicalOutputs = MAX_LEXICAL_CACHE_OUTPUTS;
     }
 
     public void setGutterDiffResolver(IntFunction<GutterDiffMarker> resolver) {
@@ -128,7 +150,7 @@ public class RenderPlanBuilder {
         }
         this.commentSyntaxProfile = next;
         this.quoteMaskCacheRevision = Long.MIN_VALUE;
-        this.unmatchedCacheRevision = Long.MIN_VALUE;
+        this.bracketFactsRevision = Long.MIN_VALUE;
         this.bracketCacheRevision = Long.MIN_VALUE;
         baseStyleGeneration++;
     }
@@ -362,6 +384,11 @@ public class RenderPlanBuilder {
         EditorLayout layout
     ) {
         requireBoundModel(model);
+        if (pendingSyntaxWork) {
+            // Resumed syntax can change prepared styles without a document edit.
+            baseStyleGeneration++;
+        }
+        pendingSyntaxWork = false;
         EditorLayout resolvedLayout = layout == null
             ? EditorLayout.resolve(
                 model,
@@ -415,7 +442,7 @@ public class RenderPlanBuilder {
                     int lineLeftColumn = slice.startCol();
                     String visibleText = slice.text();
                     List<StyleSpan> syntaxSpans = syntaxHighlightingEnabled
-                        ? syntaxSpansForLine(model, lineIndex, line)
+                        ? syntaxSpansForLine(lineIndex, line, lineLeftColumn, lineLeftColumn + visibleText.length())
                         : List.of();
                     List<StyleSpan> spans = new ArrayList<>(clipSpans(syntaxSpans, lineLeftColumn, visibleText.length()));
                     if (rainbowBracketsEnabled) {
@@ -469,7 +496,8 @@ public class RenderPlanBuilder {
                                 lineIndex,
                                 lineLeftColumn,
                                 visibleText.length()
-                            )
+                            ),
+                            selectionStyleForLineBreak(state, model, lineIndex, leftVisualColumn, textWidth)
                         )
                     );
                 } else {
@@ -488,16 +516,18 @@ public class RenderPlanBuilder {
                 List<Integer> starts = wrapStarts(lineIndex, layoutWidth, wrapByWords);
                 int segStart = Math.max(0, Math.min(firstSegmentOffset, starts.size() - 1));
                 int segEnd = Math.min(starts.size(), segStart + contentRows - lines.size());
+                int visibleStart = starts.get(segStart);
                 int visibleEnd = segEnd < starts.size() ? starts.get(segEnd) : line.length();
                 GutterDiffMarker gutterDiff = gutterDiffForLine(lineIndex);
                 List<StyleSpan> lineSpans = new ArrayList<>(
-                    syntaxHighlightingEnabled ? syntaxSpansForLine(model, lineIndex, line) : List.of()
+                    syntaxHighlightingEnabled
+                        ? syntaxSpansForLine(lineIndex, line, visibleStart, visibleEnd) : List.of()
                 );
                 if (rainbowBracketsEnabled) {
-                    lineSpans.addAll(rainbowBracketSpansForLine(lineIndex, 0, line.length()));
+                    lineSpans.addAll(bracketDecorationSpans(lineIndex, visibleStart, visibleEnd, 0, false));
                 }
                 if (bracketMatchingEnabled) {
-                    lineSpans.addAll(unmatchedBracketSpansForLine(lineIndex, 0, line.length()));
+                    lineSpans.addAll(bracketDecorationSpans(lineIndex, visibleStart, visibleEnd, 0, true));
                 }
                 int baseSpanCount = lineSpans.size();
                 if (bracketMatchingEnabled) {
@@ -545,7 +575,13 @@ public class RenderPlanBuilder {
                             textLayout.visualColumnAt(lineIndex, start, tabWidth),
                             0,
                             partBaseSpanCount,
-                            baseStyleKey(model, lineIndex, start, part.length())
+                            baseStyleKey(model, lineIndex, start, part.length()),
+                            seg == starts.size() - 1
+                                ? selectionStyleForLineBreak(
+                                    state, model, lineIndex,
+                                    textLayout.visualColumnAt(lineIndex, start, tabWidth), textWidth
+                                )
+                                : null
                         )
                     );
                 }
@@ -688,6 +724,7 @@ public class RenderPlanBuilder {
             return;
         }
         syntaxSpanCache.clear();
+        syntaxCacheWeight = 0;
         syntaxCacheRevision = revision;
     }
 
@@ -700,14 +737,10 @@ public class RenderPlanBuilder {
         quoteMaskComputedUntil = -1;
         lexicalContinuationState = null;
         remainingLexicalScanChars = MAX_UNMATCHED_SCAN_CHARS;
+        remainingLexicalOutputs = MAX_LEXICAL_CACHE_OUTPUTS;
         lexicalScanExhausted = false;
         quoteMaskCacheRevision = revision;
         quoteMaskCacheProfile = commentSyntaxProfile;
-    }
-
-    private boolean[] quotedMaskForLine(TextModel model, int lineIndex, String line) {
-        QuoteMask mask = quoteMaskForLine(model, lineIndex, line);
-        return mask == null ? null : mask.mask();
     }
 
     private QuoteMask quoteMaskForLine(TextModel model, int lineIndex, String line) {
@@ -718,7 +751,8 @@ public class RenderPlanBuilder {
 
         int target = Math.max(0, Math.min(lineIndex, Math.max(0, model.lineCount() - 1)));
         for (int i = quoteMaskComputedUntil + 1; i <= target; i++) {
-            if (lexicalScanExhausted || remainingLexicalScanChars <= 0 || i >= MAX_LEXICAL_SCAN_LINES) {
+            if (lexicalScanExhausted || remainingLexicalScanChars <= 0 || remainingLexicalOutputs <= 0
+                || i >= MAX_LEXICAL_SCAN_LINES) {
                 lexicalScanExhausted = true;
                 break;
             }
@@ -730,16 +764,23 @@ public class RenderPlanBuilder {
             if (result.scannedCodeUnits() > limit) {
                 throw new IllegalStateException("Lexical scanner exceeded its prefix budget");
             }
+            int outputs = result.excludedRanges().size() + result.quotes().size();
+            if (outputs > remainingLexicalOutputs) {
+                lexicalScanExhausted = true;
+                lexicalContinuationState = null;
+                break;
+            }
+            remainingLexicalOutputs -= outputs;
             boolean[] mask = new boolean[result.scannedCodeUnits()];
             for (LineLexicalScanner.Range range : result.excludedRanges()) {
                 Arrays.fill(mask, range.start(), range.end(), true);
             }
-            boolean completeLine = result.scannedCodeUnits() == lineText.length();
+            boolean completeLine = result.contextKnown() && result.scannedCodeUnits() == lineText.length();
             List<QuoteRange> quotes = result.quotes().stream()
                 .filter(quote -> completeLine || quote.end() >= 0)
                 .map(quote -> new QuoteRange(quote.start(), quote.end())).toList();
             quoteMaskCache.put(i, new QuoteMask(lineText, mask, quotes, completeLine));
-            lexicalContinuationState = result.endState();
+            lexicalContinuationState = completeLine ? result.endState() : null;
             // Empty lines still consume budget, and the line cap bounds cache/object overhead.
             remainingLexicalScanChars -= Math.max(1, quoteMaskCache.get(i).mask().length);
             quoteMaskComputedUntil = i;
@@ -752,16 +793,44 @@ public class RenderPlanBuilder {
         return resolved != null && resolved.lineText().equals(line) ? resolved : null;
     }
 
-    private List<StyleSpan> syntaxSpansForLine(TextModel model, int lineIndex, String line) {
-        SyntaxSpans cached = syntaxSpanCache.get(lineIndex);
+    private List<StyleSpan> syntaxSpansForLine(int lineIndex, String line, int startUtf16, int endUtf16) {
+        SyntaxKey key = new SyntaxKey(lineIndex, startUtf16, endUtf16);
+        SyntaxSpans cached = syntaxSpanCache.get(key);
         if (cached != null && cached.lineText().equals(line)) {
             return cached.spans();
         }
-        List<StyleSpan> spans = highlighter instanceof ContextualLineHighlighter contextual
-            ? List.copyOf(contextual.highlight(documentView, lineIndex, line))
-            : List.copyOf(highlighter.highlight(line));
-        syntaxSpanCache.put(lineIndex, new SyntaxSpans(line, spans));
+        if (cached != null) {
+            syntaxSpanCache.remove(key);
+            syntaxCacheWeight -= cached.weight();
+        }
+        HighlightRequest request = new HighlightRequest(startUtf16, endUtf16,
+            MAX_SYNTAX_SCAN_CODE_UNITS, MAX_SYNTAX_SPANS, MAX_SYNTAX_WORK);
+        HighlightResult result = highlighter instanceof ContextualLineHighlighter contextual
+            ? contextual.highlightResult(documentView, lineIndex, line, request)
+            : HighlightResult.completed(highlighter.highlight(line, request));
+        List<StyleSpan> spans = request.clipSpans(result.spans());
+        if (result.retryPending()) {
+            pendingSyntaxWork = true;
+            return spans;
+        }
+        SyntaxSpans computed = new SyntaxSpans(line, spans);
+        syntaxSpanCache.put(key, computed);
+        syntaxCacheWeight += computed.weight();
+        var iterator = syntaxSpanCache.entrySet().iterator();
+        while (syntaxSpanCache.size() > MAX_SYNTAX_CACHE_ENTRIES || syntaxCacheWeight > MAX_SYNTAX_CACHE_WEIGHT) {
+            SyntaxSpans removed = iterator.next().getValue();
+            syntaxCacheWeight -= removed.weight();
+            iterator.remove();
+        }
         return spans;
+    }
+
+    int syntaxCacheWeight() {
+        return syntaxCacheWeight;
+    }
+
+    int syntaxCacheSize() {
+        return syntaxSpanCache.size();
     }
 
     private void requireBoundModel(TextModel model) {
@@ -812,46 +881,36 @@ public class RenderPlanBuilder {
             return List.of();
         }
         List<StyleSpan> spans = new ArrayList<>(2);
-        addBracketSpan(spans, pair.primary(), lineIndex, leftColumn, visibleLength, pair.style());
-        addBracketSpan(spans, pair.match(), lineIndex, leftColumn, visibleLength, pair.style());
+        Style style = pair.match() == null ? unmatchedBracketStyle
+            : pair.kind() == MatchKind.QUOTE ? quoteMatchStyle : bracketMatchStyle;
+        addBracketSpan(spans, pair.primary(), lineIndex, leftColumn, visibleLength, style);
+        addBracketSpan(spans, pair.match(), lineIndex, leftColumn, visibleLength, style);
         return spans;
     }
 
     private List<StyleSpan> unmatchedBracketSpansForLine(int lineIndex, int leftColumn, int visibleLength) {
-        if (visibleLength <= 0) {
-            return List.of();
-        }
-        List<Integer> columns = unmatchedBracketColumnsByLine.get(lineIndex);
-        if (columns == null || columns.isEmpty()) {
-            return List.of();
-        }
-        List<StyleSpan> spans = new ArrayList<>(columns.size());
-        for (int column : columns) {
-            int visStart = column - leftColumn;
-            int visEnd = visStart + 1;
-            if (visEnd <= 0 || visStart >= visibleLength) {
-                continue;
-            }
-            spans.add(
-                new StyleSpan(
-                    Math.max(0, visStart),
-                    Math.min(visibleLength, visEnd),
-                    unmatchedBracketStyle
-                )
-            );
-        }
-        return spans;
+        return bracketDecorationSpans(lineIndex, leftColumn,
+            (int) Math.min(Integer.MAX_VALUE, (long) leftColumn + visibleLength), leftColumn, true);
     }
 
     private List<StyleSpan> rainbowBracketSpansForLine(int lineIndex, int leftColumn, int visibleLength) {
-        if (visibleLength <= 0) {
-            return List.of();
+        return bracketDecorationSpans(lineIndex, leftColumn,
+            (int) Math.min(Integer.MAX_VALUE, (long) leftColumn + visibleLength), leftColumn, false);
+    }
+
+    /** Facts retain positions and depths; only the visible interval creates styled objects. */
+    private List<StyleSpan> bracketDecorationSpans(int line, int start, int end, int origin, boolean unmatchedOnly) {
+        if (bracketFacts == null || end <= start) return List.of();
+        int first = bracketFacts.lowerBound(BracketFacts.position(line, start));
+        long after = BracketFacts.position(line, end);
+        List<StyleSpan> spans = new ArrayList<>();
+        for (int index = first; index < bracketFacts.size && bracketFacts.positions[index] < after; index++) {
+            if (unmatchedOnly && !bracketFacts.unmatched.get(index)) continue;
+            int column = (int) bracketFacts.positions[index] - origin;
+            spans.add(new StyleSpan(column, column + 1,
+                unmatchedOnly ? unmatchedBracketStyle : rainbowBracketStyle(bracketFacts.depths[index])));
         }
-        List<StyleSpan> spans = rainbowBracketSpansByLine.get(lineIndex);
-        if (spans == null || spans.isEmpty()) {
-            return List.of();
-        }
-        return clipSpans(spans, leftColumn, visibleLength);
+        return spans;
     }
 
     private void addBracketSpan(
@@ -871,6 +930,21 @@ public class RenderPlanBuilder {
             return;
         }
         spans.add(new StyleSpan(Math.max(0, visStart), Math.min(visibleLength, visEnd), style));
+    }
+
+    private Style selectionStyleForLineBreak(
+        EditorState state, TextModel model, int lineIndex, int leftVisualColumn, int visibleWidth
+    ) {
+        if (!state.hasSelection() || visibleWidth <= 0 || lineIndex >= model.lineCount() - 1) {
+            return null;
+        }
+        int firstLine = Math.min(state.getSelectionAnchor().line(), state.getCursor().line());
+        int lastLine = Math.max(state.getSelectionAnchor().line(), state.getCursor().line());
+        if (lineIndex < firstLine || lineIndex >= lastLine) {
+            return null;
+        }
+        int column = textLayout.visualWidth(lineIndex, tabWidth) - leftVisualColumn;
+        return column >= 0 && column < visibleWidth ? selectionStyle : null;
     }
 
     private StyleSpan selectionSpanForLine(EditorState state, TextModel model, int lineIndex, int leftColumn, int visibleLength) {
@@ -948,15 +1022,13 @@ public class RenderPlanBuilder {
         Position cursor = model.clamp(state.getCursor());
         long revision = model.revision();
         if (bracketCacheRevision == revision
-            && cursor.equals(bracketCacheCursor)
-            && bracketCacheRainbowEnabled == rainbowBracketsEnabled) {
+            && cursor.equals(bracketCacheCursor)) {
             return bracketCachePair;
         }
         if (model.lineCount() <= 0) {
             bracketCacheRevision = revision;
             bracketCacheCursor = cursor;
             bracketCachePair = null;
-            bracketCacheRainbowEnabled = rainbowBracketsEnabled;
             return null;
         }
         BracketAtCursor at = bracketAtCursor(model, cursor);
@@ -964,7 +1036,6 @@ public class RenderPlanBuilder {
             bracketCacheRevision = revision;
             bracketCacheCursor = cursor;
             bracketCachePair = null;
-            bracketCacheRainbowEnabled = rainbowBracketsEnabled;
             return null;
         }
         BracketSearch search = switch (at.kind()) {
@@ -975,31 +1046,20 @@ public class RenderPlanBuilder {
             };
             case QUOTE -> new BracketSearch(findMatchingQuote(model, at.position()), true);
         };
-        Position match = search.match();
-        Style style = switch (at.kind()) {
-            case BRACKET -> match == null
-                ? unmatchedBracketStyle
-                : bracketMatchStyle;
-            case QUOTE -> match == null
-                ? unmatchedBracketStyle
-                : quoteMatchStyle;
-        };
-        BracketPair pair = search.complete() ? new BracketPair(at.position(), match, style) : null;
+        BracketPair pair = search.complete() ? new BracketPair(at.position(), search.match(), at.kind()) : null;
         bracketCacheRevision = revision;
         bracketCacheCursor = cursor;
         bracketCachePair = pair;
-        bracketCacheRainbowEnabled = rainbowBracketsEnabled;
         return pair;
     }
 
     private void ensureBracketDecorationCache(TextModel model) {
         long revision = model.revision();
-        if (unmatchedCacheRevision == revision) {
+        if (bracketFacts != null && bracketFactsRevision == revision) {
             return;
         }
-        Map<Integer, List<Integer>> unmatched = new HashMap<>();
-        Map<Integer, List<StyleSpan>> rainbow = new HashMap<>();
-        ArrayDeque<OpenBracket> stack = new ArrayDeque<>();
+        BracketFacts facts = new BracketFacts();
+        BracketStack stack = new BracketStack();
         int scanned = 0;
         boolean complete = true;
         outer:
@@ -1023,22 +1083,24 @@ public class RenderPlanBuilder {
                 if (!isBracket(ch)) {
                     continue;
                 }
+                if (facts.size == MAX_BRACKET_FACTS || isOpeningBracket(ch) && stack.size == MAX_BRACKET_DEPTH) {
+                    complete = false;
+                    break outer;
+                }
                 if (isOpeningBracket(ch)) {
-                    int depth = stack.size() + 1;
-                    addRainbowBracket(rainbow, line, col, depth);
-                    stack.push(new OpenBracket(new Position(line, col), ch, depth));
+                    int index = facts.add(line, col, ch, stack.size + 1);
+                    stack.push(index);
                     continue;
                 }
                 if (!stack.isEmpty()) {
-                    OpenBracket open = stack.pop();
-                    addRainbowBracket(rainbow, line, col, open.depth());
-                    if (closingBracketFor(open.ch()) != ch) {
-                        addUnmatchedBracket(unmatched, open.position().line(), open.position().col());
-                        addUnmatchedBracket(unmatched, line, col);
+                    int open = stack.pop();
+                    int closing = facts.add(line, col, ch, facts.depths[open]);
+                    if (closingBracketFor((char) facts.kinds[open]) != ch) {
+                        facts.unmatched.set(open);
+                        facts.unmatched.set(closing);
                     }
                 } else {
-                    addRainbowBracket(rainbow, line, col, 1);
-                    addUnmatchedBracket(unmatched, line, col);
+                    facts.unmatched.set(facts.add(line, col, ch, 1));
                 }
             }
             if (!lexical.completeLine()) {
@@ -1047,30 +1109,26 @@ public class RenderPlanBuilder {
             }
         }
         if (complete) {
-            markUnmatchedOpenBrackets(unmatched, stack);
+            while (!stack.isEmpty()) facts.unmatched.set(stack.pop());
         }
-        unmatchedBracketColumnsByLine = unmatched;
-        rainbowBracketSpansByLine = rainbow;
-        unmatchedCacheRevision = revision;
+        bracketFacts = facts;
+        bracketFactsRevision = revision;
     }
 
-    private static void markUnmatchedOpenBrackets(
-        Map<Integer, List<Integer>> unmatched,
-        ArrayDeque<OpenBracket> stack
-    ) {
-        while (!stack.isEmpty()) {
-            OpenBracket bracket = stack.pop();
-            addUnmatchedBracket(unmatched, bracket.position().line(), bracket.position().col());
-        }
+    int bracketFactCount() {
+        return bracketFacts == null ? 0 : bracketFacts.size;
     }
 
-    private static void addUnmatchedBracket(Map<Integer, List<Integer>> map, int line, int col) {
-        map.computeIfAbsent(line, key -> new ArrayList<>(2)).add(col);
+    long bracketFactsStorageBytes() {
+        return bracketFacts == null ? 0 : bracketFacts.storageBytes();
     }
 
-    private void addRainbowBracket(Map<Integer, List<StyleSpan>> map, int line, int col, int depth) {
-        map.computeIfAbsent(line, key -> new ArrayList<>(4))
-            .add(new StyleSpan(col, col + 1, rainbowBracketStyle(depth)));
+    int lexicalCacheSize() {
+        return quoteMaskCache.size();
+    }
+
+    int lexicalOutputCount() {
+        return MAX_LEXICAL_CACHE_OUTPUTS - remainingLexicalOutputs;
     }
 
     private BracketAtCursor bracketAtCursor(TextModel model, Position cursor) {
@@ -1128,15 +1186,16 @@ public class RenderPlanBuilder {
     }
 
     private BracketSearch findBracketForward(TextModel model, Position from, char open) {
-        ArrayDeque<Character> stack = new ArrayDeque<>();
+        BracketStack stack = new BracketStack();
         stack.push(open);
         int scanned = 0;
         for (int line = from.line(); line < model.lineCount(); line++) {
             String text = model.getLine(line);
-            boolean[] quotedMask = quotedMaskForLine(model, line, text);
-            if (quotedMask == null) {
+            QuoteMask lexical = quoteMaskForLine(model, line, text);
+            if (lexical == null) {
                 return new BracketSearch(null, false);
             }
+            boolean[] quotedMask = lexical.mask();
             int start = line == from.line() ? from.col() + 1 : 0;
             for (int col = start; col < quotedMask.length; col++) {
                 if (++scanned > MAX_BRACKET_SCAN_CHARS) {
@@ -1147,9 +1206,9 @@ public class RenderPlanBuilder {
                 }
                 char ch = text.charAt(col);
                 if (isOpeningBracket(ch)) {
-                    stack.push(ch);
+                    if (!stack.push(ch)) return new BracketSearch(null, false);
                 } else if (isBracket(ch)) {
-                    if (closingBracketFor(stack.pop()) != ch) {
+                    if (closingBracketFor((char) stack.pop()) != ch) {
                         return new BracketSearch(null, true);
                     }
                     if (stack.isEmpty()) {
@@ -1157,7 +1216,7 @@ public class RenderPlanBuilder {
                     }
                 }
             }
-            if (quotedMask.length != text.length() || ++scanned > MAX_BRACKET_SCAN_CHARS) {
+            if (!lexical.completeLine() || ++scanned > MAX_BRACKET_SCAN_CHARS) {
                 return new BracketSearch(null, false);
             }
         }
@@ -1165,12 +1224,13 @@ public class RenderPlanBuilder {
     }
 
     private BracketSearch findBracketBackward(TextModel model, Position from, char close) {
-        ArrayDeque<Character> stack = new ArrayDeque<>();
+        BracketStack stack = new BracketStack();
         stack.push(close);
         int scanned = 0;
         for (int line = from.line(); line >= 0; line--) {
             String text = model.getLine(line);
-            boolean[] quotedMask = quotedMaskForLine(model, line, text);
+            QuoteMask lexical = quoteMaskForLine(model, line, text);
+            boolean[] quotedMask = lexical == null ? null : lexical.mask();
             int start = line == from.line() ? from.col() - 1 : text.length() - 1;
             if (quotedMask == null || start >= quotedMask.length) {
                 return new BracketSearch(null, false);
@@ -1184,9 +1244,9 @@ public class RenderPlanBuilder {
                 }
                 char ch = text.charAt(col);
                 if (isBracket(ch) && !isOpeningBracket(ch)) {
-                    stack.push(ch);
+                    if (!stack.push(ch)) return new BracketSearch(null, false);
                 } else if (isOpeningBracket(ch)) {
-                    if (openingBracketFor(stack.pop()) != ch) {
+                    if (openingBracketFor((char) stack.pop()) != ch) {
                         return new BracketSearch(null, true);
                     }
                     if (stack.isEmpty()) {
@@ -1194,7 +1254,7 @@ public class RenderPlanBuilder {
                     }
                 }
             }
-            if (++scanned > MAX_BRACKET_SCAN_CHARS) {
+            if (!lexical.completeLine() || ++scanned > MAX_BRACKET_SCAN_CHARS) {
                 return new BracketSearch(null, false);
             }
         }
@@ -1232,7 +1292,7 @@ public class RenderPlanBuilder {
         };
     }
 
-    private record BracketPair(Position primary, Position match, Style style) {
+    private record BracketPair(Position primary, Position match, MatchKind kind) {
     }
 
     private record BracketSearch(Position match, boolean complete) {
@@ -1246,13 +1306,84 @@ public class RenderPlanBuilder {
         QUOTE
     }
 
-    private record OpenBracket(Position position, char ch, int depth) {
+    /** Bounded primitive stack, shared by decoration and cursor-pair scans. */
+    private static final class BracketStack {
+        private int[] values = new int[32];
+        private int size;
+
+        private boolean push(int value) {
+            if (size == MAX_BRACKET_DEPTH) return false;
+            if (size == values.length) {
+                values = Arrays.copyOf(values, Math.min(MAX_BRACKET_DEPTH, values.length * 2));
+            }
+            values[size++] = value;
+            return true;
+        }
+
+        private int pop() {
+            return values[--size];
+        }
+
+        private boolean isEmpty() {
+            return size == 0;
+        }
+    }
+
+    /**
+     * Sorted source facts contain no styles or per-bracket objects. Capacity is
+     * capped before growth; even the transient old/new arrays have a fixed bound.
+     */
+    private static final class BracketFacts {
+        private long[] positions = new long[64];
+        private int[] depths = new int[64];
+        private byte[] kinds = new byte[64];
+        private final BitSet unmatched = new BitSet();
+        private int size;
+
+        private int add(int line, int column, char kind, int depth) {
+            if (size == positions.length) {
+                int capacity = Math.min(MAX_BRACKET_FACTS, positions.length * 2);
+                positions = Arrays.copyOf(positions, capacity);
+                depths = Arrays.copyOf(depths, capacity);
+                kinds = Arrays.copyOf(kinds, capacity);
+            }
+            int index = size++;
+            positions[index] = position(line, column);
+            depths[index] = depth;
+            kinds[index] = (byte) kind;
+            return index;
+        }
+
+        private static long position(int line, int column) {
+            return ((long) line << 32) | (column & 0xFFFF_FFFFL);
+        }
+
+        private int lowerBound(long position) {
+            int low = 0;
+            int high = size;
+            while (low < high) {
+                int middle = (low + high) >>> 1;
+                if (positions[middle] < position) low = middle + 1;
+                else high = middle;
+            }
+            return low;
+        }
+
+        private long storageBytes() {
+            return 13L * positions.length + unmatched.size() / 8L;
+        }
     }
 
     private record VisualSlice(int startCol, String text, int sourceVisualColumn, int leadingClippedCells) {
     }
 
+    private record SyntaxKey(int lineIndex, int startUtf16, int endUtf16) {
+    }
+
     private record SyntaxSpans(String lineText, List<StyleSpan> spans) {
+        int weight() {
+            return 1 + spans.size();
+        }
     }
 
     private record QuoteRange(int start, int end) {

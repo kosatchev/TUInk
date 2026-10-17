@@ -43,6 +43,31 @@ class TerminalEditorTextLayoutMemoryTest {
     }
 
     @Test
+    void acceptedLargeLinesNeverReachLegacyFullLineStylingInEitherLayout(@TempDir Path directory) throws Exception {
+        for (int[] example : new int[][] {{3, 64}, {10, 192}}) {
+            Path file = directory.resolve("legacy-" + example[0] + ".csv");
+            byte[] block = "1,".repeat(4096).getBytes(StandardCharsets.UTF_8);
+            try (var output = Files.newOutputStream(file)) {
+                for (int index = 0; index < example[0] * 128; index++) {
+                    output.write(block);
+                }
+            }
+            String classpath = String.join(File.pathSeparator, location(getClass()), location(RenderPlanBuilder.class),
+                location(TextModel.class), location(TerminalText.class), location(DocumentView.class));
+            Process child = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                "-Xmx" + example[1] + "m", "-cp", classpath, BoundedRenderProbe.class.getName(), file.toString())
+                .redirectErrorStream(true).start();
+            try {
+                assertTrue(child.waitFor(20, TimeUnit.SECONDS), "bounded render probe exceeded its deadline");
+                String output = new String(child.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                assertEquals(0, child.exitValue(), example[0] + " MiB / " + example[1] + " MiB heap: " + output);
+            } finally {
+                child.destroyForcibly();
+            }
+        }
+    }
+
+    @Test
     void acceptedLongUnicodeLinesFitTheirFirstLayoutInASmallHeap(@TempDir Path directory) throws Exception {
         for (int[] example : new int[][] {{3, 64}, {9, 192}}) {
             Path file = directory.resolve("line-" + example[0] + ".txt");
@@ -135,4 +160,29 @@ class TerminalEditorTextLayoutMemoryTest {
         }
     }
 
+    public static final class BoundedRenderProbe {
+        public static void main(String[] args) throws Exception {
+            TextModel model = new TextModel(new SimpleLineBuffer());
+            model.load(Path.of(args[0]));
+            RenderPlanBuilder builder = new RenderPlanBuilder(line -> {
+                throw new AssertionError("Oversized input reached a legacy full-line highlighter");
+            }, new TerminalEditorTextLayout(model));
+            builder.setBracketMatchingEnabled(false);
+            builder.setRainbowBracketsEnabled(false);
+            EditorState state = new EditorState();
+            render(builder, model, state, false);
+            state.setLeftVisualColumn(1_000_000);
+            render(builder, model, state, false);
+            state.setTopWrapSegment(1000);
+            render(builder, model, state, true);
+        }
+
+        private static void render(RenderPlanBuilder builder, TextModel model, EditorState state, boolean wrap) {
+            RenderPlan plan = builder.build(model, state, 24, 80, "top", "bottom", null, SearchOptions.DEFAULT,
+                null, null, null, null, wrap, false);
+            if (plan.lines().stream().anyMatch(line -> !line.spans().isEmpty())) {
+                throw new AssertionError("The compatibility fallback must leave unsupported input unstyled");
+            }
+        }
+    }
 }

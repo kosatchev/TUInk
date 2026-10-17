@@ -1,9 +1,10 @@
 package dev.tuink.highlight.regex;
 
-import dev.tuink.editor.document.DocumentId;
 import dev.tuink.editor.document.DocumentView;
 import dev.tuink.render.Color;
 import dev.tuink.render.ContextualLineHighlighter;
+import dev.tuink.render.HighlightRequest;
+import dev.tuink.render.HighlightResult;
 import dev.tuink.render.LineLexicalScanner;
 import dev.tuink.render.Style;
 import dev.tuink.render.StyleSpan;
@@ -17,6 +18,8 @@ import java.util.Set;
  * Applies language-specific strings and comments in source order, over ordinary regex rules.
  */
 final class CStyleHighlighter extends RegexHighlighter implements ContextualLineHighlighter {
+    static final int MAX_CONTEXT_DEPTH = 1024;
+    static final int MAX_CONTEXT_NODES_PER_SCAN = 16_384;
     private static final Style STRING_STYLE = Style.fg(Color.BRIGHT_GREEN);
     private static final Style COMMENT_STYLE = Style.fg(Color.BRIGHT_BLACK);
     private static final Set<String> REGEX_PREFIX_KEYWORDS = Set.of(
@@ -186,10 +189,34 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
         }
     }
 
-    private record Parenthesis(boolean controlCondition, Parenthesis parent, int depth, int cachedHash) {
-        private Parenthesis(boolean controlCondition, Parenthesis parent) {
-            this(controlCondition, parent, parent == null ? 1 : parent.depth + 1,
-                31 * (parent == null ? 1 : parent.cachedHash) + Boolean.hashCode(controlCondition));
+    private enum JavaScriptGoal {
+        STATEMENT, OPERAND, VALUE, ASYNC_VALUE, BODY_KEY, PARAMETERS_END, ARROW_BODY, BLOCK_END;
+
+        boolean permitsRegex() { return this == STATEMENT || this == OPERAND || this == ARROW_BODY; }
+    }
+
+    private enum DelimiterKind {
+        GROUP(')', JavaScriptGoal.VALUE), CONTROL(')', JavaScriptGoal.STATEMENT),
+        ARRAY(']', JavaScriptGoal.VALUE), OBJECT('}', JavaScriptGoal.VALUE),
+        BLOCK('}', JavaScriptGoal.BLOCK_END), ARROW('}', JavaScriptGoal.BLOCK_END),
+        FUNCTION('}', JavaScriptGoal.VALUE), CONDITIONAL(':', JavaScriptGoal.OPERAND),
+        EXPRESSION_BODY('{', JavaScriptGoal.VALUE), DECLARATION_BODY('{', JavaScriptGoal.STATEMENT);
+
+        private final char closing;
+        private final JavaScriptGoal after;
+
+        DelimiterKind(char closing, JavaScriptGoal after) {
+            this.closing = closing;
+            this.after = after;
+        }
+
+        boolean pendingBody() { return this == EXPRESSION_BODY || this == DECLARATION_BODY; }
+    }
+
+    private record Delimiter(DelimiterKind kind, Delimiter parent, int depth, int cachedHash) {
+        private Delimiter(DelimiterKind kind, Delimiter parent) {
+            this(kind, parent, parent == null ? 1 : parent.depth + 1,
+                31 * (parent == null ? 1 : parent.cachedHash) + kind.hashCode());
         }
 
         @Override
@@ -197,13 +224,13 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
             if (this == other) {
                 return true;
             }
-            if (!(other instanceof Parenthesis that) || depth != that.depth || cachedHash != that.cachedHash) {
+            if (!(other instanceof Delimiter that) || depth != that.depth || cachedHash != that.cachedHash) {
                 return false;
             }
-            Parenthesis left = this;
-            Parenthesis right = that;
+            Delimiter left = this;
+            Delimiter right = that;
             while (left != right) {
-                if (left == null || right == null || left.controlCondition != right.controlCondition) {
+                if (left == null || right == null || left.kind != right.kind) {
                     return false;
                 }
                 left = left.parent;
@@ -219,12 +246,14 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
 
         @Override
         public String toString() {
-            return "Parenthesis[controlCondition=" + controlCondition + ", depth=" + depth + "]";
+            return "Delimiter[kind=" + kind + ", depth=" + depth + "]";
         }
     }
 
-    private record JavaScriptContext(Parenthesis parentheses, boolean controlKeyword, boolean propertyAccess) {
-        private static final JavaScriptContext EMPTY = new JavaScriptContext(null, false, false);
+    private record JavaScriptContext(Delimiter delimiters, JavaScriptGoal goal,
+                                     boolean controlKeyword, boolean propertyAccess) {
+        private static final JavaScriptContext EMPTY =
+            new JavaScriptContext(null, JavaScriptGoal.STATEMENT, false, false);
     }
 
     private record ScanState(
@@ -240,10 +269,8 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
     }
 
     private final Syntax syntax;
-    private DocumentId cachedDocumentId;
-    private long cachedRevision = Long.MIN_VALUE;
-    private int cachedFirstLine = -1;
-    private final List<ScanState> stateBeforeLine = new ArrayList<>();
+    private final BoundedLineContext<ScanState> contexts = new BoundedLineContext<>(
+        ScanState.EMPTY, CStyleHighlighter::stateWeight, this::scanContext);
 
     CStyleHighlighter(List<RegexRule> rules) {
         this(rules, Syntax.STANDARD);
@@ -256,12 +283,32 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
 
     @Override
     public List<StyleSpan> highlight(String line) {
-        return highlight(line, ScanState.EMPTY);
+        return highlight(line, legacyRequest(line));
+    }
+
+    @Override
+    public List<StyleSpan> highlight(String line, HighlightRequest request) {
+        HighlightWork work = new HighlightWork(request.maxWork());
+        try {
+            return highlight(line, ScanState.EMPTY, request, request.maxScanCodeUnits(), work);
+        } catch (HighlightWork.Exhausted | ScanLimitExceeded ignored) {
+            return List.of();
+        }
     }
 
     @Override
     public List<StyleSpan> highlight(DocumentView document, int lineIndex, String line) {
-        return highlight(document, lineIndex, line, 0);
+        return highlight(document, lineIndex, line, legacyRequest(line));
+    }
+
+    @Override
+    public List<StyleSpan> highlight(DocumentView document, int lineIndex, String line, HighlightRequest request) {
+        return highlight(document, lineIndex, line, 0, request);
+    }
+
+    @Override
+    public HighlightResult highlightResult(DocumentView document, int lineIndex, String line, HighlightRequest request) {
+        return highlightResult(document, lineIndex, line, 0, request, false);
     }
 
     @Override
@@ -278,64 +325,105 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
         if (maxCodeUnits < 0) {
             throw new IllegalArgumentException("maxCodeUnits must be non-negative");
         }
+        if (previous == LineLexicalScanner.State.UNKNOWN) {
+            return new LineLexicalScanner.Result(0, previous, List.of(), List.of(), false);
+        }
         int limit = Math.min(line.length(), maxCodeUnits);
         String prefix = limit == line.length() ? line : line.substring(0, limit);
         ScanOutput output = new ScanOutput(null, true);
         ScanState state = previous instanceof ScanState prior ? prior : ScanState.EMPTY;
         ScanResult result = scan(prefix, state, output, limit < line.length());
-        if (result.scannedCodeUnits() == line.length() && output.openingQuote >= 0) {
-            output.quotes.add(new LineLexicalScanner.Quote(output.openingQuote, -1));
+        boolean contextKnown = result.complete() && result.scannedCodeUnits() == line.length();
+        if (contextKnown && output.openingQuote >= 0) {
+            output.quote(output.openingQuote, -1);
         }
         return new LineLexicalScanner.Result(result.scannedCodeUnits(), result.endState(),
-            output.excludedRanges(), output.quotes);
+            output.excludedRanges(), output.quotes, contextKnown);
     }
 
     // Markdown code fences start a fresh lexical context at their first content line.
     List<StyleSpan> highlight(DocumentView document, int lineIndex, String line, int firstLine) {
+        return highlight(document, lineIndex, line, firstLine, legacyRequest(line));
+    }
+
+    List<StyleSpan> highlight(DocumentView document, int lineIndex, String line, int firstLine,
+        HighlightRequest request) {
+        return highlightResult(document, lineIndex, line, firstLine, request, false).spans();
+    }
+
+    HighlightResult highlightResult(DocumentView document, int lineIndex, String line, int firstLine,
+        HighlightRequest request, boolean enclosingContextAdvanced) {
+        if (request.startUtf16() == request.endUtf16() || request.maxSpans() == 0) {
+            return HighlightResult.completed(List.of());
+        }
+        if (request.maxWork() == 0 || request.maxScanCodeUnits() == 0) {
+            return new HighlightResult(List.of(), enclosingContextAdvanced);
+        }
         if (document == null || line == null
             || firstLine < 0 || lineIndex < firstLine || lineIndex >= document.lineCount()) {
-            return highlight(line);
+            return HighlightResult.completed(highlight(line, request));
         }
-        ensureComputed(document, lineIndex, firstLine);
-        return highlight(line, stateBeforeLine.get(lineIndex - firstLine));
-    }
-
-    private void ensureComputed(DocumentView document, int targetLine, int firstLine) {
-        if (!Objects.equals(document.documentId(), cachedDocumentId)
-            || firstLine != cachedFirstLine) {
-            cachedDocumentId = document.documentId();
-            cachedRevision = document.revision();
-            cachedFirstLine = firstLine;
-            stateBeforeLine.clear();
-            stateBeforeLine.add(ScanState.EMPTY);
-        } else if (document.revision() != cachedRevision) {
-            int firstChangedLine = Math.max(0, document.firstChangedLineSince(cachedRevision));
-            // State immediately before the first changed line is still valid.
-            int retainedStates = (int) Math.min(
-                stateBeforeLine.size(),
-                Math.max(0L, (long) firstChangedLine - firstLine) + 1L
-            );
-            stateBeforeLine.subList(retainedStates, stateBeforeLine.size()).clear();
-            cachedRevision = document.revision();
+        HighlightWork work = new HighlightWork(request.maxWork());
+        var context = contexts.before(document, lineIndex, firstLine, request.maxScanCodeUnits(), work);
+        boolean canRetry = !context.permanentlyUnavailable() && (context.advanced() || enclosingContextAdvanced);
+        if (!context.complete()) {
+            return new HighlightResult(List.of(), canRetry);
         }
-        while (stateBeforeLine.size() <= targetLine - firstLine) {
-            int previousIndex = stateBeforeLine.size() - 1;
-            String previousLine = document.line(firstLine + previousIndex);
-            ScanState previousState = stateBeforeLine.get(previousIndex);
-            stateBeforeLine.add(scan(previousLine, previousState, null).endState());
+        try {
+            if (Math.min(line.length(), request.endUtf16()) > context.remainingCodeUnits()) {
+                return new HighlightResult(List.of(), canRetry);
+            }
+            return HighlightResult.completed(
+                highlight(line, context.state(), request, context.remainingCodeUnits(), work));
+        } catch (HighlightWork.Exhausted ignored) {
+            return new HighlightResult(List.of(), canRetry);
+        } catch (ScanLimitExceeded ignored) {
+            return HighlightResult.completed(List.of());
         }
     }
 
-    private List<StyleSpan> highlight(String line, ScanState state) {
-        if (line == null || line.isEmpty()) {
+    private List<StyleSpan> highlight(String line, ScanState state, HighlightRequest request,
+        int maxCodeUnits, HighlightWork work) {
+        if (line == null || line.isEmpty() || request.startUtf16() == request.endUtf16()
+            || request.maxSpans() == 0 || request.maxWork() == 0) {
             return List.of();
         }
-        Style[] styleAt = highlightStyles(line);
-        scan(line, state, new ScanOutput(styleAt, false));
-        return spans(styleAt);
+        int limit = Math.min(request.scanEnd(line), maxCodeUnits);
+        if (limit > 0 && limit < line.length() && Character.isHighSurrogate(line.charAt(limit - 1))
+            && Character.isLowSurrogate(line.charAt(limit))) limit--;
+        if (request.startUtf16() >= limit || Math.min(line.length(), request.endUtf16()) > limit) return List.of();
+        boolean partial = limit < line.length();
+        if (partial) work.spend(2L * limit); // Prefix copy and style storage, before either allocation.
+        String prefix = partial ? line.substring(0, limit) : line;
+        Style[] styleAt;
+        if (partial) {
+            // Only the lexer can safely style an unfinished prefix. Ordinary
+            // regex rules may rely on an actual EOL or a later delimiter.
+            styleAt = new Style[limit];
+        } else {
+            styleAt = highlightStyles(prefix, work);
+        }
+        work.spend(limit); // Lexical paint fills are disjoint and cover at most this prefix.
+        ScanResult scanned = scan(prefix, state, new ScanOutput(styleAt, false), partial, work);
+        if (!scanned.complete()) throw new ScanLimitExceeded(scanned.stop());
+        return spans(styleAt, request, work);
     }
 
-    private record ScanResult(int scannedCodeUnits, ScanState endState) {
+    private ScanState scanContext(String line, int lineIndex, ScanState before, HighlightWork work) {
+        ScanResult result = scan(line, before, null, false, work);
+        return result.complete() ? result.endState() : null;
+    }
+
+    private static int stateWeight(ScanState state) {
+        long delimiters = state.javascript().delimiters() == null ? 0 : state.javascript().delimiters().depth();
+        long ruby = state.string() == null || state.string().rubyFrame() == null ? 0 : state.string().rubyFrame().depth();
+        return (int) Math.min(Integer.MAX_VALUE, 1 + delimiters + ruby);
+    }
+
+    private enum ScanStop { COMPLETE, WORK_LIMIT, STATE_LIMIT, OUTPUT_LIMIT }
+
+    private record ScanResult(int scannedCodeUnits, ScanState endState, ScanStop stop) {
+        boolean complete() { return stop == ScanStop.COMPLETE; }
     }
 
     private ScanResult scan(String line, ScanState state, ScanOutput output) {
@@ -343,12 +431,23 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
     }
 
     private ScanResult scan(String line, ScanState state, ScanOutput output, boolean partialLine) {
-        ScanWork work = new ScanWork(line.length());
+        return scan(line, state, output, partialLine, null);
+    }
+
+    private ScanResult scan(String line, ScanState state, ScanOutput output, boolean partialLine, HighlightWork shared) {
+        // Some linear lexer branches skip an identifier or indentation in one
+        // step. Charge that traversal before reading or caching its final state.
+        if (shared != null) shared.spend(line.length());
+        ScanWork work = new ScanWork(line.length(), shared);
         try {
-            return new ScanResult(line.length(), scanLine(line, state, output, work, partialLine));
-        } catch (ScanLimitExceeded ignored) {
-            // Malformed candidate literals must not repeatedly search an unbounded suffix.
-            return new ScanResult(work.completedCodeUnits, ScanState.EMPTY);
+            ScanState after = scanLine(line, state, output, work, partialLine);
+            if (output != null) output.finishRange();
+            return new ScanResult(line.length(), after, ScanStop.COMPLETE);
+        } catch (ScanLimitExceeded stopped) {
+            // Retain only proven output, including when a quote's output budget
+            // stopped a token after paint but before its closing delimiter.
+            if (output != null) output.truncate(work.completedCodeUnits);
+            return new ScanResult(work.completedCodeUnits, null, stopped.stop);
         }
     }
 
@@ -367,10 +466,12 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
         }
         int blockDepth = state.blockDepth();
         QuotedString string = state.string();
-        boolean expressionStart = true;
-        Parenthesis parentheses = state.javascript().parentheses();
+        JavaScriptGoal goal = state.javascript().goal();
+        Delimiter delimiters = state.javascript().delimiters();
         boolean controlKeyword = state.javascript().controlKeyword();
         boolean propertyAccess = state.javascript().propertyAccess();
+        boolean restrictedLineEnd = false;
+        boolean jumpStatement = false;
         boolean markupTag = state.markupTag();
         boolean yamlPlainContinuation = syntax == Syntax.YAML && state.yamlPlainIndent() >= 0
             && (state.yamlFlowDepth() > 0 || indentation > state.yamlPlainIndent());
@@ -408,7 +509,7 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
                     }
                     return syntax.continuesAcrossLines(string, line)
                         ? scanState(0, string, yamlFlowDepth, -1,
-                            parentheses, controlKeyword, propertyAccess, markupTag) : ScanState.EMPTY;
+                            delimiters, goal, controlKeyword, propertyAccess, markupTag) : ScanState.EMPTY;
                 }
                 paint(output, cursor, end, STRING_STYLE);
                 if (output != null) {
@@ -416,7 +517,7 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
                 }
                 cursor = end;
                 string = null;
-                expressionStart = false;
+                goal = JavaScriptGoal.VALUE;
                 controlKeyword = false;
                 propertyAccess = false;
                 yamlNodeStart = false;
@@ -451,7 +552,7 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
                 cursor = yamlPropertyEnd(line, cursor, work);
                 continue;
             }
-            int regexEnd = current == '/' && syntax == Syntax.BACKTICK && expressionStart
+            int regexEnd = current == '/' && syntax == Syntax.BACKTICK && goal.permitsRegex()
                 && !line.startsWith("//", cursor) && !line.startsWith("/*", cursor)
                 ? regexLiteralEnd(line, cursor, work) : -1;
             QuotedString rawString = syntax == Syntax.RUST ? rustRawStringAt(line, cursor, work) : null;
@@ -461,7 +562,7 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
                 int openingEnd = cursor + prefixLength + string.delimiterLength();
                 paint(output, cursor, openingEnd, STRING_STYLE);
                 cursor = openingEnd;
-                expressionStart = false;
+                goal = JavaScriptGoal.VALUE;
             } else if (syntax.quotedStrings()
                 && (current == '"' || current == '\'' || (current == '`' && syntax.backtickStrings))
                 && (syntax != Syntax.YAML || yamlNodeStart)
@@ -491,14 +592,17 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
                     paint(output, cursor, cursor + string.delimiterLength(), STRING_STYLE);
                     cursor += string.delimiterLength();
                 }
-                expressionStart = false;
+                goal = JavaScriptGoal.VALUE;
                 controlKeyword = false;
                 propertyAccess = false;
+                restrictedLineEnd = false;
+                jumpStatement = false;
             } else if (syntax.startsLineComment(line, cursor)) {
                 paint(output, cursor, line.length(), COMMENT_STYLE);
                 // A comment terminates a YAML plain scalar; a flow collection can continue.
                 return scanState(0, null, yamlFlowDepth, -1,
-                    parentheses, controlKeyword, propertyAccess, markupTag);
+                    delimiters, lineEndGoal(goal, restrictedLineEnd, partialLine),
+                    controlKeyword, propertyAccess, markupTag);
             } else if (syntax == Syntax.MARKUP && line.startsWith("<!--", cursor)) {
                 paint(output, cursor, cursor + 4, COMMENT_STYLE);
                 blockDepth = 1;
@@ -510,20 +614,40 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
             } else if (regexEnd > cursor) {
                 paint(output, cursor, regexEnd, STRING_STYLE);
                 cursor = regexEnd;
-                expressionStart = false;
+                goal = JavaScriptGoal.VALUE;
                 controlKeyword = false;
                 propertyAccess = false;
+                restrictedLineEnd = false;
+                jumpStatement = false;
             } else if (syntax == Syntax.BACKTICK && Character.isJavaIdentifierStart(current)) {
                 int start = cursor++;
                 while (cursor < line.length() && Character.isJavaIdentifierPart(line.charAt(cursor))) {
                     cursor++;
                 }
                 String keyword = line.substring(start, cursor);
-                // A control condition's closing ')' starts a statement; a call's ')' does not.
-                // Keep a persistent stack so nested and multiline conditions stay linear.
+                boolean bodyKeyword = !propertyAccess && (keyword.equals("function") || keyword.equals("class"));
+                if (bodyKeyword) {
+                    // Retain the declaration/expression position through a name,
+                    // parameter list or extends clause until its body opens.
+                    DelimiterKind body = goal == JavaScriptGoal.OPERAND || goal == JavaScriptGoal.ASYNC_VALUE
+                        || goal == JavaScriptGoal.ARROW_BODY ? DelimiterKind.EXPRESSION_BODY : DelimiterKind.DECLARATION_BODY;
+                    work.newContextNode(delimiters == null ? 1 : delimiters.depth() + 1);
+                    delimiters = new Delimiter(body, delimiters);
+                }
+                // Property names such as object.if must not start a control condition.
                 controlKeyword = !propertyAccess && (CONTROL_CONDITION_KEYWORDS.contains(keyword)
                     || controlKeyword && keyword.equals("await"));
-                expressionStart = !propertyAccess && REGEX_PREFIX_KEYWORDS.contains(keyword);
+                jumpStatement = !propertyAccess
+                    && (jumpStatement || keyword.equals("break") || keyword.equals("continue"));
+                restrictedLineEnd = !propertyAccess
+                    && (keyword.equals("return") || keyword.equals("debugger") || jumpStatement);
+                goal = bodyKeyword ? JavaScriptGoal.BODY_KEY
+                    : !propertyAccess && (keyword.equals("else") || keyword.equals("do") || keyword.equals("debugger"))
+                    ? JavaScriptGoal.STATEMENT
+                    : !propertyAccess && keyword.equals("async") && goal == JavaScriptGoal.OPERAND
+                        ? JavaScriptGoal.ASYNC_VALUE
+                    : !propertyAccess && REGEX_PREFIX_KEYWORDS.contains(keyword)
+                        ? JavaScriptGoal.OPERAND : JavaScriptGoal.VALUE;
                 propertyAccess = false;
             } else {
                 if (syntax == Syntax.YAML && !yamlSeparation(current)) {
@@ -561,6 +685,14 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
                     yamlQuotedNode = false;
                 }
                 if (syntax == Syntax.BACKTICK && !Character.isWhitespace(current)) {
+                    restrictedLineEnd = false;
+                    jumpStatement = false;
+                    if (delimiters != null && delimiters.kind().pendingBody()
+                        && (current == ';' || goal == JavaScriptGoal.BODY_KEY && (current == ':' || current == '='))) {
+                        // TS signatures can end without a body. These keywords
+                        // can also be object keys or class field names.
+                        delimiters = delimiters.parent();
+                    }
                     if ((current == '+' || current == '-') && cursor + 1 < line.length()
                         && line.charAt(cursor + 1) == current) {
                         controlKeyword = false;
@@ -568,14 +700,60 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
                         cursor += 2;
                         continue;
                     }
-                    if (current == '(') {
-                        parentheses = new Parenthesis(controlKeyword, parentheses);
-                        expressionStart = true;
-                    } else if (current == ')') {
-                        expressionStart = parentheses != null && parentheses.controlCondition();
-                        parentheses = parentheses == null ? null : parentheses.parent();
+                    if (current == '=' && cursor + 1 < line.length() && line.charAt(cursor + 1) == '>') {
+                        goal = JavaScriptGoal.ARROW_BODY;
+                        controlKeyword = false;
+                        propertyAccess = false;
+                        cursor += 2;
+                        continue;
+                    }
+                    if (current == '?' && cursor + 1 < line.length()
+                        && (line.charAt(cursor + 1) == '?' || line.charAt(cursor + 1) == '.')) {
+                        // Nullish coalescing and optional chaining are not ternaries.
+                        goal = line.charAt(cursor + 1) == '?' ? JavaScriptGoal.OPERAND : JavaScriptGoal.VALUE;
+                        propertyAccess = line.charAt(cursor + 1) == '.';
+                        controlKeyword = false;
+                        cursor += 2;
+                        continue;
+                    }
+                    if (current == '(' || current == '[' || current == '{' || current == '?') {
+                        DelimiterKind kind;
+                        if (current == '{' && delimiters != null && delimiters.kind().pendingBody()) {
+                            if (goal == JavaScriptGoal.OPERAND || goal == JavaScriptGoal.ARROW_BODY) {
+                                // A TS return annotation can itself contain object
+                                // and function types before the actual body.
+                                kind = DelimiterKind.OBJECT;
+                            } else {
+                                kind = delimiters.kind() == DelimiterKind.EXPRESSION_BODY ? DelimiterKind.FUNCTION : DelimiterKind.BLOCK;
+                                delimiters = delimiters.parent();
+                            }
+                        } else {
+                            kind = openingDelimiter(current, goal, controlKeyword);
+                        }
+                        work.newContextNode(delimiters == null ? 1 : delimiters.depth() + 1);
+                        delimiters = new Delimiter(kind, delimiters);
+                        goal = kind == DelimiterKind.BLOCK || kind == DelimiterKind.ARROW || kind == DelimiterKind.FUNCTION
+                            ? JavaScriptGoal.STATEMENT : JavaScriptGoal.OPERAND;
+                    } else if (current == ')' || current == ']' || current == '}' || current == ':') {
+                        if (delimiters != null && delimiters.kind().closing == current) {
+                            goal = delimiters.kind().after;
+                            delimiters = delimiters.parent();
+                            if (current == ')' && delimiters != null && delimiters.kind().pendingBody()) {
+                                goal = JavaScriptGoal.PARAMETERS_END;
+                            }
+                        } else if (current == ':') {
+                            // Object values and parameter/type annotations expect an
+                            // operand; labels and switch clauses start a statement.
+                            goal = goal == JavaScriptGoal.PARAMETERS_END
+                                || delimiters != null && (delimiters.kind() == DelimiterKind.OBJECT
+                                || delimiters.kind() == DelimiterKind.GROUP || delimiters.kind() == DelimiterKind.ARRAY)
+                                    ? JavaScriptGoal.OPERAND : JavaScriptGoal.STATEMENT;
+                        } else {
+                            goal = current == '}' ? JavaScriptGoal.STATEMENT : JavaScriptGoal.VALUE;
+                        }
                     } else {
-                        expressionStart = "=([{,:;!?&|+-*%^~<>/".indexOf(current) >= 0;
+                        goal = current == ';' ? JavaScriptGoal.STATEMENT
+                            : "=,:!?&|+-*%^~<>/".indexOf(current) >= 0 ? JavaScriptGoal.OPERAND : JavaScriptGoal.VALUE;
                     }
                     controlKeyword = false;
                     propertyAccess = current == '.';
@@ -583,24 +761,47 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
                 cursor++;
             }
         }
+        // A line terminator after bare return/break/continue ends the statement,
+        // even when a block comment spans that terminator. Other values continue
+        // across newlines: a following slash can still be division.
+        goal = lineEndGoal(goal, restrictedLineEnd, partialLine);
         if (blockDepth > 0) {
             return scanState(blockDepth, null, 0, -1,
-                parentheses, controlKeyword, propertyAccess, markupTag);
+                delimiters, goal, controlKeyword, propertyAccess, markupTag);
         }
         if (string != null && syntax.continuesAcrossLines(string, line)) {
             return scanState(0, string, yamlFlowDepth, -1,
-                parentheses, controlKeyword, propertyAccess, markupTag);
+                delimiters, goal, controlKeyword, propertyAccess, markupTag);
         }
         return scanState(0, null, yamlFlowDepth, yamlPlainIndent,
-            parentheses, controlKeyword, propertyAccess, markupTag);
+            delimiters, goal, controlKeyword, propertyAccess, markupTag);
     }
 
-    private static ScanState scanState(
+    private static DelimiterKind openingDelimiter(char opening, JavaScriptGoal goal, boolean controlKeyword) {
+        return switch (opening) {
+            case '(' -> controlKeyword ? DelimiterKind.CONTROL : DelimiterKind.GROUP;
+            case '[' -> DelimiterKind.ARRAY;
+            case '?' -> DelimiterKind.CONDITIONAL;
+            default -> goal == JavaScriptGoal.ARROW_BODY ? DelimiterKind.ARROW
+                : goal == JavaScriptGoal.OPERAND ? DelimiterKind.OBJECT : DelimiterKind.BLOCK;
+        };
+    }
+
+    private static JavaScriptGoal lineEndGoal(JavaScriptGoal goal, boolean restrictedStatement, boolean partialLine) {
+        if (partialLine) return goal;
+        if (restrictedStatement || goal == JavaScriptGoal.BLOCK_END) return JavaScriptGoal.STATEMENT;
+        // async function requires no intervening line terminator. A standalone
+        // async identifier remains a value, but no longer prefixes a body.
+        return goal == JavaScriptGoal.ASYNC_VALUE ? JavaScriptGoal.VALUE : goal;
+    }
+
+    private ScanState scanState(
         int blockDepth, QuotedString string, int yamlFlowDepth, int yamlPlainIndent,
-        Parenthesis parentheses, boolean controlKeyword, boolean propertyAccess, boolean markupTag
+        Delimiter delimiters, JavaScriptGoal goal, boolean controlKeyword, boolean propertyAccess, boolean markupTag
     ) {
-        JavaScriptContext javascript = parentheses == null && !controlKeyword && !propertyAccess
-            ? JavaScriptContext.EMPTY : new JavaScriptContext(parentheses, controlKeyword, propertyAccess);
+        JavaScriptContext javascript = syntax != Syntax.BACKTICK
+            || delimiters == null && goal == JavaScriptGoal.STATEMENT && !controlKeyword && !propertyAccess
+                ? JavaScriptContext.EMPTY : new JavaScriptContext(delimiters, goal, controlKeyword, propertyAccess);
         return blockDepth == 0 && string == null && yamlFlowDepth == 0 && yamlPlainIndent < 0
             && javascript == JavaScriptContext.EMPTY && !markupTag
                 ? ScanState.EMPTY : new ScanState(blockDepth, string, yamlFlowDepth, yamlPlainIndent, javascript, markupTag);
@@ -637,6 +838,9 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
                 rangeEnd = Math.max(rangeEnd, end);
             } else {
                 finishRange();
+                if (ranges.size() == LineLexicalScanner.MAX_EXCLUDED_RANGES) {
+                    throw new ScanLimitExceeded(ScanStop.OUTPUT_LIMIT);
+                }
                 rangeStart = start;
                 rangeEnd = end;
             }
@@ -656,6 +860,9 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
 
         private void openQuote(int start) {
             if (lexical) {
+                if (quotes.size() == LineLexicalScanner.MAX_QUOTES) {
+                    throw new ScanLimitExceeded(ScanStop.OUTPUT_LIMIT);
+                }
                 openingQuote = start;
             }
         }
@@ -669,8 +876,26 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
 
         private void quote(int start, int end) {
             if (lexical) {
+                if (quotes.size() == LineLexicalScanner.MAX_QUOTES) {
+                    throw new ScanLimitExceeded(ScanStop.OUTPUT_LIMIT);
+                }
                 quotes.add(new LineLexicalScanner.Quote(start, end));
             }
+        }
+
+        private void truncate(int end) {
+            while (!ranges.isEmpty() && ranges.getLast().start() >= end) ranges.removeLast();
+            if (!ranges.isEmpty() && ranges.getLast().end() > end) {
+                var last = ranges.removeLast();
+                ranges.add(new LineLexicalScanner.Range(last.start(), end));
+            }
+            if (rangeStart >= end) rangeStart = -1;
+            else rangeEnd = Math.min(rangeEnd, end);
+            while (!quotes.isEmpty() && (quotes.getLast().start() >= end || quotes.getLast().end() >= end)) {
+                quotes.removeLast();
+            }
+            openingQuote = -1;
+            finishRange();
         }
     }
 
@@ -678,9 +903,12 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
         private long remaining;
         private int completedCodeUnits;
         private RubyFrame rubyFrame;
+        private int newContextNodes;
+        private final HighlightWork shared;
 
-        private ScanWork(int length) {
+        private ScanWork(int length, HighlightWork shared) {
             remaining = 256L + 8L * length;
+            this.shared = shared;
         }
 
         private void at(int cursor) {
@@ -689,15 +917,35 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
         }
 
         private void step() {
+            if (shared != null) shared.spend(1);
             if (--remaining < 0) {
                 throw new ScanLimitExceeded();
             }
         }
+
+        private void newContextNode(int depth) {
+            if (depth > MAX_CONTEXT_DEPTH || newContextNodes == MAX_CONTEXT_NODES_PER_SCAN) {
+                throw new ScanLimitExceeded(ScanStop.STATE_LIMIT);
+            }
+            newContextNodes++;
+        }
+
+        private RubyFrame rubyFrame(char quote, int braces, RubyFrame parent) {
+            newContextNode(parent == null ? 1 : parent.depth() + 1);
+            return new RubyFrame(quote, braces, parent);
+        }
     }
 
     private static final class ScanLimitExceeded extends RuntimeException {
+        private final ScanStop stop;
+
         private ScanLimitExceeded() {
+            this(ScanStop.WORK_LIMIT);
+        }
+
+        private ScanLimitExceeded(ScanStop stop) {
             super(null, null, false, false);
+            this.stop = stop;
         }
     }
 
@@ -736,7 +984,7 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
 
     private static int rubyQuotedEnd(String line, int start, QuotedString string, ScanWork work) {
         RubyFrame frame = string.rubyFrame() == null
-            ? new RubyFrame(string.quote(), 0, null) : string.rubyFrame();
+            ? work.rubyFrame(string.quote(), 0, null) : string.rubyFrame();
         for (int cursor = start; cursor < line.length(); cursor++) {
             work.step();
             char current = line.charAt(cursor);
@@ -744,7 +992,7 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
                 cursor++;
             } else if (frame.quote() != 0) {
                 if (frame.quote() != '\'' && line.startsWith("#{", cursor)) {
-                    frame = new RubyFrame('\0', 1, frame);
+                    frame = work.rubyFrame('\0', 1, frame);
                     cursor++;
                 } else if (current == frame.quote()) {
                     frame = frame.parent();
@@ -757,12 +1005,12 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
                 // A comment in an interpolated expression lasts until the next source line.
                 break;
             } else if (current == '\'' || current == '"' || current == '`') {
-                frame = new RubyFrame(current, 0, frame);
+                frame = work.rubyFrame(current, 0, frame);
             } else if (current == '{') {
-                frame = new RubyFrame('\0', frame.braces() + 1, frame.parent());
+                frame = work.rubyFrame('\0', frame.braces() + 1, frame.parent());
             } else if (current == '}') {
                 frame = frame.braces() == 1 ? frame.parent()
-                    : new RubyFrame('\0', frame.braces() - 1, frame.parent());
+                    : work.rubyFrame('\0', frame.braces() - 1, frame.parent());
             }
         }
         work.rubyFrame = frame;

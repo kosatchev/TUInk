@@ -18,8 +18,9 @@ final class MarkdownInlineHighlighter extends RegexHighlighter {
     }
 
     @Override
-    protected Style[] highlightStyles(String line) {
-        Style[] styles = super.highlightStyles(line);
+    protected Style[] highlightStyles(String line, HighlightWork work) {
+        work.spend(8L * line.length());
+        Style[] styles = super.highlightStyles(line, work);
         highlightLinks(line, styles);
         Matcher quote = QUOTE.matcher(line);
         if (quote.find()) {

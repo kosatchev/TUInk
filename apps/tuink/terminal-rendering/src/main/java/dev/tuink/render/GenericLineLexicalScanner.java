@@ -19,6 +19,9 @@ final class GenericLineLexicalScanner implements LineLexicalScanner {
         if (maxCodeUnits < 0) {
             throw new IllegalArgumentException("maxCodeUnits must be non-negative");
         }
+        if (previous == State.UNKNOWN) {
+            return new Result(0, previous, List.of(), List.of(), false);
+        }
         int limit = Math.min(line.length(), maxCodeUnits);
         String prefix = limit == line.length() ? line : line.substring(0, limit);
         QuoteContinuationState state = previous instanceof QuoteContinuationState continuation
@@ -26,9 +29,16 @@ final class GenericLineLexicalScanner implements LineLexicalScanner {
         QuoteMaskResult result = computeQuotedMask(prefix, profile, state);
         List<Range> ranges = new ArrayList<>();
         int start = -1;
-        for (int i = 0; i <= result.mask().length; i++) {
-            if (i < result.mask().length && result.mask()[i]) {
+        int scanned = result.scannedCodeUnits();
+        boolean contextKnown = result.contextKnown() && limit == line.length();
+        for (int i = 0; i <= scanned; i++) {
+            if (i < scanned && result.mask()[i]) {
                 if (start < 0) {
+                    if (ranges.size() == MAX_EXCLUDED_RANGES) {
+                        scanned = i;
+                        contextKnown = false;
+                        break;
+                    }
                     start = i;
                 }
             } else if (start >= 0) {
@@ -36,10 +46,13 @@ final class GenericLineLexicalScanner implements LineLexicalScanner {
                 start = -1;
             }
         }
+        int provenEnd = scanned;
+        boolean complete = contextKnown;
         List<Quote> quotes = result.quoteRanges().stream()
-            .filter(quote -> limit == line.length() || quote.end() >= 0)
+            .filter(quote -> quote.start() < provenEnd && quote.end() < provenEnd
+                && (complete || quote.end() >= 0))
             .map(quote -> new Quote(quote.start(), quote.end())).toList();
-        return new Result(limit, result.endState(), ranges, quotes);
+        return new Result(scanned, result.endState(), ranges, quotes, contextKnown);
     }
 
     private static QuoteMaskResult computeQuotedMask(
@@ -62,6 +75,7 @@ final class GenericLineLexicalScanner implements LineLexicalScanner {
         boolean escaped = false;
         int quoteStart = -1;
         List<QuoteRange> quoteRanges = null;
+        int scanned = line.length();
 
         for (int i = 0; i < line.length(); i++) {
             if (mask[i]) {
@@ -158,10 +172,18 @@ final class GenericLineLexicalScanner implements LineLexicalScanner {
                 break;
             }
             if (ch == '\'' && !isApostropheInWord(line, i) && !isEscaped(line, i)) {
+                if (quoteRanges != null && quoteRanges.size() == MAX_QUOTES) {
+                    scanned = i;
+                    break;
+                }
                 mask[i] = true;
                 inSingle = true;
                 quoteStart = i;
             } else if (ch == '"' && !isEscaped(line, i)) {
+                if (quoteRanges != null && quoteRanges.size() == MAX_QUOTES) {
+                    scanned = i;
+                    break;
+                }
                 mask[i] = true;
                 inDouble = true;
                 quoteStart = i;
@@ -179,7 +201,7 @@ final class GenericLineLexicalScanner implements LineLexicalScanner {
         return new QuoteMaskResult(
             mask,
             new QuoteContinuationState(inBlockComment, inHtmlComment),
-            quoteRanges == null ? List.of() : List.copyOf(quoteRanges)
+            quoteRanges == null ? List.of() : List.copyOf(quoteRanges), scanned, scanned == line.length()
         );
     }
 
@@ -246,7 +268,8 @@ final class GenericLineLexicalScanner implements LineLexicalScanner {
     }
 
     private record QuoteMaskResult(
-        boolean[] mask, QuoteContinuationState endState, List<QuoteRange> quoteRanges
+        boolean[] mask, QuoteContinuationState endState, List<QuoteRange> quoteRanges,
+        int scannedCodeUnits, boolean contextKnown
     ) {
     }
 

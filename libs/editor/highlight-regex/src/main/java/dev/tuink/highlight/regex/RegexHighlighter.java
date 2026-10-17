@@ -1,14 +1,14 @@
 package dev.tuink.highlight.regex;
 
+import dev.tuink.editor.language.LanguageRegistry;
 import dev.tuink.render.Color;
+import dev.tuink.render.HighlightRequest;
 import dev.tuink.render.LineHighlighter;
 import dev.tuink.render.Style;
 import dev.tuink.render.StyleSpan;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
-import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -16,6 +16,7 @@ import java.util.regex.Pattern;
  * Line highlighter using layered regex rules.
  */
 public class RegexHighlighter implements LineHighlighter {
+    private static final int LEGACY_MAX_SCAN = 1_048_576;
     private static final Style KEYWORD_STYLE = new Style(Color.BRIGHT_BLUE, Color.DEFAULT, true, false);
     private static final Style TYPE_STYLE = new Style(Color.BRIGHT_MAGENTA, Color.DEFAULT, false, false);
     private static final Style NUMBER_STYLE = new Style(Color.BRIGHT_CYAN, Color.DEFAULT, false, false);
@@ -23,33 +24,6 @@ public class RegexHighlighter implements LineHighlighter {
     private static final Style COMMENT_STYLE = new Style(Color.BRIGHT_BLACK, Color.DEFAULT, false, false);
     private static final Style DECORATOR_STYLE = new Style(Color.BRIGHT_YELLOW, Color.DEFAULT, false, false);
     private static final Style MARKUP_STYLE = new Style(Color.BRIGHT_YELLOW, Color.DEFAULT, true, false);
-
-    private static final Set<String> JAVA_EXT = Set.of("java");
-    private static final Set<String> C_EXT = Set.of("c", "h", "ino");
-    private static final Set<String> PY_EXT = Set.of("py");
-    private static final Set<String> MD_EXT = Set.of("md", "markdown");
-    private static final Set<String> JS_EXT = Set.of("js", "mjs", "cjs", "jsx");
-    private static final Set<String> TS_EXT = Set.of("ts", "tsx");
-    private static final Set<String> GRADLE_EXT = Set.of("gradle");
-    private static final Set<String> SHELL_EXT = Set.of("sh", "bash", "zsh");
-    private static final Set<String> SQL_EXT = Set.of("sql");
-    private static final Set<String> GO_EXT = Set.of("go");
-    private static final Set<String> RUST_EXT = Set.of("rs");
-    private static final Set<String> PHP_EXT = Set.of("php", "phtml", "php5", "php7", "php8");
-    private static final Set<String> RUBY_EXT = Set.of("rb", "rake", "gemspec");
-    private static final Set<String> PERL_EXT = Set.of("pl", "pm", "perl", "t");
-    private static final Set<String> KOTLIN_EXT = Set.of("kt", "kts");
-    private static final Set<String> PROTO_EXT = Set.of("proto");
-    private static final Set<String> HTML_EXT = Set.of("html", "htm");
-    private static final Set<String> CSS_EXT = Set.of("css", "scss");
-    private static final Set<String> DIFF_EXT = Set.of("diff", "patch");
-    private static final Set<String> CSV_EXT = Set.of("csv");
-    private static final Set<String> CONFIG_EXT = Set.of(
-        "json", "yaml", "yml", "toml", "ini", "cfg", "conf", "properties", "xml"
-    );
-    private static final Set<String> CONFIG_FILE_NAMES = Set.of(
-        "dockerfile", ".gitignore", "makefile", ".editorconfig", "docker-compose.yml", "docker-compose.yaml"
-    );
 
     private final List<RegexRule> rules;
 
@@ -72,100 +46,51 @@ public class RegexHighlighter implements LineHighlighter {
     }
 
     public static LineHighlighter forFileName(String fileName) {
-        String name = normalizeName(fileName);
-        if (name != null) {
-            if (CONFIG_FILE_NAMES.contains(name)) {
-                return forConfigFileName(name);
-            }
-            if (name.startsWith("git-commit")) {
-                return forGitCommit();
-            }
-            if (name.startsWith(".env")) {
-                return forEnv();
-            }
-        }
-
-        String ext = extensionOf(fileName);
-        if (ext == null) {
-            return withDefaults();
-        }
-        if (JAVA_EXT.contains(ext)) {
-            return forJava();
-        }
-        if (C_EXT.contains(ext)) {
-            return forC();
-        }
-        if (PY_EXT.contains(ext)) {
-            return forPython();
-        }
-        if (MD_EXT.contains(ext)) {
-            return new MarkdownFenceHighlighter();
-        }
-        if (JS_EXT.contains(ext)) {
-            return forJavaScript();
-        }
-        if (TS_EXT.contains(ext)) {
-            return forTypeScript();
-        }
-        if (GRADLE_EXT.contains(ext)) {
-            return forGradle();
-        }
-        if (SHELL_EXT.contains(ext)) {
-            return forShell();
-        }
-        if (SQL_EXT.contains(ext)) {
-            return forSql();
-        }
-        if (GO_EXT.contains(ext)) {
-            return forGo();
-        }
-        if (RUST_EXT.contains(ext)) {
-            return forRust();
-        }
-        if (PHP_EXT.contains(ext)) {
-            return forPhp();
-        }
-        if (RUBY_EXT.contains(ext)) {
-            return forRuby();
-        }
-        if (PERL_EXT.contains(ext)) {
-            return forPerl();
-        }
-        if (KOTLIN_EXT.contains(ext)) {
-            return forKotlin();
-        }
-        if (PROTO_EXT.contains(ext)) {
-            return forProto();
-        }
-        if (HTML_EXT.contains(ext)) {
-            return forHtml();
-        }
-        if (CSS_EXT.contains(ext)) {
-            return forCssLike();
-        }
-        if (DIFF_EXT.contains(ext)) {
-            return forDiff();
-        }
-        if (CSV_EXT.contains(ext)) {
-            return forCsv();
-        }
-        if (CONFIG_EXT.contains(ext)) {
-            return forConfig(ext);
-        }
-        return withDefaults();
+        return switch (LanguageRegistry.forFileName(fileName)) {
+            case JAVA -> forJava();
+            case C -> forC();
+            case CPP -> forCpp();
+            case PYTHON -> forPython();
+            case MARKDOWN -> new MarkdownFenceHighlighter();
+            case JAVASCRIPT -> forJavaScript();
+            case TYPESCRIPT -> forTypeScript();
+            case GROOVY -> forGradle();
+            case SHELL -> forShell();
+            case SQL -> forSql();
+            case GO -> forGo();
+            case RUST -> forRust();
+            case PHP -> forPhp();
+            case RUBY -> forRuby();
+            case PERL -> forPerl();
+            case KOTLIN -> forKotlin();
+            case PROTO -> forProto();
+            case HTML -> forHtml();
+            case CSS, SCSS -> forCssLike();
+            case DIFF -> forDiff();
+            case CSV -> forCsv();
+            case JSON -> forJson();
+            case YAML -> forYaml();
+            case TOML -> forToml();
+            case INI, CONFIG -> forIniLike();
+            case PROPERTIES -> forProperties();
+            case XML -> forXml();
+            case DOCKERFILE -> forDockerfile();
+            case ENV -> forEnv();
+            case GIT_IGNORE -> forGitIgnore();
+            case MAKEFILE -> forMakefile();
+            case EDITORCONFIG -> forEditorConfig();
+            case GIT_COMMIT -> forGitCommit();
+            default -> withDefaults();
+        };
     }
 
     public static RegexHighlighter forConfigFileName(String fileName) {
-        String name = normalizeName(fileName);
-        if (name == null) {
-            return withDefaults();
-        }
-        return switch (name) {
-            case "dockerfile" -> forDockerfile();
-            case ".gitignore" -> forGitIgnore();
-            case "makefile" -> forMakefile();
-            case ".editorconfig" -> forEditorConfig();
-            case "docker-compose.yml", "docker-compose.yaml" -> forYaml();
+        return switch (LanguageRegistry.forFileName(fileName)) {
+            case DOCKERFILE -> forDockerfile();
+            case GIT_IGNORE -> forGitIgnore();
+            case MAKEFILE -> forMakefile();
+            case EDITORCONFIG -> forEditorConfig();
+            case YAML -> forYaml();
             default -> withDefaults();
         };
     }
@@ -191,6 +116,16 @@ public class RegexHighlighter implements LineHighlighter {
             new RegexRule(Pattern.compile("\\b\\d+(?:\\.\\d+)?(?:[uUlLfF]+)?\\b"), NUMBER_STYLE),
             new RegexRule(Pattern.compile("#\\s*[A-Za-z_][A-Za-z0-9_]*.*$"), DECORATOR_STYLE)
         ));
+    }
+
+    public static RegexHighlighter forCpp() {
+        List<RegexRule> cppRules = new ArrayList<>(forC().rules);
+        cppRules.add(new RegexRule(Pattern.compile(
+            "\\b(namespace|using|class|public|protected|private|template|typename|virtual|override|final|"
+                + "constexpr|consteval|constinit|decltype|auto|new|delete|try|catch|throw|noexcept|"
+                + "static_cast|dynamic_cast|reinterpret_cast|const_cast|nullptr|true|false)\\b"), KEYWORD_STYLE));
+        cppRules.add(new RegexRule(Pattern.compile("\\b(bool|wchar_t|char8_t|char16_t|char32_t)\\b"), TYPE_STYLE));
+        return new CStyleHighlighter(cppRules);
     }
 
     public static RegexHighlighter forPython() {
@@ -369,14 +304,13 @@ public class RegexHighlighter implements LineHighlighter {
     }
 
     public static RegexHighlighter forConfig(String extension) {
-        String ext = extension == null ? "" : extension.toLowerCase(Locale.ROOT);
-        return switch (ext) {
-            case "json" -> forJson();
-            case "yaml", "yml" -> forYaml();
-            case "toml" -> forToml();
-            case "ini", "cfg", "conf" -> forIniLike();
-            case "properties" -> forProperties();
-            case "xml" -> forXml();
+        return switch (LanguageRegistry.forExtension(extension)) {
+            case JSON -> forJson();
+            case YAML -> forYaml();
+            case TOML -> forToml();
+            case INI, CONFIG -> forIniLike();
+            case PROPERTIES -> forProperties();
+            case XML -> forXml();
             default -> withDefaults();
         };
     }
@@ -517,46 +451,46 @@ public class RegexHighlighter implements LineHighlighter {
         ));
     }
 
-    private static String extensionOf(String fileName) {
-        if (fileName == null) {
-            return null;
-        }
-        int idx = fileName.lastIndexOf('.');
-        if (idx < 0 || idx == fileName.length() - 1) {
-            return null;
-        }
-        return fileName.substring(idx + 1).toLowerCase(Locale.ROOT);
-    }
-
-    private static String normalizeName(String fileName) {
-        if (fileName == null || fileName.isBlank()) {
-            return null;
-        }
-        return fileName.toLowerCase(Locale.ROOT);
+    @Override
+    public List<StyleSpan> highlight(String line) {
+        return highlight(line, legacyRequest(line));
     }
 
     @Override
-    public List<StyleSpan> highlight(String line) {
-        if (line == null || line.isEmpty()) {
+    public List<StyleSpan> highlight(String line, HighlightRequest request) {
+        Objects.requireNonNull(request, "request");
+        // Regex rules may depend on a closing delimiter or EOL beyond the visible
+        // interval. Never reinterpret a truncated substring as a complete line.
+        if (line == null || line.isEmpty() || !request.allowsFullLine(line)) {
             return List.of();
         }
-
-        return spans(highlightStyles(line));
+        HighlightWork work = new HighlightWork(request.maxWork());
+        try {
+            return spans(highlightStyles(line, work), request, work);
+        } catch (HighlightWork.Exhausted ignored) {
+            return List.of();
+        }
     }
 
-    protected Style[] highlightStyles(String line) {
+    static HighlightRequest legacyRequest(String line) {
+        return new HighlightRequest(0, line == null ? 0 : line.length(), LEGACY_MAX_SCAN, 65_536, 32_000_000L);
+    }
+
+    protected Style[] highlightStyles(String line, HighlightWork work) {
+        work.spend(line.length());
         Style[] styleAt = new Style[line.length()];
-        applyRules(line, styleAt, rules);
+        applyRules(line, styleAt, rules, work);
         return styleAt;
     }
 
-    protected static void applyRules(String line, Style[] styleAt, List<RegexRule> rules) {
+    protected static void applyRules(String line, Style[] styleAt, List<RegexRule> rules, HighlightWork work) {
         for (RegexRule rule : rules) {
             try {
-                Matcher matcher = rule.pattern().matcher(new RegexInput(line));
+                Matcher matcher = rule.pattern().matcher(new RegexInput(line, work));
                 while (matcher.find()) {
                     int start = Math.max(0, matcher.start());
                     int end = Math.min(line.length(), matcher.end());
+                    if (work != null) work.spend(end - start);
                     for (int i = start; i < end; i++) {
                         styleAt[i] = rule.style();
                     }
@@ -569,25 +503,27 @@ public class RegexHighlighter implements LineHighlighter {
         }
     }
 
-    protected static List<StyleSpan> spans(Style[] styleAt) {
-        List<StyleSpan> spans = new ArrayList<>();
-        int start = -1;
-        Style current = null;
-        for (int i = 0; i < styleAt.length; i++) {
-            Style style = styleAt[i];
-            if (!Objects.equals(current, style)) {
+    /** Produces only requested spans; output exhaustion yields an unstyled result. */
+    protected static List<StyleSpan> spans(Style[] styleAt, HighlightRequest request, HighlightWork work) {
+        int from = Math.min(styleAt.length, request.startUtf16());
+        int end = Math.min(styleAt.length, request.endUtf16());
+        if (from >= end || request.maxSpans() == 0) return List.of();
+        work.spend(end - from);
+        List<StyleSpan> result = new ArrayList<>();
+        Style current = styleAt[from];
+        int start = from;
+        for (int offset = from + 1; offset <= end; offset++) {
+            Style next = offset == end ? null : styleAt[offset];
+            if (!Objects.equals(current, next)) {
                 if (current != null) {
-                    spans.add(new StyleSpan(start, i, current));
+                    if (result.size() == request.maxSpans()) return List.of();
+                    result.add(new StyleSpan(start, offset, current));
                 }
-                current = style;
-                start = i;
+                current = next;
+                start = offset;
             }
         }
-
-        if (current != null) {
-            spans.add(new StyleSpan(start, styleAt.length, current));
-        }
-
-        return spans;
+        return List.copyOf(result);
     }
+
 }

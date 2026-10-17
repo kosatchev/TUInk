@@ -10,6 +10,7 @@ import dev.tuiframe.input.KeyStroke;
 import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.input.ResizeEvent;
 import dev.tuiframe.input.TuiInputEvent;
+import dev.tuiframe.style.CellStyle;
 import dev.tuiframe.jline.presentation.ScreenPresenter;
 import dev.tuiframe.runtime.TuiEventLoop;
 import dev.tuiframe.widget.FocusResetPolicy;
@@ -216,6 +217,11 @@ final class EditorWindowFixture implements AutoCloseable {
             text.append(frame.get(row, column).grapheme());
         }
         return text.toString();
+    }
+
+    CellStyle screenStyle(int row, int column) {
+        assertNotNull(renderer.frame);
+        return renderer.frame.get(row, column).style();
     }
 
     int rowStartingWith(String label) {

@@ -10,6 +10,8 @@ import java.util.List;
  * @param leadingClippedCells cells hidden between that offset and the viewport left edge
  * @param baseSpanCount number of leading spans that do not depend on cursor, search or selection state
  * @param baseStyleKey stable, opaque render-owned identity for the base span layout, or {@code null}
+ * @param lineBreakSelectionStyle style of a selected real line break after this row's text,
+ *                               or {@code null}; the line break occupies one blank display cell
  */
 public record LineVisual(
     String gutter,
@@ -19,8 +21,23 @@ public record LineVisual(
     int sourceVisualColumn,
     int leadingClippedCells,
     int baseSpanCount,
-    BaseStyleIdentity baseStyleKey
+    BaseStyleIdentity baseStyleKey,
+    Style lineBreakSelectionStyle
 ) {
+    public LineVisual(
+        String gutter,
+        String text,
+        List<StyleSpan> spans,
+        GutterDiffMarker gutterDiff,
+        int sourceVisualColumn,
+        int leadingClippedCells,
+        int baseSpanCount,
+        BaseStyleIdentity baseStyleKey
+    ) {
+        this(gutter, text, spans, gutterDiff, sourceVisualColumn, leadingClippedCells,
+            baseSpanCount, baseStyleKey, null);
+    }
+
     public LineVisual(String gutter, String text, List<StyleSpan> spans, GutterDiffMarker gutterDiff) {
         this(gutter, text, spans, gutterDiff, 0, 0, spans == null ? 0 : spans.size(), null);
     }

@@ -9,6 +9,9 @@ import java.util.Objects;
  * A caller owns the continuation state and the total document scan budget.
  */
 public interface LineLexicalScanner {
+    int MAX_EXCLUDED_RANGES = 4096;
+    int MAX_QUOTES = 4096;
+
     /** Shared conservative fallback for prose and highlighters without semantic tokenization. */
     static LineLexicalScanner generic() {
         return new GenericLineLexicalScanner(CommentSyntaxProfile.GENERIC);
@@ -21,6 +24,8 @@ public interface LineLexicalScanner {
 
     /** Opaque, immutable continuation state belonging to one scanner. Null starts a document. */
     interface State {
+        /** A stopped scan cannot be resumed as though it had reached an ordinary line boundary. */
+        State UNKNOWN = new State() {};
     }
 
     /**
@@ -28,6 +33,10 @@ public interface LineLexicalScanner {
      * Implementations must also bound allocation and work by this prefix, without
      * traversing preceding lines or the unprocessed tail. Returned ranges exclude
      * strings and comments from bracket matching, independently of display style.
+     * Output limits must be checked before allocating ranges or quotes. A caller
+     * may reuse the end state only when {@link Result#contextKnown()} is true and
+     * the scanned prefix covers the original line. Unknown state stays unknown,
+     * including across an empty line.
      */
     Result scan(String line, int maxCodeUnits, State previous);
 
@@ -48,13 +57,29 @@ public interface LineLexicalScanner {
         }
     }
 
-    record Result(int scannedCodeUnits, State endState, List<Range> excludedRanges, List<Quote> quotes) {
+    record Result(int scannedCodeUnits, State endState, List<Range> excludedRanges, List<Quote> quotes,
+                  boolean contextKnown) {
+        /** Compatibility constructor; callers must still verify that the complete source line was scanned. */
+        public Result(int scannedCodeUnits, State endState, List<Range> excludedRanges, List<Quote> quotes) {
+            this(scannedCodeUnits, endState, excludedRanges, quotes, true);
+        }
+
         public Result {
             if (scannedCodeUnits < 0) {
                 throw new IllegalArgumentException("Negative lexical scan length");
             }
-            excludedRanges = List.copyOf(Objects.requireNonNull(excludedRanges, "excludedRanges"));
-            quotes = List.copyOf(Objects.requireNonNull(quotes, "quotes"));
+            Objects.requireNonNull(excludedRanges, "excludedRanges");
+            Objects.requireNonNull(quotes, "quotes");
+            if (excludedRanges.size() > MAX_EXCLUDED_RANGES || quotes.size() > MAX_QUOTES) {
+                throw new IllegalArgumentException("Lexical output exceeds its per-line budget");
+            }
+            excludedRanges = List.copyOf(excludedRanges);
+            quotes = List.copyOf(quotes);
+            if (!contextKnown) {
+                endState = State.UNKNOWN;
+            } else if (endState == State.UNKNOWN) {
+                throw new IllegalArgumentException("Unknown lexical context cannot be marked complete");
+            }
             for (Range range : excludedRanges) {
                 if (range.end() > scannedCodeUnits) {
                     throw new IllegalArgumentException("Excluded range exceeds scanned prefix");

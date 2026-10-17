@@ -366,19 +366,17 @@ class MarkdownFenceHighlighterTest {
             lines.add("~~~");
             DocumentSnapshot document = new DocumentSnapshot(DOCUMENT_ID, revision, lines);
 
-            // Computing a later line also retains the delegates for every earlier line.
             assertEquals(
                 List.of(span(document.line(131), "return", KEYWORD), span(document.line(131), "7", NUMBER)),
                 highlight(highlighter, document, 131)
             );
-            List<LineHighlighter> delegates = retainedDelegates(highlighter);
             if (fallback == null) {
-                fallback = delegates.get(1);
+                fallback = embeddedDelegate(highlighter, "");
             }
             for (int line = 1; line <= 128; line++) {
-                assertSame(fallback, delegates.get(line), "unnamed fence line " + line);
+                assertEquals(fallback.highlight(document.line(line)), highlight(highlighter, document, line));
             }
-            assertSame(fallback, delegates.get(131), "second fence in revision " + revision);
+            assertSame(fallback, embeddedDelegate(highlighter, ""), "second fence in revision " + revision);
         }
     }
 
@@ -397,12 +395,11 @@ class MarkdownFenceHighlighterTest {
                 List.of(span(document.line(4), "return", KEYWORD), span(document.line(4), "8", NUMBER)),
                 highlight(highlighter, document, 4)
             );
-            List<LineHighlighter> delegates = retainedDelegates(highlighter);
             if (fallback == null) {
-                fallback = delegates.get(4);
+                fallback = embeddedDelegate(highlighter, "");
             }
-            assertSame(fallback, delegates.get(1), "unsupported tag in revision " + revision);
-            assertSame(fallback, delegates.get(4), "unnamed fence in revision " + revision);
+            assertSame(fallback, embeddedDelegate(highlighter, "unsupported-" + revision), "unsupported tag in revision " + revision);
+            assertSame(fallback, embeddedDelegate(highlighter, ""), "unnamed fence in revision " + revision);
         }
         Field cache = MarkdownFenceHighlighter.class.getDeclaredField("languageCache");
         cache.setAccessible(true);
@@ -410,18 +407,11 @@ class MarkdownFenceHighlighterTest {
     }
 
     // Equal spans cannot distinguish shared rules from a newly compiled rule set per line.
-    private static List<LineHighlighter> retainedDelegates(MarkdownFenceHighlighter highlighter)
+    private static LineHighlighter embeddedDelegate(MarkdownFenceHighlighter highlighter, String tag)
         throws ReflectiveOperationException {
-        Field byLine = MarkdownFenceHighlighter.class.getDeclaredField("delegatesByLine");
-        byLine.setAccessible(true);
-        List<?> delegates = (List<?>) byLine.get(highlighter);
-        Field delegateHighlighter = delegates.get(0).getClass().getDeclaredField("highlighter");
-        delegateHighlighter.setAccessible(true);
-        List<LineHighlighter> result = new ArrayList<>(delegates.size());
-        for (Object delegate : delegates) {
-            result.add((LineHighlighter) delegateHighlighter.get(delegate));
-        }
-        return result;
+        var delegate = MarkdownFenceHighlighter.class.getDeclaredMethod("embeddedHighlighter", String.class);
+        delegate.setAccessible(true);
+        return (LineHighlighter) delegate.invoke(highlighter, tag);
     }
 
     private static ContextualLineHighlighter markdownHighlighter() {

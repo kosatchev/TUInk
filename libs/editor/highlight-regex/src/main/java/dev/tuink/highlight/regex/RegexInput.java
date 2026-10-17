@@ -6,16 +6,22 @@ final class RegexInput implements CharSequence {
     private final int start;
     private final int end;
     private final Budget budget;
+    private final HighlightWork sharedWork;
 
     RegexInput(String text) {
-        this(text, 0, text.length(), new Budget(1024L + 64L * text.length()));
+        this(text, null);
     }
 
-    private RegexInput(String text, int start, int end, Budget budget) {
+    RegexInput(String text, HighlightWork sharedWork) {
+        this(text, 0, text.length(), new Budget(1024L + 64L * text.length()), sharedWork);
+    }
+
+    private RegexInput(String text, int start, int end, Budget budget, HighlightWork sharedWork) {
         this.text = text;
         this.start = start;
         this.end = end;
         this.budget = budget;
+        this.sharedWork = sharedWork;
     }
 
     @Override
@@ -31,6 +37,7 @@ final class RegexInput implements CharSequence {
         if (--budget.remaining < 0) {
             throw new MatchLimitExceeded();
         }
+        if (sharedWork != null) sharedWork.spend(1);
         return text.charAt(start + index);
     }
 
@@ -39,7 +46,7 @@ final class RegexInput implements CharSequence {
         if (from < 0 || to < from || to > length()) {
             throw new IndexOutOfBoundsException();
         }
-        return new RegexInput(text, start + from, start + to, budget);
+        return new RegexInput(text, start + from, start + to, budget, sharedWork);
     }
 
     @Override

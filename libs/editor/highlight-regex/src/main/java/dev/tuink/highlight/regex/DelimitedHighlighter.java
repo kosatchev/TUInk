@@ -26,8 +26,13 @@ final class DelimitedHighlighter extends RegexHighlighter {
     }
 
     @Override
-    protected Style[] highlightStyles(String line) {
-        Style[] styles = super.highlightStyles(line);
+    protected Style[] highlightStyles(String line, HighlightWork work) {
+        work.spend((8L * delimiters.size() + 4) * line.length());
+        Style[] styles = super.highlightStyles(line, work);
+        return highlightDelimited(line, styles, work);
+    }
+
+    private Style[] highlightDelimited(String line, Style[] styles, HighlightWork work) {
         int[] nextOpening = new int[delimiters.size()];
         int[] lastClosing = new int[delimiters.size()];
         for (int index = 0; index < delimiters.size(); index++) {
@@ -68,7 +73,7 @@ final class DelimitedHighlighter extends RegexHighlighter {
             cursor = closing + delimiter.closing().length();
             Arrays.fill(styles, start, cursor, style);
         }
-        applyRules(line, styles, followingRules);
+        applyRules(line, styles, followingRules, work);
         return styles;
     }
 }

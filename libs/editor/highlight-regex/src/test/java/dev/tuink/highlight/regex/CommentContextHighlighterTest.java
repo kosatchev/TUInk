@@ -1,6 +1,7 @@
 package dev.tuink.highlight.regex;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -170,8 +171,11 @@ class CommentContextHighlighterTest {
     @Test
     void deepRubyInterpolationAndJavascriptConditionsKeepScanningBoundedWithoutRecursion() {
         assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
+            String withinLimit = "\"#{".repeat(128) + "value" + "}\"".repeat(128);
+            assertEquals(List.of(new StyleSpan(0, withinLimit.length(), STRING)),
+                RegexHighlighter.forRuby().highlight(withinLimit));
             String ruby = "\"#{".repeat(20_000) + "value" + "}\"".repeat(20_000);
-            assertEquals(List.of(new StyleSpan(0, ruby.length(), STRING)), RegexHighlighter.forRuby().highlight(ruby));
+            assertTrue(RegexHighlighter.forRuby().highlight(ruby).isEmpty());
             String javascript = "if (" + "(".repeat(60_000) + "value" + ")".repeat(60_000) + ") /[/*]/;";
             for (String fileName : List.of("script.rb", "script.js", "page.html", "settings.xml")) {
                 String line = fileName.endsWith("rb") ? ruby : fileName.endsWith("js") ? javascript
@@ -184,7 +188,14 @@ class CommentContextHighlighterTest {
                     assertTrue(range.end() <= 64, fileName);
                 }
                 LineLexicalScanner.Result complete = scanner.scan(line, line.length(), null);
-                assertEquals(line.length(), complete.scannedCodeUnits(), fileName);
+                if (fileName.endsWith("rb") || fileName.endsWith("js")) {
+                    assertFalse(complete.contextKnown(), fileName);
+                    assertTrue(complete.scannedCodeUnits() < line.length(), fileName);
+                    assertEquals(LineLexicalScanner.State.UNKNOWN, complete.endState(), fileName);
+                } else {
+                    assertTrue(complete.contextKnown(), fileName);
+                    assertEquals(line.length(), complete.scannedCodeUnits(), fileName);
+                }
             }
         });
     }

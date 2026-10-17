@@ -80,6 +80,38 @@ class FilePickerOpenIntegrationTest {
         }
     }
 
+    @Test
+    void aSelectionReplacedByADirectoryCanBeCancelledAndRetried() throws Exception {
+        Path target = directory.resolve("z-selected.txt");
+        try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("original"))) {
+            Files.writeString(target, "selected");
+            window.event(new TextInput("draft "));
+            var original = window.active();
+            var builder = window.context.renderPlanBuilder();
+            selectLastFile(window, target);
+            Files.delete(target);
+            Files.createDirectory(target);
+            window.event(KeyStroke.of(KeyStroke.Key.ENTER));
+            assertEquals(1, window.tabs.size());
+            assertSame(original, window.active());
+            assertSame(builder, window.context.renderPlanBuilder());
+            assertTrue(window.notification.message.startsWith("Open failed:"));
+            window.event(new TextInput("captured"));
+            assertEquals("draft original", original.tabSession().model().getLine(0));
+            window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
+
+            Files.delete(target);
+            Files.writeString(target, "retried");
+            selectLastFile(window, target);
+            window.event(KeyStroke.of(KeyStroke.Key.ENTER));
+            assertEquals(2, window.tabs.size());
+            assertSame(original, window.tabs.getFirst());
+            assertTrue(original.state().isDirty());
+            assertEquals("retried", window.active().tabSession().model().getLine(0));
+            assertSame(window.active().tabSession().textLayout(), window.context.renderPlanBuilder().textLayout());
+        }
+    }
+
     private static void selectLastFile(EditorWindowFixture window, Path target) throws Exception {
         window.command(TuinkCommand.DOCUMENT_OPEN);
         window.await(() -> !window.tree.loading());

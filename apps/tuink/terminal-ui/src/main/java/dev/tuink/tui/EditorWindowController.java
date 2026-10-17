@@ -4,7 +4,6 @@ import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.LanguageProfiles;
 import dev.tuink.core.Position;
-import dev.tuink.core.SaveDisposition;
 import dev.tuink.core.SearchOptions;
 import dev.tuink.core.TabSession;
 import dev.tuink.core.TextModel;
@@ -68,7 +67,6 @@ import dev.tuink.tui.ui.TabBarView;
 import dev.tuink.tui.ui.FileTreeView;
 import dev.tuink.tui.ui.ViewportController;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
@@ -1348,17 +1346,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 editorView.cancelMouseSelection();
             }
             if (openInput.intent() != null) {
-                TerminalEditorApp.OpenFileApplyResult applied = host.applyOpenFileIntent(
-                    openInput.intent(),
-                    openFileTree,
-                    tabs,
-                    activeTabIndex,
-                    notification
-                );
-                openFileMode = applied.openFileMode();
-                if (applied.activeTabIndex() != activeTabIndex) {
-                    sessionContext.activate(applied.activeTabIndex());
-                }
+                applyOpenFileResult(FilePickerOpenWorkflow.apply(openInput.intent(), openFileTree,
+                    () -> TuiDocumentSession.create(host.clipboard)));
                 return;
             }
             if (openInput.consumed()) {
@@ -1633,7 +1622,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                     if (restoredCount > 0) {
                         activeTabIndex = sessionContext.activeTabIndex();
                         state = sessionContext.state();
-                        openFileTree.setRoot(host.initialOpenRoot(state));
+                        openFileTree.setRoot(FilePickerOpenWorkflow.initialRoot(state.getCurrentFile()));
                         notification.info("Recovered " + restoredCount + " tab(s)");
                     } else {
                         notification.info("No recovery snapshots restored");
@@ -1655,155 +1644,20 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         }
 
         if (modalState.isSaveAs()) {
-            UiModalState saveAsState = modalState;
-            String saveAsDraftBefore = saveAsInput.text();
-            SaveFlowController.SaveAsResult saveAsResult = SaveFlowController.handleSaveAsInput(
-                key.command(),
-                modalState,
-                saveAsInput.text(),
-                state.getCurrentFile(),
-                state.getSaveDisposition(),
-                host::validateSaveTarget,
-                path -> Files.exists(path),
-                host::isReadOnlyFile,
-                host::isSameFilePath,
-                host::suggestWritableName
-            );
-            if (saveAsResult.consumed()) {
-                modalState = saveAsResult.modalState();
-                if (saveAsResult.clearNotification()) {
-                    notification.clear();
-                }
-                if (saveAsResult.errorMessage() != null) {
-                    notification.error(saveAsResult.errorMessage());
-                    focusFirstBlockingControl();
-                }
-                host.applySaveAsTextInputEffect(saveAsInput, saveAsResult.textInputEffect());
-                if (saveAsResult.modalState().isSaveAs()) {
-                    saveAsSuggestions.rememberDraft(tabs.get(activeTabIndex).tabSession(), saveAsInput.text());
-                } else {
-                    saveAsSuggestions.rememberDraft(tabs.get(activeTabIndex).tabSession(), saveAsDraftBefore);
-                }
-                if (saveAsResult.saveNowPath() != null) {
-                    try {
-                        engine.saveAs(
-                            saveAsResult.saveNowPath(),
-                            saveAsResult.saveDisposition()
-                        );
-                        renderPlanBuilder = new RenderPlanBuilder(
-                            host.resolveHighlighter(state.getCurrentFile()),
-                            engine.textLayout()
-                        );
-                        sessionContext.replaceActiveRenderPlanBuilder(renderPlanBuilder);
-                        saveAsSuggestions.rememberSavedPath(tabs.get(activeTabIndex).tabSession(), state.getCurrentFile());
-                        notification.success(host.savedMessage(state));
-                        saveAsInput.clear();
-                        TerminalEditorApp.SaveFlowProgress progress = host.continueAfterSuccessfulSave(
-                            saveAsState,
-                            sessionContext,
-                            tabs,
-                            saveAsInput,
-                            saveAsSuggestions,
-                            notification
-                        );
-                        running = progress.running();
-                        modalState = progress.modalState();
-                    } catch (IOException e) {
-                        modalState = saveAsState;
-                        notification.error(host.saveErrorMessage(e));
-                        focusFirstBlockingControl();
-                    }
-                }
+            applySaveResult(SaveWorkflow.saveAsInput(saveContext(), key.command(), modalState, saveAsInput.text()));
+            return;
+        }
+        if (routedConfirmDecision != null) {
+            if (modalState.isSaveOverwriteConfirm()) {
+                applySaveResult(SaveWorkflow.overwrite(saveContext(), modalState, routedConfirmDecision));
                 return;
             }
-        }
-
-        if (modalState.isSaveOverwriteConfirm()) {
-            UiModalState overwriteState = modalState;
-            if (routedConfirmDecision != null) {
-                if (routedConfirmDecision == ConfirmChoice.SAVE) {
-                    try {
-                        engine.saveAs(
-                            modalState.pendingOverwritePath(),
-                            SaveDisposition.REPLACE_EXISTING
-                        );
-                        renderPlanBuilder = new RenderPlanBuilder(
-                            host.resolveHighlighter(state.getCurrentFile()),
-                            engine.textLayout()
-                        );
-                        sessionContext.replaceActiveRenderPlanBuilder(renderPlanBuilder);
-                        saveAsSuggestions.rememberSavedPath(tabs.get(activeTabIndex).tabSession(), state.getCurrentFile());
-                        notification.success(host.savedMessage(state));
-                        saveAsInput.clear();
-                        TerminalEditorApp.SaveFlowProgress progress = host.continueAfterSuccessfulSave(
-                            overwriteState,
-                            sessionContext,
-                            tabs,
-                            saveAsInput,
-                            saveAsSuggestions,
-                            notification
-                        );
-                        running = progress.running();
-                        modalState = progress.modalState();
-                    } catch (IOException e) {
-                        notification.error(host.saveErrorMessage(e));
-                    }
-                } else if (routedConfirmDecision == ConfirmChoice.DISCARD) {
-                    modalState = modalState.backToSaveAs();
-                    notification.clear();
-                } else {
-                    modalState = UiModalState.none();
-                    notification.clear();
-                }
+            if (modalState.isQuitConfirm()) {
+                applySaveResult(SaveWorkflow.quit(saveContext(), routedConfirmDecision));
                 return;
             }
-        }
-
-        if (modalState.isQuitConfirm()) {
-            if (routedConfirmDecision != null) {
-                if (routedConfirmDecision == ConfirmChoice.SAVE) {
-                    TerminalEditorApp.SaveFlowProgress progress = host.continueQuitSaveFlow(
-                        sessionContext,
-                        tabs,
-                        saveAsInput,
-                        saveAsSuggestions,
-                        notification
-                    );
-                    running = progress.running();
-                    modalState = progress.modalState();
-                } else if (routedConfirmDecision == ConfirmChoice.DISCARD) {
-                    running = false;
-                    modalState = UiModalState.none();
-                } else {
-                    modalState = UiModalState.none();
-                }
-                return;
-            }
-        }
-
-        if (modalState.isCloseTabConfirm()) {
-            if (routedConfirmDecision != null) {
-                int closeIndex = modalState.pendingCloseTabIndex();
-                if (closeIndex < 0 || closeIndex >= tabs.size()) {
-                    modalState = UiModalState.none();
-                    return;
-                }
-                if (routedConfirmDecision == ConfirmChoice.SAVE) {
-                    TerminalEditorApp.EditorTab pendingTab = tabs.get(closeIndex);
-                    if (host.requiresSaveAs(pendingTab)) {
-                        sessionContext.activate(closeIndex);
-                        host.prepareSaveAs(pendingTab, saveAsInput, saveAsSuggestions, notification);
-                        modalState = UiModalState.saveAsForCloseTab(closeIndex);
-                    } else if (host.saveDirtyTab(pendingTab, notification, saveAsSuggestions)) {
-                        sessionContext.activate(host.closeTab(tabs, activeTabIndex, closeIndex, saveAsSuggestions));
-                        modalState = UiModalState.none();
-                    }
-                } else if (routedConfirmDecision == ConfirmChoice.DISCARD) {
-                    sessionContext.activate(host.closeTab(tabs, activeTabIndex, closeIndex, saveAsSuggestions));
-                    modalState = UiModalState.none();
-                } else {
-                    modalState = UiModalState.none();
-                }
+            if (modalState.isCloseTabConfirm()) {
+                applySaveResult(SaveWorkflow.closeTab(saveContext(), modalState, routedConfirmDecision));
                 return;
             }
         }
@@ -1876,36 +1730,86 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             state.isDirty(),
             activeTabIndex,
             state.getCurrentFile(),
-            state.getCurrentFile() != null && host.isReadOnlyFile(state.getCurrentFile())
+            state.getCurrentFile() != null && SaveTargetPolicy.isReadOnlyFile(state.getCurrentFile())
         );
         var themeBefore = host.theme;
-        TerminalEditorApp.EditorActionApplyResult editorActionApplyResult = host.applyEditorActionResult(
-            editorAction,
-            sessionContext,
-            tabs,
-            activeTabIndex,
-            state,
-            engine,
-            notification,
-            topMenu,
-            openFileTree,
-            openFileMode,
-            openFileFocusState.focus(),
-            saveAsInput,
-            saveAsSuggestions,
-            renderer
-        );
+        host.applyEditorActionResult(editorAction, sessionContext, tabs, activeTabIndex,
+            notification, saveAsSuggestions, renderer);
         if (host.theme != themeBefore) {
             settingsSession.themeChanged();
         }
         if (editorAction.tabCommand() != EditorActionController.TabCommand.NONE
-            || editorAction.requestOpenFile() || !editorActionApplyResult.modalState().isNone()) {
+            || editorAction.requestOpenFile() || !editorAction.modalState().isNone()) {
             uiSessionState.searchMode = false;
         }
-        running = editorActionApplyResult.running();
-        modalState = editorActionApplyResult.modalState();
-        openFileMode = editorActionApplyResult.openFileMode();
-        openFileFocusState.focus(editorActionApplyResult.openFileFocus());
+        running = editorAction.running();
+        modalState = editorAction.modalState();
+        if (editorAction.requestOpenFile()) {
+            topMenu.close();
+            openFileMode = true;
+            openFileTree.setRoot(FilePickerOpenWorkflow.initialRoot(state.getCurrentFile()));
+            openFileFocusState.focus(OpenFileInputRouter.Focus.LIST);
+        }
+        applyFilenameEffect(SaveWorkflow.initialFilename(saveContext(), editorAction.saveAsPreset()));
+        if (editorAction.requestSaveCurrent()) {
+            applySaveResult(SaveWorkflow.saveCurrent(saveContext()));
+        }
+    }
+
+    private void applyOpenFileResult(FilePickerOpenWorkflow.Result result) {
+        if (result.openedDocument() != null) {
+            TuiDocumentSession document = result.openedDocument();
+            RenderPlanBuilder builder = new RenderPlanBuilder(
+                host.resolveHighlighter(document.view().state().getCurrentFile()), document.view().textLayout());
+            tabs.add(new TerminalEditorApp.EditorTab(document, builder));
+            sessionContext.activate(tabs.size() - 1);
+        }
+        openFileMode = result.openFileMode();
+        switch (result.noticeKind()) {
+            case UNCHANGED -> { }
+            case SUCCESS -> notification.success(result.message());
+            case WARNING -> notification.warning(result.message());
+            case ERROR -> notification.error(result.message());
+        }
+    }
+
+    private SaveWorkflow.Context saveContext() {
+        return new SaveWorkflow.Context(tabs.stream().map(TerminalEditorApp.EditorTab::tabSession).toList(),
+            sessionContext.activeTabIndex(), saveAsSuggestions);
+    }
+
+    private void applyFilenameEffect(SaveFlowController.TextInputEffect effect) {
+        switch (effect.kind()) {
+            case NONE -> { }
+            case SET_TEXT -> saveAsInput.set(effect.text());
+            case CLEAR -> saveAsInput.clear();
+        }
+    }
+
+    private void applySaveResult(SaveWorkflow.Result result) {
+        // Refresh the saved tab before a continuation activates or closes another tab.
+        if (result.refreshSavedHighlighter()) {
+            renderPlanBuilder = new RenderPlanBuilder(host.resolveHighlighter(state.getCurrentFile()), engine.textLayout());
+            sessionContext.replaceActiveRenderPlanBuilder(renderPlanBuilder);
+        }
+        if (result.activateTabIndex() >= 0) {
+            sessionContext.activate(result.activateTabIndex());
+        }
+        if (result.closeTabIndex() >= 0) {
+            sessionContext.activate(host.closeTab(tabs, sessionContext.activeTabIndex(), result.closeTabIndex(), saveAsSuggestions));
+        }
+        applyFilenameEffect(result.filename());
+        switch (result.notice().kind()) {
+            case UNCHANGED -> { }
+            case CLEAR -> notification.clear();
+            case SUCCESS -> notification.success(result.notice().message());
+            case ERROR -> notification.error(result.notice().message());
+        }
+        running = result.running();
+        modalState = result.modalState();
+        if (result.focusFilename()) {
+            focusFirstBlockingControl();
+        }
     }
 
     private InputActionDispatcher.DispatchResult dispatchInputAction(TuinkCommand command) {

@@ -1,6 +1,5 @@
 package dev.tuink.tui;
 
-import dev.tuink.core.DocumentEncodingException;
 import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
@@ -18,8 +17,6 @@ import dev.tuink.tui.flow.AppSettingsStore;
 import dev.tuink.tui.flow.ConfirmChoice;
 import dev.tuink.tui.flow.RecoveryStore;
 import dev.tuink.tui.flow.SaveAsSuggestionStore;
-import dev.tuink.tui.flow.SaveContinuation;
-import dev.tuink.tui.flow.SaveTargetSuggester;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.flow.UiModalState;
 import dev.tuink.editor.command.CommandInvocation;
@@ -88,7 +85,6 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.nio.file.Files;
-import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
@@ -106,7 +102,6 @@ import java.util.function.Supplier;
  * JLine terminal application wiring core + render + highlighter.
  */
 public class TerminalEditorApp {
-    private static final String DEFAULT_FILE_NAME = "untitled.txt";
     static final Object SAVE_AS_SCOPE_ID = new Object();
     static final Object SEARCH_SCOPE_ID = new Object();
     static final Object OPEN_FILE_SCOPE_ID = new Object();
@@ -239,7 +234,7 @@ public class TerminalEditorApp {
         TextField searchReplaceInput = new TextField(TextField.PastePolicy.PRESERVE_TABS);
         SearchController.SearchUiOptions searchUi = SearchController.SearchUiOptions.DEFAULT;
         TopMenuController topMenu = new TopMenuController();
-        Path initialOpenFileRoot = initialOpenRoot(state);
+        Path initialOpenFileRoot = FilePickerOpenWorkflow.initialRoot(state.getCurrentFile());
         try {
             RecoveryStore.LoadResult recoveryLoad = recoveryStore.loadAll();
             startupRecoveryEntries.addAll(recoveryLoad.entries());
@@ -355,83 +350,25 @@ public class TerminalEditorApp {
         }
     }
 
-    EditorActionApplyResult applyEditorActionResult(
+    void applyEditorActionResult(
         EditorActionController.Result editorAction,
         SessionContext sessionContext,
         List<EditorTab> tabs,
         int activeTabIndex,
-        EditorState state,
-        EditorEngine engine,
         NotificationState notification,
-        TopMenuController topMenu,
-        OpenFileTreeController openFileTree,
-        boolean openFileMode,
-        OpenFileInputRouter.Focus openFileFocus,
-        TextField saveAsInput,
         SaveAsSuggestionStore saveAsSuggestions,
         RenderRasterizer renderer
     ) {
-        boolean running = editorAction.running();
-        UiModalState modalState = editorAction.modalState();
-        boolean nextOpenFileMode = openFileMode;
-        OpenFileInputRouter.Focus nextOpenFileFocus = openFileFocus;
-
         if (editorAction.clearNotification()) {
             notification.clear();
         }
         if (editorAction.notificationError() != null) {
             notification.error(editorAction.notificationError());
         }
-        if (editorAction.requestSaveCurrent()) {
-            try {
-                engine.save();
-                saveAsSuggestions.rememberSavedPath(tabs.get(activeTabIndex).tabSession(), state.getCurrentFile());
-                notification.success(savedMessage(state));
-            } catch (IOException e) {
-                notification.error(saveErrorMessage(e));
-            }
-        }
-        if (editorAction.requestOpenFile()) {
-            topMenu.close();
-            nextOpenFileMode = true;
-            openFileTree.setRoot(initialOpenRoot(state));
-            nextOpenFileFocus = OpenFileInputRouter.Focus.LIST;
-        }
         if (editorAction.requestToggleTheme()) {
             applyTheme(theme.next());
             renderer.setTheme(theme);
             notification.info("Theme: " + theme.label());
-        }
-
-        switch (editorAction.saveAsPreset()) {
-            case NONE -> {
-            }
-            case DEFAULT_FILE_NAME -> saveAsInput.set(
-                saveAsSuggestions.suggestionFor(
-                    tabs.get(activeTabIndex).tabSession(),
-                    state.getCurrentFile(),
-                    DEFAULT_FILE_NAME
-                )
-            );
-            case FROM_CURRENT_OR_DEFAULT -> {
-                saveAsInput.set(
-                    saveAsSuggestions.suggestionFor(
-                        tabs.get(activeTabIndex).tabSession(),
-                        state.getCurrentFile(),
-                        DEFAULT_FILE_NAME
-                    )
-                );
-            }
-            case SUGGESTED_FROM_CURRENT -> {
-                String suggestion = saveAsSuggestions.suggestionFor(
-                    tabs.get(activeTabIndex).tabSession(),
-                    null,
-                    suggestWritableName(state.getCurrentFile()),
-                    this::isSuitableSaveAsDraft
-                );
-                saveAsInput.set(suggestion);
-                saveAsSuggestions.rememberDraft(tabs.get(activeTabIndex).tabSession(), suggestion);
-            }
         }
 
         switch (editorAction.tabCommand()) {
@@ -449,24 +386,6 @@ public class TerminalEditorApp {
             case CLOSE_TAB -> sessionContext.activate(closeCurrentTab(tabs, activeTabIndex, saveAsSuggestions));
         }
 
-        return new EditorActionApplyResult(
-            running,
-            modalState,
-            nextOpenFileMode,
-            nextOpenFileFocus
-        );
-    }
-
-    void applySaveAsTextInputEffect(TextField saveAsInput, SaveFlowController.TextInputEffect effect) {
-        if (effect == null) {
-            return;
-        }
-        switch (effect.kind()) {
-            case NONE -> {
-            }
-            case SET_TEXT -> saveAsInput.set(effect.text());
-            case CLEAR -> saveAsInput.clear();
-        }
     }
 
     static void applyWheelVerticalScroll(
@@ -503,20 +422,6 @@ public class TerminalEditorApp {
             Math.max(1, contentRows), coordinates.totalRows()
         );
         coordinates.applyTop(state, coordinates.topAtRow(target));
-    }
-
-    record EditorActionApplyResult(
-        boolean running,
-        UiModalState modalState,
-        boolean openFileMode,
-        OpenFileInputRouter.Focus openFileFocus
-    ) {
-    }
-
-    record OpenFileApplyResult(boolean openFileMode, int activeTabIndex) {
-    }
-
-    record SaveFlowProgress(boolean running, UiModalState modalState) {
     }
 
     private void drawTopFileNameBold(
@@ -803,16 +708,6 @@ public class TerminalEditorApp {
 
     private String padRight(String text, int width) {
         return CellText.fit(text, width);
-    }
-
-    Path initialOpenRoot(EditorState state) {
-        if (state.getCurrentFile() != null) {
-            Path parent = state.getCurrentFile().toAbsolutePath().normalize().getParent();
-            if (parent != null) {
-                return parent;
-            }
-        }
-        return Path.of(".").toAbsolutePath().normalize();
     }
 
     private void drawOpenFileOverlay(
@@ -1223,66 +1118,6 @@ public class TerminalEditorApp {
         return CellText.clip(text, 0, width);
     }
 
-    OpenFileApplyResult applyOpenFileIntent(
-        OpenFileInputRouter.Intent intent,
-        OpenFileTreeController tree,
-        List<EditorTab> tabs,
-        int activeTabIndex,
-        NotificationState notification
-    ) {
-        if (intent == null) {
-            return new OpenFileApplyResult(true, activeTabIndex);
-        }
-        if (intent instanceof OpenFileInputRouter.ToggleDirectory toggle) {
-            tree.requestExpansion(toggle.id(), toggle.expand());
-            return new OpenFileApplyResult(true, activeTabIndex);
-        }
-        if (intent instanceof OpenFileInputRouter.ChangeRoot root) {
-            tree.setRoot(root.root());
-            return new OpenFileApplyResult(true, activeTabIndex);
-        }
-        if (intent instanceof OpenFileInputRouter.MoveToParentRoot) {
-            tree.moveToParentRoot();
-            return new OpenFileApplyResult(true, activeTabIndex);
-        }
-        if (intent instanceof OpenFileInputRouter.ToggleHidden) {
-            tree.toggleHiddenFiles();
-            return new OpenFileApplyResult(true, activeTabIndex);
-        }
-        if (intent instanceof OpenFileInputRouter.CloseDialog) {
-            return new OpenFileApplyResult(false, activeTabIndex);
-        }
-        if (intent instanceof OpenFileInputRouter.SelectionRejected rejected) {
-            notification.warning(
-                rejected.reason() == OpenFileInputRouter.Rejection.ERROR
-                    ? "The selected tree entry cannot be opened"
-                    : "Select a file"
-            );
-            return new OpenFileApplyResult(true, activeTabIndex);
-        }
-        if (intent instanceof OpenFileInputRouter.OpenFile open) {
-            Path target = open.file();
-            try {
-                EditorTab tab = newEditorTab();
-                tab.engine().openExisting(target);
-                tab = tab.withRenderPlanBuilder(
-                    new RenderPlanBuilder(resolveHighlighter(target), tab.textLayout())
-                );
-                tabs.add(tab);
-                int newIndex = tabs.size() - 1;
-                notification.success("Opened " + target);
-                return new OpenFileApplyResult(false, newIndex);
-            } catch (NoSuchFileException e) {
-                notification.error("Open failed: file no longer exists: " + target);
-                return new OpenFileApplyResult(true, activeTabIndex);
-            } catch (IOException e) {
-                notification.error("Open failed: " + e.getMessage());
-                return new OpenFileApplyResult(true, activeTabIndex);
-            }
-        }
-        throw new IllegalStateException("Unsupported open-file intent: " + intent);
-    }
-
     String buildBottomBar(
         EditorState state,
         TextModel model,
@@ -1327,7 +1162,7 @@ public class TerminalEditorApp {
     }
 
     private String buildStateIndicators(EditorState state, boolean readingMode) {
-        String ro = isReadOnlyFile(state.getCurrentFile()) ? "RO" : "RW";
+        String ro = SaveTargetPolicy.isReadOnlyFile(state.getCurrentFile()) ? "RO" : "RW";
         String enc = state.getFileEncoding() == null ? "UTF-8" : state.getFileEncoding().name();
         String eol = switch (state.getLineSeparator()) {
             case EditorState.LINE_SEPARATOR_CRLF -> "CRLF";
@@ -1645,7 +1480,7 @@ public class TerminalEditorApp {
         String primaryLabel;
         if (multiple) {
             primaryLabel = "Save All";
-        } else if (dirtyTabs.size() == 1 && requiresSaveAs(dirtyTabs.get(0))) {
+        } else if (dirtyTabs.size() == 1 && SaveTargetPolicy.requiresSaveAs(dirtyTabs.get(0).state().getCurrentFile())) {
             primaryLabel = "Save As";
         } else {
             primaryLabel = "Save";
@@ -1676,7 +1511,7 @@ public class TerminalEditorApp {
         EditorTab pendingTab = closeTabIndex >= 0 && closeTabIndex < tabs.size()
             ? tabs.get(closeTabIndex)
             : null;
-        String primaryLabel = pendingTab != null && requiresSaveAs(pendingTab) ? "Save As" : "Save";
+        String primaryLabel = pendingTab != null && SaveTargetPolicy.requiresSaveAs(pendingTab.state().getCurrentFile()) ? "Save As" : "Save";
         return ConfirmBarView.build(
             buildCloseTabPrompt(tabs, closeTabIndex),
             cols,
@@ -1698,131 +1533,6 @@ public class TerminalEditorApp {
         Path path = tabs.get(closeTabIndex).state().getCurrentFile();
         String name = path == null ? "--no name--" : dev.tuink.tui.ui.PathPresentation.name(path);
         return "Close modified tab: " + name + " ? (y/N)";
-    }
-
-    boolean requiresSaveAs(EditorTab tab) {
-        if (tab == null) {
-            return false;
-        }
-        Path file = tab.state().getCurrentFile();
-        return file == null || isReadOnlyFile(file);
-    }
-
-    void prepareSaveAs(
-        EditorTab tab,
-        TextField saveAsInput,
-        SaveAsSuggestionStore saveAsSuggestions,
-        NotificationState notification
-    ) {
-        Path file = tab.state().getCurrentFile();
-        String suggestion = file == null
-            ? saveAsSuggestions.suggestionFor(tab.tabSession(), null, DEFAULT_FILE_NAME)
-            : saveAsSuggestions.suggestionFor(
-                tab.tabSession(),
-                null,
-                suggestWritableName(file),
-                this::isSuitableSaveAsDraft
-            );
-        saveAsInput.set(suggestion);
-        saveAsSuggestions.rememberDraft(tab.tabSession(), suggestion);
-        notification.clear();
-    }
-
-    private boolean isSuitableSaveAsDraft(String draft) {
-        try {
-            Path path = Path.of(draft);
-            return validateSaveTarget(path) == null && !isReadOnlyFile(path);
-        } catch (java.nio.file.InvalidPathException invalid) {
-            return false;
-        }
-    }
-
-    SaveFlowProgress continueQuitSaveFlow(
-        SessionContext sessionContext,
-        List<EditorTab> tabs,
-        TextField saveAsInput,
-        SaveAsSuggestionStore saveAsSuggestions,
-        NotificationState notification
-    ) {
-        for (int i = 0; i < tabs.size(); i++) {
-            EditorTab tab = tabs.get(i);
-            if (tab.state().isDirty() && requiresSaveAs(tab)) {
-                sessionContext.activate(i);
-                prepareSaveAs(tab, saveAsInput, saveAsSuggestions, notification);
-                return new SaveFlowProgress(true, UiModalState.saveAsForQuit());
-            }
-        }
-        for (int i = 0; i < tabs.size(); i++) {
-            EditorTab tab = tabs.get(i);
-            if (!tab.state().isDirty()) {
-                continue;
-            }
-            if (!saveDirtyTab(tab, notification, saveAsSuggestions)) {
-                sessionContext.activate(i);
-                return new SaveFlowProgress(true, UiModalState.quitConfirm());
-            }
-        }
-        return new SaveFlowProgress(false, UiModalState.none());
-    }
-
-    SaveFlowProgress continueAfterSuccessfulSave(
-        UiModalState completedSaveState,
-        SessionContext sessionContext,
-        List<EditorTab> tabs,
-        TextField saveAsInput,
-        SaveAsSuggestionStore saveAsSuggestions,
-        NotificationState notification
-    ) {
-        if (completedSaveState.saveContinuation() == SaveContinuation.QUIT) {
-            return continueQuitSaveFlow(
-                sessionContext,
-                tabs,
-                saveAsInput,
-                saveAsSuggestions,
-                notification
-            );
-        }
-        if (completedSaveState.saveContinuation() == SaveContinuation.CLOSE_TAB) {
-            int closeIndex = completedSaveState.pendingCloseTabIndex();
-            if (closeIndex >= 0 && closeIndex < tabs.size()) {
-                sessionContext.activate(
-                    closeTab(
-                        tabs,
-                        sessionContext.activeTabIndex(),
-                        closeIndex,
-                        saveAsSuggestions
-                    )
-                );
-            }
-        }
-        return new SaveFlowProgress(true, UiModalState.none());
-    }
-
-    boolean saveDirtyTab(
-        EditorTab tab,
-        NotificationState notification,
-        SaveAsSuggestionStore saveAsSuggestions
-    ) {
-        if (tab == null || !tab.state().isDirty()) {
-            return true;
-        }
-        Path file = tab.state().getCurrentFile();
-        if (file == null) {
-            notification.error("Save failed: tab has no file path. Use Save As.");
-            return false;
-        }
-        if (isReadOnlyFile(file)) {
-            notification.error(readOnlySaveAsMessage(file));
-            return false;
-        }
-        try {
-            tab.engine().save();
-            saveAsSuggestions.rememberSavedPath(tab.tabSession(), file);
-            return true;
-        } catch (IOException e) {
-            notification.error(saveErrorMessage(e));
-            return false;
-        }
     }
 
     int restoreRecoveredTabs(
@@ -1864,89 +1574,8 @@ public class TerminalEditorApp {
         return restored.size();
     }
 
-    String savedMessage(EditorState state) {
-        return "Saved " + state.getCurrentFile() + " [" + state.getFileEncoding().displayName() + "]";
-    }
-
-    String saveErrorMessage(IOException e) {
-        if (e instanceof DocumentEncodingException encoding) {
-            return "Save failed: " + encoding.charsetName() + " cannot encode U+"
-                + String.format(Locale.ROOT, "%04X", encoding.codePoint())
-                + ". Copy to a new UTF-8 tab.";
-        }
-        String msg = e.getMessage() == null ? "Unknown I/O error" : e.getMessage();
-        String lower = msg.toLowerCase();
-        if (lower.contains("permission denied") || lower.contains("access denied")) {
-            return "Save failed: permission denied";
-        }
-        if (lower.contains("no space") || lower.contains("not enough space")) {
-            return "Save failed: no space left on device";
-        }
-        if (lower.contains("is a directory")) {
-            return "Save failed: target is a directory";
-        }
-        return "Save failed: " + msg;
-    }
-
-    private String readOnlySaveAsMessage(Path path) {
-        return "File is read-only. Use Save As. " + path;
-    }
-
-    String validateSaveTarget(Path path) {
-        Path normalized = path.toAbsolutePath().normalize();
-        Path parent = normalized.getParent();
-        if (parent != null) {
-            if (!Files.exists(parent)) {
-                return "Save failed: directory does not exist: " + parent;
-            }
-            if (!Files.isDirectory(parent)) {
-                return "Save failed: parent path is not a directory: " + parent;
-            }
-            if (!Files.isWritable(parent)) {
-                return "Save failed: no write access to directory: " + parent;
-            }
-        }
-        if (Files.isDirectory(normalized)) {
-            return "Save failed: target is a directory: " + normalized;
-        }
-        return null;
-    }
-
-    boolean isReadOnlyFile(Path path) {
-        if (path == null) {
-            return false;
-        }
-        try {
-            return Files.exists(path) && !Files.isWritable(path);
-        } catch (SecurityException e) {
-            return true;
-        }
-    }
-
     boolean hasDirtyTabs(List<EditorTab> tabs) {
         return TabSessions.hasDirtyTabs(toTabSessions(tabs));
-    }
-
-    String suggestWritableName(Path path) {
-        String fileName = path.getFileName() == null ? DEFAULT_FILE_NAME : path.getFileName().toString();
-        int dot = fileName.lastIndexOf('.');
-        String base = dot > 0 ? fileName.substring(0, dot) : fileName;
-        String ext = dot > 0 ? fileName.substring(dot) : "";
-        String candidate = base + "-copy" + ext;
-        Path parent = path.getParent();
-        Path preferred = parent == null ? Path.of(candidate) : parent.resolve(candidate);
-        return SaveTargetSuggester.firstAvailable(preferred, Files::exists).toString();
-    }
-
-    boolean isSameFilePath(Path a, Path b) {
-        if (a == null || b == null) {
-            return false;
-        }
-        try {
-            return a.toAbsolutePath().normalize().equals(b.toAbsolutePath().normalize());
-        } catch (Exception e) {
-            return a.equals(b);
-        }
     }
 
     private record HelpDialogLayout(int top, int left, int width, int height) {

@@ -197,6 +197,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     private FileTreeView.Placement openFileTreePlacement;
     private OpenFileDialogView.Placement openFileDialogPlacement;
     private final SearchPresentation searchPresentation = new SearchPresentation();
+    private TerminalEditorApp.HelpOverlayPlacement helpOverlayPlacement;
 
     private int rows;
     private int cols;
@@ -601,9 +602,11 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             tabs.size(),
             searchSummary
         );
-        modalInputBounds = host.blockingSurface(rows, cols, contentTopRow, inlinePromptBar.height(),
-            saveAsMode || confirmMode, host.activeHelpPage(helpHintsMode, helpLicensesMode, helpAuthorMode),
-            openFileMode ? openFileLayout : null);
+        HelpPage helpPage = host.activeHelpPage(helpHintsMode, helpLicensesMode, helpAuthorMode);
+        helpOverlayPlacement = helpPage == null ? null : host.helpOverlayPlacement(rows, cols, helpPage);
+        modalInputBounds = helpOverlayPlacement != null ? helpOverlayPlacement.frame().bounds()
+            : openFileDialogPlacement != null ? openFileDialogPlacement.frame().bounds()
+            : host.blockingSurface(rows, cols, contentTopRow, inlinePromptBar.height(), saveAsMode || confirmMode);
         if (blockingContentFocused) {
             if (blockingContentAvailable()) {
                 clearBlockingControlFocus();
@@ -641,15 +644,12 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 confirmBarPlacement,
                 openFileMode
                     ? new FrameComposition.OpenFile(
-                        true,
-                        openFileLayout,
                         openFileTree.root().toString(),
-                        openFileTree.showHiddenFiles(),
-                        openFileTreePlacement,
+                        openFileDialogPlacement,
                         openFileFocusState.focus()
                     )
                     : FrameComposition.OpenFile.hidden(),
-                host.activeHelpPage(helpHintsMode, helpLicensesMode, helpAuthorMode),
+                helpOverlayPlacement,
                 host.modalAttention.highlighted(),
                 blockingContentFocused
             ),
@@ -678,8 +678,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     }
 
     private TerminalEditorApp.HelpOverlayPlacement currentHelpOverlay() {
-        HelpPage page = host.activeHelpPage(helpHintsMode, helpLicensesMode, helpAuthorMode);
-        return page == null ? null : host.helpOverlayPlacement(rows, cols, page);
+        return helpHintsMode || helpLicensesMode || helpAuthorMode ? helpOverlayPlacement : null;
     }
 
     private void cancelDocumentPointerInteraction() {
@@ -1228,13 +1227,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             boolean pointerAllowed = !(inputEvent instanceof PointerEvent)
                 || uiSessionState.mouseModeSetting && uiSessionState.mouseModeAvailable;
             if (pointerAllowed) {
-                HelpPage helpPage = host.activeHelpPage(
-                    modalState.isHelpHints(),
-                    modalState.isHelpLicenses(),
-                    modalState.isHelpAuthor()
-                );
                 HelpOverlayInputRouter.Result helpInput = host.routeHelpOverlayInput(
-                    rows, cols, helpPage, inputEvent, pointerCapture, this
+                    currentHelpOverlay(), inputEvent, pointerCapture, this
                 );
                 if (helpInput.closeRequested()) {
                     host.helpFocusManager.deactivate(HelpOverlayInputRouter.Scope.HELP);

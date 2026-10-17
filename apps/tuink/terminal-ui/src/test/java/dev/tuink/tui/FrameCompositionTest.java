@@ -118,17 +118,6 @@ class FrameCompositionTest {
         FrameComposition base = composition(InlinePromptBar.hidden(), 0);
         FrameComposition.OpenFile hidden = base.layers().openFile();
 
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> new FrameComposition.OpenFile(
-                true,
-                null,
-                ".",
-                false,
-                null,
-                OpenFileInputRouter.Focus.LIST
-            )
-        );
         FrameComposition.Layers conflicting = new FrameComposition.Layers(
             null,
             null,
@@ -136,7 +125,7 @@ class FrameCompositionTest {
             null,
             null,
             hidden,
-            HelpPages.KEYMAP,
+            new TerminalEditorApp().helpOverlayPlacement(8, 40, HelpPages.KEYMAP),
             false,
             false
         );
@@ -317,11 +306,9 @@ class FrameCompositionTest {
         FileTreeView.Placement placement
     ) {
         return new FrameComposition.OpenFile(
-            true,
-            layout,
             root.toString(),
-            false,
-            placement,
+            OpenFileDialogView.place(TerminalEditorApp.OPEN_FILE_SCOPE_ID, layout, placement, false,
+                new Rect(0, 0, 40, 12)),
             OpenFileInputRouter.Focus.LIST
         );
     }

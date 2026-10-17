@@ -11,6 +11,8 @@ import dev.tuiframe.widget.FocusResetPolicy;
 import dev.tuiframe.widget.FocusScope;
 import dev.tuiframe.widget.FocusSpace;
 import dev.tuiframe.widget.InteractionResult;
+import dev.tuiframe.widget.Modal;
+import dev.tuiframe.widget.PlacedModal;
 import dev.tuiframe.widget.PlacedInteractiveWidget;
 import dev.tuiframe.widget.RoutedTarget;
 import dev.tuiframe.widget.Theme;
@@ -53,7 +55,10 @@ final class OpenFileDialogView {
             buttonTarget(Control.HIDDEN, hidden, space, tree.enabled(), false),
             buttonTarget(Control.CLOSE, close, space, tree.enabled(), false)
         );
-        return new Placement(tree, new FocusScope<>(
+        PlacedModal frame = new Modal(layout.width(), layout.height(),
+            tree.loading() ? " Open File (Loading...) " : " Open File ")
+            .layout(new Rect(layout.left(), layout.top(), layout.width(), layout.height()));
+        return new Placement(layout, frame, tree, new FocusScope<>(
             scopeId, FocusResetPolicy.FIRST_FOCUSABLE, targets,
             List.of(Control.LIST, Control.OK, Control.CANCEL),
             List.of(Control.CLOSE, Control.HIDDEN, Control.CANCEL, Control.OK, Control.LIST)
@@ -102,11 +107,15 @@ final class OpenFileDialogView {
     }
 
     record Placement(
+        OpenDialogLayout layout,
+        PlacedModal frame,
         FileTreeView.Placement tree,
         FocusScope<Control, Button.Action> focusScope,
         boolean showHiddenFiles
     ) {
         Placement {
+            Objects.requireNonNull(layout, "layout");
+            Objects.requireNonNull(frame, "frame");
             Objects.requireNonNull(tree, "tree");
             Objects.requireNonNull(focusScope, "focusScope");
         }

@@ -201,10 +201,12 @@ class ModalAttentionIntegrationTest {
             FileTreeView.Placement placement = FileTreeView.fromSnapshot(
                 new FileTreeModel.Snapshot(Path.of("/test/中🦀"), 1, List.of()), false, false
             ).place(tree, FileTreeView.State.initial(), new Rect(0, 0, cols, rows), true);
-            open = new FrameComposition.OpenFile(true, layout, "/test/中🦀", false, placement, OpenFileInputRouter.Focus.LIST);
+            open = new FrameComposition.OpenFile("/test/中🦀",
+                OpenFileDialogView.place(TerminalEditorApp.OPEN_FILE_SCOPE_ID, layout, placement, false,
+                    new Rect(0, 0, cols, rows)), OpenFileInputRouter.Focus.LIST);
         }
         return composition(rows, cols, InlinePromptBar.hidden(),
-            new FrameComposition.Layers(null, null, false, null, null, open, help ? HELP : null, attention, false));
+            new FrameComposition.Layers(null, null, false, null, null, open, help ? new TerminalEditorApp().helpOverlayPlacement(rows, cols, HELP) : null, attention, false));
     }
 
     private static FrameComposition composition(int rows, int cols, InlinePromptBar prompt, FrameComposition.Layers layers) {
@@ -239,7 +241,7 @@ class ModalAttentionIntegrationTest {
 
     private static void paintDialog(TerminalEditorApp app, CellBuffer buffer, FrameComposition frame, boolean color) throws Exception {
         if (frame.layers().helpPage() != null) {
-            app.paintHelpOverlay(new Canvas(buffer), buffer.rows(), buffer.cols(), frame.layers().helpPage(), color);
+            app.paintHelpOverlay(new Canvas(buffer), frame.layers().help(), color);
         } else {
             Method painter = TerminalEditorApp.class.getDeclaredMethod("drawOpenFileOverlay", Canvas.class,
                 int.class, int.class, FrameComposition.OpenFile.class, boolean.class);

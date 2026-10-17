@@ -108,10 +108,12 @@ record FrameComposition(
         SaveAsBarView.Placement saveAs,
         ConfirmBarView.Placement confirm,
         OpenFile openFile,
-        HelpPage helpPage,
+        TerminalEditorApp.HelpOverlayPlacement help,
         boolean blockedInputHighlight,
         boolean contentFocused
     ) {
+        HelpPage helpPage() { return help == null ? null : help.page(); }
+
         Layers {
             Objects.requireNonNull(openFile, "openFile");
             if (!saveAsMode && saveAs != null) {
@@ -121,47 +123,40 @@ record FrameComposition(
     }
 
     record OpenFile(
-        boolean visible,
-        OpenDialogLayout layout,
         String rootLabel,
-        boolean showHiddenFiles,
-        FileTreeView.Placement placement,
+        OpenFileDialogView.Placement dialog,
         OpenFileInputRouter.Focus focus
     ) {
-        private static final OpenFile HIDDEN = new OpenFile(
-            false,
-            null,
-            "",
-            false,
-            null,
-            OpenFileInputRouter.Focus.LIST
-        );
+        private static final OpenFile HIDDEN = new OpenFile("", null, OpenFileInputRouter.Focus.LIST);
 
         OpenFile {
             Objects.requireNonNull(rootLabel, "rootLabel");
             Objects.requireNonNull(focus, "focus");
-            if (visible != (layout != null) || visible != (placement != null)) {
-                throw new IllegalArgumentException("Open-file visibility, layout, and placement must agree");
-            }
         }
 
         static OpenFile hidden() {
             return HIDDEN;
         }
 
+        boolean visible() { return dialog != null; }
+        OpenDialogLayout layout() { return dialog == null ? null : dialog.layout(); }
+        FileTreeView.Placement placement() { return dialog == null ? null : dialog.tree(); }
+        boolean showHiddenFiles() { return dialog != null && dialog.showHiddenFiles(); }
+
         int firstVisibleIndex() {
-            return placement == null ? 0 : placement.state().widgetState().firstVisibleIndex();
+            return dialog == null ? 0 : dialog.tree().state().widgetState().firstVisibleIndex();
         }
 
         OpenTreeDiffKey diffKey() {
+            FileTreeView.Placement placement = placement();
             if (placement == null) {
                 return null;
             }
             OpenTreeSurfaceKey surface = new OpenTreeSurfaceKey(
                 rootLabel,
-                showHiddenFiles,
+                showHiddenFiles(),
                 placement.state().snapshotRevision(),
-                layout,
+                layout(),
                 placement.bounds(),
                 placement.contentBounds(),
                 placement.leadingBounds(),

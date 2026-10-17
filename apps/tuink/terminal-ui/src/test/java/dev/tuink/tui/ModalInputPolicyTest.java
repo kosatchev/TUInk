@@ -187,7 +187,7 @@ class ModalInputPolicyTest {
             KeyStroke.Key.END, KeyStroke.Key.ARROW_DOWN, KeyStroke.Key.PAGE_DOWN
         )) {
             KeyStroke event = KeyStroke.of(key);
-            assertTrue(app.routeHelpOverlayInput(8, 24, page, event).consumed());
+            assertTrue(app.routeHelpOverlayInput(app.helpOverlayPlacement(8, 24, page), event, null, null).consumed());
             assertFalse(blocked(Kind.HELP, event));
         }
         Rect clip = new Rect(0, 0, 30, 12);

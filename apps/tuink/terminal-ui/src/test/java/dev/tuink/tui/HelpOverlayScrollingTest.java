@@ -31,7 +31,7 @@ class HelpOverlayScrollingTest {
         assertTrue(first.contains("1-17/80"));
         assertTrue(first.contains("PgUp/PgDn Home/End"));
 
-        HelpOverlayInputRouter.Result end = app.routeHelpOverlayInput(
+        HelpOverlayInputRouter.Result end = routeHelp(app,
             24, 80, LONG_PAGE, KeyStroke.of(KeyStroke.Key.END)
         );
         assertTrue(end.consumed());
@@ -41,26 +41,40 @@ class HelpOverlayScrollingTest {
         assertFalse(last.contains("Help row 1 "));
         assertTrue(last.contains("64-80/80"));
 
-        app.routeHelpOverlayInput(24, 80, LONG_PAGE, KeyStroke.of(KeyStroke.Key.HOME));
+        routeHelp(app, 24, 80, LONG_PAGE, KeyStroke.of(KeyStroke.Key.HOME));
         assertTrue(paint(app, 24, 80, LONG_PAGE).contains("Help row 1 "));
+    }
+
+    @Test
+    void paintingACompletedProjectionDoesNotPrepareOrAdoptNewScrollState() {
+        TerminalEditorApp app = new TerminalEditorApp();
+        var prepared = app.helpOverlayPlacement(24, 80, LONG_PAGE);
+        routeHelp(app, 24, 80, LONG_PAGE, KeyStroke.of(KeyStroke.Key.END));
+        CellBuffer cells = new CellBuffer(24, 80);
+
+        app.paintHelpOverlay(new Canvas(cells), prepared, true);
+
+        assertTrue(read(cells).contains("1-17/80"));
+        assertFalse(read(cells).contains("Help row 80"));
+        assertTrue(paint(app, 24, 80, LONG_PAGE).contains("64-80/80"));
     }
 
     @Test
     void growingTheTerminalClampsThePageAndClosingOrChangingHelpResetsScrolling() {
         TerminalEditorApp app = new TerminalEditorApp();
-        app.routeHelpOverlayInput(24, 80, LONG_PAGE, KeyStroke.of(KeyStroke.Key.END));
+        routeHelp(app, 24, 80, LONG_PAGE, KeyStroke.of(KeyStroke.Key.END));
         String enlarged = paint(app, 100, 80, LONG_PAGE);
         assertTrue(enlarged.contains("Help row 1 "));
         assertTrue(enlarged.contains("Help row 80"));
 
-        app.routeHelpOverlayInput(24, 80, LONG_PAGE, KeyStroke.of(KeyStroke.Key.END));
-        assertTrue(app.routeHelpOverlayInput(24, 80, LONG_PAGE, KeyStroke.of(KeyStroke.Key.ENTER)).closeRequested());
+        routeHelp(app, 24, 80, LONG_PAGE, KeyStroke.of(KeyStroke.Key.END));
+        assertTrue(routeHelp(app, 24, 80, LONG_PAGE, KeyStroke.of(KeyStroke.Key.ENTER)).closeRequested());
         assertTrue(paint(app, 24, 80, LONG_PAGE).contains("Help row 1 "));
 
-        app.routeHelpOverlayInput(24, 80, LONG_PAGE, KeyStroke.of(KeyStroke.Key.END));
+        routeHelp(app, 24, 80, LONG_PAGE, KeyStroke.of(KeyStroke.Key.END));
         paint(app, 24, 80, new HelpPage("About", List.of("A short page")));
         assertTrue(paint(app, 24, 80, LONG_PAGE).contains("Help row 1 "));
-        app.routeHelpOverlayInput(24, 80, LONG_PAGE, KeyStroke.of(KeyStroke.Key.END));
+        routeHelp(app, 24, 80, LONG_PAGE, KeyStroke.of(KeyStroke.Key.END));
         paint(app, 24, 80, null);
         assertTrue(paint(app, 24, 80, LONG_PAGE).contains("Help row 1 "));
     }
@@ -68,9 +82,9 @@ class HelpOverlayScrollingTest {
     @Test
     void mouseWheelScrollsOnlyInsideHelpAndSmallTerminalsStayClipped() {
         TerminalEditorApp app = new TerminalEditorApp();
-        app.routeHelpOverlayInput(24, 80, LONG_PAGE, wheel(10, 10));
+        routeHelp(app, 24, 80, LONG_PAGE, wheel(10, 10));
         assertTrue(paint(app, 24, 80, LONG_PAGE).contains("4-20/80"));
-        app.routeHelpOverlayInput(24, 80, LONG_PAGE, wheel(0, 0));
+        routeHelp(app, 24, 80, LONG_PAGE, wheel(0, 0));
         assertTrue(paint(app, 24, 80, LONG_PAGE).contains("4-20/80"));
         assertTrue(paint(app, 8, 24, LONG_PAGE).contains("PgUp/PgDn"));
         assertFalse(paint(app, 7, 23, LONG_PAGE).contains("Help row"));
@@ -79,16 +93,16 @@ class HelpOverlayScrollingTest {
     @Test
     void sharedScrollbarKeepsItsGrabPointAndCapturesUntilReleaseOutsideTheDialog() {
         TerminalEditorApp app = new TerminalEditorApp();
-        assertTrue(app.routeHelpOverlayInput(24, 80, LONG_PAGE, pointer(5, 71, PointerEvent.Kind.PRESS)).consumed());
+        assertTrue(routeHelp(app, 24, 80, LONG_PAGE, pointer(5, 71, PointerEvent.Kind.PRESS)).consumed());
         assertTrue(paint(app, 24, 80, LONG_PAGE).contains("1-17/80"));
-        app.routeHelpOverlayInput(24, 80, LONG_PAGE, pointer(5, 71, PointerEvent.Kind.DRAG));
+        routeHelp(app, 24, 80, LONG_PAGE, pointer(5, 71, PointerEvent.Kind.DRAG));
         assertTrue(paint(app, 24, 80, LONG_PAGE).contains("1-17/80"));
-        app.routeHelpOverlayInput(24, 80, LONG_PAGE, pointer(23, 0, PointerEvent.Kind.DRAG));
+        routeHelp(app, 24, 80, LONG_PAGE, pointer(23, 0, PointerEvent.Kind.DRAG));
         assertTrue(paint(app, 24, 80, LONG_PAGE).contains("64-80/80"));
-        app.routeHelpOverlayInput(24, 80, LONG_PAGE, pointer(23, 0, PointerEvent.Kind.RELEASE));
-        app.routeHelpOverlayInput(24, 80, LONG_PAGE, pointer(0, 0, PointerEvent.Kind.DRAG));
+        routeHelp(app, 24, 80, LONG_PAGE, pointer(23, 0, PointerEvent.Kind.RELEASE));
+        routeHelp(app, 24, 80, LONG_PAGE, pointer(0, 0, PointerEvent.Kind.DRAG));
         assertTrue(paint(app, 24, 80, LONG_PAGE).contains("64-80/80"));
-        assertTrue(app.routeHelpOverlayInput(24, 80, LONG_PAGE, KeyStroke.of(KeyStroke.Key.ENTER)).closeRequested());
+        assertTrue(routeHelp(app, 24, 80, LONG_PAGE, KeyStroke.of(KeyStroke.Key.ENTER)).closeRequested());
     }
 
     @Test
@@ -100,7 +114,7 @@ class HelpOverlayScrollingTest {
                 TerminalEditorApp app = new TerminalEditorApp();
                 applyTheme.invoke(app, theme);
                 CellBuffer cells = new CellBuffer(24, 80);
-                app.paintHelpOverlay(new Canvas(cells), 24, 80, LONG_PAGE, colorEnabled);
+                paintHelp(app, new Canvas(cells), 24, 80, LONG_PAGE, colorEnabled);
                 var body = cells.get(20, 7).style();
                 var border = cells.get(2, 6).style();
                 for (int row : List.of(3, 10)) {
@@ -109,9 +123,9 @@ class HelpOverlayScrollingTest {
                     assertEquals(border.fg(), scrollbar.fg());
                     assertEquals(border.bold(), scrollbar.bold());
                 }
-                app.routeHelpOverlayInput(24, 80, LONG_PAGE, pointer(5, 71, PointerEvent.Kind.PRESS));
+                routeHelp(app, 24, 80, LONG_PAGE, pointer(5, 71, PointerEvent.Kind.PRESS));
                 paint(app, 30, 100, LONG_PAGE);
-                app.routeHelpOverlayInput(30, 100, LONG_PAGE, pointer(29, 0, PointerEvent.Kind.DRAG));
+                routeHelp(app, 30, 100, LONG_PAGE, pointer(29, 0, PointerEvent.Kind.DRAG));
                 assertTrue(paint(app, 30, 100, LONG_PAGE).contains("1-23/80"));
             }
         }
@@ -122,7 +136,7 @@ class HelpOverlayScrollingTest {
         for (boolean colorEnabled : List.of(true, false)) {
             TerminalEditorApp app = new TerminalEditorApp();
             CellBuffer cells = new CellBuffer(24, 80);
-            app.paintHelpOverlay(new Canvas(cells), 24, 80, LONG_PAGE, colorEnabled, true);
+            paintHelp(app, new Canvas(cells), 24, 80, LONG_PAGE, colorEnabled, true);
             assertEquals(cells.get(2, 6).style().fg(), cells.get(10, 71).style().fg());
             assertEquals(cells.get(2, 6).style().bold(), cells.get(10, 71).style().bold());
             assertEquals(cells.get(20, 7).style().bg(), cells.get(10, 71).style().bg());
@@ -140,7 +154,7 @@ class HelpOverlayScrollingTest {
             StringBuilder read = new StringBuilder();
             for (int step = 0; step < 60; step++) {
                 read.append(paint(app, size[0], size[1], page)).append('\n');
-                app.routeHelpOverlayInput(size[0], size[1], page, KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
+                routeHelp(app, size[0], size[1], page, KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
             }
             for (int word = 0; word < 60; word++) {
                 String expected = "word" + String.format(java.util.Locale.ROOT, "%03d", word);
@@ -161,13 +175,37 @@ class HelpOverlayScrollingTest {
 
     private static String paint(TerminalEditorApp app, int rows, int cols, HelpPage page) {
         CellBuffer cells = new CellBuffer(rows, cols);
-        app.paintHelpOverlay(new Canvas(cells), rows, cols, page, true);
-        return IntStream.range(0, rows).mapToObj(row -> {
+        paintHelp(app, new Canvas(cells), rows, cols, page, true);
+        return read(cells);
+    }
+
+    private static String read(CellBuffer cells) {
+        return IntStream.range(0, cells.rows()).mapToObj(row -> {
             StringBuilder text = new StringBuilder();
-            for (int col = 0; col < cols; col++) {
+            for (int col = 0; col < cells.cols(); col++) {
                 text.append(cells.get(row, col).grapheme());
             }
             return text.toString();
         }).collect(Collectors.joining("\n"));
+    }
+    private static HelpOverlayInputRouter.Result routeHelp(
+        TerminalEditorApp app, int rows, int cols, HelpPage page,
+        dev.tuiframe.input.TuiInputEvent event
+    ) {
+        return app.routeHelpOverlayInput(app.helpOverlayPlacement(rows, cols, page), event, null, null);
+    }
+
+    private static void paintHelp(
+        TerminalEditorApp app, Canvas canvas, int rows, int cols,
+        HelpPage page, boolean color
+    ) {
+        paintHelp(app, canvas, rows, cols, page, color, false);
+    }
+
+    private static void paintHelp(
+        TerminalEditorApp app, Canvas canvas, int rows, int cols,
+        HelpPage page, boolean color, boolean attention
+    ) {
+        app.paintHelpOverlay(canvas, app.helpOverlayPlacement(rows, cols, page), color, attention);
     }
 }

@@ -641,23 +641,20 @@ public class TerminalEditorApp {
         FrameComposition.Layers layers = composition.layers();
         int rows = composition.document().layout().rows();
         int cols = composition.document().layout().cols();
+        if (layers.openFile().visible()) {
+            return rows < 8 || cols < 24
+                ? new Rect(0, 0, 0, 0) : layers.openFile().dialog().frame().bounds();
+        }
+        if (layers.help() != null) {
+            HelpOverlayPlacement overlay = layers.help();
+            return overlay.viewport().height() < 8 || overlay.viewport().width() < 24
+                ? new Rect(0, 0, 0, 0) : overlay.frame().bounds();
+        }
         return blockingSurface(rows, cols, composition.document().layout().contentTopRow(),
-            composition.surface().inlinePrompt().height(), layers.saveAsMode() || layers.confirm() != null,
-            layers.helpPage(), layers.openFile().visible() ? layers.openFile().layout() : null);
+            composition.surface().inlinePrompt().height(), layers.saveAsMode() || layers.confirm() != null);
     }
 
-    Rect blockingSurface(int rows, int cols, int contentTop, int promptHeight,
-                                boolean inline, HelpPage help, OpenDialogLayout open) {
-        if (help != null || open != null) {
-            if (rows < 8 || cols < 24) {
-                return new Rect(0, 0, 0, 0);
-            }
-            if (help != null) {
-                HelpDialogLayout layout = helpDialogLayout(rows, cols, help.rows().size());
-                return new Rect(layout.left(), layout.top(), layout.width(), layout.height());
-            }
-            return new Rect(open.left(), open.top(), open.width(), open.height());
-        }
+    Rect blockingSurface(int rows, int cols, int contentTop, int promptHeight, boolean inline) {
         if (inline) {
             Rect prompt = new Rect(0, rows - 1 - promptHeight, cols, promptHeight);
             return prompt.intersection(new Rect(0, contentTop, cols, Math.max(0, rows - 1 - contentTop)));
@@ -739,12 +736,10 @@ public class TerminalEditorApp {
             return;
         }
         OpenDialogLayout layout = openFile.layout();
-        Modal frame = openFileFrame(
-            layout, openFile.placement() != null && openFile.placement().loading(),
-            highlighted ? blockingAccent(colorEnabled) : styles.dialogBorder()
-        );
-        Theme childTheme = frame.childTheme(colorEnabled ? colorFileTreeWidgetTheme : monoFileTreeWidgetTheme);
-        frame.layout(new Rect(layout.left(), layout.top(), layout.width(), layout.height())).paint(canvas, childTheme);
+        OpenFileDialogView.Placement dialog = openFile.dialog();
+        Theme childTheme = (colorEnabled ? colorFileTreeWidgetTheme : monoFileTreeWidgetTheme)
+            .withSurface(styles.dialog(), highlighted ? blockingAccent(colorEnabled) : styles.dialogBorder());
+        dialog.frame().paint(canvas, childTheme);
         String pathLine = " " + openFile.rootLabel();
         drawMenuLine(
             canvas,
@@ -759,31 +754,8 @@ public class TerminalEditorApp {
                 canvas,
                 childTheme
             );
-            OpenFileDialogView.place(
-                OPEN_FILE_SCOPE_ID, layout, treePlacement, openFile.showHiddenFiles(), new Rect(0, 0, cols, rows)
-            ).paintControls(canvas, childTheme, openFile.focus(), contentFocused);
+            dialog.paintControls(canvas, childTheme, openFile.focus(), contentFocused);
         }
-    }
-
-    private Modal openFileFrame(OpenFileDialogController.OpenDialogLayout layout) {
-        return openFileFrame(layout, false);
-    }
-
-    private Modal openFileFrame(OpenFileDialogController.OpenDialogLayout layout, boolean loading) {
-        return openFileFrame(layout, loading, styles.dialogBorder());
-    }
-
-    private Modal openFileFrame(OpenFileDialogController.OpenDialogLayout layout, boolean loading, CellStyle border) {
-        return new Modal(
-            layout.top(),
-            layout.left(),
-            layout.width(),
-            layout.height(),
-            loading ? " Open File (Loading...) " : " Open File ",
-            styles.dialog(),
-            border,
-            styles.dialogTitle()
-        );
     }
 
     private HelpDialogLayout helpDialogLayout(int rows, int cols, int contentRows) {
@@ -809,6 +781,10 @@ public class TerminalEditorApp {
     }
 
     HelpOverlayPlacement helpOverlayPlacement(int rows, int cols, HelpPage page) {
+        if (page == null) {
+            resetHelpScroll();
+            return null;
+        }
         HelpDialogLayout layout = helpDialogLayout(rows, cols, page.rows().size());
         int visibleRows = rows < 8 || cols < 24 ? 0 : Math.max(0, layout.height() - 3);
         if (helpScrollPage != page) {
@@ -882,16 +858,11 @@ public class TerminalEditorApp {
     }
 
     HelpOverlayInputRouter.Result routeHelpOverlayInput(
-        int rows, int cols, HelpPage page, TuiInputEvent event
+        HelpOverlayPlacement overlay, TuiInputEvent event, WindowPointerCapture capture, Object surfaceId
     ) {
-        return routeHelpOverlayInput(rows, cols, page, event, null, null);
-    }
-
-    HelpOverlayInputRouter.Result routeHelpOverlayInput(
-        int rows, int cols, HelpPage page, TuiInputEvent event,
-        WindowPointerCapture capture, Object surfaceId
-    ) {
-        HelpOverlayPlacement overlay = helpOverlayPlacement(rows, cols, page);
+        if (overlay == null) {
+            return new HelpOverlayInputRouter.Result(true, false);
+        }
         boolean visible = overlay.content().bounds().height() > 0;
         var scrolled = overlay.content().handle(
             event, new FocusContext(visible, visible, FocusSpace.root(overlay.viewport()))
@@ -914,18 +885,14 @@ public class TerminalEditorApp {
         return result;
     }
 
-    void paintHelpOverlay(Canvas canvas, int rows, int cols, HelpPage page, boolean colorEnabled) {
-        paintHelpOverlay(canvas, rows, cols, page, colorEnabled, false);
+    void paintHelpOverlay(Canvas canvas, HelpOverlayPlacement overlay, boolean colorEnabled) {
+        paintHelpOverlay(canvas, overlay, colorEnabled, false);
     }
 
     void paintHelpOverlay(
-        Canvas canvas, int rows, int cols, HelpPage page, boolean colorEnabled, boolean highlighted
+        Canvas canvas, HelpOverlayPlacement overlay, boolean colorEnabled, boolean highlighted
     ) {
-        if (page == null) {
-            resetHelpScroll();
-            return;
-        }
-        drawInfoOverlay(canvas, helpOverlayPlacement(rows, cols, page), colorEnabled, highlighted);
+        drawInfoOverlay(canvas, overlay, colorEnabled, highlighted);
     }
 
     private void drawInfoOverlay(
@@ -1207,9 +1174,7 @@ public class TerminalEditorApp {
         FileTreeView.Placement openFileTreePlacement = openFile.placement();
         HelpPage helpPage = layers.helpPage();
         boolean helpMode = helpPage != null;
-        HelpOverlayPlacement helpOverlay = helpPage == null
-            ? null
-            : helpOverlayPlacement(rows, cols, helpPage);
+        HelpOverlayPlacement helpOverlay = layers.help();
         boolean colorEnabled = services.colorEnabled;
         ScreenPresenter screenPresenter = services.screenPresenter;
         RenderRasterizer renderer = services.renderer;
@@ -1299,7 +1264,7 @@ public class TerminalEditorApp {
             composition.layers().blockedInputHighlight(),
             composition.layers().contentFocused()
         );
-        paintHelpOverlay(canvas, rows, cols, helpPage, colorEnabled, composition.layers().blockedInputHighlight());
+        paintHelpOverlay(canvas, helpOverlay, colorEnabled, composition.layers().blockedInputHighlight());
         paintBlockingAttention(current, composition, colorEnabled);
 
         EditorView.CursorPosition editorCursor = editorView.cursorFromPlan(plan, contentTopRow);

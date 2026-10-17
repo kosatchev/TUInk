@@ -73,7 +73,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends --yes \
-            build-essential zlib1g-dev binutils gzip unzip curl python3 lintian acl
+            build-essential zlib1g-dev binutils gzip unzip curl python3 lintian
 
       - name: Set up the pinned Oracle GraalVM SDK
         uses: ./.github/actions/setup-graalvm
@@ -130,7 +130,7 @@ jobs:
           ./gradlew --no-daemon --no-parallel --max-workers=1 \
             --stacktrace --warning-mode=fail \
             '-Dorg.gradle.jvmargs=-Xmx768m -XX:MaxMetaspaceSize=384m' \
-            clean :app:release -Ptarget=all
+            clean :app:release :app:nativeAclCheck -Ptarget=all
 
       - name: Verify the complete asset set and checksums
         id: assets

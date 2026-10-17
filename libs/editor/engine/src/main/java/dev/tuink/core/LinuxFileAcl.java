@@ -3,107 +3,129 @@ package dev.tuink.core;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystems;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
 import java.util.Arrays;
-import java.util.List;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.FutureTask;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+import java.util.Set;
 
-/** Linux POSIX ACLs are not exposed by the JDK's ACL or user-attribute views. */
+/** Copies Linux POSIX access ACLs without invoking external programs. */
 final class LinuxFileAcl {
-    private static final int MAX_OUTPUT_BYTES = 131_072;
-    private static final long TIMEOUT_SECONDS = 5;
-    private final byte[] accessAcl;
+    private static final int MAX_ACL_BYTES = 65_536;
+    private static final int ENODATA = 61;
+    private static final int EOPNOTSUPP = 95;
+    private static final byte[] ATTRIBUTE = "system.posix_acl_access\0".getBytes(StandardCharsets.US_ASCII);
+    private static final Access SYSTEM = new Access() {
+        public int get(byte[] path, byte[] name, byte[] value) throws IOException {
+            return LinuxXattr.get(path, name, value);
+        }
 
-    private LinuxFileAcl(byte[] accessAcl) {
+        public int set(byte[] path, byte[] name, byte[] value) throws IOException {
+            return LinuxXattr.set(path, name, value);
+        }
+
+        public int remove(byte[] path, byte[] name) throws IOException {
+            return LinuxXattr.remove(path, name);
+        }
+    };
+
+    private final byte[] accessAcl;
+    private final Set<PosixFilePermission> permissions;
+    private final Access access;
+
+    private LinuxFileAcl(byte[] accessAcl, Set<PosixFilePermission> permissions, Access access) {
         this.accessAcl = accessAcl;
+        this.permissions = permissions;
+        this.access = access;
     }
 
     static LinuxFileAcl read(Path source) throws IOException {
+        return read(source, SYSTEM);
+    }
+
+    static LinuxFileAcl read(Path source, Access access) throws IOException {
         if (!"Linux".equals(System.getProperty("os.name"))
             || source.getFileSystem() != FileSystems.getDefault()) {
             return null;
         }
-        byte[] acl = run(
-            List.of("getfacl", "--absolute-names", "--omit-header", "--numeric",
-                "--no-effective", "--access", "--", source.toString()),
-            new byte[0]
-        );
-        if (acl.length == 0) {
-            throw new IOException("Cannot preserve Linux file ACL: getfacl returned an empty ACL");
+        byte[] value = new byte[MAX_ACL_BYTES];
+        int count = access.get(nativePath(source), ATTRIBUTE, value);
+        byte[] acl;
+        if (absent(count)) {
+            acl = null;
+        } else {
+            requireSuccess("read", count);
+            if (count == 0 || count > value.length) {
+                throw new IOException("Cannot preserve Linux file ACL: invalid access ACL size");
+            }
+            acl = Arrays.copyOf(value, count);
         }
-        return new LinuxFileAcl(acl);
+        return new LinuxFileAcl(acl, Set.copyOf(Files.getPosixFilePermissions(source)), access);
     }
 
     void apply(Path staged) throws IOException {
-        // Replace the complete ACL, including a source with only the three base
-        // entries. A temporary inode can inherit a different default ACL from
-        // its directory. The complete ACL also supplies the base permissions;
-        // chmod before it could expose inherited entries. A later restoration
-        // of special mode bits must keep the same rwx bits and verify the ACL.
-        run(List.of("setfacl", "--no-mask", "--set-file=-", "--", staged.toString()), accessAcl);
+        byte[] path = nativePath(staged);
+        if (accessAcl != null) {
+            // Set the entire ACL, including its exact mask, in one operation.
+            requireSuccess("write", access.set(path, ATTRIBUTE, accessAcl));
+        } else {
+            // A temp inode can inherit named entries even when the original had
+            // none. Remove them before chmod could activate their permissions.
+            int result = access.remove(path, ATTRIBUTE);
+            if (!absent(result)) requireSuccess("remove", result);
+            LinuxFileAcl cleared = read(staged, access);
+            if (cleared == null || cleared.accessAcl != null) {
+                throw new IOException("Cannot preserve Linux file ACL: inherited ACL was not removed");
+            }
+            Files.setPosixFilePermissions(staged, permissions);
+        }
         verify(staged);
     }
 
     void verify(Path staged) throws IOException {
-        LinuxFileAcl copied = read(staged);
-        if (copied == null || !Arrays.equals(accessAcl, copied.accessAcl)) {
-            throw new IOException("Cannot preserve Linux file ACL: staged ACL differs from the original");
+        LinuxFileAcl copied = read(staged, access);
+        if (copied == null || !Arrays.equals(accessAcl, copied.accessAcl)
+            || !permissions.equals(copied.permissions)) {
+            throw new IOException("Cannot preserve Linux file ACL: staged ACL or permissions differ from the original");
         }
     }
 
-    private static byte[] run(List<String> command, byte[] input) throws IOException {
-        Process process;
-        try {
-            ProcessBuilder builder = new ProcessBuilder(command).redirectErrorStream(true);
-            builder.environment().put("LC_ALL", "C");
-            process = builder.start();
-        } catch (IOException failure) {
-            throw new IOException(
-                "Cannot preserve Linux file ACL: install the 'acl' package (getfacl and setfacl). "
-                    + "The original file was left unchanged.", failure
-            );
+    /** Path.toUri percent-encodes the original Unix bytes, including invalid UTF-8. */
+    static byte[] nativePath(Path path) throws IOException {
+        String encoded = path.toAbsolutePath().toUri().getRawPath();
+        byte[] bytes = new byte[encoded.length() + 1];
+        int count = 0;
+        for (int i = 0; i < encoded.length(); i++) {
+            char current = encoded.charAt(i);
+            int value = current;
+            if (current == '%') {
+                if (i + 2 >= encoded.length()) throw new IOException("Invalid native file URI");
+                int high = Character.digit(encoded.charAt(++i), 16);
+                int low = Character.digit(encoded.charAt(++i), 16);
+                if (high < 0 || low < 0) throw new IOException("Invalid native file URI");
+                value = (high << 4) | low;
+            }
+            if (value == 0 || value > 127 && current != '%') {
+                throw new IOException("Invalid native file URI");
+            }
+            bytes[count++] = (byte) value;
         }
-        FutureTask<byte[]> output = new FutureTask<>(() -> {
-            try (var stream = process.getInputStream()) {
-                return stream.readNBytes(MAX_OUTPUT_BYTES + 1);
-            }
-        });
-        FutureTask<Void> writer = new FutureTask<>(() -> {
-            try (var stream = process.getOutputStream()) {
-                stream.write(input);
-            }
-            return null;
-        });
-        Thread.startVirtualThread(output);
-        Thread.startVirtualThread(writer);
-        try {
-            if (!process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-                throw new IOException("Cannot preserve Linux file ACL: " + command.getFirst() + " timed out");
-            }
-            byte[] result = output.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            if (result.length > MAX_OUTPUT_BYTES) {
-                throw new IOException("Cannot preserve Linux file ACL: excessive tool output");
-            }
-            if (process.exitValue() != 0) {
-                String diagnostic = new String(result, StandardCharsets.UTF_8).strip();
-                throw new IOException("Cannot preserve Linux file ACL: " + diagnostic);
-            }
-            writer.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            return result;
-        } catch (InterruptedException failure) {
-            Thread.currentThread().interrupt();
-            throw new IOException("Interrupted while preserving Linux file ACL", failure);
-        } catch (ExecutionException | TimeoutException failure) {
-            throw new IOException("Cannot preserve Linux file ACL", failure);
-        } finally {
-            if (process.isAlive()) {
-                process.destroyForcibly();
-            }
-            writer.cancel(true);
-            output.cancel(true);
+        return Arrays.copyOf(bytes, count + 1);
+    }
+
+    private static boolean absent(int result) {
+        return result == -ENODATA || result == -EOPNOTSUPP;
+    }
+
+    private static void requireSuccess(String operation, int result) throws IOException {
+        if (result < 0) {
+            throw new IOException("Cannot preserve Linux file ACL: " + operation + " failed (errno " + -result + ")");
         }
+    }
+
+    interface Access {
+        int get(byte[] path, byte[] name, byte[] value) throws IOException;
+        int set(byte[] path, byte[] name, byte[] value) throws IOException;
+        int remove(byte[] path, byte[] name) throws IOException;
     }
 }

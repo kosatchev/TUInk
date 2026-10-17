@@ -50,20 +50,20 @@ Only static musl archives include the musl and zlib notice directories. The
 glibc archive and Debian package use host libraries for libc and zlib and omit
 those two bundles. PGO does not change the notice selection.
 
-All Linux distributions, including the static musl executable and JVM ZIP,
-require `getfacl` and `setfacl` from the `acl` package to preserve access ACLs
-when saving existing files. If these tools are missing or fail, the save is
-rejected before the original file is replaced. The Debian package installs
-the `acl` dependency automatically.
+All Linux distributions preserve access ACLs through libc calls without
+requiring the `acl` package or a separate `libacl` library. JVM runs use Java
+25's Foreign Function and Memory API; native binaries link the calls at build
+time, including in the fully static musl executable. An ACL read, write, or
+verification failure rejects the save before the original file is replaced.
 
 The static musl executable uses JLine's `exec` terminal provider. Interactive
 startup also requires the external `tty` and `stty` commands in `PATH` (provided
 by `coreutils` on Debian/Ubuntu). Static linking removes the shared-library
-requirement, while these terminal commands and the ACL tools remain runtime
+requirement, while these terminal commands remain runtime
 dependencies. Check them on minimal systems or when using a restricted `PATH`:
 
 ```bash
-command -v tty stty getfacl setfacl
+command -v tty stty
 ```
 
 If the terminal commands are missing, startup can report
@@ -204,7 +204,7 @@ Do not use `-Ptarget=musl` for this task. The package installs:
 It does not execute the archive `install.sh`, use `/opt`, or invoke `sudo`
 during package assembly. The current native binary requires glibc 2.34 or
 newer and zlib 1.2.2 or newer; those minimums are declared in the package
-metadata, together with the `acl` utilities. Before assembly, `nativeDeb` uses Python 3.10+, `readelf` and `dpkg` to
+metadata. Before assembly, `nativeDeb` uses Python 3.10+, `readelf` and `dpkg` to
 check the staged binary's required library versions against `Depends`. A build
 that needs newer versions or additional shared libraries fails instead of
 producing a package with incomplete dependencies. The fully static musl archive

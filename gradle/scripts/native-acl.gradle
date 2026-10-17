@@ -1,0 +1,126 @@
+// Native Image substitutions and their tiny libc adapter never enter the JVM distribution.
+sourceSets {
+    nativeSupport {
+        java.srcDir('src/native/java')
+    }
+    nativeAclTest {
+        java.srcDir('src/nativeTest/java')
+        compileClasspath += sourceSets.main.runtimeClasspath
+        runtimeClasspath += sourceSets.main.runtimeClasspath
+    }
+}
+
+tasks.named('compileNativeSupportJava', JavaCompile) {
+    dependsOn(tasks.named('verifyNativeToolchain'))
+    options.compilerArgs.addAll(['--add-modules', 'org.graalvm.nativeimage,org.graalvm.word'])
+}
+
+def nativeSupportJar = tasks.register('nativeSupportJar', Jar) {
+    archiveClassifier = 'native-support'
+    from(sourceSets.nativeSupport.output)
+}
+ext.tuinkNativeSupportJar = nativeSupportJar
+
+def adapterSource = file('src/native/c/tuink_xattr.c')
+def adapterHeader = file('src/native/c/tuink_xattr.h')
+def adapterIncludes = file('src/native/c')
+def nativeAclLibraries = [:]
+['glibc': 'gcc', 'musl': 'musl-gcc'].each { target, defaultCompiler ->
+    def compiler = providers.gradleProperty("native${target.capitalize()}Compiler")
+        .orElse(defaultCompiler)
+    def directory = layout.buildDirectory.dir("native-support/${target}")
+    def objectFile = directory.map { it.file('tuink_xattr.o') }
+    def libraryFile = directory.map { it.file('libtuink_xattr.a') }
+    def compile = tasks.register("compileNativeAcl${target.capitalize()}", Exec) {
+        group = 'build'
+        description = "Compile the ${target} libc adapter for Linux file ACLs."
+        dependsOn(tasks.named('verifyNativeToolchain'))
+        inputs.files(adapterSource, adapterHeader)
+        inputs.property('compiler', compiler)
+        inputs.property('compilerSearchPath', providers.environmentVariable('PATH').orElse(''))
+        outputs.file(objectFile)
+        doFirst {
+            directory.get().asFile.mkdirs()
+            commandLine(compiler.get(), '-std=c11', '-O2', '-fPIC', '-Wall', '-Wextra', '-Werror',
+                '-c', adapterSource.absolutePath, '-o', objectFile.get().asFile.absolutePath)
+        }
+    }
+    def library = tasks.register("nativeAcl${target.capitalize()}Library", Exec) {
+        group = 'build'
+        description = "Archive the ${target} libc adapter for Linux file ACLs."
+        dependsOn(compile)
+        inputs.file(objectFile)
+        outputs.file(libraryFile)
+        commandLine('ar', 'rcsD', libraryFile.get().asFile.absolutePath, objectFile.get().asFile.absolutePath)
+    }
+    nativeAclLibraries[target] = [directory: directory, file: libraryFile, task: library]
+}
+
+ext.tuinkNativeAclBuildArgs = { String target ->
+    ['-H:+UnlockExperimentalVMOptions',
+     "-H:CCompilerOption=-I${adapterIncludes.absolutePath}",
+     "-H:CLibraryPath=${nativeAclLibraries[target].directory.get().asFile.absolutePath}",
+     '-H:-UnlockExperimentalVMOptions']
+}
+ext.tuinkNativeAclInputs = { String target ->
+    files(adapterSource, adapterHeader, nativeAclLibraries[target].task)
+}
+
+// configureEach also covers Native Image test and optional PGO binaries created later.
+graalvmNative.binaries.configureEach { binary ->
+    String target = binary.name.toLowerCase().startsWith('musl') ? 'musl' : 'glibc'
+    binary.classpath(nativeSupportJar)
+    binary.buildArgs.addAll(tuinkNativeAclBuildArgs(target))
+}
+tasks.configureEach { task ->
+    if (task.class.name.contains('BuildNativeImageTask')) {
+        String target = task.name.toLowerCase().startsWith('nativemusl') ? 'musl' : 'glibc'
+        dependsOn(nativeAclLibraries[target].task)
+        inputs.files(tuinkNativeAclInputs(target)).withPropertyName('tuinkNativeAclAdapter')
+    }
+}
+
+def nativeAclTestJar = tasks.register('nativeAclTestJar', Jar) {
+    archiveClassifier = 'native-acl-test'
+    from(sourceSets.nativeAclTest.output)
+}
+def smokeTasks = [:]
+['glibc', 'musl'].each { target ->
+    String binaryName = target == 'musl' ? 'muslAclSmoke' : 'aclSmoke'
+    String compileTaskName = "native${binaryName.capitalize()}Compile"
+    String smokeImageName = target == 'musl' ? 'tuink-acl-smoke-musl' : 'tuink-acl-smoke'
+    graalvmNative.binaries.create(binaryName) {
+        imageName = smokeImageName
+        mainClass = 'dev.tuink.core.NativeAclSmoke'
+        classpath(sourceSets.nativeAclTest.runtimeClasspath, nativeAclTestJar)
+        buildArgs.addAll(tuinkBaseNativeBuildArgs())
+        buildArgs.add("-march=${tuinkNativeMarch}")
+        if (target == 'musl') {
+            buildArgs.addAll(['--static', '--libc=musl', '-Ddev.tuiframe.provider=exec'])
+        }
+    }
+    def binaryFile = layout.buildDirectory.file("native/${compileTaskName}/${smokeImageName}")
+    def smokeDirectory = layout.buildDirectory.dir("native-acl-smoke/${target}")
+    smokeTasks[target] = tasks.register("nativeAcl${target.capitalize()}Smoke", Exec) {
+        group = 'verification'
+        description = "Verify ACL preservation and errno in the ${target} native adapter."
+        dependsOn(tasks.named(compileTaskName))
+        inputs.file(binaryFile)
+        doFirst {
+            File directory = smokeDirectory.get().asFile
+            File emptyPath = new File(directory, 'empty-path')
+            emptyPath.mkdirs()
+            environment('PATH', emptyPath.absolutePath)
+            commandLine(binaryFile.get().asFile.absolutePath, directory.absolutePath)
+        }
+    }
+}
+def smokeTarget = (project.findProperty('target') ?: 'glibc').toString().toLowerCase()
+if (!(smokeTarget in ['glibc', 'musl', 'all'])) {
+    throw new GradleException("Unsupported -Ptarget=${smokeTarget}. Use glibc, musl, or all.")
+}
+tasks.register('nativeAclCheck') {
+    group = 'verification'
+    description = 'Verify native ACL support without building the editor. Use -Ptarget=glibc|musl|all.'
+    dependsOn(smokeTarget == 'all' ? smokeTasks.values() : smokeTasks[smokeTarget])
+}

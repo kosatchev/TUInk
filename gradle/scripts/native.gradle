@@ -1,3 +1,6 @@
+// JVM builds use a Java 25 toolchain from any vendor and do not run this preflight.
+// Native Image, native releases and PGO require Oracle GraalVM 25.0.4+7.1.
+// The exact Java runtime values below identify that SDK, not the JVM build baseline.
 def jlineNativeExcludes = [
     '--exclude-config', '.*jline-.*\\.jar', 'META-INF/native-image/org\\.jline/.*'
 ]
@@ -183,6 +186,9 @@ tasks.configureEach { task ->
             .optional()
     }
 }
+
+apply from: "${rootProject.projectDir}/gradle/scripts/native-acl.gradle"
+apply from: "${rootProject.projectDir}/gradle/scripts/native-receipts.gradle"
 
 tasks.register('nativeGlibc') {
     group = 'build'

@@ -9,7 +9,8 @@ if (!(nativeTarget in ['glibc', 'musl'])) {
 }
 def nativeMarch = project.ext.tuinkNativeMarch.toString()
 def baseNativeBuildArgs = project.ext.tuinkBaseNativeBuildArgs
-def runtimeInputs = files(sourceSets.main.runtimeClasspath, tasks.named('jar'))
+def runtimeInputs = files(sourceSets.main.runtimeClasspath, tasks.named('jar'), tuinkNativeSupportJar)
+def aclInputs = tuinkNativeAclInputs(nativeTarget)
 def profileFile = rootProject.file(
     project.findProperty('pgoProfile') ?: ".local/pgo/${nativeTarget}/profile.iprof"
 )
@@ -133,7 +134,7 @@ def compilerInputs = { task, String role ->
         classpath: hashInputs(options.classpath.files),
         configuration: normalizeConfigurationInputs(hashInputs(options.configurationFileDirectories.files),
             inputLabel(generatedResources)),
-        nativeInputs: hashInputs([]),
+        nativeInputs: hashInputs(aclInputs.files),
         sdkRelease: hashFile(new File(sdkHome.get(), 'release')),
         nativeImage: hashFile(new File(sdkHome.get(), 'bin/native-image'))]
 }
@@ -222,7 +223,7 @@ def train = tasks.register('nativeProfileTrain', Exec) {
     group = 'build'
     description = 'Train and merge a fresh PGO profile using verified editor sessions.'
     dependsOn(tasks.named('nativeProfileInstrument'), 'pgoHarnessTest', pgoCompilerFiles)
-    inputs.files(pgoCompilerFiles, trainingScript, renderScript, runtimeInputs, instrumentBinary)
+    inputs.files(pgoCompilerFiles, trainingScript, renderScript, runtimeInputs, aclInputs, instrumentBinary)
     outputs.files(profileFile, receiptFile)
     outputs.upToDateWhen { false }
     notCompatibleWithConfigurationCache('Records fingerprints of the selected native training inputs.')
@@ -264,7 +265,7 @@ def train = tasks.register('nativeProfileTrain', Exec) {
 def verifyProfile = tasks.register('verifyPgoProfile') {
     group = 'verification'
     description = 'Reject missing, modified, or stale PGO profiles before native compilation.'
-    dependsOn(tasks.named('verifyNativeToolchain'), runtimeInputs, pgoCompilerFiles)
+    dependsOn(tasks.named('verifyNativeToolchain'), runtimeInputs, aclInputs, pgoCompilerFiles)
     mustRunAfter(train)
     notCompatibleWithConfigurationCache('Compares the current native inputs with the training receipt.')
     doLast {

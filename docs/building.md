@@ -19,9 +19,8 @@ required only for native builds.
 The packaged JVM ZIP requires Java 25 or newer. A step-by-step guide for a new
 computer is available in Russian: [Перенос, сборка и запуск](setup-ru.md).
 
-On Linux, install the `acl` package (`getfacl` and `setfacl`) for the tests and
-for saving existing documents. This runtime requirement applies to both JVM
-and native distributions; the Debian package declares it as a dependency.
+Linux access ACL support calls libc directly. Neither the tests nor JVM and
+native distributions require the `acl` package or a separate `libacl` library.
 
 Check the active JVM and Gradle environment:
 
@@ -65,6 +64,7 @@ checks that the minimum versions in `Depends` cover its required glibc/zlib ABI.
 | JVM release ZIP | `./gradlew :app:distZip` | `build/releases/tuink-<version>.zip` |
 | Native glibc binary | `./gradlew :app:nativeGlibc` | `apps/tuink/launcher/build/native/nativeCompile/tuink` |
 | Native musl binary | `./gradlew :app:nativeMusl` | `apps/tuink/launcher/build/native/nativeMuslCompile/tuink-musl` |
+| Native ACL checks | `./gradlew :app:nativeAclCheck -Ptarget=all` | ACL, permissions, raw filename, and errno checks for glibc and static musl |
 | Native archive | `./gradlew :app:nativeDistTarGz` | `build/releases/*.tar.gz` |
 | Debian package | `./gradlew :app:nativeDeb` | `build/releases/tuink_<version>_<arch>.deb` |
 | Benchmark harness self-test | `./gradlew :app:perfHarnessTest` | Python fixture, parser, and statistics checks |
@@ -107,8 +107,18 @@ Run the canonical application entrypoint:
 
 ```bash
 ./gradlew --console=plain :app:run
-./gradlew --console=plain :app:run -PappArgs="file.txt"
+./gradlew --console=plain :app:run --args='file.txt'
+./gradlew --console=plain :app:run --args='--read "my notes.txt"'
+./gradlew --console=plain :app:run --args='-- "--notes with spaces.md"'
 ```
+
+Use Gradle's `--args` option to pass editor options and a filename. The outer
+quotes preserve the argument string in the shell; the inner quotes keep a
+filename containing spaces together when Gradle parses that string. Use `--`
+inside the argument string before a filename beginning with a dash.
+The `-PappArgs` property accepts the same quoted argument syntax, for example
+`-PappArgs='--read "my notes.txt"'`. Unbalanced quotes are rejected before the
+editor starts. If both forms are supplied, `--args` takes precedence.
 
 The editor requires an interactive TTY. An IDE console or redirected stdin may
 be detected as a dumb terminal.
@@ -230,8 +240,8 @@ apps/tuink/launcher/build/native/nativeMuslCompile/tuink-musl
 ```
 
 Interactive musl runs use JLine's `exec` provider and require external `tty`
-and `stty` commands in `PATH`, as well as the ACL tools for saving existing
-files. See [runtime dependencies and troubleshooting](packaging.md#complete-release).
+and `stty` commands in `PATH`.
+See [runtime dependencies and troubleshooting](packaging.md#complete-release).
 
 Native builds default to `-march=compatibility` so release binaries work on
 older x86_64 CPUs. Override it only when the deployment CPU is known:

@@ -5,9 +5,12 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
 
 import com.tngtech.archunit.core.domain.JavaClasses;
+import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.lang.ArchRule;
+import com.tngtech.archunit.library.dependencies.SliceAssignment;
+import com.tngtech.archunit.library.dependencies.SliceIdentifier;
 import org.junit.jupiter.api.Test;
 
 class ArchitectureTest {
@@ -52,6 +55,7 @@ class ArchitectureTest {
             "java..",
             "org.eclipse.jgit..",
             "dev.tuink.core..",
+            "dev.tuink.editor.language..",
             "dev.tuink.unicode.."
         );
 
@@ -171,6 +175,13 @@ class ArchitectureTest {
         .should().onlyDependOnClassesThat().resideInAnyPackage(
             "java..",
             "dev.tuink.editor.document.."
+        );
+
+    static final ArchRule LANGUAGE_CONTRACT_IS_SELF_CONTAINED = classes()
+        .that().resideInAPackage("dev.tuink.editor.language..")
+        .should().onlyDependOnClassesThat().resideInAnyPackage(
+            "java..",
+            "dev.tuink.editor.language.."
         );
 
     static final ArchRule EDITOR_SESSION_STAYS_FRONTEND_INDEPENDENT = classes()
@@ -297,8 +308,37 @@ class ArchitectureTest {
         .that().resideOutsideOfPackage("dev.tuiframe.jline..")
         .should().dependOnClassesThat().resideInAPackage("org.jline..");
 
+    // editor-contract and editor-session share dev.tuink.editor, but are separate
+    // modules: core -> contract and session -> core form an acyclic module graph.
+    private static final SliceAssignment TUINK_MODULES = new SliceAssignment() {
+        @Override
+        public SliceIdentifier getIdentifierOf(JavaClass javaClass) {
+            String prefix = "dev.tuink.";
+            String packageName = javaClass.getPackageName();
+            if (!packageName.startsWith(prefix)) return SliceIdentifier.ignore();
+            String relative = packageName.substring(prefix.length());
+            if (relative.equals("editor.session") || relative.startsWith("editor.session.")) {
+                return SliceIdentifier.of("editor-session");
+            }
+            for (String contractPackage : new String[] {"editor.command", "editor.document", "editor.language"}) {
+                if (relative.equals(contractPackage) || relative.startsWith(contractPackage + ".")) {
+                    return SliceIdentifier.of("editor-contract");
+                }
+            }
+            // Retain the original partition for every other TUInk namespace,
+            // including future packages, so no module disappears from the rule.
+            int separator = relative.indexOf('.');
+            return SliceIdentifier.of(separator < 0 ? relative : relative.substring(0, separator));
+        }
+
+        @Override
+        public String getDescription() {
+            return "TUInk modules with separate editor-contract and editor-session";
+        }
+    };
+
     static final ArchRule TOP_LEVEL_SLICES_ARE_FREE_OF_CYCLES = slices()
-        .matching("dev.tuink.(*)..")
+        .assignedFrom(TUINK_MODULES)
         .should().beFreeOfCycles();
 
     static final ArchRule TUI_SUBPACKAGE_SLICES_ARE_FREE_OF_CYCLES = slices()
@@ -353,6 +393,7 @@ class ArchitectureTest {
         EDITOR_INPUT_COMBINES_ONLY_PHYSICAL_EVENTS_AND_SEMANTIC_COMMANDS.check(PRODUCTION_CLASSES);
         COMMAND_CONTRACT_IS_SELF_CONTAINED.check(PRODUCTION_CLASSES);
         DOCUMENT_CONTRACT_IS_SELF_CONTAINED.check(PRODUCTION_CLASSES);
+        LANGUAGE_CONTRACT_IS_SELF_CONTAINED.check(PRODUCTION_CLASSES);
         EDITOR_SESSION_STAYS_FRONTEND_INDEPENDENT.check(PRODUCTION_CLASSES);
         KEYMAP_LAYER_STAYS_EDITOR_INDEPENDENT.check(PRODUCTION_CLASSES);
         GENERIC_KEYMAP_DOES_NOT_IMPORT_PHYSICAL_INPUT.check(PRODUCTION_CLASSES);

@@ -1,147 +1,54 @@
 package dev.tuink.core;
 
+import dev.tuink.editor.language.LanguageId;
+import dev.tuink.editor.language.LanguageRegistry;
 import java.nio.file.Path;
-import java.util.Locale;
-import java.util.Set;
 
-/**
- * Resolves language profiles from file names/extensions.
- */
+/** Editing policies for the shared, presentation-independent language identity. */
 public final class LanguageProfiles {
-    private static final Set<String> PYTHON_EXTENSIONS = Set.of("py", "pyi", "pyw", "pyx");
-    private static final Set<String> YAML_EXTENSIONS = Set.of("yaml", "yml");
-    private static final Set<String> MARKDOWN_EXTENSIONS = Set.of("md", "markdown", "mdown", "mkd");
-    private static final Set<String> STRUCTURED_TEXT_EXTENSIONS = Set.of(
-        "json",
-        "toml",
-        "ini",
-        "cfg",
-        "conf",
-        "properties",
-        "xml",
-        "yaml",
-        "yml"
-    );
-    private static final Set<String> PLAIN_TEXT_EXTENSIONS = Set.of(
-        "txt",
-        "log",
-        "csv"
-    );
-    private static final Set<String> SLASH_REGEX_EXTENSIONS = Set.of(
-        "js", "mjs", "cjs", "jsx", "ts", "tsx"
-    );
-    private static final Set<String> AMBIGUOUS_SLASH_EXTENSIONS = Set.of(
-        "gradle", "groovy", "rb", "rake", "gemspec", "pl", "pm", "perl", "t"
-    );
-    private static final Set<String> HASH_COMMENT_EXTENSIONS = Set.of(
-        "py", "pyi", "pyw", "pyx",
-        "sh", "bash", "zsh",
-        "rb", "rake", "gemspec",
-        "pl", "pm", "perl", "t",
-        "yaml", "yml", "toml", "cfg", "conf", "properties"
-    );
-    private static final Set<String> C_STYLE_COMMENT_EXTENSIONS = Set.of(
-        "java",
-        "c", "h", "cc", "cpp", "cxx", "hh", "hpp", "hxx", "ino",
-        "js", "mjs", "cjs", "jsx", "ts", "tsx",
-        "go", "rs",
-        "php", "phtml", "php5", "php7", "php8",
-        "kt", "kts", "cs", "swift", "scala", "dart", "proto", "gradle",
-        "scss"
-    );
-    private static final Set<String> HASH_COMMENT_FILE_NAMES = Set.of(
-        "dockerfile", ".gitignore", ".editorconfig", "makefile"
-    );
-
-    private LanguageProfiles() {
-    }
+    private LanguageProfiles() {}
 
     public static LanguageProfile resolve(Path path) {
-        String ext = extensionOf(path);
-        if (ext == null) {
-            return LanguageProfile.GENERIC_CODE;
-        }
-        if (PYTHON_EXTENSIONS.contains(ext)) {
-            return LanguageProfile.PYTHON;
-        }
-        if (YAML_EXTENSIONS.contains(ext)) {
-            return LanguageProfile.YAML;
-        }
-        if (MARKDOWN_EXTENSIONS.contains(ext)) {
-            return LanguageProfile.MARKDOWN;
-        }
-        if (PLAIN_TEXT_EXTENSIONS.contains(ext)) {
-            return LanguageProfile.PLAIN_TEXT;
-        }
-        if (STRUCTURED_TEXT_EXTENSIONS.contains(ext)) {
-            return LanguageProfile.STRUCTURED_TEXT;
-        }
-        return LanguageProfile.GENERIC_CODE;
+        return switch (language(path)) {
+            case PYTHON -> LanguageProfile.PYTHON;
+            case YAML -> LanguageProfile.YAML;
+            case MARKDOWN -> LanguageProfile.MARKDOWN;
+            case PLAIN_TEXT, CSV -> LanguageProfile.PLAIN_TEXT;
+            case JSON, TOML, INI, CONFIG, PROPERTIES, XML -> LanguageProfile.STRUCTURED_TEXT;
+            default -> LanguageProfile.GENERIC_CODE;
+        };
     }
 
     public static CommentSyntaxProfile resolveCommentSyntax(Path path) {
-        String name = fileNameOf(path);
-        if (name == null) {
-            return CommentSyntaxProfile.GENERIC;
-        }
-        String ext = extensionOf(path);
-        if (HASH_COMMENT_FILE_NAMES.contains(name) || name.startsWith(".env")) {
-            return CommentSyntaxProfile.HASH;
-        }
-        if (ext != null && HASH_COMMENT_EXTENSIONS.contains(ext)) {
-            return CommentSyntaxProfile.HASH;
-        }
-        if ("ini".equals(ext)) {
-            return CommentSyntaxProfile.SEMICOLON;
-        }
-        if (ext != null && C_STYLE_COMMENT_EXTENSIONS.contains(ext)) {
-            return CommentSyntaxProfile.C_STYLE;
-        }
-        if ("sql".equals(ext)) {
-            return CommentSyntaxProfile.SQL;
-        }
-        if ("css".equals(ext)) {
-            return CommentSyntaxProfile.SLASH_BLOCK;
-        }
-        if ("html".equals(ext) || "htm".equals(ext) || "xml".equals(ext)) {
-            return CommentSyntaxProfile.HTML;
-        }
-        if (ext != null && MARKDOWN_EXTENSIONS.contains(ext)) {
-            return CommentSyntaxProfile.MARKDOWN;
-        }
-        if (ext != null && ("json".equals(ext) || PLAIN_TEXT_EXTENSIONS.contains(ext)
-            || "diff".equals(ext) || "patch".equals(ext))) {
-            return CommentSyntaxProfile.NONE;
-        }
-        return CommentSyntaxProfile.GENERIC;
+        return switch (language(path)) {
+            case PYTHON, SHELL, RUBY, PERL, YAML, TOML, CONFIG, PROPERTIES,
+                DOCKERFILE, ENV, GIT_IGNORE, MAKEFILE, EDITORCONFIG -> CommentSyntaxProfile.HASH;
+            case INI -> CommentSyntaxProfile.SEMICOLON;
+            case JAVA, C, CPP, JAVASCRIPT, TYPESCRIPT, GROOVY, GO, RUST, PHP,
+                KOTLIN, CSHARP, SWIFT, SCALA, DART, PROTO, SCSS -> CommentSyntaxProfile.C_STYLE;
+            case SQL -> CommentSyntaxProfile.SQL;
+            case CSS -> CommentSyntaxProfile.SLASH_BLOCK;
+            case HTML, XML -> CommentSyntaxProfile.HTML;
+            case MARKDOWN -> CommentSyntaxProfile.MARKDOWN;
+            case JSON, PLAIN_TEXT, CSV, DIFF -> CommentSyntaxProfile.NONE;
+            default -> CommentSyntaxProfile.GENERIC;
+        };
     }
 
     static boolean supportsSlashRegex(Path path) {
-        String extension = extensionOf(path);
-        return extension != null && SLASH_REGEX_EXTENSIONS.contains(extension);
+        LanguageId language = language(path);
+        return language == LanguageId.JAVASCRIPT || language == LanguageId.TYPESCRIPT;
     }
 
     static boolean hasAmbiguousSlashSyntax(Path path) {
-        String extension = extensionOf(path);
-        return extension != null && AMBIGUOUS_SLASH_EXTENSIONS.contains(extension);
+        return switch (language(path)) {
+            case GROOVY, RUBY, PERL -> true;
+            default -> false;
+        };
     }
 
-    private static String extensionOf(Path path) {
-        if (path == null || path.getFileName() == null) {
-            return null;
-        }
-        String name = path.getFileName().toString().toLowerCase(Locale.ROOT);
-        int dot = name.lastIndexOf('.');
-        if (dot < 0 || dot >= name.length() - 1) {
-            return null;
-        }
-        return name.substring(dot + 1);
-    }
-
-    private static String fileNameOf(Path path) {
-        if (path == null || path.getFileName() == null) {
-            return null;
-        }
-        return path.getFileName().toString().toLowerCase(Locale.ROOT);
+    static LanguageId language(Path path) {
+        return LanguageRegistry.forFileName(path == null || path.getFileName() == null
+            ? null : path.getFileName().toString());
     }
 }

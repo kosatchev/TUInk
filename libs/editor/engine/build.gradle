@@ -29,6 +29,7 @@ dependencies {
     jgitBinary "org.eclipse.jgit:org.eclipse.jgit:${jgitVersion}"
     implementation(files(tasks.named('unsignedJgitJar')))
     implementation project(':unicode-text')
+    implementation project(':editor-contract')
     implementation 'com.googlecode.javaewah:JavaEWAH:1.2.3'
     implementation 'org.slf4j:slf4j-api:1.7.36'
     implementation 'commons-codec:commons-codec:1.17.0'

@@ -13,7 +13,7 @@ TUInk развивается как приложение-редактор пов
 | `tuiframe-core` | geometry, physical events, cell metrics, line layout/cache, `Canvas`, `CellBuffer`, `Frame`, capabilities и event loop |
 | `tuiframe-jline` | JLine lifecycle, decoder, raw mode, signals, ANSI presenter и cleanup |
 | `tuiframe-widgets` | layout, focus, hit testing, общий захват мыши, theme и reusable widgets |
-| `editor-contract` | immutable command/document DTO, argument schemas, UTF-16 ranges и `WorkspaceEdit` |
+| `editor-contract` | immutable command/document DTO, argument schemas, UTF-16 ranges, `WorkspaceEdit` и общий каталог языков по именам файлов |
 | `core` | общий документ/history, отдельные позиции views, search, editor operations и terminal-neutral `EditorTextLayout` port |
 | `editor-session` | command registry, owner-thread `EditorDocumentSession`, validation и bounded async ingress |
 | `render` | `EditorTextLayout` adapter, координаты/навигация представления, editor layout и render planning |
@@ -23,7 +23,9 @@ TUInk развивается как приложение-редактор пов
 
 `tuiframe-core` и `editor-contract` не имеют production dependencies на другие
 project modules. `tuiframe-jline` и `tuiframe-widgets` зависят от
-`tuiframe-core`. Среди project modules `core` зависит только от `unicode-text`.
+`tuiframe-core`. Среди project modules `core` зависит от `unicode-text` и
+нейтрального `editor-contract.language`: редактирование и подсветка используют
+одни имена и расширения, сохраняя собственные правила обработки языка.
 `editor-session` экспортирует `editor-contract`, а `core` использует как
 implementation dependency; его runtime пока включает зависимости `core`, в
 том числе JGit.

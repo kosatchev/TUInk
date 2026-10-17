@@ -8,6 +8,8 @@ import static dev.tuink.tui.command.TuinkCommand.MENU_TABS;
 import static dev.tuink.tui.command.TuinkCommand.MENU_VIEW;
 
 import dev.tuink.core.EditorEngine;
+import dev.tuink.core.ClipboardLimitException;
+import dev.tuink.core.DocumentEditLimitException;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.GutterDiffMode;
 import dev.tuink.core.TabInsertMode;
@@ -211,23 +213,35 @@ final class InputActionDispatcher {
                 return DispatchResult.handled(null);
             }
             case EDIT_COPY -> {
-                if (ctx.engine().hasSelection()) {
-                    statusMessage = ctx.engine().copySelection() ? "Copied selection" : "Nothing to copy";
-                } else {
-                    statusMessage = ctx.engine().copyCurrentLine() ? "Copied line" : "Nothing to copy";
+                try {
+                    if (ctx.engine().hasSelection()) {
+                        statusMessage = ctx.engine().copySelection() ? "Copied selection" : "Nothing to copy";
+                    } else {
+                        statusMessage = ctx.engine().copyCurrentLine() ? "Copied line" : "Nothing to copy";
+                    }
+                } catch (ClipboardLimitException limit) {
+                    return DispatchResult.handled(limit.getMessage(), StatusLevel.ERROR);
                 }
                 return DispatchResult.handled(statusMessage);
             }
             case EDIT_CUT -> {
-                if (ctx.engine().hasSelection()) {
-                    statusMessage = ctx.engine().cutSelection() ? "Cut selection" : "Nothing to cut";
-                } else {
-                    statusMessage = ctx.engine().cutCurrentLine() ? "Cut line" : "Nothing to cut";
+                try {
+                    if (ctx.engine().hasSelection()) {
+                        statusMessage = ctx.engine().cutSelection() ? "Cut selection" : "Nothing to cut";
+                    } else {
+                        statusMessage = ctx.engine().cutCurrentLine() ? "Cut line" : "Nothing to cut";
+                    }
+                } catch (ClipboardLimitException limit) {
+                    return DispatchResult.handled(limit.getMessage(), StatusLevel.ERROR);
                 }
                 return DispatchResult.handled(statusMessage);
             }
             case EDIT_PASTE -> {
-                statusMessage = ctx.engine().pasteClipboard() ? "Pasted" : "Clipboard empty";
+                try {
+                    statusMessage = ctx.engine().pasteClipboard() ? "Pasted" : "Clipboard empty";
+                } catch (DocumentEditLimitException limit) {
+                    return DispatchResult.handled(limit.getMessage(), StatusLevel.ERROR);
+                }
                 return DispatchResult.handled(statusMessage);
             }
             case EDIT_UNDO -> {
@@ -243,7 +257,13 @@ final class InputActionDispatcher {
                 return DispatchResult.handled(statusMessage);
             }
             case EDIT_TOGGLE_LINE_COMMENT -> {
-                EditorEngine.LineCommentResult result = ctx.engine().toggleLineComment();
+                EditorEngine.LineCommentResult result;
+                try {
+                    result = ctx.engine().toggleLineComment();
+                } catch (DocumentEditLimitException limit) {
+                    return DispatchResult.handled("Comment change is too large for available memory. Select fewer lines.",
+                        StatusLevel.ERROR);
+                }
                 return switch (result.action()) {
                     case COMMENTED -> DispatchResult.handled(
                         "Commented " + lineCountLabel(result.lineCount())

@@ -128,7 +128,7 @@ class EditorEngineCutHistoryTest {
         EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model));
         long revision = model.revision();
 
-        assertTrue(engine.cutCurrentLine());
+        assertFalse(engine.cutCurrentLine());
 
         assertEquals(revision, model.revision());
         assertFalse(state.isDirty());

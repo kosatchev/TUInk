@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collections;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -144,6 +145,86 @@ class EditorEnginePasteTest {
             assertArrayEquals("\uFEFFo👩‍💻\r\nnew\r\nxree\rfour".getBytes(StandardCharsets.UTF_8), Files.readAllBytes(path));
             assertFalse(fixture.state.isDirty());
         }
+    }
+
+    @Test
+    void identicalLogicalPastePreservesMixedLineEndingsAndTheCleanSavepoint(@TempDir Path directory) throws Exception {
+        byte[] original = "\uFEFFone\r\ntwo\nthree\rfour".getBytes(StandardCharsets.UTF_8);
+        Path path = directory.resolve("identical.txt");
+        for (boolean reversed : List.of(false, true)) {
+            Files.write(path, original);
+            Fixture fixture = fixture("");
+            fixture.engine.open(path);
+            Position start = new Position(0, 1);
+            Position end = new Position(2, 2);
+            fixture.engine.restoreSelection(reversed ? start : end, reversed ? end : start);
+            DocumentFileMetadata metadata = fixture.model.fileMetadata();
+            long revision = fixture.model.revision();
+
+            assertTrue(fixture.engine.pasteText("ne\r\ntwo\rth"));
+
+            assertEquals(revision, fixture.model.revision());
+            assertEquals(metadata, fixture.model.fileMetadata());
+            assertEquals(end, fixture.state.getCursor());
+            assertNull(fixture.state.getSelectionAnchor());
+            assertFalse(fixture.state.isDirty());
+            assertFalse(fixture.engine.undo());
+            assertFalse(fixture.engine.redo());
+            fixture.engine.save();
+            assertArrayEquals(original, Files.readAllBytes(path));
+        }
+    }
+
+    @Test
+    void identicalClipboardPasteKeepsExistingUndoAndRedoEntries() {
+        Fixture fixture = fixture("base");
+        fixture.engine.insertInput("first ");
+        fixture.engine.moveCursorTo(new Position(0, 0));
+        fixture.engine.insertInput("second ");
+        assertTrue(fixture.engine.undo());
+        assertEquals("first base", fixture.model.getLine(0));
+        fixture.engine.restoreSelection(new Position(0, 5), new Position(0, 0));
+        fixture.clipboard.setText("first");
+        long revision = fixture.model.revision();
+
+        assertTrue(fixture.engine.pasteClipboard());
+
+        assertEquals(revision, fixture.model.revision());
+        assertTrue(fixture.state.isDirty());
+        assertEquals(new Position(0, 5), fixture.state.getCursor());
+        assertNull(fixture.state.getSelectionAnchor());
+        assertTrue(fixture.engine.redo());
+        assertEquals("second first base", fixture.model.getLine(0));
+        assertTrue(fixture.engine.undo());
+        assertTrue(fixture.engine.undo());
+        assertEquals("base", fixture.model.getLine(0));
+        assertFalse(fixture.state.isDirty());
+    }
+
+    @Test
+    void smallPasteDoesNotReadTheUnchangedDocumentPrefix() {
+        class CountingModel extends TextModel {
+            int reads;
+            CountingModel() { super(new SimpleLineBuffer()); }
+            @Override public String getLine(int line) {
+                reads++;
+                return super.getLine(line);
+            }
+        }
+        CountingModel model = new CountingModel();
+        model.replaceLines(Collections.nCopies(10_000, "unchanged"));
+        EditorEngine engine = new EditorEngine(model, new EditorState(), new LogicalEditorTextLayout(model));
+        engine.setGutterDiffMode(GutterDiffMode.DISABLED);
+        engine.moveDocumentEnd(false);
+        model.reads = 0;
+
+        assertTrue(engine.pasteText(" pasted"));
+
+        assertTrue(model.reads < 50, "A local paste must not scan or snapshot every unchanged line");
+        assertEquals("unchanged pasted", model.getLine(9999));
+        assertTrue(engine.undo());
+        assertEquals("unchanged", model.getLine(9999));
+        assertFalse(engine.state().isDirty());
     }
 
     private static Fixture fixture(String... lines) {

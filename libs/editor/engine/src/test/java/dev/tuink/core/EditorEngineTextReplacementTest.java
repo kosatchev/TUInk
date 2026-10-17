@@ -7,11 +7,44 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 
 class EditorEngineTextReplacementTest {
+    @Test
+    void aLargeLogicalNoOpComparesTheRangeWithoutCopyingItOrLosingRedo() {
+        class RangeCountingModel extends TextModel {
+            int rangeCopies;
+            RangeCountingModel() { super(new SimpleLineBuffer()); }
+            @Override public String getTextRange(Position start, Position end) {
+                rangeCopies++;
+                return super.getTextRange(start, end);
+            }
+        }
+        int count = 50_000;
+        RangeCountingModel model = new RangeCountingModel();
+        model.replaceLines(Collections.nCopies(count, "a"));
+        EditorEngine engine = new EditorEngine(model, new EditorState(), new LogicalEditorTextLayout(model));
+        engine.setGutterDiffMode(GutterDiffMode.DISABLED);
+        engine.insertInput("X");
+        assertTrue(engine.undo());
+        model.rangeCopies = 0;
+        long revision = model.revision();
+        long navigation = engine.navigationRevision();
+
+        assertFalse(engine.applyTextReplacements(List.of(new TextReplacement(
+            new Position(0, 0), new Position(count - 1, 1), "a\r\n".repeat(count - 1) + "a"))));
+
+        assertEquals(0, model.rangeCopies);
+        assertEquals(revision, model.revision());
+        assertEquals(navigation, engine.navigationRevision());
+        assertFalse(engine.state().isDirty());
+        assertTrue(engine.redo());
+        assertEquals("Xa", model.getLine(0));
+    }
+
     @Test
     void validatesEveryRangeBeforeMutatingAnything() {
         Fixture fixture = fixture(List.of("one", "A😀B"));

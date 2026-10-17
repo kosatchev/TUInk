@@ -109,6 +109,61 @@ class EditorEngineClipboardTest {
     }
 
     @Test
+    void copyingOrCuttingAnEmptyFinalLinePreservesTheClipboardSavepointAndRedo() {
+        for (boolean cut : List.of(false, true)) {
+            for (List<String> lines : List.of(List.of(""), List.of("first", ""))) {
+                TextModel model = new TextModel(new SimpleLineBuffer());
+                model.replaceLines(lines);
+                EditorState state = new EditorState();
+                EditorClipboard clipboard = new EditorClipboard();
+                clipboard.setText("previously copied text😀");
+                EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model), clipboard);
+                engine.moveDocumentEnd(false);
+                engine.insertInput("x");
+                assertTrue(engine.undo());
+                long revision = model.revision();
+                long navigationRevision = engine.navigationRevision();
+                DocumentFileMetadata metadata = model.fileMetadata();
+                Position cursor = state.getCursor();
+
+                assertFalse(cut ? engine.cutCurrentLine() : engine.copyCurrentLine());
+
+                assertEquals("previously copied text😀", clipboard.text());
+                assertEquals(lines, model.snapshotLines());
+                assertEquals(metadata, model.fileMetadata());
+                assertEquals(revision, model.revision());
+                assertEquals(navigationRevision, engine.navigationRevision());
+                assertEquals(cursor, state.getCursor());
+                assertFalse(state.isDirty());
+                assertFalse(engine.undo());
+                assertTrue(engine.redo());
+                assertEquals("x", model.getLine(model.lineCount() - 1));
+                assertTrue(state.isDirty());
+            }
+        }
+    }
+
+    @Test
+    void emptyLinesBeforeEofStillCopyAndCutTheirNewline() {
+        for (boolean cut : List.of(false, true)) {
+            EditorClipboard clipboard = new EditorClipboard();
+            clipboard.setText("previous text");
+            TabSession source = tab(clipboard, "first\n\nlast");
+            source.engine().moveCursorTo(new Position(1, 0));
+
+            assertTrue(cut ? source.engine().cutCurrentLine() : source.engine().copyCurrentLine());
+
+            assertEquals("\n", clipboard.text());
+            assertEquals(cut ? List.of("first", "last") : List.of("first", "", "last"),
+                source.model().snapshotLines());
+            if (cut) {
+                assertTrue(source.engine().undo());
+                assertEquals(List.of("first", "", "last"), source.model().snapshotLines());
+            }
+        }
+    }
+
+    @Test
     void retainsCopiedTextAfterTheSourceTabIsClosedAndANewTabIsCreated() {
         EditorClipboard clipboard = new EditorClipboard();
         List<TabSession> tabs = new ArrayList<>();

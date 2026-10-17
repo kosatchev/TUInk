@@ -1,6 +1,7 @@
 package dev.tuink.tui;
 
 import dev.tuink.core.EditorEngine;
+import dev.tuink.core.DocumentEditLimitException;
 import dev.tuink.core.SearchOptions;
 import dev.tuink.core.TabSession;
 import dev.tuink.core.TabSearch;
@@ -20,6 +21,15 @@ final class SearchCommandHandler {
         InputActionDispatcher.StatusLevel statusLevel) {}
 
     static Result execute(TuinkCommand command, Context context, BooleanSupplier revealCurrentSelection) {
+        try {
+            return executeSearch(command, context, revealCurrentSelection);
+        } catch (DocumentEditLimitException limit) {
+            return new Result(context.activeTabIndex(), 0, false, CursorPolicy.PRESERVE,
+                limit.getMessage(), InputActionDispatcher.StatusLevel.ERROR);
+        }
+    }
+
+    private static Result executeSearch(TuinkCommand command, Context context, BooleanSupplier revealCurrentSelection) {
         var current = context.tabs().get(context.activeTabIndex());
         EditorEngine engine = current.engine();
         SearchOptions options = SearchController.toSearchOptions(context.options());

@@ -24,6 +24,27 @@ class SearchReplaceFeedbackIntegrationTest {
     @TempDir
     Path directory;
 
+    @Test
+    void rejectedReplaceAllShowsAPersistentErrorAndKeepsTheDocument() throws Exception {
+        String original = "a".repeat(4096);
+        try (EditorWindowFixture window = window(List.of(original))) {
+            search(window, "a", "b".repeat(1_000_000));
+            long revision = window.active().tabSession().model().revision();
+
+            replace(window, SearchFocus.ALL_BUTTON);
+
+            assertTrue(window.notification.message.startsWith("Replacement result is too large"));
+            assertEquals(window.host.styles.notifyError(), window.notification.style());
+            assertEquals(-1L, window.notification.nanosUntilExpire(System.nanoTime()));
+            window.frame();
+            assertEquals(window.host.styles.notifyError(), window.notification.style());
+            assertEquals(original, window.active().tabSession().model().getLine(0));
+            assertEquals(revision, window.active().tabSession().model().revision());
+            assertFalse(window.active().state().isDirty());
+            assertFalse(window.active().tabSession().engine().undo());
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void identicalReplaceAllPreservesSelectionManualViewportAndCleanHistory(boolean wrapped) throws Exception {

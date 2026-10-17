@@ -1,5 +1,6 @@
 package dev.tuink.core;
 
+import dev.tuink.core.TextModel.ReplacementDelta;
 import dev.tuink.unicode.GraphemeText;
 import java.io.IOException;
 import java.nio.charset.Charset;
@@ -7,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Deque;
@@ -142,54 +144,61 @@ public class EditorEngine {
      *
      * <p>Every range is checked against the same pre-edit model before any mutation.
      * Ranges use exact UTF-16 offsets, may not split surrogate pairs or overlap, and
-     * are composed in one forward pass over the original document. The cursor is
+     * are measured before allocation, then composed in one forward pass. The cursor is
      * moved to the end of the earliest applied replacement.</p>
      *
      * @return {@code true} when logical document content changed
      * @throws IllegalArgumentException when any replacement is invalid
+     * @throws DocumentEditLimitException when the result cannot be built with available memory
      */
     public boolean applyTextReplacements(List<TextReplacement> replacements) {
         List<TextReplacement> canonical = validateTextReplacements(replacements);
-        List<TextReplacement> effective = new ArrayList<>(canonical.size());
-        for (TextReplacement replacement : canonical) {
-            String normalized = normalizeInsertedText(replacement.replacement());
-            if (!model.getTextRange(replacement.start(), replacement.end()).equals(normalized)) {
-                effective.add(new TextReplacement(
-                    replacement.start(),
-                    replacement.end(),
-                    normalized
-                ));
-            }
-        }
-        if (effective.isEmpty()) {
+        DocumentFileMetadata metadata = model.fileMetadata();
+        ReplacementBuilder admission = ReplacementBuilder.counting(model.lineCount());
+        if (composeTextReplacements(canonical, admission, metadata) == null) {
             return false;
         }
+        ReplacementBuilder builder = admission.materializer();
+        Position cursor = composeTextReplacements(canonical, builder, metadata);
+        applyBuiltReplacement(builder, metadata, cursor);
+        return true;
+    }
 
+    private Position composeTextReplacements(List<TextReplacement> replacements, ReplacementBuilder builder,
+                                            DocumentFileMetadata metadata) {
+        Position sourcePosition = new Position(0, 0);
+        Position earliestResult = null;
+        for (TextReplacement replacement : replacements) {
+            ReplacementText text = new ReplacementText(replacement.replacement());
+            if (text.matches(model, replacement.start(), replacement.end())) {
+                continue;
+            }
+            appendOriginalRange(builder, sourcePosition, replacement.start(), metadata);
+            builder.appendReplacement(text, metadata.defaultLineSeparator());
+            if (earliestResult == null) {
+                earliestResult = builder.position();
+            }
+            sourcePosition = replacement.end();
+        }
+        if (earliestResult != null) {
+            int lastLine = model.lineCount() - 1;
+            appendOriginalRange(builder, sourcePosition,
+                new Position(lastLine, model.getLine(lastLine).length()), metadata);
+            builder.finishLine();
+        }
+        return earliestResult;
+    }
+
+    private void applyBuiltReplacement(ReplacementBuilder builder, DocumentFileMetadata metadata, Position cursor) {
+        EditorViewMemento after = editedView(new EditorViewMemento(state.viewId(), cursor, state.viewport(), null),
+            builder.lines::get);
         state.invalidateNavigation();
         breakCoalescing();
         applyEdit(EditKind.NONE, () -> {
-            DocumentFileMetadata metadata = model.fileMetadata();
-            ReplacementBuilder builder = new ReplacementBuilder();
-            Position sourcePosition = new Position(0, 0);
-            Position earliestResult = null;
-            for (TextReplacement replacement : effective) {
-                appendOriginalRange(builder, sourcePosition, replacement.start(), metadata);
-                builder.appendReplacement(replacement.replacement(), metadata.defaultLineSeparator());
-                if (earliestResult == null) {
-                    earliestResult = builder.position();
-                }
-                sourcePosition = replacement.end();
-            }
-            int lastLine = model.lineCount() - 1;
-            appendOriginalRange(
-                builder, sourcePosition, new Position(lastLine, model.getLine(lastLine).length()), metadata
-            );
-            builder.finishLine();
             model.replaceLines(builder.lines, metadata.withLineSeparators(builder.separators));
-            state.setCursor(earliestResult);
+            state.setCursor(after.cursor());
             state.clearSelection();
         });
-        return true;
     }
 
     private void appendOriginalRange(
@@ -206,60 +215,6 @@ public class EditorEngine {
             column = 0;
         }
         builder.append(model.getLine(end.line()), column, end.col());
-    }
-
-    /** Reuses untouched line strings and copies each changed line only once. */
-    private static final class ReplacementBuilder {
-        private final List<String> lines = new ArrayList<>();
-        private final List<String> separators = new ArrayList<>();
-        private String wholeLine;
-        private StringBuilder pending;
-
-        private void append(String text, int start, int end) {
-            if (start == end) {
-                return;
-            }
-            if (pending == null && wholeLine == null && start == 0 && end == text.length()) {
-                wholeLine = text;
-                return;
-            }
-            if (pending == null) {
-                pending = new StringBuilder();
-                if (wholeLine != null) {
-                    pending.append(wholeLine);
-                    wholeLine = null;
-                }
-            }
-            pending.append(text, start, end);
-        }
-
-        private void appendReplacement(String text, String separator) {
-            int start = 0;
-            int end;
-            while ((end = text.indexOf('\n', start)) >= 0) {
-                append(text, start, end);
-                newline(separator);
-                start = end + 1;
-            }
-            append(text, start, text.length());
-        }
-
-        private Position position() {
-            return new Position(lines.size(), pending == null
-                ? wholeLine == null ? 0 : wholeLine.length()
-                : pending.length());
-        }
-
-        private void newline(String separator) {
-            finishLine();
-            separators.add(separator);
-        }
-
-        private void finishLine() {
-            lines.add(pending == null ? wholeLine == null ? "" : wholeLine : pending.toString());
-            pending = null;
-            wholeLine = null;
-        }
     }
 
     /** Moves the primary cursor through the engine-owned mutation boundary. */
@@ -772,7 +727,7 @@ public class EditorEngine {
         }
 
         ViewState before = captureViewState();
-        List<TrackedEdit> ops = new ArrayList<>();
+        List<ReplacementDelta> ops = new ArrayList<>();
         SelectionRange selection = currentSelection();
         Position rangeStart = selection == null ? model.clamp(state.getCursor()) : selection.start();
         Position rangeEnd = selection == null ? rangeStart : selection.end();
@@ -784,7 +739,7 @@ public class EditorEngine {
         } else {
             Position afterInsert = applyReplaceAndTrack(ops, rangeStart, rangeEnd, String.valueOf(ch));
             state.setCursor(afterInsert);
-            TrackedEdit outdent = maybeAutoOutdentKeywordLineOp();
+            ReplacementDelta outdent = maybeAutoOutdentKeywordLineOp();
             if (outdent != null) {
                 ops.add(outdent);
             }
@@ -807,13 +762,13 @@ public class EditorEngine {
         state.invalidateNavigation();
         boolean hadSelection = state.hasSelection();
         ViewState before = captureViewState();
-        List<TrackedEdit> ops = new ArrayList<>();
+        List<ReplacementDelta> ops = new ArrayList<>();
         SelectionRange selection = currentSelection();
         Position rangeStart = selection == null ? model.clamp(state.getCursor()) : selection.start();
         Position rangeEnd = selection == null ? rangeStart : selection.end();
         Position afterInsert = applyReplaceAndTrack(ops, rangeStart, rangeEnd, text);
         state.setCursor(afterInsert);
-        TrackedEdit outdent = maybeAutoOutdentKeywordLineOp();
+        ReplacementDelta outdent = maybeAutoOutdentKeywordLineOp();
         if (outdent != null) {
             ops.add(outdent);
         }
@@ -825,7 +780,7 @@ public class EditorEngine {
         state.invalidateNavigation();
         boolean hadSelection = state.hasSelection();
         ViewState before = captureViewState();
-        List<TrackedEdit> ops = new ArrayList<>();
+        List<ReplacementDelta> ops = new ArrayList<>();
         SelectionRange selection = currentSelection();
         Position rangeStart = selection == null ? model.clamp(state.getCursor()) : selection.start();
         Position rangeEnd = selection == null ? rangeStart : selection.end();
@@ -836,7 +791,7 @@ public class EditorEngine {
         String tabText = indentationDecisions().unit(cursor.line(), indentPrefix);
         Position afterInsert = applyReplaceAndTrack(ops, rangeStart, rangeEnd, tabText);
         state.setCursor(afterInsert);
-        TrackedEdit outdent = maybeAutoOutdentKeywordLineOp();
+        ReplacementDelta outdent = maybeAutoOutdentKeywordLineOp();
         if (outdent != null) {
             ops.add(outdent);
         }
@@ -848,7 +803,7 @@ public class EditorEngine {
         state.invalidateNavigation();
         boolean hadSelection = state.hasSelection();
         ViewState before = captureViewState();
-        List<TrackedEdit> ops = new ArrayList<>();
+        List<ReplacementDelta> ops = new ArrayList<>();
         SelectionRange range = currentSelection();
         if (range == null && isAutoPairsActive()) {
             range = pairRangeAroundCursor();
@@ -880,7 +835,7 @@ public class EditorEngine {
         state.invalidateNavigation();
         boolean hadSelection = state.hasSelection();
         ViewState before = captureViewState();
-        List<TrackedEdit> ops = new ArrayList<>();
+        List<ReplacementDelta> ops = new ArrayList<>();
         SelectionRange range = currentSelection();
         if (range == null) {
             Position cursor = model.clamp(state.getCursor());
@@ -902,7 +857,7 @@ public class EditorEngine {
     private void deleteAndCommit(
         EditKind kind,
         ViewState before,
-        List<TrackedEdit> ops,
+        List<ReplacementDelta> ops,
         SelectionRange range
     ) {
         if (range != null) {
@@ -915,7 +870,7 @@ public class EditorEngine {
     public void insertNewline() {
         state.invalidateNavigation();
         ViewState before = captureViewState();
-        List<TrackedEdit> ops = new ArrayList<>();
+        List<ReplacementDelta> ops = new ArrayList<>();
         SelectionRange selection = currentSelection();
         Position rangeStart = selection == null ? model.clamp(state.getCursor()) : selection.start();
         Position rangeEnd = selection == null ? rangeStart : selection.end();
@@ -940,7 +895,6 @@ public class EditorEngine {
     }
 
     public LineCommentResult toggleLineComment() {
-        state.invalidateNavigation();
         CommentSyntaxProfile syntax = LanguageProfiles.resolveCommentSyntax(state.getCurrentFile());
         String marker = syntax.lineCommentPrefix();
         if (marker == null) {
@@ -962,63 +916,91 @@ public class EditorEngine {
             }
         }
 
-        List<Integer> nonBlankLines = new ArrayList<>();
+        int nonBlankCount = 0;
+        long copiedUnits = 0;
+        long longestLine = 0;
+        boolean uncomment = true;
+        String commonIndent = null;
+        int commonIndentLength = 0;
         for (int lineIndex = firstLine; lineIndex <= lastLine; lineIndex++) {
-            if (!model.getLine(lineIndex).isBlank()) {
-                nonBlankLines.add(lineIndex);
+            String line = model.getLine(lineIndex);
+            if (line.isBlank()) continue;
+            nonBlankCount++;
+            copiedUnits = DocumentEditBudget.add(copiedUnits, line.length() + marker.length() + 1L);
+            longestLine = Math.max(longestLine, line.length() + marker.length() + 1L);
+            if (lineCommentColumn(line, marker, lineIndex) < 0) uncomment = false;
+            int indentLength = leadingIndentLength(line);
+            if (commonIndent == null) {
+                commonIndent = line;
+                commonIndentLength = indentLength;
+            } else {
+                int shared = 0;
+                int limit = Math.min(commonIndentLength, indentLength);
+                while (shared < limit && commonIndent.charAt(shared) == line.charAt(shared)) shared++;
+                commonIndentLength = shared;
             }
         }
-        if (nonBlankLines.isEmpty()) {
+        if (nonBlankCount == 0) {
             return new LineCommentResult(LineCommentAction.NO_CONTENT, 0);
         }
+        DocumentEditBudget.currentHeap(model.lineCount())
+            .requireLineReplacements(copiedUnits, nonBlankCount, longestLine);
 
-        boolean uncomment = true;
-        for (int lineIndex : nonBlankLines) {
-            if (lineCommentColumn(model.getLine(lineIndex), marker, lineIndex) < 0) {
-                uncomment = false;
-                break;
-            }
-        }
-
+        TextModel.PreparedLineReplacements prepared;
         ViewState before = captureViewState();
-        List<TrackedEdit> ops = new ArrayList<>(nonBlankLines.size());
-        List<LineCommentEdit> positionEdits = new ArrayList<>(nonBlankLines.size());
-        if (uncomment) {
-            for (int lineIndex : nonBlankLines) {
+        ViewState after;
+        Deque<HistoryEntry> nextUndo;
+        LineCommentResult result;
+        long afterStateId = history.nextDocumentStateId + 1;
+        try {
+            List<TextReplacement> replacements = new ArrayList<>(nonBlankCount);
+            List<LineCommentEdit> positionEdits = new ArrayList<>(nonBlankCount);
+            String inserted = uncomment ? "" : marker + " ";
+            for (int lineIndex = firstLine; lineIndex <= lastLine; lineIndex++) {
                 String line = model.getLine(lineIndex);
-                int column = lineCommentColumn(line, marker, lineIndex);
-                int removeLength = marker.length();
+                if (line.isBlank()) continue;
+                int column = uncomment ? lineCommentColumn(line, marker, lineIndex) : commonIndentLength;
+                int removeLength = uncomment ? marker.length() : 0;
                 int afterMarker = column + removeLength;
-                if (afterMarker < line.length() && line.charAt(afterMarker) == ' ') {
+                if (uncomment && afterMarker < line.length() && line.charAt(afterMarker) == ' ') {
                     removeLength++;
                 }
-                applyReplaceAndTrack(
-                    ops,
-                    new Position(lineIndex, column),
-                    new Position(lineIndex, column + removeLength),
-                    ""
-                );
-                positionEdits.add(new LineCommentEdit(lineIndex, column, removeLength, 0));
+                replacements.add(new TextReplacement(new Position(lineIndex, column),
+                    new Position(lineIndex, column + removeLength), inserted));
+                positionEdits.add(new LineCommentEdit(lineIndex, column, removeLength, inserted.length()));
             }
-        } else {
-            int commonIndent = commonIndentLength(nonBlankLines);
-            String inserted = marker + " ";
-            for (int lineIndex : nonBlankLines) {
-                Position at = new Position(lineIndex, commonIndent);
-                applyReplaceAndTrack(ops, at, at, inserted);
-                positionEdits.add(new LineCommentEdit(lineIndex, commonIndent, 0, inserted.length()));
-            }
+            prepared = model.prepareLineReplacements(replacements);
+            EditorViewMemento afterView = new EditorViewMemento(state.viewId(),
+                transformPosition(cursorBefore, positionEdits), before.view().viewport(),
+                anchorBefore == null ? null : transformPosition(anchorBefore, positionEdits));
+            after = new ViewState(before.document(), editedView(afterView, prepared.buffer()::getLine));
+            OperationHistoryEntry entry = new OperationHistoryEntry(EditKind.NONE, before, after,
+                prepared.operations(), history.currentDocumentStateId, afterStateId);
+            nextUndo = new ArrayDeque<>(history.undoStack);
+            pushWithLimit(nextUndo, entry);
+            result = new LineCommentResult(
+                uncomment ? LineCommentAction.UNCOMMENTED : LineCommentAction.COMMENTED, nonBlankCount
+            );
+        } catch (OutOfMemoryError exhausted) {
+            // The active buffer, view and history have not been touched.
+            throw new DocumentEditLimitException();
         }
-
-        state.setCursor(transformPosition(cursorBefore, positionEdits));
-        if (anchorBefore != null) {
-            state.setSelectionAnchor(transformPosition(anchorBefore, positionEdits));
-        }
-        commitOperationEdit(EditKind.NONE, before, ops);
-        return new LineCommentResult(
-            uncomment ? LineCommentAction.UNCOMMENTED : LineCommentAction.COMMENTED,
-            nonBlankLines.size()
-        );
+        model.publishLineReplacements(prepared);
+        history.undoStack = nextUndo;
+        history.nextDocumentStateId = afterStateId;
+        history.currentDocumentStateId = afterStateId;
+        history.redoStack.clear();
+        state.setCursor(after.cursor());
+        state.setSelectionAnchor(after.selectionAnchor());
+        state.invalidateNavigation();
+        state.setDirty(history.savedDocumentStateId < 0L || afterStateId != history.savedDocumentStateId);
+        history.lastEditKind = EditKind.NONE;
+        history.lastEditAtNanos = System.nanoTime();
+        history.lastEditCursorAfter = after.cursor();
+        history.lastEditViewId = state.viewId();
+        applyGutterDiffOp(prepared.operations().getFirst().operation());
+        document.changed();
+        return result;
     }
 
     public boolean copySelection() {
@@ -1026,7 +1008,7 @@ public class EditorEngine {
         if (range == null) {
             return false;
         }
-        String copied = model.getTextRange(range.start(), range.end());
+        String copied = ClipboardText.copy(model, range.start(), range.end());
         clipboard.setText(copied);
         return !copied.isEmpty();
     }
@@ -1044,26 +1026,29 @@ public class EditorEngine {
         } else {
             end = new Position(line, model.getLine(line).length());
         }
-        String copied = model.getTextRange(start, end);
+        String copied = ClipboardText.copy(model, start, end);
+        if (copied.isEmpty()) {
+            return false;
+        }
         clipboard.setText(copied);
-        return !copied.isEmpty();
+        return true;
     }
 
     public boolean cutSelection() {
-        state.invalidateNavigation();
         SelectionRange range = currentSelection();
         if (range == null) {
             return false;
         }
-        clipboard.setText(model.getTextRange(range.start(), range.end()));
+        String copied = ClipboardText.copy(model, range.start(), range.end());
+        state.invalidateNavigation();
         ViewState before = captureViewState();
-        List<TrackedEdit> ops = new ArrayList<>(1);
+        List<ReplacementDelta> ops = new ArrayList<>(1);
         deleteAndCommit(EditKind.NONE, before, ops, range);
+        clipboard.setText(copied);
         return true;
     }
 
     public boolean cutCurrentLine() {
-        state.invalidateNavigation();
         Position cursor = model.clamp(state.getCursor());
         int line = cursor.line();
         if (line < 0 || line >= model.lineCount()) {
@@ -1077,10 +1062,15 @@ public class EditorEngine {
         } else {
             end = new Position(line, model.getLine(line).length());
         }
-        clipboard.setText(model.getTextRange(start, end));
+        if (start.equals(end)) {
+            return false;
+        }
+        String copied = ClipboardText.copy(model, start, end);
+        state.invalidateNavigation();
         ViewState before = captureViewState();
-        List<TrackedEdit> ops = new ArrayList<>(1);
+        List<ReplacementDelta> ops = new ArrayList<>(1);
         deleteAndCommit(EditKind.NONE, before, ops, new SelectionRange(start, end));
+        clipboard.setText(copied);
         return true;
     }
 
@@ -1088,21 +1078,28 @@ public class EditorEngine {
         return pasteText(clipboard.text());
     }
 
-    /** Pastes literal text as one undo step without typing assists or changing the workspace clipboard. */
+    /**
+     * Pastes literal text as one undo step without typing assists or changing the workspace clipboard.
+     * Oversized results are rejected before changing text, view state or history.
+     *
+     * @throws DocumentEditLimitException when the replacement cannot be built with available memory
+     */
     public boolean pasteText(String pasted) {
         if (pasted == null || pasted.isEmpty()) {
             return false;
         }
-        LogicalDocumentLines.requireWellFormedUtf16(pasted);
-        state.invalidateNavigation();
-        ViewState before = captureViewState();
-        List<TrackedEdit> ops = new ArrayList<>(1);
+        ReplacementText replacement = new ReplacementText(pasted);
         SelectionRange selection = currentSelection();
         Position start = selection == null ? model.clamp(state.getCursor()) : selection.start();
         Position end = selection == null ? start : selection.end();
-        state.setCursor(applyReplaceAndTrack(ops, start, end, pasted));
-        state.clearSelection();
-        commitOperationEdit(EditKind.NONE, before, ops);
+        if (replacement.matches(model, start, end)) {
+            state.invalidateNavigation();
+            state.setCursor(end);
+            state.clearSelection();
+            breakCoalescing();
+            return true;
+        }
+        commitPreparedReplacement(start, end, replacement, null, captureViewState());
         return true;
     }
 
@@ -1214,35 +1211,39 @@ public class EditorEngine {
             return false;
         }
         SearchMatcher matcher = SearchMatcher.compile(needle, options);
-        String replacementText = normalizeInsertedText(replacement == null ? "" : replacement);
-        LogicalDocumentLines.requireWellFormedUtf16(replacementText);
+        ReplacementText replacementText = new ReplacementText(replacement);
 
         SelectionRange selected = currentSelection();
+        ViewState before = captureViewState();
         if (selected == null || !matchesSelectedText(matcher, selected)) {
-            if (!findNext(needle, options)) {
-                return false;
-            }
-            selected = currentSelection();
-            if (selected == null) {
-                return false;
-            }
+            // Locate the match without publishing a selection: a refused replacement
+            // must preserve even the view and coalescing state from before the command.
+            SearchMatch found = findForward(model.clamp(state.getCursor()), matcher, true);
+            if (found == null) return false;
+            selected = new SelectionRange(found.start(),
+                new Position(found.start().line(), found.start().col() + found.length()));
+            before = new ViewState(before.document(), new EditorViewMemento(state.viewId(),
+                selected.end(), before.view().viewport(), selected.start()));
         }
 
         Position rangeStart = selected.start();
         Position rangeEnd = selected.end();
-        String selectedText = model.getTextRange(rangeStart, rangeEnd);
-        if (selectedText.equals(replacementText)) {
+        if (replacementText.matches(model, rangeStart, rangeEnd)) {
             // Replacing a match with the exact same text must not manufacture a
             // document revision or an undo entry. Move to the following match so
-            // repeated Replace commands still make progress.
-            return findNext(needle, options);
+            // repeated Replace commands still make progress. Resolve that move
+            // before publishing a selection or breaking a pending typing group:
+            // even a no-op replacement can exhaust the shared search budget.
+            SearchMatch next = findForward(rangeEnd, matcher, true);
+            breakCoalescing();
+            if (next == null) {
+                selectMatch(rangeStart, rangeEnd.col() - rangeStart.col());
+                return false;
+            }
+            selectMatch(next.start(), next.length());
+            return true;
         }
-        state.invalidateNavigation();
-        ViewState before = captureViewState();
-        List<TrackedEdit> ops = new ArrayList<>(1);
-        state.setCursor(applyReplaceAndTrack(ops, rangeStart, rangeEnd, replacementText));
-        state.setSelectionAnchor(rangeStart);
-        commitOperationEdit(EditKind.NONE, before, ops);
+        commitPreparedReplacement(rangeStart, rangeEnd, replacementText, rangeStart, before);
         return true;
     }
 
@@ -1250,30 +1251,64 @@ public class EditorEngine {
         return replaceAll(query, replacement, SearchOptions.DEFAULT);
     }
 
+    /** Counts and admits the complete result before allocating it or changing document/view/history state. */
     public int replaceAll(String query, String replacement, SearchOptions options) {
         String needle = normalizeQuery(query);
         if (needle == null) {
             return 0;
         }
         SearchMatcher matcher = SearchMatcher.compile(needle, options);
-        String replacementText = normalizeInsertedText(replacement == null ? "" : replacement);
-        LogicalDocumentLines.requireWellFormedUtf16(replacementText);
-        List<TextReplacement> replacements = new ArrayList<>();
+        ReplacementText replacementText = new ReplacementText(replacement);
+        DocumentFileMetadata metadata = model.fileMetadata();
+        ReplacementBuilder admission = ReplacementBuilder.counting(model.lineCount());
+        ReplacementResult counted = composeSearchReplacements(matcher, replacementText, admission, metadata);
+        if (counted.firstChange() != null) {
+            ReplacementBuilder builder = admission.materializer();
+            ReplacementResult built = composeSearchReplacements(matcher, replacementText, builder, metadata);
+            applyBuiltReplacement(builder, metadata, built.firstChange());
+        }
+        return counted.matchCount();
+    }
+
+    private ReplacementResult composeSearchReplacements(SearchMatcher matcher, ReplacementText replacement,
+                                                         ReplacementBuilder builder, DocumentFileMetadata metadata) {
+        int[] matchCount = {0};
+        int[] copiedThrough = {0};
+        Position[] earliestResult = {null};
         for (int line = 0; line < model.lineCount(); line++) {
-            for (SearchMatcher.Match match : matcher.findAll(model.getLine(line))) {
-                replacements.add(new TextReplacement(
-                    new Position(line, match.startUtf16()),
-                    new Position(line, match.endUtf16()),
-                    replacementText
-                ));
+            int sourceLine = line;
+            String text = model.getLine(line);
+            copiedThrough[0] = 0;
+            matcher.scanMatches(text, (start, end) -> {
+                if (matchCount[0] == Integer.MAX_VALUE) throw new DocumentEditLimitException();
+                matchCount[0]++;
+                if (replacement.matches(text, start, end)) {
+                    return true;
+                }
+                if (earliestResult[0] == null) {
+                    appendOriginalRange(builder, new Position(0, 0), new Position(sourceLine, start), metadata);
+                } else {
+                    builder.append(text, copiedThrough[0], start);
+                }
+                builder.appendReplacement(replacement, metadata.defaultLineSeparator());
+                if (earliestResult[0] == null) {
+                    earliestResult[0] = builder.position();
+                }
+                copiedThrough[0] = end;
+                return true;
+            });
+            if (earliestResult[0] != null) {
+                builder.append(text, copiedThrough[0], text.length());
+                if (line + 1 < model.lineCount()) {
+                    builder.newline(metadata.lineSeparators().get(line));
+                }
             }
         }
-        if (replacements.isEmpty()) {
-            return 0;
-        }
-        applyTextReplacements(replacements);
-        return replacements.size();
+        if (earliestResult[0] != null) builder.finishLine();
+        return new ReplacementResult(matchCount[0], earliestResult[0]);
     }
+
+    private record ReplacementResult(int matchCount, Position firstChange) {}
 
     private int firstNonWhitespaceColumn(String line) {
         GraphemeText graphemes = graphemes(line);
@@ -1384,7 +1419,7 @@ public class EditorEngine {
         }
         char close = closingPairFor(open);
         ViewState before = captureViewState();
-        List<TrackedEdit> ops = new ArrayList<>(2);
+        List<ReplacementDelta> ops = new ArrayList<>(2);
         // Keep the selected content and its original line separators in place.
         // Inserting from the end also keeps both original positions valid.
         applyReplaceAndTrack(ops, range.end(), range.end(), String.valueOf(close));
@@ -1489,7 +1524,7 @@ public class EditorEngine {
         return true;
     }
 
-    private TrackedEdit maybeAutoOutdentKeywordLineOp() {
+    private ReplacementDelta maybeAutoOutdentKeywordLineOp() {
         if (!isAutoIndentActive()) {
             return null;
         }
@@ -1500,10 +1535,9 @@ public class EditorEngine {
         }
         Position deleteStart = new Position(cursor.line(), 0);
         Position deleteEnd = new Position(cursor.line(), drop);
-        String deleted = model.getTextRange(deleteStart, deleteEnd);
-        model.deleteRange(deleteStart, deleteEnd);
+        ReplacementDelta delta = model.replaceRange(deleteStart, deleteEnd, "");
         state.setCursor(new Position(cursor.line(), cursor.col() - drop));
-        return new TrackedEdit(EditOp.delete(deleteStart, deleted), 0, List.of(), List.of());
+        return delta;
     }
 
     private static int leadingIndentLength(String line) {
@@ -1562,12 +1596,22 @@ public class EditorEngine {
         gutterDiff.gutterDiffComputedRevision = Long.MIN_VALUE;
     }
 
-    private void commitOperationEdit(EditKind kind, ViewState before, List<TrackedEdit> ops) {
+    private void commitOperationEdit(EditKind kind, ViewState before, List<ReplacementDelta> ops) {
         if (ops == null || ops.isEmpty()) {
             return;
         }
         long beforeStateId = history.currentDocumentStateId;
         ViewState after = captureViewState();
+        for (ReplacementDelta delta : ops) {
+            if (delta.operation().deletedText().equals(delta.operation().insertedText())) continue;
+            EditorViewMemento view = editedView(after.view(), model::getLine);
+            if (view != after.view()) {
+                after = new ViewState(after.document(), view);
+                state.setCursor(view.cursor());
+                state.setSelectionAnchor(view.selectionAnchor());
+            }
+            break;
+        }
         long afterStateId = nextDocumentStateId();
         history.currentDocumentStateId = afterStateId;
         long now = System.nanoTime();
@@ -1594,6 +1638,44 @@ public class EditorEngine {
         history.lastEditViewId = state.viewId();
     }
 
+    /** Prepares the document, compact undo and view before exposing any part of a local replacement. */
+    private void commitPreparedReplacement(Position start, Position end, ReplacementText replacement,
+                                           Position anchorAfter, ViewState before) {
+        TextModel.PreparedReplacement prepared;
+        ViewState after;
+        Deque<HistoryEntry> nextUndo;
+        long afterStateId = history.nextDocumentStateId + 1;
+        try {
+            prepared = model.prepareReplacement(start, end, replacement);
+            after = new ViewState(before.document(), new EditorViewMemento(state.viewId(),
+                prepared.delta().endAfter(), before.view().viewport(), anchorAfter));
+            after = new ViewState(after.document(), editedView(after.view(), prepared::resultingLine));
+            OperationHistoryEntry entry = new OperationHistoryEntry(EditKind.NONE, before, after,
+                List.of(prepared.delta()), history.currentDocumentStateId, afterStateId);
+            nextUndo = new ArrayDeque<>(history.undoStack);
+            pushWithLimit(nextUndo, entry);
+        } catch (OutOfMemoryError exhausted) {
+            // Preparation only owns temporary data. The active model and history
+            // still describe the complete pre-command document.
+            throw new DocumentEditLimitException();
+        }
+        model.publishReplacement(prepared);
+        history.undoStack = nextUndo;
+        history.nextDocumentStateId = afterStateId;
+        history.currentDocumentStateId = afterStateId;
+        history.redoStack.clear();
+        state.setCursor(after.cursor());
+        state.setSelectionAnchor(after.selectionAnchor());
+        state.invalidateNavigation();
+        state.setDirty(history.savedDocumentStateId < 0L || afterStateId != history.savedDocumentStateId);
+        history.lastEditKind = EditKind.NONE;
+        history.lastEditAtNanos = System.nanoTime();
+        history.lastEditCursorAfter = after.cursor();
+        history.lastEditViewId = state.viewId();
+        applyGutterDiffOp(prepared.delta().operation());
+        document.changed();
+    }
+
     private boolean tryMergeSnapshotEntry(EditKind kind, Snapshot after, long afterStateId) {
         HistoryEntry top = history.undoStack.peek();
         if (!(top instanceof SnapshotHistoryEntry entry) || entry.kind() != kind) {
@@ -1606,7 +1688,7 @@ public class EditorEngine {
     private boolean tryMergeOperationEntry(
         EditKind kind,
         ViewState after,
-        List<TrackedEdit> ops,
+        List<ReplacementDelta> ops,
         long afterStateId
     ) {
         HistoryEntry top = history.undoStack.peek();
@@ -1618,42 +1700,17 @@ public class EditorEngine {
     }
 
     private Position applyReplaceAndTrack(
-        List<TrackedEdit> ops,
+        List<ReplacementDelta> ops,
         Position start,
         Position end,
         String insertedText
     ) {
-        Position a = model.clamp(start);
-        Position b = model.clamp(end);
-        if (comparePositions(a, b) > 0) {
-            Position temp = a;
-            a = b;
-            b = temp;
+        ReplacementDelta delta = model.replaceRange(start, end, insertedText);
+        if (!delta.isEmpty()) {
+            ops.add(delta);
+            applyGutterDiffOp(delta.operation());
         }
-        String deletedText = model.getTextRange(a, b);
-        String inserted = normalizeInsertedText(insertedText == null ? "" : insertedText);
-        LogicalDocumentLines.requireWellFormedUtf16(inserted);
-        if (deletedText.isEmpty() && inserted.isEmpty()) {
-            return a;
-        }
-        int firstSeparator = Math.max(0, a.line() - 1);
-        List<String> beforeSeparators = model.fileMetadata().lineSeparators();
-        List<String> deletedSeparators = List.copyOf(
-            beforeSeparators.subList(firstSeparator, Math.min(beforeSeparators.size(), b.line() + 1))
-        );
-        Position cursor = model.deleteRange(a, b);
-        if (!inserted.isEmpty()) {
-            cursor = model.insertText(cursor, inserted);
-        }
-        model.normalizeLineSeparators(a.line(), cursor.line());
-        List<String> afterSeparators = model.fileMetadata().lineSeparators();
-        List<String> insertedSeparators = List.copyOf(
-            afterSeparators.subList(firstSeparator, Math.min(afterSeparators.size(), cursor.line() + 1))
-        );
-        EditOp.ReplaceRange op = EditOp.replace(a, deletedText, inserted);
-        ops.add(new TrackedEdit(op, firstSeparator, deletedSeparators, insertedSeparators));
-        applyGutterDiffOp(op);
-        return cursor;
+        return delta.endAfter();
     }
 
     private static int comparePositions(Position left, Position right) {
@@ -1667,6 +1724,17 @@ public class EditorEngine {
         Position clamped = model.clamp(requested);
         String line = model.getLine(clamped.line());
         return new Position(clamped.line(), graphemes(line).floorBoundary(clamped.col()));
+    }
+
+    /** Keep subsequent typing after a newly joined cluster without widening an exact text selection. */
+    private static EditorViewMemento editedView(EditorViewMemento view, IntFunction<String> lines) {
+        Position cursor = view.cursor();
+        int column = GraphemeText.ceilBoundary(lines.apply(cursor.line()), cursor.col());
+        Position anchor = view.selectionAnchor();
+        boolean splitAnchor = anchor != null
+            && GraphemeText.ceilBoundary(lines.apply(anchor.line()), anchor.col()) != anchor.col();
+        if (column == cursor.col() && !splitAnchor) return view;
+        return new EditorViewMemento(view.viewId(), new Position(cursor.line(), column), view.viewport(), null);
     }
 
     private GraphemeText graphemes(String text) {
@@ -1693,7 +1761,9 @@ public class EditorEngine {
 
     private List<TextReplacement> validateTextReplacements(List<TextReplacement> replacements) {
         Objects.requireNonNull(replacements, "replacements");
-        List<TextReplacement> canonical = new ArrayList<>(replacements.size());
+        Comparator<TextReplacement> order = Comparator.comparing(TextReplacement::start, EditorEngine::comparePositions)
+            .thenComparing(TextReplacement::end, EditorEngine::comparePositions);
+        boolean sorted = true;
         for (int index = 0; index < replacements.size(); index++) {
             TextReplacement replacement = Objects.requireNonNull(
                 replacements.get(index),
@@ -1706,12 +1776,14 @@ public class EditorEngine {
             } catch (IllegalArgumentException e) {
                 throw invalidReplacement(index, "contains malformed UTF-16 text");
             }
-            canonical.add(replacement);
+            if (index > 0 && order.compare(replacements.get(index - 1), replacement) > 0) sorted = false;
         }
-        canonical.sort(
-            Comparator.comparing(TextReplacement::start, EditorEngine::comparePositions)
-                .thenComparing(TextReplacement::end, EditorEngine::comparePositions)
-        );
+        List<TextReplacement> canonical = replacements;
+        if (!sorted) {
+            DocumentEditBudget.requireTemporaryReferences(replacements.size());
+            canonical = new ArrayList<>(replacements);
+            canonical.sort(order);
+        }
         for (int index = 1; index < canonical.size(); index++) {
             TextReplacement previous = canonical.get(index - 1);
             TextReplacement current = canonical.get(index);
@@ -1722,7 +1794,7 @@ public class EditorEngine {
                 );
             }
         }
-        return List.copyOf(canonical);
+        return canonical;
     }
 
     private void requireTextPosition(Position position, int replacementIndex, String endpoint) {
@@ -1959,6 +2031,12 @@ public class EditorEngine {
             state.setCursor(model.clamp(memento.cursor()));
             state.setViewport(memento.viewport());
             state.setSelectionAnchor(memento.selectionAnchor());
+        } else {
+            EditorViewMemento active = new EditorViewMemento(state.viewId(), model.clamp(state.getCursor()),
+                state.viewport(), state.getSelectionAnchor() == null ? null : model.clamp(state.getSelectionAnchor()));
+            EditorViewMemento normalized = editedView(active, model::getLine);
+            state.setCursor(normalized.cursor());
+            state.setSelectionAnchor(normalized.selectionAnchor());
         }
     }
 
@@ -2003,15 +2081,6 @@ public class EditorEngine {
         Position selectionAnchor() {
             return view.selectionAnchor();
         }
-    }
-
-    /** Separator slices are copied so history never retains whole metadata lists. */
-    private record TrackedEdit(
-        EditOp.ReplaceRange operation,
-        int firstSeparator,
-        List<String> deletedSeparators,
-        List<String> insertedSeparators
-    ) {
     }
 
     interface HistoryEntry {
@@ -2067,7 +2136,7 @@ public class EditorEngine {
         private final EditKind kind;
         private final ViewState beforeView;
         private ViewState afterView;
-        private final List<TrackedEdit> ops;
+        private final List<ReplacementDelta> ops;
         private final long beforeStateId;
         private long afterStateId;
 
@@ -2075,7 +2144,7 @@ public class EditorEngine {
             EditKind kind,
             ViewState beforeView,
             ViewState afterView,
-            List<TrackedEdit> ops,
+            List<ReplacementDelta> ops,
             long beforeStateId,
             long afterStateId
         ) {
@@ -2092,7 +2161,7 @@ public class EditorEngine {
         }
 
         void append(
-            List<TrackedEdit> extraOps,
+            List<ReplacementDelta> extraOps,
             ViewState mergedAfterView,
             long mergedAfterStateId
         ) {
@@ -2104,9 +2173,7 @@ public class EditorEngine {
         @Override
         public void undo(EditorEngine engine) {
             for (int i = ops.size() - 1; i >= 0; i--) {
-                TrackedEdit edit = ops.get(i);
-                EditOp.ReplaceRange op = edit.operation();
-                applyReplace(engine, op.start(), op.insertedText(), op.deletedText(), edit.firstSeparator(), edit.deletedSeparators());
+                replay(engine, ops.get(i).inverse());
             }
             engine.restoreViewState(beforeView);
             engine.history.currentDocumentStateId = beforeStateId;
@@ -2114,49 +2181,16 @@ public class EditorEngine {
 
         @Override
         public void redo(EditorEngine engine) {
-            for (TrackedEdit edit : ops) {
-                EditOp.ReplaceRange op = edit.operation();
-                applyReplace(engine, op.start(), op.deletedText(), op.insertedText(), edit.firstSeparator(), edit.insertedSeparators());
+            for (ReplacementDelta delta : ops) {
+                replay(engine, delta);
             }
             engine.restoreViewState(afterView);
             engine.history.currentDocumentStateId = afterStateId;
         }
 
-        private void applyReplace(
-            EditorEngine engine,
-            Position start,
-            String deletedText,
-            String insertedText,
-            int firstSeparator,
-            List<String> insertedSeparators
-        ) {
-            TextModel model = engine.model;
-            Position a = model.clamp(start);
-            Position b = advancePosition(model, a, deletedText);
-            Position cursor = model.deleteRange(a, b);
-            if (insertedText != null && !insertedText.isEmpty()) {
-                model.insertText(cursor, insertedText);
-            }
-            model.restoreLineSeparators(firstSeparator, insertedSeparators);
-            engine.applyGutterDiffOp(EditOp.replace(a, deletedText, insertedText));
-        }
-
-        private Position advancePosition(TextModel model, Position start, String text) {
-            int line = start.line();
-            int col = start.col();
-            if (text == null || text.isEmpty()) {
-                return start;
-            }
-            for (int i = 0; i < text.length(); i++) {
-                char ch = text.charAt(i);
-                if (ch == '\n') {
-                    line++;
-                    col = 0;
-                } else {
-                    col++;
-                }
-            }
-            return model.clamp(new Position(line, col));
+        private void replay(EditorEngine engine, ReplacementDelta delta) {
+            engine.model.replayReplacement(delta);
+            engine.applyGutterDiffOp(delta.operation());
         }
     }
 
@@ -2202,28 +2236,6 @@ public class EditorEngine {
             return new SelectionRange(b, a);
         }
         return new SelectionRange(a, b);
-    }
-
-    private int commonIndentLength(List<Integer> lineIndexes) {
-        String common = null;
-        for (int lineIndex : lineIndexes) {
-            String line = model.getLine(lineIndex);
-            String indent = line.substring(0, leadingIndentLength(line));
-            if (common == null) {
-                common = indent;
-                continue;
-            }
-            int shared = 0;
-            int limit = Math.min(common.length(), indent.length());
-            while (shared < limit && common.charAt(shared) == indent.charAt(shared)) {
-                shared++;
-            }
-            common = common.substring(0, shared);
-            if (common.isEmpty()) {
-                return 0;
-            }
-        }
-        return common == null ? 0 : common.length();
     }
 
     private static int lineCommentColumn(String line, String marker, int lineIndex) {

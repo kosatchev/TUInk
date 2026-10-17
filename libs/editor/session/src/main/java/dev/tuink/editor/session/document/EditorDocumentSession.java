@@ -3,6 +3,7 @@ package dev.tuink.editor.session.document;
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorDocument;
 import dev.tuink.core.EditorClipboard;
+import dev.tuink.core.DocumentEditLimitException;
 import dev.tuink.core.LogicalEditorTextLayout;
 import dev.tuink.core.Position;
 import dev.tuink.core.SimpleLineBuffer;
@@ -14,7 +15,7 @@ import dev.tuink.editor.document.TextEdit;
 import dev.tuink.editor.document.TextPosition;
 import dev.tuink.editor.document.WorkspaceEdit;
 import dev.tuink.editor.session.edit.WorkspaceEditValidator;
-import java.util.ArrayList;
+import java.util.AbstractList;
 import java.util.List;
 import java.util.Objects;
 
@@ -89,17 +90,23 @@ public final class EditorDocumentSession {
             );
         }
 
-        List<TextReplacement> replacements = new ArrayList<>(proposed.edits().size());
-        for (TextEdit edit : proposed.edits()) {
-            replacements.add(new TextReplacement(
-                position(edit.range().start()),
-                position(edit.range().end()),
-                edit.replacement()
-            ));
+        // The contract already owns a canonical immutable edit list. Adapt it
+        // lazily rather than duplicating every range before core admission.
+        List<TextReplacement> replacements = new AbstractList<>() {
+            @Override public int size() { return proposed.edits().size(); }
+            @Override public TextReplacement get(int index) {
+                TextEdit edit = proposed.edits().get(index);
+                return new TextReplacement(position(edit.range().start()), position(edit.range().end()), edit.replacement());
+            }
+        };
+        try {
+            boolean changed = engine.applyTextReplacements(replacements);
+            DocumentSnapshot after = publishIfChanged();
+            return new WorkspaceEditResult.Applied(after, changed);
+        } catch (DocumentEditLimitException tooLarge) {
+            return new WorkspaceEditResult.Rejected(
+                WorkspaceEditResult.RejectionReason.EDIT_LIMIT_EXCEEDED, current, List.of());
         }
-        boolean changed = engine.applyTextReplacements(replacements);
-        DocumentSnapshot after = publishIfChanged();
-        return new WorkspaceEditResult.Applied(after, changed);
     }
 
     /** Undoes exactly one committed session mutation. */

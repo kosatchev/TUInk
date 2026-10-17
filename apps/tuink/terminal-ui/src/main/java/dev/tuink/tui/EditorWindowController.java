@@ -1,6 +1,7 @@
 package dev.tuink.tui;
 
 import dev.tuink.core.EditorEngine;
+import dev.tuink.core.DocumentEditLimitException;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.LanguageProfiles;
 import dev.tuink.core.Position;
@@ -995,8 +996,11 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         tabs.get(result.activeTabIndex()).viewportController().onCommandResult(result.cursorPolicy());
         if (result.activeTabIndex() != activeTabIndex) sessionContext.activate(result.activeTabIndex());
         if (result.status() != null && !result.status().isBlank()) {
-            if (result.statusLevel() == InputActionDispatcher.StatusLevel.WARNING) notification.warning(result.status());
-            else notification.info(result.status());
+            switch (result.statusLevel()) {
+                case ERROR -> notification.error(result.status());
+                case WARNING -> notification.warning(result.status());
+                case INFO -> notification.info(result.status());
+            }
         }
     }
 
@@ -1512,7 +1516,12 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 } else {
                     long revisionBefore = model.revision();
                     Position cursorBefore = state.getCursor();
-                    engine.pasteText(paste.text());
+                    try {
+                        engine.pasteText(paste.text());
+                    } catch (DocumentEditLimitException limit) {
+                        notification.error(limit.getMessage());
+                        return;
+                    }
                     if (revisionBefore != model.revision() || !cursorBefore.equals(state.getCursor())) {
                         viewportController.onEditorTextInteraction();
                     }

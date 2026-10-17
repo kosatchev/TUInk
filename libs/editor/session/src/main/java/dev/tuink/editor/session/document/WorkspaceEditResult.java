@@ -29,14 +29,15 @@ public sealed interface WorkspaceEditResult
             if (reason == RejectionReason.VALIDATION_FAILED && violations.isEmpty()) {
                 throw new IllegalArgumentException("A validation rejection must contain violations");
             }
-            if (reason == RejectionReason.WRONG_OWNER_THREAD && !violations.isEmpty()) {
-                throw new IllegalArgumentException("Thread rejection must not contain edit violations");
+            if (reason != RejectionReason.VALIDATION_FAILED && !violations.isEmpty()) {
+                throw new IllegalArgumentException("An admission rejection must not contain edit violations");
             }
         }
     }
 
     enum RejectionReason {
         WRONG_OWNER_THREAD,
+        EDIT_LIMIT_EXCEEDED,
         VALIDATION_FAILED
     }
 }

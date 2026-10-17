@@ -37,7 +37,7 @@ import java.util.concurrent.atomic.AtomicLong;
 public class TextModel {
     private static final AtomicLong NEXT_CACHE_ID = new AtomicLong();
     private static final int CHANGE_HISTORY_CAPACITY = 128;
-    private final TextBuffer buffer;
+    private TextBuffer buffer;
     private final int[] firstChangedLines = new int[CHANGE_HISTORY_CAPACITY];
     private final LineChange[] lineChanges = new LineChange[CHANGE_HISTORY_CAPACITY];
     private static final Charset FALLBACK_CHARSET = Charset.forName("windows-1251");
@@ -87,6 +87,11 @@ public class TextModel {
         }
         this.buffer = owned;
         this.fileMetadata = DocumentFileMetadata.newDocument(checked.size());
+    }
+
+    private TextModel(TextBuffer ownedBuffer, DocumentFileMetadata metadata) {
+        this.buffer = ownedBuffer;
+        this.fileMetadata = metadata;
     }
 
     public int lineCount() {
@@ -193,14 +198,34 @@ public class TextModel {
             return line.substring(a.col(), b.col());
         }
 
-        StringBuilder out = new StringBuilder();
-        out.append(buffer.getLine(a.line()).substring(a.col()));
+        long length = textRangeLengthOrdered(a, b);
+        if (length > Integer.MAX_VALUE - 8L) {
+            throw new OutOfMemoryError("Text range exceeds the maximum String size");
+        }
+        StringBuilder out = new StringBuilder((int) length);
+        String first = buffer.getLine(a.line());
+        out.append(first, a.col(), first.length());
         out.append('\n');
         for (int line = a.line() + 1; line < b.line(); line++) {
             out.append(buffer.getLine(line)).append('\n');
         }
         out.append(buffer.getLine(b.line()), 0, b.col());
         return out.toString();
+    }
+
+    long textRangeLength(Position start, Position end) {
+        Position a = requireCodePointBoundary(start);
+        Position b = requireCodePointBoundary(end);
+        return comesAfter(a, b) ? textRangeLengthOrdered(b, a) : textRangeLengthOrdered(a, b);
+    }
+
+    private long textRangeLengthOrdered(Position start, Position end) {
+        if (start.line() == end.line()) return end.col() - (long) start.col();
+        long length = buffer.getLine(start.line()).length() - (long) start.col() + 1 + end.col();
+        for (int line = start.line() + 1; line < end.line(); line++) {
+            length += buffer.getLine(line).length() + 1L;
+        }
+        return length;
     }
 
     public Position deleteRange(Position start, Position end) {
@@ -258,6 +283,313 @@ public class TextModel {
         insertDefaultLineSeparators(at.line(), parts.length - 1);
         markChanged(at.line(), 1, parts.length);
         return new Position(at.line() + parts.length - 1, last.length());
+    }
+
+    /** Admits local replacement allocations, including undo, before deleting any source text. */
+    void requireReplacementFits(Position start, Position end, ReplacementText replacement) {
+        long deletedUnits;
+        if (start.line() == end.line()) {
+            deletedUnits = end.col() - (long) start.col();
+        } else {
+            deletedUnits = getLine(start.line()).length() - (long) start.col() + 1 + end.col();
+            for (int line = start.line() + 1; line < end.line(); line++) {
+                deletedUnits = DocumentEditBudget.add(deletedUnits, getLine(line).length() + 1L);
+            }
+        }
+        long retainedUnits = start.col() + (long) getLine(end.line()).length() - end.col();
+        long insertedUnits = replacement.text().length();
+        long copiedUnits = DocumentEditBudget.add(deletedUnits,
+            DocumentEditBudget.add(retainedUnits, insertedUnits));
+        long changedLines = replacement.lineBreaks() + 1L;
+        long resultLines = lineCount() - (end.line() - (long) start.line()) + replacement.lineBreaks();
+        long longestLine = replacement.lineBreaks() == 0
+            ? DocumentEditBudget.add(retainedUnits, insertedUnits)
+            : Math.max(DocumentEditBudget.add(start.col(), replacement.firstEnd()),
+                Math.max(replacement.longestInteriorLine(),
+                    insertedUnits - replacement.lastStart() + getLine(end.line()).length() - end.col()));
+        DocumentEditBudget.currentHeap(lineCount())
+            .requireLocalReplacement(copiedUnits, resultLines, changedLines, longestLine);
+    }
+
+    /**
+     * Builds a local replacement without touching the active buffer. Ordinary
+     * single-line replacements retain just the changed line; structural changes
+     * use a sibling buffer and share all untouched immutable line strings.
+     */
+    PreparedReplacement prepareReplacement(Position start, Position end, ReplacementText replacement) {
+        Position a = requireCodePointBoundary(start);
+        Position b = requireCodePointBoundary(end);
+        if (comesAfter(a, b)) {
+            Position swap = a;
+            a = b;
+            b = swap;
+        }
+        requireReplacementFits(a, b, replacement);
+        String inserted = replacement.text().replace("\r\n", "\n").replace('\r', '\n');
+        // Only this storage strategy guarantees that publishing setLine merely
+        // assigns an already allocated reference. Other strategies stage a sibling.
+        if (buffer.getClass() == SimpleLineBuffer.class
+            && a.line() == b.line() && replacement.lineBreaks() == 0) {
+            String source = buffer.getLine(a.line());
+            String updated = source.substring(0, a.col()) + inserted + source.substring(b.col());
+            DocumentFileMetadata metadata = fileMetadata;
+            List<String> separators = metadata.lineSeparators();
+            if (updated.isEmpty() && a.line() > 0 && a.line() < lineCount() - 1
+                && EditorState.LINE_SEPARATOR_CR.equals(separators.get(a.line() - 1))
+                && EditorState.LINE_SEPARATOR_LF.equals(separators.get(a.line()))) {
+                List<String> normalized = new ArrayList<>(separators);
+                normalized.set(a.line(), EditorState.LINE_SEPARATOR_CRLF);
+                metadata = metadata.withLineSeparators(normalized);
+            }
+            int firstSeparator = Math.max(0, a.line() - 1);
+            ReplacementDelta delta = new ReplacementDelta(
+                EditOp.replace(a, source.substring(a.col(), b.col()), inserted), firstSeparator,
+                separatorSlice(firstSeparator, b.line()),
+                List.copyOf(metadata.lineSeparators().subList(firstSeparator,
+                    Math.min(metadata.lineSeparators().size(), a.line() + 1))));
+            return new PreparedReplacement(buffer, revision, null, updated, metadata, delta,
+                new LineChange(a.line(), 1, 1));
+        }
+        TextBuffer nextBuffer = Objects.requireNonNull(buffer.createEmptySibling(), "buffer.createEmptySibling()");
+        if (nextBuffer == buffer || nextBuffer.lineCount() != 1 || !nextBuffer.getLine(0).isEmpty()) {
+            throw new IllegalArgumentException("createEmptySibling() must return an independent empty buffer");
+        }
+        nextBuffer.setLine(0, buffer.getLine(0));
+        for (int line = 1; line < lineCount(); line++) {
+            nextBuffer.insertLine(line, buffer.getLine(line));
+        }
+        TextModel staged = new TextModel(nextBuffer, fileMetadata);
+        ReplacementDelta delta = staged.replaceRange(a, b, inserted);
+        return new PreparedReplacement(buffer, revision, nextBuffer, null, staged.fileMetadata, delta,
+            new LineChange(a.line(), b.line() - a.line() + 1, replacement.lineBreaks() + 1));
+    }
+
+    /** All text, metadata and change records have already been allocated. */
+    void publishReplacement(PreparedReplacement prepared) {
+        if (prepared.source() != buffer || prepared.revision() != revision) {
+            throw new IllegalStateException("The prepared replacement is stale");
+        }
+        if (prepared.buffer() == null) {
+            buffer.setLine(prepared.change().firstLine(), prepared.line());
+        } else {
+            buffer = prepared.buffer();
+        }
+        fileMetadata = prepared.metadata();
+        revision++;
+        int slot = (int) (revision % CHANGE_HISTORY_CAPACITY);
+        firstChangedLines[slot] = prepared.change().firstLine();
+        lineChanges[slot] = prepared.change();
+    }
+
+    record PreparedReplacement(TextBuffer source, long revision, TextBuffer buffer, String line,
+        DocumentFileMetadata metadata, ReplacementDelta delta, LineChange change) {
+        String resultingLine(int index) {
+            return buffer != null ? buffer.getLine(index)
+                : index == change.firstLine() ? line : source.getLine(index);
+        }
+    }
+
+    /**
+     * Completes one logical replacement, including any adjacent CR/LF disambiguation.
+     * Ranges retain the clamping and ordering rules of {@link #deleteRange}; both
+     * endpoints and the inserted UTF-16 text are checked before the first mutation.
+     */
+    ReplacementDelta replaceRange(Position start, Position end, String text) {
+        Position a = requireCodePointBoundary(start);
+        Position b = requireCodePointBoundary(end);
+        if (comesAfter(a, b)) {
+            Position swap = a;
+            a = b;
+            b = swap;
+        }
+        String inserted = text == null ? "" : text.replace("\r\n", "\n").replace('\r', '\n');
+        LogicalDocumentLines.requireWellFormedUtf16(inserted);
+        String deleted = getTextRange(a, b);
+        EditOp.ReplaceRange operation = EditOp.replace(a, deleted, inserted);
+        int firstSeparator = Math.max(0, a.line() - 1);
+        if (deleted.isEmpty() && inserted.isEmpty()) {
+            return new ReplacementDelta(operation, firstSeparator, List.of(), List.of());
+        }
+        List<String> before = separatorSlice(firstSeparator, b.line());
+        Position after = deleteRange(a, b);
+        if (!inserted.isEmpty()) {
+            after = insertText(after, inserted);
+        }
+        normalizeLineSeparators(a.line(), after.line());
+        return new ReplacementDelta(operation, firstSeparator, before, separatorSlice(firstSeparator, after.line()));
+    }
+
+    /** Builds a same-line batch without exposing intermediate text or separator changes. */
+    PreparedLineReplacements prepareLineReplacements(List<TextReplacement> replacements) {
+        TextBuffer nextBuffer = Objects.requireNonNull(buffer.createEmptySibling(), "buffer.createEmptySibling()");
+        if (nextBuffer == buffer || nextBuffer.lineCount() != 1 || !nextBuffer.getLine(0).isEmpty()) {
+            throw new IllegalArgumentException("createEmptySibling() must return an independent empty buffer");
+        }
+        nextBuffer.setLine(0, buffer.getLine(0));
+        for (int line = 1; line < lineCount(); line++) {
+            nextBuffer.insertLine(line, buffer.getLine(line));
+        }
+        TextModel staged = new TextModel(nextBuffer, fileMetadata);
+        List<ReplacementDelta> operations = new ArrayList<>(replacements.size());
+        int previousLine = -1;
+        for (TextReplacement replacement : replacements) {
+            if (replacement.start().line() != replacement.end().line()
+                || replacement.start().line() <= previousLine
+                || replacement.replacement().indexOf('\n') >= 0
+                || replacement.replacement().indexOf('\r') >= 0) {
+                throw new IllegalArgumentException("A line batch requires ordered, distinct single-line ranges");
+            }
+            staged.requireExactCodePointBoundary(replacement.start());
+            staged.requireExactCodePointBoundary(replacement.end());
+            ReplacementDelta delta = staged.replaceRange(
+                replacement.start(), replacement.end(), replacement.replacement()
+            );
+            if (!delta.isEmpty()) operations.add(delta);
+            previousLine = replacement.start().line();
+        }
+        int firstLine = replacements.getFirst().start().line();
+        int span = replacements.getLast().start().line() - firstLine + 1;
+        return new PreparedLineReplacements(buffer, revision, nextBuffer, staged.fileMetadata,
+            operations, new LineChange(firstLine, span, span));
+    }
+
+    /** Publication only assigns prepared references; allocation failures cannot expose half a batch. */
+    void publishLineReplacements(PreparedLineReplacements prepared) {
+        if (prepared.source() != buffer || prepared.revision() != revision) {
+            throw new IllegalStateException("The prepared line batch is stale");
+        }
+        buffer = prepared.buffer();
+        fileMetadata = prepared.metadata();
+        revision++;
+        int slot = (int) (revision % CHANGE_HISTORY_CAPACITY);
+        firstChangedLines[slot] = prepared.change().firstLine();
+        lineChanges[slot] = prepared.change();
+    }
+
+    record PreparedLineReplacements(TextBuffer source, long revision, TextBuffer buffer,
+        DocumentFileMetadata metadata, List<ReplacementDelta> operations, LineChange change) {
+    }
+
+    /**
+     * Replays a captured replacement after checking its text and boundary EOLs.
+     * Inversion is represented by {@link ReplacementDelta#inverse()}.
+     */
+    void replayReplacement(ReplacementDelta delta) {
+        Objects.requireNonNull(delta, "delta");
+        EditOp.ReplaceRange operation = delta.operation();
+        Position start = requireExactCodePointBoundary(operation.start());
+        Position end = requireExactCodePointBoundary(delta.endBefore());
+        requireLogicalText(operation.deletedText());
+        requireLogicalText(operation.insertedText());
+        if (!getTextRange(start, end).equals(operation.deletedText())) {
+            throw new IllegalArgumentException("Replacement no longer matches the document text");
+        }
+        if (delta.isEmpty()) {
+            return;
+        }
+        List<String> currentSeparators = fileMetadata.lineSeparators();
+        int currentCount = currentSeparators.size();
+        int resultingCount = currentCount - (end.line() - start.line()) + (delta.endAfter().line() - start.line());
+        int firstSeparator = Math.max(0, start.line() - 1);
+        int beforeLimit = Math.min(currentCount, end.line() + 1);
+        int afterLimit = Math.min(resultingCount, delta.endAfter().line() + 1);
+        if (delta.firstSeparator() != firstSeparator
+            || delta.deletedSeparators().size() != beforeLimit - firstSeparator
+            || delta.insertedSeparators().size() != afterLimit - firstSeparator) {
+            throw new IllegalArgumentException("Replacement separator slice does not fit the document");
+        }
+        if (!currentSeparators.subList(firstSeparator, beforeLimit).equals(delta.deletedSeparators())) {
+            throw new IllegalArgumentException("Replacement no longer matches the document line separators");
+        }
+        Position after = deleteRange(start, end);
+        if (!operation.insertedText().isEmpty()) {
+            insertText(after, operation.insertedText());
+        }
+        // The delta already captures the completed replacement's exact boundary EOLs.
+        // Re-normalizing the transient delete/insert states would lose that history.
+        restoreLineSeparators(delta.firstSeparator(), delta.insertedSeparators());
+    }
+
+    private List<String> separatorSlice(int firstSeparator, int lastChangedLine) {
+        List<String> separators = fileMetadata.lineSeparators();
+        return List.copyOf(separators.subList(firstSeparator, Math.min(separators.size(), lastChangedLine + 1)));
+    }
+
+    private Position requireExactCodePointBoundary(Position position) {
+        Position checked = requireCodePointBoundary(position);
+        if (!checked.equals(position)) {
+            throw new IllegalArgumentException("Replacement range is outside the document");
+        }
+        return checked;
+    }
+
+    private static void requireLogicalText(String text) {
+        LogicalDocumentLines.requireWellFormedUtf16(text);
+        if (text.indexOf('\r') >= 0) {
+            throw new IllegalArgumentException("Replacement text must use logical LF separators");
+        }
+    }
+
+    /** An immutable text change with only the affected and adjacent separators. */
+    record ReplacementDelta(
+        EditOp.ReplaceRange operation,
+        int firstSeparator,
+        List<String> deletedSeparators,
+        List<String> insertedSeparators
+    ) {
+        ReplacementDelta {
+            operation = Objects.requireNonNull(operation, "operation");
+            if (firstSeparator < 0) {
+                throw new IllegalArgumentException("firstSeparator must not be negative");
+            }
+            deletedSeparators = copySeparators(deletedSeparators);
+            insertedSeparators = copySeparators(insertedSeparators);
+        }
+
+        boolean isEmpty() {
+            return operation.deletedText().isEmpty() && operation.insertedText().isEmpty();
+        }
+
+        Position endBefore() {
+            return advance(operation.start(), operation.deletedText());
+        }
+
+        Position endAfter() {
+            return advance(operation.start(), operation.insertedText());
+        }
+
+        ReplacementDelta inverse() {
+            return new ReplacementDelta(
+                EditOp.replace(operation.start(), operation.insertedText(), operation.deletedText()),
+                firstSeparator, insertedSeparators, deletedSeparators
+            );
+        }
+
+        private static List<String> copySeparators(List<String> separators) {
+            List<String> owned = List.copyOf(separators);
+            for (String separator : owned) {
+                if (!EditorState.LINE_SEPARATOR_LF.equals(separator)
+                    && !EditorState.LINE_SEPARATOR_CR.equals(separator)
+                    && !EditorState.LINE_SEPARATOR_CRLF.equals(separator)) {
+                    throw new IllegalArgumentException("Unknown replacement line separator");
+                }
+            }
+            return owned;
+        }
+
+        private static Position advance(Position start, String text) {
+            int line = start.line();
+            int column = start.col();
+            for (int index = 0; index < text.length(); index++) {
+                if (text.charAt(index) == '\n') {
+                    line++;
+                    column = 0;
+                } else {
+                    column++;
+                }
+            }
+            return new Position(line, column);
+        }
     }
 
     public Position clamp(Position requested) {
@@ -520,7 +852,7 @@ public class TextModel {
     }
 
     /** Restores the separator slice captured for an undo/redo operation. */
-    void restoreLineSeparators(int firstSeparator, List<String> restored) {
+    private void restoreLineSeparators(int firstSeparator, List<String> restored) {
         if (restored.isEmpty()) {
             return;
         }
@@ -536,7 +868,7 @@ public class TextModel {
     }
 
     /** Called after a complete replacement, once its resulting logical lines are known. */
-    void normalizeLineSeparators(int firstLine, int lastLine) {
+    private void normalizeLineSeparators(int firstLine, int lastLine) {
         fileMetadata = unambiguousLineSeparators(fileMetadata, firstLine, lastLine);
     }
 

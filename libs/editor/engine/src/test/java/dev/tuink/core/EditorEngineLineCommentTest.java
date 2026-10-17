@@ -2,10 +2,13 @@ package dev.tuink.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 
 class EditorEngineLineCommentTest {
@@ -140,6 +143,79 @@ class EditorEngineLineCommentTest {
         assertEquals("#!/usr/bin/env python3", fixture.model.getLine(0));
     }
 
+    @Test
+    void batchUndoPreservesMixedSeparatorsAndSharedViewsWithoutDocumentSnapshots() {
+        SnapshotCountingModel model = new SnapshotCountingModel(new SimpleLineBuffer());
+        List<String> original = List.of("// alpha", "//", "// omega");
+        DocumentFileMetadata metadata = new DocumentFileMetadata(StandardCharsets.UTF_16LE,
+            BomKind.UTF_16_LE, "\r", List.of("\r", "\n"));
+        model.replaceLines(original, metadata);
+        EditorDocument document = new EditorDocument(model);
+        TabSession first = document.attach(LogicalEditorTextLayout::new, new EditorClipboard());
+        TabSession second = document.attach(LogicalEditorTextLayout::new, new EditorClipboard());
+        first.state().setCurrentFile(Path.of("Demo.java"));
+        first.engine().selectAll();
+        EditorViewMemento before = first.state().viewMemento();
+        second.state().setCursor(new Position(1, 2));
+        model.snapshots = 0;
+
+        assertEquals(EditorEngine.LineCommentAction.UNCOMMENTED, first.engine().toggleLineComment().action());
+
+        assertEquals(List.of("alpha", "", "omega"), model.snapshotLines());
+        assertEquals(List.of("\r", "\r\n"), model.fileMetadata().lineSeparators());
+        assertEquals(new Position(1, 0), second.state().getCursor());
+        assertTrue(second.state().isDirty());
+        assertTrue(first.engine().undo());
+        assertEquals(original, model.snapshotLines());
+        assertEquals(metadata, model.fileMetadata());
+        assertEquals(before, first.state().viewMemento());
+        assertFalse(second.state().isDirty());
+        assertFalse(first.engine().undo(), "A comment batch must occupy one history step");
+        assertTrue(first.engine().redo());
+        assertEquals(List.of("alpha", "", "omega"), model.snapshotLines());
+        // The three explicit assertions above inspect snapshots; the edit and history do not.
+        assertEquals(3, model.snapshots);
+    }
+
+    @Test
+    void stagingAllocationFailureLeavesTheActiveDocumentAndHistoryUntouched() {
+        AtomicBoolean fail = new AtomicBoolean();
+        TextModel model = new TextModel(new FailingBuffer(fail));
+        model.replaceLines(List.of("first", "second", "third"));
+        EditorState state = new EditorState();
+        state.setCurrentFile(Path.of("Demo.java"));
+        EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model));
+        engine.setAutoPairsEnabled(false);
+        engine.insertInput("X");
+        engine.insertNewline();
+        assertTrue(engine.undo());
+        engine.selectAll();
+        List<String> before = model.snapshotLines();
+        DocumentFileMetadata metadata = model.fileMetadata();
+        EditorViewMemento view = state.viewMemento();
+        long revision = model.revision();
+        long epoch = model.contentEpoch();
+        long navigation = engine.navigationRevision();
+        boolean dirty = state.isDirty();
+        fail.set(true);
+
+        assertThrows(DocumentEditLimitException.class, engine::toggleLineComment);
+
+        fail.set(false);
+        assertEquals(before, model.snapshotLines());
+        assertEquals(metadata, model.fileMetadata());
+        assertEquals(view, state.viewMemento());
+        assertEquals(revision, model.revision());
+        assertEquals(epoch, model.contentEpoch());
+        assertEquals(navigation, engine.navigationRevision());
+        assertEquals(dirty, state.isDirty());
+        assertTrue(engine.redo(), "Failure must retain the existing redo branch");
+        assertTrue(engine.undo());
+        assertEquals(before, model.snapshotLines());
+        assertTrue(engine.undo());
+        assertFalse(state.isDirty());
+    }
+
     private static void assertCommentMarker(String input, String fileName, String expected) {
         Fixture fixture = fixture(input, fileName);
         fixture.engine.toggleLineComment();
@@ -155,5 +231,35 @@ class EditorEngineLineCommentTest {
     }
 
     private record Fixture(TextModel model, EditorState state, EditorEngine engine) {
+    }
+
+    private static final class SnapshotCountingModel extends TextModel {
+        private int snapshots;
+
+        private SnapshotCountingModel(TextBuffer buffer) {
+            super(buffer);
+        }
+
+        @Override public List<String> snapshotLines() {
+            snapshots++;
+            return super.snapshotLines();
+        }
+    }
+
+    private static final class FailingBuffer extends SimpleLineBuffer {
+        private final AtomicBoolean fail;
+
+        private FailingBuffer(AtomicBoolean fail) {
+            this.fail = fail;
+        }
+
+        @Override public TextBuffer createEmptySibling() {
+            return new FailingBuffer(fail);
+        }
+
+        @Override public void insertLine(int index, String text) {
+            if (fail.get() && lineCount() == 2) throw new OutOfMemoryError("staging allocation");
+            super.insertLine(index, text);
+        }
     }
 }

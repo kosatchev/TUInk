@@ -706,41 +706,54 @@ public class EditorEngine {
     }
 
     public void moveHome() {
-        state.invalidateNavigation();
-        breakCoalescing();
-        state.clearSelection();
-        state.setCursor(new Position(state.getCursor().line(), 0));
+        moveHome(false);
+    }
+
+    public void moveHome(boolean selecting) {
+        navigateTo(new Position(state.getCursor().line(), 0), selecting);
     }
 
     public void moveEnd() {
-        state.invalidateNavigation();
+        moveEnd(false);
+    }
+
+    public void moveEnd(boolean selecting) {
         Position p = state.getCursor();
-        breakCoalescing();
-        state.clearSelection();
-        state.setCursor(new Position(p.line(), model.getLine(p.line()).length()));
+        navigateTo(new Position(p.line(), model.getLine(p.line()).length()), selecting);
     }
 
     public void moveHomeSmart() {
-        state.invalidateNavigation();
-        breakCoalescing();
-        state.clearSelection();
+        moveHomeSmart(false);
+    }
+
+    public void moveHomeSmart(boolean selecting) {
         Position p = state.getCursor();
         String line = model.getLine(p.line());
         int firstContentCol = firstNonWhitespaceColumn(line);
         int target = p.col() == firstContentCol ? 0 : firstContentCol;
-        state.setCursor(new Position(p.line(), target));
+        navigateTo(new Position(p.line(), target), selecting);
     }
 
     public void moveEndSmart() {
-        state.invalidateNavigation();
-        breakCoalescing();
-        state.clearSelection();
+        moveEndSmart(false);
+    }
+
+    public void moveEndSmart(boolean selecting) {
         Position p = state.getCursor();
         String line = model.getLine(p.line());
         int trimmedEnd = trailingTrimEndColumn(line);
         int absoluteEnd = line.length();
         int target = p.col() == trimmedEnd ? absoluteEnd : trimmedEnd;
-        state.setCursor(new Position(p.line(), target));
+        navigateTo(new Position(p.line(), target), selecting);
+    }
+
+    public void moveDocumentStart(boolean selecting) {
+        navigateTo(new Position(0, 0), selecting);
+    }
+
+    public void moveDocumentEnd(boolean selecting) {
+        int last = model.lineCount() - 1;
+        navigateTo(new Position(last, model.getLine(last).length()), selecting);
     }
 
     public void insertChar(char ch) {
@@ -1272,12 +1285,13 @@ public class EditorEngine {
         return 0;
     }
 
-    private static int trailingTrimEndColumn(String line) {
-        int end = line.length();
-        while (end > 0 && Character.isWhitespace(line.charAt(end - 1))) {
+    private int trailingTrimEndColumn(String line) {
+        GraphemeText graphemes = graphemes(line);
+        int end = graphemes.graphemeCount();
+        while (end > 0 && graphemes.isWhitespace(end - 1)) {
             end--;
         }
-        return end;
+        return end == graphemes.graphemeCount() ? line.length() : graphemes.start(end);
     }
 
     private IndentationDecisions indentationDecisions() {

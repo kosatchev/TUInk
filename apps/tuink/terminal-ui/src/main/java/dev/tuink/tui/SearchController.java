@@ -68,4 +68,14 @@ final class SearchController {
             default -> TuinkCommand.SEARCH_NEXT;
         };
     }
+
+    static SearchFocus focusForAction(TuinkCommand command) {
+        return switch (command) {
+            case SEARCH_NEXT -> SearchFocus.NEXT_BUTTON;
+            case SEARCH_PREVIOUS -> SearchFocus.PREV_BUTTON;
+            case SEARCH_REPLACE -> SearchFocus.REPLACE_BUTTON;
+            case SEARCH_REPLACE_ALL -> SearchFocus.ALL_BUTTON;
+            default -> throw new IllegalArgumentException("Not a document search command: " + command);
+        };
+    }
 }

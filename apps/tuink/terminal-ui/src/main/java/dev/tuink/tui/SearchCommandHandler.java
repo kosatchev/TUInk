@@ -2,84 +2,72 @@ package dev.tuink.tui;
 
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.SearchOptions;
+import dev.tuink.core.TabSession;
 import dev.tuink.core.TabSearch;
 import dev.tuink.tui.command.TuinkCommand;
-import dev.tuink.tui.flow.SearchFocus;
-import dev.tuink.tui.ui.SearchBarView;
 import dev.tuink.tui.ui.ViewportController.CursorPolicy;
 import java.util.List;
+import java.util.function.BooleanSupplier;
 
 /** Search operations on documents; field editing stays in the control router. */
 final class SearchCommandHandler {
     private SearchCommandHandler() {}
 
-    record Context(TerminalEditorApp host, List<TerminalEditorApp.EditorTab> tabs, int activeTabIndex,
-        UiSessionState ui, SearchController.SearchUiOptions options, String query, String replacement,
-        SearchBarView.Placement placement, int rows, int columns) {}
+    record Context(List<TabSession> tabs, int activeTabIndex, boolean readingMode,
+        SearchController.SearchUiOptions options, String query, String replacement) {}
 
-    record Result(int activeTabIndex, CursorPolicy cursorPolicy, String status,
+    record Result(int activeTabIndex, int matchedCount, boolean documentChanged, CursorPolicy cursorPolicy, String status,
         InputActionDispatcher.StatusLevel statusLevel) {}
 
-    static Result execute(TuinkCommand command, Context context) {
+    static Result execute(TuinkCommand command, Context context, BooleanSupplier revealCurrentSelection) {
         var current = context.tabs().get(context.activeTabIndex());
-        EditorEngine engine = current.tabSession().engine();
+        EditorEngine engine = current.engine();
         SearchOptions options = SearchController.toSearchOptions(context.options());
         boolean allTabs = context.options().allTabs();
         int activeTabIndex = context.activeTabIndex();
+        int matchedCount = 0;
+        boolean documentChanged = false;
         CursorPolicy policy = CursorPolicy.PRESERVE;
         String status;
         var level = InputActionDispatcher.StatusLevel.INFO;
-        if (command == TuinkCommand.CURSOR_PAGE_UP || command == TuinkCommand.CURSOR_PAGE_DOWN) {
-            TerminalEditorApp.scrollDocumentViewport(current.tabSession().model(), engine.textLayout(), current.state(),
-                context.rows(), context.columns(), context.ui().wrapLinesSetting, context.ui().wrapWordsSetting,
-                (command == TuinkCommand.CURSOR_PAGE_UP ? -1 : 1) * Math.max(1, context.rows()),
-                context.ui().tabWidthSetting);
-            return new Result(activeTabIndex, CursorPolicy.PAGE_SCROLL, null, level);
-        }
-        SearchFocus focus = switch (command) {
-            case SEARCH_NEXT -> SearchFocus.NEXT_BUTTON;
-            case SEARCH_PREVIOUS -> SearchFocus.PREV_BUTTON;
-            case SEARCH_REPLACE -> SearchFocus.REPLACE_BUTTON;
-            case SEARCH_REPLACE_ALL -> SearchFocus.ALL_BUTTON;
-            default -> throw new IllegalArgumentException("Not a document search command: " + command);
-        };
-        if (SearchController.isSearchActionFocus(context.host().searchFocusManager.focused().orElse(null))) {
-            context.host().focusSearch(context.placement(), focus);
-        }
         switch (command) {
             case SEARCH_NEXT, SEARCH_PREVIOUS -> {
                 boolean next = command == TuinkCommand.SEARCH_NEXT;
-                boolean found = next && context.host().focusCurrentMatchIfOffscreen(current.tabSession().model(), current.state(),
-                    engine, context.rows(), context.columns(), context.ui().wrapLinesSetting,
-                    context.ui().wrapWordsSetting, context.query(), options);
+                boolean found = next && SearchSelection.matchesQuery(current.model(), current.state(), context.query(), options)
+                    && revealCurrentSelection.getAsBoolean();
                 if (!found && allTabs) {
                     int foundTab = next
-                        ? TabSearch.findNextAcrossTabs(context.host().toTabSessions(context.tabs()), activeTabIndex, context.query(), options)
-                        : TabSearch.findPreviousAcrossTabs(context.host().toTabSessions(context.tabs()), activeTabIndex, context.query(), options);
+                        ? TabSearch.findNextAcrossTabs(context.tabs(), activeTabIndex, context.query(), options)
+                        : TabSearch.findPreviousAcrossTabs(context.tabs(), activeTabIndex, context.query(), options);
                     found = foundTab >= 0;
                     if (found) activeTabIndex = foundTab;
                 } else if (!found) {
                     found = next ? engine.findNext(context.query(), options) : engine.findPrevious(context.query(), options);
                 }
                 if (found) policy = CursorPolicy.FOLLOW_CURSOR;
+                matchedCount = found ? 1 : 0;
                 status = found ? next ? "Found next match" : "Found previous match" : "Not found";
             }
             case SEARCH_REPLACE, SEARCH_REPLACE_ALL -> {
-                if (context.ui().readingModeSetting) {
+                if (context.readingMode()) {
                     status = "Reading mode: replace is disabled";
                 } else if (command == TuinkCommand.SEARCH_REPLACE) {
-                    long before = current.tabSession().model().revision();
+                    long before = current.model().revision();
                     var cursor = current.state().getCursor();
                     var anchor = current.state().getSelectionAnchor();
                     boolean found = engine.replaceCurrentOrNext(context.query(), context.replacement(), options);
-                    boolean changed = before != current.tabSession().model().revision();
+                    boolean changed = before != current.model().revision();
+                    matchedCount = found ? 1 : 0;
+                    documentChanged = changed;
                     if (changed || !cursor.equals(current.state().getCursor())
                         || !java.util.Objects.equals(anchor, current.state().getSelectionAnchor())) policy = CursorPolicy.FOLLOW_CURSOR;
                     status = changed ? "Replaced match" : found ? "Match found; text unchanged" : "Nothing to replace";
                 } else {
-                    long before = current.tabSession().model().revision();
+                    long before = current.model().revision();
                     int matched = engine.replaceAll(context.query(), context.replacement(), options);
-                    if (before != current.tabSession().model().revision()) {
+                    matchedCount = matched;
+                    documentChanged = before != current.model().revision();
+                    if (documentChanged) {
                         policy = CursorPolicy.FOLLOW_CURSOR;
                         status = "Matched " + matched + " occurrence(s); replacement applied. Undo available: Ctrl+Z";
                         level = InputActionDispatcher.StatusLevel.WARNING;
@@ -90,6 +78,6 @@ final class SearchCommandHandler {
             }
             default -> throw new IllegalArgumentException("Not a document search command: " + command);
         }
-        return new Result(activeTabIndex, policy, status, level);
+        return new Result(activeTabIndex, matchedCount, documentChanged, policy, status, level);
     }
 }

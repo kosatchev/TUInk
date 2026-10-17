@@ -7,10 +7,8 @@ import dev.tuink.core.EditorState;
 import dev.tuink.core.EditorTextLayout;
 import dev.tuink.core.Position;
 import dev.tuink.core.RecoverySnapshot;
-import dev.tuink.core.SearchMatcher;
 import dev.tuink.core.SearchOptions;
 import dev.tuink.core.TabSession;
-import dev.tuink.core.TabSearch;
 import dev.tuink.core.TabSessions;
 import dev.tuink.core.TextModel;
 import dev.tuink.highlight.regex.RegexHighlighter;
@@ -115,9 +113,6 @@ public class TerminalEditorApp {
     private static final long NOTIFY_DURATION_NANOS = 3_000_000_000L;
     static final long OPEN_DIALOG_DOUBLE_CLICK_NANOS = 450_000_000L;
     private static final int PROFILE_LOG_EVERY_FRAMES = 30;
-    private static final int AUTO_SELECTION_HIGHLIGHT_MIN_CHARS = 2;
-    private static final int AUTO_SELECTION_HIGHLIGHT_MAX_CHARS = 128;
-    private static final int CTRL_F_SELECTION_MAX_CHARS = 256;
     private static final long RECOVERY_AUTOSAVE_DEBOUNCE_NANOS = 2_000_000_000L;
     private static final long RECOVERY_ERROR_NOTIFY_COOLDOWN_NANOS = 5_000_000_000L;
     final EditorClipboard clipboard = new EditorClipboard();
@@ -1331,22 +1326,6 @@ public class TerminalEditorApp {
         return left + " ".repeat(free - rightWidth) + rightBlock;
     }
 
-    String buildSearchSummary(
-        boolean searchMode,
-        String query,
-        SearchController.SearchUiOptions searchUi,
-        int matchCount,
-        int totalTabs
-    ) {
-        if (!searchMode || query == null || query.isEmpty()) {
-            return "";
-        }
-        if (searchUi != null && searchUi.allTabs() && totalTabs > 1) {
-            return "Find " + matchCount + " in " + totalTabs + " tabs";
-        }
-        return "Find " + matchCount;
-    }
-
     private String buildStateIndicators(EditorState state, boolean readingMode) {
         String ro = isReadOnlyFile(state.getCurrentFile()) ? "RO" : "RW";
         String enc = state.getFileEncoding() == null ? "UTF-8" : state.getFileEncoding().name();
@@ -1404,7 +1383,7 @@ public class TerminalEditorApp {
         SearchOptions renderSearchOptions = searchMode
             ? search.options()
             : SearchOptions.DEFAULT;
-        String renderSearchQuery = resolveRenderSearchQuery(
+        String renderSearchQuery = SearchSelection.highlightQuery(
             searchMode,
             searchQuery,
             model,
@@ -1621,118 +1600,6 @@ public class TerminalEditorApp {
         }
         lastOpenTreeDiffKey = openTreeDiffKey;
         return new RenderFrameResult(plan, true);
-    }
-
-    private String resolveRenderSearchQuery(
-        boolean searchMode,
-        String searchQuery,
-        TextModel model,
-        EditorState state,
-        boolean autoSelectionHighlightSetting,
-        boolean mouseSelectionInProgress
-    ) {
-        if (searchMode) {
-            return searchQuery;
-        }
-        if (!autoSelectionHighlightSetting) {
-            return null;
-        }
-        if (mouseSelectionInProgress) {
-            return null;
-        }
-        if (!state.hasSelection()) {
-            return null;
-        }
-        Position a = state.getSelectionAnchor();
-        Position b = state.getCursor();
-        if (a == null || b == null || a.line() != b.line()) {
-            return null;
-        }
-        if (a.col() > b.col()) {
-            Position tmp = a;
-            a = b;
-            b = tmp;
-        }
-        int length = b.col() - a.col();
-        if (length < AUTO_SELECTION_HIGHLIGHT_MIN_CHARS || length > AUTO_SELECTION_HIGHLIGHT_MAX_CHARS) {
-            return null;
-        }
-        String selected = model.getTextRange(a, b);
-        if (selected.isBlank() || selected.indexOf('\n') >= 0) {
-            return null;
-        }
-        return selected;
-    }
-
-    String selectionQueryForCtrlF(TextModel model, EditorState state) {
-        if (!state.hasSelection()) {
-            return null;
-        }
-        Position a = state.getSelectionAnchor();
-        Position b = state.getCursor();
-        if (a == null || b == null || a.line() != b.line()) {
-            return null;
-        }
-        if (a.col() > b.col()) {
-            Position tmp = a;
-            a = b;
-            b = tmp;
-        }
-        int length = b.col() - a.col();
-        if (length <= 0 || length > CTRL_F_SELECTION_MAX_CHARS) {
-            return null;
-        }
-        String selected = model.getTextRange(a, b);
-        return selected;
-    }
-
-    boolean focusCurrentMatchIfOffscreen(
-        TextModel model,
-        EditorState state,
-        EditorEngine engine,
-        int contentRows,
-        int contentCols,
-        boolean wrapLines,
-        boolean wrapByWords,
-        String query,
-        SearchOptions options
-    ) {
-        if (query == null || query.isEmpty()) {
-            return false;
-        }
-        if (!searchSelectionMatchesQuery(model, state, query, options)) {
-            return false;
-        }
-        int topBefore = state.getTopLine();
-        int wrapBefore = state.getTopWrapSegment();
-        int leftBefore = state.getLeftVisualColumn();
-        EditorViewNavigation.ensureCursorVisible(engine, contentRows, contentCols, wrapLines, wrapByWords);
-        return topBefore != state.getTopLine()
-            || wrapBefore != state.getTopWrapSegment()
-            || leftBefore != state.getLeftVisualColumn();
-    }
-
-    private boolean searchSelectionMatchesQuery(
-        TextModel model,
-        EditorState state,
-        String query,
-        SearchOptions options
-    ) {
-        if (!state.hasSelection()) {
-            return false;
-        }
-        Position start = state.getSelectionAnchor();
-        Position end = state.getCursor();
-        if (start == null || end == null || start.line() != end.line()) {
-            return false;
-        }
-        if (start.col() > end.col()) {
-            Position temporary = start;
-            start = end;
-            end = temporary;
-        }
-        SearchMatcher matcher = SearchMatcher.compile(query, options);
-        return matcher.matchesRange(model.getLine(start.line()), start.col(), end.col());
     }
 
     final class RenderFrameController {
@@ -2082,48 +1949,6 @@ public class TerminalEditorApp {
         }
     }
 
-    int countSearchMatches(TextModel model, List<EditorTab> tabs, String query, SearchOptions options) {
-        if (query == null || query.isEmpty()) {
-            return 0;
-        }
-        SearchOptions safe = options == null ? SearchOptions.DEFAULT : options;
-        if (tabs != null) {
-            return TabSearch.countMatches(toTabSessions(tabs), query, safe);
-        }
-        if (model == null) {
-            return 0;
-        }
-        return TabSearch.countMatchesInModel(model, query, safe);
-    }
-
-    long searchSourceIdentity(TextModel model, List<EditorTab> tabs, boolean allTabs) {
-        if (!allTabs) {
-            return model == null ? 0L : model.cacheIdentity();
-        }
-        long hash = 1469598103934665603L;
-        for (EditorTab tab : tabs) {
-            hash ^= tab.model().cacheIdentity();
-            hash *= 1099511628211L;
-        }
-        hash ^= tabs.size();
-        return hash;
-    }
-
-    long searchSourceRevision(TextModel model, List<EditorTab> tabs, boolean allTabs) {
-        if (!allTabs) {
-            return model == null ? 0L : model.revision();
-        }
-        long hash = 1469598103934665603L;
-        for (EditorTab tab : tabs) {
-            hash ^= tab.model().cacheIdentity();
-            hash *= 1099511628211L;
-            hash ^= tab.model().revision();
-            hash *= 1099511628211L;
-        }
-        hash ^= tabs.size();
-        return hash;
-    }
-
     private record HelpDialogLayout(int top, int left, int width, int height) {
     }
 
@@ -2190,15 +2015,6 @@ public class TerminalEditorApp {
         return sessions;
     }
 
-    private long tabsRevisionFingerprint(List<EditorTab> tabs) {
-        long hash = 1469598103934665603L;
-        for (EditorTab tab : tabs) {
-            hash ^= tab.model().revision();
-            hash *= 1099511628211L;
-        }
-        return hash;
-    }
-
     List<TabBarView.TabItem> toTabItems(List<EditorTab> tabs, boolean[] matchFlags) {
         List<TabBarView.TabItem> out = new ArrayList<>(tabs.size());
         for (int i = 0; i < tabs.size(); i++) {
@@ -2211,32 +2027,6 @@ public class TerminalEditorApp {
             ));
         }
         return out;
-    }
-
-    private boolean[] findTabsWithMatches(List<EditorTab> tabs, String query, SearchOptions options) {
-        boolean[] flags = new boolean[tabs.size()];
-        if (query == null || query.isEmpty()) {
-            return flags;
-        }
-        int[] match = TabSearch.findMatchTabs(toTabSessions(tabs), query, options);
-        for (int i = 0; i < flags.length && i < match.length; i++) {
-            flags[i] = match[i] != 0;
-        }
-        return flags;
-    }
-
-    boolean[] resolveTabMatchFlags(
-        List<EditorTab> tabs,
-        boolean searchMode,
-        String query,
-        SearchOptions options,
-        TabMatchCache cache
-    ) {
-        if (!searchMode || query == null || query.isEmpty()) {
-            return new boolean[tabs.size()];
-        }
-        long revisionFingerprint = tabsRevisionFingerprint(tabs);
-        return cache.resolve(tabs, query, options, revisionFingerprint, () -> findTabsWithMatches(tabs, query, options));
     }
 
     List<TopMenuView.TabItem> toTopMenuTabs(List<EditorTab> tabs, boolean[] matchFlags) {
@@ -2295,35 +2085,6 @@ public class TerminalEditorApp {
 
         private EditorTab withRenderPlanBuilder(RenderPlanBuilder nextBuilder) {
             return new EditorTab(documentSession, nextBuilder, viewportController, navigation);
-        }
-    }
-
-    static final class TabMatchCache {
-        private String query;
-        private SearchOptions options;
-        private long tabsFingerprint = Long.MIN_VALUE;
-        private boolean[] flags = new boolean[0];
-
-        private boolean[] resolve(
-            List<EditorTab> tabs,
-            String query,
-            SearchOptions options,
-            long tabsFingerprint,
-            java.util.function.Supplier<boolean[]> compute
-        ) {
-            if (this.query != null
-                && this.query.equals(query)
-                && this.options != null
-                && this.options.equals(options)
-                && this.tabsFingerprint == tabsFingerprint
-                && this.flags.length == tabs.size()) {
-                return this.flags;
-            }
-            this.query = query;
-            this.options = options;
-            this.tabsFingerprint = tabsFingerprint;
-            this.flags = compute.get();
-            return this.flags;
         }
     }
 

@@ -198,8 +198,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     private TopMenuView.Placement topMenuPlacement;
     private FileTreeView.Placement openFileTreePlacement;
     private OpenFileDialogView.Placement openFileDialogPlacement;
-    private final TerminalEditorApp.TabMatchCache tabMatchCache = new TerminalEditorApp.TabMatchCache();
-    private final SearchMatchCountCache searchMatchCountCache = new SearchMatchCountCache();
+    private final SearchPresentation searchPresentation = new SearchPresentation();
 
     private int rows;
     private int cols;
@@ -322,52 +321,10 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     }
 
     private FrameComposition prepareComposition(boolean fullRedraw) {
-        String searchQuery = "";
-        SearchOptions searchOptions = SearchOptions.DEFAULT;
-        int searchMatchCount = 0;
-        if (uiSessionState.searchMode) {
-            searchQuery = searchQueryInput.text();
-            searchOptions = SearchController.toSearchOptions(searchUi);
-            if (!searchQuery.isEmpty()) {
-                boolean searchAllTabs = searchUi.allTabs();
-                TextModel searchCountModel = searchAllTabs ? null : model;
-                List<TerminalEditorApp.EditorTab> searchCountTabs = searchAllTabs ? tabs : null;
-                long searchSourceIdentity = host.searchSourceIdentity(
-                    model,
-                    tabs,
-                    searchAllTabs
-                );
-                long searchSourceRevision = host.searchSourceRevision(
-                    model,
-                    tabs,
-                    searchAllTabs
-                );
-                searchMatchCount = searchMatchCountCache.lookup(
-                    true,
-                    searchQuery,
-                    searchOptions,
-                    searchAllTabs,
-                    searchSourceIdentity,
-                    searchSourceRevision
-                );
-                if (searchMatchCount < 0) {
-                    searchMatchCount = host.countSearchMatches(
-                        searchCountModel,
-                        searchCountTabs,
-                        searchQuery,
-                        searchOptions
-                    );
-                    searchMatchCountCache.store(
-                        searchQuery,
-                        searchOptions,
-                        searchAllTabs,
-                        searchSourceIdentity,
-                        searchSourceRevision,
-                        searchMatchCount
-                    );
-                }
-            }
-        }
+        SearchPresentation.Snapshot searchSnapshot = searchPresentation.resolve(
+            uiSessionState.searchMode, searchQueryInput.text(), searchUi, host.toTabSessions(tabs), activeTabIndex);
+        String searchQuery = searchSnapshot.query();
+        SearchOptions searchOptions = searchSnapshot.options();
         if (host.profileEnabled) {
             host.frameProfiler.searchNanos = host.frameProfiler.stopwatchNanos();
         }
@@ -381,13 +338,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 searchUi.allTabs()
             )
             : null;
-        String searchSummary = host.buildSearchSummary(
-            uiSessionState.searchMode,
-            searchQuery,
-            searchUi,
-            searchMatchCount,
-            tabs.size()
-        );
+        String searchSummary = searchSnapshot.summary();
         boolean showTabBar = uiSessionState.showTabBarSetting && tabs.size() > 1;
         contentTopRow = showTabBar ? 2 : 1;
         // Keep the search model for resume-after-modal, but a
@@ -550,13 +501,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             uiSessionState.searchEditorFocused = false;
             host.searchFocusManager.next(searchBarPlacement.focusScope());
         }
-        boolean[] tabMatchFlags = host.resolveTabMatchFlags(
-            tabs,
-            uiSessionState.searchMode,
-            searchQuery,
-            searchOptions,
-            tabMatchCache
-        );
+        boolean[] tabMatchFlags = searchSnapshot.tabMatchFlags();
         List<TabBarView.TabItem> tabItems = host.toTabItems(tabs, tabMatchFlags);
         if (showTabBar) {
             TabBarView tabBarView = TabBarView.build(
@@ -1035,15 +980,37 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     }
 
     private void executeSearchDocumentCommand(TuinkCommand command) {
+        if (command == TuinkCommand.CURSOR_PAGE_UP || command == TuinkCommand.CURSOR_PAGE_DOWN) {
+            TerminalEditorApp.scrollDocumentViewport(model, engine.textLayout(), state, contentRows, contentCols,
+                uiSessionState.wrapLinesSetting, uiSessionState.wrapWordsSetting,
+                (command == TuinkCommand.CURSOR_PAGE_UP ? -1 : 1) * Math.max(1, contentRows),
+                uiSessionState.tabWidthSetting);
+            viewportController.onCommandResult(ViewportController.CursorPolicy.PAGE_SCROLL);
+            return;
+        }
+        if (SearchController.isSearchActionFocus(host.searchFocusManager.focused().orElse(null))) {
+            host.focusSearch(searchBarPlacement, SearchController.focusForAction(command));
+        }
         SearchCommandHandler.Result result = SearchCommandHandler.execute(command,
-            new SearchCommandHandler.Context(host, tabs, activeTabIndex, uiSessionState, searchUi,
-                searchQueryInput.text(), searchReplaceInput.text(), searchBarPlacement, contentRows, contentCols));
+            new SearchCommandHandler.Context(host.toTabSessions(tabs), activeTabIndex,
+                uiSessionState.readingModeSetting, searchUi, searchQueryInput.text(), searchReplaceInput.text()),
+            this::revealCurrentSelection);
         tabs.get(result.activeTabIndex()).viewportController().onCommandResult(result.cursorPolicy());
         if (result.activeTabIndex() != activeTabIndex) sessionContext.activate(result.activeTabIndex());
         if (result.status() != null && !result.status().isBlank()) {
             if (result.statusLevel() == InputActionDispatcher.StatusLevel.WARNING) notification.warning(result.status());
             else notification.info(result.status());
         }
+    }
+
+    private boolean revealCurrentSelection() {
+        int topBefore = state.getTopLine();
+        int wrapBefore = state.getTopWrapSegment();
+        int leftBefore = state.getLeftVisualColumn();
+        EditorViewNavigation.ensureCursorVisible(engine, contentRows, contentCols,
+            uiSessionState.wrapLinesSetting, uiSessionState.wrapWordsSetting);
+        return topBefore != state.getTopLine() || wrapBefore != state.getTopWrapSegment()
+            || leftBefore != state.getLeftVisualColumn();
     }
 
     private void handleDocumentPointer(PointerEvent mouse) {
@@ -1882,7 +1849,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         if (dispatchResult.handled()) {
             viewportController.onCommandResult(dispatchResult.viewportPolicy());
             if (action == TuinkCommand.SEARCH_OPEN) {
-                String selectedQuery = host.selectionQueryForCtrlF(model, state);
+                String selectedQuery = SearchSelection.prefill(model, state);
                 if (selectedQuery != null) {
                     searchQueryInput.set(selectedQuery);
                 }

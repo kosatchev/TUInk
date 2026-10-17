@@ -28,6 +28,56 @@ class SearchMatcherTest {
     }
 
     @Test
+    void longRepetitiveLiteralQueriesCompileAndSearchWithinTheInteractiveBudget() {
+        assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
+            String query = "a".repeat(200_000);
+            for (boolean insensitive : List.of(false, true)) {
+                for (SearchOptions.MatchMode mode : List.of(
+                    SearchOptions.MatchMode.SUBSTRING, SearchOptions.MatchMode.WHOLE_WORD
+                )) {
+                    SearchMatcher matcher = SearchMatcher.compile(query, new SearchOptions(insensitive, mode));
+                    assertEquals(List.of(new SearchMatcher.Match(0, query.length())), matcher.findAll(query));
+                    assertEquals(List.of(), matcher.findAll("a".repeat(199_999)));
+                    assertEquals(List.of(), SearchMatcher.compile(query + "b", new SearchOptions(insensitive, mode))
+                        .findAll(query + "c"));
+                }
+            }
+        });
+    }
+
+    @Test
+    void literalCaseFoldingPreservesSupplementaryAndCombiningOffsets() {
+        SearchMatcher dottedI = SearchMatcher.compile("i", CASE_INSENSITIVE);
+        assertEquals(List.of(new SearchMatcher.Match(0, 1), new SearchMatcher.Match(2, 3),
+            new SearchMatcher.Match(4, 5), new SearchMatcher.Match(6, 7)), dottedI.findAll("İ I ı i"));
+        assertEquals(List.of(new SearchMatcher.Match(0, 3), new SearchMatcher.Match(4, 7)),
+            SearchMatcher.compile("𐐀x", CASE_INSENSITIVE).findAll("𐐨X 𐐀x"));
+        assertEquals(List.of(new SearchMatcher.Match(0, 1), new SearchMatcher.Match(2, 3)),
+            SearchMatcher.compile("σ", CASE_INSENSITIVE).findAll("Σ ς"));
+        assertEquals(List.of(), SearchMatcher.compile("ss", CASE_INSENSITIVE).findAll("ß"));
+        for (String query : List.of("ß", "ẞ")) {
+            assertEquals(List.of(new SearchMatcher.Match(0, 1), new SearchMatcher.Match(2, 3)),
+                SearchMatcher.compile(query, CASE_INSENSITIVE).findAll("ß ẞ"));
+        }
+        assertEquals(List.of(new SearchMatcher.Match(3, 5)),
+            SearchMatcher.compile("e\u0301", SearchOptions.DEFAULT).findAll("🙂 e\u0301"));
+        assertEquals(List.of(), SearchMatcher.compile("e\u0301", SearchOptions.DEFAULT).findAll("é"));
+    }
+
+    @Test
+    void literalMatchingKeepsGlobAndRegexCharactersLiteral() {
+        String query = "[a].*?\\E";
+        String source = query + query;
+        SearchMatcher matcher = SearchMatcher.compile(query, SearchOptions.DEFAULT);
+
+        assertEquals(List.of(new SearchMatcher.Match(0, query.length()),
+            new SearchMatcher.Match(query.length(), source.length())), matcher.findAll(source));
+        assertEquals(2, matcher.countMatches(source));
+        assertEquals(List.of(new SearchMatcher.Match(0, query.length())), matcher.findIntersecting(source, 1, 2));
+        assertNull(matcher.findFirstAtOrAfter(source, query.length() + 1));
+    }
+
+    @Test
     void wildcardQuestionMarkConsumesOneSupplementaryCodePoint() {
         String source = "𝔸x 𝔸X";
         SearchMatcher matcher = SearchMatcher.compile(
@@ -151,6 +201,10 @@ class SearchMatcherTest {
                 List.of(),
                 SearchMatcher.compile("a?".repeat(5_000) + "z", wildcard).findAll(source)
             );
+            assertEquals(
+                List.of(),
+                SearchMatcher.compile("a?".repeat(150_000), wildcard).findAll("🙂".repeat(200_000))
+            );
         });
     }
 
@@ -197,6 +251,40 @@ class SearchMatcherTest {
             List.of(new SearchMatcher.Match(6, unicodeSource.length())),
             SearchMatcher.compile(unicodeQuery, wildcard).findAll(unicodeSource)
         );
+    }
+
+    @Test
+    void streamingWildcardWindowsKeepUnicodeOffsetsForLeadingInternalAndTrailingQuestions() {
+        List<String> sources = List.of(
+            "🙂aĀa🙂aāa🙂aĀa🙂",
+            "🙂".repeat(75) + "a🙂b" + "Ā".repeat(75) + "🙂a🙂b" + "🙂".repeat(75)
+        );
+        List<String> queries = List.of(
+            "??a?a??", "*??a?a??", "??a?a??*", "??a?a??*🙂??", "??Ā??",
+            "?".repeat(70) + "a?b" + "?".repeat(70),
+            "*" + "?".repeat(70) + "a?b" + "?".repeat(70)
+        );
+        for (boolean insensitive : List.of(false, true)) {
+            SearchOptions options = new SearchOptions(insensitive, SearchOptions.MatchMode.WILDCARD);
+            for (String source : sources) {
+                for (String query : queries) {
+                    SearchMatcher matcher = SearchMatcher.compile(query, options);
+                    List<SearchMatcher.Match> expected = referenceWildcardMatches(source, query, insensitive);
+                    String context = "query=" + query + ", insensitive=" + insensitive;
+                    assertEquals(expected, matcher.findAll(source), context);
+                    assertEquals(expected.size(), matcher.countMatches(source), context);
+                    for (int from = 0; from <= source.length(); from++) {
+                        int start = from;
+                        assertEquals(expected.stream().filter(match -> match.startUtf16() >= start).findFirst().orElse(null),
+                            matcher.findFirstAtOrAfter(source, from), context);
+                        assertEquals(expected.stream().filter(match -> match.startUtf16() < start).reduce((a, b) -> b).orElse(null),
+                            matcher.findLastBefore(source, from), context);
+                        assertEquals(expected.stream().filter(match -> match.endUtf16() > start
+                            && match.startUtf16() < start + 2).toList(), matcher.findIntersecting(source, from, from + 2), context);
+                    }
+                }
+            }
+        }
     }
 
     @Test

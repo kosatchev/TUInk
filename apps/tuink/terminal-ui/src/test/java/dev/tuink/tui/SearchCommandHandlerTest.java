@@ -20,6 +20,66 @@ import org.junit.jupiter.api.Test;
 
 class SearchCommandHandlerTest {
     @Test
+    void exhaustingTheBudgetWhileMaterializingReplaceAllPreservesTheDocument() {
+        String original = "a".repeat(132);
+        TabSession current = tab(original);
+        Position cursor = new Position(0, 20);
+        Position anchor = new Position(0, 10);
+        current.engine().restoreSelection(cursor, anchor);
+        long revision = current.model().revision();
+        var options = new SearchController.SearchUiOptions(true, dev.tuink.core.SearchOptions.MatchMode.WILDCARD, false);
+        var context = new SearchCommandHandler.Context(List.of(current), 0, false, options,
+            "a".repeat(64) + "?a", "replacement");
+
+        // Admission consumes 132 updates. The second pass builds one replacement
+        // before exhausting the remaining 68, while the model is still intact.
+        var rejected = dev.tuink.core.SearchWorkBudget.run(200,
+            () -> SearchCommandHandler.execute(TuinkCommand.SEARCH_REPLACE_ALL, context, () -> false));
+
+        assertEquals(InputActionDispatcher.StatusLevel.ERROR, rejected.statusLevel());
+        assertTrue(rejected.status().startsWith("Search is too complex"));
+        assertFalse(rejected.documentChanged());
+        assertEquals(original, current.model().getLine(0));
+        assertEquals(revision, current.model().revision());
+        assertEquals(cursor, current.state().getCursor());
+        assertEquals(anchor, current.state().getSelectionAnchor());
+        assertFalse(current.state().isDirty());
+        assertFalse(current.engine().undo());
+    }
+
+    @Test
+    void expensiveNavigationAndReplacementReportErrorsWithoutChangingDocumentViewOrHistory() {
+        String original = "a".repeat(100_000) + "b";
+        String query = "a".repeat(8192) + "?b";
+        TabSession current = tab(original);
+        current.engine().insertInput("X");
+        assertTrue(current.engine().undo());
+        Position cursor = new Position(0, 120);
+        Position anchor = new Position(0, 80);
+        current.engine().restoreSelection(cursor, anchor);
+        long revision = current.model().revision();
+        var options = new SearchController.SearchUiOptions(true, dev.tuink.core.SearchOptions.MatchMode.WILDCARD, true);
+        var context = new SearchCommandHandler.Context(List.of(current, tab("other")), 0, false, options, query, "replace");
+
+        for (TuinkCommand command : List.of(TuinkCommand.SEARCH_NEXT, TuinkCommand.SEARCH_PREVIOUS,
+            TuinkCommand.SEARCH_REPLACE, TuinkCommand.SEARCH_REPLACE_ALL)) {
+            var rejected = SearchCommandHandler.execute(command, context, () -> false);
+
+            assertTrue(rejected.status().startsWith("Search is too complex"), command.toString());
+            assertEquals(InputActionDispatcher.StatusLevel.ERROR, rejected.statusLevel());
+            assertFalse(rejected.documentChanged());
+            assertEquals(CursorPolicy.PRESERVE, rejected.cursorPolicy());
+            assertEquals(original, current.model().getLine(0));
+            assertEquals(revision, current.model().revision());
+            assertEquals(cursor, current.state().getCursor());
+            assertEquals(anchor, current.state().getSelectionAnchor());
+            assertFalse(current.state().isDirty());
+        }
+        assertTrue(current.engine().redo());
+        assertEquals("X" + original, current.model().getLine(0));
+    }
+
+    @Test
     void nextRevealsACurrentLongMatchBeforeAdvancingToAnotherTab() {
         String query = "q".repeat(300);
         TabSession current = tab(query);
@@ -116,6 +176,39 @@ class SearchCommandHandlerTest {
         assertEquals("\treplaced\t \treplaced\t", current.model().getLine(0));
         assertTrue(current.engine().undo());
         assertEquals("needle needle", current.model().getLine(0));
+    }
+
+    @Test
+    void anOversizedReplacementReportsAnErrorAndPreservesSelectionAndRedo() {
+        String original = "a".repeat(4096);
+        TabSession current = tab(original);
+        TabSession other = tab("another document");
+        current.engine().insertInput("X");
+        assertTrue(current.engine().undo());
+        Position cursor = new Position(0, 120);
+        Position anchor = new Position(0, 80);
+        current.engine().restoreSelection(cursor, anchor);
+        long revision = current.model().revision();
+        var expanding = context(List.of(current, other), true, false, "a", "b".repeat(1_000_000));
+
+        var rejected = SearchCommandHandler.execute(TuinkCommand.SEARCH_REPLACE_ALL, expanding, () -> false);
+
+        assertTrue(rejected.status().startsWith("Replacement result is too large"));
+        assertEquals(InputActionDispatcher.StatusLevel.ERROR, rejected.statusLevel());
+        assertEquals(CursorPolicy.PRESERVE, rejected.cursorPolicy());
+        assertEquals(0, rejected.activeTabIndex());
+        assertFalse(rejected.documentChanged());
+        assertEquals(revision, current.model().revision());
+        assertEquals(original, current.model().getLine(0));
+        assertEquals(cursor, current.state().getCursor());
+        assertEquals(anchor, current.state().getSelectionAnchor());
+        assertFalse(current.state().isDirty());
+        assertEquals("another document", other.model().getLine(0));
+        assertTrue(current.engine().redo());
+        assertEquals("X" + original, current.model().getLine(0));
+        assertTrue(current.engine().undo());
+        assertEquals(original, current.model().getLine(0));
+        assertFalse(current.state().isDirty());
     }
 
     private static SearchCommandHandler.Context context(List<TabSession> tabs, boolean allTabs,

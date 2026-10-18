@@ -160,7 +160,7 @@ class TextFieldInteractiveTest {
             new PasteEvent("partial", true),
             FOCUSED
         );
-        assertEquals(TextField.Action.PASTE_REJECTED, truncated.output().orElseThrow());
+        assertEquals(TextField.Action.INPUT_REJECTED, truncated.output().orElseThrow());
         assertEquals(beforeTruncated, field.text());
 
         field.clear();

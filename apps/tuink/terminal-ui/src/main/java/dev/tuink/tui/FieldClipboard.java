@@ -9,19 +9,31 @@ final class FieldClipboard {
     private FieldClipboard() {
     }
 
-    static boolean handle(TuinkCommand command, TextField field, EditorClipboard clipboard) {
+    enum Result {
+        IGNORED, HANDLED, INPUT_REJECTED;
+
+        boolean handled() { return this != IGNORED; }
+    }
+
+    static Result handle(TuinkCommand command, TextField field, EditorClipboard clipboard) {
         if (command == TuinkCommand.EDIT_PASTE) {
-            field.paste(clipboard.text());
+            return field.paste(clipboard.text()) ? Result.HANDLED : Result.INPUT_REJECTED;
         } else if (command == TuinkCommand.EDIT_COPY || command == TuinkCommand.EDIT_CUT) {
             if (field.hasSelection()) {
-                clipboard.setText(field.selectedText());
-                if (command == TuinkCommand.EDIT_CUT) {
-                    field.deleteSelection();
+                String selected;
+                try {
+                    selected = field.selectedText();
+                } catch (OutOfMemoryError exhausted) {
+                    return Result.INPUT_REJECTED;
                 }
+                if (command == TuinkCommand.EDIT_CUT && !field.deleteSelection()) return Result.INPUT_REJECTED;
+                // Both the copied string and any deletion are prepared before replacing
+                // the old clipboard. Publishing this String reference cannot allocate.
+                clipboard.setText(selected);
             }
         } else {
-            return false;
+            return Result.IGNORED;
         }
-        return true;
+        return Result.HANDLED;
     }
 }

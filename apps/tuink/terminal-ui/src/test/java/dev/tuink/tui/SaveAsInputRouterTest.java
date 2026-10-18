@@ -146,7 +146,7 @@ class SaveAsInputRouterTest {
         String before = fixture.field.text();
         int cursorBefore = fixture.field.cursor();
         assertAction(
-            SaveAsBarView.Action.PASTE_REJECTED,
+            SaveAsBarView.Action.INPUT_REJECTED,
             fixture.route(new PasteEvent("partial", true))
         );
         assertEquals(before, fixture.field.text());
@@ -311,7 +311,7 @@ class SaveAsInputRouterTest {
         ));
         assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.F1)));
         assertAction(
-            SaveAsBarView.Action.PASTE_REJECTED,
+            SaveAsBarView.Action.INPUT_REJECTED,
             fixture.route(new PasteEvent("partial", true))
         );
         assertIgnored(fixture.route(KeyStroke.of(KeyStroke.Key.ESCAPE)));

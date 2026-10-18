@@ -3,6 +3,8 @@ package dev.tuink.tui;
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.DocumentEditLimitException;
 import dev.tuink.core.SearchOptions;
+import dev.tuink.core.SearchLimitException;
+import dev.tuink.core.SearchWorkBudget;
 import dev.tuink.core.TabSession;
 import dev.tuink.core.TabSearch;
 import dev.tuink.tui.command.TuinkCommand;
@@ -22,8 +24,9 @@ final class SearchCommandHandler {
 
     static Result execute(TuinkCommand command, Context context, BooleanSupplier revealCurrentSelection) {
         try {
-            return executeSearch(command, context, revealCurrentSelection);
-        } catch (DocumentEditLimitException limit) {
+            return SearchWorkBudget.run(SearchPresentation.INTERACTIVE_WILDCARD_WORK_LIMIT,
+                () -> executeSearch(command, context, revealCurrentSelection));
+        } catch (DocumentEditLimitException | SearchLimitException limit) {
             return new Result(context.activeTabIndex(), 0, false, CursorPolicy.PRESERVE,
                 limit.getMessage(), InputActionDispatcher.StatusLevel.ERROR);
         }
@@ -79,7 +82,7 @@ final class SearchCommandHandler {
                     documentChanged = before != current.model().revision();
                     if (documentChanged) {
                         policy = CursorPolicy.FOLLOW_CURSOR;
-                        status = "Matched " + matched + " occurrence(s); replacement applied. Undo available: Ctrl+Z";
+                        status = "Matched " + matched + " occurrence(s); replacement applied. Undo: Esc, then Ctrl+Z";
                         level = InputActionDispatcher.StatusLevel.WARNING;
                     } else {
                         status = matched > 0 ? "Found " + matched + " occurrence(s); text unchanged" : "Nothing to replace";

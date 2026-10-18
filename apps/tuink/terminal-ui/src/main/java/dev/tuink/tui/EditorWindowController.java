@@ -199,6 +199,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     private FileTreeView.Placement openFileTreePlacement;
     private OpenFileDialogView.Placement openFileDialogPlacement;
     private final SearchPresentation searchPresentation = new SearchPresentation();
+    private String reportedSearchError = "";
     private TerminalEditorApp.HelpOverlayPlacement helpOverlayPlacement;
 
     private int rows;
@@ -347,6 +348,10 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     private FrameComposition prepareComposition(boolean fullRedraw) {
         SearchPresentation.Snapshot searchSnapshot = searchPresentation.resolve(
             uiSessionState.searchMode, searchQueryInput.text(), searchUi, host.toTabSessions(tabs), activeTabIndex);
+        if (!searchSnapshot.error().equals(reportedSearchError)) {
+            reportedSearchError = searchSnapshot.error();
+            if (!reportedSearchError.isEmpty()) notification.error(reportedSearchError);
+        }
         String searchQuery = searchSnapshot.query();
         SearchOptions searchOptions = searchSnapshot.options();
         if (host.profileEnabled) {
@@ -991,8 +996,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             host.searchFocusManager.deactivate(TerminalEditorApp.SEARCH_SCOPE_ID);
             return true;
         }
-        if (action == SearchBarView.Action.PASTE_REJECTED) {
-            notification.error("Paste is too large and was not inserted");
+        if (action == SearchBarView.Action.INPUT_REJECTED) {
+            notification.error("Text is too large; nothing changed");
             return true;
         }
         SearchFocus toggle = TerminalEditorApp.toggleTarget(action);
@@ -1297,8 +1302,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                     saveAsBarPlacement, physicalCommand, host.clipboard);
             }
             SaveAsBarView.Action fieldAction = saveAsInputResult.action();
-            if (fieldAction == SaveAsBarView.Action.PASTE_REJECTED) {
-                notification.error("Paste is too large and was not inserted");
+            if (fieldAction == SaveAsBarView.Action.INPUT_REJECTED) {
+                notification.error("Text is too large; nothing changed");
                 return;
             }
             if (fieldAction == SaveAsBarView.Action.VALUE_CHANGED) {
@@ -1737,8 +1742,13 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             viewportController.onCommandResult(dispatchResult.viewportPolicy());
             if (action == TuinkCommand.SEARCH_OPEN) {
                 String selectedQuery = SearchSelection.prefill(model, state);
-                if (selectedQuery != null) {
-                    searchQueryInput.set(selectedQuery);
+                if (selectedQuery != null && !searchQueryInput.set(selectedQuery)) {
+                    uiSessionState.searchMode = false;
+                    uiSessionState.searchEditorFocused = false;
+                    host.searchFocusManager.deactivate(TerminalEditorApp.SEARCH_SCOPE_ID);
+                    searchBarPlacement = null;
+                    notification.error("Not enough memory to open Find with the selected text");
+                    return;
                 }
                 host.focusSearch(searchBarPlacement, SearchFocus.FIND);
             }
@@ -1811,12 +1821,24 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             sessionContext.activeTabIndex(), saveAsSuggestions);
     }
 
-    private void applyFilenameEffect(SaveFlowController.TextInputEffect effect) {
+    private boolean applyFilenameEffect(SaveFlowController.TextInputEffect effect) {
         switch (effect.kind()) {
             case NONE -> { }
-            case SET_TEXT -> saveAsInput.set(effect.text());
+            case SET_TEXT -> {
+                if (!saveAsInput.set(effect.text())) {
+                    // Never leave a previous tab's filename active after a refused preset.
+                    // Cancelling this continuation keeps every unsaved document open.
+                    modalState = UiModalState.none();
+                    running = true;
+                    host.saveAsFocusManager.deactivate(TerminalEditorApp.SAVE_AS_SCOPE_ID);
+                    saveAsBarPlacement = null;
+                    notification.error("Not enough memory to open Save As; the filename was not changed");
+                    return false;
+                }
+            }
             case CLEAR -> saveAsInput.clear();
         }
+        return true;
     }
 
     private void applySaveResult(SaveWorkflow.Result result) {
@@ -1831,7 +1853,9 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         if (result.closeTabIndex() >= 0) {
             sessionContext.activate(host.closeTab(tabs, sessionContext.activeTabIndex(), result.closeTabIndex(), saveAsSuggestions));
         }
-        applyFilenameEffect(result.filename());
+        if (!applyFilenameEffect(result.filename())) {
+            return;
+        }
         switch (result.notice().kind()) {
             case UNCHANGED -> { }
             case CLEAR -> notification.clear();
@@ -1841,7 +1865,10 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         running = result.running();
         modalState = result.modalState();
         if (result.focusFilename()) {
-            focusFirstBlockingControl();
+            blockingContentFocused = false;
+            // Re-enter against the next frame's filename placement, including after a
+            // continuation changes tabs without changing the Save As scope identity.
+            host.saveAsFocusManager.deactivate(TerminalEditorApp.SAVE_AS_SCOPE_ID);
         }
     }
 

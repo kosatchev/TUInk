@@ -95,7 +95,7 @@ class TextFieldPastePolicyTest {
 
         InteractionResult<TextField.Action> truncated = placement.handle(new PasteEvent("\tlost\t", true), FOCUSED);
 
-        assertEquals(TextField.Action.PASTE_REJECTED, truncated.output().orElseThrow());
+        assertEquals(TextField.Action.INPUT_REJECTED, truncated.output().orElseThrow());
         assertEquals("\tkeep\t", field.text());
         assertEquals(field.length(), field.cursor());
         assertEquals(field.text(), field.selectedText());

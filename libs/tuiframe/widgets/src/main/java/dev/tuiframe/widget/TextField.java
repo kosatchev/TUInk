@@ -14,6 +14,7 @@ import dev.tuiframe.style.CellStyle;
 import dev.tuiframe.text.TerminalText;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.LongSupplier;
 
 /**
  * Reusable single-line text input buffer and interactive TUI widget.
@@ -48,20 +49,22 @@ public final class TextField implements InteractiveWidget<TextField.Action> {
         InteractionResult.output(Action.VALUE_CHANGED);
     private static final InteractionResult<Action> SUBMITTED_RESULT =
         InteractionResult.output(Action.SUBMITTED);
-    private static final InteractionResult<Action> PASTE_REJECTED_RESULT =
-        InteractionResult.output(Action.PASTE_REJECTED);
+    private static final InteractionResult<Action> INPUT_REJECTED_RESULT =
+        InteractionResult.output(Action.INPUT_REJECTED);
     private static final InteractionResult<Action> FOCUS_SELF_RESULT =
         InteractionResult.focus(FocusRequest.SELF);
 
-    private final StringBuilder value = new StringBuilder();
+    private String value = "";
     private final PastePolicy pastePolicy;
+    private final LongSupplier allocationBudget;
+    private final boolean heapBudget;
     private int cursor;
     private int selectionAnchor = -1;
     private boolean mouseSelecting;
     private Rect mouseViewportBounds;
     private int mouseViewportLeft;
     private TerminalText.Metrics cachedMetrics = EMPTY_METRICS;
-    private boolean metricsValid = true;
+    private boolean collectAfterRejectedPreparation;
 
     /** Creates a field that normalizes pasted tabs with the existing single-line policy. */
     public TextField() {
@@ -76,16 +79,27 @@ public final class TextField implements InteractiveWidget<TextField.Action> {
      * retain their existing behavior.
      */
     public TextField(PastePolicy pastePolicy) {
-        this.pastePolicy = Objects.requireNonNull(pastePolicy, "pastePolicy");
+        this(pastePolicy, TextField::currentAllocationBudget, true);
     }
 
-    public void insert(String text) {
-        insertValue(text);
+    TextField(PastePolicy pastePolicy, LongSupplier allocationBudget) {
+        this(pastePolicy, allocationBudget, false);
+    }
+
+    private TextField(PastePolicy pastePolicy, LongSupplier allocationBudget, boolean heapBudget) {
+        this.pastePolicy = Objects.requireNonNull(pastePolicy, "pastePolicy");
+        this.allocationBudget = Objects.requireNonNull(allocationBudget, "allocationBudget");
+        this.heapBudget = heapBudget;
+    }
+
+    /** Returns whether the edit was accepted; a memory rejection leaves the field unchanged. */
+    public boolean insert(String text) {
+        return insertValue(text) != EditResult.REJECTED;
     }
 
     /** Inserts clipboard text at the caret using the same single-line policy as raw paste. */
-    public void paste(String text) {
-        pasteValue(text);
+    public boolean paste(String text) {
+        return pasteValue(text) != EditResult.REJECTED;
     }
 
     public void backspace() {
@@ -114,23 +128,27 @@ public final class TextField implements InteractiveWidget<TextField.Action> {
 
     public void clear() {
         cancelMouseSelection();
-        if (!value.isEmpty()) {
-            value.setLength(0);
-            invalidateMetrics();
-        }
+        value = "";
+        cachedMetrics = EMPTY_METRICS;
+        mouseViewportBounds = null;
         cursor = 0;
         selectionAnchor = -1;
     }
 
-    public void set(String text) {
-        cancelMouseSelection();
+    /**
+     * Replaces the complete trusted value without normalizing controls. Returns false if
+     * preparation cannot fit in memory; text, caret, selection and viewport then stay unchanged.
+     */
+    public boolean set(String text) {
         String next = text == null ? "" : text;
-        if (!metrics().text().equals(next)) {
-            value.setLength(0);
-            value.append(next);
-            invalidateMetrics();
+        if (!value.equals(next)) {
+            if (replaceValue(0, value.length(), next, next.length()) == EditResult.REJECTED) {
+                return false;
+            }
         }
+        cancelMouseSelection();
         updateCursor(value.length(), -1);
+        return true;
     }
 
     public boolean isEmpty() {
@@ -196,16 +214,7 @@ public final class TextField implements InteractiveWidget<TextField.Action> {
     }
 
     public boolean deleteSelection() {
-        cancelMouseSelection();
-        if (!hasSelection()) {
-            return false;
-        }
-        int start = selectionStart();
-        value.delete(start, selectionEnd());
-        invalidateMetrics();
-        cursor = metrics().floorBoundary(start);
-        selectionAnchor = -1;
-        return true;
+        return deleteSelectionValue() == EditResult.CHANGED;
     }
 
     /** Moves the field caret without crossing an extended grapheme boundary. */
@@ -266,70 +275,171 @@ public final class TextField implements InteractiveWidget<TextField.Action> {
     public enum Action {
         VALUE_CHANGED,
         SUBMITTED,
-        PASTE_REJECTED
+        INPUT_REJECTED
     }
 
-    private boolean insertValue(String text) {
-        cancelMouseSelection();
+    private enum EditResult { UNCHANGED, CHANGED, REJECTED }
+
+    private EditResult insertValue(String text) {
+        return insertValue(text, new Admission());
+    }
+
+    private EditResult insertValue(String text, Admission admission) {
         if (text == null || text.isEmpty()) {
-            return false;
+            return EditResult.UNCHANGED;
         }
         int insertionOffset = metrics().floorBoundary(cursor);
+        int end = insertionOffset;
         if (hasSelection()) {
             insertionOffset = selectionStart();
-            value.delete(insertionOffset, selectionEnd());
+            end = selectionEnd();
         }
-        selectionAnchor = -1;
-        value.insert(insertionOffset, text);
-        invalidateMetrics();
-        int tentativeCursor = insertionOffset + text.length();
-        cursor = metrics().ceilBoundary(tentativeCursor);
-        return true;
+        return replaceValue(insertionOffset, end, text, (long) insertionOffset + text.length(), admission);
     }
 
-    private boolean pasteValue(String text) {
-        return insertValue(normalizeSingleLinePaste(text, pastePolicy));
+    private EditResult pasteValue(String text) {
+        if (text == null || text.isEmpty()) return EditResult.UNCHANGED;
+        Admission admission = new Admission();
+        try {
+            // Normalization can require a builder and its finished UTF-16 string.
+            // Admit those copies before entering the normalizer as well.
+            if (!alreadySingleLine(text, pastePolicy)
+                && !admission.fits(6L * text.length() + 16_384)) {
+                return admission.rejected();
+            }
+            return insertValue(normalizeSingleLinePaste(text, pastePolicy), admission);
+        } catch (OutOfMemoryError exhausted) {
+            return admission.rejected();
+        }
     }
 
-    private boolean backspaceValue() {
-        cancelMouseSelection();
-        if (deleteSelection()) {
-            return true;
-        }
-        selectionAnchor = -1;
+    private EditResult deleteSelectionValue() {
+        return hasSelection() ? replaceValue(selectionStart(), selectionEnd(), "", selectionStart())
+            : EditResult.UNCHANGED;
+    }
+
+    private EditResult backspaceValue() {
+        if (hasSelection()) return deleteSelectionValue();
         if (cursor <= 0) {
-            return false;
+            return EditResult.UNCHANGED;
         }
         TerminalText.Metrics before = metrics();
         int end = before.ceilBoundary(cursor);
         int start = before.previousBoundary(end);
         if (start >= end) {
-            return false;
+            return EditResult.UNCHANGED;
         }
-        value.delete(start, end);
-        invalidateMetrics();
-        cursor = metrics().floorBoundary(start);
-        return true;
+        return replaceValue(start, end, "", start);
     }
 
-    private boolean deleteForwardValue() {
-        cancelMouseSelection();
-        if (deleteSelection()) {
-            return true;
-        }
-        selectionAnchor = -1;
+    private EditResult deleteForwardValue() {
+        if (hasSelection()) return deleteSelectionValue();
         if (cursor >= value.length()) {
-            return false;
+            return EditResult.UNCHANGED;
         }
         TerminalText.Metrics before = metrics();
         int start = before.floorBoundary(cursor);
         int end = before.nextBoundary(start);
         if (start >= end) {
+            return EditResult.UNCHANGED;
+        }
+        return replaceValue(start, end, "", start);
+    }
+
+    /** Builds every allocation while the published field still describes the old value. */
+    private EditResult replaceValue(int start, int end, String insertion, long tentativeCursor) {
+        return replaceValue(start, end, insertion, tentativeCursor, new Admission());
+    }
+
+    private EditResult replaceValue(int start, int end, String insertion, long tentativeCursor, Admission admission) {
+        long length = (long) value.length() - (end - start) + insertion.length();
+        if (length > (Integer.MAX_VALUE - 8L) / 2) return EditResult.REJECTED;
+        try {
+            boolean wholeValue = start == 0 && end == value.length();
+            boolean compactCandidate = !wholeValue && isAscii(value) && isAscii(insertion);
+            // ASCII stays Latin-1 in a compact StringBuilder and its finished String.
+            // Unicode needs UTF-16 source/output arrays and attempted Latin-1 compression.
+            if (!wholeValue && !admission.fits((compactCandidate ? 2L : 5L) * length + 16_384)) {
+                return admission.rejected();
+            }
+            String next;
+            if (wholeValue) {
+                next = insertion;
+            } else if (compactCandidate) {
+                next = new StringBuilder((int) length).append(value, 0, start).append(insertion)
+                    .append(value, end, value.length()).toString();
+            } else {
+                // A char array avoids the extra Latin-1 buffer allocated when a
+                // StringBuilder widens after receiving a Unicode suffix.
+                char[] preparedText = new char[(int) length];
+                value.getChars(0, start, preparedText, 0);
+                insertion.getChars(0, insertion.length(), preparedText, start);
+                value.getChars(end, value.length(), preparedText, start + insertion.length());
+                next = new String(preparedText);
+            }
+            TerminalText.Metrics prepared = EMPTY_METRICS;
+            if (!next.isEmpty()) {
+                if (!admission.fits(TerminalText.estimatedMetricsBytes(next, TAB_WIDTH) + 16_384)) {
+                    return admission.rejected();
+                }
+                prepared = TerminalText.metrics(next, TAB_WIDTH);
+            }
+            int nextCursor = prepared.ceilBoundary((int) tentativeCursor);
+            // No allocations or externally visible intermediate edits after this point.
+            value = next;
+            cachedMetrics = prepared;
+            cursor = nextCursor;
+            selectionAnchor = -1;
+            cancelMouseSelection();
+            mouseViewportBounds = null;
+            return EditResult.CHANGED;
+        } catch (OutOfMemoryError exhausted) {
+            // Admission is conservative; a concurrent allocation may still exhaust the
+            // heap. Preparation has not changed text, caret, selection or viewport.
+            return admission.rejected();
+        }
+    }
+
+    private final class Admission {
+        private boolean collected;
+        private boolean largeOperation;
+
+        private boolean fits(long bytes) {
+            largeOperation |= bytes >= 1_048_576;
+            if (bytes <= Math.max(0, allocationBudget.getAsLong())) return true;
+            if (heapBudget && (largeOperation || collectAfterRejectedPreparation) && !collected) {
+                collected = true;
+                collectAfterRejectedPreparation = false;
+                // Runtime's used heap includes unreachable strings/indices from prior
+                // prepared edits. Allocation normally collects those itself; admission
+                // happens earlier, so allow one collection during preparation before
+                // refusing a large edit. Injected budgets never trigger collection.
+                System.gc();
+                return bytes <= Math.max(0, allocationBudget.getAsLong());
+            }
             return false;
         }
-        value.delete(start, end);
-        invalidateMetrics();
-        cursor = metrics().floorBoundary(start);
+
+        private EditResult rejected() {
+            // A failed large preparation leaves temporary arrays unreachable only
+            // after it returns. Let the next refused operation reclaim them once,
+            // even if the user cleared the field and is now typing a small value.
+            if (heapBudget && largeOperation) collectAfterRejectedPreparation = true;
+            return EditResult.REJECTED;
+        }
+    }
+
+    private static long currentAllocationBudget() {
+        Runtime runtime = Runtime.getRuntime();
+        long available = Math.max(0, runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory()));
+        long reserve = Math.max(1_048_576, Math.min(8_388_608, runtime.maxMemory() / 16));
+        return Math.max(0, available - reserve);
+    }
+
+    private static boolean isAscii(String text) {
+        for (int offset = 0; offset < text.length(); offset++) {
+            if (text.charAt(offset) > 0x7F) return false;
+        }
         return true;
     }
 
@@ -419,31 +529,32 @@ public final class TextField implements InteractiveWidget<TextField.Action> {
         return Character.isWhitespace(point) ? 0 : Character.isLetterOrDigit(point) || point == '_' ? 1 : 2;
     }
 
-    private boolean deleteWord(boolean backwards) {
-        if (!hasSelection()) {
-            int next = backwards ? previousWord() : nextWord();
-            moveCursor(next, true);
-        }
-        return deleteSelection();
+    private EditResult deleteWord(boolean backwards) {
+        if (hasSelection()) return deleteSelectionValue();
+        int next = backwards ? previousWord() : nextWord();
+        return next == cursor ? EditResult.UNCHANGED
+            : replaceValue(Math.min(cursor, next), Math.max(cursor, next), "", Math.min(cursor, next));
     }
 
     private TerminalText.Metrics metrics() {
-        if (!metricsValid) {
-            cachedMetrics = TerminalText.metrics(value.toString(), TAB_WIDTH);
-            metricsValid = true;
-        }
         return cachedMetrics;
     }
 
-    private void invalidateMetrics() {
-        metricsValid = false;
-        mouseViewportBounds = null;
+    private static boolean alreadySingleLine(String text, PastePolicy pastePolicy) {
+        for (int offset = 0; offset < text.length(); offset++) {
+            char ch = text.charAt(offset);
+            if (Character.isISOControl(ch) && (ch != '\t' || pastePolicy != PastePolicy.PRESERVE_TABS)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static String normalizeSingleLinePaste(String text, PastePolicy pastePolicy) {
         if (text == null || text.isEmpty()) {
             return "";
         }
+        if (alreadySingleLine(text, pastePolicy)) return text;
         StringBuilder normalized = new StringBuilder(text.length());
         boolean separatorPending = false;
         for (int offset = 0; offset < text.length();) {
@@ -527,7 +638,7 @@ public final class TextField implements InteractiveWidget<TextField.Action> {
                 0,
                 Math.min(bounds.width() - 1, cursorVisual - viewportLeft)
             );
-            visibleText = CellText.clip(metrics.text(), viewportLeft, bounds.width());
+            visibleText = CellText.clipIndexed(metrics, viewportLeft, bounds.width());
             selectionLeft = Math.max(0, metrics.visualColumnAt(selectionStart) - viewportLeft);
             selectionRight = Math.min(bounds.width(), metrics.visualColumnAt(selectionEnd) - viewportLeft);
         }
@@ -600,17 +711,13 @@ public final class TextField implements InteractiveWidget<TextField.Action> {
                 return InteractionResult.ignored();
             }
             if (event instanceof TextInput text) {
-                return owner.insertValue(text.text())
-                    ? VALUE_CHANGED_RESULT
-                    : InteractionResult.handled();
+                return editResult(owner.insertValue(text.text()));
             }
             if (event instanceof PasteEvent paste) {
                 if (paste.truncated()) {
-                    return PASTE_REJECTED_RESULT;
+                    return INPUT_REJECTED_RESULT;
                 }
-                return owner.pasteValue(paste.text())
-                    ? VALUE_CHANGED_RESULT
-                    : InteractionResult.handled();
+                return editResult(owner.pasteValue(paste.text()));
             }
             if (!(event instanceof KeyStroke stroke)) {
                 return InteractionResult.ignored();
@@ -725,8 +832,12 @@ public final class TextField implements InteractiveWidget<TextField.Action> {
             owner.cancelMouseSelection();
         }
 
-        private static InteractionResult<Action> editResult(boolean changed) {
-            return changed ? VALUE_CHANGED_RESULT : InteractionResult.handled();
+        private static InteractionResult<Action> editResult(EditResult result) {
+            return switch (result) {
+                case CHANGED -> VALUE_CHANGED_RESULT;
+                case UNCHANGED -> InteractionResult.handled();
+                case REJECTED -> INPUT_REJECTED_RESULT;
+            };
         }
     }
 }

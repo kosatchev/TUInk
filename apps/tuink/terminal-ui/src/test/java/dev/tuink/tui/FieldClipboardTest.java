@@ -25,7 +25,7 @@ class FieldClipboardTest {
         EditorClipboard clipboard = new EditorClipboard();
         clipboard.setText("old value");
 
-        assertTrue(FieldClipboard.handle(TuinkCommand.EDIT_COPY, field, clipboard));
+        assertTrue(FieldClipboard.handle(TuinkCommand.EDIT_COPY, field, clipboard).handled());
 
         assertEquals("ef", clipboard.text());
         assertEquals(value, field.text());
@@ -42,7 +42,7 @@ class FieldClipboardTest {
         field.selectAll();
         EditorClipboard clipboard = new EditorClipboard();
 
-        assertTrue(FieldClipboard.handle(TuinkCommand.EDIT_CUT, field, clipboard));
+        assertTrue(FieldClipboard.handle(TuinkCommand.EDIT_CUT, field, clipboard).handled());
 
         assertEquals(value, clipboard.text());
         assertTrue(field.isEmpty());
@@ -56,7 +56,7 @@ class FieldClipboardTest {
         EditorClipboard clipboard = new EditorClipboard();
         clipboard.setText("retained");
         for (TuinkCommand command : List.of(TuinkCommand.EDIT_COPY, TuinkCommand.EDIT_CUT)) {
-            assertTrue(FieldClipboard.handle(command, field, clipboard));
+            assertTrue(FieldClipboard.handle(command, field, clipboard).handled());
             assertEquals("retained", clipboard.text());
             assertEquals("unchanged 😀", field.text());
         }
@@ -70,11 +70,11 @@ class FieldClipboardTest {
         field.navigate(KeyStroke.Key.ARROW_RIGHT, true, false);
         field.navigate(KeyStroke.Key.ARROW_RIGHT, false, true);
         EditorClipboard clipboard = new EditorClipboard();
-        assertTrue(FieldClipboard.handle(TuinkCommand.EDIT_CUT, field, clipboard));
+        assertTrue(FieldClipboard.handle(TuinkCommand.EDIT_CUT, field, clipboard).handled());
         assertEquals("👩‍💻", clipboard.text());
         assertEquals("left  right", field.text());
         field.selectAll();
-        assertTrue(FieldClipboard.handle(TuinkCommand.EDIT_PASTE, field, clipboard));
+        assertTrue(FieldClipboard.handle(TuinkCommand.EDIT_PASTE, field, clipboard).handled());
         assertEquals("👩‍💻", field.text());
         assertFalse(field.hasSelection());
     }
@@ -89,7 +89,7 @@ class FieldClipboardTest {
         String source = "first\r\n\tsecond\u0000 🦀\n";
         clipboard.setText(source);
 
-        assertTrue(FieldClipboard.handle(TuinkCommand.EDIT_PASTE, field, clipboard));
+        assertTrue(FieldClipboard.handle(TuinkCommand.EDIT_PASTE, field, clipboard).handled());
 
         assertEquals("Afirst second 🦀👩‍💻B", field.text());
         assertEquals("Afirst second 🦀".length(), field.cursor());
@@ -105,7 +105,7 @@ class FieldClipboardTest {
         clipboard.setText("retained 中🦀");
 
         for (TuinkCommand command : List.of(TuinkCommand.EDIT_COPY, TuinkCommand.EDIT_CUT)) {
-            assertTrue(FieldClipboard.handle(command, field, clipboard));
+            assertTrue(FieldClipboard.handle(command, field, clipboard).handled());
             assertEquals("retained 中🦀", clipboard.text());
             assertEquals("", field.text());
             assertEquals(0, field.cursor());
@@ -121,7 +121,7 @@ class FieldClipboardTest {
         EditorClipboard clipboard = new EditorClipboard();
         for (String source : List.of("", "\r\n\t\u0000")) {
             clipboard.setText(source);
-            assertTrue(FieldClipboard.handle(TuinkCommand.EDIT_PASTE, field, clipboard));
+            assertTrue(FieldClipboard.handle(TuinkCommand.EDIT_PASTE, field, clipboard).handled());
             assertEquals("A🦀B", field.text());
             assertEquals(caret, field.cursor());
             assertEquals(source, clipboard.text());
@@ -140,11 +140,11 @@ class FieldClipboardTest {
             if (command == TuinkCommand.EDIT_COPY || command == TuinkCommand.EDIT_CUT || command == TuinkCommand.EDIT_PASTE) {
                 continue;
             }
-            assertFalse(FieldClipboard.handle(command, field, clipboard), command.toString());
+            assertFalse(FieldClipboard.handle(command, field, clipboard).handled(), command.toString());
             assertEquals("keep 👩‍💻", field.text());
             assertEquals(caret, field.cursor());
             assertEquals("retained", clipboard.text());
         }
-        assertFalse(FieldClipboard.handle(null, field, clipboard));
+        assertFalse(FieldClipboard.handle(null, field, clipboard).handled());
     }
 }

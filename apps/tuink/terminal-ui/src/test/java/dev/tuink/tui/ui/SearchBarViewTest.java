@@ -70,16 +70,16 @@ class SearchBarViewTest {
 
         assertEquals(TARGET_ORDER, placement.focusScope().tabOrder());
         assertEquals(TARGET_ORDER, placement.focusScope().pointerTopmostFirst());
-        assertEquals(new Rect(6, topRow, 44, 1), placement.targetBounds(SearchFocus.FIND));
-        assertEquals(new Rect(9, topRow + 1, 41, 1), placement.targetBounds(SearchFocus.REPLACE));
-        assertEquals(new Rect(50, topRow, 6, 1), placement.targetBounds(SearchFocus.CASE));
-        assertEquals(new Rect(57, topRow, 8, 1), placement.targetBounds(SearchFocus.WORD));
-        assertEquals(new Rect(66, topRow, 5, 1), placement.targetBounds(SearchFocus.WILDCARD));
-        assertEquals(new Rect(72, topRow, 7, 1), placement.targetBounds(SearchFocus.ALL));
-        assertEquals(new Rect(50, topRow + 1, 6, 1), placement.targetBounds(SearchFocus.NEXT_BUTTON));
-        assertEquals(new Rect(57, topRow + 1, 6, 1), placement.targetBounds(SearchFocus.PREV_BUTTON));
-        assertEquals(new Rect(64, topRow + 1, 9, 1), placement.targetBounds(SearchFocus.REPLACE_BUTTON));
-        assertEquals(new Rect(74, topRow + 1, 5, 1), placement.targetBounds(SearchFocus.ALL_BUTTON));
+        assertEquals(new Rect(6, topRow, 39, 1), placement.targetBounds(SearchFocus.FIND));
+        assertEquals(new Rect(9, topRow + 1, 33, 1), placement.targetBounds(SearchFocus.REPLACE));
+        assertEquals(new Rect(45, topRow, 6, 1), placement.targetBounds(SearchFocus.CASE));
+        assertEquals(new Rect(52, topRow, 8, 1), placement.targetBounds(SearchFocus.WORD));
+        assertEquals(new Rect(61, topRow, 5, 1), placement.targetBounds(SearchFocus.WILDCARD));
+        assertEquals(new Rect(67, topRow, 12, 1), placement.targetBounds(SearchFocus.ALL));
+        assertEquals(new Rect(42, topRow + 1, 6, 1), placement.targetBounds(SearchFocus.NEXT_BUTTON));
+        assertEquals(new Rect(49, topRow + 1, 6, 1), placement.targetBounds(SearchFocus.PREV_BUTTON));
+        assertEquals(new Rect(56, topRow + 1, 9, 1), placement.targetBounds(SearchFocus.REPLACE_BUTTON));
+        assertEquals(new Rect(66, topRow + 1, 13, 1), placement.targetBounds(SearchFocus.ALL_BUTTON));
         for (SearchFocus target : TARGET_ORDER) {
             RoutedTarget<SearchFocus, SearchBarView.Action> routed = target(placement, target);
             assertTrue(routed.enabled(), target.toString());
@@ -127,12 +127,12 @@ class SearchBarViewTest {
 
         String expectedRow1 = "Find: "
             + "needle"
-            + " ".repeat(38)
-            + "[Аа:x] [word: ] [*: ] [All:x] ";
+            + " ".repeat(33)
+            + "[Аа:x] [word: ] [*: ] [All tabs:x] ";
         String expectedRow2 = "Replace: "
             + "swap"
-            + " ".repeat(37)
-            + "[Next] [Prev] [Replace] [All] ";
+            + " ".repeat(29)
+            + "[Next] [Prev] [Replace] [Replace all] ";
         assertEquals(expectedRow1, visibleCellRow(buffer, topRow));
         assertEquals(expectedRow2, visibleCellRow(buffer, topRow + 1));
         assertEquals(1, occurrences(visibleCellRow(buffer, topRow), query.text()));
@@ -140,7 +140,7 @@ class SearchBarViewTest {
         assertEquals(PROMPT, buffer.get(topRow, 0).style());
         assertEquals(FOCUSED, buffer.get(topRow, 6).style());
         assertEquals(NORMAL, buffer.get(topRow + 1, 9).style());
-        assertEquals(NORMAL, buffer.get(topRow, 50).style());
+        assertEquals(NORMAL, buffer.get(topRow, 45).style());
         assertTrue(canvas.put(0, 0, "Z", NORMAL), "widget paint must restore the parent clip");
     }
 
@@ -175,7 +175,7 @@ class SearchBarViewTest {
     }
 
     @Test
-    void tinyAndPartiallyClippedTargetsAreDisabledAndNeverOwnACursor() {
+    void tinyAndPartiallyClippedFieldsCannotOfferReplacementContext() {
         int columns = 10;
         int topRow = 2;
         Rect fullTinyClip = viewport(5, columns);
@@ -184,14 +184,14 @@ class SearchBarViewTest {
         FocusManager<SearchFocus> tinyFocus = new FocusManager<>();
         tiny.activate(tinyFocus);
 
-        assertTrue(tiny.targetBounds(SearchFocus.FIND).isEmpty());
-        assertFalse(target(tiny, SearchFocus.FIND).enabled());
-        assertTrue(target(tiny, SearchFocus.CASE).enabled());
+        assertEquals(4, tiny.targetBounds(SearchFocus.FIND).width());
+        assertTrue(target(tiny, SearchFocus.FIND).enabled());
+        assertFalse(target(tiny, SearchFocus.CASE).enabled());
         assertFalse(target(tiny, SearchFocus.WORD).enabled());
-        assertTrue(target(tiny, SearchFocus.NEXT_BUTTON).enabled());
+        assertFalse(target(tiny, SearchFocus.NEXT_BUTTON).enabled());
         assertFalse(target(tiny, SearchFocus.PREV_BUTTON).enabled());
-        assertEquals(SearchFocus.CASE, tinyFocus.focused().orElseThrow());
-        assertTrue(tiny.cursorPosition(tinyFocus).isEmpty());
+        assertEquals(SearchFocus.FIND, tinyFocus.focused().orElseThrow());
+        assertTrue(tiny.cursorPosition(tinyFocus).isPresent());
 
         Rect clipped = new Rect(0, 0, 4, 5);
         SearchBarView.Placement hidden = view(new TextField(), new TextField(), columns)
@@ -209,7 +209,7 @@ class SearchBarViewTest {
 
         CellBuffer buffer = new CellBuffer(5, columns);
         hidden.paint(new Canvas(buffer), THEME, hiddenFocus);
-        assertEquals(DISABLED, buffer.get(topRow, 0).style());
+        assertEquals(DISABLED, buffer.get(topRow, 6).style());
     }
 
     @Test

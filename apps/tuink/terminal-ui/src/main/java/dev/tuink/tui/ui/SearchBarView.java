@@ -64,11 +64,11 @@ public final class SearchBarView {
         Button wildcardToggle = new Button(
             "*:" + (safeMatchMode == SearchOptions.MatchMode.WILDCARD ? "x" : " ")
         );
-        Button allToggle = new Button("All:" + (allTabs ? "x" : " "));
+        Button allToggle = new Button("All tabs:" + (allTabs ? "x" : " "));
         Button next = new Button("Next");
         Button previous = new Button("Prev");
         Button replace = new Button("Replace");
-        Button replaceAll = new Button("All");
+        Button replaceAll = new Button("Replace all");
 
         List<ButtonTarget> optionTargets = List.of(
             new ButtonTarget(SearchFocus.CASE, caseToggle, Action.TOGGLE_CASE),
@@ -89,6 +89,14 @@ public final class SearchBarView {
         int actionLeftWidth = leftWidth(actionTargets, safeColumns);
         int findLabelWidth = CellText.width(FIND_LABEL);
         int replaceLabelWidth = CellText.width(REPLACE_LABEL);
+        boolean optionsVisible = optionLeftWidth - findLabelWidth >= 1;
+        boolean actionsVisible = actionLeftWidth - replaceLabelWidth >= 1;
+        if (!optionsVisible) {
+            optionLeftWidth = safeColumns;
+        }
+        if (!actionsVisible) {
+            actionLeftWidth = safeColumns;
+        }
         this.queryStart = Math.min(findLabelWidth, optionLeftWidth);
         this.queryWidth = Math.max(0, optionLeftWidth - findLabelWidth);
         this.replacementStart = Math.min(replaceLabelWidth, actionLeftWidth);
@@ -97,8 +105,8 @@ public final class SearchBarView {
         this.row2 = CellText.fit(REPLACE_LABEL, safeColumns);
 
         ArrayList<ButtonSpec> placedButtons = new ArrayList<>(8);
-        appendButtons(placedButtons, optionTargets, optionsStart, 0);
-        appendButtons(placedButtons, actionTargets, actionsStart, 1);
+        appendButtons(placedButtons, optionTargets, optionsStart, 0, optionsVisible);
+        appendButtons(placedButtons, actionTargets, actionsStart, 1, actionsVisible);
         this.buttons = List.copyOf(placedButtons);
     }
 
@@ -159,7 +167,7 @@ public final class SearchBarView {
         );
         for (ButtonSpec spec : buttons) {
             PlacedInteractiveWidget<Button.Action> placedButton = spec.button().layout(
-                new Rect(spec.column(), topRow + spec.row(), spec.button().width(), 1)
+                new Rect(spec.column(), topRow + spec.row(), spec.visible() ? spec.button().width() : 0, 1)
             );
             addTarget(
                 targets,
@@ -183,7 +191,7 @@ public final class SearchBarView {
     public enum Action {
         QUERY_CHANGED,
         REPLACEMENT_CHANGED,
-        PASTE_REJECTED,
+        INPUT_REJECTED,
         FIND_NEXT,
         FIND_PREVIOUS,
         REPLACE,
@@ -323,7 +331,8 @@ public final class SearchBarView {
         List<ButtonSpec> destination,
         List<ButtonTarget> targets,
         int startColumn,
-        int row
+        int row,
+        boolean visible
     ) {
         int column = startColumn;
         for (ButtonTarget target : targets) {
@@ -332,7 +341,8 @@ public final class SearchBarView {
                 target.button(),
                 target.action(),
                 row,
-                column
+                column,
+                visible
             ));
             column += target.button().width() + 1;
         }
@@ -406,7 +416,7 @@ public final class SearchBarView {
             Action action = switch (result.output().orElseThrow()) {
                 case VALUE_CHANGED -> changedAction;
                 case SUBMITTED -> Action.FIND_NEXT;
-                case PASTE_REJECTED -> Action.PASTE_REJECTED;
+                case INPUT_REJECTED -> Action.INPUT_REJECTED;
             };
             return mapped(result, action);
         }
@@ -458,7 +468,8 @@ public final class SearchBarView {
         Button button,
         Action action,
         int row,
-        int column
+        int column,
+        boolean visible
     ) {
     }
 }

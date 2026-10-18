@@ -196,7 +196,7 @@ class SearchInputRouterTest {
         assertEquals("замена", fixture.replacement.text());
         String before = fixture.replacement.text();
         assertAction(
-            SearchBarView.Action.PASTE_REJECTED,
+            SearchBarView.Action.INPUT_REJECTED,
             fixture.route(new PasteEvent("partial", true))
         );
         assertEquals(before, fixture.replacement.text());
@@ -205,7 +205,7 @@ class SearchInputRouterTest {
         assertCaptured(fixture.route(new TextInput("ignored")));
         assertCaptured(fixture.route(new PasteEvent("ignored", false)));
         assertAction(
-            SearchBarView.Action.PASTE_REJECTED,
+            SearchBarView.Action.INPUT_REJECTED,
             fixture.route(new PasteEvent("partial", true))
         );
         assertEquals(before, fixture.replacement.text());
@@ -444,7 +444,7 @@ class SearchInputRouterTest {
         assertCaptured(fixture.route(new TextInput("hidden")));
         assertCaptured(fixture.route(new PasteEvent("hidden", false)));
         assertAction(
-            SearchBarView.Action.PASTE_REJECTED,
+            SearchBarView.Action.INPUT_REJECTED,
             fixture.route(new PasteEvent("partial", true))
         );
         assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.BACKSPACE)));
@@ -473,7 +473,7 @@ class SearchInputRouterTest {
 
         Rect partialCase = fixture.placement.targetBounds(SearchFocus.CASE);
         assertFalse(fixture.placement.focusScope().target(SearchFocus.CASE).orElseThrow().enabled());
-        assertCaptured(fixture.route(pointer(
+        assertIgnored(fixture.route(pointer(
             partialCase.y(),
             partialCase.x(),
             PointerEvent.Kind.PRESS,

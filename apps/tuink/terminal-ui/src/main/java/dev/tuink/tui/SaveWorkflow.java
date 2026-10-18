@@ -100,7 +100,8 @@ final class SaveWorkflow {
             Notice notice = Notice.success(SaveTargetPolicy.savedMessage(tab.state()));
             Result continuation = afterSuccessfulSave(context, modal, notice);
             return new Result(continuation.running(), continuation.modalState(), continuation.activateTabIndex(),
-                continuation.closeTabIndex(), continuation.filename(), continuation.notice(), true, false);
+                continuation.closeTabIndex(), continuation.filename(), continuation.notice(), true,
+                continuation.focusFilename());
         } catch (IOException error) {
             return new Result(true, modal, -1, -1, SaveFlowController.TextInputEffect.none(),
                 Notice.error(SaveTargetPolicy.saveErrorMessage(error)), false, modal.isSaveAs());
@@ -172,7 +173,7 @@ final class SaveWorkflow {
                 SaveTargetPolicy::isSuitableDraft);
         context.suggestions().rememberDraft(tab, suggestion);
         return new Result(true, modal, index, -1, SaveFlowController.TextInputEffect.setText(suggestion),
-            Notice.clear(), false, false);
+            Notice.clear(), false, true);
     }
 
     private static String saveDirty(Context context, int index) {

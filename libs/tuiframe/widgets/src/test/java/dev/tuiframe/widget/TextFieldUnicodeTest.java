@@ -9,6 +9,7 @@ import dev.tuiframe.cell.CellBuffer;
 import dev.tuiframe.geometry.Point;
 import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.input.PointerEvent;
+import dev.tuiframe.input.KeyStroke;
 import dev.tuiframe.style.CellStyle;
 import java.util.List;
 import java.util.Random;
@@ -105,7 +106,29 @@ class TextFieldUnicodeTest {
         deleted.backspace();
 
         assertEquals("🇦🇧🇨", deleted.text());
+        assertEquals("🇦🇧".length(), deleted.cursor());
         assertTrue(TerminalText.metrics(deleted.text(), 4).isBoundary(deleted.cursor()));
+    }
+
+    @Test
+    void everyDeletionKeepsTheCaretAfterTheGraphemeJoinedAcrossTheEdit() {
+        for (String operation : List.of("delete", "backspace", "selection")) {
+            TextField field = new TextField();
+            field.set("👩‍x💻TAIL");
+            field.moveHome();
+            field.moveRight();
+            if (operation.equals("delete")) {
+                field.deleteForward();
+            } else {
+                field.navigate(KeyStroke.Key.ARROW_RIGHT, false, operation.equals("selection"));
+                if (operation.equals("selection")) field.deleteSelection();
+                else field.backspace();
+            }
+            assertEquals("👩‍💻TAIL", field.text(), operation);
+            assertEquals("👩‍💻".length(), field.cursor(), operation);
+            field.insert("B");
+            assertEquals("👩‍💻BTAIL", field.text(), operation);
+        }
     }
 
     @Test

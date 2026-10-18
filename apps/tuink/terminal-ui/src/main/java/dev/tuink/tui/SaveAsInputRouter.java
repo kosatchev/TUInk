@@ -46,6 +46,7 @@ final class SaveAsInputRouter {
         ControlCommandRouter.ClipboardResult copied = ControlCommandRouter.clipboard(command,
             placement.field(focusManager.focused().orElse(null)).orElse(null), clipboard);
         if (copied.handled()) {
+            if (copied.inputRejected()) return Result.action(SaveAsBarView.Action.INPUT_REJECTED);
             return copied.valueChanged() ? Result.action(SaveAsBarView.Action.VALUE_CHANGED) : Result.CAPTURED;
         }
         if (command == TuinkCommand.UI_ESCAPE || command == TuinkCommand.SEARCH_CLOSE) {
@@ -106,7 +107,8 @@ final class SaveAsInputRouter {
                 capture.observe(surfaceId, scope, target.id(), interaction);
             }
             if (interaction.output().isPresent()) {
-                return Result.action(interaction.output().orElseThrow());
+                SaveAsBarView.Action action = interaction.output().orElseThrow();
+                return Result.action(action);
             }
             if (interaction.consumed()) {
                 return Result.CAPTURED;
@@ -114,7 +116,7 @@ final class SaveAsInputRouter {
         }
 
         if (event instanceof PasteEvent paste && paste.truncated()) {
-            return Result.action(SaveAsBarView.Action.PASTE_REJECTED);
+            return Result.action(SaveAsBarView.Action.INPUT_REJECTED);
         }
         if (!interactive) {
             return Result.CAPTURED;

@@ -8,6 +8,7 @@ import dev.tuiframe.input.KeyStroke;
 import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.input.TextInput;
 import dev.tuink.core.Position;
+import dev.tuink.tui.command.TuinkCommand;
 import dev.tuink.tui.flow.SearchFocus;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -34,7 +35,7 @@ class SearchReplaceFeedbackIntegrationTest {
 
             if (mouse) {
                 int row = window.rowStartingWith("Replace:");
-                int column = window.screenRow(row).indexOf("[All]") + 2;
+                int column = window.screenRow(row).indexOf("[Replace all]") + 2;
                 assertTrue(column >= 2);
                 window.pointer(PointerEvent.Kind.PRESS, row, column);
                 assertEquals(window.host.styles.notifyError(), window.notification.style());
@@ -121,7 +122,7 @@ class SearchReplaceFeedbackIntegrationTest {
 
             replace(window, SearchFocus.ALL_BUTTON);
 
-            assertEquals("Matched 3 occurrence(s); replacement applied. Undo available: Ctrl+Z", window.notification.message);
+            assertEquals("Matched 3 occurrence(s); replacement applied. Undo: Esc, then Ctrl+Z", window.notification.message);
             assertEquals("Xalpha alpha alpha", window.active().tabSession().model().getLine(0));
             assertTrue(window.active().state().isDirty());
             assertTrue(window.active().tabSession().engine().undo());
@@ -131,6 +132,25 @@ class SearchReplaceFeedbackIntegrationTest {
             assertEquals("Alpha alpha ALPHA", window.active().tabSession().model().getLine(0));
             assertFalse(window.active().state().isDirty());
             assertFalse(window.active().tabSession().engine().undo());
+        }
+    }
+
+    @Test
+    void replaceAllAdvertisesAnUndoSequenceThatWorksFromItsRetainedButtonFocus() throws Exception {
+        try (EditorWindowFixture window = window(List.of("alpha alpha"))) {
+            search(window, "alpha", "beta");
+            replace(window, SearchFocus.ALL_BUTTON);
+            assertEquals("Matched 2 occurrence(s); replacement applied. Undo: Esc, then Ctrl+Z",
+                window.notification.message);
+            assertEquals(SearchFocus.ALL_BUTTON, window.host.searchFocusManager.focused().orElseThrow());
+
+            window.event(KeyStroke.of(KeyStroke.Key.Z, KeyStroke.Modifier.CTRL));
+            assertEquals(List.of("beta beta"), window.active().tabSession().model().snapshotLines());
+            window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
+            window.event(KeyStroke.of(KeyStroke.Key.Z, KeyStroke.Modifier.CTRL));
+
+            assertEquals(List.of("alpha alpha"), window.active().tabSession().model().snapshotLines());
+            assertFalse(window.active().state().isDirty());
         }
     }
 
@@ -173,6 +193,30 @@ class SearchReplaceFeedbackIntegrationTest {
             assertEquals(window.host.styles.notifyInfo(), window.notification.style());
             assertEquals(revision, window.active().tabSession().model().revision());
             assertFalse(window.active().state().isDirty());
+        }
+    }
+
+    @Test
+    void allTabsOptionAndReplaceAllButtonHaveDistinctLabelsAndScopes() throws Exception {
+        try (EditorWindowFixture window = window(List.of("alpha"))) {
+            var first = window.active();
+            window.command(TuinkCommand.TAB_NEW);
+            window.event(new TextInput("alpha alpha"));
+            search(window, "alpha", "beta");
+
+            assertTrue(window.screenRow(window.height - 3).contains("[All tabs: ]"));
+            assertTrue(window.screenRow(window.height - 2).contains("[Replace all]"));
+            window.focusSearch(SearchFocus.ALL);
+            window.event(new TextInput(" "));
+            assertTrue(window.screenRow(window.height - 3).contains("[All tabs:x]"));
+            assertTrue(window.screenRow(window.height - 1).contains("Find 3 in 2 tabs"));
+
+            replace(window, SearchFocus.ALL_BUTTON);
+
+            assertEquals(List.of("alpha"), first.tabSession().model().snapshotLines());
+            assertFalse(first.state().isDirty());
+            assertEquals(List.of("beta beta"), window.active().tabSession().model().snapshotLines());
+            assertTrue(window.screenRow(window.height - 1).contains("Find 1 in 2 tabs"));
         }
     }
 

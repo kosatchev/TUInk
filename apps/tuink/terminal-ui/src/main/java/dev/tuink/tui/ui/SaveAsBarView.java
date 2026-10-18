@@ -78,8 +78,9 @@ public final class SaveAsBarView {
         Objects.requireNonNull(scopeId, "scopeId");
         Rect safeInteractionClip = Objects.requireNonNull(interactionClip, "interactionClip");
         List<RoutedTarget<Target, Action>> targets = new ArrayList<>(ORDER.size());
+        Rect fieldBounds = new Rect(fieldStart, topRow, fieldWidth, 1);
         addTarget(targets, Target.FIELD,
-            new FieldPlacement(field.layout(new Rect(fieldStart, topRow, fieldWidth, 1))), safeInteractionClip);
+            new FieldPlacement(field.layout(fieldBounds)), safeInteractionClip);
         addTarget(targets, Target.SAVE,
             new ButtonPlacement(save.layout(new Rect(saveStart, topRow, buttonsVisible ? save.width() : 0, 1)),
                 Action.SUBMITTED), safeInteractionClip);
@@ -105,7 +106,7 @@ public final class SaveAsBarView {
     public enum Action {
         VALUE_CHANGED,
         SUBMITTED,
-        PASTE_REJECTED,
+        INPUT_REJECTED,
         CANCELLED
     }
 
@@ -223,7 +224,7 @@ public final class SaveAsBarView {
             Action action = result.output().map(value -> switch (value) {
                 case VALUE_CHANGED -> Action.VALUE_CHANGED;
                 case SUBMITTED -> Action.SUBMITTED;
-                case PASTE_REJECTED -> Action.PASTE_REJECTED;
+                case INPUT_REJECTED -> Action.INPUT_REJECTED;
             }).orElse(Action.VALUE_CHANGED);
             return mapped(result, action);
         }

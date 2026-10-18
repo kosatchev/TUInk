@@ -69,7 +69,7 @@ class TextFieldSelectionTest {
         assertFalse(field.hasSelection());
 
         key(field, KeyStroke.Key.A, KeyStroke.Modifier.CTRL);
-        assertEquals(TextField.Action.PASTE_REJECTED,
+        assertEquals(TextField.Action.INPUT_REJECTED,
             handle(field, new PasteEvent("partial", true)).output().orElseThrow());
         assertEquals("before 中 after", field.selectedText());
         handle(field, new PasteEvent("new\r\n\tvalue"));

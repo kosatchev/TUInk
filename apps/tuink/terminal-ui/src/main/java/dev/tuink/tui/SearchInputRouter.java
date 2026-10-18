@@ -49,6 +49,7 @@ final class SearchInputRouter {
         ControlCommandRouter.ClipboardResult copied = ControlCommandRouter.clipboard(command,
             placement.field(focused).orElse(null), clipboard);
         if (copied.handled()) {
+            if (copied.inputRejected()) return Result.action(SearchBarView.Action.INPUT_REJECTED);
             return copied.valueChanged() ? Result.action(focused == SearchFocus.REPLACE
                 ? SearchBarView.Action.REPLACEMENT_CHANGED : SearchBarView.Action.QUERY_CHANGED) : Result.CAPTURED;
         }
@@ -144,7 +145,7 @@ final class SearchInputRouter {
         }
 
         if (event instanceof PasteEvent paste && paste.truncated()) {
-            return Result.action(SearchBarView.Action.PASTE_REJECTED);
+            return Result.action(SearchBarView.Action.INPUT_REJECTED);
         }
 
         if (event instanceof PasteEvent) {

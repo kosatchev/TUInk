@@ -61,16 +61,17 @@ final class ControlCommandRouter {
         Objects.requireNonNull(clipboard, "clipboard");
         if (command != TuinkCommand.EDIT_COPY && command != TuinkCommand.EDIT_CUT
             && command != TuinkCommand.EDIT_PASTE) {
-            return new ClipboardResult(false, false);
+            return new ClipboardResult(false, false, false);
         }
         if (field == null) {
-            return new ClipboardResult(true, false);
+            return new ClipboardResult(true, false, false);
         }
         String before = field.text();
-        FieldClipboard.handle(command, field, clipboard);
-        return new ClipboardResult(true, !before.equals(field.text()));
+        FieldClipboard.Result result = FieldClipboard.handle(command, field, clipboard);
+        return new ClipboardResult(result.handled(), !before.equals(field.text()),
+            result == FieldClipboard.Result.INPUT_REJECTED);
     }
 
-    record ClipboardResult(boolean handled, boolean valueChanged) {
+    record ClipboardResult(boolean handled, boolean valueChanged, boolean inputRejected) {
     }
 }

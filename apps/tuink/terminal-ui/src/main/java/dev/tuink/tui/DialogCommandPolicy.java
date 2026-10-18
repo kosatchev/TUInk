@@ -57,7 +57,9 @@ final class DialogCommandPolicy {
             case EDIT_SELECT_ALL, CURSOR_UP, CURSOR_DOWN, CURSOR_LEFT, CURSOR_RIGHT,
                 CURSOR_SELECT_UP, CURSOR_SELECT_DOWN, CURSOR_SELECT_LEFT, CURSOR_SELECT_RIGHT,
                 CURSOR_WORD_LEFT, CURSOR_WORD_RIGHT, CURSOR_PAGE_UP, CURSOR_PAGE_DOWN,
-                CURSOR_HOME, CURSOR_END -> Action.READ;
+                CURSOR_HOME, CURSOR_END, CURSOR_SELECT_HOME, CURSOR_SELECT_END,
+                CURSOR_DOCUMENT_START, CURSOR_DOCUMENT_END,
+                CURSOR_SELECT_DOCUMENT_START, CURSOR_SELECT_DOCUMENT_END -> Action.READ;
             // File/tab/menu commands also stay behind a pending blocking operation.
             default -> Action.MODIFY;
         };

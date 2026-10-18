@@ -10,6 +10,7 @@ import static dev.tuink.tui.command.TuinkCommand.MENU_VIEW;
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.ClipboardLimitException;
 import dev.tuink.core.DocumentEditLimitException;
+import dev.tuink.core.DocumentFileMetadata;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.GutterDiffMode;
 import dev.tuink.core.TabInsertMode;
@@ -245,11 +246,15 @@ final class InputActionDispatcher {
                 return DispatchResult.handled(statusMessage);
             }
             case EDIT_UNDO -> {
-                statusMessage = ctx.engine().undo() ? "Undo" : "Nothing to undo";
+                DocumentFileMetadata before = ctx.engine().model().fileMetadata();
+                statusMessage = ctx.engine().undo()
+                    ? historyMessage("Undo", before, ctx.engine().model().fileMetadata()) : "Nothing to undo";
                 return DispatchResult.handled(statusMessage);
             }
             case EDIT_REDO -> {
-                statusMessage = ctx.engine().redo() ? "Redo" : "Nothing to redo";
+                DocumentFileMetadata before = ctx.engine().model().fileMetadata();
+                statusMessage = ctx.engine().redo()
+                    ? historyMessage("Redo", before, ctx.engine().model().fileMetadata()) : "Nothing to redo";
                 return DispatchResult.handled(statusMessage);
             }
             case EDIT_SELECT_ALL -> {
@@ -335,20 +340,30 @@ final class InputActionDispatcher {
                 return DispatchResult.handled(null).withViewportPolicy(ctx.engine().hasSelection()
                     ? CursorPolicy.PAGE_SCROLL : CursorPolicy.FOLLOW_CURSOR);
             }
-            case CURSOR_HOME -> {
+            case CURSOR_HOME, CURSOR_SELECT_HOME -> {
+                boolean selecting = command == TuinkCommand.CURSOR_SELECT_HOME;
                 if (ui.smartHomeEndSetting) {
-                    ctx.engine().moveHomeSmart();
+                    ctx.engine().moveHomeSmart(selecting);
                 } else {
-                    ctx.engine().moveHome();
+                    ctx.engine().moveHome(selecting);
                 }
                 return DispatchResult.followCursor();
             }
-            case CURSOR_END -> {
+            case CURSOR_END, CURSOR_SELECT_END -> {
+                boolean selecting = command == TuinkCommand.CURSOR_SELECT_END;
                 if (ui.smartHomeEndSetting) {
-                    ctx.engine().moveEndSmart();
+                    ctx.engine().moveEndSmart(selecting);
                 } else {
-                    ctx.engine().moveEnd();
+                    ctx.engine().moveEnd(selecting);
                 }
+                return DispatchResult.followCursor();
+            }
+            case CURSOR_DOCUMENT_START, CURSOR_SELECT_DOCUMENT_START -> {
+                ctx.engine().moveDocumentStart(command == TuinkCommand.CURSOR_SELECT_DOCUMENT_START);
+                return DispatchResult.followCursor();
+            }
+            case CURSOR_DOCUMENT_END, CURSOR_SELECT_DOCUMENT_END -> {
+                ctx.engine().moveDocumentEnd(command == TuinkCommand.CURSOR_SELECT_DOCUMENT_END);
                 return DispatchResult.followCursor();
             }
             case EDIT_BACKSPACE -> {
@@ -374,6 +389,12 @@ final class InputActionDispatcher {
 
     private static TabInsertMode nextTabInsertMode(TabInsertMode mode) {
         return mode == null ? TabInsertMode.AUTO : mode.next();
+    }
+
+    private static String historyMessage(String action, DocumentFileMetadata before, DocumentFileMetadata after) {
+        return before.charset().equals(after.charset()) && before.bomKind() == after.bomKind()
+            ? action : action + ": encoding restored to " + after.charset().displayName()
+                + (after.bomKind() == dev.tuink.core.BomKind.NONE ? " without BOM" : " with BOM");
     }
 
     private static GutterDiffMode nextGutterDiffMode(GutterDiffMode mode) {

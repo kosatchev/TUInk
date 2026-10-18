@@ -24,14 +24,25 @@ class SearchReplaceFeedbackIntegrationTest {
     @TempDir
     Path directory;
 
-    @Test
-    void rejectedReplaceAllShowsAPersistentErrorAndKeepsTheDocument() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void rejectedReplaceAllShowsAPersistentErrorAndKeepsTheDocument(boolean mouse) throws Exception {
         String original = "a".repeat(4096);
         try (EditorWindowFixture window = window(List.of(original))) {
             search(window, "a", "b".repeat(1_000_000));
             long revision = window.active().tabSession().model().revision();
 
-            replace(window, SearchFocus.ALL_BUTTON);
+            if (mouse) {
+                int row = window.rowStartingWith("Replace:");
+                int column = window.screenRow(row).indexOf("[All]") + 2;
+                assertTrue(column >= 2);
+                window.pointer(PointerEvent.Kind.PRESS, row, column);
+                assertEquals(window.host.styles.notifyError(), window.notification.style());
+                window.pointer(PointerEvent.Kind.RELEASE, row, column);
+                window.pointer(PointerEvent.Kind.MOVE, row, column);
+            } else {
+                replace(window, SearchFocus.ALL_BUTTON);
+            }
 
             assertTrue(window.notification.message.startsWith("Replacement result is too large"));
             assertEquals(window.host.styles.notifyError(), window.notification.style());

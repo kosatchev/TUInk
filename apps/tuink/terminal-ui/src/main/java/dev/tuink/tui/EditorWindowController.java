@@ -1249,7 +1249,11 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 DialogCommandPolicy.action(inputEvent, physicalCommand)).consumed()) {
             return;
         }
-        if (!saveAsMode && !confirmMode) {
+        boolean startsAction = !(inputEvent instanceof PointerEvent pointer) || switch (pointer.kind()) {
+            case PRESS, SCROLL_UP, SCROLL_DOWN, SCROLL_LEFT, SCROLL_RIGHT -> true;
+            default -> false;
+        };
+        if (!saveAsMode && !confirmMode && startsAction) {
             notification.clearErrorOnUserAction();
         }
         eventLoop.invalidate();

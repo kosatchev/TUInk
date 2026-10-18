@@ -34,7 +34,10 @@ class DialogCommandPolicyTest {
         TuinkCommand.CURSOR_SELECT_LEFT, TuinkCommand.CURSOR_SELECT_RIGHT,
         TuinkCommand.CURSOR_WORD_LEFT, TuinkCommand.CURSOR_WORD_RIGHT,
         TuinkCommand.CURSOR_PAGE_UP, TuinkCommand.CURSOR_PAGE_DOWN,
-        TuinkCommand.CURSOR_HOME, TuinkCommand.CURSOR_END
+        TuinkCommand.CURSOR_HOME, TuinkCommand.CURSOR_END,
+        TuinkCommand.CURSOR_SELECT_HOME, TuinkCommand.CURSOR_SELECT_END,
+        TuinkCommand.CURSOR_DOCUMENT_START, TuinkCommand.CURSOR_DOCUMENT_END,
+        TuinkCommand.CURSOR_SELECT_DOCUMENT_START, TuinkCommand.CURSOR_SELECT_DOCUMENT_END
     );
     private static final KeyStroke PHYSICAL_KEY = KeyStroke.of(KeyStroke.Key.UNKNOWN);
 

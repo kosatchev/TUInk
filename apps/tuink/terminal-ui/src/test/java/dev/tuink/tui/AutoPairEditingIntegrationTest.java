@@ -54,9 +54,7 @@ class AutoPairEditingIntegrationTest {
         String original = "x' ";
         try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of(original))) {
             if (reverse) {
-                for (int i = 0; i < original.length(); i++) {
-                    window.event(KeyStroke.of(KeyStroke.Key.ARROW_RIGHT));
-                }
+                window.event(ctrl(KeyStroke.Key.END));
             } else {
                 window.event(KeyStroke.of(KeyStroke.Key.ARROW_RIGHT));
             }

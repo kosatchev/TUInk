@@ -38,6 +38,12 @@ public enum TuinkCommand {
     CURSOR_PAGE_DOWN("tuink.cursor.page-down", "Page down"),
     CURSOR_HOME("tuink.cursor.home", "Move to line start"),
     CURSOR_END("tuink.cursor.end", "Move to line end"),
+    CURSOR_SELECT_HOME("tuink.cursor.select-home", "Select to line start"),
+    CURSOR_SELECT_END("tuink.cursor.select-end", "Select to line end"),
+    CURSOR_DOCUMENT_START("tuink.cursor.document-start", "Move to document start"),
+    CURSOR_DOCUMENT_END("tuink.cursor.document-end", "Move to document end"),
+    CURSOR_SELECT_DOCUMENT_START("tuink.cursor.select-document-start", "Select to document start"),
+    CURSOR_SELECT_DOCUMENT_END("tuink.cursor.select-document-end", "Select to document end"),
 
     SEARCH_OPEN("tuink.search.open", "Open search"),
     SEARCH_NEXT("tuink.search.next", "Find next"),

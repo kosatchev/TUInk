@@ -22,6 +22,12 @@ final class ControlCommandRouter {
             case EDIT_DELETE_FORWARD, SEARCH_FIELD_DELETE -> KeyStroke.of(KeyStroke.Key.DELETE);
             case CURSOR_HOME, SEARCH_FIELD_HOME -> KeyStroke.of(KeyStroke.Key.HOME);
             case CURSOR_END, SEARCH_FIELD_END -> KeyStroke.of(KeyStroke.Key.END);
+            case CURSOR_SELECT_HOME -> KeyStroke.of(KeyStroke.Key.HOME, KeyStroke.Modifier.SHIFT);
+            case CURSOR_SELECT_END -> KeyStroke.of(KeyStroke.Key.END, KeyStroke.Modifier.SHIFT);
+            case CURSOR_DOCUMENT_START -> KeyStroke.of(KeyStroke.Key.HOME, KeyStroke.Modifier.CTRL);
+            case CURSOR_DOCUMENT_END -> KeyStroke.of(KeyStroke.Key.END, KeyStroke.Modifier.CTRL);
+            case CURSOR_SELECT_DOCUMENT_START -> KeyStroke.of(KeyStroke.Key.HOME, KeyStroke.Modifier.CTRL, KeyStroke.Modifier.SHIFT);
+            case CURSOR_SELECT_DOCUMENT_END -> KeyStroke.of(KeyStroke.Key.END, KeyStroke.Modifier.CTRL, KeyStroke.Modifier.SHIFT);
             case CURSOR_LEFT, SEARCH_NAVIGATE_LEFT -> KeyStroke.of(KeyStroke.Key.ARROW_LEFT);
             case CURSOR_RIGHT, SEARCH_NAVIGATE_RIGHT -> KeyStroke.of(KeyStroke.Key.ARROW_RIGHT);
             case CURSOR_UP, SEARCH_NAVIGATE_UP -> KeyStroke.of(KeyStroke.Key.ARROW_UP);

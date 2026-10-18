@@ -2,6 +2,8 @@ package dev.tuink.tui.keymap;
 
 import static dev.tuink.tui.command.TuinkCommand.APP_QUIT;
 import static dev.tuink.tui.command.TuinkCommand.CURSOR_DOWN;
+import static dev.tuink.tui.command.TuinkCommand.CURSOR_DOCUMENT_START;
+import static dev.tuink.tui.command.TuinkCommand.CURSOR_DOCUMENT_END;
 import static dev.tuink.tui.command.TuinkCommand.CURSOR_END;
 import static dev.tuink.tui.command.TuinkCommand.CURSOR_HOME;
 import static dev.tuink.tui.command.TuinkCommand.CURSOR_LEFT;
@@ -12,6 +14,10 @@ import static dev.tuink.tui.command.TuinkCommand.CURSOR_SELECT_DOWN;
 import static dev.tuink.tui.command.TuinkCommand.CURSOR_SELECT_LEFT;
 import static dev.tuink.tui.command.TuinkCommand.CURSOR_SELECT_RIGHT;
 import static dev.tuink.tui.command.TuinkCommand.CURSOR_SELECT_UP;
+import static dev.tuink.tui.command.TuinkCommand.CURSOR_SELECT_HOME;
+import static dev.tuink.tui.command.TuinkCommand.CURSOR_SELECT_END;
+import static dev.tuink.tui.command.TuinkCommand.CURSOR_SELECT_DOCUMENT_START;
+import static dev.tuink.tui.command.TuinkCommand.CURSOR_SELECT_DOCUMENT_END;
 import static dev.tuink.tui.command.TuinkCommand.CURSOR_UP;
 import static dev.tuink.tui.command.TuinkCommand.CURSOR_WORD_LEFT;
 import static dev.tuink.tui.command.TuinkCommand.CURSOR_WORD_RIGHT;
@@ -102,6 +108,12 @@ public final class TuinkKeymap {
         bind(result, key(KeyStroke.Key.PAGE_DOWN), CURSOR_PAGE_DOWN);
         bind(result, key(KeyStroke.Key.HOME), CURSOR_HOME);
         bind(result, key(KeyStroke.Key.END), CURSOR_END);
+        bind(result, key(KeyStroke.Key.HOME, KeyStroke.Modifier.SHIFT), CURSOR_SELECT_HOME);
+        bind(result, key(KeyStroke.Key.END, KeyStroke.Modifier.SHIFT), CURSOR_SELECT_END);
+        bind(result, key(KeyStroke.Key.HOME, KeyStroke.Modifier.CTRL), CURSOR_DOCUMENT_START);
+        bind(result, key(KeyStroke.Key.END, KeyStroke.Modifier.CTRL), CURSOR_DOCUMENT_END);
+        bind(result, key(KeyStroke.Key.HOME, KeyStroke.Modifier.CTRL, KeyStroke.Modifier.SHIFT), CURSOR_SELECT_DOCUMENT_START);
+        bind(result, key(KeyStroke.Key.END, KeyStroke.Modifier.CTRL, KeyStroke.Modifier.SHIFT), CURSOR_SELECT_DOCUMENT_END);
         bind(result, key(KeyStroke.Key.ESCAPE), UI_ESCAPE);
 
         bind(result, key(KeyStroke.Key.F1), MENU_FILE);

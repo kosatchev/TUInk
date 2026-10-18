@@ -396,22 +396,27 @@ public class EditorEngine {
     }
 
     public void open(Path path) throws IOException {
-        open(path, true);
+        open(path, true, DocumentOpenMode.DETECT);
     }
 
     /** Opens an existing file without treating a missing target as a new document. */
     public void openExisting(Path path) throws IOException {
-        open(path, false);
+        openExisting(path, DocumentOpenMode.DETECT);
     }
 
-    private void open(Path path, boolean createIfMissing) throws IOException {
+    public void openExisting(Path path, DocumentOpenMode openMode) throws IOException {
+        open(path, false, openMode);
+    }
+
+    private void open(Path path, boolean createIfMissing, DocumentOpenMode openMode) throws IOException {
         if (path == null) {
             throw new IOException("No file selected");
         }
         Path normalizedPath = path.toAbsolutePath().normalize();
         SaveDisposition openedDisposition;
         try {
-            TextModel.LoadMetadata loaded = model.load(normalizedPath);
+            TextModel.LoadMetadata loaded = openMode == DocumentOpenMode.DETECT
+                ? model.load(normalizedPath) : model.load(normalizedPath, openMode);
             state.setFileEncoding(loaded.charset());
             state.setLineSeparator(loaded.lineSeparator());
             openedDisposition = SaveDisposition.REPLACE_EXISTING;
@@ -466,18 +471,49 @@ public class EditorEngine {
     }
 
     public void saveAs(Path path, SaveDisposition disposition) throws IOException {
+        saveAs(path, disposition, model.fileMetadata());
+    }
+
+    /** Explicit, lossless conversion: UTF-8 without a BOM, with every existing EOL retained. */
+    public void saveAsUtf8(Path path, SaveDisposition disposition) throws IOException {
+        DocumentFileMetadata original = model.fileMetadata();
+        saveAs(path, disposition, new DocumentFileMetadata(StandardCharsets.UTF_8, BomKind.NONE,
+            original.defaultLineSeparator(), original.lineSeparators()));
+    }
+
+    private void saveAs(Path path, SaveDisposition disposition, DocumentFileMetadata metadata) throws IOException {
         if (path == null) {
             throw new IOException("No file selected");
         }
         Path normalizedPath = path.toAbsolutePath().normalize();
+        boolean formatChanged = !DocumentPreferences.from(model.fileMetadata())
+            .equals(DocumentPreferences.from(metadata));
+        // Allocate the complete history transition before writing to disk. A
+        // failed encoding/write must leave history, format and savepoint intact.
+        Deque<HistoryEntry> preparedHistory = null;
+        long convertedStateId = history.nextDocumentStateId + 1;
+        if (formatChanged) {
+            ViewState before = captureViewState();
+            ViewState after = new ViewState(DocumentPreferences.from(metadata), before.view());
+            HistoryEntry conversion = new OperationHistoryEntry(EditKind.NONE, before, after,
+                List.of(), history.currentDocumentStateId, convertedStateId);
+            preparedHistory = new ArrayDeque<>(history.undoStack);
+            pushWithLimit(preparedHistory, conversion);
+        }
         Path currentFile = state.getCurrentFile();
         FileBaseline baseline = model.fileBaseline();
         boolean sameFile = isSameSaveTarget(normalizedPath, currentFile)
             || (baseline != null && isSameSaveTarget(normalizedPath, baseline.target()));
         if (sameFile) {
-            model.saveIfUnchanged(normalizedPath, model.fileMetadata(), disposition);
+            model.saveIfUnchanged(normalizedPath, metadata, disposition);
         } else {
-            model.save(normalizedPath, model.fileMetadata(), disposition);
+            model.save(normalizedPath, metadata, disposition);
+        }
+        if (preparedHistory != null) {
+            history.undoStack = preparedHistory;
+            history.redoStack.clear();
+            history.nextDocumentStateId = convertedStateId;
+            history.currentDocumentStateId = convertedStateId;
         }
         state.setCurrentFile(normalizedPath);
         state.setSaveDisposition(SaveDisposition.REPLACE_EXISTING);
@@ -485,6 +521,11 @@ public class EditorEngine {
         breakCoalescing();
         resetGutterDiffSavedBaseline();
         markCurrentAsSaved();
+    }
+
+    /** Includes format/savepoint changes that intentionally do not invalidate text layout. */
+    public long recoveryRevision() {
+        return model.revision() + document.recoveryGeneration;
     }
 
     private static boolean isSameSaveTarget(Path requested, Path known) throws IOException {

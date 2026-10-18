@@ -2,6 +2,7 @@ package dev.tuink.core;
 
 import dev.tuink.unicode.GraphemeText;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.channels.SeekableByteChannel;
@@ -37,6 +38,7 @@ import java.util.concurrent.atomic.AtomicLong;
 public class TextModel {
     private static final AtomicLong NEXT_CACHE_ID = new AtomicLong();
     private static final int CHANGE_HISTORY_CAPACITY = 128;
+    static final int MAX_LOAD_BYTES = 64 * 1024 * 1024;
     private TextBuffer buffer;
     private final int[] firstChangedLines = new int[CHANGE_HISTORY_CAPACITY];
     private final LineChange[] lineChanges = new LineChange[CHANGE_HISTORY_CAPACITY];
@@ -612,12 +614,30 @@ public class TextModel {
     }
 
     public LoadMetadata load(Path path) throws IOException {
+        return load(path, DocumentOpenMode.DETECT);
+    }
+
+    public LoadMetadata load(Path path, DocumentOpenMode openMode) throws IOException {
+        Objects.requireNonNull(openMode, "openMode");
         Path target = path.toRealPath();
-        if (!Files.readAttributes(target, BasicFileAttributes.class).isRegularFile()) {
+        BasicFileAttributes attributes = Files.readAttributes(target, BasicFileAttributes.class);
+        if (!attributes.isRegularFile()) {
             throw new IOException("Not a regular file: " + path);
         }
-        byte[] data = Files.readAllBytes(target);
-        DecodedContent decoded = decodeWithDetectedCharset(data);
+        Runtime runtime = Runtime.getRuntime();
+        long availableHeap = runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory());
+        // Leave headroom for existing tabs, decoding and the new view's derived state.
+        long memoryBudget = Math.max(0L, availableHeap / 2);
+        int maxBytes = (int) Math.min(MAX_LOAD_BYTES, memoryBudget / 8);
+        if (attributes.size() > maxBytes) {
+            throw loadSizeExceeded(target, maxBytes);
+        }
+        byte[] data;
+        try (InputStream input = Files.newInputStream(target)) {
+            data = readDocumentBytes(input, target, maxBytes);
+        }
+        DecodedContent decoded = decodeWithDetectedCharset(data, openMode);
+        requireLoadFitsMemory(decoded.text(), data.length, memoryBudget, target);
         ParsedContent parsed = parseContent(decoded.text());
         DocumentFileMetadata loadedMetadata = new DocumentFileMetadata(
             decoded.charset(),
@@ -634,6 +654,43 @@ public class TextModel {
         fileBaseline = FileBaseline.fromBytes(target, data);
         markContentReplaced();
         return new LoadMetadata(loadedMetadata);
+    }
+
+    /** The extra byte detects growth beyond the size observed before opening the stream. */
+    static byte[] readDocumentBytes(InputStream input, Path target, int maxBytes) throws IOException {
+        if (maxBytes < 0 || maxBytes > MAX_LOAD_BYTES) {
+            throw new IllegalArgumentException("Invalid document read limit");
+        }
+        byte[] data = input.readNBytes(maxBytes + 1);
+        if (data.length > maxBytes) {
+            throw loadSizeExceeded(target, maxBytes);
+        }
+        return data;
+    }
+
+    private static IOException loadSizeExceeded(Path target, int maxBytes) {
+        return new IOException("File too large to open: " + target
+            + ". Current limit: " + maxBytes + " bytes (at most 64 MiB, reduced by available memory).");
+    }
+
+    private static void requireLoadFitsMemory(String content, int encodedBytes, long budget, Path target)
+        throws IOException {
+        // A file made of short lines needs much more space than its byte count suggests.
+        // Check before allocating the per-line strings, separator lists and view state.
+        long lineCount = 1;
+        for (int index = 0; index < content.length(); index++) {
+            char character = content.charAt(index);
+            if (character == '\r' || character == '\n') {
+                lineCount++;
+                if (character == '\r' && index + 1 < content.length() && content.charAt(index + 1) == '\n') {
+                    index++;
+                }
+            }
+        }
+        if (8L * encodedBytes + 128L * lineCount > budget) {
+            throw new IOException("File too large to open with available memory: " + target
+                + ". Too much text or too many lines.");
+        }
     }
 
     public void save(Path path) throws IOException {
@@ -1025,7 +1082,27 @@ public class TextModel {
         return checked;
     }
 
-    private DecodedContent decodeWithDetectedCharset(byte[] data) throws CharacterCodingException {
+    private DecodedContent decodeWithDetectedCharset(byte[] data, DocumentOpenMode openMode) throws IOException {
+        if (openMode == DocumentOpenMode.UTF_16LE) {
+            if (!hasUtf16LeBom(data)) {
+                throw new IOException("Explicit UTF-16LE opening requires a UTF-16LE BOM");
+            }
+            return new DecodedContent(StandardCharsets.UTF_16LE, BomKind.UTF_16_LE,
+                decodeStrict(data, 2, StandardCharsets.UTF_16LE));
+        }
+        if (hasUtf32Bom(data, true) && isValidUtf32(data, true)) {
+            // A valid UTF-32LE stream may also be valid UTF-16LE beginning with
+            // NUL. Bytes alone cannot decide which interpretation was intended.
+            try {
+                decodeStrict(data, 2, StandardCharsets.UTF_16LE);
+            } catch (CharacterCodingException invalidUtf16) {
+                throw unsupportedUtf32("UTF-32LE");
+            }
+            throw new AmbiguousDocumentEncodingException();
+        }
+        if (hasUtf32Bom(data, false) && isValidUtf32(data, false)) {
+            throw unsupportedUtf32("UTF-32BE");
+        }
         if (hasUtf8Bom(data)) {
             return new DecodedContent(
                 StandardCharsets.UTF_8,
@@ -1055,6 +1132,33 @@ public class TextModel {
             BomKind.NONE,
             decodeStrict(data, 0, FALLBACK_CHARSET)
         );
+    }
+
+    private static IOException unsupportedUtf32(String encoding) {
+        return new IOException("Unsupported document encoding: " + encoding
+            + ". Convert the file to UTF-8 before opening.");
+    }
+
+    private static boolean hasUtf32Bom(byte[] data, boolean littleEndian) {
+        return data.length >= 4 && (littleEndian
+            ? data[0] == (byte) 0xFF && data[1] == (byte) 0xFE && data[2] == 0 && data[3] == 0
+            : data[0] == 0 && data[1] == 0 && data[2] == (byte) 0xFE && data[3] == (byte) 0xFF);
+    }
+
+    private static boolean isValidUtf32(byte[] data, boolean littleEndian) {
+        if ((data.length & 3) != 0) {
+            return false;
+        }
+        for (int offset = 4; offset < data.length; offset += 4) {
+            long scalar = 0;
+            for (int index = 0; index < 4; index++) {
+                scalar = (scalar << 8) | (data[offset + (littleEndian ? 3 - index : index)] & 0xFF);
+            }
+            if (scalar > Character.MAX_CODE_POINT || scalar >= 0xD800 && scalar <= 0xDFFF) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static String decodeStrict(byte[] data, int offset, Charset charset)

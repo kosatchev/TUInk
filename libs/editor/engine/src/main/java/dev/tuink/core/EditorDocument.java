@@ -16,6 +16,7 @@ public final class EditorDocument {
     final Baselines baselines = new Baselines();
     private final List<WeakReference<EditorState>> views = new ArrayList<>();
     private boolean initialized;
+    long recoveryGeneration;
 
     public EditorDocument(TextModel model) {
         this(model, new EditorDocumentState());
@@ -66,6 +67,7 @@ public final class EditorDocument {
 
     /** Other views retain their position; document changes only clamp invalid UTF-16 positions. */
     void changed() {
+        recoveryGeneration++;
         reflectFileMetadata();
         views.removeIf(reference -> reference.get() == null);
         for (WeakReference<EditorState> reference : views) {

@@ -8,20 +8,22 @@ import dev.tuink.core.Position;
 import dev.tuink.core.RecoverySnapshot;
 import dev.tuink.core.SaveDisposition;
 import dev.tuink.core.ViewportState;
+import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.nio.ByteBuffer;
-import java.nio.CharBuffer;
+import java.io.OutputStreamWriter;
+import java.net.URI;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
 import java.nio.charset.Charset;
-import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
+import java.nio.file.FileSystems;
 import java.nio.file.LinkOption;
 import java.nio.file.OpenOption;
 import java.nio.file.Path;
@@ -31,7 +33,6 @@ import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -51,10 +52,15 @@ public final class RecoveryStore implements AutoCloseable {
     private static final String DELETE_SUFFIX = ".delete.properties";
     private static final String TEXT_SUFFIX = ".txt";
     private static final String LOCK_SUFFIX = ".lock";
-    private static final String FORMAT = "5";
+    private static final String NAMESPACE_LOCK = ".namespace.lock";
+    private static final String FORMAT = "8";
+    private static final String PREVIOUS_FORMAT = "7";
+    private static final String LEGACY_FORMAT = "6";
+    private static final String DISPLAY_PATH_FORMAT = "5";
     // Some systems release process-wide locks when any descriptor for the same
     // file closes. Avoid opening a second channel for a local owner's lock.
     private static final Map<Path, RecoveryStore> LOCAL_OWNERS = new HashMap<>();
+    private static final Map<Path, NamespaceGuard> LOCAL_NAMESPACES = new HashMap<>();
     private static final Set<PosixFilePermission> DIRECTORY_PERMISSIONS = Set.of(
         PosixFilePermission.OWNER_READ,
         PosixFilePermission.OWNER_WRITE,
@@ -65,6 +71,7 @@ public final class RecoveryStore implements AutoCloseable {
         PosixFilePermission.OWNER_WRITE
     );
     private static final String KEY_FORMAT = "format";
+    private static final String KEY_PATH_PLATFORM = "pathPlatform";
     private static final String KEY_CREATED_AT = "createdAtEpochMillis";
     private static final String KEY_TEXT_GENERATION = "textGeneration";
     private static final String KEY_DIRTY = "dirty";
@@ -78,6 +85,7 @@ public final class RecoveryStore implements AutoCloseable {
     private static final String KEY_FILE_BASELINE_PRESENT = "fileBaseline.present";
     private static final String KEY_FILE_BASELINE_TARGET = "fileBaseline.target";
     private static final String KEY_FILE_BASELINE_SHA256 = "fileBaseline.sha256";
+    private static final String KEY_FILE_BASELINE_BYTE_SIZE = "fileBaseline.byteSize";
     private static final String KEY_CURSOR_LINE = "cursor.line";
     private static final String KEY_CURSOR_COL = "cursor.col";
     private static final String KEY_TOP_LINE = "viewport.topLine";
@@ -89,6 +97,7 @@ public final class RecoveryStore implements AutoCloseable {
     private static final String KEY_SELECTION_COL = "selection.col";
     private static final Set<String> REQUIRED_KEYS = Set.of(
         KEY_FORMAT,
+        KEY_PATH_PLATFORM,
         KEY_CREATED_AT,
         KEY_TEXT_GENERATION,
         KEY_DIRTY,
@@ -113,21 +122,23 @@ public final class RecoveryStore implements AutoCloseable {
         KEY_SELECTION_COL
     );
     private final Path recoveryDirectory;
+    private Path physicalRecoveryDirectory;
     private final Map<String, EntryLock> entryLocks = new LinkedHashMap<>();
+    private Path namespacePath;
     private boolean closed;
 
-    public RecoveryStore() {
+    public RecoveryStore() throws IOException {
         this(defaultDirectory());
     }
 
     RecoveryStore(Path recoveryDirectory) {
         this.recoveryDirectory = Objects.requireNonNull(recoveryDirectory, "recoveryDirectory")
-            .toAbsolutePath()
-            .normalize();
+            .toAbsolutePath();
     }
 
-    public Path directory() {
-        return recoveryDirectory;
+    /** Returns the configured path until initialization, then the pinned physical directory. */
+    public synchronized Path directory() {
+        return physicalRecoveryDirectory == null ? recoveryDirectory : physicalRecoveryDirectory;
     }
 
     public synchronized void save(String entryId, RecoverySnapshot snapshot) throws IOException {
@@ -135,8 +146,8 @@ public final class RecoveryStore implements AutoCloseable {
         if (entryId == null || entryId.isBlank() || snapshot == null) {
             return;
         }
-        Path dir = directory();
-        ensurePrivateDirectory(dir);
+        RecoveryLimits.requireDocument(snapshot.lines());
+        Path dir = initializeDirectory();
         String id = sanitize(entryId);
         requireClaim(id);
         Path meta = dir.resolve(id + META_SUFFIX);
@@ -149,11 +160,7 @@ public final class RecoveryStore implements AutoCloseable {
         }
         Path previousText = null;
         if (Files.exists(meta, LinkOption.NOFOLLOW_LINKS)) {
-            Entry existing = readEntry(id, meta);
-            if (existing == null) {
-                throw invalid(meta, "existing snapshot is incomplete or incompatible and was left unchanged");
-            }
-            previousText = textPath(id, readTextGeneration(meta));
+            previousText = validateStoredSnapshot(id, meta);
         }
 
         String generation = UUID.randomUUID().toString().replace("-", "");
@@ -177,14 +184,28 @@ public final class RecoveryStore implements AutoCloseable {
         }
     }
 
+    /** Claims compatible snapshots without reading their document text. */
+    public synchronized DiscoveryResult discover() throws IOException {
+        return scan(false);
+    }
+
+    /** Convenience for callers that need materialized snapshots, with the same memory admission checks. */
     public synchronized LoadResult loadAll() throws IOException {
+        DiscoveryResult result = scan(true);
+        return new LoadResult(result.entries().stream().map(Entry.class::cast).toList(), result.skipped());
+    }
+
+    private DiscoveryResult scan(boolean materialize) throws IOException {
         ensureOpen();
         Path dir = directory();
         if (!Files.exists(dir, LinkOption.NOFOLLOW_LINKS)) {
-            return new LoadResult(List.of(), List.of());
+            return new DiscoveryResult(List.of(), List.of());
         }
-        ensurePrivateDirectory(dir);
-        List<Entry> out = new ArrayList<>();
+        dir = initializeDirectory();
+        synchronized (LOCAL_OWNERS) {
+            acquireNamespaceGuard();
+        }
+        List<PendingSnapshot> out = new ArrayList<>();
         List<SkippedSnapshot> skipped = new ArrayList<>();
         retryPendingDeletions(dir, skipped);
         List<Path> metadataFiles;
@@ -213,7 +234,7 @@ public final class RecoveryStore implements AutoCloseable {
                     // that this instance should offer to restore or discard.
                     continue;
                 }
-                Entry entry = readEntry(id, meta);
+                PendingSnapshot entry = materialize ? readEntry(id, meta) : discoverEntry(id, meta);
                 if (entry != null) {
                     out.add(entry);
                     loaded = true;
@@ -228,7 +249,15 @@ public final class RecoveryStore implements AutoCloseable {
                 }
             }
         }
-        return new LoadResult(List.copyOf(out), List.copyOf(skipped));
+        return new DiscoveryResult(out, skipped);
+    }
+
+    /** Makes an owned snapshot available to another editor without changing its persisted data. */
+    public synchronized void release(String entryId) throws IOException {
+        ensureOpen();
+        if (entryId != null && !entryId.isBlank()) {
+            releaseClaim(sanitize(entryId));
+        }
     }
 
     public synchronized void delete(String entryId) throws IOException {
@@ -241,7 +270,7 @@ public final class RecoveryStore implements AutoCloseable {
         if (!Files.exists(dir, LinkOption.NOFOLLOW_LINKS)) {
             return;
         }
-        ensurePrivateDirectory(dir);
+        dir = initializeDirectory();
         requireClaim(id);
         Path meta = dir.resolve(id + META_SUFFIX);
         Path deletionMarker = dir.resolve(id + DELETE_SUFFIX);
@@ -324,6 +353,19 @@ public final class RecoveryStore implements AutoCloseable {
         }
     }
 
+    private Path initializeDirectory() throws IOException {
+        Path dir = directory();
+        // Keep initialization lazy and reject a symlink at the configured leaf
+        // before resolving parent aliases. No entry may be claimed before pinning.
+        ensurePrivateDirectory(dir);
+        if (physicalRecoveryDirectory == null) {
+            Path physical = dir.toRealPath();
+            ensurePrivateDirectory(physical);
+            physicalRecoveryDirectory = physical;
+        }
+        return physicalRecoveryDirectory;
+    }
+
     private void requireClaim(String id) throws IOException {
         if (!tryClaim(id)) {
             throw new IOException("Recovery snapshot is owned by another editor: " + id);
@@ -334,8 +376,9 @@ public final class RecoveryStore implements AutoCloseable {
         if (entryLocks.containsKey(id)) {
             return true;
         }
-        Path lockPath = directory().toRealPath().resolve(id + LOCK_SUFFIX);
+        Path lockPath = directory().resolve(id + LOCK_SUFFIX);
         synchronized (LOCAL_OWNERS) {
+            acquireNamespaceGuard();
             if (LOCAL_OWNERS.containsKey(lockPath)) {
                 return false;
             }
@@ -400,8 +443,96 @@ public final class RecoveryStore implements AutoCloseable {
                 LOCAL_OWNERS.remove(claimed.path(), this);
             }
         }
-        // Never unlink a lock sidecar: another process may already have its inode
-        // open, and replacing it would allow two owners to lock different files.
+        // Sidecars are reclaimed only under the exclusive namespace guard, after
+        // all cooperating stores have closed every entry channel.
+    }
+
+    /** Called under LOCAL_OWNERS before opening any entry channel. */
+    private void acquireNamespaceGuard() throws IOException {
+        if (namespacePath != null) {
+            return;
+        }
+        Path path = directory().resolve(NAMESPACE_LOCK);
+        NamespaceGuard existing = LOCAL_NAMESPACES.get(path);
+        if (existing != null) {
+            existing.references++;
+            namespacePath = path;
+            return;
+        }
+        if (Files.exists(path, LinkOption.NOFOLLOW_LINKS)
+            && !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("Recovery namespace lock is not a regular file: " + path);
+        }
+        Set<OpenOption> options = Set.of(StandardOpenOption.CREATE, StandardOpenOption.READ,
+            StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
+        FileChannel channel;
+        try {
+            channel = FileChannel.open(path, options, PosixFilePermissions.asFileAttribute(FILE_PERMISSIONS));
+        } catch (UnsupportedOperationException unsupported) {
+            channel = FileChannel.open(path, options);
+        }
+        boolean acquired = false;
+        try {
+            setPrivateFilePermissions(path);
+            FileLock lock = channel.lock(0, Long.MAX_VALUE, true);
+            LOCAL_NAMESPACES.put(path, new NamespaceGuard(channel, lock));
+            namespacePath = path;
+            acquired = true;
+        } finally {
+            if (!acquired) channel.close();
+        }
+    }
+
+    private void releaseNamespaceGuard() throws IOException {
+        synchronized (LOCAL_OWNERS) {
+            if (namespacePath == null) return;
+            Path path = namespacePath;
+            namespacePath = null;
+            NamespaceGuard guard = LOCAL_NAMESPACES.get(path);
+            if (--guard.references != 0) return;
+            LOCAL_NAMESPACES.remove(path);
+            try (FileChannel channel = guard.channel) {
+                guard.lock.release();
+                // No local entry descriptors remain. If another process still
+                // owns a store, leave its namespace intact and let its close GC.
+                try (FileLock exclusive = channel.tryLock()) {
+                    if (exclusive != null) collectUnusedEntryLocks(path.getParent());
+                }
+            }
+        }
+    }
+
+    private static void collectUnusedEntryLocks(Path directory) {
+        try (var paths = Files.list(directory)) {
+            for (Path path : paths.toList()) {
+                String name = path.getFileName().toString();
+                if (!name.endsWith(LOCK_SUFFIX)
+                    || !isCanonicalId(name.substring(0, name.length() - LOCK_SUFFIX.length()))) continue;
+                // A pre-guard editor version can still hold an old sidecar. Do
+                // not remove that active owner; mixed versions must not race
+                // opening new entries during a protocol migration.
+                if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) continue;
+                try (FileChannel entry = FileChannel.open(path, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
+                     FileLock unused = entry.tryLock()) {
+                    if (unused != null) Files.deleteIfExists(path);
+                } catch (IOException | OverlappingFileLockException ignored) {
+                    // Cleanup is best effort; the next last-store close retries.
+                }
+            }
+        } catch (IOException ignored) {
+            // Recovery data and the stable namespace guard remain available.
+        }
+    }
+
+    private static final class NamespaceGuard {
+        private final FileChannel channel;
+        private final FileLock lock;
+        private int references = 1;
+
+        private NamespaceGuard(FileChannel channel, FileLock lock) {
+            this.channel = channel;
+            this.lock = lock;
+        }
     }
 
     @Override
@@ -421,6 +552,12 @@ public final class RecoveryStore implements AutoCloseable {
                     failure.addSuppressed(e);
                 }
             }
+        }
+        try {
+            releaseNamespaceGuard();
+        } catch (IOException error) {
+            if (failure == null) failure = error;
+            else failure.addSuppressed(error);
         }
         if (failure != null) {
             throw failure;
@@ -442,40 +579,285 @@ public final class RecoveryStore implements AutoCloseable {
         if (!Files.isRegularFile(metaPath, LinkOption.NOFOLLOW_LINKS)) {
             return null;
         }
-        Properties p = new Properties();
-        try (InputStream in = Files.newInputStream(metaPath)) {
-            p.load(in);
-        } catch (IllegalArgumentException malformed) {
-            throw new IOException("Malformed recovery metadata " + metaPath + ": " + malformed.getMessage(), malformed);
-        }
-        requireExactSchema(p, metaPath);
+        Properties p = readMetadata(metaPath);
+        SnapshotFields fields = parseSnapshotFields(p, metaPath);
         Path textPath = textPath(id, parseTextGeneration(p, metaPath));
         if (!Files.isRegularFile(textPath, LinkOption.NOFOLLOW_LINKS)) {
             return null;
         }
-        String text = decodeUtf8Strict(Files.readAllBytes(textPath));
-        List<String> lines = Arrays.asList(text.split("\n", -1));
+        requireRestoreFits(0, fields.fileMetadata().separators().count() + 1, textPath);
+        TextShape shape = inspectStoredText(textPath, fields, metaPath);
+        requireRestoreFits(shape.codeUnits(), shape.lines(), textPath);
+        List<String> lines = materializeText(textPath, shape);
         try {
             RecoverySnapshot snapshot = new RecoverySnapshot(
                 lines,
-                new Position(parseCoordinate(p, KEY_CURSOR_LINE, metaPath), parseCoordinate(p, KEY_CURSOR_COL, metaPath)),
-                new ViewportState(
-                    parseCoordinate(p, KEY_TOP_LINE, metaPath),
-                    parseCoordinate(p, KEY_TOP_WRAP_SEGMENT, metaPath),
-                    parseCoordinate(p, KEY_LEFT_COLUMN, metaPath),
-                    parseCoordinate(p, KEY_LEFT_VISUAL_COLUMN, metaPath)
-                ),
-                parseSelection(p, metaPath),
-                parseBoolean(p, KEY_DIRTY, metaPath),
-                parseCurrentFile(p, metaPath),
-                parseSaveDisposition(p, metaPath),
-                parseFileMetadata(p, metaPath, lines.size()),
-                parseFileBaseline(p, metaPath),
-                parseInstant(p, metaPath)
+                fields.cursor(), fields.viewport(), fields.selectionAnchor(), fields.dirty(), fields.currentFile(),
+                fields.saveDisposition(), fields.fileMetadata().materialize(), fields.fileBaseline(), fields.createdAt()
             );
             return new Entry(id, snapshot);
         } catch (IllegalArgumentException e) {
             throw invalid(metaPath, "invalid recovery snapshot: " + e.getMessage());
+        }
+    }
+
+    private PendingSnapshot discoverEntry(String id, Path metaPath) throws IOException {
+        Properties p = readMetadata(metaPath);
+        String generation = parseTextGeneration(p, metaPath);
+        if (!Files.isRegularFile(textPath(id, generation), LinkOption.NOFOLLOW_LINKS)) {
+            return null;
+        }
+        // Validate metadata while it is in hand, but retain only a small identity
+        // descriptor. Text decoding and document validation happen after Restore.
+        parseSnapshotFields(p, metaPath);
+        return new StoredSnapshot(id, generation);
+    }
+
+    /** Validates the old generation without allocating a second document during autosave. */
+    private Path validateStoredSnapshot(String id, Path metaPath) throws IOException {
+        if (!Files.isRegularFile(metaPath, LinkOption.NOFOLLOW_LINKS)) {
+            throw invalid(metaPath, "existing snapshot metadata is not a regular file and was left unchanged");
+        }
+        Properties properties = readMetadata(metaPath);
+        Path textPath = textPath(id, parseTextGeneration(properties, metaPath));
+        if (!Files.isRegularFile(textPath, LinkOption.NOFOLLOW_LINKS)) {
+            throw invalid(metaPath, "existing snapshot text is missing or not a regular file and was left unchanged");
+        }
+        SnapshotFields fields = parseSnapshotFields(properties, metaPath);
+        inspectStoredText(textPath, fields, metaPath);
+        return textPath;
+    }
+
+    private record TextShape(long codeUnits, int lines) {}
+
+    private static void requireRestoreFits(long codeUnits, int lines, Path path) throws IOException {
+        if (8L * codeUnits + 128L * lines > availableHeap() / 2) {
+            throw new IOException("Recovery text is too large or has too many lines for the available memory: " + path);
+        }
+    }
+
+    /** Constant-space validation is shared by replacement of an old generation and restoration. */
+    private static TextShape inspectStoredText(Path textPath, SnapshotFields fields, Path metaPath) throws IOException {
+        int line = 0;
+        int column = 0;
+        long codeUnits = 0;
+        char[] chunk = new char[8192];
+        try (var reader = new InputStreamReader(RecoveryLimits.openText(textPath), StandardCharsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT))) {
+            int count;
+            while ((count = reader.read(chunk)) >= 0) {
+                codeUnits += count;
+                RecoveryLimits.requireSize(codeUnits, RecoveryLimits.MAX_CODE_UNITS,
+                    "Recovery document exceeds 64 Mi UTF-16 code units");
+                for (int index = 0; index < count; index++) {
+                    char character = chunk[index];
+                    if (character == '\r') {
+                        throw invalid(metaPath, "logical document lines must not contain carriage returns");
+                    }
+                    if (Character.isLowSurrogate(character)) {
+                        requireSurrogateBoundary(fields.cursor(), "cursor", line, column, metaPath);
+                        requireSurrogateBoundary(fields.selectionAnchor(), "selection anchor", line, column, metaPath);
+                    }
+                    if (character == '\n') {
+                        requireLinePositions(fields, line, column, metaPath);
+                        if (line == Integer.MAX_VALUE - 1) {
+                            throw invalid(metaPath, "too many logical document lines");
+                        }
+                        line++;
+                        column = 0;
+                    } else {
+                        if (column == Integer.MAX_VALUE) {
+                            throw invalid(metaPath, "logical document line is too long");
+                        }
+                        column++;
+                    }
+                }
+            }
+        }
+        requireLinePositions(fields, line, column, metaPath);
+        if (fields.cursor().line() > line) {
+            throw invalid(metaPath, "cursor is outside recovery document");
+        }
+        if (fields.selectionAnchor() != null && fields.selectionAnchor().line() > line) {
+            throw invalid(metaPath, "selection anchor is outside recovery document");
+        }
+        if (fields.viewport().topLine() > line) {
+            throw invalid(metaPath, "Viewport top line is outside recovery document");
+        }
+        requireLineCountMatches(fields, line + 1, metaPath);
+        return new TextShape(codeUnits, line + 1);
+    }
+
+    /** A second bounded pass allocates document lines only after their full shape is admitted. */
+    private static List<String> materializeText(Path textPath, TextShape expected) throws IOException {
+        List<String> lines = new ArrayList<>(expected.lines());
+        StringBuilder line = new StringBuilder();
+        long codeUnits = 0;
+        char[] chunk = new char[8192];
+        try (var reader = new InputStreamReader(RecoveryLimits.openText(textPath), StandardCharsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT))) {
+            int count;
+            while ((count = reader.read(chunk)) >= 0) {
+                codeUnits += count;
+                if (codeUnits > expected.codeUnits()) throw changedText(textPath);
+                int start = 0;
+                for (int index = 0; index < count; index++) {
+                    if (chunk[index] == '\r') throw changedText(textPath);
+                    if (chunk[index] == '\n') {
+                        if (lines.size() >= expected.lines() - 1) throw changedText(textPath);
+                        line.append(chunk, start, index - start);
+                        lines.add(line.toString());
+                        line.setLength(0);
+                        start = index + 1;
+                    }
+                }
+                line.append(chunk, start, count - start);
+            }
+        }
+        lines.add(line.toString());
+        if (codeUnits != expected.codeUnits() || lines.size() != expected.lines()) throw changedText(textPath);
+        return lines;
+    }
+
+    private static IOException changedText(Path path) {
+        return new IOException("Recovery text changed during restoration: " + path + "; snapshot left unchanged");
+    }
+
+    private static void requireLinePositions(SnapshotFields fields, int line, int length, Path path)
+        throws IOException {
+        requirePositionOnLine(fields.cursor(), "cursor", line, length, path);
+        requirePositionOnLine(fields.selectionAnchor(), "selection anchor", line, length, path);
+    }
+
+    private static void requirePositionOnLine(Position position, String name, int line, int length, Path path)
+        throws IOException {
+        if (position != null && position.line() == line && position.col() > length) {
+            throw invalid(path, name + " is outside recovery document");
+        }
+    }
+
+    private static void requireSurrogateBoundary(Position position, String name, int line, int column, Path path)
+        throws IOException {
+        if (position != null && position.line() == line && position.col() == column) {
+            throw invalid(path, name + " splits a UTF-16 surrogate pair");
+        }
+    }
+
+    private record SnapshotFileMetadata(DocumentFileMetadata format, RecoverySeparators separators) {
+        DocumentFileMetadata materialize() throws IOException {
+            return format.withLineSeparators(separators.materialize());
+        }
+    }
+
+    private record SnapshotFields(Position cursor, ViewportState viewport, Position selectionAnchor, boolean dirty,
+                                  Path currentFile, SaveDisposition saveDisposition, SnapshotFileMetadata fileMetadata,
+                                  FileBaseline fileBaseline, Instant createdAt) {}
+
+    private static SnapshotFields parseSnapshotFields(Properties p, Path path) throws IOException {
+        Position cursor = new Position(parseCoordinate(p, KEY_CURSOR_LINE, path), parseCoordinate(p, KEY_CURSOR_COL, path));
+        ViewportState viewport = new ViewportState(
+            parseCoordinate(p, KEY_TOP_LINE, path), parseCoordinate(p, KEY_TOP_WRAP_SEGMENT, path),
+            parseCoordinate(p, KEY_LEFT_COLUMN, path), parseCoordinate(p, KEY_LEFT_VISUAL_COLUMN, path)
+        );
+        Position selection = parseSelection(p, path);
+        boolean dirty = parseBoolean(p, KEY_DIRTY, path);
+        Path currentFile = parseCurrentFile(p, path);
+        SaveDisposition disposition = parseSaveDisposition(p, path);
+        FileBaseline baseline = parseFileBaseline(p, path);
+        if (currentFile == null && disposition != SaveDisposition.CREATE_NEW) {
+            throw invalid(path, "A recovery snapshot without a current path cannot replace an existing file");
+        }
+        if (baseline != null && (currentFile == null || disposition != SaveDisposition.REPLACE_EXISTING)) {
+            throw invalid(path, "A file baseline requires an existing current file");
+        }
+        if (DISPLAY_PATH_FORMAT.equals(p.getProperty(KEY_FORMAT))
+            && (hasAmbiguousDisplayPath(currentFile) || hasAmbiguousDisplayPath(baseline == null ? null : baseline.target()))) {
+            // Format 5 saved Path.toString(), which replaces undecodable Unix
+            // filename bytes with U+FFFD. Even a matching digest cannot prove
+            // which of two identically populated files that name referred to.
+            // Keep the text recoverable, but require an explicit new Save As.
+            currentFile = null;
+            baseline = null;
+            disposition = SaveDisposition.CREATE_NEW;
+            dirty = true;
+        }
+        return new SnapshotFields(cursor, viewport, selection, dirty, currentFile, disposition,
+            parseFileMetadata(p, path), baseline, parseInstant(p, path));
+    }
+
+    private static void requireLineCountMatches(SnapshotFields fields, int lineCount, Path path) throws IOException {
+        if (fields.fileMetadata().separators().count() != lineCount - 1) {
+            throw invalid(path, KEY_LINE_SEPARATORS + " count does not match recovery text line count");
+        }
+    }
+
+    private Properties readMetadata(Path path) throws IOException {
+        int limit = (int) Math.min(RecoveryLimits.MAX_LEGACY_METADATA_BYTES, availableHeap() / 32);
+        byte[] data = readBounded(path, limit, "Recovery metadata is too large for the available memory");
+        Properties properties = new Properties();
+        try (InputStream in = new java.io.ByteArrayInputStream(data)) {
+            properties.load(in);
+        } catch (IllegalArgumentException malformed) {
+            throw new IOException("Malformed recovery metadata " + path + ": " + malformed.getMessage(), malformed);
+        }
+        requireExactSchema(properties, path);
+        if (!usesCsvSeparators(properties)) {
+            RecoveryLimits.requireSize(data.length, RecoveryLimits.MAX_METADATA_BYTES,
+                "Recovery metadata exceeds its storage limit: " + path);
+        }
+        return properties;
+    }
+
+    private static byte[] readBounded(Path path, int maxBytes, String reason) throws IOException {
+        if (Files.size(path) > maxBytes) {
+            throw new IOException(reason + ": " + path + "; snapshot left unchanged");
+        }
+        try (InputStream in = Files.newInputStream(path)) {
+            byte[] data = in.readNBytes(maxBytes + 1);
+            if (data.length > maxBytes) {
+                throw new IOException(reason + ": " + path + "; snapshot left unchanged");
+            }
+            return data;
+        }
+    }
+
+    private static long availableHeap() {
+        Runtime runtime = Runtime.getRuntime();
+        return Math.max(0L, runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory()));
+    }
+
+    private final class StoredSnapshot implements PendingSnapshot {
+        private final String id;
+        private final String generation;
+
+        private StoredSnapshot(String id, String generation) {
+            this.id = id;
+            this.generation = generation;
+        }
+
+        @Override
+        public String id() {
+            return id;
+        }
+
+        @Override
+        public RecoverySnapshot snapshot() throws IOException {
+            synchronized (RecoveryStore.this) {
+                ensureOpen();
+                if (!entryLocks.containsKey(id)) {
+                    throw new IOException("Recovery snapshot is no longer claimed: " + id);
+                }
+                Path meta = directory().resolve(id + META_SUFFIX);
+                if (!generation.equals(readTextGeneration(meta))) {
+                    throw new IOException("Recovery snapshot changed since discovery: " + id);
+                }
+                Entry entry = readEntry(id, meta);
+                if (entry == null) {
+                    throw new IOException("Recovery snapshot is no longer available: " + id);
+                }
+                return entry.snapshot();
+            }
         }
     }
 
@@ -499,27 +881,21 @@ public final class RecoveryStore implements AutoCloseable {
     }
 
     private void writeSnapshotText(Path target, List<String> lines) throws IOException {
-        String body = String.join("\n", lines == null || lines.isEmpty() ? List.of("") : lines);
-        byte[] encoded = encodeUtf8Strict(body);
-        writeAtomically(target, out -> out.write(encoded));
-    }
-
-    private static byte[] encodeUtf8Strict(String text) throws CharacterCodingException {
-        ByteBuffer encoded = StandardCharsets.UTF_8.newEncoder()
-            .onMalformedInput(CodingErrorAction.REPORT)
-            .onUnmappableCharacter(CodingErrorAction.REPORT)
-            .encode(CharBuffer.wrap(text));
-        byte[] bytes = new byte[encoded.remaining()];
-        encoded.get(bytes);
-        return bytes;
-    }
-
-    private static String decodeUtf8Strict(byte[] bytes) throws CharacterCodingException {
-        return StandardCharsets.UTF_8.newDecoder()
-            .onMalformedInput(CodingErrorAction.REPORT)
-            .onUnmappableCharacter(CodingErrorAction.REPORT)
-            .decode(ByteBuffer.wrap(bytes))
-            .toString();
+        List<String> documentLines = lines == null || lines.isEmpty() ? List.of("") : lines;
+        writeAtomically(target, out -> {
+            try (var writer = new BufferedWriter(new OutputStreamWriter(
+                RecoveryLimits.boundedOutput(out, RecoveryLimits.MAX_TEXT_BYTES, "Recovery text exceeds its storage limit"),
+                StandardCharsets.UTF_8.newEncoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)))) {
+                for (int i = 0; i < documentLines.size(); i++) {
+                    if (i > 0) {
+                        writer.write('\n');
+                    }
+                    writer.write(documentLines.get(i));
+                }
+            }
+        });
     }
 
     private void writeSnapshotMeta(
@@ -529,26 +905,25 @@ public final class RecoveryStore implements AutoCloseable {
     ) throws IOException {
         Properties p = new Properties();
         p.setProperty(KEY_FORMAT, FORMAT);
+        p.setProperty(KEY_PATH_PLATFORM, pathPlatform());
         p.setProperty(KEY_CREATED_AT, Long.toString(snapshot.createdAt().toEpochMilli()));
         p.setProperty(KEY_TEXT_GENERATION, textGeneration);
         p.setProperty(KEY_DIRTY, Boolean.toString(snapshot.dirty()));
         p.setProperty(KEY_CURRENT_FILE_PRESENT, Boolean.toString(snapshot.currentFile() != null));
-        p.setProperty(KEY_CURRENT_FILE, snapshot.currentFile() == null ? "" : snapshot.currentFile().toString());
+        p.setProperty(KEY_CURRENT_FILE,
+            snapshot.currentFile() == null ? "" : encodePath(snapshot.currentFile(), KEY_CURRENT_FILE, target));
         p.setProperty(KEY_SAVE_DISPOSITION, snapshot.saveDisposition().name());
         DocumentFileMetadata fileMetadata = snapshot.fileMetadata();
         p.setProperty(KEY_FILE_ENCODING, fileMetadata.charset().name());
         p.setProperty(KEY_BOM_KIND, fileMetadata.bomKind().name());
         p.setProperty(KEY_DEFAULT_LINE_SEPARATOR, encodeLineSeparator(fileMetadata.defaultLineSeparator()));
-        p.setProperty(
-            KEY_LINE_SEPARATORS,
-            fileMetadata.lineSeparators().stream()
-                .map(RecoveryStore::encodeLineSeparator)
-                .collect(java.util.stream.Collectors.joining(","))
-        );
+        p.setProperty(KEY_LINE_SEPARATORS, RecoverySeparators.encode(fileMetadata.lineSeparators()));
         FileBaseline fileBaseline = snapshot.fileBaseline();
         p.setProperty(KEY_FILE_BASELINE_PRESENT, Boolean.toString(fileBaseline != null));
-        p.setProperty(KEY_FILE_BASELINE_TARGET, fileBaseline == null ? "" : fileBaseline.target().toString());
+        p.setProperty(KEY_FILE_BASELINE_TARGET,
+            fileBaseline == null ? "" : encodePath(fileBaseline.target(), KEY_FILE_BASELINE_TARGET, target));
         p.setProperty(KEY_FILE_BASELINE_SHA256, fileBaseline == null ? "" : fileBaseline.sha256());
+        p.setProperty(KEY_FILE_BASELINE_BYTE_SIZE, fileBaseline == null ? "" : Long.toString(fileBaseline.byteSize()));
         p.setProperty(KEY_CURSOR_LINE, Integer.toString(snapshot.cursor().line()));
         p.setProperty(KEY_CURSOR_COL, Integer.toString(snapshot.cursor().col()));
         p.setProperty(KEY_TOP_LINE, Integer.toString(snapshot.viewport().topLine()));
@@ -559,7 +934,9 @@ public final class RecoveryStore implements AutoCloseable {
         p.setProperty(KEY_SELECTION_PRESENT, Boolean.toString(selection != null));
         p.setProperty(KEY_SELECTION_LINE, Integer.toString(selection == null ? 0 : selection.line()));
         p.setProperty(KEY_SELECTION_COL, Integer.toString(selection == null ? 0 : selection.col()));
-        writeAtomically(target, out -> p.store(out, "TUInk recovery snapshot"));
+        writeAtomically(target, out -> p.store(
+            RecoveryLimits.boundedOutput(out, RecoveryLimits.MAX_METADATA_BYTES, "Recovery metadata exceeds its storage limit"),
+            "TUInk recovery snapshot"));
     }
 
     private interface Writer {
@@ -597,9 +974,8 @@ public final class RecoveryStore implements AutoCloseable {
         }
     }
 
-    private static Path defaultDirectory() {
-        String home = System.getProperty("user.home", ".");
-        return Path.of(home, ".config", "tuink", RECOVERY_DIR);
+    private static Path defaultDirectory() throws IOException {
+        return UserDirectories.configDirectory().resolve(RECOVERY_DIR);
     }
 
     private static void ensurePrivateDirectory(Path directory) throws IOException {
@@ -666,16 +1042,96 @@ public final class RecoveryStore implements AutoCloseable {
     }
 
     private static void requireExactSchema(Properties p, Path path) throws IOException {
-        if (!FORMAT.equals(p.getProperty(KEY_FORMAT))) {
+        if (!FORMAT.equals(p.getProperty(KEY_FORMAT)) && !PREVIOUS_FORMAT.equals(p.getProperty(KEY_FORMAT))
+            && !LEGACY_FORMAT.equals(p.getProperty(KEY_FORMAT)) && !DISPLAY_PATH_FORMAT.equals(p.getProperty(KEY_FORMAT))) {
             throw invalid(path, "unsupported or missing format marker");
         }
-        if (!p.stringPropertyNames().equals(REQUIRED_KEYS)) {
-            Set<String> missing = new java.util.HashSet<>(REQUIRED_KEYS);
+        Set<String> requiredKeys = new java.util.HashSet<>(REQUIRED_KEYS);
+        if (FORMAT.equals(p.getProperty(KEY_FORMAT))) requiredKeys.add(KEY_FILE_BASELINE_BYTE_SIZE);
+        if (DISPLAY_PATH_FORMAT.equals(p.getProperty(KEY_FORMAT))) requiredKeys.remove(KEY_PATH_PLATFORM);
+        if (!p.stringPropertyNames().equals(requiredKeys)) {
+            Set<String> missing = new java.util.HashSet<>(requiredKeys);
             missing.removeAll(p.stringPropertyNames());
             Set<String> unknown = new java.util.HashSet<>(p.stringPropertyNames());
-            unknown.removeAll(REQUIRED_KEYS);
+            unknown.removeAll(requiredKeys);
             throw invalid(path, "schema mismatch; missing=" + missing + ", unknown=" + unknown);
         }
+        if (!DISPLAY_PATH_FORMAT.equals(p.getProperty(KEY_FORMAT))
+            && !pathPlatform().equals(p.getProperty(KEY_PATH_PLATFORM))) {
+            throw invalid(path, KEY_PATH_PLATFORM + " does not match this platform");
+        }
+    }
+
+    private static String pathPlatform() {
+        return FileSystems.getDefault().getSeparator().equals("\\") ? "windows" : "unix";
+    }
+
+    private static String encodePath(Path value, String key, Path metadata) throws IOException {
+        if (value.getFileSystem() != FileSystems.getDefault()) {
+            throw invalid(metadata, key + " must use the native filesystem");
+        }
+        String encoded = filePathUri(value);
+        if (!value.equals(parsePath(encoded, key, metadata))) {
+            throw invalid(metadata, key + " cannot be represented by a lossless file URI");
+        }
+        return encoded;
+    }
+
+    private static Path parsePath(String encoded, String key, Path metadata) throws IOException {
+        try {
+            URI uri = URI.create(encoded);
+            if (!encoded.equals(uri.toASCIIString()) || !"file".equals(uri.getScheme()) || uri.isOpaque()
+                || uri.getRawQuery() != null || uri.getRawFragment() != null) {
+                throw new IllegalArgumentException("not a canonical ASCII file URI");
+            }
+            Path value = Path.of(uri);
+            if (value.getFileSystem() != FileSystems.getDefault() || !value.isAbsolute()
+                || !value.equals(value.normalize()) || !encoded.equals(filePathUri(value))) {
+                throw new IllegalArgumentException("not an absolute normalized native file URI");
+            }
+            return value;
+        } catch (RuntimeException malformed) {
+            throw invalid(metadata, key + " must be a canonical ASCII file URI for an absolute normalized native path");
+        }
+    }
+
+    private static String filePathUri(Path value) {
+        String encoded = value.toUri().toASCIIString();
+        // Path.toUri may append '/' after inspecting the current target type.
+        // A document's name must round-trip even if another process replaces
+        // its file with a directory and later removes that directory.
+        return value.getFileName() != null && encoded.endsWith("/")
+            ? encoded.substring(0, encoded.length() - 1) : encoded;
+    }
+
+    private static boolean hasAmbiguousDisplayPath(Path value) {
+        return value != null && value.toString().indexOf('\uFFFD') >= 0;
+    }
+
+    private static Path parseStoredPath(Properties p, String raw, String key, Path metadata) throws IOException {
+        if (!DISPLAY_PATH_FORMAT.equals(p.getProperty(KEY_FORMAT))) {
+            return parsePath(raw, key, metadata);
+        }
+        try {
+            // The v0.13.0 writer stored absolute normalized native display
+            // strings. Do not resolve relative paths against this process's
+            // working directory or interpret percent escapes as a file URI.
+            Path value = Path.of(raw);
+            if (value.getFileSystem() != FileSystems.getDefault() || !value.isAbsolute()
+                || !value.equals(value.normalize()) || !raw.equals(value.toString())
+                || raw.codePoints().anyMatch(codePoint -> codePoint >= 0xD800 && codePoint <= 0xDFFF)) {
+                throw new IllegalArgumentException("not an absolute normalized native display path");
+            }
+            return value;
+        } catch (RuntimeException malformed) {
+            throw invalid(metadata, key + " in format 5 must be an absolute normalized native display path; "
+                + "restore with the old TUInk binary on the original platform and use Save As to keep the draft");
+        }
+    }
+
+    private static boolean usesCsvSeparators(Properties properties) {
+        String format = properties.getProperty(KEY_FORMAT);
+        return DISPLAY_PATH_FORMAT.equals(format) || LEGACY_FORMAT.equals(format);
     }
 
     private static int parseCoordinate(Properties p, String key, Path path) throws IOException {
@@ -715,14 +1171,7 @@ public final class RecoveryStore implements AutoCloseable {
     }
 
     private String readTextGeneration(Path metaPath) throws IOException {
-        Properties properties = new Properties();
-        try (InputStream in = Files.newInputStream(metaPath)) {
-            properties.load(in);
-        } catch (IllegalArgumentException malformed) {
-            throw new IOException("Malformed recovery metadata " + metaPath + ": " + malformed.getMessage(), malformed);
-        }
-        requireExactSchema(properties, metaPath);
-        return parseTextGeneration(properties, metaPath);
+        return parseTextGeneration(readMetadata(metaPath), metaPath);
     }
 
     private Path textPath(String id, String generation) throws IOException {
@@ -740,7 +1189,7 @@ public final class RecoveryStore implements AutoCloseable {
         return generation;
     }
 
-    private static DocumentFileMetadata parseFileMetadata(Properties p, Path path, int lineCount)
+    private static SnapshotFileMetadata parseFileMetadata(Properties p, Path path)
         throws IOException {
         Charset charset = parseCharset(p, path);
         BomKind bomKind;
@@ -754,28 +1203,16 @@ public final class RecoveryStore implements AutoCloseable {
             KEY_DEFAULT_LINE_SEPARATOR,
             path
         );
-        String encodedSeparators = p.getProperty(KEY_LINE_SEPARATORS);
-        List<String> lineSeparators = new ArrayList<>();
-        if (!encodedSeparators.isEmpty()) {
-            String[] tokens = encodedSeparators.split(",", -1);
-            for (String token : tokens) {
-                lineSeparators.add(parseLineSeparator(token, KEY_LINE_SEPARATORS, path));
-            }
-        }
+        RecoverySeparators separators = RecoverySeparators.parse(p.getProperty(KEY_LINE_SEPARATORS),
+            usesCsvSeparators(p));
         try {
             DocumentFileMetadata metadata = new DocumentFileMetadata(
                 charset,
                 bomKind,
                 defaultLineSeparator,
-                lineSeparators
+                List.of()
             );
-            if (!metadata.isCompatibleWithLineCount(lineCount)) {
-                throw invalid(
-                    path,
-                    KEY_LINE_SEPARATORS + " count does not match recovery text line count"
-                );
-            }
-            return metadata;
+            return new SnapshotFileMetadata(metadata, separators);
         } catch (IllegalArgumentException e) {
             throw invalid(path, "invalid file metadata: " + e.getMessage());
         }
@@ -793,19 +1230,16 @@ public final class RecoveryStore implements AutoCloseable {
         if (raw.isBlank()) {
             throw invalid(path, KEY_CURRENT_FILE + " is required when currentFile.present=true");
         }
-        try {
-            return Path.of(raw).toAbsolutePath().normalize();
-        } catch (RuntimeException e) {
-            throw invalid(path, "invalid currentFile path");
-        }
+        return parseStoredPath(p, raw, KEY_CURRENT_FILE, path);
     }
 
     private static FileBaseline parseFileBaseline(Properties p, Path path) throws IOException {
         boolean present = parseBoolean(p, KEY_FILE_BASELINE_PRESENT, path);
         String rawTarget = p.getProperty(KEY_FILE_BASELINE_TARGET);
         String sha256 = p.getProperty(KEY_FILE_BASELINE_SHA256);
+        String rawSize = p.getProperty(KEY_FILE_BASELINE_BYTE_SIZE);
         if (!present) {
-            if (!rawTarget.isEmpty() || !sha256.isEmpty()) {
+            if (!rawTarget.isEmpty() || !sha256.isEmpty() || rawSize != null && !rawSize.isEmpty()) {
                 throw invalid(path, "fileBaseline fields must be empty when fileBaseline.present=false");
             }
             return null;
@@ -816,15 +1250,16 @@ public final class RecoveryStore implements AutoCloseable {
         if (!sha256.matches("[0-9a-f]{64}")) {
             throw invalid(path, KEY_FILE_BASELINE_SHA256 + " must be 64 lowercase hexadecimal characters");
         }
-        try {
-            Path target = Path.of(rawTarget);
-            if (!target.isAbsolute() || !target.equals(target.normalize())) {
-                throw invalid(path, KEY_FILE_BASELINE_TARGET + " must be an absolute normalized path");
+        long byteSize = -1L;
+        if (rawSize != null) {
+            try {
+                byteSize = Long.parseLong(rawSize);
+                if (byteSize < -1L || !Long.toString(byteSize).equals(rawSize)) throw new NumberFormatException();
+            } catch (NumberFormatException malformed) {
+                throw invalid(path, KEY_FILE_BASELINE_BYTE_SIZE + " must be nonnegative or unknown (-1)");
             }
-            return new FileBaseline(target, sha256);
-        } catch (RuntimeException e) {
-            throw invalid(path, "invalid fileBaseline: " + e.getMessage());
         }
+        return new FileBaseline(parseStoredPath(p, rawTarget, KEY_FILE_BASELINE_TARGET, path), sha256, byteSize);
     }
 
     private static SaveDisposition parseSaveDisposition(Properties p, Path path) throws IOException {
@@ -875,7 +1310,20 @@ public final class RecoveryStore implements AutoCloseable {
         return message == null || message.isBlank() ? e.getClass().getSimpleName() : message;
     }
 
-    public record Entry(String id, RecoverySnapshot snapshot) {
+    public interface PendingSnapshot {
+        String id();
+
+        RecoverySnapshot snapshot() throws IOException;
+    }
+
+    public record Entry(String id, RecoverySnapshot snapshot) implements PendingSnapshot {
+    }
+
+    public record DiscoveryResult(List<PendingSnapshot> entries, List<SkippedSnapshot> skipped) {
+        public DiscoveryResult {
+            entries = List.copyOf(entries);
+            skipped = List.copyOf(skipped);
+        }
     }
 
     public record SkippedSnapshot(String id, String reason) {

@@ -36,7 +36,7 @@ class RecoveryAutosaveManagerTest {
         int liveTopLine = session.state().getTopLine();
         FakeRecoveryPersistence persistence = new FakeRecoveryPersistence();
         TerminalEditorApp.RecoveryAutosaveManager manager =
-            new TerminalEditorApp.RecoveryAutosaveManager(persistence);
+            new TerminalEditorApp.RecoveryAutosaveManager(persistence, Runnable::run);
 
         assertNull(manager.autosaveDirtyTabs(List.of(session), 0L));
 
@@ -58,7 +58,7 @@ class RecoveryAutosaveManagerTest {
         TabSession session = scrolledSessionAfterDeletingAllText();
         FakeRecoveryPersistence persistence = new FakeRecoveryPersistence();
         TerminalEditorApp.RecoveryAutosaveManager manager =
-            new TerminalEditorApp.RecoveryAutosaveManager(persistence);
+            new TerminalEditorApp.RecoveryAutosaveManager(persistence, Runnable::run);
         TuiEventLoop<TuiInputEvent> loop = new TuiEventLoop<>(timeout -> TuiEventLoop.Read.end());
         List<String> warnings = new ArrayList<>();
 
@@ -80,7 +80,7 @@ class RecoveryAutosaveManagerTest {
         RecoverySnapshot snapshot = session.engine().captureRecoverySnapshot();
         persistence.snapshots.put("startup-entry", snapshot);
         TerminalEditorApp.RecoveryAutosaveManager manager =
-            new TerminalEditorApp.RecoveryAutosaveManager(persistence);
+            new TerminalEditorApp.RecoveryAutosaveManager(persistence, Runnable::run);
         manager.adoptSnapshot(session, "startup-entry", 0L);
         long savedRevision = session.model().revision();
         session.state().setCursor(new Position(0, 2));
@@ -110,7 +110,7 @@ class RecoveryAutosaveManagerTest {
         FakeRecoveryPersistence persistence = new FakeRecoveryPersistence();
         TabSession session = dirtySession("unsaved first draft");
         TerminalEditorApp.RecoveryAutosaveManager manager =
-            new TerminalEditorApp.RecoveryAutosaveManager(persistence);
+            new TerminalEditorApp.RecoveryAutosaveManager(persistence, Runnable::run);
         TuiEventLoop<TuiInputEvent> loop = new TuiEventLoop<>(timeout -> TuiEventLoop.Read.end());
         List<String> warnings = new ArrayList<>();
 
@@ -132,7 +132,7 @@ class RecoveryAutosaveManagerTest {
         TabSession session = dirtySession("draft");
         persistence.snapshots.put("startup-entry", session.engine().captureRecoverySnapshot());
         TerminalEditorApp.RecoveryAutosaveManager manager =
-            new TerminalEditorApp.RecoveryAutosaveManager(persistence, () -> 1L);
+            new TerminalEditorApp.RecoveryAutosaveManager(persistence, () -> 1L, Runnable::run);
         manager.adoptSnapshot(session, "startup-entry", 0L);
         AtomicReference<TuiEventLoop<TuiInputEvent>> loopReference = new AtomicReference<>();
         TuiEventLoop<TuiInputEvent> loop = new TuiEventLoop<>(timeout -> {
@@ -163,7 +163,7 @@ class RecoveryAutosaveManagerTest {
         TabSession session = dirtySession("explicitly discarded draft");
         persistence.snapshots.put("startup-entry", session.engine().captureRecoverySnapshot());
         TerminalEditorApp.RecoveryAutosaveManager manager =
-            new TerminalEditorApp.RecoveryAutosaveManager(persistence);
+            new TerminalEditorApp.RecoveryAutosaveManager(persistence, Runnable::run);
         manager.adoptSnapshot(session, "startup-entry", 0L);
         TuiEventLoop<TuiInputEvent> loop = new TuiEventLoop<>(
             timeout -> TuiEventLoop.Read.event(new TextInput("q"))
@@ -188,7 +188,7 @@ class RecoveryAutosaveManagerTest {
         TabSession session = dirtySession("draft");
         persistence.snapshots.put("startup-entry", session.engine().captureRecoverySnapshot());
         TerminalEditorApp.RecoveryAutosaveManager manager =
-            new TerminalEditorApp.RecoveryAutosaveManager(persistence, () -> 1L);
+            new TerminalEditorApp.RecoveryAutosaveManager(persistence, () -> 1L, Runnable::run);
         manager.adoptSnapshot(session, "startup-entry", 0L);
         session.engine().insertInput(" after autosave");
         IOException inputFailure = new IOException("simulated terminal input failure");
@@ -214,7 +214,7 @@ class RecoveryAutosaveManagerTest {
         TabSession session = dirtySession("draft");
         persistence.snapshots.put("startup-entry", session.engine().captureRecoverySnapshot());
         TerminalEditorApp.RecoveryAutosaveManager manager =
-            new TerminalEditorApp.RecoveryAutosaveManager(persistence, () -> 1L);
+            new TerminalEditorApp.RecoveryAutosaveManager(persistence, () -> 1L, Runnable::run);
         manager.adoptSnapshot(session, "startup-entry", 0L);
         session.engine().insertInput(" after autosave");
         IllegalStateException renderFailure = new IllegalStateException("simulated renderer failure");
@@ -248,7 +248,7 @@ class RecoveryAutosaveManagerTest {
         persistence.snapshots.put("startup-entry", previous);
         persistence.failingSaves.add("startup-entry");
         TerminalEditorApp.RecoveryAutosaveManager manager =
-            new TerminalEditorApp.RecoveryAutosaveManager(persistence, () -> 3_000_000_002L);
+            new TerminalEditorApp.RecoveryAutosaveManager(persistence, () -> 3_000_000_002L, Runnable::run);
         manager.adoptSnapshot(session, "startup-entry", 0L);
         session.engine().insertInput(" latest edit");
         assertTrue(manager.autosaveDirtyTabs(List.of(session), 3_000_000_000L)
@@ -278,7 +278,7 @@ class RecoveryAutosaveManagerTest {
         IllegalStateException saveFailure = new IllegalStateException("simulated unexpected save failure");
         persistence.uncheckedSaveFailure = saveFailure;
         TerminalEditorApp.RecoveryAutosaveManager manager =
-            new TerminalEditorApp.RecoveryAutosaveManager(persistence, () -> 1L);
+            new TerminalEditorApp.RecoveryAutosaveManager(persistence, () -> 1L, Runnable::run);
         manager.adoptSnapshot(session, "startup-entry", 0L);
         session.engine().insertInput(" latest edit");
         IOException inputFailure = new IOException("simulated terminal input failure");
@@ -306,7 +306,7 @@ class RecoveryAutosaveManagerTest {
         TabSession restored = newSession();
         restored.engine().restoreRecoverySnapshot(snapshot);
         TerminalEditorApp.RecoveryAutosaveManager manager =
-            new TerminalEditorApp.RecoveryAutosaveManager(persistence);
+            new TerminalEditorApp.RecoveryAutosaveManager(persistence, Runnable::run);
 
         manager.adoptSnapshot(restored, "startup-entry", 0L);
         manager.syncTabs(List.of(restored));
@@ -332,7 +332,7 @@ class RecoveryAutosaveManagerTest {
         persistence.snapshots.put("startup-entry", snapshot);
         persistence.failingDeletes.add("startup-entry");
         TerminalEditorApp.RecoveryAutosaveManager manager =
-            new TerminalEditorApp.RecoveryAutosaveManager(persistence);
+            new TerminalEditorApp.RecoveryAutosaveManager(persistence, Runnable::run);
         manager.adoptSnapshot(restored, "startup-entry", 0L);
 
         manager.syncTabs(List.of());
@@ -359,7 +359,7 @@ class RecoveryAutosaveManagerTest {
         persistence.snapshots.put(second.id(), snapshot);
         persistence.failingDeletes.add(second.id());
         TerminalEditorApp.RecoveryAutosaveManager manager =
-            new TerminalEditorApp.RecoveryAutosaveManager(persistence);
+            new TerminalEditorApp.RecoveryAutosaveManager(persistence, Runnable::run);
 
         TerminalEditorApp.RecoveryAutosaveManager.DeletionResult result =
             manager.deleteEntries(List.of(first, second));
@@ -386,7 +386,7 @@ class RecoveryAutosaveManagerTest {
         persistence.failAllSaves = true;
         TabSession session = dirtySession("draft");
         TerminalEditorApp.RecoveryAutosaveManager manager =
-            new TerminalEditorApp.RecoveryAutosaveManager(persistence);
+            new TerminalEditorApp.RecoveryAutosaveManager(persistence, Runnable::run);
 
         assertTrue(manager.autosaveDirtyTabs(List.of(session), 0L).contains("Recovery autosave failed"));
         for (int turn = 1; turn < 100; turn++) {
@@ -410,7 +410,7 @@ class RecoveryAutosaveManagerTest {
         FakeRecoveryPersistence persistence = new FakeRecoveryPersistence();
         TabSession session = dirtySession("draft");
         TerminalEditorApp.RecoveryAutosaveManager manager =
-            new TerminalEditorApp.RecoveryAutosaveManager(persistence);
+            new TerminalEditorApp.RecoveryAutosaveManager(persistence, Runnable::run);
         assertNull(manager.autosaveDirtyTabs(List.of(session), 0L));
         RecoverySnapshot committed = persistence.snapshots.values().iterator().next();
         session.engine().insertInput(" latest");
@@ -513,6 +513,11 @@ class RecoveryAutosaveManagerTest {
                 throw new IOException("simulated delete failure for " + entryId);
             }
             snapshots.remove(entryId);
+        }
+
+        @Override
+        public void release(String entryId) {
+            // The in-memory port has no process ownership to release.
         }
     }
 }

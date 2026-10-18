@@ -97,7 +97,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     private final TextField searchQueryInput;
     private final TextField searchReplaceInput;
     private final TerminalEditorApp.SessionContext sessionContext;
-    private final List<RecoveryStore.Entry> startupRecoveryEntries;
+    private final List<RecoveryStore.PendingSnapshot> startupRecoveryEntries;
     private final List<TerminalEditorApp.EditorTab> tabs;
     private final TerminalAccess terminal;
     private final TopMenuController topMenu;
@@ -147,7 +147,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         TextField searchQueryInput,
         TextField searchReplaceInput,
         TerminalEditorApp.SessionContext sessionContext,
-        List<RecoveryStore.Entry> startupRecoveryEntries,
+        List<RecoveryStore.PendingSnapshot> startupRecoveryEntries,
         List<TerminalEditorApp.EditorTab> tabs,
         TerminalAccess terminal,
         TopMenuController topMenu,
@@ -263,10 +263,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         }
         List<TabSession> recoveryTabSessions = host.toTabSessions(tabs);
         recoveryAutosave.syncTabs(recoveryTabSessions);
-        String recoveryWarning = recoveryAutosave.autosaveDirtyTabs(
-            recoveryTabSessions,
-            System.nanoTime()
-        );
+        String recoveryWarning = modalState.isRecoveryConfirm() ? null
+            : recoveryAutosave.autosaveDirtyTabs(recoveryTabSessions, System.nanoTime());
         if (recoveryWarning != null) {
             notification.warning(recoveryWarning);
             eventLoop.invalidate();
@@ -1672,7 +1670,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         if (modalState.isRecoveryConfirm()) {
             if (routedConfirmDecision != null) {
                 if (routedConfirmDecision == ConfirmChoice.SAVE) {
-                    int restoredCount = host.restoreRecoveredTabs(
+                    var restored = host.restoreRecoveredTabs(
                         startupRecoveryEntries,
                         tabs,
                         sessionContext,
@@ -1680,6 +1678,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                         System.nanoTime()
                     );
                     startupRecoveryEntries.clear();
+                    startupRecoveryEntries.addAll(restored.failedEntries());
+                    int restoredCount = restored.restoredCount();
                     if (restoredCount > 0) {
                         activeTabIndex = sessionContext.activeTabIndex();
                         state = sessionContext.state();
@@ -1687,6 +1687,12 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                         notification.info("Recovered " + restoredCount + " tab(s)");
                     } else {
                         notification.info("No recovery snapshots restored");
+                    }
+                    if (!restored.failedEntries().isEmpty()) {
+                        notification.error("Could not restore " + restored.failedEntries().size()
+                            + " snapshot(s); data kept. Choose Later or Delete. "
+                            + String.join("; ", restored.failureDetails()));
+                        return;
                     }
                 } else if (routedConfirmDecision == ConfirmChoice.DISCARD) {
                     TerminalEditorApp.RecoveryAutosaveManager.DeletionResult deletion =
@@ -1698,6 +1704,15 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                         return;
                     }
                     notification.info("Recovery snapshots discarded");
+                } else {
+                    var release = recoveryAutosave.releaseEntries(startupRecoveryEntries);
+                    startupRecoveryEntries.clear();
+                    startupRecoveryEntries.addAll(release.failedEntries());
+                    if (!release.successful()) {
+                        notification.error(release.failureMessage());
+                        return;
+                    }
+                    notification.info("Recovery postponed; snapshots kept for next launch");
                 }
                 modalState = UiModalState.none();
                 return;

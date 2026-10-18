@@ -35,14 +35,14 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class RecoveryMigrationIntegrationTest {
     private static final String GENERATION = "0123456789abcdef0123456789abcdef";
-    private static final String ENTRY_ID = "existing-format5-session";
+    private static final String ENTRY_ID = "existing-format6-session";
 
     @TempDir
     Path directory;
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void existingFormat5RestoresFileFidelityAndTheViewBeforeItsFirstVisibleFrame(boolean wrapped) throws Exception {
+    void existingFormat6RestoresFileFidelityAndTheViewBeforeItsFirstVisibleFrame(boolean wrapped) throws Exception {
         List<String> original = new ArrayList<>(IntStream.range(0, 120)
             .mapToObj(index -> "ROW%04d|".formatted(index) + "Содержимое 中😀e\u0301 " + "abcdef ".repeat(40)).toList());
         original.add("");
@@ -56,7 +56,7 @@ class RecoveryMigrationIntegrationTest {
         List<String> edited = new ArrayList<>(original);
         edited.set(0, "edited " + edited.getFirst());
         ViewportState expectedViewport = new ViewportState(60, wrapped ? 2 : 0, wrapped ? 0 : 40, wrapped ? 0 : 40);
-        Path recoveryDirectory = writeFormat5(currentFile, edited, metadata, expectedViewport,
+        Path recoveryDirectory = writeFormat6(currentFile, edited, metadata, expectedViewport,
             SaveDisposition.REPLACE_EXISTING, diskBytes);
         byte[] originalMetadata = Files.readAllBytes(recoveryDirectory.resolve(ENTRY_ID + ".meta.properties"));
         byte[] originalRecoveryText = Files.readAllBytes(recoveryDirectory.resolve(ENTRY_ID + "." + GENERATION + ".txt"));
@@ -107,12 +107,12 @@ class RecoveryMigrationIntegrationTest {
     }
 
     @Test
-    void existingFormat5CreateNewIntentSurvivesRestorationAndRejectsAFileThatAppearedLater() throws Exception {
+    void existingFormat6CreateNewIntentSurvivesRestorationAndRejectsAFileThatAppearedLater() throws Exception {
         Path target = directory.resolve("expected-absent.txt");
         DocumentFileMetadata metadata = new DocumentFileMetadata(Charset.forName("windows-1251"), BomKind.NONE,
             "\r\n", List.of("\r\n", "\n"));
         List<String> edited = List.of("черновик", "вторая строка", "");
-        Path recoveryDirectory = writeFormat5(target, edited, metadata, new ViewportState(0, 0, 0, 0),
+        Path recoveryDirectory = writeFormat6(target, edited, metadata, new ViewportState(0, 0, 0, 0),
             SaveDisposition.CREATE_NEW, null);
         try (RecoveryStore store = RecoveryStoreFixtures.open(recoveryDirectory);
              EditorWindowFixture fixture = new EditorWindowFixture(directory.resolve("window"), false)) {
@@ -137,8 +137,8 @@ class RecoveryMigrationIntegrationTest {
         }
     }
 
-    /** Deliberately independent of RecoveryStore's writer: this is the persisted format-5 contract. */
-    private Path writeFormat5(Path currentFile, List<String> lines, DocumentFileMetadata metadata,
+    /** Deliberately independent of RecoveryStore's writer: this is the persisted format-6 contract. */
+    private Path writeFormat6(Path currentFile, List<String> lines, DocumentFileMetadata metadata,
                              ViewportState viewport, SaveDisposition disposition, byte[] baseline) throws Exception {
         Path recovery = directory.resolve("existing-recovery");
         Files.createDirectories(recovery);
@@ -149,7 +149,8 @@ class RecoveryMigrationIntegrationTest {
             default -> throw new AssertionError("unknown fixture separator");
         }).collect(Collectors.joining(","));
         String properties = """
-            format=5
+            format=6
+            pathPlatform=%s
             createdAtEpochMillis=1784851200000
             textGeneration=0123456789abcdef0123456789abcdef
             dirty=true
@@ -172,7 +173,8 @@ class RecoveryMigrationIntegrationTest {
             selection.present=true
             selection.line=0
             selection.col=0
-            """.formatted(propertyPath(currentFile), disposition.name(), metadata.charset().name(), metadata.bomKind().name(),
+            """.formatted(java.io.File.separatorChar == '\\' ? "windows" : "unix",
+                propertyPath(currentFile), disposition.name(), metadata.charset().name(), metadata.bomKind().name(),
                 separatorTokens, baseline != null, baseline == null ? "" : propertyPath(currentFile.toRealPath()),
                 baseline == null ? "" : HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(baseline)),
                 viewport.topLine(), viewport.topWrapSegment(), viewport.leftColumn(), viewport.leftVisualColumn());
@@ -182,7 +184,7 @@ class RecoveryMigrationIntegrationTest {
     }
 
     private static String propertyPath(Path path) {
-        return path.toAbsolutePath().normalize().toString().replace("\\", "\\\\");
+        return path.toAbsolutePath().normalize().toUri().toASCIIString();
     }
 
     private static byte[] encode(List<String> lines, DocumentFileMetadata metadata) {

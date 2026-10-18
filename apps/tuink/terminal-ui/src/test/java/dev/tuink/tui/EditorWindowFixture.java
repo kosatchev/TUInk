@@ -77,13 +77,13 @@ final class EditorWindowFixture implements AutoCloseable {
     }
 
     EditorWindowFixture(Path directory, boolean reading, List<String> lines,
-                        List<RecoveryStore.Entry> startupRecoveryEntries) throws IOException {
+                        List<? extends RecoveryStore.PendingSnapshot> startupRecoveryEntries) throws IOException {
         this(directory, reading, lines,
             new AppSettingsSession(AppSettings.defaults(), TuiCliOptions.parse(new String[0])), startupRecoveryEntries);
     }
 
     EditorWindowFixture(Path directory, boolean reading, List<String> lines,
-                        List<RecoveryStore.Entry> startupRecoveryEntries,
+                        List<? extends RecoveryStore.PendingSnapshot> startupRecoveryEntries,
                         TerminalEditorApp.RecoveryPersistence recoveryPersistence) throws IOException {
         this(directory, reading, lines,
             new AppSettingsSession(AppSettings.defaults(), TuiCliOptions.parse(new String[0])),
@@ -101,13 +101,13 @@ final class EditorWindowFixture implements AutoCloseable {
 
     private EditorWindowFixture(Path directory, boolean reading, List<String> lines,
                                 AppSettingsSession settingsSession,
-                                List<RecoveryStore.Entry> startupRecoveryEntries) throws IOException {
+                                List<? extends RecoveryStore.PendingSnapshot> startupRecoveryEntries) throws IOException {
         this(directory, reading, lines, settingsSession, startupRecoveryEntries, null);
     }
 
     private EditorWindowFixture(Path directory, boolean reading, List<String> lines,
                                 AppSettingsSession settingsSession,
-                                List<RecoveryStore.Entry> startupRecoveryEntries,
+                                List<? extends RecoveryStore.PendingSnapshot> startupRecoveryEntries,
                                 TerminalEditorApp.RecoveryPersistence recoveryPersistence) throws IOException {
         this.settingsSession = settingsSession;
         Files.createDirectories(directory);
@@ -130,19 +130,26 @@ final class EditorWindowFixture implements AutoCloseable {
         ScreenPresenter presenter = new ScreenPresenter(new PrintWriter(new StringWriter()), TerminalCapabilities.DEFAULT);
         TerminalEditorApp.RecoveryPersistence persistence = recoveryPersistence != null ? recoveryPersistence
             : new TerminalEditorApp.RecoveryPersistence() {
-            @Override
-            public void save(String entryId, RecoverySnapshot snapshot) {
-                recoverySnapshots.put(entryId, snapshot);
-            }
+                @Override
+                public void save(String entryId, RecoverySnapshot snapshot) {
+                    recoverySnapshots.put(entryId, snapshot);
+                }
 
-            @Override
-            public void delete(String entryId) {
-                recoverySnapshots.remove(entryId);
-            }
+                @Override
+                public void delete(String entryId) {
+                    recoverySnapshots.remove(entryId);
+                }
+
+                @Override
+                public void release(String entryId) {
+                    // The in-memory port has no process ownership to release.
+                }
             };
-        recoveryManager = new TerminalEditorApp.RecoveryAutosaveManager(persistence);
-        for (RecoveryStore.Entry entry : startupRecoveryEntries) {
-            recoverySnapshots.put(entry.id(), entry.snapshot());
+        recoveryManager = new TerminalEditorApp.RecoveryAutosaveManager(persistence, Runnable::run);
+        for (RecoveryStore.PendingSnapshot entry : startupRecoveryEntries) {
+            if (entry instanceof RecoveryStore.Entry loaded) {
+                recoverySnapshots.put(entry.id(), loaded.snapshot());
+            }
         }
         controller = new EditorWindowController(host, new EditorWindowController.Resources(
             new CommandRouter(keymap), editorView, loop,
@@ -169,7 +176,7 @@ final class EditorWindowFixture implements AutoCloseable {
         for (RecoveryStore.Entry entry : entries) {
             recoverySnapshots.put(entry.id(), entry.snapshot());
         }
-        return host.restoreRecoveredTabs(entries, tabs, context, recoveryManager, 0L);
+        return host.restoreRecoveredTabs(entries, tabs, context, recoveryManager, 0L).restoredCount();
     }
 
     void event(TuiInputEvent event) {

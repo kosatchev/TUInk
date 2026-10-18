@@ -224,6 +224,22 @@ class SaveAsWorkspaceIntegrationTest {
         }
     }
 
+    @Test
+    void aRecoveredDocumentsExistingIdentityCanStillBeSavedWithSaveAs() throws Exception {
+        try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("original"))) {
+            var recovered = window.host.newEditorTab();
+            recovered.tabSession().engine().openExisting(window.document);
+            recovered.tabSession().engine().insertInput("recovered ");
+            window.restore(List.of(new RecoveryStore.Entry("draft", recovered.tabSession().engine().captureRecoverySnapshot())));
+
+            SaveWorkflowIntegrationTest.submitFilename(window, window.document);
+
+            assertEquals("recovered original", Files.readString(window.document));
+            assertFalse(window.active().state().isDirty());
+            assertEquals(2, window.tabs.size());
+        }
+    }
+
     private static void fillFilename(EditorWindowFixture window, Path path) {
         window.event(KeyStroke.of(KeyStroke.Key.A, KeyStroke.Modifier.CTRL));
         window.event(new TextInput(path.toString()));

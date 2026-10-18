@@ -94,6 +94,9 @@ class ExpectedAbsentOverwriteIntegrationTest {
             @Override public void delete(String entryId) throws IOException {
                 store.delete(entryId);
             }
+            @Override public void release(String entryId) throws IOException {
+                store.release(entryId);
+            }
         };
     }
 }

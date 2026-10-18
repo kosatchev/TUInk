@@ -69,6 +69,65 @@ class UserDirectoriesTest {
         assertEquals(home.resolve(".config/tuink"), UserDirectories.configDirectory(null, home.toString()));
     }
 
+    @Test
+    void allDefaultPersistenceEntryPointsRejectAnAmbiguousProfileWithoutWritingAnother() throws Exception {
+        for (boolean ambiguousXdg : new boolean[] {true, false}) {
+            Path home = directory.resolve(ambiguousXdg ? "safe-home" : "home-\uFFFD");
+            String value = ambiguousXdg ? directory.resolve("profile-\uFFFD").toString() : "";
+            Path output = runProbe(home, value, "reject", ambiguousXdg ? "XDG_CONFIG_HOME" : "user.home");
+            assertTrue(Files.readString(output).contains("All persistence entry points rejected"));
+            assertFalse(Files.exists(home.resolve(".config")));
+            if (ambiguousXdg) assertFalse(Files.exists(Path.of(value)));
+        }
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void nativeFilenameBytesInXdgAndFallbackHomeCannotSelectUnicodeNeighbors() throws Exception {
+        Path prefix = directory.resolve("native-");
+        Path raw = Path.of(URI.create(prefix.toUri().toASCIIString() + "%FF"));
+        Path neighbor = directory.resolve("native-\uFFFD");
+        Files.createDirectory(raw);
+        Files.createDirectory(neighbor);
+        Path sentinel = neighbor.resolve("sentinel.txt");
+        Files.writeString(sentinel, "keep neighboring profile unchanged", StandardCharsets.UTF_8);
+        for (boolean nativeXdg : new boolean[] {true, false}) {
+            Path home = directory.resolve(nativeXdg ? "xdg-home" : "fallback-home");
+            // The shell introduces byte FF after ProcessBuilder has encoded its
+            // arguments, so this exercises the JVM's actual native decoding.
+            String script = nativeXdg
+                ? "XDG_CONFIG_HOME=$(printf '%s\\377' \"$1\"); export XDG_CONFIG_HOME; shift; exec \"$@\""
+                : "profile_home=$(printf '%s\\377' \"$1\"); shift; launcher=$1; shift; "
+                    + "XDG_CONFIG_HOME=; export XDG_CONFIG_HOME; exec \"$launcher\" \"-Duser.home=$profile_home\" \"$@\"";
+            var commandLine = new java.util.ArrayList<>(List.of(
+                "/bin/sh", "-c", script, "profile-probe", prefix.toString(),
+                Path.of(System.getProperty("java.home"), "bin/java").toString()));
+            if (nativeXdg) commandLine.add("-Duser.home=" + home);
+            commandLine.addAll(List.of("-cp", probeClasspath(), ProfileProbe.class.getName(),
+                "reject", nativeXdg ? "XDG_CONFIG_HOME" : "user.home"));
+            ProcessBuilder command = new ProcessBuilder(commandLine);
+            command.environment().put("LC_ALL", "C.UTF-8");
+            runProbe(command);
+            assertFalse(Files.exists(home.resolve(".config")));
+            assertFalse(Files.exists(raw.resolve(nativeXdg ? "tuink" : ".config")));
+            assertFalse(Files.exists(neighbor.resolve(nativeXdg ? "tuink" : ".config")));
+            assertEquals("keep neighboring profile unchanged", Files.readString(sentinel, StandardCharsets.UTF_8));
+        }
+    }
+
+    @Test
+    void settingsAndRecoveryShareTheSelectedProfileWithoutReadingTheDefault() throws Exception {
+        for (String value : List.of(directory.resolve("selected profile").toString(), "relative", "")) {
+            Path home = Files.createTempDirectory(directory, "home-");
+            Path expected = value.startsWith(directory.toString())
+                ? Path.of(value).resolve("tuink") : home.resolve(".config/tuink");
+            runProbe(home, value, expected.toString());
+            if (!value.isEmpty() && Path.of(value).isAbsolute()) {
+                assertFalse(Files.exists(home.resolve(".config")));
+            }
+        }
+    }
+
     private Path runProbe(Path home, String configuredHome, String... arguments) throws Exception {
         var commandLine = new java.util.ArrayList<>(List.of(
             Path.of(System.getProperty("java.home"), "bin/java").toString(),

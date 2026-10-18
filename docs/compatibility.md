@@ -131,9 +131,14 @@ ui.theme=...
 The reader accepts only the current schema. Unknown formats, malformed values, missing required fields, and unsupported combinations are incompatible. TUInk must preserve the incompatible file, use documented defaults for the running process, and emit a clear warning. It must not silently rewrite the file as though it had been read successfully.
 
 Each settings save stages a complete snapshot in its own unique temporary file
-in the settings directory, then replaces the settings file. Concurrent editor
-instances never write, move, or delete each other's temporary files. The last
-completed replacement wins; settings from different instances are not merged.
+beside the resolved settings target, then publishes it. Concurrent editor
+instances never write, move, or delete each other's temporary files.
+
+Automatic session saves compare the physical target and the bytes loaded at
+startup before publication. If either changed, the settings file is preserved
+and the session reports a conflict. Newly created settings files never
+overwrite a name created concurrently. Settings from different instances
+are not merged.
 
 ### Recovery snapshots
 

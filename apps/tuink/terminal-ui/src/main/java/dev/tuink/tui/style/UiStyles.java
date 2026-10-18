@@ -5,6 +5,7 @@ import dev.tuink.render.Style;
 import dev.tuiframe.style.CellColor;
 import dev.tuiframe.style.CellStyle;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Centralized style palette for TUI widgets and renderer defaults.
@@ -48,7 +49,7 @@ public final class UiStyles {
             if (raw == null) {
                 return CYAN;
             }
-            return switch (raw.trim().toLowerCase()) {
+            return switch (raw.trim().toLowerCase(Locale.ROOT)) {
                 case "cyan" -> CYAN;
                 case "blue" -> BLUE;
                 case "light" -> LIGHT;

@@ -26,22 +26,10 @@ final class ConfirmBarInputRouter {
         ConfirmChoice ctrlQDecision,
         boolean pointerMissBubbles
     ) {
-        private static final Policy RECOVERY = new Policy(
-            ConfirmChoice.SAVE,
-            ConfirmChoice.DISCARD,
-            ConfirmChoice.DISCARD,
-            ConfirmChoice.DISCARD,
-            false
-        );
+        private static final Policy RECOVERY = standard(ConfirmChoice.SAVE, false);
         private static final Policy OVERWRITE = standard(ConfirmChoice.SAVE, false);
-        private static final Policy QUIT = new Policy(
-            ConfirmChoice.DISCARD,
-            ConfirmChoice.CANCEL,
-            ConfirmChoice.CANCEL,
-            ConfirmChoice.DISCARD,
-            false
-        );
-        private static final Policy CLOSE_TAB = standard(ConfirmChoice.DISCARD, true);
+        private static final Policy QUIT = standard(ConfirmChoice.SAVE, false);
+        private static final Policy CLOSE_TAB = standard(ConfirmChoice.SAVE, true);
 
         Policy {
             Objects.requireNonNull(yesDecision, "yesDecision");

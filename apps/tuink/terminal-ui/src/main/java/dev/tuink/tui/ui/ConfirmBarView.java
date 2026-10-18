@@ -34,7 +34,16 @@ public final class ConfirmBarView {
     }
 
     public static ConfirmBarView buildRecovery(String prompt, int cols) {
-        return build(prompt, cols, "Restore", "Discard", false, "Cancel");
+        return build(prompt, cols, "Restore", "Delete", true, "Later");
+    }
+
+    /** A two-way explicit choice whose initial focus is always Cancel. */
+    public static ConfirmBarView buildAlternative(String prompt, int cols, String primaryLabel) {
+        ConfirmBarView prototype = build(prompt, cols, primaryLabel, "Cancel", false, "Cancel");
+        List<ChoiceButton> choices = List.of(prototype.choices.get(0),
+            new ChoiceButton(ConfirmChoice.CANCEL, prototype.choices.get(1).button()));
+        String row = prototype.row;
+        return new ConfirmBarView(row, choices, ConfirmChoice.CANCEL);
     }
 
     public static ConfirmBarView build(

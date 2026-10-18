@@ -28,7 +28,9 @@ class SearchTabMarkerCacheIntegrationTest {
             assertTrue(window.screenRow(window.height - 1).contains("Find 1"));
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
             window.command(TuinkCommand.TAB_CLOSE);
-            window.event(new TextInput("y"));
+            window.event(KeyStroke.of(KeyStroke.Key.HOME));
+            window.event(KeyStroke.of(KeyStroke.Key.ARROW_RIGHT));
+            window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             assertEquals(1, window.tabs.size());
             window.command(TuinkCommand.TAB_NEW);
             window.event(new TextInput("other"));

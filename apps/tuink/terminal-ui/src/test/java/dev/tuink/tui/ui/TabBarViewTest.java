@@ -3,6 +3,7 @@ package dev.tuink.tui.ui;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import dev.tuiframe.cell.Canvas;
 import dev.tuiframe.cell.Cell;
@@ -14,6 +15,8 @@ import dev.tuiframe.style.CellStyle;
 import dev.tuiframe.widget.TabBar;
 import dev.tuiframe.widget.Theme;
 import dev.tuiframe.widget.WidgetThemeKeys;
+import java.io.File;
+import java.net.URI;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -37,6 +40,31 @@ class TabBarViewTest {
         }
         return BAR;
     };
+
+    @Test
+    void encodedLabelsKeepWholeEscapesAtEveryWidthAndTheirVisibleCloseButtonClosesTheSameItem() {
+        assumeTrue(File.separatorChar == '/');
+        Path path = Path.of(URI.create("file:///tmp/long-%FF-%FE-example.txt"));
+        for (int width = 7; width <= 44; width++) {
+            Rect bounds = new Rect(0, 1, width, 1);
+            TabBarView.Placement placed = TabBarView.build(
+                List.of(new TabBarView.TabItem(path, true, true)), 0, TabBar.State.initial())
+                .place(bounds, new Rect(0, 0, width, 3));
+            CellBuffer buffer = filled(3, width);
+            placed.paint(new Canvas(buffer), THEME);
+            String text = row(buffer, 1, 0, width);
+            for (int index = text.indexOf('%'); index >= 0; index = text.indexOf('%', index + 3)) {
+                assertTrue(index + 2 < text.length(), text);
+                assertTrue(Character.digit(text.charAt(index + 1), 16) >= 0, text);
+                assertTrue(Character.digit(text.charAt(index + 2), 16) >= 0, text);
+            }
+            int close = text.indexOf(" x]");
+            if (close >= 0) {
+                assertEquals(new TabBar.ClosePressed(0, placed.state()),
+                    placed.handle(pointer(1, close + 1)).output().orElseThrow());
+            }
+        }
+    }
 
     @Test
     void commonFormatterKeepsEditorPathDirtyAndSearchSemanticsOutsideTheWidget() {

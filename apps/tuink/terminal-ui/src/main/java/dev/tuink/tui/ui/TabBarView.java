@@ -28,8 +28,9 @@ public final class TabBarView {
         for (TabItem tab : List.copyOf(tabs)) {
             TabItem required = Objects.requireNonNull(tab, "tab");
             mapped.add(new TabBar.Item(
-                formatTabTitle(required.file(), required.dirty(), required.hasMatch()),
-                true
+                DocumentCaption.name(required.file()), true,
+                required.hasMatch() ? "#" : "", required.dirty() ? "*" : "",
+                DocumentCaption.extensionCells(DocumentCaption.name(required.file())), PathPresentation.LABEL_POLICY
             ));
         }
         this.items = List.copyOf(mapped);
@@ -46,13 +47,7 @@ public final class TabBarView {
      * and the Tabs menu.
      */
     public static String formatTabTitle(Path file, boolean dirty, boolean hasMatch) {
-        String name;
-        if (file == null) {
-            name = NO_NAME_LABEL;
-        } else {
-            Path fileName = file.getFileName();
-            name = fileName == null ? file.toString() : fileName.toString();
-        }
+        String name = DocumentCaption.name(file);
         return (hasMatch ? "#" : "") + name + (dirty ? "*" : "");
     }
 
@@ -95,7 +90,7 @@ public final class TabBarView {
         return new Placement(widgetPlacement, context);
     }
 
-    /** Editor-owned metadata which is flattened to a generic display label. */
+    /** Editor-owned metadata mapped to a generic label and separately retained affixes. */
     public record TabItem(Path file, boolean dirty, boolean hasMatch) {
     }
 

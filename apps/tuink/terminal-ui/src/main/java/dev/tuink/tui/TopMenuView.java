@@ -62,6 +62,8 @@ import dev.tuiframe.widget.RoutedTarget;
 import dev.tuiframe.widget.Theme;
 import dev.tuiframe.widget.WidgetState;
 import dev.tuink.tui.ui.TabBarView;
+import dev.tuink.tui.ui.DocumentCaption;
+import dev.tuink.tui.ui.PathPresentation;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -146,9 +148,17 @@ final class TopMenuView {
     }
 
     Placement place(Rect fullLayerBounds, boolean readingMode) {
+        return place(fullLayerBounds, readingMode, false);
+    }
+
+    Placement place(Rect fullLayerBounds, boolean readingMode, boolean dirty) {
         Rect bounds = Objects.requireNonNull(fullLayerBounds, "fullLayerBounds");
+        int readWidth = readingMode ? Math.min(bounds.width(), CellText.width(READING_BADGE)) : 0;
+        int bodyWidth = bounds.width() - readWidth;
+        boolean compact = bodyWidth < menuPrefixWidth() + (dirty ? 2 : 0) + 1;
+        int dirtyWidth = dirty && compact && bodyWidth > 0 ? 1 : 0;
         MenuBar.Placement<CommandInvocation> placed = widget.layout(
-            bounds, readingMode ? CellText.width(READING_BADGE) : 0
+            bounds, readWidth + dirtyWidth
         );
         boolean enabled = !placed.bounds().isEmpty();
         FocusContext context = new FocusContext(
@@ -167,32 +177,35 @@ final class TopMenuView {
     TopBar topBar(Path currentFile, boolean dirty, int cols, boolean readingMode) {
         String prefix = " ".repeat(widget.preferredBarWidth()) + MENU_SUFFIX;
         int prefixWidth = CellText.width(prefix);
-        String file = currentFile == null ? TabBarView.NO_NAME_LABEL : currentFile.toString();
-        String base = prefix + file + (dirty ? " *" : "");
-        String read = readingMode ? READING_BADGE : "";
-        String text;
-        if (read.isEmpty()) {
-            text = CellText.fit(base, cols);
-        } else {
-            int readWidth = CellText.width(read);
-            if (cols <= readWidth) {
-                text = CellText.alignRight(read, cols);
-            } else {
-                text = CellText.fit(base, cols - readWidth) + read;
-            }
+        int width = Math.max(0, cols);
+        String read = readingMode ? CellText.alignRight(READING_BADGE, Math.min(width, CellText.width(READING_BADGE))) : "";
+        int bodyWidth = width - CellText.width(read);
+        String status = dirty ? " *" : "";
+        int nameCapacity = bodyWidth - prefixWidth - CellText.width(status);
+        if (nameCapacity <= 0) {
+            String compactStatus = dirty && bodyWidth > 0 ? "*" : "";
+            String text = CellText.fit("", bodyWidth - CellText.width(compactStatus)) + compactStatus + read;
+            return new TopBar(text, prefixWidth, 0, 0);
         }
-        return new TopBar(text, prefixWidth);
+        String file = DocumentCaption.fitPath(currentFile, nameCapacity);
+        String text = CellText.fit(prefix + file + status, bodyWidth) + read;
+        return new TopBar(text, prefixWidth, prefixWidth, prefixWidth + CellText.width(file));
     }
 
     int menuPrefixWidth() {
         return widget.preferredBarWidth() + CellText.width(MENU_SUFFIX);
     }
 
-    record TopBar(String text, int menuPrefixWidth) {
+    record TopBar(String text, int menuPrefixWidth, int filenameStart, int filenameEnd) {
+        TopBar(String text, int menuPrefixWidth) {
+            this(text, menuPrefixWidth, 0, 0);
+        }
+
         TopBar {
             Objects.requireNonNull(text, "text");
-            if (menuPrefixWidth < 0) {
-                throw new IllegalArgumentException("menuPrefixWidth must not be negative");
+            if (menuPrefixWidth < 0 || filenameStart < 0 || filenameEnd < filenameStart
+                || filenameEnd > CellText.width(text)) {
+                throw new IllegalArgumentException("Invalid prepared top-bar ranges");
             }
         }
     }
@@ -439,7 +452,8 @@ final class TopMenuView {
             int mnemonic = spec.enabled()
                 ? mnemonicGraphemeIndex(spec.label(), usedMnemonics)
                 : -1;
-            result.add(new MenuBar.Item<>(spec.value(), spec.label(), mnemonic, spec.enabled()));
+            result.add(new MenuBar.Item<>(spec.value(), spec.label(), mnemonic, spec.enabled(),
+                PathPresentation.LABEL_POLICY));
         }
         return List.copyOf(result);
     }

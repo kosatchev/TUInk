@@ -12,13 +12,17 @@ import dev.tuiframe.geometry.Point;
 import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.scroll.Scrollbar;
 import dev.tuiframe.scroll.ScrollInteraction;
+import java.util.Objects;
+import java.util.function.LongSupplier;
 
 /**
  * UI helper for the main editor text area.
  */
 public final class EditorView {
     private static final int EDGE_AUTO_SCROLL_MAX_STEP = 6;
+    private static final long EDGE_AUTO_SCROLL_INTERVAL_NANOS = 50_000_000L;
     private static final long DOUBLE_CLICK_WINDOW_NANOS = 450_000_000L;
+    private final LongSupplier nanoClock;
 
     public enum ScrollAxis {
         NONE,
@@ -30,6 +34,16 @@ public final class EditorView {
     private Position lastClickPosition;
     private long lastClickAtNanos;
     private int tabWidth = 4;
+    private PointerEvent selectionScrollPointer;
+    private long selectionScrollAtNanos;
+
+    public EditorView() {
+        this(System::nanoTime);
+    }
+
+    public EditorView(LongSupplier nanoClock) {
+        this.nanoClock = Objects.requireNonNull(nanoClock, "nanoClock");
+    }
 
     public CursorPosition cursorFromPlan(RenderPlan plan, int contentTopRow) {
         int top = Math.max(1, contentTopRow);
@@ -38,6 +52,7 @@ public final class EditorView {
 
     public void cancelMouseSelection() {
         mouseSelecting = false;
+        selectionScrollPointer = null;
         lastClickPosition = null;
         lastClickAtNanos = 0L;
     }
@@ -56,6 +71,7 @@ public final class EditorView {
         int contentTopRow,
         boolean extendSelection
     ) {
+        selectionScrollPointer = null;
         boolean selectedWordByDoubleClick = false;
         Position hit = mouseToTextPosition(
             mouse,
@@ -102,6 +118,53 @@ public final class EditorView {
         if (!mouseSelecting || mouse.button() != PointerEvent.Button.LEFT) {
             return;
         }
+        boolean changed = dragSelection(mouse, model, state, plan, contentRows, engine, contentTopRow);
+        scheduleSelectionScroll(mouse, plan, contentRows, contentTopRow, changed, nanoClock.getAsLong());
+    }
+
+    /** Next selection scroll runs on the UI thread, using the last drag coordinates. */
+    public long nanosUntilSelectionScroll(long nowNanos) {
+        return selectionScrollPointer == null ? -1L : Math.max(0L, selectionScrollAtNanos - nowNanos);
+    }
+
+    public boolean scrollSelectionIfDue(
+        TextModel model,
+        EditorState state,
+        RenderPlan plan,
+        int contentRows,
+        EditorEngine engine,
+        int contentTopRow,
+        long nowNanos
+    ) {
+        if (selectionScrollPointer == null || nowNanos - selectionScrollAtNanos < 0L) {
+            return false;
+        }
+        PointerEvent mouse = selectionScrollPointer;
+        boolean changed = dragSelection(mouse, model, state, plan, contentRows, engine, contentTopRow);
+        scheduleSelectionScroll(mouse, plan, contentRows, contentTopRow, changed, nowNanos);
+        return changed;
+    }
+
+    private void scheduleSelectionScroll(
+        PointerEvent mouse, RenderPlan plan, int contentRows, int contentTopRow, boolean changed, long nowNanos
+    ) {
+        int top = Math.max(1, contentTopRow);
+        int bottom = top + contentRows - 1;
+        boolean verticalEdge = mouse.row() <= top || mouse.row() >= bottom;
+        boolean horizontalEdge = !plan.wrapLines()
+            && (mouse.column() <= plan.gutterWidth() || mouse.column() >= plan.cols() - plan.scrollbarWidth() - 1);
+        selectionScrollPointer = changed && contentRows > 0 && (verticalEdge || horizontalEdge) ? mouse : null;
+        selectionScrollAtNanos = nowNanos + EDGE_AUTO_SCROLL_INTERVAL_NANOS;
+    }
+
+    private boolean dragSelection(
+        PointerEvent mouse, TextModel model, EditorState state, RenderPlan plan, int contentRows,
+        EditorEngine engine, int contentTopRow
+    ) {
+        Position oldCursor = state.getCursor();
+        int oldTop = state.getTopLine();
+        int oldSegment = state.getTopWrapSegment();
+        int oldLeft = state.getLeftVisualColumn();
         int top = Math.max(1, contentTopRow);
         int bottom = top + Math.max(0, contentRows) - 1;
         PointerEvent effectiveMouse = mouse;
@@ -139,6 +202,8 @@ public final class EditorView {
             engine.extendSelectionTo(hit);
             ensureCursorVisible(engine, plan, contentRows);
         }
+        return !oldCursor.equals(state.getCursor()) || oldTop != state.getTopLine()
+            || oldSegment != state.getTopWrapSegment() || oldLeft != state.getLeftVisualColumn();
     }
 
     private void ensureCursorVisible(EditorEngine engine, RenderPlan plan, int contentRows) {
@@ -187,7 +252,7 @@ public final class EditorView {
     }
 
     private boolean isDoubleClick(Position hit) {
-        long now = System.nanoTime();
+        long now = nanoClock.getAsLong();
         boolean doubleClick = lastClickPosition != null
             && hit.line() == lastClickPosition.line()
             && Math.abs(hit.col() - lastClickPosition.col()) <= 1
@@ -198,6 +263,7 @@ public final class EditorView {
     }
 
     public void handleMouseRelease(EditorEngine engine) {
+        selectionScrollPointer = null;
         if (!mouseSelecting) {
             return;
         }

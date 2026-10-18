@@ -19,10 +19,11 @@ public final class NotificationBar {
     }
 
     public static NotificationBar of(String text, Style style) {
-        if (text == null || text.isBlank()) {
+        String plain = NotificationPresentation.singleLine(text);
+        if (plain.isBlank()) {
             return hidden();
         }
-        return new NotificationBar(text, style);
+        return new NotificationBar(plain, style);
     }
 
     public boolean visible() {

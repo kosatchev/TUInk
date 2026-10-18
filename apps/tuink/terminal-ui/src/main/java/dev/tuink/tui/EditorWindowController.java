@@ -77,6 +77,7 @@ import java.util.function.IntSupplier;
 /** Owns frame preparation and event handling for one terminal editor window. */
 final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiInputEvent> {
 
+    private static final long SYNTAX_RETRY_DELAY_NANOS = 16_000_000L;
     private static final Object DOCUMENT_POINTER_SCOPE = new Object();
     private static final Object HELP_CONTENT_POINTER_SCOPE = new Object();
     private final WindowPointerCapture pointerCapture = new WindowPointerCapture();
@@ -213,6 +214,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     private Path pendingOverwritePath;
     private int pendingCloseTabIndex;
     private boolean confirmMode;
+    private long syntaxRetryAtNanos = Long.MIN_VALUE;
 
     @Override
     public boolean running() {
@@ -231,6 +233,14 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         state = sessionContext.state();
         engine = sessionContext.engine();
         renderPlanBuilder = sessionContext.renderPlanBuilder();
+        if (syntaxRetryAtNanos != Long.MIN_VALUE) {
+            if (!renderPlanBuilder.hasPendingSyntaxWork()) {
+                syntaxRetryAtNanos = Long.MIN_VALUE;
+            } else if (System.nanoTime() - syntaxRetryAtNanos >= 0L) {
+                syntaxRetryAtNanos = Long.MIN_VALUE;
+                eventLoop.invalidate();
+            }
+        }
         viewportController = tabs.get(activeTabIndex).viewportController();
         navigation = tabs.get(activeTabIndex).navigation();
         engine.setGutterDiffMode(uiSessionState.gutterDiffModeSetting);
@@ -263,8 +273,14 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         if (openFileMode && openFileTree.consumeMetadataChanged()) {
             eventLoop.invalidate();
         }
-        rows = Math.max(2, terminal.height());
-        cols = Math.max(1, terminal.width());
+        int nextRows = Math.max(2, terminal.height());
+        int nextCols = Math.max(1, terminal.width());
+        if (rows != nextRows || cols != nextCols || !uiSessionState.mouseModeSetting || !uiSessionState.mouseModeAvailable) {
+            cancelPointerCapture(PointerCaptureCancellation.SURFACE_CHANGED);
+            cancelDocumentPointerInteraction();
+        }
+        rows = nextRows;
+        cols = nextCols;
         saveAsMode = modalState.isSaveAs();
         saveOverwriteConfirmMode = modalState.isSaveOverwriteConfirm();
         recoveryConfirmMode = modalState.isRecoveryConfirm();
@@ -304,6 +320,12 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             confirmScopeId = null;
             confirmBarPlacement = null;
         }
+        if (plan != null && editorView.scrollSelectionIfDue(
+            model, state, plan, contentRows, engine, contentTopRow, System.nanoTime()
+        )) {
+            viewportController.onEditorTextInteraction();
+            eventLoop.invalidate();
+        }
     }
 
     @Override
@@ -317,6 +339,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         FrameComposition composition = prepareComposition(frameTicket.fullRedraw());
         TerminalEditorApp.RenderFrameResult frameResult = renderFrameController.renderFrameIfNeeded(composition);
         plan = frameResult.plan();
+        syntaxRetryAtNanos = renderPlanBuilder.hasPendingSyntaxWork()
+            ? System.nanoTime() + SYNTAX_RETRY_DELAY_NANOS : Long.MIN_VALUE;
         return frameResult.rendered();
     }
 
@@ -532,7 +556,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             topMenu.state()
         );
         topMenuPlacement = topMenuView.place(
-            new Rect(0, 0, cols, rows), uiSessionState.readingModeSetting
+            new Rect(0, 0, cols, rows), uiSessionState.readingModeSetting, state.isDirty()
         );
         topMenu.adopt(topMenuPlacement.state());
         OpenDialogLayout openFileLayout = null;
@@ -674,7 +698,9 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         return TerminalEditorApp.earlierDeadline(
             TerminalEditorApp.earlierDeadline(notification.nanosUntilExpire(nowNanos),
                 host.modalAttention.nanosUntilChange(nowNanos)),
-            engine.nanosUntilGutterDiffRefresh(nowNanos)
+            TerminalEditorApp.earlierDeadline(editorView.nanosUntilSelectionScroll(nowNanos),
+                TerminalEditorApp.earlierDeadline(engine.nanosUntilGutterDiffRefresh(nowNanos),
+                    syntaxRetryAtNanos == Long.MIN_VALUE ? -1L : Math.max(0L, syntaxRetryAtNanos - nowNanos)))
         );
     }
 

@@ -428,14 +428,13 @@ public class TerminalEditorApp {
         CellBuffer buffer,
         Canvas canvas,
         int cols,
-        EditorState state,
-        int startCol
+        TopMenuView.TopBar topBar
     ) {
+        int startCol = topBar.filenameStart();
         if (buffer.rows() < 1 || cols <= startCol || startCol < 0) {
             return;
         }
-        String file = state.getCurrentFile() == null ? "--no name--" : state.getCurrentFile().toString();
-        int endCol = Math.min(cols, startCol + CellText.width(file));
+        int endCol = Math.min(cols, topBar.filenameEnd());
         for (int col = startCol; col < endCol;) {
             var cell = buffer.get(0, col);
             if (cell.continuation()) {
@@ -1156,7 +1155,6 @@ public class TerminalEditorApp {
         int rows = editorLayout.rows();
         int cols = editorLayout.cols();
         int contentTopRow = editorLayout.contentTopRow();
-        int topMenuPrefixWidth = surface.topBar().menuPrefixWidth();
         String topBar = surface.topBar().text();
         String bottomBar = surface.bottomBar();
         InlinePromptBar inlinePromptBar = surface.inlinePrompt();
@@ -1254,7 +1252,7 @@ public class TerminalEditorApp {
                 colorEnabled ? colorTopMenuWidgetTheme : monoTopMenuWidgetTheme
             );
         }
-        drawTopFileNameBold(current, canvas, cols, state, topMenuPrefixWidth);
+        drawTopFileNameBold(current, canvas, cols, surface.topBar());
         drawOpenFileOverlay(
             canvas,
             rows,

@@ -200,6 +200,46 @@ class TopMenuViewTest {
     }
 
     @Test
+    void longPathsKeepTheBasenameExtensionDirtyAndExactFilenameStyleRange() {
+        TopMenuView view = view(ui(), MenuBar.State.closed());
+        Path file = Path.of("very-long-parent-directory".repeat(3), "e\u0301👩‍💻界-long-file-name.java");
+        for (int width : List.of(60, 64, 80, 120)) {
+            TopMenuView.TopBar topBar = view.topBar(file, true, width, false);
+            assertTrue(topBar.text().contains(".java *"), topBar.text());
+            assertEquals(width, CellText.width(topBar.text()));
+            String filename = CellText.clip(topBar.text(), topBar.filenameStart(),
+                topBar.filenameEnd() - topBar.filenameStart());
+            assertTrue(filename.endsWith(".java"), filename);
+            assertFalse(filename.contains("*"), filename);
+        }
+    }
+
+    @Test
+    void dirtyStatusSurvivesMenuPaintingAndNeverCreatesAMenuHitTarget() {
+        TopMenuView view = view(ui(), MenuBar.State.closed());
+        for (boolean reading : List.of(false, true)) {
+            for (int width = 1; width <= 70; width++) {
+                TopMenuView.TopBar topBar = view.topBar(Path.of("long-name.java"), true, width, reading);
+                TopMenuView.Placement placement = view.place(new Rect(0, 0, width, 12), reading, true);
+                CellBuffer buffer = new CellBuffer(12, width);
+                Canvas canvas = new Canvas(buffer);
+                CellText.drawClipped(canvas, 0, 0, topBar.text(), CellStyle.DEFAULT, width);
+                placement.paint(canvas, Theme.fixed(CellStyle.DEFAULT));
+                int readWidth = reading ? Math.min(width, 6) : 0;
+                if (width > readWidth) {
+                    int dirtyColumn = -1;
+                    for (int col = 0; col < width - readWidth; col++) {
+                        if (buffer.get(0, col).grapheme().equals("*")) dirtyColumn = col;
+                    }
+                    assertTrue(dirtyColumn >= 0, "dirty hidden at width=" + width + " reading=" + reading);
+                    assertFalse(placement.contains(new PointerEvent(0, dirtyColumn, PointerEvent.Kind.PRESS,
+                        PointerEvent.Button.LEFT, Set.of())), "status must not activate a clipped menu");
+                }
+            }
+        }
+    }
+
+    @Test
     void shiftedHeadingsHaveNoRasterCopiesOrPhantomLabelsInTheirGaps() {
         TopMenuView help = view(ui(), MenuBar.State.open(TopMenuController.HELP_INDEX));
         for (int width : List.of(15, 24, 40)) {

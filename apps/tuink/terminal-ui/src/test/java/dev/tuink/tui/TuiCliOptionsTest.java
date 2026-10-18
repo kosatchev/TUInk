@@ -52,6 +52,25 @@ class TuiCliOptionsTest {
     }
 
     @Test
+    @ResourceLock(Resources.LOCALE)
+    void themeParsingAndCliFlagsIgnoreTheDefaultLocale() {
+        Locale original = Locale.getDefault();
+        Locale originalDisplay = Locale.getDefault(Locale.Category.DISPLAY);
+        Locale originalFormat = Locale.getDefault(Locale.Category.FORMAT);
+        try {
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+            for (UiStyles.Theme theme : UiStyles.Theme.values()) {
+                assertEquals(theme, UiStyles.Theme.parse(" " + theme.name() + " "));
+                assertEquals(theme, TuiCliOptions.parse(new String[] {"--theme=" + theme.name()}).themeOverride());
+            }
+        } finally {
+            Locale.setDefault(original);
+            Locale.setDefault(Locale.Category.DISPLAY, originalDisplay);
+            Locale.setDefault(Locale.Category.FORMAT, originalFormat);
+        }
+    }
+
+    @Test
     void profileFileEnablesProfilingInBothForms() {
         TuiCliOptions separate = TuiCliOptions.parse(new String[] {"--profile-file", "first.log"});
         TuiCliOptions inline = TuiCliOptions.parse(new String[] {"--profile-file=second.log"});

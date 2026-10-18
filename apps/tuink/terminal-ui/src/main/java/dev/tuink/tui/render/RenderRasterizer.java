@@ -16,6 +16,7 @@ import dev.tuiframe.style.CellStyle;
 import dev.tuink.tui.style.UiStyles;
 import dev.tuink.tui.style.UiStyles.Palette;
 import dev.tuink.tui.ui.EditorScrollbars;
+import dev.tuink.tui.ui.NotificationPresentation;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -144,14 +145,8 @@ public class RenderRasterizer {
             CellStyle style = plan.notificationBarStyle() == null
                 ? styles.renderNotification()
                 : cellStyle(plan.notificationBarStyle());
-            String[] lines = splitLines(plan.notificationBarText());
-            for (int i = lines.length - 1; i >= 0; i--) {
-                int row = overlayTopRow - (lines.length - 1 - i);
-                if (row < 0) {
-                    continue;
-                }
-                drawText(buffer, row, 0, truncateOrPad(lines[i], cols), style, cols);
-            }
+            drawText(buffer, overlayTopRow, 0,
+                truncateOrPad(NotificationPresentation.fit(plan.notificationBarText(), cols), cols), style, cols);
         }
 
         return buffer;
@@ -235,6 +230,14 @@ public class RenderRasterizer {
                     ? "·"
                     : prepared.display()[index];
                 buffer.set(row, screenCol, shown, style);
+            }
+        }
+        if (line.lineBreakSelectionStyle() != null) {
+            int endColumn = graphemeCount == 0 ? 0
+                : prepared.visualOffsets()[graphemeCount - 1] + prepared.advances()[graphemeCount - 1];
+            int screenCol = startCol + endColumn - line.leadingClippedCells();
+            if (screenCol >= startCol && screenCol < cols) {
+                buffer.set(row, screenCol, " ", cellStyle(line.lineBreakSelectionStyle()));
             }
         }
     }
@@ -619,7 +622,7 @@ public class RenderRasterizer {
                 return ASCII_DISPLAY[value];
             }
         }
-        return TerminalText.sanitizeGrapheme(text.substring(start, end));
+        return TerminalText.sanitizeGrapheme(text, start, end);
     }
 
     private static String[] createAsciiDisplay() {

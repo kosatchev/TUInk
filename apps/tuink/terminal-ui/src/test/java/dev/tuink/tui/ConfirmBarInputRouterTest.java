@@ -55,7 +55,7 @@ class ConfirmBarInputRouterTest {
     }
 
     @Test
-    void recoveryHasTwoTargetsAndStartsAtRestore() {
+    void recoveryHasThreeTargetsAndStartsAtLater() {
         Object scopeId = new Object();
         ConfirmBarView.Placement placement = ConfirmBarView.buildRecovery("Recover?", 80)
             .place(scopeId, 4, viewport(6, 80));
@@ -66,12 +66,14 @@ class ConfirmBarInputRouterTest {
         );
         placement.activate(fixture.focus);
 
-        assertEquals(2, placement.focusScope().tabOrder().size());
+        assertEquals(3, placement.focusScope().tabOrder().size());
+        assertEquals(ConfirmChoice.CANCEL, fixture.focus.focused().orElseThrow());
+        fixture.route(KeyStroke.of(KeyStroke.Key.TAB));
         assertEquals(ConfirmChoice.SAVE, fixture.focus.focused().orElseThrow());
         fixture.route(KeyStroke.of(KeyStroke.Key.TAB));
         assertEquals(ConfirmChoice.DISCARD, fixture.focus.focused().orElseThrow());
         fixture.route(KeyStroke.of(KeyStroke.Key.TAB));
-        assertEquals(ConfirmChoice.SAVE, fixture.focus.focused().orElseThrow());
+        assertEquals(ConfirmChoice.CANCEL, fixture.focus.focused().orElseThrow());
     }
 
     @Test
@@ -108,16 +110,16 @@ class ConfirmBarInputRouterTest {
     }
 
     @Test
-    void applicationPoliciesKeepDistinctYesNoEscapeAndCtrlQDecisions() {
+    void applicationPoliciesSaveOnYesAndCancelOnNoEscapeAndCtrlQ() {
         Fixture quit = standard(ConfirmBarInputRouter.Policy.quit(), 80);
-        assertEquals(ConfirmChoice.DISCARD, quit.route(new TextInput("Y")).decision());
+        assertEquals(ConfirmChoice.SAVE, quit.route(new TextInput("Y")).decision());
         assertEquals(ConfirmChoice.CANCEL, quit.route(new TextInput("n")).decision());
         assertEquals(
             ConfirmChoice.CANCEL,
             quit.route(KeyStroke.of(KeyStroke.Key.ESCAPE)).decision()
         );
         assertEquals(
-            ConfirmChoice.DISCARD,
+            ConfirmChoice.CANCEL,
             quit.route(KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL)).decision()
         );
 
@@ -126,7 +128,7 @@ class ConfirmBarInputRouterTest {
         assertEquals(ConfirmChoice.CANCEL, overwrite.route(new TextInput("N")).decision());
 
         Fixture closeTab = standard(ConfirmBarInputRouter.Policy.closeTab(), 80);
-        assertEquals(ConfirmChoice.DISCARD, closeTab.route(new TextInput("y")).decision());
+        assertEquals(ConfirmChoice.SAVE, closeTab.route(new TextInput("y")).decision());
 
         Fixture recovery = fixture(
             ConfirmBarView.buildRecovery("Recover?", 80),
@@ -135,9 +137,9 @@ class ConfirmBarInputRouterTest {
             new Object()
         );
         assertEquals(ConfirmChoice.SAVE, recovery.route(new TextInput("y")).decision());
-        assertEquals(ConfirmChoice.DISCARD, recovery.route(new TextInput("n")).decision());
+        assertEquals(ConfirmChoice.CANCEL, recovery.route(new TextInput("n")).decision());
         assertEquals(
-            ConfirmChoice.DISCARD,
+            ConfirmChoice.CANCEL,
             recovery.route(KeyStroke.of(KeyStroke.Key.ESCAPE)).decision()
         );
     }
@@ -146,8 +148,8 @@ class ConfirmBarInputRouterTest {
     void exactCtrlQKeepsTheIntendedDecisionInAllConfirmationModes() {
         List<Fixture> fixtures = allConfirmationModes();
         List<ConfirmChoice> expected = List.of(
-            ConfirmChoice.DISCARD, ConfirmChoice.CANCEL,
-            ConfirmChoice.DISCARD, ConfirmChoice.CANCEL
+            ConfirmChoice.CANCEL, ConfirmChoice.CANCEL,
+            ConfirmChoice.CANCEL, ConfirmChoice.CANCEL
         );
 
         for (int index = 0; index < fixtures.size(); index++) {
@@ -258,7 +260,7 @@ class ConfirmBarInputRouterTest {
         ConfirmBarView.Placement recovery = ConfirmBarView.buildRecovery("Recover?", 60)
             .place(new Object(), 3, viewport(5, 60));
         recovery.activate(original.focus);
-        assertEquals(ConfirmChoice.SAVE, original.focus.focused().orElseThrow());
+        assertEquals(ConfirmChoice.CANCEL, original.focus.focused().orElseThrow());
         assertEquals(ConfirmChoice.CANCEL, samePrompt.route(new TextInput("n")).decision());
     }
 

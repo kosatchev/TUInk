@@ -76,12 +76,39 @@ final class EditorWindowFixture implements AutoCloseable {
         this(directory, reading, lines, new AppSettingsSession(AppSettings.defaults(), TuiCliOptions.parse(new String[0])));
     }
 
+    EditorWindowFixture(Path directory, boolean reading, List<String> lines,
+                        List<RecoveryStore.Entry> startupRecoveryEntries) throws IOException {
+        this(directory, reading, lines,
+            new AppSettingsSession(AppSettings.defaults(), TuiCliOptions.parse(new String[0])), startupRecoveryEntries);
+    }
+
+    EditorWindowFixture(Path directory, boolean reading, List<String> lines,
+                        List<RecoveryStore.Entry> startupRecoveryEntries,
+                        TerminalEditorApp.RecoveryPersistence recoveryPersistence) throws IOException {
+        this(directory, reading, lines,
+            new AppSettingsSession(AppSettings.defaults(), TuiCliOptions.parse(new String[0])),
+            startupRecoveryEntries, recoveryPersistence);
+    }
+
     EditorWindowFixture(Path directory, List<String> lines, AppSettingsSession settingsSession) throws IOException {
         this(directory, settingsSession.initialSettings().readingMode(), lines, settingsSession);
     }
 
     private EditorWindowFixture(Path directory, boolean reading, List<String> lines,
                                 AppSettingsSession settingsSession) throws IOException {
+        this(directory, reading, lines, settingsSession, List.of());
+    }
+
+    private EditorWindowFixture(Path directory, boolean reading, List<String> lines,
+                                AppSettingsSession settingsSession,
+                                List<RecoveryStore.Entry> startupRecoveryEntries) throws IOException {
+        this(directory, reading, lines, settingsSession, startupRecoveryEntries, null);
+    }
+
+    private EditorWindowFixture(Path directory, boolean reading, List<String> lines,
+                                AppSettingsSession settingsSession,
+                                List<RecoveryStore.Entry> startupRecoveryEntries,
+                                TerminalEditorApp.RecoveryPersistence recoveryPersistence) throws IOException {
         this.settingsSession = settingsSession;
         Files.createDirectories(directory);
         document = directory.resolve("document.txt");
@@ -101,7 +128,8 @@ final class EditorWindowFixture implements AutoCloseable {
             settings.tabInsertMode(), false, false, false);
         renderer = new ObservedRasterizer(host.theme);
         ScreenPresenter presenter = new ScreenPresenter(new PrintWriter(new StringWriter()), TerminalCapabilities.DEFAULT);
-        recoveryManager = new TerminalEditorApp.RecoveryAutosaveManager(new TerminalEditorApp.RecoveryPersistence() {
+        TerminalEditorApp.RecoveryPersistence persistence = recoveryPersistence != null ? recoveryPersistence
+            : new TerminalEditorApp.RecoveryPersistence() {
             @Override
             public void save(String entryId, RecoverySnapshot snapshot) {
                 recoverySnapshots.put(entryId, snapshot);
@@ -111,12 +139,19 @@ final class EditorWindowFixture implements AutoCloseable {
             public void delete(String entryId) {
                 recoverySnapshots.remove(entryId);
             }
-        });
+            };
+        recoveryManager = new TerminalEditorApp.RecoveryAutosaveManager(persistence);
+        for (RecoveryStore.Entry entry : startupRecoveryEntries) {
+            recoverySnapshots.put(entry.id(), entry.snapshot());
+        }
         controller = new EditorWindowController(host, new EditorWindowController.Resources(
-            new CommandRouter(keymap), editorView, loop, UiModalState.none(), SearchController.SearchUiOptions.DEFAULT,
+            new CommandRouter(keymap), editorView, loop,
+            startupRecoveryEntries.isEmpty() ? UiModalState.none() : UiModalState.recoveryConfirm(),
+            SearchController.SearchUiOptions.DEFAULT,
             notification, tree, recoveryManager, host.new RenderFrameController(renderer, editorView, true, presenter),
             renderer, filename, new SaveAsSuggestionStore(), presenter, query, replacement, context,
-            new ArrayList<>(), tabs, new EditorWindowController.TerminalAccess(() -> width, () -> height, enabled -> {}),
+            new ArrayList<>(startupRecoveryEntries), tabs,
+            new EditorWindowController.TerminalAccess(() -> width, () -> height, enabled -> {}),
             menu, ui, settingsSession));
         try {
             frame();

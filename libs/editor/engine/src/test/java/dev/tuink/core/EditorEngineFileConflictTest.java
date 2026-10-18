@@ -228,6 +228,91 @@ class EditorEngineFileConflictTest {
     }
 
     @Test
+    void saveAsCanExplicitlyReplaceTheNewTargetOfARetargetedOpeningAlias() throws IOException {
+        assumeTrue(Files.getFileStore(directory).supportsFileAttributeView("posix"));
+        Path original = write("source-target.txt", "before");
+        Path other = write("other-target.txt", "other");
+        Path link = Files.createSymbolicLink(directory.resolve("source-alias.txt"), original.getFileName());
+        EditorEngine engine = open(link);
+        engine.insertInput("mine ");
+        Files.delete(link);
+        Files.createSymbolicLink(link, other.getFileName());
+
+        assertTrue(engine.isCurrentSaveTarget(link), "the original spelling keeps its baseline guard");
+        assertTrue(engine.isCurrentSaveTarget(original));
+        assertFalse(engine.isCurrentSaveTarget(other), "the live alias must not claim another physical target");
+        assertThrows(IOException.class, engine::save);
+        assertThrows(IOException.class, () -> engine.saveAs(link, SaveDisposition.REPLACE_EXISTING));
+        engine.saveAs(other, SaveDisposition.REPLACE_EXISTING);
+
+        assertEquals("before", Files.readString(original));
+        assertEquals("mine before", Files.readString(other));
+        assertEquals(other, engine.state().getCurrentFile());
+        assertFalse(engine.state().isDirty());
+        assertEquals(other.getFileName(), Files.readSymbolicLink(link));
+    }
+
+    @Test
+    void anOriginalPhysicalPathReplacedByASymlinkDoesNotClaimThatLinksNewTarget() throws IOException {
+        assumeTrue(Files.getFileStore(directory).supportsFileAttributeView("posix"));
+        Path original = write("physical-source.txt", "before");
+        Path other = write("physical-other.txt", "other");
+        EditorEngine engine = open(original);
+        engine.insertInput("mine ");
+        Files.delete(original);
+        Files.createSymbolicLink(original, other.getFileName());
+
+        assertTrue(engine.isCurrentSaveTarget(original));
+        assertFalse(engine.isCurrentSaveTarget(other));
+        assertThrows(IOException.class, () -> engine.saveAs(original, SaveDisposition.REPLACE_EXISTING));
+        engine.saveAs(other, SaveDisposition.REPLACE_EXISTING);
+
+        assertEquals("mine before", Files.readString(other));
+        assertTrue(Files.isSymbolicLink(original));
+    }
+
+    @Test
+    void saveAsCannotRecreateADeletedOwnedFileButCanStillCreateADifferentNewName() throws IOException {
+        Path original = write("deleted-owned.txt", "before");
+        EditorEngine engine = open(original);
+        engine.insertInput("mine ");
+        FileBaseline baseline = engine.model().fileBaseline();
+        Files.delete(original);
+
+        assertTrue(engine.isCurrentSaveTarget(original));
+        assertThrows(IOException.class, () -> engine.saveAs(original, SaveDisposition.CREATE_NEW));
+        assertFalse(Files.exists(original));
+        assertEquals(baseline, engine.model().fileBaseline());
+        assertTrue(engine.state().isDirty());
+        Path copy = directory.resolve("deleted-owned-copy.txt");
+        assertFalse(engine.isCurrentSaveTarget(copy));
+        engine.saveAs(copy, SaveDisposition.CREATE_NEW);
+
+        assertEquals("mine before", Files.readString(copy));
+        assertFalse(Files.exists(original));
+        assertFalse(engine.state().isDirty());
+    }
+
+    @Test
+    void theMissingLoadedTargetIsGuardedEvenAfterItsOpeningAliasIsRetargeted() throws IOException {
+        assumeTrue(Files.getFileStore(directory).supportsFileAttributeView("posix"));
+        Path original = write("missing-baseline.txt", "before");
+        Path other = write("missing-baseline-other.txt", "other");
+        Path link = Files.createSymbolicLink(directory.resolve("missing-baseline-alias.txt"), original.getFileName());
+        EditorEngine engine = open(link);
+        engine.insertInput("mine ");
+        Files.delete(original);
+        Files.delete(link);
+        Files.createSymbolicLink(link, other.getFileName());
+
+        assertTrue(engine.isCurrentSaveTarget(original));
+        assertThrows(IOException.class, () -> engine.saveAs(original, SaveDisposition.CREATE_NEW));
+        assertFalse(Files.exists(original));
+        assertEquals("other", Files.readString(other));
+        assertTrue(engine.state().isDirty());
+    }
+
+    @Test
     void replacingTheOriginalRegularPathWithASymlinkCannotBypassTheIdentityCheck() throws IOException {
         assumeTrue(Files.getFileStore(directory).supportsFileAttributeView("posix"));
         Path path = write("replaced.txt", "before");

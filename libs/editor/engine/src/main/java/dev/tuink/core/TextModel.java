@@ -16,6 +16,7 @@ import java.nio.charset.UnmappableCharacterException;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
@@ -57,6 +58,7 @@ public class TextModel {
     private final long cacheIdentity = NEXT_CACHE_ID.incrementAndGet();
     private DocumentFileMetadata fileMetadata;
     private FileBaseline fileBaseline;
+    private final FileBaseline.InputOpener baselineInput;
     private EditorDocument documentOwner;
 
     void claimDocument(EditorDocument owner) {
@@ -67,6 +69,11 @@ public class TextModel {
     }
 
     public TextModel(TextBuffer sourceBuffer) {
+        this(sourceBuffer, Files::newInputStream);
+    }
+
+    TextModel(TextBuffer sourceBuffer, FileBaseline.InputOpener baselineInput) {
+        this.baselineInput = Objects.requireNonNull(baselineInput, "baselineInput");
         TextBuffer source = Objects.requireNonNull(sourceBuffer, "buffer");
         int sourceLineCount = source.lineCount();
         List<String> imported = new ArrayList<>(Math.max(1, sourceLineCount));
@@ -92,6 +99,7 @@ public class TextModel {
     }
 
     private TextModel(TextBuffer ownedBuffer, DocumentFileMetadata metadata) {
+        this.baselineInput = Files::newInputStream;
         this.buffer = ownedBuffer;
         this.fileMetadata = metadata;
     }
@@ -736,15 +744,24 @@ public class TextModel {
             requireCompatibleMetadata(metadata, lineCount()), 1, lineCount() - 2
         );
         SaveDisposition checkedDisposition = Objects.requireNonNull(disposition, "disposition");
-        Path requestedTarget = path.toAbsolutePath().normalize();
-        if (checkBaseline && checkedDisposition == SaveDisposition.REPLACE_EXISTING) {
-            requireUnchangedFile(requestedTarget);
+        Path requestedTarget = path.toAbsolutePath();
+        boolean verifyOriginal = checkBaseline
+            && (checkedDisposition == SaveDisposition.REPLACE_EXISTING || fileBaseline != null);
+        Path target;
+        try {
+            target = resolveSaveTarget(requestedTarget);
+        } catch (IOException inaccessible) {
+            if (verifyOriginal) throw new IOException(FileBaseline.conflictMessage(requestedTarget), inaccessible);
+            throw inaccessible;
+        }
+        // Validate the address that will receive the staged bytes. Resolving
+        // a changing opening alias again could verify one file and replace another.
+        if (verifyOriginal) {
+            requireUnchangedFile(target);
         }
         byte[] content = encode(snapshotLines(), checkedMetadata);
-        Path target = resolveSaveTarget(requestedTarget);
         FileBaseline savedBaseline = FileBaseline.fromBytes(target, content);
-        boolean targetExists = Files.exists(target);
-        FileSaveAttributes targetAttributes = targetExists ? FileSaveAttributes.read(target) : null;
+        boolean targetExists = requireRegularSaveTargetOrMissing(target);
         Path parent = target.getParent();
         Path tempDir = parent != null ? parent : Path.of(".").toAbsolutePath().normalize();
         String fileName = target.getFileName() == null ? "tuink" : target.getFileName().toString();
@@ -755,15 +772,31 @@ public class TextModel {
 
         Path tempFile = createSaveTempFile(tempDir, prefix, targetExists);
         boolean committed = false;
+        FileSaveGuard guard = null;
+        Throwable failure = null;
         try {
             Files.write(tempFile, content);
+            guard = FileSaveGuard.acquire(target);
+            if (verifyOriginal) {
+                requireUnchangedFile(target);
+            }
+            requireSameSaveTarget(requestedTarget, target);
+            boolean currentTargetExists = requireRegularSaveTargetOrMissing(target);
+            if (checkedDisposition == SaveDisposition.CREATE_NEW && currentTargetExists) {
+                throw new FileAlreadyExistsException(target.toString());
+            }
+            // Read and apply the current attributes inside the same publication
+            // guard used by settings saves and every other TUInk document.
+            FileSaveAttributes targetAttributes = currentTargetExists ? FileSaveAttributes.read(target) : null;
             if (targetAttributes != null) {
                 targetAttributes.apply(tempFile);
             }
-            if (checkBaseline && checkedDisposition == SaveDisposition.REPLACE_EXISTING) {
+            if (verifyOriginal) {
                 // Recheck after staging bytes, immediately before the filesystem commit.
-                requireUnchangedFile(requestedTarget);
+                requireUnchangedFile(target);
             }
+            requireSameSaveTarget(requestedTarget, target);
+            requireRegularSaveTargetOrMissing(target);
             if (checkedDisposition == SaveDisposition.CREATE_NEW) {
                 publishNewFile(tempFile, target, content);
             } else {
@@ -775,19 +808,33 @@ public class TextModel {
                         StandardCopyOption.ATOMIC_MOVE
                     );
                 } catch (AtomicMoveNotSupportedException e) {
+                    if (verifyOriginal) requireUnchangedFile(target);
+                    requireSameSaveTarget(requestedTarget, target);
+                    requireRegularSaveTargetOrMissing(target);
                     Files.move(tempFile, target, StandardCopyOption.REPLACE_EXISTING);
                 }
             }
             fileMetadata = checkedMetadata;
             fileBaseline = savedBaseline;
             committed = true;
+        } catch (IOException | RuntimeException | Error error) {
+            failure = error;
+            throw error;
         } finally {
+            if (guard != null) {
+                try {
+                    guard.close();
+                } catch (IOException cleanupFailure) {
+                    if (failure != null) failure.addSuppressed(cleanupFailure);
+                    // Publication already completed when there is no primary
+                    // failure. Releasing the guard cannot undo a committed save.
+                }
+            }
             try {
                 Files.deleteIfExists(tempFile);
             } catch (IOException cleanupFailure) {
-                if (!committed) {
-                    throw cleanupFailure;
-                }
+                if (failure != null) failure.addSuppressed(cleanupFailure);
+                else if (!committed) throw cleanupFailure;
                 // The target is already committed. A private orphan temp file is
                 // preferable to reporting a failed save and desynchronizing state.
             }
@@ -850,14 +897,45 @@ public class TextModel {
         }
     }
 
+    /** Resolves parent aliases before dot segments while retaining a final symlink alias. */
+    static Path resolveDocumentPath(Path requested) throws IOException {
+        Path absolute = requested.toAbsolutePath();
+        Path leaf = absolute.getFileName();
+        if (leaf == null || leaf.toString().equals(".") || leaf.toString().equals("..")) {
+            throw new IOException("Document target must be a file: " + requested);
+        }
+        return absolute.getParent().toRealPath().resolve(leaf);
+    }
+
     private static Path resolveSaveTarget(Path requestedTarget) throws IOException {
-        if (requestedTarget.getFileName() == null) {
-            throw new IOException("Save target must be a file: " + requestedTarget);
+        return FileSaveGuard.canonicalTarget(requestedTarget);
+    }
+
+    private static void requireSameSaveTarget(Path requestedTarget, Path target) throws IOException {
+        // Staged bytes, attributes and baseline belong to this exact name.
+        if (!target.equals(resolveSaveTarget(requestedTarget))) {
+            throw new IOException("Save target changed outside TUInk during saving: " + requestedTarget
+                + ". Choose the target again and retry Save As.");
         }
-        if (Files.isSymbolicLink(requestedTarget)) {
-            return requestedTarget.toRealPath();
+    }
+
+    private static boolean requireRegularSaveTargetOrMissing(Path target) throws IOException {
+        BasicFileAttributes attributes;
+        try {
+            attributes = Files.readAttributes(target, BasicFileAttributes.class);
+        } catch (NoSuchFileException missing) {
+            if (Files.isSymbolicLink(target)) {
+                throw missing;
+            }
+            return false;
         }
-        return requestedTarget.getParent().toRealPath().resolve(requestedTarget.getFileName());
+        if (attributes.isDirectory()) {
+            throw new IOException("Save target is a directory: " + target);
+        }
+        if (!attributes.isRegularFile()) {
+            throw new IOException("Save target is not a regular file: " + target);
+        }
+        return true;
     }
 
     private void requireUnchangedFile(Path path) throws IOException {
@@ -865,7 +943,7 @@ public class TextModel {
             throw new IOException("Cannot verify the original file: " + path
                 + ". Use Save As with a different name, or reopen the file.");
         }
-        fileBaseline.requireUnchanged(path);
+        fileBaseline.requireUnchanged(path, baselineInput);
     }
 
     private static Path createSaveTempFile(Path tempDir, String prefix, boolean targetExists)

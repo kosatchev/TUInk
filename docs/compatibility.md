@@ -71,6 +71,13 @@ metadata and the saved-file baseline remain unchanged. TUInk does not delete the
 destination after such a failure because another writer may have replaced it.
 Existing-file replacement retains its atomic-move behavior and baseline checks.
 
+For an owned destination, baseline verification reads the pinned physical target
+that will receive the staged file. Checking the requested alias separately
+confirms that it still resolves to that target. Repeatedly resolving a changing
+alias for both checks cannot transfer ownership to another physical filename.
+Changes by a writer that ignores TUInk's locks after the final verification
+remain outside this protection.
+
 Before replacing an existing file, TUInk copies its POSIX permissions and
 owner/group, user-defined extended attributes, and ACLs available through the
 Java filesystem provider to the staged inode. An error reading or applying

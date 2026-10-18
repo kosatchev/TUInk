@@ -13,6 +13,7 @@ import dev.tuink.core.BomKind;
 import dev.tuink.core.DocumentFileMetadata;
 import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.EditorState;
+import dev.tuink.core.FileBaseline;
 import dev.tuink.core.Position;
 import dev.tuink.core.RecoverySnapshot;
 import dev.tuink.core.SaveDisposition;
@@ -145,7 +146,14 @@ class RecoveryStoreTest {
 
         Files.writeString(snapshot.currentFile(), "external edit", StandardCharsets.UTF_8);
         RecoverySnapshot recovered = store.loadAll().entries().get(0).snapshot();
-        assertEquals(snapshot, recovered);
+        // Format 5 stores baseline identity and digest; its byte size remains unknown.
+        assertEquals(-1L, recovered.fileBaseline().byteSize());
+        RecoverySnapshot formatFiveSnapshot = new RecoverySnapshot(
+            snapshot.lines(), snapshot.cursor(), snapshot.viewport(), snapshot.selectionAnchor(),
+            snapshot.dirty(), snapshot.currentFile(), snapshot.saveDisposition(), snapshot.fileMetadata(),
+            new FileBaseline(snapshot.fileBaseline().target(), snapshot.fileBaseline().sha256()),
+            snapshot.createdAt());
+        assertEquals(formatFiveSnapshot, recovered);
         TabSession restored = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
         restored.engine().restoreRecoverySnapshot(recovered);
 

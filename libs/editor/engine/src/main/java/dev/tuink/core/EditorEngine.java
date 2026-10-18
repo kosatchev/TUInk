@@ -412,7 +412,7 @@ public class EditorEngine {
         if (path == null) {
             throw new IOException("No file selected");
         }
-        Path normalizedPath = path.toAbsolutePath().normalize();
+        Path normalizedPath = TextModel.resolveDocumentPath(path);
         SaveDisposition openedDisposition;
         try {
             TextModel.LoadMetadata loaded = openMode == DocumentOpenMode.DETECT
@@ -485,7 +485,7 @@ public class EditorEngine {
         if (path == null) {
             throw new IOException("No file selected");
         }
-        Path normalizedPath = path.toAbsolutePath().normalize();
+        Path normalizedPath = TextModel.resolveDocumentPath(path);
         boolean formatChanged = !DocumentPreferences.from(model.fileMetadata())
             .equals(DocumentPreferences.from(metadata));
         // Allocate the complete history transition before writing to disk. A
@@ -500,11 +500,7 @@ public class EditorEngine {
             preparedHistory = new ArrayDeque<>(history.undoStack);
             pushWithLimit(preparedHistory, conversion);
         }
-        Path currentFile = state.getCurrentFile();
-        FileBaseline baseline = model.fileBaseline();
-        boolean sameFile = isSameSaveTarget(normalizedPath, currentFile)
-            || (baseline != null && isSameSaveTarget(normalizedPath, baseline.target()));
-        if (sameFile) {
+        if (isCurrentSaveTarget(path, normalizedPath)) {
             model.saveIfUnchanged(normalizedPath, metadata, disposition);
         } else {
             model.save(normalizedPath, metadata, disposition);
@@ -528,9 +524,38 @@ public class EditorEngine {
         return model.revision() + document.recoveryGeneration;
     }
 
+    /** Whether Save As must retain this document's original-file conflict checks. */
+    public boolean isCurrentSaveTarget(Path path) throws IOException {
+        return path != null && isCurrentSaveTarget(path, TextModel.resolveDocumentPath(path));
+    }
+
+    private boolean isCurrentSaveTarget(Path requested, Path resolved) throws IOException {
+        Path currentFile = state.getCurrentFile();
+        boolean ownsCurrentName = state.getSaveDisposition() == SaveDisposition.REPLACE_EXISTING;
+        if (ownsCurrentName && currentFile != null
+            && (requested.toAbsolutePath().equals(currentFile.toAbsolutePath())
+                || resolved.equals(currentFile.toAbsolutePath()))) {
+            // The spelling originally opened remains guarded even when its
+            // symlink was redirected or its file has since been removed.
+            return true;
+        }
+        FileBaseline baseline = model.fileBaseline();
+        if (baseline == null) {
+            // A recovered existing file without a baseline must still refuse
+            // unverified overwrites through its known name or physical aliases.
+            return ownsCurrentName && isSameSaveTarget(resolved, currentFile);
+        }
+        Path loadedTarget = baseline.target();
+        if (resolved.equals(loadedTarget)) return true;
+        // Alias identity belongs to the physical target loaded by this
+        // document, not to whichever file the opening alias points to now.
+        return Files.exists(loadedTarget) && loadedTarget.equals(loadedTarget.toRealPath())
+            && isSameSaveTarget(resolved, loadedTarget);
+    }
+
     private static boolean isSameSaveTarget(Path requested, Path known) throws IOException {
         return known != null && (
-            requested.equals(known.toAbsolutePath().normalize())
+            requested.equals(known.toAbsolutePath())
                 || (Files.exists(requested) && Files.exists(known) && Files.isSameFile(requested, known))
         );
     }

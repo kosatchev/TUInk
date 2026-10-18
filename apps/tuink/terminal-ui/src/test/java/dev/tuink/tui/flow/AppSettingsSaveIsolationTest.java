@@ -85,6 +85,36 @@ class AppSettingsSaveIsolationTest {
         else System.setProperty("user.home", previousHome);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"document:document", "document:settings", "settings:document"})
+    void documentsAndSettingsShareTheSameCrossProfilePublicationGuard(String roles) throws Exception {
+        assumeTrue(directory.getFileSystem().supportedFileAttributeViews().contains("posix"));
+        Path target = directory.resolve("tuink.properties");
+        AppSettingsStore.save(target, AppSettings.defaults());
+        Path alias = Files.createSymbolicLink(directory.resolve("alias.properties"), target.getFileName());
+        String[] pair = roles.split(":");
+        Process first = settingsProcess(pair[0].equals("document") ? "hold-document" : "hold", target);
+        try (var output = new BufferedReader(new InputStreamReader(first.getInputStream(), StandardCharsets.UTF_8));
+             var input = new PrintWriter(first.getOutputStream(), true, StandardCharsets.UTF_8)) {
+            assertEquals("READY", readLine(output));
+            Process second = settingsProcess(pair[1].equals("document") ? "document" : "save", alias);
+            try {
+                assertTrue(second.waitFor(TIMEOUT_SECONDS, SECONDS));
+                String reported = new String(second.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                assertEquals(0, second.exitValue(), reported);
+                assertEquals("CONFLICT", reported.strip());
+            } finally { second.destroyForcibly(); }
+            assertEquals(AppSettings.defaults(), AppSettingsStore.load(target));
+            input.println("release");
+            assertTrue(first.waitFor(TIMEOUT_SECONDS, SECONDS));
+            assertEquals("SAVED", output.readLine());
+            assertEquals(0, first.exitValue());
+            if (pair[0].equals("document")) assertTrue(Files.readString(target).startsWith("# document edits\n"));
+            else assertEquals(settings(UiStyles.Theme.BLUE), AppSettingsStore.load(target));
+            assertOnlyFiles("tuink.properties", "alias.properties");
+        } finally { first.destroyForcibly(); }
+    }
+
     @Test
     void aSecondProcessCannotPublishTheSameBaselineThroughASymlinkAlias() throws Exception {
         assertProcessConflictThroughAlias(false);
@@ -523,6 +553,26 @@ class AppSettingsSaveIsolationTest {
         assertEquals(AppSettings.defaults(), AppSettingsStore.load(target));
         assertEquals(2, fileSystem.provider.moveCount.get());
         assertOnlyFiles("tuink.properties");
+    }
+
+    @Test
+    void documentSaveRechecksBeforeTheNonAtomicMoveFallback() throws IOException {
+        Path target = Files.writeString(directory.resolve("document.txt"), "original\n");
+        SavingFileSystem fileSystem = new SavingFileSystem(target.getFileSystem(), Mode.NORMAL);
+        TextModel model = new TextModel(new SimpleLineBuffer());
+        EditorEngine editor = new EditorEngine(model, new EditorState(), new LogicalEditorTextLayout(model));
+        editor.setGutterDiffMode(GutterDiffMode.DISABLED);
+        editor.openExisting(fileSystem.wrap(target));
+        editor.pasteText("draft ");
+        fileSystem.provider.beforeAtomicFailure = () -> Files.writeString(target, "external writer\n");
+
+        IOException failure = assertThrows(IOException.class, editor::save);
+
+        assertTrue(failure.getMessage().contains("changed outside TUInk"));
+        assertEquals("external writer\n", Files.readString(target));
+        assertTrue(editor.state().isDirty());
+        assertEquals(1, fileSystem.provider.moveCount.get());
+        assertOnlyFiles("document.txt");
     }
 
     @Test

@@ -22,6 +22,12 @@ class AppCliTest {
             {"--theme=unknown"},
             {"first.txt", "second.txt"},
             {"--profile-file"},
+            {"--file-uri"},
+            {"--file-uri", "--ui=gui"},
+            {"--file-uri=file:///bad%zz"},
+            {"ambiguous-�.txt"},
+            {"--", "ambiguous-�.txt"},
+            {"--profile-file=ambiguous-�.log"},
             {"--ui=gui"},
             {"--ui"}
         };
@@ -42,6 +48,31 @@ class AppCliTest {
             Result result = run(arguments);
 
             assertEquals(0, result.exitCode());
+            assertTrue(result.output().startsWith("Usage: tuink"));
+            assertEquals("", result.error());
+        }
+    }
+
+    @Test
+    void endOfOptionsPreservesLiteralUiSelectorsAndHelpLookingFilenames() throws Exception {
+        for (String filename : new String[] {"--ui=gui", "--ui", "--help", "-h", "--"}) {
+            Result help = run(new String[] {"--help", "--", filename});
+            assertEquals(0, help.exitCode());
+            assertTrue(help.output().contains("[--] [file]"));
+            assertEquals("", help.error());
+
+            Result tooManyFiles = run(new String[] {"--", filename, "another-file"});
+            assertEquals(2, tooManyFiles.exitCode());
+            assertTrue(tooManyFiles.error().startsWith("Only one file path is supported."), tooManyFiles.error());
+            assertEquals("", tooManyFiles.output());
+        }
+    }
+
+    @Test
+    void profileValuesLookingLikeUiSelectorsAndSeparatorsRemainValuesEndToEnd() throws Exception {
+        for (String value : new String[] {"--ui=gui", "--ui", "--"}) {
+            Result result = run(new String[] {"--profile-file", value, "--help"});
+            assertEquals(0, result.exitCode(), value);
             assertTrue(result.output().startsWith("Usage: tuink"));
             assertEquals("", result.error());
         }

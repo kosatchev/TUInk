@@ -1,6 +1,7 @@
 package dev.tuink.tui.file;
 
 import java.io.IOException;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
@@ -232,10 +233,11 @@ public final class FileTreeModel implements AutoCloseable {
         try {
             List<Entry> entries = parentEntries(request.root());
             Map<EntryId, BasicFileAttributes> attributes = new HashMap<>();
-            appendTreeEntries(request.root(), 0, entries, attributes, request);
+            List<DirectoryFailure> failures = new ArrayList<>();
+            appendTreeEntries(request.root(), 0, entries, attributes, failures, request);
             checkCurrentGeneration(request.generation());
-            publishSnapshot(entries, request.generation());
-            enrichMetadata(entries, attributes, request);
+            publishSnapshot(entries, failures, request.generation());
+            enrichMetadata(entries, attributes, failures, request);
         } catch (CancellationException ignored) {
             // A newer root/options/expansion request owns all future publications.
         } finally {
@@ -252,6 +254,7 @@ public final class FileTreeModel implements AutoCloseable {
         int depth,
         List<Entry> entries,
         Map<EntryId, BasicFileAttributes> attributes,
+        List<DirectoryFailure> failures,
         LoadRequest request
     ) {
         checkCurrentGeneration(request.generation());
@@ -269,7 +272,9 @@ public final class FileTreeModel implements AutoCloseable {
         } catch (CancellationException cancelled) {
             throw cancelled;
         } catch (IOException | RuntimeException e) {
-            String message = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            String message = e instanceof AccessDeniedException ? "permission denied"
+                : e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            failures.add(new DirectoryFailure(directory, message));
             entries.add(new Entry(
                 new EntryId(directory, Kind.ERROR),
                 "<cannot read directory: " + message + ">",
@@ -307,7 +312,7 @@ public final class FileTreeModel implements AutoCloseable {
                 attributes.put(id, child.attributes());
             }
             if (directoryEntry && expanded) {
-                appendTreeEntries(child.path(), depth + 1, entries, attributes, request);
+                appendTreeEntries(child.path(), depth + 1, entries, attributes, failures, request);
             }
         }
     }
@@ -352,6 +357,7 @@ public final class FileTreeModel implements AutoCloseable {
     private void enrichMetadata(
         List<Entry> entries,
         Map<EntryId, BasicFileAttributes> attributes,
+        List<DirectoryFailure> failures,
         LoadRequest request
     ) {
         if (!request.showSizeColumn() && !request.showDateColumn()) {
@@ -380,23 +386,23 @@ public final class FileTreeModel implements AutoCloseable {
                 updatedEntries.set(index, updated);
                 changedBatch++;
                 if (changedBatch >= publishBatchSize) {
-                    publishSnapshot(updatedEntries, request.generation());
+                    publishSnapshot(updatedEntries, failures, request.generation());
                     changedBatch = 0;
                 }
             }
         }
         if (changedBatch > 0) {
-            publishSnapshot(updatedEntries, request.generation());
+            publishSnapshot(updatedEntries, failures, request.generation());
         }
     }
 
-    private void publishSnapshot(List<Entry> entries, long generation) {
+    private void publishSnapshot(List<Entry> entries, List<DirectoryFailure> failures, long generation) {
         List<Entry> publishedEntries = List.copyOf(entries);
         synchronized (loaderLock) {
             if (closed || loadGeneration != generation) {
                 return;
             }
-            snapshot = new Snapshot(snapshot.root(), ++revision, publishedEntries);
+            snapshot = new Snapshot(snapshot.root(), ++revision, publishedEntries, false, failures);
             snapshotSignal.incrementAndGet();
         }
     }
@@ -515,9 +521,16 @@ public final class FileTreeModel implements AutoCloseable {
     ) {
     }
 
-    public record Snapshot(Path root, long revision, List<Entry> entries, boolean loading) {
+    public record DirectoryFailure(Path directory, String reason) {}
+
+    public record Snapshot(Path root, long revision, List<Entry> entries, boolean loading,
+                           List<DirectoryFailure> failures) {
         public Snapshot(Path root, long revision, List<Entry> entries) {
-            this(root, revision, entries, false);
+            this(root, revision, entries, false, List.of());
+        }
+
+        public Snapshot(Path root, long revision, List<Entry> entries, boolean loading) {
+            this(root, revision, entries, loading, List.of());
         }
 
         public Snapshot {
@@ -526,6 +539,7 @@ public final class FileTreeModel implements AutoCloseable {
                 throw new IllegalArgumentException("revision must be non-negative");
             }
             entries = List.copyOf(entries);
+            failures = List.copyOf(failures);
         }
     }
 

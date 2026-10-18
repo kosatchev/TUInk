@@ -19,7 +19,8 @@ record TuiCliOptions(
     boolean showHelp,
     UiStyles.Theme themeOverride,
     boolean profileEnabled,
-    Path profileFile
+    Path profileFile,
+    boolean openAsUtf16Le
 ) {
     static TuiCliOptions parse(String[] args) {
         if (args == null) {
@@ -36,6 +37,7 @@ record TuiCliOptions(
         UiStyles.Theme themeOverride = null;
         Path file = null;
         boolean endOfOptions = false;
+        boolean openAsUtf16Le = false;
 
         for (int i = 0; i < args.length; i++) {
             String arg = args[i];
@@ -55,6 +57,7 @@ record TuiCliOptions(
                 case "--no-alt-screen" -> altScreenEnabled = false;
                 case "--no-color" -> colorEnabled = false;
                 case "--read" -> readModeOverride = true;
+                case "--open-as-utf16le" -> openAsUtf16Le = true;
                 case "--profile" -> profileEnabled = true;
                 case "--help", "-h" -> showHelp = true;
                 default -> {
@@ -100,6 +103,9 @@ record TuiCliOptions(
             }
         }
 
+        if (openAsUtf16Le && file == null && !showHelp) {
+            throw new IllegalArgumentException("--open-as-utf16le requires a file path");
+        }
         return new TuiCliOptions(
             file,
             mouseEnabledOverride,
@@ -109,7 +115,8 @@ record TuiCliOptions(
             showHelp,
             themeOverride,
             profileEnabled,
-            profileFile
+            profileFile,
+            openAsUtf16Le
         );
     }
 }

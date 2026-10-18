@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import dev.tuiframe.cell.CellBuffer;
 import dev.tuiframe.cell.Canvas;
@@ -19,6 +20,8 @@ import dev.tuiframe.widget.InteractionResult;
 import dev.tuiframe.widget.Theme;
 import dev.tuink.tui.file.FileTreeModel;
 import java.io.IOException;
+import java.io.File;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Set;
@@ -30,6 +33,42 @@ class FileTreeViewTest {
 
     @TempDir
     Path root;
+
+    @Test
+    void horizontalScrollingMasksPartialNativeByteEscapesAndActivationRetainsTheExactPath() throws IOException {
+        assumeTrue(File.separatorChar == '/');
+        Path raw = Path.of(URI.create(root.toUri().toASCIIString() + "prefix-%FF-%FE-long-name.txt"));
+        Files.writeString(raw, "raw");
+        try (FileTreeModel model = new FileTreeModel(root, false, false)) {
+            FileTreeModel.Snapshot snapshot = awaitLoaded(model);
+            FileTreeModel.Entry selected = entry(snapshot, raw);
+            FileTreeView view = FileTreeView.fromSnapshot(snapshot, false, false);
+            String name = PathPresentation.name(raw);
+            int horizontal = 2 + name.indexOf("%FF") + 1;
+            FileTreeView.Placement placed = view.place(new Rect(2, 1, 12, 4), state(snapshot, selected, 0, horizontal),
+                new Rect(0, 0, 30, 8), true);
+            CellBuffer buffer = new CellBuffer(8, 30);
+            placed.paint(new Canvas(buffer), Theme.fixed(CellStyle.DEFAULT));
+            String text = cells(buffer, selectedRow(placed), placed.leadingBounds());
+            assertTrue(text.startsWith("  -%FE-"), text);
+            var requested = assertInstanceOf(FileTreeView.FileRequested.class,
+                output(placed.handle(KeyStroke.of(KeyStroke.Key.ENTER), 1L, DOUBLE_CLICK_NANOS)));
+            assertEquals(raw, requested.file());
+
+            for (int width = 7; width <= 30; width++) {
+                placed = view.place(new Rect(2, 1, width, 4), state(snapshot, selected, 0, 0),
+                    new Rect(0, 0, 40, 8), true);
+                buffer = new CellBuffer(8, 40);
+                placed.paint(new Canvas(buffer), Theme.fixed(CellStyle.DEFAULT));
+                text = cells(buffer, selectedRow(placed), placed.leadingBounds());
+                for (int index = text.indexOf('%'); index >= 0; index = text.indexOf('%', index + 3)) {
+                    assertTrue(index + 2 < text.length(), text);
+                    assertTrue(Character.digit(text.charAt(index + 1), 16) >= 0, text);
+                    assertTrue(Character.digit(text.charAt(index + 2), 16) >= 0, text);
+                }
+            }
+        }
+    }
 
     @Test
     void metadataColumnsStayPinnedAndAdaptWithoutEnteringTheGenericModel() throws IOException {

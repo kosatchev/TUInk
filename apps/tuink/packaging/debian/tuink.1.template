@@ -27,6 +27,10 @@ Select the UI palette: blue, cyan, or light.
 .BR \-\-read
 Start in reading mode with editing disabled.
 .TP
+.BR \-\-open\-as\-utf16le
+Interpret the selected BOM-marked file as UTF-16LE for this open request only.
+Use this for UTF-16LE files whose leading NUL makes their bytes ambiguous with UTF-32LE.
+.TP
 .BR \-\-profile
 Log render timings to standard error.
 .TP

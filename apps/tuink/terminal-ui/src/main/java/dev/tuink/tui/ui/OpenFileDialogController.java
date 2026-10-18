@@ -33,7 +33,8 @@ public final class OpenFileDialogController {
         int left = Math.max(0, (cols - width) / 2);
         int top = Math.max(0, (rows - height) / 2);
         int listStartRow = top + 2;
-        int listRows = Math.max(1, height - 3);
+        // Keep a stable row above the buttons for local open/retry feedback.
+        int listRows = Math.max(1, height - 4);
         return new OpenDialogLayout(top, left, width, height, listStartRow, listRows);
     }
 

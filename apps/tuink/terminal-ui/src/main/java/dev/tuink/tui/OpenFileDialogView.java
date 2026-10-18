@@ -1,7 +1,9 @@
 package dev.tuink.tui;
 
 import dev.tuiframe.cell.Canvas;
+import dev.tuiframe.cell.CellText;
 import dev.tuiframe.geometry.Rect;
+import dev.tuiframe.style.CellStyle;
 import dev.tuiframe.input.TuiInputEvent;
 import dev.tuiframe.widget.Button;
 import dev.tuiframe.widget.DialogFocusTraversal;
@@ -17,9 +19,11 @@ import dev.tuiframe.widget.PlacedInteractiveWidget;
 import dev.tuiframe.widget.RoutedTarget;
 import dev.tuiframe.widget.Theme;
 import dev.tuiframe.widget.WidgetState;
+import dev.tuiframe.widget.WidgetThemeKeys;
 import dev.tuink.tui.ui.FileTreeView;
 import dev.tuink.tui.ui.OpenFileDialogController;
 import dev.tuink.tui.ui.OpenFileDialogController.OpenDialogLayout;
+import dev.tuink.tui.ui.NotificationPresentation;
 import java.util.List;
 import java.util.Objects;
 
@@ -38,6 +42,17 @@ final class OpenFileDialogView {
         FileTreeView.Placement tree,
         boolean showHiddenFiles,
         Rect interactionClip
+    ) {
+        return place(scopeId, layout, tree, showHiddenFiles, interactionClip, null);
+    }
+
+    static Placement place(
+        Object scopeId,
+        OpenDialogLayout layout,
+        FileTreeView.Placement tree,
+        boolean showHiddenFiles,
+        Rect interactionClip,
+        FilePickerOpenWorkflow.Notice notice
     ) {
         Objects.requireNonNull(layout, "layout");
         Objects.requireNonNull(tree, "tree");
@@ -62,7 +77,7 @@ final class OpenFileDialogView {
             scopeId, FocusResetPolicy.FIRST_FOCUSABLE, targets,
             List.of(Control.LIST, Control.OK, Control.CANCEL),
             List.of(Control.CLOSE, Control.HIDDEN, Control.CANCEL, Control.OK, Control.LIST)
-        ), showHiddenFiles);
+        ), showHiddenFiles, notice);
     }
 
     private static RoutedTarget<Control, Button.Action> buttonTarget(
@@ -111,7 +126,8 @@ final class OpenFileDialogView {
         PlacedModal frame,
         FileTreeView.Placement tree,
         FocusScope<Control, Button.Action> focusScope,
-        boolean showHiddenFiles
+        boolean showHiddenFiles,
+        FilePickerOpenWorkflow.Notice notice
     ) {
         Placement {
             Objects.requireNonNull(layout, "layout");
@@ -153,6 +169,20 @@ final class OpenFileDialogView {
                 boolean highlighted = id == Control.HIDDEN ? showHiddenFiles
                     : !contentFocused && control(focused) == id;
                 target.placement().paint(canvas, theme, new WidgetState(highlighted, target.enabled()));
+            }
+            paintNotice(canvas, theme, new Rect(layout.left() + 1, layout.bottom() - 1,
+                Math.max(0, layout.width() - 2), 1));
+        }
+
+
+        private void paintNotice(Canvas canvas, Theme theme, Rect bounds) {
+            if (bounds.isEmpty()) return;
+            CellStyle body = theme.resolveStyle(WidgetThemeKeys.MODAL_BODY);
+            CellStyle style = notice == null ? body : new CellStyle(body.fg(), body.bg(), true, body.underline());
+            canvas.fill(bounds, style);
+            if (notice != null) {
+                String message = NotificationPresentation.fitReasonWithPath(notice.summary(), notice.path(), bounds.width());
+                CellText.drawClipped(canvas, bounds.x(), bounds.y(), message, style, bounds.width());
             }
         }
     }

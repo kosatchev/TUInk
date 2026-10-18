@@ -22,7 +22,7 @@ class SaveWorkflowTest {
     @TempDir Path directory;
 
     @Test
-    void encodingFailureRetainsEachModalAndItsOriginalFocusPolicy() throws Exception {
+    void encodingFailureOffersExplicitConversionAndRetainsEachSaveContinuation() throws Exception {
         Path source = directory.resolve("legacy.txt");
         Charset charset = Charset.forName("windows-1251");
         Files.write(source, "Привет".getBytes(charset));
@@ -33,8 +33,8 @@ class SaveWorkflowTest {
         Path target = directory.resolve("new.txt");
         var direct = SaveWorkflow.saveAsInput(context, TuinkCommand.EDIT_INSERT_NEWLINE,
             UiModalState.saveAsForCloseTab(0), target.toString());
-        assertEquals(UiModalState.saveAsForCloseTab(0), direct.modalState());
-        assertTrue(direct.focusFilename());
+        assertEquals(UiModalState.saveAsForCloseTab(0).offerUtf8(), direct.modalState());
+        assertFalse(direct.focusFilename());
         assertFalse(direct.refreshSavedHighlighter());
         assertEquals(SaveFlowController.TextInputEffectKind.NONE, direct.filename().kind());
         assertFalse(Files.exists(target));
@@ -42,7 +42,7 @@ class SaveWorkflowTest {
         Files.writeString(target, "untouched");
         UiModalState overwrite = UiModalState.saveAsForQuit().confirmOverwrite(target);
         var confirmed = SaveWorkflow.overwrite(context, overwrite, ConfirmChoice.SAVE);
-        assertEquals(overwrite, confirmed.modalState());
+        assertEquals(overwrite.offerUtf8(), confirmed.modalState());
         assertFalse(confirmed.focusFilename());
         assertFalse(confirmed.refreshSavedHighlighter());
         assertEquals(SaveWorkflow.NoticeKind.ERROR, confirmed.notice().kind());
@@ -50,6 +50,12 @@ class SaveWorkflowTest {
         assertEquals("untouched", Files.readString(target));
         assertEquals(source, tab.state().getCurrentFile());
         assertTrue(tab.state().isDirty());
+        assertEquals(charset, tab.state().getFileEncoding());
+        assertEquals(direct.modalState().utf8SaveAs(),
+            SaveWorkflow.encodingChoice(direct.modalState(), ConfirmChoice.SAVE).modalState());
+        assertEquals(confirmed.modalState().utf8SaveAs(),
+            SaveWorkflow.encodingChoice(confirmed.modalState(), ConfirmChoice.SAVE).modalState());
+        assertTrue(SaveWorkflow.encodingChoice(direct.modalState(), ConfirmChoice.CANCEL).modalState().isNone());
     }
 
     @Test

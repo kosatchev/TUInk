@@ -16,6 +16,22 @@ import org.junit.jupiter.api.io.TempDir;
 class NotificationIntegrationTest {
     @TempDir Path directory;
 
+    @Test
+    void savingAFilenameContainingNewlineDisplaysItsExactSafeIdentity() throws Exception {
+        try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("original"))) {
+            Path file = Files.writeString(directory.resolve("first\nsecond.txt"), "contents");
+            window.active().tabSession().engine().openExisting(file);
+            window.frame();
+            window.event(new TextInput("draft "));
+            window.command(TuinkCommand.DOCUMENT_SAVE);
+            assertEquals("draft contents", Files.readString(file));
+            assertTrue(window.notification.message.contains(SavePathInput.format(file)));
+            assertFalse(window.notification.message.contains("\n"));
+            assertTrue(window.screenRow(window.height - 2).startsWith("Saved file:"));
+            assertEquals(List.of("draft contents"), window.active().tabSession().model().snapshotLines());
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"success", "info", "warning", "error"})
     void everyLevelDisplaysExternalControlsOnExactlyOneRow(String level) throws Exception {

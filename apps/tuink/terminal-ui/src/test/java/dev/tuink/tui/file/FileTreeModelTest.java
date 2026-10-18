@@ -27,6 +27,18 @@ class FileTreeModelTest {
     Path root;
 
     @Test
+    void deniedDirectoryExposesATypedReasonWithoutRelyingOnTheExceptionMessage() throws Exception {
+        try (FileTreeModel model = new FileTreeModel(root, false, false,
+            (directory, hidden) -> { throw new java.nio.file.AccessDeniedException(directory.toString()); })) {
+            awaitLoaded(model);
+            assertEquals(List.of(new FileTreeModel.DirectoryFailure(root, "permission denied")),
+                model.snapshot().failures());
+            assertTrue(model.snapshot().entries().stream()
+                .anyMatch(entry -> entry.kind() == FileTreeModel.Kind.ERROR && entry.name().contains("permission denied")));
+        }
+    }
+
+    @Test
     void snapshotSortsDirectoriesBeforeFilesAndAppliesHiddenFilter() throws IOException {
         Path alphaDirectory = Files.createDirectory(root.resolve("Alpha-dir"));
         Path zetaDirectory = Files.createDirectory(root.resolve("zeta-dir"));

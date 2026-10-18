@@ -1,30 +1,33 @@
 package dev.tuink.tui.flow;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.TabSession;
 import dev.tuink.render.TerminalEditorTextLayout;
 import java.io.IOException;
+import java.io.File;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class SaveAsSuggestionStoreTest {
     @Test
-    void automaticDefaultSkipsExistingFiles(@TempDir Path tempDir) throws IOException {
-        Path preferred = Files.createFile(tempDir.resolve("untitled.txt"));
-        Files.createFile(tempDir.resolve("untitled-1.txt"));
+    void automaticDefaultsAreGeneratedLazilyAndRecomputedAfterUntouchedInput() {
+        TabSession tab = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
         SaveAsSuggestionStore store = new SaveAsSuggestionStore();
+        AtomicInteger generation = new AtomicInteger();
 
-        String suggestion = store.suggestionFor(
-            TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard()),
-            null,
-            preferred.toString()
-        );
+        String suggestion = store.suggestionFor(tab, () -> "automatic-" + generation.incrementAndGet());
+        store.rememberInput(tab, suggestion);
 
-        assertEquals(tempDir.resolve("untitled-2.txt").toString(), suggestion);
+        assertEquals("automatic-1", suggestion);
+        assertEquals("automatic-2", store.suggestionFor(tab, () -> "automatic-" + generation.incrementAndGet()));
     }
 
     @Test
@@ -36,8 +39,7 @@ class SaveAsSuggestionStoreTest {
 
         String suggestion = store.suggestionFor(
             tab,
-            null,
-            tempDir.resolve("untitled.txt").toString()
+            () -> { throw new AssertionError("A remembered draft must not generate another target"); }
         );
 
         assertEquals(existing.toString(), suggestion);
@@ -51,9 +53,10 @@ class SaveAsSuggestionStoreTest {
         SaveAsSuggestionStore store = new SaveAsSuggestionStore();
         store.rememberSavedPath(tab, source);
 
-        assertEquals(copy.toString(), store.suggestionFor(tab, null, copy.toString(),
+        assertEquals(copy.toString(), store.suggestionFor(tab, copy::toString,
             draft -> !draft.equals(source.toString())));
-        assertEquals(source.toString(), store.suggestionFor(tab, source, copy.toString()));
+        store.rememberInput(tab, copy.toString());
+        assertEquals(source.toString(), store.suggestionFor(tab, copy::toString));
     }
 
     @Test
@@ -63,7 +66,61 @@ class SaveAsSuggestionStoreTest {
         SaveAsSuggestionStore store = new SaveAsSuggestionStore();
         store.rememberDraft(tab, target.toString());
 
-        assertEquals(target.toString(), store.suggestionFor(tab, null,
-            tempDir.resolve("source-copy.txt").toString(), draft -> draft.equals(target.toString())));
+        assertEquals(target.toString(), store.suggestionFor(tab,
+            () -> tempDir.resolve("source-copy.txt").toString(), draft -> draft.equals(target.toString())));
+    }
+
+    @Test
+    void explicitlyEditingAnAutomaticDefaultMakesItAUserDraft() {
+        TabSession tab = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
+        SaveAsSuggestionStore store = new SaveAsSuggestionStore();
+        String suggestion = store.suggestionFor(tab, () -> "chosen.txt");
+        store.rememberDraft(tab, suggestion);
+        store.rememberInput(tab, suggestion);
+
+        assertEquals("chosen.txt", store.suggestionFor(tab, () -> "another.txt"));
+    }
+
+    @Test
+    void generatedFallbackDoesNotEraseAnUnsuitableManualDraft() {
+        TabSession tab = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
+        SaveAsSuggestionStore store = new SaveAsSuggestionStore();
+        store.rememberDraft(tab, "manual.txt");
+        store.rememberGenerated(tab, "automatic.txt");
+        store.rememberInput(tab, "automatic.txt");
+
+        assertEquals("manual.txt", store.suggestionFor(tab, () -> "another.txt"));
+    }
+
+    @Test
+    void submittedEditedTextIsRememberedAndRemovingATabClearsBothOrigins() {
+        TabSession tab = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
+        TabSession other = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
+        SaveAsSuggestionStore store = new SaveAsSuggestionStore();
+        store.suggestionFor(tab, () -> "automatic.txt");
+        store.rememberInput(tab, "manual.txt");
+        store.rememberDraft(other, "other.txt");
+        assertEquals("manual.txt", store.suggestionFor(tab, () -> "unused.txt"));
+        store.remove(tab);
+
+        assertEquals("fresh.txt", store.suggestionFor(tab, () -> "fresh.txt"));
+        assertEquals("other.txt", store.suggestionFor(other, () -> "unused.txt"));
+    }
+
+    @Test
+    void rawPathsStayReversibleInCurrentSuggestionsRememberedPathsAndCopyFallbacks(@TempDir Path tempDir) {
+        assumeTrue(File.separatorChar == '/');
+        Path raw = Path.of(URI.create(tempDir.toUri().toASCIIString() + "parent-%FE/legacy-%FF.txt"));
+        Path copy = SavePathInput.withNameSuffix(raw, "-copy");
+        TabSession tab = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
+        SaveAsSuggestionStore store = new SaveAsSuggestionStore();
+
+        assertEquals(raw, SavePathInput.parse(store.suggestionFor(tab, () -> SavePathInput.format(raw))));
+        store.rememberSavedPath(tab, raw);
+        String remembered = store.suggestionFor(tab, () -> "untitled.txt");
+        assertTrue(remembered.startsWith("file:/"));
+        assertEquals(raw, SavePathInput.parse(remembered));
+        String fallback = store.suggestionFor(tab, () -> SavePathInput.format(copy), draft -> false);
+        assertEquals(copy, SavePathInput.parse(fallback));
     }
 }

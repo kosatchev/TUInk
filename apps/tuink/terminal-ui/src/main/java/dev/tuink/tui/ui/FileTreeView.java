@@ -259,7 +259,7 @@ public final class FileTreeView {
                 displayLabel(entry),
                 widgetDepth(entry),
                 widgetKind(entry),
-                formatMetadata(entry, columns)
+                formatMetadata(entry, columns), PathPresentation.LABEL_POLICY
             ));
         }
         dev.tuiframe.widget.TreeView<FileTreeModel.EntryId> tree =
@@ -284,9 +284,11 @@ public final class FileTreeView {
     }
 
     private static String displayLabel(FileTreeModel.Entry entry) {
-        return entry.kind() == FileTreeModel.Kind.DIRECTORY
-            ? entry.name() + "/"
-            : entry.name();
+        return switch (entry.kind()) {
+            case FILE -> PathPresentation.name(entry.path());
+            case DIRECTORY -> PathPresentation.name(entry.path()) + "/";
+            case PARENT, ERROR -> entry.name();
+        };
     }
 
     private static dev.tuiframe.widget.TreeView.Kind widgetKind(

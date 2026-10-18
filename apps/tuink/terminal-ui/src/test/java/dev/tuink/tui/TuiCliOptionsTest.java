@@ -18,6 +18,16 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class TuiCliOptionsTest {
     @Test
+    void explicitUtf16ChoiceAppliesOnlyToTheRequestedCommandLineFile() {
+        assertTrue(TuiCliOptions.parse(new String[] {"--open-as-utf16le", "file.txt"}).openAsUtf16Le());
+        assertFalse(TuiCliOptions.parse(new String[] {"file.txt"}).openAsUtf16Le());
+        assertThrows(IllegalArgumentException.class,
+            () -> TuiCliOptions.parse(new String[] {"--open-as-utf16le"}));
+        assertEquals(Path.of("--open-as-utf16le"),
+            TuiCliOptions.parse(new String[] {"--", "--open-as-utf16le"}).file());
+    }
+
+    @Test
     void defaultsLeaveOptionalOverridesUnset() {
         TuiCliOptions options = TuiCliOptions.parse(new String[0]);
 

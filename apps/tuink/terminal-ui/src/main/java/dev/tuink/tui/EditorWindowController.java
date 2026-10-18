@@ -62,6 +62,7 @@ import dev.tuink.tui.ui.NotificationBar;
 import dev.tuink.tui.ui.HelpPage;
 import dev.tuink.tui.ui.OpenFileDialogController.OpenDialogLayout;
 import dev.tuink.tui.ui.OpenFileDialogController;
+import dev.tuink.tui.file.FileTreeModel;
 import dev.tuink.tui.ui.SaveAsBarView;
 import dev.tuink.tui.ui.SearchBarView;
 import dev.tuink.tui.ui.TabBarView;
@@ -164,6 +165,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     private UiModalState modalState;
     private SearchController.SearchUiOptions searchUi;
     private boolean openFileMode;
+    private FilePickerOpenWorkflow.Notice pickerNotice;
+    private FileTreeModel.DirectoryFailure lastPickerDirectoryFailure;
     private final OpenFileDialogView.FocusState openFileFocusState = new OpenFileDialogView.FocusState();
     private EditorView.ScrollAxis editorScrollDrag = EditorView.ScrollAxis.NONE;
     private int editorScrollDragThumbOffset;
@@ -272,6 +275,11 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             eventLoop.invalidate();
         }
         if (openFileMode && openFileTree.consumeMetadataChanged()) {
+            var failure = openFileTree.directoryFailure();
+            if (failure != null && !failure.equals(lastPickerDirectoryFailure)) {
+                pickerNotice = new FilePickerOpenWorkflow.Notice(failure.reason(), failure.directory());
+            }
+            lastPickerDirectoryFailure = failure;
             eventLoop.invalidate();
         }
         int nextRows = Math.max(2, terminal.height());
@@ -296,6 +304,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         pendingOverwritePath = modalState.pendingOverwritePath();
         pendingCloseTabIndex = modalState.pendingCloseTabIndex();
         confirmMode = recoveryConfirmMode
+            || modalState.isSaveUtf8Confirm()
+            || modalState.isOpenUtf16Confirm()
             || saveOverwriteConfirmMode
             || quitConfirmMode
             || closeTabConfirmMode;
@@ -381,12 +391,24 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         SaveAsBarView saveAsBar = null;
         InlinePromptBar inlinePromptBar = InlinePromptBar.hidden();
         if (saveAsMode) {
-            saveAsBar = SaveAsBarView.build(saveAsInput, cols);
+            saveAsBar = SaveAsBarView.build(
+                modalState.saveFormat() == dev.tuink.tui.flow.DocumentSaveFormat.UTF8 ? "Save UTF-8: " : SaveAsBarView.DEFAULT_LABEL,
+                saveAsInput, cols);
             inlinePromptBar = InlinePromptBar.of(
                 saveAsBar.row(),
                 EditorStyleAdapter.toEditor(host.styles.promptAlert()),
                 1
             );
+        } else if (modalState.isSaveUtf8Confirm() || modalState.isOpenUtf16Confirm()) {
+            boolean opening = modalState.isOpenUtf16Confirm();
+            String primaryLabel = opening ? "Open UTF-16LE" : "Save UTF-8";
+            String question = opening
+                ? ("Ambiguous: " + dev.tuink.tui.ui.PathPresentation.name(modalState.pendingOpenPath()) + " as UTF-16LE?")
+                : "Save as UTF-8 without BOM?";
+            confirmBar = ConfirmBarView.buildAlternative(
+                question, cols, primaryLabel);
+            inlinePromptBar = InlinePromptBar.of(confirmBar.row(),
+                EditorStyleAdapter.toEditor(host.styles.promptAlert()), 1, 1);
         } else if (saveOverwriteConfirmMode) {
             confirmBar = ConfirmBarView.build(
                 host.buildOverwritePrompt(pendingOverwritePath),
@@ -583,7 +605,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             );
             openFileDialogPlacement = OpenFileDialogView.place(
                 TerminalEditorApp.OPEN_FILE_SCOPE_ID, openFileLayout, openFileTreePlacement,
-                openFileTree.showHiddenFiles(), new Rect(0, 0, cols, rows)
+                openFileTree.showHiddenFiles(), new Rect(0, 0, cols, rows), pickerNotice
             );
             openFileDialogPlacement.activate(openFileFocusState);
         } else {
@@ -674,7 +696,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 confirmBarPlacement,
                 openFileMode
                     ? new FrameComposition.OpenFile(
-                        openFileTree.root().toString(),
+                        dev.tuink.tui.ui.PathPresentation.full(openFileTree.root()),
                         openFileDialogPlacement,
                         openFileFocusState.focus()
                     )
@@ -1380,6 +1402,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             }
             if (openInput.intent() != null) {
                 applyOpenFileResult(FilePickerOpenWorkflow.apply(openInput.intent(), openFileTree,
+                    host.toTabSessions(tabs), sessionContext.activeTabIndex(),
                     () -> TuiDocumentSession.create(host.clipboard)));
                 return;
             }
@@ -1686,6 +1709,22 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             return;
         }
         if (routedConfirmDecision != null) {
+            if (modalState.isOpenUtf16Confirm()) {
+                Path target = modalState.pendingOpenPath();
+                modalState = UiModalState.none();
+                if (routedConfirmDecision == ConfirmChoice.SAVE) {
+                    applyOpenFileResult(FilePickerOpenWorkflow.openAsUtf16(target,
+                        host.toTabSessions(tabs), sessionContext.activeTabIndex(),
+                        () -> TuiDocumentSession.create(host.clipboard)));
+                } else {
+                    openFileMode = true;
+                }
+                return;
+            }
+            if (modalState.isSaveUtf8Confirm()) {
+                applySaveResult(SaveWorkflow.encodingChoice(modalState, routedConfirmDecision));
+                return;
+            }
             if (modalState.isSaveOverwriteConfirm()) {
                 applySaveResult(SaveWorkflow.overwrite(saveContext(), modalState, routedConfirmDecision));
                 return;
@@ -1790,6 +1829,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         if (editorAction.requestOpenFile()) {
             topMenu.close();
             openFileMode = true;
+            pickerNotice = null;
+            lastPickerDirectoryFailure = null;
             openFileTree.setRoot(FilePickerOpenWorkflow.initialRoot(state.getCurrentFile()));
             openFileFocusState.focus(OpenFileInputRouter.Focus.LIST);
         }
@@ -1806,13 +1847,25 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 host.resolveHighlighter(document.view().state().getCurrentFile()), document.view().textLayout());
             tabs.add(new TerminalEditorApp.EditorTab(document, builder));
             sessionContext.activate(tabs.size() - 1);
+        } else if (result.activateTabIndex() >= 0) {
+            sessionContext.activate(result.activateTabIndex());
         }
         openFileMode = result.openFileMode();
+        if (result.pendingExplicitOpenPath() != null) {
+            modalState = UiModalState.openUtf16Confirm(result.pendingExplicitOpenPath());
+        }
+        if (!openFileMode) pickerNotice = null;
         switch (result.noticeKind()) {
             case UNCHANGED -> { }
             case SUCCESS -> notification.success(result.message());
-            case WARNING -> notification.warning(result.message());
-            case ERROR -> notification.error(result.message());
+            case WARNING -> {
+                if (openFileMode) pickerNotice = result.notice();
+                else notification.warning(result.message());
+            }
+            case ERROR -> {
+                if (openFileMode) pickerNotice = result.notice();
+                else notification.error(result.message());
+            }
         }
     }
 

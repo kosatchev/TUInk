@@ -11,6 +11,7 @@ import dev.tuink.tui.flow.SaveContinuation;
 import dev.tuink.tui.flow.UiModalMode;
 import dev.tuink.tui.flow.UiModalState;
 import dev.tuink.tui.command.TuinkCommand;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -149,12 +150,10 @@ class SaveFlowControllerTest {
             TuinkCommand.EDIT_INSERT_NEWLINE,
             UiModalState.saveAs(),
             "current.txt",
-            Path.of("current.txt"),
-            SaveDisposition.REPLACE_EXISTING,
             path -> null,
             path -> true,
             path -> false,
-            Path::equals,
+            path -> path.equals(Path.of("current.txt")),
             Path::toString
         );
 
@@ -168,17 +167,28 @@ class SaveFlowControllerTest {
             TuinkCommand.EDIT_INSERT_NEWLINE,
             UiModalState.saveAs(),
             "current.txt",
-            Path.of("current.txt"),
-            SaveDisposition.CREATE_NEW,
             path -> null,
             path -> true,
             path -> false,
-            Path::equals,
+            path -> false,
             Path::toString
         );
 
         assertEquals(UiModalMode.SAVE_OVERWRITE_CONFIRM, result.modalState().mode());
         assertEquals(Path.of("current.txt"), result.modalState().pendingOverwritePath());
+    }
+
+    @Test
+    void anIdentityCheckFailureKeepsTheFilenameAndPendingQuitWithoutAuthorizingOverwrite() {
+        UiModalState saveAs = UiModalState.saveAsForQuit();
+        var result = SaveFlowController.handleSaveAsInput(TuinkCommand.EDIT_INSERT_NEWLINE, saveAs,
+            "current.txt", path -> null, path -> true, path -> false,
+            path -> { throw new IOException("Cannot inspect the loaded file"); }, Path::toString);
+
+        assertSame(saveAs, result.modalState());
+        assertEquals("Save failed: Cannot inspect the loaded file", result.errorMessage());
+        assertNull(result.saveNowPath());
+        assertEquals(SaveFlowController.TextInputEffectKind.NONE, result.textInputEffect().kind());
     }
 
     @Test
@@ -202,12 +212,10 @@ class SaveFlowControllerTest {
             TuinkCommand.UI_ESCAPE,
             UiModalState.saveAsForQuit(),
             "saved.txt",
-            null,
-            SaveDisposition.CREATE_NEW,
             path -> null,
             path -> false,
             path -> false,
-            (left, right) -> false,
+            path -> false,
             Path::toString
         );
 
@@ -220,12 +228,10 @@ class SaveFlowControllerTest {
             input,
             modalState,
             "saved.txt",
-            null,
-            SaveDisposition.CREATE_NEW,
             path -> null,
             path -> false,
             path -> false,
-            (left, right) -> false,
+            path -> false,
             Path::toString
         );
     }
@@ -244,12 +250,10 @@ class SaveFlowControllerTest {
             TuinkCommand.EDIT_INSERT_NEWLINE,
             modalState,
             text,
-            null,
-            SaveDisposition.CREATE_NEW,
             path -> validationError,
             path -> exists,
             path -> false,
-            (left, right) -> false,
+            path -> false,
             Path::toString
         );
     }

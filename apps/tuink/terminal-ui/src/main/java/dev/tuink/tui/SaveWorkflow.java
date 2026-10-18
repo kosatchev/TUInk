@@ -1,14 +1,19 @@
 package dev.tuink.tui;
 
 import dev.tuink.core.SaveDisposition;
+import dev.tuink.core.DocumentEncodingException;
 import dev.tuink.core.TabSession;
 import dev.tuink.tui.command.TuinkCommand;
 import dev.tuink.tui.flow.ConfirmChoice;
+import dev.tuink.tui.flow.DocumentSaveFormat;
 import dev.tuink.tui.flow.SaveAsSuggestionStore;
 import dev.tuink.tui.flow.SaveContinuation;
+import dev.tuink.tui.flow.SaveTargetSuggester;
 import dev.tuink.tui.flow.UiModalState;
+import dev.tuink.tui.ui.PathPresentation;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.List;
 
@@ -39,16 +44,8 @@ final class SaveWorkflow {
         if (preset == EditorActionController.SaveAsPreset.NONE) {
             return SaveFlowController.TextInputEffect.none();
         }
-        TabSession tab = context.active();
-        String suggestion;
-        if (preset == EditorActionController.SaveAsPreset.SUGGESTED_FROM_CURRENT) {
-            suggestion = context.suggestions().suggestionFor(tab, null,
-                SaveTargetPolicy.suggestWritableName(tab.state().getCurrentFile()), SaveTargetPolicy::isSuitableDraft);
-            context.suggestions().rememberDraft(tab, suggestion);
-        } else {
-            suggestion = context.suggestions().suggestionFor(tab, tab.state().getCurrentFile(),
-                SaveTargetPolicy.DEFAULT_FILE_NAME);
-        }
+        String suggestion = suggestFilename(context, context.activeTabIndex(),
+            preset == EditorActionController.SaveAsPreset.SUGGESTED_FROM_CURRENT);
         return SaveFlowController.TextInputEffect.setText(suggestion);
     }
 
@@ -56,9 +53,12 @@ final class SaveWorkflow {
         TabSession tab = context.active();
         try {
             tab.engine().save();
-            context.suggestions().rememberSavedPath(tab, tab.state().getCurrentFile());
+            rememberSavedPath(context, tab, tab.state().getCurrentFile());
             return result(UiModalState.none(), Notice.success(SaveTargetPolicy.savedMessage(tab.state())));
         } catch (IOException error) {
+            if (error instanceof DocumentEncodingException) {
+                return offerUtf8(context, context.activeTabIndex(), UiModalState.saveAs(), error, true);
+            }
             return result(UiModalState.none(), Notice.error(SaveTargetPolicy.saveErrorMessage(error)));
         }
     }
@@ -66,15 +66,13 @@ final class SaveWorkflow {
     static Result saveAsInput(Context context, TuinkCommand command, UiModalState modal, String draft) {
         TabSession tab = context.active();
         SaveFlowController.SaveAsResult decision = SaveFlowController.handleSaveAsInput(command, modal, draft,
-            tab.state().getCurrentFile(), tab.state().getSaveDisposition(), SaveTargetPolicy::validateSaveTarget,
-            Files::exists, SaveTargetPolicy::isReadOnlyFile, SaveTargetPolicy::isSameFilePath,
-            SaveTargetPolicy::suggestWritableName);
-        String nextDraft = switch (decision.textInputEffect().kind()) {
-            case NONE -> draft;
-            case SET_TEXT -> decision.textInputEffect().text();
-            case CLEAR -> "";
-        };
-        context.suggestions().rememberDraft(tab, decision.modalState().isSaveAs() ? nextDraft : draft);
+            target -> validateSaveAsTarget(context, target),
+            Files::exists, SaveTargetPolicy::isReadOnlyFile, tab.engine()::isCurrentSaveTarget,
+            target -> suggestWritableName(context, context.activeTabIndex(), target));
+        context.suggestions().rememberInput(tab, draft);
+        if (decision.textInputEffect().kind() == SaveFlowController.TextInputEffectKind.SET_TEXT) {
+            context.suggestions().rememberGenerated(tab, decision.textInputEffect().text());
+        }
         if (decision.saveNowPath() != null) {
             return saveAs(context, modal, decision.saveNowPath(), decision.saveDisposition());
         }
@@ -92,20 +90,55 @@ final class SaveWorkflow {
         };
     }
 
+    static Result encodingChoice(UiModalState modal, ConfirmChoice choice) {
+        return choice == ConfirmChoice.SAVE
+            ? new Result(true, modal.utf8SaveAs(), -1, -1, SaveFlowController.TextInputEffect.none(),
+                Notice.clear(), false, true)
+            : result(UiModalState.none(), Notice.clear());
+    }
+
     private static Result saveAs(Context context, UiModalState modal, Path target, SaveDisposition disposition) {
         TabSession tab = context.active();
+        // A symlink may have changed while overwrite confirmation was open.
+        String conflict = workspaceSaveConflict(context, target);
+        if (conflict != null) {
+            UiModalState retry = modal.isSaveOverwriteConfirm() ? modal.backToSaveAs() : modal;
+            return new Result(true, retry, -1, -1, SaveFlowController.TextInputEffect.none(),
+                Notice.error(conflict), false, true);
+        }
         try {
-            tab.engine().saveAs(target, disposition);
-            context.suggestions().rememberSavedPath(tab, tab.state().getCurrentFile());
+            if (modal.saveFormat() == DocumentSaveFormat.UTF8) {
+                tab.engine().saveAsUtf8(target, disposition);
+            } else {
+                tab.engine().saveAs(target, disposition);
+            }
+            rememberSavedPath(context, tab, tab.state().getCurrentFile());
             Notice notice = Notice.success(SaveTargetPolicy.savedMessage(tab.state()));
             Result continuation = afterSuccessfulSave(context, modal, notice);
             return new Result(continuation.running(), continuation.modalState(), continuation.activateTabIndex(),
                 continuation.closeTabIndex(), continuation.filename(), continuation.notice(), true,
                 continuation.focusFilename());
         } catch (IOException error) {
+            if (error instanceof DocumentEncodingException && modal.saveFormat() != DocumentSaveFormat.UTF8) {
+                return offerUtf8(context, context.activeTabIndex(), modal, error, false);
+            }
             return new Result(true, modal, -1, -1, SaveFlowController.TextInputEffect.none(),
                 Notice.error(SaveTargetPolicy.saveErrorMessage(error)), false, modal.isSaveAs());
         }
+    }
+
+    private static String validateSaveAsTarget(Context context, Path target) {
+        String error = SaveTargetPolicy.validateSaveTarget(target);
+        return error == null ? workspaceSaveConflict(context, target) : error;
+    }
+
+    private static String workspaceSaveConflict(Context context, Path target) {
+        int owner = WorkspaceDocuments.findOpenFile(context.tabs(), context.activeTabIndex(), target);
+        if (owner < 0 || owner == context.activeTabIndex()) {
+            return null;
+        }
+        return "Save failed: target is already open in tab " + (owner + 1)
+            + ". Switch to that tab or choose another name.";
     }
 
     private static Result afterSuccessfulSave(Context context, UiModalState modal, Notice notice) {
@@ -136,10 +169,13 @@ final class SaveWorkflow {
             }
         }
         for (int index = 0; index < context.tabs().size(); index++) {
-            String error = saveDirty(context, index);
+            IOException error = saveDirty(context, index);
             if (error != null) {
+                if (error instanceof DocumentEncodingException) {
+                    return offerUtf8(context, index, UiModalState.saveAsForQuit(), error, true);
+                }
                 return new Result(true, UiModalState.quitConfirm(), index, -1,
-                    filename, Notice.error(error), false, false);
+                    filename, Notice.error(SaveTargetPolicy.saveErrorMessage(error)), false, false);
             }
         }
         return new Result(false, UiModalState.none(), -1, -1, filename,
@@ -155,9 +191,12 @@ final class SaveWorkflow {
             if (SaveTargetPolicy.requiresSaveAs(context.tabs().get(index).state().getCurrentFile())) {
                 return prepareSaveAs(context, index, UiModalState.saveAsForCloseTab(index));
             }
-            String error = saveDirty(context, index);
+            IOException error = saveDirty(context, index);
             if (error != null) {
-                return result(modal, Notice.error(error));
+                if (error instanceof DocumentEncodingException) {
+                    return offerUtf8(context, index, UiModalState.saveAsForCloseTab(index), error, true);
+                }
+                return result(modal, Notice.error(SaveTargetPolicy.saveErrorMessage(error)));
             }
         }
         return new Result(true, UiModalState.none(), -1, index, SaveFlowController.TextInputEffect.none(),
@@ -166,39 +205,75 @@ final class SaveWorkflow {
 
     private static Result prepareSaveAs(Context context, int index, UiModalState modal) {
         TabSession tab = context.tabs().get(index);
-        Path file = tab.state().getCurrentFile();
-        String suggestion = file == null
-            ? context.suggestions().suggestionFor(tab, null, SaveTargetPolicy.DEFAULT_FILE_NAME)
-            : context.suggestions().suggestionFor(tab, null, SaveTargetPolicy.suggestWritableName(file),
-                SaveTargetPolicy::isSuitableDraft);
-        context.suggestions().rememberDraft(tab, suggestion);
+        String suggestion = suggestFilename(context, index, tab.state().getCurrentFile() != null);
         return new Result(true, modal, index, -1, SaveFlowController.TextInputEffect.setText(suggestion),
             Notice.clear(), false, true);
     }
 
-    private static String saveDirty(Context context, int index) {
+    private static Result offerUtf8(Context context, int index, UiModalState modal, IOException error,
+                                    boolean suggestCopy) {
+        var filename = suggestCopy
+            ? SaveFlowController.TextInputEffect.setText(
+                suggestWritableName(context, index, context.tabs().get(index).state().getCurrentFile()))
+            : SaveFlowController.TextInputEffect.none();
+        return new Result(true, modal.offerUtf8(), index, -1, filename,
+            Notice.error(SaveTargetPolicy.saveErrorMessage(error)), false, false);
+    }
+
+    private static String suggestFilename(Context context, int index, boolean writableCopy) {
+        TabSession tab = context.tabs().get(index);
+        Path file = tab.state().getCurrentFile();
+        return context.suggestions().suggestionFor(tab, () -> {
+            if (writableCopy) {
+                return suggestWritableName(context, index, file);
+            }
+            if (file != null) {
+                return PathPresentation.full(file.toAbsolutePath());
+            }
+            Path preferred = Path.of("").toAbsolutePath().resolve(SaveTargetPolicy.DEFAULT_FILE_NAME);
+            return PathPresentation.full(SaveTargetSuggester.firstAvailable(preferred,
+                target -> occupied(context, index, target)));
+        }, draft -> !writableCopy || SaveTargetPolicy.isSuitableDraft(draft));
+    }
+
+    private static String suggestWritableName(Context context, int index, Path source) {
+        return SaveTargetPolicy.suggestWritableName(source, target -> occupied(context, index, target));
+    }
+
+    private static boolean occupied(Context context, int index, Path target) {
+        if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+            return true;
+        }
+        return WorkspaceDocuments.findOtherOpenFile(context.tabs(), index, target) >= 0;
+    }
+
+    private static IOException saveDirty(Context context, int index) {
         TabSession tab = context.tabs().get(index);
         if (!tab.state().isDirty()) {
             return null;
         }
         Path file = tab.state().getCurrentFile();
         if (file == null) {
-            return "Save failed: tab has no file path. Use Save As.";
+            return new IOException("Tab has no file path. Use Save As.");
         }
         if (SaveTargetPolicy.isReadOnlyFile(file)) {
-            return "File is read-only. Use Save As. " + file;
+            return new IOException("File is read-only. Use Save As. " + file);
         }
         try {
             tab.engine().save();
-            context.suggestions().rememberSavedPath(tab, file);
+            rememberSavedPath(context, tab, file);
             return null;
         } catch (IOException error) {
-            return SaveTargetPolicy.saveErrorMessage(error);
+            return error;
         }
     }
 
     private static boolean validIndex(Context context, int index) {
         return index >= 0 && index < context.tabs().size();
+    }
+
+    private static void rememberSavedPath(Context context, TabSession tab, Path file) {
+        context.suggestions().rememberDraft(tab, PathPresentation.full(file.toAbsolutePath()));
     }
 
     private static Result result(UiModalState modal, Notice notice) {

@@ -6,10 +6,17 @@ public record UiModalState(
     UiModalMode mode,
     Path pendingOverwritePath,
     int pendingCloseTabIndex,
-    SaveContinuation saveContinuation
+    SaveContinuation saveContinuation,
+    DocumentSaveFormat saveFormat,
+    Path pendingOpenPath
 ) {
+    public UiModalState(UiModalMode mode, Path pendingOverwritePath, int pendingCloseTabIndex,
+                        SaveContinuation saveContinuation) {
+        this(mode, pendingOverwritePath, pendingCloseTabIndex, saveContinuation, DocumentSaveFormat.ORIGINAL, null);
+    }
+
     public UiModalState {
-        if (mode == null || saveContinuation == null) {
+        if (mode == null || saveContinuation == null || saveFormat == null) {
             throw new IllegalArgumentException("Modal mode and save continuation are required");
         }
         if (mode == UiModalMode.SAVE_OVERWRITE_CONFIRM) {
@@ -25,7 +32,14 @@ public record UiModalState(
         } else if (pendingOverwritePath != null) {
             throw new IllegalArgumentException("Modal payload does not match mode " + mode);
         }
-        boolean saveFlowMode = mode == UiModalMode.SAVE_AS || mode == UiModalMode.SAVE_OVERWRITE_CONFIRM;
+        boolean saveFlowMode = mode == UiModalMode.SAVE_AS || mode == UiModalMode.SAVE_OVERWRITE_CONFIRM
+            || mode == UiModalMode.SAVE_UTF8_CONFIRM;
+        if (!saveFlowMode && saveFormat != DocumentSaveFormat.ORIGINAL) {
+            throw new IllegalArgumentException("Save format requires a save modal");
+        }
+        if ((mode == UiModalMode.OPEN_UTF16_CONFIRM) != (pendingOpenPath != null)) {
+            throw new IllegalArgumentException("Explicit open confirmation requires only its requested path");
+        }
         if (!saveFlowMode && saveContinuation != SaveContinuation.NONE) {
             throw new IllegalArgumentException("Save continuation requires a save modal");
         }
@@ -91,6 +105,35 @@ public record UiModalState(
         return mode == UiModalMode.SAVE_OVERWRITE_CONFIRM;
     }
 
+    public boolean isSaveUtf8Confirm() {
+        return mode == UiModalMode.SAVE_UTF8_CONFIRM;
+    }
+
+    public boolean isOpenUtf16Confirm() {
+        return mode == UiModalMode.OPEN_UTF16_CONFIRM;
+    }
+
+    public static UiModalState openUtf16Confirm(Path path) {
+        return new UiModalState(UiModalMode.OPEN_UTF16_CONFIRM, null, -1, SaveContinuation.NONE,
+            DocumentSaveFormat.ORIGINAL, java.util.Objects.requireNonNull(path));
+    }
+
+    public UiModalState offerUtf8() {
+        if (!isSaveAs() && !isSaveOverwriteConfirm()) {
+            throw new IllegalStateException("Encoding choice requires a save flow");
+        }
+        return new UiModalState(UiModalMode.SAVE_UTF8_CONFIRM, null, pendingCloseTabIndex, saveContinuation,
+            DocumentSaveFormat.ORIGINAL, null);
+    }
+
+    public UiModalState utf8SaveAs() {
+        if (!isSaveUtf8Confirm()) {
+            throw new IllegalStateException("UTF-8 Save As requires explicit confirmation");
+        }
+        return new UiModalState(UiModalMode.SAVE_AS, null, pendingCloseTabIndex, saveContinuation,
+            DocumentSaveFormat.UTF8, null);
+    }
+
     public boolean isRecoveryConfirm() {
         return mode == UiModalMode.RECOVERY_CONFIRM;
     }
@@ -119,11 +162,13 @@ public record UiModalState(
         if (!isSaveAs()) {
             throw new IllegalStateException("Overwrite confirmation can only follow Save As");
         }
-        return state(
+        return new UiModalState(
             UiModalMode.SAVE_OVERWRITE_CONFIRM,
             path,
             pendingCloseTabIndex,
-            saveContinuation
+            saveContinuation,
+            saveFormat,
+            null
         );
     }
 
@@ -131,7 +176,7 @@ public record UiModalState(
         if (!isSaveOverwriteConfirm()) {
             throw new IllegalStateException("Only overwrite confirmation can return to Save As");
         }
-        return state(UiModalMode.SAVE_AS, null, pendingCloseTabIndex, saveContinuation);
+        return new UiModalState(UiModalMode.SAVE_AS, null, pendingCloseTabIndex, saveContinuation, saveFormat, null);
     }
 
     private static UiModalState state(

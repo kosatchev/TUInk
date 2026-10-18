@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import dev.tuink.core.EditorClipboard;
+import dev.tuink.core.Position;
 import dev.tuink.core.SaveDisposition;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -47,6 +48,7 @@ class FilePickerOpenWorkflowTest {
             assertEquals(FilePickerOpenWorkflow.NoticeKind.WARNING, rejected.noticeKind());
             Path absent = directory.resolve("missing.txt");
             var missing = FilePickerOpenWorkflow.apply(new OpenFileInputRouter.OpenFile(absent), tree,
+                List.of(), -1,
                 () -> TuiDocumentSession.create(new EditorClipboard()));
             assertTrue(missing.openFileMode());
             assertNull(missing.openedDocument());
@@ -64,6 +66,7 @@ class FilePickerOpenWorkflowTest {
         clipboard.setText("clipboard");
         try (OpenFileTreeController tree = new OpenFileTreeController(directory, true, false)) {
             var opened = FilePickerOpenWorkflow.apply(new OpenFileInputRouter.OpenFile(file), tree,
+                List.of(), -1,
                 () -> TuiDocumentSession.create(clipboard));
             assertFalse(opened.openFileMode());
             assertNotNull(opened.openedDocument());
@@ -78,6 +81,31 @@ class FilePickerOpenWorkflowTest {
     }
 
     @Test
+    void openingAnExistingDirtyDocumentReturnsItsIndexWithoutReloadingOrAllocating() throws Exception {
+        Path file = Files.writeString(directory.resolve("selected.txt"), "saved");
+        var existing = TuiDocumentSession.create(new EditorClipboard()).view();
+        existing.engine().open(file);
+        existing.engine().insertInput("draft ");
+        existing.engine().moveCursorTo(new Position(0, 2));
+        long revision = existing.model().revision();
+        try (OpenFileTreeController tree = new OpenFileTreeController(directory, true, false)) {
+            var result = FilePickerOpenWorkflow.apply(new OpenFileInputRouter.OpenFile(file), tree,
+                List.of(existing), 0, () -> fail("an already open file must not allocate another document"));
+
+            assertFalse(result.openFileMode());
+            assertNull(result.openedDocument());
+            assertEquals(0, result.activateTabIndex());
+            assertEquals(List.of("draft saved"), existing.model().snapshotLines());
+            assertEquals(revision, existing.model().revision());
+            assertEquals(new Position(0, 2), existing.state().getCursor());
+            assertTrue(existing.state().isDirty());
+            existing.engine().undo();
+            assertEquals(List.of("saved"), existing.model().snapshotLines());
+            assertFalse(existing.state().isDirty());
+        }
+    }
+
+    @Test
     void initialRootUsesTheActiveFileParentOrWorkingDirectory() {
         assertEquals(directory, FilePickerOpenWorkflow.initialRoot(directory.resolve("document.txt")));
         assertEquals(Path.of(".").toAbsolutePath().normalize(), FilePickerOpenWorkflow.initialRoot(null));
@@ -86,6 +114,7 @@ class FilePickerOpenWorkflowTest {
 
     private static FilePickerOpenWorkflow.Result applyWithoutDocument(OpenFileInputRouter.Intent intent,
                                                                       OpenFileTreeController tree) {
-        return FilePickerOpenWorkflow.apply(intent, tree, () -> fail("navigation must not allocate a document"));
+        return FilePickerOpenWorkflow.apply(intent, tree, List.of(), -1,
+            () -> fail("navigation must not allocate a document"));
     }
 }

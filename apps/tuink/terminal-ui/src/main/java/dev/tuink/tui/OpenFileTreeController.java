@@ -65,6 +65,11 @@ final class OpenFileTreeController implements AutoCloseable {
         return model.snapshot().loading();
     }
 
+    FileTreeModel.DirectoryFailure directoryFailure() {
+        var failures = model.snapshot().failures();
+        return failures.isEmpty() ? null : failures.getFirst();
+    }
+
     FileTreeView.Placement place(
         Rect bounds,
         Rect interactionClip,

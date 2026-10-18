@@ -2,9 +2,10 @@ package dev.tuink.tui;
 
 import dev.tuink.core.SaveDisposition;
 import dev.tuink.tui.flow.UiModalState;
+import dev.tuink.tui.flow.SavePathInput;
 import dev.tuink.tui.command.TuinkCommand;
+import java.io.IOException;
 import java.nio.file.Path;
-import java.util.function.BiPredicate;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
@@ -16,12 +17,10 @@ final class SaveFlowController {
         TuinkCommand command,
         UiModalState modalState,
         String saveAsText,
-        Path currentFile,
-        SaveDisposition currentSaveDisposition,
         Function<Path, String> validateSaveTarget,
         Predicate<Path> pathExists,
         Predicate<Path> isReadOnlyFile,
-        BiPredicate<Path, Path> isSameFilePath,
+        CurrentSaveTarget isCurrentSaveTarget,
         Function<Path, String> suggestWritableName
     ) {
         if (!modalState.isSaveAs()) {
@@ -34,12 +33,10 @@ final class SaveFlowController {
             case EDIT_INSERT_NEWLINE -> handleEnter(
                 modalState,
                 saveAsText,
-                currentFile,
-                currentSaveDisposition,
                 validateSaveTarget,
                 pathExists,
                 isReadOnlyFile,
-                isSameFilePath,
+                isCurrentSaveTarget,
                 suggestWritableName
             );
             case UI_ESCAPE, APP_QUIT -> result(
@@ -57,12 +54,10 @@ final class SaveFlowController {
     private static SaveAsResult handleEnter(
         UiModalState modalState,
         String saveAsText,
-        Path currentFile,
-        SaveDisposition currentSaveDisposition,
         Function<Path, String> validateSaveTarget,
         Predicate<Path> pathExists,
         Predicate<Path> isReadOnlyFile,
-        BiPredicate<Path, Path> isSameFilePath,
+        CurrentSaveTarget isCurrentSaveTarget,
         Function<Path, String> suggestWritableName
     ) {
         String target = saveAsText;
@@ -72,7 +67,7 @@ final class SaveFlowController {
 
         final Path path;
         try {
-            path = Path.of(target);
+            path = SavePathInput.parse(target);
         } catch (RuntimeException e) {
             return result(
                 true,
@@ -98,9 +93,13 @@ final class SaveFlowController {
             );
         }
         boolean targetExists = pathExists.test(path);
-        boolean sameFile = targetExists
-            && currentSaveDisposition == SaveDisposition.REPLACE_EXISTING
-            && isSameFilePath.test(path, currentFile);
+        boolean sameFile;
+        try {
+            sameFile = targetExists && isCurrentSaveTarget.matches(path);
+        } catch (IOException error) {
+            return result(true, modalState, TextInputEffect.none(), false,
+                SaveTargetPolicy.saveErrorMessage(error), null);
+        }
         if (targetExists && !sameFile) {
             return result(
                 true,
@@ -120,6 +119,11 @@ final class SaveFlowController {
             path,
             targetExists ? SaveDisposition.REPLACE_EXISTING : SaveDisposition.CREATE_NEW
         );
+    }
+
+    @FunctionalInterface
+    interface CurrentSaveTarget {
+        boolean matches(Path path) throws IOException;
     }
 
     private static SaveAsResult result(

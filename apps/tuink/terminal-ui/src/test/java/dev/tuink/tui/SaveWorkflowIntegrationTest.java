@@ -75,7 +75,7 @@ class SaveWorkflowIntegrationTest {
             window.event(new TextInput("second"));
             var second = window.active();
             window.command(TuinkCommand.APP_QUIT);
-            chooseSave(window);
+            window.event(new TextInput("y"));
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
             assertTrue(window.controller.running());
             assertTrue(first.state().isDirty());
@@ -83,7 +83,7 @@ class SaveWorkflowIntegrationTest {
             assertEquals("original", Files.readString(window.document));
 
             window.command(TuinkCommand.APP_QUIT);
-            chooseSave(window);
+            window.event(new TextInput("y"));
             Path target = directory.resolve("existing.txt");
             Files.writeString(target, "replace me");
             replaceFilename(window, target);
@@ -110,7 +110,7 @@ class SaveWorkflowIntegrationTest {
             window.command(TuinkCommand.TAB_NEW);
             window.event(new TextInput("second"));
             window.command(TuinkCommand.TAB_CLOSE);
-            chooseSave(window);
+            window.event(new TextInput("y"));
             Path target = directory.resolve("existing.txt");
             Files.writeString(target, "replace me");
             replaceFilename(window, target);
@@ -141,11 +141,6 @@ class SaveWorkflowIntegrationTest {
             assertEquals("external", Files.readString(window.document));
             assertFalse(window.active().state().isDirty());
         }
-    }
-
-    private static void chooseSave(EditorWindowFixture window) {
-        window.event(KeyStroke.of(KeyStroke.Key.HOME));
-        window.event(KeyStroke.of(KeyStroke.Key.ENTER));
     }
 
     private static void chooseDiscard(EditorWindowFixture window) {

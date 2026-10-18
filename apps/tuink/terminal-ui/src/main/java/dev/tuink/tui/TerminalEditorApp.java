@@ -263,7 +263,11 @@ public class TerminalEditorApp {
         if (cli.file() != null) {
             Path file = cli.file();
             try {
-                engine.open(file);
+                if (cli.openAsUtf16Le()) {
+                    engine.openExisting(file, dev.tuink.core.DocumentOpenMode.UTF_16LE);
+                } else {
+                    engine.open(file);
+                }
                 renderPlanBuilder = new RenderPlanBuilder(resolveHighlighter(file), engine.textLayout());
                 sessionContext.replaceActiveRenderPlanBuilder(renderPlanBuilder);
             } catch (IOException e) {
@@ -744,7 +748,8 @@ public class TerminalEditorApp {
             canvas,
             layout.top() + 1,
             layout.left() + 1,
-            padRight(pathLine, Math.max(0, layout.width() - 2)),
+            padRight(dev.tuink.tui.ui.PathPresentation.clip(pathLine, 0, Math.max(0, layout.width() - 2)),
+                Math.max(0, layout.width() - 2)),
             styles.dialog()
         );
         FileTreeView.Placement treePlacement = openFile.placement();
@@ -1045,6 +1050,9 @@ public class TerminalEditorApp {
     }
 
     ConfirmBarInputRouter.Policy confirmPolicy(UiModalState modalState) {
+        if (modalState.isSaveUtf8Confirm() || modalState.isOpenUtf16Confirm()) {
+            return ConfirmBarInputRouter.Policy.overwrite();
+        }
         if (modalState.isRecoveryConfirm()) {
             return ConfirmBarInputRouter.Policy.recovery();
         }
@@ -2180,17 +2188,20 @@ public class TerminalEditorApp {
     }
 
     private void printUsage(PrintStream output) {
-        output.println("Usage: tuink [options] [file]");
-        output.println("Development: ./gradlew --console=plain :app:run -PappArgs=\"[options] [file]\"");
+        output.println("Usage: tuink [options] [--] [file]");
+        output.println("Development: ./gradlew --console=plain :app:run -PappArgs=\"[options] [--] [file]\"");
         output.println("Options:");
         output.println("  --no-mouse       Disable mouse tracking and mouse interactions");
         output.println("  --no-alt-screen  Do not use alternate screen buffer");
         output.println("  --no-color       Render in monochrome (no ANSI colors, keep text attributes)");
         output.println("  --theme=<name>   UI palette: blue, cyan (default), light");
         output.println("  --read           Start in reading mode (editing disabled)");
+        output.println("  --open-as-utf16le Interpret the selected BOM-marked file as UTF-16LE");
         output.println("  --profile        Log render timings to stderr every " + PROFILE_LOG_EVERY_FRAMES + " frames");
         output.println("  --profile-file   Create a new profile log file (also enables --profile)");
+        output.println("  --file-uri=<uri> Open an ASCII percent-encoded absolute file URI");
         output.println("  --help, -h       Show this help");
+        output.println("  --              End options; the following argument is a literal file path");
     }
 
     private boolean shouldForceExecTerminalProvider() {

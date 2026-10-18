@@ -19,10 +19,42 @@ The scenarios protect the following user behavior:
 | `focus` | Opening Find ends document selection capture; a later drag cannot steal focus |
 | `field` | Copy and a menu roundtrip preserve the long field's viewport in color and monochrome |
 | `resize` | Wrapped text retains its textual anchor when terminal width/height change |
+| `large-wrap` | A 2 MB document with 400,000 short lines survives wrapping and repeated resizes on a 192 MiB JVM heap |
 | `tabs` | Save, Copy, and returning to a tab preserve its independent viewport |
 | `history` | Undo/Redo through the real keymap preserve Unicode text and grouping |
+| `grapheme-edit-caret` | Typing after replacing part of a combining cluster or joining lines continues after the complete grapheme |
+| `selection-autoscroll` | A stationary drag at either viewport edge keeps scrolling; release and opening Find stop the timer |
+| `long-copy-name` | Saving a read-only file with a 255-byte name generates a fitting copy name, skips an occupied candidate and preserves both existing files |
+| `navigation` | Ctrl+Home/End and Shift combinations move or select the correct Unicode range, which can be replaced and undone |
+| `fragmented-keys` | Split ESC/CSI/SS3 arrows preserve document bytes and search focus across delayed delivery; standalone Escape still closes search |
+| `quit-confirmation` | Repeated Ctrl+Q cancels quitting and retains the draft; Y saves before exiting |
 | `gutter-idle` | Deferred change markers appear after rapid edits and clear after Undo without another input event |
-| `recovery` | After autosave and a forced crash, a second process restores and saves unsaved edits |
+| `paste` | Terminal paste keeps literal text and Unicode content in a separate Undo step |
+| `settings` | CLI overrides apply to the current session while explicit menu changes preserve saved preferences and dotfile symlinks |
+| `settings-conflict` | Ordinary menu changes persist; editing the app's own settings document and changing a menu preference retains the exact document bytes through Save and normal quit, with conflict feedback, for regular settings files and dotfile symlinks |
+| `recovery` | After a forced crash, safe cancellation preserves drafts across normal exits and releases them for restoration by another instance while the first remains open |
+| `recovery-format5` | A v0.13.0 draft is offered, postponed and restored without rewriting its files; later autosave uses format 8, Save preserves BOM/CRLF, and ambiguous old filenames require Save As |
+| `recovery-memory` | Four valid 10 MiB drafts can be offered and postponed on a 64 MiB heap; failed restoration preserves every snapshot and the explicitly opened document |
+| `linux-keys` | Linux console F1–F5 open their menus and Shift+Tab moves search focus backwards without inserting terminal sequence bytes into the document |
+| `enhanced-text` | Shift-only CSI-u and modifyOtherKeys enter punctuation, Cyrillic and supplementary Unicode in the document and Find; command modifiers keep their shortcut behavior |
+| `long-unicode-edit` | An accepted 11 MiB Unicode line supports editing, subsequent navigation, wildcard search and undo on a 192 MiB heap |
+| `save-as-workspace` | Save As preserves a file owned by another tab, keeps the draft editable and accepts a different filename |
+| `settings-memory` | Growth to a 2 GiB settings file produces a conflict on exit and defaults on the next launch, preserving the config on a 64 MiB heap |
+| `syntax-memory` | Dense 3 MiB and 10 MiB CSV lines open, edit/undo, navigate, resize and wrap on 64 MiB and 192 MiB heaps |
+| `unix-path-recovery` | A non-UTF-8 Unix filename opens through the picker, saves, and retains its identity through crash recovery beside a colliding display name |
+| `literal-indentation` | Enter inside a Python multiline string, Java block comment or YAML block scalar copies whitespace without syntax-based indentation or list continuation; Undo restores the exact content |
+| `field-memory` | A 2 MiB document can be copied into Find, Replace and Save As and navigated on a 128 MiB heap; cancelling the fields preserves the document bytes |
+| `document-caption` | Long paths and filenames retain the extension and dirty marker in the header and tabs across resizes; the visible close button closes that tab |
+| `save-name-suggestion` | An unnamed draft's proposed filename skips names reserved by other tabs, existing files and dangling symlinks |
+| `replacement-memory` | A replacement expanding 500,000 matches to 32 MB is rejected on a 64 MiB heap; the editor remains usable, and Undo and Save preserve the original document |
+| `paste-memory` | A 1 MiB multiline paste is rejected on a 32 MiB heap before replacing the selected draft; Save and Undo remain usable |
+| `recovery-lock-cleanup` | Clean launches create no entry locks, and closing the last editor reclaims locks from a real background snapshot |
+| `xdg-profile` | A configuration directory outside the home holds settings and recovery without touching the default profile |
+| `cli-path-identity` | Ambiguous native argv filenames are rejected before startup; ASCII file URIs open and save the distinct raw-byte and literal `�` files |
+| `save-as-retarget` | A retargeted opening symlink still conflicts on Save; explicitly choosing its new target requires confirmation and saves only that file |
+| `field-edit-caret` | Deleting an emoji separator keeps subsequent input after the newly joined grapheme in Find and Save As |
+| `field-memory-growth` | Dense Unicode field growth on a 128 MiB heap refuses a whole paste before exhaustion; editing and saving the document remain usable |
+| `identical-replace-budget` | A single identical replacement exceeding its wildcard budget preserves the caret, selection and document |
 
 For an already built install layout, select scenarios directly:
 

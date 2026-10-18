@@ -15,18 +15,20 @@ from vt import Screen
 
 
 class Session:
-    def __init__(self, root, java, classpath, document=None, home=None, mono=False, options=None):
+    def __init__(self, root, java, classpath, document=None, home=None, mono=False, options=None,
+                 term="xterm-256color", max_heap_mb=192, config_home=None):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         home = Path(home) if home else self.root / "home"
         home.mkdir(parents=True, exist_ok=True)
         self.home = home
+        self.config_home = Path(config_home) if config_home is not None else home / ".config"
         self.screen = Screen()
         self.log = bytearray()
         self.status = None
         self.closed = False
         self.deadline = time.monotonic() + 45
-        args = [str(java), "--enable-native-access=ALL-UNNAMED", "-Xmx192m",
+        args = [str(java), "--enable-native-access=ALL-UNNAMED", f"-Xmx{max_heap_mb}m",
                 f"-Duser.home={home}", "-cp", classpath, "dev.tuink.app.App"]
         args.extend(("--theme=cyan",) if options is None else options)
         if mono:
@@ -38,8 +40,8 @@ class Session:
             try:
                 fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
                 os.chdir(self.root)
-                env = dict(os.environ, TERM="xterm-256color", HOME=str(home),
-                           XDG_CONFIG_HOME=str(home / ".config"), XDG_DATA_HOME=str(home / ".local/share"),
+                env = dict(os.environ, TERM=term, HOME=str(home),
+                           XDG_CONFIG_HOME=str(self.config_home), XDG_DATA_HOME=str(home / ".local/share"),
                            XDG_CACHE_HOME=str(home / ".cache"))
                 # Noninteractive CI shells may inherit SIGINT as ignored.
                 # The editor must install its own terminal signal handlers.

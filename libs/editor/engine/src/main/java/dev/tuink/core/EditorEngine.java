@@ -46,6 +46,8 @@ public class EditorEngine {
     private final EditorTextLayout textLayout;
     private final EditorClipboard clipboard;
     private final LongSupplier gutterDiffClock;
+    private final MarkdownBlockContext markdownContext;
+    private final IndentationContext indentationContext;
     private GraphemeText cachedGraphemes;
     private int tabWidth = 4;
     private TabInsertMode tabInsertMode = TabInsertMode.AUTO;
@@ -88,6 +90,8 @@ public class EditorEngine {
         this.textLayout = textLayout;
         this.clipboard = Objects.requireNonNull(clipboard, "clipboard");
         this.gutterDiffClock = Objects.requireNonNull(gutterDiffClock, "gutterDiffClock");
+        this.markdownContext = new MarkdownBlockContext(model::getLine);
+        this.indentationContext = new IndentationContext(model::getLine);
         if (document.register(state)) {
             resetGutterDiffBaselinesOnOpen();
             if (state.isDirty()) {
@@ -798,7 +802,7 @@ public class EditorEngine {
         Position rangeStart = selection == null ? model.clamp(state.getCursor()) : selection.start();
         Position rangeEnd = selection == null ? rangeStart : selection.end();
 
-        if (isAutoPairsActive() && shouldAutoPair(ch)) {
+        if (isAutoPairsActive() && shouldAutoPair(ch, rangeStart, rangeEnd)) {
             String paired = String.valueOf(ch) + closingPairFor(ch);
             Position afterInsert = applyReplaceAndTrack(ops, rangeStart, rangeEnd, paired);
             state.setCursor(new Position(afterInsert.line(), Math.max(0, afterInsert.col() - 1)));
@@ -1396,46 +1400,60 @@ public class EditorEngine {
     }
 
     private IndentationDecisions indentationDecisions() {
-        return new IndentationDecisions(model.lineCount(), model::getLine, state.getCurrentFile(), tabWidth, tabInsertMode);
+        return new IndentationDecisions(model.lineCount(), model::getLine, state.getCurrentFile(), tabWidth,
+            tabInsertMode, indentationContext());
+    }
+
+    private IndentationContext indentationContext() {
+        indentationContext.synchronize(model.contentEpoch(), model.revision(),
+            model.firstChangedLineSince(indentationContext.revision()), model.lineCount(), state.getCurrentFile());
+        return indentationContext;
     }
 
     private MarkdownListDecisions markdownListDecisions() {
-        return new MarkdownListDecisions(
-            model::getLine, (line, column) -> textLayout.visualColumnAt(line, column, tabWidth)
+        markdownContext.synchronize(
+            model.contentEpoch(), model.revision(),
+            model.firstChangedLineSince(markdownContext.revision()), model.lineCount()
         );
+        return new MarkdownListDecisions(model::getLine, markdownContext::allowsListAssist);
     }
 
     private String continuationAfterNewLine(Position cursor) {
         LanguageProfile profile = languageProfile();
         String line = model.getLine(cursor.line());
         int col = Math.max(0, Math.min(cursor.col(), line.length()));
-        String beforeCursor = line.substring(0, col);
         return switch (profile) {
-            case YAML -> yamlContinuationMarker(beforeCursor);
-            case MARKDOWN -> markdownListDecisions().continuation(cursor.line(), beforeCursor);
+            case YAML -> yamlContinuationMarker(cursor.line(), line, col);
+            case MARKDOWN -> markdownListDecisions().continuation(cursor.line(), line.substring(0, col));
             default -> "";
         };
     }
 
-    private boolean shouldAutoPair(char ch) {
+    private boolean shouldAutoPair(char ch, Position rangeStart, Position rangeEnd) {
         if (!isOpeningPair(ch)) {
             return false;
         }
-        Position cursor = model.clamp(state.getCursor());
-        String line = model.getLine(cursor.line());
-        int col = Math.max(0, Math.min(cursor.col(), line.length()));
+        String leftLine = model.getLine(rangeStart.line());
+        String rightLine = model.getLine(rangeEnd.line());
+        int leftCol = rangeStart.col();
+        int rightCol = rangeEnd.col();
 
-        if ((ch == '\'' || ch == '"') && isEscaped(line, col)) {
+        if ((ch == '\'' || ch == '"') && isEscaped(leftLine, leftCol)) {
             return false;
         }
-        if (ch == '\'' && ((col > 0 && isWordChar(line.charAt(col - 1)))
-            || (col < line.length() && isWordChar(line.charAt(col))))) {
-            return false;
+        if (ch == '\'') {
+            boolean leftWord = leftCol > 0
+                && isWordGrapheme(leftLine, graphemes(leftLine).previousBoundary(leftCol), leftCol);
+            boolean rightWord = rightCol < rightLine.length()
+                && isWordGrapheme(rightLine, rightCol, graphemes(rightLine).nextBoundary(rightCol));
+            if (leftWord || rightWord) {
+                return false;
+            }
         }
-        if (col >= line.length()) {
+        if (rightCol >= rightLine.length()) {
             return true;
         }
-        char next = line.charAt(col);
+        char next = rightLine.charAt(rightCol);
         return Character.isWhitespace(next)
             || isClosingPair(next)
             || next == ','
@@ -1474,8 +1492,16 @@ public class EditorEngine {
         if (range == null) {
             return false;
         }
-        String selected = model.getTextRange(range.start(), range.end());
-        return selected.indexOf('\'') < 0;
+        for (int lineIndex = range.start().line(); lineIndex <= range.end().line(); lineIndex++) {
+            String line = model.getLine(lineIndex);
+            int from = lineIndex == range.start().line() ? range.start().col() : 0;
+            int to = lineIndex == range.end().line() ? range.end().col() : line.length();
+            int quote = line.indexOf('\'', from);
+            if (quote >= 0 && quote < to) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private void wrapSelectionWithPair(char open) {
@@ -1508,6 +1534,10 @@ public class EditorEngine {
         String line = model.getLine(cursor.line());
         if (cursor.col() >= line.length()
             || !isMatchingPair(line.charAt(cursor.col() - 1), line.charAt(cursor.col()))) {
+            return null;
+        }
+        char left = line.charAt(cursor.col() - 1);
+        if ((left == '\'' || left == '"') && isEscaped(line, cursor.col() - 1)) {
             return null;
         }
         GraphemeText graphemes = graphemes(line);
@@ -1544,15 +1574,19 @@ public class EditorEngine {
             || (left == '\'' && right == '\'');
     }
 
-    private String yamlContinuationMarker(String beforeCursor) {
-        int leading = leadingIndentLength(beforeCursor);
-        if (leading >= beforeCursor.length()) {
+    private String yamlContinuationMarker(int lineIndex, String line, int column) {
+        if (column > IndentationContext.MAX_SCAN_CODE_UNITS) return "";
+        int leading = 0;
+        while (leading < column && (line.charAt(leading) == ' ' || line.charAt(leading) == '\t')) leading++;
+        if (leading + 2 > column || !line.startsWith("- ", leading)) {
             return "";
         }
-        String rest = beforeCursor.substring(leading);
-        if (!rest.startsWith("- ")) {
-            return "";
-        }
+        String code = indentationContext().codeBeforeCursor(lineIndex, column);
+        // Both the marker and the insertion point must be outside a scalar.
+        // A quote can close later on this line while its initial "- " remains
+        // literal; conversely, a real marker can introduce an unfinished scalar.
+        if (code == null || !code.startsWith("- ", leading)) return "";
+        String rest = line.substring(leading, column);
         if (rest.startsWith("- [ ] ") || rest.startsWith("- [x] ") || rest.startsWith("- [X] ")) {
             String tail = rest.substring(6).trim();
             return tail.isEmpty() ? "" : "- [ ] ";
@@ -2416,10 +2450,6 @@ public class EditorEngine {
         SearchMatcher.Match match = matcher.findLastBefore(text, beforeCol);
         return match == null ? null
             : new SearchMatch(new Position(line, match.startUtf16()), match.lengthUtf16());
-    }
-
-    private static boolean isWordChar(char ch) {
-        return Character.isLetterOrDigit(ch) || ch == '_';
     }
 
     private static boolean isWhitespaceGrapheme(String text, int start, int end) {

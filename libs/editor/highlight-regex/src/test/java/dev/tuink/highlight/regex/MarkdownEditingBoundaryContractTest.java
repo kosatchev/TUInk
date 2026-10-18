@@ -22,6 +22,47 @@ import org.junit.jupiter.api.Test;
 /** Keeps independently owned editing and highlighting rules aligned at Markdown code boundaries. */
 class MarkdownEditingBoundaryContractTest {
     @Test
+    void codeHighlightingAndAutomaticListsAgreeInsideListContainers() {
+        record Example(List<String> prefix, String item, boolean insideCode) {}
+        Style keyword = new Style(Color.BRIGHT_BLUE, Color.DEFAULT, true, false);
+        for (Example example : List.of(
+            new Example(List.of("- parent", "    ```python"), "    1. return", true),
+            new Example(List.of("- parent", "\t```python"), "\t1. return", true),
+            new Example(List.of("-\t```python"), "\t1. return", true),
+            new Example(List.of("- parent", "", "    ~~~python"), "    1. return", true),
+            new Example(List.of("- ```python"), "  1. return", true),
+            new Example(List.of("123. ~~~python"), "     1. return", true),
+            new Example(List.of("- parent", "    - child", "        ```python"), "        1. return", true),
+            new Example(List.of("- parent", "    ```python", "    ```not-a-close"), "    1. return", true),
+            new Example(List.of("- parent", "    ```python", "    ```"), "    1. return", false),
+            new Example(List.of("- parent", "    ```python"), "1. return", false)
+        )) {
+            List<String> lines = new ArrayList<>(example.prefix());
+            lines.add(example.item());
+            DocumentSnapshot document = new DocumentSnapshot(new DocumentId("nested-markdown-boundaries"), 0, lines);
+            ContextualLineHighlighter highlighter = (ContextualLineHighlighter) RegexHighlighter.forFileName("notes.md");
+            StyleSpan returnKeyword = new StyleSpan(example.item().indexOf("return"), example.item().length(), keyword);
+            assertEquals(example.insideCode(), highlighter.highlight(document, lines.size() - 1, example.item())
+                .contains(returnKeyword), example.toString());
+
+            for (int tabWidth : List.of(2, 4)) {
+                TextModel model = new TextModel(new SimpleLineBuffer());
+                model.replaceLines(lines);
+                EditorState state = new EditorState();
+                state.setCurrentFile(Path.of("notes.md"));
+                EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model));
+                engine.setTabWidth(tabWidth);
+                engine.setAutoIndentEnabled(false);
+                engine.moveCursorTo(new Position(lines.size() - 1, example.item().length()));
+                engine.insertNewline();
+
+                assertEquals(example.insideCode() ? "" : "2. ", model.getLine(lines.size()),
+                    example + " tabWidth=" + tabWidth);
+            }
+        }
+    }
+
+    @Test
     void codeHighlightingAndAutomaticListsAgreeOnFenceBoundaries() {
         record Example(List<String> prefix, boolean insideCode) {}
         String item = "1. return";
@@ -49,17 +90,21 @@ class MarkdownEditingBoundaryContractTest {
             boolean highlightedAsCode = highlighter.highlight(document, lines.size() - 1, item).contains(returnKeyword);
             assertEquals(example.insideCode(), highlightedAsCode, example.prefix().toString());
 
-            TextModel model = new TextModel(new SimpleLineBuffer());
-            model.replaceLines(lines);
-            EditorState state = new EditorState();
-            state.setCurrentFile(Path.of("notes.md"));
-            EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model));
-            engine.setAutoIndentEnabled(false);
-            engine.moveCursorTo(new Position(lines.size() - 1, item.length()));
+            for (int tabWidth : List.of(2, 4)) {
+                TextModel model = new TextModel(new SimpleLineBuffer());
+                model.replaceLines(lines);
+                EditorState state = new EditorState();
+                state.setCurrentFile(Path.of("notes.md"));
+                EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model));
+                engine.setTabWidth(tabWidth);
+                engine.setAutoIndentEnabled(false);
+                engine.moveCursorTo(new Position(lines.size() - 1, item.length()));
 
-            engine.insertNewline();
+                engine.insertNewline();
 
-            assertEquals(highlightedAsCode ? "" : "2. ", model.getLine(lines.size()), example.prefix().toString());
+                assertEquals(highlightedAsCode ? "" : "2. ", model.getLine(lines.size()),
+                    example.prefix() + " tabWidth=" + tabWidth);
+            }
         }
     }
 }

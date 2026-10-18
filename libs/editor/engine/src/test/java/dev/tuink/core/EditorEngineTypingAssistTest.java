@@ -161,6 +161,74 @@ class EditorEngineTypingAssistTest {
         }
     }
 
+    @Test
+    void apostrophesAfterUnicodeWordClustersStaySingleAndRoundTripThroughHistory() {
+        for (String word : List.of("René", "Rene\u0301", "𝒜", "𐐀", "_", "7")) {
+            for (String suffix : List.of("", " ", ")")) {
+                String original = word + suffix;
+                Fixture fixture = fixture("test.txt", List.of(original));
+                Position before = new Position(0, word.length());
+                fixture.engine.moveCursorTo(before);
+
+                fixture.engine.insertInput("'");
+
+                String expected = word + "'" + suffix;
+                Position after = new Position(0, word.length() + 1);
+                assertEquals(expected, fixture.model.getLine(0), original);
+                assertEquals(after, fixture.state.getCursor());
+                assertTrue(fixture.engine.undo());
+                assertEquals(original, fixture.model.getLine(0));
+                assertEquals(before, fixture.state.getCursor());
+                assertFalse(fixture.state.isDirty());
+                assertFalse(fixture.engine.undo());
+                assertTrue(fixture.engine.redo());
+                assertEquals(expected, fixture.model.getLine(0));
+                assertEquals(after, fixture.state.getCursor());
+            }
+        }
+    }
+
+    @Test
+    void apostrophesBeforeUnicodeWordClustersStaySingle() {
+        for (String word : List.of("René", "Rene\u0301", "𝒜", "𐐀", "_", "7")) {
+            Fixture fixture = fixture("test.txt", List.of(" " + word));
+            fixture.engine.moveCursorTo(new Position(0, 1));
+
+            fixture.engine.insertInput("'");
+
+            assertEquals(" '" + word, fixture.model.getLine(0));
+            assertEquals(new Position(0, 2), fixture.state.getCursor());
+        }
+    }
+
+    @Test
+    void nonWordClustersStillAllowQuotePairs() {
+        for (String prefix : List.of("", " ", ".", "😀", "!\u0301", "\u0301")) {
+            for (char quote : new char[] {'\'', '"'}) {
+                Fixture fixture = fixture("test.txt", List.of(prefix));
+                fixture.engine.moveCursorTo(new Position(0, prefix.length()));
+
+                fixture.engine.insertChar(quote);
+
+                assertEquals(prefix + String.valueOf(quote).repeat(2), fixture.model.getLine(0));
+                assertEquals(new Position(0, prefix.length() + 1), fixture.state.getCursor());
+            }
+        }
+    }
+
+    @Test
+    void doubleQuotesStillPairAfterUnicodeWordClusters() {
+        for (String word : List.of("René", "Rene\u0301", "𝒜")) {
+            Fixture fixture = fixture("test.txt", List.of(word));
+            fixture.engine.moveEnd();
+
+            fixture.engine.insertInput("\"");
+
+            assertEquals(word + "\"\"", fixture.model.getLine(0));
+            assertEquals(new Position(0, word.length() + 1), fixture.state.getCursor());
+        }
+    }
+
     private static void type(EditorEngine engine, String text) {
         for (char ch : text.toCharArray()) {
             engine.insertChar(ch);

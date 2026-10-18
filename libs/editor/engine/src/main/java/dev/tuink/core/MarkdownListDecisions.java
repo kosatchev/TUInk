@@ -1,18 +1,16 @@
 package dev.tuink.core;
 
-import java.util.function.IntBinaryOperator;
 import java.util.function.IntFunction;
+import java.util.function.IntPredicate;
 
-/** Decides Markdown list changes from text and indentation columns without applying edits. */
+/** Proposes Markdown list edits using read-only text and block context. */
 final class MarkdownListDecisions {
-    private static final int ASSIST_LOOKBACK_LINES = 256;
-    private static final int ASSIST_LOOKBACK_CHARS = 16_384;
     private final IntFunction<String> lines;
-    private final IntBinaryOperator visualColumn;
+    private final IntPredicate allowsListAssist;
 
-    MarkdownListDecisions(IntFunction<String> lines, IntBinaryOperator visualColumn) {
+    MarkdownListDecisions(IntFunction<String> lines, IntPredicate allowsListAssist) {
         this.lines = lines;
-        this.visualColumn = visualColumn;
+        this.allowsListAssist = allowsListAssist;
     }
 
     /** Replaces an empty marker on its current line, preserving the indentation. */
@@ -29,65 +27,21 @@ final class MarkdownListDecisions {
     }
 
     String continuation(int lineIndex, String beforeCursor) {
-        if (isInsideMarkdownFence(lineIndex)) {
-            return "";
-        }
         int leading = leadingIndentLength(beforeCursor);
         if (leading >= beforeCursor.length()) {
             return "";
         }
         String rest = beforeCursor.substring(leading);
 
-        String unordered = markdownUnorderedContinuation(rest);
-        if (!unordered.isEmpty()) {
-            return unordered;
-        }
-        return markdownOrderedContinuation(rest);
+        String continuation = markdownContinuation(rest);
+        return !continuation.isEmpty() && allowsListAssist.test(lineIndex) ? continuation : "";
     }
 
     private boolean canTerminate(Position cursor) {
         String line = lines.apply(cursor.line());
         int markerEnd = markdownListMarkerEnd(line);
-        if (markerEnd < 0 || cursor.col() < markerEnd || !line.substring(markerEnd).isBlank()
-            || isInsideMarkdownFence(cursor.line())) {
-            return false;
-        }
-        int indent = leadingIndentLength(line);
-        if (visualColumn.applyAsInt(cursor.line(), indent) < 4) {
-            return true;
-        }
-        // Four-space/tab indentation can instead be an indented code block.
-        // Only terminate a deeply indented item when a surrounding list is visible.
-        int indentColumn = visualColumn.applyAsInt(cursor.line(), indent);
-        int remainingChars = ASSIST_LOOKBACK_CHARS;
-        for (int previous = cursor.line() - 1; previous >= Math.max(0, cursor.line() - ASSIST_LOOKBACK_LINES); previous--) {
-            String text = lines.apply(previous);
-            remainingChars -= text.length();
-            if (remainingChars < 0 || text.isBlank() || fenceMarker(text.stripLeading()) != null) {
-                return false;
-            }
-            int previousIndent = leadingIndentLength(text);
-            if (previousIndent < indent) {
-                int contentStart = markdownListPrefixEnd(text);
-                if (contentStart < 0) {
-                    return false;
-                }
-                int firstContentColumn = visualColumn.applyAsInt(previous, contentStart);
-                while (contentStart < text.length() && (text.charAt(contentStart) == ' ' || text.charAt(contentStart) == '\t')) {
-                    contentStart++;
-                }
-                int contentColumn = visualColumn.applyAsInt(previous, contentStart);
-                if (contentColumn - firstContentColumn >= 4 || indentColumn >= contentColumn + 4) {
-                    return false;
-                }
-                if (visualColumn.applyAsInt(previous, previousIndent) < 4) {
-                    return true;
-                }
-                indent = previousIndent;
-                indentColumn = visualColumn.applyAsInt(previous, previousIndent);
-            }
-        }
-        return false;
+        return markerEnd >= 0 && cursor.col() >= markerEnd && line.substring(markerEnd).isBlank()
+            && allowsListAssist.test(cursor.line());
     }
 
     private static int markdownListMarkerEnd(String line) {
@@ -95,16 +49,19 @@ final class MarkdownListDecisions {
         if (markerEnd < 0) {
             return -1;
         }
-        int end = markerEnd;
-        while (end < line.length() && (line.charAt(end) == ' ' || line.charAt(end) == '\t')) {
-            end++;
+        int end = skipIndent(line, markerEnd);
+        int taskEnd = markdownTaskEnd(line, end);
+        return taskEnd >= 0 ? taskEnd : markerEnd;
+    }
+
+    private static int markdownTaskEnd(String line, int start) {
+        int end = start + 3;
+        if (end <= line.length() && line.charAt(start) == '[' && line.charAt(start + 2) == ']'
+            && (line.charAt(start + 1) == ' ' || line.charAt(start + 1) == 'x' || line.charAt(start + 1) == 'X')
+            && (end == line.length() || line.charAt(end) == ' ' || line.charAt(end) == '\t')) {
+            return end;
         }
-        if (end + 3 <= line.length() && line.charAt(end) == '[' && line.charAt(end + 2) == ']'
-            && (line.charAt(end + 1) == ' ' || line.charAt(end + 1) == 'x' || line.charAt(end + 1) == 'X')
-            && (end + 3 == line.length() || line.charAt(end + 3) == ' ' || line.charAt(end + 3) == '\t')) {
-            return end + 3;
-        }
-        return markerEnd;
+        return -1;
     }
 
     private static int markdownListPrefixEnd(String line) {
@@ -131,109 +88,42 @@ final class MarkdownListDecisions {
         return end + 1;
     }
 
-    private String markdownUnorderedContinuation(String rest) {
-        if (rest.startsWith("- [ ] ") || rest.startsWith("- [x] ") || rest.startsWith("- [X] ")) {
-            String tail = rest.substring(6).trim();
-            return tail.isEmpty() ? "" : "- [ ] ";
-        }
-        if (rest.length() < 2) {
+    private static String markdownContinuation(String rest) {
+        int prefixEnd = markdownListPrefixEnd(rest);
+        if (prefixEnd < 0) {
             return "";
         }
-        char marker = rest.charAt(0);
-        if (marker != '-' && marker != '*' && marker != '+') {
+        // The validated prefix includes the first required padding character.
+        int markerEnd = prefixEnd - 1;
+        int contentStart = skipIndent(rest, prefixEnd);
+        int taskEnd = markdownTaskEnd(rest, contentStart);
+        int textStart = taskEnd < 0 ? contentStart : skipIndent(rest, taskEnd);
+        if (rest.substring(textStart).isBlank()) {
             return "";
         }
-        if (rest.charAt(1) != ' ') {
-            return "";
-        }
-        String tail = rest.substring(2).trim();
-        return tail.isEmpty() ? "" : marker + " ";
-    }
 
-    private String markdownOrderedContinuation(String rest) {
-        int sep = -1;
-        char delimiter = '.';
-        for (int i = 0; i < rest.length(); i++) {
-            char ch = rest.charAt(i);
-            if (ch == '.' || ch == ')') {
-                sep = i;
-                delimiter = ch;
-                break;
-            }
-            if (!Character.isDigit(ch)) {
+        String marker = rest.substring(0, markerEnd);
+        char first = marker.charAt(0);
+        if (first >= '0' && first <= '9') {
+            int digitCount = marker.length() - 1;
+            int number = Integer.parseInt(marker.substring(0, digitCount));
+            // CommonMark permits at most nine digits in an ordered marker.
+            if (number == 999_999_999) {
                 return "";
             }
+            String next = Integer.toString(number + 1);
+            marker = "0".repeat(Math.max(0, digitCount - next.length())) + next + marker.charAt(digitCount);
         }
-        if (sep <= 0 || sep >= rest.length() - 1) {
-            return "";
-        }
-        for (int i = 0; i < sep; i++) {
-            if (!Character.isDigit(rest.charAt(i))) {
-                return "";
-            }
-        }
-        if (rest.charAt(sep + 1) != ' ') {
-            return "";
-        }
-        String tail = rest.substring(sep + 2).trim();
-        if (tail.isEmpty()) {
-            return "";
-        }
-        try {
-            int number = Integer.parseInt(rest.substring(0, sep));
-            return Math.max(1, number + 1) + String.valueOf(delimiter) + " ";
-        } catch (NumberFormatException ignored) {
-            return "";
-        }
-    }
-
-    private boolean isInsideMarkdownFence(int lineIndex) {
-        String activeFence = null;
-        for (int i = 0; i <= lineIndex; i++) {
-            String line = lines.apply(i);
-            String fence = fenceMarker(line);
-            if (fence == null) {
-                continue;
-            }
-            if (activeFence == null) {
-                activeFence = fence;
-                continue;
-            }
-            if (activeFence.charAt(0) == fence.charAt(0) && fence.length() >= activeFence.length()
-                && line.stripLeading().substring(fence.length()).isBlank()) {
-                activeFence = null;
-            }
-        }
-        return activeFence != null;
-    }
-
-    private static String fenceMarker(String line) {
-        if (line == null || line.length() < 3) {
-            return null;
-        }
-        int start = 0;
-        while (start < line.length() && start < 3 && line.charAt(start) == ' ') {
-            start++;
-        }
-        if (start >= line.length()) {
-            return null;
-        }
-        char ch = line.charAt(start);
-        if (ch != '`' && ch != '~') {
-            return null;
-        }
-        int count = 1;
-        while (start + count < line.length() && line.charAt(start + count) == ch) {
-            count++;
-        }
-        if (count < 3) {
-            return null;
-        }
-        return String.valueOf(ch).repeat(count);
+        String continuation = marker + rest.substring(markerEnd, contentStart);
+        return taskEnd < 0 ? continuation : continuation + "[ ]" + rest.substring(taskEnd, textStart);
     }
 
     private static int leadingIndentLength(String line) {
-        int i = 0;
+        return skipIndent(line, 0);
+    }
+
+    private static int skipIndent(String line, int start) {
+        int i = start;
         while (i < line.length()) {
             char ch = line.charAt(i);
             if (ch != ' ' && ch != '\t') {

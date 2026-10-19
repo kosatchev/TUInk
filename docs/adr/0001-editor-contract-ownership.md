@@ -21,6 +21,13 @@ paths with subtly different revision and range semantics.
 - `CommandId`, `CommandInvocation`, `CommandDescriptor`, and argument schemas;
 - `DocumentId`, `DocumentSnapshot`, `TextPosition`, `TextRange`, `TextEdit`, and
   `WorkspaceEdit`.
+- `LanguageId` and `LanguageRegistry`, the JDK-only filename/extension identity
+  shared by editing and highlighting. The registry owns aliases, including
+  Python stubs/windowed scripts, Markdown aliases and C++ source/header suffixes.
+  Indentation, comments, lexical scanning and colors remain consumer policies.
+
+`core` depends on `editor-contract` only for the neutral language identity;
+highlighters use the same registry without depending on mutable core classes.
 
 `editor-session` owns the reusable command registry and document execution
 boundary: workspace edit validation, revision gates, and external-event ingress.

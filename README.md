@@ -48,9 +48,8 @@ automatically downloads a Java 25 toolchain when needed.
 The packaged JVM ZIP runs on Java 25 or newer. See the
 [setup and transfer guide in Russian](docs/setup-ru.md) for a new computer.
 
-On Linux, saving existing files also requires the `acl` package
-(`getfacl` and `setfacl`), for both JVM and native distributions. The Debian
-package installs this dependency automatically.
+Linux access ACLs are preserved directly through libc in both JVM and native
+distributions; the `acl` package and a separate `libacl` library are not required.
 
 ```bash
 ./gradlew --console=plain :app:run
@@ -59,8 +58,14 @@ package installs this dependency automatically.
 Open a file directly:
 
 ```bash
-./gradlew --console=plain :app:run -PappArgs="README.md"
+./gradlew --console=plain :app:run --args="README.md"
 ```
+
+For a filename containing spaces, quote it inside Gradle's argument string:
+`./gradlew --console=plain :app:run --args='"my notes.txt"'`.
+
+Use `--` before a filename that starts with a dash, for example `tuink -- --notes.md`.
+Arguments after `--` are treated as filenames, including names matching CLI options.
 
 Run `./gradlew buildHelp` for the complete local build command reference.
 
@@ -94,10 +99,22 @@ Run `./gradlew buildHelp` for the complete local build command reference.
 - switchable line/word wrapping, auto-indent, autopairs, and automatic lists;
 - two gutter-diff layers: `saved -> current` and `open -> current`.
 
+Extremely long combining sequences are displayed as replacement glyphs while
+the original text remains available for editing, copying, and saving.
+
+Markdown list continuation and termination respect indented code blocks and
+code fences, including fences nested in list items.
+List markers accept spaces or tabs; continuation preserves their padding and
+resets task checkboxes for `-`, `*`, `+`, and numbered lists.
+
 For heavily changed documents, gutter markers can use a broader changed range
 to keep editing responsive; unchanged lines inside that range may also be marked.
 
 ### File safety
+
+Opening a file is limited to 64 MiB and may have a lower limit when available
+heap memory is small or the file contains many lines. An oversized file reports
+an error without changing open documents. Reads remain bounded if the file grows.
 
 - Save As validation and overwrite confirmation;
 - explicit handling of read-only files and dirty tabs;
@@ -117,6 +134,19 @@ conflict. Use Save As with a different name to keep both versions, or reopen
 the file. This check also applies to recovered documents. Locks coordinate
 TUInk instances of the same user across configuration profiles. Other editors
 do not use these locks: a change after the final check can still be overwritten.
+Before assigning a new filename, Save As checks open documents. A target belonging
+to another tab must be saved from that tab or replaced with a different name. This
+includes physical file aliases and filenames reserved by unsaved named documents.
+Generated copy and numbered names fit a 255-byte filename budget, shortening the
+base name before checking availability. Names entered manually remain exact.
+
+If an edit cannot be encoded in the original charset, saving offers **Save as
+UTF-8** with Cancel selected initially. The explicit conversion writes UTF-8
+without a BOM and preserves existing line endings. It becomes a separate undo
+step after a successful save; earlier text edits remain in history.
+UTF-16LE files starting with NUL can share the exact bytes of UTF-32LE files.
+For ambiguous input, choose Open UTF-16LE in the picker or pass
+`--open-as-utf16le` for that file. UTF-32 editing is not supported.
 
 Existing-file saves copy supported filesystem attributes to the staged file
 before replacing the original. If those attributes cannot be preserved, saving
@@ -128,9 +158,32 @@ Where the filesystem exposes Unix mode bits, saves also preserve `setuid`,
 verified before replacement; a filesystem that clears a required bit causes
 the save to fail while retaining the original.
 
-Linux access ACLs are copied with their named entries and exact mask, then
-verified before replacement. If the ACL tools are unavailable or fail, saving
-reports an error and retains the original file.
+Linux access ACLs are copied with their named entries and exact mask. If the
+original has no extended access ACL, any ACL inherited by the staged file is
+removed. The ACL and mode are verified before replacement; a failure reports
+an error and retains the original file.
+Saving and recovery retain the original bytes of Unix filenames, including
+names which cannot be represented as UTF-8 text.
+To open those names, use the file picker or pass an ASCII percent-encoded URI,
+such as `tuink --file-uri='file:///path/legacy-%FF.txt'`. Ordinary command-line
+paths containing `�` are rejected because the JVM may have already replaced
+undecodable filename bytes with that character. This also applies to a literal
+`�` in a filename; the file picker and encoded URI keep its identity exact.
+The picker, tab titles and file confirmations use an escaped `file:` label when
+native filename bytes or nonprinting characters cannot be displayed literally.
+For example, `file:a%FF.txt` and `file:a%FE.txt` identify different native names;
+an ordinary filename `a%FF.txt` remains literal. These short labels are for display;
+Save As uses the complete absolute file URI. Encoded names must fit in an overwrite
+confirmation before its action is available; enlarge the window when requested.
+
+Syntax highlighting uses bounded scanning and output budgets. Long lines or
+unavailable lexical context may be displayed as plain text so that highlighting
+does not prevent opening and navigating the document.
+Lexical nesting, continuation state and returned ranges also have fixed limits.
+Exceeding a limit leaves the unknown region plain and suppresses uncertain bracket
+errors rather than treating an incomplete scan as a complete document.
+Resumable lexical context is completed in subsequent frames, including while
+the editor is idle, when another bounded scan can retain useful progress.
 
 ## Controls
 
@@ -156,6 +209,9 @@ reports an error and retains the original file.
 | `F6` / `Alt+H` | Open the Help menu |
 | Arrows / Page Up / Page Down / Home / End | Navigate the document |
 | `Shift` + Arrow keys | Extend the selection |
+| `Shift+Home` / `Shift+End` | Select to the line start / end, respecting Smart Home/End |
+| `Ctrl+Home` / `Ctrl+End` | Move to the document start / end |
+| `Ctrl+Shift+Home` / `Ctrl+Shift+End` | Select to the document start / end |
 | `Ctrl+Left` / `Alt+B` | Move to the previous word |
 | `Ctrl+Right` / `Alt+F` | Move to the next word |
 | `Enter` / `Tab` | Insert a newline / tab |
@@ -166,9 +222,15 @@ desktop passes them through. For example, some terminals cannot distinguish
 `Ctrl+Shift+S` from `Ctrl+S`, or `Ctrl+Tab` from `Tab`. Use another listed
 shortcut when a combination is unavailable.
 
+A standalone `Esc` can take up to half a second to act while TUInk waits for a
+possible terminal key sequence. Unambiguous key sequences, including Alt
+shortcuts, are handled immediately.
+
 Mouse controls include click-to-position, drag selection, Shift+Click
 selection from the previous cursor position, wheel scrolling, tab and menu
 activation, scrollbar interaction, and file-picker navigation.
+Holding a dragged pointer at an editor edge continues scrolling the selection
+until the button is released or the gesture is cancelled.
 
 Saving and copying preserve a manually scrolled document viewport. Each tab
 remembers its own viewing position; navigation and editing resume following
@@ -182,11 +244,15 @@ rows; Shift+Up/Down extend the selection by displayed rows. A fully filled
 final wrap segment has an extra empty row for the cursor after the text.
 
 Without a selection, `Ctrl+C` copies the current line and `Ctrl+X` cuts it.
+On an empty final line both operations do nothing and preserve the clipboard;
+empty lines with a line ending are still copied or cut.
 Close a tab through Tab > Close Tab.
 
 With the search panel focused, use `Ctrl+F` for the next match, `Ctrl+G` for the previous
-match and `Ctrl+R` to replace. Activate the All button to replace all matches
+match and `Ctrl+R` to replace. Activate the `Replace all` button to replace all matches
 in the active tab.
+The `All tabs` option extends matching and next/previous navigation to all open tabs.
+`Replace` and `Replace all` change the active tab.
 `Enter` advances to the next match from a text field. Enter or Space activates
 the focused button, including option toggles. `Tab` and
 `Shift+Tab` cycle through fields, options, buttons, and the document; `Esc`
@@ -194,6 +260,12 @@ closes search. Clicking a search control or the document also moves focus.
 With the document focused, ordinary editing and `Ctrl+Z` / `Ctrl+Y` work
 while search stays open; `Tab` continues to move focus. Undo and redo are
 ignored throughout the search panel. `Ctrl+F` returns focus to Find.
+After `Replace all`, close search with `Esc` before using `Ctrl+Z` to undo it.
+Single and bulk replacements check the proposed result against available memory before
+changing text or history. If the result is too large, the editor reports an error;
+reduce the number of matches or shorten the replacement and try again.
+Pasting uses the same admission policy and preserves the selection, text, and
+undo history when there is insufficient memory.
 
 With Find or Replace focused, Left/Right and Home/End move within the field;
 `Ctrl+Left/Right` or `Alt+B/F` move by word. Hold Shift to select text, or use
@@ -202,11 +274,18 @@ cuts it; without a selection both leave the field and clipboard unchanged.
 Dragging the mouse selects field text; Shift+Click extends the selection.
 Typing and `Ctrl+V` replace selected text, joining pasted lines with spaces.
 Pasting into Find, Replace, or Save As preserves tabs.
+Field edits prepare their value and layout before applying the change. Input
+that exceeds available memory is refused with a message, preserving the field.
+For a Unix filename that cannot be represented as UTF-8, Save As shows an ASCII
+`file:` URI with percent escapes. Leaving that value unchanged retains the
+original path; ordinary filenames continue to use normal path text.
 `Ctrl+Backspace/Delete` delete by word. Up/Down stay in the single-line field;
 use `Tab` / `Shift+Tab` or a click to move focus. Page Up/Page Down and the mouse
 wheel scroll the document while preserving its caret, selection, and field focus.
 These field shortcuts leave the document text unchanged.
 `Ctrl+C` / `Ctrl+X` / `Ctrl+V` are ignored when a button or search option is focused.
+In narrow terminals, button groups are hidden first to keep the fields editable.
+Replacement commands are unavailable while either field is hidden or clipped.
 
 Save As and confirmation prompts include the document in their `Tab` /
 `Shift+Tab` focus cycle. While either is open, the document allows navigation,
@@ -217,7 +296,8 @@ and uses the same field clipboard behavior as Find and Replace.
 Its focus order is filename, Save, Cancel, then document. `Enter` in the filename
 field saves; `Enter` or Space activates a focused button. Cancel closes the prompt
 without saving, just like `Esc`. Buttons are hidden in narrow terminals when there
-is not enough room to retain an editable filename field; `Enter` and `Esc` still work.
+is not enough room to retain an editable filename field. Saving requires room for
+a filename glyph and its caret; enlarge the terminal when prompted. `Esc` still cancels.
 A failed save keeps the prompt open and returns focus to the filename. Its error
 stays visible until the filename changes or the prompt closes. Submitting an empty
 filename shows an error and preserves any pending quit or close-tab operation.
@@ -239,9 +319,11 @@ Backspace because the two keys send the same byte.
 In confirmation prompts, `Tab` / `Shift+Tab` cycle through buttons and the
 document. With a button focused, Left/Right move between buttons, and `Enter`
 or Space activates the focused button. With the prompt focused, `Y` confirms
-overwriting, discards edits in quit/close-tab confirmation, and restores
+overwriting, saves edits in quit/close-tab confirmation, and restores
 recovery snapshots. `N` cancels overwrite, quit, or close-tab confirmation;
-in recovery it discards and deletes the offered snapshots.
+in recovery it chooses Later and keeps the offered snapshots for the next launch.
+The recovery prompt starts with Later focused. Only explicitly activating Delete
+removes the offered snapshots.
 
 `Ctrl+Q` has the following context-specific actions:
 
@@ -250,11 +332,15 @@ in recovery it discards and deletes the offered snapshots.
 | Save As | Cancel Save As |
 | Overwrite confirmation | Cancel the save |
 | Close-tab confirmation | Cancel closing the tab |
-| Quit confirmation | Discard unsaved edits and exit |
-| Recovery confirmation | Discard and delete the offered recovery snapshots |
+| Quit confirmation | Cancel quitting and keep unsaved edits |
+| Recovery confirmation | Postpone recovery and keep the snapshots for the next launch |
 
 `Esc` cancels Save As and overwrite, close-tab, or quit confirmation. In the
-recovery prompt, `Esc` also discards and deletes the offered snapshots.
+recovery prompt, `Esc` chooses Later and keeps the offered snapshots, including
+when the terminal is too small to show the question and buttons. They remain
+available after a normal quit and are offered again on the next launch.
+Choosing Later also releases their ownership immediately, so another editor
+instance can offer them while the current instance remains open.
 
 Open Help > Keyboard hints for the complete in-app reference. Use Up/Down,
 Page Up/Page Down, Home/End, or the mouse wheel over the dialog to scroll help.
@@ -304,29 +390,56 @@ Usage: tuink [options] [file]
   --no-color       Render without ANSI colors
   --theme=<name>   Select blue, cyan (default), or light
   --read           Start in reading mode
+  --open-as-utf16le Interpret the selected BOM-marked file as UTF-16LE
   --profile        Log render timings
   --profile-file=<path>
                    Write render timings to a new file
+  --file-uri=<uri> Open an ASCII percent-encoded absolute file URI
   --help, -h       Show command-line help
 ```
 
 Help exits with status `0`. Invalid command-line arguments exit with status `2`
 and write diagnostics to standard error.
 
-UI settings are stored in `~/.config/tuink/tuink.properties`. The `--read`,
+UI settings are stored in `$XDG_CONFIG_HOME/tuink/tuink.properties`, defaulting
+to `~/.config/tuink/tuink.properties` when the variable is unset, empty, or
+relative. The selected profile also holds recovery data; TUInk does not read
+another profile as a fallback. If the selected `XDG_CONFIG_HOME` or fallback
+`user.home` contains `U+FFFD`, startup stops with a diagnostic: Java may have lost
+the original Unix filename bytes. This also conservatively rejects a literal
+`U+FFFD` in that directory name. Set `XDG_CONFIG_HOME` to an unambiguous absolute
+directory to start; no other profile is selected automatically. The `--read`,
 `--no-mouse`, and `--theme` options apply only to the current session. Explicit
 changes through the menus or their key bindings are saved as preferences.
-Recovery data is
-stored under `~/.config/tuink/recovery`; on POSIX systems the directory uses
+If the settings file changes during the session, including edits saved from
+TUInk itself, the changed file is kept and the application warns on exit that
+this session's menu preferences were not saved.
+Concurrent TUInk instances coordinate document and settings writes with persistent
+locks in `~/.local/state/tuink/save-locks-v1`, independently of configuration profiles.
+The lock covers the physical directory entry, including symbolic-link aliases,
+and the final baseline check and replacement. A busy or unavailable lock leaves
+the draft unsaved and preserves the target. Lock files stay in place to retain
+one shared lock inode; they are not created inside edited projects.
+This coordination applies to cooperating TUInk processes for the same user on
+one host. Other editors do not acquire these locks and can still race a save.
+If the settings file is a symbolic link, saving updates its existing regular-file
+target and preserves the link.
+Recovery data is stored in the selected profile's `tuink/recovery` directory
+(`~/.config/tuink/recovery` by default); on POSIX systems the directory uses
 `0700` permissions and snapshot files use `0600`.
 Active recovery snapshots are isolated between editor instances. If input ends
 or the editor is interrupted, its snapshots remain available for recovery on
 the next start.
+Autosave writes run serially in the background with at most one snapshot in
+flight. Shutdown waits for that write before final recovery saves or cleanup.
+Startup lists snapshots before reading their text. Restore preserves files already
+opened in the session; a snapshot that exceeds available memory stays on disk and
+can be postponed or explicitly deleted.
 
 <details>
 <summary>Supported syntax-highlighting formats</summary>
 
-TUInk detects syntax by extension for Java, C headers/sources, Arduino, Python, Markdown,
+TUInk detects syntax by extension for Java, C/C++ headers/sources, Arduino, Python, Markdown,
 JavaScript, TypeScript, Gradle, shell scripts, SQL, Go, Rust, PHP, Ruby, Perl,
 Kotlin, Protocol Buffers, HTML, CSS/SCSS, diff/patch, CSV, JSON, YAML, TOML,
 INI/properties, and XML.
@@ -377,6 +490,7 @@ outside those reusable modules.
 - [Перенос на другой компьютер, сборка и запуск (русский)](docs/setup-ru.md)
 - [Build, test, and native targets](docs/building.md)
 - [Release archives and Debian packaging](docs/packaging.md)
+- [Unreleased changes](docs/releases/unreleased.md)
 - [Architecture roadmap](docs/architecture-roadmap.md)
 - [Architecture decisions](docs/adr/)
 - [Compatibility policy](docs/compatibility.md)

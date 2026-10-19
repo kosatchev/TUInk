@@ -54,6 +54,23 @@ tab, and menu commands remain unavailable from a document behind a blocking
 or exclusive operation. Escape and the existing per-dialog Ctrl+Q actions
 continue through the dialog's cancellation policy.
 
+Quit and close-tab confirmations map `Y` to Save and `N`, Escape, or Ctrl+Q
+to Cancel. Discard requires explicitly activating its button. These choices
+use the existing save continuations, including Save As and multi-tab saves.
+
+Recovery offers Restore, Delete, and Later, with Later initially focused.
+`N`, Escape, and Ctrl+Q choose Later, even when the terminal is too small to
+show the question. Postponing recovery keeps the startup snapshots on disk
+through a later normal quit; the recovery store releases their claims immediately,
+so another instance can offer them without waiting for this editor to close.
+Only explicitly activating Delete
+removes the offered snapshots. Restore and Delete remain unavailable while
+their question or controls are clipped.
+
+Search reserves room for its fields before showing option and action groups.
+Replacement requires both field placements to remain visible; the window checks
+the same condition before physical or semantic replacement commands execute.
+
 `TextField` owns its text, selection gesture data, and horizontal viewport.
 Cancelling capture preserves the viewing position; Copy and other actions that
 leave the text and caret unchanged must not scroll the field. A shared TUIframe
@@ -71,6 +88,11 @@ the stable surface/scope/target address. TUInk's `WindowPointerCapture` supplies
 an ephemeral current-input frame containing typed bindings and result adopters;
 it does not retain placements or callbacks between frames. One delivery path
 serves search, Save As, help, menus, the file tree, and the document adapter.
+
+`MenuBar` allows activation only when the complete item label fits in the
+current popup. Enter, pointer, ordinal, and mnemonic routes share that check;
+clipped labels use the disabled style. Navigation and Escape remain available,
+and resizing recalculates whether an item can be activated.
 
 Cancellation runs while the owner binding still exists and adopts its ordinary
 widget output. An immutable placement is rebuilt after cancellation before
@@ -92,10 +114,20 @@ own text field. Its controls are the filename field, Save, and Cancel, followed
 by the document stop. Enter in the field and activation of Save share the save
 flow, including validation and overwrite confirmation; Cancel uses the existing
 Escape cancellation. Buttons that cannot fit beside an editable field are
-hidden and excluded from traversal. Help and the file picker are exclusive: Tab traversal stays
+hidden and excluded from traversal. Saving requires a fully visible filename
+viewport with room for a wide glyph and its caret; all submit routes share
+that condition. Cancellation remains available when the field is clipped.
+Help and the file picker are exclusive: Tab traversal stays
 inside the dialog, and document input is rejected. A document caret covered
 by a dialog is hidden; a document completely covered by the dialog is skipped
 during focus traversal even when its mode permits content focus.
+
+File identities use one application presentation policy across the picker,
+tabs, menus and confirmation questions. If native bytes or terminal sanitization
+make a literal ambiguous, the display uses a marked, percent-encoded label.
+Clipping respects encoded tokens. A destructive action on an encoded name is
+available only when its complete basename is visible; otherwise the existing
+resize prompt applies. Presentation labels never determine the persistence path.
 
 ## Consequences
 

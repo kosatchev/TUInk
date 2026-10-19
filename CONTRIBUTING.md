@@ -60,7 +60,11 @@ Prefer small, typed state transitions over boolean flag combinations. Keep parsi
 
 ## Compatibility and persistence
 
-TUInk targets only the current release contract. Do not introduce migrations, historical readers, deprecated aliases, or old-path fallbacks. See the [Compatibility policy](docs/compatibility.md).
+TUInk targets the current release contract. The documented recovery reader for
+exact snapshot schemas 5 through 8 is an explicit exception that protects
+unfinished drafts; writers use only the current format. Outside that exception,
+do not introduce migrations, historical readers, deprecated aliases, or old-path
+fallbacks. See the [Compatibility policy](docs/compatibility.md).
 
 Every persisted schema change must update:
 

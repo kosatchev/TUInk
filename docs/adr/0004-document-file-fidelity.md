@@ -30,11 +30,36 @@ along with the resolved target path. Normal save and Save As to the current file
 reject changed, removed, retargeted, or unverifiable files before committing.
 Recovery retains this disk baseline separately from the edited document text.
 Save As to a different path remains the way to preserve both versions.
+Every save also resolves its target before staging and again before commit.
+If a symbolic link redirects the path to a different target during staging,
+the save fails without publishing the staged bytes or marking the document saved.
 Malformed BOM-declared input and text not representable in the retained charset
 fail explicitly; encoding never substitutes replacement characters silently.
 BOM-less UTF-16 is intentionally not auto-detected: UTF-16 input must declare
 its byte order with a BOM, avoiding heuristic corruption of arbitrary byte data.
 Explicit UTF-16LE/BE output therefore always writes the matching BOM.
+UTF-32 signatures are checked against the complete stream length and scalar
+values. A UTF-16LE file beginning with NUL remains readable when its bytes cannot
+form UTF-32. When both interpretations are valid, opening requires an explicit
+UTF-16LE choice in the picker or `--open-as-utf16le` for that command-line file.
+The choice never changes detection for other requests. UTF-32 itself remains
+unsupported and must be converted before opening.
+
+Unrepresentable edits offer an explicit Save as UTF-8 flow, with Cancel selected
+initially. It writes UTF-8 without BOM and retains each existing line separator.
+Successful conversion adds one format-only undo step before the savepoint;
+undo restores the old charset/BOM and marks the document dirty, while retaining
+earlier text history. Failed writes and cancellation change neither format nor
+history. Recovery observes format and file/savepoint changes as well as text.
+
+Documents and preferences share a fail-fast per-user save guard in
+`~/.local/state/tuink/save-locks-v1`, independent of configuration profiles.
+The key represents the canonical directory entry rather than its replaceable
+inode. Baseline, destination and current attributes are rechecked while holding
+the guard through publication. Symlink aliases share a guard; distinct hard-link
+entries remain distinct because atomic replacement already separates them.
+Persistent lock files are never unlinked during normal operation. This serializes
+cooperating TUInk writers on one host, not foreign applications or users.
 
 Existing-file replacement stages POSIX permissions and ownership, user-defined
 extended attributes, and ACLs exposed by the filesystem provider before commit.
@@ -42,11 +67,14 @@ Failure to read or apply supported attributes leaves the original file intact.
 Providers exposing `unix:mode` also preserve `setuid`, `setgid`, and `sticky`
 after content and ownership changes. The staged mode is verified; restoring
 special bits must retain the access ACL's exact mask and named entries.
-On the default Linux filesystem provider, the `acl` package's `getfacl` and
-`setfacl` preserve POSIX access ACLs that Java's ACL view does not expose. The
-full ACL supplies permissions and replaces any inherited staged ACL in one operation;
-its entries and mask must match the source before replacement. Missing or failed
-tools abort the save while retaining the original.
+On the default Linux filesystem provider, libc's extended-attribute functions
+preserve `system.posix_acl_access`, which Java's ACL view does not expose.
+JVM runs use Java 25's Foreign Function and Memory API, and native builds link
+the libc calls at build time. No external ACL utility or `libacl` is required.
+The full ACL replaces any inherited staged ACL; when the source has no extended
+access ACL, the staged ACL is removed. Its entries, mask and the restored Unix
+mode must match the source before replacement. Failed calls or verification
+abort the save while retaining the original.
 This does not promise preservation of security labels or other attributes not
 exposed by those Java views. Other hard links keep their original inode and
 contents after atomic replacement.

@@ -48,7 +48,32 @@ TUInk связывает разные типы scopes через `WindowPointerC
 model, metadata worker, selection/viewport state и open/save/search/recovery
 flows. `FrameComposition` объединяет geometry и placements одного кадра;
 заимствованные mutable editor references используются только в синхронном
-render на owner thread.
+render на owner thread. Полные placements файлового диалога и справки готовятся
+до рисования и используются input, focus, pointer capture, cursor и paint.
+При изменении состояния или размеров готовится новая проекция; paint не
+пересчитывает layout и не принимает новое состояние прокрутки. Последний
+видимый help viewport сохраняет anchor при временном переходе в compact mode.
+
+Прикладной поиск исполняет `SearchCommandHandler` с узким контекстом документа
+и вкладок. Его результат различает число совпадений и изменение документа;
+окно применяет viewport и notification effects. `SearchSelection` разделяет
+ограниченную автоподстановку Ctrl+F, автоматическую подсветку и точную проверку
+текущего совпадения. `SearchPresentation` владеет count/tab-marker caches;
+ключи учитывают identity модели и revision. Поля и focus остаются у окна.
+Literal-поиск в `SearchMatcher` использует KMP по Unicode code points:
+подготовка запроса и проход строки линейны, результаты сохраняют исходные
+UTF-16 offsets. Case-insensitive режим сравнивает code points после
+`Character.toLowerCase(Character.toUpperCase(cp))`, без нормализации текста
+и многосимвольных замен.
+
+`SaveWorkflow` выполняет save/Save As/overwrite/quit/close transitions через
+существующие `UiModalState`, `SaveContinuation` и `SaveAsSuggestionStore`.
+`SaveFlowController` проверяет submit, `SaveTargetPolicy` задаёт прикладные
+предложения пути и сообщения. Window применяет результат в одном месте и
+обновляет highlighter сохранённой вкладки до смены активной вкладки.
+`FilePickerOpenWorkflow` возвращает документ только после успешного
+`openExisting`; окно создаёт его представление и активирует вкладку.
+Обычный CLI open по-прежнему допускает создание нового документа.
 
 `core` сохраняет terminal-neutral layout port. `render` реализует его через
 `TerminalEditorTextLayout`; один adapter/cache на attached view используется editing,
@@ -58,6 +83,42 @@ layout и render planning. Editor-specific `EditorLayout`, `RenderPlan` и
 `EditorViewCoordinates` объединяет hit testing, переносы, EOF и resize anchors;
 `EditorViewNavigation` владеет предпочтительной визуальной колонкой и использует
 логические navigation targets движка.
+`TerminalTextLayoutCache` удерживает компактные индексы числа visual rows для
+четырёх вариантов переноса; списки offsets создаются по запросу и вытесняются
+по общему бюджету числа записей и offsets. Построение индекса не заполняет
+кэш раскладками всех невидимых строк документа. Подсчёт rows и получение
+offsets используют один обход `TerminalLineLayout`; подсчёт не создаёт список
+offsets для каждой строки.
+
+`IndentationDecisions` и `MarkdownListDecisions` вычисляют typing assists через
+read-only доступ к строкам и необходимые настройки/проекции колонок. Они не
+владеют mutable document или view state. Engine сохраняет фазы вызова правил,
+применение правок, cursor/selection и Undo grouping; literal paste проходит
+отдельным путём. Контекст Markdown различает списки, отступные блоки кода и
+fences внутри списков. Контекст запрашивается только для подходящего маркера
+списка. Engine хранит ограниченный набор контрольных точек разбора и состояние
+перед последней запрошенной строкой. Первый дальний запрос последовательно
+разбирает префикс без сохранения объекта для каждой строки; последующие запросы
+используют ближайшее действительное состояние. Правки сбрасывают состояния
+после первой изменённой строки, замена документа сбрасывает весь кэш.
+Markdown использует табстопы через четыре колонки независимо
+от настройки ширины табуляции для отображения. Ограничения lookback для эвристик
+отступов и консервативные отказы сохранены.
+В `highlight-regex` один разбор границ fenced blocks обслуживает подсветку и
+ограниченный lexical scanner, включая fences внутри списков. Разбор остаётся
+владением highlighter и не добавляет зависимость production-кода от `core`.
+
+Законченную локальную замену текста выполняет `TextModel.replaceRange`.
+Внутренний immutable `ReplacementDelta` содержит текстовую операцию и только
+затронутые соседние EOL slices. Engine хранит эти deltas в компактной истории;
+модель проверяет ожидаемые текст и разделители до replay и точно восстанавливает
+их при Undo/Redo. Нормализация EOL выполняется после полной замены и остаётся
+внутренним делом модели. Bulk edits сохраняют отдельный snapshot path.
+Массовая замена последовательно получает диапазоны от `SearchMatcher` и собирает
+результат без списка объектов на каждое совпадение; весь результат применяется
+одним шагом истории. Совпадения с идентичной заменой учитываются в счётчике,
+но не меняют документ, savepoint и историю. Структурные изменения строк
+сохраняют прежнюю стоимость immutable metadata.
 
 `EditorDocumentSession` владеет общим `EditorDocument`, публикует immutable
 `DocumentSnapshot` и принимает revision-guarded `WorkspaceEdit`. У документа
@@ -239,6 +300,11 @@ alpha и появления независимого consumer.
 Текущие команды тестирования и dependency checks приведены в
 [руководстве по сборке](building.md); методика измерения render path — в
 [руководстве по profiling](profiling.md).
+
+`EditingWorkflowArchitectureTest` запрещает typing rules зависеть от mutable
+model/engine/view owners, а прикладным workflows — от `TerminalEditorApp` и
+контролов TUIframe. Поведение проверяется через существующие engine/window
+регрессии, контракты обратимых замен с mixed EOL и PTY-сценарии.
 
 По мере появления consumers и plugin host проверки должны охватывать:
 

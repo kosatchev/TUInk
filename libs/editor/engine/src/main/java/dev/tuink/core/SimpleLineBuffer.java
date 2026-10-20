@@ -1,16 +1,18 @@
 package dev.tuink.core;
 
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Simple list-based text storage.
  */
 public class SimpleLineBuffer implements TextBuffer {
-    private final List<String> lines = new ArrayList<>();
+    private String[] lines = new String[10];
+    private int size = 1;
 
     public SimpleLineBuffer() {
-        lines.add("");
+        lines[0] = "";
     }
 
     @Override
@@ -20,42 +22,86 @@ public class SimpleLineBuffer implements TextBuffer {
 
     @Override
     public int lineCount() {
-        return lines.size();
+        return size;
     }
 
     @Override
     public String getLine(int line) {
-        return lines.get(line);
+        return lines[Objects.checkIndex(line, size)];
     }
 
     @Override
     public void setLine(int line, String text) {
-        lines.set(line, text);
+        lines[Objects.checkIndex(line, size)] = text;
     }
 
     @Override
     public void insertLine(int index, String text) {
-        lines.add(index, text);
+        Objects.checkFromToIndex(index, index, size);
+        reserveLines(Math.addExact(size, 1));
+        System.arraycopy(lines, index, lines, index + 1, size - index);
+        lines[index] = text;
+        size++;
     }
 
     @Override
     public void insertLines(int index, List<String> text) {
-        lines.addAll(index, text);
+        Objects.checkFromToIndex(index, index, size);
+        String[] inserted = text.toArray(String[]::new);
+        reserveLines(Math.addExact(size, inserted.length));
+        replacePreparedLines(index, 0, inserted);
     }
 
     @Override
     public String removeLine(int index) {
-        return lines.remove(index);
+        String removed = getLine(index);
+        System.arraycopy(lines, index + 1, lines, index, size - index - 1);
+        lines[--size] = null;
+        return removed;
     }
 
     @Override
     public void removeLines(int fromIndex, int toIndex) {
-        lines.subList(fromIndex, toIndex).clear();
+        Objects.checkFromToIndex(fromIndex, toIndex, size);
+        int remaining = size - toIndex;
+        System.arraycopy(lines, toIndex, lines, fromIndex, remaining);
+        int nextSize = size - (toIndex - fromIndex);
+        Arrays.fill(lines, nextSize, size, null);
+        size = nextSize;
     }
 
     @Override
     public void clear() {
-        lines.clear();
-        lines.add("");
+        Arrays.fill(lines, 0, size, null);
+        lines[0] = "";
+        size = 1;
+    }
+
+    /** Reserves a local edit's peak capacity before any document text is published. */
+    protected void reserveLines(int required) {
+        if (required > Integer.MAX_VALUE - 8) throw new OutOfMemoryError("Too many document lines");
+        if (required > lines.length) {
+            lines = Arrays.copyOf(lines, (int) additionalCapacity(required));
+        }
+    }
+
+    long additionalCapacity(int required) {
+        return required <= lines.length ? 0
+            : Math.min(Integer.MAX_VALUE - 8L, Math.max(required, lines.length + (long) lines.length / 2));
+    }
+
+    /**
+     * Subclasses with their own storage or mutation hooks use an independent sibling.
+     * A subclass may opt in only when publishing the inherited storage directly is safe.
+     */
+    protected boolean supportsPreparedPublication() { return getClass() == SimpleLineBuffer.class; }
+
+    /** All ranges, strings and capacity were checked during preparation; this cannot allocate. */
+    final void replacePreparedLines(int index, int removed, String[] inserted) {
+        int nextSize = size - removed + inserted.length;
+        System.arraycopy(lines, index + removed, lines, index + inserted.length, size - index - removed);
+        System.arraycopy(inserted, 0, lines, index, inserted.length);
+        if (nextSize < size) Arrays.fill(lines, nextSize, size, null);
+        size = nextSize;
     }
 }

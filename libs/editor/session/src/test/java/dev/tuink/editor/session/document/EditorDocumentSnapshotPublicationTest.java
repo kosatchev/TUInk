@@ -132,6 +132,11 @@ class EditorDocumentSnapshotPublicationTest {
         }
 
         @Override
+        protected boolean supportsPreparedPublication() {
+            return true;
+        }
+
+        @Override
         public int lineCount() {
             reads.observeAccess();
             return super.lineCount();

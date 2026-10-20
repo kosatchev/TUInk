@@ -44,6 +44,18 @@ public class EditorState {
         return view.navigationRevision;
     }
 
+    /** Restores a rejected speculative command without allocating or advancing navigation. */
+    void restoreEditState(EditorViewMemento before, long navigation) {
+        view.cursor = before.cursor();
+        view.selectionAnchor = before.selectionAnchor();
+        ViewportState viewport = before.viewport();
+        view.topLine = viewport.topLine();
+        view.topWrapSegment = viewport.topWrapSegment();
+        view.leftColumn = viewport.leftColumn();
+        view.leftVisualColumn = viewport.leftVisualColumn();
+        view.navigationRevision = navigation;
+    }
+
     public Position getCursor() {
         return view.cursor;
     }

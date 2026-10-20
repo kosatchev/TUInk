@@ -60,6 +60,47 @@ public class TextModel {
     private FileBaseline fileBaseline;
     private final FileBaseline.InputOpener baselineInput;
     private EditorDocument documentOwner;
+    private LocalEdit localEdit;
+
+    /** Isolates a keyboard command without copying untouched document lines. */
+    LocalEdit beginLocalEdit() {
+        if (localEdit != null) throw new IllegalStateException("A local edit is already active");
+        LocalEdit prepared = new LocalEdit();
+        localEdit = prepared;
+        buffer = prepared.staged;
+        return prepared;
+    }
+
+    final class LocalEdit {
+        private final TextBuffer source = buffer;
+        private final LocalEditBuffer staged = new LocalEditBuffer(source);
+        private final DocumentFileMetadata metadataBefore = fileMetadata;
+        private final long revisionBefore = revision;
+        private final long epochBefore = contentEpoch;
+        private final long replacementRevisionBefore = lastContentReplacementRevision;
+        private final int[] changedBefore = firstChangedLines.clone();
+        private final LineChange[] changesBefore = lineChanges.clone();
+        private TextBuffer publication;
+
+        void preparePublication() { publication = staged.preparePublication(); }
+
+        void publish() {
+            staged.publishTo(publication);
+            buffer = publication;
+            localEdit = null;
+        }
+
+        void abort() {
+            buffer = source;
+            fileMetadata = metadataBefore;
+            revision = revisionBefore;
+            contentEpoch = epochBefore;
+            lastContentReplacementRevision = replacementRevisionBefore;
+            System.arraycopy(changedBefore, 0, firstChangedLines, 0, CHANGE_HISTORY_CAPACITY);
+            System.arraycopy(changesBefore, 0, lineChanges, 0, CHANGE_HISTORY_CAPACITY);
+            localEdit = null;
+        }
+    }
 
     void claimDocument(EditorDocument owner) {
         if (documentOwner != null && documentOwner != owner) {
@@ -317,8 +358,14 @@ public class TextModel {
             : Math.max(DocumentEditBudget.add(start.col(), replacement.firstEnd()),
                 Math.max(replacement.longestInteriorLine(),
                     insertedUnits - replacement.lastStart() + getLine(end.line()).length() - end.col()));
-        DocumentEditBudget.currentHeap(lineCount())
-            .requireLocalReplacement(copiedUnits, resultLines, changedLines, longestLine);
+        DocumentEditBudget budget = DocumentEditBudget.currentHeap(lineCount());
+        if (localEdit != null && localEdit.staged.supportsLocalPublication()) {
+            budget.requireStagedReplacement(copiedUnits, resultLines, changedLines, longestLine,
+                localEdit.staged.additionalCapacity((int) resultLines),
+                start.line() == end.line() && replacement.lineBreaks() == 0);
+        } else {
+            budget.requireLocalReplacement(copiedUnits, resultLines, changedLines, longestLine);
+        }
     }
 
     /**
@@ -412,6 +459,7 @@ public class TextModel {
         }
         String inserted = text == null ? "" : text.replace("\r\n", "\n").replace('\r', '\n');
         LogicalDocumentLines.requireWellFormedUtf16(inserted);
+        if (localEdit != null) requireReplacementFits(a, b, new ReplacementText(inserted));
         String deleted = getTextRange(a, b);
         EditOp.ReplaceRange operation = EditOp.replace(a, deleted, inserted);
         int firstSeparator = Math.max(0, a.line() - 1);
@@ -419,6 +467,17 @@ public class TextModel {
             return new ReplacementDelta(operation, firstSeparator, List.of(), List.of());
         }
         List<String> before = separatorSlice(firstSeparator, b.line());
+        if (localEdit != null && a.line() == b.line() && inserted.indexOf('\n') < 0) {
+            String source = buffer.getLine(a.line());
+            char[] updated = new char[source.length() - (b.col() - a.col()) + inserted.length()];
+            source.getChars(0, a.col(), updated, 0);
+            inserted.getChars(0, inserted.length(), updated, a.col());
+            source.getChars(b.col(), source.length(), updated, a.col() + inserted.length());
+            buffer.setLine(a.line(), new String(updated));
+            markChanged(a.line());
+            normalizeLineSeparators(a.line(), a.line());
+            return new ReplacementDelta(operation, firstSeparator, before, separatorSlice(firstSeparator, a.line()));
+        }
         Position after = deleteRange(a, b);
         if (!inserted.isEmpty()) {
             after = insertText(after, inserted);

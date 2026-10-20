@@ -30,6 +30,13 @@ final class IndentationContext {
         return revision;
     }
 
+    void reset() {
+        checkpoints.clear();
+        retainedWeight = 0;
+        contentEpoch = Long.MIN_VALUE;
+        revision = -1;
+    }
+
     void synchronize(long epoch, long nextRevision, int firstChangedLine, int count, Path nextFile) {
         LanguageId nextLanguage = LanguageProfiles.language(nextFile);
         if (contentEpoch != epoch || revision > nextRevision || language != nextLanguage) {

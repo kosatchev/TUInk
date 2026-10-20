@@ -28,7 +28,12 @@ final class InputActionDispatcher {
 
     static DispatchResult dispatch(TuinkCommand command, UiSessionState ui, DispatchContext ctx) {
         DocumentInteraction before = DocumentInteraction.capture(ctx.engine());
-        DispatchResult result = execute(command, ui, ctx);
+        DispatchResult result;
+        try {
+            result = execute(command, ui, ctx);
+        } catch (DocumentEditLimitException limit) {
+            result = DispatchResult.handled(limit.getMessage(), StatusLevel.ERROR);
+        }
         return result.handled() && before.changed(ctx.engine())
             && result.viewportPolicy() == CursorPolicy.PRESERVE
             ? result.withViewportPolicy(CursorPolicy.FOLLOW_CURSOR) : result;

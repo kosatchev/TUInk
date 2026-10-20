@@ -1782,7 +1782,12 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             } else {
                 long revisionBefore = model.revision();
                 Position cursorBefore = state.getCursor();
-                engine.insertInput(charInput.text());
+                try {
+                    engine.insertInput(charInput.text());
+                } catch (DocumentEditLimitException limit) {
+                    notification.error(limit.getMessage());
+                    return;
+                }
                 if (revisionBefore != model.revision() || !cursorBefore.equals(state.getCursor())) {
                     viewportController.onEditorTextInteraction();
                 }

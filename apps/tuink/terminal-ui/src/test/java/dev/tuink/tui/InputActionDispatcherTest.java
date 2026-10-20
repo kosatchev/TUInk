@@ -5,8 +5,14 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.core.EditorClipboard;
+import dev.tuink.core.EditorEngine;
+import dev.tuink.core.EditorState;
+import dev.tuink.core.GutterDiffMode;
 import dev.tuink.core.Position;
+import dev.tuink.core.SimpleLineBuffer;
 import dev.tuink.core.TabSession;
+import dev.tuink.core.TextBuffer;
+import dev.tuink.core.TextModel;
 import dev.tuink.render.TerminalEditorTextLayout;
 import dev.tuink.render.EditorViewNavigation;
 import dev.tuink.tui.command.TuinkCommand;
@@ -16,6 +22,57 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 
 class InputActionDispatcherTest {
+    @Test
+    void rejectedKeyboardEditsReportAnErrorAndKeepTheDocumentViewUsable() {
+        for (TuinkCommand command : List.of(TuinkCommand.EDIT_INSERT_TAB, TuinkCommand.EDIT_INSERT_NEWLINE,
+            TuinkCommand.EDIT_BACKSPACE, TuinkCommand.EDIT_DELETE_FORWARD, TuinkCommand.EDIT_CUT)) {
+            AtomicBoolean refuseStorage = new AtomicBoolean();
+            TextModel model = new TextModel(new RefusingBuffer(refuseStorage));
+            model.replaceLines(List.of("first", "second"));
+            EditorState state = new EditorState();
+            EditorEngine engine = new EditorEngine(model, state, new TerminalEditorTextLayout(model));
+            engine.setGutterDiffMode(GutterDiffMode.DISABLED);
+            engine.restoreSelection(new Position(0, 3), new Position(0, 0));
+            var before = state.viewMemento();
+            var metadata = model.fileMetadata();
+            long revision = model.revision();
+            var context = new InputActionDispatcher.DispatchContext(engine, state, null,
+                ignored -> {}, 3, 20, new EditorViewNavigation(engine));
+            refuseStorage.set(true);
+
+            var result = InputActionDispatcher.dispatch(command, new UiSessionState(), context);
+
+            assertTrue(result.handled(), command.name());
+            assertEquals(InputActionDispatcher.StatusLevel.ERROR, result.statusLevel(), command.name());
+            assertTrue(result.statusMessage().contains("available memory"), command.name());
+            assertEquals(CursorPolicy.PRESERVE, result.viewportPolicy(), command.name());
+            assertEquals(List.of("first", "second"), model.snapshotLines(), command.name());
+            assertEquals(before, state.viewMemento(), command.name());
+            assertEquals(metadata, model.fileMetadata(), command.name());
+            assertEquals(revision, model.revision(), command.name());
+            assertFalse(state.isDirty(), command.name());
+            refuseStorage.set(false);
+            assertFalse(engine.undo(), command.name());
+            engine.insertInput("X");
+            assertEquals("Xst", model.getLine(0), command.name());
+        }
+    }
+
+    /** Simulates failure to prepare replacement storage without exhausting the test JVM. */
+    private static final class RefusingBuffer extends SimpleLineBuffer {
+        private final AtomicBoolean refuse;
+
+        private RefusingBuffer(AtomicBoolean refuse) {
+            this.refuse = refuse;
+        }
+
+        @Override
+        public TextBuffer createEmptySibling() {
+            if (refuse.get()) throw new OutOfMemoryError("replacement storage refused");
+            return new RefusingBuffer(refuse);
+        }
+    }
+
     @Test
     void successiveDispatchContextsReuseTheViewColumnAndRejectedEditsDoNotResetIt() {
         TabSession tab = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());

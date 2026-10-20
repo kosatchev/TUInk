@@ -252,6 +252,8 @@ class EditorEngineDeletionHistoryTest {
             return new CountingBuffer(reads);
         }
 
+        @Override protected boolean supportsPreparedPublication() { return true; }
+
         @Override
         public String getLine(int line) {
             reads.incrementAndGet();

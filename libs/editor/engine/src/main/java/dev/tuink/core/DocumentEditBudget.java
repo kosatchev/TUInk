@@ -61,6 +61,23 @@ final class DocumentEditBudget {
         if (peak > additionalPeakLimit) throw new DocumentEditLimitException();
     }
 
+    /** A local command shares untouched lines and allocates a backing array only when it grows. */
+    void requireStagedReplacement(long copiedUnits, long resultLines, long changedLines,
+                                  long longestLine, long capacityReferences, boolean singleLine) {
+        if (resultLines > MAX_LINES || longestLine > MAX_LINE_CODE_UNITS) {
+            throw new DocumentEditLimitException();
+        }
+        // A same-line keyboard edit builds one exact char[] and one String in
+        // an isolated command. Used heap also includes reclaimable garbage,
+        // so a free-heap estimate can reject a small edit to an admitted line.
+        // Keep the hard bounds above; an actual allocation failure aborts the
+        // command before text, history or views are published.
+        if (singleLine) return;
+        long peak = add(FIXED_OVERHEAD, add(multiply(copiedUnits, 8),
+            add(multiply(changedLines, 256), multiply(capacityReferences, 8))));
+        if (peak > additionalPeakLimit) throw new DocumentEditLimitException();
+    }
+
     void requireLineReplacements(long copiedUnits, long changedLines, long longestLine) {
         if (longestLine > MAX_LINE_CODE_UNITS) throw new DocumentEditLimitException();
         // Stage a sibling buffer before publishing any line. Compact undo deltas,

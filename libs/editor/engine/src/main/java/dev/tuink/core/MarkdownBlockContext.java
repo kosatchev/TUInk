@@ -31,6 +31,13 @@ final class MarkdownBlockContext {
         return revision;
     }
 
+    void reset() {
+        checkpoints.clear();
+        clearCursor();
+        contentEpoch = Long.MIN_VALUE;
+        revision = -1;
+    }
+
     /** Invalidates the changed suffix, retaining the lexical state before it. */
     void synchronize(long nextEpoch, long nextRevision, int firstChangedLine, int nextLineCount) {
         if (nextLineCount < 1 || firstChangedLine < 0) {

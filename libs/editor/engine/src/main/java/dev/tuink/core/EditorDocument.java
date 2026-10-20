@@ -85,6 +85,36 @@ public final class EditorDocument {
         }
     }
 
+    /** Allocates every other view's clamp result while a local command is still isolated. */
+    PreparedChange prepareChange() {
+        views.removeIf(reference -> reference.get() == null);
+        List<ViewChange> changes = new ArrayList<>();
+        for (int index = 0; index < views.size(); index++) {
+            EditorState view = views.get(index).get();
+            if (view == null) continue;
+            Position cursor = clamp(view.getCursor());
+            Position anchor = view.getSelectionAnchor() == null ? null : clamp(view.getSelectionAnchor());
+            if (!cursor.equals(view.getCursor()) || !Objects.equals(anchor, view.getSelectionAnchor())) {
+                changes.add(new ViewChange(view, cursor, anchor));
+            }
+        }
+        return new PreparedChange(changes);
+    }
+
+    void publishChange(PreparedChange prepared) {
+        recoveryGeneration++;
+        reflectFileMetadata();
+        for (int index = 0; index < prepared.views().size(); index++) {
+            ViewChange change = prepared.views().get(index);
+            change.view().setCursor(change.cursor());
+            change.view().setSelectionAnchor(change.anchor());
+            change.view().invalidateNavigation();
+        }
+    }
+
+    record PreparedChange(List<ViewChange> views) {}
+    private record ViewChange(EditorState view, Position cursor, Position anchor) {}
+
     private Position clamp(Position position) {
         Position bounded = model.clamp(position);
         String text = model.getLine(bounded.line());

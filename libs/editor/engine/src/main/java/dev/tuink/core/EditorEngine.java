@@ -17,6 +17,7 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.function.IntFunction;
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 import org.eclipse.jgit.diff.DiffAlgorithm;
 import org.eclipse.jgit.diff.Edit;
 import org.eclipse.jgit.diff.EditList;
@@ -54,6 +55,9 @@ public class EditorEngine {
     private boolean autoIndentEnabled = true;
     private boolean autoPairsEnabled = true;
     private boolean autoListEnabled = true;
+    private PreparedKeyboardHistory keyboardHistory;
+    private boolean keyboardCommand;
+    private String keyboardClipboard;
 
     public EditorEngine(TextModel model, EditorState state, EditorTextLayout textLayout) {
         this(model, state, textLayout, new EditorClipboard());
@@ -783,6 +787,10 @@ public class EditorEngine {
     }
 
     public void insertChar(char ch) {
+        keyboardEdit(() -> { insertCharInCommand(ch); return null; });
+    }
+
+    private void insertCharInCommand(char ch) {
         if (Character.isSurrogate(ch)) {
             throw new IllegalArgumentException("A standalone UTF-16 surrogate is not valid input");
         }
@@ -821,6 +829,10 @@ public class EditorEngine {
 
     /** Inserts one decoded Unicode input event without splitting supplementary characters. */
     public void insertInput(String text) {
+        keyboardEdit(() -> { insertInputInCommand(text); return null; });
+    }
+
+    private void insertInputInCommand(String text) {
         if (text == null || text.isEmpty()) {
             return;
         }
@@ -848,6 +860,10 @@ public class EditorEngine {
     }
 
     public void insertTab() {
+        keyboardEdit(() -> { insertTabInCommand(); return null; });
+    }
+
+    private void insertTabInCommand() {
         state.invalidateNavigation();
         boolean hadSelection = state.hasSelection();
         ViewState before = captureViewState();
@@ -871,6 +887,10 @@ public class EditorEngine {
     }
 
     public void backspace() {
+        keyboardEdit(() -> { backspaceInCommand(); return null; });
+    }
+
+    private void backspaceInCommand() {
         state.invalidateNavigation();
         boolean hadSelection = state.hasSelection();
         ViewState before = captureViewState();
@@ -903,6 +923,10 @@ public class EditorEngine {
     }
 
     public void deleteForward() {
+        keyboardEdit(() -> { deleteForwardInCommand(); return null; });
+    }
+
+    private void deleteForwardInCommand() {
         state.invalidateNavigation();
         boolean hadSelection = state.hasSelection();
         ViewState before = captureViewState();
@@ -939,6 +963,10 @@ public class EditorEngine {
     }
 
     public void insertNewline() {
+        keyboardEdit(() -> { insertNewlineInCommand(); return null; });
+    }
+
+    private void insertNewlineInCommand() {
         state.invalidateNavigation();
         ViewState before = captureViewState();
         List<ReplacementDelta> ops = new ArrayList<>();
@@ -1106,6 +1134,10 @@ public class EditorEngine {
     }
 
     public boolean cutSelection() {
+        return keyboardEdit(this::cutSelectionInCommand);
+    }
+
+    private boolean cutSelectionInCommand() {
         SelectionRange range = currentSelection();
         if (range == null) {
             return false;
@@ -1115,11 +1147,15 @@ public class EditorEngine {
         ViewState before = captureViewState();
         List<ReplacementDelta> ops = new ArrayList<>(1);
         deleteAndCommit(EditKind.NONE, before, ops, range);
-        clipboard.setText(copied);
+        keyboardClipboard = copied;
         return true;
     }
 
     public boolean cutCurrentLine() {
+        return keyboardEdit(this::cutCurrentLineInCommand);
+    }
+
+    private boolean cutCurrentLineInCommand() {
         Position cursor = model.clamp(state.getCursor());
         int line = cursor.line();
         if (line < 0 || line >= model.lineCount()) {
@@ -1141,7 +1177,7 @@ public class EditorEngine {
         ViewState before = captureViewState();
         List<ReplacementDelta> ops = new ArrayList<>(1);
         deleteAndCommit(EditKind.NONE, before, ops, new SelectionRange(start, end));
-        clipboard.setText(copied);
+        keyboardClipboard = copied;
         return true;
     }
 
@@ -1697,6 +1733,82 @@ public class EditorEngine {
         gutterDiff.gutterDiffComputedRevision = Long.MIN_VALUE;
     }
 
+    /** Runs typing assists against a local overlay, then publishes prepared text, history and views. */
+    private <T> T keyboardEdit(Supplier<T> action) {
+        if (keyboardCommand) return action.get();
+        EditorViewMemento before = state.viewMemento();
+        long navigationBefore = state.navigationRevision();
+        TextModel.LocalEdit edit = null;
+        boolean published = false;
+        try {
+            edit = model.beginLocalEdit();
+            keyboardCommand = true;
+            T result = action.get();
+            edit.preparePublication();
+            EditorDocument.PreparedChange views = keyboardHistory == null ? null : document.prepareChange();
+            edit.publish();
+            published = true;
+            if (keyboardHistory != null) {
+                publishKeyboardHistory(keyboardHistory);
+                document.publishChange(views);
+            }
+            if (keyboardClipboard != null) clipboard.setText(keyboardClipboard);
+            return result;
+        } catch (OutOfMemoryError exhausted) {
+            if (published) throw exhausted;
+            throw new DocumentEditLimitException();
+        } finally {
+            if (!published) {
+                if (edit != null) edit.abort();
+                state.restoreEditState(before, navigationBefore);
+                cachedGraphemes = null;
+                indentationContext.reset();
+                markdownContext.reset();
+            }
+            keyboardCommand = false;
+            keyboardHistory = null;
+            keyboardClipboard = null;
+        }
+    }
+
+    private PreparedKeyboardHistory prepareKeyboardHistory(EditKind kind, ViewState before, ViewState after,
+                                                           List<ReplacementDelta> operations) {
+        long afterStateId = history.nextDocumentStateId + 1;
+        long now = System.nanoTime();
+        OperationHistoryEntry merged = null;
+        Deque<HistoryEntry> undo = null;
+        if (shouldCoalesce(kind, before.cursor(), before.selectionAnchor(), now)
+            && history.undoStack.peek() instanceof OperationHistoryEntry previous && previous.kind() == kind) {
+            previous.prepareAppend(operations.size());
+            merged = previous;
+        } else {
+            OperationHistoryEntry entry = new OperationHistoryEntry(kind, before, after, operations,
+                history.currentDocumentStateId, afterStateId);
+            undo = new ArrayDeque<>(MAX_HISTORY + 1);
+            undo.addAll(history.undoStack);
+            pushWithLimit(undo, entry);
+        }
+        return new PreparedKeyboardHistory(kind, after, operations, afterStateId, now, merged, undo);
+    }
+
+    /** Capacity and every object reachable by this publication were allocated before the text commit. */
+    private void publishKeyboardHistory(PreparedKeyboardHistory prepared) {
+        if (prepared.merged() == null) history.undoStack = prepared.undo();
+        else prepared.merged().append(prepared.operations(), prepared.after(), prepared.stateId());
+        history.nextDocumentStateId = prepared.stateId();
+        history.currentDocumentStateId = prepared.stateId();
+        history.redoStack.clear();
+        state.setDirty(history.savedDocumentStateId < 0L || prepared.stateId() != history.savedDocumentStateId);
+        history.lastEditKind = prepared.kind();
+        history.lastEditAtNanos = prepared.atNanos();
+        history.lastEditCursorAfter = prepared.after().cursor();
+        history.lastEditViewId = state.viewId();
+        applyGutterDiffOp(prepared.operations().getFirst().operation());
+    }
+
+    private record PreparedKeyboardHistory(EditKind kind, ViewState after, List<ReplacementDelta> operations,
+        long stateId, long atNanos, OperationHistoryEntry merged, Deque<HistoryEntry> undo) {}
+
     private void commitOperationEdit(EditKind kind, ViewState before, List<ReplacementDelta> ops) {
         if (ops == null || ops.isEmpty()) {
             return;
@@ -1712,6 +1824,10 @@ public class EditorEngine {
                 state.setSelectionAnchor(view.selectionAnchor());
             }
             break;
+        }
+        if (keyboardCommand) {
+            keyboardHistory = prepareKeyboardHistory(kind, before, after, ops);
+            return;
         }
         long afterStateId = nextDocumentStateId();
         history.currentDocumentStateId = afterStateId;
@@ -1809,7 +1925,7 @@ public class EditorEngine {
         ReplacementDelta delta = model.replaceRange(start, end, insertedText);
         if (!delta.isEmpty()) {
             ops.add(delta);
-            applyGutterDiffOp(delta.operation());
+            if (!keyboardCommand) applyGutterDiffOp(delta.operation());
         }
         return delta.endAfter();
     }
@@ -2237,7 +2353,7 @@ public class EditorEngine {
         private final EditKind kind;
         private final ViewState beforeView;
         private ViewState afterView;
-        private final List<ReplacementDelta> ops;
+        private final ArrayList<ReplacementDelta> ops;
         private final long beforeStateId;
         private long afterStateId;
 
@@ -2266,9 +2382,13 @@ public class EditorEngine {
             ViewState mergedAfterView,
             long mergedAfterStateId
         ) {
-            this.ops.addAll(extraOps);
+            for (int index = 0; index < extraOps.size(); index++) this.ops.add(extraOps.get(index));
             this.afterView = mergedAfterView;
             this.afterStateId = mergedAfterStateId;
+        }
+
+        void prepareAppend(int count) {
+            ops.ensureCapacity(Math.addExact(ops.size(), count));
         }
 
         @Override

@@ -33,7 +33,7 @@ OPERATION_TIMEOUT = 30.0
 EXIT_TIMEOUT = 45.0
 MERGE_TIMEOUT = 120.0
 CTRL_S, CTRL_Z, CTRL_Y = b"\x13", b"\x1a", b"\x19"
-CTRL_F, CTRL_G, CTRL_A = b"\x06", b"\x07", b"\x01"
+CTRL_F, CTRL_G = b"\x06", b"\x07"
 CTRL_X, CTRL_V, CTRL_Q = b"\x18", b"\x16", b"\x11"
 ESCAPE, HOME, PAGE_UP = b"\x1b[27u", b"\x1b[H", b"\x1b[5~"
 DOWN, UP, SHIFT_DOWN = b"\x1b[B", b"\x1b[A", b"\x1b[1;2B"
@@ -342,8 +342,9 @@ def train_session(binary: Path, output: Path, name: str) -> dict:
             operation("search_previous", CTRL_G, marker=b"previous match")
             replacement = f"replacement_{language}"
             occurrences = fixture.data.count(fixture.query.encode("ascii"))
-            operation("replace_all", b"\t" * 5 + bracketed_paste(replacement) + CTRL_A,
-                      marker=f"Replaced {occurrences} occurrence".encode("ascii"))
+            # Ctrl+A selects field text; activate Replace all through its button.
+            operation("replace_all", b"\t" * 5 + bracketed_paste(replacement) + b"\t" * 4 + b"\r",
+                      marker=f"Matched {occurrences} occurrence(s); replacement applied.".encode("ascii"))
             expected = fixture.data.replace(fixture.query.encode("ascii"), replacement.encode("ascii"))
             operation("save_replacements", ESCAPE + CTRL_S, expected)
             pages = (fixture.data.count(b"\n") + len(fixture.data) // (COLS - 10)) // (ROWS - 8) + 3

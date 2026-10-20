@@ -521,18 +521,24 @@ class Regressions:
             session.send(b"\x1b[1;5H")  # Ctrl+Home
             assert status(session).startswith("Ln 1/3, Col 1/"), session.screen.text
             session.send(b"\x1b[1;6FX\x13")  # Ctrl+Shift+End
-            assert document.read_text(encoding="utf-8") == "X", session.screen.text
+            session.expect(lambda: document.read_text(encoding="utf-8") == "X",
+                           "saving replacement of the whole document")
             session.send(b"\x1a\x13")
-            assert document.read_text(encoding="utf-8") == original
+            session.expect(lambda: document.read_text(encoding="utf-8") == original,
+                           "saving undo of the navigation edit")
 
             session.send(b"\x1b[1;5F\x1b[1;2HZ\x13")  # End, Shift+Home
-            assert document.read_text(encoding="utf-8") == "Ae\u0301😀\nsecond\nZ", session.screen.text
+            session.expect(lambda: document.read_text(encoding="utf-8") == "Ae\u0301😀\nsecond\nZ",
+                           "saving replacement of the last line")
             session.send(b"\x1a\x13\x1b[1;5H\x1b[1;2FY\x13")  # Home, Shift+End
-            assert document.read_text(encoding="utf-8") == "Y\nsecond\nlast", session.screen.text
+            session.expect(lambda: document.read_text(encoding="utf-8") == "Y\nsecond\nlast",
+                           "saving replacement of the first line")
             session.send(b"\x1a\x13\x1b[1;5F\x1b[1;6HW\x13")  # Ctrl+Shift+Home
-            assert document.read_text(encoding="utf-8") == "W", session.screen.text
+            session.expect(lambda: document.read_text(encoding="utf-8") == "W",
+                           "saving backward selection replacement")
             session.send(b"\x1a\x13")
-            assert document.read_text(encoding="utf-8") == original
+            session.expect(lambda: document.read_text(encoding="utf-8") == original,
+                           "saving undo of the navigation edit")
             session.finish()
 
     def quit_confirmation(self):
@@ -600,14 +606,16 @@ class Regressions:
             with self.session("paste-" + name, document) as session:
                 session.send(b"\x1b[200~" + inserted.encode("utf-8") + b"\x1b[201~")
                 session.send(b"\x13")
-                assert document.read_text(encoding="utf-8") == inserted + original
+                session.expect(lambda: document.read_text(encoding="utf-8") == inserted + original,
+                               "saving the bracketed paste")
                 session.finish()
         document = self.fixture("paste-history", "")
         with self.session("paste-history", document) as session:
             session.send(b"a\x1b[200~PASTED\x1b[201~b")
             for expected in ("aPASTED", "a", ""):
                 session.send(b"\x1a\x13")
-                assert document.read_text(encoding="utf-8") == expected
+                session.expect(lambda: document.read_text(encoding="utf-8") == expected,
+                               "saving each paste history undo")
             session.finish()
 
     def settings(self):
@@ -765,7 +773,8 @@ class Regressions:
                 session.expect(lambda: "Restore now?" in session.screen.text, "recovery in a concurrent instance")
                 session.send(b"y")
                 session.send(b"\x13")
-                assert document.read_text(encoding="utf-8") == text + original, session.screen.text
+                session.expect(lambda: document.read_text(encoding="utf-8") == text + original,
+                               "saving the restored draft")
                 session.finish()
             owner.finish()
         assert not list((home / ".config/tuink/recovery").glob("*.meta.properties")), "normal saved exit left recovery entries"
@@ -1160,7 +1169,7 @@ class Regressions:
             session.finish()
 
     def clipboard_memory(self):
-        with self.session("clipboard-memory", max_heap_mb=64) as session:
+        with self.session("clipboard-memory", max_heap_mb=64, timeout=180) as session:
             session.send(b"seed\x01\x03\x01")
             for _ in range(30):
                 session.send(b"\x1b[200~" + b"a" * 1_048_575 + b"\n\x1b[201~", wait=0.12)

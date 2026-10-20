@@ -16,7 +16,7 @@ from vt import Screen
 
 class Session:
     def __init__(self, root, java, classpath, document=None, home=None, mono=False, options=None,
-                 term="xterm-256color", max_heap_mb=192, config_home=None):
+                 term="xterm-256color", max_heap_mb=192, config_home=None, timeout=45):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         home = Path(home) if home else self.root / "home"
@@ -27,7 +27,8 @@ class Session:
         self.log = bytearray()
         self.status = None
         self.closed = False
-        self.deadline = time.monotonic() + 45
+        self.timeout = timeout
+        self.deadline = time.monotonic() + timeout
         args = [str(java), "--enable-native-access=ALL-UNNAMED", f"-Xmx{max_heap_mb}m",
                 f"-Duser.home={home}", "-cp", classpath, "dev.tuink.app.App"]
         args.extend(("--theme=cyan",) if options is None else options)
@@ -67,7 +68,7 @@ class Session:
     def drain(self, seconds=0.18):
         end = min(self.deadline, time.monotonic() + seconds)
         if time.monotonic() >= self.deadline:
-            raise TimeoutError("scenario exceeded 45 seconds")
+            raise TimeoutError(f"scenario exceeded {self.timeout:g} seconds")
         while time.monotonic() < end:
             if not select.select([self.fd], [], [], min(0.025, max(0, end - time.monotonic())))[0]:
                 continue

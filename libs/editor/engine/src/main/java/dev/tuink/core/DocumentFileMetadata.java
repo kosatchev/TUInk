@@ -2,8 +2,6 @@ package dev.tuink.core;
 
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 /**
@@ -34,15 +32,7 @@ public record DocumentFileMetadata(
         defaultLineSeparator = defaultLineSeparator == null
             ? EditorState.LINE_SEPARATOR_LF
             : requireLineSeparator(defaultLineSeparator);
-        if (lineSeparators == null || lineSeparators.isEmpty()) {
-            lineSeparators = List.of();
-        } else {
-            List<String> normalized = new ArrayList<>(lineSeparators.size());
-            for (String separator : lineSeparators) {
-                normalized.add(requireLineSeparator(separator));
-            }
-            lineSeparators = List.copyOf(normalized);
-        }
+        lineSeparators = LineSeparatorSequence.copyOf(lineSeparators);
     }
 
     public static DocumentFileMetadata newDocument(int lineCount) {
@@ -67,7 +57,7 @@ public record DocumentFileMetadata(
             charset,
             bomKind,
             normalizedSeparator,
-            Collections.nCopies(separatorCount, normalizedSeparator)
+            LineSeparatorSequence.repeated(normalizedSeparator, separatorCount)
         );
     }
 
@@ -78,6 +68,26 @@ public record DocumentFileMetadata(
 
     public DocumentFileMetadata withLineSeparators(List<String> separators) {
         return new DocumentFileMetadata(charset, bomKind, defaultLineSeparator, separators);
+    }
+
+    public DocumentFileMetadata insertLineSeparators(int index, int count) {
+        return replaceLineSeparators(index, 0, LineSeparatorSequence.repeated(defaultLineSeparator, count));
+    }
+
+    public DocumentFileMetadata removeLineSeparators(int index, int count) {
+        return replaceLineSeparators(index, count, List.of());
+    }
+
+    public DocumentFileMetadata replaceLineSeparators(int index, int removedCount, List<String> inserted) {
+        LineSeparatorSequence current = (LineSeparatorSequence) lineSeparators;
+        LineSeparatorSequence next = current.replace(index, removedCount, LineSeparatorSequence.copyOf(inserted));
+        return next == current ? this : withLineSeparators(next);
+    }
+
+    public DocumentFileMetadata withLineSeparator(int index, String separator) {
+        String checked = requireLineSeparator(separator);
+        return checked.equals(lineSeparators.get(index)) ? this
+            : replaceLineSeparators(index, 1, LineSeparatorSequence.repeated(checked, 1));
     }
 
     public DocumentFileMetadata canonicalized(Charset nextCharset, String lineSeparator, int lineCount) {
@@ -103,7 +113,7 @@ public record DocumentFileMetadata(
         return EditorState.LINE_SEPARATOR_LF;
     }
 
-    private static String requireLineSeparator(String separator) {
+    static String requireLineSeparator(String separator) {
         if (EditorState.LINE_SEPARATOR_LF.equals(separator)
             || EditorState.LINE_SEPARATOR_CRLF.equals(separator)
             || EditorState.LINE_SEPARATOR_CR.equals(separator)) {

@@ -29,14 +29,16 @@ final class RecoverySeparators {
         RecoveryLimits.requireSize(encodedLength, RecoveryLimits.MAX_METADATA_BYTES,
             "Recovery line separators exceed the metadata storage limit");
         byte[] packed = new byte[(separators.size() + 3) / 4];
-        for (int index = 0; index < separators.size(); index++) {
-            int code = switch (separators.get(index)) {
+        int index = 0;
+        for (String separator : separators) {
+            int code = switch (separator) {
                 case "\n" -> 0;
                 case "\r\n" -> 1;
                 case "\r" -> 2;
                 default -> throw new IOException("Unknown recovery line separator");
             };
             packed[index / 4] |= (byte) (code << ((index % 4) * 2));
+            index++;
         }
         return PREFIX + separators.size() + ":" + Base64.getEncoder().encodeToString(packed);
     }

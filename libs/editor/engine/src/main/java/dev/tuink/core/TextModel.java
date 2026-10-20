@@ -347,9 +347,7 @@ public class TextModel {
             if (updated.isEmpty() && a.line() > 0 && a.line() < lineCount() - 1
                 && EditorState.LINE_SEPARATOR_CR.equals(separators.get(a.line() - 1))
                 && EditorState.LINE_SEPARATOR_LF.equals(separators.get(a.line()))) {
-                List<String> normalized = new ArrayList<>(separators);
-                normalized.set(a.line(), EditorState.LINE_SEPARATOR_CRLF);
-                metadata = metadata.withLineSeparators(normalized);
+                metadata = metadata.withLineSeparator(a.line(), EditorState.LINE_SEPARATOR_CRLF);
             }
             int firstSeparator = Math.max(0, a.line() - 1);
             ReplacementDelta delta = new ReplacementDelta(
@@ -995,11 +993,7 @@ public class TextModel {
         if (current.subList(firstSeparator, firstSeparator + restored.size()).equals(restored)) {
             return;
         }
-        List<String> separators = new ArrayList<>(current);
-        for (int index = 0; index < restored.size(); index++) {
-            separators.set(firstSeparator + index, restored.get(index));
-        }
-        fileMetadata = fileMetadata.withLineSeparators(separators);
+        fileMetadata = fileMetadata.replaceLineSeparators(firstSeparator, restored.size(), restored);
     }
 
     /** Called after a complete replacement, once its resulting logical lines are known. */
@@ -1010,21 +1004,24 @@ public class TextModel {
     private DocumentFileMetadata unambiguousLineSeparators(
         DocumentFileMetadata metadata, int firstLine, int lastLine
     ) {
-        List<String> separators = metadata.lineSeparators();
-        List<String> normalized = null;
-        for (int line = Math.max(1, firstLine); line <= Math.min(lineCount() - 2, lastLine); line++) {
+        int first = Math.max(1, firstLine);
+        int last = Math.min(lineCount() - 2, lastLine);
+        if (first > last) return metadata;
+        var separators = metadata.lineSeparators().listIterator(first - 1);
+        String previous = separators.next();
+        DocumentFileMetadata normalized = metadata;
+        for (int line = first; line <= last; line++) {
+            String current = separators.next();
             if (buffer.getLine(line).isEmpty()
-                && EditorState.LINE_SEPARATOR_CR.equals(separators.get(line - 1))
-                && EditorState.LINE_SEPARATOR_LF.equals(separators.get(line))) {
-                if (normalized == null) {
-                    normalized = new ArrayList<>(separators);
-                }
+                && EditorState.LINE_SEPARATOR_CR.equals(previous)
+                && EditorState.LINE_SEPARATOR_LF.equals(current)) {
                 // CR + an empty line + LF would otherwise serialize as one CRLF.
                 // Keep the preceding line's separator and disambiguate the empty line's own EOL.
-                normalized.set(line, EditorState.LINE_SEPARATOR_CRLF);
+                normalized = normalized.withLineSeparator(line, EditorState.LINE_SEPARATOR_CRLF);
             }
+            previous = current;
         }
-        return normalized == null ? metadata : metadata.withLineSeparators(normalized);
+        return normalized;
     }
 
     public long revision() {
@@ -1089,11 +1086,8 @@ public class TextModel {
         List<String> replacement = LogicalDocumentLines.copyOfOrEmptyDocument(lines);
         DocumentFileMetadata replacementMetadata = fileMetadata;
         if (replacement.size() != lineCount()) {
-            List<String> separators = new ArrayList<>(Math.max(0, replacement.size() - 1));
-            for (int i = 1; i < replacement.size(); i++) {
-                separators.add(fileMetadata.defaultLineSeparator());
-            }
-            replacementMetadata = fileMetadata.withLineSeparators(separators);
+            replacementMetadata = DocumentFileMetadata.canonical(fileMetadata.charset(), fileMetadata.bomKind(),
+                fileMetadata.defaultLineSeparator(), replacement.size());
         }
         replaceLines(replacement, replacementMetadata);
     }
@@ -1132,18 +1126,14 @@ public class TextModel {
         if (count <= 0) {
             return;
         }
-        List<String> separators = new ArrayList<>(fileMetadata.lineSeparators());
-        separators.addAll(index, Collections.nCopies(count, fileMetadata.defaultLineSeparator()));
-        fileMetadata = fileMetadata.withLineSeparators(separators);
+        fileMetadata = fileMetadata.insertLineSeparators(index, count);
     }
 
     private void removeLineSeparators(int index, int count) {
         if (count <= 0) {
             return;
         }
-        List<String> separators = new ArrayList<>(fileMetadata.lineSeparators());
-        separators.subList(index, index + count).clear();
-        fileMetadata = fileMetadata.withLineSeparators(separators);
+        fileMetadata = fileMetadata.removeLineSeparators(index, count);
     }
 
     private static DocumentFileMetadata requireCompatibleMetadata(

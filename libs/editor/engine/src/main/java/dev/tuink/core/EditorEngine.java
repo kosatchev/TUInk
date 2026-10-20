@@ -212,10 +212,11 @@ public class EditorEngine {
         DocumentFileMetadata metadata
     ) {
         int column = start.col();
+        var separators = metadata.lineSeparators().listIterator(start.line());
         for (int line = start.line(); line < end.line(); line++) {
             String text = model.getLine(line);
             builder.append(text, column, text.length());
-            builder.newline(metadata.lineSeparators().get(line));
+            builder.newline(separators.next());
             column = 0;
         }
         builder.append(model.getLine(end.line()), column, end.col());
@@ -1345,6 +1346,7 @@ public class EditorEngine {
         int[] matchCount = {0};
         int[] copiedThrough = {0};
         Position[] earliestResult = {null};
+        var separators = metadata.lineSeparators().iterator();
         for (int line = 0; line < model.lineCount(); line++) {
             int sourceLine = line;
             String text = model.getLine(line);
@@ -1367,11 +1369,10 @@ public class EditorEngine {
                 copiedThrough[0] = end;
                 return true;
             });
+            String separator = separators.hasNext() ? separators.next() : null;
             if (earliestResult[0] != null) {
                 builder.append(text, copiedThrough[0], text.length());
-                if (line + 1 < model.lineCount()) {
-                    builder.newline(metadata.lineSeparators().get(line));
-                }
+                if (separator != null) builder.newline(separator);
             }
         }
         if (earliestResult[0] != null) builder.finishLine();

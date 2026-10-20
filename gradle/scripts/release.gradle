@@ -1,0 +1,43 @@
+// Archive-only checksums must not pull Debian tooling into a musl build.
+// The complete release has its own manifest, including DEB when glibc is selected.
+def registerChecksums = { String name, artifacts, String outputName ->
+    tasks.register(name) {
+        group = name == 'releaseChecksums' ? 'distribution' : null
+        description = "Write ${outputName} for the selected distribution artifacts."
+        inputs.files(artifacts)
+        def output = rootProject.layout.buildDirectory.file("releases/${outputName}")
+        outputs.file(output)
+        doLast {
+            def lines = artifacts.files.sort { it.name }.collect { artifact ->
+                def digest = java.security.MessageDigest.getInstance('SHA-256')
+                artifact.withInputStream { stream ->
+                    byte[] buffer = new byte[8192]
+                    int count
+                    while ((count = stream.read(buffer)) != -1) {
+                        digest.update(buffer, 0, count)
+                    }
+                }
+                "${digest.digest().encodeHex()}  ${artifact.name}"
+            }
+            output.get().asFile.parentFile.mkdirs()
+            output.get().asFile.setText(lines.join('\n') + '\n', 'UTF-8')
+        }
+    }
+}
+registerChecksums('releaseChecksums', tuinkArchiveFiles, 'ARCHIVE_SHA256SUMS')
+def releaseFiles = files(tuinkArchiveFiles)
+if (tuinkNativeTargets.contains('glibc')) {
+    releaseFiles.from(tuinkDebFile)
+}
+def manifest = registerChecksums('releaseManifest', releaseFiles, 'SHA256SUMS')
+
+tasks.register('release') {
+    group = 'distribution'
+    description = 'Build tested archives, a glibc DEB when selected, and SHA256SUMS.'
+    dependsOn {
+        if (tuinkNativeMarch != 'compatibility') {
+            throw new GradleException('Public releases require -PnativeMarch=compatibility. Use nativeDist for a CPU-specific build.')
+        }
+        [rootProject.tasks.named('check'), manifest]
+    }
+}

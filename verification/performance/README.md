@@ -19,8 +19,11 @@ The harness requires Python 3.10+ as `python3` on a POSIX system.
 shutdown using temporary test programs without a native SDK or editor binary.
 It runs explicitly in CI, separately from the JVM
 `check` task. `perfSmoke` and `perfCheck` depend on that self-test and build the
-glibc native binary; they also require the
-[native toolchain](../../docs/building.md#native-toolchain) and a pseudo-terminal.
+selected native variant: ordinary glibc by default, `-Pmusl` for musl and
+`-Ppgo` for PGO. Combine the flags for musl PGO, or use `-Ptarget=all` to measure
+both libc targets. PGO requires a matching existing profile. The tasks also
+require the [native toolchain](../../docs/building.md#native-toolchain) and a
+pseudo-terminal.
 Native compiler tasks write a binary-adjacent `<binary>.build.json` receipt
 after a successful build. This adds no Python prerequisite to native compilation.
 
@@ -29,15 +32,18 @@ after a successful build. This adds no Python prerequisite to native compilation
 | `perfSmoke` | 120 | 1 | `down`, `shift-down`, `mouse-drag` |
 | `perfCheck` | 600 | 3 | `down`, `shift-down`, `mouse-drag` |
 
-`perfSmoke` is included in `:app:release`. Override the full-run defaults with
+`:app:release` smoke-tests every native variant it ships, including ordinary
+and PGO variants when `-Ppgo` is enabled. Override the full-run defaults with
 `-PperfFrames=<positive-multiple-of-30>`, `-PperfRepeats=<n>` and
 `-PperfLabel=<label>`. `perfFrames` sets the number of injected input events.
+Gradle grows the fixture when needed, so a larger event count does not reach
+the end of the generated document.
 
 ### Method
 
-The default workload uses deterministic ASCII Java source with 1,800 generated
-lines, a `42x140` pseudo-terminal, a two-second startup delay and one input event
-every 2 ms. After injection, the harness waits for terminal output to remain
+The default workload uses deterministic ASCII Java source with at least 1,800
+generated lines, a `42x140` pseudo-terminal, a two-second startup delay and one
+input event every 2 ms. After injection, the harness waits for terminal output to remain
 quiet for 500 ms. The built-in profiler logs one checkpoint every 30 frames;
 the harness checks the expected checkpoint count before accepting a run. The
 editor must also exit normally with code zero within three seconds of Ctrl+Q.
@@ -77,13 +83,18 @@ python3 verification/performance/render_benchmark.py \
 The script also accepts `--rows`, `--cols`, `--fixture-lines`, `--startup-delay`,
 `--event-delay`, `--quiet-period`, `--completion-timeout` and `--output-root`.
 Keep these equal across comparisons. `--frames` must be a positive multiple
-of 30, and `--fixture-lines` must exceed events plus terminal rows. Functional
-tests cover exact input routing; retained ANSI output alone does not establish
+of 30, and `--fixture-lines` must exceed events plus terminal rows. When invoking
+the Python script directly, increase its default 1,800 lines for longer runs.
+Functional tests cover exact input routing; retained ANSI output alone does not establish
 those semantics.
 
 ### Outputs and interpretation
 
-Results are written below `build/performance/render/<timestamp>-<label>/`:
+Gradle writes results below
+`build/performance/render/<variant>/<smoke-or-check>/<timestamp>-<label>/`.
+The label also includes the variant, so glibc, musl and PGO results remain
+distinct. Direct Python runs use `build/performance/render/<timestamp>-<label>/`
+unless `--output-root` is supplied. Each run contains:
 
 ```text
 fixture.java
@@ -144,24 +155,26 @@ establish an overall speedup.
 
 ## Optional PGO training
 
-PGO is experimental and uses the same pinned Oracle GraalVM SDK and
-`verifyNativeToolchain` preflight as ordinary native builds. Run the harness
+PGO is experimental and specifically requires **Oracle GraalVM 25.0.4+7.1
+Native Image**: Oracle JDK alone is insufficient, and GraalVM Community does
+not support PGO. It uses the same pinned SDK and `verifyNativeToolchain`
+preflight as ordinary native builds. Run the harness
 self-test without a native SDK or editor binary:
 
 ```bash
 ./gradlew :app:pgoHarnessTest
 ```
 
-It requires POSIX Python 3.10+ as `python3`, is available without `-PenablePgo`,
-and runs explicitly in CI. Build, train and optimize the default glibc target:
+It requires POSIX Python 3.10+ as `python3`, is available without `-Ppgo`,
+and runs explicitly in CI. Train and optimize the default glibc target:
 
 ```bash
-./gradlew :app:nativeProfileInstrument -PenablePgo
-./gradlew :app:nativeProfileTrain -PenablePgo
-./gradlew :app:nativeProfileBuild -PenablePgo
+./gradlew :app:nativeProfileTrain -Ppgo
+./gradlew :app:nativeDist -Ppgo
 ```
 
-`nativeProfileOptimize -PenablePgo` performs fresh training and the optimized
+`nativeProfileTrain` first builds the instrumented binary.
+`nativeProfileOptimize -Ppgo` performs fresh training and the optimized
 build together. Training runs five checked PTY sessions: Java, Python, YAML and
 Rust editing, plus mouse drag. Editing sessions verify saved bytes; every
 session must exit normally with code zero and produce a fresh nonempty profile
@@ -170,20 +183,35 @@ before the profiles are merged.
 The default profile is `.local/pgo/<target>/profile.iprof`, with an adjacent
 `profile.iprof.json` receipt binding it to the SDK, classpath, compiler arguments,
 CPU/libc target and harness. Retrain when these inputs change. Use
-`-PpgoProfile=<path>` for a custom ignored location outside build directories.
-Pass `-Ptarget=musl` to every command for a separate musl profile and binary;
-`-Ptarget=all` is rejected. Profiles survive `clean` and remain local build
-inputs.
+`-PpgoProfile=<path>` for a custom ignored location outside build directories
+when selecting one libc.
+Pass `-Pmusl` to every command for a separate musl profile and binary;
+`-Ptarget=all` processes both libc targets with separate profiles. With `all`,
+use `-PpgoGlibcProfile=<path>` and `-PpgoMuslProfile=<path>` for custom paths;
+the shared `-PpgoProfile` is rejected. Explicit `nativeProfileGlibc*` and
+`nativeProfileMusl*` tasks select their named libc; do not add a contradictory
+libc selector. All profile path properties require PGO to be enabled; shared
+and per-target paths must agree when both are supplied for the same target.
+Profiles survive `clean` and remain local build inputs.
 
-Optimized binaries are separate outputs:
+`nativeDist -Ppgo` exposes the selected bare executable as
+`build/native-dist/glibc-pgo/tuink`, or `build/native-dist/musl-pgo/tuink` with
+`-Pmusl`. The compiler's intermediate optimized binaries remain separate outputs:
 
 ```text
 apps/tuink/launcher/build/native/nativePgoOptimizedCompile/tuink-pgo
 apps/tuink/launcher/build/native/nativeMuslPgoOptimizedCompile/tuink-musl-pgo
 ```
 
-Regular release packaging uses ordinary Oracle O3 binaries. Profiles, training
-measurements and PGO binaries are excluded. See
+`nativeDistTarGz` uses an ordinary Oracle O3 binary by default; `-Ppgo`
+selects the optimized archive, and `-Pmusl` selects its libc. `nativeDeb -Ppgo`
+uses optimized glibc, with the same package name and version as the ordinary
+package. `distributionArchives -Ptarget=all -Ppgo` produces
+all five application archives. `release` adds the selected PGO archives only
+with `-Ppgo` or the legacy `-PenablePgo`. Explicit per-variant archive tasks and
+the legacy `-Ptarget=glibc|musl|all` selector remain supported.
+Packaging requires matching existing profiles and does not train automatically.
+Profiles, receipts, training measurements and instrumented binaries are excluded. See
 [PGO build instructions](../../docs/building.md#pgo) for target prerequisites and
 profile validation.
 

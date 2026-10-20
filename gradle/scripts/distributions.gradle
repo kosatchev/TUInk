@@ -11,11 +11,6 @@ abstract class DistributionArchiveServices {
 def archiveOperations = objects.newInstance(DistributionArchiveServices).archiveOperations
 def releaseVersion = project.version.toString()
 
-def nativeTarget = (project.findProperty('target') ?: 'glibc').toString().toLowerCase()
-if (!(nativeTarget in ['glibc', 'musl', 'all'])) {
-    throw new GradleException("Unsupported -Ptarget=${nativeTarget}. Use glibc, musl, or all.")
-}
-
 def osToken = Os.isFamily(Os.FAMILY_WINDOWS)
     ? 'windows'
     : (Os.isFamily(Os.FAMILY_MAC) ? 'macos' : 'linux')
@@ -26,8 +21,7 @@ def archToken = {
     return raw.replaceAll('[^a-z0-9_\\-]', '_')
 }.call()
 
-def glibcReleaseName = "tuink-${releaseVersion}-${osToken}-${archToken}"
-def muslReleaseName = "${glibcReleaseName}-musl"
+def nativeReleaseName = "tuink-${releaseVersion}-${osToken}-${archToken}"
 def distributionDir = rootProject.layout.buildDirectory.dir('releases')
 apply from: rootProject.file('gradle/scripts/distribution-documentation.gradle')
 def verifyDocumentationLinks = verifyDistributionDocumentationLinks
@@ -58,9 +52,6 @@ def archiveInstallScripts = rootProject.files(
     rootProject.file('apps/tuink/packaging/archive/uninstall.sh')
 )
 
-ext.releaseArtifactFiles = objects.fileCollection()
-def releaseArtifacts = releaseArtifactFiles
-
 distributions {
     main {
         contents {
@@ -79,177 +70,162 @@ def jvmDistZip = tasks.named('distZip', Zip) {
     }
 }
 
+// The unpacked JVM distribution and its ZIP share user documents, notices,
+// demo images and samples through distributions.main.contents above.
+tasks.register('dist') {
+    group = 'distribution'
+    description = 'Build the unpacked JVM distribution with launchers, libraries and documentation.'
+    dependsOn(tasks.named('installDist'))
+}
+
 tasks.withType(AbstractArchiveTask).configureEach {
     preserveFileTimestamps = false
     reproducibleFileOrder = true
 }
 
-tasks.register('stageNativeGlibc', Sync) {
-    group = 'distribution'
-    description = 'Prepare the glibc native release directory before packaging.'
-    dependsOn(tasks.named('nativeCompile'))
-    into(layout.buildDirectory.dir("staging/glibc/${glibcReleaseName}"))
-    dirPermissions {
-        unix('rwxr-xr-x')
+// All four native archives share documentation, Oracle runtime notices, samples,
+// installation scripts and executable-permission checks. Only optimized PGO
+// outputs are packaged; training binaries and profiles are intermediate inputs.
+def registerNativeDistribution = { String target, boolean pgo ->
+    String pgoSuffix = pgo ? 'Pgo' : ''
+    String variant = target + (pgo ? '-pgo' : '')
+    String releaseSuffix = (target == 'musl' ? '-musl' : '') + (pgo ? '-pgo' : '')
+    String releaseName = nativeReleaseName + releaseSuffix + tuinkNativeCpuSuffix
+    def compileTask = tuinkNativeCompiler(target, pgo)
+    // Separate output directories keep flag changes from overwriting another
+    // variant. nativeDist exports just the executable; the tar.gz carries docs.
+    def binary = tasks.register("exportNative${target.capitalize()}${pgoSuffix}", Sync) {
+        description = "Export the ${variant} native executable without an archive."
+        dependsOn(compileTask)
+        into(rootProject.layout.buildDirectory.dir("native-dist/${variant}${tuinkNativeCpuSuffix}"))
+        dirPermissions {
+            unix('rwxr-xr-x')
+        }
+        from(compileTask.flatMap { it.outputFile }) {
+            rename { 'tuink' }
+            filePermissions {
+                unix('rwxr-xr-x')
+            }
+        }
     }
+    def stagingDirectory = layout.buildDirectory.dir("staging/${variant}/${releaseName}")
+    def stage = tasks.register("stageNative${pgoSuffix}${target.capitalize()}", Sync) {
+        description = "Prepare the ${variant} Oracle GraalVM native release directory."
+        dependsOn(compileTask)
+        into(stagingDirectory)
+        dirPermissions {
+            unix('rwxr-xr-x')
+        }
+        from(compileTask.flatMap { it.outputFile }) {
+            rename { 'tuink' }
+            filePermissions {
+                unix('rwxr-xr-x')
+            }
+        }
+        inputs.property('documentationRef', archiveDocumentationRef)
+        from(archiveInstallScripts) {
+            filter(ReplaceTokens, tokens: [TUINK_DOCUMENTATION_REF: archiveDocumentationRef.get()])
+            filePermissions {
+                unix('rwxr-xr-x')
+            }
+        }
+        with(documentationFor.call(target))
+        from(releaseSamplesDir) {
+            into('samples')
+            filePermissions {
+                unix('rw-r--r--')
+            }
+        }
+    }
+    def archive = tasks.register("packageNative${target.capitalize()}${pgoSuffix}", Tar) {
+        description = "Build the ${variant} Oracle GraalVM native tar.gz release archive."
+        dependsOn(stage)
+        compression = Compression.GZIP
+        archiveBaseName = 'tuink'
+        archiveVersion = releaseVersion
+        archiveClassifier = "${osToken}-${archToken}${releaseSuffix}${tuinkNativeCpuSuffix}"
+        archiveExtension = 'tar.gz'
+        destinationDirectory = distributionDir
 
-    from(layout.buildDirectory.file('native/nativeCompile/tuink')) {
-        filePermissions {
-            unix('rwxr-xr-x')
+        from(stagingDirectory) {
+            into(releaseName)
+            exclude(nativeExecutableNames)
+        }
+        from(stagingDirectory) {
+            into(releaseName)
+            include(nativeExecutableNames)
+            filePermissions {
+                unix('rwxr-xr-x')
+            }
+        }
+        doLast {
+            def contents = archiveOperations.tarTree(archiveOperations.gzip(archiveFile.get()))
+            verifyDocumentationLinks.call(contents, releaseName)
+            verifyNativeExecutablePermissions.call(contents, releaseName)
         }
     }
-    inputs.property('documentationRef', archiveDocumentationRef)
-    from(archiveInstallScripts) {
-        filter(ReplaceTokens, tokens: [TUINK_DOCUMENTATION_REF: archiveDocumentationRef.get()])
-        filePermissions {
-            unix('rwxr-xr-x')
-        }
-    }
-    with(documentationFor.call('glibc'))
-    from(releaseSamplesDir) {
-        into('samples')
-        filePermissions {
-            unix('rw-r--r--')
-        }
-    }
+    [binary: binary, archive: archive]
 }
 
-tasks.register('stageNativeMusl', Sync) {
-    group = 'distribution'
-    description = 'Prepare the musl native release directory before packaging.'
-    dependsOn(tasks.named('nativeMuslCompile'))
-    into(layout.buildDirectory.dir("staging/musl/${muslReleaseName}"))
-    dirPermissions {
-        unix('rwxr-xr-x')
-    }
-
-    from(layout.buildDirectory.file('native/nativeMuslCompile/tuink-musl')) {
-        rename { 'tuink' }
-        filePermissions {
-            unix('rwxr-xr-x')
-        }
-    }
-    inputs.property('documentationRef', archiveDocumentationRef)
-    from(archiveInstallScripts) {
-        filter(ReplaceTokens, tokens: [TUINK_DOCUMENTATION_REF: archiveDocumentationRef.get()])
-        filePermissions {
-            unix('rwxr-xr-x')
-        }
-    }
-    with(documentationFor.call('musl'))
-    from(releaseSamplesDir) {
-        into('samples')
-        filePermissions {
-            unix('rw-r--r--')
-        }
+// One descriptor per variant serves the bare binary, tar.gz and release tasks.
+def nativeDistributions = [:]
+['glibc', 'musl'].each { target ->
+    (tuinkPgo ? [false, true] : [false]).each { pgo ->
+        nativeDistributions[target + (pgo ? '-pgo' : '')] = registerNativeDistribution(target, pgo)
     }
 }
-
-def nativeTarGz = tasks.register('nativeTarGz', Tar) {
-    group = 'distribution'
-    description = 'Build the glibc native tar.gz release archive.'
-    dependsOn(tasks.named('stageNativeGlibc'))
-    compression = Compression.GZIP
-    archiveBaseName = 'tuink'
-    archiveVersion = releaseVersion
-    archiveClassifier = "${osToken}-${archToken}"
-    archiveExtension = 'tar.gz'
-    destinationDirectory = distributionDir
-
-    from(layout.buildDirectory.dir("staging/glibc/${glibcReleaseName}")) {
-        into(glibcReleaseName)
-        exclude(nativeExecutableNames)
-    }
-    from(layout.buildDirectory.dir("staging/glibc/${glibcReleaseName}")) {
-        into(glibcReleaseName)
-        include(nativeExecutableNames)
-        filePermissions {
-            unix('rwxr-xr-x')
-        }
-    }
-    doLast {
-        def contents = archiveOperations.tarTree(archiveOperations.gzip(archiveFile.get()))
-        verifyDocumentationLinks.call(contents, glibcReleaseName)
-        verifyNativeExecutablePermissions.call(contents, glibcReleaseName)
-    }
+def distributionFor = { String target, boolean pgo ->
+    nativeDistributions[target + (pgo ? '-pgo' : '')]
 }
+def selected = tuinkNativeTargets.collect { distributionFor(it, tuinkPgo) }
 
-def nativeMuslTarGz = tasks.register('nativeMuslTarGz', Tar) {
+tasks.register('nativeDist') {
     group = 'distribution'
-    description = 'Build the musl native tar.gz release archive.'
-    dependsOn(tasks.named('stageNativeMusl'))
-    compression = Compression.GZIP
-    archiveBaseName = 'tuink'
-    archiveVersion = releaseVersion
-    archiveClassifier = "${osToken}-${archToken}-musl"
-    archiveExtension = 'tar.gz'
-    destinationDirectory = distributionDir
-
-    from(layout.buildDirectory.dir("staging/musl/${muslReleaseName}")) {
-        into(muslReleaseName)
-        exclude(nativeExecutableNames)
-    }
-    from(layout.buildDirectory.dir("staging/musl/${muslReleaseName}")) {
-        into(muslReleaseName)
-        include(nativeExecutableNames)
-        filePermissions {
-            unix('rwxr-xr-x')
-        }
-    }
-    doLast {
-        def contents = archiveOperations.tarTree(archiveOperations.gzip(archiveFile.get()))
-        verifyDocumentationLinks.call(contents, muslReleaseName)
-        verifyNativeExecutablePermissions.call(contents, muslReleaseName)
-    }
+    description = 'Build a native executable. Use -Pmusl and/or -Ppgo (default: glibc without PGO).'
+    dependsOn(selected.collect { it.binary })
 }
-
 tasks.register('nativeDistTarGz') {
     group = 'distribution'
-    description = 'Build native tar.gz release archives. Use -Ptarget=glibc|musl|all (default: glibc).'
-    if (nativeTarget == 'glibc') {
-        dependsOn(nativeTarGz)
-        releaseArtifactFiles.from(nativeTarGz.flatMap { it.archiveFile })
-    } else if (nativeTarget == 'musl') {
-        dependsOn(nativeMuslTarGz)
-        releaseArtifactFiles.from(nativeMuslTarGz.flatMap { it.archiveFile })
-    } else {
-        dependsOn(nativeTarGz, nativeMuslTarGz)
-        releaseArtifactFiles.from(nativeTarGz.flatMap { it.archiveFile })
-        releaseArtifactFiles.from(nativeMuslTarGz.flatMap { it.archiveFile })
+    description = 'Build a native tar.gz with README, licenses and notices. Use -Pmusl and/or -Ppgo.'
+    dependsOn(selected.collect { it.archive })
+}
+
+// Keep old entry points as aliases, rather than maintaining another selector.
+[nativeTarGz: 'glibc', nativeMuslTarGz: 'musl'].each { name, target ->
+    tasks.register(name) {
+        description = "Compatibility alias: package ${target}, honoring -Ppgo."
+        dependsOn {
+            tuinkRequireNativeTarget(target)
+            distributionFor(target, tuinkPgo).archive
+        }
+    }
+}
+if (tuinkPgo) {
+    [nativePgoTarGz: 'glibc', nativeMuslPgoTarGz: 'musl'].each { name, target ->
+        tasks.register(name) {
+            description = "Compatibility alias: package the ${target} PGO binary."
+            dependsOn {
+                tuinkRequireNativeTarget(target)
+                distributionFor(target, true).archive
+            }
+        }
+    }
+    tasks.register('nativePgoDistTarGz') {
+        description = 'Compatibility alias: package the selected PGO binaries.'
+        dependsOn(tasks.named('nativeDistTarGz'))
     }
 }
 
-tasks.register('releaseChecksums') {
+// A complete bundle keeps ordinary archives and adds PGO archives when enabled.
+def releaseArchives = tuinkNativeTargets.collectMany { target ->
+    (tuinkPgo ? [false, true] : [false]).collect { distributionFor(target, it).archive }
+}
+ext.tuinkArchiveFiles = files(jvmDistZip.flatMap { it.archiveFile },
+    releaseArchives.collect { it.flatMap { task -> task.archiveFile } })
+tasks.register('distributionArchives') {
     group = 'distribution'
-    description = 'Write SHA256SUMS for all artifacts produced by the release task.'
-    dependsOn(tasks.named('nativeDistTarGz'))
-    dependsOn(jvmDistZip)
-    releaseArtifactFiles.from(jvmDistZip.flatMap { it.archiveFile })
-    inputs.files(releaseArtifactFiles)
-    def checksumFile = distributionDir.map { it.file('SHA256SUMS') }
-    outputs.file(checksumFile)
-
-    doLast {
-        def lines = releaseArtifacts.files
-            .sort { left, right -> left.name <=> right.name }
-            .collect { artifact ->
-                if (!artifact.isFile()) {
-                    throw new GradleException("Release artifact not found: ${artifact}")
-                }
-                def digest = java.security.MessageDigest.getInstance('SHA-256')
-                artifact.withInputStream { stream ->
-                    byte[] buffer = new byte[8192]
-                    int count
-                    while ((count = stream.read(buffer)) != -1) {
-                        digest.update(buffer, 0, count)
-                    }
-                }
-                "${digest.digest().encodeHex()}  ${artifact.name}"
-            }
-        def output = checksumFile.get().asFile
-        output.parentFile.mkdirs()
-        output.setText(lines.join(System.lineSeparator()) + System.lineSeparator(), 'UTF-8')
-    }
+    description = 'Build JVM/native archives; add Oracle PGO with -Ppgo. Use -Ptarget=all for all five variants.'
+    dependsOn(jvmDistZip, releaseArchives)
 }
 
 tasks.named('installDist', Sync) {

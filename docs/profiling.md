@@ -50,16 +50,20 @@ rendering or input changes:
 
 `perfSmoke` runs 120 events once and is included in `:app:release`.
 `perfCheck` runs 600 events three times for `Down`, `Shift+Down`, and mouse
-drag. It builds the glibc native binary automatically. Results are written to:
+drag. It builds the selected native variant automatically (glibc by default).
+Gradle writes results to:
 
 ```text
-build/performance/render/<timestamp>-<label>/
+build/performance/render/<variant>/<smoke-or-check>/<timestamp>-<label>/
 ├── fixture.java
 ├── tuink.properties
 ├── <scenario>-<repeat>.log
 ├── summary.json
 └── summary.md
 ```
+
+Direct Python harness runs use `build/performance/render/<timestamp>-<label>/`
+unless `--output-root` is supplied.
 
 The harness also has opt-in `save-as-left`, `search-replace-left`, and
 `tabbar-wheel` scenarios. The first opens Save As through Ctrl+K. The second

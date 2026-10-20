@@ -1,5 +1,4 @@
 def benchmarkScript = rootProject.file('verification/performance/render_benchmark.py')
-def nativeBinary = layout.buildDirectory.file('native/nativeCompile/tuink')
 def performanceRoot = rootProject.layout.buildDirectory.dir('performance/render')
 
 def perfHarnessTest = tasks.register('perfHarnessTest', Exec) {
@@ -17,44 +16,78 @@ tasks.register('pgoHarnessTest', Exec) {
     commandLine('python3', trainingScript.absolutePath, '--self-test')
 }
 
-def configureNativeBenchmark = { task, String frames, String repeats, String label ->
-    task.dependsOn(tasks.named('nativeCompile'))
-    task.dependsOn(perfHarnessTest)
-    task.inputs.file(benchmarkScript)
-    task.inputs.file(nativeBinary)
-    task.outputs.dir(performanceRoot)
-    task.outputs.upToDateWhen { false }
-    task.doFirst {
-        commandLine(
-            'python3',
-            benchmarkScript.absolutePath,
-            '--binary', nativeBinary.get().asFile.absolutePath,
-            '--output-root', performanceRoot.get().asFile.absolutePath,
-            '--label', label,
-            '--frames', frames,
-            '--repeats', repeats,
-            '--scenarios', 'down,shift-down,mouse-drag'
-        )
+def positiveIntegerProperty = { String name, int fallback ->
+    String raw = providers.gradleProperty(name).getOrElse(fallback.toString())
+    int value
+    try {
+        value = Integer.parseInt(raw.trim())
+    } catch (NumberFormatException ignored) {
+        throw new GradleException("-P${name} must be a positive 32-bit integer; got '${raw}'.")
+    }
+    if (value <= 0) {
+        throw new GradleException("-P${name} must be positive; got '${raw}'.")
+    }
+    value
+}
+
+def registerNativeBenchmark = { String target, boolean pgo, boolean smoke ->
+    String suffix = "${target.capitalize()}${pgo ? 'Pgo' : ''}"
+    String variant = "${target}${pgo ? '-pgo' : ''}"
+    def compiler = tuinkNativeCompiler(target, pgo)
+    def nativeBinary = compiler.flatMap { it.outputFile }
+    def outputRoot = performanceRoot.map { it.dir("${variant}/${smoke ? 'smoke' : 'check'}") }
+    tasks.register("perf${smoke ? 'Smoke' : 'Check'}${suffix}", Exec) {
+        // Validate only a requested benchmark, before any native compilation runs.
+        int frames = smoke ? 120 : positiveIntegerProperty('perfFrames', 600)
+        int repeats = smoke ? 1 : positiveIntegerProperty('perfRepeats', 3)
+        if (frames % 30 != 0 || frames > Integer.MAX_VALUE - 43) {
+            throw new GradleException('-PperfFrames must be a positive multiple of 30 with room for 43 fixture lines.')
+        }
+        int fixtureLines = Math.max(1800, frames + 43)
+        String label = smoke ? project.version.toString()
+            : providers.gradleProperty('perfLabel').getOrElse(project.version.toString())
+        dependsOn(compiler, perfHarnessTest)
+        inputs.files(benchmarkScript, nativeBinary)
+        outputs.dir(outputRoot)
+        outputs.upToDateWhen { false }
+        doFirst {
+            commandLine(
+                'python3', benchmarkScript.absolutePath,
+                '--binary', nativeBinary.get().asFile.absolutePath,
+                '--output-root', outputRoot.get().asFile.absolutePath,
+                '--label', "${label}-${variant}${smoke ? '-smoke' : ''}",
+                '--frames', frames.toString(),
+                '--repeats', repeats.toString(),
+                '--fixture-lines', fixtureLines.toString(),
+                '--scenarios', 'down,shift-down,mouse-drag'
+            )
+        }
     }
 }
 
-def perfSmoke = tasks.register('perfSmoke', Exec) {
-    group = 'verification'
-    description = 'Run a short native PTY render-loop smoke benchmark.'
+def benchmarks = ['glibc', 'musl'].collectEntries { target ->
+    def modes = (tuinkPgo ? [false, true] : [false]).collectEntries { pgo ->
+        [(pgo): [smoke: registerNativeBenchmark(target, pgo, true),
+                 check: registerNativeBenchmark(target, pgo, false)]]
+    }
+    [(target): modes]
 }
-configureNativeBenchmark(perfSmoke.get(), '120', '1', "${project.version}-smoke")
 
-def perfCheck = tasks.register('perfCheck', Exec) {
+tasks.register('perfSmoke') {
     group = 'verification'
-    description = 'Run the full native PTY render benchmark (600 events, three repeats by default).'
+    description = 'Run a short native PTY render benchmark for the selected libc and PGO mode.'
+    dependsOn(tuinkNativeTargets.collect { benchmarks[it][tuinkPgo].smoke })
 }
-configureNativeBenchmark(
-    perfCheck.get(),
-    (project.findProperty('perfFrames') ?: '600').toString(),
-    (project.findProperty('perfRepeats') ?: '3').toString(),
-    (project.findProperty('perfLabel') ?: project.version).toString()
-)
+
+tasks.register('perfCheck') {
+    group = 'verification'
+    description = 'Benchmark the selected native variant (600 events, three repeats by default).'
+    dependsOn(tuinkNativeTargets.collect { benchmarks[it][tuinkPgo].check })
+}
 
 tasks.named('release') {
-    dependsOn(perfSmoke)
+    // A PGO release ships ordinary and optimized binaries; smoke-test both.
+    dependsOn(tuinkNativeTargets.collectMany { target ->
+        benchmarks[target].values().collect { it.smoke }
+    })
 }

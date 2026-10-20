@@ -3,303 +3,354 @@ import groovy.json.JsonSlurper
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 
-def nativeTarget = (project.findProperty('target') ?: 'glibc').toString().toLowerCase()
-if (!(nativeTarget in ['glibc', 'musl'])) {
-    throw new GradleException('PGO requires one target per profile. Use -Ptarget=glibc or -Ptarget=musl.')
-}
-def nativeMarch = project.ext.tuinkNativeMarch.toString()
-def baseNativeBuildArgs = project.ext.tuinkBaseNativeBuildArgs
-def runtimeInputs = files(sourceSets.main.runtimeClasspath, tasks.named('jar'), tuinkNativeSupportJar)
-def aclInputs = tuinkNativeAclInputs(nativeTarget)
-def profileFile = rootProject.file(
-    project.findProperty('pgoProfile') ?: ".local/pgo/${nativeTarget}/profile.iprof"
-)
-def receiptFile = new File(profileFile.absolutePath + '.json')
-def trainingScript = rootProject.file('verification/performance/pgo_training.py')
-def renderScript = rootProject.file('verification/performance/render_benchmark.py')
-def projectRootPath = rootProject.projectDir.toPath()
-def trainingRoot = layout.buildDirectory.dir("pgo-training/${nativeTarget}")
-def pgoLogger = logger
-def sdkHome = providers.environmentVariable('GRAALVM_HOME').map { new File(it.trim()).canonicalFile }
-def pgoArgs = { String target ->
-    baseNativeBuildArgs() + ["-march=${nativeMarch}"] +
-        (target == 'musl' ? ['--static', '--libc=musl', '-Ddev.tuiframe.provider=exec'] : [])
+// PGO requires Oracle GraalVM 25.0.4+7.1 Native Image, including its profile tools.
+// A regular Oracle JDK and GraalVM Community do not provide this PGO toolchain.
+// All compiler tasks inherit verifyNativeToolchain from native.gradle.
+def selectedTarget = tuinkNativeTarget
+if (selectedTarget == 'all' && project.hasProperty('pgoProfile')) {
+    throw new GradleException('One PGO profile cannot serve both libc targets. '
+        + 'Use -PpgoGlibcProfile and -PpgoMuslProfile with -Ptarget=all.')
 }
 
-def binaryPrefix = nativeTarget == 'musl' ? 'muslPgo' : 'pgo'
-def imagePrefix = nativeTarget == 'musl' ? 'tuink-musl-pgo' : 'tuink-pgo'
-['Instrument', 'Optimized'].each { suffix ->
-    graalvmNative.binaries.create(binaryPrefix + suffix) {
-        imageName = imagePrefix + (suffix == 'Instrument' ? '-instrument' : '')
-        mainClass = application.mainClass
-        classpath(runtimeInputs)
-        buildArgs.addAll(pgoArgs(nativeTarget))
-        buildArgs.add(suffix == 'Instrument' ? '--pgo-instrument' : "--pgo=${profileFile.absolutePath}")
+// Register both targets independently so an all-variants build never shares a
+// profile, receipt, training directory, or optimized binary between libc targets.
+def registerPgoTarget = { String nativeTarget ->
+    def nativeMarch = project.ext.tuinkNativeMarch.toString()
+    def baseNativeBuildArgs = project.ext.tuinkBaseNativeBuildArgs
+    def runtimeInputs = files(sourceSets.main.runtimeClasspath, tasks.named('jar'), tuinkNativeSupportJar)
+    def aclInputs = tuinkNativeAclInputs(nativeTarget)
+    def targetSuffix = nativeTarget.capitalize()
+    def customProfile = project.findProperty("pgo${targetSuffix}Profile")
+    def commonProfile = selectedTarget == nativeTarget ? project.findProperty('pgoProfile') : null
+    if ([customProfile, commonProfile].any { it != null && !it.toString().trim() }) {
+        throw new GradleException('PGO profile options require a file path.')
     }
-}
+    if (customProfile != null && commonProfile != null
+        && rootProject.file(customProfile).canonicalFile != rootProject.file(commonProfile).canonicalFile) {
+        throw new GradleException("pgoProfile and pgo${targetSuffix}Profile name different files. Choose one.")
+    }
+    customProfile = customProfile ?: commonProfile
+    def profileFile = rootProject.file(customProfile ?: ".local/pgo/${nativeTarget}/profile.iprof")
+    def receiptFile = new File(profileFile.absolutePath + '.json')
+    def trainingScript = rootProject.file('verification/performance/pgo_training.py')
+    def renderScript = rootProject.file('verification/performance/render_benchmark.py')
+    def projectRootPath = rootProject.projectDir.toPath()
+    def trainingRoot = layout.buildDirectory.dir("pgo-training/${nativeTarget}")
+    def pgoLogger = logger
+    def sdkHome = providers.environmentVariable('GRAALVM_HOME').map { new File(it.trim()).canonicalFile }
+    def pgoArgs = { String target ->
+        baseNativeBuildArgs() + ["-march=${nativeMarch}"] +
+            (target == 'musl' ? ['--static', '--libc=musl', '-Ddev.tuiframe.provider=exec'] : [])
+    }
 
-def hashFile = { File file ->
-    def hash = java.security.MessageDigest.getInstance('SHA-256')
-    file.withInputStream { stream ->
-        byte[] buffer = new byte[65536]
-        int count
-        while ((count = stream.read(buffer)) != -1) {
-            hash.update(buffer, 0, count)
+    def binaryPrefix = nativeTarget == 'musl' ? 'muslPgo' : 'pgo'
+    def imagePrefix = nativeTarget == 'musl' ? 'tuink-musl-pgo' : 'tuink-pgo'
+    ['Instrument', 'Optimized'].each { suffix ->
+        graalvmNative.binaries.create(binaryPrefix + suffix) {
+            imageName = imagePrefix + (suffix == 'Instrument' ? '-instrument' : '')
+            mainClass = application.mainClass
+            classpath(runtimeInputs)
+            buildArgs.addAll(pgoArgs(nativeTarget))
+            buildArgs.add(suffix == 'Instrument' ? '--pgo-instrument' : "--pgo=${profileFile.absolutePath}")
         }
     }
-    hash.digest().encodeHex().toString()
-}
-// Read the compiler task options after Gradle has applied command-line overrides.
-def effectiveCompilerOptions = { options ->
-    def automaticProfiles = options.pgoProfilesDirectory.orNull
-    if (!options.layers.empty
-        || (automaticProfiles != null && automaticProfiles.asFileTree.files.any { it.name.endsWith('.iprof') })) {
-        throw new GradleException('PGO tasks require one explicit profile and no image layers. Use -PpgoProfile for the training profile.')
-    }
-    def environment = options.environmentVariables.get().collectEntries { key, value ->
-        [(key.toString()): value.toString()]
-    }
-    def environmentHash = { value ->
-        java.security.MessageDigest.getInstance('SHA-256')
-            .digest(JsonOutput.toJson(value).getBytes('UTF-8')).encodeHex().toString()
-    }
-    [buildArgs: options.buildArgs.get().collect { it.toString() },
-        jvmArgs: options.jvmArgs.get().collect { it.toString() },
-        mainClass: options.mainClass.get(), imageName: options.imageName.get(),
-        systemProperties: options.systemProperties.get().collectEntries { key, value ->
-            [(key.toString()): value.toString()]
-        },
-        excludeConfigArgs: options.excludeConfigArgs.get().collect { it.toString() },
-        environment: environmentHash(new TreeMap(environment)),
-        compilerEnvironment: environmentHash(
-            ['NATIVE_IMAGE_OPTIONS', 'JAVA_TOOL_OPTIONS', 'JDK_JAVA_OPTIONS', '_JAVA_OPTIONS'].collectEntries { key ->
-                [(key): environment.containsKey(key) ? environment[key] : System.getenv(key)]
-            }),
-        flags: [debug: options.debug.get(), fallback: options.fallback.get(),
-            quickBuild: options.quickBuild.get(), sharedLibrary: options.sharedLibrary.get(),
-            useFatJar: options.useFatJar.get(), pgoInstrument: options.pgoInstrument.get(),
-            verbose: options.verbose.get(), richOutput: options.richOutput.get()],
-        resources: [bundles: options.resources.bundles.get(),
-            included: options.resources.includedPatterns.get(),
-            excluded: options.resources.excludedPatterns.get()]]
-}
-def normalizeCompilerOptions = { Map state, String role ->
-    def expectedMode = role == 'Instrument' ? '--pgo-instrument' : "--pgo=${profileFile.absolutePath}".toString()
-    def args = new ArrayList(state.buildArgs)
-    // Only the selector declared above is interchangeable. A second selector
-    // could make native-image train or consume a different profile.
-    if (state.flags.pgoInstrument || args.count { it == expectedMode } != 1
-        || args.any { (it == '--pgo' || it.startsWith('--pgo=')
-            || it == '--pgo-instrument' || it.startsWith('--pgo-instrument=')) && it != expectedMode }) {
-        throw new GradleException('PGO compiler mode was overridden. Use the selected PGO tasks and -PpgoProfile.')
-    }
-    args.remove(expectedMode)
-    def expectedImage = imagePrefix + (role == 'Instrument' ? '-instrument' : '')
-    state + [buildArgs: args,
-        imageName: state.imageName == expectedImage ? imagePrefix : state.imageName]
-}
-def inputLabel = { File entry ->
-    (entry.toPath().startsWith(projectRootPath)
-        ? projectRootPath.relativize(entry.toPath()).toString() : entry.absolutePath).toString()
-}
-def normalizeConfigurationInputs = { collection, String generatedPath ->
-    collection.collect { entry ->
-        entry.path == generatedPath ? entry + [path: 'generated/resources'] : entry
-    }
-}
-def hashInputs = { collection ->
-    collection.collect { File entry ->
-        def label = inputLabel(entry)
-        def hashes = [:]
-        if (entry.isDirectory()) {
-            Files.walk(entry.toPath()).withCloseable { stream ->
-                stream.filter { Files.isRegularFile(it) }.sorted().forEach { path ->
-                    hashes[entry.toPath().relativize(path).toString()] = hashFile(path.toFile())
-                }
+
+    def hashFile = { File file ->
+        def hash = java.security.MessageDigest.getInstance('SHA-256')
+        file.withInputStream { stream ->
+            byte[] buffer = new byte[65536]
+            int count
+            while ((count = stream.read(buffer)) != -1) {
+                hash.update(buffer, 0, count)
             }
-        } else if (entry.isFile()) {
-            hashes['.'] = hashFile(entry)
-        } else {
-            hashes['.'] = null
         }
-        [path: label.toString(), files: hashes]
+        hash.digest().encodeHex().toString()
     }
-}
-def compilerInputs = { task, String role ->
-    def options = task.options.get()
-    def resourceTaskName = 'generate' + (binaryPrefix + role).capitalize() + 'ResourcesConfigFile'
-    def generatedResources = tasks.named(resourceTaskName).get().outputFile.get().asFile.parentFile
-    [target: nativeTarget, options: normalizeCompilerOptions(effectiveCompilerOptions(options), role),
-        // Classpath order affects which duplicate class or resource wins.
-        classpath: hashInputs(options.classpath.files),
-        configuration: normalizeConfigurationInputs(hashInputs(options.configurationFileDirectories.files),
-            inputLabel(generatedResources)),
-        nativeInputs: hashInputs(aclInputs.files),
-        sdkRelease: hashFile(new File(sdkHome.get(), 'release')),
-        nativeImage: hashFile(new File(sdkHome.get(), 'bin/native-image'))]
-}
-def instrumentTaskName = nativeTarget == 'musl'
-    ? 'nativeMuslPgoInstrumentCompile' : 'nativePgoInstrumentCompile'
-def optimizedTaskName = nativeTarget == 'musl'
-    ? 'nativeMuslPgoOptimizedCompile' : 'nativePgoOptimizedCompile'
-def instrumentTask = tasks.named(instrumentTaskName)
-def optimizedTask = tasks.named(optimizedTaskName)
-// Keep the file collections' producer dependencies. Looking only at their files
-// would query generated configuration before its task has run.
-def pgoCompilerFiles = files(
-    { instrumentTask.get().options.get().classpath },
-    { instrumentTask.get().options.get().configurationFileDirectories },
-    { optimizedTask.get().options.get().classpath },
-    { optimizedTask.get().options.get().configurationFileDirectories })
-def instrumentBinary = instrumentTask.flatMap { it.outputFile }
-// Resolve the task's own output directly while Gradle snapshots its outputs;
-// mapping a task-output provider here would require its producer to be complete.
-def instrumentReceipt = { new File(instrumentTask.get().outputFile.get().asFile.absolutePath + '.pgo-build.json') }
-def profileInputs = { task = optimizedTask.get(), String role = 'Optimized' ->
-    [compiler: compilerInputs(task, role), trainingHarness: hashFile(trainingScript),
-        renderHarness: hashFile(renderScript)]
-}
-
-// Preserve the inputs of the compilation, even when training runs in a later
-// invocation with different CLI options or when the compiler task is up to date.
-instrumentTask.configure { task ->
-    def before = [:]
-    inputs.property('pgoCompilerEnvironment', {
-        effectiveCompilerOptions(task.options.get()).compilerEnvironment
-    })
-    outputs.file(instrumentReceipt).withPropertyName('pgoInstrumentBuildReceipt')
-    notCompatibleWithConfigurationCache('Records the effective compiler inputs of the PGO training binary.')
-    doFirst {
-        Files.deleteIfExists(instrumentReceipt().toPath())
-        before.inputs = compilerInputs(task, 'Instrument')
-    }
-    doLast {
-        if (before.inputs != compilerInputs(task, 'Instrument')) {
-            throw new GradleException('PGO instrument compiler inputs changed during compilation. Rebuild before training.')
+    // Read the compiler task options after Gradle has applied command-line overrides.
+    def effectiveCompilerOptions = { options ->
+        def automaticProfiles = options.pgoProfilesDirectory.orNull
+        if (!options.layers.empty
+            || (automaticProfiles != null && automaticProfiles.asFileTree.files.any { it.name.endsWith('.iprof') })) {
+            throw new GradleException('PGO tasks require one explicit profile and no image layers. '
+                + "Use -Ppgo${targetSuffix}Profile for this target's training profile.")
         }
-        def receipt = [schema: 1, kind: 'tuink-pgo-instrument-build', inputs: before.inputs,
-            binarySha256: hashFile(task.outputFile.get().asFile)]
-        instrumentReceipt().setText(JsonOutput.prettyPrint(JsonOutput.toJson(receipt)) + '\n', 'UTF-8')
+        def environment = options.environmentVariables.get().collectEntries { key, value ->
+            [(key.toString()): value.toString()]
+        }
+        def environmentHash = { value ->
+            java.security.MessageDigest.getInstance('SHA-256')
+                .digest(JsonOutput.toJson(value).getBytes('UTF-8')).encodeHex().toString()
+        }
+        [buildArgs: options.buildArgs.get().collect { it.toString() },
+            jvmArgs: options.jvmArgs.get().collect { it.toString() },
+            mainClass: options.mainClass.get(), imageName: options.imageName.get(),
+            systemProperties: options.systemProperties.get().collectEntries { key, value ->
+                [(key.toString()): value.toString()]
+            },
+            excludeConfigArgs: options.excludeConfigArgs.get().collect { it.toString() },
+            environment: environmentHash(new TreeMap(environment)),
+            compilerEnvironment: environmentHash(
+                ['NATIVE_IMAGE_OPTIONS', 'JAVA_TOOL_OPTIONS', 'JDK_JAVA_OPTIONS', '_JAVA_OPTIONS'].collectEntries { key ->
+                    [(key): environment.containsKey(key) ? environment[key] : System.getenv(key)]
+                }),
+            flags: [debug: options.debug.get(), fallback: options.fallback.get(),
+                quickBuild: options.quickBuild.get(), sharedLibrary: options.sharedLibrary.get(),
+                useFatJar: options.useFatJar.get(), pgoInstrument: options.pgoInstrument.get(),
+                verbose: options.verbose.get(), richOutput: options.richOutput.get()],
+            resources: [bundles: options.resources.bundles.get(),
+                included: options.resources.includedPatterns.get(),
+                excluded: options.resources.excludedPatterns.get()]]
     }
-}
-def verifyInstrumentBuild = {
-    def receipt
-    try {
-        receipt = new JsonSlurper().parse(instrumentReceipt(), 'UTF-8')
-    } catch (Exception error) {
-        throw new GradleException('PGO training requires a matching instrument compiler receipt. Rebuild the instrumented binary.', error)
+    def normalizeCompilerOptions = { Map state, String role ->
+        def expectedMode = role == 'Instrument' ? '--pgo-instrument' : "--pgo=${profileFile.absolutePath}".toString()
+        def args = new ArrayList(state.buildArgs)
+        // Only the selector declared above is interchangeable. A second selector
+        // could make native-image train or consume a different profile.
+        if (state.flags.pgoInstrument || args.count { it == expectedMode } != 1
+            || args.any { (it == '--pgo' || it.startsWith('--pgo=')
+                || it == '--pgo-instrument' || it.startsWith('--pgo-instrument=')) && it != expectedMode }) {
+            throw new GradleException('PGO compiler mode was overridden. '
+                + "Use the selected PGO tasks and -Ppgo${targetSuffix}Profile.")
+        }
+        args.remove(expectedMode)
+        def expectedImage = imagePrefix + (role == 'Instrument' ? '-instrument' : '')
+        state + [buildArgs: args,
+            imageName: state.imageName == expectedImage ? imagePrefix : state.imageName]
     }
-    if (!(receipt instanceof Map) || receipt.schema != 1 || receipt.kind != 'tuink-pgo-instrument-build'
-        || receipt.inputs != compilerInputs(instrumentTask.get(), 'Instrument')
-        || receipt.binarySha256 != hashFile(instrumentBinary.get().asFile)) {
-        throw new GradleException('PGO instrumented binary does not match the current compiler inputs. Rebuild it before training.')
+    def inputLabel = { File entry ->
+        (entry.toPath().startsWith(projectRootPath)
+            ? projectRootPath.relativize(entry.toPath()).toString() : entry.absolutePath).toString()
     }
-}
+    def normalizeConfigurationInputs = { collection, String generatedPath ->
+        collection.collect { entry ->
+            entry.path == generatedPath ? entry + [path: 'generated/resources'] : entry
+        }
+    }
+    def hashInputs = { collection ->
+        collection.collect { File entry ->
+            def label = inputLabel(entry)
+            def hashes = [:]
+            if (entry.isDirectory()) {
+                Files.walk(entry.toPath()).withCloseable { stream ->
+                    stream.filter { Files.isRegularFile(it) }.sorted().forEach { path ->
+                        hashes[entry.toPath().relativize(path).toString()] = hashFile(path.toFile())
+                    }
+                }
+            } else if (entry.isFile()) {
+                hashes['.'] = hashFile(entry)
+            } else {
+                hashes['.'] = null
+            }
+            [path: label.toString(), files: hashes]
+        }
+    }
+    def compilerInputs = { task, String role ->
+        def options = task.options.get()
+        def resourceTaskName = 'generate' + (binaryPrefix + role).capitalize() + 'ResourcesConfigFile'
+        def generatedResources = tasks.named(resourceTaskName).get().outputFile.get().asFile.parentFile
+        [target: nativeTarget, options: normalizeCompilerOptions(effectiveCompilerOptions(options), role),
+            // Classpath order affects which duplicate class or resource wins.
+            classpath: hashInputs(options.classpath.files),
+            configuration: normalizeConfigurationInputs(hashInputs(options.configurationFileDirectories.files),
+                inputLabel(generatedResources)),
+            nativeInputs: hashInputs(aclInputs.files),
+            sdkRelease: hashFile(new File(sdkHome.get(), 'release')),
+            nativeImage: hashFile(new File(sdkHome.get(), 'bin/native-image'))]
+    }
+    def instrumentTaskName = nativeTarget == 'musl'
+        ? 'nativeMuslPgoInstrumentCompile' : 'nativePgoInstrumentCompile'
+    def optimizedTaskName = nativeTarget == 'musl'
+        ? 'nativeMuslPgoOptimizedCompile' : 'nativePgoOptimizedCompile'
+    def instrumentTask = tasks.named(instrumentTaskName)
+    def optimizedTask = tasks.named(optimizedTaskName)
+    // Keep the file collections' producer dependencies. Looking only at their files
+    // would query generated configuration before its task has run.
+    def pgoCompilerFiles = files(
+        { instrumentTask.get().options.get().classpath },
+        { instrumentTask.get().options.get().configurationFileDirectories },
+        { optimizedTask.get().options.get().classpath },
+        { optimizedTask.get().options.get().configurationFileDirectories })
+    def instrumentBinary = instrumentTask.flatMap { it.outputFile }
+    // Resolve the task's own output directly while Gradle snapshots its outputs;
+    // mapping a task-output provider here would require its producer to be complete.
+    def instrumentReceipt = { new File(instrumentTask.get().outputFile.get().asFile.absolutePath + '.pgo-build.json') }
+    def profileInputs = { task = optimizedTask.get(), String role = 'Optimized' ->
+        [compiler: compilerInputs(task, role), trainingHarness: hashFile(trainingScript),
+            renderHarness: hashFile(renderScript)]
+    }
 
+    // Preserve the inputs of the compilation, even when training runs in a later
+    // invocation with different CLI options or when the compiler task is up to date.
+    instrumentTask.configure { task ->
+        def before = [:]
+        inputs.property('pgoCompilerEnvironment', {
+            effectiveCompilerOptions(task.options.get()).compilerEnvironment
+        })
+        outputs.file(instrumentReceipt).withPropertyName('pgoInstrumentBuildReceipt')
+        notCompatibleWithConfigurationCache('Records the effective compiler inputs of the PGO training binary.')
+        doFirst {
+            Files.deleteIfExists(instrumentReceipt().toPath())
+            before.inputs = compilerInputs(task, 'Instrument')
+        }
+        doLast {
+            if (before.inputs != compilerInputs(task, 'Instrument')) {
+                throw new GradleException('PGO instrument compiler inputs changed during compilation. Rebuild before training.')
+            }
+            def receipt = [schema: 1, kind: 'tuink-pgo-instrument-build', inputs: before.inputs,
+                binarySha256: hashFile(task.outputFile.get().asFile)]
+            instrumentReceipt().setText(JsonOutput.prettyPrint(JsonOutput.toJson(receipt)) + '\n', 'UTF-8')
+        }
+    }
+    def verifyInstrumentBuild = {
+        def receipt
+        try {
+            receipt = new JsonSlurper().parse(instrumentReceipt(), 'UTF-8')
+        } catch (Exception error) {
+            throw new GradleException('PGO training requires a matching instrument compiler receipt. Rebuild the instrumented binary.', error)
+        }
+        if (!(receipt instanceof Map) || receipt.schema != 1 || receipt.kind != 'tuink-pgo-instrument-build'
+            || receipt.inputs != compilerInputs(instrumentTask.get(), 'Instrument')
+            || receipt.binarySha256 != hashFile(instrumentBinary.get().asFile)) {
+            throw new GradleException('PGO instrumented binary does not match the current compiler inputs. Rebuild it before training.')
+        }
+    }
+
+    def pgoInputsTest = tasks.register("pgoInputs${targetSuffix}Test") {
+        description = 'Validate effective PGO compiler inputs and the instrument/optimized normalization.'
+        def testFile = rootProject.file('verification/performance/test_pgo_inputs.groovy')
+        inputs.files(testFile, rootProject.file('gradle/scripts/pgo.gradle'))
+        doLast {
+            def bindings = new Binding([effectiveCompilerOptions: effectiveCompilerOptions,
+                normalizeCompilerOptions: normalizeCompilerOptions,
+                normalizeConfigurationInputs: normalizeConfigurationInputs, profilePath: profileFile.absolutePath,
+                imagePrefix: imagePrefix])
+            new GroovyShell(getClass().classLoader, bindings).evaluate(testFile)
+        }
+    }
+
+    def instrument = tasks.register("nativeProfile${targetSuffix}Instrument") {
+        description = "Build the ${nativeTarget} PGO training binary with Oracle GraalVM Native Image."
+        dependsOn {
+            tuinkRequireNativeTarget(nativeTarget)
+            tasks.named(instrumentTaskName)
+        }
+    }
+
+    def trainingState = [:]
+    def train = tasks.register("nativeProfile${targetSuffix}Train", Exec) {
+        description = "Train a separate ${nativeTarget} PGO profile using Oracle GraalVM Native Image."
+        dependsOn(instrument, 'pgoHarnessTest', pgoCompilerFiles)
+        inputs.files(pgoCompilerFiles, trainingScript, renderScript, runtimeInputs, aclInputs, instrumentBinary)
+        outputs.files(profileFile, receiptFile)
+        outputs.upToDateWhen { false }
+        notCompatibleWithConfigurationCache('Records fingerprints of the selected native training inputs.')
+        doFirst {
+            def runRoot = trainingRoot.get().asFile
+            runRoot.mkdirs()
+            def directory = Files.createTempDirectory(runRoot.toPath(), 'run-').toFile()
+            trainingState.directory = directory
+            verifyInstrumentBuild()
+            trainingState.inputs = profileInputs(instrumentTask.get(), 'Instrument')
+            if (trainingState.inputs != profileInputs()) {
+                throw new GradleException('PGO instrument and optimized compiler options differ. Apply the same build options to both tasks before training.')
+            }
+            trainingState.binaryHash = hashFile(instrumentBinary.get().asFile)
+            commandLine('python3', trainingScript.absolutePath,
+                '--binary', instrumentBinary.get().asFile.absolutePath,
+                '--output-dir', directory.absolutePath,
+                '--graalvm-home', sdkHome.get().absolutePath)
+        }
+        doLast {
+            if (profileInputs(instrumentTask.get(), 'Instrument') != trainingState.inputs
+                || profileInputs() != trainingState.inputs
+                || hashFile(instrumentBinary.get().asFile) != trainingState.binaryHash) {
+                throw new GradleException("PGO training inputs changed during the run. Run nativeProfile${targetSuffix}Train again.")
+            }
+            def merged = new File(trainingState.directory, 'profile.iprof')
+            if (!merged.isFile() || merged.length() == 0) {
+                throw new GradleException("Training produced no PGO profile: ${merged}")
+            }
+            def receipt = [schema: 2, inputs: trainingState.inputs,
+                profileSha256: hashFile(merged), instrumentedBinarySha256: trainingState.binaryHash]
+            profileFile.parentFile.mkdirs()
+            Files.copy(merged.toPath(), profileFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            receiptFile.setText(JsonOutput.prettyPrint(JsonOutput.toJson(receipt)) + '\n', 'UTF-8')
+            pgoLogger.lifecycle("PGO profile: ${profileFile}; training logs: ${trainingState.directory}")
+        }
+    }
+
+    def verifyProfile = tasks.register("verifyPgo${targetSuffix}Profile") {
+        description = 'Reject missing, modified, or stale PGO profiles before native compilation.'
+        dependsOn(tasks.named('verifyNativeToolchain'), runtimeInputs, aclInputs, pgoCompilerFiles)
+        mustRunAfter(train)
+        notCompatibleWithConfigurationCache('Compares the current native inputs with the training receipt.')
+        doLast {
+            if (!profileFile.isFile() || profileFile.length() == 0 || !receiptFile.isFile()) {
+                throw new GradleException("PGO profile and training receipt required at ${profileFile}. "
+                    + "Run :app:nativeProfile${targetSuffix}Train -Ppgo first.")
+            }
+            def receipt
+            try {
+                receipt = new JsonSlurper().parse(receiptFile, 'UTF-8')
+            } catch (Exception error) {
+                throw new GradleException("Invalid PGO training receipt: ${receiptFile}", error)
+            }
+            if (!(receipt instanceof Map) || receipt.schema != 2
+                || receipt.inputs != profileInputs()
+                || receipt.profileSha256 != hashFile(profileFile)) {
+                throw new GradleException('PGO profile does not match the current sources, compiler options, SDK, target, or training harness. '
+                    + "Run :app:nativeProfile${targetSuffix}Train -Ppgo again.")
+            }
+        }
+    }
+
+    // Each libc consumes only its own verified profile and receipt.
+    tasks.named(optimizedTaskName) {
+        dependsOn(verifyProfile)
+        inputs.files(profileFile, receiptFile).withPropertyName('pgoTrainingProfile')
+    }
+    def build = tasks.register("nativeProfile${targetSuffix}Build") {
+        description = "Build the ${nativeTarget} PGO binary with Oracle GraalVM and a verified profile."
+        dependsOn {
+            tuinkRequireNativeTarget(nativeTarget)
+            tasks.named(optimizedTaskName)
+        }
+    }
+    def optimize = tasks.register("nativeProfile${targetSuffix}Optimize") {
+        description = "Instrument, train, verify, and build the ${nativeTarget} Oracle GraalVM PGO binary."
+        dependsOn(train, build)
+    }
+
+    [instrument: instrument, train: train, build: build, optimize: optimize,
+        verify: verifyProfile, inputsTest: pgoInputsTest,
+        profile: profileFile.canonicalFile, receipt: receiptFile.canonicalFile]
+}
+def pgoTargets = ['glibc', 'musl'].collectEntries { target -> [(target): registerPgoTarget(target)] }
+def profilePaths = pgoTargets.values().collectMany { [it.profile, it.receipt] }
+if (profilePaths.toSet().size() != profilePaths.size()) {
+    throw new GradleException('glibc and musl require separate PGO profile and receipt paths.')
+}
+// Keep simultaneous training requests sequential; mustRunAfter does not schedule
+// glibc training when only a musl build was requested.
+pgoTargets.musl.train.configure { mustRunAfter(pgoTargets.glibc.train) }
+def selectedTargets = selectedTarget == 'all' ? pgoTargets.values() : [pgoTargets[selectedTarget]]
+[
+    nativeProfileInstrument: [role: 'instrument', description: 'Build Oracle GraalVM PGO training binaries.'],
+    nativeProfileTrain: [role: 'train', description: 'Train separate Oracle GraalVM PGO profiles for the selected targets.'],
+    nativeProfileBuild: [role: 'build', description: 'Build Oracle GraalVM PGO binaries from verified profiles.'],
+    nativeProfileOptimize: [role: 'optimize', description: 'Instrument, train, verify, and build Oracle GraalVM PGO binaries.'],
+    verifyPgoProfile: [role: 'verify', description: 'Verify the selected libc-specific PGO profiles and receipts.']
+].each { name, configuration ->
+    tasks.register(name) {
+        group = configuration.role == 'verify' ? 'verification' : 'build'
+        description = configuration.description + ' Use -Ppgo; add -Pmusl for static musl (default: glibc).'
+        dependsOn(selectedTargets.collect { it[configuration.role] })
+    }
+}
 def pgoInputsTest = tasks.register('pgoInputsTest') {
     group = 'verification'
-    description = 'Validate effective PGO compiler inputs and the instrument/optimized normalization.'
-    def testFile = rootProject.file('verification/performance/test_pgo_inputs.groovy')
-    inputs.files(testFile, rootProject.file('gradle/scripts/pgo.gradle'))
-    doLast {
-        def bindings = new Binding([effectiveCompilerOptions: effectiveCompilerOptions,
-            normalizeCompilerOptions: normalizeCompilerOptions,
-            normalizeConfigurationInputs: normalizeConfigurationInputs, profilePath: profileFile.absolutePath,
-            imagePrefix: imagePrefix])
-        new GroovyShell(getClass().classLoader, bindings).evaluate(testFile)
-    }
+    description = 'Validate PGO compiler input normalization for both libc targets.'
+    dependsOn(pgoTargets.values().collect { it.inputsTest })
 }
 tasks.named('check') { dependsOn(pgoInputsTest) }
 tasks.matching { it.name == 'pgoHarnessTest' }.configureEach { dependsOn(pgoInputsTest) }
-
-tasks.register('nativeProfileInstrument') {
-    group = 'build'
-    description = 'Build the Oracle GraalVM instrumented binary for the selected PGO target.'
-    dependsOn(tasks.named(instrumentTaskName))
-}
-
-def trainingState = [:]
-def train = tasks.register('nativeProfileTrain', Exec) {
-    group = 'build'
-    description = 'Train and merge a fresh PGO profile using verified editor sessions.'
-    dependsOn(tasks.named('nativeProfileInstrument'), 'pgoHarnessTest', pgoCompilerFiles)
-    inputs.files(pgoCompilerFiles, trainingScript, renderScript, runtimeInputs, aclInputs, instrumentBinary)
-    outputs.files(profileFile, receiptFile)
-    outputs.upToDateWhen { false }
-    notCompatibleWithConfigurationCache('Records fingerprints of the selected native training inputs.')
-    doFirst {
-        def runRoot = trainingRoot.get().asFile
-        runRoot.mkdirs()
-        def directory = Files.createTempDirectory(runRoot.toPath(), 'run-').toFile()
-        trainingState.directory = directory
-        verifyInstrumentBuild()
-        trainingState.inputs = profileInputs(instrumentTask.get(), 'Instrument')
-        if (trainingState.inputs != profileInputs()) {
-            throw new GradleException('PGO instrument and optimized compiler options differ. Apply the same build options to both tasks before training.')
-        }
-        trainingState.binaryHash = hashFile(instrumentBinary.get().asFile)
-        commandLine('python3', trainingScript.absolutePath,
-            '--binary', instrumentBinary.get().asFile.absolutePath,
-            '--output-dir', directory.absolutePath,
-            '--graalvm-home', sdkHome.get().absolutePath)
-    }
-    doLast {
-        if (profileInputs(instrumentTask.get(), 'Instrument') != trainingState.inputs
-            || profileInputs() != trainingState.inputs
-            || hashFile(instrumentBinary.get().asFile) != trainingState.binaryHash) {
-            throw new GradleException('PGO training inputs changed during the run. Run nativeProfileTrain again.')
-        }
-        def merged = new File(trainingState.directory, 'profile.iprof')
-        if (!merged.isFile() || merged.length() == 0) {
-            throw new GradleException("Training produced no PGO profile: ${merged}")
-        }
-        def receipt = [schema: 2, inputs: trainingState.inputs,
-            profileSha256: hashFile(merged), instrumentedBinarySha256: trainingState.binaryHash]
-        profileFile.parentFile.mkdirs()
-        Files.copy(merged.toPath(), profileFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
-        receiptFile.setText(JsonOutput.prettyPrint(JsonOutput.toJson(receipt)) + '\n', 'UTF-8')
-        pgoLogger.lifecycle("PGO profile: ${profileFile}; training logs: ${trainingState.directory}")
-    }
-}
-
-def verifyProfile = tasks.register('verifyPgoProfile') {
-    group = 'verification'
-    description = 'Reject missing, modified, or stale PGO profiles before native compilation.'
-    dependsOn(tasks.named('verifyNativeToolchain'), runtimeInputs, aclInputs, pgoCompilerFiles)
-    mustRunAfter(train)
-    notCompatibleWithConfigurationCache('Compares the current native inputs with the training receipt.')
-    doLast {
-        if (!profileFile.isFile() || profileFile.length() == 0 || !receiptFile.isFile()) {
-            throw new GradleException("PGO profile and training receipt required at ${profileFile}. "
-                + 'Run :app:nativeProfileTrain -PenablePgo for the selected target first.')
-        }
-        def receipt
-        try {
-            receipt = new JsonSlurper().parse(receiptFile, 'UTF-8')
-        } catch (Exception error) {
-            throw new GradleException("Invalid PGO training receipt: ${receiptFile}", error)
-        }
-        if (!(receipt instanceof Map) || receipt.schema != 2
-            || receipt.inputs != profileInputs()
-            || receipt.profileSha256 != hashFile(profileFile)) {
-            throw new GradleException('PGO profile does not match the current sources, compiler options, SDK, target, or training harness. '
-                + 'Run :app:nativeProfileTrain -PenablePgo again.')
-        }
-    }
-}
-
-// The unselected libc has no PGO compiler task, so it cannot consume this profile.
-tasks.named(optimizedTaskName) {
-    dependsOn(verifyProfile)
-    inputs.files(profileFile, receiptFile).withPropertyName('pgoTrainingProfile')
-}
-tasks.register('nativeProfileBuild') {
-    group = 'build'
-    description = 'Build the optimized PGO binary from a matching profile and training receipt.'
-    dependsOn(tasks.named(optimizedTaskName))
-}
-tasks.register('nativeProfileOptimize') {
-    group = 'build'
-    description = 'Instrument, train, verify, and build the optional PGO native binary.'
-    dependsOn(train, tasks.named('nativeProfileBuild'))
-}

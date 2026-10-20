@@ -157,88 +157,62 @@ tasks.register('buildHelp') {
         println """
             TUInk ${rootVersionForHelp} build help
 
-            JVM development
-              Java 25 is selected through Gradle toolchains and downloaded when needed.
+            JVM development (Java 25 toolchain, downloaded when needed)
               ./gradlew check
-                  Run all module tests and architecture checks.
-              ./gradlew clean check build
-                  Clean, verify, and build the complete multi-module JVM project.
-              ./gradlew --console=plain :app:run
-                  Run the canonical application entrypoint in an interactive TTY.
+              ./gradlew --console=plain :app:run --args='file.txt'
 
-            JVM distribution
-              ./gradlew :app:installDist
-                  Installed layout: apps/tuink/launcher/build/install/tuink/
+            JVM distributions (README, docs, samples, licenses and notices)
+              ./gradlew :app:dist
+                  Directory: apps/tuink/launcher/build/install/tuink/
               ./gradlew :app:distZip
                   ZIP: build/releases/tuink-${rootVersionForHelp}.zip
 
-            Native binaries (use the pinned Oracle GraalVM SDK with Java 25)
+            Native builds (Oracle GraalVM 25.0.4+7.1 with Native Image)
               export JAVA_HOME=/absolute/path/to/graalvm-jdk-25.0.4+7.1
               export GRAALVM_HOME=\$JAVA_HOME
-              ./gradlew :app:verifyNativeToolchain
-                  Verify the explicit native toolchain before building.
-              ./gradlew :app:nativeGlibc
-                  Binary: apps/tuink/launcher/build/native/nativeCompile/tuink
-              ./gradlew :app:nativeMusl
-                  Static binary: apps/tuink/launcher/build/native/nativeMuslCompile/tuink-musl
-              ./gradlew :app:nativeAll
-                  Build both native binaries.
-              ./gradlew :app:nativeAclCheck -Ptarget=all
-                  Verify ACL preservation and libc error handling for glibc and musl.
-
-            Optional PGO (same Oracle SDK, POSIX Python 3.10+)
-              ./gradlew :app:pgoHarnessTest
-                  Validate the PGO harness without a native build.
-              ./gradlew :app:nativeProfileInstrument -PenablePgo
-              ./gradlew :app:nativeProfileTrain -PenablePgo
-              ./gradlew :app:nativeProfileBuild -PenablePgo
-                  Train five checked sessions and build a separate glibc PGO binary.
-              ./gradlew :app:nativeProfileOptimize -PenablePgo
-                  Run fresh training and the optimized build together.
-                  Binary: apps/tuink/launcher/build/native/nativePgoOptimizedCompile/tuink-pgo
-                  Profile: .local/pgo/glibc/profile.iprof with adjacent .json receipt.
-                  -PpgoProfile=<path> selects a custom profile and adjacent receipt.
-                  Use -Ptarget=musl for a separate musl profile/binary; all is rejected.
-                  PGO is experimental; release packaging uses the ordinary O3 binary.
-
-            Native archives
+              ./gradlew :app:nativeDist
+                  Bare executable: build/native-dist/glibc/tuink
               ./gradlew :app:nativeDistTarGz
-                  Build the default glibc tar.gz in build/releases/.
-              ./gradlew :app:nativeDistTarGz -Ptarget=musl
-                  Build the musl tar.gz.
-              ./gradlew :app:nativeDistTarGz -Ptarget=all
-                  Build both native archives.
-
-            Debian package (Linux, glibc target)
+                  Archive with documentation and licenses: build/releases/
               ./gradlew :app:nativeDeb
-                  Package: build/releases/tuink_${rootVersionForHelp}_<deb-arch>.deb
+                  Debian package: build/releases/tuink_${rootVersionForHelp}_<arch>.deb
+                  glibc only; -Ppgo replaces its binary with the PGO variant.
 
-            Render performance
-              ./gradlew :app:perfHarnessTest
-                  Validate the benchmark fixture, parser, and statistics.
+            Native flags
+              -Pmusl selects static musl; default: glibc.
+              -Ppgo selects PGO; combine with -Pmusl for musl PGO.
+              Empty/true enables a flag; false disables it.
+              -Ptarget=all selects both libc targets; -PenablePgo aliases -Ppgo.
+              Bare binaries use separate glibc, musl, glibc-pgo, musl-pgo folders.
+
+            PGO (Oracle GraalVM Native Image required, not ordinary Oracle JDK)
+              ./gradlew :app:nativeProfileTrain -Ppgo -Ptarget=all
+                  Train separate glibc and musl profiles; needs POSIX Python 3.10+.
+              ./gradlew :app:nativeDist -Ppgo [-Pmusl]
+                  Build from an existing matching profile; never trains implicitly.
+                  GraalVM Community does not support PGO.
+
+            Render benchmarks (same -Pmusl / -Ppgo variant selection)
               ./gradlew :app:perfSmoke
-                  Run a short native PTY smoke benchmark.
-              ./gradlew :app:perfCheck
-                  Run 600 events in three repeats for Down, Shift+Down,
-                  and mouse drag. Results: build/performance/render/.
               ./gradlew :app:perfCheck -PperfLabel=<label> -PperfRepeats=<n>
-                  Label a run or override the repeat count.
+                  Results: build/performance/render/
 
-            Complete release
-              ./gradlew clean :app:release
-                  Run tests and build the JVM ZIP, glibc archive, Debian package,
-                  build/releases/SHA256SUMS, and the render smoke benchmark.
-              ./gradlew clean :app:release -Ptarget=all
-                  Also include the musl archive.
+            Archives and releases
+              ./gradlew :app:distributionArchives -Ptarget=all -Ppgo
+                  Five archives: JVM ZIP and ordinary/PGO glibc/musl tar.gz files.
+                  Requires trained profiles; no tests, benchmarks or DEB.
+              ./gradlew :app:releaseChecksums [-Pmusl] [-Ppgo]
+                  Selected archives and ARCHIVE_SHA256SUMS; no DEB, tests or benchmarks.
+              ./gradlew clean :app:release [-Ptarget=all] [-Ppgo]
+                  Tests, selected archives, smoke benchmarks and checksums.
+                  Includes one glibc DEB when glibc is selected; uses PGO with -Ppgo.
+                  Writes SHA256SUMS; musl-only releases omit DEB.
+                  Both release and nativeDeb require nativeMarch=compatibility.
 
-            Useful inspection
+            More commands and advanced settings
               ./gradlew :app:tasks --group distribution
               ./gradlew help --task :app:release
-
-            Notes
-              Module JARs are internal build artifacts, not the supported standalone
-              distribution. Use :app:distZip for a JVM release.
-              Detailed docs: docs/building.md and docs/packaging.md
+              docs/building.md, docs/packaging.md, verification/performance/README.md
         """.stripIndent().trim()
     }
 }

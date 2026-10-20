@@ -115,12 +115,9 @@ def smokeTasks = [:]
         }
     }
 }
-def smokeTarget = (project.findProperty('target') ?: 'glibc').toString().toLowerCase()
-if (!(smokeTarget in ['glibc', 'musl', 'all'])) {
-    throw new GradleException("Unsupported -Ptarget=${smokeTarget}. Use glibc, musl, or all.")
-}
+def smokeTarget = tuinkNativeTarget
 tasks.register('nativeAclCheck') {
     group = 'verification'
-    description = 'Verify native ACL support without building the editor. Use -Ptarget=glibc|musl|all.'
+    description = 'Verify native ACL support without building the editor. Use -Pmusl or -Ptarget=all (default: glibc).'
     dependsOn(smokeTarget == 'all' ? smokeTasks.values() : smokeTasks[smokeTarget])
 }

@@ -1,5 +1,6 @@
 // JVM builds use a Java 25 toolchain from any vendor and do not run this preflight.
 // Native Image, native releases and PGO require Oracle GraalVM 25.0.4+7.1.
+// PGO needs Oracle GraalVM Native Image; a regular Oracle JDK is insufficient.
 // The exact Java runtime values below identify that SDK, not the JVM build baseline.
 def jlineNativeExcludes = [
     '--exclude-config', '.*jline-.*\\.jar', 'META-INF/native-image/org\\.jline/.*'
@@ -15,7 +16,7 @@ def jlineNativeManualArgs = [
         'META-INF/native-image/org.jline/jline-terminal-jni/reflection-config.json',
     '-H:JNIConfigurationResources=META-INF/native-image/org.jline/jline-native/jni-config.json'
 ]
-def nativeMarch = (project.findProperty('nativeMarch') ?: 'compatibility').toString()
+def nativeMarch = tuinkNativeMarch
 def requiredNativeJavaVersion = '25.0.4'
 def graalVmHomeEnvironment = providers.environmentVariable('GRAALVM_HOME')
 def javaHomeEnvironment = providers.environmentVariable('JAVA_HOME')
@@ -41,7 +42,6 @@ def baseNativeBuildArgs = {
     ]
 }
 
-ext.tuinkNativeMarch = nativeMarch
 ext.tuinkBaseNativeBuildArgs = baseNativeBuildArgs
 
 def verifyNativeToolchain = tasks.register('verifyNativeToolchain') {
@@ -191,20 +191,18 @@ apply from: "${rootProject.projectDir}/gradle/scripts/native-acl.gradle"
 apply from: "${rootProject.projectDir}/gradle/scripts/native-receipts.gradle"
 
 tasks.register('nativeGlibc') {
-    group = 'build'
-    description = 'Build the glibc native binary.'
-    dependsOn(tasks.named('nativeCompile'))
+    description = 'Compatibility alias: build glibc, honoring -Ppgo. Prefer nativeDist.'
+    dependsOn { tuinkNativeCompiler(tuinkRequireNativeTarget('glibc')) }
 }
 
 tasks.register('nativeMusl') {
-    group = 'build'
-    description = 'Build the static musl native binary.'
-    dependsOn(tasks.named('nativeMuslCompile'))
+    description = 'Compatibility alias: build musl, honoring -Ppgo. Prefer nativeDist -Pmusl.'
+    dependsOn { tuinkNativeCompiler(tuinkRequireNativeTarget('musl')) }
 }
 
 tasks.register('nativeAll') {
-    group = 'build'
-    description = 'Build both glibc and musl native binaries.'
-    dependsOn(tasks.named('nativeCompile'))
-    dependsOn(tasks.named('nativeMuslCompile'))
+    description = 'Compatibility alias: build both libcs, honoring -Ppgo.'
+    dependsOn {
+        ['glibc', 'musl'].collect { tuinkNativeCompiler(tuinkRequireNativeTarget(it)) }
+    }
 }

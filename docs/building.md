@@ -60,20 +60,23 @@ checks that the minimum versions in `Depends` cover its required glibc/zlib ABI.
 | Run verification | `./gradlew check` | Tests plus architecture/dependency checks |
 | Build JVM project | `./gradlew clean test build` | Module classes and JARs |
 | Run from sources | `./gradlew --console=plain :app:run` | Interactive process |
-| Installable JVM layout | `./gradlew :app:installDist` | `apps/tuink/launcher/build/install/tuink/` |
+| Unpacked JVM distribution | `./gradlew :app:dist` | `apps/tuink/launcher/build/install/tuink/` (alias of `installDist`) |
 | JVM release ZIP | `./gradlew :app:distZip` | `build/releases/tuink-<version>.zip` |
-| Native glibc binary | `./gradlew :app:nativeGlibc` | `apps/tuink/launcher/build/native/nativeCompile/tuink` |
-| Native musl binary | `./gradlew :app:nativeMusl` | `apps/tuink/launcher/build/native/nativeMuslCompile/tuink-musl` |
+| Native glibc binary | `./gradlew :app:nativeDist` | `build/native-dist/glibc/tuink` |
+| Native musl binary | `./gradlew :app:nativeDist -Pmusl` | `build/native-dist/musl/tuink` |
+| Native glibc PGO binary | `./gradlew :app:nativeDist -Ppgo` | `build/native-dist/glibc-pgo/tuink`; existing profile required |
+| Native musl PGO binary | `./gradlew :app:nativeDist -Pmusl -Ppgo` | `build/native-dist/musl-pgo/tuink`; existing profile required |
 | Native ACL checks | `./gradlew :app:nativeAclCheck -Ptarget=all` | ACL, permissions, raw filename, and errno checks for glibc and static musl |
-| Native archive | `./gradlew :app:nativeDistTarGz` | `build/releases/*.tar.gz` |
-| Debian package | `./gradlew :app:nativeDeb` | `build/releases/tuink_<version>_<arch>.deb` |
+| Native archive | `./gradlew :app:nativeDistTarGz [-Pmusl] [-Ppgo]` | `build/releases/*.tar.gz`; README, documentation and licenses included |
+| All five distribution variants | `./gradlew :app:distributionArchives -Ptarget=all -Ppgo` | JVM ZIP and four native archives; existing PGO profiles required |
+| Debian package | `./gradlew :app:nativeDeb [-Ppgo]` | `build/releases/tuink_<version>_<arch>.deb`; glibc only |
 | Benchmark harness self-test | `./gradlew :app:perfHarnessTest` | Python fixture, parser, and statistics checks |
 | PGO harness self-test | `./gradlew :app:pgoHarnessTest` | Python training-input and profile-merge checks |
 | UI harness self-test | `./gradlew :app:uiHarnessTest` | Screen parser and PTY cleanup checks |
 | Linux UI regressions | `./gradlew :app:uiRegressionTest` | Real JVM keyboard/pointer/resize/history/recovery checks |
-| Optional PGO glibc binary | `./gradlew :app:nativeProfileOptimize -PenablePgo` | `apps/tuink/launcher/build/native/nativePgoOptimizedCompile/tuink-pgo` |
-| Render smoke benchmark | `./gradlew :app:perfSmoke` | `build/performance/render/` |
-| Full render benchmark | `./gradlew :app:perfCheck` | `build/performance/render/` |
+| Fresh PGO training and build | `./gradlew :app:nativeProfileOptimize -Ppgo` | `apps/tuink/launcher/build/native/nativePgoOptimizedCompile/tuink-pgo` |
+| Render smoke benchmark | `./gradlew :app:perfSmoke [-Pmusl] [-Ppgo]` | Selected native variant; `build/performance/render/` |
+| Full render benchmark | `./gradlew :app:perfCheck [-Pmusl] [-Ppgo]` | Selected native variant; `build/performance/render/` |
 | Complete release | `./gradlew clean :app:release` | ZIP, glibc archive, DEB, checksums |
 
 ## JVM development build
@@ -139,7 +142,7 @@ verification metadata together while resolving the complete CI dependency
 graph:
 
 ```bash
-./gradlew --write-locks --write-verification-metadata sha256 \
+./gradlew -Ppgo --write-locks --write-verification-metadata sha256 \
   check :app:distZip :app:perfHarnessTest \
   :unicode-text:dependencies :tuiframe-core:dependencies \
   :tuiframe-jline:dependencies :tuiframe-widgets:dependencies :core:dependencies \
@@ -148,6 +151,8 @@ graph:
 ```
 
 Review the resulting coordinate and checksum changes before committing them.
+`-Ppgo` registers the PGO configurations so their dependencies are resolved too;
+this command does not build native binaries or train profiles.
 When upgrading Gradle itself, obtain both wrapper checksums from the official
 Gradle distribution index and update `gradle-wrapper.properties` together with
 `gradle-wrapper.jar.sha256`.
@@ -157,7 +162,7 @@ Gradle distribution index and update `gradle-wrapper.properties` together with
 Build an installed JVM layout or ZIP:
 
 ```bash
-./gradlew :app:installDist
+./gradlew :app:dist
 ./gradlew :app:distZip
 ```
 
@@ -167,10 +172,14 @@ Run the installed layout:
 ./apps/tuink/launcher/build/install/tuink/bin/tuink file.txt
 ```
 
-The JVM distribution requires Java 25 or newer on the target machine. It includes
-`README.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `SECURITY.md`, available
-demo images and `samples/`. Developer documentation stays in the source tree;
-packaged links use the build's immutable source revision online.
+`dist` is a short alias of Gradle's standard `installDist`. Both the unpacked
+directory and the ZIP contain the same complete distribution, with `bin/`
+launchers and `lib/` dependencies. They require Java 25 or newer on the target
+machine and include `README.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`,
+`SECURITY.md`, the two demo GIFs in `docs/assets/`, and `samples/`.
+Developer documentation and native-runtime notice directories are omitted.
+Links to source-only documents and notices use the packaged source revision
+online.
 
 Gradle also creates module JARs as internal build products. They are not
 standalone fat/executable JAR distributions and do not carry the complete
@@ -219,25 +228,43 @@ CI and the release workflow use the same download/checksum recipe through
 
 ## Native targets
 
-Build the default glibc binary:
+Build a bare executable, defaulting to glibc without PGO:
 
 ```bash
-./gradlew :app:nativeGlibc
-./apps/tuink/launcher/build/native/nativeCompile/tuink file.txt
+./gradlew :app:nativeDist
+./build/native-dist/glibc/tuink file.txt
 ```
 
-Build the static musl binary or both variants:
+Select musl and/or PGO with independent flags:
 
 ```bash
-./gradlew :app:nativeMusl
-./gradlew :app:nativeAll
+./gradlew :app:nativeDist -Pmusl
+./gradlew :app:nativeDist -Ppgo
+./gradlew :app:nativeDist -Pmusl -Ppgo
 ```
 
-The musl binary is written to:
+Each selected binary is named `tuink`, in a separate output directory:
 
 ```text
-apps/tuink/launcher/build/native/nativeMuslCompile/tuink-musl
+build/native-dist/glibc/tuink
+build/native-dist/musl/tuink
+build/native-dist/glibc-pgo/tuink
+build/native-dist/musl-pgo/tuink
 ```
+
+`nativeDist` contains only the executable. Use `nativeDistTarGz` for an archive
+with README, documentation, licenses and install scripts. `-Ppgo` requires a
+matching existing [PGO profile](#pgo); it never starts training automatically.
+Both flags accept an empty value or `true`; use `false` to disable them.
+`-PenablePgo` is an exact alias of `-Ppgo`; if both are supplied, their values
+must agree.
+
+The explicit `nativeGlibc`, `nativeMusl` and `nativeAll` compile tasks remain
+available and honor `-Ppgo`. They write compiler intermediates below
+`apps/tuink/launcher/build/native/`. Do not pass a libc selector that contradicts an explicit
+task's target.
+The legacy `-Ptarget=glibc|musl|all` selector remains supported for automation;
+do not combine `-Pmusl` with a conflicting `-Ptarget` value.
 
 Interactive musl runs use JLine's `exec` provider and require external `tty`
 and `stty` commands in `PATH`.
@@ -247,11 +274,13 @@ Native builds default to `-march=compatibility` so release binaries work on
 older x86_64 CPUs. Override it only when the deployment CPU is known:
 
 ```bash
-./gradlew :app:nativeMusl -PnativeMarch=native
+./gradlew :app:nativeDist -Pmusl -PnativeMarch=native
 ```
 
 Use `nativeMarch=native` only for a binary that will run on the same or a known
-compatible CPU generation. Release builds should keep the default
+compatible CPU generation. CPU-specific binaries use
+`build/native-dist/<variant>-march-<cpu>/tuink`, and their archive names end in
+`-march-<cpu>.tar.gz`. Both `release` and `nativeDeb` require the default
 `compatibility` value.
 
 All native variants use Oracle `-O3`, at most two compiler worker threads and
@@ -260,16 +289,36 @@ runtime heap defaults.
 
 ## Native release archives
 
-Build a glibc, musl, or both native archives:
+The archive command uses the same flags as `nativeDist`:
 
 ```bash
 ./gradlew :app:nativeDistTarGz
-./gradlew :app:nativeDistTarGz -Ptarget=musl
-./gradlew :app:nativeDistTarGz -Ptarget=all
+./gradlew :app:nativeDistTarGz -Pmusl
+./gradlew :app:nativeDistTarGz -Ppgo
+./gradlew :app:nativeDistTarGz -Pmusl -Ppgo
 ```
 
 Archives are written to `build/releases/` and include the binary, installer,
-uninstaller, README, licenses, third-party notices, and samples.
+uninstaller, the same user documentation, demo images and samples as the JVM
+distribution, and the complete Oracle runtime notice bundle. Static musl
+archives additionally include the musl and zlib notice bundles. `-Ppgo`
+selects the optimized archive instead of the ordinary archive; profiles must
+already be trained.
+
+The five distribution variants are the JVM ZIP, native glibc, native musl,
+native glibc PGO, and native musl PGO. After [training both PGO profiles](#pgo),
+assemble all five without running tests, benchmarks, or Debian packaging:
+
+```bash
+./gradlew :app:distributionArchives -Ptarget=all -Ppgo
+```
+
+Without `-Ppgo`, `distributionArchives` includes only the JVM ZIP and ordinary
+native archives selected by `-Pmusl` (default `glibc`). `-Ptarget=all` selects
+both libc targets. In this aggregate task, `-Ppgo` adds the selected PGO
+archives alongside the ordinary ones; it does not replace them.
+PGO archive tasks compile against existing verified profiles; they do not
+train automatically or package instrumented binaries, profiles, or receipts.
 
 ## Debian package
 
@@ -277,6 +326,7 @@ Build a Debian package from the glibc native binary:
 
 ```bash
 ./gradlew :app:nativeDeb
+./gradlew :app:nativeDeb -Ppgo
 ```
 
 The package is written to:
@@ -285,8 +335,11 @@ The package is written to:
 build/releases/tuink_<version>_<deb-arch>.deb
 ```
 
+`-Ppgo` selects the optimized glibc binary and requires its existing profile.
+Both modes use the same package name, version and output filename: building
+one replaces the other, and they cannot be installed side by side.
 The Debian task does not use the archive installer and does not invoke `sudo`.
-Do not pass `-Ptarget=musl` to `nativeDeb`.
+Do not pass `-Pmusl` or `-Ptarget=musl` to `nativeDeb`.
 
 See [Packaging TUInk](packaging.md) for package contents, inspection, linting,
 and installation.
@@ -306,36 +359,64 @@ Include the musl archive as well:
 ./gradlew clean :app:release -Ptarget=all
 ```
 
-The `release` task runs module tests and the short native render benchmark
-before assembling public artifacts. It does not publish or install anything
-outside the repository.
+Include all five distribution variants, using previously trained PGO profiles:
+
+```bash
+./gradlew clean :app:release -Ptarget=all -Ppgo
+```
+
+The `release` task runs module tests and smoke benchmarks for every shipped
+native variant. With `-Ppgo`, it includes ordinary and PGO archives and uses
+the PGO glibc binary in its single Debian package. A musl-only release
+(`-Pmusl`) omits the Debian package. The final `SHA256SUMS` covers all selected
+release artifacts.
+
+For archive checksums without tests, benchmarks or Debian packaging, use
+`:app:releaseChecksums` with the same selection flags. It writes
+`ARCHIVE_SHA256SUMS`; the full release writes `SHA256SUMS`, including its DEB
+when glibc is selected. Neither task publishes or installs anything outside
+the repository.
 
 ## PGO
 
-PGO is optional and experimental. Its native tasks are registered only with
-`-PenablePgo` and use the same pinned SDK and `verifyNativeToolchain` preflight
-as ordinary native builds. [GraalVM PGO](https://www.graalvm.org/jdk25/reference-manual/native-image/optimizations-and-performance/PGO/)
+PGO is optional and experimental. It specifically requires **Oracle GraalVM
+25.0.4+7.1 with Native Image**: Oracle JDK alone is insufficient, and GraalVM
+Community does not support PGO. Its native tasks are registered only with
+`-Ppgo` (or its exact legacy alias `-PenablePgo`) and use the same pinned SDK and
+`verifyNativeToolchain` preflight as ordinary native builds.
+[GraalVM PGO](https://www.graalvm.org/jdk25/reference-manual/native-image/optimizations-and-performance/PGO/)
 uses an instrumented training run to guide compilation. Training requires
 Python 3.10+ as `python3` on a POSIX system with a pseudo-terminal.
 
 Build the instrumented binary, train, and build the optimized glibc binary:
 
 ```bash
-./gradlew :app:nativeProfileInstrument -PenablePgo
-./gradlew :app:nativeProfileTrain -PenablePgo
-./gradlew :app:nativeProfileBuild -PenablePgo
-./apps/tuink/launcher/build/native/nativePgoOptimizedCompile/tuink-pgo file.txt
+./gradlew :app:nativeProfileTrain -Ppgo
+./gradlew :app:nativeDist -Ppgo
+./build/native-dist/glibc-pgo/tuink file.txt
 ```
+
+`nativeProfileTrain` first builds the instrumented binary. Low-level
+`nativeProfileInstrument` and `nativeProfileBuild` tasks remain available.
 
 For a fresh train-and-build run, use the convenience task:
 
 ```bash
-./gradlew :app:nativeProfileOptimize -PenablePgo
+./gradlew :app:nativeProfileOptimize -Ppgo
 ```
 
-The default target is `glibc`. Pass `-Ptarget=musl` to every PGO command for a
+The default target is `glibc`. Pass `-Pmusl` to every PGO command for a
 separate musl profile and binary; the musl C toolchain is also required.
-`-Ptarget=all` is rejected so glibc and musl profiles cannot be mixed.
+`-Ptarget=all` runs both targets with separate profiles:
+
+```bash
+./gradlew :app:nativeProfileOptimize -Ptarget=all -Ppgo
+```
+
+The explicit `nativeProfileGlibcInstrument`, `nativeProfileGlibcTrain`,
+`nativeProfileGlibcBuild`, and `nativeProfileGlibcOptimize` tasks select glibc;
+corresponding `nativeProfileMusl*` tasks select musl. Do not combine an explicit
+task with a contradictory libc selector.
 
 Training uses the current instrumented binary in five checked sessions:
 Java/Python/YAML/Rust editing and mouse drag. Each session must exit normally
@@ -347,7 +428,13 @@ these limits do not change the resulting binary's runtime defaults.
 
 The default merged profile is `.local/pgo/<target>/profile.iprof`, with an
 adjacent `profile.iprof.json` receipt. `-PpgoProfile=<path>` selects another
-root-relative or absolute path for both training and the optimized build.
+root-relative or absolute path for one selected libc. It is rejected with
+`-Ptarget=all`; use `-PpgoGlibcProfile=<path>` and
+`-PpgoMuslProfile=<path>` to override the targets independently.
+The shared `pgoProfile` follows the selected libc; use the per-target
+properties with explicit `nativeProfileGlibc*` or `nativeProfileMusl*` tasks.
+Profile path properties require PGO to be enabled. If both a shared path and
+the selected libc's path are provided, they must name the same file.
 The receipt binds the profile to its classpath, SDK, compiler arguments,
 `nativeMarch`, target and training-harness SHA-256. The optimized build rejects
 missing, empty or mismatched profiles and receipts; retrain after changing these inputs.
@@ -356,16 +443,26 @@ are ignored by Git. For a custom path, choose an ignored location outside
 build directories. Do not commit profiles or receipts or copy a profile
 between libc targets.
 
-PGO binaries are separate build products:
+The compiler's intermediate PGO binaries remain separate build products:
 
 ```text
 apps/tuink/launcher/build/native/nativePgoOptimizedCompile/tuink-pgo
 apps/tuink/launcher/build/native/nativeMuslPgoOptimizedCompile/tuink-musl-pgo
 ```
 
-The regular archives, Debian package and release task package the ordinary
-Oracle O3 binaries. PGO profiles and optimized binaries remain separate local
-outputs.
+Package verified optimized binaries with the same archive command and `-Ppgo`:
+
+```bash
+./gradlew :app:nativeDistTarGz -Ppgo
+./gradlew :app:nativeDistTarGz -Pmusl -Ppgo
+```
+
+Explicit `nativePgoTarGz`, `nativeMuslPgoTarGz` and `nativePgoDistTarGz`
+tasks remain available. `distributionArchives` and `release` include these PGO
+archives only when `-Ppgo` or the legacy `-PenablePgo` is enabled. Missing or
+stale profiles fail the build instead of starting a training run. Profiles,
+receipts, training measurements, and instrumented binaries are never included
+in the archives.
 
 Evaluate PGO on representative editing and mouse workloads against the ordinary
 Oracle O3 binary from the same SDK. Measure CPU, wall time, memory and frame
@@ -386,12 +483,21 @@ build/releases/
 ├── tuink-<version>.zip
 ├── tuink-<version>-linux-<arch>.tar.gz
 ├── tuink-<version>-linux-<arch>-musl.tar.gz  # when requested
+├── tuink-<version>-linux-<arch>-pgo.tar.gz   # when PGO is requested
+├── tuink-<version>-linux-<arch>-musl-pgo.tar.gz
 ├── tuink_<version>_<deb-arch>.deb
 └── SHA256SUMS
+
+build/native-dist/
+├── glibc/tuink                    # nativeDist default
+├── musl/tuink                     # -Pmusl
+├── glibc-pgo/tuink                # -Ppgo
+└── musl-pgo/tuink                 # -Pmusl -Ppgo
 ```
 
 `apps/tuink/launcher/build/` and other module `build/` directories are intermediate output.
-Only `build/releases/` is the public release output directory.
+`build/native-dist/` contains bare binaries for local use. Complete release
+archives, documentation and licenses are assembled in `build/releases/`.
 
 ## Cleaning
 
@@ -426,10 +532,13 @@ task inputs need inspection:
 ## Build configuration layout
 
 - `apps/tuink/launcher/build.gradle`: application entrypoint and dependencies.
+- `gradle/scripts/build-variants.gradle`: shared libc and PGO selection.
 - `gradle/scripts/native.gradle`: regular GraalVM binaries.
 - `gradle/scripts/pgo.gradle`: optional PGO binaries and tasks.
-- `gradle/scripts/distributions.gradle`: staging, archives, and checksums.
+- `gradle/scripts/distributions.gradle`: staging and JVM/native archives.
 - `gradle/scripts/debian.gradle`: Debian filesystem layout and package task.
+- `gradle/scripts/release.gradle`: archive and complete-release checksum manifests.
+- `gradle/scripts/performance.gradle`: benchmarks of the selected native variants.
 - `apps/tuink/packaging/`: source-controlled packaging templates and archive scripts.
 
 Intermediate application output stays below `apps/tuink/launcher/build/`. Public ZIP, native

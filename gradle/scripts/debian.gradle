@@ -1,7 +1,6 @@
-import org.apache.tools.ant.taskdefs.condition.Os
 import org.apache.tools.ant.filters.ReplaceTokens
 
-def nativeTarget = (project.findProperty('target') ?: 'glibc').toString().toLowerCase()
+def debCompiler = tuinkNativeCompiler('glibc', tuinkPgo)
 def rawArch = System.getProperty('os.arch', 'amd64').toLowerCase()
 def debArchitecture = [
     'amd64': 'amd64',
@@ -14,16 +13,21 @@ def debArchitecture = [
 ].get(rawArch, rawArch.replaceAll('[^a-z0-9-]', '-'))
 def releaseVersion = project.version.toString()
 def debRootName = "tuink_${releaseVersion}_${debArchitecture}"
-def debStageDir = layout.buildDirectory.dir("debian/${debRootName}")
+def debVariant = tuinkPgo ? 'glibc-pgo' : 'glibc'
+def debStageDir = layout.buildDirectory.dir("debian/${debVariant}${tuinkNativeCpuSuffix}/${debRootName}")
 def debOutput = rootProject.layout.buildDirectory.file("releases/${debRootName}.deb")
 def generatedDebianDir = layout.buildDirectory.dir('generated/debian')
 def generatedDebianDocsDir = layout.buildDirectory.dir('generated/debian-docs')
-def releaseEpochSeconds = providers.environmentVariable('SOURCE_DATE_EPOCH').orElse('946684800')
+def releaseEpochSeconds = providers.environmentVariable('SOURCE_DATE_EPOCH').orElse('946684800').map { value ->
+    if (!(value ==~ /[0-9]+/)) {
+        throw new GradleException('SOURCE_DATE_EPOCH must be a nonnegative integer.')
+    }
+    value.toLong()
+}
 def stagedDebTree = fileTree(debStageDir)
 def verifyDocumentationLinks = verifyDistributionDocumentationLinks
 
 tasks.register('generateDebianMetadata', Copy) {
-    group = 'distribution'
     description = 'Generate Debian control metadata from project properties.'
     inputs.property('version', releaseVersion)
     inputs.property('architecture', debArchitecture)
@@ -38,7 +42,6 @@ tasks.register('generateDebianMetadata', Copy) {
 }
 
 tasks.register('generateDebianDocs') {
-    group = 'distribution'
     description = 'Generate versioned Debian package documentation.'
     def changelogTemplate = rootProject.file('apps/tuink/packaging/debian/changelog.template')
     def manPageTemplate = rootProject.file('apps/tuink/packaging/debian/tuink.1.template')
@@ -80,9 +83,21 @@ def compressDebianManPage = tasks.register('compressDebianManPage', Exec) {
 }
 
 tasks.register('stageDeb', Sync) {
-    group = 'distribution'
     description = 'Prepare the Debian filesystem tree before packaging.'
-    dependsOn(tasks.named('nativeCompile'))
+    // Resolve unsupported options before executing the compiler dependencies.
+    dependsOn {
+        if (!System.getProperty('os.name').equalsIgnoreCase('Linux')) {
+            throw new GradleException('Debian packages can only be built on Linux.')
+        }
+        if (tuinkNativeTarget == 'musl') {
+            throw new GradleException('nativeDeb requires glibc. Omit -Pmusl and -Ptarget=musl.')
+        }
+        if (tuinkNativeMarch != 'compatibility') {
+            throw new GradleException('Debian packages require -PnativeMarch=compatibility.')
+        }
+        releaseEpochSeconds.get()
+        debCompiler
+    }
     dependsOn(tasks.named('generateDebianMetadata'))
     dependsOn(compressDebianChangelog)
     dependsOn(compressDebianManPage)
@@ -97,7 +112,8 @@ tasks.register('stageDeb', Sync) {
             unix('rw-r--r--')
         }
     }
-    from(layout.buildDirectory.file('native/nativeCompile/tuink')) {
+    from(debCompiler.flatMap { it.outputFile }) {
+        rename { 'tuink' }
         into('usr/bin')
         filePermissions {
             unix('rwxr-xr-x')
@@ -133,14 +149,6 @@ tasks.register('stageDeb', Sync) {
         }
     }
 
-    doFirst {
-        if (!Os.isFamily(Os.FAMILY_UNIX) || Os.isFamily(Os.FAMILY_MAC)) {
-            throw new GradleException('Debian packages can only be built on Linux.')
-        }
-        if (nativeTarget == 'musl') {
-            throw new GradleException('nativeDeb requires the glibc target. Omit -Ptarget or use -Ptarget=all.')
-        }
-    }
     doLast {
         verifyDocumentationLinks.call(stagedDebTree, 'usr/share/doc/tuink')
     }
@@ -149,8 +157,7 @@ tasks.register('stageDeb', Sync) {
 def stagedDebBinary = debStageDir.map { it.file('usr/bin/tuink') }
 
 def stripDebBinary = tasks.register('stripDebBinary', Exec) {
-    group = 'distribution'
-    description = 'Strip the staged Debian binary without changing nativeCompile output.'
+    description = 'Strip the staged Debian binary without changing the compiler output.'
     dependsOn(tasks.named('stageDeb'))
     inputs.file(stagedDebBinary)
     outputs.file(stagedDebBinary)
@@ -158,7 +165,7 @@ def stripDebBinary = tasks.register('stripDebBinary', Exec) {
     commandLine('strip', '--strip-unneeded', stagedDebBinary.get().asFile.absolutePath)
 
     doLast {
-        long timestamp = releaseEpochSeconds.get().toLong() * 1000L
+        long timestamp = releaseEpochSeconds.get() * 1000L
         stagedDebTree.visit { details ->
             details.file.setLastModified(timestamp)
             if (details.directory) {
@@ -178,7 +185,6 @@ def stripDebBinary = tasks.register('stripDebBinary', Exec) {
 }
 
 def verifyDebNativeDependencies = tasks.register('verifyDebNativeDependencies', Exec) {
-    group = 'verification'
     description = 'Verify that Debian dependencies cover the staged native ELF requirements.'
     dependsOn(stripDebBinary)
     def control = generatedDebianDir.map { it.file('control') }
@@ -195,11 +201,11 @@ def verifyDebNativeDependencies = tasks.register('verifyDebNativeDependencies', 
 
 def nativeDeb = tasks.register('nativeDeb', Exec) {
     group = 'distribution'
-    description = 'Build a Debian package from the glibc native binary.'
+    description = 'Build a glibc Debian package; -Ppgo selects the optimized binary.'
     dependsOn(verifyDebNativeDependencies)
     inputs.dir(debStageDir)
     outputs.file(debOutput)
-    environment('SOURCE_DATE_EPOCH', releaseEpochSeconds.get())
+    environment('SOURCE_DATE_EPOCH', releaseEpochSeconds.get().toString())
     environment('TZ', 'UTC')
     commandLine(
         'dpkg-deb',
@@ -213,15 +219,4 @@ def nativeDeb = tasks.register('nativeDeb', Exec) {
     }
 }
 
-releaseArtifactFiles.from(nativeDeb.map { debOutput.get().asFile })
-
-tasks.named('releaseChecksums') {
-    dependsOn(nativeDeb)
-}
-
-tasks.register('release') {
-    group = 'distribution'
-    description = 'Build tested JVM/native archives, Debian package, and SHA-256 checksums.'
-    dependsOn(rootProject.tasks.named('check'))
-    dependsOn(tasks.named('releaseChecksums'))
-}
+ext.tuinkDebFile = files(nativeDeb.map { debOutput.get() })

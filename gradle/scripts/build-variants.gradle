@@ -1,0 +1,66 @@
+// Public native selectors: glibc without PGO by default, -Pmusl and -Ppgo.
+// Parse values as well as flag presence so -Ppgo=false never enables PGO.
+def booleanProperty = { String name ->
+    String raw = providers.gradleProperty(name).orNull
+    if (raw == null) {
+        return false
+    }
+    String value = raw.trim().toLowerCase(Locale.ROOT)
+    if (value in ['', 'true']) {
+        return true
+    }
+    if (value == 'false') {
+        return false
+    }
+    throw new GradleException("Invalid -P${name}=${raw}. Use -P${name} or -P${name}=true|false.")
+}
+def useMusl = booleanProperty('musl')
+def legacyPgo = booleanProperty('enablePgo')
+def usePgo = booleanProperty('pgo')
+if (project.hasProperty('pgo') && project.hasProperty('enablePgo') && usePgo != legacyPgo) {
+    throw new GradleException('-Ppgo and -PenablePgo select different optimization modes. Use -Ppgo.')
+}
+usePgo = usePgo || legacyPgo
+// The old target selector remains useful when a release includes both libcs.
+def configuredTarget = providers.gradleProperty('target').orNull
+String nativeTarget = configuredTarget == null
+    ? (useMusl ? 'musl' : 'glibc') : configuredTarget.trim().toLowerCase(Locale.ROOT)
+if (!(nativeTarget in ['glibc', 'musl', 'all'])) {
+    throw new GradleException("Unsupported -Ptarget=${nativeTarget}. Use glibc, musl, or all.")
+}
+if (useMusl && nativeTarget != 'musl') {
+    throw new GradleException('-Pmusl conflicts with -Ptarget=' + nativeTarget + '. Select one libc target.')
+}
+
+ext.tuinkNativeTarget = nativeTarget
+ext.tuinkNativeTargets = nativeTarget == 'all' ? ['glibc', 'musl'] : [nativeTarget]
+ext.tuinkPgo = usePgo
+ext.tuinkNativeMarch = providers.gradleProperty('nativeMarch').orElse('compatibility').get().trim()
+if (!tuinkNativeMarch) {
+    throw new GradleException('-PnativeMarch must name a Native Image CPU target.')
+}
+ext.tuinkNativeCpuSuffix = tuinkNativeMarch == 'compatibility'
+    ? '' : '-march-' + tuinkNativeMarch.replaceAll('[^A-Za-z0-9_.-]', '_')
+
+if (!usePgo && ['pgoProfile', 'pgoGlibcProfile', 'pgoMuslProfile'].any { project.hasProperty(it) }) {
+    throw new GradleException('A PGO profile requires -Ppgo. No ordinary binary will be built with that profile.')
+}
+
+// Resolve tasks after native.gradle and pgo.gradle have registered the binaries.
+ext.tuinkNativeCompiler = { String target, boolean pgo = usePgo ->
+    String libc = target == 'musl' ? 'Musl' : ''
+    tasks.named("native${libc}${pgo ? 'PgoOptimized' : ''}Compile")
+}
+// Fixed-libc compatibility aliases may override the default, but not an
+// explicitly contradictory selector. Internal compiler tasks remain fixed.
+ext.tuinkRequireNativeTarget = { String target ->
+    if ((project.hasProperty('musl') || project.hasProperty('target'))
+        && nativeTarget != 'all' && nativeTarget != target) {
+        throw new GradleException("This task builds ${target}, but the flags select ${nativeTarget}.")
+    }
+    if (project.hasProperty('pgoProfile') && nativeTarget != target) {
+        throw new GradleException("pgoProfile belongs to ${nativeTarget}. Select -Ptarget=${target} "
+            + "or use -Ppgo${target.capitalize()}Profile for this task.")
+    }
+    target
+}

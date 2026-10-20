@@ -27,11 +27,16 @@ tasks.named('distTar') {
     description = 'Disabled: use distZip for JVM releases or nativeDistTarGz for native releases.'
 }
 
+apply from: "${rootProject.projectDir}/gradle/scripts/build-variants.gradle"
 apply from: "${rootProject.projectDir}/gradle/scripts/native.gradle"
-if (project.hasProperty('enablePgo')) {
+// Five archive variants: JVM ZIP, native glibc/musl, and native PGO glibc/musl.
+// -Pmusl selects static musl; -Ppgo selects Oracle GraalVM 25.0.4+7.1 PGO.
+// A regular Oracle JDK or GraalVM Community cannot build these PGO variants.
+if (tuinkPgo) {
     apply from: "${rootProject.projectDir}/gradle/scripts/pgo.gradle"
 }
 apply from: "${rootProject.projectDir}/gradle/scripts/distributions.gradle"
 apply from: "${rootProject.projectDir}/gradle/scripts/debian.gradle"
+apply from: "${rootProject.projectDir}/gradle/scripts/release.gradle"
 apply from: "${rootProject.projectDir}/gradle/scripts/performance.gradle"
 apply from: "${rootProject.projectDir}/gradle/scripts/ui-regression.gradle"

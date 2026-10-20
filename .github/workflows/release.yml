@@ -20,7 +20,7 @@ defaults:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 90
+    timeout-minutes: 180
     outputs:
       tag: ${{ steps.metadata.outputs.tag }}
       version: ${{ steps.metadata.outputs.version }}
@@ -121,16 +121,20 @@ jobs:
           python3 -B .github/scripts/test_publish_release.py
           python3 -B .github/scripts/test_release_dispatch.py
 
-      - name: Verify native toolchain and build the complete release
+      - name: Train separate Oracle GraalVM PGO profiles for glibc and musl
+        # Profiles live in .local/pgo/<target>, so the release clean preserves them.
         run: |
           ./gradlew --no-daemon --no-parallel --max-workers=1 \
             --stacktrace --warning-mode=fail \
             '-Dorg.gradle.jvmargs=-Xmx768m -XX:MaxMetaspaceSize=384m' \
-            :app:verifyNativeToolchain
+            :app:nativeProfileTrain -Ptarget=all -Ppgo
+
+      - name: Build and verify the complete release
+        run: |
           ./gradlew --no-daemon --no-parallel --max-workers=1 \
             --stacktrace --warning-mode=fail \
             '-Dorg.gradle.jvmargs=-Xmx768m -XX:MaxMetaspaceSize=384m' \
-            clean :app:release :app:nativeAclCheck -Ptarget=all
+            clean :app:release :app:nativeAclCheck -Ptarget=all -Ppgo
 
       - name: Verify the complete asset set and checksums
         id: assets
@@ -149,6 +153,8 @@ jobs:
               f"tuink-{version}.zip",
               f"tuink-{version}-linux-x86_64.tar.gz",
               f"tuink-{version}-linux-x86_64-musl.tar.gz",
+              f"tuink-{version}-linux-x86_64-pgo.tar.gz",
+              f"tuink-{version}-linux-x86_64-musl-pgo.tar.gz",
               f"tuink_{version}_amd64.deb",
           }
           actual = {entry.name for entry in directory.iterdir()}
@@ -156,10 +162,10 @@ jobs:
               raise SystemExit(f"Unexpected release assets: {sorted(actual)}")
           rows = (directory / "SHA256SUMS").read_text().splitlines()
           matches = [re.fullmatch(r"[0-9a-f]{64}  (.+)", row) for row in rows]
-          if len(matches) != 4 or not all(matches):
+          if len(matches) != len(artifacts) or not all(matches):
               raise SystemExit("Invalid checksum manifest")
           if {match.group(1) for match in matches} != artifacts:
-              raise SystemExit("Checksum manifest does not cover the four release artifacts")
+              raise SystemExit("Checksum manifest does not cover all release artifacts")
           PY
           cd build/releases
           sha256sum --check --strict SHA256SUMS
@@ -176,7 +182,7 @@ jobs:
           [[ "$(dpkg-deb --field "$package" Architecture)" == amd64 ]]
           lintian --fail-on error "$package"
 
-      - name: Smoke test packaged launchers and the static musl editor
+      - name: Smoke test packaged launchers and verify both static musl binaries
         env:
           RELEASE_VERSION: ${{ steps.metadata.outputs.version }}
         run: |
@@ -184,31 +190,31 @@ jobs:
           smoke="$RUNNER_TEMP/tuink-release-smoke"
           mkdir -p "$smoke"
           unzip -q "build/releases/tuink-${RELEASE_VERSION}.zip" -d "$smoke"
-          tar -xzf "build/releases/tuink-${RELEASE_VERSION}-linux-x86_64.tar.gz" -C "$smoke"
-          tar -xzf "build/releases/tuink-${RELEASE_VERSION}-linux-x86_64-musl.tar.gz" -C "$smoke"
           dpkg-deb --extract "build/releases/tuink_${RELEASE_VERSION}_amd64.deb" "$smoke/debian"
-          glibc_binary="$smoke/tuink-${RELEASE_VERSION}-linux-x86_64/tuink"
-          musl_binary="$smoke/tuink-${RELEASE_VERSION}-linux-x86_64-musl/tuink"
           "$smoke/tuink-${RELEASE_VERSION}/bin/tuink" --help > "$smoke/jvm-help.txt"
-          "$glibc_binary" --help > "$smoke/glibc-help.txt"
-          "$musl_binary" --help > "$smoke/musl-help.txt"
           "$smoke/debian/usr/bin/tuink" --help > "$smoke/debian-help.txt"
+          # The Gradle release task exercises every native variant in a PTY.
+          # Here check the actual packaged binaries and each musl ELF's linkage.
+          for suffix in '' '-musl' '-pgo' '-musl-pgo'; do
+            name="tuink-${RELEASE_VERSION}-linux-x86_64${suffix}"
+            label="${suffix#-}"
+            label="${label:-glibc}"
+            tar -xzf "build/releases/${name}.tar.gz" -C "$smoke"
+            binary="$smoke/$name/tuink"
+            "$binary" --help > "$smoke/$label-help.txt"
+            if [[ "$suffix" == *musl* ]]; then
+              readelf --program-headers "$binary" > "$smoke/$label-program-headers.txt"
+              readelf --dynamic "$binary" > "$smoke/$label-dynamic.txt"
+              if grep -q INTERP "$smoke/$label-program-headers.txt" \
+                || grep -q '(NEEDED)' "$smoke/$label-dynamic.txt"; then
+                echo "The $label release must be fully static." >&2
+                exit 1
+              fi
+            fi
+          done
           for output in "$smoke/"*-help.txt; do
             grep -F 'Usage: tuink' "$output"
           done
-          readelf --program-headers "$musl_binary" > "$smoke/musl-program-headers.txt"
-          readelf --dynamic "$musl_binary" > "$smoke/musl-dynamic.txt"
-          if grep -q INTERP "$smoke/musl-program-headers.txt" \
-            || grep -q '(NEEDED)' "$smoke/musl-dynamic.txt"; then
-            echo 'The musl release must be fully static.' >&2
-            exit 1
-          fi
-          python3 -B verification/performance/render_benchmark.py \
-            --binary "$musl_binary" \
-            --output-root build/performance/musl \
-            --label "${RELEASE_VERSION}-musl-smoke" \
-            --frames 60 --repeats 1 \
-            --scenarios down,shift-down,mouse-drag
 
       - name: Preserve native smoke results
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -291,6 +297,8 @@ jobs:
               "tuink-" + $version + ".zip",
               "tuink-" + $version + "-linux-x86_64.tar.gz",
               "tuink-" + $version + "-linux-x86_64-musl.tar.gz",
+              "tuink-" + $version + "-linux-x86_64-pgo.tar.gz",
+              "tuink-" + $version + "-linux-x86_64-musl-pgo.tar.gz",
               "tuink_" + $version + "_amd64.deb"
             ] | sort)
           ' "$RUNNER_TEMP/release.json"

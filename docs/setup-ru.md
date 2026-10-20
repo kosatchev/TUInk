@@ -176,13 +176,14 @@ native-image --version
 и всеми библиотеками:
 
 ```bash
-./gradlew :app:installDist
+./gradlew :app:dist
 ./apps/tuink/launcher/build/install/tuink/bin/tuink --help
 ./apps/tuink/launcher/build/install/tuink/bin/tuink README.md
 ```
 
+`dist` — короткий алиас стандартной задачи Gradle `installDist`.
 Пусковой скрипт работает без Gradle; после изменений исходников повторите
-`installDist`. Путь с пробелами передавайте непосредственно скрипту:
+`dist`. Путь с пробелами передавайте непосредственно скрипту:
 
 ```bash
 ./apps/tuink/launcher/build/install/tuink/bin/tuink "/путь/с пробелами/заметки.txt"
@@ -226,6 +227,13 @@ unzip tuink-<version>.zip
 `apps/tuink/launcher/build/libs/` и других модулей не являются самостоятельной поставкой:
 в них нет полного набора библиотек для запуска через `java -jar`.
 
+Каталог `dist` и архив `distZip` содержат одинаковый полный комплект:
+`README.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `SECURITY.md`, два
+демонстрационных изображения GIF в `docs/assets/` и примеры `samples/`.
+Java, документы разработчика и каталоги лицензий нативных runtime-компонентов
+в JVM-поставку не включены. Ссылки на эти документы ведут к ревизии исходников,
+из которой собран архив.
+
 ## 6. Собрать нативную версию для Linux
 
 Этот вариант нужен для запуска без установленной Java. Используйте GraalVM
@@ -244,19 +252,40 @@ sudo apt install build-essential zlib1g-dev
 точного совпадения поставщика и версий; наличие команды `native-image` само
 по себе недостаточно.
 
-Сборка и запуск:
+Сборка отдельного исполняемого файла и запуск; по умолчанию используется glibc
+без PGO:
 
 ```bash
-./gradlew :app:nativeGlibc
-./apps/tuink/launcher/build/native/nativeCompile/tuink --help
-./apps/tuink/launcher/build/native/nativeCompile/tuink README.md
+./gradlew :app:nativeDist
+./build/native-dist/glibc/tuink --help
+./build/native-dist/glibc/tuink README.md
 ```
 
-Архив для переноса на другой Linux-компьютер:
+`nativeDist` создаёт только бинарник. Для переноса полного комплекта с
+пользовательскими документами, демонстрационными изображениями, примерами,
+скриптами установки и полным набором уведомлений Oracle в `licenses/`
+соберите архив. Статический musl-архив дополнительно содержит уведомления
+musl и zlib:
 
 ```bash
 ./gradlew :app:nativeDistTarGz
 ```
+
+Обе задачи поддерживают одинаковые независимые флаги: `-Pmusl` выбирает
+статическую musl-сборку, `-Ppgo` — сборку с готовым профилем оптимизации.
+Флаги можно объединить:
+
+```bash
+./gradlew :app:nativeDist -Pmusl
+./gradlew :app:nativeDistTarGz -Pmusl
+./gradlew :app:nativeDistTarGz -Ppgo
+./gradlew :app:nativeDistTarGz -Pmusl -Ppgo
+```
+
+Бинарники находятся в `build/native-dist/<вариант>/tuink`, где вариант —
+`glibc`, `musl`, `glibc-pgo` или `musl-pgo`. Флаги без значения и со значением
+`true` включены; значение `false` их отключает. Архивные задачи с `-Ppgo`
+не запускают обучение автоматически.
 
 Результат: `build/releases/tuink-<version>-linux-<arch>.tar.gz`.
 На целевом компьютере:
@@ -278,47 +307,82 @@ zlib (`zlib1g` на Ubuntu/Debian). Сборка на другой систем�
 стандартный `-march=compatibility`: `-PnativeMarch=native` может сделать файл
 непригодным для процессора другого компьютера.
 
-Статическая musl-сборка (`:app:nativeMusl`) требует отдельного C-toolchain
+Статическая musl-сборка (`:app:nativeDist -Pmusl`) требует отдельного C-toolchain
 с musl и соответствующих библиотек; установки GraalVM для неё недостаточно.
 Подробности целей сборки — в [building.md](building.md#native-targets).
 
 ### Необязательная PGO-сборка
 
-PGO — экспериментальный вариант, включаемый через `-PenablePgo`. Используйте
-ту же установку Oracle SDK из шага 3 и те же C-зависимости. Дополнительно нужен
+PGO — экспериментальный вариант, включаемый через `-Ppgo`. Нужен именно
+**Oracle GraalVM 25.0.4+7.1 с Native Image** из шага 3: обычного Oracle JDK
+недостаточно, GraalVM Community не поддерживает PGO. Сохраняются те же
+C-зависимости. Дополнительно нужен
 Python 3.10+ в POSIX-окружении с псевдотерминалом:
 
 ```bash
 ./gradlew :app:verifyNativeToolchain
-./gradlew :app:nativeProfileInstrument -PenablePgo
-./gradlew :app:nativeProfileTrain -PenablePgo
-./gradlew :app:nativeProfileBuild -PenablePgo
-./apps/tuink/launcher/build/native/nativePgoOptimizedCompile/tuink-pgo README.md
+./gradlew :app:nativeProfileTrain -Ppgo
+./gradlew :app:nativeDist -Ppgo
+./build/native-dist/glibc-pgo/tuink README.md
 ```
 
-`:app:nativeProfileOptimize -PenablePgo` объединяет свежее обучение и сборку.
+`nativeProfileTrain` сначала собирает инструментированный бинарник.
+`:app:nativeProfileOptimize -Ppgo` объединяет свежее обучение и сборку.
 Обучение запускает пять проверяемых сессий: редактирование Java/Python/YAML/Rust
 и перетаскивание мышью. Профиль и его проверяемая квитанция сохраняются в
 `.local/pgo/glibc/profile.iprof` и `profile.iprof.json`; они переживают `clean`
 и не попадают в Git. Изменение classpath, SDK, аргументов компилятора,
 `nativeMarch`, цели или harness требует нового обучения.
-Другой путь задаётся через `-PpgoProfile=<путь>`;
+Другой путь для одной выбранной libc задаётся через `-PpgoProfile=<путь>`;
 выбирайте игнорируемый Git каталог вне `build/`, чтобы квитанция не попала
-в коммит, а `clean` не удалил профиль.
+в коммит, а `clean` не удалил профиль. Параметры путей требуют включённого PGO;
+если заданы общий и отдельный путь для одной libc, они должны совпадать.
 
-По умолчанию используется glibc. Для musl добавляйте `-Ptarget=musl` ко всем
-PGO-командам и установите musl toolchain; результат находится в
-`apps/tuink/launcher/build/native/nativeMuslPgoOptimizedCompile/tuink-musl-pgo`.
-`-Ptarget=all` для PGO запрещён: профили разных libc не смешиваются.
+По умолчанию используется glibc. Для musl добавляйте `-Pmusl` ко всем
+PGO-командам и установите musl toolchain; `nativeDist -Pmusl -Ppgo`
+сохранит результат в `build/native-dist/musl-pgo/tuink`.
+`-Ptarget=all` обрабатывает обе libc с отдельными профилями:
+
+```bash
+./gradlew :app:nativeProfileOptimize -Ptarget=all -Ppgo
+```
+
+Для обеих целей общий `-PpgoProfile` запрещён. Отдельные пути задаются через
+`-PpgoGlibcProfile=<путь>` и `-PpgoMuslProfile=<путь>`.
+Задачи `nativeProfileGlibcInstrument/Train/Build/Optimize` и
+`nativeProfileMuslInstrument/Train/Build/Optimize` позволяют выбрать libc явно
+(например, `:app:nativeProfileMuslOptimize -Ppgo`).
+Для таких явных задач используйте `pgoGlibcProfile` или `pgoMuslProfile`:
+общий `pgoProfile` следует за выбранной libc. Не добавляйте к явной задаче
+противоречащий ей флаг libc.
 
 Ускорение зависит от корпуса и операций. Сравнивайте PGO-бинарник с обычной
 нативной сборкой из того же SDK на одинаковых данных. Измеряйте CPU, время
 выполнения, память и задержки отрисовки отдельно. Подробности проверки профилей:
 [PGO в building.md](building.md#pgo).
 
-Обычные архивы, DEB и полный релиз используют тот же Oracle SDK и обычный
-бинарник с `-O3`. PGO-профили и оптимизированные бинарники остаются отдельными
-локальными результатами сборки.
+Архивы по умолчанию и DEB используют бинарник с `-O3` без PGO. Для PGO-архива
+используйте `:app:nativeDistTarGz -Ppgo`, для musl добавьте `-Pmusl`.
+DEB с оптимизированным glibc-бинарником собирается через `:app:nativeDeb -Ppgo`.
+Упаковка проверяет существующие профили и собирает оптимизированные бинарники;
+автоматически обучение не запускается.
+Профили, квитанции и инструментированные бинарники не входят в архивы.
+
+Прежние задачи `nativePgoTarGz`, `nativeMuslPgoTarGz`, `nativePgoDistTarGz`,
+параметр `-Ptarget=glibc|musl|all` и флаг `-PenablePgo` остаются совместимыми.
+`-PenablePgo` — точный алиас `-Ppgo`; их явные значения не должны противоречить
+друг другу. Не сочетайте `-Pmusl` с противоречащим ему значением `-Ptarget`.
+
+После обучения обеих целей собрать все **пять вариантов** — JVM ZIP, native
+glibc, native musl, native glibc PGO и native musl PGO — можно одной командой:
+
+```bash
+./gradlew :app:distributionArchives -Ptarget=all -Ppgo
+```
+
+Она не запускает тесты и бенчмарк и не создаёт DEB. Без `-Ppgo` собираются
+только ZIP и обычные нативные архивы выбранных целей. В этой общей задаче
+`-Ppgo` добавляет PGO-архивы к обычным, а не заменяет их.
 
 ## 7. DEB и полный релиз
 
@@ -332,6 +396,9 @@ python3 --version
 ```
 
 Пакет находится в `build/releases/tuink_<version>_<deb-arch>.deb`.
+Для PGO добавьте `-Ppgo`: нужны Oracle GraalVM Native Image и готовый glibc-профиль.
+Имя пакета, версия и имя файла совпадают с обычной сборкой: варианты заменяют
+друг друга и не устанавливаются параллельно. Musl для DEB не поддерживается.
 Установка на совместимом Ubuntu/Debian:
 
 ```bash
@@ -346,9 +413,22 @@ tuink /путь/к/файлу.txt
 ./gradlew clean :app:release
 ```
 
+Чтобы включить все пять вариантов, используя готовые PGO-профили:
+
+```bash
+./gradlew clean :app:release -Ptarget=all -Ppgo
+```
+
 Результаты будут в `build/releases/`. Эта команда использует ту же установку
 GraalVM и требует всего нативного окружения; для обычной JVM-разработки
 достаточно шага 4.
+С `-Ppgo` в релиз входят обычные и PGO-архивы, а единственный DEB содержит
+PGO-бинарник. Короткий бенчмарк проверяет каждый выпускаемый нативный вариант.
+Релиз только для musl (`-Pmusl`) не включает DEB. `:app:releaseChecksums`
+с теми же флагами собирает архивы и их `ARCHIVE_SHA256SUMS` без DEB, тестов
+и бенчмарков; полный `release` пишет отдельный `SHA256SUMS` и включает в него
+DEB, если выбран glibc. Для `release` и `nativeDeb` требуется стандартный
+`nativeMarch=compatibility`.
 Упаковка и установка подробнее описаны в [packaging.md](packaging.md).
 
 ## 8. Windows, macOS и личные настройки
@@ -360,7 +440,7 @@ GraalVM и требует всего нативного окружения; дл
 $env:JAVA_HOME = 'C:\path\to\jdk-25'
 $env:Path = "$env:JAVA_HOME\bin;$env:Path"
 .\gradlew.bat --version
-.\gradlew.bat :app:installDist
+.\gradlew.bat :app:dist
 .\app\build\install\tuink\bin\tuink.bat README.md
 ```
 

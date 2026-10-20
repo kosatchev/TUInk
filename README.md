@@ -457,6 +457,20 @@ Run the full JVM test and build suite:
 ./gradlew clean check build
 ```
 
+The main distribution commands are:
+
+| Command | Output |
+|---|---|
+| `./gradlew :app:dist` | JVM directory with launchers, libraries, README, documentation and licenses |
+| `./gradlew :app:distZip` | The same JVM distribution in a ZIP |
+| `./gradlew :app:nativeDist` | A bare glibc executable in `build/native-dist/glibc/tuink` |
+| `./gradlew :app:nativeDistTarGz` | A native archive with README, documentation, licenses and install scripts |
+
+Both native commands accept `-Pmusl` for static musl and `-Ppgo` for a
+profile-optimized build; combine them for musl PGO. Without either flag, they
+build ordinary glibc. The bare binary omits accompanying files; use the archive
+to distribute the complete package.
+
 Native releases use the pinned Oracle GraalVM toolchain. Follow the
 [native toolchain instructions](docs/building.md#native-toolchain), then run:
 
@@ -468,11 +482,23 @@ export PATH="$JAVA_HOME/bin:$PATH"
 ```
 
 The release task builds the tested JVM ZIP, glibc archive, Debian package, and
-SHA-256 manifest under `build/releases/`. It also runs a short native render
-benchmark. The task does not install or publish anything.
+SHA-256 manifest under `build/releases/`. It runs a short render benchmark
+for each shipped native variant. The task does not install or publish anything.
 
-Optional [PGO training](docs/building.md#pgo) uses the same SDK and produces a
-separate local binary; release artifacts use the ordinary Oracle O3 build.
+Optional [PGO training](docs/building.md#pgo) specifically requires **Oracle
+GraalVM 25.0.4+7.1 with Native Image**; Oracle JDK alone is insufficient.
+After training both libc profiles,
+`./gradlew :app:distributionArchives -Ptarget=all -Ppgo` packages
+all five variants: JVM ZIP, native glibc, native musl, glibc PGO, and musl PGO.
+The default release uses ordinary Oracle O3 binaries; add `-Ppgo` to include
+the selected PGO archives and use PGO in the Debian package. `nativeDeb -Ppgo`
+also builds that package separately; its name and version match the ordinary
+package, so the two replace each other. Musl-only releases omit Debian packaging.
+Packaging requires existing profiles and never starts training automatically.
+
+`perfSmoke` and `perfCheck` accept the same `-Pmusl` and `-Ppgo` flags to measure
+the selected native variants. See the [build reference](docs/building.md) for
+training, checksums and advanced settings.
 
 ## Project family
 

@@ -3,6 +3,7 @@ package dev.tuink.core;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
@@ -12,6 +13,59 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 class IndentationContextTest {
+    @Test
+    void compactYamlMappingScalarsMeasureExplicitIndentFromTheirKeyColumn() {
+        for (String prefix : List.of("", "- ", "- - ", "  - - ", "-   ")) {
+            String mappingIndent = " ".repeat(prefix.length());
+            for (int indicator : List.of(1, 2, 9)) {
+                for (String style : List.of("|", ">")) {
+                    List<String> lines = List.of(prefix + "description: " + style + indicator,
+                        mappingIndent + " ".repeat(indicator) + "items:", mappingIndent + "items:");
+                    IndentationContext context = new IndentationContext(lines::get);
+                    context.synchronize(1, 1, 0, lines.size(), Path.of("config.yaml"));
+
+                    assertNull(context.codeBeforeCursor(1, lines.get(1).length()), lines.toString());
+                    assertEquals(lines.get(2), context.codeBeforeCursor(2, lines.get(2).length()), lines.toString());
+                }
+            }
+        }
+    }
+
+    @Test
+    void compactYamlMappingScalarsInferIndentFromNonblankContentAndMayBeEmpty() {
+        for (String prefix : List.of("", "- ", "- - ", "  - - ", "-   ")) {
+            String mappingIndent = " ".repeat(prefix.length());
+            for (boolean empty : List.of(false, true)) {
+                List<String> lines = empty
+                    ? List.of(prefix + "description: |", mappingIndent + "         ", mappingIndent + "items:")
+                    : List.of(prefix + "description: |", mappingIndent + "         ",
+                        mappingIndent + "    items:", mappingIndent + "items:");
+                IndentationContext context = new IndentationContext(lines::get);
+                context.synchronize(1, 1, 0, lines.size(), Path.of("config.yaml"));
+
+                assertNull(context.codeBeforeCursor(1, lines.get(1).length()), lines.toString());
+                if (!empty) assertNull(context.codeBeforeCursor(2, lines.get(2).length()), lines.toString());
+                int last = lines.size() - 1;
+                assertEquals(lines.getLast(), context.codeBeforeCursor(last, lines.getLast().length()), lines.toString());
+            }
+        }
+    }
+
+    @Test
+    void repairingUncertainHistoryInvalidatesItsCertificateWithoutDisablingNormalCodeMasking() {
+        TextModel model = new TextModel(new SimpleLineBuffer());
+        model.replaceLines(List.of("value = \"unfinished", "if ready:", "    run()", "    else:"));
+        IndentationContext context = new IndentationContext(model::getLine);
+        synchronize(context, model, "main.py");
+
+        assertNotNull(context.codeBeforeCursor(1, model.getLine(1).length()));
+        assertFalse(context.hasCertainContextBefore(1, 0));
+        model.replaceRange(new Position(0, 0), new Position(0, model.getLine(0).length()), "value = 1");
+        synchronize(context, model, "main.py");
+
+        assertTrue(context.hasCertainContextBefore(1, 0));
+    }
+
     @Test
     void distantQueriesHaveAHardLineBudgetAndPreserveTheirBoundedProgress() {
         AtomicInteger reads = new AtomicInteger();

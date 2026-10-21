@@ -6,10 +6,42 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class EditorEngineKeywordIndentTest {
+    @Test
+    void nearbyPythonOwnerStillDedentsAfterThreeHundredUnrelatedLines() {
+        List<String> original = new ArrayList<>(Collections.nCopies(300, "value = 1"));
+        original.addAll(List.of("if ready:", "    run()", "    else"));
+        Fixture fixture = fixture("main.py", original);
+        Position cursor = fixture.state.getCursor();
+
+        fixture.engine.insertChar(':');
+
+        assertEquals("else:", fixture.model.getLine(original.size() - 1));
+        assertTrue(fixture.engine.undo());
+        assertEquals(original, fixture.model.snapshotLines());
+        assertEquals(cursor, fixture.state.getCursor());
+        assertFalse(fixture.state.isDirty());
+        assertTrue(fixture.engine.redo());
+        assertEquals("else:", fixture.model.getLine(original.size() - 1));
+    }
+
+    @Test
+    void nearbySwitchSiblingStillDedentsAfterThreeHundredUnrelatedLines() {
+        for (String clause : List.of("case 2:", "default:")) {
+            List<String> lines = new ArrayList<>(Collections.nCopies(300, "work();"));
+            lines.addAll(List.of("switch (value) {", "    case 1:", "        run();"));
+            Fixture fixture = afterEnter("Main.java", lines);
+
+            type(fixture.engine, clause);
+
+            assertEquals("    " + clause, fixture.model.getLine(lines.size()), clause);
+        }
+    }
+
     @Test
     void pythonCommentsDoNotMakeAlignedClausesLoseTheirContainingScope() {
         record Example(List<String> prefix, String clause) {}

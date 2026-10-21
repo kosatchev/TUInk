@@ -11,7 +11,9 @@ import java.util.function.IntFunction;
 final class IndentationContext {
     static final int MAX_SCAN_CODE_UNITS = 65_536;
     static final int MAX_SCAN_LINES = 1024;
-    private static final int MAX_CHECKPOINTS = 256;
+    // Incoming states for the current line and every line in the 256-line
+    // structural assist window, including its oldest permitted owner.
+    private static final int MAX_CHECKPOINTS = 257;
     private static final int MAX_STATE_WEIGHT = 4096;
     private final IntFunction<String> lines;
     private final TreeMap<Integer, IndentationLexer.State> checkpoints = new TreeMap<>();
@@ -55,6 +57,29 @@ final class IndentationContext {
 
     /** Null means that syntax cannot be established within this invocation's budget. */
     String codeBeforeCursor(int target, int column) {
+        if (!IndentationLexer.needsContext(language)) {
+            if (target < 0 || target >= lineCount) return null;
+            String text = lines.apply(target);
+            int end = Math.max(0, Math.min(column, text.length()));
+            return end > MAX_SCAN_CODE_UNITS ? null : text.substring(0, end);
+        }
+        IndentationLexer.Result scanned = scanBeforeCursor(target, column, true);
+        return scanned == null || !scanned.codeAtCursor() ? null : scanned.code();
+    }
+
+    /**
+     * Proves a destructive assist's boundary from BOF or a retained lexical
+     * checkpoint. Unlike a structural lookback, this certificate preserves
+     * earlier uncertainty without rescanning unrelated lines before an owner.
+     */
+    boolean hasCertainContextBefore(int target, int column) {
+        // Even generic/unknown file types need anchored proof here; their raw
+        // same-line code fast path cannot rule out an earlier multiline comment.
+        IndentationLexer.Result scanned = scanBeforeCursor(target, column, false);
+        return scanned != null && scanned.codeAtCursor() && scanned.afterLine().certainPrefix();
+    }
+
+    private IndentationLexer.Result scanBeforeCursor(int target, int column, boolean produceCode) {
         if (target < 0 || target >= lineCount) {
             return null;
         }
@@ -62,9 +87,6 @@ final class IndentationContext {
         int end = Math.max(0, Math.min(column, text.length()));
         if (end > MAX_SCAN_CODE_UNITS) {
             return null;
-        }
-        if (!IndentationLexer.needsContext(language)) {
-            return text.substring(0, end);
         }
         Map.Entry<Integer, IndentationLexer.State> checkpoint = checkpoints.floorEntry(target);
         int next = checkpoint == null ? 0 : checkpoint.getKey();
@@ -91,8 +113,7 @@ final class IndentationContext {
         if (end > remaining) {
             return null;
         }
-        IndentationLexer.Result scanned = IndentationLexer.scan(text, end, file, before, true);
-        return scanned == null || !scanned.codeAtCursor() ? null : scanned.code();
+        return IndentationLexer.scan(text, end, file, before, produceCode);
     }
 
     private void remember(int line, IndentationLexer.State state) {

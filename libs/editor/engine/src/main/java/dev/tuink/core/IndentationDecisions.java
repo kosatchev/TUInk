@@ -103,29 +103,12 @@ final class IndentationDecisions {
                     if (pending.isEmpty()) {
                         String openerIndent = text.substring(0, leadingIndentLength(text));
                         return currentIndent.length() > openerIndent.length() && currentIndent.startsWith(openerIndent)
-                            && hasCertainContextBefore(previous, index, firstLine, remainingChars);
+                            && syntax.hasCertainContextBefore(previous, index);
                     }
                 }
             }
         }
         return false;
-    }
-
-    private boolean hasCertainContextBefore(int lineIndex, int column, int firstLine, int remainingChars) {
-        for (int previous = lineIndex; previous >= firstLine; previous--) {
-            String text = lines.apply(previous);
-            int end = previous == lineIndex ? column : text.length();
-            remainingChars -= end;
-            if (remainingChars < 0) {
-                return false;
-            }
-            String code = syntax.codeBeforeCursor(previous, end);
-            if (code == null || IndentationSyntax.maskOrdinaryLiterals(code) == null) {
-                return false;
-            }
-
-        }
-        return firstLine == 0;
     }
 
     private boolean shouldIncreaseIndent(String code) {
@@ -532,7 +515,7 @@ final class IndentationDecisions {
             if (compatible) {
                 // A clause aligned with its owner or an existing sibling needs no correction.
                 return leading == reduced.length()
-                    && hasCertainContextBefore(previous, leading, firstLine, remainingChars);
+                    && syntax.hasCertainContextBefore(previous, leading);
             }
             if (!keyword.equals("finally") || !owner.equals("else") || leading != reduced.length()) {
                 return false;
@@ -616,7 +599,7 @@ final class IndentationDecisions {
             String owner = leadingKeyword(code.substring(leading));
             if (owner.equals("case") || owner.equals("default")) {
                 return leading == reduced.length()
-                    && hasCertainContextBefore(previous, leading, firstLine, remainingChars);
+                    && syntax.hasCertainContextBefore(previous, leading);
             }
         }
         return false;

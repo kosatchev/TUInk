@@ -3,6 +3,8 @@ package dev.tuink.core;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -38,6 +40,106 @@ class IndentationDecisionsTest {
             java.util.stream.Stream.of("    else:")
         ).toList();
         assertEquals(0, decisions("main.py", lines).keywordOutdent(new Position(257, 9)));
+    }
+
+    @Test
+    void nearbyPythonOwnerRemainsAvailablePastTheAbsoluteLookbackBoundary() {
+        for (int prefixLength : new int[] {254, 255, 256, 300}) {
+            List<String> lines = new ArrayList<>(Collections.nCopies(prefixLength, "value = 1"));
+            lines.addAll(List.of("if ready:", "    run()", "    else:"));
+
+            assertEquals(4, decisions("main.py", lines).keywordOutdent(new Position(lines.size() - 1, 9)),
+                "The owner is two lines away after " + prefixLength + " unrelated lines");
+        }
+    }
+
+    @Test
+    void characterLookbackCountsTheDistanceToTheOwnerInsteadOfTheWholePrefix() {
+        List<String> lines = new ArrayList<>(Collections.nCopies(120, "value = \"" + "x".repeat(200) + "\""));
+        lines.addAll(List.of("if ready:", "    run()", "    else:"));
+
+        assertEquals(4, decisions("main.py", lines).keywordOutdent(new Position(lines.size() - 1, 9)));
+    }
+
+    @Test
+    void nearbyOwnerStillRequiresKnownIncomingLexicalContext() {
+        for (String opening : List.of("payload = '''", "value = \"unfinished", "value = `unfinished", "value = \\")) {
+            List<String> lines = new ArrayList<>();
+            lines.add(opening);
+            lines.addAll(Collections.nCopies(300, "value = 1"));
+            lines.addAll(List.of("if ready:", "    run()", "    else:"));
+
+            assertEquals(0, decisions("main.py", lines).keywordOutdent(new Position(lines.size() - 1, 9)), opening);
+        }
+    }
+
+    @Test
+    void cachedLexicalContextCanProveANearbyOwnerBeyondTheInitialScanBudget() {
+        for (boolean malformed : new boolean[] {false, true}) {
+            List<String> lines = new ArrayList<>(Collections.nCopies(3_000, "value = 1"));
+            if (malformed) lines.set(0, "value = \"unfinished");
+            lines.addAll(List.of("if ready:", "    run()", "    else:"));
+            IndentationContext context = new IndentationContext(lines::get);
+            context.synchronize(1, 1, 0, lines.size(), Path.of("main.py"));
+            int last = lines.size() - 1;
+            for (int attempt = 0; attempt < 4; attempt++) context.codeBeforeCursor(last, 9);
+            IndentationDecisions decisions = new IndentationDecisions(lines.size(), lines::get, Path.of("main.py"),
+                4, TabInsertMode.ALWAYS_SPACES_4, context);
+
+            assertEquals(malformed ? 0 : 4, decisions.keywordOutdent(new Position(last, 9)),
+                "Evicting old checkpoints must preserve whether the incoming context was proven");
+        }
+    }
+
+    @Test
+    void completedMultilineLiteralsDoNotMakeLaterKnownCodeUncertain() {
+        for (String delimiter : List.of("'''", "\"\"\"")) {
+            List<String> lines = new ArrayList<>(List.of("payload = " + delimiter, "    if fake:", delimiter));
+            lines.addAll(Collections.nCopies(300, "value = 1"));
+            lines.addAll(List.of("if ready:", "    run()", "    else:"));
+
+            assertEquals(4, decisions("main.py", lines).keywordOutdent(new Position(lines.size() - 1, 9)), delimiter);
+        }
+    }
+
+    @Test
+    void aWarmDeepContextIncludesTheOldestPermittedOwnerWithoutExtendingTheLookback() {
+        for (int distance : new int[] {256, 257}) {
+            List<String> lines = new ArrayList<>(Collections.nCopies(3_000, "value = 1"));
+            lines.add("if ready:");
+            lines.addAll(Collections.nCopies(distance - 1, "    run()"));
+            lines.add("    else:");
+            IndentationContext context = new IndentationContext(lines::get);
+            context.synchronize(1, 1, 0, lines.size(), Path.of("main.py"));
+            int last = lines.size() - 1;
+            for (int attempt = 0; attempt < 4; attempt++) context.codeBeforeCursor(last, 9);
+            IndentationDecisions decisions = new IndentationDecisions(lines.size(), lines::get, Path.of("main.py"),
+                4, TabInsertMode.ALWAYS_SPACES_4, context);
+
+            assertEquals(distance == 256 ? 4 : 0, decisions.keywordOutdent(new Position(last, 9)),
+                "Owner distance " + distance);
+        }
+    }
+
+    @Test
+    void genericFileStillNeedsAnAnchoredProofAgainstAnEarlierOpenComment() {
+        for (boolean closed : new boolean[] {false, true}) {
+            List<String> lines = new ArrayList<>(List.of("/* earlier comment"));
+            if (closed) lines.add("*/");
+            lines.addAll(Collections.nCopies(300, "work();"));
+            lines.addAll(List.of("    work() {", "        run();", "        }"));
+
+            assertEquals(closed ? "    " : "        ", decisions("source.unknown", lines)
+                .newLineIndent(new Position(lines.size() - 1, lines.getLast().length())));
+        }
+    }
+
+    @Test
+    void conservativeContinuationProofDoesNotDisableLaterOrdinaryIndentIncreases() {
+        List<String> lines = List.of("value = \"continued\\", "closed\"", "if ready:");
+        IndentationDecisions decisions = decisions("main.py", lines);
+
+        assertEquals("    ", decisions.newLineIndent(new Position(2, lines.get(2).length())));
     }
 
     @Test

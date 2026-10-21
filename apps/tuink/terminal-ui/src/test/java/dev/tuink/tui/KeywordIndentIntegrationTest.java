@@ -7,6 +7,8 @@ import dev.tuiframe.input.KeyStroke;
 import dev.tuiframe.input.TextInput;
 import dev.tuink.core.Position;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -14,6 +16,28 @@ import org.junit.jupiter.api.io.TempDir;
 class KeywordIndentIntegrationTest {
     @TempDir
     Path directory;
+
+    @Test
+    void aNearbyPythonOwnerStillDedentsAfter257UnrelatedLines() throws Exception {
+        List<String> original = new ArrayList<>(Collections.nCopies(257, ""));
+        original.addAll(List.of("if ready:", "    run()"));
+        int clauseLine = original.size();
+        try (EditorWindowFixture window = prepared("main.py", original)) {
+            window.event(KeyStroke.of(KeyStroke.Key.ENTER));
+            type(window, "else:");
+
+            assertEquals("else:", window.active().tabSession().model().getLine(clauseLine));
+            assertEquals(new Position(clauseLine, 5), window.active().state().getCursor());
+            window.event(ctrl(KeyStroke.Key.Z));
+            assertEquals("    ", window.active().tabSession().model().getLine(clauseLine));
+            window.event(ctrl(KeyStroke.Key.Z));
+            assertEquals(original, window.active().tabSession().model().snapshotLines());
+            assertFalse(window.active().state().isDirty());
+            window.event(ctrl(KeyStroke.Key.Y));
+            window.event(ctrl(KeyStroke.Key.Y));
+            assertEquals("else:", window.active().tabSession().model().getLine(clauseLine));
+        }
+    }
 
     @Test
     void typingElseAfterAnAlignedPythonCommentKeepsTheFunctionScope() throws Exception {

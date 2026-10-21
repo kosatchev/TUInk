@@ -10,16 +10,82 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class EditorEngineYamlListTest {
+    private static final List<String> BLOCK_INDICATORS = List.of(
+        "|", "|-", "|+", "|2", "|2-", "|-2", "|2+", "|+2",
+        ">", ">-", ">+", ">2", ">2-", ">-2", ">2+", ">+2");
+
     @Test
     void blockScalarsNeverContinueLiteralDashesIncludingChompingAndIndentIndicators() {
         for (String extension : List.of("yaml", "yml")) {
-            for (String indicator : List.of("|", "|-", "|+", "|2", "|2-", "|-2", "|2+", "|+2",
-                ">", ">-", ">+", ">2", ">2-", ">-2", ">2+", ">+2")) {
+            for (String indicator : BLOCK_INDICATORS) {
                 for (boolean autoIndent : List.of(false, true)) {
                     assertNewline(extension, List.of("description: " + indicator + " # note", "  - literal text"),
                         autoIndent, autoIndent ? "  " : "");
                     assertNewline(extension, List.of("settings:", "  description: " + indicator, "    - [x] literal"),
                         autoIndent, autoIndent ? "    " : "");
+                }
+            }
+        }
+    }
+
+    @Test
+    void compactMappingScalarsReleaseFollowingKeysAndSequencesAtTheMappingIndent() {
+        for (String extension : List.of("yaml", "yml")) {
+            for (String prefix : List.of("- ", "- - ", "  - - ", "-   ")) {
+                String mappingIndent = " ".repeat(prefix.length());
+                String scalarIndent = mappingIndent + "  ";
+                for (String indicator : BLOCK_INDICATORS) {
+                    String header = prefix + "description: " + indicator + " # note";
+                    for (boolean empty : List.of(false, true)) {
+                        List<String> scalar = empty
+                            ? List.of(header, "")
+                            : List.of(header, scalarIndent + "text", "");
+                        List<String> followingKey = new ArrayList<>(scalar);
+                        followingKey.add(mappingIndent + "items:");
+                        assertNewline(extension, followingKey, true, scalarIndent,
+                            TabInsertMode.ALWAYS_SPACES_2);
+
+                        List<String> followingSequence = new ArrayList<>(followingKey);
+                        followingSequence.add(scalarIndent + "- value");
+                        for (boolean autoIndent : List.of(false, true)) {
+                            assertNewline(extension, followingSequence, autoIndent,
+                                (autoIndent ? scalarIndent : "") + "- ");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void compactMappingScalarContentKeepsLiteralKeysAndDashes() {
+        for (String prefix : List.of("- ", "- - ", "  - - ", "-   ")) {
+            String scalarIndent = " ".repeat(prefix.length() + 2);
+            for (String indicator : BLOCK_INDICATORS) {
+                String header = prefix + "'description': &text !!str " + indicator + " # note";
+                for (String content : List.of("- literal", "items:")) {
+                    assertNewline("yaml", List.of(header, scalarIndent + content), true,
+                        scalarIndent, TabInsertMode.ALWAYS_SPACES_2);
+                }
+            }
+        }
+    }
+
+    @Test
+    void compactSequenceScalarsUseTheirInnermostDashIndentEvenWithNodeProperties() {
+        for (String prefix : List.of("- ", "- - ", "  - - ", "-   -   ")) {
+            String sequenceIndent = " ".repeat(prefix.lastIndexOf('-'));
+            String scalarIndent = sequenceIndent + "  ";
+            for (String indicator : BLOCK_INDICATORS) {
+                for (String properties : List.of("", "&text !!str ")) {
+                    String header = prefix + properties + indicator;
+                    assertNewline("yaml", List.of(header, scalarIndent + "- literal"), true, scalarIndent);
+                    for (boolean empty : List.of(false, true)) {
+                        List<String> lines = empty
+                            ? List.of(header, sequenceIndent + "- value")
+                            : List.of(header, scalarIndent + "text", sequenceIndent + "- value");
+                        assertNewline("yaml", lines, true, sequenceIndent + "- ");
+                    }
                 }
             }
         }
@@ -153,8 +219,14 @@ class EditorEngineYamlListTest {
     }
 
     private static void assertNewline(String extension, List<String> original, boolean autoIndent, String inserted) {
+        assertNewline(extension, original, autoIndent, inserted, TabInsertMode.AUTO);
+    }
+
+    private static void assertNewline(String extension, List<String> original, boolean autoIndent, String inserted,
+                                      TabInsertMode tabInsertMode) {
         Fixture fixture = fixture(extension, original);
         fixture.engine().setAutoIndentEnabled(autoIndent);
+        fixture.engine().setTabInsertMode(tabInsertMode);
         Position before = fixture.state().getCursor();
         List<String> expected = new ArrayList<>(original);
         expected.add(inserted);

@@ -15,8 +15,8 @@ final class IndentationLexer {
 
     record State(Kind kind, String close, boolean escapes, boolean doubled, boolean multiline,
                  int depth, int indent, Template template, Parenthesis parentheses,
-                 boolean regexAllowed, boolean pendingControl) {
-        static final State CODE = new State(Kind.CODE, "", false, false, false, 0, 0, null, null, true, false);
+                 boolean regexAllowed, boolean pendingControl, boolean certainPrefix) {
+        static final State CODE = new State(Kind.CODE, "", false, false, false, 0, 0, null, null, true, false, true);
 
         int weight() {
             return 1 + close.length() + (template == null ? 0 : template.depth())
@@ -153,7 +153,7 @@ final class IndentationLexer {
                 && yamlScalarStart(text, index)
                 && yamlBlockTail(text, index + 1, end)) {
                 scan.kind = Kind.YAML_BLOCK;
-                scan.depth = leading(text, end);
+                scan.depth = yamlBlockParentIndent(text, index);
                 scan.indent = -1;
                 for (int at = index + 1; at < end && !Character.isWhitespace(text.charAt(at)); at++) {
                     if (text.charAt(at) >= '1' && text.charAt(at) <= '9') scan.indent = scan.depth + text.charAt(at) - '0';
@@ -275,6 +275,9 @@ final class IndentationLexer {
                 continue;
             }
             if (!Character.isWhitespace(current)) {
+                // These tokens outside a recognized literal can carry syntax
+                // this small lexer cannot prove (for example a continuation).
+                if (current == '\\' || current == '`') scan.certainPrefix = false;
                 if (current == '(') {
                     if (scan.parentheses != null && scan.parentheses.depth() >= MAX_NESTING) return null;
                     scan.parentheses = new Parenthesis(scan.pendingControl, scan.parentheses);
@@ -330,6 +333,28 @@ final class IndentationLexer {
             if (!Character.isWhitespace(current) && current != '+' && current != '-' && (current < '1' || current > '9')) return false;
         }
         return true;
+    }
+
+    private static int yamlBlockParentIndent(String text, int scalar) {
+        int parent = leading(text, scalar);
+        int node = parent;
+        // Compact collections add indentation after their indicators without
+        // adding leading whitespace: "- - description: |2" owns its scalar at
+        // the mapping key's column, while "- - |2" uses the inner dash's column.
+        while (node + 1 < scalar) {
+            char indicator = text.charAt(node);
+            if ((indicator != '-' && indicator != '?' && indicator != ':')
+                || !Character.isWhitespace(text.charAt(node + 1))) break;
+            parent = node++;
+            while (node < scalar && Character.isWhitespace(text.charAt(node))) node++;
+        }
+        int content = node;
+        // Node properties do not turn a direct sequence scalar into a mapping.
+        while (content < scalar && (text.charAt(content) == '&' || text.charAt(content) == '!')) {
+            while (content < scalar && !Character.isWhitespace(text.charAt(content))) content++;
+            while (content < scalar && Character.isWhitespace(text.charAt(content))) content++;
+        }
+        return content < scalar ? node : parent;
     }
 
     private static boolean yamlScalarStart(String text, int at) {
@@ -393,6 +418,7 @@ final class IndentationLexer {
         private boolean regexAllowed;
         private boolean pendingControl;
         private boolean continuedQuote;
+        private boolean certainPrefix;
         private int index;
 
         private Scan(String text, int end, boolean produceCode, State before) {
@@ -409,6 +435,7 @@ final class IndentationLexer {
             parentheses = before.parentheses();
             regexAllowed = before.regexAllowed();
             pendingControl = before.pendingControl();
+            certainPrefix = before.certainPrefix();
         }
 
         private void openQuote(String delimiter, boolean escape, boolean doubleDelimiter, boolean multipleLines, int afterOpening) {
@@ -431,8 +458,12 @@ final class IndentationLexer {
         private Result result() {
             boolean atCode = kind == Kind.CODE && template == null;
             Kind after = kind == Kind.QUOTE && !multiline && !continuedQuote ? Kind.CODE : kind;
+            // An ordinary string left open at a newline may require recovery
+            // or continuation grammar. Keep useful masking/indent increases,
+            // but preserve the conservative guard against deleting indentation.
+            boolean certain = certainPrefix && !(kind == Kind.QUOTE && !multiline);
             State state = new State(after, close, escapes, doubled, multiline, depth, indent, template,
-                parentheses, regexAllowed, pendingControl);
+                parentheses, regexAllowed, pendingControl, certain);
             return new Result(state, atCode, code == null ? null : new String(code));
         }
     }

@@ -6,10 +6,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class EditorEngineClosingIndentTest {
+    @Test
+    void nearbyCloserStillDedentsAfterThreeHundredUnrelatedLines() {
+        List<String> lines = new ArrayList<>(Collections.nCopies(300, "work();"));
+        lines.addAll(List.of("    void work() {", "        run();", "        }"));
+
+        assertNewlineIndent("Main.java", lines, "    ");
+    }
+
     @Test
     void alignedClosingDelimitersKeepTheContainingBlockIndent() {
         assertNewlineIndent("Main.java", List.of(
@@ -59,6 +68,13 @@ class EditorEngineClosingIndentTest {
         assertNewlineIndent("Main.java", List.of("String value = \"\"\"", "{", "    }"), "    ");
         assertNewlineIndent("main.js", List.of("const value = `", "{", "    }"), "    ");
         assertNewlineIndent("Main.java", List.of("String value = \"\"\"", "*/", "{", "    }"), "    ");
+    }
+
+    @Test
+    void anOrdinaryQuoteContinuedAcrossANewlineCannotProveAClosingIndentRemoval() {
+        assertNewlineIndent("Main.java", List.of(
+            "String value = \"unfinished\\", "closed\";", "    work() {", "        run();", "        }"
+        ), "        ");
     }
 
     @Test

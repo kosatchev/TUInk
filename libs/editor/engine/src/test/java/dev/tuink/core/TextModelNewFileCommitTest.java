@@ -100,6 +100,22 @@ class TextModelNewFileCommitTest {
     }
 
     @Test
+    void portableExclusiveCreationCopiesTheWholeStagedFileAcrossMultipleBuffers() throws IOException {
+        Fixture fixture = fixture(CommitBehavior.UNSUPPORTED_LINK, false);
+        String first = "Ā".repeat(20_000);
+        String second = "😀".repeat(9000);
+        fixture.model().replaceLines(List.of(first, second));
+
+        fixture.save();
+
+        byte[] expected = ("\uFEFF" + first + "\r\n" + second).getBytes(StandardCharsets.UTF_16LE);
+        assertArrayEquals(expected, Files.readAllBytes(fixture.target()));
+        assertEquals(FileBaseline.fromBytes(fixture.target(), expected), fixture.model().fileBaseline());
+        assertEquals(1, fixture.provider().successfulExclusiveOpens);
+        assertNoStagedFiles();
+    }
+
+    @Test
     void writesExclusivelyWhenTheProviderReportsALinkIoFailure() throws IOException {
         Fixture fixture = fixture(CommitBehavior.LINK_IO_FAILURE, false);
 

@@ -88,7 +88,7 @@ public record FileBaseline(Path target, String sha256, long byteSize) {
             + ". Use Save As with a different name, or reopen the file.";
     }
 
-    private static MessageDigest digest() {
+    static MessageDigest digest() {
         try {
             return MessageDigest.getInstance("SHA-256");
         } catch (NoSuchAlgorithmException impossible) {

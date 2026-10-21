@@ -52,7 +52,7 @@ class TextModelSaveTargetIdentityTest {
         Position cursor = state.getCursor();
         Position selection = state.getSelectionAnchor();
         ViewportState viewport = state.viewport();
-        model.afterNextSnapshot(() -> redirect(alias, second.getFileName()));
+        model.afterNextLineRead(() -> redirect(alias, second.getFileName()));
 
         IOException failure = assertThrows(IOException.class,
             () -> engine.saveAs(alias, SaveDisposition.REPLACE_EXISTING));
@@ -97,7 +97,7 @@ class TextModelSaveTargetIdentityTest {
         var model = new RedirectingModel();
         model.insertText(new Position(0, 0), "draft");
         DocumentFileMetadata metadata = model.fileMetadata();
-        model.afterNextSnapshot(() -> redirect(alias, second.getFileName()));
+        model.afterNextLineRead(() -> redirect(alias, second.getFileName()));
 
         assertThrows(IOException.class, () -> model.save(alias.resolve("target.txt"), metadata,
             overwrite ? SaveDisposition.REPLACE_EXISTING : SaveDisposition.CREATE_NEW));
@@ -121,7 +121,7 @@ class TextModelSaveTargetIdentityTest {
         Path alias = Files.createSymbolicLink(directory.resolve("alias.txt"), target.getFileName());
         var model = new RedirectingModel();
         model.insertText(new Position(0, 0), "draft");
-        model.afterNextSnapshot(() -> redirect(alias, secondAlias.getFileName()));
+        model.afterNextLineRead(() -> redirect(alias, secondAlias.getFileName()));
 
         model.save(alias, model.fileMetadata(), SaveDisposition.REPLACE_EXISTING);
 
@@ -143,7 +143,7 @@ class TextModelSaveTargetIdentityTest {
         EditorState state = new EditorState();
         EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model));
         engine.insertInput("draft");
-        model.afterNextSnapshot(() -> redirect(alias, second.getFileName()));
+        model.afterNextLineRead(() -> redirect(alias, second.getFileName()));
 
         engine.saveAs(alias.resolve("target.txt"), SaveDisposition.REPLACE_EXISTING);
 
@@ -160,7 +160,7 @@ class TextModelSaveTargetIdentityTest {
         Path target = directory.resolve("new.txt");
         var model = new RedirectingModel();
         model.insertText(new Position(0, 0), "draft");
-        model.afterNextSnapshot(() -> Files.writeString(target, "another writer"));
+        model.afterNextLineRead(() -> Files.writeString(target, "another writer"));
 
         assertThrows(FileAlreadyExistsException.class,
             () -> model.save(target, model.fileMetadata(), SaveDisposition.CREATE_NEW));
@@ -184,23 +184,23 @@ class TextModelSaveTargetIdentityTest {
     @FunctionalInterface
     private interface FileChange { void apply() throws IOException; }
 
-    /** Saving snapshots text after target resolution; this existing virtual call controls the external change. */
+    /** Saving reads its first line after target resolution; that read controls the external change. */
     private static final class RedirectingModel extends TextModel {
         private FileChange change;
 
         RedirectingModel() { super(new SimpleLineBuffer()); }
 
-        void afterNextSnapshot(FileChange next) { change = next; }
+        void afterNextLineRead(FileChange next) { change = next; }
 
-        @Override public List<String> snapshotLines() {
-            List<String> snapshot = super.snapshotLines();
+        @Override public String getLine(int index) {
+            String line = super.getLine(index);
             FileChange next = change;
             change = null;
             if (next != null) {
                 try { next.apply(); }
                 catch (IOException failure) { throw new UncheckedIOException(failure); }
             }
-            return snapshot;
+            return line;
         }
     }
 }

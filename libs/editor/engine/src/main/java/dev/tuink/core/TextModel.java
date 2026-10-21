@@ -3,6 +3,7 @@ package dev.tuink.core;
 import dev.tuink.unicode.GraphemeText;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.channels.SeekableByteChannel;
@@ -11,6 +12,7 @@ import java.nio.charset.Charset;
 import java.nio.charset.CharsetDecoder;
 import java.nio.charset.CharsetEncoder;
 import java.nio.charset.CodingErrorAction;
+import java.nio.charset.CoderResult;
 import java.nio.charset.StandardCharsets;
 import java.nio.charset.UnmappableCharacterException;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -23,9 +25,11 @@ import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -797,42 +801,41 @@ public class TextModel {
         SaveDisposition disposition,
         boolean checkBaseline
     ) throws IOException {
-        DocumentFileMetadata checkedMetadata = unambiguousLineSeparators(
-            requireCompatibleMetadata(metadata, lineCount()), 1, lineCount() - 2
-        );
-        SaveDisposition checkedDisposition = Objects.requireNonNull(disposition, "disposition");
-        Path requestedTarget = path.toAbsolutePath();
-        boolean verifyOriginal = checkBaseline
-            && (checkedDisposition == SaveDisposition.REPLACE_EXISTING || fileBaseline != null);
-        Path target;
-        try {
-            target = resolveSaveTarget(requestedTarget);
-        } catch (IOException inaccessible) {
-            if (verifyOriginal) throw new IOException(FileBaseline.conflictMessage(requestedTarget), inaccessible);
-            throw inaccessible;
-        }
-        // Validate the address that will receive the staged bytes. Resolving
-        // a changing opening alias again could verify one file and replace another.
-        if (verifyOriginal) {
-            requireUnchangedFile(target);
-        }
-        byte[] content = encode(snapshotLines(), checkedMetadata);
-        FileBaseline savedBaseline = FileBaseline.fromBytes(target, content);
-        boolean targetExists = requireRegularSaveTargetOrMissing(target);
-        Path parent = target.getParent();
-        Path tempDir = parent != null ? parent : Path.of(".").toAbsolutePath().normalize();
-        String fileName = target.getFileName() == null ? "tuink" : target.getFileName().toString();
-        String prefix = "." + sanitizePrefix(fileName) + ".";
-        if (prefix.length() < 3) {
-            prefix = ".tuink.";
-        }
-
-        Path tempFile = createSaveTempFile(tempDir, prefix, targetExists);
+        Path tempFile = null;
         boolean committed = false;
         FileSaveGuard guard = null;
         Throwable failure = null;
         try {
-            Files.write(tempFile, content);
+            DocumentFileMetadata checkedMetadata = unambiguousLineSeparators(
+                requireCompatibleMetadata(metadata, lineCount()), 1, lineCount() - 2
+            );
+            SaveDisposition checkedDisposition = Objects.requireNonNull(disposition, "disposition");
+            Path requestedTarget = path.toAbsolutePath();
+            boolean verifyOriginal = checkBaseline
+                && (checkedDisposition == SaveDisposition.REPLACE_EXISTING || fileBaseline != null);
+            Path target;
+            try {
+                target = resolveSaveTarget(requestedTarget);
+            } catch (IOException inaccessible) {
+                if (verifyOriginal) throw new IOException(FileBaseline.conflictMessage(requestedTarget), inaccessible);
+                throw inaccessible;
+            }
+            // Validate the address that will receive the staged bytes. Resolving
+            // a changing opening alias again could verify one file and replace another.
+            if (verifyOriginal) {
+                requireUnchangedFile(target);
+            }
+            boolean targetExists = requireRegularSaveTargetOrMissing(target);
+            Path parent = target.getParent();
+            Path tempDir = parent != null ? parent : Path.of(".").toAbsolutePath().normalize();
+            String fileName = target.getFileName() == null ? "tuink" : target.getFileName().toString();
+            String prefix = "." + sanitizePrefix(fileName) + ".";
+            if (prefix.length() < 3) {
+                prefix = ".tuink.";
+            }
+
+            tempFile = createSaveTempFile(tempDir, prefix, targetExists);
+            FileBaseline savedBaseline = encodeToFile(tempFile, target, checkedMetadata);
             guard = FileSaveGuard.acquire(target);
             if (verifyOriginal) {
                 requireUnchangedFile(target);
@@ -855,7 +858,7 @@ public class TextModel {
             requireSameSaveTarget(requestedTarget, target);
             requireRegularSaveTargetOrMissing(target);
             if (checkedDisposition == SaveDisposition.CREATE_NEW) {
-                publishNewFile(tempFile, target, content);
+                publishNewFile(tempFile, target);
             } else {
                 try {
                     Files.move(
@@ -871,9 +874,13 @@ public class TextModel {
                     Files.move(tempFile, target, StandardCopyOption.REPLACE_EXISTING);
                 }
             }
+            committed = true;
             fileMetadata = checkedMetadata;
             fileBaseline = savedBaseline;
-            committed = true;
+        } catch (OutOfMemoryError allocationFailure) {
+            IOException saveFailure = new IOException("Not enough memory to save this document", allocationFailure);
+            failure = saveFailure;
+            throw saveFailure;
         } catch (IOException | RuntimeException | Error error) {
             failure = error;
             throw error;
@@ -881,24 +888,24 @@ public class TextModel {
             if (guard != null) {
                 try {
                     guard.close();
-                } catch (IOException cleanupFailure) {
+                } catch (IOException | OutOfMemoryError cleanupFailure) {
                     if (failure != null) failure.addSuppressed(cleanupFailure);
                     // Publication already completed when there is no primary
                     // failure. Releasing the guard cannot undo a committed save.
                 }
             }
             try {
-                Files.deleteIfExists(tempFile);
-            } catch (IOException cleanupFailure) {
+                if (tempFile != null) Files.deleteIfExists(tempFile);
+            } catch (IOException | OutOfMemoryError cleanupFailure) {
                 if (failure != null) failure.addSuppressed(cleanupFailure);
-                else if (!committed) throw cleanupFailure;
+                else if (!committed) throw new IOException("Cannot remove a staged save file", cleanupFailure);
                 // The target is already committed. A private orphan temp file is
                 // preferable to reporting a failed save and desynchronizing state.
             }
         }
     }
 
-    private static void publishNewFile(Path tempFile, Path target, byte[] content) throws IOException {
+    private static void publishNewFile(Path tempFile, Path target) throws IOException {
         Throwable linkFailure;
         try {
             // Linking the fully staged inode publishes complete bytes without
@@ -912,6 +919,8 @@ public class TextModel {
             linkFailure = failure;
         }
 
+        byte[] buffer = new byte[8192];
+        ByteBuffer bytes = ByteBuffer.wrap(buffer);
         SeekableByteChannel output;
         try {
             output = createNewSaveChannel(target);
@@ -923,12 +932,15 @@ public class TextModel {
             unsupported.addSuppressed(linkFailure);
             throw unsupported;
         }
-        try (output) {
-            ByteBuffer bytes = ByteBuffer.wrap(content);
-            while (bytes.hasRemaining()) {
-                output.write(bytes);
+        try (output; InputStream input = Files.newInputStream(tempFile)) {
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                bytes.clear().limit(read);
+                while (bytes.hasRemaining()) {
+                    output.write(bytes);
+                }
             }
-        } catch (IOException failure) {
+        } catch (IOException | OutOfMemoryError failure) {
             // Keep the new path: another writer may have replaced it after the
             // exclusive open, so deleting it by name could remove their file.
             IOException incomplete = new IOException(
@@ -1339,41 +1351,90 @@ public class TextModel {
         return mostFrequent;
     }
 
-    private static byte[] encode(List<String> lines, DocumentFileMetadata metadata)
-        throws CharacterCodingException {
-        StringBuilder content = new StringBuilder();
-        for (int i = 0; i < lines.size(); i++) {
-            content.append(lines.get(i));
-            if (i < metadata.lineSeparators().size()) {
-                content.append(metadata.lineSeparators().get(i));
+    private FileBaseline encodeToFile(Path stagedFile, Path target, DocumentFileMetadata metadata)
+        throws IOException {
+        StagedEncoder encoded;
+        try (OutputStream output = Files.newOutputStream(stagedFile)) {
+            encoded = new StagedEncoder(output, metadata.charset());
+            byte[] bom = metadata.bomKind().bytes();
+            encoded.writeBytes(bom, bom.length);
+            var separators = metadata.lineSeparators().iterator();
+            for (int line = 0; line < lineCount(); line++) {
+                encoded.append(getLine(line));
+                if (separators.hasNext()) encoded.append(separators.next());
+            }
+            encoded.finish();
+        }
+        return new FileBaseline(target, HexFormat.of().formatHex(encoded.digest.digest()), encoded.byteSize);
+    }
+
+    /** One encoder retains shift state and split surrogate pairs across every document chunk. */
+    private static final class StagedEncoder {
+        private final OutputStream output;
+        private final Charset charset;
+        private final CharsetEncoder encoder;
+        private final CharBuffer input = CharBuffer.allocate(8192);
+        private final ByteBuffer bytes = ByteBuffer.allocate(8192);
+        private final MessageDigest digest = FileBaseline.digest();
+        private long byteSize;
+
+        StagedEncoder(OutputStream output, Charset charset) {
+            this.output = output;
+            this.charset = charset;
+            encoder = charset.newEncoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT);
+        }
+
+        void append(String text) throws IOException {
+            int offset = 0;
+            while (offset < text.length()) {
+                int end = offset + Math.min(input.remaining(), text.length() - offset);
+                input.put(text, offset, end);
+                offset = end;
+                if (!input.hasRemaining()) encode(false);
             }
         }
-        CharsetEncoder encoder = metadata.charset().newEncoder()
-            .onMalformedInput(CodingErrorAction.REPORT)
-            .onUnmappableCharacter(CodingErrorAction.REPORT);
-        CharBuffer input = CharBuffer.wrap(content);
-        final ByteBuffer encodedBuffer;
-        try {
-            encodedBuffer = encoder.encode(input);
-        } catch (UnmappableCharacterException failure) {
-            // An encoder leaves the input at the first unrepresentable character.
-            // Keep the diagnostic independent of the surrounding document text.
-            if (!input.hasRemaining()) {
-                throw failure;
-            }
-            throw new DocumentEncodingException(metadata.charset(),
-                Character.codePointAt(content, input.position()), failure);
+
+        private void encode(boolean endOfInput) throws IOException {
+            input.flip();
+            CoderResult result;
+            do {
+                result = encoder.encode(input, bytes, endOfInput);
+                if (result.isError()) {
+                    try {
+                        result.throwException();
+                    } catch (UnmappableCharacterException failure) {
+                        throw new DocumentEncodingException(charset,
+                            Character.codePointAt(input, 0), failure);
+                    }
+                }
+                drain();
+            } while (result.isOverflow());
+            // A trailing high surrogate remains for the next input chunk.
+            input.compact();
         }
-        byte[] encodedText = new byte[encodedBuffer.remaining()];
-        encodedBuffer.get(encodedText);
-        byte[] bom = metadata.bomKind().bytes();
-        if (bom.length == 0) {
-            return encodedText;
+
+        void finish() throws IOException {
+            encode(true);
+            CoderResult result;
+            do {
+                result = encoder.flush(bytes);
+                if (result.isError()) result.throwException();
+                drain();
+            } while (result.isOverflow());
         }
-        byte[] encoded = new byte[bom.length + encodedText.length];
-        System.arraycopy(bom, 0, encoded, 0, bom.length);
-        System.arraycopy(encodedText, 0, encoded, bom.length, encodedText.length);
-        return encoded;
+
+        private void drain() throws IOException {
+            writeBytes(bytes.array(), bytes.position());
+            bytes.clear();
+        }
+
+        private void writeBytes(byte[] data, int length) throws IOException {
+            output.write(data, 0, length);
+            digest.update(data, 0, length);
+            byteSize += length;
+        }
     }
 
     private static boolean isValidUtf8(byte[] data) {

@@ -28,6 +28,7 @@ public final class KeyDecoder {
     // ambiguous first byte expires; a recognized sequence survives idle polls.
     private static final long ESCAPE_AMBIGUITY_NANOS = 500_000_000L;
     private static final int MAX_SEQUENCE_READ_CODE_UNITS = 128;
+    private static final int MAX_PASTE_READS_PER_POLL = 4096;
     private static final int MAX_CSI_LENGTH = 64;
     private static final String BRACKETED_PASTE_END = "\u001B[201~";
     static final int DEFAULT_MAX_PASTE_CODE_UNITS = 1_048_576;
@@ -659,10 +660,18 @@ public final class KeyDecoder {
     }
 
     private ReadResult readBracketedPaste(long timeoutMs) throws IOException {
-        long nextTimeout = timeoutMs;
-        while (true) {
+        long startedAtNanos = nanoClock.getAsLong();
+        long budgetNanos = sequenceContinuationTimeout(timeoutMs) * 1_000_000L;
+        // A paste is one event, but draining it must leave turns available for
+        // rendering, resize and stop requests, even after its text limit is hit.
+        for (int reads = 0; reads < MAX_PASTE_READS_PER_POLL; reads++) {
+            long remainingNanos = budgetNanos - (nanoClock.getAsLong() - startedAtNanos);
+            if (remainingNanos <= 0L) {
+                return ReadResult.idle();
+            }
+            // Zero means an unbounded wait to JLine. Round a positive remainder up.
+            long nextTimeout = (remainingNanos + 999_999L) / 1_000_000L;
             int next = readCodeUnit(nextTimeout);
-            nextTimeout = SEQUENCE_TIMEOUT_MS;
             if (next == NonBlockingReader.READ_EXPIRED) {
                 return ReadResult.idle();
             }
@@ -686,6 +695,7 @@ public final class KeyDecoder {
                 }
             }
         }
+        return ReadResult.idle();
     }
 
     private void beginBracketedPaste() {

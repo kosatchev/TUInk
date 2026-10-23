@@ -6,6 +6,7 @@ import dev.tuink.core.EditorTextLayout;
 import dev.tuink.core.GutterDiffFlag;
 import dev.tuink.core.GutterDiffMarker;
 import dev.tuink.core.Position;
+import dev.tuink.core.SearchLimitException;
 import dev.tuink.core.SearchMatcher;
 import dev.tuink.core.SearchOptions;
 import dev.tuink.core.TextModel;
@@ -73,6 +74,51 @@ public class RenderPlanBuilder {
     private Style quoteMatchStyle = Style.DEFAULT;
     private Style unmatchedBracketStyle = Style.DEFAULT;
     private List<Style> rainbowBracketStyles = List.of(Style.DEFAULT);
+    private SearchFailure failedSearch;
+
+    private record SearchFailure(String query, SearchOptions options, long identity, long revision) {}
+
+    /** Optional highlights must not prevent a document frame from being built. */
+    private final class SearchHighlights {
+        private final SearchFailure key;
+        private SearchMatcher matcher;
+
+        private SearchHighlights(TextModel model, String query, SearchOptions options) {
+            key = new SearchFailure(query, options, model.cacheIdentity(), model.revision());
+            if (key.equals(failedSearch)) return;
+            try {
+                matcher = SearchMatcher.compile(query, options);
+                failedSearch = null;
+            } catch (SearchLimitException limit) {
+                failedSearch = key;
+            }
+        }
+
+        private List<SearchMatcher.Match> findIntersecting(String source, int start, int end) {
+            if (matcher == null) return List.of();
+            try {
+                return matcher.findIntersecting(source, start, end);
+            } catch (SearchLimitException limit) {
+                refuse();
+                return List.of();
+            }
+        }
+
+        private boolean matchesRange(String source, int start, int end) {
+            if (matcher == null) return false;
+            try {
+                return matcher.matchesRange(source, start, end);
+            } catch (SearchLimitException limit) {
+                refuse();
+                return false;
+            }
+        }
+
+        private void refuse() {
+            matcher = null;
+            failedSearch = key;
+        }
+    }
 
     public RenderPlanBuilder(LineHighlighter highlighter, EditorTextLayout textLayout) {
         this.highlighter = highlighter;
@@ -429,7 +475,7 @@ public class RenderPlanBuilder {
         if (bracketMatchingEnabled || rainbowBracketsEnabled) {
             ensureBracketDecorationCache(model);
         }
-        SearchMatcher searchMatcher = SearchMatcher.compile(searchQuery, searchOptions);
+        SearchHighlights searchMatcher = new SearchHighlights(model, searchQuery, searchOptions);
 
         List<LineVisual> lines = new ArrayList<>(contentRows);
         if (!wrapLines) {
@@ -869,7 +915,7 @@ public class RenderPlanBuilder {
     }
 
     private List<StyleSpan> searchMatchSpans(
-        String line, SearchMatcher matcher, Style style, int start, int end
+        String line, SearchHighlights matcher, Style style, int start, int end
     ) {
         return matcher.findIntersecting(line, start, end).stream()
             .map(m -> new StyleSpan(m.startUtf16(), m.endUtf16(), style))
@@ -989,7 +1035,7 @@ public class RenderPlanBuilder {
         int lineIndex,
         int leftColumn,
         int visibleLength,
-        SearchMatcher matcher
+        SearchHighlights matcher
     ) {
         if (!state.hasSelection() || visibleLength <= 0) {
             return null;

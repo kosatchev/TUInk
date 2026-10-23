@@ -12,10 +12,12 @@ public final class SearchWorkBudget {
     private static final ScopedValue<SearchWorkBudget> CURRENT = ScopedValue.newInstance();
     private final SearchWorkBudget parent;
     private long remaining;
+    private long remainingCompilationBytes;
 
     private SearchWorkBudget(long maximumWork, SearchWorkBudget parent) {
         remaining = maximumWork;
         this.parent = parent;
+        remainingCompilationBytes = SearchMemoryBudget.additionalPeakLimit();
     }
 
     /** Runs with a shared limit on automaton words beyond its linear first word. */
@@ -40,5 +42,12 @@ public final class SearchWorkBudget {
             parent.consume(work);
         }
         remaining -= work;
+    }
+
+    /** Retained and temporary compilation state across a complete action. */
+    void reserveCompilation(long bytes) {
+        if (bytes > remainingCompilationBytes) throw SearchLimitException.memory();
+        if (parent != null) parent.reserveCompilation(bytes);
+        remainingCompilationBytes -= bytes;
     }
 }

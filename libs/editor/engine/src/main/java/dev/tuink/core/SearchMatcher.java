@@ -12,36 +12,132 @@ import java.util.Map;
  * source string in UTF-16 offsets.
  */
 public final class SearchMatcher {
+    private static final SearchLimitException MEMORY_LIMIT = SearchLimitException.memory();
     private final SearchOptions.MatchMode matchMode;
     private final LiteralPattern literal;
     private final WildcardPattern wildcard;
 
-    private SearchMatcher(String query, SearchOptions options) {
+    private SearchMatcher(String query, SearchOptions options, int codePoints) {
         String safeQuery = query == null ? "" : query;
         SearchOptions safeOptions = options == null ? SearchOptions.DEFAULT : options;
         this.matchMode = safeOptions.matchMode() == null
             ? SearchOptions.MatchMode.SUBSTRING
             : safeOptions.matchMode();
         this.wildcard = !safeQuery.isEmpty() && matchMode == SearchOptions.MatchMode.WILDCARD
-            ? new WildcardPattern(safeQuery, safeOptions.caseInsensitive())
+            ? new WildcardPattern(safeQuery, safeOptions.caseInsensitive(), codePoints)
             : null;
         this.literal = safeQuery.isEmpty() || wildcard != null
             ? null
-            : new LiteralPattern(safeQuery, safeOptions.caseInsensitive());
+            : new LiteralPattern(safeQuery, safeOptions.caseInsensitive(), codePoints);
     }
 
     public static SearchMatcher compile(String query, SearchOptions options) {
-        return new SearchMatcher(query, options);
+        try {
+            String safeQuery = query == null ? "" : query;
+            SearchOptions safeOptions = options == null ? SearchOptions.DEFAULT : options;
+            int codePoints = safeQuery.codePointCount(0, safeQuery.length());
+            if (codePoints > 0) {
+                SearchMemoryBudget.requireCompilation(compilationBytes(safeQuery, safeOptions, codePoints));
+            }
+            return new SearchMatcher(safeQuery, safeOptions, codePoints);
+        } catch (OutOfMemoryError exhausted) {
+            throw MEMORY_LIMIT;
+        }
+    }
+
+    /**
+     * Preflight without query-sized storage. Besides the retained matcher, allow
+     * for its construction copies and the largest query-sized matching scratch.
+     * A wildcard word contains at most 64 distinct literal masks, so a bounded
+     * set suffices to count an upper bound on masks and map keys across segments.
+     */
+    private static long compilationBytes(String query, SearchOptions options, int codePoints) {
+        if (options.matchMode() != SearchOptions.MatchMode.WILDCARD) {
+            // Tokens, prefix table and original-source offset ring.
+            return SearchMemoryBudget.FIXED_OVERHEAD + 12L * codePoints;
+        }
+        SearchMemoryBudget.requireScratch(SearchMemoryBudget.FIXED_OVERHEAD);
+        int[] wordLiterals = new int[Long.SIZE];
+        long bytes = SearchMemoryBudget.FIXED_OVERHEAD + 4L * codePoints;
+        int segmentLength = 0;
+        int firstLiteral = -1;
+        int lastLiteral = -1;
+        int word = -1;
+        int distinct = 0;
+        long maskEntries = 0;
+        boolean internalQuestion = false;
+        for (int offset = 0; offset <= query.length();) {
+            int token = offset < query.length() ? query.codePointAt(offset) : '*';
+            if (token == '*') {
+                if (segmentLength > 0) {
+                    int coreLength = firstLiteral < 0 ? 0 : lastLiteral - firstLiteral + 1;
+                    // Segment object, both segment reference arrays, array
+                    // headers and temporary token slice copied by its constructor.
+                    bytes += 256L + 4L * segmentLength + 4L * coreLength;
+                    if (internalQuestion) {
+                        long words = (coreLength + 63L) / Long.SIZE;
+                        // Question masks, scan state, WordMask objects/references,
+                        // boxed keys, both maps, construction lists and prefilter set.
+                        bytes += 16L * words + 320L * maskEntries;
+                    } else {
+                        bytes += 4L * coreLength;
+                    }
+                }
+                segmentLength = 0;
+                firstLiteral = -1;
+                lastLiteral = -1;
+                word = -1;
+                distinct = 0;
+                maskEntries = 0;
+                internalQuestion = false;
+            } else {
+                if (token != '?') {
+                    if (firstLiteral < 0) firstLiteral = segmentLength;
+                    if (lastLiteral >= 0 && segmentLength > lastLiteral + 1) internalQuestion = true;
+                    lastLiteral = segmentLength;
+                    int nextWord = (segmentLength - firstLiteral) / Long.SIZE;
+                    if (word != nextWord) {
+                        word = nextWord;
+                        distinct = 0;
+                    }
+                    if (options.caseInsensitive()) token = WildcardPattern.foldCase(token);
+                    int index = 0;
+                    while (index < distinct && wordLiterals[index] != token) index++;
+                    if (index == distinct) {
+                        wordLiterals[distinct++] = token;
+                        maskEntries++;
+                    }
+                }
+                segmentLength++;
+            }
+            if (offset == query.length()) break;
+            offset += Character.charCount(query.codePointAt(offset));
+        }
+        return bytes;
+    }
+
+    private static int[] tokens(String query, int codePoints) {
+        int[] result = new int[codePoints];
+        for (int offset = 0, index = 0; offset < query.length(); index++) {
+            int codePoint = query.codePointAt(offset);
+            result[index] = codePoint;
+            offset += Character.charCount(codePoint);
+        }
+        return result;
     }
 
     /** Returns non-overlapping half-open UTF-16 ranges in {@code source}. */
     public List<Match> findAll(String source) {
-        List<Match> matches = new ArrayList<>();
-        scanMatches(source, (start, end) -> {
-            matches.add(new Match(start, end));
-            return true;
-        });
-        return List.copyOf(matches);
+        try {
+            List<Match> matches = new ArrayList<>();
+            scanMatches(source, (start, end) -> {
+                matches.add(new Match(start, end));
+                return true;
+            });
+            return List.copyOf(matches);
+        } catch (OutOfMemoryError exhausted) {
+            throw MEMORY_LIMIT;
+        }
     }
 
     /**
@@ -54,17 +150,21 @@ public final class SearchMatcher {
         if (endUtf16 <= startUtf16) {
             return List.of();
         }
-        List<Match> matches = new ArrayList<>();
-        scanMatches(source, (start, end) -> {
-            if (start >= endUtf16) {
-                return false;
-            }
-            if (end > startUtf16) {
-                matches.add(new Match(start, end));
-            }
-            return true;
-        });
-        return List.copyOf(matches);
+        try {
+            List<Match> matches = new ArrayList<>();
+            scanMatches(source, (start, end) -> {
+                if (start >= endUtf16) {
+                    return false;
+                }
+                if (end > startUtf16) {
+                    matches.add(new Match(start, end));
+                }
+                return true;
+            });
+            return List.copyOf(matches);
+        } catch (OutOfMemoryError exhausted) {
+            throw MEMORY_LIMIT;
+        }
     }
 
     /**
@@ -73,40 +173,52 @@ public final class SearchMatcher {
      * even when the requested offset lies inside an earlier result.
      */
     public Match findFirstAtOrAfter(String source, int fromUtf16) {
-        int[] found = {-1, -1};
-        scanMatches(source, (start, end) -> {
-            if (start < fromUtf16) {
-                return true;
-            }
-            found[0] = start;
-            found[1] = end;
-            return false;
-        });
-        return found[0] < 0 ? null : new Match(found[0], found[1]);
+        try {
+            int[] found = {-1, -1};
+            scanMatches(source, (start, end) -> {
+                if (start < fromUtf16) {
+                    return true;
+                }
+                found[0] = start;
+                found[1] = end;
+                return false;
+            });
+            return found[0] < 0 ? null : new Match(found[0], found[1]);
+        } catch (OutOfMemoryError exhausted) {
+            throw MEMORY_LIMIT;
+        }
     }
 
     /** Returns the last result starting before {@code beforeUtf16}, or null. */
     public Match findLastBefore(String source, int beforeUtf16) {
-        int[] found = {-1, -1};
-        scanMatches(source, (start, end) -> {
-            if (start >= beforeUtf16) {
-                return false;
-            }
-            found[0] = start;
-            found[1] = end;
-            return true;
-        });
-        return found[0] < 0 ? null : new Match(found[0], found[1]);
+        try {
+            int[] found = {-1, -1};
+            scanMatches(source, (start, end) -> {
+                if (start >= beforeUtf16) {
+                    return false;
+                }
+                found[0] = start;
+                found[1] = end;
+                return true;
+            });
+            return found[0] < 0 ? null : new Match(found[0], found[1]);
+        } catch (OutOfMemoryError exhausted) {
+            throw MEMORY_LIMIT;
+        }
     }
 
     /** Counts results without allocating a range object for each occurrence. */
     public int countMatches(String source) {
-        int[] count = {0};
-        scanMatches(source, (start, end) -> {
-            count[0]++;
-            return true;
-        });
-        return count[0];
+        try {
+            int[] count = {0};
+            scanMatches(source, (start, end) -> {
+                count[0]++;
+                return true;
+            });
+            return count[0];
+        } catch (OutOfMemoryError exhausted) {
+            throw MEMORY_LIMIT;
+        }
     }
 
     /**
@@ -131,11 +243,15 @@ public final class SearchMatcher {
         if (source == null || source.isEmpty() || (literal == null && wildcard == null)) {
             return;
         }
-        if (wildcard != null) {
-            wildcard.scanMatches(source, visitor);
-            return;
+        try {
+            if (wildcard != null) {
+                wildcard.scanMatches(source, visitor);
+                return;
+            }
+            literal.scanMatches(source, visitor, matchMode == SearchOptions.MatchMode.WHOLE_WORD);
+        } catch (OutOfMemoryError exhausted) {
+            throw MEMORY_LIMIT;
         }
-        literal.scanMatches(source, visitor, matchMode == SearchOptions.MatchMode.WHOLE_WORD);
     }
 
     @FunctionalInterface
@@ -150,9 +266,12 @@ public final class SearchMatcher {
         private final int[] prefix;
         private final boolean caseInsensitive;
 
-        private LiteralPattern(String query, boolean caseInsensitive) {
+        private LiteralPattern(String query, boolean caseInsensitive, int codePoints) {
             this.caseInsensitive = caseInsensitive;
-            tokens = query.codePoints().map(this::fold).toArray();
+            tokens = tokens(query, codePoints);
+            if (caseInsensitive) {
+                for (int index = 0; index < tokens.length; index++) tokens[index] = fold(tokens[index]);
+            }
             prefix = new int[tokens.length];
             for (int index = 1, matched = 0; index < tokens.length; index++) {
                 while (matched > 0 && tokens[index] != tokens[matched]) {
@@ -171,6 +290,7 @@ public final class SearchMatcher {
             }
             // Retain only the last query-length code-point offsets. Case folding
             // never changes the positions reported in the original source.
+            SearchMemoryBudget.requireScratch(SearchMemoryBudget.FIXED_OVERHEAD + 4L * tokens.length);
             int[] offsets = new int[tokens.length];
             int matched = 0;
             int codePointIndex = 0;
@@ -216,8 +336,8 @@ public final class SearchMatcher {
         private final boolean trailingStar;
         private final int minimumLength;
 
-        private WildcardPattern(String query, boolean caseInsensitive) {
-            int[] tokens = query.codePoints().toArray();
+        private WildcardPattern(String query, boolean caseInsensitive, int codePoints) {
+            int[] tokens = tokens(query, codePoints);
             this.caseInsensitive = caseInsensitive;
             this.leadingStar = tokens[0] == '*';
             this.trailingStar = tokens[tokens.length - 1] == '*';
@@ -393,6 +513,11 @@ public final class SearchMatcher {
                         start = end;
                     }
                     return;
+                }
+
+                if (prefix == null) {
+                    SearchMemoryBudget.requireScratch(SearchMemoryBudget.FIXED_OVERHEAD
+                        + 8L * questionMasks.length + 64L * literalMasks.size());
                 }
 
                 // A long mixed segment can otherwise update hundreds of words

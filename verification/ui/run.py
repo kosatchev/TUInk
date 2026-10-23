@@ -858,7 +858,10 @@ class Regressions:
             for path in sorted(directory.iterdir()):
                 if path.suffix == ".txt" or path.name.endswith(".meta.properties"):
                     with path.open("rb") as source:
-                        result[path.name] = hashlib.file_digest(source, "sha256").hexdigest()
+                        digest = hashlib.sha256()
+                        while block := source.read(64 * 1024):
+                            digest.update(block)
+                        result[path.name] = digest.hexdigest()
             return result
 
         before = fingerprints()

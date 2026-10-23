@@ -2248,13 +2248,15 @@ public class EditorEngine {
             state.setCursor(model.clamp(memento.cursor()));
             state.setViewport(memento.viewport());
             state.setSelectionAnchor(memento.selectionAnchor());
-        } else {
+        } else if (!state.hasSelection()) {
             EditorViewMemento active = new EditorViewMemento(state.viewId(), model.clamp(state.getCursor()),
                 state.viewport(), state.getSelectionAnchor() == null ? null : model.clamp(state.getSelectionAnchor()));
             EditorViewMemento normalized = editedView(active, model::getLine);
             state.setCursor(normalized.cursor());
             state.setSelectionAnchor(normalized.selectionAnchor());
         }
+        // Foreign selections keep exact search ranges; an unselected caret
+        // resumes at a grapheme boundary. Publication also clamps invalid ranges.
     }
 
     private Snapshot captureSnapshot() {

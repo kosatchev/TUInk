@@ -138,6 +138,60 @@ class EditorDocumentViewsTest {
     }
 
     @Test
+    void undoAndRedoFromAnotherViewPreserveExactSearchSelectionsForOperationEntries() {
+        assertForeignHistoryPreservesSearchSelection(false);
+    }
+
+    @Test
+    void undoAndRedoFromAnotherViewPreserveExactSearchSelectionsForSnapshotEntries() {
+        assertForeignHistoryPreservesSearchSelection(true);
+    }
+
+    @Test
+    void foreignUndoStillClampsPositionsThatWouldSplitASurrogatePair() {
+        EditorDocument document = document("😀");
+        TabSession first = document.attach(LogicalEditorTextLayout::new, new EditorClipboard());
+        TabSession other = document.attach(LogicalEditorTextLayout::new, new EditorClipboard());
+        first.engine().selectAll();
+        first.engine().pasteText("a");
+        assertTrue(other.engine().findNext("a"));
+
+        assertTrue(other.engine().undo());
+
+        assertEquals("😀", document.model().getLine(0));
+        assertEquals(new Position(0, 0), other.state().getCursor());
+        assertEquals(new Position(0, 0), other.state().getSelectionAnchor());
+        assertFalse(other.state().hasSelection());
+    }
+
+    private static void assertForeignHistoryPreservesSearchSelection(boolean snapshotEntry) {
+        EditorDocument document = document("e\u0301", "alpha");
+        TabSession first = document.attach(LogicalEditorTextLayout::new, new EditorClipboard());
+        TabSession other = document.attach(LogicalEditorTextLayout::new, new EditorClipboard());
+        first.engine().moveCursorTo(new Position(1, 0));
+        if (snapshotEntry) {
+            first.engine().applyTextReplacements(List.of(new TextReplacement(
+                new Position(1, 0), new Position(1, 0), "X")));
+        } else {
+            first.engine().insertInput("X");
+        }
+        assertTrue(other.engine().findNext("e"));
+        assertEquals(new Position(0, 1), other.state().getCursor());
+        assertEquals(new Position(0, 0), other.state().getSelectionAnchor());
+        other.state().setTopLine(1);
+        other.state().setLeftVisualColumn(2);
+        EditorViewMemento before = other.state().viewMemento();
+
+        assertTrue(other.engine().undo());
+
+        assertEquals(List.of("e\u0301", "alpha"), document.model().snapshotLines());
+        assertEquals(before, other.state().viewMemento());
+        assertTrue(other.engine().redo());
+        assertEquals(List.of("e\u0301", "Xalpha"), document.model().snapshotLines());
+        assertEquals(before, other.state().viewMemento());
+    }
+
+    @Test
     void snapshotAndOperationEntriesShareHistoryWithoutCapturingAnEngine() {
         EditorDocument document = document("alpha", "beta");
         TabSession first = document.attach(LogicalEditorTextLayout::new, new EditorClipboard());

@@ -5,6 +5,7 @@ import dev.tuink.core.EditorState;
 import dev.tuink.core.EditorTextLayout;
 import dev.tuink.core.GutterDiffFlag;
 import dev.tuink.core.GutterDiffMarker;
+import dev.tuink.core.LineText;
 import dev.tuink.core.Position;
 import dev.tuink.core.SearchLimitException;
 import dev.tuink.core.SearchMatcher;
@@ -30,6 +31,7 @@ public class RenderPlanBuilder {
     private static final AtomicLong NEXT_BASE_STYLE_OWNER_ID = new AtomicLong();
     private static final AtomicLong NEXT_STANDALONE_DOCUMENT_ID = new AtomicLong();
     private static final int MAX_SYNTAX_CACHE_ENTRIES = 1024;
+    private static final int MAX_CONTIGUOUS_VISIBLE_CODE_UNITS = 8192;
     static final int MAX_SYNTAX_CACHE_WEIGHT = 65_536;
     private static final int MAX_SYNTAX_SCAN_CODE_UNITS = 65_536;
     private static final int MAX_SYNTAX_SPANS = 4096;
@@ -511,10 +513,10 @@ public class RenderPlanBuilder {
             for (int row = 0; row < contentRows; row++) {
                 int lineIndex = state.getTopLine() + row;
                 if (lineIndex < model.lineCount()) {
-                    String line = model.getLine(lineIndex);
+                    CharSequence line = model.lineText(lineIndex);
                     VisualSlice slice = visibleSlice(lineIndex, line, leftVisualColumn, textWidth);
                     int lineLeftColumn = slice.startCol();
-                    String visibleText = slice.text();
+                    CharSequence visibleText = slice.text();
                     List<StyleSpan> syntaxSpans = syntaxHighlightingEnabled
                         ? syntaxSpansForLine(lineIndex, line, lineLeftColumn, lineLeftColumn + visibleText.length())
                         : List.of();
@@ -586,7 +588,7 @@ public class RenderPlanBuilder {
                     lines.add(new LineVisual(tildeGutter(gutterWidth), "", List.of(), GutterDiffMarker.NONE));
                     continue;
                 }
-                String line = model.getLine(lineIndex);
+                CharSequence line = model.lineText(lineIndex);
                 List<Integer> starts = wrapStarts(lineIndex, layoutWidth, wrapByWords);
                 int segStart = Math.max(0, Math.min(firstSegmentOffset, starts.size() - 1));
                 int segEnd = Math.min(starts.size(), segStart + contentRows - lines.size());
@@ -629,7 +631,7 @@ public class RenderPlanBuilder {
                 for (int seg = segStart; seg < starts.size() && lines.size() < contentRows; seg++) {
                     int start = starts.get(seg);
                     int end = seg + 1 < starts.size() ? starts.get(seg + 1) : line.length();
-                    String part = line.substring(start, end);
+                    CharSequence part = visibleText(line, start, end);
                     List<StyleSpan> partSpans = new ArrayList<>(
                         clipSpans(lineSpans.subList(0, baseSpanCount), start, part.length())
                     );
@@ -760,7 +762,7 @@ public class RenderPlanBuilder {
         return clipped;
     }
 
-    private VisualSlice visibleSlice(int lineIndex, String line, int leftVisualColumn, int maxWidth) {
+    private VisualSlice visibleSlice(int lineIndex, CharSequence line, int leftVisualColumn, int maxWidth) {
         if (maxWidth <= 0 || line.isEmpty()) {
             return new VisualSlice(0, "", 0, 0);
         }
@@ -777,10 +779,16 @@ public class RenderPlanBuilder {
         end = Math.max(start, Math.min(end, line.length()));
         return new VisualSlice(
             start,
-            line.substring(start, end),
+            visibleText(line, start, end),
             sourceVisual,
             Math.max(0, safeLeftVisual - sourceVisual)
         );
+    }
+
+    /** Keep normal rows contiguous without slicing storage blocks or flattening oversized clusters. */
+    private static CharSequence visibleText(CharSequence line, int start, int end) {
+        if (end - start > MAX_CONTIGUOUS_VISIBLE_CODE_UNITS) return line.subSequence(start, end);
+        return line instanceof LineText text ? text.sliceString(start, end) : line.subSequence(start, end).toString();
     }
 
     private int columnForVisualColumn(int lineIndex, int targetVisual) {
@@ -817,7 +825,7 @@ public class RenderPlanBuilder {
         quoteMaskCacheProfile = commentSyntaxProfile;
     }
 
-    private QuoteMask quoteMaskForLine(TextModel model, int lineIndex, String line) {
+    private QuoteMask quoteMaskForLine(TextModel model, int lineIndex, CharSequence line) {
         QuoteMask cached = quoteMaskCache.get(lineIndex);
         if (cached != null && cached.lineText().equals(line)) {
             return cached;
@@ -830,11 +838,15 @@ public class RenderPlanBuilder {
                 lexicalScanExhausted = true;
                 break;
             }
-            String lineText = model.getLine(i);
+            CharSequence lineText = model.lineText(i);
             int limit = Math.min(lineText.length(), remainingLexicalScanChars);
             LineLexicalScanner scanner = lexicalScanner == null
                 ? new GenericLineLexicalScanner(commentSyntaxProfile) : lexicalScanner;
-            LineLexicalScanner.Result result = scanner.scan(lineText, limit, lexicalContinuationState);
+            // Retain one real lookahead unit when the prefix is incomplete so
+            // scanners cannot mistake the budget boundary for the actual EOL.
+            String scanText = lineText.subSequence(0,
+                (int) Math.min(lineText.length(), (long) limit + 1L)).toString();
+            LineLexicalScanner.Result result = scanner.scan(scanText, limit, lexicalContinuationState);
             if (result.scannedCodeUnits() > limit) {
                 throw new IllegalStateException("Lexical scanner exceeded its prefix budget");
             }
@@ -867,7 +879,7 @@ public class RenderPlanBuilder {
         return resolved != null && resolved.lineText().equals(line) ? resolved : null;
     }
 
-    private List<StyleSpan> syntaxSpansForLine(int lineIndex, String line, int startUtf16, int endUtf16) {
+    private List<StyleSpan> syntaxSpansForLine(int lineIndex, CharSequence line, int startUtf16, int endUtf16) {
         SyntaxKey key = new SyntaxKey(lineIndex, startUtf16, endUtf16);
         SyntaxSpans cached = syntaxSpanCache.get(key);
         if (cached != null && cached.lineText().equals(line)) {
@@ -879,9 +891,12 @@ public class RenderPlanBuilder {
         }
         HighlightRequest request = new HighlightRequest(startUtf16, endUtf16,
             MAX_SYNTAX_SCAN_CODE_UNITS, MAX_SYNTAX_SPANS, MAX_SYNTAX_WORK);
+        // Keep one real lookahead unit: a bounded prefix must not look like EOL
+        // to a highlighter which declines incomplete input.
+        String syntaxText = line.subSequence(0, Math.min(line.length(), MAX_SYNTAX_SCAN_CODE_UNITS + 1)).toString();
         HighlightResult result = highlighter instanceof ContextualLineHighlighter contextual
-            ? contextual.highlightResult(documentView, lineIndex, line, request)
-            : HighlightResult.completed(highlighter.highlight(line, request));
+            ? contextual.highlightResult(documentView, lineIndex, syntaxText, request)
+            : HighlightResult.completed(highlighter.highlight(syntaxText, request));
         List<StyleSpan> spans = request.clipSpans(result.spans());
         if (result.retryPending()) {
             pendingSyntaxWork = true;
@@ -943,7 +958,7 @@ public class RenderPlanBuilder {
     }
 
     private List<StyleSpan> searchMatchSpans(
-        String line, SearchHighlights matcher, Style style, int start, int end
+        CharSequence line, SearchHighlights matcher, Style style, int start, int end
     ) {
         return matcher.findIntersecting(line, start, end).stream()
             .map(m -> new StyleSpan(m.startUtf16(), m.endUtf16(), style))
@@ -1036,7 +1051,7 @@ public class RenderPlanBuilder {
             return null;
         }
 
-        int lineLen = model.getLine(lineIndex).length();
+        int lineLen = model.lineLength(lineIndex);
         int start = 0;
         int end = lineLen;
         if (lineIndex == a.line()) {
@@ -1079,7 +1094,7 @@ public class RenderPlanBuilder {
             return null;
         }
 
-        String line = model.getLine(lineIndex);
+        CharSequence line = model.lineText(lineIndex);
         if (!matcher.matchesRange(line, a.col(), b.col())) {
             return null;
         }
@@ -1138,7 +1153,7 @@ public class RenderPlanBuilder {
         boolean complete = true;
         outer:
         for (int line = 0; line < model.lineCount(); line++) {
-            String text = model.getLine(line);
+            CharSequence text = model.lineText(line);
             QuoteMask lexical = quoteMaskForLine(model, line, text);
             if (lexical == null) {
                 complete = false;
@@ -1206,7 +1221,7 @@ public class RenderPlanBuilder {
     }
 
     private BracketAtCursor bracketAtCursor(TextModel model, Position cursor) {
-        String line = model.getLine(cursor.line());
+        CharSequence line = model.lineText(cursor.line());
         QuoteMask quoteMask = quoteMaskForLine(model, cursor.line(), line);
         if (quoteMask == null) {
             return null;
@@ -1235,7 +1250,7 @@ public class RenderPlanBuilder {
     }
 
     private Position findMatchingQuote(TextModel model, Position from) {
-        String line = model.getLine(from.line());
+        CharSequence line = model.lineText(from.line());
         QuoteRange range = quoteRangeAt(quoteMaskForLine(model, from.line(), line), from.col());
         if (range == null || range.end() < 0) {
             return null;
@@ -1264,7 +1279,7 @@ public class RenderPlanBuilder {
         stack.push(open);
         int scanned = 0;
         for (int line = from.line(); line < model.lineCount(); line++) {
-            String text = model.getLine(line);
+            CharSequence text = model.lineText(line);
             QuoteMask lexical = quoteMaskForLine(model, line, text);
             if (lexical == null) {
                 return new BracketSearch(null, false);
@@ -1302,7 +1317,7 @@ public class RenderPlanBuilder {
         stack.push(close);
         int scanned = 0;
         for (int line = from.line(); line >= 0; line--) {
-            String text = model.getLine(line);
+            CharSequence text = model.lineText(line);
             QuoteMask lexical = quoteMaskForLine(model, line, text);
             boolean[] quotedMask = lexical == null ? null : lexical.mask();
             int start = line == from.line() ? from.col() - 1 : text.length() - 1;
@@ -1448,13 +1463,13 @@ public class RenderPlanBuilder {
         }
     }
 
-    private record VisualSlice(int startCol, String text, int sourceVisualColumn, int leadingClippedCells) {
+    private record VisualSlice(int startCol, CharSequence text, int sourceVisualColumn, int leadingClippedCells) {
     }
 
     private record SyntaxKey(int lineIndex, int startUtf16, int endUtf16) {
     }
 
-    private record SyntaxSpans(String lineText, List<StyleSpan> spans) {
+    private record SyntaxSpans(CharSequence lineText, List<StyleSpan> spans) {
         int weight() {
             return 1 + spans.size();
         }
@@ -1463,7 +1478,7 @@ public class RenderPlanBuilder {
     private record QuoteRange(int start, int end) {
     }
 
-    private record QuoteMask(String lineText, boolean[] mask, List<QuoteRange> quoteRanges, boolean completeLine) {
+    private record QuoteMask(CharSequence lineText, boolean[] mask, List<QuoteRange> quoteRanges, boolean completeLine) {
     }
 
 }

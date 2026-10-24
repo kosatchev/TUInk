@@ -36,6 +36,11 @@ final class TextModelDocumentView implements DocumentView {
     }
 
     @Override
+    public CharSequence lineText(int index) {
+        return model.lineText(index);
+    }
+
+    @Override
     public int firstChangedLineSince(long earlierRevision) {
         return model.firstChangedLineSince(earlierRevision);
     }

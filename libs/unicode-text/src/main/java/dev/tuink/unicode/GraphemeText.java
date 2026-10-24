@@ -13,14 +13,18 @@ import java.util.regex.Pattern;
 public final class GraphemeText {
     private static final Pattern GRAPHEME_PATTERN = Pattern.compile("\\X");
 
-    private final String text;
+    private final CharSequence text;
     private final boolean simpleAscii;
     private final int graphemeCount;
     private final int[] boundaries;
     private final SparseBoundaries sparse;
+    private final BoundaryIndex index;
+    private final ResegmentedRange resegmentedRange;
 
-    private GraphemeText(String text) {
+    private GraphemeText(CharSequence text) {
         this.text = text == null ? "" : text;
+        this.index = null;
+        this.resegmentedRange = null;
         this.simpleAscii = isSimpleAscii(this.text);
         if (simpleAscii) {
             graphemeCount = this.text.length();
@@ -83,7 +87,7 @@ public final class GraphemeText {
         }
     }
 
-    private static Counts scan(String text, int[] boundaries, SparseBoundaries sparse) {
+    private static Counts scan(CharSequence text, int[] boundaries, SparseBoundaries sparse) {
         Matcher matcher = null;
         int count = 0;
         int exceptions = 0;
@@ -121,6 +125,83 @@ public final class GraphemeText {
 
     public static GraphemeText of(String text) {
         return new GraphemeText(text);
+    }
+
+    public static GraphemeText of(CharSequence text) {
+        return new GraphemeText(text);
+    }
+
+    private GraphemeText(CharSequence text, BoundaryIndex index, ResegmentedRange range) {
+        this.text = text;
+        this.index = index;
+        this.resegmentedRange = range;
+        simpleAscii = false;
+        graphemeCount = index.count();
+        boundaries = null;
+        sparse = null;
+    }
+
+    /**
+     * Reindexes an exact immutable replacement while sharing unchanged boundary data.
+     * Segmentation resumes before the edited cluster; RI runs may propagate farther
+     * until an unchanged suffix boundary agrees with the previous segmentation.
+     */
+    public GraphemeText updated(CharSequence next, int start, int removed, int inserted) {
+        if (next == null || start < 0 || removed < 0 || inserted < 0
+            || (long) start + removed > text.length()
+            || (long) text.length() - removed + inserted != next.length()) {
+            throw new IllegalArgumentException("Invalid immutable text replacement");
+        }
+        int restart = floorBoundary(start);
+        if (restart > 0) restart = previousBoundary(restart);
+        int end = restart;
+        int delta = inserted - removed;
+        Matcher matcher = null;
+        while (end < start + inserted || end - delta < start + removed || !isBoundary(end - delta)) {
+            if (end >= next.length()) break;
+            if (isSimpleAsciiChar(next.charAt(end))
+                && (end + 1 == next.length() || isSimpleAsciiChar(next.charAt(end + 1)))) {
+                end++;
+            } else {
+                if (matcher == null) matcher = GRAPHEME_PATTERN.matcher(next);
+                matcher.region(end, next.length());
+                if (!matcher.lookingAt() || matcher.end() <= end) {
+                    throw new IllegalStateException("Unicode grapheme matcher did not advance");
+                }
+                end = matcher.end();
+            }
+        }
+        BoundaryIndex source = boundaryIndex();
+        BoundaryIndex changed = of(next.subSequence(restart, end)).boundaryIndex();
+        int before = floorIndex(restart);
+        int after = floorIndex(end - delta);
+        return new GraphemeText(next, BoundaryIndex.join(source.slice(0, before), changed,
+            source.slice(after, graphemeCount)), new ResegmentedRange(restart, end - delta, end));
+    }
+
+    /** The previous/new intervals actually rescanned by the most recent incremental update. */
+    public record ResegmentedRange(int start, int removedEnd, int insertedEnd) {}
+    public ResegmentedRange resegmentedRange() { return resegmentedRange; }
+
+    public int boundaryIndexAtOrBefore(int offset) { return floorIndex(clampOffset(offset)); }
+
+    private BoundaryIndex boundaryIndex() {
+        return index != null ? index : BoundaryIndex.of(new BoundaryData(graphemeCount, boundaries, sparse));
+    }
+
+    private record BoundaryData(int count, int[] boundaries, SparseBoundaries sparse) implements BoundaryIndex.Data {
+        @Override public int boundary(int index) {
+            return boundaries != null ? boundaries[index] : sparse != null ? sparse.boundary(index) : index;
+        }
+        @Override public int floor(int offset) {
+            if (sparse != null) return sparse.floorIndex(offset);
+            if (boundaries == null) return offset;
+            int found = Arrays.binarySearch(boundaries, offset);
+            return found >= 0 ? found : Math.max(0, -found - 2);
+        }
+        @Override public int weight() {
+            return boundaries != null ? boundaries.length : sparse != null ? 2 * sparse.indices.length : 1;
+        }
     }
 
     public static int previousBoundary(String text, int offset) {
@@ -167,8 +248,11 @@ public final class GraphemeText {
     }
 
     public String text() {
-        return text;
+        return text.toString();
     }
+
+    /** Original immutable source, without materializing a contiguous String. */
+    public CharSequence sequence() { return text; }
 
     boolean simpleAscii() {
         return simpleAscii;
@@ -236,6 +320,7 @@ public final class GraphemeText {
 
     /** Approximate primitive-array slots retained by this layout. */
     int storageWeight() {
+        if (index != null) return index.weight();
         return boundaries != null ? boundaries.length : sparse != null ? 2 * sparse.indices.length : 1;
     }
 
@@ -243,11 +328,12 @@ public final class GraphemeText {
         if (boundaryIndex < 0 || boundaryIndex > graphemeCount()) {
             throw new IndexOutOfBoundsException("boundary index: " + boundaryIndex);
         }
-        return boundaries != null ? boundaries[boundaryIndex]
+        return index != null ? index.boundary(boundaryIndex) : boundaries != null ? boundaries[boundaryIndex]
             : sparse != null ? sparse.boundary(boundaryIndex) : boundaryIndex;
     }
 
     private int floorIndex(int offset) {
+        if (index != null) return index.floor(offset);
         if (sparse != null) {
             return sparse.floorIndex(offset);
         }
@@ -268,7 +354,7 @@ public final class GraphemeText {
         }
     }
 
-    private static boolean isSimpleAscii(String text) {
+    private static boolean isSimpleAscii(CharSequence text) {
         for (int index = 0; index < text.length(); index++) {
             char ch = text.charAt(index);
             if (!isSimpleAsciiChar(ch)) {
@@ -282,9 +368,9 @@ public final class GraphemeText {
         return character <= 0x7F && character != '\r' && character != '\n';
     }
 
-    private static boolean isWhitespaceCluster(String text, int start, int end) {
+    private static boolean isWhitespaceCluster(CharSequence text, int start, int end) {
         for (int index = start; index < end;) {
-            int codePoint = text.codePointAt(index);
+            int codePoint = Character.codePointAt(text, index);
             if (!Character.isWhitespace(codePoint)) {
                 return false;
             }

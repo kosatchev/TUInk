@@ -107,7 +107,7 @@ public final class EditorViewCoordinates {
         List<Integer> starts = geometry.wrapLines() ? starts(top.line()) : List.of(0);
         int start = starts.get(top.segment());
         boolean hasNext = top.segment() + 1 < starts.size();
-        int end = hasNext ? starts.get(top.segment() + 1) : model.getLine(top.line()).length();
+        int end = hasNext ? starts.get(top.segment() + 1) : model.lineLength(top.line());
         int requestedVisual = saturatedSum(visualColumn(top.line(), start), Math.max(0, column));
         int offset = layout.textOffsetAtVisualColumn(top.line(), requestedVisual, geometry.tabWidth(),
             EditorTextLayout.Bias.NEAREST);
@@ -162,7 +162,7 @@ public final class EditorViewCoordinates {
 
     private Position endOfDocument() {
         int lastLine = Math.max(0, model.lineCount() - 1);
-        return new Position(lastLine, model.getLine(lastLine).length());
+        return new Position(lastLine, model.lineLength(lastLine));
     }
 
     private static int saturatedSum(int first, int second) {

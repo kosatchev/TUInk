@@ -1120,7 +1120,7 @@ public class TerminalEditorApp {
         final int rightMargin = 1;
         Position p = state.getCursor();
         int totalLines = model.lineCount();
-        int lineCols = model.getLine(p.line()).length();
+        int lineCols = model.lineLength(p.line());
         String indicators = buildStateIndicators(state, readingMode);
         String left = " ".repeat(Math.max(0, leftMargin))
             + "Ln " + (p.line() + 1) + "/" + totalLines

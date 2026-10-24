@@ -155,6 +155,15 @@ Line-comment toggling prepares the changed lines, line-ending metadata and undo
 entry before publishing the edit. If the available-memory budget cannot admit
 the operation, the document and history stay unchanged; select fewer lines.
 
+Logical lines use immutable balanced text blocks. Local edits and snapshots share
+unchanged blocks; compatibility APIs requesting a complete String still materialize
+one. Rendering and syntax context check their range/work limits before doing so.
+Grapheme and terminal indices reuse unchanged ranges after a local edit and do not
+retain prior text versions. Initial indexing is linear. Regional-indicator parity
+and other boundary dependencies may propagate beyond the edited block. General
+word/tab wrapping may also reflow the whole line; fixed-width runs use virtual row
+starts. These changes do not promise a bounded latency for every Unicode input.
+
 ## Storage formats
 
 Persisted files must have an explicit format marker, strict validation, complete current-schema serialization, and safe handling of incompatible content. A format change replaces the current contract; it does not imply a migration path.

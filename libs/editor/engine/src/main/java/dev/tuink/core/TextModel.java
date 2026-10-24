@@ -27,7 +27,6 @@ import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.security.MessageDigest;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
@@ -65,6 +64,7 @@ public class TextModel {
     private final FileBaseline.InputOpener baselineInput;
     private EditorDocument documentOwner;
     private LocalEdit localEdit;
+    private GraphemeText cachedGraphemes;
 
     /** Isolates a keyboard command without copying untouched document lines. */
     LocalEdit beginLocalEdit() {
@@ -168,6 +168,16 @@ public class TextModel {
         return List.copyOf(lines);
     }
 
+    private GraphemeText graphemes(LineText text) {
+        if (cachedGraphemes != null && cachedGraphemes.sequence() == text) return cachedGraphemes;
+        LineText.Edit edit = text.edit();
+        if (cachedGraphemes != null && cachedGraphemes.sequence() instanceof LineText previous
+            && edit != null && edit.sourceIdentity() == previous.identity()) {
+            cachedGraphemes = cachedGraphemes.updated(text, edit.start(), edit.removedLength(), edit.insertedLength());
+        } else cachedGraphemes = GraphemeText.of(text);
+        return cachedGraphemes;
+    }
+
     public Position insertChar(Position position, char ch) {
         if (ch == '\n' || ch == '\r') {
             throw new IllegalArgumentException("Use insertNewline or insertText for line separators");
@@ -176,22 +186,19 @@ public class TextModel {
             throw new IllegalArgumentException("A standalone UTF-16 surrogate is not valid text");
         }
         Position at = requireCodePointBoundary(position);
-        String line = buffer.getLine(at.line());
+        LineText line = buffer.lineText(at.line());
         int col = at.col();
-        String updated = line.substring(0, col) + ch + line.substring(col);
-        buffer.setLine(at.line(), updated);
+        buffer.setLineText(at.line(), line.replace(col, col, String.valueOf(ch)));
         markChanged(at.line());
         return new Position(at.line(), col + 1);
     }
 
     public Position insertNewline(Position position) {
         Position at = requireCodePointBoundary(position);
-        String line = buffer.getLine(at.line());
+        LineText line = buffer.lineText(at.line());
         int col = at.col();
-        String left = line.substring(0, col);
-        String right = line.substring(col);
-        buffer.setLine(at.line(), left);
-        buffer.insertLine(at.line() + 1, right);
+        buffer.setLineText(at.line(), line.subSequence(0, col));
+        buffer.insertLineText(at.line() + 1, line.subSequence(col, line.length()));
         insertDefaultLineSeparators(at.line(), 1);
         markChanged(at.line(), 1, 2);
         return new Position(at.line() + 1, 0);
@@ -199,13 +206,12 @@ public class TextModel {
 
     public Position deleteBackward(Position position) {
         if (position.col() > 0) {
-            String line = buffer.getLine(position.line());
+            LineText line = buffer.lineText(position.line());
             int col = Math.min(position.col(), line.length());
-            GraphemeText graphemes = GraphemeText.of(line);
+            GraphemeText graphemes = graphemes(line);
             int end = graphemes.ceilBoundary(col);
             int previous = graphemes.previousBoundary(end);
-            String updated = line.substring(0, previous) + line.substring(end);
-            buffer.setLine(position.line(), updated);
+            buffer.setLineText(position.line(), line.replace(previous, end, ""));
             markChanged(position.line());
             return new Position(position.line(), previous);
         }
@@ -214,25 +220,25 @@ public class TextModel {
             return position;
         }
 
-        String current = buffer.removeLine(position.line());
+        LineText current = buffer.lineText(position.line());
+        buffer.removeLines(position.line(), position.line() + 1);
         int prevLineIndex = position.line() - 1;
-        String prev = buffer.getLine(prevLineIndex);
-        buffer.setLine(prevLineIndex, prev + current);
+        LineText prev = buffer.lineText(prevLineIndex);
+        buffer.setLineText(prevLineIndex, prev.replace(prev.length(), prev.length(), current));
         removeLineSeparators(prevLineIndex, 1);
         markChanged(prevLineIndex, 2, 1);
         return new Position(prevLineIndex, prev.length());
     }
 
     public Position deleteForward(Position position) {
-        String line = buffer.getLine(position.line());
+        LineText line = buffer.lineText(position.line());
         int col = Math.min(position.col(), line.length());
 
         if (col < line.length()) {
-            GraphemeText graphemes = GraphemeText.of(line);
+            GraphemeText graphemes = graphemes(line);
             int start = graphemes.floorBoundary(col);
             int next = graphemes.nextBoundary(start);
-            String updated = line.substring(0, start) + line.substring(next);
-            buffer.setLine(position.line(), updated);
+            buffer.setLineText(position.line(), line.replace(start, next, ""));
             markChanged(position.line());
             return new Position(position.line(), start);
         }
@@ -241,8 +247,9 @@ public class TextModel {
             return new Position(position.line(), col);
         }
 
-        String next = buffer.removeLine(position.line() + 1);
-        buffer.setLine(position.line(), line + next);
+        LineText next = buffer.lineText(position.line() + 1);
+        buffer.removeLines(position.line() + 1, position.line() + 2);
+        buffer.setLineText(position.line(), line.replace(line.length(), line.length(), next));
         removeLineSeparators(position.line(), 1);
         markChanged(position.line(), 2, 1);
         return new Position(position.line(), col);
@@ -260,7 +267,7 @@ public class TextModel {
             return "";
         }
         if (a.line() == b.line()) {
-            String line = buffer.getLine(a.line());
+            LineText line = buffer.lineText(a.line());
             return line.substring(a.col(), b.col());
         }
 
@@ -269,13 +276,13 @@ public class TextModel {
             throw new OutOfMemoryError("Text range exceeds the maximum String size");
         }
         StringBuilder out = new StringBuilder((int) length);
-        String first = buffer.getLine(a.line());
+        LineText first = buffer.lineText(a.line());
         out.append(first, a.col(), first.length());
         out.append('\n');
         for (int line = a.line() + 1; line < b.line(); line++) {
-            out.append(buffer.getLine(line)).append('\n');
+            out.append(buffer.lineText(line)).append('\n');
         }
-        out.append(buffer.getLine(b.line()), 0, b.col());
+        out.append(buffer.lineText(b.line()), 0, b.col());
         return out.toString();
     }
 
@@ -287,9 +294,9 @@ public class TextModel {
 
     private long textRangeLengthOrdered(Position start, Position end) {
         if (start.line() == end.line()) return end.col() - (long) start.col();
-        long length = buffer.getLine(start.line()).length() - (long) start.col() + 1 + end.col();
+        long length = buffer.lineText(start.line()).length() - (long) start.col() + 1 + end.col();
         for (int line = start.line() + 1; line < end.line(); line++) {
-            length += buffer.getLine(line).length() + 1L;
+            length += buffer.lineText(line).length() + 1L;
         }
         return length;
     }
@@ -307,15 +314,16 @@ public class TextModel {
         }
 
         if (a.line() == b.line()) {
-            String line = buffer.getLine(a.line());
-            buffer.setLine(a.line(), line.substring(0, a.col()) + line.substring(b.col()));
+            LineText line = buffer.lineText(a.line());
+            buffer.setLineText(a.line(), line.replace(a.col(), b.col(), ""));
             markChanged(a.line());
             return a;
         }
 
-        String head = buffer.getLine(a.line()).substring(0, a.col());
-        String tail = buffer.getLine(b.line()).substring(b.col());
-        buffer.setLine(a.line(), head + tail);
+        LineText head = buffer.lineText(a.line()).subSequence(0, a.col());
+        LineText endLine = buffer.lineText(b.line());
+        LineText tail = endLine.subSequence(b.col(), endLine.length());
+        buffer.setLineText(a.line(), head.replace(head.length(), head.length(), tail));
         buffer.removeLines(a.line() + 1, b.line() + 1);
         removeLineSeparators(a.line(), b.line() - a.line());
         markChanged(a.line(), b.line() - a.line() + 1, 1);
@@ -331,21 +339,22 @@ public class TextModel {
         Position at = requireCodePointBoundary(position);
         String normalized = text.replace("\r\n", "\n").replace('\r', '\n');
         String[] parts = normalized.split("\n", -1);
-        String line = buffer.getLine(at.line());
+        LineText line = buffer.lineText(at.line());
         int col = Math.min(at.col(), line.length());
-        String left = line.substring(0, col);
-        String right = line.substring(col);
-
         if (parts.length == 1) {
-            buffer.setLine(at.line(), left + parts[0] + right);
+            buffer.setLineText(at.line(), line.replace(col, col, parts[0]));
             markChanged(at.line());
             return new Position(at.line(), col + parts[0].length());
         }
 
-        buffer.setLine(at.line(), left + parts[0]);
+        LineText left = line.subSequence(0, col);
+        LineText right = line.subSequence(col, line.length());
+        buffer.setLineText(at.line(), left.replace(left.length(), left.length(), parts[0]));
         String last = parts[parts.length - 1];
-        parts[parts.length - 1] = last + right;
-        buffer.insertLines(at.line() + 1, Arrays.asList(parts).subList(1, parts.length));
+        List<LineText> inserted = new ArrayList<>(parts.length - 1);
+        for (int index = 1; index < parts.length - 1; index++) inserted.add(LineText.of(parts[index]));
+        inserted.add(right.replace(0, 0, last));
+        buffer.insertLineTexts(at.line() + 1, inserted);
         insertDefaultLineSeparators(at.line(), parts.length - 1);
         markChanged(at.line(), 1, parts.length);
         return new Position(at.line() + parts.length - 1, last.length());
@@ -357,22 +366,25 @@ public class TextModel {
         if (start.line() == end.line()) {
             deletedUnits = end.col() - (long) start.col();
         } else {
-            deletedUnits = getLine(start.line()).length() - (long) start.col() + 1 + end.col();
+            deletedUnits = lineLength(start.line()) - (long) start.col() + 1 + end.col();
             for (int line = start.line() + 1; line < end.line(); line++) {
-                deletedUnits = DocumentEditBudget.add(deletedUnits, getLine(line).length() + 1L);
+                deletedUnits = DocumentEditBudget.add(deletedUnits, lineLength(line) + 1L);
             }
         }
-        long retainedUnits = start.col() + (long) getLine(end.line()).length() - end.col();
+        long retainedUnits = start.col() + (long) lineLength(end.line()) - end.col();
         long insertedUnits = replacement.text().length();
         long copiedUnits = DocumentEditBudget.add(deletedUnits,
-            DocumentEditBudget.add(retainedUnits, insertedUnits));
+            DocumentEditBudget.add(4L * LineText.BLOCK_SIZE, insertedUnits));
+        boolean sharesBlocks = buffer instanceof SimpleLineBuffer simple && simple.supportsPreparedPublication()
+            || localEdit != null && localEdit.staged.supportsLocalPublication();
+        if (!sharesBlocks) copiedUnits = DocumentEditBudget.add(copiedUnits, retainedUnits);
         long changedLines = replacement.lineBreaks() + 1L;
         long resultLines = lineCount() - (end.line() - (long) start.line()) + replacement.lineBreaks();
         long longestLine = replacement.lineBreaks() == 0
             ? DocumentEditBudget.add(retainedUnits, insertedUnits)
             : Math.max(DocumentEditBudget.add(start.col(), replacement.firstEnd()),
                 Math.max(replacement.longestInteriorLine(),
-                    insertedUnits - replacement.lastStart() + getLine(end.line()).length() - end.col()));
+                    insertedUnits - replacement.lastStart() + lineLength(end.line()) - end.col()));
         DocumentEditBudget budget = DocumentEditBudget.currentHeap(lineCount());
         if (localEdit != null && localEdit.staged.supportsLocalPublication()) {
             budget.requireStagedReplacement(copiedUnits, resultLines, changedLines, longestLine,
@@ -402,8 +414,8 @@ public class TextModel {
         // assigns an already allocated reference. Other strategies stage a sibling.
         if (buffer.getClass() == SimpleLineBuffer.class
             && a.line() == b.line() && replacement.lineBreaks() == 0) {
-            String source = buffer.getLine(a.line());
-            String updated = source.substring(0, a.col()) + inserted + source.substring(b.col());
+            LineText source = buffer.lineText(a.line());
+            LineText updated = source.replace(a.col(), b.col(), inserted);
             DocumentFileMetadata metadata = fileMetadata;
             List<String> separators = metadata.lineSeparators();
             if (updated.isEmpty() && a.line() > 0 && a.line() < lineCount() - 1
@@ -424,9 +436,9 @@ public class TextModel {
         if (nextBuffer == buffer || nextBuffer.lineCount() != 1 || !nextBuffer.getLine(0).isEmpty()) {
             throw new IllegalArgumentException("createEmptySibling() must return an independent empty buffer");
         }
-        nextBuffer.setLine(0, buffer.getLine(0));
+        nextBuffer.setLineText(0, buffer.lineText(0));
         for (int line = 1; line < lineCount(); line++) {
-            nextBuffer.insertLine(line, buffer.getLine(line));
+            nextBuffer.insertLineText(line, buffer.lineText(line));
         }
         TextModel staged = new TextModel(nextBuffer, fileMetadata);
         ReplacementDelta delta = staged.replaceRange(a, b, inserted);
@@ -440,7 +452,7 @@ public class TextModel {
             throw new IllegalStateException("The prepared replacement is stale");
         }
         if (prepared.buffer() == null) {
-            buffer.setLine(prepared.change().firstLine(), prepared.line());
+            buffer.setLineText(prepared.change().firstLine(), prepared.line());
         } else {
             buffer = prepared.buffer();
         }
@@ -451,11 +463,11 @@ public class TextModel {
         lineChanges[slot] = prepared.change();
     }
 
-    record PreparedReplacement(TextBuffer source, long revision, TextBuffer buffer, String line,
+    record PreparedReplacement(TextBuffer source, long revision, TextBuffer buffer, LineText line,
         DocumentFileMetadata metadata, ReplacementDelta delta, LineChange change) {
-        String resultingLine(int index) {
-            return buffer != null ? buffer.getLine(index)
-                : index == change.firstLine() ? line : source.getLine(index);
+        LineText resultingLine(int index) {
+            return buffer != null ? buffer.lineText(index)
+                : index == change.firstLine() ? line : source.lineText(index);
         }
     }
 
@@ -483,12 +495,8 @@ public class TextModel {
         }
         List<String> before = separatorSlice(firstSeparator, b.line());
         if (localEdit != null && a.line() == b.line() && inserted.indexOf('\n') < 0) {
-            String source = buffer.getLine(a.line());
-            char[] updated = new char[source.length() - (b.col() - a.col()) + inserted.length()];
-            source.getChars(0, a.col(), updated, 0);
-            inserted.getChars(0, inserted.length(), updated, a.col());
-            source.getChars(b.col(), source.length(), updated, a.col() + inserted.length());
-            buffer.setLine(a.line(), new String(updated));
+            LineText source = buffer.lineText(a.line());
+            buffer.setLineText(a.line(), source.replace(a.col(), b.col(), inserted));
             markChanged(a.line());
             normalizeLineSeparators(a.line(), a.line());
             return new ReplacementDelta(operation, firstSeparator, before, separatorSlice(firstSeparator, a.line()));
@@ -507,9 +515,9 @@ public class TextModel {
         if (nextBuffer == buffer || nextBuffer.lineCount() != 1 || !nextBuffer.getLine(0).isEmpty()) {
             throw new IllegalArgumentException("createEmptySibling() must return an independent empty buffer");
         }
-        nextBuffer.setLine(0, buffer.getLine(0));
+        nextBuffer.setLineText(0, buffer.lineText(0));
         for (int line = 1; line < lineCount(); line++) {
-            nextBuffer.insertLine(line, buffer.getLine(line));
+            nextBuffer.insertLineText(line, buffer.lineText(line));
         }
         TextModel staged = new TextModel(nextBuffer, fileMetadata);
         List<ReplacementDelta> operations = new ArrayList<>(replacements.size());
@@ -529,8 +537,8 @@ public class TextModel {
             if (!delta.isEmpty()) operations.add(delta);
             previousLine = replacement.start().line();
         }
-        int firstLine = replacements.getFirst().start().line();
-        int span = replacements.getLast().start().line() - firstLine + 1;
+        int firstLine = replacements.get(0).start().line();
+        int span = replacements.get(replacements.size() - 1).start().line() - firstLine + 1;
         return new PreparedLineReplacements(buffer, revision, nextBuffer, staged.fileMetadata,
             operations, new LineChange(firstLine, span, span));
     }
@@ -676,13 +684,13 @@ public class TextModel {
 
     public Position clamp(Position requested) {
         int line = Math.max(0, Math.min(requested.line(), buffer.lineCount() - 1));
-        int col = Math.max(0, Math.min(requested.col(), buffer.getLine(line).length()));
+        int col = Math.max(0, Math.min(requested.col(), buffer.lineText(line).length()));
         return new Position(line, col);
     }
 
     private Position requireCodePointBoundary(Position requested) {
         Position clamped = clamp(Objects.requireNonNull(requested, "position"));
-        String line = buffer.getLine(clamped.line());
+        LineText line = buffer.lineText(clamped.line());
         int offset = clamped.col();
         if (offset > 0
             && offset < line.length()
@@ -1094,7 +1102,7 @@ public class TextModel {
         DocumentFileMetadata normalized = metadata;
         for (int line = first; line <= last; line++) {
             String current = separators.next();
-            if (buffer.getLine(line).isEmpty()
+            if (buffer.lineText(line).isEmpty()
                 && EditorState.LINE_SEPARATOR_CR.equals(previous)
                 && EditorState.LINE_SEPARATOR_LF.equals(current)) {
                 // CR + an empty line + LF would otherwise serialize as one CRLF.

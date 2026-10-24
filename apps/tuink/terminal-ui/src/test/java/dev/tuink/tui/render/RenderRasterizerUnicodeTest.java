@@ -9,6 +9,7 @@ import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.scroll.ScrollLayout;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.GutterDiffMarker;
+import dev.tuink.core.LineText;
 import dev.tuink.core.Position;
 import dev.tuink.core.SearchOptions;
 import dev.tuink.core.SimpleLineBuffer;
@@ -92,6 +93,47 @@ class RenderRasterizerUnicodeTest {
             assertTrue(output.toString().length() < 4096);
             assertEquals(original, model.getLine(0));
             assertEquals(original, Files.readString(file));
+        }
+    }
+
+    @Test
+    void anEditedOversizedClusterKeepsSourceOffsetsWithoutFlatteningItsVisibleRow() {
+        for (String base : List.of("a", "中")) {
+            String original = base + "\u0301".repeat(1_000_000) + "B";
+            TextModel model = new TextModel(new SimpleLineBuffer());
+            model.replaceLines(List.of(original));
+            TerminalEditorTextLayout layout = new TerminalEditorTextLayout(model);
+            RenderPlanBuilder builder = RenderPlanBuilder.standalone(ignored -> List.of(), layout);
+            builder.setSyntaxHighlightingEnabled(false);
+            builder.setBracketMatchingEnabled(false);
+            builder.setRainbowBracketsEnabled(false);
+            builder.setDecorationStyles(new Style(Color.BLACK, Color.BRIGHT_CYAN, false, false),
+                Style.DEFAULT, Style.DEFAULT, Style.DEFAULT, Style.DEFAULT, Style.DEFAULT, List.of(Style.DEFAULT));
+            EditorState state = new EditorState();
+            RenderRasterizer rasterizer = new RenderRasterizer();
+            for (boolean wrap : new boolean[] {false, true}) {
+                LineText.Work before = LineText.work();
+                model.insertChar(new Position(0, 1), '\u0301');
+                int length = model.lineLength(0);
+                state.setSelectionAnchor(new Position(0, length - 1));
+                state.setCursor(new Position(0, length));
+
+                RenderPlan plan = builder.build(model, state, 8, 80, "top", "bottom", null,
+                    SearchOptions.DEFAULT, null, null, null, null, wrap, false);
+                CellBuffer cells = rasterizer.rasterize(plan, 8, 80);
+
+                LineText.Work after = LineText.work();
+                assertTrue(after.materializedCodeUnits() - before.materializedCodeUnits() < 4096,
+                    "A visible oversized cluster must reach the sanitizer without a contiguous String");
+                assertTrue(after.copiedCodeUnits() - before.copiedCodeUnits() < 65_536,
+                    "Only the edited storage blocks may be copied");
+                int start = plan.gutterWidth();
+                int clusterWidth = TerminalText.graphemeWidth(base);
+                assertEquals(clusterWidth, cells.get(1, start).width());
+                assertEquals("B", cells.get(1, start + clusterWidth).grapheme());
+                assertFalse(cells.get(1, start).style().equals(cells.get(1, start + clusterWidth).style()),
+                    "Selection offsets after the oversized cluster must remain source UTF-16 offsets");
+            }
         }
     }
 

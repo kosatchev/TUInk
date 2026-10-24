@@ -214,7 +214,7 @@ public class EditorEngine {
         if (earliestResult != null) {
             int lastLine = model.lineCount() - 1;
             appendOriginalRange(builder, sourcePosition,
-                new Position(lastLine, model.getLine(lastLine).length()), metadata);
+                new Position(lastLine, model.lineLength(lastLine)), metadata);
             builder.finishLine();
         }
         return earliestResult;
@@ -241,12 +241,12 @@ public class EditorEngine {
         int column = start.col();
         var separators = metadata.lineSeparators().listIterator(start.line());
         for (int line = start.line(); line < end.line(); line++) {
-            String text = model.getLine(line);
+            LineText text = model.lineText(line);
             builder.append(text, column, text.length());
             builder.newline(separators.next());
             column = 0;
         }
-        builder.append(model.getLine(end.line()), column, end.col());
+        builder.append(model.lineText(end.line()), column, end.col());
     }
 
     /** Moves the primary cursor through the engine-owned mutation boundary. */
@@ -604,10 +604,10 @@ public class EditorEngine {
             return;
         }
         if (p.col() > 0) {
-            String line = model.getLine(p.line());
+            LineText line = model.lineText(p.line());
             moveCursor(new Position(p.line(), graphemes(line).previousBoundary(p.col())), selecting, p);
         } else if (p.line() > 0) {
-            int prevLen = model.getLine(p.line() - 1).length();
+            int prevLen = model.lineLength(p.line() - 1);
             moveCursor(new Position(p.line() - 1, prevLen), selecting, p);
         } else {
             moveCursor(p, selecting, p);
@@ -624,13 +624,13 @@ public class EditorEngine {
         SelectionRange selection = selecting ? null : currentSelection();
         if (selection != null) {
             Position end = model.clamp(selection.end());
-            int endColumn = graphemes(model.getLine(end.line())).ceilBoundary(end.col());
+            int endColumn = graphemes(model.lineText(end.line())).ceilBoundary(end.col());
             moveCursor(new Position(end.line(), endColumn), false, p);
             return;
         }
-        int len = model.getLine(p.line()).length();
+        int len = model.lineLength(p.line());
         if (p.col() < len) {
-            String line = model.getLine(p.line());
+            LineText line = model.lineText(p.line());
             moveCursor(new Position(p.line(), graphemes(line).nextBoundary(p.col())), selecting, p);
         } else if (p.line() < model.lineCount() - 1) {
             moveCursor(new Position(p.line() + 1, 0), selecting, p);
@@ -651,9 +651,9 @@ public class EditorEngine {
         }
         if (col == 0 && line > 0) {
             line--;
-            col = model.getLine(line).length();
+            col = model.lineLength(line);
         }
-        String text = model.getLine(line);
+        LineText text = model.lineText(line);
         GraphemeText graphemes = graphemes(text);
         int target = graphemes.floorBoundary(col);
         while (target > 0) {
@@ -685,15 +685,15 @@ public class EditorEngine {
         int line = p.line();
         int col = p.col();
         int lastLine = model.lineCount() - 1;
-        if (line == lastLine && col >= model.getLine(line).length()) {
+        if (line == lastLine && col >= model.lineLength(line)) {
             moveCursor(p, false, previous);
             return;
         }
-        String text = model.getLine(line);
+        LineText text = model.lineText(line);
         if (col >= text.length() && line < lastLine) {
             line++;
             col = 0;
-            text = model.getLine(line);
+            text = model.lineText(line);
         }
         GraphemeText graphemes = graphemes(text);
         int target = graphemes.ceilBoundary(col);
@@ -723,7 +723,7 @@ public class EditorEngine {
         state.invalidateNavigation();
         breakCoalescing();
         Position p = model.clamp(requested);
-        String text = model.getLine(p.line());
+        LineText text = model.lineText(p.line());
         if (text.isEmpty()) {
             state.clearSelection();
             state.setCursor(p);
@@ -771,7 +771,7 @@ public class EditorEngine {
 
     public void moveEnd(boolean selecting) {
         Position p = state.getCursor();
-        navigateTo(new Position(p.line(), model.getLine(p.line()).length()), selecting);
+        navigateTo(new Position(p.line(), model.lineLength(p.line())), selecting);
     }
 
     public void moveHomeSmart() {
@@ -780,7 +780,7 @@ public class EditorEngine {
 
     public void moveHomeSmart(boolean selecting) {
         Position p = state.getCursor();
-        String line = model.getLine(p.line());
+        LineText line = model.lineText(p.line());
         int firstContentCol = firstNonWhitespaceColumn(line);
         int target = p.col() == firstContentCol ? 0 : firstContentCol;
         navigateTo(new Position(p.line(), target), selecting);
@@ -792,7 +792,7 @@ public class EditorEngine {
 
     public void moveEndSmart(boolean selecting) {
         Position p = state.getCursor();
-        String line = model.getLine(p.line());
+        LineText line = model.lineText(p.line());
         int trimmedEnd = trailingTrimEndColumn(line);
         int absoluteEnd = line.length();
         int target = p.col() == trimmedEnd ? absoluteEnd : trimmedEnd;
@@ -805,7 +805,7 @@ public class EditorEngine {
 
     public void moveDocumentEnd(boolean selecting) {
         int last = model.lineCount() - 1;
-        navigateTo(new Position(last, model.getLine(last).length()), selecting);
+        navigateTo(new Position(last, model.lineLength(last)), selecting);
     }
 
     public void insertChar(char ch) {
@@ -894,7 +894,7 @@ public class EditorEngine {
         Position rangeStart = selection == null ? model.clamp(state.getCursor()) : selection.start();
         Position rangeEnd = selection == null ? rangeStart : selection.end();
         Position cursor = model.clamp(rangeStart);
-        String line = model.getLine(cursor.line());
+        LineText line = model.lineText(cursor.line());
         int col = Math.min(cursor.col(), line.length());
         String indentPrefix = line.substring(0, Math.min(col, leadingIndentLength(line)));
         String tabText = indentationDecisions().unit(cursor.line(), indentPrefix);
@@ -927,7 +927,7 @@ public class EditorEngine {
         if (range == null) {
             Position cursor = model.clamp(state.getCursor());
             if (cursor.col() > 0) {
-                GraphemeText graphemes = graphemes(model.getLine(cursor.line()));
+                GraphemeText graphemes = graphemes(model.lineText(cursor.line()));
                 int end = graphemes.ceilBoundary(cursor.col());
                 range = new SelectionRange(
                     new Position(cursor.line(), graphemes.previousBoundary(end)),
@@ -936,7 +936,7 @@ public class EditorEngine {
             } else if (cursor.line() > 0) {
                 int previousLine = cursor.line() - 1;
                 range = new SelectionRange(
-                    new Position(previousLine, model.getLine(previousLine).length()),
+                    new Position(previousLine, model.lineLength(previousLine)),
                     cursor
                 );
             }
@@ -956,7 +956,7 @@ public class EditorEngine {
         SelectionRange range = currentSelection();
         if (range == null) {
             Position cursor = model.clamp(state.getCursor());
-            String line = model.getLine(cursor.line());
+            LineText line = model.lineText(cursor.line());
             if (cursor.col() < line.length()) {
                 GraphemeText graphemes = graphemes(line);
                 int start = graphemes.floorBoundary(cursor.col());
@@ -1041,10 +1041,10 @@ public class EditorEngine {
         long copiedUnits = 0;
         long longestLine = 0;
         boolean uncomment = true;
-        String commonIndent = null;
+        CharSequence commonIndent = null;
         int commonIndentLength = 0;
         for (int lineIndex = firstLine; lineIndex <= lastLine; lineIndex++) {
-            String line = model.getLine(lineIndex);
+            LineText line = model.lineText(lineIndex);
             if (line.isBlank()) continue;
             nonBlankCount++;
             copiedUnits = DocumentEditBudget.add(copiedUnits, line.length() + marker.length() + 1L);
@@ -1078,7 +1078,7 @@ public class EditorEngine {
             List<LineCommentEdit> positionEdits = new ArrayList<>(nonBlankCount);
             String inserted = uncomment ? "" : marker + " ";
             for (int lineIndex = firstLine; lineIndex <= lastLine; lineIndex++) {
-                String line = model.getLine(lineIndex);
+                LineText line = model.lineText(lineIndex);
                 if (line.isBlank()) continue;
                 int column = uncomment ? lineCommentColumn(line, marker, lineIndex) : commonIndentLength;
                 int removeLength = uncomment ? marker.length() : 0;
@@ -1145,7 +1145,7 @@ public class EditorEngine {
         if (line < model.lineCount() - 1) {
             end = new Position(line + 1, 0);
         } else {
-            end = new Position(line, model.getLine(line).length());
+            end = new Position(line, model.lineLength(line));
         }
         String copied = ClipboardText.copy(model, start, end);
         if (copied.isEmpty()) {
@@ -1189,7 +1189,7 @@ public class EditorEngine {
             // Include trailing newline by cutting until start of next line.
             end = new Position(line + 1, 0);
         } else {
-            end = new Position(line, model.getLine(line).length());
+            end = new Position(line, model.lineLength(line));
         }
         if (start.equals(end)) {
             return false;
@@ -1240,7 +1240,7 @@ public class EditorEngine {
         }
         Position start = new Position(0, 0);
         int lastLine = lines - 1;
-        Position end = new Position(lastLine, model.getLine(lastLine).length());
+        Position end = new Position(lastLine, model.lineLength(lastLine));
         if (start.equals(end)) {
             state.clearSelection();
             state.setCursor(start);
@@ -1461,7 +1461,7 @@ public class EditorEngine {
 
     private record ReplacementResult(int matchCount, Position firstChange) {}
 
-    private int firstNonWhitespaceColumn(String line) {
+    private int firstNonWhitespaceColumn(CharSequence line) {
         GraphemeText graphemes = graphemes(line);
         for (int index = 0; index < graphemes.graphemeCount(); index++) {
             if (!graphemes.isWhitespace(index)) {
@@ -1471,7 +1471,7 @@ public class EditorEngine {
         return 0;
     }
 
-    private int trailingTrimEndColumn(String line) {
+    private int trailingTrimEndColumn(CharSequence line) {
         GraphemeText graphemes = graphemes(line);
         int end = graphemes.graphemeCount();
         while (end > 0 && graphemes.isWhitespace(end - 1)) {
@@ -1721,7 +1721,7 @@ public class EditorEngine {
         return delta;
     }
 
-    private static int leadingIndentLength(String line) {
+    private static int leadingIndentLength(CharSequence line) {
         int i = 0;
         while (i < line.length()) {
             char ch = line.charAt(i);
@@ -1861,7 +1861,7 @@ public class EditorEngine {
         ViewState after = captureViewState();
         for (ReplacementDelta delta : ops) {
             if (delta.operation().deletedText().equals(delta.operation().insertedText())) continue;
-            EditorViewMemento view = editedView(after.view(), model::getLine);
+            EditorViewMemento view = editedView(after.view(), model::lineText);
             if (view != after.view()) {
                 after = new ViewState(after.document(), view);
                 state.setCursor(view.cursor());
@@ -1983,33 +1983,34 @@ public class EditorEngine {
 
     private Position clampCursorBoundary(Position requested) {
         Position clamped = model.clamp(requested);
-        String line = model.getLine(clamped.line());
+        LineText line = model.lineText(clamped.line());
         return new Position(clamped.line(), graphemes(line).floorBoundary(clamped.col()));
     }
 
     /** Keep subsequent typing after a newly joined cluster without widening an exact text selection. */
-    private static EditorViewMemento editedView(EditorViewMemento view, IntFunction<String> lines) {
+    private EditorViewMemento editedView(EditorViewMemento view, IntFunction<? extends CharSequence> lines) {
         Position cursor = view.cursor();
-        int column = GraphemeText.ceilBoundary(lines.apply(cursor.line()), cursor.col());
+        int column = graphemes(lines.apply(cursor.line())).ceilBoundary(cursor.col());
         Position anchor = view.selectionAnchor();
         boolean splitAnchor = anchor != null
-            && GraphemeText.ceilBoundary(lines.apply(anchor.line()), anchor.col()) != anchor.col();
+            && graphemes(lines.apply(anchor.line())).ceilBoundary(anchor.col()) != anchor.col();
         if (column == cursor.col() && !splitAnchor) return view;
         return new EditorViewMemento(view.viewId(), new Position(cursor.line(), column), view.viewport(), null);
     }
 
-    private GraphemeText graphemes(String text) {
-        // Strings are immutable: identity also makes direct model edits and undo safe,
-        // without retaining layouts for every line or for old document revisions.
-        if (cachedGraphemes == null || cachedGraphemes.text() != text) {
-            cachedGraphemes = GraphemeText.of(text);
-        }
+    private GraphemeText graphemes(CharSequence text) {
+        if (cachedGraphemes != null && cachedGraphemes.sequence() == text) return cachedGraphemes;
+        LineText.Edit edit = text instanceof LineText next ? next.edit() : null;
+        if (cachedGraphemes != null && cachedGraphemes.sequence() instanceof LineText previous
+            && edit != null && edit.sourceIdentity() == previous.identity()) {
+            cachedGraphemes = cachedGraphemes.updated(text, edit.start(), edit.removedLength(), edit.insertedLength());
+        } else cachedGraphemes = GraphemeText.of(text);
         return cachedGraphemes;
     }
 
     private Position requireTextBoundary(Position requested) {
         Position clamped = model.clamp(requested);
-        String line = model.getLine(clamped.line());
+        LineText line = model.lineText(clamped.line());
         int offset = clamped.col();
         if (offset > 0
             && offset < line.length()
@@ -2062,7 +2063,7 @@ public class EditorEngine {
         if (position.line() >= model.lineCount()) {
             throw invalidReplacement(replacementIndex, endpoint + " line is outside the document");
         }
-        String line = model.getLine(position.line());
+        LineText line = model.lineText(position.line());
         if (position.col() > line.length()) {
             throw invalidReplacement(replacementIndex, endpoint + " offset is outside the line");
         }
@@ -2301,7 +2302,7 @@ public class EditorEngine {
         } else if (!state.hasSelection()) {
             EditorViewMemento active = new EditorViewMemento(state.viewId(), model.clamp(state.getCursor()),
                 state.viewport(), state.getSelectionAnchor() == null ? null : model.clamp(state.getSelectionAnchor()));
-            EditorViewMemento normalized = editedView(active, model::getLine);
+            EditorViewMemento normalized = editedView(active, model::lineText);
             state.setCursor(normalized.cursor());
             state.setSelectionAnchor(normalized.selectionAnchor());
         }
@@ -2511,7 +2512,7 @@ public class EditorEngine {
         return new SelectionRange(a, b);
     }
 
-    private static int lineCommentColumn(String line, String marker, int lineIndex) {
+    private static int lineCommentColumn(LineText line, String marker, int lineIndex) {
         int column = leadingIndentLength(line);
         if (!line.startsWith(marker, column)) {
             return -1;
@@ -2643,12 +2644,12 @@ public class EditorEngine {
             : new SearchMatch(new Position(line, match.startUtf16()), match.lengthUtf16());
     }
 
-    private static boolean isWhitespaceGrapheme(String text, int start, int end) {
+    private static boolean isWhitespaceGrapheme(CharSequence text, int start, int end) {
         if (start >= end) {
             return false;
         }
         for (int i = start; i < end;) {
-            int codePoint = text.codePointAt(i);
+            int codePoint = Character.codePointAt(text, i);
             if (!Character.isWhitespace(codePoint)) {
                 return false;
             }
@@ -2657,15 +2658,15 @@ public class EditorEngine {
         return true;
     }
 
-    private static boolean isWordGrapheme(String text, int start, int end) {
+    private static boolean isWordGrapheme(CharSequence text, int start, int end) {
         if (start >= end) {
             return false;
         }
-        int codePoint = text.codePointAt(start);
+        int codePoint = Character.codePointAt(text, start);
         return Character.isLetterOrDigit(codePoint) || codePoint == '_';
     }
 
-    private static int graphemeGroup(String text, int start, int end) {
+    private static int graphemeGroup(CharSequence text, int start, int end) {
         if (isWhitespaceGrapheme(text, start, end)) {
             return 0;
         }

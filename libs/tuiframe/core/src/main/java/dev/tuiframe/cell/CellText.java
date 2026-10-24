@@ -152,15 +152,16 @@ public final class CellText {
      */
     public static String clipIndexed(TerminalText.Metrics metrics, int leftCells, int maxCells) {
         Objects.requireNonNull(metrics, "metrics");
-        if (metrics.text().isEmpty() || maxCells <= 0) return "";
+        String source = metrics.text();
+        if (source.isEmpty() || maxCells <= 0) return "";
         CellSlice slice = new CellSlice(leftCells, maxCells);
         int offset = metrics.offsetForVisualColumn(Math.max(0, leftCells), TerminalText.Bias.FLOOR);
         long visual = metrics.visualColumnAt(offset);
-        while (offset < metrics.text().length() && visual < slice.right) {
+        while (offset < source.length() && visual < slice.right) {
             int end = metrics.nextBoundary(offset);
             int next = metrics.visualColumnAt(end);
-            boolean tab = end == offset + 1 && metrics.text().charAt(offset) == '\t';
-            slice.append(metrics.text(), offset, end, tab, visual, (int) (next - visual));
+            boolean tab = end == offset + 1 && source.charAt(offset) == '\t';
+            slice.append(source, offset, end, tab, visual, (int) (next - visual));
             offset = end;
             visual = next;
         }

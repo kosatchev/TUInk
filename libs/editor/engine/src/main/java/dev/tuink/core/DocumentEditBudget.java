@@ -67,9 +67,9 @@ final class DocumentEditBudget {
         if (resultLines > MAX_LINES || longestLine > MAX_LINE_CODE_UNITS) {
             throw new DocumentEditLimitException();
         }
-        // A same-line keyboard edit builds one exact char[] and one String in
-        // an isolated command. Used heap also includes reclaimable garbage,
-        // so a free-heap estimate can reject a small edit to an admitted line.
+        // A same-line keyboard edit copies small boundary blocks and tree paths
+        // in an isolated command. Used heap includes reclaimable garbage, so a
+        // free-heap estimate can reject a small edit to an admitted line.
         // Keep the hard bounds above; an actual allocation failure aborts the
         // command before text, history or views are published.
         if (singleLine) return;

@@ -8,6 +8,8 @@ Changes on the development branch after [v0.16.0](0.16.0.md).
   entry while retaining the previous lock for existing canonical paths.
 - Continue sequential search from accepted matches with a bounded result cache
   and sparse checkpoints, preserving non-overlapping matching rules.
+- Align editing and terminal grapheme boundary checks for offsets outside the
+  document, and describe workspace edits using their current preparation model.
 
 - Encode saved documents into the staged file through bounded buffers, retaining
   original encodings, BOMs and line endings while hashing the written bytes.

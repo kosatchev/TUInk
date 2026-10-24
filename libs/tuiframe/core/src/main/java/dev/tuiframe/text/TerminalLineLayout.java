@@ -33,10 +33,13 @@ public final class TerminalLineLayout {
         TerminalText.Metrics metrics, int maxVisualWidth, boolean wrapByWords, boolean reserveLineEndCell
     ) {
         WrapSummary summary = wrapSummary(metrics, maxVisualWidth, wrapByWords);
-        boolean appendEnd = reserveLineEndCell && maxVisualWidth > 0 && !metrics.text().isEmpty()
+        boolean appendEnd = reserveLineEndCell && maxVisualWidth > 0 && !metrics.sequence().isEmpty()
             && metrics.visualWidth() - metrics.visualColumnAt(summary.lastStartOffset()) >= maxVisualWidth;
         List<Integer> starts;
-        if (summary.rowCount() <= MAX_CHECKPOINTS) {
+        int uniformRowSize = uniformRowSize(metrics, maxVisualWidth, wrapByWords);
+        if (uniformRowSize > 0 && summary.rowCount() > MAX_CHECKPOINTS) {
+            starts = new UniformStarts(metrics, uniformRowSize, summary.rowCount());
+        } else if (summary.rowCount() <= MAX_CHECKPOINTS) {
             List<Integer> materialized = new ArrayList<>(summary.rowCount());
             int boundary = 0;
             for (int row = 0; row < summary.rowCount(); row++) {
@@ -49,14 +52,19 @@ public final class TerminalLineLayout {
         } else {
             starts = new SparseStarts(metrics, maxVisualWidth, wrapByWords, summary.rowCount());
         }
-        return appendEnd ? new WithLineEnd(starts, metrics.text().length()) : starts;
+        return appendEnd ? new WithLineEnd(starts, metrics.sequence().length()) : starts;
     }
 
     /** Row geometry without materializing the UTF-16 start offset of every row. */
     public static WrapSummary wrapSummary(TerminalText.Metrics metrics, int maxVisualWidth, boolean wrapByWords) {
         Objects.requireNonNull(metrics, "metrics");
-        if (metrics.text().isEmpty() || maxVisualWidth <= 0) {
+        if (metrics.sequence().isEmpty() || maxVisualWidth <= 0) {
             return new WrapSummary(1, 0);
+        }
+        int uniformRowSize = uniformRowSize(metrics, maxVisualWidth, wrapByWords);
+        if (uniformRowSize > 0) {
+            int rows = (metrics.graphemeCount() - 1) / uniformRowSize + 1;
+            return new WrapSummary(rows, offset(metrics, (rows - 1) * uniformRowSize));
         }
         int rows = 1;
         int boundary = 0;
@@ -74,6 +82,9 @@ public final class TerminalLineLayout {
 
     /** Counts retained integer slots, including metrics retained by a sparse view. */
     static int retainedWeight(List<Integer> starts) {
+        if (starts instanceof UniformStarts uniform) {
+            return (int) Math.min(Integer.MAX_VALUE, (long) uniform.metrics.storageWeight() + 4);
+        }
         if (starts instanceof SparseStarts sparse) {
             return (int) Math.min(Integer.MAX_VALUE,
                 (long) sparse.metrics.storageWeight() + sparse.checkpoints.length + sparse.page.length);
@@ -85,7 +96,30 @@ public final class TerminalLineLayout {
     }
 
     private static int offset(TerminalText.Metrics metrics, int boundary) {
-        return boundary == metrics.graphemeCount() ? metrics.text().length() : metrics.start(boundary);
+        return boundary == metrics.graphemeCount() ? metrics.sequence().length() : metrics.start(boundary);
+    }
+
+    private static int uniformRowSize(TerminalText.Metrics metrics, int width, boolean words) {
+        int cellWidth = metrics.uniformCellWidth();
+        return width <= 0 || cellWidth == 0 || words && !metrics.hasNoWhitespace()
+            ? 0 : Math.max(1, width / cellWidth);
+    }
+
+    /** Random access to huge fixed-cell runs without visiting every grapheme or row. */
+    private static final class UniformStarts extends AbstractList<Integer> implements RandomAccess {
+        private final TerminalText.Metrics metrics;
+        private final int rowSize;
+        private final int size;
+        UniformStarts(TerminalText.Metrics metrics, int rowSize, int size) {
+            this.metrics = metrics;
+            this.rowSize = rowSize;
+            this.size = size;
+        }
+        @Override public int size() { return size; }
+        @Override public Integer get(int row) {
+            Objects.checkIndex(row, size);
+            return offset(metrics, row * rowSize);
+        }
     }
 
     /** A row boundary is sufficient to resume: tabs retain their absolute columns. */

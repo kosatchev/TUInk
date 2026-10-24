@@ -2,7 +2,9 @@ package dev.tuink.core;
 
 import dev.tuink.unicode.GraphemeText;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -14,6 +16,7 @@ import java.util.Objects;
  */
 public final class LogicalEditorTextLayout implements EditorTextLayout {
     private final TextModel model;
+    private final Map<Integer, Metrics> metricCache = new LinkedHashMap<>(16, 0.75f, true);
 
     public LogicalEditorTextLayout(TextModel model) {
         this.model = Objects.requireNonNull(model, "model");
@@ -42,7 +45,7 @@ public final class LogicalEditorTextLayout implements EditorTextLayout {
     @Override
     public List<Integer> wrapStarts(int line, int width, boolean wrapByWords, int tabWidth) {
         Metrics metrics = metrics(line, tabWidth);
-        if (metrics.text().isEmpty() || width <= 0) {
+        if (metrics.text().length() == 0 || width <= 0) {
             return List.of(0);
         }
         List<Integer> starts = new ArrayList<>();
@@ -131,56 +134,54 @@ public final class LogicalEditorTextLayout implements EditorTextLayout {
 
     private Metrics metrics(int line, int tabWidth) {
         int safeLine = Math.max(0, Math.min(line, model.lineCount() - 1));
-        String text = model.getLine(safeLine);
-        GraphemeText graphemes = GraphemeText.of(text);
-        int[] visual = new int[graphemes.graphemeCount() + 1];
+        LineText text = model.lineText(safeLine);
         int safeTabWidth = Math.max(1, tabWidth);
-        for (int index = 0; index < graphemes.graphemeCount(); index++) {
-            int width = graphemes.isTab(index)
-                ? safeTabWidth - visual[index] % safeTabWidth
-                : 1;
-            visual[index + 1] = visual[index] + width;
+        Metrics cached = metricCache.get(safeLine);
+        if (cached != null && cached.text() == text && cached.tabWidth() == safeTabWidth) return cached;
+        GraphemeText graphemes;
+        LogicalColumnIndex columns;
+        LineText.Edit edit = text.edit();
+        if (cached != null && cached.tabWidth() == safeTabWidth && edit != null
+            && edit.sourceIdentity() == cached.text().identity()) {
+            graphemes = cached.graphemes().updated(text, edit.start(), edit.removedLength(), edit.insertedLength());
+            GraphemeText.ResegmentedRange range = graphemes.resegmentedRange();
+            LogicalColumnIndex changed = LogicalColumnIndex.build(graphemes, range.start(), range.insertedEnd(), safeTabWidth);
+            columns = cached.columns().updated(changed,
+                cached.graphemes().boundaryIndexAtOrBefore(range.start()),
+                cached.graphemes().boundaryIndexAtOrBefore(range.removedEnd()));
+        } else {
+            graphemes = GraphemeText.of(text);
+            columns = LogicalColumnIndex.build(graphemes, 0, text.length(), safeTabWidth);
         }
-        return new Metrics(text, graphemes, visual);
+        Metrics result = new Metrics(text, graphemes, columns, safeTabWidth);
+        metricCache.put(safeLine, result);
+        if (metricCache.size() > 256) metricCache.remove(metricCache.keySet().iterator().next());
+        return result;
     }
 
-    private record Metrics(String text, GraphemeText graphemes, int[] visual) {
+    private record Metrics(LineText text, GraphemeText graphemes, LogicalColumnIndex columns, int tabWidth) {
         private int visualWidth() {
-            return visual[visual.length - 1];
+            return columns.column(graphemes.graphemeCount());
         }
 
         private int visualAtBoundary(int boundary) {
-            return visual[Math.max(0, Math.min(boundary, visual.length - 1))];
+            return columns.column(Math.max(0, Math.min(boundary, graphemes.graphemeCount())));
         }
 
         private int visualColumnAt(int textOffset) {
-            int offset = graphemes.floorBoundary(textOffset);
-            for (int index = 0; index < graphemes.graphemeCount(); index++) {
-                if (graphemes.start(index) == offset) {
-                    return visual[index];
-                }
-            }
-            return offset >= text.length() ? visualWidth() : 0;
+            return columns.column(graphemes.boundaryIndexAtOrBefore(textOffset));
         }
 
         private int textOffsetAtVisualColumn(int column, Bias requestedBias) {
             int target = Math.max(0, column);
             Bias bias = requestedBias == null ? Bias.NEAREST : requestedBias;
-            for (int index = 0; index < graphemes.graphemeCount(); index++) {
-                int start = visual[index];
-                int end = visual[index + 1];
-                if (target < end) {
-                    if (bias == Bias.CEIL
-                        || (bias == Bias.NEAREST && target - start > end - target)) {
-                        return graphemes.end(index);
-                    }
-                    return graphemes.start(index);
-                }
-                if (target == end) {
-                    return graphemes.end(index);
-                }
-            }
-            return text.length();
+            int index = columns.floorColumn(target);
+            if (index == graphemes.graphemeCount()) return text.length();
+            int start = columns.column(index);
+            if (start == target) return graphemes.start(index);
+            int end = columns.column(index + 1);
+            return bias == Bias.CEIL || bias == Bias.NEAREST && target - start > end - target
+                ? graphemes.end(index) : graphemes.start(index);
         }
     }
 }

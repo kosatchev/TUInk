@@ -174,11 +174,11 @@ class TerminalTextLayoutCacheTest {
         assertEquals(1, oversizedCache.metricsCacheWeight());
 
         MutableLineSource weightedSource = source("a\tb", "x", "y");
-        TerminalTextLayoutCache weightedCache = new TerminalTextLayoutCache(weightedSource, 10, 5);
+        TerminalTextLayoutCache weightedCache = new TerminalTextLayoutCache(weightedSource, 10, 6);
         TerminalText.Metrics tabbed = weightedCache.metrics(0, 4);
-        assertEquals(4, tabbed.storageWeight());
+        assertEquals(5, tabbed.storageWeight());
         weightedCache.metrics(1, 4);
-        assertEquals(5, weightedCache.metricsCacheWeight());
+        assertEquals(6, weightedCache.metricsCacheWeight());
         weightedCache.metrics(2, 4);
         assertEquals(2, weightedCache.metricsCacheSize());
         assertEquals(2, weightedCache.metricsCacheWeight());

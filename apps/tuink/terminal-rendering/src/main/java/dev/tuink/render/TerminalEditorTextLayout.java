@@ -2,6 +2,7 @@ package dev.tuink.render;
 
 import dev.tuink.core.EditorTextLayout;
 import dev.tuink.core.TextModel;
+import dev.tuink.core.LineText;
 import dev.tuiframe.text.TerminalText;
 import dev.tuiframe.text.TerminalTextLayoutCache;
 import java.util.List;
@@ -137,6 +138,14 @@ public final class TerminalEditorTextLayout implements EditorTextLayout {
         @Override
         public String line(int index) {
             return model.getLine(index);
+        }
+
+        @Override public CharSequence lineSequence(int index) { return model.lineText(index); }
+        @Override public long lineIdentity(int index) { return model.lineText(index).identity(); }
+        @Override public TerminalTextLayoutCache.TextEdit textEdit(int index) {
+            LineText.Edit edit = model.lineText(index).edit();
+            return edit == null ? null : new TerminalTextLayoutCache.TextEdit(
+                edit.sourceIdentity(), edit.start(), edit.removedLength(), edit.insertedLength());
         }
     }
 }

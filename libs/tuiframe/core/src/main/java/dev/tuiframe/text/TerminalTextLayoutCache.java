@@ -47,7 +47,18 @@ public final class TerminalTextLayoutCache {
         int lineCount();
 
         String line(int index);
+
+        /** Immutable source; frontends may avoid constructing a contiguous String. */
+        default CharSequence lineSequence(int index) { return line(index); }
+
+        /** Identity of this immutable line value, or zero when unavailable. */
+        default long lineIdentity(int index) { return 0; }
+
+        /** Exact replacement from a previous immutable line, or null when unavailable. */
+        default TextEdit textEdit(int index) { return null; }
     }
+
+    public record TextEdit(long sourceIdentity, int start, int removedLength, int insertedLength) {}
 
     public record LineChange(int firstLine, int removedLineCount, int addedLineCount) {
         public LineChange {
@@ -250,7 +261,7 @@ public final class TerminalTextLayoutCache {
         }
         int safeLine = Math.max(0, Math.min(line, count - 1));
         int safeTabWidth = Math.max(1, tabWidth);
-        String text = requireLine(safeLine);
+        CharSequence text = requireLine(safeLine);
         MetricsEntry cached = metricsCache.get(safeLine);
         if (cached != null && cached.matches(text, safeTabWidth)) {
             return cached.metrics();
@@ -260,8 +271,12 @@ public final class TerminalTextLayoutCache {
             metricsWeight -= cached.weight();
         }
 
-        TerminalText.Metrics metrics = TerminalText.metrics(text, safeTabWidth);
-        MetricsEntry computed = new MetricsEntry(text, safeTabWidth, metrics);
+        TextEdit edit = source.textEdit(safeLine);
+        TerminalText.Metrics metrics = cached != null && cached.tabWidth() == safeTabWidth && edit != null
+            && cached.identity() != 0 && edit.sourceIdentity() == cached.identity()
+            ? cached.metrics().updated(text, edit.start(), edit.removedLength(), edit.insertedLength())
+            : TerminalText.metrics(text, safeTabWidth);
+        MetricsEntry computed = new MetricsEntry(text, source.lineIdentity(safeLine), safeTabWidth, metrics);
         metricsCache.put(safeLine, computed);
         metricsWeight += computed.weight();
         trimMetricsCache();
@@ -326,7 +341,7 @@ public final class TerminalTextLayoutCache {
     private int computeWrapRowCount(int line, WrapLayoutKey key) {
         TerminalText.Metrics metrics = metricsSynchronized(line, key.tabWidth());
         TerminalLineLayout.WrapSummary summary = TerminalLineLayout.wrapSummary(metrics, key.width(), key.wrapByWords());
-        boolean lineEndRow = reserveLineEndCell && key.width() > 0 && !metrics.text().isEmpty()
+        boolean lineEndRow = reserveLineEndCell && key.width() > 0 && !metrics.sequence().isEmpty()
             && metrics.visualWidth() - metrics.visualColumnAt(summary.lastStartOffset()) >= key.width();
         return summary.rowCount() + (lineEndRow ? 1 : 0);
     }
@@ -503,8 +518,8 @@ public final class TerminalTextLayoutCache {
         return Math.max(0, source.lineCount());
     }
 
-    private String requireLine(int index) {
-        return Objects.requireNonNull(source.line(index), "source line " + index);
+    private CharSequence requireLine(int index) {
+        return Objects.requireNonNull(source.lineSequence(index), "source line " + index);
     }
 
     int metricsCacheSize() {
@@ -538,9 +553,9 @@ public final class TerminalTextLayoutCache {
         return wrapLayouts.size();
     }
 
-    private record MetricsEntry(String lineText, int tabWidth, TerminalText.Metrics metrics) {
-        private boolean matches(String text, int width) {
-            return tabWidth == width && lineText.equals(text);
+    private record MetricsEntry(CharSequence lineText, long identity, int tabWidth, TerminalText.Metrics metrics) {
+        private boolean matches(CharSequence text, int width) {
+            return tabWidth == width && (lineText == text || lineText instanceof String && lineText.equals(text));
         }
 
         private int weight() {

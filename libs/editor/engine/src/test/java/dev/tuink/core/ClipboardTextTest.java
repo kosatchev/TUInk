@@ -45,4 +45,20 @@ class ClipboardTextTest {
         assertThrows(IllegalArgumentException.class,
             () -> ClipboardText.copy(model, new Position(0, 1), new Position(0, 2), 100_000));
     }
+
+    @Test
+    void editedWholeLineRequiresAdmissionBeforeMaterializingItsBlocks() {
+        TextModel model = new TextModel(new SimpleLineBuffer());
+        model.replaceLines(List.of("a".repeat(1_000_000)));
+        model.insertChar(new Position(0, 500_000), 'b');
+        Position end = new Position(0, model.lineLength(0));
+        LineText.Work before = LineText.work();
+
+        assertThrows(ClipboardLimitException.class,
+            () -> ClipboardText.copy(model, new Position(0, 0), end, 0));
+        assertEquals(before.materializedCodeUnits(), LineText.work().materializedCodeUnits());
+        String copied = ClipboardText.copy(model, new Position(0, 0), end, 7_000_000);
+        assertEquals('b', copied.charAt(500_000));
+        assertSame(copied, ClipboardText.copy(model, new Position(0, 0), end, 0));
+    }
 }

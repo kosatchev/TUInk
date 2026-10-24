@@ -179,7 +179,7 @@ public class RenderRasterizer {
             ? List.of()
             : (baseSpanCount == spans.size() ? spans : spans.subList(0, baseSpanCount));
         PreparedLine prepared = preparedLine(
-            line.text(),
+            line.sequence(),
             baseSpans,
             line.sourceVisualColumn(),
             line.baseStyleKey(),
@@ -362,15 +362,15 @@ public class RenderRasterizer {
     }
 
     private PreparedLine preparedLine(
-        String text,
+        CharSequence text,
         List<StyleSpan> baseSpans,
         int sourceVisualColumn,
         BaseStyleIdentity baseStyleKey,
         int cacheSlot
     ) {
-        String value = text == null ? "" : text;
+        CharSequence value = text == null ? "" : text;
         int tabPhase = Math.floorMod(sourceVisualColumn, tabWidth);
-        String keyedText = baseStyleKey == null ? value : "";
+        CharSequence keyedText = baseStyleKey == null ? value : "";
         List<StyleSpan> keyedBaseSpans = baseStyleKey == null ? baseSpans : List.of();
         PreparedLineKey lookupKey = new PreparedLineKey(
             keyedText,
@@ -615,7 +615,7 @@ public class RenderRasterizer {
         return preparedLineCacheMisses;
     }
 
-    private static String displayGrapheme(String text, int start, int end) {
+    private static String displayGrapheme(CharSequence text, int start, int end) {
         if (end == start + 1) {
             char value = text.charAt(start);
             if (value < ASCII_DISPLAY.length) {
@@ -634,7 +634,7 @@ public class RenderRasterizer {
     }
 
     private static int preparedLineWeight(
-        String text,
+        CharSequence text,
         TerminalText.Metrics metrics,
         int baseSpanCount
     ) {
@@ -647,7 +647,7 @@ public class RenderRasterizer {
     }
 
     private static final class PreparedLineKey {
-        private final String text;
+        private final CharSequence text;
         private final List<StyleSpan> baseSpans;
         private final BaseStyleIdentity baseStyleKey;
         private final int tabWidth;
@@ -655,7 +655,7 @@ public class RenderRasterizer {
         private final int hashCode;
 
         private PreparedLineKey(
-            String text,
+            CharSequence text,
             List<StyleSpan> baseSpans,
             BaseStyleIdentity baseStyleKey,
             int tabWidth,
@@ -667,7 +667,9 @@ public class RenderRasterizer {
             this.tabWidth = tabWidth;
             this.tabPhase = tabPhase;
             int hash = 31 * tabWidth + tabPhase;
-            hash = 31 * hash + (baseStyleKey == null ? text.hashCode() : baseStyleKey.hashCode());
+            hash = 31 * hash + (baseStyleKey == null
+                ? text instanceof String string ? string.hashCode() : System.identityHashCode(text)
+                : baseStyleKey.hashCode());
             this.hashCode = baseStyleKey == null ? 31 * hash + baseSpans.hashCode() : hash;
         }
 
@@ -685,7 +687,7 @@ public class RenderRasterizer {
             if (baseStyleKey != null || key.baseStyleKey != null) {
                 return baseStyleKey != null && baseStyleKey.equals(key.baseStyleKey);
             }
-            return text.equals(key.text) && baseSpans.equals(key.baseSpans);
+            return (text == key.text || text instanceof String && text.equals(key.text)) && baseSpans.equals(key.baseSpans);
         }
 
         @Override

@@ -214,7 +214,7 @@ class TerminalTextTest {
             () -> assertEquals(1, tabbed.offsetForVisualColumn(2, TerminalText.Bias.FLOOR)),
             () -> assertEquals(2, tabbed.offsetForVisualColumn(2, TerminalText.Bias.CEIL)),
             () -> assertEquals(1, plain.storageWeight()),
-            () -> assertEquals(4, tabbed.storageWeight()),
+            () -> assertEquals(5, tabbed.storageWeight()),
             () -> assertEquals(4, TerminalText.metrics("中", 4).storageWeight())
         );
     }
@@ -228,7 +228,7 @@ class TerminalTextTest {
         assertEquals(1, ordinary.storageWeight());
         assertEquals(prefix.length() + 1, ordinary.graphemeCount());
         assertEquals(prefix.length() + 1, ordinary.visualWidth());
-        assertEquals(16, exceptional.storageWeight());
+        assertEquals(17, exceptional.storageWeight());
         assertEquals(prefix.length(), exceptional.floorBoundary(prefix.length() + 1));
         assertEquals(prefix.length() + 2, exceptional.ceilBoundary(prefix.length() + 1));
     }

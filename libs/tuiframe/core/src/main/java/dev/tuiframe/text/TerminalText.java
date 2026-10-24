@@ -33,15 +33,20 @@ public final class TerminalText {
      * Accessors describe that cluster until the next advance.
      */
     public static final class GraphemeCursor {
-        private final String text;
+        private final CharSequence text;
         private Matcher matcher;
         private int start;
         private int end;
         private int width;
         private boolean tab;
 
-        private GraphemeCursor(String text) {
+        private GraphemeCursor(CharSequence text) {
             this.text = text;
+        }
+
+        private GraphemeCursor(CharSequence text, int start) {
+            this.text = text;
+            this.end = start;
         }
 
         public boolean advance() {
@@ -73,12 +78,16 @@ public final class TerminalText {
         return new GraphemeCursor(text == null ? "" : text);
     }
 
+    public static GraphemeCursor graphemeCursor(CharSequence text) {
+        return new GraphemeCursor(text == null ? "" : text);
+    }
+
     /**
      * Immutable grapheme boundaries and terminal-cell prefix columns for one
      * string and tab width.
      */
     public static final class Metrics {
-        private final String text;
+        private final CharSequence text;
         private final int tabWidth;
         private final boolean simpleAscii;
         private final int graphemeCount;
@@ -87,9 +96,13 @@ public final class TerminalText {
         private final byte[] widths;
         private final boolean[] whitespace;
         private final SparseIndex sparse;
+        private final int[] tabs;
+        private final MetricIndex index;
+        private final boolean noWhitespace;
 
-        private Metrics(String text, int tabWidth, boolean simpleAscii,
-            int[] boundaries, int[] visualColumns, byte[] widths, boolean[] whitespace, SparseIndex sparse) {
+        private Metrics(CharSequence text, int tabWidth, boolean simpleAscii,
+            int[] boundaries, int[] visualColumns, byte[] widths, boolean[] whitespace, SparseIndex sparse,
+            int[] tabs, boolean noWhitespace) {
             this.text = text;
             this.tabWidth = tabWidth;
             this.simpleAscii = simpleAscii;
@@ -98,13 +111,29 @@ public final class TerminalText {
             this.widths = widths;
             this.whitespace = whitespace;
             this.sparse = sparse;
+            this.tabs = tabs;
+            this.index = null;
+            this.noWhitespace = noWhitespace;
             this.graphemeCount = simpleAscii ? text.length()
                 : sparse == null ? boundaries.length - 1 : sparse.floorIndex(text.length(), sparse.offsets);
         }
 
         public String text() {
-            return text;
+            return text.toString();
         }
+
+        /** Original immutable source, without flattening a rope-backed line. */
+        public CharSequence sequence() { return text; }
+
+        /** Uniform effective cell advance, or zero for mixed advances or tabs. */
+        public int uniformCellWidth() {
+            if (index != null) return index.uniformWidth();
+            if (tabs.length != 0 || graphemeCount == 0) return 0;
+            long width = visualWidth();
+            return width == graphemeCount ? 1 : width == 2L * graphemeCount ? 2 : 0;
+        }
+
+        public boolean hasNoWhitespace() { return noWhitespace; }
 
         public int tabWidth() {
             return tabWidth;
@@ -126,6 +155,7 @@ public final class TerminalText {
 
         public int width(int graphemeIndex) {
             checkGraphemeIndex(graphemeIndex);
+            if (index != null) return index.width(graphemeIndex);
             if (simpleAscii) {
                 return text.charAt(graphemeIndex) == '\t' ? 0 : 1;
             }
@@ -140,6 +170,11 @@ public final class TerminalText {
 
         public boolean isWhitespace(int graphemeIndex) {
             checkGraphemeIndex(graphemeIndex);
+            if (index != null) {
+                int start = boundary(graphemeIndex);
+                return boundary(graphemeIndex + 1) == start + 1
+                    ? Character.isWhitespace(text.charAt(start)) : index.whitespace(graphemeIndex);
+            }
             if (simpleAscii) {
                 return Character.isWhitespace(text.charAt(graphemeIndex));
             }
@@ -148,6 +183,7 @@ public final class TerminalText {
 
         public int visualColumnAtBoundary(int boundaryIndex) {
             int safe = Math.max(0, Math.min(boundaryIndex, graphemeCount));
+            if (index != null) return index.column(safe);
             return sparse != null ? sparse.positionAt(safe, sparse.columns)
                 : visualColumns == null ? safe : visualColumns[safe];
         }
@@ -173,9 +209,10 @@ public final class TerminalText {
             return boundary(boundary(floor) == safe ? floor : floor + 1);
         }
 
+        /** Returns false for offsets outside the original text. */
         public boolean isBoundary(int offset) {
-            int safe = clampOffset(offset);
-            return boundary(floorBoundaryIndex(safe)) == safe;
+            return offset >= 0 && offset <= text.length()
+                && boundary(floorBoundaryIndex(offset)) == offset;
         }
 
         public int visualColumnAt(int offset) {
@@ -187,11 +224,12 @@ public final class TerminalText {
         }
 
         public int storageWeight() {
+            if (index != null) return index.weight();
             if (sparse != null) {
-                return (int) Math.max(1, Math.min(Integer.MAX_VALUE, 4L * sparse.indices.length));
+                return (int) Math.max(1, Math.min(Integer.MAX_VALUE, 4L * sparse.indices.length + tabs.length));
             }
-            return simpleAscii ? visualColumns == null ? 1 : visualColumns.length
-                : boundaries.length + visualColumns.length + widths.length + whitespace.length;
+            return (simpleAscii ? visualColumns == null ? 1 : visualColumns.length
+                : boundaries.length + visualColumns.length + widths.length + whitespace.length) + tabs.length;
         }
 
         public int offsetForVisualColumn(int targetVisualColumn, Bias bias) {
@@ -200,7 +238,16 @@ public final class TerminalText {
                 return text.length();
             }
             int left;
-            if (sparse != null) {
+            if (index != null) {
+                int low = 0;
+                int high = graphemeCount;
+                while (low < high) {
+                    int middle = (low + high + 1) >>> 1;
+                    if (index.column(middle) <= target) low = middle;
+                    else high = middle - 1;
+                }
+                left = low;
+            } else if (sparse != null) {
                 left = sparse.floorIndex(target, sparse.columns);
             } else if (visualColumns == null) {
                 return target;
@@ -222,10 +269,12 @@ public final class TerminalText {
         }
 
         private int boundary(int index) {
-            return simpleAscii ? index : sparse == null ? boundaries[index] : sparse.positionAt(index, sparse.offsets);
+            return this.index != null ? this.index.boundary(index)
+                : simpleAscii ? index : sparse == null ? boundaries[index] : sparse.positionAt(index, sparse.offsets);
         }
 
         private int floorBoundaryIndex(int safeOffset) {
+            if (index != null) return index.floor(safeOffset);
             if (simpleAscii) {
                 return safeOffset;
             }
@@ -244,6 +293,84 @@ public final class TerminalText {
             if (index < 0 || index >= graphemeCount) {
                 throw new IndexOutOfBoundsException("grapheme index: " + index);
             }
+        }
+
+        private Metrics(CharSequence text, int tabWidth, MetricIndex index) {
+            this.text = text;
+            this.tabWidth = tabWidth;
+            this.index = index;
+            noWhitespace = index.noWhitespace();
+            graphemeCount = index.count();
+            simpleAscii = false;
+            boundaries = visualColumns = null;
+            widths = null;
+            whitespace = null;
+            sparse = null;
+            tabs = EMPTY_TABS;
+        }
+
+        /** Prepares local grapheme changes and shares the unchanged metric prefix and suffix. */
+        public Metrics updated(CharSequence next, int start, int removed, int inserted) {
+            if (next == null || start < 0 || removed < 0 || inserted < 0
+                || (long) start + removed > text.length()
+                || (long) text.length() - removed + inserted != next.length()) {
+                throw new IllegalArgumentException("Invalid immutable text replacement");
+            }
+            int restart = floorBoundary(start);
+            if (restart > 0) restart = previousBoundary(restart);
+            int end = restart;
+            int delta = inserted - removed;
+            GraphemeCursor cursor = new GraphemeCursor(next, restart);
+            while (end < start + inserted || end - delta < start + removed || !isBoundary(end - delta)) {
+                if (!cursor.advance()) break;
+                end = cursor.end();
+            }
+            MetricIndex source = metricIndex();
+            MetricIndex changed = metrics(next.subSequence(restart, end), tabWidth).metricIndex();
+            return new Metrics(next, tabWidth, MetricIndex.join(source.slice(0, floorBoundaryIndex(restart)),
+                changed, source.slice(floorBoundaryIndex(end - delta), graphemeCount)));
+        }
+
+        private MetricIndex metricIndex() {
+            return index != null ? index : MetricIndex.of(new MetricData(graphemeCount, simpleAscii,
+                boundaries, visualColumns, widths, whitespace, sparse, tabs, noWhitespace), tabWidth);
+        }
+    }
+
+    private record MetricData(int count, boolean ascii, int[] boundaries, int[] columns, byte[] widths,
+        boolean[] blanks, SparseIndex sparse, int[] tabs, boolean noWhitespace) implements MetricIndex.Data {
+        @Override public int boundary(int index) {
+            return ascii ? index : sparse == null ? boundaries[index] : sparse.positionAt(index, sparse.offsets);
+        }
+        @Override public int floor(int offset) {
+            if (ascii) return offset;
+            if (sparse != null) return sparse.floorIndex(offset, sparse.offsets);
+            int found = Arrays.binarySearch(boundaries, offset);
+            return found >= 0 ? found : Math.max(0, -found - 2);
+        }
+        @Override public int column(int index) {
+            return sparse != null ? sparse.positionAt(index, sparse.columns) : columns == null ? index : columns[index];
+        }
+        @Override public int firstTab(int from, int to) {
+            int found = Arrays.binarySearch(tabs, from);
+            int position = found >= 0 ? found : -found - 1;
+            return position < tabs.length && tabs[position] < to ? tabs[position] : -1;
+        }
+        @Override public int width(int index) {
+            if (Arrays.binarySearch(tabs, index) >= 0) return 0;
+            return ascii ? 1 : sparse == null ? widths[index] : sparse.width(index);
+        }
+        @Override public boolean whitespace(int index) {
+            if (ascii) return false;
+            if (sparse == null) return blanks[index];
+            int found = Arrays.binarySearch(sparse.indices, index + 1);
+            return found >= 0 && (sparse.attributes[found] & SparseIndex.WHITESPACE) != 0;
+        }
+        @Override public int weight() {
+            long slots = sparse != null ? 4L * sparse.indices.length
+                : ascii ? columns == null ? 1 : columns.length
+                : (long) boundaries.length + columns.length + widths.length + blanks.length;
+            return (int) Math.max(1, Math.min(Integer.MAX_VALUE, slots + tabs.length));
         }
     }
 
@@ -294,18 +421,18 @@ public final class TerminalText {
             return found < 0 ? 1 : attributes[found] & 3;
         }
 
-        private boolean isWhitespace(int index, String text) {
+        private boolean isWhitespace(int index, CharSequence text) {
             int found = Arrays.binarySearch(indices, index + 1);
             return found < 0 ? Character.isWhitespace(text.charAt(positionAt(index, offsets)))
                 : (attributes[found] & WHITESPACE) != 0;
         }
     }
 
-    private record MetricCounts(int graphemes, int exceptions) {}
+    private record MetricCounts(int graphemes, int exceptions, int tabs, boolean noWhitespace) {}
 
     /** Allocates the smaller representation once, after a streaming count pass. */
     private static final class MetricsBuilder {
-        private final String text;
+        private final CharSequence text;
         private final int tabWidth;
         private final boolean ascii;
         private final int[] boundaries;
@@ -313,12 +440,17 @@ public final class TerminalText {
         private final byte[] widths;
         private final boolean[] whitespace;
         private final SparseIndex sparse;
+        private final int[] tabs;
+        private final boolean noWhitespace;
         private int exception;
+        private int tabCount;
 
-        private MetricsBuilder(String text, int tabWidth, boolean ascii, MetricCounts counts) {
+        private MetricsBuilder(CharSequence text, int tabWidth, boolean ascii, MetricCounts counts) {
             this.text = text;
             this.tabWidth = tabWidth;
             this.ascii = ascii;
+            tabs = counts.tabs() == 0 ? EMPTY_TABS : new int[counts.tabs()];
+            noWhitespace = counts.noWhitespace();
             long denseBytes = ascii ? 4L * (counts.graphemes() + 1) : 10L * counts.graphemes() + 8;
             if (13L * counts.exceptions() < denseBytes) {
                 sparse = counts.exceptions() == 0 ? SparseIndex.EMPTY : new SparseIndex(counts.exceptions());
@@ -335,7 +467,8 @@ public final class TerminalText {
             }
         }
 
-        private void accept(int index, int end, int column, int width, boolean blank, boolean exceptional) {
+        private void accept(int index, int end, int column, int width, boolean blank, boolean exceptional, boolean tab) {
+            if (tab) tabs[tabCount++] = index - 1;
             if (sparse != null) {
                 if (exceptional) {
                     sparse.indices[exception] = index;
@@ -354,7 +487,7 @@ public final class TerminalText {
         }
 
         private Metrics finish() {
-            return new Metrics(text, tabWidth, ascii, boundaries, columns, widths, whitespace, sparse);
+            return new Metrics(text, tabWidth, ascii, boundaries, columns, widths, whitespace, sparse, tabs, noWhitespace);
         }
     }
 
@@ -364,16 +497,22 @@ public final class TerminalText {
     private static final int DOTTED_CIRCLE = 0x25CC;
     private static final int REPLACEMENT_CHARACTER = 0xFFFD;
     private static final Pattern GRAPHEME_PATTERN = Pattern.compile("\\X");
+    private static final int[] EMPTY_TABS = new int[0];
 
     private TerminalText() {
     }
 
     public static Metrics metrics(String text, int tabWidth) {
-        String value = text == null ? "" : text;
+        return metrics((CharSequence) text, tabWidth);
+    }
+
+    public static Metrics metrics(CharSequence text, int tabWidth) {
+        CharSequence value = text == null ? "" : text;
         int safeTabWidth = Math.max(1, tabWidth);
         boolean ascii = isSimpleAscii(value);
-        if (ascii && value.indexOf('\t') < 0) {
-            return new Metrics(value, safeTabWidth, true, null, null, null, null, null);
+        if (ascii && !containsTab(value)) {
+            return new Metrics(value, safeTabWidth, true, null, null, null, null, null, EMPTY_TABS,
+                !containsWhitespace(value));
         }
         MetricCounts counts = scanMetrics(value, safeTabWidth, null);
         MetricsBuilder builder = new MetricsBuilder(value, safeTabWidth, ascii, counts);
@@ -393,27 +532,32 @@ public final class TerminalText {
         if (ascii && value.indexOf('\t') < 0) return 512;
         MetricCounts counts = scanMetrics(value, Math.max(1, tabWidth), null);
         long denseBytes = ascii ? 4L * (counts.graphemes() + 1L) : 10L * counts.graphemes() + 8;
-        return 512 + Math.min(denseBytes, 13L * counts.exceptions());
+        return 512 + Math.min(denseBytes, 13L * counts.exceptions()) + 4L * counts.tabs();
     }
 
-    private static MetricCounts scanMetrics(String value, int tabWidth, MetricsBuilder builder) {
+    private static MetricCounts scanMetrics(CharSequence value, int tabWidth, MetricsBuilder builder) {
         int count = 0;
         int exceptions = 0;
         int visual = 0;
+        int tabs = 0;
+        boolean noWhitespace = true;
         GraphemeCursor cursor = graphemeCursor(value);
         while (cursor.advance()) {
             int width = cursor.width();
             visual += cursor.isTab() ? tabWidth - visual % tabWidth : Math.max(1, width);
             count++;
+            if (cursor.isTab()) tabs++;
+            boolean blank = cursor.isWhitespace();
+            noWhitespace &= !blank;
             boolean exceptional = cursor.end() != cursor.start() + 1 || width != 1;
             if (exceptional) {
                 exceptions++;
             }
             if (builder != null) {
-                builder.accept(count, cursor.end(), visual, width, cursor.isWhitespace(), exceptional);
+                builder.accept(count, cursor.end(), visual, width, blank, exceptional, cursor.isTab());
             }
         }
-        return new MetricCounts(count, exceptions);
+        return new MetricCounts(count, exceptions, tabs, noWhitespace);
     }
 
     public static List<Grapheme> graphemes(String text) {
@@ -535,13 +679,23 @@ public final class TerminalText {
 
     /** Sanitizes an original grapheme range without copying an oversized payload. */
     public static String sanitizeGrapheme(String text, int start, int end) {
-        Objects.checkFromToIndex(start, end, text.length());
-        return end - start > MAX_DISPLAY_GRAPHEME_LENGTH
-            ? oversizedGrapheme(text, start, end)
-            : sanitizeGrapheme(text.substring(start, end));
+        return sanitizeGrapheme((CharSequence) text, start, end);
     }
 
-    private static String oversizedGrapheme(String text, int start, int end) {
+    /** Sanitizes a source range before materializing its bounded display payload. */
+    public static String sanitizeGrapheme(CharSequence text, int start, int end) {
+        Objects.checkFromToIndex(start, end, text.length());
+        int length = end - start;
+        if (length > MAX_DISPLAY_GRAPHEME_LENGTH) return oversizedGrapheme(text, start, end);
+        if (text instanceof String string) return sanitizeGrapheme(string.substring(start, end));
+        // Taking a rope subSequence may split/copy both storage blocks for
+        // every displayed glyph. Copy only this already bounded payload.
+        char[] payload = new char[length];
+        for (int index = 0; index < length; index++) payload[index] = text.charAt(start + index);
+        return sanitizeGrapheme(new String(payload));
+    }
+
+    private static String oversizedGrapheme(CharSequence text, int start, int end) {
         // A fullwidth question mark preserves a wide cluster's two-cell geometry.
         return graphemeWidth(text, start, end) == 2 ? "\uFF1F" : Character.toString(REPLACEMENT_CHARACTER);
     }
@@ -553,7 +707,7 @@ public final class TerminalText {
         return containsUnsafeControl(text, 0, text.length());
     }
 
-    private static int graphemeWidth(String text, int start, int end) {
+    private static int graphemeWidth(CharSequence text, int start, int end) {
         if (start >= end) {
             return 0;
         }
@@ -568,7 +722,7 @@ public final class TerminalText {
         boolean emojiJoinPending = false;
         boolean visibleBase = false;
         for (int i = start; i < end;) {
-            int codePoint = text.codePointAt(i);
+            int codePoint = codePointAt(text, i);
             if (isRegionalIndicator(codePoint)) {
                 regionalIndicators++;
             }
@@ -607,7 +761,7 @@ public final class TerminalText {
         return Math.min(2, maximum);
     }
 
-    private static boolean isSimpleAscii(String text) {
+    private static boolean isSimpleAscii(CharSequence text) {
         for (int i = 0; i < text.length(); i++) {
             char ch = text.charAt(i);
             if (!isSimpleAsciiChar(ch)) {
@@ -621,9 +775,20 @@ public final class TerminalText {
         return ch <= 0x7F && ch != '\r' && ch != '\n';
     }
 
-    private static boolean containsUnsafeControl(String text, int start, int end) {
+    private static boolean containsTab(CharSequence text) {
+        if (text instanceof String string) return string.indexOf('\t') >= 0;
+        for (int index = 0; index < text.length(); index++) if (text.charAt(index) == '\t') return true;
+        return false;
+    }
+
+    private static boolean containsWhitespace(CharSequence text) {
+        for (int index = 0; index < text.length(); index++) if (Character.isWhitespace(text.charAt(index))) return true;
+        return false;
+    }
+
+    private static boolean containsUnsafeControl(CharSequence text, int start, int end) {
         for (int i = start; i < end;) {
-            int codePoint = text.codePointAt(i);
+            int codePoint = codePointAt(text, i);
             if (codePoint <= 0x1F || (codePoint >= 0x7F && codePoint <= 0x9F)) {
                 return true;
             }
@@ -632,7 +797,7 @@ public final class TerminalText {
         return false;
     }
 
-    private static boolean containsUnpairedSurrogate(String text, int start, int end) {
+    private static boolean containsUnpairedSurrogate(CharSequence text, int start, int end) {
         for (int i = start; i < end; i++) {
             char ch = text.charAt(i);
             if (Character.isHighSurrogate(ch)) {
@@ -664,15 +829,19 @@ public final class TerminalText {
             || codePoint >= 0xE0100 && codePoint <= 0xE01EF;
     }
 
-    private static boolean isWhitespaceCluster(String text, int start, int end) {
+    private static boolean isWhitespaceCluster(CharSequence text, int start, int end) {
         for (int i = start; i < end;) {
-            int codePoint = text.codePointAt(i);
+            int codePoint = codePointAt(text, i);
             if (!Character.isWhitespace(codePoint)) {
                 return false;
             }
             i += Character.charCount(codePoint);
         }
         return true;
+    }
+
+    private static int codePointAt(CharSequence text, int index) {
+        return text instanceof String string ? string.codePointAt(index) : Character.codePointAt(text, index);
     }
 
     private static String visibleControl(int codePoint) {

@@ -6,7 +6,8 @@ import java.util.List;
 /**
  * Render-ready visual data for a single visible editor row.
  *
- * @param sourceVisualColumn absolute cell column of the first UTF-16 offset in {@code text}
+ * @param sequence immutable source UTF-16 slice; display payloads may be sanitized without changing these offsets
+ * @param sourceVisualColumn absolute cell column of the first UTF-16 offset in {@code sequence}
  * @param leadingClippedCells cells hidden between that offset and the viewport left edge
  * @param baseSpanCount number of leading spans that do not depend on cursor, search or selection state
  * @param baseStyleKey stable, opaque render-owned identity for the base span layout, or {@code null}
@@ -15,7 +16,7 @@ import java.util.List;
  */
 public record LineVisual(
     String gutter,
-    String text,
+    CharSequence sequence,
     List<StyleSpan> spans,
     GutterDiffMarker gutterDiff,
     int sourceVisualColumn,
@@ -26,7 +27,7 @@ public record LineVisual(
 ) {
     public LineVisual(
         String gutter,
-        String text,
+        CharSequence text,
         List<StyleSpan> spans,
         GutterDiffMarker gutterDiff,
         int sourceVisualColumn,
@@ -38,13 +39,13 @@ public record LineVisual(
             baseSpanCount, baseStyleKey, null);
     }
 
-    public LineVisual(String gutter, String text, List<StyleSpan> spans, GutterDiffMarker gutterDiff) {
+    public LineVisual(String gutter, CharSequence text, List<StyleSpan> spans, GutterDiffMarker gutterDiff) {
         this(gutter, text, spans, gutterDiff, 0, 0, spans == null ? 0 : spans.size(), null);
     }
 
     public LineVisual(
         String gutter,
-        String text,
+        CharSequence text,
         List<StyleSpan> spans,
         GutterDiffMarker gutterDiff,
         int sourceVisualColumn,
@@ -64,7 +65,7 @@ public record LineVisual(
 
     public LineVisual(
         String gutter,
-        String text,
+        CharSequence text,
         List<StyleSpan> spans,
         GutterDiffMarker gutterDiff,
         int sourceVisualColumn,
@@ -88,4 +89,7 @@ public record LineVisual(
         leadingClippedCells = Math.max(0, leadingClippedCells);
         baseSpanCount = Math.max(0, Math.min(baseSpanCount, spans == null ? 0 : spans.size()));
     }
+
+    /** Contiguous compatibility view; renderers consume {@link #sequence()} directly. */
+    public String text() { return sequence == null ? null : sequence.toString(); }
 }

@@ -82,7 +82,14 @@ small service SPI. Neither provider enters the shared engine's runtime closure.
 Local file APIs remain transitional core surfaces and still need extraction
 before a platform-neutral storage/application API is complete.
 
-## Implementation and compatibility (2026-10-15)
+The session owns one canonical `DocumentId`, shared with live render/highlighter
+adapters. Cache identity and resource binding are separate identities. Snapshot
+lines share final immutable block values; UTF-16/line-separator summaries are
+maintained during block edits. Explicit String access may materialize a line.
+Required workspace-edit and history-replay snapshots/results are prepared before
+text/history publication, so a preparation failure aborts the mutation.
+
+## Implementation and compatibility
 
 The core's `EditorDocument` owns its `TextModel`, `EditorDocumentState`,
 `EditorDocumentHistory`, and saved/open diff baselines. `EditorViewState` owns

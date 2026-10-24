@@ -106,9 +106,10 @@ public final class EditorDocumentSession {
             }
         };
         try {
-            boolean changed = engine.applyTextReplacements(replacements);
-            DocumentSnapshot after = publishIfChanged();
-            return new WorkspaceEditResult.Applied(after, changed);
+            WorkspaceEditResult.Applied result = engine.applyTextReplacements(replacements,
+                this::prepareMutationResult);
+            publishedSnapshot = result.snapshot();
+            return result;
         } catch (DocumentEditLimitException tooLarge) {
             return new WorkspaceEditResult.Rejected(
                 WorkspaceEditResult.RejectionReason.EDIT_LIMIT_EXCEEDED, current, List.of());
@@ -118,21 +119,21 @@ public final class EditorDocumentSession {
     /** Undoes exactly one committed session mutation. */
     public boolean undo() {
         requireOwnerThread();
-        boolean undone = engine.undo();
-        if (undone) {
-            publishIfChanged();
-        }
-        return undone;
+        WorkspaceEditResult.Applied result = engine.undo(this::prepareMutationResult);
+        publishedSnapshot = result.snapshot();
+        return result.changed();
     }
 
     /** Redoes exactly one mutation from the same document history as every attached view. */
     public boolean redo() {
         requireOwnerThread();
-        boolean redone = engine.redo();
-        if (redone) {
-            publishIfChanged();
-        }
-        return redone;
+        WorkspaceEditResult.Applied result = engine.redo(this::prepareMutationResult);
+        publishedSnapshot = result.snapshot();
+        return result.changed();
+    }
+
+    private WorkspaceEditResult.Applied prepareMutationResult(boolean changed) {
+        return new WorkspaceEditResult.Applied(changed ? captureSnapshot() : publishedSnapshot, changed);
     }
 
     EditorDocument document() {

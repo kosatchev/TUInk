@@ -86,7 +86,11 @@ public class TextModel {
         private final LineChange[] changesBefore = lineChanges.clone();
         private TextBuffer publication;
 
-        void preparePublication() { publication = staged.preparePublication(); }
+        void preparePublication() {
+            // A whole-document replacement may already own an independent buffer.
+            // Local line commands instead publish the overlay into prepared storage.
+            publication = buffer == staged ? staged.preparePublication() : buffer;
+        }
 
         void publish() {
             staged.publishTo(publication);
@@ -1185,14 +1189,26 @@ public class TextModel {
     public void replaceLines(List<String> lines, DocumentFileMetadata metadata) {
         List<String> replacement = LogicalDocumentLines.copyOfOrEmptyDocument(lines);
         DocumentFileMetadata checkedMetadata = requireCompatibleMetadata(metadata, replacement.size());
-        buffer.clear();
-        buffer.setLine(0, replacement.get(0));
-        for (int i = 1; i < replacement.size(); i++) {
-            buffer.insertLine(i, replacement.get(i));
+        TextBuffer nextBuffer = Objects.requireNonNull(buffer.createEmptySibling(), "buffer.createEmptySibling()");
+        if (nextBuffer == buffer || nextBuffer.lineCount() != 1 || !nextBuffer.getLine(0).isEmpty()) {
+            throw new IllegalArgumentException("createEmptySibling() must return an independent empty buffer");
         }
-        fileMetadata = checkedMetadata;
-        normalizeLineSeparators(1, lineCount() - 2);
-        markContentReplaced();
+        nextBuffer.setLine(0, replacement.get(0));
+        for (int i = 1; i < replacement.size(); i++) {
+            nextBuffer.insertLine(i, replacement.get(i));
+        }
+        TextModel staged = new TextModel(nextBuffer, checkedMetadata);
+        staged.normalizeLineSeparators(1, replacement.size() - 2);
+        LineChange change = new LineChange(0, 1, 1);
+
+        buffer = nextBuffer;
+        fileMetadata = staged.fileMetadata;
+        contentEpoch++;
+        revision++;
+        int slot = (int) (revision % CHANGE_HISTORY_CAPACITY);
+        firstChangedLines[slot] = 0;
+        lineChanges[slot] = change;
+        lastContentReplacementRevision = revision;
     }
 
     private void markChanged(int firstLine) {

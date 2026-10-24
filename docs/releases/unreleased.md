@@ -6,6 +6,11 @@ Changes on the development branch after [v0.16.0](0.16.0.md).
   redirected opening symlink cannot make an ordinary save overwrite another file.
 - Coordinate Unix save locks across bind-mounted aliases of the same directory
   entry while retaining the previous lock for existing canonical paths.
+- Share immutable text blocks in document snapshots and prepare mandatory session
+  results before committing edits or history replay. Render and session consumers
+  use the same document identity.
+- Prepare bulk edits and undo/redo text, history and shared-view positions before
+  publishing their state; failed preparation retains the previous draft.
 - Continue sequential search from accepted matches with a bounded result cache
   and sparse checkpoints, preserving non-overlapping matching rules.
 - Align editing and terminal grapheme boundary checks for offsets outside the

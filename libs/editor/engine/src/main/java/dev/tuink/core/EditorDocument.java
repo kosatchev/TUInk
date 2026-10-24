@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.IntFunction;
 
 /** Owns one mutable document, file state and history. Views attach their own positions and layout. */
 public final class EditorDocument {
@@ -75,33 +76,24 @@ public final class EditorDocument {
 
     /** Other views retain their position; document changes only clamp invalid UTF-16 positions. */
     void changed() {
-        recoveryGeneration++;
-        reflectFileMetadata();
-        views.removeIf(reference -> reference.get() == null);
-        for (WeakReference<EditorState> reference : views) {
-            EditorState view = reference.get();
-            if (view == null) {
-                continue;
-            }
-            Position cursor = clamp(view.getCursor());
-            Position anchor = view.getSelectionAnchor() == null ? null : clamp(view.getSelectionAnchor());
-            if (!cursor.equals(view.getCursor()) || !Objects.equals(anchor, view.getSelectionAnchor())) {
-                view.setCursor(cursor);
-                view.setSelectionAnchor(anchor);
-                view.invalidateNavigation();
-            }
-        }
+        publishChange(prepareChange());
     }
 
     /** Allocates every other view's clamp result while a local command is still isolated. */
     PreparedChange prepareChange() {
+        return prepareChange(model.lineCount(), model::lineText, null);
+    }
+
+    /** Prepares foreign views against unpublished text; the initiating view has its own prepared memento. */
+    PreparedChange prepareChange(int lineCount, IntFunction<? extends CharSequence> lines, EditorState initiatingView) {
         views.removeIf(reference -> reference.get() == null);
         List<ViewChange> changes = new ArrayList<>();
         for (int index = 0; index < views.size(); index++) {
             EditorState view = views.get(index).get();
-            if (view == null) continue;
-            Position cursor = clamp(view.getCursor());
-            Position anchor = view.getSelectionAnchor() == null ? null : clamp(view.getSelectionAnchor());
+            if (view == null || view == initiatingView) continue;
+            Position cursor = clamp(view.getCursor(), lineCount, lines);
+            Position anchor = view.getSelectionAnchor() == null ? null
+                : clamp(view.getSelectionAnchor(), lineCount, lines);
             if (!cursor.equals(view.getCursor()) || !Objects.equals(anchor, view.getSelectionAnchor())) {
                 changes.add(new ViewChange(view, cursor, anchor));
             }
@@ -123,15 +115,15 @@ public final class EditorDocument {
     record PreparedChange(List<ViewChange> views) {}
     private record ViewChange(EditorState view, Position cursor, Position anchor) {}
 
-    private Position clamp(Position position) {
-        Position bounded = model.clamp(position);
-        String text = model.getLine(bounded.line());
-        int column = bounded.col();
+    private static Position clamp(Position position, int lineCount, IntFunction<? extends CharSequence> lines) {
+        int line = Math.min(position.line(), lineCount - 1);
+        CharSequence text = lines.apply(line);
+        int column = Math.min(position.col(), text.length());
         if (column > 0 && column < text.length() && Character.isHighSurrogate(text.charAt(column - 1))
             && Character.isLowSurrogate(text.charAt(column))) {
             column--;
         }
-        return new Position(bounded.line(), column);
+        return new Position(line, column);
     }
 
     static final class Baselines {

@@ -21,6 +21,7 @@ import java.util.Objects;
 import java.util.function.IntFunction;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
+import java.util.function.Function;
 
 /**
  * Editing adapter for one attached view of an {@link EditorDocument}.
@@ -183,16 +184,26 @@ public class EditorEngine {
      * @throws DocumentEditLimitException when the result cannot be built with available memory
      */
     public boolean applyTextReplacements(List<TextReplacement> replacements) {
+        return applyTextReplacements(replacements, Boolean::valueOf);
+    }
+
+    /**
+     * Prepares an internal result against staged text before publishing text/history.
+     * The callback may read staged state but must not mutate or publish it. Its
+     * failure aborts the transaction, including allocation of mandatory snapshots.
+     */
+    public <T> T applyTextReplacements(List<TextReplacement> replacements,
+                                     Function<Boolean, T> prepareResult) {
+        Objects.requireNonNull(prepareResult, "prepareResult");
         List<TextReplacement> canonical = validateTextReplacements(replacements);
         DocumentFileMetadata metadata = model.fileMetadata();
         ReplacementBuilder admission = ReplacementBuilder.counting(model.lineCount());
         if (composeTextReplacements(canonical, admission, metadata) == null) {
-            return false;
+            return prepareResult.apply(false);
         }
         ReplacementBuilder builder = admission.materializer();
         Position cursor = composeTextReplacements(canonical, builder, metadata);
-        applyBuiltReplacement(builder, metadata, cursor);
-        return true;
+        return applyBuiltReplacement(builder, metadata, cursor, prepareResult);
     }
 
     private Position composeTextReplacements(List<TextReplacement> replacements, ReplacementBuilder builder,
@@ -221,15 +232,18 @@ public class EditorEngine {
     }
 
     private void applyBuiltReplacement(ReplacementBuilder builder, DocumentFileMetadata metadata, Position cursor) {
+        applyBuiltReplacement(builder, metadata, cursor, changed -> null);
+    }
+
+    private <T> T applyBuiltReplacement(ReplacementBuilder builder, DocumentFileMetadata metadata, Position cursor,
+                                       Function<Boolean, T> prepareResult) {
         EditorViewMemento after = editedView(new EditorViewMemento(state.viewId(), cursor, state.viewport(), null),
             builder.lines::get);
-        state.invalidateNavigation();
-        breakCoalescing();
-        applyEdit(EditKind.NONE, () -> {
+        return commitSnapshotEdit(() -> {
             model.replaceLines(builder.lines, metadata.withLineSeparators(builder.separators));
             state.setCursor(after.cursor());
             state.clearSelection();
-        });
+        }, prepareResult);
     }
 
     private void appendOriginalRange(
@@ -1068,6 +1082,7 @@ public class EditorEngine {
             .requireLineReplacements(copiedUnits, nonBlankCount, longestLine);
 
         TextModel.PreparedLineReplacements prepared;
+        EditorDocument.PreparedChange views;
         ViewState before = captureViewState();
         ViewState after;
         Deque<HistoryEntry> nextUndo;
@@ -1094,7 +1109,7 @@ public class EditorEngine {
             EditorViewMemento afterView = new EditorViewMemento(state.viewId(),
                 transformPosition(cursorBefore, positionEdits), before.view().viewport(),
                 anchorBefore == null ? null : transformPosition(anchorBefore, positionEdits));
-            after = new ViewState(before.document(), editedView(afterView, prepared.buffer()::getLine));
+            after = new ViewState(before.document(), editedView(afterView, prepared.buffer()::lineText));
             OperationHistoryEntry entry = new OperationHistoryEntry(EditKind.NONE, before, after,
                 prepared.operations(), history.currentDocumentStateId, afterStateId);
             nextUndo = new ArrayDeque<>(history.undoStack);
@@ -1102,6 +1117,7 @@ public class EditorEngine {
             result = new LineCommentResult(
                 uncomment ? LineCommentAction.UNCOMMENTED : LineCommentAction.COMMENTED, nonBlankCount
             );
+            views = document.prepareChange(prepared.buffer().lineCount(), prepared.buffer()::lineText, state);
         } catch (OutOfMemoryError exhausted) {
             // The active buffer, view and history have not been touched.
             throw new DocumentEditLimitException();
@@ -1120,7 +1136,7 @@ public class EditorEngine {
         history.lastEditCursorAfter = after.cursor();
         history.lastEditViewId = state.viewId();
         invalidateGutterDiff();
-        document.changed();
+        document.publishChange(views);
         return result;
     }
 
@@ -1253,29 +1269,20 @@ public class EditorEngine {
     }
 
     public boolean undo() {
-        state.invalidateNavigation();
-        if (history.undoStack.isEmpty()) {
-            return false;
-        }
-        breakCoalescing();
-        HistoryEntry previous = history.undoStack.pop();
-        previous.undo(this);
-        pushWithLimit(history.redoStack, previous);
-        updateDirtyFromSavepoint();
-        return true;
+        return undo(Boolean::valueOf);
+    }
+
+    /** Internal session result preparation has the same transaction boundary as text replay. */
+    public <T> T undo(Function<Boolean, T> prepareResult) {
+        return replayHistory(true, Objects.requireNonNull(prepareResult, "prepareResult"));
     }
 
     public boolean redo() {
-        state.invalidateNavigation();
-        if (history.redoStack.isEmpty()) {
-            return false;
-        }
-        breakCoalescing();
-        HistoryEntry next = history.redoStack.pop();
-        next.redo(this);
-        pushWithLimit(history.undoStack, next);
-        updateDirtyFromSavepoint();
-        return true;
+        return redo(Boolean::valueOf);
+    }
+
+    public <T> T redo(Function<Boolean, T> prepareResult) {
+        return replayHistory(false, Objects.requireNonNull(prepareResult, "prepareResult"));
     }
 
     public boolean findNext(String query) {
@@ -1749,33 +1756,95 @@ public class EditorEngine {
         return autoListEnabled;
     }
 
-    private void applyEdit(EditKind kind, Runnable editOperation) {
-        long beforeStateId = history.currentDocumentStateId;
-        Snapshot before = captureSnapshot();
-        editOperation.run();
-        Snapshot after = captureSnapshot();
-        if (after.equals(before)) {
-            return;
-        }
-        long afterStateId = nextDocumentStateId();
-        history.currentDocumentStateId = afterStateId;
-        long now = System.nanoTime();
-        boolean merged = shouldCoalesce(kind, before.cursor(), before.selectionAnchor(), now)
-            && tryMergeSnapshotEntry(kind, after, afterStateId);
-        if (!merged) {
-            pushWithLimit(
-                history.undoStack,
-                new SnapshotHistoryEntry(kind, before, after, beforeStateId, afterStateId)
-            );
-        }
-        history.redoStack.clear();
-        updateDirtyFromSavepoint();
-        history.lastEditKind = kind;
-        history.lastEditAtNanos = now;
-        history.lastEditCursorAfter = after.cursor();
-        history.lastEditViewId = state.viewId();
-        gutterDiff.gutterDiffComputedRevision = Long.MIN_VALUE;
+    private void commitSnapshotEdit(Runnable editOperation) {
+        commitSnapshotEdit(editOperation, changed -> null);
     }
+
+    private <T> T commitSnapshotEdit(Runnable editOperation, Function<Boolean, T> prepareResult) {
+        return prepareAndCommitDocumentEdit(() -> {
+            Snapshot before = captureSnapshot();
+            editOperation.run();
+            Snapshot after = captureSnapshot();
+            if (after.equals(before)) return null;
+            long afterStateId = history.nextDocumentStateId + 1;
+            Deque<HistoryEntry> undo = copyHistory(history.undoStack);
+            pushWithLimit(undo, new SnapshotHistoryEntry(before, after,
+                history.currentDocumentStateId, afterStateId));
+            return new PreparedDocumentHistory(undo, new ArrayDeque<>(), afterStateId, afterStateId);
+        }, prepareResult);
+    }
+
+    private <T> T replayHistory(boolean undoing, Function<Boolean, T> prepareResult) {
+        HistoryEntry entry = (undoing ? history.undoStack : history.redoStack).peek();
+        if (entry == null) {
+            T result;
+            try {
+                result = prepareResult.apply(false);
+            } catch (OutOfMemoryError exhausted) {
+                throw new DocumentEditLimitException();
+            }
+            state.invalidateNavigation();
+            return result;
+        }
+        return prepareAndCommitDocumentEdit(() -> {
+            long stateId = undoing ? entry.undo(this) : entry.redo(this);
+            Deque<HistoryEntry> undo = copyHistory(history.undoStack);
+            Deque<HistoryEntry> redo = copyHistory(history.redoStack);
+            (undoing ? undo : redo).pop();
+            pushWithLimit(undoing ? redo : undo, entry);
+            return new PreparedDocumentHistory(undo, redo, stateId, history.nextDocumentStateId);
+        }, prepareResult);
+    }
+
+    private static Deque<HistoryEntry> copyHistory(Deque<HistoryEntry> source) {
+        Deque<HistoryEntry> copy = new ArrayDeque<>(MAX_HISTORY + 1);
+        copy.addAll(source);
+        return copy;
+    }
+
+    /** Isolates bulk edits and history replay until text, stacks and all attached views are ready. */
+    private <T> T prepareAndCommitDocumentEdit(Supplier<PreparedDocumentHistory> preparation,
+                                              Function<Boolean, T> prepareResult) {
+        EditorViewMemento before = state.viewMemento();
+        long navigationBefore = state.navigationRevision();
+        TextModel.LocalEdit edit = null;
+        boolean published = false;
+        try {
+            edit = model.beginLocalEdit();
+            PreparedDocumentHistory prepared = preparation.get();
+            if (prepared == null) return prepareResult.apply(false);
+            edit.preparePublication();
+            EditorDocument.PreparedChange views = document.prepareChange();
+            T result = prepareResult.apply(true);
+            edit.publish();
+            published = true;
+            history.undoStack = prepared.undo();
+            history.redoStack = prepared.redo();
+            history.currentDocumentStateId = prepared.stateId();
+            history.nextDocumentStateId = prepared.nextStateId();
+            state.setDirty(history.savedDocumentStateId < 0L
+                || prepared.stateId() != history.savedDocumentStateId);
+            state.invalidateNavigation();
+            breakCoalescing();
+            invalidateGutterDiff();
+            document.publishChange(views);
+            return result;
+        } catch (OutOfMemoryError exhausted) {
+            if (published) throw exhausted;
+            throw new DocumentEditLimitException();
+        } finally {
+            if (!published) {
+                if (edit != null) edit.abort();
+                state.restoreEditState(before, navigationBefore);
+                cachedGraphemes = null;
+                indentationContext.reset();
+                markdownContext.reset();
+            }
+        }
+    }
+
+    private record PreparedDocumentHistory(Deque<HistoryEntry> undo, Deque<HistoryEntry> redo,
+        long stateId, long nextStateId) {}
 
     /** Runs typing assists against a local overlay, then publishes prepared text, history and views. */
     private <T> T keyboardEdit(Supplier<T> action) {
@@ -1857,7 +1926,6 @@ public class EditorEngine {
         if (ops == null || ops.isEmpty()) {
             return;
         }
-        long beforeStateId = history.currentDocumentStateId;
         ViewState after = captureViewState();
         for (ReplacementDelta delta : ops) {
             if (delta.operation().deletedText().equals(delta.operation().insertedText())) continue;
@@ -1869,40 +1937,15 @@ public class EditorEngine {
             }
             break;
         }
-        if (keyboardCommand) {
-            keyboardHistory = prepareKeyboardHistory(kind, before, after, ops);
-            return;
-        }
-        long afterStateId = nextDocumentStateId();
-        history.currentDocumentStateId = afterStateId;
-        long now = System.nanoTime();
-        boolean merged = shouldCoalesce(kind, before.cursor(), before.selectionAnchor(), now)
-            && tryMergeOperationEntry(kind, after, ops, afterStateId);
-        if (!merged) {
-            pushWithLimit(
-                history.undoStack,
-                new OperationHistoryEntry(
-                    kind,
-                    before,
-                    after,
-                    ops,
-                    beforeStateId,
-                    afterStateId
-                )
-            );
-        }
-        history.redoStack.clear();
-        updateDirtyFromSavepoint();
-        history.lastEditKind = kind;
-        history.lastEditAtNanos = now;
-        history.lastEditCursorAfter = after.cursor();
-        history.lastEditViewId = state.viewId();
+        if (!keyboardCommand) throw new IllegalStateException("Operation edits require an isolated command");
+        keyboardHistory = prepareKeyboardHistory(kind, before, after, ops);
     }
 
     /** Prepares the document, compact undo and view before exposing any part of a local replacement. */
     private void commitPreparedReplacement(Position start, Position end, ReplacementText replacement,
                                            Position anchorAfter, ViewState before) {
         TextModel.PreparedReplacement prepared;
+        EditorDocument.PreparedChange views;
         ViewState after;
         Deque<HistoryEntry> nextUndo;
         long afterStateId = history.nextDocumentStateId + 1;
@@ -1915,6 +1958,8 @@ public class EditorEngine {
                 List.of(prepared.delta()), history.currentDocumentStateId, afterStateId);
             nextUndo = new ArrayDeque<>(history.undoStack);
             pushWithLimit(nextUndo, entry);
+            int lineCount = prepared.buffer() == null ? model.lineCount() : prepared.buffer().lineCount();
+            views = document.prepareChange(lineCount, prepared::resultingLine, state);
         } catch (OutOfMemoryError exhausted) {
             // Preparation only owns temporary data. The active model and history
             // still describe the complete pre-command document.
@@ -1934,30 +1979,7 @@ public class EditorEngine {
         history.lastEditCursorAfter = after.cursor();
         history.lastEditViewId = state.viewId();
         invalidateGutterDiff();
-        document.changed();
-    }
-
-    private boolean tryMergeSnapshotEntry(EditKind kind, Snapshot after, long afterStateId) {
-        HistoryEntry top = history.undoStack.peek();
-        if (!(top instanceof SnapshotHistoryEntry entry) || entry.kind() != kind) {
-            return false;
-        }
-        entry.setAfter(after, afterStateId);
-        return true;
-    }
-
-    private boolean tryMergeOperationEntry(
-        EditKind kind,
-        ViewState after,
-        List<ReplacementDelta> ops,
-        long afterStateId
-    ) {
-        HistoryEntry top = history.undoStack.peek();
-        if (!(top instanceof OperationHistoryEntry entry) || entry.kind() != kind) {
-            return false;
-        }
-        entry.append(ops, after, afterStateId);
-        return true;
+        document.publishChange(views);
     }
 
     private Position applyReplaceAndTrack(
@@ -2317,7 +2339,6 @@ public class EditorEngine {
     private void restoreSnapshot(Snapshot snapshot) {
         model.replaceLines(snapshot.lines(), snapshot.fileMetadata());
         restoreViewState(new ViewState(DocumentPreferences.from(snapshot.fileMetadata()), snapshot.view()));
-        gutterDiff.gutterDiffComputedRevision = Long.MIN_VALUE;
     }
 
     private static <T> void pushWithLimit(Deque<T> stack, T entry) {
@@ -2327,15 +2348,7 @@ public class EditorEngine {
         }
     }
 
-    private record Snapshot(List<String> lines, DocumentFileMetadata fileMetadata, EditorViewMemento view) {
-        Position cursor() {
-            return view.cursor();
-        }
-
-        Position selectionAnchor() {
-            return view.selectionAnchor();
-        }
-    }
+    private record Snapshot(List<String> lines, DocumentFileMetadata fileMetadata, EditorViewMemento view) {}
 
     private record DocumentPreferences(Charset charset, BomKind bomKind, String defaultLineSeparator) {
         static DocumentPreferences from(DocumentFileMetadata metadata) {
@@ -2354,51 +2367,39 @@ public class EditorEngine {
     }
 
     interface HistoryEntry {
-        void undo(EditorEngine engine);
+        long undo(EditorEngine engine);
 
-        void redo(EditorEngine engine);
+        long redo(EditorEngine engine);
     }
 
     private static final class SnapshotHistoryEntry implements HistoryEntry {
-        private final EditKind kind;
         private final Snapshot before;
-        private Snapshot after;
+        private final Snapshot after;
         private final long beforeStateId;
-        private long afterStateId;
+        private final long afterStateId;
 
         private SnapshotHistoryEntry(
-            EditKind kind,
             Snapshot before,
             Snapshot after,
             long beforeStateId,
             long afterStateId
         ) {
-            this.kind = kind;
             this.before = before;
             this.after = after;
             this.beforeStateId = beforeStateId;
             this.afterStateId = afterStateId;
         }
 
-        EditKind kind() {
-            return kind;
-        }
-
-        void setAfter(Snapshot after, long nextAfterStateId) {
-            this.after = after;
-            this.afterStateId = nextAfterStateId;
-        }
-
         @Override
-        public void undo(EditorEngine engine) {
+        public long undo(EditorEngine engine) {
             engine.restoreSnapshot(before);
-            engine.history.currentDocumentStateId = beforeStateId;
+            return beforeStateId;
         }
 
         @Override
-        public void redo(EditorEngine engine) {
+        public long redo(EditorEngine engine) {
             engine.restoreSnapshot(after);
-            engine.history.currentDocumentStateId = afterStateId;
+            return afterStateId;
         }
     }
 
@@ -2445,26 +2446,25 @@ public class EditorEngine {
         }
 
         @Override
-        public void undo(EditorEngine engine) {
+        public long undo(EditorEngine engine) {
             for (int i = ops.size() - 1; i >= 0; i--) {
                 replay(engine, ops.get(i).inverse());
             }
             engine.restoreViewState(beforeView);
-            engine.history.currentDocumentStateId = beforeStateId;
+            return beforeStateId;
         }
 
         @Override
-        public void redo(EditorEngine engine) {
+        public long redo(EditorEngine engine) {
             for (ReplacementDelta delta : ops) {
                 replay(engine, delta);
             }
             engine.restoreViewState(afterView);
-            engine.history.currentDocumentStateId = afterStateId;
+            return afterStateId;
         }
 
         private void replay(EditorEngine engine, ReplacementDelta delta) {
             engine.model.replayReplacement(delta);
-            engine.invalidateGutterDiff();
         }
     }
 

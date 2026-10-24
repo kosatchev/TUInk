@@ -9,9 +9,9 @@ import java.util.Objects;
  * An atomic, revision-guarded set of edits for one document.
  *
  * <p>Edits are canonicalized in ascending range order and must not overlap.
- * An applier validates every range first, then applies the list in reverse
- * order so earlier UTF-16 offsets remain stable. Either all edits commit or
- * none do.</p>
+ * An applier validates every range against the original document, prepares
+ * the complete result, then publishes it as one change. Coordinates always
+ * refer to the original revision. Either all edits commit or none do.</p>
  */
 public record WorkspaceEdit(DocumentId documentId, long expectedRevision, List<TextEdit> edits) {
     private static final Comparator<TextEdit> RANGE_ORDER = Comparator

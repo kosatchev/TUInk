@@ -52,7 +52,8 @@ Text coordinates are zero-based `(line, UTF-16 offset)` pairs. Ranges are
 half-open. A `WorkspaceEdit` targets one document revision, is canonicalized in
 ascending range order, and rejects overlaps and ambiguous shared insertion
 points. The host validates all ranges and surrogate boundaries before mutation;
-application is atomic and proceeds in reverse range order.
+the complete result is composed in ascending range order using original-document
+coordinates and published atomically.
 
 Mutable document state is owned by an `EditorDocumentSession` bound to its
 creating thread. Background consumers receive only immutable snapshots. A

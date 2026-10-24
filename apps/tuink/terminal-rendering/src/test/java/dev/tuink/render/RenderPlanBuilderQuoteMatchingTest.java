@@ -122,7 +122,7 @@ class RenderPlanBuilderQuoteMatchingTest {
     }
 
     private static RenderPlanBuilder builder(TextModel model) {
-        RenderPlanBuilder builder = new RenderPlanBuilder(line -> List.of(), new TerminalEditorTextLayout(model));
+        RenderPlanBuilder builder = RenderPlanBuilder.standalone(line -> List.of(), new TerminalEditorTextLayout(model));
         builder.setSyntaxHighlightingEnabled(false);
         builder.setRainbowBracketsEnabled(false);
         builder.setCommentSyntaxProfile(CommentSyntaxProfile.GENERIC);

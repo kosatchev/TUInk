@@ -5,11 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
-import dev.tuink.render.Color;
-import dev.tuink.render.ContextualLineHighlighter;
-import dev.tuink.render.LineHighlighter;
-import dev.tuink.render.Style;
-import dev.tuink.render.StyleSpan;
+import dev.tuink.editor.highlight.ContextualSyntaxHighlighter;
+import dev.tuink.editor.highlight.SyntaxHighlighter;
+import dev.tuink.editor.highlight.SemanticStyleKey;
+import dev.tuink.editor.highlight.TokenSpan;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -17,28 +16,28 @@ import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
 class RegexHighlighterTest {
-    private static final Style KEYWORD = new Style(Color.BRIGHT_BLUE, Color.DEFAULT, true, false);
-    private static final Style TYPE = Style.fg(Color.BRIGHT_MAGENTA);
-    private static final Style NUMBER = Style.fg(Color.BRIGHT_CYAN);
-    private static final Style STRING = Style.fg(Color.BRIGHT_GREEN);
-    private static final Style COMMENT = Style.fg(Color.BRIGHT_BLACK);
-    private static final Style DECORATOR = Style.fg(Color.BRIGHT_YELLOW);
+    private static final SemanticStyleKey KEYWORD = SemanticStyleKey.KEYWORD;
+    private static final SemanticStyleKey TYPE = SemanticStyleKey.TYPE;
+    private static final SemanticStyleKey NUMBER = SemanticStyleKey.NUMBER;
+    private static final SemanticStyleKey STRING = SemanticStyleKey.STRING;
+    private static final SemanticStyleKey COMMENT = SemanticStyleKey.COMMENT;
+    private static final SemanticStyleKey DECORATOR = SemanticStyleKey.DECORATOR;
 
     @Test
     void laterRulesOverrideEarlierRulesAndAdjacentMatchesAreCoalesced() {
-        Style base = Style.fg(Color.RED);
-        Style overlay = new Style(Color.GREEN, Color.DEFAULT, true, false);
+        SemanticStyleKey base = new SemanticStyleKey("test.red");
+        SemanticStyleKey overlay = new SemanticStyleKey("test.green.strong");
         RegexHighlighter highlighter = new RegexHighlighter(List.of(
             new RegexRule(Pattern.compile("[a-z]"), base),
             new RegexRule(Pattern.compile("bc"), overlay),
-            new RegexRule(Pattern.compile("(?=d)"), Style.fg(Color.BLUE))
+            new RegexRule(Pattern.compile("(?=d)"), new SemanticStyleKey("test.blue"))
         ));
 
         assertEquals(
             List.of(
-                new StyleSpan(0, 1, base),
-                new StyleSpan(1, 3, overlay),
-                new StyleSpan(3, 5, base)
+                new TokenSpan(0, 1, base),
+                new TokenSpan(1, 3, overlay),
+                new TokenSpan(3, 5, base)
             ),
             highlighter.highlight("abcde!")
         );
@@ -46,15 +45,15 @@ class RegexHighlighterTest {
 
     @Test
     void constructorSnapshotsTheRuleList() {
-        Style initial = Style.fg(Color.RED);
+        SemanticStyleKey initial = new SemanticStyleKey("test.red");
         List<RegexRule> rules = new ArrayList<>();
         rules.add(new RegexRule(Pattern.compile("value"), initial));
         RegexHighlighter highlighter = new RegexHighlighter(rules);
 
         rules.clear();
-        rules.add(new RegexRule(Pattern.compile("value"), Style.fg(Color.BLUE)));
+        rules.add(new RegexRule(Pattern.compile("value"), new SemanticStyleKey("test.blue")));
 
-        assertEquals(List.of(new StyleSpan(0, 5, initial)), highlighter.highlight("value"));
+        assertEquals(List.of(new TokenSpan(0, 5, initial)), highlighter.highlight("value"));
     }
 
     @Test
@@ -78,7 +77,7 @@ class RegexHighlighterTest {
                 span(line, "public", KEYWORD),
                 span(line, "int", TYPE),
                 span(line, "42", NUMBER),
-                new StyleSpan(commentStart, line.length(), COMMENT)
+                new TokenSpan(commentStart, line.length(), COMMENT)
             ),
             RegexHighlighter.forJava().highlight(line)
         );
@@ -87,10 +86,10 @@ class RegexHighlighterTest {
     @Test
     void cStyleCommentsInsideQuotedStringsDoNotConsumeFollowingCode() {
         String line = "\"https://example.invalid/* path */\"; 7; // actual comment";
-        List<StyleSpan> expected = List.of(
-            new StyleSpan(0, line.indexOf(';'), STRING),
+        List<TokenSpan> expected = List.of(
+            new TokenSpan(0, line.indexOf(';'), STRING),
             span(line, "7", NUMBER),
-            new StyleSpan(line.lastIndexOf("//"), line.length(), COMMENT)
+            new TokenSpan(line.lastIndexOf("//"), line.length(), COMMENT)
         );
 
         for (String fileName : List.of(
@@ -107,12 +106,12 @@ class RegexHighlighterTest {
 
         assertEquals(
             List.of(
-                new StyleSpan(0, line.indexOf(';'), STRING),
+                new TokenSpan(0, line.indexOf(';'), STRING),
                 span(line, "'/'", STRING),
                 span(line, "'\\''", STRING),
                 span(line, "return", KEYWORD),
                 span(line, "7", NUMBER),
-                new StyleSpan(line.lastIndexOf("//"), line.length(), COMMENT)
+                new TokenSpan(line.lastIndexOf("//"), line.length(), COMMENT)
             ),
             RegexHighlighter.forJava().highlight(line)
         );
@@ -127,10 +126,10 @@ class RegexHighlighterTest {
 
         assertEquals(
             List.of(
-                new StyleSpan(0, firstEnd, COMMENT),
+                new TokenSpan(0, firstEnd, COMMENT),
                 span(line, "int", TYPE),
                 span(line, "7", NUMBER),
-                new StyleSpan(secondStart, secondEnd, COMMENT),
+                new TokenSpan(secondStart, secondEnd, COMMENT),
                 span(line, "return", KEYWORD)
             ),
             RegexHighlighter.forJava().highlight(line)
@@ -146,27 +145,27 @@ class RegexHighlighterTest {
         assertAll(
             () -> assertEquals(
                 List.of(
-                    new StyleSpan(0, javascript.indexOf(';'), STRING),
+                    new TokenSpan(0, javascript.indexOf(';'), STRING),
                     span(javascript, "return", KEYWORD),
                     span(javascript, "7", NUMBER),
-                    new StyleSpan(javascript.lastIndexOf("//"), javascript.length(), COMMENT)
+                    new TokenSpan(javascript.lastIndexOf("//"), javascript.length(), COMMENT)
                 ),
                 RegexHighlighter.forJavaScript().highlight(javascript)
             ),
             () -> assertEquals(
                 List.of(
-                    new StyleSpan(css.indexOf('"'), css.lastIndexOf('"') + 1, STRING),
+                    new TokenSpan(css.indexOf('"'), css.lastIndexOf('"') + 1, STRING),
                     span(css, "7", NUMBER),
-                    new StyleSpan(css.lastIndexOf("/*"), css.length(), COMMENT)
+                    new TokenSpan(css.lastIndexOf("/*"), css.length(), COMMENT)
                 ),
                 RegexHighlighter.forCssLike().highlight(css)
             ),
             () -> assertEquals(
                 List.of(
-                    new StyleSpan(0, php.indexOf(';'), STRING),
+                    new TokenSpan(0, php.indexOf(';'), STRING),
                     span(php, "return", KEYWORD),
                     span(php, "7", NUMBER),
-                    new StyleSpan(php.lastIndexOf('#'), php.length(), COMMENT)
+                    new TokenSpan(php.lastIndexOf('#'), php.length(), COMMENT)
                 ),
                 RegexHighlighter.forPhp().highlight(php)
             )
@@ -187,7 +186,7 @@ class RegexHighlighterTest {
                     span(line, "'🦀'", STRING),
                     span(line, "return", KEYWORD),
                     span(line, "7", NUMBER),
-                    new StyleSpan(line.indexOf("//"), line.length(), COMMENT)
+                    new TokenSpan(line.indexOf("//"), line.length(), COMMENT)
                 ),
                 RegexHighlighter.forRust().highlight(line)
             ),
@@ -196,7 +195,7 @@ class RegexHighlighterTest {
                     span(escaped, "'\\''", STRING),
                     span(escaped, "'\\u{1F980}'", STRING),
                     span(escaped, "'\\x41'", STRING),
-                    new StyleSpan(escaped.indexOf("//"), escaped.length(), COMMENT)
+                    new TokenSpan(escaped.indexOf("//"), escaped.length(), COMMENT)
                 ),
                 RegexHighlighter.forRust().highlight(escaped)
             )
@@ -213,7 +212,7 @@ class RegexHighlighterTest {
                 List.of(
                     span(python, "@cached", DECORATOR),
                     span(python, "def", KEYWORD),
-                    new StyleSpan(python.indexOf('#'), python.length(), COMMENT)
+                    new TokenSpan(python.indexOf('#'), python.length(), COMMENT)
                 ),
                 RegexHighlighter.forPython().highlight(python)
             ),
@@ -222,7 +221,7 @@ class RegexHighlighterTest {
                     span(sql, "select", KEYWORD),
                     span(sql, "7", NUMBER),
                     span(sql, "FROM", KEYWORD),
-                    new StyleSpan(sql.indexOf("--"), sql.length(), COMMENT)
+                    new TokenSpan(sql.indexOf("--"), sql.length(), COMMENT)
                 ),
                 RegexHighlighter.forSql().highlight(sql)
             )
@@ -232,14 +231,14 @@ class RegexHighlighterTest {
     @Test
     void markupAttributesKeepTheirRangesAndStringAndCommentOverrides() {
         String line = "<ns:item \talpha =\"value\" data-id='tail' ns:attr.name_1\t=7/> <!-- ignored=\"text\" -->";
-        List<StyleSpan> expected = List.of(
+        List<TokenSpan> expected = List.of(
             span(line, "<ns:item", KEYWORD),
             span(line, " \talpha =", TYPE),
             span(line, "\"value\"", STRING),
             span(line, " data-id=", TYPE),
             span(line, "'tail'", STRING),
             span(line, " ns:attr.name_1\t=", TYPE),
-            new StyleSpan(line.indexOf("<!--"), line.length(), COMMENT)
+            new TokenSpan(line.indexOf("<!--"), line.length(), COMMENT)
         );
 
         for (String fileName : List.of("index.html", "settings.xml")) {
@@ -248,7 +247,7 @@ class RegexHighlighterTest {
 
         String colonName = " :name=value";
         assertAll(
-            () -> assertEquals(List.of(new StyleSpan(0, 7, TYPE)), RegexHighlighter.forHtml().highlight(colonName)),
+            () -> assertEquals(List.of(new TokenSpan(0, 7, TYPE)), RegexHighlighter.forHtml().highlight(colonName)),
             () -> assertEquals(List.of(), RegexHighlighter.forXml().highlight(colonName))
         );
     }
@@ -268,12 +267,12 @@ class RegexHighlighterTest {
 
         assertTimeoutPreemptively(Duration.ofSeconds(3), () -> {
             for (String fileName : List.of("index.html", "settings.xml")) {
-                LineHighlighter highlighter = RegexHighlighter.forFileName(fileName);
+                SyntaxHighlighter highlighter = RegexHighlighter.forFileName(fileName);
                 for (String line : unmatched) {
                     assertEquals(List.of(), highlighter.highlight(line), fileName);
                 }
                 assertEquals(
-                    List.of(new StyleSpan(0, assignment.length() - "value".length(), TYPE)),
+                    List.of(new TokenSpan(0, assignment.length() - "value".length(), TYPE)),
                     highlighter.highlight(assignment),
                     fileName
                 );
@@ -284,13 +283,13 @@ class RegexHighlighterTest {
     @Test
     void markdownLinksRetainSimpleDelimiterRangesAndRecoverAfterInvalidCandidates() {
         for (String fileName : List.of("README.md", "notes.markdown")) {
-            LineHighlighter highlighter = RegexHighlighter.forFileName(fileName);
+            SyntaxHighlighter highlighter = RegexHighlighter.forFileName(fileName);
             String line = "[](empty) [empty]() [missing] suffix [first](one) ![画像🦀](図.png) [second](two)";
             assertEquals(
                 List.of(
-                    span(line, "[first](one)", DECORATOR),
-                    span(line, "[画像🦀](図.png)", DECORATOR),
-                    span(line, "[second](two)", DECORATOR)
+                    span(line, "[first](one)", SemanticStyleKey.LINK),
+                    span(line, "[画像🦀](図.png)", SemanticStyleKey.LINK),
+                    span(line, "[second](two)", SemanticStyleKey.LINK)
                 ),
                 highlighter.highlight(line),
                 fileName
@@ -302,9 +301,9 @@ class RegexHighlighterTest {
             () -> assertEquals(List.of(), highlighter.highlight("[unclosed [label] without a destination")),
             () -> assertEquals(List.of(), highlighter.highlight("[label](missing close")),
             () -> assertEquals(List.of(), highlighter.highlight("[escaped\\]suffix](target)")),
-            () -> assertEquals(List.of(new StyleSpan(0, 17, DECORATOR)), highlighter.highlight("[[nested](target)")),
-            () -> assertEquals(List.of(new StyleSpan(0, 18, DECORATOR)), highlighter.highlight("[outer]([inner](u))")),
-            () -> assertEquals(List.of(new StyleSpan(0, 16, DECORATOR)), highlighter.highlight("[a](one)[b](two)"))
+            () -> assertEquals(List.of(new TokenSpan(0, 17, SemanticStyleKey.LINK)), highlighter.highlight("[[nested](target)")),
+            () -> assertEquals(List.of(new TokenSpan(0, 18, SemanticStyleKey.LINK)), highlighter.highlight("[outer]([inner](u))")),
+            () -> assertEquals(List.of(new TokenSpan(0, 16, SemanticStyleKey.LINK)), highlighter.highlight("[a](one)[b](two)"))
         );
     }
 
@@ -315,17 +314,17 @@ class RegexHighlighterTest {
         assertAll(
             () -> assertEquals(
                 List.of(
-                    new StyleSpan(0, 1, STRING),
-                    span(inline, "[code](url)", DECORATOR),
-                    new StyleSpan(12, 13, STRING),
-                    new StyleSpan(14, 16, TYPE),
-                    span(inline, "[bold](target)", DECORATOR),
-                    new StyleSpan(inline.length() - 2, inline.length(), TYPE)
+                    new TokenSpan(0, 1, STRING),
+                    span(inline, "[code](url)", SemanticStyleKey.LINK),
+                    new TokenSpan(12, 13, STRING),
+                    new TokenSpan(14, 16, TYPE),
+                    span(inline, "[bold](target)", SemanticStyleKey.LINK),
+                    new TokenSpan(inline.length() - 2, inline.length(), TYPE)
                 ),
                 RegexHighlighter.forMarkdown().highlight(inline)
             ),
             () -> assertEquals(
-                List.of(new StyleSpan(0, quote.length(), COMMENT)),
+                List.of(new TokenSpan(0, quote.length(), SemanticStyleKey.QUOTE)),
                 RegexHighlighter.forMarkdown().highlight(quote)
             )
         );
@@ -336,17 +335,17 @@ class RegexHighlighterTest {
         String brackets = "[".repeat(80_000);
         String invalidLinks = "[empty]() [missing] ".repeat(4_000);
         assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
-            for (LineHighlighter highlighter : List.of(
+            for (SyntaxHighlighter highlighter : List.of(
                 RegexHighlighter.forMarkdown(), RegexHighlighter.forFileName("README.md")
             )) {
                 assertEquals(List.of(), highlighter.highlight(brackets));
                 assertEquals(List.of(), highlighter.highlight(brackets + "] without a destination"));
                 assertEquals(List.of(), highlighter.highlight("[target](" + brackets));
                 String valid = brackets + "](target)";
-                assertEquals(List.of(new StyleSpan(0, valid.length(), DECORATOR)), highlighter.highlight(valid));
+                assertEquals(List.of(new TokenSpan(0, valid.length(), SemanticStyleKey.LINK)), highlighter.highlight(valid));
                 String afterInvalid = invalidLinks + "[valid](target)";
                 assertEquals(
-                    List.of(new StyleSpan(invalidLinks.length(), afterInvalid.length(), DECORATOR)),
+                    List.of(new TokenSpan(invalidLinks.length(), afterInvalid.length(), SemanticStyleKey.LINK)),
                     highlighter.highlight(afterInvalid)
                 );
             }
@@ -359,34 +358,34 @@ class RegexHighlighterTest {
 
         assertAll(
             () -> assertEquals(
-                List.of(new StyleSpan(0, 6, KEYWORD), new StyleSpan(6, envLine.length(), STRING)),
+                List.of(new TokenSpan(0, 6, KEYWORD), new TokenSpan(6, envLine.length(), STRING)),
                 RegexHighlighter.forFileName(".ENV.local").highlight(envLine)
             ),
             () -> assertEquals(
-                List.of(new StyleSpan(0, 4, KEYWORD)),
+                List.of(new TokenSpan(0, 4, KEYWORD)),
                 RegexHighlighter.forFileName("DOCKERFILE").highlight("FROM base")
             ),
             () -> assertEquals(
-                List.of(new StyleSpan(0, 6, KEYWORD)),
+                List.of(new TokenSpan(0, 6, KEYWORD)),
                 RegexHighlighter.forFileName("Example.JAVA").highlight("public value")
             ),
             () -> assertInstanceOf(
-                ContextualLineHighlighter.class,
+                ContextualSyntaxHighlighter.class,
                 RegexHighlighter.forFileName("README.MD")
             ),
             () -> assertEquals(
-                List.of(new StyleSpan(0, 5, KEYWORD)),
+                List.of(new TokenSpan(0, 5, KEYWORD)),
                 RegexHighlighter.forFileName(null).highlight("class value")
             ),
             () -> assertEquals(
-                List.of(new StyleSpan(0, 5, KEYWORD)),
+                List.of(new TokenSpan(0, 5, KEYWORD)),
                 RegexHighlighter.forFileName("notes.unknown").highlight("class value")
             )
         );
     }
 
-    private static StyleSpan span(String line, String token, Style style) {
+    private static TokenSpan span(String line, String token, SemanticStyleKey style) {
         int start = line.indexOf(token);
-        return new StyleSpan(start, start + token.length(), style);
+        return new TokenSpan(start, start + token.length(), style);
     }
 }

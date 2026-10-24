@@ -55,6 +55,11 @@ public final class EditorDocumentSession {
         return new EditorDocumentSession(documentId, new EditorDocument(model));
     }
 
+    /** Stable logical identity; reading it never captures or publishes document text. */
+    public DocumentId documentId() {
+        return documentId;
+    }
+
     /**
      * On the owner thread, returns and publishes the current document on demand.
      * Unchanged revisions reuse the same immutable snapshot. Background callers receive the

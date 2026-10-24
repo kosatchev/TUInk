@@ -109,7 +109,7 @@ class RenderPlanBuilderLineBreakSelectionTest {
     }
 
     private static RenderPlan build(TextModel model, EditorState state, int cols, boolean wrap, boolean words) {
-        RenderPlanBuilder builder = new RenderPlanBuilder(ignored -> List.of(), new TerminalEditorTextLayout(model));
+        RenderPlanBuilder builder = RenderPlanBuilder.standalone(ignored -> List.of(), new TerminalEditorTextLayout(model));
         builder.setSyntaxHighlightingEnabled(false);
         builder.setBracketMatchingEnabled(false);
         builder.setRainbowBracketsEnabled(false);

@@ -3,12 +3,11 @@ package dev.tuink.highlight.regex;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.tuink.core.CommentSyntaxProfile;
 import dev.tuink.editor.document.DocumentId;
 import dev.tuink.editor.document.DocumentView;
-import dev.tuink.render.ContextualLineHighlighter;
-import dev.tuink.render.HighlightRequest;
-import dev.tuink.render.LineHighlighter;
+import dev.tuink.editor.highlight.ContextualSyntaxHighlighter;
+import dev.tuink.editor.highlight.HighlightRequest;
+import dev.tuink.editor.highlight.SyntaxHighlighter;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -34,8 +33,7 @@ class HighlighterMemoryTest {
 
     private static void runProbe(String mode) throws Exception {
         String classpath = String.join(File.pathSeparator, location(HighlighterMemoryTest.class),
-            location(RegexHighlighter.class), location(HighlightRequest.class), location(DocumentView.class),
-            location(CommentSyntaxProfile.class));
+            location(RegexHighlighter.class), location(HighlightRequest.class), location(DocumentView.class));
         Process process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx64m", "-cp", classpath, MemoryProbe.class.getName(), mode).redirectErrorStream(true).start();
         try {
@@ -65,7 +63,7 @@ class HighlighterMemoryTest {
                         return index % 2 == 0 ? "```" + "x".repeat(1024 * 1024 - 32) + index : "```";
                     }
                 };
-                ContextualLineHighlighter highlighter = (ContextualLineHighlighter) RegexHighlighter.forFileName("notes.md");
+                ContextualSyntaxHighlighter highlighter = (ContextualSyntaxHighlighter) RegexHighlighter.forFileName("notes.md");
                 for (int line = 0; line < generated.lineCount(); line++) {
                     highlighter.highlight(generated, line, generated.line(line));
                 }
@@ -77,7 +75,7 @@ class HighlighterMemoryTest {
                     @Override public String line(int index) { return ""; }
                 };
                 for (String file : List.of("Main.java", "notes.md")) {
-                    ContextualLineHighlighter highlighter = (ContextualLineHighlighter) RegexHighlighter.forFileName(file);
+                    ContextualSyntaxHighlighter highlighter = (ContextualSyntaxHighlighter) RegexHighlighter.forFileName(file);
                     if (!highlighter.highlight(generated, generated.lineCount() - 1, "return 7;",
                         new HighlightRequest(0, 9, 4096, 256, 100_000)).isEmpty()) {
                         throw new AssertionError("Unknown context must remain unstyled");
@@ -87,7 +85,7 @@ class HighlighterMemoryTest {
         }
 
         private static void verifyLine(String text) {
-            for (LineHighlighter highlighter : List.of(RegexHighlighter.forCsv(), RegexHighlighter.forJson())) {
+            for (SyntaxHighlighter highlighter : List.of(RegexHighlighter.forCsv(), RegexHighlighter.forJson())) {
                 if (!highlighter.highlight(text).isEmpty()) throw new AssertionError("Oversized legacy input must be bounded");
                 for (int start : new int[] {0, text.length() / 2, text.length() - 80}) {
                     if (!highlighter.highlight(text, new HighlightRequest(start, start + 80, 65_536, 256, 1_000_000)).isEmpty()) {

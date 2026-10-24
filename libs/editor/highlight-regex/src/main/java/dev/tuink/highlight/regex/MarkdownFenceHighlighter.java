@@ -1,12 +1,14 @@
 package dev.tuink.highlight.regex;
 
 import dev.tuink.editor.document.DocumentView;
-import dev.tuink.render.ContextualLineHighlighter;
-import dev.tuink.render.HighlightRequest;
-import dev.tuink.render.HighlightResult;
-import dev.tuink.render.LineHighlighter;
-import dev.tuink.render.LineLexicalScanner;
-import dev.tuink.render.StyleSpan;
+import dev.tuink.editor.highlight.ContextualSyntaxHighlighter;
+import dev.tuink.editor.highlight.HighlightRequest;
+import dev.tuink.editor.highlight.HighlightResult;
+import dev.tuink.editor.highlight.SyntaxHighlighter;
+import dev.tuink.editor.highlight.LexicalScanner;
+import dev.tuink.editor.highlight.GenericLexicalScanner;
+import dev.tuink.editor.highlight.LexicalConfig;
+import dev.tuink.editor.highlight.TokenSpan;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -16,46 +18,46 @@ import java.util.Objects;
 /**
  * Markdown highlighter that applies language-aware syntax inside fenced code blocks.
  */
-final class MarkdownFenceHighlighter implements ContextualLineHighlighter {
+final class MarkdownFenceHighlighter implements ContextualSyntaxHighlighter {
     static final int MAX_CONTAINER_DEPTH = 1024;
-    private final LineHighlighter markdown = RegexHighlighter.forMarkdown();
-    private final LineHighlighter fallback = RegexHighlighter.withDefaults();
-    private final LineLexicalScanner proseScanner = LineLexicalScanner.markdownProse();
-    private final LineLexicalScanner fallbackScanner = LineLexicalScanner.generic();
-    private final Map<String, LineHighlighter> languageCache = new HashMap<>();
+    private final SyntaxHighlighter markdown = RegexHighlighter.forMarkdown();
+    private final SyntaxHighlighter fallback = RegexHighlighter.withDefaults();
+    private final LexicalScanner proseScanner = new GenericLexicalScanner(LexicalConfig.MARKDOWN);
+    private final LexicalScanner fallbackScanner = new GenericLexicalScanner(LexicalConfig.GENERIC);
+    private final Map<String, SyntaxHighlighter> languageCache = new HashMap<>();
     private final BoundedLineContext<BlockState> contexts = new BoundedLineContext<>(
         BlockState.EMPTY, MarkdownFenceHighlighter::stateWeight, MarkdownFenceHighlighter::scanContext);
 
     @Override
-    public List<StyleSpan> highlight(String line) {
+    public List<TokenSpan> highlight(String line) {
         return highlight(line, RegexHighlighter.legacyRequest(line));
     }
 
     @Override
-    public List<StyleSpan> highlight(String line, HighlightRequest request) {
+    public List<TokenSpan> highlight(String line, HighlightRequest request) {
         return markdown.highlight(line, request);
     }
 
     @Override
-    public LineLexicalScanner lexicalScanner() {
+    public LexicalScanner lexicalScanner() {
         return this::scanLexically;
     }
 
-    private record LexicalState(BlockState block, LineLexicalScanner.State delegateState)
-        implements LineLexicalScanner.State {
+    private record LexicalState(BlockState block, LexicalScanner.State delegateState)
+        implements LexicalScanner.State {
     }
 
-    private LineLexicalScanner.Result scanLexically(
+    private LexicalScanner.Result scanLexically(
         String line,
         int maxCodeUnits,
-        LineLexicalScanner.State previous
+        LexicalScanner.State previous
     ) {
         Objects.requireNonNull(line, "line");
         if (maxCodeUnits < 0) {
             throw new IllegalArgumentException("maxCodeUnits must be non-negative");
         }
-        if (previous == LineLexicalScanner.State.UNKNOWN) {
-            return new LineLexicalScanner.Result(0, previous, List.of(), List.of(), false);
+        if (previous == LexicalScanner.State.UNKNOWN) {
+            return new LexicalScanner.Result(0, previous, List.of(), List.of(), false);
         }
         int limit = Math.min(line.length(), maxCodeUnits);
         String prefix = limit == line.length() ? line : line.substring(0, limit);
@@ -66,43 +68,43 @@ final class MarkdownFenceHighlighter implements ContextualLineHighlighter {
         } catch (ContainerLimitExceeded ignored) {
             // No prose scanner has proven even the prefix yet (ordered list
             // markers can themselves contain parentheses), so expose none.
-            return new LineLexicalScanner.Result(0, LineLexicalScanner.State.UNKNOWN,
+            return new LexicalScanner.Result(0, LexicalScanner.State.UNKNOWN,
                 List.of(), List.of(), false);
         }
         if (boundary.markerLine()) {
             return fenceResult(limit, boundary.after(), limit == line.length());
         }
         Fence fence = boundary.codeFence();
-        LineLexicalScanner scanner = proseScanner;
+        LexicalScanner scanner = proseScanner;
         if (fence != null) {
-            LineHighlighter embedded = embeddedHighlighter(fence.languageTag());
-            scanner = embedded instanceof ContextualLineHighlighter contextual
+            SyntaxHighlighter embedded = embeddedHighlighter(fence.languageTag());
+            scanner = embedded instanceof ContextualSyntaxHighlighter contextual
                 ? contextual.lexicalScanner() : null;
             if (scanner == null) {
                 scanner = fallbackScanner;
             }
         }
-        LineLexicalScanner.State delegateState = state.block().fence() == fence ? state.delegateState() : null;
+        LexicalScanner.State delegateState = state.block().fence() == fence ? state.delegateState() : null;
         // The scanner sees the original line so it can distinguish truncation from a real EOL.
-        LineLexicalScanner.Result result = scanner.scan(line, limit, delegateState);
-        return new LineLexicalScanner.Result(result.scannedCodeUnits(),
+        LexicalScanner.Result result = scanner.scan(line, limit, delegateState);
+        return new LexicalScanner.Result(result.scannedCodeUnits(),
             new LexicalState(boundary.after(), result.endState()), result.excludedRanges(), result.quotes(),
             result.contextKnown() && result.scannedCodeUnits() == line.length());
     }
 
-    private static LineLexicalScanner.Result fenceResult(int limit, BlockState after, boolean contextKnown) {
-        List<LineLexicalScanner.Range> ranges = limit == 0
-            ? List.of() : List.of(new LineLexicalScanner.Range(0, limit));
-        return new LineLexicalScanner.Result(limit, new LexicalState(after, null), ranges, List.of(), contextKnown);
+    private static LexicalScanner.Result fenceResult(int limit, BlockState after, boolean contextKnown) {
+        List<LexicalScanner.Range> ranges = limit == 0
+            ? List.of() : List.of(new LexicalScanner.Range(0, limit));
+        return new LexicalScanner.Result(limit, new LexicalState(after, null), ranges, List.of(), contextKnown);
     }
 
     @Override
-    public List<StyleSpan> highlight(DocumentView document, int lineIndex, String line) {
+    public List<TokenSpan> highlight(DocumentView document, int lineIndex, String line) {
         return highlight(document, lineIndex, line, RegexHighlighter.legacyRequest(line));
     }
 
     @Override
-    public List<StyleSpan> highlight(DocumentView document, int lineIndex, String line, HighlightRequest request) {
+    public List<TokenSpan> highlight(DocumentView document, int lineIndex, String line, HighlightRequest request) {
         return highlightResult(document, lineIndex, line, request).spans();
     }
 
@@ -127,7 +129,7 @@ final class MarkdownFenceHighlighter implements ContextualLineHighlighter {
             HighlightRequest delegated = new HighlightRequest(request.startUtf16(), request.endUtf16(),
                 context.remainingCodeUnits(), request.maxSpans(), work.remaining());
             Fence fence = boundary.codeFence();
-            LineHighlighter highlighter = fence == null ? markdown : embeddedHighlighter(fence.languageTag());
+            SyntaxHighlighter highlighter = fence == null ? markdown : embeddedHighlighter(fence.languageTag());
             if (highlighter instanceof CStyleHighlighter contextual) {
                 return contextual.highlightResult(document, lineIndex, line, fence.firstLine(), delegated,
                     context.advanced());
@@ -156,15 +158,15 @@ final class MarkdownFenceHighlighter implements ContextualLineHighlighter {
         return (int) Math.min(Integer.MAX_VALUE, 1 + container + fence + languageTag);
     }
 
-    private LineHighlighter embeddedHighlighter(String languageTag) {
+    private SyntaxHighlighter embeddedHighlighter(String languageTag) {
         if (languageTag == null || languageTag.isEmpty()) {
             return fallback;
         }
-        LineHighlighter cached = languageCache.get(languageTag);
+        SyntaxHighlighter cached = languageCache.get(languageTag);
         if (cached != null) {
             return cached;
         }
-        LineHighlighter created = createEmbeddedHighlighter(languageTag);
+        SyntaxHighlighter created = createEmbeddedHighlighter(languageTag);
         // Unknown tags can change on every edit; retain only the finite supported set.
         if (created != fallback) {
             languageCache.put(languageTag, created);
@@ -172,7 +174,7 @@ final class MarkdownFenceHighlighter implements ContextualLineHighlighter {
         return created;
     }
 
-    private LineHighlighter createEmbeddedHighlighter(String languageTag) {
+    private SyntaxHighlighter createEmbeddedHighlighter(String languageTag) {
         return switch (languageTag) {
             case "java" -> RegexHighlighter.forJava();
             case "c", "h" -> RegexHighlighter.forC();

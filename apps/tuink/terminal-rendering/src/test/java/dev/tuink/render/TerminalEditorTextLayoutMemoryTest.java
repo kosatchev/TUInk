@@ -80,7 +80,8 @@ class TerminalEditorTextLayoutMemoryTest {
                 output.write("Ā".getBytes(StandardCharsets.UTF_8));
             }
             String classpath = String.join(File.pathSeparator, location(TerminalEditorTextLayoutMemoryTest.class),
-                location(TerminalEditorTextLayout.class), location(TextModel.class), location(TerminalText.class), location(DocumentView.class));
+                location(TerminalEditorTextLayout.class), location(TextModel.class), location(TerminalText.class),
+                location(DocumentView.class));
             Process process = new ProcessBuilder(
                 Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                 "-Xmx" + example[1] + "m", "-cp", classpath, FirstLayoutProbe.class.getName(), file.toString()
@@ -105,7 +106,7 @@ class TerminalEditorTextLayoutMemoryTest {
             model.load(Path.of(args[0]));
             int length = model.getLine(0).length();
             TerminalEditorTextLayout layout = new TerminalEditorTextLayout(model);
-            RenderPlanBuilder builder = new RenderPlanBuilder(line -> java.util.List.of(), layout);
+            RenderPlanBuilder builder = RenderPlanBuilder.standalone(line -> java.util.List.of(), layout);
             builder.setSyntaxHighlightingEnabled(false);
             builder.setBracketMatchingEnabled(false);
             builder.setRainbowBracketsEnabled(false);
@@ -164,7 +165,7 @@ class TerminalEditorTextLayoutMemoryTest {
         public static void main(String[] args) throws Exception {
             TextModel model = new TextModel(new SimpleLineBuffer());
             model.load(Path.of(args[0]));
-            RenderPlanBuilder builder = new RenderPlanBuilder(line -> {
+            RenderPlanBuilder builder = RenderPlanBuilder.standalone(line -> {
                 throw new AssertionError("Oversized input reached a legacy full-line highlighter");
             }, new TerminalEditorTextLayout(model));
             builder.setBracketMatchingEnabled(false);

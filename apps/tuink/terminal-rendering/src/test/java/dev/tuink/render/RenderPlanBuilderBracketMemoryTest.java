@@ -57,7 +57,7 @@ class RenderPlanBuilderBracketMemoryTest {
             TerminalEditorTextLayout layout = new TerminalEditorTextLayout(model);
             for (boolean matching : new boolean[] {true, false}) {
                 for (boolean rainbow : new boolean[] {true, false}) {
-                    RenderPlanBuilder builder = new RenderPlanBuilder(line -> List.of(), layout);
+                    RenderPlanBuilder builder = RenderPlanBuilder.standalone(line -> List.of(), layout);
                     builder.setSyntaxHighlightingEnabled(false);
                     builder.setBracketMatchingEnabled(matching);
                     builder.setRainbowBracketsEnabled(rainbow);

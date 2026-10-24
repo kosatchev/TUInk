@@ -204,7 +204,7 @@ class ViewportControllerTest {
         controller.ensureCursorVisible(engine, 4, 11, true, true, 2);
         var initial = new EditorViewCoordinates(layout, 11, true, true, 2);
         Position anchor = initial.anchor(EditorViewCoordinates.Top.from(state));
-        var builder = new RenderPlanBuilder(line -> List.of(), layout);
+        var builder = RenderPlanBuilder.standalone(line -> List.of(), layout);
         builder.setTabWidth(2);
         builder.setSyntaxHighlightingEnabled(false);
         builder.setBracketMatchingEnabled(false);

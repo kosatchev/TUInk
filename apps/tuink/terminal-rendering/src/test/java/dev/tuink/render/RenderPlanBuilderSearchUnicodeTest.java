@@ -53,7 +53,7 @@ class RenderPlanBuilderSearchUnicodeTest {
     void regularAndCurrentSearchHighlightsUseOriginalUtf16Ranges() {
         TextModel model = model("İx");
         EditorState state = new EditorState();
-        RenderPlanBuilder builder = new RenderPlanBuilder(
+        RenderPlanBuilder builder = RenderPlanBuilder.standalone(
             line -> List.of(),
             new TerminalEditorTextLayout(model)
         );
@@ -89,7 +89,7 @@ class RenderPlanBuilderSearchUnicodeTest {
     }
 
     private static RenderPlanBuilder searchBuilder(TextModel model) {
-        RenderPlanBuilder builder = new RenderPlanBuilder(line -> List.of(), new TerminalEditorTextLayout(model));
+        RenderPlanBuilder builder = RenderPlanBuilder.standalone(line -> List.of(), new TerminalEditorTextLayout(model));
         builder.setSyntaxHighlightingEnabled(false);
         builder.setBracketMatchingEnabled(false);
         builder.setRainbowBracketsEnabled(false);

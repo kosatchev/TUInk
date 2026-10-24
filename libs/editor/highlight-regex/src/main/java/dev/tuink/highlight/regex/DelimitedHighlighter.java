@@ -1,6 +1,6 @@
 package dev.tuink.highlight.regex;
 
-import dev.tuink.render.Style;
+import dev.tuink.editor.highlight.SemanticStyleKey;
 import java.util.Arrays;
 import java.util.List;
 
@@ -10,13 +10,13 @@ final class DelimitedHighlighter extends RegexHighlighter {
     }
 
     private final List<Delimiter> delimiters;
-    private final Style style;
+    private final SemanticStyleKey style;
     private final List<RegexRule> followingRules;
 
     DelimitedHighlighter(
         List<RegexRule> precedingRules,
         List<Delimiter> delimiters,
-        Style style,
+        SemanticStyleKey style,
         List<RegexRule> followingRules
     ) {
         super(precedingRules);
@@ -26,13 +26,13 @@ final class DelimitedHighlighter extends RegexHighlighter {
     }
 
     @Override
-    protected Style[] highlightStyles(String line, HighlightWork work) {
+    protected SemanticStyleKey[] highlightStyles(String line, HighlightWork work) {
         work.spend((8L * delimiters.size() + 4) * line.length());
-        Style[] styles = super.highlightStyles(line, work);
+        SemanticStyleKey[] styles = super.highlightStyles(line, work);
         return highlightDelimited(line, styles, work);
     }
 
-    private Style[] highlightDelimited(String line, Style[] styles, HighlightWork work) {
+    private SemanticStyleKey[] highlightDelimited(String line, SemanticStyleKey[] styles, HighlightWork work) {
         int[] nextOpening = new int[delimiters.size()];
         int[] lastClosing = new int[delimiters.size()];
         for (int index = 0; index < delimiters.size(); index++) {

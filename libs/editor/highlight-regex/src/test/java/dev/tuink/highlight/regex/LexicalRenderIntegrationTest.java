@@ -10,6 +10,7 @@ import dev.tuink.core.TextModel;
 import dev.tuink.render.Color;
 import dev.tuink.render.RenderPlan;
 import dev.tuink.render.RenderPlanBuilder;
+import dev.tuink.render.SemanticHighlighterAdapter;
 import dev.tuink.render.Style;
 import dev.tuink.render.StyleSpan;
 import dev.tuink.render.TerminalEditorTextLayout;
@@ -61,8 +62,8 @@ class LexicalRenderIntegrationTest {
     }
 
     private static RenderPlanBuilder builder(TextModel model, String fileName, boolean syntax) {
-        RenderPlanBuilder builder = new RenderPlanBuilder(
-            RegexHighlighter.forFileName(fileName), new TerminalEditorTextLayout(model));
+        RenderPlanBuilder builder = RenderPlanBuilder.standalone(
+            new SemanticHighlighterAdapter(RegexHighlighter.forFileName(fileName)), new TerminalEditorTextLayout(model));
         builder.setSyntaxHighlightingEnabled(syntax);
         builder.setRainbowBracketsEnabled(false);
         builder.setDecorationStyles(Style.DEFAULT, Style.DEFAULT, Style.DEFAULT, MATCH, QUOTE, UNMATCHED,

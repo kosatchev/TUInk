@@ -1863,8 +1863,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     private void applyOpenFileResult(FilePickerOpenWorkflow.Result result) {
         if (result.openedDocument() != null) {
             TuiDocumentSession document = result.openedDocument();
-            RenderPlanBuilder builder = new RenderPlanBuilder(
-                host.resolveHighlighter(document.view().state().getCurrentFile()), document.view().textLayout());
+            RenderPlanBuilder builder = document.newRenderPlanBuilder(
+                host.resolveHighlighter(document.view().state().getCurrentFile()));
             tabs.add(new TerminalEditorApp.EditorTab(document, builder));
             sessionContext.activate(tabs.size() - 1);
         } else if (result.activateTabIndex() >= 0) {
@@ -1917,7 +1917,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     private void applySaveResult(SaveWorkflow.Result result) {
         // Refresh the saved tab before a continuation activates or closes another tab.
         if (result.refreshSavedHighlighter()) {
-            renderPlanBuilder = new RenderPlanBuilder(host.resolveHighlighter(state.getCurrentFile()), engine.textLayout());
+            renderPlanBuilder = tabs.get(sessionContext.activeTabIndex()).documentSession()
+                .newRenderPlanBuilder(host.resolveHighlighter(state.getCurrentFile()));
             sessionContext.replaceActiveRenderPlanBuilder(renderPlanBuilder);
         }
         if (result.activateTabIndex() >= 0) {

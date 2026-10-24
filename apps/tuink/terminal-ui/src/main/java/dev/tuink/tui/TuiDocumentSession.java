@@ -5,6 +5,8 @@ import dev.tuink.core.TabSession;
 import dev.tuink.editor.document.DocumentId;
 import dev.tuink.editor.session.document.CoreSessionBridge;
 import dev.tuink.editor.session.document.EditorDocumentSession;
+import dev.tuink.render.LineHighlighter;
+import dev.tuink.render.RenderPlanBuilder;
 import dev.tuink.render.TerminalEditorTextLayout;
 import java.util.List;
 import java.util.Objects;
@@ -29,6 +31,10 @@ final class TuiDocumentSession {
 
     EditorDocumentSession document() {
         return document;
+    }
+
+    RenderPlanBuilder newRenderPlanBuilder(LineHighlighter highlighter) {
+        return new RenderPlanBuilder(highlighter, view.textLayout(), document.documentId());
     }
 
     /** Stable view identity is also used by recovery and Save As draft tracking. */

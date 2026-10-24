@@ -215,7 +215,7 @@ class RenderPlanBuilderTest {
     }
 
     private static RenderPlanBuilder builder(TextModel model) {
-        RenderPlanBuilder builder = new RenderPlanBuilder(
+        RenderPlanBuilder builder = RenderPlanBuilder.standalone(
             line -> List.of(),
             new TerminalEditorTextLayout(model)
         );

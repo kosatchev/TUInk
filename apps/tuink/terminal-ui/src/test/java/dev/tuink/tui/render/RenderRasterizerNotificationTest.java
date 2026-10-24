@@ -17,7 +17,7 @@ class RenderRasterizerNotificationTest {
     @Test
     void rawRenderPlanNotificationsCannotClaimMultipleRowsBesideAMultilineSearchPanel() {
         TextModel model = new TextModel(new SimpleLineBuffer());
-        RenderPlanBuilder builder = new RenderPlanBuilder(ignored -> List.of(), new TerminalEditorTextLayout(model));
+        RenderPlanBuilder builder = RenderPlanBuilder.standalone(ignored -> List.of(), new TerminalEditorTextLayout(model));
         RenderPlan plain = builder.build(model, new EditorState(), 8, 60, "top", "bottom", null,
             SearchOptions.DEFAULT, "Find:\nReplace:", null, null, null, false, false);
         RenderPlan withNotice = builder.build(model, new EditorState(), 8, 60, "top", "bottom", null,

@@ -11,7 +11,6 @@ import dev.tuink.core.TextModel;
 import dev.tuink.editor.document.DocumentView;
 import dev.tuink.editor.session.document.EditorDocumentSession;
 import dev.tuink.highlight.regex.RegexHighlighter;
-import dev.tuink.render.RenderPlanBuilder;
 import dev.tuink.render.TerminalEditorTextLayout;
 import dev.tuink.tui.command.TuinkCommand;
 import java.io.File;
@@ -85,7 +84,7 @@ class LexicalStateMemoryIntegrationTest {
                     TuiDocumentSession document = TuiDocumentSession.create(window.host.clipboard);
                     document.view().engine().openExisting(file);
                     int firstLineLength = document.view().model().getLine(0).length();
-                    var builder = new RenderPlanBuilder(window.host.resolveHighlighter(file), document.view().textLayout());
+                    var builder = document.newRenderPlanBuilder(window.host.resolveHighlighter(file));
                     window.tabs.add(new TerminalEditorApp.EditorTab(document, builder));
                     window.context.activate(window.tabs.size() - 1);
                     window.frame();

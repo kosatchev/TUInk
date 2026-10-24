@@ -101,7 +101,7 @@ class LexicalOutputBudgetTest {
             @Override public List<StyleSpan> highlight(DocumentView document, int line, String text) { return List.of(); }
             @Override public LineLexicalScanner lexicalScanner() { return scanner; }
         };
-        RenderPlanBuilder builder = new RenderPlanBuilder(highlighter, new TerminalEditorTextLayout(model));
+        RenderPlanBuilder builder = RenderPlanBuilder.standalone(highlighter, new TerminalEditorTextLayout(model));
         builder.setSyntaxHighlightingEnabled(false);
         builder.setRainbowBracketsEnabled(false);
         builder.setDecorationStyles(Style.DEFAULT, Style.DEFAULT, Style.DEFAULT, MATCH, MATCH, ERROR,

@@ -77,7 +77,7 @@ class RenderRasterizerUnicodeTest {
             Files.writeString(file, original);
             TextModel model = new TextModel(new SimpleLineBuffer());
             model.load(file);
-            RenderPlanBuilder builder = new RenderPlanBuilder(ignored -> List.of(), new TerminalEditorTextLayout(model));
+            RenderPlanBuilder builder = RenderPlanBuilder.standalone(ignored -> List.of(), new TerminalEditorTextLayout(model));
             RenderPlan plan = builder.build(model, new EditorState(), 8, 80, "top", "bottom", null,
                 SearchOptions.DEFAULT, null, null, null, null, false, false);
 
@@ -260,7 +260,7 @@ class RenderRasterizerUnicodeTest {
         TextModel model = new TextModel(lines);
         Style syntax = new Style(Color.RED, Color.DEFAULT, false, false);
         Style selection = new Style(Color.BLACK, Color.BRIGHT_CYAN, false, false);
-        RenderPlanBuilder builder = new RenderPlanBuilder(
+        RenderPlanBuilder builder = RenderPlanBuilder.standalone(
             text -> List.of(new StyleSpan(0, text.length(), syntax)),
             new TerminalEditorTextLayout(model)
         );
@@ -557,7 +557,7 @@ class RenderRasterizerUnicodeTest {
         SimpleLineBuffer buffer = new SimpleLineBuffer();
         buffer.setLine(0, line);
         TextModel model = new TextModel(buffer);
-        RenderPlanBuilder builder = new RenderPlanBuilder(
+        RenderPlanBuilder builder = RenderPlanBuilder.standalone(
             ignored -> List.of(),
             new TerminalEditorTextLayout(model)
         );

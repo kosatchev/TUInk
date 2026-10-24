@@ -237,7 +237,7 @@ class FrameCompositionTest {
         TextModel model = new TextModel(buffer);
         EditorState state = new EditorState();
         TerminalEditorTextLayout textLayout = new TerminalEditorTextLayout(model);
-        RenderPlanBuilder builder = new RenderPlanBuilder(text -> java.util.List.of(), textLayout);
+        RenderPlanBuilder builder = RenderPlanBuilder.standalone(text -> java.util.List.of(), textLayout);
         EditorLayout layout = EditorLayout.resolve(
             model,
             textLayout,

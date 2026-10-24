@@ -115,7 +115,7 @@ class RenderPlanBuilderLexicalBudgetTest {
     }
 
     private static RenderPlanBuilder builder(TextModel model, LineHighlighter highlighter) {
-        RenderPlanBuilder builder = new RenderPlanBuilder(highlighter, new TerminalEditorTextLayout(model));
+        RenderPlanBuilder builder = RenderPlanBuilder.standalone(highlighter, new TerminalEditorTextLayout(model));
         builder.setSyntaxHighlightingEnabled(false);
         builder.setDecorationStyles(
             Style.DEFAULT, Style.DEFAULT, Style.DEFAULT, MATCH, MATCH, ERROR,

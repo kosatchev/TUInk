@@ -33,6 +33,7 @@ import dev.tuiframe.cell.CellBuffer;
 import dev.tuiframe.cell.CellText;
 import dev.tuiframe.cell.Canvas;
 import dev.tuink.render.LineHighlighter;
+import dev.tuink.render.SemanticHighlighterAdapter;
 import dev.tuink.render.EditorLayout;
 import dev.tuink.render.EditorViewCoordinates;
 import dev.tuink.render.EditorViewNavigation;
@@ -279,7 +280,8 @@ public class TerminalEditorApp {
                 } else {
                     engine.open(file);
                 }
-                renderPlanBuilder = new RenderPlanBuilder(resolveHighlighter(file), engine.textLayout());
+                renderPlanBuilder = tabs.get(activeTabIndex).documentSession()
+                    .newRenderPlanBuilder(resolveHighlighter(file));
                 sessionContext.replaceActiveRenderPlanBuilder(renderPlanBuilder);
             } catch (IOException e) {
                 notification.error("Open failed: " + e.getMessage());
@@ -1553,10 +1555,8 @@ public class TerminalEditorApp {
             TuiDocumentSession documentSession = TuiDocumentSession.create(clipboard);
             TabSession tabSession = documentSession.view();
             tabSession.engine().restoreRecoverySnapshot(snapshot);
-            RenderPlanBuilder builder = new RenderPlanBuilder(
-                resolveHighlighter(tabSession.state().getCurrentFile()),
-                tabSession.textLayout()
-            );
+            RenderPlanBuilder builder = documentSession.newRenderPlanBuilder(
+                resolveHighlighter(tabSession.state().getCurrentFile()));
             // Keep the already committed startup snapshot as the durable backing
             // for this tab. The next autosave updates the same entry instead of
             // creating a gap in which neither the old nor a new snapshot exists.
@@ -1606,7 +1606,7 @@ public class TerminalEditorApp {
 
     EditorTab newEditorTab() {
         TuiDocumentSession session = TuiDocumentSession.create(clipboard);
-        RenderPlanBuilder builder = new RenderPlanBuilder(RegexHighlighter.withDefaults(), session.view().textLayout());
+        RenderPlanBuilder builder = session.newRenderPlanBuilder(resolveHighlighter(null));
         return new EditorTab(session, builder);
     }
 
@@ -1692,8 +1692,9 @@ public class TerminalEditorApp {
                 || renderPlanBuilder == null
                 || viewportController == null
                 || navigation == null || navigation.engine() != documentSession.view().engine()
-                || renderPlanBuilder.textLayout() != documentSession.view().textLayout()) {
-                throw new IllegalArgumentException("tab components must share one textLayout");
+                || renderPlanBuilder.textLayout() != documentSession.view().textLayout()
+                || !renderPlanBuilder.documentId().equals(documentSession.document().documentId())) {
+                throw new IllegalArgumentException("tab components must share one document identity and textLayout");
             }
         }
 
@@ -1856,7 +1857,8 @@ public class TerminalEditorApp {
     }
 
     LineHighlighter resolveHighlighter(Path file) {
-        return file == null ? RegexHighlighter.withDefaults() : RegexHighlighter.forFileName(file.getFileName().toString());
+        return new SemanticHighlighterAdapter(file == null ? RegexHighlighter.withDefaults()
+            : RegexHighlighter.forFileName(file.getFileName().toString()));
     }
 
     static void runWithRecovery(

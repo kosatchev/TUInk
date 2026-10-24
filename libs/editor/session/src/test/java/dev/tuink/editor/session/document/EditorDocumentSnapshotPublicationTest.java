@@ -29,6 +29,25 @@ import org.junit.jupiter.api.Test;
 
 class EditorDocumentSnapshotPublicationTest {
     @Test
+    void readingDocumentIdentityDoesNotPublishOrReadUnpublishedText() throws InterruptedException {
+        Fixture fixture = fixture(128);
+        DocumentSnapshot initial = fixture.session.snapshot();
+        fixture.view.engine().insertChar('X');
+        fixture.reads.lines.set(0);
+
+        assertSame(initial.documentId(), fixture.session.documentId());
+        AtomicReference<DocumentId> backgroundIdentity = new AtomicReference<>();
+        Thread background = new Thread(() -> backgroundIdentity.set(fixture.session.documentId()));
+        background.start();
+        background.join();
+
+        assertSame(initial.documentId(), backgroundIdentity.get());
+        assertSame(initial, backgroundSnapshot(fixture.session));
+        assertEquals(0, fixture.reads.lines.get());
+        assertEquals(0, fixture.reads.foreignAccesses.get());
+    }
+
+    @Test
     void typingDefersWholeDocumentReadsUntilAnOwnerSnapshotRequest() throws InterruptedException {
         Fixture fixture = fixture(20_000);
         DocumentSnapshot initial = fixture.session.snapshot();

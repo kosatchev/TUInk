@@ -9,6 +9,7 @@ import dev.tuink.core.EditorState;
 import dev.tuink.core.Position;
 import dev.tuink.core.SimpleLineBuffer;
 import dev.tuink.core.TextModel;
+import dev.tuink.editor.document.DocumentId;
 import dev.tuink.editor.document.DocumentView;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -18,7 +19,7 @@ class ContextualLineHighlighterBoundaryTest {
     void documentViewReportsTheUnchangedPrefixAcrossSeveralEdits() {
         TextModel model = new TextModel(new SimpleLineBuffer());
         model.replaceLines(List.of("first", "second", "third"));
-        DocumentView view = new TextModelDocumentView(model);
+        DocumentView view = new TextModelDocumentView(model, new DocumentId("changed-prefix"));
         long revision = view.revision();
 
         model.insertChar(new Position(2, 0), '!');
@@ -35,9 +36,11 @@ class ContextualLineHighlighterBoundaryTest {
         TextModel model = new TextModel(new SimpleLineBuffer());
         model.replaceLines(List.of("first"));
         CapturingHighlighter highlighter = new CapturingHighlighter();
+        DocumentId identity = new DocumentId("logical-document");
         RenderPlanBuilder builder = new RenderPlanBuilder(
             highlighter,
-            new TerminalEditorTextLayout(model)
+            new TerminalEditorTextLayout(model),
+            identity
         );
 
         builder.build(model, new EditorState(), 4, 20, "top", "bottom");
@@ -45,6 +48,8 @@ class ContextualLineHighlighterBoundaryTest {
 
         assertNotNull(firstView);
         assertFalse(firstView instanceof TextModel);
+        assertSame(identity, builder.documentId());
+        assertSame(identity, firstView.documentId());
         assertEquals(model.revision(), firstView.revision());
         assertEquals("first", firstView.line(0));
 
@@ -52,6 +57,7 @@ class ContextualLineHighlighterBoundaryTest {
         builder.build(model, new EditorState(), 4, 20, "top", "bottom");
 
         assertSame(firstView, highlighter.document);
+        assertSame(identity, highlighter.document.documentId());
         assertEquals(model.revision(), highlighter.document.revision());
         assertEquals("first!", highlighter.document.line(0));
     }

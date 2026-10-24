@@ -10,9 +10,9 @@ final class TextModelDocumentView implements DocumentView {
     private final TextModel model;
     private final DocumentId documentId;
 
-    TextModelDocumentView(TextModel model) {
+    TextModelDocumentView(TextModel model, DocumentId documentId) {
         this.model = Objects.requireNonNull(model, "model");
-        this.documentId = new DocumentId("render-model-" + Long.toUnsignedString(model.cacheIdentity()));
+        this.documentId = Objects.requireNonNull(documentId, "documentId");
     }
 
     @Override

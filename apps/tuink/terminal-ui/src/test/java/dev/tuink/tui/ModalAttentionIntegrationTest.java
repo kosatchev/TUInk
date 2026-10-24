@@ -215,7 +215,7 @@ class ModalAttentionIntegrationTest {
         TextModel model = new TextModel(lines);
         EditorState state = new EditorState();
         TerminalEditorTextLayout textLayout = new TerminalEditorTextLayout(model);
-        RenderPlanBuilder builder = new RenderPlanBuilder(text -> List.of(), textLayout);
+        RenderPlanBuilder builder = RenderPlanBuilder.standalone(text -> List.of(), textLayout);
         EditorLayout layout = EditorLayout.resolve(model, textLayout, state, rows, cols, 1, prompt.height(), false, false, 4);
         return new FrameComposition(new FrameComposition.Document(builder, model, state, layout, null),
             new FrameComposition.Surface(new TopMenuView.TopBar(" File ", 6), "status", prompt, NotificationBar.hidden()),

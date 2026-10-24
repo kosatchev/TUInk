@@ -10,6 +10,7 @@ import dev.tuink.core.SearchLimitException;
 import dev.tuink.core.SearchMatcher;
 import dev.tuink.core.SearchOptions;
 import dev.tuink.core.TextModel;
+import dev.tuink.editor.document.DocumentId;
 import dev.tuink.editor.document.DocumentView;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -27,6 +28,7 @@ import java.util.function.IntFunction;
  */
 public class RenderPlanBuilder {
     private static final AtomicLong NEXT_BASE_STYLE_OWNER_ID = new AtomicLong();
+    private static final AtomicLong NEXT_STANDALONE_DOCUMENT_ID = new AtomicLong();
     private static final int MAX_SYNTAX_CACHE_ENTRIES = 1024;
     static final int MAX_SYNTAX_CACHE_WEIGHT = 65_536;
     private static final int MAX_SYNTAX_SCAN_CODE_UNITS = 65_536;
@@ -120,12 +122,28 @@ public class RenderPlanBuilder {
         }
     }
 
-    public RenderPlanBuilder(LineHighlighter highlighter, EditorTextLayout textLayout) {
+    public RenderPlanBuilder(LineHighlighter highlighter, EditorTextLayout textLayout, DocumentId documentId) {
         this.highlighter = highlighter;
         this.lexicalScanner = highlighter instanceof ContextualLineHighlighter contextual
             ? contextual.lexicalScanner() : null;
         this.textLayout = Objects.requireNonNull(textLayout, "textLayout");
-        this.documentView = new TextModelDocumentView(textLayout.model());
+        this.documentView = new TextModelDocumentView(textLayout.model(), documentId);
+    }
+
+    /**
+     * Creates an individual model/layout fixture without a document session. Each
+     * call gets a separate logical identity; attached production views must use
+     * the constructor with their session's canonical document ID instead.
+     */
+    public static RenderPlanBuilder standalone(LineHighlighter highlighter, EditorTextLayout textLayout) {
+        DocumentId identity = new DocumentId("standalone-render-"
+            + Long.toUnsignedString(NEXT_STANDALONE_DOCUMENT_ID.incrementAndGet()));
+        return new RenderPlanBuilder(highlighter, textLayout, identity);
+    }
+
+    /** Logical identity passed to highlighters, independent of render/cache ownership. */
+    public DocumentId documentId() {
+        return documentView.documentId();
     }
 
     /** Returns the shared layout instance used by this builder. */

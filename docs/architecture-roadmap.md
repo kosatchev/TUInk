@@ -17,15 +17,15 @@ TUInk развивается как приложение-редактор пов
 | `core` | общий документ/history, отдельные позиции views, search, editor operations и terminal-neutral `EditorTextLayout` port |
 | `editor-session` | command registry, owner-thread `EditorDocumentSession`, validation и bounded async ingress |
 | `render` | `EditorTextLayout` adapter, координаты/навигация представления, editor layout и render planning |
-| `highlight-regex` | встроенная regex-based подсветка |
+| `highlight-regex` | встроенная bounded regex-based подсветка с semantic token output, без зависимости от terminal render |
 | `tui` | TUInk keymap, controllers, palettes, editor rasterization и widget adapters |
 | `app` | CLI target selection, composition и release assembly |
 
 `tuiframe-core` и `editor-contract` не имеют production dependencies на другие
 project modules. `tuiframe-jline` и `tuiframe-widgets` зависят от
 `tuiframe-core`. Среди project modules `core` зависит от `unicode-text` и
-нейтрального `editor-contract.language`: редактирование и подсветка используют
-одни имена и расширения, сохраняя собственные правила обработки языка.
+нейтрального `editor-contract`: редактирование и подсветка используют одни имена
+и расширения, сохраняя собственные правила обработки языка.
 `editor-session` экспортирует `editor-contract`, а `core` использует как
 implementation dependency; его runtime пока включает зависимости `core`, в
 том числе JGit.

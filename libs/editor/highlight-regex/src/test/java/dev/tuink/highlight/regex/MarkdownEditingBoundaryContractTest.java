@@ -10,10 +10,9 @@ import dev.tuink.core.SimpleLineBuffer;
 import dev.tuink.core.TextModel;
 import dev.tuink.editor.document.DocumentId;
 import dev.tuink.editor.document.DocumentSnapshot;
-import dev.tuink.render.Color;
-import dev.tuink.render.ContextualLineHighlighter;
-import dev.tuink.render.Style;
-import dev.tuink.render.StyleSpan;
+import dev.tuink.editor.highlight.ContextualSyntaxHighlighter;
+import dev.tuink.editor.highlight.SemanticStyleKey;
+import dev.tuink.editor.highlight.TokenSpan;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -24,7 +23,7 @@ class MarkdownEditingBoundaryContractTest {
     @Test
     void codeHighlightingAndAutomaticListsAgreeInsideListContainers() {
         record Example(List<String> prefix, String item, boolean insideCode) {}
-        Style keyword = new Style(Color.BRIGHT_BLUE, Color.DEFAULT, true, false);
+        SemanticStyleKey keyword = SemanticStyleKey.KEYWORD;
         for (Example example : List.of(
             new Example(List.of("- parent", "    ```python"), "    1. return", true),
             new Example(List.of("- parent", "\t```python"), "\t1. return", true),
@@ -40,8 +39,8 @@ class MarkdownEditingBoundaryContractTest {
             List<String> lines = new ArrayList<>(example.prefix());
             lines.add(example.item());
             DocumentSnapshot document = new DocumentSnapshot(new DocumentId("nested-markdown-boundaries"), 0, lines);
-            ContextualLineHighlighter highlighter = (ContextualLineHighlighter) RegexHighlighter.forFileName("notes.md");
-            StyleSpan returnKeyword = new StyleSpan(example.item().indexOf("return"), example.item().length(), keyword);
+            ContextualSyntaxHighlighter highlighter = (ContextualSyntaxHighlighter) RegexHighlighter.forFileName("notes.md");
+            TokenSpan returnKeyword = new TokenSpan(example.item().indexOf("return"), example.item().length(), keyword);
             assertEquals(example.insideCode(), highlighter.highlight(document, lines.size() - 1, example.item())
                 .contains(returnKeyword), example.toString());
 
@@ -66,8 +65,8 @@ class MarkdownEditingBoundaryContractTest {
     void codeHighlightingAndAutomaticListsAgreeOnFenceBoundaries() {
         record Example(List<String> prefix, boolean insideCode) {}
         String item = "1. return";
-        Style keyword = new Style(Color.BRIGHT_BLUE, Color.DEFAULT, true, false);
-        StyleSpan returnKeyword = new StyleSpan(3, item.length(), keyword);
+        SemanticStyleKey keyword = SemanticStyleKey.KEYWORD;
+        TokenSpan returnKeyword = new TokenSpan(3, item.length(), keyword);
         for (Example example : List.of(
             new Example(List.of("```python", "```not-a-close"), true),
             new Example(List.of("~~~python", "~~~not-a-close"), true),
@@ -86,7 +85,7 @@ class MarkdownEditingBoundaryContractTest {
             List<String> lines = new ArrayList<>(example.prefix());
             lines.add(item);
             DocumentSnapshot document = new DocumentSnapshot(new DocumentId("markdown-boundaries"), 0, lines);
-            ContextualLineHighlighter highlighter = (ContextualLineHighlighter) RegexHighlighter.forFileName("notes.md");
+            ContextualSyntaxHighlighter highlighter = (ContextualSyntaxHighlighter) RegexHighlighter.forFileName("notes.md");
             boolean highlightedAsCode = highlighter.highlight(document, lines.size() - 1, item).contains(returnKeyword);
             assertEquals(example.insideCode(), highlightedAsCode, example.prefix().toString());
 

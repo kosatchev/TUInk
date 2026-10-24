@@ -3,25 +3,24 @@ package dev.tuink.highlight.regex;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
-import dev.tuink.render.Color;
-import dev.tuink.render.LineHighlighter;
-import dev.tuink.render.Style;
-import dev.tuink.render.StyleSpan;
+import dev.tuink.editor.highlight.SyntaxHighlighter;
+import dev.tuink.editor.highlight.SemanticStyleKey;
+import dev.tuink.editor.highlight.TokenSpan;
 import java.time.Duration;
 import java.util.List;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
 class HighlighterResponsivenessTest {
-    private static final Style KEYWORD = new Style(Color.BRIGHT_BLUE, Color.DEFAULT, true, false);
-    private static final Style TYPE = Style.fg(Color.BRIGHT_MAGENTA);
-    private static final Style STRING = Style.fg(Color.BRIGHT_GREEN);
-    private static final Style COMMENT = Style.fg(Color.BRIGHT_BLACK);
+    private static final SemanticStyleKey KEYWORD = SemanticStyleKey.KEYWORD;
+    private static final SemanticStyleKey TYPE = SemanticStyleKey.TYPE;
+    private static final SemanticStyleKey STRING = SemanticStyleKey.STRING;
+    private static final SemanticStyleKey COMMENT = SemanticStyleKey.COMMENT;
 
     @Test
     void markupCommentsEndAtTheirOwnDelimiterAndLeaveInterveningTagsVisible() {
         String line = "<!-- first --> <node value=\"text\"> <!-- second -->";
-        for (LineHighlighter highlighter : List.of(RegexHighlighter.forXml(), RegexHighlighter.forHtml())) {
+        for (SyntaxHighlighter highlighter : List.of(RegexHighlighter.forXml(), RegexHighlighter.forHtml())) {
             assertEquals(List.of(
                 span(line, "<!-- first -->", COMMENT),
                 span(line, "<node", KEYWORD),
@@ -36,11 +35,11 @@ class HighlighterResponsivenessTest {
     void repeatedUnterminatedMarkupCommentsDoNotRescanTheRemainingLine() {
         String opening = "<!--".repeat(40_000);
         assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
-            for (LineHighlighter highlighter : List.of(RegexHighlighter.forXml(), RegexHighlighter.forHtml())) {
-                assertEquals(List.of(new StyleSpan(0, opening.length(), COMMENT)), highlighter.highlight(opening));
+            for (SyntaxHighlighter highlighter : List.of(RegexHighlighter.forXml(), RegexHighlighter.forHtml())) {
+                assertEquals(List.of(new TokenSpan(0, opening.length(), COMMENT)), highlighter.highlight(opening));
                 String closed = opening + "--> <node>";
                 assertEquals(List.of(
-                    new StyleSpan(0, opening.length() + 3, COMMENT),
+                    new TokenSpan(0, opening.length() + 3, COMMENT),
                     span(closed, "<node", KEYWORD)
                 ), highlighter.highlight(closed));
             }
@@ -53,20 +52,20 @@ class HighlighterResponsivenessTest {
         assertEquals(List.of(
             span(line, "$(FIRST)", TYPE),
             span(line, "${SECOND}", TYPE),
-            new StyleSpan(line.indexOf('#'), line.length(), COMMENT)
+            new TokenSpan(line.indexOf('#'), line.length(), COMMENT)
         ), RegexHighlighter.forMakefile().highlight(line));
     }
 
     @Test
     void repeatedUnterminatedMakeVariablesStillAllowTheOtherDelimiterKind() {
-        LineHighlighter highlighter = RegexHighlighter.forMakefile();
+        SyntaxHighlighter highlighter = RegexHighlighter.forMakefile();
         assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
             for (String opening : List.of("$(", "${")) {
                 String unmatched = opening.repeat(60_000);
                 assertEquals(List.of(), highlighter.highlight(unmatched));
                 String valid = opening.equals("$(") ? "${VALUE}" : "$(VALUE)";
                 String line = unmatched + " " + valid;
-                assertEquals(List.of(new StyleSpan(unmatched.length() + 1, line.length(), TYPE)),
+                assertEquals(List.of(new TokenSpan(unmatched.length() + 1, line.length(), TYPE)),
                     highlighter.highlight(line));
             }
         });
@@ -81,12 +80,12 @@ class HighlighterResponsivenessTest {
                 "unknown", "script.sh", "script.rb", "script.pl", "data.json", "data.toml",
                 "data.ini", "data.xml", "page.html", "Dockerfile", ".env"
             )) {
-                assertEquals(List.of(new StyleSpan(0, quoted.length(), STRING)),
+                assertEquals(List.of(new TokenSpan(0, quoted.length(), STRING)),
                     RegexHighlighter.forFileName(fileName).highlight(quoted), fileName);
                 if (!fileName.endsWith("json")) {
                     boolean literalSingleQuotes = List.of("script.sh", "data.toml", "Dockerfile", ".env").contains(fileName);
                     String value = literalSingleQuotes ? "'" + "plain\\text".repeat(15_000) + "'" : singleQuoted;
-                    assertEquals(List.of(new StyleSpan(0, value.length(), STRING)),
+                    assertEquals(List.of(new TokenSpan(0, value.length(), STRING)),
                         RegexHighlighter.forFileName(fileName).highlight(value), fileName);
                 }
             }
@@ -97,14 +96,14 @@ class HighlighterResponsivenessTest {
     void longCsvFieldsPreserveDoubledQuotesWithoutRecursiveRegexMatching() {
         String line = "\"" + "plain\"\"text".repeat(30_000) + "\"";
         assertTimeoutPreemptively(Duration.ofSeconds(5), () ->
-            assertEquals(List.of(new StyleSpan(0, line.length(), STRING)),
+            assertEquals(List.of(new TokenSpan(0, line.length(), STRING)),
                 RegexHighlighter.forCsv().highlight(line)));
     }
 
     @Test
     void expensiveCustomRulesHaveBoundedRetriesAndDoNotDisableTheFollowingRules() {
-        Style earlier = Style.fg(Color.RED);
-        Style following = Style.fg(Color.BLUE);
+        SemanticStyleKey earlier = new SemanticStyleKey("test.red");
+        SemanticStyleKey following = new SemanticStyleKey("test.blue");
         RegexHighlighter highlighter = new RegexHighlighter(List.of(
             new RegexRule(Pattern.compile("prefix"), earlier),
             // This uses non-recursive quantifiers: catching stack overflow cannot bound its time.
@@ -117,8 +116,8 @@ class HighlighterResponsivenessTest {
                 highlighter.highlight(line)));
     }
 
-    private static StyleSpan span(String line, String token, Style style) {
+    private static TokenSpan span(String line, String token, SemanticStyleKey style) {
         int start = line.indexOf(token);
-        return new StyleSpan(start, start + token.length(), style);
+        return new TokenSpan(start, start + token.length(), style);
     }
 }

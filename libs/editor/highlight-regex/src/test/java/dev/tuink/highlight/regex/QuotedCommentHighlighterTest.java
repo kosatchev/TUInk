@@ -4,20 +4,19 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import dev.tuink.editor.document.DocumentId;
 import dev.tuink.editor.document.DocumentSnapshot;
-import dev.tuink.render.Color;
-import dev.tuink.render.ContextualLineHighlighter;
-import dev.tuink.render.Style;
-import dev.tuink.render.StyleSpan;
+import dev.tuink.editor.highlight.ContextualSyntaxHighlighter;
+import dev.tuink.editor.highlight.SemanticStyleKey;
+import dev.tuink.editor.highlight.TokenSpan;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class QuotedCommentHighlighterTest {
     private static final DocumentId DOCUMENT_ID = new DocumentId("quoted-comment-test");
-    private static final Style KEYWORD = new Style(Color.BRIGHT_BLUE, Color.DEFAULT, true, false);
-    private static final Style TYPE = Style.fg(Color.BRIGHT_MAGENTA);
-    private static final Style NUMBER = Style.fg(Color.BRIGHT_CYAN);
-    private static final Style STRING = Style.fg(Color.BRIGHT_GREEN);
-    private static final Style COMMENT = Style.fg(Color.BRIGHT_BLACK);
+    private static final SemanticStyleKey KEYWORD = SemanticStyleKey.KEYWORD;
+    private static final SemanticStyleKey TYPE = SemanticStyleKey.TYPE;
+    private static final SemanticStyleKey NUMBER = SemanticStyleKey.NUMBER;
+    private static final SemanticStyleKey STRING = SemanticStyleKey.STRING;
+    private static final SemanticStyleKey COMMENT = SemanticStyleKey.COMMENT;
 
     @Test
     void hashCommentsAndQuotedValuesAreScannedInSourceOrderAcrossTextFormats() {
@@ -61,7 +60,7 @@ class QuotedCommentHighlighterTest {
                 RegexHighlighter.forFileName(fileName).highlight(line), fileName);
         }
         String perl = "'escaped \\' # literal' # actual";
-        assertEquals(List.of(new StyleSpan(0, perl.lastIndexOf('\'') + 1, STRING),
+        assertEquals(List.of(new TokenSpan(0, perl.lastIndexOf('\'') + 1, STRING),
             comment(perl, perl.lastIndexOf('#'))), RegexHighlighter.forPerl().highlight(perl));
     }
 
@@ -77,11 +76,11 @@ class QuotedCommentHighlighterTest {
         for (String opening : List.of("my $suffix = $';", "my $separator = $\";", "use Foo'Bar;", "package Foo'Bar;")) {
             String following = "return 7 # actual \"comment\"";
             DocumentSnapshot document = document(opening, following);
-            ContextualLineHighlighter highlighter = highlighter("script.pl");
+            ContextualSyntaxHighlighter highlighter = highlighter("script.pl");
 
             assertEquals(List.of(span(following, "return", KEYWORD), span(following, "7", NUMBER),
                 comment(following, following.indexOf('#'))), highlight(highlighter, document, 1), opening);
-            List<StyleSpan> expectedOpening = opening.startsWith("my")
+            List<TokenSpan> expectedOpening = opening.startsWith("my")
                 ? List.of(span(opening, "my", KEYWORD),
                     span(opening, opening.contains("$suffix") ? "$suffix" : "$separator", TYPE))
                 : List.of(span(opening, opening.startsWith("use") ? "use" : "package", KEYWORD));
@@ -94,7 +93,7 @@ class QuotedCommentHighlighterTest {
         for (String prefix : List.of("print", "return", "q")) {
             String quoted = "'hash # literal'";
             String line = prefix + quoted + "; # actual";
-            List<StyleSpan> expected = prefix.equals("return")
+            List<TokenSpan> expected = prefix.equals("return")
                 ? List.of(span(line, prefix, KEYWORD), span(line, quoted, STRING), comment(line, line.lastIndexOf('#')))
                 : List.of(span(line, quoted, STRING), comment(line, line.lastIndexOf('#')));
             assertEquals(expected, RegexHighlighter.forPerl().highlight(line), prefix);
@@ -150,8 +149,8 @@ class QuotedCommentHighlighterTest {
             highlight(highlighter("settings.toml"), ordinary, 1));
         for (String delimiter : List.of("\"\"\"", "'''")) {
             DocumentSnapshot multiline = document("value = " + delimiter, "# still quoted", delimiter + " # actual");
-            ContextualLineHighlighter highlighter = highlighter("settings.toml");
-            assertEquals(List.of(new StyleSpan(0, delimiter.length(), STRING),
+            ContextualSyntaxHighlighter highlighter = highlighter("settings.toml");
+            assertEquals(List.of(new TokenSpan(0, delimiter.length(), STRING),
                 comment(multiline.line(2), multiline.line(2).indexOf('#'))), highlight(highlighter, multiline, 2));
             assertEquals(string(multiline.line(1)), highlight(highlighter, multiline, 1));
         }
@@ -161,7 +160,7 @@ class QuotedCommentHighlighterTest {
     void unterminatedShellAndEnvStringsContinueAndCloseBeforeARealComment() {
         for (String fileName : List.of("script.sh", ".env")) {
             DocumentSnapshot document = document("\"unclosed", "# still quoted\" # actual \"text\"");
-            assertEquals(List.of(new StyleSpan(0, document.line(1).indexOf('"') + 1, STRING),
+            assertEquals(List.of(new TokenSpan(0, document.line(1).indexOf('"') + 1, STRING),
                 comment(document.line(1), document.line(1).lastIndexOf('#'))),
                 highlight(highlighter(fileName), document, 1), fileName);
         }
@@ -230,7 +229,7 @@ class QuotedCommentHighlighterTest {
 
         assertEquals(
             List.of(span(line, "SELECT", KEYWORD), span(line, "7", NUMBER),
-                new StyleSpan(line.indexOf("/*"), line.indexOf("*/") + 2, COMMENT),
+                new TokenSpan(line.indexOf("/*"), line.indexOf("*/") + 2, COMMENT),
                 span(line, "8", NUMBER), comment(line, line.indexOf("--"))),
             RegexHighlighter.forSql().highlight(line)
         );
@@ -241,7 +240,7 @@ class QuotedCommentHighlighterTest {
         DocumentSnapshot document = document(
             "SELECT 7; /* open", "([)] SELECT '/*' -- )", "*/ SELECT 8;", "SELECT 9;"
         );
-        ContextualLineHighlighter highlighter = highlighter("test.sql");
+        ContextualSyntaxHighlighter highlighter = highlighter("test.sql");
 
         assertEquals(
             List.of(span(document.line(3), "SELECT", KEYWORD), span(document.line(3), "9", NUMBER)),
@@ -249,7 +248,7 @@ class QuotedCommentHighlighterTest {
         );
         assertEquals(List.of(comment(document.line(1), 0)), highlight(highlighter, document, 1));
         assertEquals(
-            List.of(new StyleSpan(0, 2, COMMENT), span(document.line(2), "SELECT", KEYWORD),
+            List.of(new TokenSpan(0, 2, COMMENT), span(document.line(2), "SELECT", KEYWORD),
                 span(document.line(2), "8", NUMBER)),
             highlight(highlighter, document, 2)
         );
@@ -265,7 +264,7 @@ class QuotedCommentHighlighterTest {
         for (String quoted : List.of("'/* marker'", "'doubled '' /* marker'",
             "\"/* identifier\"", "\"doubled \"\" /* identifier\"")) {
             DocumentSnapshot document = document("SELECT " + quoted + "; -- /* ignored", "SELECT 7;");
-            ContextualLineHighlighter highlighter = highlighter("test.sql");
+            ContextualSyntaxHighlighter highlighter = highlighter("test.sql");
 
             assertEquals(
                 List.of(span(document.line(1), "SELECT", KEYWORD), span(document.line(1), "7", NUMBER)),
@@ -284,7 +283,7 @@ class QuotedCommentHighlighterTest {
         for (String plain : List.of("don't", "plain 'quote", "plain \"quote", "value#fragment", "plain, 'quote")) {
             String line = "key: " + plain + " # actual";
             DocumentSnapshot document = document(line, "next: true # next comment");
-            ContextualLineHighlighter highlighter = highlighter("test.yaml");
+            ContextualSyntaxHighlighter highlighter = highlighter("test.yaml");
 
             assertEquals(
                 List.of(span(line, "key:", KEYWORD), comment(line, line.lastIndexOf('#'))),
@@ -305,7 +304,7 @@ class QuotedCommentHighlighterTest {
         for (String prefix : List.of("key: &anchor ", "key: !!str ", "key: !<tag:example.org,str> ", "- ")) {
             String quoted = "'quoted # text'";
             String line = prefix + quoted + " # actual";
-            List<StyleSpan> expected = prefix.startsWith("key:")
+            List<TokenSpan> expected = prefix.startsWith("key:")
                 ? List.of(span(line, "key:", KEYWORD), span(line, quoted, STRING), comment(line, line.lastIndexOf('#')))
                 : List.of(span(line, quoted, STRING), comment(line, line.lastIndexOf('#')));
             assertEquals(expected, RegexHighlighter.forYaml().highlight(line), line);
@@ -340,12 +339,12 @@ class QuotedCommentHighlighterTest {
             DocumentSnapshot document = document(
                 "value = " + delimiter, "# // /* @decorator return 7", delimiter + "; return 8 # actual", "return 9"
             );
-            ContextualLineHighlighter highlighter = highlighter("test.py");
+            ContextualSyntaxHighlighter highlighter = highlighter("test.py");
 
             assertEquals(code(document.line(3), "9"), highlight(highlighter, document, 3));
             assertEquals(string(document.line(1)), highlight(highlighter, document, 1));
             assertEquals(
-                List.of(new StyleSpan(0, delimiter.length(), STRING), span(document.line(2), "return", KEYWORD),
+                List.of(new TokenSpan(0, delimiter.length(), STRING), span(document.line(2), "return", KEYWORD),
                     span(document.line(2), "8", NUMBER), comment(document.line(2), document.line(2).indexOf('#'))),
                 highlight(highlighter, document, 2)
             );
@@ -355,11 +354,11 @@ class QuotedCommentHighlighterTest {
     @Test
     void ordinaryPythonStringsContinueOnlyWithAnUnescapedBackslash() {
         DocumentSnapshot continued = document("value = \"first\\", "# quoted\"; return 7 # actual", "return 8");
-        ContextualLineHighlighter highlighter = highlighter("test.py");
+        ContextualSyntaxHighlighter highlighter = highlighter("test.py");
 
         assertEquals(code(continued.line(2), "8"), highlight(highlighter, continued, 2));
         assertEquals(
-            List.of(new StyleSpan(0, continued.line(1).indexOf('"') + 1, STRING),
+            List.of(new TokenSpan(0, continued.line(1).indexOf('"') + 1, STRING),
                 span(continued.line(1), "return", KEYWORD), span(continued.line(1), "7", NUMBER),
                 comment(continued.line(1), continued.line(1).lastIndexOf('#'))),
             highlight(highlighter, continued, 1)
@@ -385,10 +384,10 @@ class QuotedCommentHighlighterTest {
                 if (yaml) {
                     document = document("key: " + delimiter, document.line(1), document.line(2), document.line(3));
                 }
-                ContextualLineHighlighter highlighter = highlighter(fileName);
+                ContextualSyntaxHighlighter highlighter = highlighter(fileName);
 
                 assertEquals(
-                    List.of(new StyleSpan(0, "end".length() + 1, STRING),
+                    List.of(new TokenSpan(0, "end".length() + 1, STRING),
                         comment(document.line(3), yaml ? document.line(3).indexOf('#') : document.line(3).indexOf("--"))),
                     highlight(highlighter, document, 3), fileName + delimiter
                 );
@@ -401,7 +400,7 @@ class QuotedCommentHighlighterTest {
     @Test
     void yamlFlowContextSurvivesMultilineQuotedValuesAndComments() {
         DocumentSnapshot document = document("key: [\"open", "end\", # actual", "'next # quoted', \"last # quoted\"] # actual");
-        ContextualLineHighlighter highlighter = highlighter("test.yaml");
+        ContextualSyntaxHighlighter highlighter = highlighter("test.yaml");
 
         assertEquals(
             List.of(span(document.line(2), "'next # quoted'", STRING), span(document.line(2), "\"last # quoted\"", STRING),
@@ -409,7 +408,7 @@ class QuotedCommentHighlighterTest {
             highlight(highlighter, document, 2)
         );
         assertEquals(
-            List.of(new StyleSpan(0, "end\"".length(), STRING), comment(document.line(1), document.line(1).indexOf('#'))),
+            List.of(new TokenSpan(0, "end\"".length(), STRING), comment(document.line(1), document.line(1).indexOf('#'))),
             highlight(highlighter, document, 1)
         );
     }
@@ -435,7 +434,7 @@ class QuotedCommentHighlighterTest {
             for (String opening : List.of("key: plain", "- plain", "- key: plain")) {
                 String continuation = (opening.startsWith("- key") ? "    " : "  ") + quote + "text # comment";
                 DocumentSnapshot document = document(opening, "", continuation, "next: true # next comment");
-                ContextualLineHighlighter highlighter = highlighter("test.yaml");
+                ContextualSyntaxHighlighter highlighter = highlighter("test.yaml");
 
                 assertEquals(
                     List.of(span(document.line(3), "next:", KEYWORD), span(document.line(3), "true", TYPE),
@@ -447,7 +446,7 @@ class QuotedCommentHighlighterTest {
             }
         }
         DocumentSnapshot flow = document("key: [plain", "  \"text # comment", ", \"next # string\"]");
-        ContextualLineHighlighter highlighter = highlighter("test.yaml");
+        ContextualSyntaxHighlighter highlighter = highlighter("test.yaml");
         assertEquals(List.of(span(flow.line(2), "\"next # string\"", STRING)), highlight(highlighter, flow, 2));
         assertEquals(List.of(comment(flow.line(1), flow.line(1).indexOf('#'))), highlight(highlighter, flow, 1));
     }
@@ -476,8 +475,8 @@ class QuotedCommentHighlighterTest {
             DocumentSnapshot quoted = document(opener, plain);
             DocumentSnapshot revised = new DocumentSnapshot(DOCUMENT_ID, 2, List.of("", plain));
             DocumentSnapshot different = new DocumentSnapshot(new DocumentId("different"), 1, revised.lines());
-            ContextualLineHighlighter highlighter = highlighter(fileName);
-            List<StyleSpan> expected = RegexHighlighter.forFileName(fileName).highlight(plain);
+            ContextualSyntaxHighlighter highlighter = highlighter(fileName);
+            List<TokenSpan> expected = RegexHighlighter.forFileName(fileName).highlight(plain);
 
             assertEquals(string(plain), highlight(highlighter, quoted, 1), fileName);
             assertEquals(expected, highlighter.highlight(plain), fileName);
@@ -495,8 +494,8 @@ class QuotedCommentHighlighterTest {
             String quoted = "# -- return 7";
             String plain = language.equals("yaml") ? "key: true # actual" : language.equals("sql") ? "select 7 -- actual" : "return 7 # actual";
             DocumentSnapshot document = document("```" + language, opener, quoted, "```", "```" + language, plain, "```");
-            ContextualLineHighlighter highlighter = highlighter("README.md");
-            List<StyleSpan> expected = RegexHighlighter.forFileName("test." + (language.equals("python") ? "py" : language)).highlight(plain);
+            ContextualSyntaxHighlighter highlighter = highlighter("README.md");
+            List<TokenSpan> expected = RegexHighlighter.forFileName("test." + (language.equals("python") ? "py" : language)).highlight(plain);
 
             assertEquals(expected, highlight(highlighter, document, 5), language);
             assertEquals(string(quoted), highlight(highlighter, document, 2), language);
@@ -504,32 +503,32 @@ class QuotedCommentHighlighterTest {
         }
     }
 
-    private static ContextualLineHighlighter highlighter(String fileName) {
-        return (ContextualLineHighlighter) RegexHighlighter.forFileName(fileName);
+    private static ContextualSyntaxHighlighter highlighter(String fileName) {
+        return (ContextualSyntaxHighlighter) RegexHighlighter.forFileName(fileName);
     }
 
     private static DocumentSnapshot document(String... lines) {
         return new DocumentSnapshot(DOCUMENT_ID, 1, List.of(lines));
     }
 
-    private static List<StyleSpan> highlight(ContextualLineHighlighter highlighter, DocumentSnapshot document, int lineIndex) {
+    private static List<TokenSpan> highlight(ContextualSyntaxHighlighter highlighter, DocumentSnapshot document, int lineIndex) {
         return highlighter.highlight(document, lineIndex, document.line(lineIndex));
     }
 
-    private static List<StyleSpan> code(String line, String number) {
+    private static List<TokenSpan> code(String line, String number) {
         return List.of(span(line, "return", KEYWORD), span(line, number, NUMBER));
     }
 
-    private static List<StyleSpan> string(String line) {
-        return List.of(new StyleSpan(0, line.length(), STRING));
+    private static List<TokenSpan> string(String line) {
+        return List.of(new TokenSpan(0, line.length(), STRING));
     }
 
-    private static StyleSpan comment(String line, int start) {
-        return new StyleSpan(start, line.length(), COMMENT);
+    private static TokenSpan comment(String line, int start) {
+        return new TokenSpan(start, line.length(), COMMENT);
     }
 
-    private static StyleSpan span(String line, String text, Style style) {
+    private static TokenSpan span(String line, String text, SemanticStyleKey style) {
         int start = line.indexOf(text);
-        return new StyleSpan(start, start + text.length(), style);
+        return new TokenSpan(start, start + text.length(), style);
     }
 }

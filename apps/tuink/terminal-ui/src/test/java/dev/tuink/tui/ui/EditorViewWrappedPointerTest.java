@@ -220,7 +220,7 @@ class EditorViewWrappedPointerTest {
             this.wrapLines = wrapLines;
             this.width = width;
             this.wrapByWords = wrapByWords;
-            builder = new RenderPlanBuilder(line -> List.of(), layout);
+            builder = RenderPlanBuilder.standalone(line -> List.of(), layout);
             builder.setSyntaxHighlightingEnabled(false);
             builder.setBracketMatchingEnabled(false);
             builder.setRainbowBracketsEnabled(false);

@@ -6,17 +6,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.editor.document.DocumentId;
 import dev.tuink.editor.document.DocumentSnapshot;
-import dev.tuink.render.Color;
-import dev.tuink.render.ContextualLineHighlighter;
-import dev.tuink.render.LineLexicalScanner;
-import dev.tuink.render.Style;
-import dev.tuink.render.StyleSpan;
+import dev.tuink.editor.highlight.ContextualSyntaxHighlighter;
+import dev.tuink.editor.highlight.LexicalScanner;
+import dev.tuink.editor.highlight.SemanticStyleKey;
+import dev.tuink.editor.highlight.TokenSpan;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class JavaScriptContinuationTest {
-    private static final Style STRING = Style.fg(Color.BRIGHT_GREEN);
+    private static final SemanticStyleKey STRING = SemanticStyleKey.STRING;
     private static final String DIVISION = "  / denominator[i] / scale;";
     private static final String REGEX = "/[{}]/.test(value);";
 
@@ -92,8 +91,8 @@ class JavaScriptContinuationTest {
 
     @Test
     void typescriptSignaturesDoNotRetainCompletedBodyHeaders() {
-        LineLexicalScanner scanner = highlighter("app.ts").lexicalScanner();
-        LineLexicalScanner.State state = null;
+        LexicalScanner scanner = highlighter("app.ts").lexicalScanner();
+        LexicalScanner.State state = null;
         String signature = "declare function f(): {value: number};";
         for (int index = 0; index <= CStyleHighlighter.MAX_CONTEXT_DEPTH; index++) {
             var result = scanner.scan(signature, signature.length(), state);
@@ -114,12 +113,12 @@ class JavaScriptContinuationTest {
     @Test
     void revisionChangesReplaceThePreviousLexicalGoal() {
         for (String file : List.of("app.js", "app.ts")) {
-            ContextualLineHighlighter highlighter = highlighter(file);
+            ContextualSyntaxHighlighter highlighter = highlighter(file);
             DocumentId id = new DocumentId("javascript-goal-revision");
             DocumentSnapshot value = new DocumentSnapshot(id, 1, List.of("const ratio = numerator", DIVISION));
             assertTrue(highlighter.highlight(value, 1, DIVISION).isEmpty());
             DocumentSnapshot statement = new DocumentSnapshot(id, 2, List.of("if (ready) {}", REGEX));
-            assertEquals(List.of(new StyleSpan(0, 6, STRING)), highlighter.highlight(statement, 1, REGEX));
+            assertEquals(List.of(new TokenSpan(0, 6, STRING)), highlighter.highlight(statement, 1, REGEX));
             assertTrue(highlighter.highlight(value, 1, DIVISION).isEmpty());
         }
     }
@@ -128,13 +127,13 @@ class JavaScriptContinuationTest {
     void allRetainedDelimiterKindsShareTheExistingContextBudgets() {
         for (String file : List.of("app.js", "app.ts")) {
             for (String opening : List.of("[", "{value:", "condition ? ")) {
-                LineLexicalScanner scanner = highlighter(file).lexicalScanner();
+                LexicalScanner scanner = highlighter(file).lexicalScanner();
                 String bounded = opening.repeat(CStyleHighlighter.MAX_CONTEXT_DEPTH);
                 var known = scanner.scan(bounded, bounded.length(), null);
                 assertTrue(known.contextKnown(), opening);
                 var stopped = scanner.scan(opening, opening.length(), known.endState());
                 assertFalse(stopped.contextKnown(), opening);
-                assertEquals(LineLexicalScanner.State.UNKNOWN, stopped.endState());
+                assertEquals(LexicalScanner.State.UNKNOWN, stopped.endState());
             }
             String flat = "[]".repeat(CStyleHighlighter.MAX_CONTEXT_NODES_PER_SCAN + 1);
             var stopped = highlighter(file).lexicalScanner().scan(flat, flat.length(), null);
@@ -147,21 +146,21 @@ class JavaScriptContinuationTest {
         assertEquals(List.of(), scanLast(file, lines).excludedRanges(), file + " " + lines);
         DocumentSnapshot document = document(lines);
         assertTrue(highlighter(file).highlight(document, lines.size() - 1, lines.getLast()).stream()
-            .noneMatch(span -> span.style().equals(STRING)), file + " " + lines);
+            .noneMatch(span -> span.styleKey().equals(STRING)), file + " " + lines);
     }
 
     private static void assertRegex(String file, List<String> lines) {
-        assertEquals(List.of(new LineLexicalScanner.Range(0, 6)), scanLast(file, lines).excludedRanges(),
+        assertEquals(List.of(new LexicalScanner.Range(0, 6)), scanLast(file, lines).excludedRanges(),
             file + " " + lines);
         DocumentSnapshot document = document(lines);
-        assertEquals(List.of(new StyleSpan(0, 6, STRING)),
+        assertEquals(List.of(new TokenSpan(0, 6, STRING)),
             highlighter(file).highlight(document, lines.size() - 1, lines.getLast()), file + " " + lines);
     }
 
-    private static LineLexicalScanner.Result scanLast(String file, List<String> lines) {
-        LineLexicalScanner scanner = highlighter(file).lexicalScanner();
-        LineLexicalScanner.State state = null;
-        LineLexicalScanner.Result result = null;
+    private static LexicalScanner.Result scanLast(String file, List<String> lines) {
+        LexicalScanner scanner = highlighter(file).lexicalScanner();
+        LexicalScanner.State state = null;
+        LexicalScanner.Result result = null;
         for (String line : lines) {
             result = scanner.scan(line, line.length(), state);
             assertTrue(result.contextKnown(), file + " " + lines);
@@ -175,7 +174,7 @@ class JavaScriptContinuationTest {
         return new DocumentSnapshot(new DocumentId("javascript-continuation"), 1, lines);
     }
 
-    private static ContextualLineHighlighter highlighter(String file) {
-        return (ContextualLineHighlighter) RegexHighlighter.forFileName(file);
+    private static ContextualSyntaxHighlighter highlighter(String file) {
+        return (ContextualSyntaxHighlighter) RegexHighlighter.forFileName(file);
     }
 }

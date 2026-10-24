@@ -8,22 +8,21 @@ import dev.tuink.core.SimpleLineBuffer;
 import dev.tuink.core.TextModel;
 import dev.tuink.editor.document.DocumentId;
 import dev.tuink.editor.document.DocumentView;
-import dev.tuink.render.Color;
-import dev.tuink.render.ContextualLineHighlighter;
-import dev.tuink.render.Style;
-import dev.tuink.render.StyleSpan;
+import dev.tuink.editor.highlight.ContextualSyntaxHighlighter;
+import dev.tuink.editor.highlight.SemanticStyleKey;
+import dev.tuink.editor.highlight.TokenSpan;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class IncrementalHighlighterTest {
-    private static final Style COMMENT = Style.fg(Color.BRIGHT_BLACK);
+    private static final SemanticStyleKey COMMENT = SemanticStyleKey.COMMENT;
 
     @Test
     void editingTheLastJavaLineDoesNotReadTheUnchangedPrefixAgain() {
         CountingDocument document = new CountingDocument(Collections.nCopies(20_000, "return 7;"));
-        ContextualLineHighlighter highlighter = highlighter("test.java");
+        ContextualSyntaxHighlighter highlighter = highlighter("test.java");
         int last = document.lineCount() - 1;
         highlight(highlighter, document, last);
 
@@ -39,7 +38,7 @@ class IncrementalHighlighterTest {
             List<String> lines = new ArrayList<>(Collections.nCopies(20_000, "<hidden>"));
             lines.set(0, "<!--");
             CountingDocument document = new CountingDocument(lines);
-            ContextualLineHighlighter highlighter = highlighter(fileName);
+            ContextualSyntaxHighlighter highlighter = highlighter(fileName);
             int last = document.lineCount() - 1;
             highlight(highlighter, document, last);
 
@@ -47,7 +46,7 @@ class IncrementalHighlighterTest {
             document.forbidReadsBefore(last);
 
             assertMatchesFresh(highlighter, document, last, fileName);
-            assertEquals(List.of(new StyleSpan(0, document.model.getLine(last).length(), COMMENT)),
+            assertEquals(List.of(new TokenSpan(0, document.model.getLine(last).length(), COMMENT)),
                 highlight(highlighter, document, last));
         }
     }
@@ -55,7 +54,7 @@ class IncrementalHighlighterTest {
     @Test
     void editingAControlConditionUpdatesItsJavascriptRegexContext() {
         CountingDocument document = new CountingDocument(List.of("call(", "value) /[/*]/.test(value);", "return 7;"));
-        ContextualLineHighlighter highlighter = highlighter("script.js");
+        ContextualSyntaxHighlighter highlighter = highlighter("script.js");
         highlight(highlighter, document, 2);
 
         document.model.deleteRange(new Position(0, 0), new Position(0, 4));
@@ -67,14 +66,14 @@ class IncrementalHighlighterTest {
     @Test
     void changedCommentAndLineInsertionInvalidateOnlyTheAffectedSuffix() {
         CountingDocument document = new CountingDocument(List.of("return 1;", "return 2;", "return 3;"));
-        ContextualLineHighlighter highlighter = highlighter("test.java");
+        ContextualSyntaxHighlighter highlighter = highlighter("test.java");
         highlight(highlighter, document, 2);
 
         document.model.insertText(new Position(1, 0), "/*\n");
         document.forbidReadsBefore(1);
 
         assertEquals(
-            List.of(new StyleSpan(0, document.model.getLine(3).length(), COMMENT)),
+            List.of(new TokenSpan(0, document.model.getLine(3).length(), COMMENT)),
             highlight(highlighter, document, 3)
         );
         document.model.deleteRange(new Position(1, 0), new Position(2, 0));
@@ -84,7 +83,7 @@ class IncrementalHighlighterTest {
     @Test
     void editsAtDifferentLinesBetweenFramesUseTheEarliestChange() {
         CountingDocument document = new CountingDocument(List.of("return 1;", "return 2;", "return 3;"));
-        ContextualLineHighlighter highlighter = highlighter("test.java");
+        ContextualSyntaxHighlighter highlighter = highlighter("test.java");
         highlight(highlighter, document, 2);
 
         document.model.insertChar(new Position(2, 0), ' ');
@@ -97,7 +96,7 @@ class IncrementalHighlighterTest {
     @Test
     void expiredChangeHistoryRecomputesCommentContext() {
         CountingDocument document = new CountingDocument(List.of("/*", "return 2;", "return 3;"));
-        ContextualLineHighlighter highlighter = highlighter("test.java");
+        ContextualSyntaxHighlighter highlighter = highlighter("test.java");
         highlight(highlighter, document, 2);
 
         document.model.deleteRange(new Position(0, 0), new Position(0, 2));
@@ -114,7 +113,7 @@ class IncrementalHighlighterTest {
         lines.set(0, "```java");
         lines.set(1, "/*");
         CountingDocument document = new CountingDocument(lines);
-        ContextualLineHighlighter highlighter = highlighter("test.md");
+        ContextualSyntaxHighlighter highlighter = highlighter("test.md");
         int last = document.lineCount() - 1;
         highlight(highlighter, document, last);
 
@@ -122,7 +121,7 @@ class IncrementalHighlighterTest {
         document.forbidReadsBefore(last);
 
         assertEquals(
-            List.of(new StyleSpan(0, document.model.getLine(last).length(), COMMENT)),
+            List.of(new TokenSpan(0, document.model.getLine(last).length(), COMMENT)),
             highlight(highlighter, document, last)
         );
     }
@@ -132,7 +131,7 @@ class IncrementalHighlighterTest {
         CountingDocument document = new CountingDocument(List.of(
             "# Heading", "```java", "/*", "return 7;", "```", "return 8;"
         ));
-        ContextualLineHighlighter highlighter = highlighter("test.md");
+        ContextualSyntaxHighlighter highlighter = highlighter("test.md");
         highlight(highlighter, document, 5);
         highlight(highlighter, document, 3);
 
@@ -152,17 +151,17 @@ class IncrementalHighlighterTest {
     @Test
     void changesOutsideTheComputedPrefixDoNotDiscardIt() {
         CountingDocument document = new CountingDocument(List.of("/*", "return 2;", "return 3;"));
-        ContextualLineHighlighter highlighter = highlighter("test.java");
+        ContextualSyntaxHighlighter highlighter = highlighter("test.java");
         highlight(highlighter, document, 1);
 
         document.model.insertChar(new Position(2, 0), ' ');
         document.forbidReadsBefore(1);
 
-        assertEquals(List.of(new StyleSpan(0, 9, COMMENT)), highlight(highlighter, document, 1));
+        assertEquals(List.of(new TokenSpan(0, 9, COMMENT)), highlight(highlighter, document, 1));
     }
 
     private static void assertMatchesFresh(
-        ContextualLineHighlighter highlighter,
+        ContextualSyntaxHighlighter highlighter,
         CountingDocument document,
         int line,
         String fileName
@@ -171,11 +170,11 @@ class IncrementalHighlighterTest {
         assertEquals(highlight(highlighter(fileName), fresh, line), highlight(highlighter, document, line));
     }
 
-    private static ContextualLineHighlighter highlighter(String fileName) {
-        return (ContextualLineHighlighter) RegexHighlighter.forFileName(fileName);
+    private static ContextualSyntaxHighlighter highlighter(String fileName) {
+        return (ContextualSyntaxHighlighter) RegexHighlighter.forFileName(fileName);
     }
 
-    private static List<StyleSpan> highlight(ContextualLineHighlighter highlighter, CountingDocument document, int line) {
+    private static List<TokenSpan> highlight(ContextualSyntaxHighlighter highlighter, CountingDocument document, int line) {
         return highlighter.highlight(document, line, document.model.getLine(line));
     }
 

@@ -1,7 +1,6 @@
 package dev.tuink.highlight.regex;
 
-import dev.tuink.render.Color;
-import dev.tuink.render.Style;
+import dev.tuink.editor.highlight.SemanticStyleKey;
 import java.util.Arrays;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -9,8 +8,8 @@ import java.util.regex.Pattern;
 
 /** Applies simple inline links without retrying an unmatched label at every opening bracket. */
 final class MarkdownInlineHighlighter extends RegexHighlighter {
-    private static final Style LINK_STYLE = Style.fg(Color.BRIGHT_YELLOW);
-    private static final Style QUOTE_STYLE = Style.fg(Color.BRIGHT_BLACK);
+    private static final SemanticStyleKey LINK_STYLE = SemanticStyleKey.LINK;
+    private static final SemanticStyleKey QUOTE_STYLE = SemanticStyleKey.QUOTE;
     private static final Pattern QUOTE = Pattern.compile("^\\s{0,3}>\\s+.*$");
 
     MarkdownInlineHighlighter(List<RegexRule> rules) {
@@ -18,9 +17,9 @@ final class MarkdownInlineHighlighter extends RegexHighlighter {
     }
 
     @Override
-    protected Style[] highlightStyles(String line, HighlightWork work) {
+    protected SemanticStyleKey[] highlightStyles(String line, HighlightWork work) {
         work.spend(8L * line.length());
-        Style[] styles = super.highlightStyles(line, work);
+        SemanticStyleKey[] styles = super.highlightStyles(line, work);
         highlightLinks(line, styles);
         Matcher quote = QUOTE.matcher(line);
         if (quote.find()) {
@@ -29,7 +28,7 @@ final class MarkdownInlineHighlighter extends RegexHighlighter {
         return styles;
     }
 
-    private static void highlightLinks(String line, Style[] styles) {
+    private static void highlightLinks(String line, SemanticStyleKey[] styles) {
         int cursor = 0;
         while (cursor < line.length()) {
             int start = line.indexOf('[', cursor);

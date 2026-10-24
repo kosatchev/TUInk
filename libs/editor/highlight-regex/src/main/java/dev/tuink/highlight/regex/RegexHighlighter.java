@@ -1,11 +1,10 @@
 package dev.tuink.highlight.regex;
 
 import dev.tuink.editor.language.LanguageRegistry;
-import dev.tuink.render.Color;
-import dev.tuink.render.HighlightRequest;
-import dev.tuink.render.LineHighlighter;
-import dev.tuink.render.Style;
-import dev.tuink.render.StyleSpan;
+import dev.tuink.editor.highlight.HighlightRequest;
+import dev.tuink.editor.highlight.SyntaxHighlighter;
+import dev.tuink.editor.highlight.SemanticStyleKey;
+import dev.tuink.editor.highlight.TokenSpan;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -15,15 +14,15 @@ import java.util.regex.Pattern;
 /**
  * Line highlighter using layered regex rules.
  */
-public class RegexHighlighter implements LineHighlighter {
+public class RegexHighlighter implements SyntaxHighlighter {
     private static final int LEGACY_MAX_SCAN = 1_048_576;
-    private static final Style KEYWORD_STYLE = new Style(Color.BRIGHT_BLUE, Color.DEFAULT, true, false);
-    private static final Style TYPE_STYLE = new Style(Color.BRIGHT_MAGENTA, Color.DEFAULT, false, false);
-    private static final Style NUMBER_STYLE = new Style(Color.BRIGHT_CYAN, Color.DEFAULT, false, false);
-    private static final Style STRING_STYLE = new Style(Color.BRIGHT_GREEN, Color.DEFAULT, false, false);
-    private static final Style COMMENT_STYLE = new Style(Color.BRIGHT_BLACK, Color.DEFAULT, false, false);
-    private static final Style DECORATOR_STYLE = new Style(Color.BRIGHT_YELLOW, Color.DEFAULT, false, false);
-    private static final Style MARKUP_STYLE = new Style(Color.BRIGHT_YELLOW, Color.DEFAULT, true, false);
+    private static final SemanticStyleKey KEYWORD_STYLE = SemanticStyleKey.KEYWORD;
+    private static final SemanticStyleKey TYPE_STYLE = SemanticStyleKey.TYPE;
+    private static final SemanticStyleKey NUMBER_STYLE = SemanticStyleKey.NUMBER;
+    private static final SemanticStyleKey STRING_STYLE = SemanticStyleKey.STRING;
+    private static final SemanticStyleKey COMMENT_STYLE = SemanticStyleKey.COMMENT;
+    private static final SemanticStyleKey DECORATOR_STYLE = SemanticStyleKey.DECORATOR;
+    private static final SemanticStyleKey MARKUP_STYLE = SemanticStyleKey.MARKUP;
 
     private final List<RegexRule> rules;
 
@@ -45,7 +44,7 @@ public class RegexHighlighter implements LineHighlighter {
         ));
     }
 
-    public static LineHighlighter forFileName(String fileName) {
+    public static SyntaxHighlighter forFileName(String fileName) {
         return switch (LanguageRegistry.forFileName(fileName)) {
             case JAVA -> forJava();
             case C -> forC();
@@ -452,12 +451,12 @@ public class RegexHighlighter implements LineHighlighter {
     }
 
     @Override
-    public List<StyleSpan> highlight(String line) {
+    public List<TokenSpan> highlight(String line) {
         return highlight(line, legacyRequest(line));
     }
 
     @Override
-    public List<StyleSpan> highlight(String line, HighlightRequest request) {
+    public List<TokenSpan> highlight(String line, HighlightRequest request) {
         Objects.requireNonNull(request, "request");
         // Regex rules may depend on a closing delimiter or EOL beyond the visible
         // interval. Never reinterpret a truncated substring as a complete line.
@@ -476,14 +475,14 @@ public class RegexHighlighter implements LineHighlighter {
         return new HighlightRequest(0, line == null ? 0 : line.length(), LEGACY_MAX_SCAN, 65_536, 32_000_000L);
     }
 
-    protected Style[] highlightStyles(String line, HighlightWork work) {
+    protected SemanticStyleKey[] highlightStyles(String line, HighlightWork work) {
         work.spend(line.length());
-        Style[] styleAt = new Style[line.length()];
+        SemanticStyleKey[] styleAt = new SemanticStyleKey[line.length()];
         applyRules(line, styleAt, rules, work);
         return styleAt;
     }
 
-    protected static void applyRules(String line, Style[] styleAt, List<RegexRule> rules, HighlightWork work) {
+    protected static void applyRules(String line, SemanticStyleKey[] styleAt, List<RegexRule> rules, HighlightWork work) {
         for (RegexRule rule : rules) {
             try {
                 Matcher matcher = rule.pattern().matcher(new RegexInput(line, work));
@@ -492,7 +491,7 @@ public class RegexHighlighter implements LineHighlighter {
                     int end = Math.min(line.length(), matcher.end());
                     if (work != null) work.spend(end - start);
                     for (int i = start; i < end; i++) {
-                        styleAt[i] = rule.style();
+                        styleAt[i] = rule.styleKey();
                     }
                 }
             } catch (RegexInput.MatchLimitExceeded ignored) {
@@ -504,20 +503,20 @@ public class RegexHighlighter implements LineHighlighter {
     }
 
     /** Produces only requested spans; output exhaustion yields an unstyled result. */
-    protected static List<StyleSpan> spans(Style[] styleAt, HighlightRequest request, HighlightWork work) {
+    protected static List<TokenSpan> spans(SemanticStyleKey[] styleAt, HighlightRequest request, HighlightWork work) {
         int from = Math.min(styleAt.length, request.startUtf16());
         int end = Math.min(styleAt.length, request.endUtf16());
         if (from >= end || request.maxSpans() == 0) return List.of();
         work.spend(end - from);
-        List<StyleSpan> result = new ArrayList<>();
-        Style current = styleAt[from];
+        List<TokenSpan> result = new ArrayList<>();
+        SemanticStyleKey current = styleAt[from];
         int start = from;
         for (int offset = from + 1; offset <= end; offset++) {
-            Style next = offset == end ? null : styleAt[offset];
+            SemanticStyleKey next = offset == end ? null : styleAt[offset];
             if (!Objects.equals(current, next)) {
                 if (current != null) {
                     if (result.size() == request.maxSpans()) return List.of();
-                    result.add(new StyleSpan(start, offset, current));
+                    result.add(new TokenSpan(start, offset, current));
                 }
                 current = next;
                 start = offset;

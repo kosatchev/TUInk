@@ -200,7 +200,7 @@ class EditorViewScrollbarTest {
     @Test
     void rendererAndPointerUseTheResolvedGeometryThroughResizeAndOverlayFrames() {
         Fixture fixture = fixture(3, "long text ".repeat(5));
-        RenderPlanBuilder builder = new RenderPlanBuilder(ignored -> List.of(), fixture.textLayout());
+        RenderPlanBuilder builder = RenderPlanBuilder.standalone(ignored -> List.of(), fixture.textLayout());
         for (boolean wrapped : new boolean[] {false, true}) {
             for (int rows = 1; rows <= 8; rows++) {
                 for (int columns = 1; columns <= 14; columns++) {

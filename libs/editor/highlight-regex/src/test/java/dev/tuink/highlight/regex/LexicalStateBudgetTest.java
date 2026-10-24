@@ -7,9 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.editor.document.DocumentId;
 import dev.tuink.editor.document.DocumentSnapshot;
-import dev.tuink.render.ContextualLineHighlighter;
-import dev.tuink.render.HighlightRequest;
-import dev.tuink.render.LineLexicalScanner;
+import dev.tuink.editor.highlight.ContextualSyntaxHighlighter;
+import dev.tuink.editor.highlight.HighlightRequest;
+import dev.tuink.editor.highlight.LexicalScanner;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -19,7 +19,7 @@ class LexicalStateBudgetTest {
         int depth = CStyleHighlighter.MAX_CONTEXT_DEPTH;
         for (String file : List.of("app.js", "app.ts")) {
             for (String opening : List.of("if (", "call(")) {
-                LineLexicalScanner scanner = scanner(file);
+                LexicalScanner scanner = scanner(file);
                 String first = opening + "(".repeat(depth - 1);
                 var previous = scanner.scan(first, first.length(), null);
                 assertTrue(previous.contextKnown());
@@ -30,7 +30,7 @@ class LexicalStateBudgetTest {
                 var result = scanner.scan(closing, closing.length(), empty.endState());
                 assertTrue(result.contextKnown());
                 assertEquals(opening.startsWith("if")
-                        ? List.of(new LineLexicalScanner.Range(depth + 1, depth + 7)) : List.of(),
+                        ? List.of(new LexicalScanner.Range(depth + 1, depth + 7)) : List.of(),
                     result.excludedRanges(), file + " " + opening);
             }
         }
@@ -39,7 +39,7 @@ class LexicalStateBudgetTest {
     @Test
     void depthFailureNeverBecomesKnownAgainThroughAnEmptyLineOrClosingParenthesis() {
         for (String file : List.of("app.js", "app.ts")) {
-            LineLexicalScanner scanner = scanner(file);
+            LexicalScanner scanner = scanner(file);
             String first = "(".repeat(CStyleHighlighter.MAX_CONTEXT_DEPTH);
             var previous = scanner.scan(first, first.length(), null);
             assertTrue(previous.contextKnown());
@@ -68,26 +68,26 @@ class LexicalStateBudgetTest {
 
     @Test
     void quoteAndRangeCapsStopBeforeRetainingUnboundedOutput() {
-        String atLimit = "\"\" ".repeat(LineLexicalScanner.MAX_QUOTES);
+        String atLimit = "\"\" ".repeat(LexicalScanner.MAX_QUOTES);
         var complete = scanner("app.java").scan(atLimit, atLimit.length(), null);
         assertTrue(complete.contextKnown());
-        assertEquals(LineLexicalScanner.MAX_QUOTES, complete.quotes().size());
-        assertEquals(LineLexicalScanner.MAX_EXCLUDED_RANGES, complete.excludedRanges().size());
+        assertEquals(LexicalScanner.MAX_QUOTES, complete.quotes().size());
+        assertEquals(LexicalScanner.MAX_EXCLUDED_RANGES, complete.excludedRanges().size());
 
-        String adjacent = "\"\"".repeat(LineLexicalScanner.MAX_QUOTES + 1);
+        String adjacent = "\"\"".repeat(LexicalScanner.MAX_QUOTES + 1);
         assertUnknown(scanner("app.js").scan(adjacent, adjacent.length(), null), adjacent.length());
-        String comments = "/*x*/ ".repeat(LineLexicalScanner.MAX_EXCLUDED_RANGES + 1);
+        String comments = "/*x*/ ".repeat(LexicalScanner.MAX_EXCLUDED_RANGES + 1);
         assertUnknown(scanner("app.java").scan(comments, comments.length(), null), comments.length());
         // Rust records a character literal after painting it; exhausting its
         // quote budget must trim that already painted token to the proven prefix.
-        String characters = "'x' ".repeat(LineLexicalScanner.MAX_QUOTES + 1);
+        String characters = "'x' ".repeat(LexicalScanner.MAX_QUOTES + 1);
         assertUnknown(scanner("app.rs").scan(characters, characters.length(), null), characters.length());
     }
 
     @Test
     void prefixExhaustionIsExplicitEvenWhenAnUnknownContinuationReachesEmptyInput() {
         for (String file : List.of("app.java", "app.js", "app.rb", "notes.md")) {
-            LineLexicalScanner scanner = scanner(file);
+            LexicalScanner scanner = scanner(file);
             assertTrue(scanner.scan("", 0, null).contextKnown());
             var failed = scanner.scan("/*", 0, null);
             assertUnknown(failed, 2);
@@ -102,7 +102,7 @@ class LexicalStateBudgetTest {
             var original = new DocumentSnapshot(id, 1, markdown
                 ? List.of("```js", "(".repeat(CStyleHighlighter.MAX_CONTEXT_DEPTH + 1), "", ") /[()]/;")
                 : List.of("const before = 1;", "(".repeat(CStyleHighlighter.MAX_CONTEXT_DEPTH + 1), "", ") /[()]/;"));
-            ContextualLineHighlighter highlighter = highlighter(markdown ? "notes.md" : "app.js");
+            ContextualSyntaxHighlighter highlighter = highlighter(markdown ? "notes.md" : "app.js");
             HighlightRequest request = new HighlightRequest(0, original.line(3).length(), 65_536, 4096, 1_048_576);
             for (int attempt = 0; attempt < 3; attempt++) {
                 var result = highlighter.highlightResult(original, 3, original.line(3), request);
@@ -122,7 +122,7 @@ class LexicalStateBudgetTest {
 
     @Test
     void markdownContainerDepthIsBoundedBeforeAllocationAndUnknownSurvivesEmptyLines() {
-        LineLexicalScanner scanner = scanner("notes.md");
+        LexicalScanner scanner = scanner("notes.md");
         String atLimit = "- ".repeat(MarkdownFenceHighlighter.MAX_CONTAINER_DEPTH) + "value";
         var known = scanner.scan(atLimit, atLimit.length(), null);
         assertTrue(known.contextKnown());
@@ -134,7 +134,7 @@ class LexicalStateBudgetTest {
 
         var id = new DocumentId("markdown-container-limit");
         var original = new DocumentSnapshot(id, 1, List.of("intro", excessive, "", "# Heading"));
-        ContextualLineHighlighter highlighter = highlighter("notes.md");
+        ContextualSyntaxHighlighter highlighter = highlighter("notes.md");
         HighlightRequest request = new HighlightRequest(0, 9, 65_536, 4096, 1_048_576);
         for (int attempt = 0; attempt < 3; attempt++) {
             var result = highlighter.highlightResult(original, 3, original.line(3), request);
@@ -152,12 +152,12 @@ class LexicalStateBudgetTest {
         assertEquals(highlighter("notes.md").highlight(edited, 3, edited.line(3), request), result.spans());
     }
 
-    private static void assertUnknown(LineLexicalScanner.Result result, int sourceLength) {
+    private static void assertUnknown(LexicalScanner.Result result, int sourceLength) {
         assertFalse(result.contextKnown());
-        assertSame(LineLexicalScanner.State.UNKNOWN, result.endState());
+        assertSame(LexicalScanner.State.UNKNOWN, result.endState());
         assertTrue(result.scannedCodeUnits() <= sourceLength);
-        assertTrue(result.excludedRanges().size() <= LineLexicalScanner.MAX_EXCLUDED_RANGES);
-        assertTrue(result.quotes().size() <= LineLexicalScanner.MAX_QUOTES);
+        assertTrue(result.excludedRanges().size() <= LexicalScanner.MAX_EXCLUDED_RANGES);
+        assertTrue(result.quotes().size() <= LexicalScanner.MAX_QUOTES);
         for (var range : result.excludedRanges()) assertTrue(range.end() <= result.scannedCodeUnits());
         for (var quote : result.quotes()) {
             assertTrue(quote.start() < result.scannedCodeUnits());
@@ -165,11 +165,11 @@ class LexicalStateBudgetTest {
         }
     }
 
-    private static ContextualLineHighlighter highlighter(String file) {
-        return (ContextualLineHighlighter) RegexHighlighter.forFileName(file);
+    private static ContextualSyntaxHighlighter highlighter(String file) {
+        return (ContextualSyntaxHighlighter) RegexHighlighter.forFileName(file);
     }
 
-    private static LineLexicalScanner scanner(String file) {
+    private static LexicalScanner scanner(String file) {
         return highlighter(file).lexicalScanner();
     }
 }

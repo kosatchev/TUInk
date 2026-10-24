@@ -7,21 +7,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.editor.document.DocumentId;
 import dev.tuink.editor.document.DocumentSnapshot;
-import dev.tuink.render.Color;
-import dev.tuink.render.ContextualLineHighlighter;
-import dev.tuink.render.LineLexicalScanner;
-import dev.tuink.render.Style;
-import dev.tuink.render.StyleSpan;
+import dev.tuink.editor.highlight.ContextualSyntaxHighlighter;
+import dev.tuink.editor.highlight.LexicalScanner;
+import dev.tuink.editor.highlight.SemanticStyleKey;
+import dev.tuink.editor.highlight.TokenSpan;
 import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class CommentContextHighlighterTest {
     private static final DocumentId ID = new DocumentId("comment-context-test");
-    private static final Style KEYWORD = new Style(Color.BRIGHT_BLUE, Color.DEFAULT, true, false);
-    private static final Style NUMBER = Style.fg(Color.BRIGHT_CYAN);
-    private static final Style STRING = Style.fg(Color.BRIGHT_GREEN);
-    private static final Style COMMENT = Style.fg(Color.BRIGHT_BLACK);
+    private static final SemanticStyleKey KEYWORD = SemanticStyleKey.KEYWORD;
+    private static final SemanticStyleKey NUMBER = SemanticStyleKey.NUMBER;
+    private static final SemanticStyleKey STRING = SemanticStyleKey.STRING;
+    private static final SemanticStyleKey COMMENT = SemanticStyleKey.COMMENT;
 
     @Test
     void rubyHashesAndInterpolationStayInsideStringsAndLeaveFollowingCodeVisible() {
@@ -32,7 +31,7 @@ class CommentContextHighlighterTest {
         )) {
             String line = "puts " + quoted + "; return 7 # actual \"comment\"";
             assertEquals(List.of(span(line, quoted, STRING), span(line, "return", KEYWORD),
-                span(line, "7", NUMBER), new StyleSpan(line.lastIndexOf('#'), line.length(), COMMENT)),
+                span(line, "7", NUMBER), new TokenSpan(line.lastIndexOf('#'), line.length(), COMMENT)),
                 RegexHighlighter.forRuby().highlight(line), quoted);
         }
     }
@@ -45,15 +44,15 @@ class CommentContextHighlighterTest {
             "  {other: \"#{name}\"})} tail\"; return 7 # actual",
             "return 8;"
         );
-        ContextualLineHighlighter highlighter = highlighter("script.rb");
+        ContextualSyntaxHighlighter highlighter = highlighter("script.rb");
 
         assertEquals(code(document.line(3), "8"), highlight(highlighter, document, 3));
-        assertEquals(List.of(new StyleSpan(0, document.line(1).length(), STRING)),
+        assertEquals(List.of(new TokenSpan(0, document.line(1).length(), STRING)),
             highlight(highlighter, document, 1));
         String closing = document.line(2);
-        assertEquals(List.of(new StyleSpan(0, closing.indexOf("; return"), STRING),
+        assertEquals(List.of(new TokenSpan(0, closing.indexOf("; return"), STRING),
             span(closing, "return", KEYWORD), span(closing, "7", NUMBER),
-            new StyleSpan(closing.indexOf('#', closing.indexOf("; return")), closing.length(), COMMENT)),
+            new TokenSpan(closing.indexOf('#', closing.indexOf("; return")), closing.length(), COMMENT)),
             highlight(highlighter, document, 2));
     }
 
@@ -62,15 +61,15 @@ class CommentContextHighlighterTest {
         for (String fileName : List.of("page.html", "settings.xml")) {
             DocumentSnapshot document = document("<!-- comment", "<hidden value=\"text\">([)]</hidden>",
                 "--> <visible>", "<after>");
-            ContextualLineHighlighter highlighter = highlighter(fileName);
+            ContextualSyntaxHighlighter highlighter = highlighter(fileName);
 
             assertEquals(List.of(span(document.line(3), "<after", KEYWORD)),
                 highlight(highlighter, document, 3), fileName);
-            assertEquals(List.of(new StyleSpan(0, document.line(0).length(), COMMENT)),
+            assertEquals(List.of(new TokenSpan(0, document.line(0).length(), COMMENT)),
                 highlight(highlighter, document, 0), fileName);
-            assertEquals(List.of(new StyleSpan(0, document.line(1).length(), COMMENT)),
+            assertEquals(List.of(new TokenSpan(0, document.line(1).length(), COMMENT)),
                 highlight(highlighter, document, 1), fileName);
-            assertEquals(List.of(new StyleSpan(0, 3, COMMENT), span(document.line(2), "<visible", KEYWORD)),
+            assertEquals(List.of(new TokenSpan(0, 3, COMMENT), span(document.line(2), "<visible", KEYWORD)),
                 highlight(highlighter, document, 2), fileName);
         }
     }
@@ -80,12 +79,12 @@ class CommentContextHighlighterTest {
         for (String fileName : List.of("page.html", "settings.xml")) {
             DocumentSnapshot document = document("Don't treat 1 < 2 and apostrophes as an attribute's opening.",
                 "<node value=\"<!-- literal -->\" path=\"C:\\\"> <!-- actual", "hidden", "--> <after>");
-            ContextualLineHighlighter highlighter = highlighter(fileName);
+            ContextualSyntaxHighlighter highlighter = highlighter(fileName);
             String line = document.line(1);
-            assertEquals(List.of(new StyleSpan(0, 3, COMMENT), span(document.line(3), "<after", KEYWORD)),
+            assertEquals(List.of(new TokenSpan(0, 3, COMMENT), span(document.line(3), "<after", KEYWORD)),
                 highlight(highlighter, document, 3), fileName);
             assertTrue(highlight(highlighter, document, 1).contains(span(line, "\"<!-- literal -->\"", STRING)), fileName);
-            assertEquals(List.of(new StyleSpan(0, document.line(2).length(), COMMENT)),
+            assertEquals(List.of(new TokenSpan(0, document.line(2).length(), COMMENT)),
                 highlight(highlighter, document, 2), fileName);
         }
     }
@@ -95,12 +94,12 @@ class CommentContextHighlighterTest {
         for (String tag : List.of("html", "xml")) {
             DocumentSnapshot document = document("```" + tag, "<!-- unclosed", "<hidden>", "```",
                 "```" + tag, "<visible>", "```", "```" + tag, "<!-- comment", "hidden", "--> <after>", "```");
-            ContextualLineHighlighter highlighter = highlighter("README.md");
+            ContextualSyntaxHighlighter highlighter = highlighter("README.md");
             assertEquals(List.of(span(document.line(5), "<visible", KEYWORD)),
                 highlight(highlighter, document, 5), tag);
-            assertEquals(List.of(new StyleSpan(0, document.line(2).length(), COMMENT)),
+            assertEquals(List.of(new TokenSpan(0, document.line(2).length(), COMMENT)),
                 highlight(highlighter, document, 2), tag);
-            assertEquals(List.of(new StyleSpan(0, 3, COMMENT), span(document.line(10), "<after", KEYWORD)),
+            assertEquals(List.of(new TokenSpan(0, 3, COMMENT), span(document.line(10), "<after", KEYWORD)),
                 highlight(highlighter, document, 10), tag);
 
             DocumentSnapshot revised = new DocumentSnapshot(ID, 2,
@@ -116,7 +115,7 @@ class CommentContextHighlighterTest {
             for (String control : List.of("if (ready)", "if (ready && check(value))", "while (ready)",
                 "for (const value of values)", "for await (const value of values)", "with (scope)", "else", "do")) {
                 DocumentSnapshot document = document(control + " /[/*]/.test(value);", "return 7;");
-                ContextualLineHighlighter highlighter = highlighter(fileName);
+                ContextualSyntaxHighlighter highlighter = highlighter(fileName);
                 assertEquals(code(document.line(1), "7"), highlight(highlighter, document, 1), control);
                 assertTrue(highlight(highlighter, document, 0).contains(span(document.line(0), "/[/*]/", STRING)), control);
             }
@@ -127,7 +126,7 @@ class CommentContextHighlighterTest {
     void javascriptConditionsKeepParenthesisContextAcrossLinesAndBlockComments() {
         DocumentSnapshot document = document("if /* between keyword and condition */ (check(",
             "  value /* condition", "  */)) /[/*]/.test(value);", "return 7;");
-        ContextualLineHighlighter highlighter = highlighter("script.js");
+        ContextualSyntaxHighlighter highlighter = highlighter("script.js");
         assertEquals(code(document.line(3), "7"), highlight(highlighter, document, 3));
         assertTrue(highlight(highlighter, document, 2).contains(span(document.line(2), "/[/*]/", STRING)));
 
@@ -139,15 +138,15 @@ class CommentContextHighlighterTest {
 
     @Test
     void javascriptControlRegexOnlyExcludesItsLiteralFromBracketMatching() {
-        LineLexicalScanner scanner = highlighter("script.js").lexicalScanner();
+        LexicalScanner scanner = highlighter("script.js").lexicalScanner();
         String first = "if (ready && check(value)) /[/*]/.test(value);";
-        LineLexicalScanner.Result condition = scanner.scan(first, first.length(), null);
+        LexicalScanner.Result condition = scanner.scan(first, first.length(), null);
         int start = first.indexOf("/[/*]/");
-        assertEquals(List.of(new LineLexicalScanner.Range(start, start + "/[/*]/".length())),
+        assertEquals(List.of(new LexicalScanner.Range(start, start + "/[/*]/".length())),
             condition.excludedRanges());
 
         String following = "return ([value]);";
-        LineLexicalScanner.Result code = scanner.scan(following, following.length(), condition.endState());
+        LexicalScanner.Result code = scanner.scan(following, following.length(), condition.endState());
         assertEquals(List.of(), code.excludedRanges());
         assertEquals(following.length(), code.scannedCodeUnits());
     }
@@ -158,13 +157,13 @@ class CommentContextHighlighterTest {
             "call(nested(value))", "value++", "value--")) {
             String line = expression + " / divisor / 2; /* actual";
             DocumentSnapshot document = document(line, "return 7;", "*/ return 8;");
-            ContextualLineHighlighter highlighter = highlighter("script.js");
-            assertEquals(List.of(new StyleSpan(0, document.line(1).length(), COMMENT)),
+            ContextualSyntaxHighlighter highlighter = highlighter("script.js");
+            assertEquals(List.of(new TokenSpan(0, document.line(1).length(), COMMENT)),
                 highlight(highlighter, document, 1), expression);
-            List<StyleSpan> spans = highlight(highlighter, document, 0);
+            List<TokenSpan> spans = highlight(highlighter, document, 0);
             assertTrue(spans.contains(span(line, "2", NUMBER)), expression);
-            assertTrue(spans.contains(new StyleSpan(line.indexOf("/*"), line.length(), COMMENT)), expression);
-            assertTrue(spans.stream().noneMatch(span -> span.style().equals(STRING)), expression);
+            assertTrue(spans.contains(new TokenSpan(line.indexOf("/*"), line.length(), COMMENT)), expression);
+            assertTrue(spans.stream().noneMatch(span -> span.styleKey().equals(STRING)), expression);
         }
     }
 
@@ -172,7 +171,7 @@ class CommentContextHighlighterTest {
     void deepRubyInterpolationAndJavascriptConditionsKeepScanningBoundedWithoutRecursion() {
         assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
             String withinLimit = "\"#{".repeat(128) + "value" + "}\"".repeat(128);
-            assertEquals(List.of(new StyleSpan(0, withinLimit.length(), STRING)),
+            assertEquals(List.of(new TokenSpan(0, withinLimit.length(), STRING)),
                 RegexHighlighter.forRuby().highlight(withinLimit));
             String ruby = "\"#{".repeat(20_000) + "value" + "}\"".repeat(20_000);
             assertTrue(RegexHighlighter.forRuby().highlight(ruby).isEmpty());
@@ -180,18 +179,18 @@ class CommentContextHighlighterTest {
             for (String fileName : List.of("script.rb", "script.js", "page.html", "settings.xml")) {
                 String line = fileName.endsWith("rb") ? ruby : fileName.endsWith("js") ? javascript
                     : "<!--" + "(".repeat(200_000) + "-->";
-                LineLexicalScanner scanner = highlighter(fileName).lexicalScanner();
-                LineLexicalScanner.Result prefix = scanner.scan(line, 64, null);
+                LexicalScanner scanner = highlighter(fileName).lexicalScanner();
+                LexicalScanner.Result prefix = scanner.scan(line, 64, null);
                 assertEquals(64, prefix.scannedCodeUnits(), fileName);
                 assertEquals(List.of(), prefix.quotes(), fileName);
-                for (LineLexicalScanner.Range range : prefix.excludedRanges()) {
+                for (LexicalScanner.Range range : prefix.excludedRanges()) {
                     assertTrue(range.end() <= 64, fileName);
                 }
-                LineLexicalScanner.Result complete = scanner.scan(line, line.length(), null);
+                LexicalScanner.Result complete = scanner.scan(line, line.length(), null);
                 if (fileName.endsWith("rb") || fileName.endsWith("js")) {
                     assertFalse(complete.contextKnown(), fileName);
                     assertTrue(complete.scannedCodeUnits() < line.length(), fileName);
-                    assertEquals(LineLexicalScanner.State.UNKNOWN, complete.endState(), fileName);
+                    assertEquals(LexicalScanner.State.UNKNOWN, complete.endState(), fileName);
                 } else {
                     assertTrue(complete.contextKnown(), fileName);
                     assertEquals(line.length(), complete.scannedCodeUnits(), fileName);
@@ -205,13 +204,13 @@ class CommentContextHighlighterTest {
         assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
             for (String fileName : List.of("script.js", "script.rb")) {
                 String line = fileName.endsWith("js") ? "if (" + "(".repeat(12_000) : "\"#{".repeat(12_000);
-                LineLexicalScanner scanner = highlighter(fileName).lexicalScanner();
-                LineLexicalScanner.State first = scanner.scan(line, line.length(), null).endState();
-                LineLexicalScanner.State second = scanner.scan(line, line.length(), null).endState();
+                LexicalScanner scanner = highlighter(fileName).lexicalScanner();
+                LexicalScanner.State first = scanner.scan(line, line.length(), null).endState();
+                LexicalScanner.State second = scanner.scan(line, line.length(), null).endState();
                 assertEquals(first, second, fileName);
                 assertEquals(first.hashCode(), second.hashCode(), fileName);
                 // Hashing retained prefixes must not repeatedly walk their entire parent chain.
-                LineLexicalScanner.State state = null;
+                LexicalScanner.State state = null;
                 for (int index = 0; index < 12_000; index++) {
                     String opening = fileName.endsWith("js") ? "(" : "\"#{";
                     state = scanner.scan(opening, opening.length(), state).endState();
@@ -221,24 +220,24 @@ class CommentContextHighlighterTest {
         });
     }
 
-    private static ContextualLineHighlighter highlighter(String fileName) {
-        return (ContextualLineHighlighter) RegexHighlighter.forFileName(fileName);
+    private static ContextualSyntaxHighlighter highlighter(String fileName) {
+        return (ContextualSyntaxHighlighter) RegexHighlighter.forFileName(fileName);
     }
 
     private static DocumentSnapshot document(String... lines) {
         return new DocumentSnapshot(ID, 1, List.of(lines));
     }
 
-    private static List<StyleSpan> highlight(ContextualLineHighlighter highlighter, DocumentSnapshot document, int index) {
+    private static List<TokenSpan> highlight(ContextualSyntaxHighlighter highlighter, DocumentSnapshot document, int index) {
         return highlighter.highlight(document, index, document.line(index));
     }
 
-    private static List<StyleSpan> code(String line, String number) {
+    private static List<TokenSpan> code(String line, String number) {
         return List.of(span(line, "return", KEYWORD), span(line, number, NUMBER));
     }
 
-    private static StyleSpan span(String line, String token, Style style) {
+    private static TokenSpan span(String line, String token, SemanticStyleKey style) {
         int start = line.indexOf(token);
-        return new StyleSpan(start, start + token.length(), style);
+        return new TokenSpan(start, start + token.length(), style);
     }
 }

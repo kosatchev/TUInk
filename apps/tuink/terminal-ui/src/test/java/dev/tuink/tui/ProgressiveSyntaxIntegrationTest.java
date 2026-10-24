@@ -8,7 +8,7 @@ import dev.tuiframe.style.CellColor;
 import dev.tuiframe.style.CellStyle;
 import dev.tuink.core.Position;
 import dev.tuink.highlight.regex.RegexHighlighter;
-import dev.tuink.render.RenderPlanBuilder;
+import dev.tuink.render.SemanticHighlighterAdapter;
 import java.nio.file.Path;
 import java.util.Collections;
 import org.junit.jupiter.api.Test;
@@ -21,7 +21,7 @@ class ProgressiveSyntaxIntegrationTest {
             Collections.nCopies(10_000, "public class Example { int value = 123; }"))) {
             window.resize(8, 80);
             var session = window.active().tabSession();
-            var builder = new RenderPlanBuilder(RegexHighlighter.forJava(), session.engine().textLayout());
+            var builder = window.active().documentSession().newRenderPlanBuilder(new SemanticHighlighterAdapter(RegexHighlighter.forJava()));
             window.context.replaceActiveRenderPlanBuilder(builder);
             builder.setBracketMatchingEnabled(false);
             builder.setRainbowBracketsEnabled(false);

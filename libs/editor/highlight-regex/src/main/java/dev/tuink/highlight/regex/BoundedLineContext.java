@@ -50,14 +50,14 @@ final class BoundedLineContext<S> {
         int remaining = maxCodeUnits;
         try {
             while (line < target) {
-                String text = document.line(line);
+                CharSequence text = document.lineText(line);
                 // Empty lines still cost one unit: a distant line index cannot turn
                 // a zero-character budget into an unbounded document traversal.
                 long cost = (long) text.length() + 1;
                 if (cost > remaining) return unresolved(startedAt, target, remaining);
                 remaining -= (int) cost;
                 work.spend(1);
-                S after = scanner.scan(text, line, state, work);
+                S after = scanner.scan(text.toString(), line, state, work);
                 // A semantic/state limit cannot be resumed with a fresh frame's
                 // work allowance. Keep earlier checkpoints, but do not schedule
                 // idle retries for this permanently unavailable context.

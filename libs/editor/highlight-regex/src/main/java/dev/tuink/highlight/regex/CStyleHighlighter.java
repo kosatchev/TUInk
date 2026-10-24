@@ -1,13 +1,12 @@
 package dev.tuink.highlight.regex;
 
 import dev.tuink.editor.document.DocumentView;
-import dev.tuink.render.Color;
-import dev.tuink.render.ContextualLineHighlighter;
-import dev.tuink.render.HighlightRequest;
-import dev.tuink.render.HighlightResult;
-import dev.tuink.render.LineLexicalScanner;
-import dev.tuink.render.Style;
-import dev.tuink.render.StyleSpan;
+import dev.tuink.editor.highlight.ContextualSyntaxHighlighter;
+import dev.tuink.editor.highlight.HighlightRequest;
+import dev.tuink.editor.highlight.HighlightResult;
+import dev.tuink.editor.highlight.LexicalScanner;
+import dev.tuink.editor.highlight.SemanticStyleKey;
+import dev.tuink.editor.highlight.TokenSpan;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -17,11 +16,11 @@ import java.util.Set;
 /**
  * Applies language-specific strings and comments in source order, over ordinary regex rules.
  */
-final class CStyleHighlighter extends RegexHighlighter implements ContextualLineHighlighter {
+final class CStyleHighlighter extends RegexHighlighter implements ContextualSyntaxHighlighter {
     static final int MAX_CONTEXT_DEPTH = 1024;
     static final int MAX_CONTEXT_NODES_PER_SCAN = 16_384;
-    private static final Style STRING_STYLE = Style.fg(Color.BRIGHT_GREEN);
-    private static final Style COMMENT_STYLE = Style.fg(Color.BRIGHT_BLACK);
+    private static final SemanticStyleKey STRING_STYLE = SemanticStyleKey.STRING;
+    private static final SemanticStyleKey COMMENT_STYLE = SemanticStyleKey.COMMENT;
     private static final Set<String> REGEX_PREFIX_KEYWORDS = Set.of(
         "return", "throw", "case", "delete", "typeof", "void", "new", "yield", "await", "in", "instanceof", "of",
         "else", "do"
@@ -264,7 +263,7 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
         JavaScriptContext javascript,
         boolean markupTag
     )
-        implements LineLexicalScanner.State {
+        implements LexicalScanner.State {
         private static final ScanState EMPTY = new ScanState(0, null, 0, -1, JavaScriptContext.EMPTY, false);
     }
 
@@ -282,12 +281,12 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
     }
 
     @Override
-    public List<StyleSpan> highlight(String line) {
+    public List<TokenSpan> highlight(String line) {
         return highlight(line, legacyRequest(line));
     }
 
     @Override
-    public List<StyleSpan> highlight(String line, HighlightRequest request) {
+    public List<TokenSpan> highlight(String line, HighlightRequest request) {
         HighlightWork work = new HighlightWork(request.maxWork());
         try {
             return highlight(line, ScanState.EMPTY, request, request.maxScanCodeUnits(), work);
@@ -297,12 +296,12 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
     }
 
     @Override
-    public List<StyleSpan> highlight(DocumentView document, int lineIndex, String line) {
+    public List<TokenSpan> highlight(DocumentView document, int lineIndex, String line) {
         return highlight(document, lineIndex, line, legacyRequest(line));
     }
 
     @Override
-    public List<StyleSpan> highlight(DocumentView document, int lineIndex, String line, HighlightRequest request) {
+    public List<TokenSpan> highlight(DocumentView document, int lineIndex, String line, HighlightRequest request) {
         return highlight(document, lineIndex, line, 0, request);
     }
 
@@ -312,21 +311,21 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
     }
 
     @Override
-    public LineLexicalScanner lexicalScanner() {
+    public LexicalScanner lexicalScanner() {
         return this::scanLexically;
     }
 
-    private LineLexicalScanner.Result scanLexically(
+    private LexicalScanner.Result scanLexically(
         String line,
         int maxCodeUnits,
-        LineLexicalScanner.State previous
+        LexicalScanner.State previous
     ) {
         Objects.requireNonNull(line, "line");
         if (maxCodeUnits < 0) {
             throw new IllegalArgumentException("maxCodeUnits must be non-negative");
         }
-        if (previous == LineLexicalScanner.State.UNKNOWN) {
-            return new LineLexicalScanner.Result(0, previous, List.of(), List.of(), false);
+        if (previous == LexicalScanner.State.UNKNOWN) {
+            return new LexicalScanner.Result(0, previous, List.of(), List.of(), false);
         }
         int limit = Math.min(line.length(), maxCodeUnits);
         String prefix = limit == line.length() ? line : line.substring(0, limit);
@@ -337,16 +336,16 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
         if (contextKnown && output.openingQuote >= 0) {
             output.quote(output.openingQuote, -1);
         }
-        return new LineLexicalScanner.Result(result.scannedCodeUnits(), result.endState(),
+        return new LexicalScanner.Result(result.scannedCodeUnits(), result.endState(),
             output.excludedRanges(), output.quotes, contextKnown);
     }
 
     // Markdown code fences start a fresh lexical context at their first content line.
-    List<StyleSpan> highlight(DocumentView document, int lineIndex, String line, int firstLine) {
+    List<TokenSpan> highlight(DocumentView document, int lineIndex, String line, int firstLine) {
         return highlight(document, lineIndex, line, firstLine, legacyRequest(line));
     }
 
-    List<StyleSpan> highlight(DocumentView document, int lineIndex, String line, int firstLine,
+    List<TokenSpan> highlight(DocumentView document, int lineIndex, String line, int firstLine,
         HighlightRequest request) {
         return highlightResult(document, lineIndex, line, firstLine, request, false).spans();
     }
@@ -382,7 +381,7 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
         }
     }
 
-    private List<StyleSpan> highlight(String line, ScanState state, HighlightRequest request,
+    private List<TokenSpan> highlight(String line, ScanState state, HighlightRequest request,
         int maxCodeUnits, HighlightWork work) {
         if (line == null || line.isEmpty() || request.startUtf16() == request.endUtf16()
             || request.maxSpans() == 0 || request.maxWork() == 0) {
@@ -395,11 +394,11 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
         boolean partial = limit < line.length();
         if (partial) work.spend(2L * limit); // Prefix copy and style storage, before either allocation.
         String prefix = partial ? line.substring(0, limit) : line;
-        Style[] styleAt;
+        SemanticStyleKey[] styleAt;
         if (partial) {
             // Only the lexer can safely style an unfinished prefix. Ordinary
             // regex rules may rely on an actual EOL or a later delimiter.
-            styleAt = new Style[limit];
+            styleAt = new SemanticStyleKey[limit];
         } else {
             styleAt = highlightStyles(prefix, work);
         }
@@ -807,27 +806,27 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
                 ? ScanState.EMPTY : new ScanState(blockDepth, string, yamlFlowDepth, yamlPlainIndent, javascript, markupTag);
     }
 
-    private static void paint(ScanOutput output, int start, int end, Style style) {
+    private static void paint(ScanOutput output, int start, int end, SemanticStyleKey style) {
         if (output != null) {
             output.paint(start, end, style);
         }
     }
 
     private static final class ScanOutput {
-        private final Style[] styles;
+        private final SemanticStyleKey[] styles;
         private final boolean lexical;
-        private final List<LineLexicalScanner.Range> ranges = new ArrayList<>();
-        private final List<LineLexicalScanner.Quote> quotes = new ArrayList<>();
+        private final List<LexicalScanner.Range> ranges = new ArrayList<>();
+        private final List<LexicalScanner.Quote> quotes = new ArrayList<>();
         private int rangeStart = -1;
         private int rangeEnd;
         private int openingQuote = -1;
 
-        private ScanOutput(Style[] styles, boolean lexical) {
+        private ScanOutput(SemanticStyleKey[] styles, boolean lexical) {
             this.styles = styles;
             this.lexical = lexical;
         }
 
-        private void paint(int start, int end, Style style) {
+        private void paint(int start, int end, SemanticStyleKey style) {
             if (styles != null) {
                 Arrays.fill(styles, start, end, style);
             }
@@ -838,7 +837,7 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
                 rangeEnd = Math.max(rangeEnd, end);
             } else {
                 finishRange();
-                if (ranges.size() == LineLexicalScanner.MAX_EXCLUDED_RANGES) {
+                if (ranges.size() == LexicalScanner.MAX_EXCLUDED_RANGES) {
                     throw new ScanLimitExceeded(ScanStop.OUTPUT_LIMIT);
                 }
                 rangeStart = start;
@@ -848,19 +847,19 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
 
         private void finishRange() {
             if (rangeStart >= 0) {
-                ranges.add(new LineLexicalScanner.Range(rangeStart, rangeEnd));
+                ranges.add(new LexicalScanner.Range(rangeStart, rangeEnd));
                 rangeStart = -1;
             }
         }
 
-        private List<LineLexicalScanner.Range> excludedRanges() {
+        private List<LexicalScanner.Range> excludedRanges() {
             finishRange();
             return ranges;
         }
 
         private void openQuote(int start) {
             if (lexical) {
-                if (quotes.size() == LineLexicalScanner.MAX_QUOTES) {
+                if (quotes.size() == LexicalScanner.MAX_QUOTES) {
                     throw new ScanLimitExceeded(ScanStop.OUTPUT_LIMIT);
                 }
                 openingQuote = start;
@@ -876,23 +875,23 @@ final class CStyleHighlighter extends RegexHighlighter implements ContextualLine
 
         private void quote(int start, int end) {
             if (lexical) {
-                if (quotes.size() == LineLexicalScanner.MAX_QUOTES) {
+                if (quotes.size() == LexicalScanner.MAX_QUOTES) {
                     throw new ScanLimitExceeded(ScanStop.OUTPUT_LIMIT);
                 }
-                quotes.add(new LineLexicalScanner.Quote(start, end));
+                quotes.add(new LexicalScanner.Quote(start, end));
             }
         }
 
         private void truncate(int end) {
-            while (!ranges.isEmpty() && ranges.getLast().start() >= end) ranges.removeLast();
-            if (!ranges.isEmpty() && ranges.getLast().end() > end) {
-                var last = ranges.removeLast();
-                ranges.add(new LineLexicalScanner.Range(last.start(), end));
+            while (!ranges.isEmpty() && ranges.get(ranges.size() - 1).start() >= end) ranges.remove(ranges.size() - 1);
+            if (!ranges.isEmpty() && ranges.get(ranges.size() - 1).end() > end) {
+                var last = ranges.remove(ranges.size() - 1);
+                ranges.add(new LexicalScanner.Range(last.start(), end));
             }
             if (rangeStart >= end) rangeStart = -1;
             else rangeEnd = Math.min(rangeEnd, end);
-            while (!quotes.isEmpty() && (quotes.getLast().start() >= end || quotes.getLast().end() >= end)) {
-                quotes.removeLast();
+            while (!quotes.isEmpty() && (quotes.get(quotes.size() - 1).start() >= end || quotes.get(quotes.size() - 1).end() >= end)) {
+                quotes.remove(quotes.size() - 1);
             }
             openingQuote = -1;
             finishRange();

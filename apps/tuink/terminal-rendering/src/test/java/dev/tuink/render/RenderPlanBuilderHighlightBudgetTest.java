@@ -110,7 +110,7 @@ class RenderPlanBuilderHighlightBudgetTest {
     }
 
     private static RenderPlanBuilder builder(TextModel model, LineHighlighter highlighter) {
-        RenderPlanBuilder builder = new RenderPlanBuilder(highlighter, new TerminalEditorTextLayout(model));
+        RenderPlanBuilder builder = RenderPlanBuilder.standalone(highlighter, new TerminalEditorTextLayout(model));
         builder.setBracketMatchingEnabled(false);
         builder.setRainbowBracketsEnabled(false);
         return builder;

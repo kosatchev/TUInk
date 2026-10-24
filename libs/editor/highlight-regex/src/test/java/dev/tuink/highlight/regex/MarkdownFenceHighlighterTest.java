@@ -6,11 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 
 import dev.tuink.editor.document.DocumentId;
 import dev.tuink.editor.document.DocumentSnapshot;
-import dev.tuink.render.Color;
-import dev.tuink.render.ContextualLineHighlighter;
-import dev.tuink.render.LineHighlighter;
-import dev.tuink.render.Style;
-import dev.tuink.render.StyleSpan;
+import dev.tuink.editor.highlight.ContextualSyntaxHighlighter;
+import dev.tuink.editor.highlight.SyntaxHighlighter;
+import dev.tuink.editor.highlight.SemanticStyleKey;
+import dev.tuink.editor.highlight.TokenSpan;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
@@ -19,11 +18,11 @@ import org.junit.jupiter.api.Test;
 
 class MarkdownFenceHighlighterTest {
     private static final DocumentId DOCUMENT_ID = new DocumentId("markdown-test");
-    private static final Style KEYWORD = new Style(Color.BRIGHT_BLUE, Color.DEFAULT, true, false);
-    private static final Style TYPE = Style.fg(Color.BRIGHT_MAGENTA);
-    private static final Style NUMBER = Style.fg(Color.BRIGHT_CYAN);
-    private static final Style COMMENT = Style.fg(Color.BRIGHT_BLACK);
-    private static final Style MARKUP = new Style(Color.BRIGHT_YELLOW, Color.DEFAULT, true, false);
+    private static final SemanticStyleKey KEYWORD = SemanticStyleKey.KEYWORD;
+    private static final SemanticStyleKey TYPE = SemanticStyleKey.TYPE;
+    private static final SemanticStyleKey NUMBER = SemanticStyleKey.NUMBER;
+    private static final SemanticStyleKey COMMENT = SemanticStyleKey.COMMENT;
+    private static final SemanticStyleKey MARKUP = SemanticStyleKey.MARKUP;
 
     @Test
     void contextualHighlightingFindsFenceStateWhenLinesAreRequestedOutOfOrder() {
@@ -34,10 +33,10 @@ class MarkdownFenceHighlighterTest {
             "```",
             "# After"
         );
-        ContextualLineHighlighter highlighter = markdownHighlighter();
+        ContextualSyntaxHighlighter highlighter = markdownHighlighter();
 
         assertEquals(
-            List.of(new StyleSpan(0, document.line(4).length(), MARKUP)),
+            List.of(new TokenSpan(0, document.line(4).length(), MARKUP)),
             highlight(highlighter, document, 4)
         );
 
@@ -48,7 +47,7 @@ class MarkdownFenceHighlighterTest {
                     span(java, "public", KEYWORD),
                     span(java, "int", TYPE),
                     span(java, "7", NUMBER),
-                    new StyleSpan(java.indexOf("//"), java.length(), COMMENT)
+                    new TokenSpan(java.indexOf("//"), java.length(), COMMENT)
                 ),
                 highlight(highlighter, document, 2)
             ),
@@ -71,7 +70,7 @@ class MarkdownFenceHighlighterTest {
             "select 1",
             "```"
         );
-        ContextualLineHighlighter highlighter = markdownHighlighter();
+        ContextualSyntaxHighlighter highlighter = markdownHighlighter();
 
         String typescript = document.line(4);
         String sql = document.line(7);
@@ -107,7 +106,7 @@ class MarkdownFenceHighlighterTest {
             "~~~~",
             "def outside():"
         );
-        ContextualLineHighlighter highlighter = markdownHighlighter();
+        ContextualSyntaxHighlighter highlighter = markdownHighlighter();
 
         assertAll(
             () -> assertEquals(
@@ -129,7 +128,7 @@ class MarkdownFenceHighlighterTest {
     @Test
     void fourSpaceIndentedMarkerDoesNotOpenAFence() {
         DocumentSnapshot document = document("    ```java", "public int value = 7;");
-        ContextualLineHighlighter highlighter = markdownHighlighter();
+        ContextualSyntaxHighlighter highlighter = markdownHighlighter();
 
         assertEquals(List.of(), highlight(highlighter, document, 1));
     }
@@ -137,7 +136,7 @@ class MarkdownFenceHighlighterTest {
     @Test
     void changedDocumentRevisionInvalidatesPreviouslyComputedFenceState() {
         DocumentSnapshot document = document("```java", "public int value = 7;", "```");
-        ContextualLineHighlighter highlighter = markdownHighlighter();
+        ContextualSyntaxHighlighter highlighter = markdownHighlighter();
 
         assertEquals(
             List.of(
@@ -159,7 +158,7 @@ class MarkdownFenceHighlighterTest {
 
     @Test
     void documentIdentityInvalidatesFenceStateEvenAtTheSameRevision() {
-        ContextualLineHighlighter highlighter = markdownHighlighter();
+        ContextualSyntaxHighlighter highlighter = markdownHighlighter();
         DocumentSnapshot fenced = new DocumentSnapshot(
             new DocumentId("fenced-document"),
             7,
@@ -185,9 +184,9 @@ class MarkdownFenceHighlighterTest {
     @Test
     void invalidContextFallsBackToPlainMarkdownHighlighting() {
         DocumentSnapshot document = document("plain");
-        ContextualLineHighlighter highlighter = markdownHighlighter();
+        ContextualSyntaxHighlighter highlighter = markdownHighlighter();
         String heading = "# Heading";
-        List<StyleSpan> expected = List.of(new StyleSpan(0, heading.length(), MARKUP));
+        List<TokenSpan> expected = List.of(new TokenSpan(0, heading.length(), MARKUP));
 
         assertAll(
             () -> assertEquals(expected, highlighter.highlight(null, 0, heading)),
@@ -210,7 +209,7 @@ class MarkdownFenceHighlighterTest {
             "public int visible = 9;",
             "```"
         );
-        ContextualLineHighlighter highlighter = markdownHighlighter();
+        ContextualSyntaxHighlighter highlighter = markdownHighlighter();
         String visible = document.line(7);
         String closingComment = document.line(4);
 
@@ -224,12 +223,12 @@ class MarkdownFenceHighlighterTest {
                 highlight(highlighter, document, 7)
             ),
             () -> assertEquals(
-                List.of(new StyleSpan(0, document.line(3).length(), COMMENT)),
+                List.of(new TokenSpan(0, document.line(3).length(), COMMENT)),
                 highlight(highlighter, document, 3)
             ),
             () -> assertEquals(
                 List.of(
-                    new StyleSpan(0, closingComment.indexOf("*/") + 2, COMMENT),
+                    new TokenSpan(0, closingComment.indexOf("*/") + 2, COMMENT),
                     span(closingComment, "return", KEYWORD),
                     span(closingComment, "8", NUMBER)
                 ),
@@ -250,9 +249,9 @@ class MarkdownFenceHighlighterTest {
             "public int visible = 9;",
             "```"
         );
-        ContextualLineHighlighter highlighter = markdownHighlighter();
+        ContextualSyntaxHighlighter highlighter = markdownHighlighter();
         String visible = document.line(6);
-        List<StyleSpan> expected = List.of(
+        List<TokenSpan> expected = List.of(
             span(visible, "public", KEYWORD),
             span(visible, "int", TYPE),
             span(visible, "9", NUMBER)
@@ -260,11 +259,11 @@ class MarkdownFenceHighlighterTest {
 
         assertEquals(expected, highlight(highlighter, document, 6));
         assertEquals(
-            List.of(new StyleSpan(0, document.line(2).length(), COMMENT)),
+            List.of(new TokenSpan(0, document.line(2).length(), COMMENT)),
             highlight(highlighter, document, 2)
         );
         assertEquals(
-            List.of(new StyleSpan(0, document.line(4).length(), MARKUP)),
+            List.of(new TokenSpan(0, document.line(4).length(), MARKUP)),
             highlight(highlighter, document, 4)
         );
         assertEquals(expected, highlight(highlighter, document, 6));
@@ -281,12 +280,12 @@ class MarkdownFenceHighlighterTest {
             "return 7;",
             "```"
         );
-        ContextualLineHighlighter highlighter = markdownHighlighter();
-        Style string = Style.fg(Color.BRIGHT_GREEN);
-        List<StyleSpan> code = List.of(span(document.line(5), "return", KEYWORD), span(document.line(5), "7", NUMBER));
+        ContextualSyntaxHighlighter highlighter = markdownHighlighter();
+        SemanticStyleKey string = SemanticStyleKey.STRING;
+        List<TokenSpan> code = List.of(span(document.line(5), "return", KEYWORD), span(document.line(5), "7", NUMBER));
 
         assertEquals(code, highlight(highlighter, document, 5));
-        assertEquals(List.of(new StyleSpan(0, document.line(2).length(), string)), highlight(highlighter, document, 2));
+        assertEquals(List.of(new TokenSpan(0, document.line(2).length(), string)), highlight(highlighter, document, 2));
         assertEquals(code, highlight(highlighter, document, 5));
     }
 
@@ -306,21 +305,21 @@ class MarkdownFenceHighlighterTest {
                 "return 8;",
                 "```"
             );
-            ContextualLineHighlighter highlighter = markdownHighlighter();
-            Style string = Style.fg(Color.BRIGHT_GREEN);
-            List<StyleSpan> visible = List.of(
+            ContextualSyntaxHighlighter highlighter = markdownHighlighter();
+            SemanticStyleKey string = SemanticStyleKey.STRING;
+            List<TokenSpan> visible = List.of(
                 span(document.line(9), "return", KEYWORD), span(document.line(9), "8", NUMBER)
             );
 
             assertEquals(visible, highlight(highlighter, document, 9), prefix);
             assertEquals(
-                List.of(new StyleSpan(0, document.line(3).length(), string)),
+                List.of(new TokenSpan(0, document.line(3).length(), string)),
                 highlight(highlighter, document, 3),
                 prefix
             );
             assertEquals(
                 List.of(
-                    new StyleSpan(0, 3, string),
+                    new TokenSpan(0, 3, string),
                     span(document.line(4), "return", KEYWORD),
                     span(document.line(4), "7", NUMBER)
                 ),
@@ -328,7 +327,7 @@ class MarkdownFenceHighlighterTest {
                 prefix
             );
             assertEquals(
-                List.of(new StyleSpan(0, document.line(7).length(), MARKUP)),
+                List.of(new TokenSpan(0, document.line(7).length(), MARKUP)),
                 highlight(highlighter, document, 7),
                 prefix
             );
@@ -340,10 +339,10 @@ class MarkdownFenceHighlighterTest {
     void changedRevisionResetsMultilineStringStateInsideAnUnchangedFence() {
         DocumentSnapshot quoted = document("```js", "const s = `", "return 7;", "```");
         DocumentSnapshot revised = new DocumentSnapshot(DOCUMENT_ID, 2, List.of("```js", "// closed", "return 7;", "```"));
-        ContextualLineHighlighter highlighter = markdownHighlighter();
-        Style string = Style.fg(Color.BRIGHT_GREEN);
+        ContextualSyntaxHighlighter highlighter = markdownHighlighter();
+        SemanticStyleKey string = SemanticStyleKey.STRING;
 
-        assertEquals(List.of(new StyleSpan(0, quoted.line(2).length(), string)), highlight(highlighter, quoted, 2));
+        assertEquals(List.of(new TokenSpan(0, quoted.line(2).length(), string)), highlight(highlighter, quoted, 2));
         assertEquals(
             List.of(span(revised.line(2), "return", KEYWORD), span(revised.line(2), "7", NUMBER)),
             highlight(highlighter, revised, 2)
@@ -353,7 +352,7 @@ class MarkdownFenceHighlighterTest {
     @Test
     void unnamedFencesReuseOneFallbackAcrossLinesBlocksAndRevisions() throws ReflectiveOperationException {
         MarkdownFenceHighlighter highlighter = new MarkdownFenceHighlighter();
-        LineHighlighter fallback = null;
+        SyntaxHighlighter fallback = null;
         for (int revision = 1; revision <= 4; revision++) {
             List<String> lines = new ArrayList<>();
             lines.add("```");
@@ -383,7 +382,7 @@ class MarkdownFenceHighlighterTest {
     @Test
     void unsupportedFenceTagsReuseFallbackWithoutAccumulatingAcrossRevisions() throws ReflectiveOperationException {
         MarkdownFenceHighlighter highlighter = new MarkdownFenceHighlighter();
-        LineHighlighter fallback = null;
+        SyntaxHighlighter fallback = null;
         for (int revision = 1; revision <= 32; revision++) {
             DocumentSnapshot document = new DocumentSnapshot(
                 DOCUMENT_ID,
@@ -407,31 +406,31 @@ class MarkdownFenceHighlighterTest {
     }
 
     // Equal spans cannot distinguish shared rules from a newly compiled rule set per line.
-    private static LineHighlighter embeddedDelegate(MarkdownFenceHighlighter highlighter, String tag)
+    private static SyntaxHighlighter embeddedDelegate(MarkdownFenceHighlighter highlighter, String tag)
         throws ReflectiveOperationException {
         var delegate = MarkdownFenceHighlighter.class.getDeclaredMethod("embeddedHighlighter", String.class);
         delegate.setAccessible(true);
-        return (LineHighlighter) delegate.invoke(highlighter, tag);
+        return (SyntaxHighlighter) delegate.invoke(highlighter, tag);
     }
 
-    private static ContextualLineHighlighter markdownHighlighter() {
-        return (ContextualLineHighlighter) RegexHighlighter.forFileName("README.md");
+    private static ContextualSyntaxHighlighter markdownHighlighter() {
+        return (ContextualSyntaxHighlighter) RegexHighlighter.forFileName("README.md");
     }
 
     private static DocumentSnapshot document(String... lines) {
         return new DocumentSnapshot(DOCUMENT_ID, 1, List.of(lines));
     }
 
-    private static List<StyleSpan> highlight(
-        ContextualLineHighlighter highlighter,
+    private static List<TokenSpan> highlight(
+        ContextualSyntaxHighlighter highlighter,
         DocumentSnapshot document,
         int lineIndex
     ) {
         return highlighter.highlight(document, lineIndex, document.line(lineIndex));
     }
 
-    private static StyleSpan span(String line, String token, Style style) {
+    private static TokenSpan span(String line, String token, SemanticStyleKey style) {
         int start = line.indexOf(token);
-        return new StyleSpan(start, start + token.length(), style);
+        return new TokenSpan(start, start + token.length(), style);
     }
 }

@@ -11,14 +11,16 @@ import dev.tuink.core.TextModel;
 import dev.tuink.editor.document.DocumentId;
 import dev.tuink.editor.document.DocumentSnapshot;
 import dev.tuink.editor.document.DocumentView;
-import dev.tuink.render.Color;
-import dev.tuink.render.ContextualLineHighlighter;
-import dev.tuink.render.HighlightRequest;
-import dev.tuink.render.LineHighlighter;
+import dev.tuink.editor.highlight.ContextualSyntaxHighlighter;
+import dev.tuink.editor.highlight.HighlightRequest;
+import dev.tuink.editor.highlight.SyntaxHighlighter;
 import dev.tuink.render.RenderPlan;
 import dev.tuink.render.RenderPlanBuilder;
-import dev.tuink.render.Style;
+import dev.tuink.render.SemanticHighlighterAdapter;
 import dev.tuink.render.StyleSpan;
+import dev.tuink.render.SyntaxStyleResolver;
+import dev.tuink.editor.highlight.SemanticStyleKey;
+import dev.tuink.editor.highlight.TokenSpan;
 import dev.tuink.render.TerminalEditorTextLayout;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -46,7 +48,7 @@ class ProgressiveHighlightingRenderTest {
 
         assertFalse(builder.hasPendingSyntaxWork(), "retained context must finish without an edit or scroll");
         assertEquals(revision, model.revision());
-        List<StyleSpan> expected = RegexHighlighter.forJava().highlight(line);
+        List<StyleSpan> expected = new SemanticHighlighterAdapter(RegexHighlighter.forJava()).highlight(line);
         assertFalse(expected.isEmpty());
         for (var visual : plan.lines()) assertEquals(expected, visual.spans());
         assertEquals(plan, build(builder, model, state), "completed spans remain cacheable");
@@ -67,7 +69,7 @@ class ProgressiveHighlightingRenderTest {
             plan = build(builder, model, state);
         }
         assertFalse(builder.hasPendingSyntaxWork());
-        assertEquals(List.of(new StyleSpan(0, 9, Style.fg(Color.BRIGHT_BLACK))),
+        assertEquals(List.of(new StyleSpan(0, 9, SyntaxStyleResolver.standard().resolve(SemanticStyleKey.COMMENT))),
             plan.lines().getFirst().spans());
     }
 
@@ -86,7 +88,7 @@ class ProgressiveHighlightingRenderTest {
             plan = build(builder, model, state);
         }
         assertFalse(builder.hasPendingSyntaxWork());
-        List<StyleSpan> expected = RegexHighlighter.forCpp().highlight(source);
+        List<StyleSpan> expected = new SemanticHighlighterAdapter(RegexHighlighter.forCpp()).highlight(source);
         for (var visual : plan.lines()) assertEquals(expected, visual.spans());
     }
 
@@ -96,7 +98,7 @@ class ProgressiveHighlightingRenderTest {
         lines.set(0, "/*");
         lines.set(499, "return 7;");
         DocumentSnapshot document = new DocumentSnapshot(new DocumentId("work-budget"), 1, lines);
-        ContextualLineHighlighter highlighter = (ContextualLineHighlighter) RegexHighlighter.forJava();
+        ContextualSyntaxHighlighter highlighter = (ContextualSyntaxHighlighter) RegexHighlighter.forJava();
         HighlightRequest request = new HighlightRequest(0, 9, 65_536, 16, 1024);
         var result = highlighter.highlightResult(document, 499, document.line(499), request);
         assertTrue(result.retryPending());
@@ -105,14 +107,14 @@ class ProgressiveHighlightingRenderTest {
             result = highlighter.highlightResult(document, 499, document.line(499), request);
         }
         assertFalse(result.retryPending());
-        assertEquals(List.of(new StyleSpan(0, 9, Style.fg(Color.BRIGHT_BLACK))), result.spans());
+        assertEquals(List.of(new TokenSpan(0, 9, SemanticStyleKey.COMMENT)), result.spans());
     }
 
     @Test
     void jumpingAboveAPopulatedCheckpointCacheCanStillRetainProgress() {
         DocumentSnapshot document = new DocumentSnapshot(new DocumentId("backward-jump"), 1,
             Collections.nCopies(500, "return 7;"));
-        ContextualLineHighlighter highlighter = (ContextualLineHighlighter) RegexHighlighter.forJava();
+        ContextualSyntaxHighlighter highlighter = (ContextualSyntaxHighlighter) RegexHighlighter.forJava();
         highlighter.highlight(document, 499, document.line(499));
         HighlightRequest request = new HighlightRequest(0, 9, 64, 16, 8192);
         var result = highlighter.highlightResult(document, 100, document.line(100), request);
@@ -128,7 +130,7 @@ class ProgressiveHighlightingRenderTest {
     void contextThatUsesTheLastScanUnitCanRetryTheVisibleLineWithAFreshBudget() {
         DocumentSnapshot document = new DocumentSnapshot(new DocumentId("context-budget"), 1,
             List.of(" ".repeat(15), " ".repeat(15), " ".repeat(15), "return 7;"));
-        ContextualLineHighlighter highlighter = (ContextualLineHighlighter) RegexHighlighter.forJava();
+        ContextualSyntaxHighlighter highlighter = (ContextualSyntaxHighlighter) RegexHighlighter.forJava();
         HighlightRequest request = new HighlightRequest(0, 9, 48, 16, 8192);
         var first = highlighter.highlightResult(document, 3, document.line(3), request);
         assertTrue(first.retryPending());
@@ -141,9 +143,9 @@ class ProgressiveHighlightingRenderTest {
     @Test
     void completedPlainTextAndAnUnscannablePredecessorDoNotScheduleEndlessRetries() {
         AtomicInteger calls = new AtomicInteger();
-        ContextualLineHighlighter plain = new ContextualLineHighlighter() {
-            @Override public List<StyleSpan> highlight(String line) { return List.of(); }
-            @Override public List<StyleSpan> highlight(DocumentView document, int line, String text) {
+        ContextualSyntaxHighlighter plain = new ContextualSyntaxHighlighter() {
+            @Override public List<TokenSpan> highlight(String line) { return List.of(); }
+            @Override public List<TokenSpan> highlight(DocumentView document, int line, String text) {
                 calls.incrementAndGet();
                 return List.of();
             }
@@ -157,7 +159,7 @@ class ProgressiveHighlightingRenderTest {
 
         DocumentSnapshot blocked = new DocumentSnapshot(new DocumentId("unscannable"), 1,
             List.of("x".repeat(100), "return 7;"));
-        var highlighter = (ContextualLineHighlighter) RegexHighlighter.forJava();
+        var highlighter = (ContextualSyntaxHighlighter) RegexHighlighter.forJava();
         var result = highlighter.highlightResult(blocked, 1, blocked.line(1),
             new HighlightRequest(0, 9, 64, 16, 8192));
         assertFalse(result.retryPending(), "no retained progress means another identical request cannot help");
@@ -170,8 +172,8 @@ class ProgressiveHighlightingRenderTest {
         return model;
     }
 
-    private static RenderPlanBuilder builder(TextModel model, LineHighlighter highlighter) {
-        RenderPlanBuilder builder = new RenderPlanBuilder(highlighter, new TerminalEditorTextLayout(model));
+    private static RenderPlanBuilder builder(TextModel model, SyntaxHighlighter highlighter) {
+        RenderPlanBuilder builder = RenderPlanBuilder.standalone(new SemanticHighlighterAdapter(highlighter), new TerminalEditorTextLayout(model));
         builder.setBracketMatchingEnabled(false);
         builder.setRainbowBracketsEnabled(false);
         return builder;

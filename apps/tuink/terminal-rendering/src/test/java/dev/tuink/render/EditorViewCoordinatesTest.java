@@ -168,7 +168,7 @@ class EditorViewCoordinatesTest {
     }
 
     private static RenderPlanBuilder builder(TerminalEditorTextLayout layout) {
-        var builder = new RenderPlanBuilder(line -> List.of(), layout);
+        var builder = RenderPlanBuilder.standalone(line -> List.of(), layout);
         builder.setSyntaxHighlightingEnabled(false);
         builder.setBracketMatchingEnabled(false);
         builder.setRainbowBracketsEnabled(false);

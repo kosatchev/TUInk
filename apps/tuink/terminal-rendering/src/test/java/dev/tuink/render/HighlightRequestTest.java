@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.core.SimpleLineBuffer;
 import dev.tuink.core.TextModel;
+import dev.tuink.editor.document.DocumentId;
 import dev.tuink.editor.document.DocumentView;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -32,7 +33,7 @@ class HighlightRequestTest {
     void contextualCompatibilityKeepsDocumentContextAndTheSameOversizedInputGuard() {
         AtomicInteger calls = new AtomicInteger();
         TextModel model = new TextModel(new SimpleLineBuffer());
-        DocumentView document = new TextModelDocumentView(model);
+        DocumentView document = new TextModelDocumentView(model, new DocumentId("highlight-request"));
         ContextualLineHighlighter legacy = new ContextualLineHighlighter() {
             @Override public List<StyleSpan> highlight(String line) {
                 throw new AssertionError("The document-aware overload must be used");

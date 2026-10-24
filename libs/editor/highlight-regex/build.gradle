@@ -3,6 +3,6 @@ plugins {
 }
 
 dependencies {
-    implementation project(':editor-contract')
-    api project(':render')
+    api project(':editor-contract')
+    testImplementation project(':render')
 }

@@ -146,6 +146,7 @@ graph:
   check :app:distZip :app:perfHarnessTest \
   :unicode-text:dependencies :tuiframe-core:dependencies \
   :tuiframe-jline:dependencies :tuiframe-widgets:dependencies :core:dependencies \
+  :editor-diff-jgit:dependencies :editor-storage-jvm:dependencies \
   :render:dependencies :highlight-regex:dependencies \
   :tui:dependencies :app:dependencies
 ```

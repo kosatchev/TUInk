@@ -69,8 +69,11 @@ after content and ownership changes. The staged mode is verified; restoring
 special bits must retain the access ACL's exact mask and named entries.
 On the default Linux filesystem provider, libc's extended-attribute functions
 preserve `system.posix_acl_access`, which Java's ACL view does not expose.
-JVM runs use Java 25's Foreign Function and Memory API, and native builds link
-the libc calls at build time. No external ACL utility or `libacl` is required.
+The bundled `editor-storage-jvm` provider uses Java 25's Foreign Function and
+Memory API; the shared engine accesses a Java 17 SPI without native API types.
+Missing, broken or ambiguous providers fail the save instead of claiming that
+ACLs are unsupported. Native builds substitute the platform implementation
+with libc calls linked at build time. No external ACL utility or `libacl` is required.
 The full ACL replaces any inherited staged ACL; when the source has no extended
 access ACL, the staged ACL is removed. Its entries, mask and the restored Unix
 mode must match the source before replacement. Failed calls or verification

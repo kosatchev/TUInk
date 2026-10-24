@@ -45,14 +45,15 @@ def allowedProjectDependencies = [
     ':core'            : [':unicode-text', ':editor-contract'] as Set,
     ':editor-session'  : [':editor-contract', ':core'] as Set,
     ':editor-diff-jgit': [':editor-contract'] as Set,
+    ':editor-storage-jvm': [':core'] as Set,
     ':render'          : [':tuiframe-core', ':editor-contract', ':core'] as Set,
     ':highlight-regex' : [':editor-contract', ':render'] as Set,
     ':tui'             : [':tuiframe-core', ':tuiframe-jline', ':tuiframe-widgets', ':editor-contract', ':core',
-                         ':editor-session', ':render', ':highlight-regex', ':editor-diff-jgit'] as Set,
+                         ':editor-session', ':render', ':highlight-regex', ':editor-diff-jgit', ':editor-storage-jvm'] as Set,
     ':app'            : [':tui'] as Set
 ]
 def allowedTestProjectDependencies = [
-    ':core': [':editor-diff-jgit'] as Set
+    ':core': [':editor-diff-jgit', ':editor-storage-jvm'] as Set
 ]
 def expectedProjectGroups = [
     ':tuiframe-core'   : 'dev.tuiframe',

@@ -16,7 +16,7 @@ import java.util.List;
 import java.util.Objects;
 
 /** Uses the linked libc in native images, including fully static musl binaries. */
-@TargetClass(className = "dev.tuink.core.LinuxXattr")
+@TargetClass(className = "dev.tuink.storage.jvm.LinuxXattr")
 @Platforms(Platform.LINUX.class)
 final class LinuxXattrSubstitutions {
     @Substitute

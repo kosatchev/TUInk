@@ -1,3 +1,7 @@
+plugins {
+    id 'java'
+}
+
 dependencies {
     implementation project(':tuiframe-core')
     implementation project(':tuiframe-jline')
@@ -8,6 +12,7 @@ dependencies {
     implementation project(':render')
     implementation project(':highlight-regex')
     implementation project(':editor-diff-jgit')
+    runtimeOnly project(':editor-storage-jvm')
 }
 
 def tuinkVersion = project.version.toString()

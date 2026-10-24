@@ -104,6 +104,12 @@ class ArchitectureTest {
             "dev.tuink.editor.document..", "org.eclipse.jgit.."
         );
 
+    static final ArchRule JVM_STORAGE_DEPENDS_ONLY_ON_ITS_SPI = classes()
+        .that().resideInAPackage("dev.tuink.storage.jvm..")
+        .should().onlyDependOnClassesThat().resideInAnyPackage(
+            "java..", "dev.tuink.storage.jvm..", "dev.tuink.core.storage.spi.."
+        );
+
     static final ArchRule TUI_DOES_NOT_DEPEND_ON_APPLICATION_ENTRYPOINT = noClasses()
         .that().resideInAPackage("dev.tuink.tui..")
         .should().dependOnClassesThat().resideInAPackage("dev.tuink.app..");
@@ -372,6 +378,7 @@ class ArchitectureTest {
         CONTEXTUAL_HIGHLIGHTER_DOES_NOT_EXPOSE_MUTABLE_MODEL.check(PRODUCTION_CLASSES);
         HIGHLIGHTER_IMPLEMENTATIONS_STAY_CORE_INDEPENDENT.check(PRODUCTION_CLASSES);
         DIFF_PROVIDER_STAYS_BEHIND_ITS_CONTRACT.check(PRODUCTION_CLASSES);
+        JVM_STORAGE_DEPENDS_ONLY_ON_ITS_SPI.check(PRODUCTION_CLASSES);
         TUI_DOES_NOT_DEPEND_ON_APPLICATION_ENTRYPOINT.check(PRODUCTION_CLASSES);
         FILE_TREE_MODEL_STAYS_TERMINAL_INDEPENDENT.check(PRODUCTION_CLASSES);
         APP_USES_ONLY_THE_TUI_FACADE.check(PRODUCTION_CLASSES);

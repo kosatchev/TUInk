@@ -27,9 +27,9 @@ class TextModelSaveMemoryTest {
         throws Exception {
         String classpath = String.join(File.pathSeparator, location(TextModelSaveMemoryTest.class),
             location(EditorEngine.class), location(GraphemeText.class),
-            location(LanguageRegistry.class));
+            location(LanguageRegistry.class), LinuxXattrTestRuntime.classpath());
         Process process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
-            "-Xmx" + heapMiB + "m", "-cp", classpath, MemoryProbe.class.getName(),
+            "--enable-native-access=ALL-UNNAMED", "-Xmx" + heapMiB + "m", "-cp", classpath, MemoryProbe.class.getName(),
             directory.toString(), Integer.toString(blocks)).redirectErrorStream(true).start();
         try {
             assertTrue(process.waitFor(60, TimeUnit.SECONDS), "Save memory probe exceeded its deadline");

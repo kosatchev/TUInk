@@ -77,8 +77,10 @@ unpublished UI revision.
 `editor-session` has a non-exported implementation dependency on `core`.
 JGit diff is an optional `LineDiff` implementation in `editor-diff-jgit`, explicitly
 attached by the TUI composition adapter; headless views neither load it nor
-schedule gutter work.
-Local file APIs and Linux FFM access remain in `core`.
+schedule gutter work. Linux FFM access lives in `editor-storage-jvm` behind a
+small service SPI. Neither provider enters the shared engine's runtime closure.
+Local file APIs remain transitional core surfaces and still need extraction
+before a platform-neutral storage/application API is complete.
 
 ## Implementation and compatibility (2026-10-15)
 

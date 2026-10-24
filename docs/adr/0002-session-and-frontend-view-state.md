@@ -74,11 +74,11 @@ its stable `TabSession` identity. Explicit publication and owner-thread snapshot
 requests cross its document boundary; background readers are not promised an
 unpublished UI revision.
 
-For now `editor-session` has an implementation dependency on the existing
-`core`, so its runtime also inherits current core dependencies such as JGit. It
-is not yet a lightweight standalone artifact. The dependency must remain
-non-exported; extracting a smaller `editor-core` remains a separate dependency
-reduction.
+`editor-session` has a non-exported implementation dependency on `core`.
+JGit diff is an optional `LineDiff` implementation in `editor-diff-jgit`, explicitly
+attached by the TUI composition adapter; headless views neither load it nor
+schedule gutter work.
+Local file APIs and Linux FFM access remain in `core`.
 
 ## Implementation and compatibility (2026-10-15)
 

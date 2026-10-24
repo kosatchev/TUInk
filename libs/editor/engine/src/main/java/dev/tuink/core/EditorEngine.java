@@ -1,6 +1,8 @@
 package dev.tuink.core;
 
 import dev.tuink.core.TextModel.ReplacementDelta;
+import dev.tuink.editor.diff.LineDiff;
+import dev.tuink.editor.diff.LineEdit;
 import dev.tuink.unicode.GraphemeText;
 import java.io.IOException;
 import java.nio.charset.Charset;
@@ -8,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.util.AbstractList;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -18,9 +21,6 @@ import java.util.Objects;
 import java.util.function.IntFunction;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
-import org.eclipse.jgit.diff.DiffAlgorithm;
-import org.eclipse.jgit.diff.Edit;
-import org.eclipse.jgit.diff.EditList;
 
 /**
  * Editing adapter for one attached view of an {@link EditorDocument}.
@@ -35,10 +35,6 @@ public class EditorEngine {
     private static final long GUTTER_DIFF_MAX_REBUILD_INTERVAL_NANOS = 350_000_000L;
     private static final int GUTTER_DIFF_DURATION_FACTOR = 2;
     private static final long GUTTER_DIFF_MAX_WORK = 250_000L;
-    private static final DiffAlgorithm GUTTER_DIFF_ALGORITHM_HISTOGRAM =
-        DiffAlgorithm.getAlgorithm(DiffAlgorithm.SupportedAlgorithm.HISTOGRAM);
-    private static final DiffAlgorithm GUTTER_DIFF_ALGORITHM_MYERS =
-        DiffAlgorithm.getAlgorithm(DiffAlgorithm.SupportedAlgorithm.MYERS);
     private final EditorDocument document;
     private final EditorDocumentHistory history;
     private final EditorGutterDiffState gutterDiff = new EditorGutterDiffState();
@@ -46,6 +42,7 @@ public class EditorEngine {
     private final EditorState state;
     private final EditorTextLayout textLayout;
     private final EditorClipboard clipboard;
+    private final LineDiff lineDiff;
     private final LongSupplier gutterDiffClock;
     private final MarkdownBlockContext markdownContext;
     private final IndentationContext indentationContext;
@@ -69,21 +66,38 @@ public class EditorEngine {
         EditorTextLayout textLayout,
         EditorClipboard clipboard
     ) {
-        this(initialDocument(model, state, textLayout, clipboard), state, textLayout, clipboard);
+        this(model, state, textLayout, clipboard, LineDiff.none());
+    }
+
+    /** A frontend may explicitly attach optional line-diff support to this view. */
+    public EditorEngine(TextModel model, EditorState state, EditorTextLayout textLayout,
+        EditorClipboard clipboard, LineDiff lineDiff) {
+        this(initialDocument(model, state, textLayout, clipboard, lineDiff), state, textLayout,
+            clipboard, lineDiff, System::nanoTime);
     }
 
     EditorEngine(EditorDocument document, EditorState state, EditorTextLayout textLayout, EditorClipboard clipboard) {
-        this(document, state, textLayout, clipboard, System::nanoTime);
+        this(document, state, textLayout, clipboard, LineDiff.none());
+    }
+
+    EditorEngine(EditorDocument document, EditorState state, EditorTextLayout textLayout,
+        EditorClipboard clipboard, LineDiff lineDiff) {
+        this(document, state, textLayout, clipboard, lineDiff, System::nanoTime);
     }
 
     EditorEngine(TextModel model, EditorState state, EditorTextLayout textLayout,
         EditorClipboard clipboard, LongSupplier gutterDiffClock) {
-        this(initialDocument(model, state, textLayout, clipboard, gutterDiffClock),
-            state, textLayout, clipboard, gutterDiffClock);
+        this(model, state, textLayout, clipboard, LineDiff.none(), gutterDiffClock);
+    }
+
+    EditorEngine(TextModel model, EditorState state, EditorTextLayout textLayout,
+        EditorClipboard clipboard, LineDiff lineDiff, LongSupplier gutterDiffClock) {
+        this(initialDocument(model, state, textLayout, clipboard, lineDiff, gutterDiffClock),
+            state, textLayout, clipboard, lineDiff, gutterDiffClock);
     }
 
     private EditorEngine(EditorDocument document, EditorState state, EditorTextLayout textLayout,
-        EditorClipboard clipboard, LongSupplier gutterDiffClock) {
+        EditorClipboard clipboard, LineDiff lineDiff, LongSupplier gutterDiffClock) {
         this.document = Objects.requireNonNull(document, "document");
         this.history = document.history;
         this.model = document.model();
@@ -93,6 +107,7 @@ public class EditorEngine {
         }
         this.textLayout = textLayout;
         this.clipboard = Objects.requireNonNull(clipboard, "clipboard");
+        this.lineDiff = Objects.requireNonNull(lineDiff, "lineDiff");
         this.gutterDiffClock = Objects.requireNonNull(gutterDiffClock, "gutterDiffClock");
         this.markdownContext = new MarkdownBlockContext(model::getLine);
         this.indentationContext = new IndentationContext(model::getLine);
@@ -117,9 +132,15 @@ public class EditorEngine {
     }
 
     private static EditorDocument initialDocument(TextModel model, EditorState state, EditorTextLayout layout,
-        EditorClipboard clipboard, LongSupplier gutterDiffClock) {
-        Objects.requireNonNull(gutterDiffClock, "gutterDiffClock");
+        EditorClipboard clipboard, LineDiff lineDiff) {
+        Objects.requireNonNull(lineDiff, "lineDiff");
         return initialDocument(model, state, layout, clipboard);
+    }
+
+    private static EditorDocument initialDocument(TextModel model, EditorState state, EditorTextLayout layout,
+        EditorClipboard clipboard, LineDiff lineDiff, LongSupplier gutterDiffClock) {
+        Objects.requireNonNull(gutterDiffClock, "gutterDiffClock");
+        return initialDocument(model, state, layout, clipboard, lineDiff);
     }
 
     public EditorDocument document() {
@@ -311,7 +332,7 @@ public class EditorEngine {
     }
 
     private GutterDiffMarker cachedGutterDiffMarkerForLine(int lineIndex) {
-        if (gutterDiff.gutterDiffMode == GutterDiffMode.DISABLED) {
+        if (!lineDiff.available() || gutterDiff.gutterDiffMode == GutterDiffMode.DISABLED) {
             return GutterDiffMarker.NONE;
         }
         if (lineIndex < 0 || lineIndex >= model.lineCount()) {
@@ -395,12 +416,11 @@ public class EditorEngine {
             return;
         }
         gutterDiff.gutterDiffMode = nextMode;
-        if (gutterDiff.gutterDiffMode == GutterDiffMode.DISABLED) {
+        if (!lineDiff.available() || gutterDiff.gutterDiffMode == GutterDiffMode.DISABLED) {
             gutterDiff.gutterDiffComputedRevision = model.revision();
             gutterDiff.gutterDiffPendingRebuild = false;
         } else {
-            gutterDiff.gutterDiffComputedRevision = Long.MIN_VALUE;
-            gutterDiff.gutterDiffPendingRebuild = true;
+            invalidateGutterDiff();
         }
     }
 
@@ -1097,7 +1117,7 @@ public class EditorEngine {
         history.lastEditAtNanos = System.nanoTime();
         history.lastEditCursorAfter = after.cursor();
         history.lastEditViewId = state.viewId();
-        applyGutterDiffOp(prepared.operations().getFirst().operation());
+        invalidateGutterDiff();
         document.changed();
         return result;
     }
@@ -1803,7 +1823,7 @@ public class EditorEngine {
         history.lastEditAtNanos = prepared.atNanos();
         history.lastEditCursorAfter = prepared.after().cursor();
         history.lastEditViewId = state.viewId();
-        applyGutterDiffOp(prepared.operations().getFirst().operation());
+        invalidateGutterDiff();
     }
 
     private record PreparedKeyboardHistory(EditKind kind, ViewState after, List<ReplacementDelta> operations,
@@ -1889,7 +1909,7 @@ public class EditorEngine {
         history.lastEditAtNanos = System.nanoTime();
         history.lastEditCursorAfter = after.cursor();
         history.lastEditViewId = state.viewId();
-        applyGutterDiffOp(prepared.delta().operation());
+        invalidateGutterDiff();
         document.changed();
     }
 
@@ -1925,7 +1945,7 @@ public class EditorEngine {
         ReplacementDelta delta = model.replaceRange(start, end, insertedText);
         if (!delta.isEmpty()) {
             ops.add(delta);
-            if (!keyboardCommand) applyGutterDiffOp(delta.operation());
+            if (!keyboardCommand) invalidateGutterDiff();
         }
         return delta.endAfter();
     }
@@ -2041,7 +2061,7 @@ public class EditorEngine {
 
     private void resetGutterDiffBaselinesOnOpen() {
         cachedGraphemes = null;
-        List<String> snapshot = List.copyOf(model.snapshotLines());
+        List<LineText> snapshot = model.snapshotTextLines();
         document.baselines.openLines = snapshot;
         document.baselines.savedLines = snapshot;
         document.baselines.generation++;
@@ -2054,7 +2074,7 @@ public class EditorEngine {
     }
 
     private void resetGutterDiffSavedBaseline() {
-        document.baselines.savedLines = List.copyOf(model.snapshotLines());
+        document.baselines.savedLines = model.snapshotTextLines();
         document.baselines.generation++;
         gutterDiff.baselineGeneration = document.baselines.generation;
         if (gutterDiff.gutterDiffMode == GutterDiffMode.DISABLED) {
@@ -2101,27 +2121,28 @@ public class EditorEngine {
     }
 
     private void rebuildGutterDiffFromCurrentState() {
-        if (gutterDiff.gutterDiffMode == GutterDiffMode.DISABLED) {
+        if (!lineDiff.available() || gutterDiff.gutterDiffMode == GutterDiffMode.DISABLED) {
             clearAllGutterDiffBuffers(model.lineCount());
             gutterDiff.gutterDiffComputedRevision = model.revision();
             gutterDiff.gutterDiffPendingRebuild = false;
             return;
         }
         long startedAt = gutterDiffClock.getAsLong();
-        List<String> current = model.snapshotLines();
+        List<LineText> current = model.snapshotTextLines();
         int lines = Math.max(1, current.size());
         initGutterDiffBuffers(gutterDiff.savedDiffFlags, gutterDiff.savedDeletedMarkers, lines);
         initGutterDiffBuffers(gutterDiff.openDiffFlags, gutterDiff.openDeletedMarkers, lines);
 
-        DiffAlgorithm algorithm = resolveGutterDiffAlgorithm();
-        EditList savedEdits = BoundedLineDiff.compute(
-            algorithm, document.baselines.savedLines, current, GUTTER_DIFF_MAX_WORK
+        LineDiff.Algorithm algorithm = resolveGutterDiffAlgorithm();
+        List<? extends CharSequence> currentLines = diffLines(current);
+        List<LineEdit> savedEdits = lineDiff.compute(
+            diffLines(document.baselines.savedLines), currentLines, algorithm, GUTTER_DIFF_MAX_WORK
         );
         applyDiffEdits(savedEdits, lines, gutterDiff.savedDiffFlags, gutterDiff.savedDeletedMarkers);
 
-        EditList openEdits = document.baselines.openLines.equals(document.baselines.savedLines)
+        List<LineEdit> openEdits = document.baselines.openLines == document.baselines.savedLines
             ? savedEdits
-            : BoundedLineDiff.compute(algorithm, document.baselines.openLines, current, GUTTER_DIFF_MAX_WORK);
+            : lineDiff.compute(diffLines(document.baselines.openLines), currentLines, algorithm, GUTTER_DIFF_MAX_WORK);
         applyDiffEdits(openEdits, lines, gutterDiff.openDiffFlags, gutterDiff.openDeletedMarkers);
 
         gutterDiff.gutterDiffLastRebuildDurationNanos = gutterDiffClock.getAsLong() - startedAt;
@@ -2130,22 +2151,17 @@ public class EditorEngine {
         gutterDiff.gutterDiffLastRebuildAtNanos = gutterDiffClock.getAsLong();
     }
 
-    private void applyGutterDiffOp(EditOp.ReplaceRange op) {
-        if (op == null) {
-            return;
-        }
-        if (gutterDiff.gutterDiffMode == GutterDiffMode.DISABLED) {
-            return;
-        }
+    /** Publication only marks derived work; provider calls belong to diff refresh. */
+    private void invalidateGutterDiff() {
         gutterDiff.gutterDiffComputedRevision = Long.MIN_VALUE;
         gutterDiff.gutterDiffPendingRebuild = true;
     }
 
     private boolean needsGutterDiffRefresh() {
+        if (!lineDiff.available()) return false;
         if (gutterDiff.baselineGeneration != document.baselines.generation) {
             gutterDiff.baselineGeneration = document.baselines.generation;
-            gutterDiff.gutterDiffComputedRevision = Long.MIN_VALUE;
-            gutterDiff.gutterDiffPendingRebuild = true;
+            invalidateGutterDiff();
         }
         if (gutterDiff.gutterDiffMode == GutterDiffMode.DISABLED) {
             return false;
@@ -2160,16 +2176,26 @@ public class EditorEngine {
         return true;
     }
 
-    private DiffAlgorithm resolveGutterDiffAlgorithm() {
+    private LineDiff.Algorithm resolveGutterDiffAlgorithm() {
         return switch (gutterDiff.gutterDiffMode) {
-            case DISABLED -> GUTTER_DIFF_ALGORITHM_MYERS;
-            case HISTOGRAM -> GUTTER_DIFF_ALGORITHM_HISTOGRAM;
-            case MYERS, STABLE -> GUTTER_DIFF_ALGORITHM_MYERS;
+            case DISABLED, MYERS, STABLE -> LineDiff.Algorithm.MYERS;
+            case HISTOGRAM -> LineDiff.Algorithm.HISTOGRAM;
+        };
+    }
+
+    /** Exposes shared immutable values to providers without a core dependency or text copies. */
+    private static List<? extends CharSequence> diffLines(List<? extends CharSequence> lines) {
+        return new AbstractList<CharSequence>() {
+            @Override public int size() { return lines.size(); }
+            @Override public CharSequence get(int index) {
+                CharSequence line = lines.get(index);
+                return line instanceof LineText text ? text.immutableText() : line;
+            }
         };
     }
 
     private void applyDiffEdits(
-        EditList edits,
+        List<LineEdit> edits,
         int currentLineCount,
         List<GutterDiffFlag> flags,
         List<Boolean> deletedMarkers
@@ -2177,11 +2203,11 @@ public class EditorEngine {
         if (edits == null || edits.isEmpty()) {
             return;
         }
-        for (Edit edit : edits) {
-            int deleted = Math.max(0, edit.getEndA() - edit.getBeginA());
-            int added = Math.max(0, edit.getEndB() - edit.getBeginB());
-            int beginCurrent = Math.max(0, edit.getBeginB());
-            switch (edit.getType()) {
+        for (LineEdit edit : edits) {
+            int deleted = Math.max(0, edit.beforeEnd() - edit.beforeStart());
+            int added = Math.max(0, edit.afterEnd() - edit.afterStart());
+            int beginCurrent = Math.max(0, edit.afterStart());
+            switch (edit.type()) {
                 case INSERT -> {
                     for (int i = 0; i < added; i++) {
                         int line = beginCurrent + i;
@@ -2413,7 +2439,7 @@ public class EditorEngine {
 
         private void replay(EditorEngine engine, ReplacementDelta delta) {
             engine.model.replayReplacement(delta);
-            engine.applyGutterDiffOp(delta.operation());
+            engine.invalidateGutterDiff();
         }
     }
 

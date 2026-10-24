@@ -2,6 +2,7 @@ package dev.tuink.tui;
 
 import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.TabSession;
+import dev.tuink.diff.jgit.JgitLineDiff;
 import dev.tuink.editor.document.DocumentId;
 import dev.tuink.editor.session.document.CoreSessionBridge;
 import dev.tuink.editor.session.document.EditorDocumentSession;
@@ -26,7 +27,7 @@ final class TuiDocumentSession {
         EditorDocumentSession document = EditorDocumentSession.create(
             new DocumentId(UUID.randomUUID().toString()), List.of(""));
         return new TuiDocumentSession(document,
-            CoreSessionBridge.attach(document, TerminalEditorTextLayout::new, clipboard));
+            CoreSessionBridge.attach(document, TerminalEditorTextLayout::new, clipboard, new JgitLineDiff()));
     }
 
     EditorDocumentSession document() {

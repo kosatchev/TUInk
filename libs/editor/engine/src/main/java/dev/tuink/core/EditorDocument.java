@@ -1,5 +1,6 @@
 package dev.tuink.core;
 
+import dev.tuink.editor.diff.LineDiff;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.List;
@@ -39,13 +40,20 @@ public final class EditorDocument {
 
     /** Attaching a view never creates history or reinitializes file/savepoint baselines. */
     public TabSession attach(EditorTextLayout.Factory layoutFactory, EditorClipboard clipboard) {
+        return attach(layoutFactory, clipboard, LineDiff.none());
+    }
+
+    /** Optional frontend services are view-local and never change the shared document/history. */
+    public TabSession attach(EditorTextLayout.Factory layoutFactory, EditorClipboard clipboard, LineDiff lineDiff) {
         if (Thread.currentThread() != ownerThread) {
             throw new IllegalStateException("Editor document views must attach on the document owner thread");
         }
         Objects.requireNonNull(layoutFactory, "layoutFactory");
+        Objects.requireNonNull(clipboard, "clipboard");
+        Objects.requireNonNull(lineDiff, "lineDiff");
         EditorState viewState = new EditorState(state, new EditorViewState());
         EditorTextLayout layout = layoutFactory.create(model);
-        EditorEngine engine = new EditorEngine(this, viewState, layout, clipboard);
+        EditorEngine engine = new EditorEngine(this, viewState, layout, clipboard, lineDiff);
         return new TabSession(model, viewState, layout, engine);
     }
 
@@ -127,8 +135,8 @@ public final class EditorDocument {
     }
 
     static final class Baselines {
-        List<String> openLines = List.of("");
-        List<String> savedLines = List.of("");
+        List<? extends CharSequence> openLines = List.of("");
+        List<? extends CharSequence> savedLines = List.of("");
         long generation;
     }
 }

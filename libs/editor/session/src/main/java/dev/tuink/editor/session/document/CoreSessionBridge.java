@@ -3,6 +3,7 @@ package dev.tuink.editor.session.document;
 import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.EditorTextLayout;
 import dev.tuink.core.TabSession;
+import dev.tuink.editor.diff.LineDiff;
 import dev.tuink.editor.document.DocumentId;
 import dev.tuink.editor.document.DocumentSnapshot;
 import java.util.Objects;
@@ -25,8 +26,15 @@ public final class CoreSessionBridge {
     public static TabSession attach(
         EditorDocumentSession session, EditorTextLayout.Factory layoutFactory, EditorClipboard clipboard
     ) {
+        return attach(session, layoutFactory, clipboard, LineDiff.none());
+    }
+
+    /** Supplies optional view services explicitly; portable sessions do not discover providers. */
+    public static TabSession attach(
+        EditorDocumentSession session, EditorTextLayout.Factory layoutFactory, EditorClipboard clipboard, LineDiff lineDiff
+    ) {
         Objects.requireNonNull(session, "session").requireOwnerThread();
-        return session.document().attach(layoutFactory, clipboard);
+        return session.document().attach(layoutFactory, clipboard, lineDiff);
     }
 
     /** Publishes UI mutations; unchanged revisions reuse the current immutable snapshot. */

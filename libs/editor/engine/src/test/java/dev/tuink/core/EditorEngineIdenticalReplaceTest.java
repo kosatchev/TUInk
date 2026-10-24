@@ -14,6 +14,7 @@ class EditorEngineIdenticalReplaceTest {
     private static final String QUERY = "a".repeat(64) + "?a";
     private static final String REPLACEMENT = "a".repeat(66);
     private static final String SOURCE = "z".repeat(200) + REPLACEMENT;
+    private static final String OTHER_LINE = "z".repeat(200);
     private static final long WORK_LIMIT = 700;
 
     @Test
@@ -64,7 +65,7 @@ class EditorEngineIdenticalReplaceTest {
         assertTrue(engine.state().isDirty());
         assertEquals("X" + SOURCE, engine.model().getLine(0));
         assertTrue(engine.redo());
-        assertEquals(List.of("X", SOURCE), engine.model().snapshotLines());
+        assertEquals(List.of("X", SOURCE, OTHER_LINE), engine.model().snapshotLines());
         assertTrue(engine.undo());
         assertEquals("X" + SOURCE, engine.model().getLine(0));
         assertTrue(engine.undo());
@@ -135,12 +136,20 @@ class EditorEngineIdenticalReplaceTest {
     }
 
     private static EditorEngine engine() {
-        return engine(SOURCE);
+        // A full count fits the work budget. Advancing through the other line
+        // and wrapping evicts the first line's scanner and really exceeds it,
+        // even when sequential same-line search no longer repeats prefixes.
+        return engine(List.of(SOURCE, OTHER_LINE));
     }
 
     private static EditorEngine engine(String source) {
+        return engine(List.of(source));
+    }
+
+    private static EditorEngine engine(List<String> source) {
         SimpleLineBuffer buffer = new SimpleLineBuffer();
-        buffer.setLine(0, source);
+        buffer.setLine(0, source.getFirst());
+        for (int line = 1; line < source.size(); line++) buffer.insertLine(line, source.get(line));
         TextModel model = new TextModel(buffer);
         EditorEngine engine = new EditorEngine(model, new EditorState(), new LogicalEditorTextLayout(model));
         engine.setAutoPairsEnabled(false);

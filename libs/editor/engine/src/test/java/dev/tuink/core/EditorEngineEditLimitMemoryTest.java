@@ -10,7 +10,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-import org.eclipse.jgit.diff.DiffAlgorithm;
 import org.junit.jupiter.api.Test;
 
 class EditorEngineEditLimitMemoryTest {
@@ -23,7 +22,7 @@ class EditorEngineEditLimitMemoryTest {
     private static void runProbe(String mode, int heapMiB) throws Exception {
         String classpath = String.join(File.pathSeparator, location(EditorEngineEditLimitMemoryTest.class),
             location(EditorEngine.class), location(TextModel.class), location(GraphemeText.class),
-            location(DiffAlgorithm.class), location(LanguageRegistry.class));
+            location(LanguageRegistry.class));
         Process process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx" + heapMiB + "m", "-cp", classpath, MemoryProbe.class.getName(), mode)
             .redirectErrorStream(true).start();

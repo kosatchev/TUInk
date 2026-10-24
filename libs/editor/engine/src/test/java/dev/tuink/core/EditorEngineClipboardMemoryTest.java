@@ -11,7 +11,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-import org.eclipse.jgit.diff.DiffAlgorithm;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -32,7 +31,7 @@ class EditorEngineClipboardMemoryTest {
     private static void probe(String mode, boolean disableCompactStrings) throws Exception {
         String classpath = String.join(File.pathSeparator, location(EditorEngineClipboardMemoryTest.class),
             location(EditorEngine.class), location(EditorDocument.class), location(GraphemeText.class),
-            location(LanguageRegistry.class), location(DiffAlgorithm.class));
+            location(LanguageRegistry.class));
         List<String> command = new ArrayList<>(List.of(
             Path.of(System.getProperty("java.home"), "bin", "java").toString(), "-Xmx64m"));
         if (disableCompactStrings) command.add("-XX:-CompactStrings");

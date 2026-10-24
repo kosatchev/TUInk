@@ -13,7 +13,6 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.concurrent.TimeUnit;
-import org.eclipse.jgit.diff.DiffAlgorithm;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -27,7 +26,7 @@ class TextModelSaveMemoryTest {
     void acceptedMultilineUnicodePastesCanBeSavedAndSavedAgainOnBoundedHeap(int heapMiB, int blocks)
         throws Exception {
         String classpath = String.join(File.pathSeparator, location(TextModelSaveMemoryTest.class),
-            location(EditorEngine.class), location(GraphemeText.class), location(DiffAlgorithm.class),
+            location(EditorEngine.class), location(GraphemeText.class),
             location(LanguageRegistry.class));
         Process process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx" + heapMiB + "m", "-cp", classpath, MemoryProbe.class.getName(),

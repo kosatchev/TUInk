@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.diff.jgit.JgitLineDiff;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
@@ -146,9 +147,9 @@ class EditorGutterDiffSchedulingTest {
         final AtomicLong snapshotCost = new AtomicLong();
         final TextModel model = new TextModel(new SimpleLineBuffer()) {
             @Override
-            public List<String> snapshotLines() {
+            public List<LineText> snapshotTextLines() {
                 now.addAndGet(snapshotCost.get());
-                return super.snapshotLines();
+                return super.snapshotTextLines();
             }
         };
         final EditorEngine engine;
@@ -156,7 +157,7 @@ class EditorGutterDiffSchedulingTest {
         Fixture(int lines) {
             model.replaceLines(IntStream.range(0, lines).mapToObj(line -> "line " + line).toList());
             engine = new EditorEngine(model, new EditorState(), new LogicalEditorTextLayout(model),
-                new EditorClipboard(), now::get);
+                new EditorClipboard(), new JgitLineDiff(), now::get);
         }
 
         void edit(int line, char character) {

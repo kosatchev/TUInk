@@ -13,6 +13,7 @@ def projectDirectories = [
     ':editor-contract': 'libs/editor/api',
     ':core': 'libs/editor/engine',
     ':editor-session': 'libs/editor/session',
+    ':editor-diff-jgit': 'libs/editor/diff-jgit',
     ':highlight-regex': 'libs/editor/highlight-regex',
     ':tuiframe-core': 'libs/tuiframe/core',
     ':tuiframe-jline': 'libs/tuiframe/jline',

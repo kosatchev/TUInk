@@ -39,8 +39,7 @@ class SearchQueryMemoryTest {
         for (String name : List.of(
             getClass().getName(), "dev.tuink.tui.SearchPresentation", "dev.tuink.core.EditorEngine",
             "dev.tuink.editor.language.LanguageRegistry", "dev.tuink.unicode.GraphemeText", "dev.tuiframe.widget.TextField",
-            "dev.tuiframe.cell.CellBuffer", "org.eclipse.jgit.diff.DiffAlgorithm", "org.slf4j.LoggerFactory",
-            "com.googlecode.javaewah.EWAHCompressedBitmap", "org.apache.commons.codec.binary.Hex"
+            "dev.tuiframe.cell.CellBuffer"
         )) locations.add(Path.of(Class.forName(name, false, getClass().getClassLoader())
             .getProtectionDomain().getCodeSource().getLocation().toURI()).toString());
         Process child = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),

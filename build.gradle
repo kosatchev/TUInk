@@ -44,11 +44,15 @@ def allowedProjectDependencies = [
     ':editor-contract' : [] as Set,
     ':core'            : [':unicode-text', ':editor-contract'] as Set,
     ':editor-session'  : [':editor-contract', ':core'] as Set,
+    ':editor-diff-jgit': [':editor-contract'] as Set,
     ':render'          : [':tuiframe-core', ':editor-contract', ':core'] as Set,
     ':highlight-regex' : [':editor-contract', ':render'] as Set,
     ':tui'             : [':tuiframe-core', ':tuiframe-jline', ':tuiframe-widgets', ':editor-contract', ':core',
-                         ':editor-session', ':render', ':highlight-regex'] as Set,
+                         ':editor-session', ':render', ':highlight-regex', ':editor-diff-jgit'] as Set,
     ':app'            : [':tui'] as Set
+]
+def allowedTestProjectDependencies = [
+    ':core': [':editor-diff-jgit'] as Set
 ]
 def expectedProjectGroups = [
     ':tuiframe-core'   : 'dev.tuiframe',
@@ -96,7 +100,11 @@ def verifyProjectDependencies = tasks.register('verifyProjectDependencies') {
                 configuration.dependencies
                     .withType(org.gradle.api.artifacts.ProjectDependency)
                     .each { dependency ->
-                        if (dependency.path != sourceProject.path && !allowed.contains(dependency.path)) {
+                        boolean allowedInTests = configuration.name.startsWith('test')
+                            && (allowedTestProjectDependencies[sourceProject.path] ?: [] as Set)
+                                .contains(dependency.path)
+                        if (dependency.path != sourceProject.path && !allowed.contains(dependency.path)
+                            && !allowedInTests) {
                             violations.add(
                                 "${sourceProject.path}:${configuration.name} -> ${dependency.path}"
                             )

@@ -11,7 +11,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
-import org.eclipse.jgit.diff.DiffAlgorithm;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -30,7 +29,7 @@ class EditorEngineNavigationMemoryTest {
                 output.write("Ā".getBytes(StandardCharsets.UTF_8));
             }
             String classpath = String.join(File.pathSeparator, location(getClass()), location(EditorEngine.class),
-                location(GraphemeText.class), location(DiffAlgorithm.class), location(LanguageRegistry.class));
+                location(GraphemeText.class), location(LanguageRegistry.class));
             Process child = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                 "-Xmx" + example[1] + "m", "-cp", classpath, NavigationProbe.class.getName(), file.toString())
                 .redirectErrorStream(true).start();

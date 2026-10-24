@@ -7,6 +7,7 @@ dependencies {
     implementation project(':editor-session')
     implementation project(':render')
     implementation project(':highlight-regex')
+    implementation project(':editor-diff-jgit')
 }
 
 def tuinkVersion = project.version.toString()

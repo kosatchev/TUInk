@@ -13,9 +13,10 @@ TUInk развивается как приложение-редактор пов
 | `tuiframe-core` | geometry, physical events, cell metrics, line layout/cache, `Canvas`, `CellBuffer`, `Frame`, capabilities и event loop |
 | `tuiframe-jline` | JLine lifecycle, decoder, raw mode, signals, ANSI presenter и cleanup |
 | `tuiframe-widgets` | layout, focus, hit testing, общий захват мыши, theme и reusable widgets |
-| `editor-contract` | immutable command/document DTO, argument schemas, UTF-16 ranges, `WorkspaceEdit` и общий каталог языков по именам файлов |
+| `editor-contract` | immutable command/document DTO и блочный текст, UTF-16 ranges, `WorkspaceEdit`, semantic highlighting/diff ports и общий каталог языков |
 | `core` | общий документ/history, отдельные позиции views, search, editor operations и terminal-neutral `EditorTextLayout` port |
 | `editor-session` | command registry, owner-thread `EditorDocumentSession`, validation и bounded async ingress |
+| `editor-diff-jgit` | опциональный bounded JGit diff; явно подключается к terminal view |
 | `render` | `EditorTextLayout` adapter, координаты/навигация представления, editor layout и render planning |
 | `highlight-regex` | встроенная bounded regex-based подсветка с semantic token output, без зависимости от terminal render |
 | `tui` | TUInk keymap, controllers, palettes, editor rasterization и widget adapters |
@@ -27,8 +28,8 @@ project modules. `tuiframe-jline` и `tuiframe-widgets` зависят от
 нейтрального `editor-contract`: редактирование и подсветка используют одни имена
 и расширения, сохраняя собственные правила обработки языка.
 `editor-session` экспортирует `editor-contract`, а `core` использует как
-implementation dependency; его runtime пока включает зависимости `core`, в
-том числе JGit.
+implementation dependency. JGit diff подключается отдельно через
+`editor-diff-jgit`, а Linux FFM access пока остаётся в `core`.
 
 TUIframe использует namespace `dev.tuiframe.*` и не зависит от TUInk, editor или
 plugin model. `TuiApplicationRunner` управляет event loop и порядком кадров;

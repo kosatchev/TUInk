@@ -11,7 +11,6 @@ import java.nio.file.Path;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-import org.eclipse.jgit.diff.DiffAlgorithm;
 import org.junit.jupiter.api.Test;
 
 class EditorEngineReplaceAllMemoryTest {
@@ -28,7 +27,7 @@ class EditorEngineReplaceAllMemoryTest {
     private static void runProbe(Class<?> probe) throws Exception {
         String classpath = String.join(File.pathSeparator,
             location(EditorEngineReplaceAllMemoryTest.class), location(EditorEngine.class), location(TextModel.class),
-            location(GraphemeText.class), location(DiffAlgorithm.class), location(LanguageRegistry.class));
+            location(GraphemeText.class), location(LanguageRegistry.class));
         Process process = new ProcessBuilder(
             Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx64m", "-cp", classpath, probe.getName()

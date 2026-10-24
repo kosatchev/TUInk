@@ -259,8 +259,7 @@ class AppSettingsSaveIsolationTest {
     private static Process settingsProcess(String mode, Path target) throws Exception {
         String classpath = String.join(File.pathSeparator, location(AppSettingsSaveIsolationTest.class),
             location(AppSettingsStore.class), location(AppSettings.class), location(GutterDiffMode.class),
-            location(Class.forName("dev.tuink.unicode.GraphemeText")), location(dev.tuink.editor.document.DocumentId.class),
-            location(Class.forName("org.eclipse.jgit.diff.DiffAlgorithm")));
+            location(Class.forName("dev.tuink.unicode.GraphemeText")), location(dev.tuink.editor.document.DocumentId.class));
         ProcessBuilder process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx96m", "-Duser.home=" + System.getProperty("user.home"),
             "-cp", classpath, SettingsWriter.class.getName(), mode, target.toString());

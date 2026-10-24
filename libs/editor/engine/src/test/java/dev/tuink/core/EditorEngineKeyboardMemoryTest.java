@@ -11,14 +11,13 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import org.eclipse.jgit.diff.DiffAlgorithm;
 import org.junit.jupiter.api.Test;
 
 class EditorEngineKeyboardMemoryTest {
     @Test
     void repeatedEndOfFileEntersAndUndoShareA400000LineDocumentOn128MiB() throws Exception {
         String classpath = String.join(File.pathSeparator, location(EditorEngineKeyboardMemoryTest.class),
-            location(EditorEngine.class), location(GraphemeText.class), location(DiffAlgorithm.class),
+            location(EditorEngine.class), location(GraphemeText.class),
             location(LanguageRegistry.class));
         Process process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx128m", "-cp", classpath, MemoryProbe.class.getName()).redirectErrorStream(true).start();

@@ -27,7 +27,7 @@ class ClipboardAdmissionIntegrationTest {
             "dev.tuink.editor.session.document.EditorDocumentSession", "dev.tuink.render.RenderPlanBuilder",
             "dev.tuink.highlight.regex.RegexHighlighter", "dev.tuiframe.cell.CellBuffer",
             "dev.tuiframe.widget.TextField", "dev.tuiframe.jline.presentation.ScreenPresenter",
-            "org.eclipse.jgit.diff.DiffAlgorithm", "org.slf4j.LoggerFactory",
+            "dev.tuink.diff.jgit.JgitLineDiff", "org.eclipse.jgit.diff.DiffAlgorithm", "org.slf4j.LoggerFactory",
             "com.googlecode.javaewah.EWAHCompressedBitmap", "org.apache.commons.codec.binary.Hex",
             "org.jline.terminal.Terminal", "org.junit.jupiter.api.Assertions",
             "org.junit.platform.commons.util.StringUtils", "org.opentest4j.AssertionFailedError"

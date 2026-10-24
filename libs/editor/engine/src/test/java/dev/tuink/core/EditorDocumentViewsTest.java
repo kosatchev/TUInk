@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.diff.jgit.JgitLineDiff;
+import dev.tuink.editor.diff.LineDiff;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -21,6 +23,8 @@ class EditorDocumentViewsTest {
         EditorTextLayout layout = new LogicalEditorTextLayout(model);
 
         assertThrows(NullPointerException.class, () -> new EditorEngine(model, state, layout, null));
+        assertThrows(NullPointerException.class,
+            () -> new EditorEngine(model, state, layout, new EditorClipboard(), (LineDiff) null));
 
         EditorEngine engine = new EditorEngine(model, state, layout, new EditorClipboard());
         engine.insertInput("still usable");
@@ -214,13 +218,13 @@ class EditorDocumentViewsTest {
     @Test
     void attachingAnotherViewPreservesDirtyHistorySavepointAndOpenBaselines(@TempDir Path directory) throws Exception {
         EditorDocument document = document("alpha");
-        TabSession first = document.attach(LogicalEditorTextLayout::new, new EditorClipboard());
+        TabSession first = document.attach(LogicalEditorTextLayout::new, new EditorClipboard(), new JgitLineDiff());
         Path file = directory.resolve("shared.txt");
         first.engine().saveAs(file);
         first.engine().insertInput("X");
         long generation = document.baselines.generation;
 
-        TabSession second = document.attach(LogicalEditorTextLayout::new, new EditorClipboard());
+        TabSession second = document.attach(LogicalEditorTextLayout::new, new EditorClipboard(), new JgitLineDiff());
 
         assertEquals(generation, document.baselines.generation);
         assertTrue(second.state().isDirty());

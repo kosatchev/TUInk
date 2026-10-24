@@ -53,9 +53,9 @@ class ArchitectureTest {
         .that().resideInAPackage("dev.tuink.core..")
         .should().onlyDependOnClassesThat().resideInAnyPackage(
             "java..",
-            "org.eclipse.jgit..",
             "dev.tuink.core..",
             "dev.tuink.editor.document..",
+            "dev.tuink.editor.diff..",
             "dev.tuink.editor.language..",
             "dev.tuink.unicode.."
         );
@@ -96,6 +96,13 @@ class ArchitectureTest {
     static final ArchRule HIGHLIGHTER_IMPLEMENTATIONS_STAY_CORE_INDEPENDENT = noClasses()
         .that().resideInAPackage("dev.tuink.highlight..")
         .should().dependOnClassesThat().resideInAPackage("dev.tuink.core..");
+
+    static final ArchRule DIFF_PROVIDER_STAYS_BEHIND_ITS_CONTRACT = classes()
+        .that().resideInAPackage("dev.tuink.diff.jgit..")
+        .should().onlyDependOnClassesThat().resideInAnyPackage(
+            "java..", "dev.tuink.diff.jgit..", "dev.tuink.editor.diff..",
+            "dev.tuink.editor.document..", "org.eclipse.jgit.."
+        );
 
     static final ArchRule TUI_DOES_NOT_DEPEND_ON_APPLICATION_ENTRYPOINT = noClasses()
         .that().resideInAPackage("dev.tuink.tui..")
@@ -192,6 +199,7 @@ class ArchitectureTest {
             "dev.tuink.core..",
             "dev.tuink.editor.command..",
             "dev.tuink.editor.document..",
+            "dev.tuink.editor.diff..",
             "dev.tuink.editor.session.."
         );
 
@@ -321,7 +329,8 @@ class ArchitectureTest {
             if (relative.equals("editor.session") || relative.startsWith("editor.session.")) {
                 return SliceIdentifier.of("editor-session");
             }
-            for (String contractPackage : new String[] {"editor.command", "editor.document", "editor.language"}) {
+            for (String contractPackage : new String[] {"editor.command", "editor.document", "editor.language",
+                "editor.highlight", "editor.diff"}) {
                 if (relative.equals(contractPackage) || relative.startsWith(contractPackage + ".")) {
                     return SliceIdentifier.of("editor-contract");
                 }
@@ -362,6 +371,7 @@ class ArchitectureTest {
         HIGHLIGHTERS_DO_NOT_DEPEND_ON_FRONTENDS.check(PRODUCTION_CLASSES);
         CONTEXTUAL_HIGHLIGHTER_DOES_NOT_EXPOSE_MUTABLE_MODEL.check(PRODUCTION_CLASSES);
         HIGHLIGHTER_IMPLEMENTATIONS_STAY_CORE_INDEPENDENT.check(PRODUCTION_CLASSES);
+        DIFF_PROVIDER_STAYS_BEHIND_ITS_CONTRACT.check(PRODUCTION_CLASSES);
         TUI_DOES_NOT_DEPEND_ON_APPLICATION_ENTRYPOINT.check(PRODUCTION_CLASSES);
         FILE_TREE_MODEL_STAYS_TERMINAL_INDEPENDENT.check(PRODUCTION_CLASSES);
         APP_USES_ONLY_THE_TUI_FACADE.check(PRODUCTION_CLASSES);

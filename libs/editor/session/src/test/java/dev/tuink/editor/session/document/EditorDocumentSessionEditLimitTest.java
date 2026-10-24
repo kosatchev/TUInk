@@ -25,8 +25,7 @@ class EditorDocumentSessionEditLimitTest {
         String classpath = String.join(File.pathSeparator, location(EditorDocumentSessionEditLimitTest.class),
             location(EditorDocumentSession.class), location(EditorEngine.class), location(TextModel.class),
             location(WorkspaceEditValidator.class),
-            location(DocumentId.class), location(Class.forName("dev.tuink.unicode.GraphemeText")),
-            location(Class.forName("org.eclipse.jgit.diff.DiffAlgorithm")));
+            location(DocumentId.class), location(Class.forName("dev.tuink.unicode.GraphemeText")));
         Process process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx64m", "-cp", classpath, MemoryProbe.class.getName()).redirectErrorStream(true).start();
         try {

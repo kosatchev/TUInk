@@ -11,7 +11,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-import org.eclipse.jgit.diff.DiffAlgorithm;
 import org.junit.jupiter.api.Test;
 
 class EditorEnginePasteMemoryTest {
@@ -22,8 +21,7 @@ class EditorEnginePasteMemoryTest {
 
     private static void probe(String mode, int heapMiB) throws Exception {
         String classpath = String.join(File.pathSeparator, location(EditorEnginePasteMemoryTest.class),
-            location(EditorEngine.class), location(GraphemeText.class), location(LanguageRegistry.class),
-            location(DiffAlgorithm.class));
+            location(EditorEngine.class), location(GraphemeText.class), location(LanguageRegistry.class));
         Process process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx" + heapMiB + "m", "-cp", classpath, MemoryProbe.class.getName(), mode)
             .redirectErrorStream(true).start();

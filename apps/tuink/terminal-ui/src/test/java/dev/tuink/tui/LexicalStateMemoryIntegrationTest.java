@@ -45,7 +45,8 @@ class LexicalStateMemoryIntegrationTest {
             TerminalEditorTextLayout.class, org.junit.jupiter.api.Assertions.class)) {
             locations.add(location(type));
         }
-        for (String type : List.of("dev.tuink.unicode.GraphemeText", "org.eclipse.jgit.diff.DiffAlgorithm",
+        for (String type : List.of("dev.tuink.unicode.GraphemeText", "dev.tuink.diff.jgit.JgitLineDiff",
+            "org.eclipse.jgit.diff.DiffAlgorithm",
             "org.slf4j.LoggerFactory", "org.opentest4j.AssertionFailedError",
             "org.junit.platform.commons.util.Preconditions")) {
             locations.add(location(Class.forName(type)));

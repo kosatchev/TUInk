@@ -32,7 +32,7 @@ class SingleReplaceAdmissionIntegrationTest {
             "dev.tuink.editor.session.document.EditorDocumentSession", "dev.tuink.render.RenderPlanBuilder",
             "dev.tuink.highlight.regex.RegexHighlighter", "dev.tuiframe.cell.CellBuffer",
             "dev.tuiframe.widget.TextField", "dev.tuiframe.jline.presentation.ScreenPresenter",
-            "org.eclipse.jgit.diff.DiffAlgorithm", "org.slf4j.LoggerFactory",
+            "dev.tuink.diff.jgit.JgitLineDiff", "org.eclipse.jgit.diff.DiffAlgorithm", "org.slf4j.LoggerFactory",
             "com.googlecode.javaewah.EWAHCompressedBitmap", "org.apache.commons.codec.binary.Hex",
             "org.jline.terminal.Terminal", "org.junit.jupiter.api.Assertions",
             "org.junit.platform.commons.util.StringUtils", "org.opentest4j.AssertionFailedError"
@@ -65,9 +65,9 @@ class SingleReplaceAdmissionIntegrationTest {
                 window.command(TuinkCommand.SEARCH_OPEN);
                 window.event(new TextInput("needle"));
                 window.focusSearch(SearchFocus.REPLACE);
-                for (int index = 0; index < 16; index++) {
-                    window.event(new PasteEvent("b".repeat(1_048_576)));
-                }
+                // Set up the replacement without transient append copies competing
+                // with the document under test for the child's small heap.
+                window.event(new PasteEvent("b".repeat(16 * 1_048_576)));
                 require(window.replacement.text().length() == 16 * 1_048_576, "Replacement field was truncated");
                 engine.restoreSelection(new Position(0, 120), new Position(0, 100));
                 tab.state().setViewport(new ViewportState(0, 0, 64, 64));

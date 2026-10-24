@@ -11,7 +11,6 @@ import java.nio.file.Path;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-import org.eclipse.jgit.diff.DiffAlgorithm;
 import org.junit.jupiter.api.Test;
 
 class EditorEngineLineCommentMemoryTest {
@@ -25,8 +24,7 @@ class EditorEngineLineCommentMemoryTest {
 
     private static void probe(String mode) throws Exception {
         String classpath = String.join(File.pathSeparator, location(EditorEngineLineCommentMemoryTest.class),
-            location(EditorEngine.class), location(GraphemeText.class), location(LanguageRegistry.class),
-            location(DiffAlgorithm.class));
+            location(EditorEngine.class), location(GraphemeText.class), location(LanguageRegistry.class));
         Process process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx128m", "-cp", classpath, MemoryProbe.class.getName(), mode)
             .redirectErrorStream(true).start();

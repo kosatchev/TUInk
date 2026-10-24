@@ -266,6 +266,13 @@ changing text or history. If the result is too large, the editor reports an erro
 reduce the number of matches or shorten the replacement and try again.
 Pasting uses the same admission policy and preserves the selection, text, and
 undo history when there is insufficient memory.
+Keyboard edits, including typing assists and cutting, also prepare their text,
+line-ending metadata and undo records before publishing a change. A rejected
+edit reports an error and preserves the draft, clipboard and viewing position.
+
+Large terminal pastes are read in bounded portions so that rendering, resizing
+and stop requests can still be handled. The complete paste is inserted as one
+undo step; oversized pastes are drained and rejected without inserting a prefix.
 
 With Find or Replace focused, Left/Right and Home/End move within the field;
 `Ctrl+Left/Right` or `Alt+B/F` move by word. Hold Shift to select text, or use

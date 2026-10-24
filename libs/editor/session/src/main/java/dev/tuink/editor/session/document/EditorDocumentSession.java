@@ -5,6 +5,7 @@ import dev.tuink.core.EditorDocument;
 import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.DocumentEditLimitException;
 import dev.tuink.core.LogicalEditorTextLayout;
+import dev.tuink.core.LineText;
 import dev.tuink.core.Position;
 import dev.tuink.core.SimpleLineBuffer;
 import dev.tuink.core.TextModel;
@@ -143,7 +144,8 @@ public final class EditorDocumentSession {
 
     private DocumentSnapshot captureSnapshot() {
         TextModel model = engine.model();
-        return new DocumentSnapshot(documentId, model.revision(), model.snapshotLines());
+        return DocumentSnapshot.fromImmutableLines(documentId, model.revision(),
+            model.snapshotTextLines().stream().map(LineText::immutableText).toList());
     }
 
     private boolean isOwnerThread() {

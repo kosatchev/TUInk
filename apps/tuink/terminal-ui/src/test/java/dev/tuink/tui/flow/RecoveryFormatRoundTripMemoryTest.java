@@ -13,6 +13,7 @@ import dev.tuink.core.SaveDisposition;
 import dev.tuink.core.SimpleLineBuffer;
 import dev.tuink.core.TextModel;
 import dev.tuink.core.ViewportState;
+import dev.tuink.editor.document.ImmutableText;
 import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.IOException;
@@ -37,7 +38,7 @@ class RecoveryFormatRoundTripMemoryTest {
     void acceptedManyLineAndLegacyEncodedDocumentsRoundTripTheirOwnRecoveryStorage(@TempDir Path directory)
         throws Exception {
         String classpath = String.join(File.pathSeparator, location(getClass()), location(RecoveryStore.class),
-            location(RecoverySnapshot.class));
+            location(RecoverySnapshot.class), location(ImmutableText.class));
         Process child = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx1g", "-cp", classpath, RoundTripProbe.class.getName(), directory.toString())
             .redirectErrorStream(true).start();

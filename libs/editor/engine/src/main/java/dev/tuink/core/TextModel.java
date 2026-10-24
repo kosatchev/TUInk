@@ -157,6 +157,17 @@ public class TextModel {
         return buffer.getLine(line);
     }
 
+    public LineText lineText(int line) { return buffer.lineText(line); }
+    public int lineLength(int line) { return lineText(line).length(); }
+    public String lineRange(int line, int start, int end) { return lineText(line).sliceString(start, end); }
+
+    public List<LineText> snapshotTextLines() {
+        if (buffer instanceof LocalEditBuffer staged) return staged.snapshotTextLines();
+        List<LineText> lines = new ArrayList<>(lineCount());
+        for (int line = 0; line < lineCount(); line++) lines.add(lineText(line));
+        return List.copyOf(lines);
+    }
+
     public Position insertChar(Position position, char ch) {
         if (ch == '\n' || ch == '\r') {
             throw new IllegalArgumentException("Use insertNewline or insertText for line separators");

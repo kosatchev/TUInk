@@ -55,6 +55,7 @@ class ArchitectureTest {
             "java..",
             "org.eclipse.jgit..",
             "dev.tuink.core..",
+            "dev.tuink.editor.document..",
             "dev.tuink.editor.language..",
             "dev.tuink.unicode.."
         );

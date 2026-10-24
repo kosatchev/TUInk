@@ -1,12 +1,13 @@
 package dev.tuink.core;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
 /** A command's small overlay of line edits; the source remains untouched until publication. */
 final class LocalEditBuffer implements TextBuffer {
-    private static final String[] EMPTY = new String[0];
+    private static final LineText[] EMPTY = new LineText[0];
     private final TextBuffer source;
     private final List<LineEdit> edits = new ArrayList<>();
     private int size;
@@ -21,7 +22,32 @@ final class LocalEditBuffer implements TextBuffer {
     @Override public TextBuffer createEmptySibling() { return source.createEmptySibling(); }
     @Override public int lineCount() { return size; }
 
+    /**
+     * Captures all references in one pass over the source followed by edit replay.
+     * A snapshot must not resolve every untouched line through the complete edit
+     * log: a coalesced history entry can contain thousands of same-line edits.
+     */
+    List<LineText> snapshotTextLines() {
+        List<LineText> lines = new ArrayList<>(peakSize);
+        for (int line = 0; line < source.lineCount(); line++) lines.add(source.lineText(line));
+        for (LineEdit edit : edits) {
+            if (edit.removed() == edit.inserted().length) {
+                for (int offset = 0; offset < edit.removed(); offset++) {
+                    lines.set(edit.index() + offset, edit.inserted()[offset]);
+                }
+            } else {
+                lines.subList(edit.index(), edit.index() + edit.removed()).clear();
+                lines.addAll(edit.index(), Arrays.asList(edit.inserted()));
+            }
+        }
+        return List.copyOf(lines);
+    }
+
     @Override public String getLine(int line) {
+        return lineText(line).toString();
+    }
+
+    @Override public LineText lineText(int line) {
         Objects.checkIndex(line, size);
         int sourceLine = line;
         for (int index = edits.size() - 1; index >= 0; index--) {
@@ -32,20 +58,30 @@ final class LocalEditBuffer implements TextBuffer {
             }
             sourceLine += edit.removed() - edit.inserted().length;
         }
-        return source.getLine(sourceLine);
+        return source.lineText(sourceLine);
     }
 
     @Override public void setLine(int line, String text) {
+        setLineText(line, LineText.of(text));
+    }
+
+    @Override public void setLineText(int line, LineText text) {
         Objects.checkIndex(line, size);
-        replace(line, 1, new String[] {text});
+        replace(line, 1, new LineText[] {text});
     }
 
     @Override public void insertLine(int index, String text) {
-        replace(index, 0, new String[] {text});
+        insertLineText(index, LineText.of(text));
     }
 
+    @Override public void insertLineText(int index, LineText text) { replace(index, 0, new LineText[] {text}); }
+
     @Override public void insertLines(int index, List<String> text) {
-        replace(index, 0, text.toArray(String[]::new));
+        replace(index, 0, text.stream().map(LineText::of).toArray(LineText[]::new));
+    }
+
+    @Override public void insertLineTexts(int index, List<LineText> text) {
+        replace(index, 0, text.toArray(LineText[]::new));
     }
 
     @Override public String removeLine(int index) {
@@ -59,9 +95,9 @@ final class LocalEditBuffer implements TextBuffer {
         replace(fromIndex, toIndex - fromIndex, EMPTY);
     }
 
-    @Override public void clear() { replace(0, size, new String[] {""}); }
+    @Override public void clear() { replace(0, size, new LineText[] {LineText.of("")}); }
 
-    private void replace(int index, int removed, String[] inserted) {
+    private void replace(int index, int removed, LineText[] inserted) {
         Objects.checkFromIndexSize(index, removed, size);
         int resultSize = Math.addExact(size - removed, inserted.length);
         edits.add(new LineEdit(index, removed, inserted));
@@ -88,8 +124,9 @@ final class LocalEditBuffer implements TextBuffer {
         if (prepared == source || prepared.lineCount() != 1 || !prepared.getLine(0).isEmpty()) {
             throw new IllegalArgumentException("createEmptySibling() must return an independent empty buffer");
         }
-        prepared.setLine(0, getLine(0));
-        for (int line = 1; line < size; line++) prepared.insertLine(line, getLine(line));
+        List<LineText> lines = snapshotTextLines();
+        prepared.setLineText(0, lines.get(0));
+        for (int line = 1; line < lines.size(); line++) prepared.insertLineText(line, lines.get(line));
         return prepared;
     }
 
@@ -103,5 +140,5 @@ final class LocalEditBuffer implements TextBuffer {
         }
     }
 
-    private record LineEdit(int index, int removed, String[] inserted) {}
+    private record LineEdit(int index, int removed, LineText[] inserted) {}
 }

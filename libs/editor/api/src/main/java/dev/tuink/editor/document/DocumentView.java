@@ -17,6 +17,11 @@ public interface DocumentView {
 
     String line(int index);
 
+    /** Read-only text without requiring an entire logical line to be materialized. */
+    default CharSequence lineText(int index) {
+        return line(index);
+    }
+
     /**
      * Returns a conservative first line that may have changed since an earlier
      * revision of this same document. Lines before the returned index retain

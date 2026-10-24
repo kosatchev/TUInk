@@ -10,6 +10,7 @@ import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.LogicalEditorTextLayout;
+import dev.tuink.core.LineText;
 import dev.tuink.core.SimpleLineBuffer;
 import dev.tuink.core.TabSession;
 import dev.tuink.core.TextBuffer;
@@ -49,7 +50,7 @@ class EditorDocumentSnapshotPublicationTest {
         assertEquals("qwertline 0", current.line(0));
         assertEquals("line 0", initial.line(0), "previously published snapshots remain immutable");
         int publishedReads = fixture.reads.lines.get();
-        assertTrue(publishedReads - typingReads >= 20_000, "the explicit request materializes the current document");
+        assertTrue(publishedReads - typingReads >= 20_000, "the explicit request captures immutable line references");
         assertSame(current, fixture.session.snapshot());
         assertSame(current, backgroundSnapshot(fixture.session));
         assertEquals(publishedReads, fixture.reads.lines.get(), "repeated unchanged requests reuse the publication");
@@ -147,6 +148,13 @@ class EditorDocumentSnapshotPublicationTest {
             reads.observeAccess();
             reads.lines.incrementAndGet();
             return super.getLine(line);
+        }
+
+        @Override
+        public LineText lineText(int line) {
+            reads.observeAccess();
+            reads.lines.incrementAndGet();
+            return super.lineText(line);
         }
     }
 }

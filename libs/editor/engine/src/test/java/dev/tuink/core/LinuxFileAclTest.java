@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import dev.tuink.unicode.GraphemeText;
+import dev.tuink.editor.document.ImmutableText;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -121,7 +122,7 @@ class LinuxFileAclTest {
     private void saveProbe(Path target, String nativeAccessOption, Class<?> probe) throws Exception {
         Path emptyPath = Files.createDirectory(tempDir.resolve("empty-path"));
         String classpath = String.join(File.pathSeparator,
-            location(LinuxFileAclTest.class), location(TextModel.class), location(GraphemeText.class));
+            location(LinuxFileAclTest.class), location(TextModel.class), location(GraphemeText.class), location(ImmutableText.class));
         ProcessBuilder builder = new ProcessBuilder(
             Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             nativeAccessOption, "-Xmx64m", "-cp", classpath,

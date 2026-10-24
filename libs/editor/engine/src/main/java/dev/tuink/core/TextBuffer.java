@@ -21,7 +21,19 @@ public interface TextBuffer {
 
     String getLine(int line);
 
+    /** Immutable ranged text; custom strategies may opt into block sharing. */
+    default LineText lineText(int line) { return LineText.of(getLine(line)); }
+
     void setLine(int line, String text);
+
+    default void setLineText(int line, LineText text) { setLine(line, text.toString()); }
+
+    default void insertLineText(int index, LineText text) { insertLine(index, text.toString()); }
+
+    /** Inserts immutable line blocks together so a retained suffix moves once. */
+    default void insertLineTexts(int index, List<LineText> text) {
+        for (int offset = 0; offset < text.size(); offset++) insertLineText(index + offset, text.get(offset));
+    }
 
     void insertLine(int index, String text);
 

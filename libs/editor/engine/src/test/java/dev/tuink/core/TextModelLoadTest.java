@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import dev.tuink.editor.document.ImmutableText;
 import dev.tuink.unicode.GraphemeText;
 import java.io.ByteArrayInputStream;
 import java.io.File;
@@ -144,7 +145,8 @@ class TextModelLoadTest {
         String classpath = String.join(File.pathSeparator,
             classpathLocation(TextModelLoadTest.class),
             classpathLocation(TextModel.class),
-            classpathLocation(GraphemeText.class));
+            classpathLocation(GraphemeText.class),
+            classpathLocation(ImmutableText.class));
         Process process = new ProcessBuilder(java.toString(), "-Xmx64m", "-cp", classpath,
             DenseFileProbe.class.getName(), dense.toString()).redirectErrorStream(true).start();
         try {
@@ -224,7 +226,8 @@ class TextModelLoadTest {
             classpathLocation(TextModelLoadTest.class),
             classpathLocation(TextModel.class),
             classpathLocation(SimpleLineBuffer.class),
-            classpathLocation(GraphemeText.class)
+            classpathLocation(GraphemeText.class),
+            classpathLocation(ImmutableText.class)
         );
         Process process = new ProcessBuilder(
             java.toString(), "-Xmx64m", "-cp", classpath, FifoProbe.class.getName(),

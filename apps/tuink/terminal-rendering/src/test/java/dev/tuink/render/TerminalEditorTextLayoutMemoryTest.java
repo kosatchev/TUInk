@@ -80,7 +80,7 @@ class TerminalEditorTextLayoutMemoryTest {
                 output.write("Ā".getBytes(StandardCharsets.UTF_8));
             }
             String classpath = String.join(File.pathSeparator, location(TerminalEditorTextLayoutMemoryTest.class),
-                location(TerminalEditorTextLayout.class), location(TextModel.class), location(TerminalText.class));
+                location(TerminalEditorTextLayout.class), location(TextModel.class), location(TerminalText.class), location(DocumentView.class));
             Process process = new ProcessBuilder(
                 Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                 "-Xmx" + example[1] + "m", "-cp", classpath, FirstLayoutProbe.class.getName(), file.toString()

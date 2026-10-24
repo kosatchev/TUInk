@@ -1,6 +1,7 @@
 package dev.tuink.core;
 
 import java.util.Objects;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -9,45 +10,40 @@ import java.util.function.Supplier;
  * and wildcard-segment scans do not consume this budget.
  */
 public final class SearchWorkBudget {
-    private static final ScopedValue<SearchWorkBudget> CURRENT = ScopedValue.newInstance();
-    private final SearchWorkBudget parent;
-    private long remaining;
-    private long remainingCompilationBytes;
+    // Compatibility boundary for existing Supplier callbacks. Search algorithms
+    // receive the context explicitly rather than reading this binding in loops.
+    private static final ThreadLocal<SearchOperationContext> CURRENT = new ThreadLocal<>();
 
-    private SearchWorkBudget(long maximumWork, SearchWorkBudget parent) {
-        remaining = maximumWork;
-        this.parent = parent;
-        remainingCompilationBytes = SearchMemoryBudget.additionalPeakLimit();
-    }
+    private SearchWorkBudget() {}
 
     /** Runs with a shared limit on automaton words beyond its linear first word. */
     public static <T> T run(long maximumWork, Supplier<T> action) {
-        if (maximumWork < 0) {
-            throw new IllegalArgumentException("Search work limit must not be negative");
-        }
         Objects.requireNonNull(action, "action");
-        SearchWorkBudget budget = new SearchWorkBudget(maximumWork, current());
-        return ScopedValue.where(CURRENT, budget).call(action::get);
+        return run(maximumWork, context -> action.get());
     }
 
-    static SearchWorkBudget current() {
-        return CURRENT.isBound() ? CURRENT.get() : null;
-    }
-
-    void consume(long work) {
-        if (work > remaining) {
-            throw new SearchLimitException();
+    /** Supplies the operation context directly while preserving legacy callbacks. */
+    public static <T> T run(long maximumWork, Function<SearchOperationContext, T> action) {
+        Objects.requireNonNull(action, "action");
+        SearchOperationContext previous = CURRENT.get();
+        SearchOperationContext context = previous == null
+            ? SearchOperationContext.bounded(maximumWork) : previous.child(maximumWork);
+        try {
+            CURRENT.set(context);
+            return action.apply(context);
+        } finally {
+            if (previous == null) CURRENT.remove();
+            else CURRENT.set(previous);
         }
-        if (parent != null) {
-            parent.consume(work);
-        }
-        remaining -= work;
     }
 
-    /** Retained and temporary compilation state across a complete action. */
-    void reserveCompilation(long bytes) {
-        if (bytes > remainingCompilationBytes) throw SearchLimitException.memory();
-        if (parent != null) parent.reserveCompilation(bytes);
-        remainingCompilationBytes -= bytes;
+    static SearchOperationContext current() {
+        try {
+            SearchOperationContext context = CURRENT.get();
+            return context == null ? SearchOperationContext.unlimited() : context;
+        } catch (OutOfMemoryError exhausted) {
+            // An unbound thread's first lookup may allocate a ThreadLocal entry.
+            throw SearchLimitException.memory();
+        }
     }
 }

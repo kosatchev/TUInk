@@ -1,6 +1,7 @@
 package dev.tuink.core;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Search utilities that work across tab sessions.
@@ -10,35 +11,53 @@ public final class TabSearch {
     }
 
     public static int countMatches(List<TabSession> tabs, String query, SearchOptions options) {
+        return countMatches(tabs, query, options, SearchWorkBudget.current());
+    }
+
+    public static int countMatches(List<TabSession> tabs, String query, SearchOptions options,
+                                  SearchOperationContext context) {
+        Objects.requireNonNull(context, "context");
         if (tabs == null || query == null || query.isEmpty()) {
             return 0;
         }
         SearchOptions safe = options == null ? SearchOptions.DEFAULT : options;
-        SearchMatcher matcher = SearchMatcher.compile(query, safe);
+        SearchMatcher matcher = SearchMatcher.compile(query, safe, context);
         int total = 0;
         for (TabSession tab : tabs) {
             TextModel model = tab.model();
             for (int i = 0; i < model.lineCount(); i++) {
-                total += matcher.countMatches(model.getLine(i));
+                total += matcher.countMatches(model.lineText(i), context);
             }
         }
         return total;
     }
 
     public static int countMatchesInModel(TextModel model, String query, SearchOptions options) {
+        return countMatchesInModel(model, query, options, SearchWorkBudget.current());
+    }
+
+    public static int countMatchesInModel(TextModel model, String query, SearchOptions options,
+                                          SearchOperationContext context) {
+        Objects.requireNonNull(context, "context");
         if (model == null || query == null || query.isEmpty()) {
             return 0;
         }
         SearchOptions safe = options == null ? SearchOptions.DEFAULT : options;
-        SearchMatcher matcher = SearchMatcher.compile(query, safe);
+        SearchMatcher matcher = SearchMatcher.compile(query, safe, context);
         int total = 0;
         for (int i = 0; i < model.lineCount(); i++) {
-            total += matcher.countMatches(model.getLine(i));
+            total += matcher.countMatches(model.lineText(i), context);
         }
         return total;
     }
 
     public static int[] findMatchTabs(List<TabSession> tabs, String query, SearchOptions options) {
+        return findMatchTabs(tabs, query, options, SearchWorkBudget.current());
+    }
+
+    public static int[] findMatchTabs(List<TabSession> tabs, String query, SearchOptions options,
+                                      SearchOperationContext context) {
+        Objects.requireNonNull(context, "context");
         if (tabs == null) {
             return new int[0];
         }
@@ -47,11 +66,11 @@ public final class TabSearch {
             return flags;
         }
         SearchOptions safe = options == null ? SearchOptions.DEFAULT : options;
-        SearchMatcher matcher = SearchMatcher.compile(query, safe);
+        SearchMatcher matcher = SearchMatcher.compile(query, safe, context);
         for (int tabIndex = 0; tabIndex < tabs.size(); tabIndex++) {
             TextModel model = tabs.get(tabIndex).model();
             for (int line = 0; line < model.lineCount(); line++) {
-                if (matcher.findFirstAtOrAfter(model.getLine(line), 0) != null) {
+                if (matcher.findFirstAtOrAfter(model.lineText(line), 0, context) != null) {
                     flags[tabIndex] = 1;
                     break;
                 }
@@ -61,15 +80,21 @@ public final class TabSearch {
     }
 
     public static int findNextAcrossTabs(List<TabSession> tabs, int activeTabIndex, String query, SearchOptions options) {
+        return findNextAcrossTabs(tabs, activeTabIndex, query, options, SearchWorkBudget.current());
+    }
+
+    public static int findNextAcrossTabs(List<TabSession> tabs, int activeTabIndex, String query, SearchOptions options,
+                                         SearchOperationContext context) {
+        Objects.requireNonNull(context, "context");
         if (tabs == null || tabs.isEmpty() || query == null || query.isEmpty()) {
             return -1;
         }
         int safeActive = Math.max(0, Math.min(activeTabIndex, tabs.size() - 1));
         SearchOptions safe = options == null ? SearchOptions.DEFAULT : options;
-        SearchMatcher matcher = SearchMatcher.compile(query, safe);
         TabSession active = tabs.get(safeActive);
-        Position from = forwardOrigin(active, matcher);
-        MatchPosition activeTail = firstAtOrAfter(active.model(), matcher, from);
+        SearchNavigation navigation = active.engine().searchNavigation(query, safe, context);
+        Position from = forwardOrigin(active, navigation, context);
+        MatchPosition activeTail = firstAtOrAfter(active, navigation, from, context);
         if (activeTail != null) {
             select(active.engine(), activeTail);
             return safeActive;
@@ -77,13 +102,13 @@ public final class TabSearch {
         for (int step = 1; step < tabs.size(); step++) {
             int idx = Math.floorMod(safeActive + step, tabs.size());
             TabSession tab = tabs.get(idx);
-            MatchPosition match = firstMatch(tab.model(), matcher);
+            MatchPosition match = firstMatch(tab, navigation, context);
             if (match != null) {
                 select(tab.engine(), match);
                 return idx;
             }
         }
-        MatchPosition wrapped = firstBefore(active.model(), matcher, from);
+        MatchPosition wrapped = firstBefore(active, navigation, from, context);
         if (wrapped != null) {
             select(active.engine(), wrapped);
             return safeActive;
@@ -92,15 +117,21 @@ public final class TabSearch {
     }
 
     public static int findPreviousAcrossTabs(List<TabSession> tabs, int activeTabIndex, String query, SearchOptions options) {
+        return findPreviousAcrossTabs(tabs, activeTabIndex, query, options, SearchWorkBudget.current());
+    }
+
+    public static int findPreviousAcrossTabs(List<TabSession> tabs, int activeTabIndex, String query, SearchOptions options,
+                                             SearchOperationContext context) {
+        Objects.requireNonNull(context, "context");
         if (tabs == null || tabs.isEmpty() || query == null || query.isEmpty()) {
             return -1;
         }
         int safeActive = Math.max(0, Math.min(activeTabIndex, tabs.size() - 1));
         SearchOptions safe = options == null ? SearchOptions.DEFAULT : options;
-        SearchMatcher matcher = SearchMatcher.compile(query, safe);
         TabSession active = tabs.get(safeActive);
-        Position from = backwardOrigin(active, matcher);
-        MatchPosition activeHead = lastBefore(active.model(), matcher, from);
+        SearchNavigation navigation = active.engine().searchNavigation(query, safe, context);
+        Position from = backwardOrigin(active, navigation, context);
+        MatchPosition activeHead = lastBefore(active, navigation, from, context);
         if (activeHead != null) {
             select(active.engine(), activeHead);
             return safeActive;
@@ -108,13 +139,13 @@ public final class TabSearch {
         for (int step = 1; step < tabs.size(); step++) {
             int idx = Math.floorMod(safeActive - step, tabs.size());
             TabSession tab = tabs.get(idx);
-            MatchPosition match = lastMatch(tab.model(), matcher);
+            MatchPosition match = lastMatch(tab, navigation, context);
             if (match != null) {
                 select(tab.engine(), match);
                 return idx;
             }
         }
-        MatchPosition wrapped = lastAtOrAfter(active.model(), matcher, from);
+        MatchPosition wrapped = lastAtOrAfter(active, navigation, from, context);
         if (wrapped != null) {
             select(active.engine(), wrapped);
             return safeActive;
@@ -122,17 +153,17 @@ public final class TabSearch {
         return -1;
     }
 
-    private static Position forwardOrigin(TabSession tab, SearchMatcher matcher) {
+    private static Position forwardOrigin(TabSession tab, SearchNavigation navigation, SearchOperationContext context) {
         Selection selection = selection(tab.state());
-        if (selection != null && matches(tab.model(), matcher, selection)) {
+        if (selection != null && matches(navigation, selection, context)) {
             return selection.end();
         }
         return tab.model().clamp(tab.state().getCursor());
     }
 
-    private static Position backwardOrigin(TabSession tab, SearchMatcher matcher) {
+    private static Position backwardOrigin(TabSession tab, SearchNavigation navigation, SearchOperationContext context) {
         Selection selection = selection(tab.state());
-        if (selection != null && matches(tab.model(), matcher, selection)) {
+        if (selection != null && matches(navigation, selection, context)) {
             return selection.start();
         }
         return tab.model().clamp(tab.state().getCursor());
@@ -150,21 +181,23 @@ public final class TabSearch {
     }
 
     private static boolean matches(
-        TextModel model,
-        SearchMatcher matcher,
-        Selection selection
+        SearchNavigation navigation,
+        Selection selection,
+        SearchOperationContext context
     ) {
         return selection.start().line() == selection.end().line()
-            && matcher.matchesRange(
-                model.getLine(selection.start().line()),
+            && navigation.matchesRange(
+                selection.start().line(),
                 selection.start().col(),
-                selection.end().col()
+                selection.end().col(), context
             );
     }
 
-    private static MatchPosition firstMatch(TextModel model, SearchMatcher matcher) {
+    private static MatchPosition firstMatch(TabSession tab, SearchNavigation query, SearchOperationContext context) {
+        TextModel model = tab.model();
+        SearchNavigation navigation = tab.engine().searchNavigation(query);
         for (int line = 0; line < model.lineCount(); line++) {
-            SearchMatcher.Match match = matcher.findFirstAtOrAfter(model.getLine(line), 0);
+            SearchMatcher.Match match = navigation.firstAtOrAfter(line, 0, context);
             if (match != null) {
                 return new MatchPosition(line, match.startUtf16(), match.endUtf16());
             }
@@ -172,10 +205,12 @@ public final class TabSearch {
         return null;
     }
 
-    private static MatchPosition lastMatch(TextModel model, SearchMatcher matcher) {
+    private static MatchPosition lastMatch(TabSession tab, SearchNavigation query, SearchOperationContext context) {
+        TextModel model = tab.model();
+        SearchNavigation navigation = tab.engine().searchNavigation(query);
         for (int line = model.lineCount() - 1; line >= 0; line--) {
-            String text = model.getLine(line);
-            SearchMatcher.Match match = matcher.findLastBefore(text, text.length());
+            LineText text = model.lineText(line);
+            SearchMatcher.Match match = navigation.lastBefore(line, text.length(), context);
             if (match != null) {
                 return new MatchPosition(line, match.startUtf16(), match.endUtf16());
             }
@@ -184,13 +219,16 @@ public final class TabSearch {
     }
 
     private static MatchPosition firstAtOrAfter(
-        TextModel model,
-        SearchMatcher matcher,
-        Position from
+        TabSession tab,
+        SearchNavigation query,
+        Position from,
+        SearchOperationContext context
     ) {
+        TextModel model = tab.model();
+        SearchNavigation navigation = tab.engine().searchNavigation(query);
         for (int line = from.line(); line < model.lineCount(); line++) {
-            SearchMatcher.Match match = matcher.findFirstAtOrAfter(
-                model.getLine(line), line == from.line() ? from.col() : 0
+            SearchMatcher.Match match = navigation.firstAtOrAfter(
+                line, line == from.line() ? from.col() : 0, context
             );
             if (match != null) {
                 return new MatchPosition(line, match.startUtf16(), match.endUtf16());
@@ -200,12 +238,14 @@ public final class TabSearch {
     }
 
     private static MatchPosition firstBefore(
-        TextModel model,
-        SearchMatcher matcher,
-        Position limit
+        TabSession tab,
+        SearchNavigation query,
+        Position limit,
+        SearchOperationContext context
     ) {
+        SearchNavigation navigation = tab.engine().searchNavigation(query);
         for (int line = 0; line <= limit.line(); line++) {
-            SearchMatcher.Match match = matcher.findFirstAtOrAfter(model.getLine(line), 0);
+            SearchMatcher.Match match = navigation.firstAtOrAfter(line, 0, context);
             if (match != null && (line < limit.line() || match.startUtf16() < limit.col())) {
                 return new MatchPosition(line, match.startUtf16(), match.endUtf16());
             }
@@ -214,14 +254,17 @@ public final class TabSearch {
     }
 
     private static MatchPosition lastBefore(
-        TextModel model,
-        SearchMatcher matcher,
-        Position limit
+        TabSession tab,
+        SearchNavigation query,
+        Position limit,
+        SearchOperationContext context
     ) {
+        TextModel model = tab.model();
+        SearchNavigation navigation = tab.engine().searchNavigation(query);
         for (int line = limit.line(); line >= 0; line--) {
-            String text = model.getLine(line);
-            SearchMatcher.Match match = matcher.findLastBefore(
-                text, line == limit.line() ? limit.col() : text.length()
+            LineText text = model.lineText(line);
+            SearchMatcher.Match match = navigation.lastBefore(
+                line, line == limit.line() ? limit.col() : text.length(), context
             );
             if (match != null) {
                 return new MatchPosition(line, match.startUtf16(), match.endUtf16());
@@ -231,13 +274,16 @@ public final class TabSearch {
     }
 
     private static MatchPosition lastAtOrAfter(
-        TextModel model,
-        SearchMatcher matcher,
-        Position limit
+        TabSession tab,
+        SearchNavigation query,
+        Position limit,
+        SearchOperationContext context
     ) {
+        TextModel model = tab.model();
+        SearchNavigation navigation = tab.engine().searchNavigation(query);
         for (int line = model.lineCount() - 1; line >= limit.line(); line--) {
-            String text = model.getLine(line);
-            SearchMatcher.Match match = matcher.findLastBefore(text, text.length());
+            LineText text = model.lineText(line);
+            SearchMatcher.Match match = navigation.lastBefore(line, text.length(), context);
             if (match != null && (line > limit.line() || match.startUtf16() >= limit.col())) {
                 return new MatchPosition(line, match.startUtf16(), match.endUtf16());
             }

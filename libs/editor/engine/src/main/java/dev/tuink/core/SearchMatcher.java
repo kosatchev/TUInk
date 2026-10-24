@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Compiled single-line search whose match ranges always address the original
@@ -32,12 +33,17 @@ public final class SearchMatcher {
     }
 
     public static SearchMatcher compile(String query, SearchOptions options) {
+        return compile(query, options, SearchWorkBudget.current());
+    }
+
+    public static SearchMatcher compile(String query, SearchOptions options, SearchOperationContext context) {
+        Objects.requireNonNull(context, "context");
         try {
             String safeQuery = query == null ? "" : query;
             SearchOptions safeOptions = options == null ? SearchOptions.DEFAULT : options;
             int codePoints = safeQuery.codePointCount(0, safeQuery.length());
             if (codePoints > 0) {
-                SearchMemoryBudget.requireCompilation(compilationBytes(safeQuery, safeOptions, codePoints));
+                SearchMemoryBudget.requireCompilation(compilationBytes(safeQuery, safeOptions, codePoints), context);
             }
             return new SearchMatcher(safeQuery, safeOptions, codePoints);
         } catch (OutOfMemoryError exhausted) {
@@ -127,13 +133,18 @@ public final class SearchMatcher {
     }
 
     /** Returns non-overlapping half-open UTF-16 ranges in {@code source}. */
-    public List<Match> findAll(String source) {
+    public List<Match> findAll(CharSequence source) {
+        return findAll(source, SearchWorkBudget.current());
+    }
+
+    public List<Match> findAll(CharSequence source, SearchOperationContext context) {
+        Objects.requireNonNull(context, "context");
         try {
             List<Match> matches = new ArrayList<>();
             scanMatches(source, (start, end) -> {
                 matches.add(new Match(start, end));
                 return true;
-            });
+            }, context);
             return List.copyOf(matches);
         } catch (OutOfMemoryError exhausted) {
             throw MEMORY_LIMIT;
@@ -144,9 +155,14 @@ public final class SearchMatcher {
      * Returns only results intersecting {@code [startUtf16, endUtf16)}.
      * Ranges retain their full source offsets rather than being clipped to the
      * interval, including a result that starts before its left edge. Earlier
-     * results still determine non-overlap, as in {@link #findAll(String)}.
+     * results still determine non-overlap, as in {@link #findAll(CharSequence)}.
      */
-    public List<Match> findIntersecting(String source, int startUtf16, int endUtf16) {
+    public List<Match> findIntersecting(CharSequence source, int startUtf16, int endUtf16) {
+        return findIntersecting(source, startUtf16, endUtf16, SearchWorkBudget.current());
+    }
+
+    public List<Match> findIntersecting(CharSequence source, int startUtf16, int endUtf16, SearchOperationContext context) {
+        Objects.requireNonNull(context, "context");
         if (endUtf16 <= startUtf16) {
             return List.of();
         }
@@ -160,7 +176,7 @@ public final class SearchMatcher {
                     matches.add(new Match(start, end));
                 }
                 return true;
-            });
+            }, context);
             return List.copyOf(matches);
         } catch (OutOfMemoryError exhausted) {
             throw MEMORY_LIMIT;
@@ -169,10 +185,15 @@ public final class SearchMatcher {
 
     /**
      * Returns the first result whose start is at least {@code fromUtf16}, or null.
-     * Results retain the same non-overlapping ranges as {@link #findAll(String)},
+     * Results retain the same non-overlapping ranges as {@link #findAll(CharSequence)},
      * even when the requested offset lies inside an earlier result.
      */
-    public Match findFirstAtOrAfter(String source, int fromUtf16) {
+    public Match findFirstAtOrAfter(CharSequence source, int fromUtf16) {
+        return findFirstAtOrAfter(source, fromUtf16, SearchWorkBudget.current());
+    }
+
+    public Match findFirstAtOrAfter(CharSequence source, int fromUtf16, SearchOperationContext context) {
+        Objects.requireNonNull(context, "context");
         try {
             int[] found = {-1, -1};
             scanMatches(source, (start, end) -> {
@@ -182,7 +203,7 @@ public final class SearchMatcher {
                 found[0] = start;
                 found[1] = end;
                 return false;
-            });
+            }, context);
             return found[0] < 0 ? null : new Match(found[0], found[1]);
         } catch (OutOfMemoryError exhausted) {
             throw MEMORY_LIMIT;
@@ -190,7 +211,12 @@ public final class SearchMatcher {
     }
 
     /** Returns the last result starting before {@code beforeUtf16}, or null. */
-    public Match findLastBefore(String source, int beforeUtf16) {
+    public Match findLastBefore(CharSequence source, int beforeUtf16) {
+        return findLastBefore(source, beforeUtf16, SearchWorkBudget.current());
+    }
+
+    public Match findLastBefore(CharSequence source, int beforeUtf16, SearchOperationContext context) {
+        Objects.requireNonNull(context, "context");
         try {
             int[] found = {-1, -1};
             scanMatches(source, (start, end) -> {
@@ -200,7 +226,7 @@ public final class SearchMatcher {
                 found[0] = start;
                 found[1] = end;
                 return true;
-            });
+            }, context);
             return found[0] < 0 ? null : new Match(found[0], found[1]);
         } catch (OutOfMemoryError exhausted) {
             throw MEMORY_LIMIT;
@@ -208,13 +234,18 @@ public final class SearchMatcher {
     }
 
     /** Counts results without allocating a range object for each occurrence. */
-    public int countMatches(String source) {
+    public int countMatches(CharSequence source) {
+        return countMatches(source, SearchWorkBudget.current());
+    }
+
+    public int countMatches(CharSequence source, SearchOperationContext context) {
+        Objects.requireNonNull(context, "context");
         try {
             int[] count = {0};
             scanMatches(source, (start, end) -> {
                 count[0]++;
                 return true;
-            });
+            }, context);
             return count[0];
         } catch (OutOfMemoryError exhausted) {
             throw MEMORY_LIMIT;
@@ -226,7 +257,12 @@ public final class SearchMatcher {
      * matcher's results. The range is expressed in original-source UTF-16
      * offsets.
      */
-    public boolean matchesRange(String source, int startUtf16, int endUtf16) {
+    public boolean matchesRange(CharSequence source, int startUtf16, int endUtf16) {
+        return matchesRange(source, startUtf16, endUtf16, SearchWorkBudget.current());
+    }
+
+    public boolean matchesRange(CharSequence source, int startUtf16, int endUtf16, SearchOperationContext context) {
+        Objects.requireNonNull(context, "context");
         if (source == null
             || startUtf16 < 0
             || endUtf16 < startUtf16
@@ -234,21 +270,26 @@ public final class SearchMatcher {
             || (literal == null && wildcard == null)) {
             return false;
         }
-        Match match = findFirstAtOrAfter(source, startUtf16);
+        Match match = findFirstAtOrAfter(source, startUtf16, context);
         return match != null && match.startUtf16() == startUtf16 && match.endUtf16() == endUtf16;
     }
 
     /** Visits the same ranges as findAll without retaining a Match object for each result. */
-    void scanMatches(String source, MatchVisitor visitor) {
-        if (source == null || source.isEmpty() || (literal == null && wildcard == null)) {
+    void scanMatches(CharSequence source, MatchVisitor visitor) {
+        scanMatches(source, visitor, SearchWorkBudget.current());
+    }
+
+    void scanMatches(CharSequence source, MatchVisitor visitor, SearchOperationContext context) {
+        Objects.requireNonNull(context, "context");
+        if (source == null || source.length() == 0 || (literal == null && wildcard == null)) {
             return;
         }
         try {
             if (wildcard != null) {
-                wildcard.scanMatches(source, visitor);
+                wildcard.scanMatches(source, visitor, context);
                 return;
             }
-            literal.scanMatches(source, visitor, matchMode == SearchOptions.MatchMode.WHOLE_WORD);
+            literal.scanMatches(source, visitor, matchMode == SearchOptions.MatchMode.WHOLE_WORD, context);
         } catch (OutOfMemoryError exhausted) {
             throw MEMORY_LIMIT;
         }
@@ -258,6 +299,76 @@ public final class SearchMatcher {
     interface MatchVisitor {
         /** Returns false when no more results are needed. */
         boolean visit(int startUtf16, int endUtf16);
+    }
+
+    /**
+     * Resumes at zero or at the end of a previously accepted match. Arbitrary
+     * offsets are deliberately handled by SearchNavigation: restarting there
+     * would change the canonical non-overlapping sequence.
+     */
+    Cursor cursor(CharSequence source, int acceptedEnd) {
+        try {
+            if (source == null || source.length() == 0 || (literal == null && wildcard == null)) {
+                return new Cursor() { @Override boolean advance(SearchOperationContext context) { return false; } };
+            }
+            if (literal != null) {
+                return literal.cursor(source, acceptedEnd, matchMode == SearchOptions.MatchMode.WHOLE_WORD);
+            }
+            if (!wildcard.hasStar) {
+                return wildcard.segments.get(0).cursor(source, acceptedEnd, true, wildcard.caseInsensitive);
+            }
+            // A starred pattern has at most one result on a line. Its greedy
+            // suffix needs the complete line, so retain the existing scan.
+            return new Cursor() {
+                private boolean done = acceptedEnd != 0;
+
+                @Override boolean advance(SearchOperationContext context) {
+                    if (done) return false;
+                    done = true;
+                    int[] result = {-1, -1};
+                    wildcard.scanMatches(source, (start, end) -> {
+                        result[0] = start;
+                        result[1] = end;
+                        return false;
+                    }, context);
+                    return result[0] >= 0 && found(result[0], result[1]);
+                }
+            };
+        } catch (OutOfMemoryError exhausted) {
+            throw MEMORY_LIMIT;
+        }
+    }
+
+    abstract static class Cursor {
+        // Counts primary literal/fixed-segment scan steps for deterministic
+        // navigation regressions, excluding starred scans and prefilters.
+        long scannedCodePoints;
+        int startUtf16;
+        int endUtf16;
+
+        final Match next() {
+            return next(SearchWorkBudget.current());
+        }
+
+        final Match next(SearchOperationContext context) {
+            return moveNext(context) ? new Match(startUtf16, endUtf16) : null;
+        }
+
+        final boolean moveNext(SearchOperationContext context) {
+            try {
+                return advance(context);
+            } catch (OutOfMemoryError exhausted) {
+                throw MEMORY_LIMIT;
+            }
+        }
+
+        final boolean found(int start, int end) {
+            startUtf16 = start;
+            endUtf16 = end;
+            return true;
+        }
+
+        abstract boolean advance(SearchOperationContext context);
     }
 
     /** Literal KMP matching with linear preprocessing and original UTF-16 ranges. */
@@ -284,46 +395,51 @@ public final class SearchMatcher {
             }
         }
 
-        private void scanMatches(String source, MatchVisitor visitor, boolean wholeWord) {
+        private void scanMatches(CharSequence source, MatchVisitor visitor, boolean wholeWord,
+                                 SearchOperationContext context) {
             if (tokens.length > source.length()) {
                 return;
             }
-            // Retain only the last query-length code-point offsets. Case folding
-            // never changes the positions reported in the original source.
-            SearchMemoryBudget.requireScratch(SearchMemoryBudget.FIXED_OVERHEAD + 4L * tokens.length);
-            int[] offsets = new int[tokens.length];
-            int matched = 0;
-            int codePointIndex = 0;
-            for (int offset = 0; offset < source.length(); codePointIndex++) {
-                offsets[codePointIndex % tokens.length] = offset;
-                int codePoint = source.codePointAt(offset);
-                int next = offset + Character.charCount(codePoint);
-                int token = fold(codePoint);
-                while (matched > 0 && token != tokens[matched]) {
-                    matched = prefix[matched - 1];
-                }
-                if (token == tokens[matched]) {
-                    matched++;
-                }
-                if (matched == tokens.length) {
-                    int start = offsets[(codePointIndex + 1 - tokens.length) % tokens.length];
-                    if (!wholeWord || isWholeWord(source, start, next)) {
-                        if (!visitor.visit(start, next)) {
-                            return;
-                        }
-                        matched = 0;
-                    } else {
-                        // Only accepted matches determine non-overlap. Preserve
-                        // overlapping candidates after a rejected word boundary.
-                        matched = prefix[matched - 1];
-                    }
-                }
-                offset = next;
+            Cursor cursor = cursor(source, 0, wholeWord);
+            while (cursor.moveNext(context)) {
+                if (!visitor.visit(cursor.startUtf16, cursor.endUtf16)) return;
             }
         }
 
         private int fold(int codePoint) {
             return caseInsensitive ? Character.toLowerCase(Character.toUpperCase(codePoint)) : codePoint;
+        }
+
+        private Cursor cursor(CharSequence source, int from, boolean wholeWord) {
+            SearchMemoryBudget.requireScratch(SearchMemoryBudget.FIXED_OVERHEAD + 4L * tokens.length);
+            return new Cursor() {
+                private final int[] offsets = new int[tokens.length];
+                private int offset = from;
+                private int codePointIndex;
+                private int matched;
+
+                @Override boolean advance(SearchOperationContext context) {
+                    while (offset < source.length()) {
+                        offsets[codePointIndex % tokens.length] = offset;
+                        int codePoint = Character.codePointAt(source, offset);
+                        offset += Character.charCount(codePoint);
+                        scannedCodePoints++;
+                        int token = fold(codePoint);
+                        while (matched > 0 && token != tokens[matched]) matched = prefix[matched - 1];
+                        if (token == tokens[matched]) matched++;
+                        codePointIndex++;
+                        if (matched == tokens.length) {
+                            int start = offsets[(codePointIndex - tokens.length) % tokens.length];
+                            if (!wholeWord || isWholeWord(source, start, offset)) {
+                                matched = 0;
+                                return found(start, offset);
+                            }
+                            matched = prefix[matched - 1];
+                        }
+                    }
+                    return false;
+                }
+            };
         }
     }
 
@@ -365,7 +481,7 @@ public final class SearchMatcher {
             this.minimumLength = required;
         }
 
-        private void scanMatches(String source, MatchVisitor visitor) {
+        private void scanMatches(CharSequence source, MatchVisitor visitor, SearchOperationContext context) {
             // UTF-16 length is a cheap upper bound on the available code points.
             // A source-sized code-point/offset index would defeat bounded searches
             // on long lines; each segment walks the original String instead.
@@ -375,7 +491,7 @@ public final class SearchMatcher {
             }
 
             if (!hasStar) {
-                segments.getFirst().scanMatches(source, 0, true, caseInsensitive, visitor);
+                segments.get(0).scanMatches(source, 0, true, caseInsensitive, visitor, context);
                 return;
             }
 
@@ -392,7 +508,7 @@ public final class SearchMatcher {
                 // A single unanchored segment also determines the leftmost
                 // start, so only a preceding star permits choosing it last.
                 boolean findLast = last && !trailingStar && (index > 0 || leadingStar);
-                Match found = segment.find(source, end, findLast, caseInsensitive);
+                Match found = segment.find(source, end, findLast, caseInsensitive, context);
                 if (found == null) {
                     return;
                 }
@@ -470,8 +586,8 @@ public final class SearchMatcher {
                         continue;
                     }
                     List<WordMask> entries = masks.computeIfAbsent(literals[index], ignored -> new ArrayList<>());
-                    if (!entries.isEmpty() && entries.getLast().word == word) {
-                        WordMask previous = entries.removeLast();
+                    if (!entries.isEmpty() && entries.get(entries.size() - 1).word == word) {
+                        WordMask previous = entries.remove(entries.size() - 1);
                         entries.add(new WordMask(word, previous.bits | bit));
                     } else {
                         entries.add(new WordMask(word, bit));
@@ -481,13 +597,14 @@ public final class SearchMatcher {
                 masks.forEach((codePoint, entries) -> literalMasks.put(codePoint, entries.toArray(WordMask[]::new)));
             }
 
-            private Match find(String source, int from, boolean last, boolean caseInsensitive) {
+            private Match find(CharSequence source, int from, boolean last, boolean caseInsensitive,
+                               SearchOperationContext context) {
                 if (literals.length == 0) {
                     int end = advance(source, from, length);
                     if (end < 0) {
                         return null;
                     }
-                    return last ? new Match(source.offsetByCodePoints(source.length(), -length), source.length())
+                    return last ? new Match(Character.offsetByCodePoints(source, source.length(), -length), source.length())
                         : new Match(from, end);
                 }
                 int[] found = {-1, -1};
@@ -495,24 +612,40 @@ public final class SearchMatcher {
                     found[0] = start;
                     found[1] = end;
                     return last;
-                });
+                }, context);
                 return found[0] < 0 ? null : new Match(found[0], found[1]);
             }
 
             private void scanMatches(
-                String source, int from, boolean nonOverlapping, boolean caseInsensitive, MatchVisitor visitor
+                CharSequence source, int from, boolean nonOverlapping, boolean caseInsensitive, MatchVisitor visitor,
+                SearchOperationContext context
             ) {
+                Cursor cursor = cursor(source, from, nonOverlapping, caseInsensitive);
+                while (cursor.moveNext(context)) {
+                    if (!visitor.visit(cursor.startUtf16, cursor.endUtf16)) return;
+                }
+            }
+
+            private Cursor cursor(CharSequence source, int from, boolean nonOverlapping, boolean caseInsensitive) {
                 if (literals.length == 0) {
                     // Used for a pattern consisting only of '?'. Each source code
                     // point is visited once, even when the query itself is long.
-                    for (int start = from; start < source.length();) {
-                        int end = advance(source, start, length);
-                        if (end < 0 || !visitor.visit(start, end)) {
-                            return;
+                    return new Cursor() {
+                        private int start = from;
+
+                        @Override boolean advance(SearchOperationContext context) {
+                            if (start >= source.length()) return false;
+                            int end = WildcardSegment.advance(source, start, length);
+                            if (end < 0) {
+                                start = source.length();
+                                return false;
+                            }
+                            scannedCodePoints += length;
+                            int previous = start;
+                            start = end;
+                            return found(previous, end);
                         }
-                        start = end;
-                    }
-                    return;
+                    };
                 }
 
                 if (prefix == null) {
@@ -526,91 +659,80 @@ public final class SearchMatcher {
                 if (prefix == null && questionMasks.length > 4
                     && (long) (source.length() - from) * questionMasks.length > 1_000_000L
                     && !containsRequiredLiterals(source, from, caseInsensitive)) {
-                    return;
+                    return new Cursor() { @Override boolean advance(SearchOperationContext context) { return false; } };
                 }
 
-                int offset = advance(source, from, leadingQuestions);
-                int suffixEnd = advance(source, offset, trailingQuestions);
-                if (suffixEnd < 0) {
-                    return;
-                }
-                int start = from;
-                int untilFullWindow = literals.length;
-                int matched = 0;
-                long[] state = prefix == null ? new long[questionMasks.length] : null;
-                SearchWorkBudget budget = SearchWorkBudget.current();
-                long finalBit = 1L << ((literals.length - 1) % Long.SIZE);
-                while (suffixEnd < source.length()) {
-                    int codePoint = source.codePointAt(offset);
-                    int next = offset + Character.charCount(codePoint);
-                    suffixEnd += Character.charCount(source.codePointAt(suffixEnd));
-                    // Once the fixed core has filled, advance the full-window
-                    // start with input; suffixEnd keeps the trailing lookahead.
-                    if (untilFullWindow > 0) {
-                        untilFullWindow--;
-                    } else {
-                        start += Character.charCount(source.codePointAt(start));
-                    }
-                    if (caseInsensitive) {
-                        codePoint = foldCase(codePoint);
-                    }
-                    boolean complete;
-                    if (prefix != null) {
-                        while (matched > 0 && codePoint != literals[matched]) {
-                            matched = prefix[matched - 1];
-                        }
-                        if (codePoint == literals[matched]) {
-                            matched++;
-                        }
-                        complete = matched == literals.length;
-                    } else {
-                        if (budget != null && state.length > 1) {
-                            budget.consume(state.length - 1L);
-                        }
-                        WordMask[] masks = literalMasks.get(codePoint);
-                        int entry = 0;
-                        long carry = 1;
-                        for (int word = 0; word < state.length; word++) {
-                            long previous = state[word];
-                            long mask = questionMasks[word];
-                            if (masks != null && entry < masks.length && masks[entry].word == word) {
-                                mask |= masks[entry++].bits;
+                return new Cursor() {
+                    private int offset = WildcardSegment.advance(source, from, leadingQuestions);
+                    private int suffixEnd = WildcardSegment.advance(source, offset, trailingQuestions);
+                    private int start = from;
+                    private int untilFullWindow = literals.length;
+                    private int matched;
+                    private final long[] state = prefix == null ? new long[questionMasks.length] : null;
+                    private final long finalBit = 1L << ((literals.length - 1) % Long.SIZE);
+
+                    @Override boolean advance(SearchOperationContext context) {
+                        while (suffixEnd >= 0 && suffixEnd < source.length()) {
+                            int codePoint = Character.codePointAt(source, offset);
+                            int next = offset + Character.charCount(codePoint);
+                            scannedCodePoints++;
+                            suffixEnd += Character.charCount(Character.codePointAt(source, suffixEnd));
+                            // Keep the full-window start and trailing lookahead
+                            // in original UTF-16 coordinates without a line index.
+                            if (untilFullWindow > 0) {
+                                untilFullWindow--;
+                            } else {
+                                start += Character.charCount(Character.codePointAt(source, start));
                             }
-                            state[word] = ((previous << 1) | carry) & mask;
-                            carry = previous >>> (Long.SIZE - 1);
-                        }
-                        complete = (state[state.length - 1] & finalBit) != 0;
-                    }
-                    if (complete) {
-                        if (!visitor.visit(start, suffixEnd)) {
-                            return;
-                        }
-                        if (nonOverlapping) {
-                            start = suffixEnd;
-                            offset = advance(source, start, leadingQuestions);
-                            suffixEnd = advance(source, offset, trailingQuestions);
-                            if (suffixEnd < 0) {
-                                return;
+                            if (caseInsensitive) codePoint = foldCase(codePoint);
+                            boolean complete;
+                            if (prefix != null) {
+                                while (matched > 0 && codePoint != literals[matched]) matched = prefix[matched - 1];
+                                if (codePoint == literals[matched]) matched++;
+                                complete = matched == literals.length;
+                            } else {
+                                if (state.length > 1) context.consume(state.length - 1L);
+                                WordMask[] masks = literalMasks.get(codePoint);
+                                int entry = 0;
+                                long carry = 1;
+                                for (int word = 0; word < state.length; word++) {
+                                    long previous = state[word];
+                                    long mask = questionMasks[word];
+                                    if (masks != null && entry < masks.length && masks[entry].word == word) {
+                                        mask |= masks[entry++].bits;
+                                    }
+                                    state[word] = ((previous << 1) | carry) & mask;
+                                    carry = previous >>> (Long.SIZE - 1);
+                                }
+                                complete = (state[state.length - 1] & finalBit) != 0;
                             }
-                            untilFullWindow = literals.length;
-                            matched = 0;
-                            if (state != null) {
-                                Arrays.fill(state, 0L);
+                            if (complete) {
+                                int matchStart = start;
+                                int matchEnd = suffixEnd;
+                                if (nonOverlapping) {
+                                    start = suffixEnd;
+                                    offset = WildcardSegment.advance(source, start, leadingQuestions);
+                                    suffixEnd = WildcardSegment.advance(source, offset, trailingQuestions);
+                                    untilFullWindow = literals.length;
+                                    matched = 0;
+                                    if (state != null) Arrays.fill(state, 0L);
+                                } else {
+                                    if (prefix != null) matched = prefix[matched - 1];
+                                    offset = next;
+                                }
+                                return found(matchStart, matchEnd);
                             }
-                            continue;
+                            offset = next;
                         }
-                        if (prefix != null) {
-                            matched = prefix[matched - 1];
-                        }
+                        return false;
                     }
-                    offset = next;
-                }
+                };
             }
 
-            private boolean containsRequiredLiterals(String source, int from, boolean caseInsensitive) {
+            private boolean containsRequiredLiterals(CharSequence source, int from, boolean caseInsensitive) {
                 var missing = new HashSet<>(literalMasks.keySet());
                 for (int offset = from; offset < source.length();) {
-                    int codePoint = source.codePointAt(offset);
+                    int codePoint = Character.codePointAt(source, offset);
                     offset += Character.charCount(codePoint);
                     missing.remove(caseInsensitive ? foldCase(codePoint) : codePoint);
                     if (missing.isEmpty()) {
@@ -621,7 +743,7 @@ public final class SearchMatcher {
             }
 
             /** Advances at most a query-sized prefix; -1 means the source ended first. */
-            private static int advance(String source, int from, int codePoints) {
+            private static int advance(CharSequence source, int from, int codePoints) {
                 if (from < 0) {
                     return -1;
                 }
@@ -630,7 +752,7 @@ public final class SearchMatcher {
                     if (offset == source.length()) {
                         return -1;
                     }
-                    offset += Character.charCount(source.codePointAt(offset));
+                    offset += Character.charCount(Character.codePointAt(source, offset));
                 }
                 return offset;
             }
@@ -644,9 +766,9 @@ public final class SearchMatcher {
         }
     }
 
-    private static boolean isWholeWord(String source, int start, int end) {
-        boolean leftBoundary = start == 0 || !isWordCodePoint(source.codePointBefore(start));
-        boolean rightBoundary = end == source.length() || !isWordCodePoint(source.codePointAt(end));
+    private static boolean isWholeWord(CharSequence source, int start, int end) {
+        boolean leftBoundary = start == 0 || !isWordCodePoint(Character.codePointBefore(source, start));
+        boolean rightBoundary = end == source.length() || !isWordCodePoint(Character.codePointAt(source, end));
         return leftBoundary && rightBoundary;
     }
 

@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
+import dev.tuink.core.LineText;
 import dev.tuink.core.Position;
 import dev.tuink.core.SearchOptions;
 import dev.tuink.core.SimpleLineBuffer;
@@ -215,9 +216,9 @@ class SearchPresentationTest {
         }
 
         @Override
-        public String getLine(int line) {
+        public LineText lineText(int line) {
             lineReads++;
-            return super.getLine(line);
+            return super.lineText(line);
         }
     }
 }

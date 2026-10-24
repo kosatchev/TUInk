@@ -42,7 +42,7 @@ final class SearchSelection {
         }
         Range range = range(state);
         return range != null && SearchMatcher.compile(query, options)
-            .matchesRange(model.getLine(range.start().line()), range.start().col(), range.end().col());
+            .matchesRange(model.lineText(range.start().line()), range.start().col(), range.end().col());
     }
 
     private static Range range(EditorState state) {

@@ -6,6 +6,9 @@ Changes on the development branch after [v0.16.0](0.16.0.md).
   redirected opening symlink cannot make an ordinary save overwrite another file.
 - Coordinate Unix save locks across bind-mounted aliases of the same directory
   entry while retaining the previous lock for existing canonical paths.
+- Continue sequential search from accepted matches with a bounded result cache
+  and sparse checkpoints, preserving non-overlapping matching rules.
+
 - Encode saved documents into the staged file through bounded buffers, retaining
   original encodings, BOMs and line endings while hashing the written bytes.
 - Reject search queries that exceed the compilation memory budget with an

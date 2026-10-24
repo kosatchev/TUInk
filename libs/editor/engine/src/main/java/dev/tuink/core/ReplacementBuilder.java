@@ -34,15 +34,15 @@ final class ReplacementBuilder {
         return new ReplacementBuilder(budget.fresh(), true);
     }
 
-    void append(String text, int start, int end) {
+    void append(CharSequence text, int start, int end) {
         if (start == end) return;
         boolean reuse = length == 0 && start == 0 && end == text.length();
-        copied |= !reuse;
+        copied |= !reuse || text instanceof LineText line && line.cachedString() == null;
         length = DocumentEditBudget.add(length, end - (long) start);
         budget.append(length, copied);
         if (!materialize) return;
         if (reuse) {
-            wholeLine = text;
+            wholeLine = text.toString();
             return;
         }
         if (pending == null) {

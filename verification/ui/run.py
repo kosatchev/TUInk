@@ -204,7 +204,10 @@ class Regressions:
         assert b"OutOfMemoryError" not in session.log
 
     def identical_replace_budget(self):
-        original = "z" * 2_700_000 + "a" * 66
+        # A same-line wrap can now reuse accepted matches. Crossing a second
+        # line evicts that scanner: counting still fits the action budget,
+        # while finding the following match and wrapping genuinely exceeds it.
+        original = "z" * 2_700_000 + "a" * 66 + "\n" + "z" * 2_700_000
         document = self.fixture("identical-replace-budget", original)
         with self.session("identical-replace-budget", document) as session:
             session.send(b"\x06\x1b[200~" + b"a" * 64 + b"?a\x1b[201~")

@@ -77,6 +77,9 @@ public class RenderPlanBuilder {
     private Style unmatchedBracketStyle = Style.DEFAULT;
     private List<Style> rainbowBracketStyles = List.of(Style.DEFAULT);
     private SearchFailure failedSearch;
+    private String highlightQuery;
+    private SearchOptions highlightOptions;
+    private SearchMatcher highlightMatcher;
 
     private record SearchFailure(String query, SearchOptions options, long identity, long revision) {}
 
@@ -89,14 +92,21 @@ public class RenderPlanBuilder {
             key = new SearchFailure(query, options, model.cacheIdentity(), model.revision());
             if (key.equals(failedSearch)) return;
             try {
-                matcher = SearchMatcher.compile(query, options);
+                if (highlightMatcher == null || !Objects.equals(query, highlightQuery)
+                    || !Objects.equals(options, highlightOptions)) {
+                    SearchMatcher compiled = SearchMatcher.compile(query, options);
+                    highlightQuery = query;
+                    highlightOptions = options;
+                    highlightMatcher = compiled;
+                }
+                matcher = highlightMatcher;
                 failedSearch = null;
             } catch (SearchLimitException limit) {
                 failedSearch = key;
             }
         }
 
-        private List<SearchMatcher.Match> findIntersecting(String source, int start, int end) {
+        private List<SearchMatcher.Match> findIntersecting(CharSequence source, int start, int end) {
             if (matcher == null) return List.of();
             try {
                 return matcher.findIntersecting(source, start, end);
@@ -106,7 +116,7 @@ public class RenderPlanBuilder {
             }
         }
 
-        private boolean matchesRange(String source, int start, int end) {
+        private boolean matchesRange(CharSequence source, int start, int end) {
             if (matcher == null) return false;
             try {
                 return matcher.matchesRange(source, start, end);

@@ -14,10 +14,9 @@ final class SearchMemoryBudget {
         return available / 2;
     }
 
-    static void requireCompilation(long bytes) {
+    static void requireCompilation(long bytes, SearchOperationContext context) {
         requireScratch(bytes);
-        SearchWorkBudget budget = SearchWorkBudget.current();
-        if (budget != null) budget.reserveCompilation(bytes);
+        context.reserveCompilation(bytes);
     }
 
     static void requireScratch(long bytes) {

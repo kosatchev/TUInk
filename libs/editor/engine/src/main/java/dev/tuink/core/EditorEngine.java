@@ -46,6 +46,7 @@ public class EditorEngine {
     private final LongSupplier gutterDiffClock;
     private final MarkdownBlockContext markdownContext;
     private final IndentationContext indentationContext;
+    private final SearchNavigation searchNavigation;
     private GraphemeText cachedGraphemes;
     private int tabWidth = 4;
     private TabInsertMode tabInsertMode = TabInsertMode.AUTO;
@@ -111,6 +112,7 @@ public class EditorEngine {
         this.gutterDiffClock = Objects.requireNonNull(gutterDiffClock, "gutterDiffClock");
         this.markdownContext = new MarkdownBlockContext(model::getLine);
         this.indentationContext = new IndentationContext(model::getLine);
+        this.searchNavigation = new SearchNavigation(model);
         if (document.register(state)) {
             resetGutterDiffBaselinesOnOpen();
             if (state.isDirty()) {
@@ -1281,20 +1283,25 @@ public class EditorEngine {
     }
 
     public boolean findNext(String query, SearchOptions options) {
+        return findNext(query, options, SearchWorkBudget.current());
+    }
+
+    public boolean findNext(String query, SearchOptions options, SearchOperationContext context) {
+        Objects.requireNonNull(context, "context");
         String needle = normalizeQuery(query);
         if (needle == null) {
             return false;
         }
-        SearchMatcher matcher = SearchMatcher.compile(needle, options);
+        SearchNavigation navigation = searchNavigation(needle, options, context);
         breakCoalescing();
 
         Position from = model.clamp(state.getCursor());
         SelectionRange selected = currentSelection();
-        if (selected != null && matchesSelectedText(matcher, selected)) {
+        if (selected != null && matchesSelectedText(navigation, selected, context)) {
             from = selected.end();
         }
 
-        SearchMatch found = findForward(from, matcher, true);
+        SearchMatch found = findForward(from, navigation, true, context);
         if (found == null) {
             return false;
         }
@@ -1307,20 +1314,25 @@ public class EditorEngine {
     }
 
     public boolean findPrevious(String query, SearchOptions options) {
+        return findPrevious(query, options, SearchWorkBudget.current());
+    }
+
+    public boolean findPrevious(String query, SearchOptions options, SearchOperationContext context) {
+        Objects.requireNonNull(context, "context");
         String needle = normalizeQuery(query);
         if (needle == null) {
             return false;
         }
-        SearchMatcher matcher = SearchMatcher.compile(needle, options);
+        SearchNavigation navigation = searchNavigation(needle, options, context);
         breakCoalescing();
 
         Position from = model.clamp(state.getCursor());
         SelectionRange selected = currentSelection();
-        if (selected != null && matchesSelectedText(matcher, selected)) {
+        if (selected != null && matchesSelectedText(navigation, selected, context)) {
             from = selected.start();
         }
 
-        SearchMatch found = findBackward(from, matcher, true);
+        SearchMatch found = findBackward(from, navigation, true, context);
         if (found == null) {
             return false;
         }
@@ -1333,19 +1345,25 @@ public class EditorEngine {
     }
 
     public boolean replaceCurrentOrNext(String query, String replacement, SearchOptions options) {
+        return replaceCurrentOrNext(query, replacement, options, SearchWorkBudget.current());
+    }
+
+    public boolean replaceCurrentOrNext(String query, String replacement, SearchOptions options,
+                                        SearchOperationContext context) {
+        Objects.requireNonNull(context, "context");
         String needle = normalizeQuery(query);
         if (needle == null) {
             return false;
         }
-        SearchMatcher matcher = SearchMatcher.compile(needle, options);
+        SearchNavigation navigation = searchNavigation(needle, options, context);
         ReplacementText replacementText = new ReplacementText(replacement);
 
         SelectionRange selected = currentSelection();
         ViewState before = captureViewState();
-        if (selected == null || !matchesSelectedText(matcher, selected)) {
+        if (selected == null || !matchesSelectedText(navigation, selected, context)) {
             // Locate the match without publishing a selection: a refused replacement
             // must preserve even the view and coalescing state from before the command.
-            SearchMatch found = findForward(model.clamp(state.getCursor()), matcher, true);
+            SearchMatch found = findForward(model.clamp(state.getCursor()), navigation, true, context);
             if (found == null) return false;
             selected = new SelectionRange(found.start(),
                 new Position(found.start().line(), found.start().col() + found.length()));
@@ -1361,7 +1379,7 @@ public class EditorEngine {
             // repeated Replace commands still make progress. Resolve that move
             // before publishing a selection or breaking a pending typing group:
             // even a no-op replacement can exhaust the shared search budget.
-            SearchMatch next = findForward(rangeEnd, matcher, true);
+            SearchMatch next = findForward(rangeEnd, navigation, true, context);
             breakCoalescing();
             if (next == null) {
                 selectMatch(rangeStart, rangeEnd.col() - rangeStart.col());
@@ -1380,32 +1398,38 @@ public class EditorEngine {
 
     /** Counts and admits the complete result before allocating it or changing document/view/history state. */
     public int replaceAll(String query, String replacement, SearchOptions options) {
+        return replaceAll(query, replacement, options, SearchWorkBudget.current());
+    }
+
+    public int replaceAll(String query, String replacement, SearchOptions options, SearchOperationContext context) {
+        Objects.requireNonNull(context, "context");
         String needle = normalizeQuery(query);
         if (needle == null) {
             return 0;
         }
-        SearchMatcher matcher = SearchMatcher.compile(needle, options);
+        SearchMatcher matcher = SearchMatcher.compile(needle, options, context);
         ReplacementText replacementText = new ReplacementText(replacement);
         DocumentFileMetadata metadata = model.fileMetadata();
         ReplacementBuilder admission = ReplacementBuilder.counting(model.lineCount());
-        ReplacementResult counted = composeSearchReplacements(matcher, replacementText, admission, metadata);
+        ReplacementResult counted = composeSearchReplacements(matcher, replacementText, admission, metadata, context);
         if (counted.firstChange() != null) {
             ReplacementBuilder builder = admission.materializer();
-            ReplacementResult built = composeSearchReplacements(matcher, replacementText, builder, metadata);
+            ReplacementResult built = composeSearchReplacements(matcher, replacementText, builder, metadata, context);
             applyBuiltReplacement(builder, metadata, built.firstChange());
         }
         return counted.matchCount();
     }
 
     private ReplacementResult composeSearchReplacements(SearchMatcher matcher, ReplacementText replacement,
-                                                         ReplacementBuilder builder, DocumentFileMetadata metadata) {
+                                                         ReplacementBuilder builder, DocumentFileMetadata metadata,
+                                                         SearchOperationContext context) {
         int[] matchCount = {0};
         int[] copiedThrough = {0};
         Position[] earliestResult = {null};
         var separators = metadata.lineSeparators().iterator();
         for (int line = 0; line < model.lineCount(); line++) {
             int sourceLine = line;
-            String text = model.getLine(line);
+            LineText text = model.lineText(line);
             copiedThrough[0] = 0;
             matcher.scanMatches(text, (start, end) -> {
                 if (matchCount[0] == Integer.MAX_VALUE) throw new DocumentEditLimitException();
@@ -1424,7 +1448,7 @@ public class EditorEngine {
                 }
                 copiedThrough[0] = end;
                 return true;
-            });
+            }, context);
             String separator = separators.hasNext() ? separators.next() : null;
             if (earliestResult[0] != null) {
                 builder.append(text, copiedThrough[0], text.length());
@@ -2526,12 +2550,27 @@ public class EditorEngine {
         return query;
     }
 
-    private SearchMatch findForward(Position from, SearchMatcher matcher, boolean wrap) {
+    SearchNavigation searchNavigation(String query, SearchOptions options) {
+        return searchNavigation(query, options, SearchWorkBudget.current());
+    }
+
+    SearchNavigation searchNavigation(String query, SearchOptions options, SearchOperationContext context) {
+        searchNavigation.configure(query, options, context);
+        return searchNavigation;
+    }
+
+    SearchNavigation searchNavigation(SearchNavigation query) {
+        searchNavigation.configureLike(query);
+        return searchNavigation;
+    }
+
+    private SearchMatch findForward(Position from, SearchNavigation navigation, boolean wrap,
+                                    SearchOperationContext context) {
         int lineCount = model.lineCount();
         for (int line = from.line(); line < lineCount; line++) {
-            String text = model.getLine(line);
+            LineText text = model.lineText(line);
             int startCol = line == from.line() ? Math.min(from.col(), text.length()) : 0;
-            SearchMatch match = findInLineForward(line, text, matcher, startCol);
+            SearchMatch match = findInLineForward(line, navigation, startCol, context);
             if (match != null) {
                 return match;
             }
@@ -2540,9 +2579,9 @@ public class EditorEngine {
             return null;
         }
         for (int line = 0; line <= from.line(); line++) {
-            String text = model.getLine(line);
+            LineText text = model.lineText(line);
             int limit = line == from.line() ? Math.min(from.col(), text.length()) : text.length();
-            SearchMatch match = findInLineForward(line, text, matcher, 0);
+            SearchMatch match = findInLineForward(line, navigation, 0, context);
             if (match != null && match.start().col() < limit) {
                 return match;
             }
@@ -2550,11 +2589,12 @@ public class EditorEngine {
         return null;
     }
 
-    private SearchMatch findBackward(Position from, SearchMatcher matcher, boolean wrap) {
+    private SearchMatch findBackward(Position from, SearchNavigation navigation, boolean wrap,
+                                     SearchOperationContext context) {
         for (int line = from.line(); line >= 0; line--) {
-            String text = model.getLine(line);
+            LineText text = model.lineText(line);
             int endExclusive = line == from.line() ? Math.min(from.col(), text.length()) : text.length();
-            SearchMatch match = findInLineBackward(line, text, matcher, endExclusive);
+            SearchMatch match = findInLineBackward(line, navigation, endExclusive, context);
             if (match != null) {
                 return match;
             }
@@ -2563,9 +2603,9 @@ public class EditorEngine {
             return null;
         }
         for (int line = model.lineCount() - 1; line >= from.line(); line--) {
-            String text = model.getLine(line);
+            LineText text = model.lineText(line);
             int startInclusive = line == from.line() ? Math.min(from.col(), text.length()) : 0;
-            SearchMatch match = findInLineBackward(line, text, matcher, text.length());
+            SearchMatch match = findInLineBackward(line, navigation, text.length(), context);
             if (match != null && match.start().col() >= startInclusive) {
                 return match;
             }
@@ -2575,28 +2615,30 @@ public class EditorEngine {
 
     private void selectMatch(Position start, int length) {
         Position safeStart = model.clamp(start);
-        int maxCol = model.getLine(safeStart.line()).length();
+        int maxCol = model.lineLength(safeStart.line());
         int endCol = Math.min(maxCol, safeStart.col() + Math.max(length, 0));
         state.setSelectionAnchor(safeStart);
         state.setCursor(new Position(safeStart.line(), endCol));
     }
 
-    private boolean matchesSelectedText(SearchMatcher matcher, SelectionRange selected) {
+    private boolean matchesSelectedText(SearchNavigation navigation, SelectionRange selected,
+                                         SearchOperationContext context) {
         if (selected.start().line() != selected.end().line()) {
             return false;
         }
-        String line = model.getLine(selected.start().line());
-        return matcher.matchesRange(line, selected.start().col(), selected.end().col());
+        return navigation.matchesRange(selected.start().line(), selected.start().col(), selected.end().col(), context);
     }
 
-    private SearchMatch findInLineForward(int line, String text, SearchMatcher matcher, int fromCol) {
-        SearchMatcher.Match match = matcher.findFirstAtOrAfter(text, fromCol);
+    private SearchMatch findInLineForward(int line, SearchNavigation navigation, int fromCol,
+                                         SearchOperationContext context) {
+        SearchMatcher.Match match = navigation.firstAtOrAfter(line, fromCol, context);
         return match == null ? null
             : new SearchMatch(new Position(line, match.startUtf16()), match.lengthUtf16());
     }
 
-    private SearchMatch findInLineBackward(int line, String text, SearchMatcher matcher, int beforeCol) {
-        SearchMatcher.Match match = matcher.findLastBefore(text, beforeCol);
+    private SearchMatch findInLineBackward(int line, SearchNavigation navigation, int beforeCol,
+                                          SearchOperationContext context) {
+        SearchMatcher.Match match = navigation.lastBefore(line, beforeCol, context);
         return match == null ? null
             : new SearchMatch(new Position(line, match.startUtf16()), match.lengthUtf16());
     }

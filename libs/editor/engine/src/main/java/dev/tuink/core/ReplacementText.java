@@ -46,16 +46,18 @@ final class ReplacementText {
     long interiorUnits() { return interiorUnits; }
     int longestInteriorLine() { return longestInteriorLine; }
 
-    boolean matches(String source, int start, int end) {
-        return lineBreaks == 0 && end - start == text.length() && source.regionMatches(start, text, 0, text.length());
+    boolean matches(CharSequence source, int start, int end) {
+        if (lineBreaks != 0 || end - start != text.length()) return false;
+        for (int index = 0; index < text.length(); index++) if (source.charAt(start + index) != text.charAt(index)) return false;
+        return true;
     }
 
     boolean matches(TextModel model, Position start, Position end) {
-        if (start.line() == end.line()) return matches(model.getLine(start.line()), start.col(), end.col());
+        if (start.line() == end.line()) return matches(model.lineText(start.line()), start.col(), end.col());
         if (lineBreaks == 0) return false;
         int line = start.line();
         int column = start.col();
-        String source = model.getLine(line);
+        CharSequence source = model.lineText(line);
         for (int index = 0; index < text.length(); index++) {
             char inserted = text.charAt(index);
             if (inserted == '\r') {
@@ -66,7 +68,7 @@ final class ReplacementText {
             char original;
             if (column == source.length() && line < end.line()) {
                 original = '\n';
-                source = model.getLine(++line);
+                source = model.lineText(++line);
                 column = 0;
             } else {
                 original = source.charAt(column++);

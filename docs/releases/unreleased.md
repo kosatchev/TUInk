@@ -11,6 +11,8 @@ Changes on the development branch after [v0.16.0](0.16.0.md).
   use the same document identity.
 - Remove retired empty license directories during archive upgrades, and reject
   unexpected managed-file types before installation or removal changes any files.
+- Bound file-picker scans across the complete expanded tree, including metadata
+  counting, and report limits or worker failures without leaving a loading state.
 - Prepare bulk edits and undo/redo text, history and shared-view positions before
   publishing their state; failed preparation retains the previous draft.
 - Continue sequential search from accepted matches with a bounded result cache

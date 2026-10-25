@@ -328,6 +328,11 @@ Enter or Space activates OK and Cancel when focused.
 In terminals where Backspace sends `^H`, legacy `Ctrl+H` is interpreted as
 Backspace because the two keys send the same byte.
 
+The picker bounds the complete expanded tree to 20,000 entries and a memory
+budget. A directory that exceeds the remaining budget is omitted with a visible
+error; its contents are not presented as a complete listing. Directory item
+counts may end in `+` when their counting budget is reached.
+
 In confirmation prompts, `Tab` / `Shift+Tab` cycle through buttons and the
 document. With a button focused, Left/Right move between buttons, and `Enter`
 or Space activates the focused button. With the prompt focused, `Y` confirms

@@ -8,16 +8,16 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -42,6 +42,8 @@ public final class FileTreeModel implements AutoCloseable {
     private final Object loaderLock = new Object();
     private final AtomicLong snapshotSignal = new AtomicLong();
     private final DirectoryScanner directoryScanner;
+    private final FileTreeLoadBudget.Limits loadLimits;
+    private final ThreadFactory workerFactory;
 
     private Path root;
     private boolean showSizeColumn;
@@ -59,7 +61,20 @@ public final class FileTreeModel implements AutoCloseable {
     }
 
     FileTreeModel(Path root, boolean showSizeColumn, boolean showDateColumn, DirectoryScanner directoryScanner) {
+        this(root, showSizeColumn, showDateColumn, directoryScanner, FileTreeLoadBudget.DEFAULT_LIMITS);
+    }
+
+    FileTreeModel(Path root, boolean showSizeColumn, boolean showDateColumn, DirectoryScanner directoryScanner,
+                  FileTreeLoadBudget.Limits loadLimits) {
+        this(root, showSizeColumn, showDateColumn, directoryScanner, loadLimits,
+            operation -> new Thread(operation, "tuink-tree-loader"));
+    }
+
+    FileTreeModel(Path root, boolean showSizeColumn, boolean showDateColumn, DirectoryScanner directoryScanner,
+                  FileTreeLoadBudget.Limits loadLimits, ThreadFactory workerFactory) {
         this.directoryScanner = Objects.requireNonNull(directoryScanner, "directoryScanner");
+        this.loadLimits = Objects.requireNonNull(loadLimits, "loadLimits");
+        this.workerFactory = Objects.requireNonNull(workerFactory, "workerFactory");
         this.showSizeColumn = showSizeColumn;
         this.showDateColumn = showDateColumn;
         this.snapshot = new Snapshot(
@@ -174,22 +189,49 @@ public final class FileTreeModel implements AutoCloseable {
     private void rebuild() {
         Thread previous;
         Thread worker;
+        LoadRequest request;
         synchronized (loaderLock) {
             long generation = ++loadGeneration;
-            LoadRequest request = new LoadRequest(
-                root, Set.copyOf(expandedDirectories), showHiddenFiles, showSizeColumn, showDateColumn, generation
+            long loadingRevision = ++revision;
+            // Reserve a revision after every possible progressive publication. The worker can
+            // then publish a preallocated terminal snapshot even if it cannot allocate anymore.
+            revision += MAX_METADATA_PUBLICATIONS + 2L;
+            request = new LoadRequest(
+                root, Set.copyOf(expandedDirectories), showHiddenFiles, showSizeColumn, showDateColumn, generation,
+                failureSnapshot(root, revision, "not enough memory to load directory", FailureKind.MEMORY),
+                failureSnapshot(root, revision, "directory listing failed", FailureKind.READ),
+                failureSnapshot(root, revision, "directory loading cancelled", FailureKind.CANCELLED)
             );
             previous = loadWorker;
-            snapshot = new Snapshot(root, ++revision, loadingEntries(request), true);
-            snapshotSignal.incrementAndGet();
-            worker = new Thread(() -> load(request), "tuink-tree-loader");
-            worker.setDaemon(true);
+            Snapshot loading = new Snapshot(root, loadingRevision, loadingEntries(request), true);
+            try {
+                worker = workerFactory.newThread(() -> load(request));
+                if (worker != null) {
+                    worker.setDaemon(true);
+                }
+            } catch (OutOfMemoryError exhausted) {
+                worker = null;
+            }
+            snapshot = worker == null ? request.memoryFailure() : loading;
             loadWorker = worker;
+            snapshotSignal.incrementAndGet();
         }
         if (previous != null) {
             previous.interrupt();
         }
-        worker.start();
+        if (worker == null) {
+            return;
+        }
+        try {
+            worker.start();
+        } catch (OutOfMemoryError exhausted) {
+            publishFailureSnapshot(request.memoryFailure(), request.generation());
+            synchronized (loaderLock) {
+                if (loadWorker == worker) {
+                    loadWorker = null;
+                }
+            }
+        }
     }
 
     private List<Entry> loadingEntries(LoadRequest request) {
@@ -231,15 +273,18 @@ public final class FileTreeModel implements AutoCloseable {
 
     private void load(LoadRequest request) {
         try {
-            List<Entry> entries = parentEntries(request.root());
-            Map<EntryId, BasicFileAttributes> attributes = new HashMap<>();
-            List<DirectoryFailure> failures = new ArrayList<>();
-            appendTreeEntries(request.root(), 0, entries, attributes, failures, request);
+            LoadState state = new LoadState(request.root(), loadLimits);
+            appendTreeEntries(state, request);
             checkCurrentGeneration(request.generation());
-            publishSnapshot(entries, failures, request.generation());
-            enrichMetadata(entries, attributes, failures, request);
-        } catch (CancellationException ignored) {
-            // A newer root/options/expansion request owns all future publications.
+            publishSnapshot(state.entries, state.failures, request.generation());
+            enrichMetadata(state, request);
+        } catch (CancellationException cancelled) {
+            // Superseded requests cannot publish; cancellation of the current request is terminal.
+            publishFailureSnapshot(request.cancelled(), request.generation());
+        } catch (OutOfMemoryError exhausted) {
+            publishFailureSnapshot(request.memoryFailure(), request.generation());
+        } catch (RuntimeException unexpected) {
+            publishFailureSnapshot(request.readFailure(), request.generation());
         } finally {
             synchronized (loaderLock) {
                 if (loadGeneration == request.generation() && loadWorker == Thread.currentThread()) {
@@ -249,18 +294,50 @@ public final class FileTreeModel implements AutoCloseable {
         }
     }
 
-    private void appendTreeEntries(
-        Path directory,
-        int depth,
-        List<Entry> entries,
-        Map<EntryId, BasicFileAttributes> attributes,
-        List<DirectoryFailure> failures,
-        LoadRequest request
-    ) {
-        checkCurrentGeneration(request.generation());
-        List<ScannedEntry> children;
+    private void appendTreeEntries(LoadState state, LoadRequest request) {
+        ArrayDeque<DirectoryFrame> pending = new ArrayDeque<>();
+        Path scanningDirectory = request.root();
+        int scanningDepth = 0;
         try {
-            children = new ArrayList<>(directoryScanner.scan(directory, request.showHiddenFiles()));
+            pending.push(scanFrame(scanningDirectory, scanningDepth, state, request));
+            while (!pending.isEmpty()) {
+                checkCurrentGeneration(request.generation());
+                DirectoryFrame frame = pending.peek();
+                if (frame.nextChild == frame.children.size()) {
+                    pending.pop();
+                    continue;
+                }
+                ScannedEntry child = frame.children.set(frame.nextChild++, null);
+                boolean directoryEntry = child.directory();
+                Path normalized = child.path().toAbsolutePath().normalize();
+                boolean expanded = directoryEntry && request.expanded().contains(normalized);
+                Kind kind = directoryEntry ? Kind.DIRECTORY
+                    : child.attributes() != null && child.attributes().isRegularFile() ? Kind.FILE : Kind.ERROR;
+                String name = kind == Kind.ERROR ? child.name() + " <not a regular file>" : child.name();
+                state.add(new Entry(
+                    new EntryId(normalized, kind), name, kind, expanded, frame.depth,
+                    kind == Kind.ERROR || !request.showSizeColumn() ? "" : PENDING_META,
+                    kind == Kind.ERROR || !request.showDateColumn() ? "" : PENDING_META
+                ), child.attributes());
+                if (expanded) {
+                    scanningDirectory = normalized;
+                    scanningDepth = frame.depth + 1;
+                    pending.push(scanFrame(scanningDirectory, scanningDepth, state, request));
+                }
+            }
+        } catch (FileTreeLoadBudget.LimitReachedException limited) {
+            addFailure(state, scanningDirectory, scanningDepth, limited.getMessage(), FailureKind.LIMIT);
+        }
+    }
+
+    private DirectoryFrame scanFrame(Path directory, int depth, LoadState state, LoadRequest request) {
+        List<ScannedEntry> children = new ArrayList<>();
+        try {
+            directoryScanner.scan(directory, request.showHiddenFiles(), (path, attributes) -> {
+                checkCurrentGeneration(request.generation());
+                state.budget.reserveEntry(path);
+                children.add(new ScannedEntry(path, attributes));
+            });
             checkCurrentGeneration(request.generation());
             Comparator<ScannedEntry> order = Comparator.comparing((ScannedEntry child) -> !child.directory())
                 .thenComparing(ScannedEntry::sortName)
@@ -269,56 +346,29 @@ public final class FileTreeModel implements AutoCloseable {
                 checkInterrupted();
                 return order.compare(left, right);
             });
-        } catch (CancellationException cancelled) {
-            throw cancelled;
-        } catch (IOException | RuntimeException e) {
-            String message = e instanceof AccessDeniedException ? "permission denied"
-                : e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-            failures.add(new DirectoryFailure(directory, message));
-            entries.add(new Entry(
-                new EntryId(directory, Kind.ERROR),
-                "<cannot read directory: " + message + ">",
-                Kind.ERROR,
-                false,
-                depth,
-                "",
-                ""
-            ));
-            return;
+        } catch (CancellationException | FileTreeLoadBudget.LimitReachedException stopped) {
+            throw stopped;
+        } catch (IOException | RuntimeException failed) {
+            state.budget.reserveEntry(directory);
+            String reason = failed instanceof AccessDeniedException ? "permission denied"
+                : failed.getMessage() == null ? failed.getClass().getSimpleName() : failed.getMessage();
+            if (reason.length() > 240) {
+                reason = reason.substring(0, 240) + "…";
+            }
+            addFailure(state, directory, depth, reason, FailureKind.READ);
+            children.clear();
         }
-
-        for (ScannedEntry child : children) {
-            checkCurrentGeneration(request.generation());
-            boolean directoryEntry = child.directory();
-            Path normalized = child.path().toAbsolutePath().normalize();
-            boolean expanded = directoryEntry && request.expanded().contains(normalized);
-            Kind kind = directoryEntry ? Kind.DIRECTORY
-                : child.attributes() != null && child.attributes().isRegularFile() ? Kind.FILE : Kind.ERROR;
-            String name = child.name();
-            if (kind == Kind.ERROR) {
-                name += " <not a regular file>";
-            }
-            EntryId id = new EntryId(normalized, kind);
-            entries.add(new Entry(
-                id,
-                name,
-                kind,
-                expanded,
-                depth,
-                kind == Kind.ERROR || !request.showSizeColumn() ? "" : PENDING_META,
-                kind == Kind.ERROR || !request.showDateColumn() ? "" : PENDING_META
-            ));
-            if (child.attributes() != null) {
-                attributes.put(id, child.attributes());
-            }
-            if (directoryEntry && expanded) {
-                appendTreeEntries(child.path(), depth + 1, entries, attributes, failures, request);
-            }
-        }
+        return new DirectoryFrame(children, depth);
     }
 
-    static List<ScannedEntry> scanDirectory(Path directory, boolean showHiddenFiles) throws IOException {
-        List<ScannedEntry> children = new ArrayList<>();
+    private static void addFailure(LoadState state, Path directory, int depth, String reason, FailureKind kind) {
+        state.failures.add(new DirectoryFailure(directory, reason, kind));
+        // One terminal limit row is allowed beyond the admission budget so the reason remains visible.
+        state.add(new Entry(new EntryId(directory, Kind.ERROR), "<cannot read directory: " + reason + ">",
+            Kind.ERROR, false, depth, "", ""), null);
+    }
+
+    static void scanDirectory(Path directory, boolean showHiddenFiles, ScannedEntryConsumer consumer) throws IOException {
         try (var stream = Files.list(directory)) {
             var iterator = stream.iterator();
             while (iterator.hasNext()) {
@@ -333,10 +383,9 @@ public final class FileTreeModel implements AutoCloseable {
                 } catch (IOException ignored) {
                     attributes = null;
                 }
-                children.add(new ScannedEntry(path, attributes));
+                consumer.accept(path, attributes);
             }
         }
-        return children;
     }
 
     private static boolean isVisiblePath(Path path, boolean showHiddenFiles) {
@@ -354,16 +403,11 @@ public final class FileTreeModel implements AutoCloseable {
         }
     }
 
-    private void enrichMetadata(
-        List<Entry> entries,
-        Map<EntryId, BasicFileAttributes> attributes,
-        List<DirectoryFailure> failures,
-        LoadRequest request
-    ) {
+    private void enrichMetadata(LoadState state, LoadRequest request) {
         if (!request.showSizeColumn() && !request.showDateColumn()) {
             return;
         }
-        List<Entry> updatedEntries = new ArrayList<>(entries);
+        List<Entry> entries = state.entries;
         // Preserve progressive updates without making full-list publication quadratic.
         int publishBatchSize = Math.max(
             MIN_METADATA_BATCH_SIZE,
@@ -376,35 +420,51 @@ public final class FileTreeModel implements AutoCloseable {
             if (entry.kind() == Kind.PARENT || entry.kind() == Kind.ERROR) {
                 continue;
             }
-            BasicFileAttributes entryAttributes = attributes.get(entry.id());
+            BasicFileAttributes entryAttributes = state.attributes.get(index);
             String size = !request.showSizeColumn() ? ""
-                : entry.directory() ? formatDirectoryChildCount(entry.path())
+                : entry.directory() ? formatDirectoryChildCount(entry.path(), state.budget)
                     : humanReadableSize(entryAttributes.size());
             String date = buildDateValue(entryAttributes, request.showDateColumn());
             Entry updated = entry.withMetadata(size, date);
             if (updated != entry) {
-                updatedEntries.set(index, updated);
+                entries.set(index, updated);
                 changedBatch++;
                 if (changedBatch >= publishBatchSize) {
-                    publishSnapshot(updatedEntries, failures, request.generation());
+                    publishSnapshot(entries, state.failures, request.generation());
                     changedBatch = 0;
                 }
             }
         }
         if (changedBatch > 0) {
-            publishSnapshot(updatedEntries, failures, request.generation());
+            publishSnapshot(entries, state.failures, request.generation());
         }
     }
 
     private void publishSnapshot(List<Entry> entries, List<DirectoryFailure> failures, long generation) {
-        List<Entry> publishedEntries = List.copyOf(entries);
         synchronized (loaderLock) {
             if (closed || loadGeneration != generation) {
                 return;
             }
-            snapshot = new Snapshot(snapshot.root(), ++revision, publishedEntries, false, failures);
+            snapshot = new Snapshot(snapshot.root(), snapshot.revision() + 1L, entries, false, failures);
             snapshotSignal.incrementAndGet();
         }
+    }
+
+    private void publishFailureSnapshot(Snapshot failure, long generation) {
+        synchronized (loaderLock) {
+            if (!closed && loadGeneration == generation) {
+                snapshot = failure;
+                snapshotSignal.incrementAndGet();
+            }
+        }
+    }
+
+    private static Snapshot failureSnapshot(Path root, long revision, String reason, FailureKind kind) {
+        List<Entry> entries = parentEntries(root);
+        entries.add(new Entry(new EntryId(root, Kind.ERROR),
+            "<cannot read directory: " + reason + ">", Kind.ERROR, false, 0, "", ""));
+        return new Snapshot(root, revision, entries, false,
+            List.of(new DirectoryFailure(root, reason, kind)));
     }
 
     private void checkCurrentGeneration(long generation) {
@@ -446,12 +506,15 @@ public final class FileTreeModel implements AutoCloseable {
         }
     }
 
-    private static String formatDirectoryChildCount(Path path) {
+    private static String formatDirectoryChildCount(Path path, FileTreeLoadBudget budget) {
         try (var stream = Files.list(path)) {
             long count = 0;
             var iterator = stream.iterator();
             while (iterator.hasNext()) {
                 checkInterrupted();
+                if (!budget.inspectMetadataEntry()) {
+                    return count == 0L ? "? items" : count + "+ items";
+                }
                 iterator.next();
                 count++;
             }
@@ -500,7 +563,12 @@ public final class FileTreeModel implements AutoCloseable {
 
     @FunctionalInterface
     interface DirectoryScanner {
-        List<ScannedEntry> scan(Path directory, boolean showHiddenFiles) throws IOException;
+        void scan(Path directory, boolean showHiddenFiles, ScannedEntryConsumer consumer) throws IOException;
+    }
+
+    @FunctionalInterface
+    interface ScannedEntryConsumer {
+        void accept(Path path, BasicFileAttributes attributes);
     }
 
     record ScannedEntry(Path path, BasicFileAttributes attributes, String name, String sortName) {
@@ -517,13 +585,70 @@ public final class FileTreeModel implements AutoCloseable {
 
     private record LoadRequest(
         Path root, Set<Path> expanded, boolean showHiddenFiles,
-        boolean showSizeColumn, boolean showDateColumn, long generation
+        boolean showSizeColumn, boolean showDateColumn, long generation,
+        Snapshot memoryFailure, Snapshot readFailure, Snapshot cancelled
     ) {
     }
 
-    public record DirectoryFailure(Path directory, String reason) {}
+    private static final class LoadState {
+        private final List<Entry> entries;
+        private final List<BasicFileAttributes> attributes = new ArrayList<>();
+        private final List<DirectoryFailure> failures = new ArrayList<>();
+        private final FileTreeLoadBudget budget;
 
-    public record Snapshot(Path root, long revision, List<Entry> entries, boolean loading,
+        private LoadState(Path root, FileTreeLoadBudget.Limits limits) {
+            entries = parentEntries(root);
+            for (int index = 0; index < entries.size(); index++) {
+                attributes.add(null);
+            }
+            budget = new FileTreeLoadBudget(limits);
+        }
+
+        private void add(Entry entry, BasicFileAttributes entryAttributes) {
+            entries.add(entry);
+            attributes.add(entryAttributes);
+        }
+    }
+
+    private static final class DirectoryFrame {
+        private final List<ScannedEntry> children;
+        private final int depth;
+        private int nextChild;
+
+        private DirectoryFrame(List<ScannedEntry> children, int depth) {
+            this.children = children;
+            this.depth = depth;
+        }
+    }
+
+    public enum FailureKind {
+        READ,
+        LIMIT,
+        MEMORY,
+        CANCELLED
+    }
+
+    public enum LoadStatus {
+        LOADING,
+        READY,
+        FAILED,
+        LIMITED,
+        CANCELLED
+    }
+
+    public record DirectoryFailure(Path directory, String reason, FailureKind kind) {
+        public DirectoryFailure(Path directory, String reason) {
+            this(directory, reason, FailureKind.READ);
+        }
+
+        public DirectoryFailure {
+            Objects.requireNonNull(directory, "directory");
+            Objects.requireNonNull(reason, "reason");
+            Objects.requireNonNull(kind, "kind");
+        }
+    }
+
+    public record Snapshot(Path root, long revision, List<Entry> entries, LoadStatus status,
                            List<DirectoryFailure> failures) {
         public Snapshot(Path root, long revision, List<Entry> entries) {
             this(root, revision, entries, false, List.of());
@@ -533,12 +658,32 @@ public final class FileTreeModel implements AutoCloseable {
             this(root, revision, entries, loading, List.of());
         }
 
+        public Snapshot(Path root, long revision, List<Entry> entries, boolean loading,
+                        List<DirectoryFailure> failures) {
+            this(root, revision, entries, loading ? LoadStatus.LOADING : terminalStatus(failures), failures);
+        }
+
+        public boolean loading() {
+            return status == LoadStatus.LOADING;
+        }
+
+        private static LoadStatus terminalStatus(List<DirectoryFailure> failures) {
+            if (failures.stream().anyMatch(failure -> failure.kind() == FailureKind.LIMIT)) {
+                return LoadStatus.LIMITED;
+            }
+            if (failures.stream().anyMatch(failure -> failure.kind() == FailureKind.CANCELLED)) {
+                return LoadStatus.CANCELLED;
+            }
+            return failures.isEmpty() ? LoadStatus.READY : LoadStatus.FAILED;
+        }
+
         public Snapshot {
             root = Objects.requireNonNull(root, "root").toAbsolutePath().normalize();
             if (revision < 0L) {
                 throw new IllegalArgumentException("revision must be non-negative");
             }
             entries = List.copyOf(entries);
+            Objects.requireNonNull(status, "status");
             failures = List.copyOf(failures);
         }
     }

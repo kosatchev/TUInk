@@ -65,6 +65,10 @@ The stream is bounded independently of its initial size, so a file growing durin
 the read cannot bypass the byte limit. A rejected load reports an I/O error and
 preserves the existing document, file metadata, baseline, revision and undo history.
 
+File-picker scans share entry and
+memory budgets across all expanded directories. A directory exceeding the
+remaining budget is rejected as a unit, with a visible incomplete-tree notice.
+
 Ordinary command-line file and profile paths containing `U+FFFD` are rejected
 before startup: native argument decoding may already have substituted that
 character for undecodable filename bytes. This includes literal `U+FFFD` names.

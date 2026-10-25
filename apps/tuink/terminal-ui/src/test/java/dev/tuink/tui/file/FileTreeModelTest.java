@@ -13,11 +13,14 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileTime;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -27,9 +30,263 @@ class FileTreeModelTest {
     Path root;
 
     @Test
+    void failingToCreateTheWorkerPublishesAMemoryFailureAndTheNextRequestCanLoad() throws IOException {
+        Path nextRoot = Files.createDirectory(root.resolve("next"));
+        Path nextFile = Files.createFile(nextRoot.resolve("file"));
+        AtomicInteger workers = new AtomicInteger();
+        AtomicInteger scans = new AtomicInteger();
+        try (FileTreeModel model = new FileTreeModel(root, false, false, (directory, hidden, consumer) -> {
+            scans.incrementAndGet();
+            FileTreeModel.scanDirectory(directory, hidden, consumer);
+        }, FileTreeLoadBudget.DEFAULT_LIMITS, operation -> {
+            if (workers.getAndIncrement() == 0) {
+                throw new OutOfMemoryError("injected thread creation failure");
+            }
+            return new Thread(operation);
+        })) {
+            FileTreeModel.Snapshot failed = awaitLoaded(model);
+            assertEquals(FileTreeModel.LoadStatus.FAILED, failed.status());
+            assertEquals(FileTreeModel.FailureKind.MEMORY, failed.failures().getFirst().kind());
+            assertEquals(0, scans.get());
+            assertParentEntry(failed, root.getParent());
+
+            model.setRoot(nextRoot);
+            FileTreeModel.Snapshot loaded = awaitLoaded(model);
+            assertEquals(FileTreeModel.LoadStatus.READY, loaded.status());
+            assertTrue(containsPath(loaded, nextFile));
+            assertEquals(2, workers.get());
+            assertEquals(1, scans.get());
+            assertTrue(loaded.revision() > failed.revision());
+        }
+    }
+
+    @Test
+    void failingToCreateAReplacementWorkerCancelsTheOldRequestAndRejectsItsLatePublication() throws Exception {
+        Path nextRoot = Files.createDirectory(root.resolve("next"));
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch interrupted = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger workers = new AtomicInteger();
+        AtomicReference<Thread> oldWorker = new AtomicReference<>();
+        FileTreeModel.DirectoryScanner scanner = (directory, hidden, consumer) -> {
+            oldWorker.set(Thread.currentThread());
+            entered.countDown();
+            try {
+                release.await();
+            } catch (InterruptedException cancelled) {
+                interrupted.countDown();
+                awaitIgnoringInterrupts(release);
+            }
+            FileTreeModel.scanDirectory(directory, hidden, consumer);
+        };
+        try (FileTreeModel model = new FileTreeModel(root, false, false, scanner,
+            FileTreeLoadBudget.DEFAULT_LIMITS, operation -> {
+                if (workers.getAndIncrement() > 0) {
+                    throw new OutOfMemoryError("injected replacement worker failure");
+                }
+                return new Thread(operation);
+            })) {
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            model.setRoot(nextRoot);
+            FileTreeModel.Snapshot failed = awaitLoaded(model);
+            assertEquals(nextRoot, failed.root());
+            assertEquals(FileTreeModel.FailureKind.MEMORY, failed.failures().getFirst().kind());
+            assertTrue(interrupted.await(5, TimeUnit.SECONDS));
+            drainMetadataSignal(model);
+            release.countDown();
+            oldWorker.get().join(5_000L);
+            assertFalse(oldWorker.get().isAlive());
+            assertSame(failed, model.snapshot());
+            assertFalse(model.consumeMetadataChanged());
+        } finally {
+            release.countDown();
+        }
+    }
+
+    @Test
+    void cancellationOfTheCurrentScanPublishesATerminalSnapshot() {
+        try (FileTreeModel model = new FileTreeModel(root, true, true,
+            (directory, hidden, consumer) -> { throw new CancellationException("provider cancelled"); })) {
+            FileTreeModel.Snapshot cancelled = awaitLoaded(model);
+            assertEquals(FileTreeModel.LoadStatus.CANCELLED, cancelled.status());
+            assertFalse(cancelled.loading());
+            assertEquals(FileTreeModel.FailureKind.CANCELLED, cancelled.failures().getFirst().kind());
+        }
+    }
+
+    @Test
+    void entryBudgetStopsTheStreamingScanBeforeAccumulatingAnOversizedDirectory() {
+        AtomicInteger visited = new AtomicInteger();
+        FileTreeModel.DirectoryScanner scanner = (directory, hidden, consumer) -> {
+            for (int index = 0; index < 10_000; index++) {
+                visited.incrementAndGet();
+                consumer.accept(directory.resolve("file-" + index), null);
+            }
+        };
+        try (FileTreeModel model = new FileTreeModel(root, true, true, scanner,
+            new FileTreeLoadBudget.Limits(3, Long.MAX_VALUE, 0))) {
+            FileTreeModel.Snapshot loaded = awaitLoaded(model);
+            assertEquals(4, visited.get());
+            assertEquals(FileTreeModel.LoadStatus.LIMITED, loaded.status());
+            assertFalse(loaded.loading());
+            assertEquals(FileTreeModel.FailureKind.LIMIT, loaded.failures().getFirst().kind());
+            assertTrue(loaded.failures().getFirst().reason().contains("entry limit"));
+            assertEquals(1, contentEntries(loaded).size());
+            assertEquals(FileTreeModel.Kind.ERROR, contentEntries(loaded).getFirst().kind());
+        }
+    }
+
+    @Test
+    void estimatedByteBudgetRejectsLongPathsBeforeKeepingTheirScanRecords() {
+        AtomicInteger visited = new AtomicInteger();
+        Path shortPath = root.resolve("short");
+        long shortEntryBytes = 1024L + 8L * shortPath.toString().length();
+        FileTreeModel.DirectoryScanner scanner = (directory, hidden, consumer) -> {
+            visited.incrementAndGet();
+            consumer.accept(shortPath, null);
+            visited.incrementAndGet();
+            consumer.accept(directory.resolve("long-name".repeat(100)), null);
+            visited.incrementAndGet();
+        };
+        try (FileTreeModel model = new FileTreeModel(root, false, false, scanner,
+            new FileTreeLoadBudget.Limits(100, shortEntryBytes + 1024L, 0))) {
+            FileTreeModel.Snapshot loaded = awaitLoaded(model);
+            assertEquals(2, visited.get());
+            assertEquals(FileTreeModel.LoadStatus.LIMITED, loaded.status());
+            assertTrue(loaded.failures().getFirst().reason().contains("memory budget"));
+        }
+    }
+
+    @Test
+    void allExpandedDirectoriesShareOneBudgetAndCollapsingReleasesTheAllowance() throws IOException {
+        Path first = Files.createDirectory(root.resolve("a"));
+        Path second = Files.createDirectory(root.resolve("b"));
+        Path firstChild = Files.createFile(first.resolve("one"));
+        Files.createFile(first.resolve("two"));
+        Path secondChild = Files.createFile(second.resolve("one"));
+        Files.createFile(second.resolve("two"));
+        try (FileTreeModel model = new FileTreeModel(root, true, true, FileTreeModel::scanDirectory,
+            new FileTreeLoadBudget.Limits(5, Long.MAX_VALUE, 100))) {
+            FileTreeModel.EntryId firstId = entry(awaitLoaded(model), first, FileTreeModel.Kind.DIRECTORY).id();
+            FileTreeModel.EntryId secondId = entry(model.snapshot(), second, FileTreeModel.Kind.DIRECTORY).id();
+            assertTrue(model.setDirectoryExpanded(firstId, true));
+            assertEquals(FileTreeModel.LoadStatus.READY, awaitLoaded(model).status());
+            assertTrue(model.setDirectoryExpanded(secondId, true));
+            FileTreeModel.Snapshot limited = awaitLoaded(model);
+            assertEquals(FileTreeModel.LoadStatus.LIMITED, limited.status());
+            assertEquals(second, limited.failures().getFirst().directory());
+            assertTrue(containsPath(limited, firstChild));
+            assertFalse(containsPath(limited, secondChild), "a partially scanned directory is not published");
+
+            assertTrue(model.setDirectoryExpanded(firstId, false));
+            FileTreeModel.Snapshot recovered = awaitLoaded(model);
+            assertEquals(FileTreeModel.LoadStatus.READY, recovered.status());
+            assertTrue(recovered.failures().isEmpty());
+            assertFalse(containsPath(recovered, firstChild));
+            assertTrue(containsPath(recovered, secondChild));
+            assertTrue(recovered.revision() > limited.revision());
+        }
+    }
+
+    @Test
+    void childCountMetadataHasOneSharedInspectionBudgetAndShowsTruncation() throws IOException {
+        Path first = Files.createDirectory(root.resolve("a"));
+        Path second = Files.createDirectory(root.resolve("b"));
+        Path empty = Files.createDirectory(root.resolve("c"));
+        for (Path directory : List.of(first, second)) {
+            Files.createFile(directory.resolve("one"));
+            Files.createFile(directory.resolve("two"));
+            Files.createFile(directory.resolve("three"));
+        }
+        try (FileTreeModel model = new FileTreeModel(root, true, false, FileTreeModel::scanDirectory,
+            new FileTreeLoadBudget.Limits(10, Long.MAX_VALUE, 2))) {
+            FileTreeModel.Snapshot loaded = awaitLoaded(model);
+            assertEquals("2+ items", entry(loaded, first, FileTreeModel.Kind.DIRECTORY).sizeValue());
+            assertEquals("? items", entry(loaded, second, FileTreeModel.Kind.DIRECTORY).sizeValue());
+            assertEquals("0 items", entry(loaded, empty, FileTreeModel.Kind.DIRECTORY).sizeValue());
+            assertEquals(FileTreeModel.LoadStatus.READY, loaded.status());
+        }
+    }
+
+    @Test
+    void outOfMemoryDuringScanningPublishesATerminalFailureAndTheNextRootCanLoad() throws IOException {
+        Path nextRoot = Files.createDirectory(root.resolve("next"));
+        Path nextFile = Files.createFile(nextRoot.resolve("file"));
+        FileTreeModel.DirectoryScanner scanner = (directory, hidden, consumer) -> {
+            if (directory.equals(root)) {
+                throw new OutOfMemoryError("injected scan allocation failure");
+            }
+            FileTreeModel.scanDirectory(directory, hidden, consumer);
+        };
+        try (FileTreeModel model = new FileTreeModel(root, true, true, scanner)) {
+            FileTreeModel.Snapshot failed = awaitLoaded(model);
+            assertEquals(FileTreeModel.LoadStatus.FAILED, failed.status());
+            assertEquals(FileTreeModel.FailureKind.MEMORY, failed.failures().getFirst().kind());
+            assertParentEntry(failed, root.getParent());
+            model.setRoot(nextRoot);
+            FileTreeModel.Snapshot recovered = awaitLoaded(model);
+            assertEquals(FileTreeModel.LoadStatus.READY, recovered.status());
+            assertTrue(containsPath(recovered, nextFile));
+            assertTrue(recovered.revision() > failed.revision());
+        }
+    }
+
+    @Test
+    void obsoleteWorkerCannotReplaceTheNewRootWithItsEmergencyFailure() throws Exception {
+        Path nextRoot = Files.createDirectory(root.resolve("next"));
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicReference<Thread> oldWorker = new AtomicReference<>();
+        FileTreeModel.DirectoryScanner scanner = (directory, hidden, consumer) -> {
+            if (directory.equals(root)) {
+                oldWorker.set(Thread.currentThread());
+                entered.countDown();
+                awaitIgnoringInterrupts(release);
+                throw new OutOfMemoryError("injected obsolete allocation failure");
+            }
+            FileTreeModel.scanDirectory(directory, hidden, consumer);
+        };
+        try (FileTreeModel model = new FileTreeModel(root, false, false, scanner)) {
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            model.setRoot(nextRoot);
+            FileTreeModel.Snapshot latest = awaitLoaded(model);
+            release.countDown();
+            oldWorker.get().join(5_000);
+            assertFalse(oldWorker.get().isAlive());
+            assertSame(latest, model.snapshot());
+        } finally {
+            release.countDown();
+        }
+    }
+
+    @Test
+    void unexpectedAttributeFailureEndsLoadingWithoutLeavingPendingMetadata() throws IOException {
+        Path file = Files.createFile(root.resolve("file"));
+        BasicFileAttributes attributes = Files.readAttributes(file, BasicFileAttributes.class);
+        BasicFileAttributes broken = new BasicFileAttributes() {
+            @Override public FileTime lastModifiedTime() { return attributes.lastModifiedTime(); }
+            @Override public FileTime lastAccessTime() { return attributes.lastAccessTime(); }
+            @Override public FileTime creationTime() { return attributes.creationTime(); }
+            @Override public boolean isRegularFile() { return attributes.isRegularFile(); }
+            @Override public boolean isDirectory() { return attributes.isDirectory(); }
+            @Override public boolean isSymbolicLink() { return attributes.isSymbolicLink(); }
+            @Override public boolean isOther() { return attributes.isOther(); }
+            @Override public long size() { throw new IllegalStateException("injected metadata failure"); }
+            @Override public Object fileKey() { return attributes.fileKey(); }
+        };
+        try (FileTreeModel model = new FileTreeModel(root, true, true,
+            (directory, hidden, consumer) -> consumer.accept(file, broken))) {
+            FileTreeModel.Snapshot failed = awaitLoaded(model);
+            assertEquals(FileTreeModel.LoadStatus.FAILED, failed.status());
+            assertEquals(FileTreeModel.FailureKind.READ, failed.failures().getFirst().kind());
+            assertTrue(failed.failures().getFirst().reason().contains("listing failed"));
+        }
+    }
+
+    @Test
     void deniedDirectoryExposesATypedReasonWithoutRelyingOnTheExceptionMessage() throws Exception {
         try (FileTreeModel model = new FileTreeModel(root, false, false,
-            (directory, hidden) -> { throw new java.nio.file.AccessDeniedException(directory.toString()); })) {
+            (directory, hidden, consumer) -> { throw new java.nio.file.AccessDeniedException(directory.toString()); })) {
             awaitLoaded(model);
             assertEquals(List.of(new FileTreeModel.DirectoryFailure(root, "permission denied")),
                 model.snapshot().failures());
@@ -147,14 +404,14 @@ class FileTreeModelTest {
         CountDownLatch release = new CountDownLatch(1);
         Thread owner = Thread.currentThread();
         AtomicReference<Thread> scannerThread = new AtomicReference<>();
-        FileTreeModel.DirectoryScanner scanner = (directory, hidden) -> {
+        FileTreeModel.DirectoryScanner scanner = (directory, hidden, consumer) -> {
             scannerThread.set(Thread.currentThread());
             if (Thread.currentThread() == owner) {
                 throw new AssertionError("Directory scans must not run on the owning UI thread");
             }
             entered.countDown();
             awaitIgnoringInterrupts(release);
-            return FileTreeModel.scanDirectory(directory, hidden);
+            FileTreeModel.scanDirectory(directory, hidden, consumer);
         };
 
         try (FileTreeModel model = new FileTreeModel(root, true, true, scanner)) {
@@ -191,13 +448,13 @@ class FileTreeModelTest {
         CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         AtomicReference<Thread> oldWorker = new AtomicReference<>();
-        FileTreeModel.DirectoryScanner scanner = (directory, hidden) -> {
+        FileTreeModel.DirectoryScanner scanner = (directory, hidden, consumer) -> {
             if (directory.equals(root)) {
                 oldWorker.set(Thread.currentThread());
                 entered.countDown();
                 awaitIgnoringInterrupts(release);
             }
-            return FileTreeModel.scanDirectory(directory, hidden);
+            FileTreeModel.scanDirectory(directory, hidden, consumer);
         };
         try (FileTreeModel model = new FileTreeModel(root, false, false, scanner)) {
             assertTrue(entered.await(5, TimeUnit.SECONDS));
@@ -224,12 +481,12 @@ class FileTreeModelTest {
         Path nextFile = Files.createFile(nextRoot.resolve("next.txt"));
         CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
-        try (FileTreeModel model = new FileTreeModel(root, false, false, (directory, hidden) -> {
+        try (FileTreeModel model = new FileTreeModel(root, false, false, (directory, hidden, consumer) -> {
             if (directory.equals(nextRoot)) {
                 entered.countDown();
                 awaitIgnoringInterrupts(release);
             }
-            return FileTreeModel.scanDirectory(directory, hidden);
+            FileTreeModel.scanDirectory(directory, hidden, consumer);
         })) {
             assertTrue(containsPath(awaitLoaded(model), oldFile));
             model.setRoot(nextRoot);
@@ -254,13 +511,13 @@ class FileTreeModelTest {
         CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         AtomicReference<Thread> oldWorker = new AtomicReference<>();
-        FileTreeModel.DirectoryScanner scanner = (directory, hidden) -> {
+        FileTreeModel.DirectoryScanner scanner = (directory, hidden, consumer) -> {
             if (directory.equals(folder)) {
                 oldWorker.set(Thread.currentThread());
                 entered.countDown();
                 awaitIgnoringInterrupts(release);
             }
-            return FileTreeModel.scanDirectory(directory, hidden);
+            FileTreeModel.scanDirectory(directory, hidden, consumer);
         };
         try (FileTreeModel model = new FileTreeModel(root, false, false, scanner)) {
             FileTreeModel.EntryId id = entry(awaitLoaded(model), folder, FileTreeModel.Kind.DIRECTORY).id();
@@ -286,11 +543,11 @@ class FileTreeModelTest {
         CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         AtomicReference<Thread> worker = new AtomicReference<>();
-        FileTreeModel model = new FileTreeModel(root, true, true, (directory, hidden) -> {
+        FileTreeModel model = new FileTreeModel(root, true, true, (directory, hidden, consumer) -> {
             worker.set(Thread.currentThread());
             entered.countDown();
             awaitIgnoringInterrupts(release);
-            return FileTreeModel.scanDirectory(directory, hidden);
+            FileTreeModel.scanDirectory(directory, hidden, consumer);
         });
         try {
             assertTrue(entered.await(5, TimeUnit.SECONDS));
@@ -313,11 +570,10 @@ class FileTreeModelTest {
     void typeSortingAndMetadataUseTheAttributesCapturedByTheScan() throws IOException {
         Path directory = Files.createDirectory(root.resolve("z-directory"));
         Path file = Files.writeString(root.resolve("a-file.txt"), "12345");
-        try (FileTreeModel model = new FileTreeModel(root, true, true, (path, hidden) -> {
-            List<FileTreeModel.ScannedEntry> scanned = FileTreeModel.scanDirectory(path, hidden);
+        try (FileTreeModel model = new FileTreeModel(root, true, true, (path, hidden, consumer) -> {
+            FileTreeModel.scanDirectory(path, hidden, consumer);
             Files.delete(directory);
             Files.delete(file);
-            return scanned;
         })) {
             FileTreeModel.Snapshot loaded = awaitLoaded(model);
             assertEquals(List.of("z-directory", "a-file.txt"), contentEntries(loaded).stream()

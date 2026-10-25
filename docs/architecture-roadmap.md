@@ -2,6 +2,7 @@
 
 TUInk развивается как приложение-редактор поверх reusable terminal toolkit
 **TUIframe**. Дальнейшая цель — отделить от TUI editor-session и plugin API.
+Общий движок также должен обслуживать будущие Android и Windows clients.
 Все библиотечные API пока внутренние и incubating; правила стабильности
 потребуются перед их самостоятельной публикацией.
 
@@ -32,6 +33,19 @@ project modules. `tuiframe-jline` и `tuiframe-widgets` зависят от
 implementation dependency. Их production runtime не включает JGit, FFM provider
 или TUIframe. Обычные file APIs пока остаются переходной поверхностью `core` и
 не являются Android storage API.
+
+Следующие этапы ещё не реализованы: вынос application I/O из `core` за
+resource/capability ports, перенос всех document commands через session API и
+единый owner workspace. Пока production TUI изменяет документ через описанный
+в ADR внутренний `CoreSessionBridge`. Общий Java baseline, immutable snapshots и
+semantic providers готовят эти переносы; Android/Windows clients, ART и IME
+проверки остаются отдельными работами.
+
+Общие модули публикуют Java 17 bytecode/API и Gradle variants; compiler и desktop
+integration tests используют JDK 25. JVM storage adapter требует Java 25.
+Проверка внешнего consumer описана в
+[Android compatibility probe](../verification/compatibility/android/README.md): компиляция
+DEX не заменяет ART, IME, lifecycle и platform-storage проверки.
 
 TUIframe использует namespace `dev.tuiframe.*` и не зависит от TUInk, editor или
 plugin model. `TuiApplicationRunner` управляет event loop и порядком кадров;

@@ -15,6 +15,14 @@ All current toolkit, `editor-contract`, and `editor-session` APIs are internal
 and incubating. Repository releases do not yet promise source or binary
 compatibility for them.
 
+`editor-contract`, `unicode-text`, `core`, `editor-session` and `highlight-regex`
+use the Java 17 API and bytecode baseline. Their production runtime dependency
+graph excludes terminal libraries, JGit and the Java 25 Linux FFM provider.
+The packaged terminal application still requires Java 25. This separation does
+not promise Android support: the [external engine probe](../verification/compatibility/android/README.md)
+checks JVM execution and D8/R8 processing; ART, Android storage and lifecycle
+remain separate gates.
+
 Before any Java or plugin API becomes public, it must have its own version
 policy and automated contract checks. Storage schema versions and plugin/API
 versions remain independent.

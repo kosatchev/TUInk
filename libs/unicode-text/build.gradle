@@ -1,1 +1,4 @@
 // Dependency-free Unicode grapheme and UTF-16 offset operations.
+plugins {
+    id 'java-library'
+}

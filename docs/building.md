@@ -19,6 +19,13 @@ required only for native builds.
 The packaged JVM ZIP requires Java 25 or newer. A step-by-step guide for a new
 computer is available in Russian: [Перенос, сборка и запуск](setup-ru.md).
 
+The shared engine libraries use Java 17 bytecode/API and publish matching Gradle
+variants; their desktop integration tests and the application still use Java 25.
+Optional JGit and Linux FFM providers are outside the shared runtime dependency
+graph. The [external engine probe](../verification/compatibility/android/README.md) runs the
+shared JARs on a selected JDK and compiles them with Android D8/R8. Actual ART,
+Android storage/IME and Windows platform acceptance are separate gates.
+
 Linux access ACL support calls libc directly. Neither the tests nor JVM and
 native distributions require the `acl` package or a separate `libacl` library.
 
@@ -144,6 +151,7 @@ graph:
 ```bash
 ./gradlew -Ppgo --write-locks --write-verification-metadata sha256 \
   check :app:distZip :app:perfHarnessTest \
+  dependencies :editor-contract:dependencies :editor-session:dependencies \
   :unicode-text:dependencies :tuiframe-core:dependencies \
   :tuiframe-jline:dependencies :tuiframe-widgets:dependencies :core:dependencies \
   :editor-diff-jgit:dependencies :editor-storage-jvm:dependencies \

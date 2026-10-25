@@ -1,3 +1,7 @@
+import org.gradle.api.attributes.Category
+import org.gradle.api.attributes.LibraryElements
+import org.gradle.api.attributes.Usage
+
 plugins {
     id 'base'
 }
@@ -16,23 +20,50 @@ allprojects {
     }
 }
 
+// The build JDK is independent of a library's runtime API baseline. Only the
+// modules already checked against Java 17 belong here; this is not an Android
+// compatibility claim for the remaining editor runtime.
+def java17Libraries = [':unicode-text', ':editor-contract', ':core', ':editor-session',
+                       ':highlight-regex', ':editor-diff-jgit'] as Set
+
 subprojects {
-    apply plugin: 'java'
-
-    java {
-        toolchain {
-            languageVersion = JavaLanguageVersion.of(25)
+    pluginManager.withPlugin('java') {
+        java {
+            toolchain {
+                languageVersion = JavaLanguageVersion.of(25)
+            }
         }
-    }
 
-    tasks.withType(Test).configureEach {
-        useJUnitPlatform()
-        jvmArgs '--enable-native-access=ALL-UNNAMED'
-    }
+        if (java17Libraries.contains(path)) {
+            java {
+                sourceCompatibility = JavaVersion.VERSION_17
+                targetCompatibility = JavaVersion.VERSION_17
+            }
+            tasks.named('compileJava', JavaCompile) {
+                options.release = 17
+            }
+            // Desktop integration tests may consume terminal/platform adapters;
+            // their JVM requirement must not raise the published library variant.
+            tasks.named('compileTestJava', JavaCompile) {
+                sourceCompatibility = '25'
+                targetCompatibility = '25'
+            }
+            configurations.matching { it.name in ['testCompileClasspath', 'testRuntimeClasspath'] }
+                .configureEach {
+                    attributes.attribute(
+                        org.gradle.api.attributes.java.TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE, 25)
+                }
+        }
 
-    dependencies {
-        testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
-        testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.10.2'
+        tasks.withType(Test).configureEach {
+            useJUnitPlatform()
+            jvmArgs '--enable-native-access=ALL-UNNAMED'
+        }
+
+        dependencies {
+            testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+            testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.10.2'
+        }
     }
 }
 
@@ -49,7 +80,8 @@ def allowedProjectDependencies = [
     ':render'          : [':tuiframe-core', ':editor-contract', ':core'] as Set,
     ':highlight-regex' : [':editor-contract', ':render'] as Set,
     ':tui'             : [':tuiframe-core', ':tuiframe-jline', ':tuiframe-widgets', ':editor-contract', ':core',
-                         ':editor-session', ':render', ':highlight-regex', ':editor-diff-jgit', ':editor-storage-jvm'] as Set,
+                         ':editor-session', ':render', ':highlight-regex', ':editor-diff-jgit',
+                         ':editor-storage-jvm'] as Set,
     ':app'            : [':tui'] as Set
 ]
 def allowedTestProjectDependencies = [
@@ -69,11 +101,59 @@ def externallyDependencyFreeProductionConfigurations = [
     'runtimeOnly'
 ] as Set
 def projectsByPath = subprojects.collectEntries { [(it.path): it] }
+def portableRuntimeProjects = [
+    ':unicode-text': [':unicode-text'] as Set,
+    ':editor-contract': [':editor-contract'] as Set,
+    ':core': [':core', ':unicode-text', ':editor-contract'] as Set,
+    ':editor-session': [':editor-session', ':core', ':unicode-text', ':editor-contract'] as Set,
+    ':highlight-regex': [':highlight-regex', ':editor-contract'] as Set
+]
 def rootVersionForHelp = rootProject.version.toString()
+def java17Consumer = configurations.create('portableJava17Consumer') {
+    description = 'External Java 17 runtime variant selection for the shared engine.'
+    canBeConsumed = false
+    canBeResolved = true
+    attributes {
+        attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage, Usage.JAVA_RUNTIME))
+        attribute(Category.CATEGORY_ATTRIBUTE, objects.named(Category, Category.LIBRARY))
+        attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, objects.named(LibraryElements, LibraryElements.JAR))
+        attribute(org.gradle.api.attributes.java.TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE, 17)
+    }
+}
+def coreJava17ApiConsumer = configurations.create('coreJava17ApiConsumer') {
+    description = 'Compile variant consumed by a Java 17 client depending only on core.'
+    canBeConsumed = false
+    canBeResolved = true
+    attributes {
+        attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage, Usage.JAVA_API))
+        attribute(Category.CATEGORY_ATTRIBUTE, objects.named(Category, Category.LIBRARY))
+        attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, objects.named(LibraryElements, LibraryElements.JAR))
+        attribute(org.gradle.api.attributes.java.TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE, 17)
+    }
+}
+dependencies {
+    portableJava17Consumer project(':editor-session')
+    portableJava17Consumer project(':highlight-regex')
+    add('coreJava17ApiConsumer', project(':core'))
+}
+
+def verifyCoreJava17Api = tasks.register('verifyCoreJava17Api', JavaCompile) {
+    group = 'verification'
+    description = 'Compile an external core API consumer through its Java 17 Gradle variant.'
+    source(file('verification/compatibility/jvm/PortableCoreApiProbe.java'))
+    classpath = coreJava17ApiConsumer
+    destinationDirectory = layout.buildDirectory.dir('compatibility/java17-core-api')
+    sourceCompatibility = '17'
+    targetCompatibility = '17'
+    options.release = 17
+    javaCompiler = providers.provider {
+        projectsByPath[':core'].tasks.named('compileJava', JavaCompile).get().javaCompiler.get()
+    }
+}
 
 def verifyProjectDependencies = tasks.register('verifyProjectDependencies') {
     group = 'verification'
-    description = 'Verify direct module dependencies and terminal-backend isolation.'
+    description = 'Verify module boundaries, portable runtime dependencies and terminal-backend isolation.'
     notCompatibleWithConfigurationCache('Reads the configured multi-project dependency model.')
 
     doLast {
@@ -145,6 +225,26 @@ def verifyProjectDependencies = tasks.register('verifyProjectDependencies') {
                     }
             }
 
+        portableRuntimeProjects.each { projectPath, allowedRuntime ->
+            projectsByPath[projectPath].configurations.runtimeClasspath.incoming
+                .resolutionResult.allComponents.each { component ->
+                    if (component.id instanceof org.gradle.api.artifacts.component.ProjectComponentIdentifier) {
+                        if (!allowedRuntime.contains(component.id.projectPath)) {
+                            violations.add("${projectPath}:runtimeClasspath -> ${component.id.projectPath}")
+                        }
+                    } else {
+                        violations.add("${projectPath}:runtimeClasspath -> ${component.id.displayName}")
+                    }
+                }
+        }
+        // Resolve through a consumer with a Java 17 requirement, independently
+        // of the Java 25 compiler and desktop integration test configurations.
+        java17Consumer.incoming.resolutionResult.allDependencies.each { dependency ->
+            if (dependency instanceof org.gradle.api.artifacts.result.UnresolvedDependencyResult) {
+                violations.add("Java 17 consumer: ${dependency.failure.message}")
+            }
+        }
+
         if (!violations.isEmpty()) {
             throw new GradleException(
                 'Forbidden direct dependencies:\n  ' + violations.sort().join('\n  ')
@@ -155,6 +255,7 @@ def verifyProjectDependencies = tasks.register('verifyProjectDependencies') {
 
 tasks.named('check') {
     dependsOn(verifyProjectDependencies)
+    dependsOn(verifyCoreJava17Api)
     dependsOn(subprojects.collect { it.tasks.named('check') })
 }
 

@@ -13,6 +13,10 @@ Changes on the development branch after [v0.16.0](0.16.0.md).
 - Share immutable text blocks in document snapshots and prepare mandatory session
   results before committing edits or history replay. Render and session consumers
   use the same document identity.
+- Return semantic highlighting tokens independently of terminal rendering. Move
+  JGit diff and Linux FFM bindings into optional platform modules, and compile
+  the shared engine libraries against Java 17 with an external JVM/D8/R8 probe.
+
 - Stop reading terminal input when the final background save completes a confirmed
   exit, keeping the saved document and recovery state consistent.
 - Remove retired empty license directories during archive upgrades, and reject

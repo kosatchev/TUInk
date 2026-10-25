@@ -42,7 +42,10 @@ final class IndentationLexer {
     }
 
     /** The caller charges the bounded prefix length before requesting a code array. */
-    static Result scan(String text, int end, Path file, State before, boolean produceCode) {
+    static Result scan(CharSequence text, int end, Path file, State before, boolean produceCode) {
+        if (end < 0 || end > text.length() || end > IndentationContext.MAX_SCAN_CODE_UNITS) {
+            return null;
+        }
         LanguageId language = LanguageProfiles.language(file);
         CommentSyntaxProfile comments = LanguageProfiles.resolveCommentSyntax(file);
         Scan scan = new Scan(text, end, produceCode, before);
@@ -168,7 +171,7 @@ final class IndentationLexer {
                     && !Character.isWhitespace(text.charAt(opening)) && text.charAt(opening) != '\\'
                     && text.charAt(opening) != ')') opening++;
                 if (opening < end && text.charAt(opening) == '(' && opening - rawDelimiterStart <= 16) {
-                    scan.openQuote(")" + text.substring(rawDelimiterStart, opening) + "\"", false, false, true, opening + 1);
+                    scan.openQuote(")" + text.subSequence(rawDelimiterStart, opening) + "\"", false, false, true, opening + 1);
                     scan.mask(index, scan.index);
                     scan.literal(index);
                     continue;
@@ -262,7 +265,7 @@ final class IndentationLexer {
             if (Character.isUnicodeIdentifierStart(current) || current == '$') {
                 int finish = index + 1;
                 while (finish < end && (Character.isUnicodeIdentifierPart(text.charAt(finish)) || text.charAt(finish) == '$')) finish++;
-                String word = text.substring(index, finish);
+                String word = text.subSequence(index, finish).toString();
                 boolean property = index > 0 && text.charAt(index - 1) == '.';
                 scan.pendingControl = !property && (isControl(word) || word.equals("await") && scan.pendingControl);
                 scan.regexAllowed = !property && switch (word) {
@@ -304,12 +307,18 @@ final class IndentationLexer {
         return scan.result();
     }
 
-    private static boolean starts(String text, int at, int end, String token) {
-        return at + token.length() <= end && text.startsWith(token, at);
+    private static boolean starts(CharSequence text, int at, int end, String token) {
+        if (at < 0 || token.length() > end - at) {
+            return false;
+        }
+        for (int index = 0; index < token.length(); index++) {
+            if (text.charAt(at + index) != token.charAt(index)) return false;
+        }
+        return true;
     }
 
-    private static int cppRawDelimiterStart(String text, int at, int end) {
-        if (at > 0 && (Character.isUnicodeIdentifierPart(text.codePointBefore(at)) || text.charAt(at - 1) == '$')) {
+    private static int cppRawDelimiterStart(CharSequence text, int at, int end) {
+        if (at > 0 && (Character.isUnicodeIdentifierPart(Character.codePointBefore(text, at)) || text.charAt(at - 1) == '$')) {
             return -1;
         }
         if (starts(text, at, end, "R\"")) return at + 2;
@@ -320,13 +329,13 @@ final class IndentationLexer {
         return -1;
     }
 
-    private static int leading(String text, int end) {
+    private static int leading(CharSequence text, int end) {
         int first = 0;
         while (first < end && (text.charAt(first) == ' ' || text.charAt(first) == '\t')) first++;
         return first;
     }
 
-    private static boolean yamlBlockTail(String text, int from, int end) {
+    private static boolean yamlBlockTail(CharSequence text, int from, int end) {
         for (int index = from; index < end; index++) {
             char current = text.charAt(index);
             if (current == '#') return index > from && Character.isWhitespace(text.charAt(index - 1));
@@ -335,7 +344,7 @@ final class IndentationLexer {
         return true;
     }
 
-    private static int yamlBlockParentIndent(String text, int scalar) {
+    private static int yamlBlockParentIndent(CharSequence text, int scalar) {
         int parent = leading(text, scalar);
         int node = parent;
         // Compact collections add indentation after their indicators without
@@ -357,7 +366,7 @@ final class IndentationLexer {
         return content < scalar ? node : parent;
     }
 
-    private static boolean yamlScalarStart(String text, int at) {
+    private static boolean yamlScalarStart(CharSequence text, int at) {
         while (true) {
             int previous = at - 1;
             while (previous >= 0 && Character.isWhitespace(text.charAt(previous))) previous--;
@@ -392,7 +401,7 @@ final class IndentationLexer {
         };
     }
 
-    private static int regexEnd(String text, int from, int end) {
+    private static int regexEnd(CharSequence text, int from, int end) {
         boolean characterClass = false;
         for (int index = from; index < end; index++) {
             char current = text.charAt(index);
@@ -421,9 +430,11 @@ final class IndentationLexer {
         private boolean certainPrefix;
         private int index;
 
-        private Scan(String text, int end, boolean produceCode, State before) {
+        private Scan(CharSequence text, int end, boolean produceCode, State before) {
             code = produceCode ? new char[end] : null;
-            if (code != null) text.getChars(0, end, code, 0);
+            if (code != null) {
+                for (int offset = 0; offset < end; offset++) code[offset] = text.charAt(offset);
+            }
             kind = before.kind();
             close = before.close();
             escapes = before.escapes();

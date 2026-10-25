@@ -15,6 +15,9 @@ Changes on the development branch after [v0.16.0](0.16.0.md).
   and sparse checkpoints, preserving non-overlapping matching rules.
 - Align editing and terminal grapheme boundary checks for offsets outside the
   document, and describe workspace edits using their current preparation model.
+- Share unchanged blocks during local edits to long lines and update Unicode and
+  terminal indices from their edited ranges. Read visible text by range and use
+  virtual wrapped rows for fixed-width runs. General word/tab reflow remains linear.
 
 - Encode saved documents into the staged file through bounded buffers, retaining
   original encodings, BOMs and line endings while hashing the written bytes.

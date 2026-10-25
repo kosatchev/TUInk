@@ -163,6 +163,9 @@ retain prior text versions. Initial indexing is linear. Regional-indicator parit
 and other boundary dependencies may propagate beyond the edited block. General
 word/tab wrapping may also reflow the whole line; fixed-width runs use virtual row
 starts. These changes do not promise a bounded latency for every Unicode input.
+Typing assists limit lexical prefixes and local indentation heuristics. A Markdown
+line beyond 1,048,576 UTF-16 units makes its following block context unknown until
+that prefix changes; uncertain list and fence assists are suppressed.
 
 ## Storage formats
 

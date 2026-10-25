@@ -111,8 +111,8 @@ public class EditorEngine {
         this.clipboard = Objects.requireNonNull(clipboard, "clipboard");
         this.lineDiff = Objects.requireNonNull(lineDiff, "lineDiff");
         this.gutterDiffClock = Objects.requireNonNull(gutterDiffClock, "gutterDiffClock");
-        this.markdownContext = new MarkdownBlockContext(model::getLine);
-        this.indentationContext = new IndentationContext(model::getLine);
+        this.markdownContext = new MarkdownBlockContext(model::lineText);
+        this.indentationContext = new IndentationContext(model::lineText);
         this.searchNavigation = new SearchNavigation(model);
         if (document.register(state)) {
             resetGutterDiffBaselinesOnOpen();
@@ -910,7 +910,10 @@ public class EditorEngine {
         Position cursor = model.clamp(rangeStart);
         LineText line = model.lineText(cursor.line());
         int col = Math.min(cursor.col(), line.length());
-        String indentPrefix = line.substring(0, Math.min(col, leadingIndentLength(line)));
+        int prefixEnd = 0;
+        int prefixLimit = Math.min(col, IndentationContext.MAX_SCAN_CODE_UNITS);
+        while (prefixEnd < prefixLimit && (line.charAt(prefixEnd) == ' ' || line.charAt(prefixEnd) == '\t')) prefixEnd++;
+        String indentPrefix = line.substring(0, prefixEnd);
         String tabText = indentationDecisions().unit(cursor.line(), indentPrefix);
         Position afterInsert = applyReplaceAndTrack(ops, rangeStart, rangeEnd, tabText);
         state.setCursor(afterInsert);
@@ -1488,7 +1491,7 @@ public class EditorEngine {
     }
 
     private IndentationDecisions indentationDecisions() {
-        return new IndentationDecisions(model.lineCount(), model::getLine, state.getCurrentFile(), tabWidth,
+        return new IndentationDecisions(model.lineCount(), model::lineText, state.getCurrentFile(), tabWidth,
             tabInsertMode, indentationContext());
     }
 
@@ -1503,16 +1506,16 @@ public class EditorEngine {
             model.contentEpoch(), model.revision(),
             model.firstChangedLineSince(markdownContext.revision()), model.lineCount()
         );
-        return new MarkdownListDecisions(model::getLine, markdownContext::allowsListAssist);
+        return new MarkdownListDecisions(model::lineText, markdownContext::allowsListAssist);
     }
 
     private String continuationAfterNewLine(Position cursor) {
         LanguageProfile profile = languageProfile();
-        String line = model.getLine(cursor.line());
+        LineText line = model.lineText(cursor.line());
         int col = Math.max(0, Math.min(cursor.col(), line.length()));
         return switch (profile) {
             case YAML -> yamlContinuationMarker(cursor.line(), line, col);
-            case MARKDOWN -> markdownListDecisions().continuation(cursor.line(), line.substring(0, col));
+            case MARKDOWN -> markdownListDecisions().continuation(cursor.line(), line.subSequence(0, col));
             default -> "";
         };
     }
@@ -1521,8 +1524,8 @@ public class EditorEngine {
         if (!isOpeningPair(ch)) {
             return false;
         }
-        String leftLine = model.getLine(rangeStart.line());
-        String rightLine = model.getLine(rangeEnd.line());
+        LineText leftLine = model.lineText(rangeStart.line());
+        LineText rightLine = model.lineText(rangeEnd.line());
         int leftCol = rangeStart.col();
         int rightCol = rangeEnd.col();
 
@@ -1554,7 +1557,7 @@ public class EditorEngine {
             return false;
         }
         Position cursor = model.clamp(state.getCursor());
-        String line = model.getLine(cursor.line());
+        LineText line = model.lineText(cursor.line());
         int col = Math.max(0, Math.min(cursor.col(), line.length()));
         if (col >= line.length()) {
             return false;
@@ -1563,7 +1566,7 @@ public class EditorEngine {
             && ((ch != '\'' && ch != '"') || !isEscaped(line, col));
     }
 
-    private static boolean isEscaped(String line, int column) {
+    private static boolean isEscaped(CharSequence line, int column) {
         int backslashes = 0;
         for (int index = column - 1; index >= 0 && line.charAt(index) == '\\'; index--) {
             backslashes++;
@@ -1581,7 +1584,7 @@ public class EditorEngine {
             return false;
         }
         for (int lineIndex = range.start().line(); lineIndex <= range.end().line(); lineIndex++) {
-            String line = model.getLine(lineIndex);
+            LineText line = model.lineText(lineIndex);
             int from = lineIndex == range.start().line() ? range.start().col() : 0;
             int to = lineIndex == range.end().line() ? range.end().col() : line.length();
             int quote = line.indexOf('\'', from);
@@ -1619,7 +1622,7 @@ public class EditorEngine {
         if (cursor.col() <= 0) {
             return null;
         }
-        String line = model.getLine(cursor.line());
+        LineText line = model.lineText(cursor.line());
         if (cursor.col() >= line.length()
             || !isMatchingPair(line.charAt(cursor.col() - 1), line.charAt(cursor.col()))) {
             return null;
@@ -1662,7 +1665,7 @@ public class EditorEngine {
             || (left == '\'' && right == '\'');
     }
 
-    private String yamlContinuationMarker(int lineIndex, String line, int column) {
+    private String yamlContinuationMarker(int lineIndex, LineText line, int column) {
         if (column > IndentationContext.MAX_SCAN_CODE_UNITS) return "";
         int leading = 0;
         while (leading < column && (line.charAt(leading) == ' ' || line.charAt(leading) == '\t')) leading++;
@@ -1688,8 +1691,9 @@ public class EditorEngine {
         if (cursor.col() <= 0) {
             return null;
         }
-        String line = model.getLine(cursor.line());
+        LineText line = model.lineText(cursor.line());
         int col = cursor.col();
+        if (col > IndentationContext.MAX_SCAN_CODE_UNITS) return null;
         if (!isLeadingWhitespaceUntil(line, col)) {
             return null;
         }
@@ -1701,7 +1705,7 @@ public class EditorEngine {
         );
     }
 
-    private static boolean isLeadingWhitespaceUntil(String line, int col) {
+    private static boolean isLeadingWhitespaceUntil(CharSequence line, int col) {
         int limit = Math.min(Math.max(col, 0), line.length());
         for (int i = 0; i < limit; i++) {
             char ch = line.charAt(i);

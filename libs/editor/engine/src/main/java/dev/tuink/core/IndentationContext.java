@@ -15,7 +15,7 @@ final class IndentationContext {
     // structural assist window, including its oldest permitted owner.
     private static final int MAX_CHECKPOINTS = 257;
     private static final int MAX_STATE_WEIGHT = 4096;
-    private final IntFunction<String> lines;
+    private final IntFunction<? extends CharSequence> lines;
     private final TreeMap<Integer, IndentationLexer.State> checkpoints = new TreeMap<>();
     private long contentEpoch = Long.MIN_VALUE;
     private long revision = -1;
@@ -24,7 +24,7 @@ final class IndentationContext {
     private int lineCount;
     private int retainedWeight;
 
-    IndentationContext(IntFunction<String> lines) {
+    IndentationContext(IntFunction<? extends CharSequence> lines) {
         this.lines = Objects.requireNonNull(lines, "lines");
     }
 
@@ -59,9 +59,9 @@ final class IndentationContext {
     String codeBeforeCursor(int target, int column) {
         if (!IndentationLexer.needsContext(language)) {
             if (target < 0 || target >= lineCount) return null;
-            String text = lines.apply(target);
+            CharSequence text = lines.apply(target);
             int end = Math.max(0, Math.min(column, text.length()));
-            return end > MAX_SCAN_CODE_UNITS ? null : text.substring(0, end);
+            return end > MAX_SCAN_CODE_UNITS ? null : text.subSequence(0, end).toString();
         }
         IndentationLexer.Result scanned = scanBeforeCursor(target, column, true);
         return scanned == null || !scanned.codeAtCursor() ? null : scanned.code();
@@ -83,7 +83,7 @@ final class IndentationContext {
         if (target < 0 || target >= lineCount) {
             return null;
         }
-        String text = lines.apply(target);
+        CharSequence text = lines.apply(target);
         int end = Math.max(0, Math.min(column, text.length()));
         if (end > MAX_SCAN_CODE_UNITS) {
             return null;
@@ -97,7 +97,7 @@ final class IndentationContext {
             if (remainingLines-- == 0) {
                 return null;
             }
-            String previous = lines.apply(next);
+            CharSequence previous = lines.apply(next);
             long cost = (long) previous.length() + 1;
             if (cost > remaining) {
                 return null;

@@ -11,17 +11,17 @@ final class IndentationDecisions {
     private static final int ASSIST_LOOKBACK_LINES = 256;
     private static final int ASSIST_LOOKBACK_CHARS = 16_384;
     private final int lineCount;
-    private final IntFunction<String> lines;
+    private final IntFunction<? extends CharSequence> lines;
     private final Path file;
     private final int tabWidth;
     private final TabInsertMode tabInsertMode;
     private final IndentationContext syntax;
 
-    IndentationDecisions(int lineCount, IntFunction<String> lines, Path file, int tabWidth, TabInsertMode tabInsertMode) {
+    IndentationDecisions(int lineCount, IntFunction<? extends CharSequence> lines, Path file, int tabWidth, TabInsertMode tabInsertMode) {
         this(lineCount, lines, file, tabWidth, tabInsertMode, initialContext(lineCount, lines, file));
     }
 
-    IndentationDecisions(int lineCount, IntFunction<String> lines, Path file, int tabWidth,
+    IndentationDecisions(int lineCount, IntFunction<? extends CharSequence> lines, Path file, int tabWidth,
                          TabInsertMode tabInsertMode, IndentationContext syntax) {
         this.lineCount = lineCount;
         this.lines = lines;
@@ -31,21 +31,25 @@ final class IndentationDecisions {
         this.syntax = syntax;
     }
 
-    private static IndentationContext initialContext(int count, IntFunction<String> lines, Path file) {
+    private static IndentationContext initialContext(int count, IntFunction<? extends CharSequence> lines, Path file) {
         IndentationContext context = new IndentationContext(lines);
         context.synchronize(0, 0, 0, count, file);
         return context;
     }
 
     String newLineIndent(Position cursor) {
-        String line = lines.apply(cursor.line());
+        CharSequence line = lines.apply(cursor.line());
         int col = Math.max(0, Math.min(cursor.col(), line.length()));
+        int prefixLimit = Math.min(col, IndentationContext.MAX_SCAN_CODE_UNITS);
         int leading = 0;
-        while (leading < line.length() && Character.isWhitespace(line.charAt(leading))) {
+        while (leading < prefixLimit && Character.isWhitespace(line.charAt(leading))) {
             leading++;
         }
+        if (leading == prefixLimit && col > prefixLimit) {
+            return "";
+        }
         int keep = Math.min(leading, col);
-        String baseIndent = keep <= 0 ? "" : line.substring(0, keep);
+        String baseIndent = keep <= 0 ? "" : line.subSequence(0, keep).toString();
         String code = syntax.codeBeforeCursor(cursor.line(), col);
         if (code == null) {
             return baseIndent;
@@ -59,12 +63,12 @@ final class IndentationDecisions {
         return baseIndent;
     }
 
-    private boolean shouldDedentFromClosing(int lineIndex, String line, int col, String currentIndent) {
-        if (line.isEmpty() || currentIndent.isEmpty() || !LanguageProfiles.resolve(file).bracketIndentEnabled()) {
+    private boolean shouldDedentFromClosing(int lineIndex, CharSequence line, int col, String currentIndent) {
+        if (line.length() == 0 || currentIndent.isEmpty() || !LanguageProfiles.resolve(file).bracketIndentEnabled()) {
             return false;
         }
         int safeCol = Math.max(0, Math.min(col, line.length()));
-        if (safeCol <= leadingIndentLength(line)) {
+        if (safeCol <= leadingIndentLength(line, safeCol)) {
             return false;
         }
         String before = syntax.codeBeforeCursor(lineIndex, safeCol);
@@ -80,7 +84,7 @@ final class IndentationDecisions {
         int remainingChars = ASSIST_LOOKBACK_CHARS;
         int firstLine = Math.max(0, lineIndex - ASSIST_LOOKBACK_LINES);
         for (int previous = lineIndex - 1; previous >= firstLine; previous--) {
-            String text = lines.apply(previous);
+            CharSequence text = lines.apply(previous);
             remainingChars -= text.length();
             if (remainingChars < 0) {
                 return false;
@@ -101,7 +105,7 @@ final class IndentationDecisions {
                         return false;
                     }
                     if (pending.isEmpty()) {
-                        String openerIndent = text.substring(0, leadingIndentLength(text));
+                        String openerIndent = text.subSequence(0, leadingIndentLength(text)).toString();
                         return currentIndent.length() > openerIndent.length() && currentIndent.startsWith(openerIndent)
                             && syntax.hasCertainContextBefore(previous, index);
                     }
@@ -184,7 +188,7 @@ final class IndentationDecisions {
         if (text == null || text.isBlank()) {
             return false;
         }
-        int first = firstNonWhitespaceColumn(text);
+        int first = firstNonWhitespaceColumn(text, new AssistScanBudget());
         if (first >= text.length()) {
             return false;
         }
@@ -227,6 +231,9 @@ final class IndentationDecisions {
     }
 
     private String autoIndentUnit(int lineIndex, String currentIndent) {
+        if (currentIndent.length() > IndentationContext.MAX_SCAN_CODE_UNITS) {
+            currentIndent = "";
+        }
         int tabs = 0;
         int spaces = 0;
         for (int i = 0; i < currentIndent.length(); i++) {
@@ -259,9 +266,11 @@ final class IndentationDecisions {
         int prevIndent = -1;
         int start = Math.max(0, lineIndex - 256);
         int end = Math.min(lineCount - 1, lineIndex);
+        AssistScanBudget budget = new AssistScanBudget();
         for (int i = start; i <= end; i++) {
-            String text = lines.apply(i);
-            int leadingSpaces = leadingSpacesOnly(text);
+            CharSequence text = lines.apply(i);
+            int leadingSpaces = leadingSpacesOnly(text, budget);
+            if (budget.exhausted()) break;
             if (leadingSpaces < 0 || leadingSpaces >= text.length()) {
                 continue;
             }
@@ -315,9 +324,11 @@ final class IndentationDecisions {
         int score4 = 0;
         int observed = 0;
         int limit = Math.min(lineCount, 256);
+        AssistScanBudget budget = new AssistScanBudget();
         for (int i = 0; i < limit; i++) {
-            String text = lines.apply(i);
-            int leadingSpaces = leadingSpacesOnly(text);
+            CharSequence text = lines.apply(i);
+            int leadingSpaces = leadingSpacesOnly(text, budget);
+            if (budget.exhausted()) break;
             if (leadingSpaces <= 0 || leadingSpaces >= text.length()) {
                 continue;
             }
@@ -346,12 +357,14 @@ final class IndentationDecisions {
         int spaceIndented = 0;
         int start = Math.max(0, lineIndex - 256);
         int end = Math.min(lineCount - 1, lineIndex + 256);
+        AssistScanBudget budget = new AssistScanBudget();
         for (int i = start; i <= end; i++) {
-            String text = lines.apply(i);
-            if (text.isEmpty() || (text.charAt(0) != '\t' && text.charAt(0) != ' ')) {
+            CharSequence text = lines.apply(i);
+            if (text.length() == 0 || (text.charAt(0) != '\t' && text.charAt(0) != ' ')) {
                 continue;
             }
-            int first = firstNonWhitespaceColumn(text);
+            int first = firstNonWhitespaceColumn(text, budget);
+            if (budget.exhausted()) break;
             if (first <= 0 || first >= text.length()) {
                 continue;
             }
@@ -365,9 +378,10 @@ final class IndentationDecisions {
         return tabIndented > spaceIndented && tabIndented > 0;
     }
 
-    private static int leadingSpacesOnly(String line) {
+    private static int leadingSpacesOnly(CharSequence line, AssistScanBudget budget) {
         int spaces = 0;
         while (spaces < line.length()) {
+            if (!budget.readUnit()) return -1;
             char ch = line.charAt(spaces);
             if (ch == ' ') {
                 spaces++;
@@ -435,20 +449,23 @@ final class IndentationDecisions {
             return 0;
         }
         int lineIndex = cursor.line();
-        String line = lines.apply(lineIndex);
+        CharSequence line = lines.apply(lineIndex);
         int cursorCol = Math.max(0, Math.min(cursor.col(), line.length()));
-        int leading = leadingIndentLength(line);
+        if (cursorCol > IndentationContext.MAX_SCAN_CODE_UNITS) {
+            return 0;
+        }
+        int leading = leadingIndentLength(line, cursorCol);
         if (leading <= 0 || cursorCol <= leading) {
             return 0;
         }
-        String currentIndent = line.substring(0, leading);
+        String currentIndent = line.subSequence(0, leading).toString();
         String code = syntax.codeBeforeCursor(lineIndex, cursorCol);
         if (code == null || !startsWithDedentKeyword(code, leading, cursorCol, profile)) {
             return 0;
         }
         String reduced = removeUnit(currentIndent, lineIndex);
         int drop = currentIndent.length() - reduced.length();
-        String keyword = leadingKeyword(line.substring(leading));
+        String keyword = leadingKeyword(code.substring(leading));
         if (drop <= 0 || !(profile == LanguageProfile.PYTHON
             ? shouldDedentPythonClause(lineIndex, keyword, currentIndent, reduced)
             : shouldDedentCodeClause(lineIndex, keyword, currentIndent, reduced))) {
@@ -461,7 +478,7 @@ final class IndentationDecisions {
         int firstLine = Math.max(0, lineIndex - ASSIST_LOOKBACK_LINES);
         int remainingChars = ASSIST_LOOKBACK_CHARS;
         for (int previous = lineIndex - 1; previous >= firstLine; previous--) {
-            String text = lines.apply(previous);
+            CharSequence text = lines.apply(previous);
             remainingChars -= text.length();
             if (remainingChars < 0) {
                 return false;
@@ -481,7 +498,7 @@ final class IndentationDecisions {
             if (leading > currentIndent.length()) {
                 continue;
             }
-            String indent = text.substring(0, leading);
+            String indent = text.subSequence(0, leading).toString();
             if (!currentIndent.startsWith(indent) || leading < reduced.length()) {
                 return false;
             }
@@ -556,7 +573,7 @@ final class IndentationDecisions {
         int closedBraces = 0;
         boolean label = keyword.equals("case") || keyword.equals("default");
         for (int previous = lineIndex - 1; previous >= firstLine; previous--) {
-            String text = lines.apply(previous);
+            CharSequence text = lines.apply(previous);
             remainingChars -= text.length();
             if (remainingChars < 0) {
                 return false;
@@ -570,7 +587,7 @@ final class IndentationDecisions {
                 continue;
             }
             if (!label) {
-                return text.substring(0, leadingIndentLength(text)).equals(currentIndent)
+                return text.subSequence(0, leadingIndentLength(text)).toString().equals(currentIndent)
                     && code.stripLeading().startsWith("}") && startsWithStandaloneClosing(code)
                     && shouldDedentFromClosing(previous, text, text.length(), currentIndent);
             }
@@ -592,7 +609,7 @@ final class IndentationDecisions {
             if (closedBraces > 0 || leading > currentIndent.length()) {
                 continue;
             }
-            String indent = text.substring(0, leading);
+            String indent = text.subSequence(0, leading).toString();
             if (!currentIndent.startsWith(indent) || leading < reduced.length()) {
                 return false;
             }
@@ -641,9 +658,13 @@ final class IndentationDecisions {
         return true;
     }
 
-    private static int leadingIndentLength(String line) {
+    private static int leadingIndentLength(CharSequence line) {
+        return leadingIndentLength(line, line.length());
+    }
+
+    private static int leadingIndentLength(CharSequence line, int end) {
         int i = 0;
-        while (i < line.length()) {
+        while (i < end) {
             char ch = line.charAt(i);
             if (ch != ' ' && ch != '\t') {
                 break;
@@ -653,10 +674,12 @@ final class IndentationDecisions {
         return i;
     }
 
-    private int firstNonWhitespaceColumn(String line) {
+    private int firstNonWhitespaceColumn(CharSequence line, AssistScanBudget budget) {
         for (int offset = 0; offset < line.length();) {
-            int codePoint = line.codePointAt(offset);
+            if (!budget.readUnit()) return 0;
+            int codePoint = Character.codePointAt(line, offset);
             int next = offset + Character.charCount(codePoint);
+            if (next > offset + 1 && !budget.readUnit()) return 0;
             if (!Character.isWhitespace(codePoint)) {
                 if (offset == 0) {
                     return 0;
@@ -664,11 +687,30 @@ final class IndentationDecisions {
                 // A combining mark can make the preceding space part of a
                 // non-whitespace grapheme. Its boundary needs only this prefix;
                 // segmenting the rest of a neighbouring line can be very costly.
-                return GraphemeText.of(line.substring(0, next)).floorBoundary(offset);
+                return GraphemeText.of(line.subSequence(0, next)).floorBoundary(offset);
             }
             offset = next;
         }
         return 0;
+    }
+
+    /** Shared across neighbouring lines, so long whitespace prefixes cannot multiply work. */
+    private static final class AssistScanBudget {
+        private int remaining = ASSIST_LOOKBACK_CHARS;
+        private boolean exhausted;
+
+        private boolean readUnit() {
+            if (remaining == 0) {
+                exhausted = true;
+                return false;
+            }
+            remaining--;
+            return true;
+        }
+
+        private boolean exhausted() {
+            return exhausted;
+        }
     }
 
     private static boolean isMatchingPair(char left, char right) {

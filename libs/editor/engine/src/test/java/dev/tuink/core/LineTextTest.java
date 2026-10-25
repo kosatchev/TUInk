@@ -92,6 +92,28 @@ class LineTextTest {
     }
 
     @Test
+    void editorTypingAndUndoAvoidWholeLineMaterialization() {
+        TextModel model = new TextModel(new SimpleLineBuffer());
+        model.replaceLines(List.of("a".repeat(1_000_000)));
+        EditorState state = new EditorState();
+        EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model));
+        engine.moveCursorTo(new Position(0, 500_000));
+        LineText.Work before = LineText.work();
+
+        for (int index = 0; index < 100; index++) engine.insertChar('b');
+        engine.backspace();
+        assertTrue(engine.undo());
+
+        LineText.Work after = LineText.work();
+        assertTrue(after.materializedCodeUnits() - before.materializedCodeUnits() < 1_024,
+            "only small deleted ranges may become strings for undo");
+        assertTrue(after.copiedCodeUnits() - before.copiedCodeUnits() < 1_024L * LineText.BLOCK_SIZE,
+            "typing must copy boundary blocks rather than the million-character line");
+        assertEquals(1_000_100, model.lineLength(0));
+        assertEquals("b".repeat(100), model.lineRange(0, 500_000, 500_100));
+    }
+
+    @Test
     void repeatedImmutableShortInputsShareStorageWithoutChangingStringIdentity() {
         String first = new String("repeated input");
         String second = new String("repeated input");

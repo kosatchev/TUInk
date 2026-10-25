@@ -185,6 +185,11 @@ errors rather than treating an incomplete scan as a complete document.
 Resumable lexical context is completed in subsequent frames, including while
 the editor is idle, when another bounded scan can retain useful progress.
 
+Local edits share unchanged text blocks and Unicode indices instead of copying
+an entire long line. Visible text is read by range. Initial indexing still reads
+the line; word wrapping with tabs and some Unicode boundary changes can require
+a long rescan. These cases do not have a constant-time responsiveness guarantee.
+
 ## Controls
 
 | Input | Action |

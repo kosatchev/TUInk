@@ -12,9 +12,10 @@ import java.util.function.IntFunction;
  * its incoming state. The engine supplies revision changes and read-only text.
  */
 final class MarkdownBlockContext {
+    static final int MAX_SCAN_CODE_UNITS = 1_048_576;
     private static final int CHECKPOINT_INTERVAL = 256;
     private static final int MAX_CHECKPOINTS = 128;
-    private final IntFunction<String> lines;
+    private final IntFunction<? extends CharSequence> lines;
     private final Map<Integer, State> checkpoints = new LinkedHashMap<>();
     private int cursorLine = -1;
     private State cursorBefore;
@@ -23,7 +24,7 @@ final class MarkdownBlockContext {
     private long revision = -1;
     private int lineCount;
 
-    MarkdownBlockContext(IntFunction<String> lines) {
+    MarkdownBlockContext(IntFunction<? extends CharSequence> lines) {
         this.lines = Objects.requireNonNull(lines, "lines");
     }
 
@@ -117,7 +118,12 @@ final class MarkdownBlockContext {
         cursorContext = null;
     }
 
-    private LineContext parse(String text, State before) {
+    private LineContext parse(CharSequence text, State before) {
+        if (!before.certain() || text.length() > MAX_SCAN_CODE_UNITS) {
+            // A skipped line may contain a fence transition. Its successors cannot
+            // certify destructive edits until that unknown prefix is invalidated.
+            return new LineContext(State.UNKNOWN, false);
+        }
         int start = skipIndent(text, 0);
         if (start == text.length()) {
             // Blank lines may occur inside both loose lists and fenced code.
@@ -134,7 +140,7 @@ final class MarkdownBlockContext {
             FenceMarker marker = fenceMarker(text, start);
             boolean closing = column - base < 4 && marker != null
                 && marker.character() == fence.character() && marker.length() >= fence.length()
-                && text.substring(marker.end()).isBlank();
+                && isBlank(text, marker.end());
             return new LineContext(new State(container, closing ? null : fence), false);
         }
         // A dedent out of a list also ends the fence belonging to that list item.
@@ -150,7 +156,7 @@ final class MarkdownBlockContext {
             }
             FenceMarker marker = fenceMarker(text, start);
             if (marker != null && (marker.character() != '`'
-                || text.indexOf('`', marker.end()) < 0)) {
+                || indexOf(text, '`', marker.end()) < 0)) {
                 Fence opened = new Fence(marker.character(), marker.length(), container);
                 return new LineContext(new State(container, opened), false);
             }
@@ -184,7 +190,7 @@ final class MarkdownBlockContext {
         return container == null ? 0 : container.contentColumn();
     }
 
-    private static int skipIndent(String text, int from) {
+    private static int skipIndent(CharSequence text, int from) {
         int end = from;
         while (end < text.length() && (text.charAt(end) == ' ' || text.charAt(end) == '\t')) {
             end++;
@@ -193,14 +199,14 @@ final class MarkdownBlockContext {
     }
 
     /** Markdown grammar uses four-column tab stops independently of a view's display width. */
-    private static int indentColumn(String text, int from, int to, int column) {
+    private static int indentColumn(CharSequence text, int from, int to, int column) {
         for (int offset = from; offset < to; offset++) {
             column = text.charAt(offset) == '\t' ? column + 4 - column % 4 : column + 1;
         }
         return column;
     }
 
-    private static int listMarkerEnd(String text, int start) {
+    private static int listMarkerEnd(CharSequence text, int start) {
         int end = start;
         char first = text.charAt(start);
         if (first == '-' || first == '*' || first == '+') {
@@ -219,7 +225,7 @@ final class MarkdownBlockContext {
     }
 
     /** Precompute once so nested marker-like text cannot repeatedly rescan the same suffix. */
-    private static ThematicBreak thematicBreakSuffix(String text) {
+    private static ThematicBreak thematicBreakSuffix(CharSequence text) {
         int end = text.length() - 1;
         while (end >= 0 && (text.charAt(end) == ' ' || text.charAt(end) == '\t')) {
             end--;
@@ -247,7 +253,7 @@ final class MarkdownBlockContext {
         return thirdFromEnd < 0 ? null : new ThematicBreak(first + 1, thirdFromEnd);
     }
 
-    private static FenceMarker fenceMarker(String text, int start) {
+    private static FenceMarker fenceMarker(CharSequence text, int start) {
         char character = text.charAt(start);
         if (character != '`' && character != '~') {
             return null;
@@ -265,8 +271,29 @@ final class MarkdownBlockContext {
 
     private record FenceMarker(char character, int length, int end) {}
 
-    private record State(Container container, Fence fence) {
+    private static boolean isBlank(CharSequence text, int start) {
+        for (int offset = start; offset < text.length();) {
+            int codePoint = Character.codePointAt(text, offset);
+            if (!Character.isWhitespace(codePoint)) return false;
+            offset += Character.charCount(codePoint);
+        }
+        return true;
+    }
+
+    private static int indexOf(CharSequence text, char character, int start) {
+        for (int offset = start; offset < text.length(); offset++) {
+            if (text.charAt(offset) == character) return offset;
+        }
+        return -1;
+    }
+
+    private record State(Container container, Fence fence, boolean certain) {
         private static final State EMPTY = new State(null, null);
+        private static final State UNKNOWN = new State(null, null, false);
+
+        private State(Container container, Fence fence) {
+            this(container, fence, true);
+        }
     }
 
     private record LineContext(State after, boolean allowsListAssist) {}

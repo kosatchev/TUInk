@@ -53,6 +53,11 @@ public record RecoverySnapshot(
     }
 
     public static RecoverySnapshot capture(TextModel model, EditorState state) {
+        return prepare(model, state).materialize();
+    }
+
+    /** Capture immutable text blocks and view fields without flattening document lines. */
+    public static Prepared prepare(TextModel model, EditorState state) {
         // Autosave can run after an edit and before the next frame adjusts the
         // viewport. Keep the checkpoint valid without changing the live view.
         ViewportState viewport = state.viewport();
@@ -60,8 +65,8 @@ public record RecoverySnapshot(
         if (topLine != viewport.topLine()) {
             viewport = new ViewportState(topLine, 0, viewport.leftColumn(), viewport.leftVisualColumn());
         }
-        return new RecoverySnapshot(
-            model.snapshotLines(),
+        return new Prepared(
+            model.snapshotTextLines(),
             state.getCursor(),
             viewport,
             state.getSelectionAnchor(),
@@ -73,6 +78,29 @@ public record RecoverySnapshot(
                 ? model.fileBaseline() : null,
             Instant.now()
         );
+    }
+
+    /** An owner-thread capture which may be materialized by an I/O worker. */
+    public record Prepared(
+        List<LineText> lines,
+        Position cursor,
+        ViewportState viewport,
+        Position selectionAnchor,
+        boolean dirty,
+        Path currentFile,
+        SaveDisposition saveDisposition,
+        DocumentFileMetadata fileMetadata,
+        FileBaseline fileBaseline,
+        Instant createdAt
+    ) {
+        public Prepared {
+            lines = List.copyOf(lines);
+        }
+
+        public RecoverySnapshot materialize() {
+            return new RecoverySnapshot(lines.stream().map(LineText::toString).toList(), cursor, viewport,
+                selectionAnchor, dirty, currentFile, saveDisposition, fileMetadata, fileBaseline, createdAt);
+        }
     }
 
     public void restore(TextModel model, EditorState state) {

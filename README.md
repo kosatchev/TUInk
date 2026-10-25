@@ -454,7 +454,8 @@ Active recovery snapshots are isolated between editor instances. If input ends
 or the editor is interrupted, its snapshots remain available for recovery on
 the next start.
 Autosave writes run serially in the background with at most one snapshot in
-flight. Shutdown waits for that write before final recovery saves or cleanup.
+flight. The UI captures immutable text blocks; the worker assembles and writes
+the snapshot. Shutdown waits for that write before final recovery saves or cleanup.
 Startup lists snapshots before reading their text. Restore preserves files already
 opened in the session; a snapshot that exceeds available memory stays on disk and
 can be postponed or explicitly deleted.

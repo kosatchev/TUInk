@@ -144,6 +144,47 @@ class AsyncSaveIntegrationTest {
     }
 
     @Test
+    void completingTheFinalQuitSaveStopsTheRuntimeBeforeAnotherEditCanBeRead() throws Exception {
+        try (Scenario scenario = scenario()) {
+            EditorWindowFixture window = scenario.window;
+            window.ui.confirmOnCloseSetting = true;
+            window.event(new TextInput("draft "));
+            String recoveryId = "quit-save-draft";
+            var saved = window.active().tabSession();
+            window.recoverySnapshots.put(recoveryId, saved.engine().captureRecoverySnapshot());
+            window.recoveryManager.publishRestoration(window.recoveryManager.prepareRestoration(List.of(
+                new TerminalEditorApp.RecoveryAutosaveManager.RestoredSnapshot(saved, recoveryId)), System.nanoTime()));
+            assertTrue(window.recoverySnapshots.containsKey(recoveryId));
+            window.command(TuinkCommand.APP_QUIT);
+            window.event(new TextInput("y"));
+            assertTrue(window.documentIo.busy());
+            scenario.executor.runNextOnWorker();
+            assertEquals("draft original", Files.readString(window.document));
+            assertTrue(window.controller.running(), "the owner has not collected the final save yet");
+            assertTrue(window.active().state().isDirty());
+
+            AtomicInteger inputPolls = new AtomicInteger();
+            TuiEventLoop<TuiInputEvent> runtime = new TuiEventLoop<>(timeout -> {
+                inputPolls.incrementAndGet();
+                return TuiEventLoop.Read.event(new TextInput("late "));
+            });
+            List<String> warnings = new ArrayList<>();
+            TerminalEditorApp.runWithRecovery(runtime, window.controller, window.recoveryManager,
+                () -> window.host.toTabSessions(window.tabs), warnings::add);
+
+            assertEquals(0, inputPolls.get(), "quit completed during prepareTurn; input must not be polled");
+            assertFalse(window.controller.running());
+            assertFalse(window.documentIo.busy());
+            assertEquals(List.of("draft original"), window.active().tabSession().model().snapshotLines());
+            assertEquals("draft original", Files.readString(window.document));
+            assertFalse(window.active().state().isDirty());
+            assertFalse(window.recoverySnapshots.containsKey(recoveryId));
+            assertTrue(window.recoverySnapshots.isEmpty(), "a confirmed exit cleans the saved draft's recovery");
+            assertTrue(warnings.isEmpty());
+        }
+    }
+
+    @Test
     void quitWritesNamedTabsInSequenceAndWaitsForEveryOwnerCompletion() throws Exception {
         try (Scenario scenario = scenario()) {
             EditorWindowFixture window = scenario.window;

@@ -31,8 +31,9 @@ TUI view. `TerminalEditorTextLayout` is the single TUInk adapter to TUIframe's
 terminal text cache. A GUI or another TUI view may use a different layout policy over the
 same document snapshot. Recovery distinguishes document/file data from the
 target view's saved position instead of treating viewport geometry as portable
-editor state. The existing format-5 checkpoint remains an application
-compatibility format.
+editor state. Recovery checkpoints remain an application storage contract;
+the current writer uses format 8 and the supported readers are described in
+[the compatibility policy](../compatibility.md).
 
 Within a TUInk view, one coordinate service owns text-to-screen and
 screen-to-text mapping, wrap boundaries, EOF hit testing, and the textual anchor
@@ -104,7 +105,7 @@ the initiating view identity. Undo/Redo restores that memento only for that view
 other views retain their own positions and clamp invalid positions after text
 changes. Edit coalescing also observes view identity.
 
-Recovery format 5 is retained. A checkpoint contains document/file data and the
+Recovery retains its application format. A checkpoint contains document/file data and the
 position of the view being recovered. Restoring through that view applies its
 position, resets the shared history/savepoint baseline as before, and leaves
 other attached views with independent positions subject to document clamping.

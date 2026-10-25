@@ -1525,6 +1525,8 @@ public class TerminalEditorApp {
     record RecoveryRestoreResult(int restoredCount, List<RecoveryStore.PendingSnapshot> failedEntries,
                                  List<String> failureDetails) {}
 
+    private record PreparedRecoveredTab(EditorTab tab, RecoveryAutosaveManager.RestoredSnapshot ownership) {}
+
     RecoveryRestoreResult restoreRecoveredTabs(
         List<? extends RecoveryStore.PendingSnapshot> entries,
         List<EditorTab> tabs,
@@ -1535,49 +1537,67 @@ public class TerminalEditorApp {
         if (entries == null || entries.isEmpty()) {
             return new RecoveryRestoreResult(0, List.of(), List.of());
         }
-        List<EditorTab> restored = new ArrayList<>();
+        List<PreparedRecoveredTab> prepared = new ArrayList<>();
         List<RecoveryStore.PendingSnapshot> failed = new ArrayList<>();
         List<String> failureDetails = new ArrayList<>();
         for (RecoveryStore.PendingSnapshot entry : entries) {
             if (entry == null) {
                 continue;
             }
-            RecoverySnapshot snapshot;
             try {
-                snapshot = entry.snapshot();
-            } catch (IOException error) {
+                RecoverySnapshot snapshot = entry.snapshot();
+                if (snapshot == null) {
+                    continue;
+                }
+                TuiDocumentSession documentSession = TuiDocumentSession.create(clipboard);
+                TabSession tabSession = documentSession.view();
+                tabSession.engine().restoreRecoverySnapshot(snapshot);
+                RenderPlanBuilder builder = documentSession.newRenderPlanBuilder(
+                    resolveHighlighter(tabSession.state().getCurrentFile()));
+                EditorTab tab = new EditorTab(documentSession, builder);
+                tab.viewportController().onRecoveredViewport();
+                prepared.add(new PreparedRecoveredTab(tab,
+                    new RecoveryAutosaveManager.RestoredSnapshot(tabSession, entry.id())));
+            } catch (IOException | RuntimeException | OutOfMemoryError error) {
                 failed.add(entry);
-                failureDetails.add(entry.id() + ": " + error.getMessage());
-                continue;
+                failureDetails.add(entry.id() + ": " + (error.getMessage() == null
+                    ? error.getClass().getSimpleName() : error.getMessage()));
             }
-            if (snapshot == null) {
-                continue;
-            }
-            TuiDocumentSession documentSession = TuiDocumentSession.create(clipboard);
-            TabSession tabSession = documentSession.view();
-            tabSession.engine().restoreRecoverySnapshot(snapshot);
-            RenderPlanBuilder builder = documentSession.newRenderPlanBuilder(
-                resolveHighlighter(tabSession.state().getCurrentFile()));
-            // Keep the already committed startup snapshot as the durable backing
-            // for this tab. The next autosave updates the same entry instead of
-            // creating a gap in which neither the old nor a new snapshot exists.
-            recoveryAutosave.adoptSnapshot(tabSession, entry.id(), nowNanos);
-            EditorTab tab = new EditorTab(documentSession, builder);
-            tab.viewportController().onRecoveredViewport();
-            restored.add(tab);
         }
-        if (restored.isEmpty()) {
-            return new RecoveryRestoreResult(0, List.copyOf(failed), List.copyOf(failureDetails));
+        // Prepare result and ownership allocations before exposing any recovered
+        // tab. A failed preparation cannot make a startup entry eligible for
+        // deletion merely because its staged tab is absent from the live list.
+        RecoveryRestoreResult result = new RecoveryRestoreResult(prepared.size(),
+            List.copyOf(failed), List.copyOf(failureDetails));
+        if (prepared.isEmpty()) {
+            return result;
         }
+        List<EditorTab> restored = prepared.stream().map(PreparedRecoveredTab::tab).toList();
+        var ownership = recoveryAutosave.prepareRestoration(
+            prepared.stream().map(PreparedRecoveredTab::ownership).toList(), nowNanos);
         boolean replacePlaceholder = tabs.size() == 1
             && WorkspaceDocuments.isPristinePlaceholder(tabs.getFirst().tabSession());
-        int firstRestoredIndex = replacePlaceholder ? 0 : tabs.size();
-        if (replacePlaceholder) {
-            tabs.clear();
+        int previousSize = tabs.size();
+        try {
+            tabs.addAll(restored);
+        } catch (RuntimeException | Error publicationFailure) {
+            // ArrayList allocates before appending. A collection port may also
+            // fail after a partial append; retain all pre-existing tabs.
+            try {
+                while (tabs.size() > previousSize) tabs.remove(tabs.size() - 1);
+            } catch (RuntimeException | Error rollbackFailure) {
+                publicationFailure.addSuppressed(rollbackFailure);
+            }
+            throw publicationFailure;
         }
-        tabs.addAll(restored);
-        sessionContext.activate(firstRestoredIndex);
-        return new RecoveryRestoreResult(restored.size(), List.copyOf(failed), List.copyOf(failureDetails));
+        if (replacePlaceholder) {
+            tabs.removeFirst();
+        }
+        // The registry commit allocates nothing; activation can fail without
+        // turning a published draft into an abandoned startup entry.
+        recoveryAutosave.publishRestoration(ownership);
+        sessionContext.activate(replacePlaceholder ? 0 : previousSize);
+        return result;
     }
 
     boolean hasDirtyTabs(List<EditorTab> tabs) {
@@ -1925,8 +1945,9 @@ public class TerminalEditorApp {
         private final LongSupplier nanoClock;
         private final Executor ioExecutor;
         private final ExecutorService ownedWorker;
-        private final Map<TabSession, RuntimeRecoveryState> runtime = new IdentityHashMap<>();
-        private final Map<String, Long> pendingDeletes = new LinkedHashMap<>();
+        private Map<TabSession, RuntimeRecoveryState> runtime = new IdentityHashMap<>();
+        private Map<String, Long> pendingDeletes = new LinkedHashMap<>();
+        private long ownershipRevision;
         private long lastErrorNotifyAtNanos = Long.MIN_VALUE;
         // Only one immutable snapshot is retained by I/O. No executor backlog
         // or per-tab pending snapshots can pin earlier versions of documents.
@@ -1988,6 +2009,7 @@ public class TerminalEditorApp {
         }
 
         void syncTabs(List<TabSession> tabs) {
+            ownershipRevision++;
             Map<TabSession, Boolean> active = new IdentityHashMap<>();
             if (tabs != null) {
                 for (TabSession session : tabs) {
@@ -2013,20 +2035,61 @@ public class TerminalEditorApp {
             }
         }
 
-        void adoptSnapshot(TabSession session, String entryId, long nowNanos) {
-            if (session == null || entryId == null || entryId.isBlank()) {
-                throw new IllegalArgumentException("session and recovery entryId are required");
-            }
-            RuntimeRecoveryState adopted = new RuntimeRecoveryState(entryId);
-            adopted.markSaved(session.engine().recoveryRevision(), nowNanos);
-            RuntimeRecoveryState replaced = runtime.put(session, adopted);
-            pendingDeletes.remove(entryId);
-            if (replaced != null && !entryId.equals(replaced.entryId())) {
-                queueDelete(replaced.entryId());
+        record RestoredSnapshot(TabSession session, String entryId) {
+            RestoredSnapshot {
+                Objects.requireNonNull(session, "session");
+                if (entryId == null || entryId.isBlank()) {
+                    throw new IllegalArgumentException("recovery entryId is required");
+                }
             }
         }
 
+        /** Owns no live registry state until the corresponding tabs are published. */
+        static final class PreparedRestoration {
+            private final RecoveryAutosaveManager owner;
+            private final long revision;
+            private final Map<TabSession, RuntimeRecoveryState> runtime;
+            private final Map<String, Long> pendingDeletes;
+            private boolean published;
+
+            private PreparedRestoration(RecoveryAutosaveManager owner,
+                Map<TabSession, RuntimeRecoveryState> runtime, Map<String, Long> pendingDeletes) {
+                this.owner = owner;
+                this.revision = owner.ownershipRevision;
+                this.runtime = runtime;
+                this.pendingDeletes = pendingDeletes;
+            }
+        }
+
+        PreparedRestoration prepareRestoration(List<RestoredSnapshot> snapshots, long nowNanos) {
+            Map<TabSession, RuntimeRecoveryState> nextRuntime = new IdentityHashMap<>(runtime);
+            Map<String, Long> nextDeletes = new LinkedHashMap<>(pendingDeletes);
+            for (RestoredSnapshot snapshot : snapshots) {
+                RuntimeRecoveryState adopted = new RuntimeRecoveryState(snapshot.entryId());
+                adopted.markSaved(snapshot.session().engine().recoveryRevision(), nowNanos);
+                RuntimeRecoveryState replaced = nextRuntime.put(snapshot.session(), adopted);
+                nextDeletes.remove(snapshot.entryId());
+                if (replaced != null && !snapshot.entryId().equals(replaced.entryId())
+                    && (replaced.hasSnapshot() || ownsInFlight(replaced))) {
+                    nextDeletes.putIfAbsent(replaced.entryId(), Long.MIN_VALUE);
+                }
+            }
+            return new PreparedRestoration(this, nextRuntime, nextDeletes);
+        }
+
+        /** Allocation-free owner commit, immediately after publishing the prepared tabs. */
+        void publishRestoration(PreparedRestoration prepared) {
+            if (prepared.owner != this || prepared.published || prepared.revision != ownershipRevision) {
+                throw new IllegalStateException("Recovery publication is stale or belongs to another session");
+            }
+            runtime = prepared.runtime;
+            pendingDeletes = prepared.pendingDeletes;
+            prepared.published = true;
+            ownershipRevision++;
+        }
+
         String autosaveDirtyTabs(List<TabSession> tabs, long nowNanos) {
+            ownershipRevision++;
             return autosaveDirtyTabs(tabs, nowNanos, false);
         }
 
@@ -2087,9 +2150,9 @@ public class TerminalEditorApp {
                 try {
                     // Capture on the owner thread; the worker never reads a
                     // live model, cursor, history, or runtime bookkeeping.
-                    RecoverySnapshot snapshot = session.engine().captureRecoverySnapshot();
+                    RecoverySnapshot.Prepared snapshot = RecoverySnapshot.prepare(session.model(), session.state());
                     if (force) {
-                        store.save(state.entryId(), snapshot);
+                        store.save(state.entryId(), snapshot.materialize());
                         state.markSaved(revision, nowNanos);
                     } else {
                         submit(new RecoveryIoOperation(state, revision, nowNanos, snapshot));
@@ -2110,6 +2173,7 @@ public class TerminalEditorApp {
         }
 
         DeletionResult deleteEntries(List<? extends RecoveryStore.PendingSnapshot> entries) {
+            ownershipRevision++;
             if (entries == null || entries.isEmpty()) {
                 return new DeletionResult(0, List.of(), List.of());
             }
@@ -2133,6 +2197,7 @@ public class TerminalEditorApp {
         }
 
         ReleaseResult releaseEntries(List<? extends RecoveryStore.PendingSnapshot> entries) {
+            ownershipRevision++;
             List<RecoveryStore.PendingSnapshot> failed = new ArrayList<>();
             List<String> failureDetails = new ArrayList<>();
             for (RecoveryStore.PendingSnapshot entry : entries) {
@@ -2147,6 +2212,7 @@ public class TerminalEditorApp {
         }
 
         String finishSession(List<TabSession> tabs, boolean exitConfirmed) {
+            ownershipRevision++;
             // Shutdown is outside the interactive event loop. Drain the single
             // outstanding write before any final save, discard, or release.
             awaitInFlight();
@@ -2262,12 +2328,12 @@ public class TerminalEditorApp {
             private final RuntimeRecoveryState state;
             private final long revision;
             private final long attemptedAtNanos;
-            private final RecoverySnapshot snapshot;
+            private final RecoverySnapshot.Prepared snapshot;
             private final CountDownLatch done = new CountDownLatch(1);
             private Throwable failure;
 
             private RecoveryIoOperation(RuntimeRecoveryState state, long revision, long attemptedAtNanos,
-                RecoverySnapshot snapshot) {
+                RecoverySnapshot.Prepared snapshot) {
                 this.state = state;
                 this.revision = revision;
                 this.attemptedAtNanos = attemptedAtNanos;
@@ -2277,7 +2343,7 @@ public class TerminalEditorApp {
             @Override public void run() {
                 try {
                     if (snapshot == null) store.delete(state.entryId());
-                    else store.save(state.entryId(), snapshot);
+                    else store.save(state.entryId(), snapshot.materialize());
                 } catch (IOException | RuntimeException | Error error) {
                     failure = error;
                 } finally {

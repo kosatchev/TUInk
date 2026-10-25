@@ -8,6 +8,8 @@ Changes on the development branch after [v0.16.0](0.16.0.md).
   entry while retaining the previous lock for existing canonical paths.
 - Bind Save As approval to the inspected target address and version; reject
   target changes before writing or publishing the staged contents.
+- Prepare recovery ownership before publishing restored tabs and retain snapshot
+  text when metadata publication has an uncertain result or cleanup fails.
 - Share immutable text blocks in document snapshots and prepare mandatory session
   results before committing edits or history replay. Render and session consumers
   use the same document identity.
@@ -29,6 +31,8 @@ Changes on the development branch after [v0.16.0](0.16.0.md).
 - Share unchanged blocks during local edits to long lines and update Unicode and
   terminal indices from their edited ranges. Read visible text by range and use
   virtual wrapped rows for fixed-width runs. General word/tab reflow remains linear.
+- Capture recovery text as immutable blocks and assemble it in the background;
+  attempt final recovery even if an outstanding document operation fails to drain.
 
 - Encode saved documents into the staged file through bounded buffers, retaining
   original encodings, BOMs and line endings while hashing the written bytes.

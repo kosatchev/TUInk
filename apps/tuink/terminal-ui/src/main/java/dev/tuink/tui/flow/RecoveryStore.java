@@ -122,6 +122,7 @@ public final class RecoveryStore implements AutoCloseable {
         KEY_SELECTION_COL
     );
     private final Path recoveryDirectory;
+    private final PublicationFiles publicationFiles;
     private Path physicalRecoveryDirectory;
     private final Map<String, EntryLock> entryLocks = new LinkedHashMap<>();
     private Path namespacePath;
@@ -132,8 +133,40 @@ public final class RecoveryStore implements AutoCloseable {
     }
 
     RecoveryStore(Path recoveryDirectory) {
+        this(recoveryDirectory, new PublicationFiles() {});
+    }
+
+    RecoveryStore(Path recoveryDirectory, PublicationFiles publicationFiles) {
         this.recoveryDirectory = Objects.requireNonNull(recoveryDirectory, "recoveryDirectory")
             .toAbsolutePath();
+        this.publicationFiles = Objects.requireNonNull(publicationFiles, "publicationFiles");
+    }
+
+    /** Filesystem boundary for publication and best-effort removal of staged/orphan files. */
+    interface PublicationFiles {
+        /** An exception does not prove that the target was left unchanged. */
+        default void publish(Path staged, Path target) throws IOException {
+            try {
+                Files.move(staged, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException ignored) {
+                Files.move(staged, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+        }
+
+        default void deleteIfExists(Path path) throws IOException {
+            Files.deleteIfExists(path);
+        }
+    }
+
+    private enum PublicationState { NOT_ATTEMPTED, ATTEMPTED, COMMITTED }
+
+    /** Shared with the generation transaction: metadata commit precedes any cleanup. */
+    private static final class Publication {
+        private PublicationState state = PublicationState.NOT_ATTEMPTED;
+        boolean attempted() { return state != PublicationState.NOT_ATTEMPTED; }
+        boolean committed() { return state == PublicationState.COMMITTED; }
+        void attempt() { state = PublicationState.ATTEMPTED; }
+        void commit() { state = PublicationState.COMMITTED; }
     }
 
     /** Returns the configured path until initialization, then the pinned physical directory. */
@@ -165,20 +198,30 @@ public final class RecoveryStore implements AutoCloseable {
 
         String generation = UUID.randomUUID().toString().replace("-", "");
         Path nextText = textPath(id, generation);
-        boolean committed = false;
+        Publication metadataPublication = new Publication();
+        Throwable failure = null;
         try {
             writeSnapshotText(nextText, snapshot.lines());
-            writeSnapshotMeta(meta, snapshot, generation);
-            committed = true;
+            writeSnapshotMeta(meta, snapshot, generation, metadataPublication);
+        } catch (IOException | RuntimeException | Error error) {
+            failure = error;
+            throw error;
         } finally {
-            if (!committed) {
-                Files.deleteIfExists(nextText);
+            // Once metadata publication was attempted, an exception may have
+            // followed its rename. Keep the payload even if the result is unknown.
+            if (!metadataPublication.attempted()) {
+                try {
+                    publicationFiles.deleteIfExists(nextText);
+                } catch (IOException | RuntimeException | OutOfMemoryError cleanupFailure) {
+                    if (failure == null) throw cleanupFailure;
+                    suppressCleanupFailure(failure, cleanupFailure);
+                }
             }
         }
         if (previousText != null && !previousText.equals(nextText)) {
             try {
-                Files.deleteIfExists(previousText);
-            } catch (IOException ignored) {
+                publicationFiles.deleteIfExists(previousText);
+            } catch (IOException | RuntimeException | OutOfMemoryError ignored) {
                 // The committed generation is authoritative; an orphan is harmless.
             }
         }
@@ -901,7 +944,8 @@ public final class RecoveryStore implements AutoCloseable {
     private void writeSnapshotMeta(
         Path target,
         RecoverySnapshot snapshot,
-        String textGeneration
+        String textGeneration,
+        Publication publication
     ) throws IOException {
         Properties p = new Properties();
         p.setProperty(KEY_FORMAT, FORMAT);
@@ -936,41 +980,57 @@ public final class RecoveryStore implements AutoCloseable {
         p.setProperty(KEY_SELECTION_COL, Integer.toString(selection == null ? 0 : selection.col()));
         writeAtomically(target, out -> p.store(
             RecoveryLimits.boundedOutput(out, RecoveryLimits.MAX_METADATA_BYTES, "Recovery metadata exceeds its storage limit"),
-            "TUInk recovery snapshot"));
+            "TUInk recovery snapshot"), publication);
     }
 
     private interface Writer {
         void write(OutputStream out) throws IOException;
     }
 
-    private static void writeAtomically(Path target, Writer writer) throws IOException {
+    private void writeAtomically(Path target, Writer writer) throws IOException {
+        writeAtomically(target, writer, new Publication());
+    }
+
+    private void writeAtomically(Path target, Writer writer, Publication publication) throws IOException {
         Path parent = target.getParent();
         if (parent != null) {
             ensurePrivateDirectory(parent);
         }
         Path tmp = createPrivateTempFile(parent, target.getFileName().toString());
-        boolean committed = false;
+        Throwable failure = null;
         try {
             try (OutputStream out = Files.newOutputStream(tmp)) {
                 writer.write(out);
             }
             setPrivateFilePermissions(tmp);
-            try {
-                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-            } catch (AtomicMoveNotSupportedException ignored) {
-                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
-            }
-            committed = true;
+            publication.attempt();
+            publicationFiles.publish(tmp, target);
+            // The outer generation transaction must see this before cleanup can
+            // fail. It must never delete a payload now referenced by metadata.
+            publication.commit();
+        } catch (IOException | RuntimeException | Error error) {
+            failure = error;
+            throw error;
         } finally {
             try {
-                Files.deleteIfExists(tmp);
-            } catch (IOException cleanupFailure) {
-                if (!committed) {
-                    throw cleanupFailure;
+                publicationFiles.deleteIfExists(tmp);
+            } catch (IOException | RuntimeException | OutOfMemoryError cleanupFailure) {
+                if (!publication.committed()) {
+                    if (failure == null) throw cleanupFailure;
+                    suppressCleanupFailure(failure, cleanupFailure);
                 }
                 // Metadata already names the committed generation. Do not turn a
                 // harmless private temp orphan into a false failed-save signal.
             }
+        }
+    }
+
+    private static void suppressCleanupFailure(Throwable failure, Throwable cleanupFailure) {
+        if (failure == cleanupFailure) return;
+        try {
+            failure.addSuppressed(cleanupFailure);
+        } catch (OutOfMemoryError exhausted) {
+            // Recording cleanup diagnostics cannot replace the primary failure.
         }
     }
 

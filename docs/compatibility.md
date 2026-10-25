@@ -439,8 +439,9 @@ Automatic snapshot writes are spaced by at least two seconds after each
 attempt, including a failed attempt. A failed update retains the previously
 committed snapshot. The final save on end of input, interruption, or application
 failure bypasses this retry delay.
-The owner thread captures one immutable snapshot, and a single background worker
-performs its filesystem I/O. At most one operation is in flight; pending edits
+The owner thread captures immutable text-block references and view fields; a single
+background worker materializes the snapshot and performs its filesystem I/O.
+At most one operation is in flight; pending edits
 are captured from the current state on a later turn rather than queued as extra
 snapshots. Completion and retry state are applied on the owner thread. Shutdown
 drains the outstanding operation before final synchronous saves or cleanup,

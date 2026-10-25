@@ -333,6 +333,12 @@ budget. A directory that exceeds the remaining budget is omitted with a visible
 error; its contents are not presented as a complete listing. Directory item
 counts may end in `+` when their counting budget is reached.
 
+Document reads and writes run in the background. During a save, the document
+being written allows navigation and copying; text edits and closing that tab
+wait until the write finishes. Other tabs remain usable. Quit waits for the
+current file operation before continuing its unsaved-work checks. Shutdown also
+finishes an already started write before taking final recovery snapshots.
+
 In confirmation prompts, `Tab` / `Shift+Tab` cycle through buttons and the
 document. With a button focused, Left/Right move between buttons, and `Enter`
 or Space activates the focused button. With the prompt focused, `Y` confirms

@@ -710,8 +710,16 @@ public class TextModel {
     }
 
     public LoadMetadata load(Path path, DocumentOpenMode openMode) throws IOException {
+        PreparedLoad prepared = prepareLoad(path, openMode);
+        applyPreparedLoad(prepared);
+        return new LoadMetadata(prepared.metadata());
+    }
+
+    /** Reads and decodes an independent immutable result, without touching an open document. */
+    public static PreparedLoad prepareLoad(Path path, DocumentOpenMode openMode) throws IOException {
         Objects.requireNonNull(openMode, "openMode");
-        Path target = path.toRealPath();
+        Path requested = resolveDocumentPath(path);
+        Path target = requested.toRealPath();
         BasicFileAttributes attributes = Files.readAttributes(target, BasicFileAttributes.class);
         if (!attributes.isRegularFile()) {
             throw new IOException("Not a regular file: " + path);
@@ -737,15 +745,24 @@ public class TextModel {
             detectDefaultLineSeparator(parsed.lineSeparators()),
             parsed.lineSeparators()
         );
-        buffer.clear();
-        buffer.setLine(0, parsed.lines().get(0));
-        for (int i = 1; i < parsed.lines().size(); i++) {
-            buffer.insertLine(i, parsed.lines().get(i));
+        return new PreparedLoad(requested, parsed.lines(), loadedMetadata, FileBaseline.fromBytes(target, data));
+    }
+
+    /** Owner-thread publication of a completed read; performs no filesystem access. */
+    public void applyPreparedLoad(PreparedLoad prepared) {
+        Objects.requireNonNull(prepared, "prepared");
+        replaceLines(prepared.lines(), prepared.metadata());
+        fileBaseline = prepared.baseline();
+    }
+
+    public record PreparedLoad(Path path, List<String> lines, DocumentFileMetadata metadata, FileBaseline baseline) {
+        public PreparedLoad {
+            Objects.requireNonNull(path, "path");
+            lines = LogicalDocumentLines.copyOfOrEmptyDocument(lines);
+            Objects.requireNonNull(metadata, "metadata");
+            Objects.requireNonNull(baseline, "baseline");
+            requireCompatibleMetadata(metadata, lines.size());
         }
-        fileMetadata = loadedMetadata;
-        fileBaseline = FileBaseline.fromBytes(target, data);
-        markContentReplaced();
-        return new LoadMetadata(loadedMetadata);
     }
 
     /** The extra byte detects growth beyond the size observed before opening the stream. */
@@ -818,12 +835,79 @@ public class TextModel {
         save(path, metadata, disposition, true);
     }
 
-    private void save(
+    /** Captures immutable save inputs on the owner thread; write() never reads the live model. */
+    public SaveRequest prepareSave(Path path, DocumentFileMetadata metadata,
+                                   SaveDisposition disposition, boolean checkBaseline) {
+        DocumentEditBudget.requireTemporaryReferences(lineCount());
+        return new SaveRequest(snapshotTextLines(), requireCompatibleMetadata(metadata, lineCount()),
+            fileBaseline, Objects.requireNonNull(path, "path"),
+            Objects.requireNonNull(disposition, "disposition"), checkBaseline);
+    }
+
+    /** Adopt the bytes actually committed by a detached writer. No text revision is changed. */
+    public void completeSave(SavedFile saved) {
+        fileMetadata = requireCompatibleMetadata(saved.metadata(), lineCount());
+        fileBaseline = saved.baseline();
+    }
+
+    public record SavedFile(Path path, DocumentFileMetadata metadata, FileBaseline baseline) {
+        public SavedFile {
+            Objects.requireNonNull(path, "path");
+            Objects.requireNonNull(metadata, "metadata");
+            Objects.requireNonNull(baseline, "baseline");
+        }
+    }
+
+    public record SaveRequest(List<LineText> lines, DocumentFileMetadata metadata, FileBaseline baseline,
+                              Path path, SaveDisposition disposition, boolean checkBaseline) {
+        public SaveRequest {
+            lines = List.copyOf(lines);
+            requireCompatibleMetadata(Objects.requireNonNull(metadata, "metadata"), lines.size());
+            Objects.requireNonNull(path, "path");
+            Objects.requireNonNull(disposition, "disposition");
+        }
+
+        public SavedFile write() throws IOException {
+            return write(resolveDocumentPath(path), checkBaseline);
+        }
+
+        SavedFile write(Path resolvedPath, boolean verifyBaseline) throws IOException {
+            TextModel detached = new TextModel(new SnapshotBuffer(lines), metadata);
+            detached.fileBaseline = baseline;
+            return detached.save(resolvedPath, metadata, disposition, verifyBaseline);
+        }
+
+        SavedFile write(PreparedSaveTarget target, boolean verifyBaseline) throws IOException {
+            TextModel detached = new TextModel(new SnapshotBuffer(lines), metadata);
+            detached.fileBaseline = baseline;
+            SaveDisposition approved = target.exists() ? disposition : SaveDisposition.CREATE_NEW;
+            return detached.save(target.requested(), metadata, approved, verifyBaseline, target);
+        }
+    }
+
+    /** Immutable writer input: no copied character data and no mutable document aliases. */
+    private record SnapshotBuffer(List<LineText> lines) implements TextBuffer {
+        @Override public TextBuffer createEmptySibling() { return new SimpleLineBuffer(); }
+        @Override public int lineCount() { return lines.size(); }
+        @Override public String getLine(int line) { return lines.get(line).toString(); }
+        @Override public LineText lineText(int line) { return lines.get(line); }
+        @Override public void setLine(int line, String text) { throw new UnsupportedOperationException(); }
+        @Override public void insertLine(int index, String text) { throw new UnsupportedOperationException(); }
+        @Override public String removeLine(int index) { throw new UnsupportedOperationException(); }
+        @Override public void clear() { throw new UnsupportedOperationException(); }
+    }
+
+    private SavedFile save(
         Path path,
         DocumentFileMetadata metadata,
         SaveDisposition disposition,
         boolean checkBaseline
     ) throws IOException {
+        return save(path, metadata, disposition, checkBaseline, null);
+    }
+
+    private SavedFile save(Path path, DocumentFileMetadata metadata, SaveDisposition disposition,
+                           boolean checkBaseline, PreparedSaveTarget approvedTarget) throws IOException {
         Path tempFile = null;
         boolean committed = false;
         FileSaveGuard guard = null;
@@ -834,11 +918,12 @@ public class TextModel {
             );
             SaveDisposition checkedDisposition = Objects.requireNonNull(disposition, "disposition");
             Path requestedTarget = path.toAbsolutePath();
+            if (approvedTarget != null) approvedTarget.beginWrite();
             boolean verifyOriginal = checkBaseline
                 && (checkedDisposition == SaveDisposition.REPLACE_EXISTING || fileBaseline != null);
             Path target;
             try {
-                target = resolveSaveTarget(requestedTarget);
+                target = approvedTarget == null ? resolveSaveTarget(requestedTarget) : approvedTarget.target();
             } catch (IOException inaccessible) {
                 if (verifyOriginal) throw new IOException(FileBaseline.conflictMessage(requestedTarget), inaccessible);
                 throw inaccessible;
@@ -859,7 +944,9 @@ public class TextModel {
 
             tempFile = createSaveTempFile(tempDir, prefix, targetExists);
             FileBaseline savedBaseline = encodeToFile(tempFile, target, checkedMetadata);
+            SavedFile result = new SavedFile(requestedTarget, checkedMetadata, savedBaseline);
             guard = FileSaveGuard.acquire(target);
+            if (approvedTarget != null) approvedTarget.requireUnchanged();
             if (verifyOriginal) {
                 requireUnchangedFile(target);
             }
@@ -880,6 +967,7 @@ public class TextModel {
             }
             requireSameSaveTarget(requestedTarget, target);
             requireRegularSaveTargetOrMissing(target);
+            if (approvedTarget != null) approvedTarget.requireUnchanged();
             if (checkedDisposition == SaveDisposition.CREATE_NEW) {
                 publishNewFile(tempFile, target);
             } else {
@@ -891,6 +979,7 @@ public class TextModel {
                         StandardCopyOption.ATOMIC_MOVE
                     );
                 } catch (AtomicMoveNotSupportedException e) {
+                    if (approvedTarget != null) approvedTarget.requireUnchanged();
                     if (verifyOriginal) requireUnchangedFile(target);
                     requireSameSaveTarget(requestedTarget, target);
                     requireRegularSaveTargetOrMissing(target);
@@ -900,6 +989,7 @@ public class TextModel {
             committed = true;
             fileMetadata = checkedMetadata;
             fileBaseline = savedBaseline;
+            return result;
         } catch (OutOfMemoryError allocationFailure) {
             IOException saveFailure = new IOException("Not enough memory to save this document", allocationFailure);
             failure = saveFailure;
@@ -1256,7 +1346,7 @@ public class TextModel {
         return checked;
     }
 
-    private DecodedContent decodeWithDetectedCharset(byte[] data, DocumentOpenMode openMode) throws IOException {
+    private static DecodedContent decodeWithDetectedCharset(byte[] data, DocumentOpenMode openMode) throws IOException {
         if (openMode == DocumentOpenMode.UTF_16LE) {
             if (!hasUtf16LeBom(data)) {
                 throw new IOException("Explicit UTF-16LE opening requires a UTF-16LE BOM");

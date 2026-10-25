@@ -34,6 +34,7 @@ def registerPgoTarget = { String nativeTarget ->
     def receiptFile = new File(profileFile.absolutePath + '.json')
     def trainingScript = rootProject.file('verification/performance/pgo_training.py')
     def renderScript = rootProject.file('verification/performance/render_benchmark.py')
+    def terminalOracle = rootProject.file('verification/ui/vt.py')
     def projectRootPath = rootProject.projectDir.toPath()
     def trainingRoot = layout.buildDirectory.dir("pgo-training/${nativeTarget}")
     def pgoLogger = logger
@@ -176,7 +177,7 @@ def registerPgoTarget = { String nativeTarget ->
     def instrumentReceipt = { new File(instrumentTask.get().outputFile.get().asFile.absolutePath + '.pgo-build.json') }
     def profileInputs = { task = optimizedTask.get(), String role = 'Optimized' ->
         [compiler: compilerInputs(task, role), trainingHarness: hashFile(trainingScript),
-            renderHarness: hashFile(renderScript)]
+            renderHarness: hashFile(renderScript), terminalOracle: hashFile(terminalOracle)]
     }
 
     // Preserve the inputs of the compilation, even when training runs in a later
@@ -240,7 +241,7 @@ def registerPgoTarget = { String nativeTarget ->
     def train = tasks.register("nativeProfile${targetSuffix}Train", Exec) {
         description = "Train a separate ${nativeTarget} PGO profile using Oracle GraalVM Native Image."
         dependsOn(instrument, 'pgoHarnessTest', pgoCompilerFiles)
-        inputs.files(pgoCompilerFiles, trainingScript, renderScript, runtimeInputs, aclInputs, instrumentBinary)
+        inputs.files(pgoCompilerFiles, trainingScript, renderScript, terminalOracle, runtimeInputs, aclInputs, instrumentBinary)
         outputs.files(profileFile, receiptFile)
         outputs.upToDateWhen { false }
         notCompatibleWithConfigurationCache('Records fingerprints of the selected native training inputs.')

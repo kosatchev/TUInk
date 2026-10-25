@@ -6,9 +6,13 @@ Changes on the development branch after [v0.16.0](0.16.0.md).
   redirected opening symlink cannot make an ordinary save overwrite another file.
 - Coordinate Unix save locks across bind-mounted aliases of the same directory
   entry while retaining the previous lock for existing canonical paths.
+- Bind Save As approval to the inspected target address and version; reject
+  target changes before writing or publishing the staged contents.
 - Share immutable text blocks in document snapshots and prepare mandatory session
   results before committing edits or history replay. Render and session consumers
   use the same document identity.
+- Stop reading terminal input when the final background save completes a confirmed
+  exit, keeping the saved document and recovery state consistent.
 - Remove retired empty license directories during archive upgrades, and reject
   unexpected managed-file types before installation or removal changes any files.
 - Bound file-picker scans across the complete expanded tree, including metadata
@@ -17,6 +21,9 @@ Changes on the development branch after [v0.16.0](0.16.0.md).
   publishing their state; failed preparation retains the previous draft.
 - Continue sequential search from accepted matches with a bounded result cache
   and sparse checkpoints, preserving non-overlapping matching rules.
+- Read and write document contents in a background worker. Saves temporarily
+  lock the affected document's edits while navigation and other tabs remain usable;
+  completion retains file-conflict checks, format history and quit/close flows.
 - Align editing and terminal grapheme boundary checks for offsets outside the
   document, and describe workspace edits using their current preparation model.
 - Share unchanged blocks during local edits to long lines and update Unicode and

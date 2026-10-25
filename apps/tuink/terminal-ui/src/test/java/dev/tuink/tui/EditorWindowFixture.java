@@ -40,6 +40,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Executor;
 import java.util.function.BooleanSupplier;
 import java.util.stream.IntStream;
 
@@ -64,6 +65,7 @@ final class EditorWindowFixture implements AutoCloseable {
     final ObservedRasterizer renderer;
     final Map<String, RecoverySnapshot> recoverySnapshots = new HashMap<>();
     final TerminalEditorApp.RecoveryAutosaveManager recoveryManager;
+    final DocumentIoController documentIo;
     int width = 80;
     int height = 24;
 
@@ -74,6 +76,19 @@ final class EditorWindowFixture implements AutoCloseable {
 
     EditorWindowFixture(Path directory, boolean reading, List<String> lines) throws IOException {
         this(directory, reading, lines, new AppSettingsSession(AppSettings.defaults(), TuiCliOptions.parse(new String[0])));
+    }
+
+    EditorWindowFixture(Path directory, boolean reading, List<String> lines, Executor documentExecutor) throws IOException {
+        this(directory, reading, lines,
+            new AppSettingsSession(AppSettings.defaults(), TuiCliOptions.parse(new String[0])),
+            List.of(), null, documentExecutor, Runnable::run);
+    }
+
+    EditorWindowFixture(Path directory, boolean reading, List<String> lines,
+                        Executor documentExecutor, Executor recoveryExecutor) throws IOException {
+        this(directory, reading, lines,
+            new AppSettingsSession(AppSettings.defaults(), TuiCliOptions.parse(new String[0])),
+            List.of(), null, documentExecutor, recoveryExecutor);
     }
 
     EditorWindowFixture(Path directory, boolean reading, List<String> lines,
@@ -109,6 +124,15 @@ final class EditorWindowFixture implements AutoCloseable {
                                 AppSettingsSession settingsSession,
                                 List<? extends RecoveryStore.PendingSnapshot> startupRecoveryEntries,
                                 TerminalEditorApp.RecoveryPersistence recoveryPersistence) throws IOException {
+        this(directory, reading, lines, settingsSession, startupRecoveryEntries, recoveryPersistence,
+            Runnable::run, Runnable::run);
+    }
+
+    private EditorWindowFixture(Path directory, boolean reading, List<String> lines,
+                                AppSettingsSession settingsSession,
+                                List<? extends RecoveryStore.PendingSnapshot> startupRecoveryEntries,
+                                TerminalEditorApp.RecoveryPersistence recoveryPersistence,
+                                Executor documentExecutor, Executor recoveryExecutor) throws IOException {
         this.settingsSession = settingsSession;
         Files.createDirectories(directory);
         document = directory.resolve("document.txt");
@@ -145,7 +169,8 @@ final class EditorWindowFixture implements AutoCloseable {
                     // The in-memory port has no process ownership to release.
                 }
             };
-        recoveryManager = new TerminalEditorApp.RecoveryAutosaveManager(persistence, Runnable::run);
+        recoveryManager = new TerminalEditorApp.RecoveryAutosaveManager(persistence, recoveryExecutor);
+        documentIo = new DocumentIoController(documentExecutor);
         for (RecoveryStore.PendingSnapshot entry : startupRecoveryEntries) {
             if (entry instanceof RecoveryStore.Entry loaded) {
                 recoverySnapshots.put(entry.id(), loaded.snapshot());
@@ -159,7 +184,7 @@ final class EditorWindowFixture implements AutoCloseable {
             renderer, filename, new SaveAsSuggestionStore(), presenter, query, replacement, context,
             new ArrayList<>(startupRecoveryEntries), tabs,
             new EditorWindowController.TerminalAccess(() -> width, () -> height, enabled -> {}),
-            menu, ui, settingsSession));
+            menu, ui, settingsSession, documentIo));
         try {
             frame();
         } catch (RuntimeException | Error failure) {
@@ -310,6 +335,7 @@ final class EditorWindowFixture implements AutoCloseable {
 
     @Override
     public void close() {
+        controller.closeDocumentIo();
         tree.close();
     }
 

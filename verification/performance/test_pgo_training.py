@@ -84,6 +84,122 @@ class PgoTrainingTest(unittest.TestCase):
             with self.subTest(status=status), self.assertRaises(RuntimeError):
                 training.require_normal_exit(status)
 
+    @staticmethod
+    def screen(session, header, notice):
+        session.screen = training.Screen(3, 80)
+        session.screen.feed((header + "\x1b[3;1H" + notice).encode("utf-8"))
+
+    def test_saved_bytes_require_a_clean_owner_acknowledgement(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            document = Path(temporary) / "draft.txt"
+            document.write_bytes(b"new draft")
+            session = training.EditorSession.__new__(training.EditorSession)
+            self.screen(session, "File draft.txt *", "Saved draft.txt")
+
+            def observe(predicate, description):
+                self.assertFalse(predicate(), "Worker bytes and the previous Saved notice are insufficient")
+                self.screen(session, "File draft.txt", "Saving document…")
+                self.assertFalse(predicate(), "The UI owner must finish save admission")
+                self.screen(session, "File draft.txt", "Saved draft.txt")
+                document.write_bytes(b"old draft")
+                self.assertFalse(predicate(), "The owner acknowledgement must match the expected bytes")
+                document.write_bytes(b"new draft")
+                self.assertTrue(predicate())
+
+            with patch.object(session, "wait_for", side_effect=observe) as wait:
+                session.wait_for_saved_bytes(document, b"new draft")
+            wait.assert_called_once()
+
+    def test_previous_clean_saved_frame_cannot_acknowledge_the_next_save(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            document = Path(temporary) / "draft.txt"
+            document.write_bytes(b"old draft")
+            session = training.EditorSession.__new__(training.EditorSession)
+            session.saves_submitted = 1
+            self.screen(session, "File draft.txt", "Saved draft.txt")
+            events = []
+
+            def observe(predicate, description):
+                self.assertFalse(predicate())
+                if events == ["edit"]:
+                    self.screen(session, "File draft.txt *", "Saved draft.txt")
+                    events.append("fresh boundary")
+                else:
+                    self.assertEqual(["edit", "fresh boundary", "Ctrl+S", "worker publication"], events)
+                    self.screen(session, "File draft.txt", "Saved draft.txt")
+                    events.append("owner completion")
+                self.assertTrue(predicate())
+
+            def submit(data):
+                if data == training.CTRL_Z:
+                    self.assertEqual([], events)
+                    events.append("edit")
+                else:
+                    self.assertEqual(training.CTRL_S, data)
+                    self.assertEqual(["edit", "fresh boundary"], events)
+                    events.append("Ctrl+S")
+                    document.write_bytes(b"new draft")
+                    self.screen(session, "File draft.txt *", "Saving document…")
+                    events.append("worker publication")
+
+            with patch.object(session, "wait_for", side_effect=observe), patch.object(session, "send", side_effect=submit):
+                session.save(document, b"new draft", training.CTRL_Z)
+            self.assertEqual(["edit", "fresh boundary", "Ctrl+S", "worker publication", "owner completion"], events)
+
+    def test_cleared_notice_from_selection_does_not_allow_saving_before_the_cut(self):
+        session = training.EditorSession.__new__(training.EditorSession)
+        session.saves_submitted = 1
+        self.screen(session, "File draft.txt", "")
+
+        def observe(predicate, description):
+            self.assertFalse(predicate(), "Clearing Saved during selection is not a cut acknowledgement")
+            raise TimeoutError("No dirty cut acknowledgement")
+
+        with patch.object(session, "wait_for", side_effect=observe), patch.object(session, "send") as send:
+            with self.assertRaises(TimeoutError):
+                session.save(Path("unused"), b"cut draft", training.CTRL_X)
+        send.assert_called_once_with(training.CTRL_X)
+
+    def test_initial_unchanged_save_requires_explicit_mode_and_cannot_be_reused(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            document = Path(temporary) / "draft.txt"
+            document.write_bytes(b"loaded draft")
+            session = training.EditorSession.__new__(training.EditorSession)
+            session.saves_submitted = 0
+            self.screen(session, "File draft.txt", "Loaded draft.txt")
+            events = []
+
+            def observe(predicate, description):
+                if events == ["navigation"]:
+                    self.assertTrue(predicate())
+                else:
+                    self.assertEqual(["navigation", "Ctrl+S"], events)
+                    self.assertFalse(predicate(), "Unchanged bytes do not acknowledge the initial save")
+                    self.screen(session, "File draft.txt", "Saved draft.txt")
+                    events.append("owner completion")
+                    self.assertTrue(predicate())
+
+            def submit(data):
+                if data == training.HOME:
+                    self.assertEqual([], events)
+                    events.append("navigation")
+                else:
+                    self.assertEqual(training.CTRL_S, data)
+                    self.assertEqual(["navigation"], events)
+                    self.screen(session, "File draft.txt", "Saving document…")
+                    events.append("Ctrl+S")
+
+            with patch.object(session, "wait_for", side_effect=observe), patch.object(session, "send", side_effect=submit):
+                session.save(document, b"loaded draft", training.HOME, require_dirty=False)
+            self.assertEqual(["navigation", "Ctrl+S", "owner completion"], events)
+            with patch.object(session, "send") as send:
+                with self.assertRaises(ValueError):
+                    session.save(document, b"loaded draft", training.HOME, require_dirty=False)
+                session.saves_submitted = 0
+                with self.assertRaises(ValueError):
+                    session.save(document, b"loaded draft", training.HOME, require_dirty=False)
+                send.assert_not_called()
+
     def test_fresh_output_preserves_existing_files_and_refuses_symlink(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

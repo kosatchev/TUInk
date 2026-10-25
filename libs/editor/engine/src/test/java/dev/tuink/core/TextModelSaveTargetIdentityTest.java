@@ -10,6 +10,13 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.charset.Charset;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CharsetEncoder;
+import java.nio.charset.CoderResult;
+import java.nio.charset.CodingErrorAction;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -52,7 +59,7 @@ class TextModelSaveTargetIdentityTest {
         Position cursor = state.getCursor();
         Position selection = state.getSelectionAnchor();
         ViewportState viewport = state.viewport();
-        model.afterNextLineRead(() -> redirect(alias, second.getFileName()));
+        model.duringNextEncoding(() -> redirect(alias, second.getFileName()));
 
         IOException failure = assertThrows(IOException.class,
             () -> engine.saveAs(alias, SaveDisposition.REPLACE_EXISTING));
@@ -97,13 +104,14 @@ class TextModelSaveTargetIdentityTest {
         var model = new RedirectingModel();
         model.insertText(new Position(0, 0), "draft");
         DocumentFileMetadata metadata = model.fileMetadata();
-        model.afterNextLineRead(() -> redirect(alias, second.getFileName()));
+        model.duringNextEncoding(() -> redirect(alias, second.getFileName()));
 
         assertThrows(IOException.class, () -> model.save(alias.resolve("target.txt"), metadata,
             overwrite ? SaveDisposition.REPLACE_EXISTING : SaveDisposition.CREATE_NEW));
 
         assertSame(metadata, model.fileMetadata());
         assertNull(model.fileBaseline());
+        assertEquals(second.getFileName(), Files.readSymbolicLink(alias));
         if (overwrite) {
             assertEquals("before first", Files.readString(firstFile));
             assertEquals("before second", Files.readString(secondFile));
@@ -121,13 +129,14 @@ class TextModelSaveTargetIdentityTest {
         Path alias = Files.createSymbolicLink(directory.resolve("alias.txt"), target.getFileName());
         var model = new RedirectingModel();
         model.insertText(new Position(0, 0), "draft");
-        model.afterNextLineRead(() -> redirect(alias, secondAlias.getFileName()));
+        model.duringNextEncoding(() -> redirect(alias, secondAlias.getFileName()));
 
         model.save(alias, model.fileMetadata(), SaveDisposition.REPLACE_EXISTING);
 
         assertEquals("draft", Files.readString(target));
         assertEquals("draft", Files.readString(alias));
         assertEquals(target, model.fileBaseline().target());
+        assertEquals(secondAlias.getFileName(), Files.readSymbolicLink(alias));
         assertTrue(Files.isSymbolicLink(alias));
         assertNoStagedFiles();
     }
@@ -143,7 +152,7 @@ class TextModelSaveTargetIdentityTest {
         EditorState state = new EditorState();
         EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model));
         engine.insertInput("draft");
-        model.afterNextLineRead(() -> redirect(alias, second.getFileName()));
+        model.duringNextEncoding(() -> redirect(alias, second.getFileName()));
 
         engine.saveAs(alias.resolve("target.txt"), SaveDisposition.REPLACE_EXISTING);
 
@@ -151,6 +160,7 @@ class TextModelSaveTargetIdentityTest {
         assertEquals("before second", Files.readString(secondFile));
         assertEquals(firstFile, state.getCurrentFile());
         assertEquals(firstFile, model.fileBaseline().target());
+        assertEquals(second.getFileName(), Files.readSymbolicLink(alias));
         assertFalse(state.isDirty());
         assertNoStagedFiles();
     }
@@ -160,7 +170,7 @@ class TextModelSaveTargetIdentityTest {
         Path target = directory.resolve("new.txt");
         var model = new RedirectingModel();
         model.insertText(new Position(0, 0), "draft");
-        model.afterNextLineRead(() -> Files.writeString(target, "another writer"));
+        model.duringNextEncoding(() -> Files.writeString(target, "another writer"));
 
         assertThrows(FileAlreadyExistsException.class,
             () -> model.save(target, model.fileMetadata(), SaveDisposition.CREATE_NEW));
@@ -184,23 +194,114 @@ class TextModelSaveTargetIdentityTest {
     @FunctionalInterface
     private interface FileChange { void apply() throws IOException; }
 
-    /** Saving reads its first line after target resolution; that read controls the external change. */
+    /** A real charset encoder controls the change after the detached writer resolves its target. */
     private static final class RedirectingModel extends TextModel {
         private FileChange change;
 
         RedirectingModel() { super(new SimpleLineBuffer()); }
 
-        void afterNextLineRead(FileChange next) { change = next; }
+        void duringNextEncoding(FileChange next) { change = next; }
 
-        @Override public String getLine(int index) {
-            String line = super.getLine(index);
+        @Override public SaveRequest prepareSave(Path path, DocumentFileMetadata metadata,
+                                                SaveDisposition disposition, boolean checkBaseline) {
+            return super.prepareSave(path, atEncodingBoundary(metadata), disposition, checkBaseline);
+        }
+
+        @Override public void save(Path path, DocumentFileMetadata metadata, SaveDisposition disposition)
+            throws IOException {
+            super.save(path, atEncodingBoundary(metadata), disposition);
+        }
+
+        private DocumentFileMetadata atEncodingBoundary(DocumentFileMetadata metadata) {
+            Charset charset = new EncodingCheckpointCharset(metadata.charset(), this::applyPendingChange);
+            return new DocumentFileMetadata(charset, metadata.bomKind(), metadata.defaultLineSeparator(),
+                metadata.lineSeparators());
+        }
+
+        private void applyPendingChange() {
             FileChange next = change;
             change = null;
             if (next != null) {
                 try { next.apply(); }
                 catch (IOException failure) { throw new UncheckedIOException(failure); }
             }
-            return line;
+        }
+    }
+
+    private static final class EncodingCheckpointCharset extends Charset {
+        private final Charset delegate;
+        private final Runnable boundary;
+
+        private EncodingCheckpointCharset(Charset delegate, Runnable boundary) {
+            // Charset equality and BOM compatibility use this canonical name.
+            super(delegate.name(), new String[0]);
+            this.delegate = delegate;
+            this.boundary = boundary;
+        }
+
+        @Override public boolean contains(Charset charset) {
+            return equals(charset) || delegate.contains(charset);
+        }
+
+        @Override public CharsetDecoder newDecoder() { return delegate.newDecoder(); }
+
+        @Override public CharsetEncoder newEncoder() {
+            return new EncodingCheckpointEncoder(this, delegate.newEncoder(), boundary);
+        }
+    }
+
+    private static final class EncodingCheckpointEncoder extends CharsetEncoder {
+        private final CharsetEncoder delegate;
+        private final Runnable boundary;
+        private final CharBuffer empty = CharBuffer.allocate(0);
+        private boolean inputEnded;
+        private boolean boundaryReached;
+
+        private EncodingCheckpointEncoder(Charset charset, CharsetEncoder delegate, Runnable boundary) {
+            super(charset, delegate.averageBytesPerChar(), delegate.maxBytesPerChar());
+            this.delegate = delegate;
+            this.boundary = boundary;
+        }
+
+        @Override protected CoderResult encodeLoop(CharBuffer input, ByteBuffer output) {
+            // Metadata construction probes the charset with "A". Every test's
+            // staged document starts with "draft", so only real document bytes
+            // trigger the race, independently of preparation or snapshot reads.
+            int at = input.position();
+            if (!boundaryReached && input.remaining() >= 5 && input.get(at) == 'd'
+                && input.get(at + 1) == 'r' && input.get(at + 2) == 'a'
+                && input.get(at + 3) == 'f' && input.get(at + 4) == 't') {
+                boundaryReached = true;
+                boundary.run();
+            }
+            return delegate.encode(input, output, false);
+        }
+
+        @Override protected CoderResult implFlush(ByteBuffer output) {
+            if (!inputEnded) {
+                CoderResult end = delegate.encode(empty, output, true);
+                if (!end.isUnderflow()) return end;
+                inputEnded = true;
+            }
+            return delegate.flush(output);
+        }
+
+        @Override protected void implReset() {
+            delegate.reset();
+            inputEnded = false;
+            boundaryReached = false;
+        }
+
+        @Override protected void implOnMalformedInput(CodingErrorAction action) {
+            if (delegate != null) delegate.onMalformedInput(action);
+        }
+
+        @Override protected void implOnUnmappableCharacter(CodingErrorAction action) {
+            if (delegate != null) delegate.onUnmappableCharacter(action);
+        }
+
+        @Override protected void implReplaceWith(byte[] replacement) {
+            if (delegate != null) delegate.replaceWith(replacement);
         }
     }
 }

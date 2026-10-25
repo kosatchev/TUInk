@@ -1,5 +1,6 @@
 package dev.tuink.tui;
 
+import static dev.tuink.tui.SaveWorkflowTestSupport.finish;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -62,8 +63,8 @@ class SaveAsSuggestionWorkflowTest {
 
         Path suggestion = suggested(context, true);
         assertEquals(directory.resolve("source-copy-3.txt"), suggestion);
-        var result = SaveWorkflow.saveAsInput(context, TuinkCommand.EDIT_INSERT_NEWLINE,
-            UiModalState.saveAs(), SavePathInput.format(suggestion));
+        var result = finish(context, SaveWorkflow.saveAsInput(context, TuinkCommand.EDIT_INSERT_NEWLINE,
+            UiModalState.saveAs(), SavePathInput.format(suggestion)));
 
         assertTrue(result.modalState().isNone());
         assertEquals("edited original", Files.readString(suggestion));
@@ -197,8 +198,8 @@ class SaveAsSuggestionWorkflowTest {
             assertNotEquals(sourcePath, target);
             assertFalse(Files.exists(target));
 
-            var result = SaveWorkflow.saveAsInput(context, TuinkCommand.EDIT_INSERT_NEWLINE,
-                action.modalState(), filename);
+            var result = finish(context, SaveWorkflow.saveAsInput(context, TuinkCommand.EDIT_INSERT_NEWLINE,
+                action.modalState(), filename));
 
             assertTrue(result.modalState().isNone(), result.notice().message());
             assertEquals("edited original", Files.readString(target));
@@ -222,8 +223,8 @@ class SaveAsSuggestionWorkflowTest {
         Path target = suggested(context, true);
 
         assertEquals(directory.resolve("a".repeat(243) + "-copy-11.txt"), target);
-        var result = SaveWorkflow.saveAsInput(context, TuinkCommand.EDIT_INSERT_NEWLINE,
-            UiModalState.saveAs(), SavePathInput.format(target));
+        var result = finish(context, SaveWorkflow.saveAsInput(context, TuinkCommand.EDIT_INSERT_NEWLINE,
+            UiModalState.saveAs(), SavePathInput.format(target)));
         assertTrue(result.modalState().isNone(), result.notice().message());
         assertEquals("edited original", Files.readString(target));
         assertEquals("original", Files.readString(sourcePath));

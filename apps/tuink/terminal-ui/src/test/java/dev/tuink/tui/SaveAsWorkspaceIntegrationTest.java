@@ -109,10 +109,26 @@ class SaveAsWorkspaceIntegrationTest {
 
             window.event(new TextInput("y"));
 
-            assertBlocked(window, link);
+            assertFilenameRetry(window, link);
+            assertTrue(window.notification.message.contains("Save target changed outside TUInk"),
+                window.notification.message);
+            assertTrue(window.notification.message.contains("Choose the target again"),
+                window.notification.message);
             assertEquals("original", Files.readString(window.document));
             assertEquals("unrelated", Files.readString(unrelated));
             assertEquals(List.of("source draft"), window.active().tabSession().model().snapshotLines());
+            assertNull(window.active().state().getCurrentFile());
+            assertTrue(window.active().state().isDirty());
+            assertEquals(window.document.getFileName(), Files.readSymbolicLink(link));
+
+            Path retry = directory.resolve("retry.txt");
+            fillFilename(window, retry);
+
+            assertEquals("source draft", Files.readString(retry));
+            assertEquals(retry, window.active().state().getCurrentFile());
+            assertFalse(window.active().state().isDirty());
+            assertEquals("original", Files.readString(window.document));
+            assertEquals("unrelated", Files.readString(unrelated));
         }
     }
 
@@ -247,10 +263,14 @@ class SaveAsWorkspaceIntegrationTest {
     }
 
     private static void assertBlocked(EditorWindowFixture window, Path target) {
+        assertFilenameRetry(window, target);
+        assertTrue(window.notification.message.contains("already open in tab 1"), window.notification.message);
+    }
+
+    private static void assertFilenameRetry(EditorWindowFixture window, Path target) {
         assertTrue(window.controller.running());
         assertEquals(2, window.tabs.size());
         assertEquals(target.toString(), window.filename.text());
-        assertTrue(window.notification.message.contains("already open in tab 1"), window.notification.message);
         assertTrue(window.screenRow(window.height - 2).startsWith("Save As: "));
     }
 }

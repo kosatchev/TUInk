@@ -101,6 +101,35 @@ class Session:
         os.write(self.fd, data)
         self.drain(wait)
 
+    def save(self, document, expected, description="completed save", timeout=3):
+        """Wait for the UI owner to acknowledge a save before sending more edits.
+
+        Atomic file publication happens on a worker before the UI unlocks the
+        document. A previous Saved notice is not an acknowledgement of this
+        request: first observe its dirty frame or the old notice disappearing.
+        Callers send their editing keys separately before entering this barrier.
+        """
+        self.expect(lambda: "*" in self.screen.lines[0] or "Saved " not in self.screen.text,
+                    "a fresh save acknowledgement boundary", timeout=max(timeout, 5))
+        self.send(b"\x13")
+        self.expect_saved(document, expected, description, timeout=timeout)
+
+    def expect_saved(self, document, expected, description="completed save", timeout=3):
+        expected_bytes = expected.encode("utf-8") if isinstance(expected, str) else expected
+
+        def completed():
+            # Both acknowledgements matter: bytes alone precede completion,
+            # while a stale notice can survive the following dirty frame.
+            if ("Saved " not in self.screen.text or "Saving document" in self.screen.text
+                    or "*" in self.screen.lines[0] or "Save As: " in self.screen.text):
+                return False
+            try:
+                return Path(document).read_bytes() == expected_bytes
+            except FileNotFoundError:
+                return False
+
+        self.expect(completed, description, timeout=timeout)
+
     def mouse(self, code, row, col, release=False):
         self.send(f'\x1b[<{code};{col + 1};{row + 1}{"m" if release else "M"}'.encode("ascii"))
 

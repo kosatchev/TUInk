@@ -335,7 +335,7 @@ class Regressions:
             for _ in range(3):
                 session.mouse(65, 10, 15)
             before = document_rows(session)
-            session.send(b"\x13")  # Save
+            session.save(document, original)
             assert document_rows(session) == before, session.screen.text
             session.send(b"\x03")  # Copy
             assert document_rows(session) == before, session.screen.text
@@ -352,11 +352,9 @@ class Regressions:
         with self.session("history", document) as session:
             session.send("draft 中e\u0301".encode("utf-8"))
             session.send(b"\x1a")
-            session.send(b"\x13")
-            assert document.read_text(encoding="utf-8") == "base\n"
+            session.save(document, "base\n")
             session.send(b"\x19")
-            session.send(b"\x13")
-            assert document.read_text(encoding="utf-8") == "draft 中e\u0301base\n"
+            session.save(document, "draft 中e\u0301base\n")
             session.finish()
 
     def grapheme_edit_caret(self):
@@ -445,8 +443,8 @@ class Regressions:
             with self.session("fragmented-" + name, document) as session:
                 # Complete an observable edit/undo before splitting input, so the
                 # initial JVM startup cannot buffer both chunks before decoding.
-                session.send(b"Z\x1a\x13")
-                session.expect(lambda: "Saved" in session.screen.text, "ready input loop")
+                session.send(b"Z\x1a")
+                session.save(document, "AB", "ready input loop")
                 session.send(prefix, gap)
                 session.send(suffix + b"X\x13")
                 session.expect(lambda: document.read_text(encoding="utf-8") == "AXB",
@@ -475,8 +473,8 @@ class Regressions:
         ):
             document = self.fixture("escape-before-arrow-" + name, "AB")
             with self.session("escape-before-arrow-" + name, document) as session:
-                session.send(b"Z\x1a\x13")
-                session.expect(lambda: "Saved" in session.screen.text, "ready input loop")
+                session.send(b"Z\x1a")
+                session.save(document, "AB", "ready input loop")
                 if opening:
                     session.send(opening)
                 session.send(b"\x1b", 0.1)
@@ -489,8 +487,8 @@ class Regressions:
 
         document = self.fixture("double-escape", "AB")
         with self.session("double-escape", document) as session:
-            session.send(b"Z\x1a\x13")
-            session.expect(lambda: "Saved" in session.screen.text, "ready input loop")
+            session.send(b"Z\x1a")
+            session.save(document, "AB", "ready input loop")
             session.send(b"\x06needle\x1bi")
             session.expect(lambda: "Find: needle" in session.screen.text and "New" in session.screen.lines[2],
                            "File menu above the search panel")
@@ -505,13 +503,11 @@ class Regressions:
                              ("overlong-csi", b"\x1b[" + b"1" * 70)):
             document = self.fixture("control-cancels-" + name, "AB")
             with self.session("control-cancels-" + name, document) as session:
-                session.send(b"X\x13")
-                session.expect(lambda: document.read_text(encoding="utf-8") == "XAB", "ready input loop")
+                session.send(b"X")
+                session.save(document, "XAB", "ready input loop")
                 session.send(b"Y")
                 session.send(prefix, 1.0)
-                session.send(b"\x13")
-                session.expect(lambda: document.read_text(encoding="utf-8") == "XYAB",
-                               "Ctrl+S cancels an incomplete terminal sequence and saves")
+                session.save(document, "XYAB", "Ctrl+S cancels an incomplete terminal sequence and saves")
                 session.send(prefix, 1.0)
                 session.finish()
 
@@ -523,25 +519,23 @@ class Regressions:
             assert status(session).startswith("Ln 3/3, Col 5/"), session.screen.text
             session.send(b"\x1b[1;5H")  # Ctrl+Home
             assert status(session).startswith("Ln 1/3, Col 1/"), session.screen.text
-            session.send(b"\x1b[1;6FX\x13")  # Ctrl+Shift+End
-            session.expect(lambda: document.read_text(encoding="utf-8") == "X",
-                           "saving replacement of the whole document")
-            session.send(b"\x1a\x13")
-            session.expect(lambda: document.read_text(encoding="utf-8") == original,
-                           "saving undo of the navigation edit")
+            session.send(b"\x1b[1;6FX")  # Ctrl+Shift+End
+            session.save(document, "X", "saving replacement of the whole document")
+            session.send(b"\x1a")
+            session.save(document, original, "saving undo of the navigation edit")
 
-            session.send(b"\x1b[1;5F\x1b[1;2HZ\x13")  # End, Shift+Home
-            session.expect(lambda: document.read_text(encoding="utf-8") == "Ae\u0301😀\nsecond\nZ",
-                           "saving replacement of the last line")
-            session.send(b"\x1a\x13\x1b[1;5H\x1b[1;2FY\x13")  # Home, Shift+End
-            session.expect(lambda: document.read_text(encoding="utf-8") == "Y\nsecond\nlast",
-                           "saving replacement of the first line")
-            session.send(b"\x1a\x13\x1b[1;5F\x1b[1;6HW\x13")  # Ctrl+Shift+Home
-            session.expect(lambda: document.read_text(encoding="utf-8") == "W",
-                           "saving backward selection replacement")
-            session.send(b"\x1a\x13")
-            session.expect(lambda: document.read_text(encoding="utf-8") == original,
-                           "saving undo of the navigation edit")
+            session.send(b"\x1b[1;5F\x1b[1;2HZ")  # End, Shift+Home
+            session.save(document, "Ae\u0301😀\nsecond\nZ", "saving replacement of the last line")
+            session.send(b"\x1a")
+            session.save(document, original, "saving undo of the last-line replacement")
+            session.send(b"\x1b[1;5H\x1b[1;2FY")  # Home, Shift+End
+            session.save(document, "Y\nsecond\nlast", "saving replacement of the first line")
+            session.send(b"\x1a")
+            session.save(document, original, "saving undo of the first-line replacement")
+            session.send(b"\x1b[1;5F\x1b[1;6HW")  # Ctrl+Shift+Home
+            session.save(document, "W", "saving backward selection replacement")
+            session.send(b"\x1a")
+            session.save(document, original, "saving undo of the navigation edit")
             session.finish()
 
     def quit_confirmation(self):
@@ -616,9 +610,8 @@ class Regressions:
         with self.session("paste-history", document) as session:
             session.send(b"a\x1b[200~PASTED\x1b[201~b")
             for expected in ("aPASTED", "a", ""):
-                session.send(b"\x1a\x13")
-                session.expect(lambda: document.read_text(encoding="utf-8") == expected,
-                               "saving each paste history undo")
+                session.send(b"\x1a")
+                session.save(document, expected, "saving each paste history undo")
             session.finish()
 
     def settings(self):
@@ -914,7 +907,7 @@ class Regressions:
         with self.session("enhanced-text", document) as session:
             session.send(payload)
             session.expect(lambda: expected in session.screen.text, "Shift-only enhanced document input")
-            session.send(b"\x13")
+            session.save(document, expected)
             session.send(b"\x06")
             session.send(payload)
             session.expect(lambda: "Find: " + expected in session.screen.text,
@@ -967,11 +960,9 @@ class Regressions:
             session.send(b"\x01")
             session.send(str(target).encode("utf-8"))
             session.send(b"\r")
-            session.expect(lambda: target.is_file() and target.read_text(encoding="utf-8") == "source draft",
-                           "saving the draft under a different name")
+            session.expect_saved(target, "source draft", "saving the draft under a different name")
             session.send(b"\x1b[5;5~")
-            session.send(b"\x13")
-            session.expect(lambda: "Saved " in session.screen.text, "saving the original tab")
+            session.save(document, "original", "saving the original tab")
             assert document.read_text(encoding="utf-8") == "original"
             session.finish()
 
@@ -1045,13 +1036,12 @@ class Regressions:
             session.send(b"\r")
             session.expect(lambda: "original" in session.screen.text, "opening raw Unix filename")
             session.send(b"first ")
-            session.send(b"\x13")
-            session.expect(lambda: document.read_bytes() == b"first original", "saving raw Unix filename")
+            session.save(document, b"first original", "saving raw Unix filename")
             assert not neighbour.exists(), "save created a different filename"
             session.send(b"\x0b")
             session.expect(lambda: "%FF" in session.screen.text, "lossless Save As filename")
             session.send(b"\r")
-            session.expect(lambda: "Save As: " not in session.screen.text, "Save As keeps the original path")
+            session.expect_saved(document, b"first original", "Save As keeps the original path")
             assert not neighbour.exists(), "Save As created a different filename"
             neighbour.write_bytes(b"first original")
             session.send(b"second ")
@@ -1084,12 +1074,10 @@ class Regressions:
             document.write_text(original, encoding="utf-8")
             with self.session("literal-indentation-" + name, document) as session:
                 session.send(b"\x1b[B\x1b[F\r")
-                session.send(b"\x13")
-                session.expect(lambda: document.read_text(encoding="utf-8") == expected,
-                               "newline copies whitespace without syntax or list continuation inside a literal")
-                session.send(b"\x1a\x13")
-                session.expect(lambda: document.read_text(encoding="utf-8") == original,
-                               "undo restores the original multiline content")
+                session.save(document, expected,
+                             "newline copies whitespace without syntax or list continuation inside a literal")
+                session.send(b"\x1a")
+                session.save(document, original, "undo restores the original multiline content")
                 session.finish()
 
     def field_memory(self):
@@ -1220,12 +1208,9 @@ class Regressions:
             session.send(b"\x1b[200~" + b"x\n" * 524288 + b"\x1b[201~")
             session.expect(lambda: "Replacement result is too large" in session.screen.text,
                            "rejecting an oversized paste without leaving the editor")
-            session.send(b"\x13")
-            session.expect(lambda: document.read_text(encoding="utf-8") == draft,
-                           "the selected draft survives the rejected paste")
-            session.send(b"\x1a\x13")
-            session.expect(lambda: document.read_text(encoding="utf-8") == original,
-                           "undo history survives the rejected paste")
+            session.save(document, draft, "the selected draft survives the rejected paste")
+            session.send(b"\x1a")
+            session.save(document, original, "undo history survives the rejected paste")
             session.finish()
 
     def recovery_lock_cleanup(self):
@@ -1241,8 +1226,7 @@ class Regressions:
             session.send(b"draft ")
             session.expect(lambda: recovery_snapshot_present(directory, "draft original"),
                            "an actual background snapshot is committed", timeout=5)
-            session.send(b"\x13")
-            session.expect(lambda: document.read_text(encoding="utf-8") == "draft original", "saving the draft")
+            session.save(document, "draft original", "saving the draft")
             session.finish()
         assert not [path for path in directory.glob("*.lock") if path.name != ".namespace.lock"], list(directory.iterdir())
 
@@ -1255,8 +1239,7 @@ class Regressions:
             session.send(b"draft ")
             session.expect(lambda: recovery_snapshot_present(recovery, "draft original"),
                            "recovery uses the selected XDG profile", timeout=5)
-            session.send(b"\x13")
-            session.expect(lambda: document.read_text(encoding="utf-8") == "draft original", "saving the draft")
+            session.save(document, "draft original", "saving the draft")
             session.send(b"\x1bOR\r")  # Explicitly change Show Tab Bar so preferences are saved.
             session.finish()
         assert (config / "tuink/tuink.properties").is_file()
@@ -1279,10 +1262,10 @@ class Regressions:
                            "bounded rejection of an expanding replacement")
             session.snapshot("replacement-rejected")
             session.send(b"\x1b", 0.7)
-            session.send(b"\x1a\x13")
-            session.expect(lambda: "Saved " in session.screen.text, "saving after a rejected replacement")
-            assert document.read_text(encoding="utf-8") == original
-            session.send(b"z\x1a\x13")
+            session.send(b"\x1a")
+            session.save(document, original, "saving after a rejected replacement")
+            session.send(b"z\x1a")
+            session.save(document, original)
             session.finish()
         assert document.read_text(encoding="utf-8") == original
 

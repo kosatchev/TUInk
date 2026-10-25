@@ -30,9 +30,16 @@ along with the resolved target path. Normal save and Save As to the current file
 reject changed, removed, retargeted, or unverifiable files before committing.
 Recovery retains this disk baseline separately from the edited document text.
 Save As to a different path remains the way to preserve both versions.
-Every save also resolves its target before staging and again before commit.
-If a symbolic link redirects the path to a different target during staging,
-the save fails without publishing the staged bytes or marking the document saved.
+Save As captures immutable document/history preparation on the owner, then
+inspects the address on a worker. The inspection pins the physical target,
+canonical parent identity, existing-file identity/attributes and a streaming
+SHA-256 version. Workspace/user approval binds to that inspection. The worker
+checks the submitted spelling before staging, then writes only through the
+pinned canonical parent and rechecks the target leaf/version before commit.
+It never selects another destination after approval. Retargeting before writing
+or changing the target leaf during staging fails without marking the document
+saved; changing the original parent alias during encoding cannot redirect the
+already canonicalized destination.
 Malformed BOM-declared input and text not representable in the retained charset
 fail explicitly; encoding never substitutes replacement characters silently.
 BOM-less UTF-16 is intentionally not auto-detected: UTF-16 input must declare

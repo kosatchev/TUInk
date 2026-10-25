@@ -6,13 +6,24 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import dev.tuink.core.AmbiguousDocumentEncodingException;
+import dev.tuink.core.DocumentOpenMode;
 import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.Position;
 import dev.tuink.core.SaveDisposition;
+import dev.tuink.core.TabSession;
+import dev.tuink.core.TextModel;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.AccessDeniedException;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -47,9 +58,13 @@ class FilePickerOpenWorkflowTest {
             assertNull(rejected.openedDocument());
             assertEquals(FilePickerOpenWorkflow.NoticeKind.WARNING, rejected.noticeKind());
             Path absent = directory.resolve("missing.txt");
-            var missing = FilePickerOpenWorkflow.apply(new OpenFileInputRouter.OpenFile(absent), tree,
+            var requested = FilePickerOpenWorkflow.apply(new OpenFileInputRouter.OpenFile(absent), tree,
                 List.of(), -1,
-                () -> TuiDocumentSession.create(new EditorClipboard()));
+                () -> fail("requesting a read must not allocate a document"));
+            assertNotNull(requested.pendingOpen());
+            assertNull(requested.openedDocument());
+            var missing = complete(requested, List.of(), -1,
+                () -> fail("a failed read must not allocate a document"));
             assertTrue(missing.openFileMode());
             assertNull(missing.openedDocument());
             assertEquals(FilePickerOpenWorkflow.NoticeKind.ERROR, missing.noticeKind());
@@ -65,9 +80,12 @@ class FilePickerOpenWorkflowTest {
         EditorClipboard clipboard = new EditorClipboard();
         clipboard.setText("clipboard");
         try (OpenFileTreeController tree = new OpenFileTreeController(directory, true, false)) {
-            var opened = FilePickerOpenWorkflow.apply(new OpenFileInputRouter.OpenFile(file), tree,
+            var requested = FilePickerOpenWorkflow.apply(new OpenFileInputRouter.OpenFile(file), tree,
                 List.of(), -1,
-                () -> TuiDocumentSession.create(clipboard));
+                () -> fail("requesting a read must not allocate a document"));
+            assertNotNull(requested.pendingOpen());
+            assertEquals(DocumentOpenMode.DETECT, requested.pendingOpen().mode());
+            var opened = complete(requested, List.of(), -1, () -> TuiDocumentSession.create(clipboard));
             assertFalse(opened.openFileMode());
             assertNotNull(opened.openedDocument());
             var tab = opened.openedDocument().view();
@@ -95,6 +113,7 @@ class FilePickerOpenWorkflowTest {
             assertFalse(result.openFileMode());
             assertNull(result.openedDocument());
             assertEquals(0, result.activateTabIndex());
+            assertNull(result.pendingOpen());
             assertEquals(List.of("draft saved"), existing.model().snapshotLines());
             assertEquals(revision, existing.model().revision());
             assertEquals(new Position(0, 2), existing.state().getCursor());
@@ -102,6 +121,112 @@ class FilePickerOpenWorkflowTest {
             existing.engine().undo();
             assertEquals(List.of("saved"), existing.model().snapshotLines());
             assertFalse(existing.state().isDirty());
+        }
+    }
+
+    @Test
+    void preparedReadIsPublishedWithoutReopeningTheFile() throws Exception {
+        Path file = Files.writeString(directory.resolve("read-once.txt"), "decoded contents");
+        var request = new FilePickerOpenWorkflow.OpenRequest(file, DocumentOpenMode.DETECT);
+        TextModel.PreparedLoad loaded = request.read();
+        Files.delete(file);
+
+        var result = FilePickerOpenWorkflow.complete(request, loaded, null, List.of(), -1,
+            () -> TuiDocumentSession.create(new EditorClipboard()));
+
+        assertNotNull(result.openedDocument());
+        assertEquals(List.of("decoded contents"), result.openedDocument().view().model().snapshotLines());
+        assertEquals(file, result.openedDocument().view().state().getCurrentFile());
+        assertFalse(Files.exists(file));
+    }
+
+    @Test
+    void completionRechecksAliasesAndPreservesADocumentOpenedDuringTheRead() throws Exception {
+        assumeTrue(Files.getFileStore(directory).supportsFileAttributeView("posix"));
+        Path file = Files.writeString(directory.resolve("original.txt"), "disk");
+        Path symlink = Files.createSymbolicLink(directory.resolve("symbolic.txt"), file.getFileName());
+        Path hardlink = Files.createLink(directory.resolve("hard.txt"), file);
+        var request = new FilePickerOpenWorkflow.OpenRequest(file, DocumentOpenMode.DETECT);
+        TextModel.PreparedLoad loaded = request.read();
+        for (Path alias : List.of(file, symlink, hardlink)) {
+            var existing = TuiDocumentSession.create(new EditorClipboard()).view();
+            existing.engine().open(alias);
+            existing.engine().insertInput("draft ");
+            existing.engine().moveCursorTo(new Position(0, 2));
+            long revision = existing.model().revision();
+
+            var result = FilePickerOpenWorkflow.complete(request, loaded, null, List.of(existing), 0,
+                () -> fail("completion must reuse the existing physical file"));
+
+            assertEquals(0, result.activateTabIndex());
+            assertNull(result.openedDocument());
+            assertEquals(revision, existing.model().revision());
+            assertEquals(List.of("draft disk"), existing.model().snapshotLines());
+            assertEquals(new Position(0, 2), existing.state().getCursor());
+            assertTrue(existing.state().isDirty());
+        }
+    }
+
+    @Test
+    void retargetedSelectionCannotSubstituteAnotherDocumentForThePreparedBytes() throws Exception {
+        assumeTrue(Files.getFileStore(directory).supportsFileAttributeView("posix"));
+        Path first = Files.writeString(directory.resolve("first.txt"), "first");
+        Path second = Files.writeString(directory.resolve("second.txt"), "second");
+        Path selected = Files.createSymbolicLink(directory.resolve("selected.txt"), first.getFileName());
+        var request = new FilePickerOpenWorkflow.OpenRequest(selected, DocumentOpenMode.DETECT);
+        TextModel.PreparedLoad loaded = request.read();
+        Files.delete(selected);
+        Files.createSymbolicLink(selected, second.getFileName());
+        var other = TuiDocumentSession.create(new EditorClipboard()).view();
+        other.engine().open(second);
+
+        var result = FilePickerOpenWorkflow.complete(request, loaded, null, List.of(other), 0,
+            () -> TuiDocumentSession.create(new EditorClipboard()));
+
+        assertEquals(-1, result.activateTabIndex());
+        assertNotNull(result.openedDocument());
+        assertEquals(List.of("first"), result.openedDocument().view().model().snapshotLines());
+        assertEquals(first, result.openedDocument().view().model().fileBaseline().target());
+        assertEquals(List.of("second"), other.model().snapshotLines());
+    }
+
+    @Test
+    void ambiguityAndExplicitUtf16ChoiceRemainSeparateReadRequests() throws Exception {
+        Path file = Files.write(directory.resolve("ambiguous.txt"),
+            new byte[] {(byte) 0xFF, (byte) 0xFE, 0, 0, 65, 0, 0, 0});
+        var request = new FilePickerOpenWorkflow.OpenRequest(file, DocumentOpenMode.DETECT);
+        var result = FilePickerOpenWorkflow.complete(request, null, new AmbiguousDocumentEncodingException(),
+            List.of(), -1, () -> fail("an ambiguous read must not allocate a document"));
+        assertEquals(file, result.pendingExplicitOpenPath());
+        assertNull(result.pendingOpen());
+        assertFalse(result.openFileMode());
+
+        var explicit = FilePickerOpenWorkflow.openAsUtf16(file, List.of(), -1,
+            () -> fail("the explicit choice must still decode on the worker"));
+        assertNotNull(explicit.pendingOpen());
+        assertEquals(DocumentOpenMode.UTF_16LE, explicit.pendingOpen().mode());
+        var opened = complete(explicit, List.of(), -1,
+            () -> TuiDocumentSession.create(new EditorClipboard()));
+        assertEquals(List.of("\0A\0"), opened.openedDocument().view().model().snapshotLines());
+        assertEquals(StandardCharsets.UTF_16LE, opened.openedDocument().view().state().getFileEncoding());
+    }
+
+    @Test
+    void completionPreservesPathSpecificAndGenericFailureMessages() {
+        Path file = directory.resolve("selected.txt");
+        var request = new FilePickerOpenWorkflow.OpenRequest(file, DocumentOpenMode.DETECT);
+        List<IOException> failures = List.of(new NoSuchFileException(file.toString()),
+            new AccessDeniedException(file.toString()), new FileSystemException(file.toString(), null, "device unavailable"),
+            new IOException("read failed"), new IOException());
+        List<String> reasons = List.of("file no longer exists", "permission denied", "device unavailable", "read failed", "I/O error");
+        for (int index = 0; index < failures.size(); index++) {
+            var result = FilePickerOpenWorkflow.complete(request, null, failures.get(index), List.of(), -1,
+                () -> fail("failed reads must not allocate documents"));
+            assertTrue(result.openFileMode());
+            assertEquals(FilePickerOpenWorkflow.NoticeKind.ERROR, result.noticeKind());
+            assertEquals(reasons.get(index), result.notice().summary());
+            assertEquals("Open failed: " + reasons.get(index) + (index < 3 ? ": " + file : ""), result.message());
+            assertEquals(index < 3 ? file : null, result.notice().path());
         }
     }
 
@@ -116,5 +241,18 @@ class FilePickerOpenWorkflowTest {
                                                                       OpenFileTreeController tree) {
         return FilePickerOpenWorkflow.apply(intent, tree, List.of(), -1,
             () -> fail("navigation must not allocate a document"));
+    }
+
+    private static FilePickerOpenWorkflow.Result complete(FilePickerOpenWorkflow.Result requested,
+                                                          List<TabSession> tabs, int active,
+                                                          Supplier<TuiDocumentSession> newDocument) {
+        var request = requested.pendingOpen();
+        TextModel.PreparedLoad loaded;
+        try {
+            loaded = request.read();
+        } catch (IOException failure) {
+            return FilePickerOpenWorkflow.complete(request, null, failure, tabs, active, newDocument);
+        }
+        return FilePickerOpenWorkflow.complete(request, loaded, null, tabs, active, newDocument);
     }
 }

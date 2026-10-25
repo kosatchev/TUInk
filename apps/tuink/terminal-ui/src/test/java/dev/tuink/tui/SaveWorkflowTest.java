@@ -1,5 +1,6 @@
 package dev.tuink.tui;
 
+import static dev.tuink.tui.SaveWorkflowTestSupport.finish;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -31,8 +32,8 @@ class SaveWorkflowTest {
         tab.engine().insertInput("😀");
         SaveWorkflow.Context context = context(List.of(tab));
         Path target = directory.resolve("new.txt");
-        var direct = SaveWorkflow.saveAsInput(context, TuinkCommand.EDIT_INSERT_NEWLINE,
-            UiModalState.saveAsForCloseTab(0), target.toString());
+        var direct = finish(context, SaveWorkflow.saveAsInput(context, TuinkCommand.EDIT_INSERT_NEWLINE,
+            UiModalState.saveAsForCloseTab(0), target.toString()));
         assertEquals(UiModalState.saveAsForCloseTab(0).offerUtf8(), direct.modalState());
         assertFalse(direct.focusFilename());
         assertFalse(direct.refreshSavedHighlighter());
@@ -40,8 +41,12 @@ class SaveWorkflowTest {
         assertFalse(Files.exists(target));
 
         Files.writeString(target, "untouched");
-        UiModalState overwrite = UiModalState.saveAsForQuit().confirmOverwrite(target);
-        var confirmed = SaveWorkflow.overwrite(context, overwrite, ConfirmChoice.SAVE);
+        var inspected = finish(context, SaveWorkflow.saveAsInput(context, TuinkCommand.EDIT_INSERT_NEWLINE,
+            UiModalState.saveAsForQuit(), target.toString()));
+        UiModalState overwrite = inspected.modalState();
+        var approvedContext = new SaveWorkflow.Context(context.tabs(), context.activeTabIndex(),
+            context.suggestions(), inspected.overwriteApproval());
+        var confirmed = finish(approvedContext, SaveWorkflow.overwrite(approvedContext, overwrite, ConfirmChoice.SAVE));
         assertEquals(overwrite.offerUtf8(), confirmed.modalState());
         assertFalse(confirmed.focusFilename());
         assertFalse(confirmed.refreshSavedHighlighter());
@@ -63,7 +68,8 @@ class SaveWorkflowTest {
         TabSession first = namedDirtyTab("first.txt");
         TabSession second = namedDirtyTab("second.txt");
         Files.writeString(second.state().getCurrentFile(), "external");
-        var result = SaveWorkflow.quit(context(List.of(first, second)), ConfirmChoice.SAVE);
+        var context = context(List.of(first, second));
+        var result = finish(context, SaveWorkflow.quit(context, ConfirmChoice.SAVE));
         assertTrue(result.running());
         assertEquals(UiModalState.quitConfirm(), result.modalState());
         assertEquals(1, result.activateTabIndex());
@@ -81,8 +87,9 @@ class SaveWorkflowTest {
         TabSession second = emptyTab();
         first.engine().insertInput("first");
         second.engine().insertInput("second");
-        var result = SaveWorkflow.saveAsInput(context(List.of(first, second)), TuinkCommand.EDIT_INSERT_NEWLINE,
-            UiModalState.saveAsForQuit(), directory.resolve("first.txt").toString());
+        var context = context(List.of(first, second));
+        var result = finish(context, SaveWorkflow.saveAsInput(context, TuinkCommand.EDIT_INSERT_NEWLINE,
+            UiModalState.saveAsForQuit(), directory.resolve("first.txt").toString()));
         assertTrue(result.running());
         assertTrue(result.refreshSavedHighlighter());
         assertEquals(UiModalState.saveAsForQuit(), result.modalState());

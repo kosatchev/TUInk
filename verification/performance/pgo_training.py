@@ -8,9 +8,13 @@ from dataclasses import dataclass
 import datetime as dt
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
+
+REPOSITORY_ROOT = next(parent for parent in Path(__file__).resolve().parents
+                       if (parent / 'settings.gradle').is_file() and (parent / 'gradlew').is_file())
 import pty
 import selectors
 import signal
@@ -23,6 +27,12 @@ import tty
 import unittest
 
 sys.dont_write_bytecode = True
+
+TERMINAL_ORACLE = REPOSITORY_ROOT / "verification/ui/vt.py"
+_oracle_spec = importlib.util.spec_from_file_location("tuink_pgo_vt", TERMINAL_ORACLE)
+_oracle = importlib.util.module_from_spec(_oracle_spec)
+_oracle_spec.loader.exec_module(_oracle)
+Screen = _oracle.Screen
 
 LANGUAGES = ("java", "python", "yaml", "rust")
 PROFILE_NAMES = (*LANGUAGES, "mouse")
@@ -145,6 +155,8 @@ class EditorSession:
         self.deadline = time.monotonic() + SESSION_TIMEOUT
         self.status = None
         self.tail = bytearray()
+        self.screen = Screen(ROWS, COLS)
+        self.saves_submitted = 0
         self.output_bytes = 0
         self.trace = trace.open("xb", buffering=65536)
         try:
@@ -200,6 +212,7 @@ class EditorSession:
                 self.selector.unregister(key.fd)
                 continue
             self.trace.write(chunk)
+            self.screen.feed(chunk)
             self.output_bytes += len(chunk)
             self.tail.extend(chunk)
             del self.tail[:-131072]
@@ -234,13 +247,34 @@ class EditorSession:
     def wait_for_text(self, text: bytes):
         self.wait_for(lambda: text in self.tail, f"terminal marker {text!r}")
 
+    def wait_for_cursor(self, line: int, column: int, line_count: int):
+        status = f"Ln {line}/{line_count}, Col {column}/"
+        self.wait_for(lambda: status in self.screen.lines[-1], f"cursor status {status}")
+
     def wait_for_saved_bytes(self, document: Path, expected: bytes):
         def saved():
+            if ("*" in self.screen.lines[0] or "Saved " not in self.screen.text
+                    or "Saving document" in self.screen.text or "Save As: " in self.screen.text):
+                return False
             try:
                 return document.read_bytes() == expected
             except FileNotFoundError:
                 return False
-        self.wait_for(saved, "exact saved document bytes")
+        self.wait_for(saved, "clean owner save acknowledgement and exact document bytes")
+
+    def save(self, document: Path, expected: bytes, before_save: bytes, *, require_dirty: bool = True):
+        if not require_dirty and (self.saves_submitted != 0 or "Saved " in self.screen.text):
+            raise ValueError("An unchanged save is only allowed before the first Saved acknowledgement")
+        self.send(before_save)
+        if require_dirty:
+            # Navigation/selection can clear the notice without changing text.
+            # Only a dirty header acknowledges a mutation before its save.
+            self.wait_for(lambda: "*" in self.screen.lines[0], "a dirty document before saving")
+        else:
+            self.wait_for(lambda: "Saved " not in self.screen.text, "the initial unsaved-notice boundary")
+        self.send(CTRL_S)
+        self.saves_submitted += 1
+        self.wait_for_saved_bytes(document, expected)
 
     def finish(self):
         self.send(CTRL_Q)
@@ -300,17 +334,30 @@ def train_session(binary: Path, output: Path, name: str) -> dict:
         child = EditorSession(command, session_dir / "terminal.bin", home / ".config")
         child.wait_for_text(fixture.marker.encode("ascii"))
 
-        def operation(label: str, data: bytes, expected: bytes | None = None, marker: bytes | None = None):
+        def operation(label: str, data: bytes, expected: bytes | None = None, marker: bytes | None = None,
+                      *, require_dirty: bool = True):
             child.tail.clear()
-            child.send(data)
+            if expected is not None:
+                if not data.endswith(CTRL_S):
+                    raise ValueError("A checked save operation must end with Ctrl+S")
+                child.save(document, expected, data[:-len(CTRL_S)], require_dirty=require_dirty)
+            else:
+                child.send(data)
             if marker is not None:
                 child.wait_for_text(marker)
-            if expected is not None:
-                child.wait_for_saved_bytes(document, expected)
             step = {"name": label}
             if expected is not None:
                 step["saved_sha256"] = sha256(expected)
             record["steps"].append(step)
+            checkpoint()
+
+        def navigate(label: str, data: bytes, line: int, column: int, expected: bytes):
+            child.tail.clear()
+            child.send(data)
+            child.wait_for_cursor(line, column, expected.count(b"\n") + 1)
+            if document.read_bytes() != expected:
+                raise AssertionError("Navigation changed the saved document bytes")
+            record["steps"].append({"name": label, "unchanged_sha256": sha256(expected)})
             checkpoint()
 
         expected = fixture.data
@@ -323,11 +370,11 @@ def train_session(binary: Path, output: Path, name: str) -> dict:
                 child.send(mouse_drag(index))
                 child.drain(0)
                 time.sleep(0.002)
-            operation("mouse_release_save", b"\x1b[<0;10;3m" + CTRL_S, expected, b"Saved ")
+            operation("mouse_release_save", b"\x1b[<0;10;3m" + CTRL_S, expected, b"Saved ", require_dirty=False)
             record["mouse_drag_events"] = 600
         else:
             operation("navigate_select_return_save", DOWN * 48 + SHIFT_DOWN * 48 + UP * 96 + HOME + CTRL_S,
-                      expected, b"Saved ")
+                      expected, b"Saved ", require_dirty=False)
             comment = "#" if language in ("python", "yaml") else "//"
             prefix = f"{comment} PGO edit λ e\u0301 中🧪\n{comment} Second pasted line\n"
             edited = prefix.encode("utf-8") + fixture.data
@@ -348,9 +395,10 @@ def train_session(binary: Path, output: Path, name: str) -> dict:
             expected = fixture.data.replace(fixture.query.encode("ascii"), replacement.encode("ascii"))
             operation("save_replacements", ESCAPE + CTRL_S, expected)
             pages = (fixture.data.count(b"\n") + len(fixture.data) // (COLS - 10)) // (ROWS - 8) + 3
-            operation("return_to_start_save", PAGE_UP * pages + HOME + CTRL_S, expected, b"Saved ")
+            navigate("return_to_start", PAGE_UP * pages + HOME, 1, 1, expected)
             cut_prefix = b"\n".join(expected.split(b"\n")[:3]) + b"\n"
-            operation("cut_three_lines_save", SHIFT_DOWN * 3 + CTRL_X + CTRL_S, expected[len(cut_prefix):])
+            navigate("select_three_lines", SHIFT_DOWN * 3, 4, 1, expected)
+            operation("cut_three_lines_save", CTRL_X + CTRL_S, expected[len(cut_prefix):])
             operation("paste_three_lines_save", CTRL_V + CTRL_S, expected)
         child.finish()
         if document.read_bytes() != expected:
@@ -435,6 +483,7 @@ def main():
                "timestamp_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
                "binary": str(binary), "binary_sha256": file_sha256(binary),
                "harness_sha256": file_sha256(Path(__file__).resolve()),
+               "terminal_oracle_sha256": file_sha256(TERMINAL_ORACLE),
                "graalvm_home": str(sdk), "rows": ROWS, "cols": COLS,
                "generated_chunks": 1600, "runtime_max_heap_mib": 512, "sessions": []}
     summary_path = output / "training-summary.json"

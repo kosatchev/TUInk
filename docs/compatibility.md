@@ -65,7 +65,10 @@ The stream is bounded independently of its initial size, so a file growing durin
 the read cannot bypass the byte limit. A rejected load reports an I/O error and
 preserves the existing document, file metadata, baseline, revision and undo history.
 
-File-picker scans share entry and
+Interactive opening reads into an independent immutable result in a worker;
+the owner thread attaches the document only after successful completion. A
+second open-file identity check uses the file actually read, including when a
+symbolic link changes during the operation. File-picker scans share entry and
 memory budgets across all expanded directories. A directory exceeding the
 remaining budget is rejected as a unit, with a visible incomplete-tree notice.
 
@@ -88,6 +91,21 @@ basenames must fit completely in destructive confirmations; otherwise the prompt
 requires a wider window before accepting the action.
 
 ## Document saves
+
+Interactive saves capture immutable text and file state on the owner thread,
+perform filesystem work in a background worker, and apply a matching successful
+result on the owner thread. The affected document cannot be edited or closed
+while its save is pending; navigation and other tabs remain usable. Only one
+document file operation is in flight, with no growing queue of captured drafts.
+Path, encoding, saved-file baseline and savepoint change only after a successful
+write. Explicit UTF-8 conversion retains its separate undo entry. Shutdown drains
+the active operation before final recovery capture; a write already publishing
+its target does not promise cancellation.
+
+Save As first inspects the target in the worker, then binds approval to its
+resolved address and observed contents. The write rechecks that approval before
+staging and publication. A changed target requires a new approval; a queued save
+cannot silently follow a retargeted symbolic link.
 
 Saving to a new name never overwrites a file created concurrently. Where hard
 links are supported, TUInk atomically publishes the complete staged bytes and

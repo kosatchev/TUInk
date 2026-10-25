@@ -114,6 +114,24 @@ class LineTextTest {
     }
 
     @Test
+    void savePreparationCapturesBlocksWithoutFlatteningEditedLines() {
+        TextModel model = new TextModel(new SimpleLineBuffer());
+        model.replaceLines(List.of("a".repeat(1_000_000)));
+        model.insertChar(new Position(0, 500_000), 'b');
+        LineText.Work before = LineText.work();
+
+        TextModel.SaveRequest prepared = model.prepareSave(Path.of("detached.txt"), model.fileMetadata(),
+            SaveDisposition.CREATE_NEW, false);
+
+        assertEquals(before.materializedCodeUnits(), LineText.work().materializedCodeUnits());
+        assertSame(model.lineText(0), prepared.lines().getFirst());
+        assertThrows(UnsupportedOperationException.class, prepared.lines()::clear);
+        model.insertChar(new Position(0, 0), 'c');
+        assertEquals(1_000_001, prepared.lines().getFirst().length());
+        assertEquals('a', prepared.lines().getFirst().charAt(0));
+    }
+
+    @Test
     void repeatedImmutableShortInputsShareStorageWithoutChangingStringIdentity() {
         String first = new String("repeated input");
         String second = new String("repeated input");

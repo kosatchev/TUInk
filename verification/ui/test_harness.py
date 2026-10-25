@@ -79,6 +79,61 @@ class RecoveryObservationTest(unittest.TestCase):
             self.assertFalse(recovery_snapshot_present(root, "incomplete draft"))
 
 
+class SaveObservationTest(unittest.TestCase):
+    @staticmethod
+    def screen(session, header, notice):
+        session.screen = Screen(3, 80)
+        session.screen.feed((header + "\x1b[3;1H" + notice).encode("utf-8"))
+
+    def test_published_bytes_require_a_clean_owner_acknowledgement(self):
+        with tempfile.TemporaryDirectory() as directory:
+            document = Path(directory) / "draft.txt"
+            document.write_bytes(b"new draft")
+            session = Session.__new__(Session)
+            self.screen(session, "File draft.txt *", "Saved draft.txt")
+
+            def observe(predicate, description, timeout):
+                self.assertFalse(predicate(), "worker bytes and a stale Saved notice are insufficient")
+                self.screen(session, "File draft.txt", "Saving document…")
+                self.assertFalse(predicate(), "the owner must acknowledge completion")
+                self.screen(session, "File draft.txt", "Saved draft.txt")
+                document.write_bytes(b"old draft")
+                self.assertFalse(predicate(), "UI acknowledgement must match the expected bytes")
+                document.write_bytes(b"new draft")
+                self.assertTrue(predicate())
+
+            with patch.object(session, "expect", side_effect=observe):
+                session.expect_saved(document, "new draft")
+
+    def test_previous_clean_saved_frame_cannot_acknowledge_the_next_request(self):
+        with tempfile.TemporaryDirectory() as directory:
+            document = Path(directory) / "draft.txt"
+            document.write_bytes(b"old draft")
+            session = Session.__new__(Session)
+            self.screen(session, "File draft.txt", "Saved draft.txt")
+            events = []
+
+            def observe(predicate, description, timeout):
+                self.assertFalse(predicate())
+                if not events:
+                    self.screen(session, "File draft.txt *", "Saved draft.txt")
+                    events.append("dirty frame")
+                else:
+                    self.screen(session, "File draft.txt", "Saved draft.txt")
+                    events.append("owner completion")
+                self.assertTrue(predicate())
+
+            def submit(data):
+                self.assertEqual(["dirty frame"], events)
+                self.assertEqual(b"\x13", data)
+                document.write_bytes(b"new draft")
+                events.append("worker publication")
+
+            with patch.object(session, "expect", side_effect=observe), patch.object(session, "send", side_effect=submit):
+                session.save(document, "new draft")
+            self.assertEqual(["dirty frame", "worker publication", "owner completion"], events)
+
+
 class LifecycleTest(unittest.TestCase):
     def test_exit_predicate_is_rechecked_after_reaping(self):
         with tempfile.TemporaryDirectory() as directory:

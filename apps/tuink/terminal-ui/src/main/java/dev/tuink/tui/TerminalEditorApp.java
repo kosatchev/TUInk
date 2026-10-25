@@ -346,7 +346,8 @@ public class TerminalEditorApp {
                         new EditorWindowController.TerminalAccess(terminal::width, terminal::height, terminal::setMouseTracking),
                         topMenu,
                         uiSessionState,
-                        settingsSession
+                        settingsSession,
+                        new DocumentIoController()
                     )),
                     recoveryAutosave,
                     () -> toTabSessions(tabs),
@@ -1880,15 +1881,33 @@ public class TerminalEditorApp {
             // Only the frontend can authorize leaving unsaved edits behind.
             // EOF, external interrupts and failures stop the runtime independently.
             try {
-                String warning = recovery.finishSession(tabs.get(), completed && !frontend.running());
-                if (warning != null) {
-                    reportWarning.accept(warning);
-                }
+                Runnable drain = frontend instanceof EditorWindowController controller
+                    ? controller::closeDocumentIo : () -> {};
+                finishRecoveryAfterIo(drain, recovery, tabs, completed && !frontend.running(), reportWarning);
             } catch (RuntimeException | Error cleanupFailure) {
                 if (failure == null) {
                     throw cleanupFailure;
                 }
                 failure.addSuppressed(cleanupFailure);
+            }
+        }
+    }
+
+    static void finishRecoveryAfterIo(Runnable drain, RecoveryAutosaveManager recovery,
+        Supplier<List<TabSession>> tabs, boolean exitConfirmed, Consumer<String> reportWarning) {
+        Throwable drainFailure = null;
+        try {
+            drain.run();
+        } catch (RuntimeException | Error failure) {
+            drainFailure = failure;
+            throw failure;
+        } finally {
+            try {
+                String warning = recovery.finishSession(tabs.get(), exitConfirmed && drainFailure == null);
+                if (warning != null) reportWarning.accept(warning);
+            } catch (RuntimeException | Error recoveryFailure) {
+                if (drainFailure == null) throw recoveryFailure;
+                drainFailure.addSuppressed(recoveryFailure);
             }
         }
     }

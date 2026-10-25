@@ -478,6 +478,18 @@ public class EditorEngine {
             state.setLineSeparator(EditorState.LINE_SEPARATOR_LF);
             openedDisposition = SaveDisposition.CREATE_NEW;
         }
+        finishOpen(normalizedPath, openedDisposition);
+    }
+
+    /** Publish a detached read on the owner thread without reopening the filesystem. */
+    public void openPrepared(TextModel.PreparedLoad prepared) {
+        model.applyPreparedLoad(prepared);
+        state.setFileEncoding(prepared.metadata().charset());
+        state.setLineSeparator(prepared.metadata().defaultLineSeparator());
+        finishOpen(prepared.path(), SaveDisposition.REPLACE_EXISTING);
+    }
+
+    private void finishOpen(Path normalizedPath, SaveDisposition openedDisposition) {
         state.setCurrentFile(normalizedPath);
         state.setSaveDisposition(openedDisposition);
         state.setCursor(new Position(0, 0));
@@ -496,19 +508,8 @@ public class EditorEngine {
     }
 
     public void save() throws IOException {
-        if (state.getCurrentFile() == null) {
-            throw new IOException("No file selected");
-        }
-        model.saveIfUnchanged(
-            state.getCurrentFile(),
-            model.fileMetadata(),
-            state.getSaveDisposition()
-        );
-        state.setSaveDisposition(SaveDisposition.REPLACE_EXISTING);
-        state.setDirty(false);
-        breakCoalescing();
-        resetGutterDiffSavedBaseline();
-        markCurrentAsSaved();
+        PreparedSave prepared = prepareSave();
+        completeSaved(prepared, prepared.write());
     }
 
     public void saveAs(Path path) throws IOException {
@@ -527,10 +528,46 @@ public class EditorEngine {
     }
 
     private void saveAs(Path path, SaveDisposition disposition, DocumentFileMetadata metadata) throws IOException {
+        SavePreparation preparation = prepareSaveInput(path, disposition, metadata);
+        PreparedSave prepared = approveSaveAs(preparation.inspectTarget());
+        completeSaved(prepared, prepared.write());
+    }
+
+    public PreparedSave prepareSave() throws IOException {
+        return new PreparedSave(prepareSaveInput(state.getCurrentFile(), state.getSaveDisposition(), model.fileMetadata()),
+            null, true);
+    }
+
+    public PreparedSave prepareSaveAs(Path path, SaveDisposition disposition, boolean utf8) throws IOException {
+        return approveSaveAs(prepareSaveAsInput(path, disposition, utf8).inspectTarget());
+    }
+
+    /** Captures owner state only. Target inspection may run on a worker before owner approval. */
+    public SavePreparation prepareSaveAsInput(Path path, SaveDisposition disposition, boolean utf8) throws IOException {
+        try {
+            DocumentFileMetadata metadata = model.fileMetadata();
+            if (utf8) metadata = new DocumentFileMetadata(StandardCharsets.UTF_8, BomKind.NONE,
+                metadata.defaultLineSeparator(), metadata.lineSeparators());
+            return prepareSaveInput(path, disposition, metadata);
+        } catch (OutOfMemoryError exhausted) {
+            throw new IOException("Not enough memory to prepare the save", exhausted);
+        }
+    }
+
+    private SavePreparation prepareSaveInput(Path path, SaveDisposition disposition, DocumentFileMetadata metadata)
+        throws IOException {
+        try {
+            return prepareSavePlan(path, disposition, metadata);
+        } catch (OutOfMemoryError | DocumentEditLimitException exhausted) {
+            throw new IOException("Not enough memory to prepare the save", exhausted);
+        }
+    }
+
+    private SavePreparation prepareSavePlan(Path path, SaveDisposition disposition, DocumentFileMetadata metadata)
+        throws IOException {
         if (path == null) {
             throw new IOException("No file selected");
         }
-        Path normalizedPath = TextModel.resolveDocumentPath(path);
         boolean formatChanged = !DocumentPreferences.from(model.fileMetadata())
             .equals(DocumentPreferences.from(metadata));
         // Allocate the complete history transition before writing to disk. A
@@ -545,23 +582,132 @@ public class EditorEngine {
             preparedHistory = new ArrayDeque<>(history.undoStack);
             pushWithLimit(preparedHistory, conversion);
         }
-        if (isCurrentSaveTarget(path, normalizedPath)) {
-            model.saveIfUnchanged(normalizedPath, metadata, disposition);
-        } else {
-            model.save(normalizedPath, metadata, disposition);
+        return new SavePreparation(this, model.prepareSave(path, metadata, disposition, false),
+            state.getCurrentFile(), state.getSaveDisposition(), model.revision(),
+            history.currentDocumentStateId, preparedHistory, convertedStateId);
+    }
+
+    /** Binds an inspected address/version to the unchanged owner; performs no filesystem I/O. */
+    public PreparedSave approveSaveAs(SaveTargetInspection inspection) throws IOException {
+        Objects.requireNonNull(inspection, "inspection");
+        SavePreparation preparation = inspection.preparation;
+        if (!preparation.belongsToUnchanged(this)) {
+            throw new IOException("Document changed while inspecting the Save As target. Choose the target again.");
         }
-        if (preparedHistory != null) {
-            history.undoStack = preparedHistory;
+        return new PreparedSave(preparation, inspection.target, inspection.currentTarget);
+    }
+
+    /** Caller keeps document edits locked until the matching detached write completes. */
+    public void completeSaved(PreparedSave prepared, TextModel.SavedFile saved) {
+        SavePreparation plan = prepared.preparation;
+        if (prepared.completed || !plan.belongsToUnchanged(this)) {
+            throw new IllegalStateException("Saved result does not belong to the unchanged document");
+        }
+        model.completeSave(saved);
+        if (plan.convertedHistory != null) {
+            history.undoStack = plan.convertedHistory;
             history.redoStack.clear();
-            history.nextDocumentStateId = convertedStateId;
-            history.currentDocumentStateId = convertedStateId;
+            history.nextDocumentStateId = plan.convertedStateId;
+            history.currentDocumentStateId = plan.convertedStateId;
         }
-        state.setCurrentFile(normalizedPath);
+        prepared.completed = true;
+        state.setCurrentFile(saved.path());
         state.setSaveDisposition(SaveDisposition.REPLACE_EXISTING);
         state.setDirty(false);
         breakCoalescing();
-        resetGutterDiffSavedBaseline();
-        markCurrentAsSaved();
+        document.baselines.savedLines = plan.request.lines();
+        document.baselines.generation++;
+        invalidateGutterDiff();
+        history.savedDocumentStateId = history.currentDocumentStateId;
+        gutterDiff.gutterDiffLastRebuildAtNanos = 0L;
+        document.recoveryGeneration++;
+        document.reflectFileMetadata();
+    }
+
+    public static final class SavePreparation {
+        private final EditorEngine owner;
+        private final Thread ownerThread;
+        private final TextModel.SaveRequest request;
+        private final Path originalPath;
+        private final SaveDisposition originalDisposition;
+        private final long revision;
+        private final long stateId;
+        private final Deque<HistoryEntry> convertedHistory;
+        private final long convertedStateId;
+
+        private SavePreparation(EditorEngine owner, TextModel.SaveRequest request,
+                             Path originalPath, SaveDisposition originalDisposition, long revision, long stateId,
+                             Deque<HistoryEntry> convertedHistory, long convertedStateId) {
+            this.owner = owner;
+            this.ownerThread = Thread.currentThread();
+            this.request = request;
+            this.originalPath = originalPath;
+            this.originalDisposition = originalDisposition;
+            this.revision = revision;
+            this.stateId = stateId;
+            this.convertedHistory = convertedHistory;
+            this.convertedStateId = convertedStateId;
+        }
+
+        /** Detached, read-only preflight. Does not access the live owner or write the target. */
+        public SaveTargetInspection inspectTarget() throws IOException {
+            try {
+                PreparedSaveTarget target = PreparedSaveTarget.inspect(request.path());
+                boolean current = isCurrentSaveTarget(request.path(), target.requested(),
+                    originalPath, originalDisposition, request.baseline());
+                return new SaveTargetInspection(this, target, current);
+            } catch (OutOfMemoryError exhausted) {
+                throw new IOException("Not enough memory to inspect the Save As target", exhausted);
+            }
+        }
+
+        public SaveDisposition disposition() { return request.disposition(); }
+
+        private boolean belongsToUnchanged(EditorEngine engine) {
+            return owner == engine && Thread.currentThread() == ownerThread && engine.model.revision() == revision
+                && engine.history.currentDocumentStateId == stateId
+                && Objects.equals(engine.state.getCurrentFile(), originalPath)
+                && engine.state.getSaveDisposition() == originalDisposition
+                && Objects.equals(engine.model.fileBaseline(), request.baseline());
+        }
+    }
+
+    /** A detached inspection belonging to exactly one captured Save As request. */
+    public static final class SaveTargetInspection {
+        private final SavePreparation preparation;
+        private final PreparedSaveTarget target;
+        private final boolean currentTarget;
+
+        private SaveTargetInspection(SavePreparation preparation, PreparedSaveTarget target, boolean currentTarget) {
+            this.preparation = preparation;
+            this.target = target;
+            this.currentTarget = currentTarget;
+        }
+
+        public Path requestedPath() { return target.requested(); }
+        public Path physicalTarget() { return target.target(); }
+        public boolean exists() { return target.exists(); }
+        public boolean currentTarget() { return currentTarget; }
+    }
+
+    public static final class PreparedSave {
+        private final SavePreparation preparation;
+        private final PreparedSaveTarget target;
+        private final boolean checkBaseline;
+        private boolean completed;
+
+        private PreparedSave(SavePreparation preparation, PreparedSaveTarget target, boolean checkBaseline) {
+            this.preparation = preparation;
+            this.target = target;
+            this.checkBaseline = checkBaseline;
+        }
+
+        /** Writes only the approved address/version or the current document's loaded baseline. */
+        public TextModel.SavedFile write() throws IOException {
+            TextModel.SaveRequest request = preparation.request;
+            return target == null ? request.write(TextModel.resolveDocumentPath(request.path()), true)
+                : request.write(target, checkBaseline);
+        }
     }
 
     /** Includes format/savepoint changes that intentionally do not invalidate text layout. */
@@ -575,8 +721,13 @@ public class EditorEngine {
     }
 
     private boolean isCurrentSaveTarget(Path requested, Path resolved) throws IOException {
-        Path currentFile = state.getCurrentFile();
-        boolean ownsCurrentName = state.getSaveDisposition() == SaveDisposition.REPLACE_EXISTING;
+        return isCurrentSaveTarget(requested, resolved, state.getCurrentFile(), state.getSaveDisposition(),
+            model.fileBaseline());
+    }
+
+    private static boolean isCurrentSaveTarget(Path requested, Path resolved, Path currentFile,
+                                              SaveDisposition originalDisposition, FileBaseline baseline) throws IOException {
+        boolean ownsCurrentName = originalDisposition == SaveDisposition.REPLACE_EXISTING;
         if (ownsCurrentName && currentFile != null
             && (requested.toAbsolutePath().equals(currentFile.toAbsolutePath())
                 || resolved.equals(currentFile.toAbsolutePath()))) {
@@ -584,7 +735,6 @@ public class EditorEngine {
             // symlink was redirected or its file has since been removed.
             return true;
         }
-        FileBaseline baseline = model.fileBaseline();
         if (baseline == null) {
             // A recovered existing file without a baseline must still refuse
             // unverified overwrites through its known name or physical aliases.
@@ -2124,19 +2274,6 @@ public class EditorEngine {
         gutterDiff.gutterDiffLastRebuildDurationNanos = 0L;
     }
 
-    private void resetGutterDiffSavedBaseline() {
-        document.baselines.savedLines = model.snapshotTextLines();
-        document.baselines.generation++;
-        gutterDiff.baselineGeneration = document.baselines.generation;
-        if (gutterDiff.gutterDiffMode == GutterDiffMode.DISABLED) {
-            clearAllGutterDiffBuffers(model.lineCount());
-            gutterDiff.gutterDiffComputedRevision = model.revision();
-            gutterDiff.gutterDiffPendingRebuild = false;
-            return;
-        }
-        rebuildGutterDiffFromCurrentState();
-    }
-
     private long nextDocumentStateId() {
         return ++history.nextDocumentStateId;
     }
@@ -2148,11 +2285,6 @@ public class EditorEngine {
     private void markCurrentAsSaved() {
         history.savedDocumentStateId = history.currentDocumentStateId;
         state.setDirty(false);
-        document.changed();
-    }
-
-    private void updateDirtyFromSavepoint() {
-        state.setDirty(history.savedDocumentStateId < 0L || history.currentDocumentStateId != history.savedDocumentStateId);
         document.changed();
     }
 

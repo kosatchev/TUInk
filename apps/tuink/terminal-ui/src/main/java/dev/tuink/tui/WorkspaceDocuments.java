@@ -28,7 +28,7 @@ final class WorkspaceDocuments {
 
     static boolean isPristinePlaceholder(TabSession tab) {
         return tab.state().getCurrentFile() == null && !tab.state().isDirty()
-            && tab.model().revision() == 0 && tab.model().lineCount() == 1 && tab.model().getLine(0).isEmpty();
+            && tab.model().revision() == 0 && tab.model().lineCount() == 1 && tab.model().lineText(0).isEmpty();
     }
 
     private static boolean matches(TabSession tab, Path requested) {

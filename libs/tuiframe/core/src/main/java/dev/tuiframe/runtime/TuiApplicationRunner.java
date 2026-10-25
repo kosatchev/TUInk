@@ -27,6 +27,8 @@ public final class TuiApplicationRunner<E> {
      * <p>Each turn prepares frontend state, claims and completes a pending
      * frame, polls once using the current frontend deadline, and delivers the
      * complete poll result. Idle and end-of-input results are delivered too.
+     * A stop during preparation skips the frame and input poll; a stop during
+     * rendering completes the frame before returning without polling input.
      * If rendering fails, the active frame is completed as not rendered before
      * the failure propagates, and {@link Frontend#frameEnded(boolean)} is not
      * called.</p>
@@ -39,6 +41,9 @@ public final class TuiApplicationRunner<E> {
 
         while (eventLoop.running() && frontend.running()) {
             frontend.prepareTurn();
+            if (!eventLoop.running() || !frontend.running()) {
+                break;
+            }
 
             TuiEventLoop.FrameTicket frameTicket = eventLoop.beginFrame();
             if (frameTicket != null) {
@@ -53,6 +58,9 @@ public final class TuiApplicationRunner<E> {
                 frontend.frameEnded(rendered);
             }
 
+            if (!eventLoop.running() || !frontend.running()) {
+                break;
+            }
             TuiEventLoop.Poll<E> poll = eventLoop.poll(deadline);
             frontend.handlePoll(poll);
         }

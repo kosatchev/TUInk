@@ -179,6 +179,51 @@ class TuiApplicationRunnerTest {
     }
 
     @Test
+    void stoppingDuringPreparationSkipsRenderingAndLeavesQueuedInputUnread() throws Exception {
+        for (boolean stopRuntime : List.of(false, true)) {
+            ScriptedInput<String> input = new ScriptedInput<>(TuiEventLoop.Read.event("late edit"));
+            TuiEventLoop<String> loop = new TuiEventLoop<>(input);
+            RecordingFrontend<String> frontend = new RecordingFrontend<>();
+            frontend.onPrepare = () -> {
+                if (stopRuntime) loop.requestStop();
+                else frontend.running = false;
+            };
+
+            new TuiApplicationRunner<>(loop).run(frontend);
+
+            assertEquals(1, frontend.prepareCount);
+            assertEquals(List.of(), frontend.frames);
+            assertEquals(List.of(), frontend.endedFrames);
+            assertEquals(List.of(), frontend.polls);
+            assertEquals(List.of(), input.timeouts);
+        }
+    }
+
+    @Test
+    void stoppingDuringAFrameCompletesItAndLeavesQueuedInputUnread() throws Exception {
+        for (boolean duringRender : List.of(false, true)) {
+            ScriptedInput<String> input = new ScriptedInput<>(TuiEventLoop.Read.event("late edit"));
+            TuiEventLoop<String> loop = new TuiEventLoop<>(input);
+            RecordingFrontend<String> frontend = new RecordingFrontend<>();
+            frontend.onRender = ticket -> {
+                if (duringRender) frontend.running = false;
+                return true;
+            };
+            frontend.onFrameEnded = rendered -> {
+                if (!duringRender) loop.requestStop();
+            };
+
+            new TuiApplicationRunner<>(loop).run(frontend);
+
+            assertEquals(1, frontend.prepareCount);
+            assertEquals(1, frontend.frames.size());
+            assertEquals(List.of(true), frontend.endedFrames);
+            assertEquals(List.of(), frontend.polls);
+            assertEquals(List.of(), input.timeouts);
+        }
+    }
+
+    @Test
     void renderFailureEndsTicketAsFailedAndPropagates() {
         TuiEventLoop<String> loop = new TuiEventLoop<>(timeout -> {
             throw new AssertionError("input must not be polled");

@@ -11,6 +11,7 @@ import dev.tuink.core.TextModel;
 import dev.tuink.tui.flow.ConfirmChoice;
 import dev.tuink.tui.flow.RecoveryStore;
 import dev.tuink.tui.flow.SaveAsSuggestionStore;
+import dev.tuink.tui.flow.SaveContinuation;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.flow.UiModalState;
 import dev.tuink.editor.command.CommandInvocation;
@@ -103,6 +104,13 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     private final TopMenuController topMenu;
     private final UiSessionState uiSessionState;
     private final AppSettingsSession settingsSession;
+    private final DocumentIoController documentIo;
+    private SaveWorkflow.SaveRequest pendingSave;
+    private SaveWorkflow.OverwriteApproval overwriteApproval;
+    private FilePickerOpenWorkflow.Result deferredOpenResult;
+    private boolean quitAfterDocumentIo;
+    private boolean closingDocumentIo;
+    private long filenameRevision;
 
     EditorWindowController(TerminalEditorApp host, Resources resources) {
         this.host = Objects.requireNonNull(host, "host");
@@ -126,6 +134,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         this.topMenu = resources.topMenu();
         this.uiSessionState = resources.uiSessionState();
         this.settingsSession = resources.settingsSession();
+        this.documentIo = Objects.requireNonNull(resources.documentIo(), "documentIo");
         this.modalState = resources.initialModalState();
         this.searchUi = resources.initialSearchUi();
     }
@@ -152,7 +161,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         TerminalAccess terminal,
         TopMenuController topMenu,
         UiSessionState uiSessionState,
-        AppSettingsSession settingsSession
+        AppSettingsSession settingsSession,
+        DocumentIoController documentIo
     ) {}
 
     record TerminalAccess(IntSupplier widthSource, IntSupplier heightSource,
@@ -227,6 +237,15 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
 
     @Override
     public void prepareTurn() {
+        while (documentIo.collect()) {
+            eventLoop.invalidate();
+        }
+        if (deferredOpenResult != null && modalState.isNone() && !documentIo.busy() && !closingDocumentIo) {
+            FilePickerOpenWorkflow.Result ready = deferredOpenResult;
+            deferredOpenResult = null;
+            applyOpenFileResult(ready);
+            eventLoop.invalidate();
+        }
         uiSessionState.syntaxHighlightingAvailable = host.syntaxHighlightingAvailable();
         if (state != sessionContext.state()) {
             cancelPointerCapture(PointerCaptureCancellation.SURFACE_CHANGED);
@@ -720,13 +739,15 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
 
     @Override
     public long nanosUntilWakeup(long nowNanos) {
-        return TerminalEditorApp.earlierDeadline(
+        long presentationDeadline = TerminalEditorApp.earlierDeadline(
             TerminalEditorApp.earlierDeadline(notification.nanosUntilExpire(nowNanos),
                 host.modalAttention.nanosUntilChange(nowNanos)),
             TerminalEditorApp.earlierDeadline(editorView.nanosUntilSelectionScroll(nowNanos),
                 TerminalEditorApp.earlierDeadline(engine.nanosUntilGutterDiffRefresh(nowNanos),
                     syntaxRetryAtNanos == Long.MIN_VALUE ? -1L : Math.max(0L, syntaxRetryAtNanos - nowNanos)))
         );
+        return TerminalEditorApp.earlierDeadline(presentationDeadline,
+            documentIo.busy() ? SYNTAX_RETRY_DELAY_NANOS : -1L);
     }
 
     private TerminalEditorApp.HelpOverlayPlacement currentHelpOverlay() {
@@ -1029,6 +1050,9 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     }
 
     private void executeSearchDocumentCommand(TuinkCommand command) {
+        if (command.editsDocumentText() && rejectSavingDocumentEdit()) {
+            return;
+        }
         if (command == TuinkCommand.CURSOR_PAGE_UP || command == TuinkCommand.CURSOR_PAGE_DOWN) {
             TerminalEditorApp.scrollDocumentViewport(model, engine.textLayout(), state, contentRows, contentCols,
                 uiSessionState.wrapLinesSetting, uiSessionState.wrapWordsSetting,
@@ -1328,6 +1352,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             }
             if (fieldAction == SaveAsBarView.Action.VALUE_CHANGED) {
                 if (!filenameBefore.equals(saveAsInput.text())) {
+                    filenameRevision++;
                     notification.clear();
                 }
                 saveAsSuggestions.rememberDraft(
@@ -1531,6 +1556,10 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             }
             Integer closeIndex = tabInput.closeIndex();
             if (closeIndex != null && closeIndex < tabs.size()) {
+                if (pendingSave != null && tabs.get(closeIndex).tabSession() == pendingSave.tab()) {
+                    notification.info("Saving this document; wait before closing its tab");
+                    return;
+                }
                 if (tabs.get(closeIndex).state().isDirty()
                     && uiSessionState.confirmOnCloseSetting) {
                     modalState = UiModalState.closeTabConfirm(closeIndex);
@@ -1567,7 +1596,9 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             if (!modalState.isNone() || openFileMode || topMenu.isOpen()) {
                 // The focused overlay owns input; paste cannot leak through it.
             } else {
-                if (uiSessionState.readingModeSetting) {
+                if (rejectSavingDocumentEdit()) {
+                    return;
+                } else if (uiSessionState.readingModeSetting) {
                     notification.warning("Reading mode: editing is disabled");
                 } else {
                     long revisionBefore = model.revision();
@@ -1777,7 +1808,9 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         }
 
         if (key.command() == null && key.event() instanceof TextInput charInput) {
-            if (uiSessionState.readingModeSetting) {
+            if (rejectSavingDocumentEdit()) {
+                return;
+            } else if (uiSessionState.readingModeSetting) {
                 notification.warning("Reading mode: editing is disabled");
             } else {
                 long revisionBefore = model.revision();
@@ -1796,6 +1829,30 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         }
 
         TuinkCommand action = key.command();
+        if (action.editsDocumentText() && rejectSavingDocumentEdit()) {
+            return;
+        }
+        if (action == TuinkCommand.APP_QUIT && documentIo.busy()) {
+            boolean alreadyQuitting = pendingSave != null && (pendingSave.purpose() == SaveWorkflow.SavePurpose.QUIT
+                || pendingSave.origin().saveContinuation() == SaveContinuation.QUIT);
+            if (!alreadyQuitting) {
+                quitAfterDocumentIo = true;
+            }
+            notification.info(alreadyQuitting ? "Saving documents before quitting"
+                : "Waiting for the file operation before quitting");
+            return;
+        }
+        if (action == TuinkCommand.TAB_CLOSE && pendingSave != null
+            && sessionContext.engine() == pendingSave.tab().engine()) {
+            notification.info("Saving this document; wait before closing its tab");
+            return;
+        }
+        if (documentIo.busy() && (action == TuinkCommand.DOCUMENT_SAVE
+            || action == TuinkCommand.DOCUMENT_SAVE_AS || action == TuinkCommand.DOCUMENT_OPEN)
+            || deferredOpenResult != null && action == TuinkCommand.DOCUMENT_OPEN) {
+            notification.info("A file operation is already in progress");
+            return;
+        }
         InputActionDispatcher.DispatchResult dispatchResult = dispatchInputAction(action);
         if (dispatchResult.handled()) {
             viewportController.onCommandResult(dispatchResult.viewportPolicy());
@@ -1861,13 +1918,46 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     }
 
     private void applyOpenFileResult(FilePickerOpenWorkflow.Result result) {
+        if (result.pendingOpen() != null) {
+            if (documentIo.busy() || deferredOpenResult != null) {
+                notification.info("A file operation is already in progress");
+                return;
+            }
+            var request = result.pendingOpen();
+            openFileMode = false;
+            pickerNotice = null;
+            notification.info("Opening document…");
+            documentIo.submit(request::read, completion -> {
+                if (closingDocumentIo) {
+                    return;
+                }
+                applyOpenFileResult(FilePickerOpenWorkflow.complete(request, completion.value(), completion.failure(),
+                    host.toTabSessions(tabs), sessionContext.activeTabIndex(),
+                    () -> TuiDocumentSession.create(host.clipboard)));
+                afterDocumentIo();
+            });
+            return;
+        }
+        boolean documentPromptActive = modalState.isSaveAs() || modalState.isSaveOverwriteConfirm()
+            || modalState.isSaveUtf8Confirm() || modalState.isCloseTabConfirm();
+        if (documentPromptActive && (result.openFileMode() || result.pendingExplicitOpenPath() != null)) {
+            deferredOpenResult = result;
+            if (result.noticeKind() == FilePickerOpenWorkflow.NoticeKind.ERROR) {
+                notification.error(result.message());
+            } else {
+                notification.info("Finish the current dialog to choose the file encoding");
+            }
+            return;
+        }
         if (result.openedDocument() != null) {
             TuiDocumentSession document = result.openedDocument();
             RenderPlanBuilder builder = document.newRenderPlanBuilder(
                 host.resolveHighlighter(document.view().state().getCurrentFile()));
             tabs.add(new TerminalEditorApp.EditorTab(document, builder));
-            sessionContext.activate(tabs.size() - 1);
-        } else if (result.activateTabIndex() >= 0) {
+            if (!documentPromptActive) {
+                sessionContext.activate(tabs.size() - 1);
+            }
+        } else if (result.activateTabIndex() >= 0 && !documentPromptActive) {
             sessionContext.activate(result.activateTabIndex());
         }
         openFileMode = result.openFileMode();
@@ -1877,7 +1967,13 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         if (!openFileMode) pickerNotice = null;
         switch (result.noticeKind()) {
             case UNCHANGED -> { }
-            case SUCCESS -> notification.success(result.message());
+            case SUCCESS -> {
+                if (documentPromptActive && result.activateTabIndex() >= 0) {
+                    notification.info("File is already open in tab " + (result.activateTabIndex() + 1));
+                } else {
+                    notification.success(result.message());
+                }
+            }
             case WARNING -> {
                 if (openFileMode) pickerNotice = result.notice();
                 else notification.warning(result.message());
@@ -1891,7 +1987,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
 
     private SaveWorkflow.Context saveContext() {
         return new SaveWorkflow.Context(tabs.stream().map(TerminalEditorApp.EditorTab::tabSession).toList(),
-            sessionContext.activeTabIndex(), saveAsSuggestions);
+            sessionContext.activeTabIndex(), saveAsSuggestions, overwriteApproval);
     }
 
     private boolean applyFilenameEffect(SaveFlowController.TextInputEffect effect) {
@@ -1908,18 +2004,24 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                     notification.error("Not enough memory to open Save As; the filename was not changed");
                     return false;
                 }
+                filenameRevision++;
             }
-            case CLEAR -> saveAsInput.clear();
+            case CLEAR -> {
+                saveAsInput.clear();
+                filenameRevision++;
+            }
         }
         return true;
     }
 
     private void applySaveResult(SaveWorkflow.Result result) {
+        applySaveResult(result, null);
+    }
+
+    private void applySaveResult(SaveWorkflow.Result result, TabSession savedTab) {
         // Refresh the saved tab before a continuation activates or closes another tab.
         if (result.refreshSavedHighlighter()) {
-            renderPlanBuilder = tabs.get(sessionContext.activeTabIndex()).documentSession()
-                .newRenderPlanBuilder(host.resolveHighlighter(state.getCurrentFile()));
-            sessionContext.replaceActiveRenderPlanBuilder(renderPlanBuilder);
+            refreshSavedHighlighter(savedTab == null ? tabs.get(sessionContext.activeTabIndex()).tabSession() : savedTab);
         }
         if (result.activateTabIndex() >= 0) {
             sessionContext.activate(result.activateTabIndex());
@@ -1930,20 +2032,132 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         if (!applyFilenameEffect(result.filename())) {
             return;
         }
-        switch (result.notice().kind()) {
-            case UNCHANGED -> { }
-            case CLEAR -> notification.clear();
-            case SUCCESS -> notification.success(result.notice().message());
-            case ERROR -> notification.error(result.notice().message());
-        }
+        applySaveNotice(result.notice());
         running = result.running();
         modalState = result.modalState();
+        overwriteApproval = result.overwriteApproval();
         if (result.focusFilename()) {
             blockingContentFocused = false;
             // Re-enter against the next frame's filename placement, including after a
             // continuation changes tabs without changing the Save As scope identity.
             host.saveAsFocusManager.deactivate(TerminalEditorApp.SAVE_AS_SCOPE_ID);
         }
+        if (result.pendingSave() != null && !closingDocumentIo) {
+            startSave(result.pendingSave());
+        }
+    }
+
+    private void refreshSavedHighlighter(TabSession savedTab) {
+        for (int index = 0; index < tabs.size(); index++) {
+            TerminalEditorApp.EditorTab tab = tabs.get(index);
+            if (tab.tabSession() == savedTab) {
+                RenderPlanBuilder builder = tab.documentSession().newRenderPlanBuilder(
+                    host.resolveHighlighter(savedTab.state().getCurrentFile()));
+                tabs.set(index, new TerminalEditorApp.EditorTab(tab.documentSession(), builder,
+                    tab.viewportController(), tab.navigation()));
+                if (index == sessionContext.activeTabIndex()) {
+                    sessionContext.activate(index);
+                    renderPlanBuilder = builder;
+                }
+                return;
+            }
+        }
+    }
+
+    private void startSave(SaveWorkflow.SaveRequest unsubmitted) {
+        // Completing a read-only inspection during close must not start a new write.
+        if (closingDocumentIo) return;
+        SaveWorkflow.SaveRequest request = unsubmitted.submission() == null
+            ? unsubmitted.submitted(saveAsInput.text(), filenameRevision) : unsubmitted;
+        if (documentIo.busy()) {
+            notification.info("A file operation is already in progress; retry saving after it finishes");
+            modalState = request.origin();
+            return;
+        }
+        pendingSave = request;
+        long submittedFilenameRevision = request.submission().filenameRevision();
+        String submittedFilename = request.submission().filename();
+        notification.info(request.inspecting() ? "Checking save target…" : "Saving document…");
+        documentIo.submit(request::perform, completion -> {
+            pendingSave = null;
+            if (!completion.succeeded()) {
+                // The deferred exit depended on this write succeeding. Keep the
+                // failed draft visible even when ordinary close confirmation is off.
+                quitAfterDocumentIo = false;
+            }
+            SaveWorkflow.Result result = SaveWorkflow.complete(saveContext(), request,
+                completion.value(), completion.failure());
+            if (request.inspecting() && result.pendingSave() == null) {
+                // A target prompt or inspection failure needs an explicit owner decision.
+                quitAfterDocumentIo = false;
+            }
+            boolean standalone = request.purpose() == SaveWorkflow.SavePurpose.CURRENT
+                    || request.purpose() == SaveWorkflow.SavePurpose.SAVE_AS
+                        && request.origin().saveContinuation() == SaveContinuation.NONE;
+            if (request.inspecting() && completion.succeeded() && result.pendingSave() != null && standalone) {
+                // Advancing inspection to writing is still the original operation.
+                // Keep any independent modal/filename opened while it was pending.
+                startSave(result.pendingSave());
+            } else if (!request.inspecting() && completion.succeeded() && standalone) {
+                // The original save prompt was dismissed when the write started. A modal or
+                // filename opened since then belongs to the user's independent interaction.
+                if (result.refreshSavedHighlighter()) {
+                    refreshSavedHighlighter(request.tab());
+                }
+                if (filenameRevision == submittedFilenameRevision) {
+                    applyFilenameEffect(result.filename());
+                }
+                applySaveNotice(result.notice());
+            } else {
+                if (request.purpose() == SaveWorkflow.SavePurpose.SAVE_AS
+                    && (!completion.succeeded() || request.inspecting() && result.pendingSave() == null)
+                    && filenameRevision != submittedFilenameRevision
+                    && (result.modalState().isSaveAs() || result.modalState().isSaveOverwriteConfirm()
+                        || result.modalState().isSaveUtf8Confirm())
+                    && !applyFilenameEffect(SaveFlowController.TextInputEffect.setText(submittedFilename))) {
+                    afterDocumentIo();
+                    return;
+                }
+                applySaveResult(result, request.tab());
+            }
+            afterDocumentIo();
+        });
+    }
+
+    private void applySaveNotice(SaveWorkflow.Notice notice) {
+        switch (notice.kind()) {
+            case UNCHANGED -> { }
+            case CLEAR -> notification.clear();
+            case SUCCESS -> notification.success(notice.message());
+            case ERROR -> notification.error(notice.message());
+        }
+    }
+
+    private boolean rejectSavingDocumentEdit() {
+        if (pendingSave == null || sessionContext.engine() != pendingSave.tab().engine()) {
+            return false;
+        }
+        notification.info("Saving this document; editing will resume when the write finishes");
+        return true;
+    }
+
+    private void afterDocumentIo() {
+        if (quitAfterDocumentIo && !documentIo.busy() && !closingDocumentIo) {
+            quitAfterDocumentIo = false;
+            if (uiSessionState.confirmOnCloseSetting && host.hasDirtyTabs(tabs)) {
+                modalState = UiModalState.quitConfirm();
+            } else {
+                running = false;
+            }
+        }
+        eventLoop.invalidate();
+    }
+
+    /** Finish a started write before recovery captures its final owner-thread state. */
+    void closeDocumentIo() {
+        closingDocumentIo = true;
+        deferredOpenResult = null;
+        documentIo.close();
     }
 
     private InputActionDispatcher.DispatchResult dispatchInputAction(TuinkCommand command) {

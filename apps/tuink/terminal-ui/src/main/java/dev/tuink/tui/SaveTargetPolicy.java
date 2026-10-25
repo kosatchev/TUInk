@@ -1,5 +1,6 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import dev.tuink.core.DocumentEncodingException;
 import dev.tuink.core.EditorState;
 import dev.tuink.tui.flow.SaveTargetSuggester;
@@ -31,7 +32,7 @@ final class SaveTargetPolicy {
     }
 
     static String savedMessage(EditorState state) {
-        return "Saved " + dev.tuink.tui.ui.NotificationPresentation.path(state.getCurrentFile())
+        return "Saved " + dev.tuink.tui.ui.NotificationPresentation.path(JvmDocumentStorage.pathOf(state.getCurrentResource()))
             + " [" + state.getFileEncoding().displayName() + "]";
     }
 

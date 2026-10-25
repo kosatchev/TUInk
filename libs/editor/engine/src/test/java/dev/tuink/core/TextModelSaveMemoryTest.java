@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.editor.language.LanguageRegistry;
+import dev.tuink.storage.jvm.FileBaseline;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import dev.tuink.unicode.GraphemeText;
 import java.io.File;
 import java.io.InputStream;
@@ -68,10 +70,10 @@ class TextModelSaveMemoryTest {
             Path target = directory.resolve("saved.txt");
 
             System.gc();
-            engine.saveAs(target);
+            engine.saveAs(JvmDocumentStorage.resource(target));
 
             require(!engine.state().isDirty(), "Save As did not clear the dirty flag");
-            verifyFile(target, blocks, "", model.fileBaseline());
+            verifyFile(target, blocks, "", JvmDocumentStorage.baselineOf(model.fileBaseline()));
             System.gc();
             require(engine.pasteText("\nlast😀\n"), "Small later paste was refused");
             require(engine.state().isDirty(), "Later paste lost the dirty flag");
@@ -87,7 +89,7 @@ class TextModelSaveMemoryTest {
             }
             require(model.getLine(blocks + 1).equals("last😀"), "Save lost supplementary text");
             require(model.getLine(blocks + 2).isEmpty(), "Save lost the trailing EOL");
-            verifyFile(target, blocks, "\nlast😀\n", model.fileBaseline());
+            verifyFile(target, blocks, "\nlast😀\n", JvmDocumentStorage.baselineOf(model.fileBaseline()));
         }
 
         private static void verifyFile(Path target, int blocks, String suffix, FileBaseline baseline)

@@ -232,7 +232,9 @@ class AppSettingsStoreTest {
             classpathLocation(AppSettingsStoreTest.class),
             classpathLocation(AppSettingsStore.class),
             classpathLocation(AppSettings.class),
-            classpathLocation(GutterDiffMode.class)
+            classpathLocation(GutterDiffMode.class),
+            classpathLocation(dev.tuink.storage.jvm.JvmDocumentStorage.class),
+            classpathLocation(dev.tuink.editor.document.DocumentId.class)
         );
         Path java = Path.of(System.getProperty("java.home"), "bin", "java");
         Process process = new ProcessBuilder(

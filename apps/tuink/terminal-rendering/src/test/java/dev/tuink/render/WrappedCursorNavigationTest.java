@@ -1,5 +1,7 @@
 package dev.tuink.render;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
@@ -176,7 +178,7 @@ class WrappedCursorNavigationTest {
         navigation.moveDown(false, 4, true, false);
         Path file = directory.resolve("next.txt");
         Files.writeString(file, "abcde");
-        engine.open(file);
+        engine.open(JvmDocumentStorage.resource(file));
         navigation.moveDown(false, 4, true, false);
         assertEquals(new Position(0, 4), engine.state().getCursor());
     }

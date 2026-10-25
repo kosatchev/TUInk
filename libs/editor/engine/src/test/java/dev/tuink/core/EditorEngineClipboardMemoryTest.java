@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.editor.language.LanguageRegistry;
+import dev.tuink.editor.storage.BomKind;
+import dev.tuink.editor.storage.DocumentFileMetadata;
 import dev.tuink.unicode.GraphemeText;
 import java.io.File;
 import java.nio.charset.StandardCharsets;

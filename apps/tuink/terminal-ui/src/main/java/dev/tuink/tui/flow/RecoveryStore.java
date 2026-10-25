@@ -1,12 +1,13 @@
 package dev.tuink.tui.flow;
 
-import dev.tuink.core.BomKind;
-import dev.tuink.core.DocumentFileMetadata;
+import dev.tuink.editor.storage.BomKind;
+import dev.tuink.editor.storage.DocumentFileMetadata;
 import dev.tuink.core.EditorState;
-import dev.tuink.core.FileBaseline;
+import dev.tuink.storage.jvm.FileBaseline;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import dev.tuink.core.Position;
 import dev.tuink.core.RecoverySnapshot;
-import dev.tuink.core.SaveDisposition;
+import dev.tuink.editor.storage.SaveDisposition;
 import dev.tuink.core.ViewportState;
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -635,7 +636,7 @@ public final class RecoveryStore implements AutoCloseable {
         try {
             RecoverySnapshot snapshot = new RecoverySnapshot(
                 lines,
-                fields.cursor(), fields.viewport(), fields.selectionAnchor(), fields.dirty(), fields.currentFile(),
+                fields.cursor(), fields.viewport(), fields.selectionAnchor(), fields.dirty(), fields.currentFile() == null ? null : JvmDocumentStorage.resource(fields.currentFile()),
                 fields.saveDisposition(), fields.fileMetadata().materialize(), fields.fileBaseline(), fields.createdAt()
             );
             return new Entry(id, snapshot);
@@ -953,16 +954,19 @@ public final class RecoveryStore implements AutoCloseable {
         p.setProperty(KEY_CREATED_AT, Long.toString(snapshot.createdAt().toEpochMilli()));
         p.setProperty(KEY_TEXT_GENERATION, textGeneration);
         p.setProperty(KEY_DIRTY, Boolean.toString(snapshot.dirty()));
-        p.setProperty(KEY_CURRENT_FILE_PRESENT, Boolean.toString(snapshot.currentFile() != null));
+        p.setProperty(KEY_CURRENT_FILE_PRESENT, Boolean.toString(JvmDocumentStorage.pathOf(snapshot.currentResource()) != null));
         p.setProperty(KEY_CURRENT_FILE,
-            snapshot.currentFile() == null ? "" : encodePath(snapshot.currentFile(), KEY_CURRENT_FILE, target));
+            JvmDocumentStorage.pathOf(snapshot.currentResource()) == null ? "" : encodePath(JvmDocumentStorage.pathOf(snapshot.currentResource()), KEY_CURRENT_FILE, target));
         p.setProperty(KEY_SAVE_DISPOSITION, snapshot.saveDisposition().name());
         DocumentFileMetadata fileMetadata = snapshot.fileMetadata();
         p.setProperty(KEY_FILE_ENCODING, fileMetadata.charset().name());
         p.setProperty(KEY_BOM_KIND, fileMetadata.bomKind().name());
         p.setProperty(KEY_DEFAULT_LINE_SEPARATOR, encodeLineSeparator(fileMetadata.defaultLineSeparator()));
         p.setProperty(KEY_LINE_SEPARATORS, RecoverySeparators.encode(fileMetadata.lineSeparators()));
-        FileBaseline fileBaseline = snapshot.fileBaseline();
+        if (snapshot.fileBaseline() != null && !(snapshot.fileBaseline() instanceof FileBaseline)) {
+            throw new IOException("Recovery storage supports only local file versions");
+        }
+        FileBaseline fileBaseline = (FileBaseline) snapshot.fileBaseline();
         p.setProperty(KEY_FILE_BASELINE_PRESENT, Boolean.toString(fileBaseline != null));
         p.setProperty(KEY_FILE_BASELINE_TARGET,
             fileBaseline == null ? "" : encodePath(fileBaseline.target(), KEY_FILE_BASELINE_TARGET, target));

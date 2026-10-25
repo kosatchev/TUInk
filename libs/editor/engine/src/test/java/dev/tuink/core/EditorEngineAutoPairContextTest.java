@@ -4,6 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.editor.storage.BomKind;
+import dev.tuink.editor.storage.DocumentFileMetadata;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -26,7 +29,7 @@ class EditorEngineAutoPairContextTest {
             String typed = "" + quote + '\\' + quote + quote;
             assertEquals(typed, fixture.model.getLine(0));
             assertEquals(new Position(0, 3), fixture.state.getCursor());
-            fixture.engine.saveAs(tempDir.resolve("quote-" + (int) quote + ".txt"));
+            fixture.engine.saveAs(JvmDocumentStorage.resource(tempDir.resolve("quote-" + (int) quote + ".txt")));
 
             fixture.engine.backspace();
 
@@ -197,7 +200,7 @@ class EditorEngineAutoPairContextTest {
             fixture.engine.insertChar('\'');
             assertEquals("x'", fixture.model.getLine(0));
             assertTrue(fixture.state.isDirty());
-            fixture.engine.saveAs(tempDir.resolve("selection-" + reverse + ".txt"));
+            fixture.engine.saveAs(JvmDocumentStorage.resource(tempDir.resolve("selection-" + reverse + ".txt")));
             assertFalse(fixture.state.isDirty());
 
             assertTrue(fixture.engine.undo());

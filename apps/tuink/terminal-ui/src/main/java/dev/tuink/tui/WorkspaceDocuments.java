@@ -1,6 +1,8 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import dev.tuink.core.TabSession;
+import dev.tuink.storage.jvm.FileBaseline;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -27,12 +29,12 @@ final class WorkspaceDocuments {
     }
 
     static boolean isPristinePlaceholder(TabSession tab) {
-        return tab.state().getCurrentFile() == null && !tab.state().isDirty()
+        return JvmDocumentStorage.pathOf(tab.state().getCurrentResource()) == null && !tab.state().isDirty()
             && tab.model().revision() == 0 && tab.model().lineCount() == 1 && tab.model().lineText(0).isEmpty();
     }
 
     private static boolean matches(TabSession tab, Path requested) {
-        Path current = tab.state().getCurrentFile();
+        Path current = JvmDocumentStorage.pathOf(tab.state().getCurrentResource());
         if (current == null || requested == null) {
             return false;
         }
@@ -43,7 +45,7 @@ final class WorkspaceDocuments {
         } catch (IOException | SecurityException unavailable) {
             namedTarget = target;
         }
-        Path physical = tab.model().fileBaseline() == null ? current : tab.model().fileBaseline().target();
+        Path physical = tab.model().fileBaseline() == null ? current : ((FileBaseline) tab.model().fileBaseline()).target();
         if (namedTarget.equals(current)
             && (tab.model().fileBaseline() == null
                 || physical.equals(current) && !Files.isSymbolicLink(current))) {

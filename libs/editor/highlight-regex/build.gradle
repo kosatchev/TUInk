@@ -2,6 +2,8 @@ plugins {
     id 'java-library'
 }
 
+sourceSets.test.java.srcDir(rootProject.file('verification/fixtures/java'))
+
 dependencies {
     api project(':editor-contract')
     testImplementation project(':render')

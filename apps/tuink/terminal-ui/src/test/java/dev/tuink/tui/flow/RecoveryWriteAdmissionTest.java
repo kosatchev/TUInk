@@ -1,12 +1,14 @@
 package dev.tuink.tui.flow;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import dev.tuink.core.RecoverySnapshot;
-import dev.tuink.core.SaveDisposition;
+import dev.tuink.editor.storage.SaveDisposition;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
@@ -89,7 +91,8 @@ class RecoveryWriteAdmissionTest {
     }
 
     private static RecoverySnapshot snapshot(List<String> lines, Path currentFile) {
-        return new RecoverySnapshot(lines, null, null, null, true, currentFile, SaveDisposition.CREATE_NEW,
+        return new RecoverySnapshot(lines, null, null, null, true,
+            currentFile == null ? null : JvmDocumentStorage.resource(currentFile), SaveDisposition.CREATE_NEW,
             null, null, Instant.parse("2026-10-18T00:00:00Z"));
     }
 

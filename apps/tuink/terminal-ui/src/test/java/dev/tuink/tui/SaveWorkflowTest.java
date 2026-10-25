@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static dev.tuink.tui.SaveWorkflowTestSupport.finish;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -28,7 +30,7 @@ class SaveWorkflowTest {
         Charset charset = Charset.forName("windows-1251");
         Files.write(source, "Привет".getBytes(charset));
         TabSession tab = emptyTab();
-        tab.engine().openExisting(source);
+        tab.engine().openExisting(JvmDocumentStorage.resource(source));
         tab.engine().insertInput("😀");
         SaveWorkflow.Context context = context(List.of(tab));
         Path target = directory.resolve("new.txt");
@@ -53,7 +55,7 @@ class SaveWorkflowTest {
         assertEquals(SaveWorkflow.NoticeKind.ERROR, confirmed.notice().kind());
         assertEquals(direct.notice().message(), confirmed.notice().message());
         assertEquals("untouched", Files.readString(target));
-        assertEquals(source, tab.state().getCurrentFile());
+        assertEquals(source, JvmDocumentStorage.pathOf(tab.state().getCurrentResource()));
         assertTrue(tab.state().isDirty());
         assertEquals(charset, tab.state().getFileEncoding());
         assertEquals(direct.modalState().utf8SaveAs(),
@@ -67,7 +69,7 @@ class SaveWorkflowTest {
     void quitSavesNamedTabsInOrderAndActivatesTheConflictingTabForRetry() throws Exception {
         TabSession first = namedDirtyTab("first.txt");
         TabSession second = namedDirtyTab("second.txt");
-        Files.writeString(second.state().getCurrentFile(), "external");
+        Files.writeString(JvmDocumentStorage.pathOf(second.state().getCurrentResource()), "external");
         var context = context(List.of(first, second));
         var result = finish(context, SaveWorkflow.quit(context, ConfirmChoice.SAVE));
         assertTrue(result.running());
@@ -77,8 +79,8 @@ class SaveWorkflowTest {
         assertEquals(SaveWorkflow.NoticeKind.ERROR, result.notice().kind());
         assertFalse(first.state().isDirty());
         assertTrue(second.state().isDirty());
-        assertEquals("draft original", Files.readString(first.state().getCurrentFile()));
-        assertEquals("external", Files.readString(second.state().getCurrentFile()));
+        assertEquals("draft original", Files.readString(JvmDocumentStorage.pathOf(first.state().getCurrentResource())));
+        assertEquals("external", Files.readString(JvmDocumentStorage.pathOf(second.state().getCurrentResource())));
     }
 
     @Test
@@ -108,7 +110,7 @@ class SaveWorkflowTest {
         TabSession tab = emptyTab();
         Path file = directory.resolve(filename);
         Files.writeString(file, "original");
-        tab.engine().openExisting(file);
+        tab.engine().openExisting(JvmDocumentStorage.resource(file));
         tab.engine().insertInput("draft ");
         return tab;
     }

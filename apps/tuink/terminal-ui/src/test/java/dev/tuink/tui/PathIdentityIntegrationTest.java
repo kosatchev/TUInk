@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -39,7 +41,7 @@ class PathIdentityIntegrationTest {
             HashSet<String> headers = new HashSet<>();
             for (int index = 0; index < paths.size(); index++) {
                 open(window, paths.get(index));
-                assertEquals(paths.get(index), window.active().state().getCurrentFile());
+                assertEquals(paths.get(index), JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
                 assertEquals("content " + index, window.active().tabSession().model().getLine(0));
                 assertTrue(headers.add(window.screenRow(0)), window.screenRow(0));
             }
@@ -67,7 +69,7 @@ class PathIdentityIntegrationTest {
                     window.screenRow(window.height - 2));
                 window.event(new TextInput("y"));
                 assertEquals("edited initial", Files.readString(target));
-                assertEquals(target, window.active().state().getCurrentFile());
+                assertEquals(target, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
                 assertFalse(window.active().state().isDirty());
                 for (int neighbor = index + 1; neighbor < paths.size(); neighbor++) {
                     assertEquals("untouched", Files.readString(paths.get(neighbor)));
@@ -82,7 +84,7 @@ class PathIdentityIntegrationTest {
         assumeTrue(File.separatorChar == '/');
         Path original = Files.writeString(directory.resolve(name), "original");
         try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("initial"))) {
-            window.active().tabSession().engine().openExisting(original);
+            window.active().tabSession().engine().openExisting(JvmDocumentStorage.resource(original));
             window.frame();
             window.event(new TextInput("edited "));
             for (int opening = 0; opening < 2; opening++) {
@@ -93,7 +95,7 @@ class PathIdentityIntegrationTest {
                 window.command(TuinkCommand.EDIT_COPY);
                 assertEquals(window.filename.text(), window.host.clipboard.text());
                 window.event(KeyStroke.of(KeyStroke.Key.ENTER));
-                assertEquals(original, window.active().state().getCurrentFile());
+                assertEquals(original, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
             }
             assertEquals("edited original", Files.readString(original));
         }

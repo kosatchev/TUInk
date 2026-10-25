@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+import dev.tuink.verification.MemoryDocumentStorage;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -105,13 +107,13 @@ class EditorEngineMultilineIndentTest {
         fixture.engine().insertNewline();
         assertTrue(fixture.engine().undo());
         long revision = fixture.model().revision();
-        fixture.engine().saveAs(directory.resolve("main.py"));
+        fixture.engine().saveAs(JvmDocumentStorage.resource(directory.resolve("main.py")));
         assertEquals(revision, fixture.model().revision());
         fixture.engine().insertNewline();
         assertEquals("    ", fixture.model().getLine(2));
         assertTrue(fixture.engine().undo());
         assertFalse(fixture.state().isDirty());
-        fixture.engine().saveAs(directory.resolve("main.txt"));
+        fixture.engine().saveAs(JvmDocumentStorage.resource(directory.resolve("main.txt")));
         fixture.engine().moveEnd();
         fixture.engine().insertInput(" {");
         fixture.engine().insertNewline();
@@ -135,7 +137,7 @@ class EditorEngineMultilineIndentTest {
         TextModel model = new TextModel(new SimpleLineBuffer());
         model.replaceLines(lines);
         EditorState state = new EditorState();
-        state.setCurrentFile(Path.of(filename));
+        state.setCurrentResource(new MemoryDocumentStorage().resource(Path.of(filename).toString()));
         EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model));
         engine.moveCursorTo(new Position(lines.size() - 1, lines.getLast().length()));
         return new Fixture(model, state, engine);

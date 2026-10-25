@@ -1,6 +1,6 @@
 package dev.tuink.tui;
 
-import dev.tuink.core.SaveDisposition;
+import dev.tuink.editor.storage.SaveDisposition;
 import dev.tuink.tui.flow.UiModalState;
 import dev.tuink.tui.flow.SavePathInput;
 import dev.tuink.tui.command.TuinkCommand;

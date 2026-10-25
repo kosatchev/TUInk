@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -82,9 +83,9 @@ class EditorEngineCppRawStringIndentTest {
     }
 
     private static void assertCodeOnFollowingLine(String opening) {
-        IndentationLexer.Result first = IndentationLexer.scan(opening, opening.length(), FILE,
+        IndentationLexer.Result first = IndentationLexer.scan(opening, opening.length(), FILE.getFileName().toString(),
             IndentationLexer.State.CODE, false);
-        IndentationLexer.Result next = IndentationLexer.scan("{", 1, FILE, first.afterLine(), true);
+        IndentationLexer.Result next = IndentationLexer.scan("{", 1, FILE.getFileName().toString(), first.afterLine(), true);
         assertTrue(next.codeAtCursor(), opening);
         assertEquals("{", next.code(), opening);
     }
@@ -101,7 +102,7 @@ class EditorEngineCppRawStringIndentTest {
         TextModel model = new TextModel(new SimpleLineBuffer());
         model.replaceLines(lines);
         EditorState state = new EditorState();
-        state.setCurrentFile(FILE);
+        state.setCurrentResource(JvmDocumentStorage.resource(FILE));
         EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model));
         engine.setGutterDiffMode(GutterDiffMode.DISABLED);
         engine.moveCursorTo(new Position(cursorLine, lines.get(cursorLine).length()));

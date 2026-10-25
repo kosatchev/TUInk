@@ -3,8 +3,8 @@ package dev.tuink.core;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.tuink.unicode.GraphemeText;
 import dev.tuink.editor.language.LanguageRegistry;
+import dev.tuink.unicode.GraphemeText;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;

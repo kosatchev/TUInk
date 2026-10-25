@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
@@ -30,7 +32,7 @@ class RecoveryWorkspaceIntegrationTest {
 
             assertEquals(2, window.tabs.size());
             assertSame(cli, window.tabs.getFirst());
-            assertEquals(window.document, cli.state().getCurrentFile());
+            assertEquals(window.document, JvmDocumentStorage.pathOf(cli.state().getCurrentResource()));
             assertEquals(List.of("CLI contents"), cli.tabSession().model().snapshotLines());
             assertFalse(cli.state().isDirty());
             assertEquals(1, window.context.activeTabIndex());
@@ -71,7 +73,7 @@ class RecoveryWorkspaceIntegrationTest {
 
             assertEquals(2, window.tabs.size());
             assertSame(named, window.tabs.getFirst());
-            assertEquals(window.document, named.state().getCurrentFile());
+            assertEquals(window.document, JvmDocumentStorage.pathOf(named.state().getCurrentResource()));
         }
     }
 
@@ -80,13 +82,13 @@ class RecoveryWorkspaceIntegrationTest {
         try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("saved"))) {
             Path absent = directory.resolve("new-command-line-file.txt");
             var named = window.active();
-            named.tabSession().engine().open(absent);
+            named.tabSession().engine().open(JvmDocumentStorage.resource(absent));
 
             window.restore(List.of(draft("recovered", null, "draft")));
 
             assertEquals(2, window.tabs.size());
             assertSame(named, window.tabs.getFirst());
-            assertEquals(absent, named.state().getCurrentFile());
+            assertEquals(absent, JvmDocumentStorage.pathOf(named.state().getCurrentResource()));
             assertFalse(Files.exists(absent));
         }
     }
@@ -150,7 +152,7 @@ class RecoveryWorkspaceIntegrationTest {
     private static RecoveryStore.Entry draft(String id, Path file, String inserted) throws Exception {
         TabSession tab = TuiDocumentSession.create(new EditorClipboard()).view();
         if (file != null) {
-            tab.engine().open(file);
+            tab.engine().open(JvmDocumentStorage.resource(file));
         }
         tab.engine().insertInput(inserted);
         RecoverySnapshot snapshot = tab.engine().captureRecoverySnapshot();

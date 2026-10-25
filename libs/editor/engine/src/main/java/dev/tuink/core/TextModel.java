@@ -1,67 +1,39 @@
 package dev.tuink.core;
 
+import dev.tuink.editor.document.ImmutableText;
+import dev.tuink.editor.storage.DocumentFileMetadata;
+import dev.tuink.editor.storage.DocumentLoad;
+import dev.tuink.editor.storage.DocumentOpenMode;
+import dev.tuink.editor.storage.DocumentResource;
+import dev.tuink.editor.storage.DocumentSave;
+import dev.tuink.editor.storage.ResourceBinding;
+import dev.tuink.editor.storage.ResourceVersion;
+import dev.tuink.editor.storage.SaveAuthorization;
+import dev.tuink.editor.storage.SaveDisposition;
+import dev.tuink.editor.storage.SavedDocument;
 import dev.tuink.unicode.GraphemeText;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.nio.ByteBuffer;
-import java.nio.CharBuffer;
-import java.nio.channels.SeekableByteChannel;
-import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
-import java.nio.charset.CharsetDecoder;
-import java.nio.charset.CharsetEncoder;
-import java.nio.charset.CodingErrorAction;
-import java.nio.charset.CoderResult;
-import java.nio.charset.StandardCharsets;
-import java.nio.charset.UnmappableCharacterException;
-import java.nio.file.AtomicMoveNotSupportedException;
-import java.nio.file.FileAlreadyExistsException;
-import java.nio.file.Files;
-import java.nio.file.NoSuchFileException;
-import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.nio.file.StandardOpenOption;
-import java.nio.file.attribute.BasicFileAttributes;
-import java.nio.file.attribute.PosixFilePermission;
-import java.nio.file.attribute.PosixFilePermissions;
-import java.security.MessageDigest;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HexFormat;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Editing operations and persistence over a {@link TextBuffer}.
+ * Editing operations and immutable resource handoffs over a {@link TextBuffer}.
  */
 public class TextModel {
     private static final AtomicLong NEXT_CACHE_ID = new AtomicLong();
     private static final int CHANGE_HISTORY_CAPACITY = 128;
-    static final int MAX_LOAD_BYTES = 64 * 1024 * 1024;
     private TextBuffer buffer;
     private final int[] firstChangedLines = new int[CHANGE_HISTORY_CAPACITY];
     private final LineChange[] lineChanges = new LineChange[CHANGE_HISTORY_CAPACITY];
-    private static final Charset FALLBACK_CHARSET = Charset.forName("windows-1251");
-    private static final Set<PosixFilePermission> NEW_FILE_PERMISSIONS = Set.of(
-        PosixFilePermission.OWNER_READ,
-        PosixFilePermission.OWNER_WRITE,
-        PosixFilePermission.GROUP_READ,
-        PosixFilePermission.GROUP_WRITE,
-        PosixFilePermission.OTHERS_READ,
-        PosixFilePermission.OTHERS_WRITE
-    );
     private long revision = 0L;
     private long contentEpoch = 0L;
     private long lastContentReplacementRevision;
     private final long cacheIdentity = NEXT_CACHE_ID.incrementAndGet();
     private DocumentFileMetadata fileMetadata;
-    private FileBaseline fileBaseline;
-    private final FileBaseline.InputOpener baselineInput;
+    private ResourceVersion fileBaseline;
     private EditorDocument documentOwner;
     private LocalEdit localEdit;
     private GraphemeText cachedGraphemes;
@@ -79,6 +51,7 @@ public class TextModel {
         private final TextBuffer source = buffer;
         private final LocalEditBuffer staged = new LocalEditBuffer(source);
         private final DocumentFileMetadata metadataBefore = fileMetadata;
+        private final ResourceVersion baselineBefore = fileBaseline;
         private final long revisionBefore = revision;
         private final long epochBefore = contentEpoch;
         private final long replacementRevisionBefore = lastContentReplacementRevision;
@@ -101,6 +74,7 @@ public class TextModel {
         void abort() {
             buffer = source;
             fileMetadata = metadataBefore;
+            fileBaseline = baselineBefore;
             revision = revisionBefore;
             contentEpoch = epochBefore;
             lastContentReplacementRevision = replacementRevisionBefore;
@@ -118,11 +92,6 @@ public class TextModel {
     }
 
     public TextModel(TextBuffer sourceBuffer) {
-        this(sourceBuffer, Files::newInputStream);
-    }
-
-    TextModel(TextBuffer sourceBuffer, FileBaseline.InputOpener baselineInput) {
-        this.baselineInput = Objects.requireNonNull(baselineInput, "baselineInput");
         TextBuffer source = Objects.requireNonNull(sourceBuffer, "buffer");
         int sourceLineCount = source.lineCount();
         List<String> imported = new ArrayList<>(Math.max(1, sourceLineCount));
@@ -148,7 +117,6 @@ public class TextModel {
     }
 
     private TextModel(TextBuffer ownedBuffer, DocumentFileMetadata metadata) {
-        this.baselineInput = Files::newInputStream;
         this.buffer = ownedBuffer;
         this.fileMetadata = metadata;
     }
@@ -705,444 +673,92 @@ public class TextModel {
         return clamped;
     }
 
-    public LoadMetadata load(Path path) throws IOException {
-        return load(path, DocumentOpenMode.DETECT);
+    public DocumentLoad load(DocumentResource resource) throws IOException {
+        return load(resource, DocumentOpenMode.DETECT);
     }
 
-    public LoadMetadata load(Path path, DocumentOpenMode openMode) throws IOException {
-        PreparedLoad prepared = prepareLoad(path, openMode);
+    public DocumentLoad load(DocumentResource resource, DocumentOpenMode openMode) throws IOException {
+        DocumentLoad prepared = prepareLoad(resource, openMode);
         applyPreparedLoad(prepared);
-        return new LoadMetadata(prepared.metadata());
+        return prepared;
     }
 
-    /** Reads and decodes an independent immutable result, without touching an open document. */
-    public static PreparedLoad prepareLoad(Path path, DocumentOpenMode openMode) throws IOException {
+    /** Reads independent content through the explicitly supplied resource provider. */
+    public static DocumentLoad prepareLoad(DocumentResource resource, DocumentOpenMode openMode) throws IOException {
+        return prepareLoad(resource, openMode, false);
+    }
+
+    public static DocumentLoad prepareLoad(DocumentResource resource, DocumentOpenMode openMode,
+                                            boolean allowMissing) throws IOException {
+        Objects.requireNonNull(resource, "resource");
         Objects.requireNonNull(openMode, "openMode");
-        Path requested = resolveDocumentPath(path);
-        Path target = requested.toRealPath();
-        BasicFileAttributes attributes = Files.readAttributes(target, BasicFileAttributes.class);
-        if (!attributes.isRegularFile()) {
-            throw new IOException("Not a regular file: " + path);
-        }
-        Runtime runtime = Runtime.getRuntime();
-        long availableHeap = runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory());
-        // Leave headroom for existing tabs, decoding and the new view's derived state.
-        long memoryBudget = Math.max(0L, availableHeap / 2);
-        int maxBytes = (int) Math.min(MAX_LOAD_BYTES, memoryBudget / 8);
-        if (attributes.size() > maxBytes) {
-            throw loadSizeExceeded(target, maxBytes);
-        }
-        byte[] data;
-        try (InputStream input = Files.newInputStream(target)) {
-            data = readDocumentBytes(input, target, maxBytes);
-        }
-        DecodedContent decoded = decodeWithDetectedCharset(data, openMode);
-        requireLoadFitsMemory(decoded.text(), data.length, memoryBudget, target);
-        ParsedContent parsed = parseContent(decoded.text());
-        DocumentFileMetadata loadedMetadata = new DocumentFileMetadata(
-            decoded.charset(),
-            decoded.bomKind(),
-            detectDefaultLineSeparator(parsed.lineSeparators()),
-            parsed.lineSeparators()
-        );
-        return new PreparedLoad(requested, parsed.lines(), loadedMetadata, FileBaseline.fromBytes(target, data));
+        return resource.storage().load(resource, openMode, allowMissing);
     }
 
-    /** Owner-thread publication of a completed read; performs no filesystem access. */
-    public void applyPreparedLoad(PreparedLoad prepared) {
+    /** Owner-thread publication of a completed read; never opens a resource. */
+    public void applyPreparedLoad(DocumentLoad prepared) {
         Objects.requireNonNull(prepared, "prepared");
         replaceLines(prepared.lines(), prepared.metadata());
         fileBaseline = prepared.baseline();
     }
 
-    public record PreparedLoad(Path path, List<String> lines, DocumentFileMetadata metadata, FileBaseline baseline) {
-        public PreparedLoad {
-            Objects.requireNonNull(path, "path");
-            lines = LogicalDocumentLines.copyOfOrEmptyDocument(lines);
-            Objects.requireNonNull(metadata, "metadata");
-            Objects.requireNonNull(baseline, "baseline");
-            requireCompatibleMetadata(metadata, lines.size());
-        }
+    public void save(DocumentResource resource) throws IOException {
+        save(resource, fileMetadata);
     }
 
-    /** The extra byte detects growth beyond the size observed before opening the stream. */
-    static byte[] readDocumentBytes(InputStream input, Path target, int maxBytes) throws IOException {
-        if (maxBytes < 0 || maxBytes > MAX_LOAD_BYTES) {
-            throw new IllegalArgumentException("Invalid document read limit");
-        }
-        byte[] data = input.readNBytes(maxBytes + 1);
-        if (data.length > maxBytes) {
-            throw loadSizeExceeded(target, maxBytes);
-        }
-        return data;
+    public void save(DocumentResource resource, Charset charset) throws IOException {
+        save(resource, charset, EditorState.LINE_SEPARATOR_LF);
     }
 
-    private static IOException loadSizeExceeded(Path target, int maxBytes) {
-        return new IOException("File too large to open: " + target
-            + ". Current limit: " + maxBytes + " bytes (at most 64 MiB, reduced by available memory).");
+    public void save(DocumentResource resource, Charset charset, String lineSeparator) throws IOException {
+        save(resource, fileMetadata.canonicalized(charset, lineSeparator, lineCount()));
     }
 
-    private static void requireLoadFitsMemory(String content, int encodedBytes, long budget, Path target)
+    public void save(DocumentResource resource, DocumentFileMetadata metadata) throws IOException {
+        save(resource, metadata, SaveDisposition.REPLACE_EXISTING);
+    }
+
+    /** Explicit export/overwrite; the inspected target is not treated as this model's owned version. */
+    public void save(DocumentResource resource, DocumentFileMetadata metadata, SaveDisposition disposition)
         throws IOException {
-        // A file made of short lines needs much more space than its byte count suggests.
-        // Check before allocating the per-line strings, separator lists and view state.
-        long lineCount = 1;
-        for (int index = 0; index < content.length(); index++) {
-            char character = content.charAt(index);
-            if (character == '\r' || character == '\n') {
-                lineCount++;
-                if (character == '\r' && index + 1 < content.length() && content.charAt(index + 1) == '\n') {
-                    index++;
-                }
-            }
+        saveThroughStorage(resource, metadata, disposition, false);
+    }
+
+    /** Saves an owned resource only while its loaded/saved version still matches. */
+    public void saveIfUnchanged(DocumentResource resource, DocumentFileMetadata metadata, SaveDisposition disposition)
+        throws IOException {
+        saveThroughStorage(resource, metadata, disposition, true);
+    }
+
+    private void saveThroughStorage(DocumentResource resource, DocumentFileMetadata metadata,
+                                    SaveDisposition disposition, boolean checkBaseline) throws IOException {
+        try {
+            DocumentSave request = prepareSave(resource, metadata, disposition);
+            SaveAuthorization authorization = checkBaseline ? new SaveAuthorization.Current()
+                : new SaveAuthorization.Approved(resource.storage().inspect(resource, ResourceBinding.unbound()));
+            completeSave(resource.storage().write(request, authorization));
+        } catch (OutOfMemoryError | DocumentEditLimitException exhausted) {
+            throw new IOException("Not enough memory to save this document", exhausted);
         }
-        if (8L * encodedBytes + 128L * lineCount > budget) {
-            throw new IOException("File too large to open with available memory: " + target
-                + ". Too much text or too many lines.");
-        }
     }
 
-    public void save(Path path) throws IOException {
-        save(path, fileMetadata);
-    }
-
-    public void save(Path path, Charset charset) throws IOException {
-        save(path, charset, EditorState.LINE_SEPARATOR_LF);
-    }
-
-    public void save(Path path, Charset charset, String lineSeparator) throws IOException {
-        save(path, fileMetadata.canonicalized(charset, lineSeparator, lineCount()));
-    }
-
-    public void save(Path path, DocumentFileMetadata metadata) throws IOException {
-        save(path, metadata, SaveDisposition.REPLACE_EXISTING);
-    }
-
-    public void save(
-        Path path,
-        DocumentFileMetadata metadata,
-        SaveDisposition disposition
-    ) throws IOException {
-        save(path, metadata, disposition, false);
-    }
-
-    /** Saves an owned path only while its last loaded/saved bytes still match. */
-    public void saveIfUnchanged(
-        Path path,
-        DocumentFileMetadata metadata,
-        SaveDisposition disposition
-    ) throws IOException {
-        save(path, metadata, disposition, true);
-    }
-
-    /** Captures immutable save inputs on the owner thread; write() never reads the live model. */
-    public SaveRequest prepareSave(Path path, DocumentFileMetadata metadata,
-                                   SaveDisposition disposition, boolean checkBaseline) {
+    /** Captures immutable save input; storage workers never access the live model. */
+    public DocumentSave prepareSave(DocumentResource resource, DocumentFileMetadata metadata,
+                                     SaveDisposition disposition) {
+        Objects.requireNonNull(resource, "resource");
+        Objects.requireNonNull(disposition, "disposition");
+        DocumentFileMetadata checked = requireCompatibleMetadata(metadata, lineCount());
         DocumentEditBudget.requireTemporaryReferences(lineCount());
-        return new SaveRequest(snapshotTextLines(), requireCompatibleMetadata(metadata, lineCount()),
-            fileBaseline, Objects.requireNonNull(path, "path"),
-            Objects.requireNonNull(disposition, "disposition"), checkBaseline);
+        List<ImmutableText> lines = new ArrayList<>(lineCount());
+        for (int line = 0; line < lineCount(); line++) lines.add(lineText(line).immutableText());
+        return new DocumentSave(resource, lines, checked, fileBaseline, disposition);
     }
 
-    /** Adopt the bytes actually committed by a detached writer. No text revision is changed. */
-    public void completeSave(SavedFile saved) {
+    /** Adopt the committed format/version; content and its revision remain unchanged. */
+    public void completeSave(SavedDocument saved) {
+        Objects.requireNonNull(saved, "saved");
         fileMetadata = requireCompatibleMetadata(saved.metadata(), lineCount());
         fileBaseline = saved.baseline();
-    }
-
-    public record SavedFile(Path path, DocumentFileMetadata metadata, FileBaseline baseline) {
-        public SavedFile {
-            Objects.requireNonNull(path, "path");
-            Objects.requireNonNull(metadata, "metadata");
-            Objects.requireNonNull(baseline, "baseline");
-        }
-    }
-
-    public record SaveRequest(List<LineText> lines, DocumentFileMetadata metadata, FileBaseline baseline,
-                              Path path, SaveDisposition disposition, boolean checkBaseline) {
-        public SaveRequest {
-            lines = List.copyOf(lines);
-            requireCompatibleMetadata(Objects.requireNonNull(metadata, "metadata"), lines.size());
-            Objects.requireNonNull(path, "path");
-            Objects.requireNonNull(disposition, "disposition");
-        }
-
-        public SavedFile write() throws IOException {
-            return write(resolveDocumentPath(path), checkBaseline);
-        }
-
-        SavedFile write(Path resolvedPath, boolean verifyBaseline) throws IOException {
-            TextModel detached = new TextModel(new SnapshotBuffer(lines), metadata);
-            detached.fileBaseline = baseline;
-            return detached.save(resolvedPath, metadata, disposition, verifyBaseline);
-        }
-
-        SavedFile write(PreparedSaveTarget target, boolean verifyBaseline) throws IOException {
-            TextModel detached = new TextModel(new SnapshotBuffer(lines), metadata);
-            detached.fileBaseline = baseline;
-            SaveDisposition approved = target.exists() ? disposition : SaveDisposition.CREATE_NEW;
-            return detached.save(target.requested(), metadata, approved, verifyBaseline, target);
-        }
-    }
-
-    /** Immutable writer input: no copied character data and no mutable document aliases. */
-    private record SnapshotBuffer(List<LineText> lines) implements TextBuffer {
-        @Override public TextBuffer createEmptySibling() { return new SimpleLineBuffer(); }
-        @Override public int lineCount() { return lines.size(); }
-        @Override public String getLine(int line) { return lines.get(line).toString(); }
-        @Override public LineText lineText(int line) { return lines.get(line); }
-        @Override public void setLine(int line, String text) { throw new UnsupportedOperationException(); }
-        @Override public void insertLine(int index, String text) { throw new UnsupportedOperationException(); }
-        @Override public String removeLine(int index) { throw new UnsupportedOperationException(); }
-        @Override public void clear() { throw new UnsupportedOperationException(); }
-    }
-
-    private SavedFile save(
-        Path path,
-        DocumentFileMetadata metadata,
-        SaveDisposition disposition,
-        boolean checkBaseline
-    ) throws IOException {
-        return save(path, metadata, disposition, checkBaseline, null);
-    }
-
-    private SavedFile save(Path path, DocumentFileMetadata metadata, SaveDisposition disposition,
-                           boolean checkBaseline, PreparedSaveTarget approvedTarget) throws IOException {
-        Path tempFile = null;
-        boolean committed = false;
-        FileSaveGuard guard = null;
-        Throwable failure = null;
-        try {
-            DocumentFileMetadata checkedMetadata = unambiguousLineSeparators(
-                requireCompatibleMetadata(metadata, lineCount()), 1, lineCount() - 2
-            );
-            SaveDisposition checkedDisposition = Objects.requireNonNull(disposition, "disposition");
-            Path requestedTarget = path.toAbsolutePath();
-            if (approvedTarget != null) approvedTarget.beginWrite();
-            boolean verifyOriginal = checkBaseline
-                && (checkedDisposition == SaveDisposition.REPLACE_EXISTING || fileBaseline != null);
-            Path target;
-            try {
-                target = approvedTarget == null ? resolveSaveTarget(requestedTarget) : approvedTarget.target();
-            } catch (IOException inaccessible) {
-                if (verifyOriginal) throw new IOException(FileBaseline.conflictMessage(requestedTarget), inaccessible);
-                throw inaccessible;
-            }
-            // Validate the address that will receive the staged bytes. Resolving
-            // a changing opening alias again could verify one file and replace another.
-            if (verifyOriginal) {
-                requireUnchangedFile(target);
-            }
-            boolean targetExists = requireRegularSaveTargetOrMissing(target);
-            Path parent = target.getParent();
-            Path tempDir = parent != null ? parent : Path.of(".").toAbsolutePath().normalize();
-            String fileName = target.getFileName() == null ? "tuink" : target.getFileName().toString();
-            String prefix = "." + sanitizePrefix(fileName) + ".";
-            if (prefix.length() < 3) {
-                prefix = ".tuink.";
-            }
-
-            tempFile = createSaveTempFile(tempDir, prefix, targetExists);
-            FileBaseline savedBaseline = encodeToFile(tempFile, target, checkedMetadata);
-            SavedFile result = new SavedFile(requestedTarget, checkedMetadata, savedBaseline);
-            guard = FileSaveGuard.acquire(target);
-            if (approvedTarget != null) approvedTarget.requireUnchanged();
-            if (verifyOriginal) {
-                requireUnchangedFile(target);
-            }
-            requireSameSaveTarget(requestedTarget, target);
-            boolean currentTargetExists = requireRegularSaveTargetOrMissing(target);
-            if (checkedDisposition == SaveDisposition.CREATE_NEW && currentTargetExists) {
-                throw new FileAlreadyExistsException(target.toString());
-            }
-            // Read and apply the current attributes inside the same publication
-            // guard used by settings saves and every other TUInk document.
-            FileSaveAttributes targetAttributes = currentTargetExists ? FileSaveAttributes.read(target) : null;
-            if (targetAttributes != null) {
-                targetAttributes.apply(tempFile);
-            }
-            if (verifyOriginal) {
-                // Recheck after staging bytes, immediately before the filesystem commit.
-                requireUnchangedFile(target);
-            }
-            requireSameSaveTarget(requestedTarget, target);
-            requireRegularSaveTargetOrMissing(target);
-            if (approvedTarget != null) approvedTarget.requireUnchanged();
-            if (checkedDisposition == SaveDisposition.CREATE_NEW) {
-                publishNewFile(tempFile, target);
-            } else {
-                try {
-                    Files.move(
-                        tempFile,
-                        target,
-                        StandardCopyOption.REPLACE_EXISTING,
-                        StandardCopyOption.ATOMIC_MOVE
-                    );
-                } catch (AtomicMoveNotSupportedException e) {
-                    if (approvedTarget != null) approvedTarget.requireUnchanged();
-                    if (verifyOriginal) requireUnchangedFile(target);
-                    requireSameSaveTarget(requestedTarget, target);
-                    requireRegularSaveTargetOrMissing(target);
-                    Files.move(tempFile, target, StandardCopyOption.REPLACE_EXISTING);
-                }
-            }
-            committed = true;
-            fileMetadata = checkedMetadata;
-            fileBaseline = savedBaseline;
-            return result;
-        } catch (OutOfMemoryError allocationFailure) {
-            IOException saveFailure = new IOException("Not enough memory to save this document", allocationFailure);
-            failure = saveFailure;
-            throw saveFailure;
-        } catch (IOException | RuntimeException | Error error) {
-            failure = error;
-            throw error;
-        } finally {
-            if (guard != null) {
-                try {
-                    guard.close();
-                } catch (IOException | OutOfMemoryError cleanupFailure) {
-                    if (failure != null) failure.addSuppressed(cleanupFailure);
-                    // Publication already completed when there is no primary
-                    // failure. Releasing the guard cannot undo a committed save.
-                }
-            }
-            try {
-                if (tempFile != null) Files.deleteIfExists(tempFile);
-            } catch (IOException | OutOfMemoryError cleanupFailure) {
-                if (failure != null) failure.addSuppressed(cleanupFailure);
-                else if (!committed) throw new IOException("Cannot remove a staged save file", cleanupFailure);
-                // The target is already committed. A private orphan temp file is
-                // preferable to reporting a failed save and desynchronizing state.
-            }
-        }
-    }
-
-    private static void publishNewFile(Path tempFile, Path target) throws IOException {
-        Throwable linkFailure;
-        try {
-            // Linking the fully staged inode publishes complete bytes without
-            // overwriting a name created concurrently. Files.move cannot offer
-            // that no-overwrite guarantee on Unix, even without REPLACE_EXISTING.
-            Files.createLink(target, tempFile);
-            return;
-        } catch (FileAlreadyExistsException conflict) {
-            throw conflict;
-        } catch (IOException | UnsupportedOperationException failure) {
-            linkFailure = failure;
-        }
-
-        byte[] buffer = new byte[8192];
-        ByteBuffer bytes = ByteBuffer.wrap(buffer);
-        SeekableByteChannel output;
-        try {
-            output = createNewSaveChannel(target);
-        } catch (IOException failure) {
-            failure.addSuppressed(linkFailure);
-            throw failure;
-        } catch (UnsupportedOperationException failure) {
-            IOException unsupported = new IOException("Cannot create a new file: " + target, failure);
-            unsupported.addSuppressed(linkFailure);
-            throw unsupported;
-        }
-        try (output; InputStream input = Files.newInputStream(tempFile)) {
-            int read;
-            while ((read = input.read(buffer)) != -1) {
-                bytes.clear().limit(read);
-                while (bytes.hasRemaining()) {
-                    output.write(bytes);
-                }
-            }
-        } catch (IOException | OutOfMemoryError failure) {
-            // Keep the new path: another writer may have replaced it after the
-            // exclusive open, so deleting it by name could remove their file.
-            IOException incomplete = new IOException(
-                "Saving the new file failed: " + target
-                    + ". The file remains at this path and may contain incomplete data.",
-                failure
-            );
-            incomplete.addSuppressed(linkFailure);
-            throw incomplete;
-        }
-    }
-
-    private static SeekableByteChannel createNewSaveChannel(Path target) throws IOException {
-        Set<StandardOpenOption> options = Set.of(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
-        try {
-            return Files.newByteChannel(
-                target,
-                options,
-                PosixFilePermissions.asFileAttribute(NEW_FILE_PERMISSIONS)
-            );
-        } catch (UnsupportedOperationException unsupportedAttributes) {
-            return Files.newByteChannel(target, options);
-        }
-    }
-
-    /** Resolves parent aliases before dot segments while retaining a final symlink alias. */
-    static Path resolveDocumentPath(Path requested) throws IOException {
-        Path absolute = requested.toAbsolutePath();
-        Path leaf = absolute.getFileName();
-        if (leaf == null || leaf.toString().equals(".") || leaf.toString().equals("..")) {
-            throw new IOException("Document target must be a file: " + requested);
-        }
-        return absolute.getParent().toRealPath().resolve(leaf);
-    }
-
-    private static Path resolveSaveTarget(Path requestedTarget) throws IOException {
-        return FileSaveGuard.canonicalTarget(requestedTarget);
-    }
-
-    private static void requireSameSaveTarget(Path requestedTarget, Path target) throws IOException {
-        // Staged bytes, attributes and baseline belong to this exact name.
-        if (!target.equals(resolveSaveTarget(requestedTarget))) {
-            throw new IOException("Save target changed outside TUInk during saving: " + requestedTarget
-                + ". Choose the target again and retry Save As.");
-        }
-    }
-
-    private static boolean requireRegularSaveTargetOrMissing(Path target) throws IOException {
-        BasicFileAttributes attributes;
-        try {
-            attributes = Files.readAttributes(target, BasicFileAttributes.class);
-        } catch (NoSuchFileException missing) {
-            if (Files.isSymbolicLink(target)) {
-                throw missing;
-            }
-            return false;
-        }
-        if (attributes.isDirectory()) {
-            throw new IOException("Save target is a directory: " + target);
-        }
-        if (!attributes.isRegularFile()) {
-            throw new IOException("Save target is not a regular file: " + target);
-        }
-        return true;
-    }
-
-    private void requireUnchangedFile(Path path) throws IOException {
-        if (fileBaseline == null) {
-            throw new IOException("Cannot verify the original file: " + path
-                + ". Use Save As with a different name, or reopen the file.");
-        }
-        fileBaseline.requireUnchanged(path, baselineInput);
-    }
-
-    private static Path createSaveTempFile(Path tempDir, String prefix, boolean targetExists)
-        throws IOException {
-        if (targetExists) {
-            return Files.createTempFile(tempDir, prefix, ".tmp");
-        }
-        try {
-            return Files.createTempFile(
-                tempDir,
-                prefix,
-                ".tmp",
-                PosixFilePermissions.asFileAttribute(NEW_FILE_PERMISSIONS)
-            );
-        } catch (UnsupportedOperationException ignored) {
-            return Files.createTempFile(tempDir, prefix, ".tmp");
-        }
     }
 
     public List<String> snapshotLines() {
@@ -1155,11 +771,11 @@ public class TextModel {
         return fileMetadata;
     }
 
-    public FileBaseline fileBaseline() {
+    public ResourceVersion fileBaseline() {
         return fileBaseline;
     }
 
-    void restoreFileBaseline(FileBaseline baseline) {
+    void restoreFileBaseline(ResourceVersion baseline) {
         fileBaseline = baseline;
     }
 
@@ -1188,24 +804,8 @@ public class TextModel {
     private DocumentFileMetadata unambiguousLineSeparators(
         DocumentFileMetadata metadata, int firstLine, int lastLine
     ) {
-        int first = Math.max(1, firstLine);
-        int last = Math.min(lineCount() - 2, lastLine);
-        if (first > last) return metadata;
-        var separators = metadata.lineSeparators().listIterator(first - 1);
-        String previous = separators.next();
-        DocumentFileMetadata normalized = metadata;
-        for (int line = first; line <= last; line++) {
-            String current = separators.next();
-            if (buffer.lineText(line).isEmpty()
-                && EditorState.LINE_SEPARATOR_CR.equals(previous)
-                && EditorState.LINE_SEPARATOR_LF.equals(current)) {
-                // CR + an empty line + LF would otherwise serialize as one CRLF.
-                // Keep the preceding line's separator and disambiguate the empty line's own EOL.
-                normalized = normalized.withLineSeparator(line, EditorState.LINE_SEPARATOR_CRLF);
-            }
-            previous = current;
-        }
-        return normalized;
+        return DocumentCodec.normalizeLineSeparators(metadata, lineCount(),
+            line -> buffer.lineText(line).isEmpty(), firstLine, lastLine);
     }
 
     public long revision() {
@@ -1346,288 +946,7 @@ public class TextModel {
         return checked;
     }
 
-    private static DecodedContent decodeWithDetectedCharset(byte[] data, DocumentOpenMode openMode) throws IOException {
-        if (openMode == DocumentOpenMode.UTF_16LE) {
-            if (!hasUtf16LeBom(data)) {
-                throw new IOException("Explicit UTF-16LE opening requires a UTF-16LE BOM");
-            }
-            return new DecodedContent(StandardCharsets.UTF_16LE, BomKind.UTF_16_LE,
-                decodeStrict(data, 2, StandardCharsets.UTF_16LE));
-        }
-        if (hasUtf32Bom(data, true) && isValidUtf32(data, true)) {
-            // A valid UTF-32LE stream may also be valid UTF-16LE beginning with
-            // NUL. Bytes alone cannot decide which interpretation was intended.
-            try {
-                decodeStrict(data, 2, StandardCharsets.UTF_16LE);
-            } catch (CharacterCodingException invalidUtf16) {
-                throw unsupportedUtf32("UTF-32LE");
-            }
-            throw new AmbiguousDocumentEncodingException();
-        }
-        if (hasUtf32Bom(data, false) && isValidUtf32(data, false)) {
-            throw unsupportedUtf32("UTF-32BE");
-        }
-        if (hasUtf8Bom(data)) {
-            return new DecodedContent(
-                StandardCharsets.UTF_8,
-                BomKind.UTF_8,
-                decodeStrict(data, 3, StandardCharsets.UTF_8)
-            );
-        }
-        if (hasUtf16LeBom(data)) {
-            return new DecodedContent(
-                StandardCharsets.UTF_16LE,
-                BomKind.UTF_16_LE,
-                decodeStrict(data, 2, StandardCharsets.UTF_16LE)
-            );
-        }
-        if (hasUtf16BeBom(data)) {
-            return new DecodedContent(
-                StandardCharsets.UTF_16BE,
-                BomKind.UTF_16_BE,
-                decodeStrict(data, 2, StandardCharsets.UTF_16BE)
-            );
-        }
-        if (isValidUtf8(data)) {
-            return new DecodedContent(StandardCharsets.UTF_8, BomKind.NONE, new String(data, StandardCharsets.UTF_8));
-        }
-        return new DecodedContent(
-            FALLBACK_CHARSET,
-            BomKind.NONE,
-            decodeStrict(data, 0, FALLBACK_CHARSET)
-        );
-    }
-
-    private static IOException unsupportedUtf32(String encoding) {
-        return new IOException("Unsupported document encoding: " + encoding
-            + ". Convert the file to UTF-8 before opening.");
-    }
-
-    private static boolean hasUtf32Bom(byte[] data, boolean littleEndian) {
-        return data.length >= 4 && (littleEndian
-            ? data[0] == (byte) 0xFF && data[1] == (byte) 0xFE && data[2] == 0 && data[3] == 0
-            : data[0] == 0 && data[1] == 0 && data[2] == (byte) 0xFE && data[3] == (byte) 0xFF);
-    }
-
-    private static boolean isValidUtf32(byte[] data, boolean littleEndian) {
-        if ((data.length & 3) != 0) {
-            return false;
-        }
-        for (int offset = 4; offset < data.length; offset += 4) {
-            long scalar = 0;
-            for (int index = 0; index < 4; index++) {
-                scalar = (scalar << 8) | (data[offset + (littleEndian ? 3 - index : index)] & 0xFF);
-            }
-            if (scalar > Character.MAX_CODE_POINT || scalar >= 0xD800 && scalar <= 0xDFFF) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private static String decodeStrict(byte[] data, int offset, Charset charset)
-        throws CharacterCodingException {
-        CharsetDecoder decoder = charset.newDecoder()
-            .onMalformedInput(CodingErrorAction.REPORT)
-            .onUnmappableCharacter(CodingErrorAction.REPORT);
-        return decoder.decode(ByteBuffer.wrap(data, offset, data.length - offset)).toString();
-    }
-
-    private static ParsedContent parseContent(String content) {
-        List<String> lines = new ArrayList<>();
-        List<String> separators = new ArrayList<>();
-        int lineStart = 0;
-        for (int i = 0; i < content.length(); i++) {
-            char ch = content.charAt(i);
-            if (ch != '\r' && ch != '\n') {
-                continue;
-            }
-            lines.add(content.substring(lineStart, i));
-            if (ch == '\r' && i + 1 < content.length() && content.charAt(i + 1) == '\n') {
-                separators.add(EditorState.LINE_SEPARATOR_CRLF);
-                i++;
-            } else if (ch == '\r') {
-                separators.add(EditorState.LINE_SEPARATOR_CR);
-            } else {
-                separators.add(EditorState.LINE_SEPARATOR_LF);
-            }
-            lineStart = i + 1;
-        }
-        lines.add(content.substring(lineStart));
-        return new ParsedContent(List.copyOf(lines), List.copyOf(separators));
-    }
-
-    private static String detectDefaultLineSeparator(List<String> separators) {
-        if (separators.isEmpty()) {
-            return EditorState.LINE_SEPARATOR_LF;
-        }
-        Map<String, Integer> counts = new LinkedHashMap<>();
-        for (String separator : separators) {
-            counts.merge(separator, 1, Integer::sum);
-        }
-        String mostFrequent = separators.get(0);
-        int highestCount = 0;
-        for (Map.Entry<String, Integer> entry : counts.entrySet()) {
-            if (entry.getValue() > highestCount) {
-                mostFrequent = entry.getKey();
-                highestCount = entry.getValue();
-            }
-        }
-        return mostFrequent;
-    }
-
-    private FileBaseline encodeToFile(Path stagedFile, Path target, DocumentFileMetadata metadata)
-        throws IOException {
-        StagedEncoder encoded;
-        try (OutputStream output = Files.newOutputStream(stagedFile)) {
-            encoded = new StagedEncoder(output, metadata.charset());
-            byte[] bom = metadata.bomKind().bytes();
-            encoded.writeBytes(bom, bom.length);
-            var separators = metadata.lineSeparators().iterator();
-            for (int line = 0; line < lineCount(); line++) {
-                encoded.append(getLine(line));
-                if (separators.hasNext()) encoded.append(separators.next());
-            }
-            encoded.finish();
-        }
-        return new FileBaseline(target, HexFormat.of().formatHex(encoded.digest.digest()), encoded.byteSize);
-    }
-
-    /** One encoder retains shift state and split surrogate pairs across every document chunk. */
-    private static final class StagedEncoder {
-        private final OutputStream output;
-        private final Charset charset;
-        private final CharsetEncoder encoder;
-        private final CharBuffer input = CharBuffer.allocate(8192);
-        private final ByteBuffer bytes = ByteBuffer.allocate(8192);
-        private final MessageDigest digest = FileBaseline.digest();
-        private long byteSize;
-
-        StagedEncoder(OutputStream output, Charset charset) {
-            this.output = output;
-            this.charset = charset;
-            encoder = charset.newEncoder()
-                .onMalformedInput(CodingErrorAction.REPORT)
-                .onUnmappableCharacter(CodingErrorAction.REPORT);
-        }
-
-        void append(String text) throws IOException {
-            int offset = 0;
-            while (offset < text.length()) {
-                int end = offset + Math.min(input.remaining(), text.length() - offset);
-                input.put(text, offset, end);
-                offset = end;
-                if (!input.hasRemaining()) encode(false);
-            }
-        }
-
-        private void encode(boolean endOfInput) throws IOException {
-            input.flip();
-            CoderResult result;
-            do {
-                result = encoder.encode(input, bytes, endOfInput);
-                if (result.isError()) {
-                    try {
-                        result.throwException();
-                    } catch (UnmappableCharacterException failure) {
-                        throw new DocumentEncodingException(charset,
-                            Character.codePointAt(input, 0), failure);
-                    }
-                }
-                drain();
-            } while (result.isOverflow());
-            // A trailing high surrogate remains for the next input chunk.
-            input.compact();
-        }
-
-        void finish() throws IOException {
-            encode(true);
-            CoderResult result;
-            do {
-                result = encoder.flush(bytes);
-                if (result.isError()) result.throwException();
-                drain();
-            } while (result.isOverflow());
-        }
-
-        private void drain() throws IOException {
-            writeBytes(bytes.array(), bytes.position());
-            bytes.clear();
-        }
-
-        private void writeBytes(byte[] data, int length) throws IOException {
-            output.write(data, 0, length);
-            digest.update(data, 0, length);
-            byteSize += length;
-        }
-    }
-
-    private static boolean isValidUtf8(byte[] data) {
-        CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder()
-            .onMalformedInput(CodingErrorAction.REPORT)
-            .onUnmappableCharacter(CodingErrorAction.REPORT);
-        try {
-            decoder.decode(ByteBuffer.wrap(data));
-            return true;
-        } catch (CharacterCodingException e) {
-            return false;
-        }
-    }
-
-    private static boolean hasUtf8Bom(byte[] data) {
-        return data.length >= 3
-            && (data[0] & 0xFF) == 0xEF
-            && (data[1] & 0xFF) == 0xBB
-            && (data[2] & 0xFF) == 0xBF;
-    }
-
-    private static boolean hasUtf16LeBom(byte[] data) {
-        return data.length >= 2
-            && (data[0] & 0xFF) == 0xFF
-            && (data[1] & 0xFF) == 0xFE;
-    }
-
-    private static boolean hasUtf16BeBom(byte[] data) {
-        return data.length >= 2
-            && (data[0] & 0xFF) == 0xFE
-            && (data[1] & 0xFF) == 0xFF;
-    }
-
-    private record DecodedContent(Charset charset, BomKind bomKind, String text) {
-    }
-
-    private record ParsedContent(List<String> lines, List<String> lineSeparators) {
-    }
-
-    public record LoadMetadata(DocumentFileMetadata fileMetadata) {
-        public LoadMetadata {
-            fileMetadata = Objects.requireNonNull(fileMetadata, "fileMetadata");
-        }
-
-        public Charset charset() {
-            return fileMetadata.charset();
-        }
-
-        public String lineSeparator() {
-            return fileMetadata.defaultLineSeparator();
-        }
-    }
-
     private static boolean comesAfter(Position a, Position b) {
         return a.line() > b.line() || (a.line() == b.line() && a.col() > b.col());
-    }
-
-    private static String sanitizePrefix(String name) {
-        StringBuilder out = new StringBuilder();
-        for (int i = 0; i < name.length(); i++) {
-            char ch = name.charAt(i);
-            if (Character.isLetterOrDigit(ch) || ch == '_' || ch == '-') {
-                out.append(ch);
-            }
-        }
-        if (out.length() < 3) {
-            out.append("tuink");
-        }
-        return out.substring(0, Math.max(3, Math.min(out.length(), 32)));
     }
 }

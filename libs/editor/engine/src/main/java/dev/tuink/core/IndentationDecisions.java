@@ -1,7 +1,6 @@
 package dev.tuink.core;
 
 import dev.tuink.unicode.GraphemeText;
-import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.function.IntFunction;
@@ -12,16 +11,16 @@ final class IndentationDecisions {
     private static final int ASSIST_LOOKBACK_CHARS = 16_384;
     private final int lineCount;
     private final IntFunction<? extends CharSequence> lines;
-    private final Path file;
+    private final String file;
     private final int tabWidth;
     private final TabInsertMode tabInsertMode;
     private final IndentationContext syntax;
 
-    IndentationDecisions(int lineCount, IntFunction<? extends CharSequence> lines, Path file, int tabWidth, TabInsertMode tabInsertMode) {
+    IndentationDecisions(int lineCount, IntFunction<? extends CharSequence> lines, String file, int tabWidth, TabInsertMode tabInsertMode) {
         this(lineCount, lines, file, tabWidth, tabInsertMode, initialContext(lineCount, lines, file));
     }
 
-    IndentationDecisions(int lineCount, IntFunction<? extends CharSequence> lines, Path file, int tabWidth,
+    IndentationDecisions(int lineCount, IntFunction<? extends CharSequence> lines, String file, int tabWidth,
                          TabInsertMode tabInsertMode, IndentationContext syntax) {
         this.lineCount = lineCount;
         this.lines = lines;
@@ -31,7 +30,7 @@ final class IndentationDecisions {
         this.syntax = syntax;
     }
 
-    private static IndentationContext initialContext(int count, IntFunction<? extends CharSequence> lines, Path file) {
+    private static IndentationContext initialContext(int count, IntFunction<? extends CharSequence> lines, String file) {
         IndentationContext context = new IndentationContext(lines);
         context.synchronize(0, 0, 0, count, file);
         return context;

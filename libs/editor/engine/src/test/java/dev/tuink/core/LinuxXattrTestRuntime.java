@@ -9,7 +9,7 @@ import java.util.LinkedHashSet;
 
 /** Includes the service descriptor as well as classes in manually forked test JVMs. */
 final class LinuxXattrTestRuntime {
-    private static final String SERVICE = "META-INF/services/dev.tuink.core.storage.spi.LinuxXattrAccess";
+    private static final String SERVICE = "META-INF/services/dev.tuink.storage.jvm.spi.LinuxXattrAccess";
 
     private LinuxXattrTestRuntime() {}
 

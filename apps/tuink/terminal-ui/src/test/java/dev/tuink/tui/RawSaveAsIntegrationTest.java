@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -30,7 +32,7 @@ class RawSaveAsIntegrationTest {
         assumeUnix();
         Path original = Files.writeString(directory.resolve(name), "original");
         try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("CLI"))) {
-            window.active().tabSession().engine().openExisting(original);
+            window.active().tabSession().engine().openExisting(JvmDocumentStorage.resource(original));
             window.frame();
             window.event(new TextInput("edited "));
             window.command(TuinkCommand.DOCUMENT_SAVE_AS);
@@ -45,7 +47,7 @@ class RawSaveAsIntegrationTest {
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
 
             assertEquals("edited original", Files.readString(original));
-            assertEquals(original, window.active().state().getCurrentFile());
+            assertEquals(original, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
             assertFalse(window.active().state().isDirty());
             try (var files = Files.list(directory)) {
                 assertEquals(2, files.count(), "Save As must not create a renamed neighbor");
@@ -73,7 +75,7 @@ class RawSaveAsIntegrationTest {
             Files.writeString(neighbor, "original");
         }
         try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("CLI"))) {
-            window.active().tabSession().engine().openExisting(original);
+            window.active().tabSession().engine().openExisting(JvmDocumentStorage.resource(original));
             window.frame();
             window.event(new TextInput("edited "));
             window.command(TuinkCommand.DOCUMENT_SAVE_AS);
@@ -92,7 +94,7 @@ class RawSaveAsIntegrationTest {
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
 
             assertEquals("edited original", Files.readString(original));
-            assertEquals(original, window.active().state().getCurrentFile());
+            assertEquals(original, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
             assertFalse(window.active().state().isDirty());
             if (neighborExists) {
                 assertEquals("original", Files.readString(neighbor));
@@ -113,7 +115,7 @@ class RawSaveAsIntegrationTest {
         Path expected = rawPath("legacy-%FF-copy-1.txt");
         Path wrong = directory.resolve("legacy-\uFFFD-copy-1.txt");
         try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("CLI"))) {
-            window.active().tabSession().engine().openExisting(original);
+            window.active().tabSession().engine().openExisting(JvmDocumentStorage.resource(original));
             window.frame();
             window.event(new TextInput("edited "));
             Files.setPosixFilePermissions(original, PosixFilePermissions.fromString("r--------"));

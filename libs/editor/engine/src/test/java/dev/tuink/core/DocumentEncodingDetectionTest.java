@@ -2,6 +2,8 @@ package dev.tuink.core;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import dev.tuink.editor.storage.DocumentOpenMode;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -17,11 +19,11 @@ class DocumentEncodingDetectionTest {
         for (String text : new String[] {"\0A", "\0AB", "\0😀"}) {
             Path file = writeUtf16(text);
             TextModel model = new TextModel(new SimpleLineBuffer());
-            model.load(file);
+            model.load(JvmDocumentStorage.resource(file));
             assertEquals(text, model.getLine(0));
             assertEquals(StandardCharsets.UTF_16LE, model.fileMetadata().charset());
             byte[] original = Files.readAllBytes(file);
-            model.save(file);
+            model.save(JvmDocumentStorage.resource(file));
             assertArrayEquals(original, Files.readAllBytes(file));
         }
     }
@@ -30,24 +32,24 @@ class DocumentEncodingDetectionTest {
     void ambiguousBytesRequireAnExplicitChoiceOnEachOpen() throws Exception {
         Path file = writeUtf16("\0A\0"); // Also BOM + U+0041 in UTF-32LE.
         TextModel model = new TextModel(new SimpleLineBuffer());
-        assertThrows(AmbiguousDocumentEncodingException.class, () -> model.load(file));
-        model.load(file, DocumentOpenMode.UTF_16LE);
+        assertThrows(AmbiguousDocumentEncodingException.class, () -> model.load(JvmDocumentStorage.resource(file)));
+        model.load(JvmDocumentStorage.resource(file), DocumentOpenMode.UTF_16LE);
         assertEquals("\0A\0", model.getLine(0));
         byte[] original = Files.readAllBytes(file);
-        model.save(file);
+        model.save(JvmDocumentStorage.resource(file));
         assertArrayEquals(original, Files.readAllBytes(file));
-        assertThrows(AmbiguousDocumentEncodingException.class, () -> model.load(file));
+        assertThrows(AmbiguousDocumentEncodingException.class, () -> model.load(JvmDocumentStorage.resource(file)));
         assertEquals("\0A\0", model.getLine(0));
     }
 
     @Test
     void explicitChoiceStillValidatesBomAndSurrogatesWithoutChangingTheDocument() throws Exception {
         TextModel model = new TextModel(new SimpleLineBuffer());
-        model.load(writeUtf16("safe"));
+        model.load(JvmDocumentStorage.resource(writeUtf16("safe")));
         for (byte[] bytes : new byte[][] {{65, 0}, {(byte) 0xFF, (byte) 0xFE, 0, (byte) 0xD8}}) {
             Path bad = directory.resolve("bad.txt");
             Files.write(bad, bytes);
-            assertThrows(IOException.class, () -> model.load(bad, DocumentOpenMode.UTF_16LE));
+            assertThrows(IOException.class, () -> model.load(JvmDocumentStorage.resource(bad), DocumentOpenMode.UTF_16LE));
             assertEquals("safe", model.getLine(0));
         }
     }
@@ -58,7 +60,7 @@ class DocumentEncodingDetectionTest {
         // U+1D800 is a scalar in UTF-32; its low word alone is a UTF-16 high surrogate.
         Files.write(file, new byte[] {(byte) 0xFF, (byte) 0xFE, 0, 0, 0, (byte) 0xD8, 1, 0});
         IOException error = assertThrows(IOException.class,
-            () -> new TextModel(new SimpleLineBuffer()).load(file));
+            () -> new TextModel(new SimpleLineBuffer()).load(JvmDocumentStorage.resource(file)));
         assertFalse(error instanceof AmbiguousDocumentEncodingException);
         assertTrue(error.getMessage().contains("Unsupported document encoding: UTF-32LE"));
     }

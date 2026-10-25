@@ -41,7 +41,7 @@ class IndentationContextMemoryTest {
                 reads.incrementAndGet();
                 return "";
             });
-            context.synchronize(1, 1, 0, 10_000_000, Path.of("Main.java"));
+            context.synchronize(1, 1, 0, 10_000_000, "Main.java");
             // A broken eviction policy would retain over two million states.
             for (int attempt = 0; attempt < 2000; attempt++) {
                 reads.set(0);
@@ -52,12 +52,12 @@ class IndentationContextMemoryTest {
 
         private static void verifyOversizedCurrentLine() {
             String text = "    " + "Ā".repeat(11 * 1024 * 1024) + "{";
-            IndentationDecisions decisions = new IndentationDecisions(1, line -> text, Path.of("Main.java"),
+            IndentationDecisions decisions = new IndentationDecisions(1, line -> text, "Main.java",
                 4, TabInsertMode.ALWAYS_SPACES_4);
             if (!decisions.newLineIndent(new Position(0, text.length())).equals("    ")) {
                 throw new AssertionError("An oversized prefix must copy only its existing whitespace");
             }
-            IndentationDecisions auto = new IndentationDecisions(513, line -> text, Path.of("notes.txt"),
+            IndentationDecisions auto = new IndentationDecisions(513, line -> text, "notes.txt",
                 4, TabInsertMode.AUTO);
             if (!auto.unit(256, "").equals("    ")) {
                 throw new AssertionError("AUTO indentation must inspect only neighbouring indentation prefixes");

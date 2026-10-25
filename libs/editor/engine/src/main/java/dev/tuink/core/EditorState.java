@@ -2,7 +2,8 @@ package dev.tuink.core;
 
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
+import dev.tuink.editor.storage.DocumentResource;
+import dev.tuink.editor.storage.SaveDisposition;
 
 /**
  * Compatibility facade over one document state and one independent view state.
@@ -123,15 +124,15 @@ public class EditorState {
         document.dirty = dirty;
     }
 
-    public Path getCurrentFile() {
-        return document.currentFile;
+    public DocumentResource getCurrentResource() {
+        return document.currentResource;
     }
 
-    public void setCurrentFile(Path currentFile) {
-        document.currentFile = currentFile;
+    public void setCurrentResource(DocumentResource currentResource) {
+        document.currentResource = currentResource;
     }
 
-    /** Filesystem commit intent retained until this document successfully owns its path. */
+    /** Resource commit intent retained until this document successfully owns its path. */
     public SaveDisposition getSaveDisposition() {
         return document.saveDisposition;
     }

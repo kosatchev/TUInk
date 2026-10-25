@@ -3,6 +3,8 @@ package dev.tuink.core;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+import dev.tuink.verification.MemoryDocumentStorage;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -102,7 +104,7 @@ class EditorEngineMarkdownContextCacheTest {
         Path other = directory.resolve("other.md");
         Files.writeString(other, "ordinary text\n- item");
 
-        engine.openExisting(other);
+        engine.openExisting(JvmDocumentStorage.resource(other));
         toEnd(engine);
         engine.insertNewline();
 
@@ -138,7 +140,7 @@ class EditorEngineMarkdownContextCacheTest {
 
     private static EditorEngine engine(TextModel model) {
         EditorState state = new EditorState();
-        state.setCurrentFile(Path.of("notes.md"));
+        state.setCurrentResource(new MemoryDocumentStorage().resource(Path.of("notes.md").toString()));
         EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model));
         engine.setGutterDiffMode(GutterDiffMode.DISABLED);
         engine.setAutoIndentEnabled(false);

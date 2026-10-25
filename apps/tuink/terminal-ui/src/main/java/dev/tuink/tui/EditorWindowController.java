@@ -1,5 +1,6 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.DocumentEditLimitException;
 import dev.tuink.core.EditorState;
@@ -636,7 +637,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             host.effectiveSyntaxHighlighting(uiSessionState.syntaxHighlightingSetting)
         );
         renderPlanBuilder.setCommentSyntaxProfile(
-            LanguageProfiles.resolveCommentSyntax(state.getCurrentFile())
+            LanguageProfiles.resolveCommentSyntax(state.getCurrentResource() == null ? null : state.getCurrentResource().nameHint())
         );
         renderPlanBuilder.setRainbowBracketsEnabled(uiSessionState.rainbowBracketsSetting);
         renderPlanBuilder.setTabWidth(uiSessionState.tabWidthSetting);
@@ -657,7 +658,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         engine.setAutoListEnabled(uiSessionState.autoListSetting);
 
         TopMenuView.TopBar topMenuBar = topMenuView.topBar(
-            state.getCurrentFile(),
+            JvmDocumentStorage.pathOf(state.getCurrentResource()),
             state.isDirty(),
             cols,
             uiSessionState.readingModeSetting
@@ -1714,7 +1715,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                     if (restoredCount > 0) {
                         activeTabIndex = sessionContext.activeTabIndex();
                         state = sessionContext.state();
-                        openFileTree.setRoot(FilePickerOpenWorkflow.initialRoot(state.getCurrentFile()));
+                        openFileTree.setRoot(FilePickerOpenWorkflow.initialRoot(JvmDocumentStorage.pathOf(state.getCurrentResource())));
                         notification.info("Recovered " + restoredCount + " tab(s)");
                     } else {
                         notification.info("No recovery snapshots restored");
@@ -1888,8 +1889,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             host.hasDirtyTabs(tabs),
             state.isDirty(),
             activeTabIndex,
-            state.getCurrentFile(),
-            state.getCurrentFile() != null && SaveTargetPolicy.isReadOnlyFile(state.getCurrentFile())
+            JvmDocumentStorage.pathOf(state.getCurrentResource()),
+            JvmDocumentStorage.pathOf(state.getCurrentResource()) != null && SaveTargetPolicy.isReadOnlyFile(JvmDocumentStorage.pathOf(state.getCurrentResource()))
         );
         var themeBefore = host.theme;
         host.applyEditorActionResult(editorAction, sessionContext, tabs, activeTabIndex,
@@ -1908,7 +1909,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             openFileMode = true;
             pickerNotice = null;
             lastPickerDirectoryFailure = null;
-            openFileTree.setRoot(FilePickerOpenWorkflow.initialRoot(state.getCurrentFile()));
+            openFileTree.setRoot(FilePickerOpenWorkflow.initialRoot(JvmDocumentStorage.pathOf(state.getCurrentResource())));
             openFileFocusState.focus(OpenFileInputRouter.Focus.LIST);
         }
         applyFilenameEffect(SaveWorkflow.initialFilename(saveContext(), editorAction.saveAsPreset()));
@@ -1952,7 +1953,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         if (result.openedDocument() != null) {
             TuiDocumentSession document = result.openedDocument();
             RenderPlanBuilder builder = document.newRenderPlanBuilder(
-                host.resolveHighlighter(document.view().state().getCurrentFile()));
+                host.resolveHighlighter(JvmDocumentStorage.pathOf(document.view().state().getCurrentResource())));
             tabs.add(new TerminalEditorApp.EditorTab(document, builder));
             if (!documentPromptActive) {
                 sessionContext.activate(tabs.size() - 1);
@@ -2052,7 +2053,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             TerminalEditorApp.EditorTab tab = tabs.get(index);
             if (tab.tabSession() == savedTab) {
                 RenderPlanBuilder builder = tab.documentSession().newRenderPlanBuilder(
-                    host.resolveHighlighter(savedTab.state().getCurrentFile()));
+                    host.resolveHighlighter(JvmDocumentStorage.pathOf(savedTab.state().getCurrentResource())));
                 tabs.set(index, new TerminalEditorApp.EditorTab(tab.documentSession(), builder,
                     tab.viewportController(), tab.navigation()));
                 if (index == sessionContext.activeTabIndex()) {

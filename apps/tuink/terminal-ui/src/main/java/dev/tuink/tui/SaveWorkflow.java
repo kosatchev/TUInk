@@ -1,10 +1,11 @@
 package dev.tuink.tui;
 
-import dev.tuink.core.SaveDisposition;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+import dev.tuink.editor.storage.SaveDisposition;
 import dev.tuink.core.DocumentEncodingException;
 import dev.tuink.core.TabSession;
 import dev.tuink.core.EditorEngine;
-import dev.tuink.core.TextModel;
+import dev.tuink.editor.storage.SavedDocument;
 import dev.tuink.tui.command.TuinkCommand;
 import dev.tuink.tui.flow.ConfirmChoice;
 import dev.tuink.tui.flow.DocumentSaveFormat;
@@ -117,7 +118,7 @@ final class SaveWorkflow {
         TabSession tab = context.active();
         SaveFlowController.SaveAsResult decision = SaveFlowController.handleSaveAsInput(command, modal, draft,
             target -> validateSaveAsTarget(context, target),
-            Files::exists, SaveTargetPolicy::isReadOnlyFile, tab.engine()::isCurrentSaveTarget,
+            Files::exists, SaveTargetPolicy::isReadOnlyFile, path -> tab.engine().isCurrentSaveTarget(JvmDocumentStorage.resource(path)),
             target -> suggestWritableName(context, context.activeTabIndex(), target));
         context.suggestions().rememberInput(tab, draft);
         if (decision.textInputEffect().kind() == SaveFlowController.TextInputEffectKind.SET_TEXT) {
@@ -147,7 +148,7 @@ final class SaveWorkflow {
     private static Result approveOverwrite(Context context, UiModalState modal) {
         OverwriteApproval approval = context.overwriteApproval();
         if (approval == null || approval.request().tab() != context.active()
-            || !approval.inspection().requestedPath().equals(modal.pendingOverwritePath())) {
+            || !JvmDocumentStorage.pathOf(approval.inspection().requestedResource()).equals(modal.pendingOverwritePath())) {
             return result(modal.backToSaveAs(), Notice.error("Save target was not inspected. Choose the target again."));
         }
         return approveTarget(context, approval.request(), approval.inspection(), modal);
@@ -171,7 +172,7 @@ final class SaveWorkflow {
         }
         try {
             return pending(new SaveRequest(tab,
-                new InspectTarget(tab.engine().prepareSaveAsInput(target, disposition,
+                new InspectTarget(tab.engine().prepareSaveAsInput(JvmDocumentStorage.resource(target), disposition,
                     modal.saveFormat() == DocumentSaveFormat.UTF8)),
                 modal, SavePurpose.SAVE_AS));
         } catch (IOException error) {
@@ -192,7 +193,7 @@ final class SaveWorkflow {
         if (request.inspecting() && failure == null) {
             EditorEngine.SaveTargetInspection inspection = (EditorEngine.SaveTargetInspection) completed;
             Context owner = new Context(context.tabs(), index, context.suggestions());
-            String conflict = workspaceSaveConflict(owner, inspection.physicalTarget());
+            String conflict = workspaceSaveConflict(owner, JvmDocumentStorage.pathOf(inspection.physicalResource()));
             if (conflict != null) {
                 return new Result(true, saveAsOrigin(origin), index, -1, SaveFlowController.TextInputEffect.none(),
                     Notice.error(conflict), false, true);
@@ -204,7 +205,7 @@ final class SaveWorkflow {
                     false, true);
             }
             if (inspection.exists() && !inspection.currentTarget()) {
-                UiModalState confirmation = saveAsOrigin(origin).confirmOverwrite(inspection.requestedPath());
+                UiModalState confirmation = saveAsOrigin(origin).confirmOverwrite(JvmDocumentStorage.pathOf(inspection.requestedResource()));
                 return new Result(true, confirmation, index, -1, SaveFlowController.TextInputEffect.none(),
                     Notice.clear(), false, false, null, new OverwriteApproval(request, inspection));
             }
@@ -229,9 +230,9 @@ final class SaveWorkflow {
             return new Result(true, retry, index, -1, SaveFlowController.TextInputEffect.none(),
                 Notice.error(SaveTargetPolicy.saveErrorMessage(failure)), false, retry.isSaveAs());
         }
-        TextModel.SavedFile saved = (TextModel.SavedFile) completed;
+        SavedDocument saved = (SavedDocument) completed;
         request.tab().engine().completeSaved(((WriteFile) request.operation()).prepared(), saved);
-        rememberSavedPath(context, request.tab(), request.tab().state().getCurrentFile());
+        rememberSavedPath(context, request.tab(), JvmDocumentStorage.pathOf(request.tab().state().getCurrentResource()));
         Notice notice = Notice.success(SaveTargetPolicy.savedMessage(request.tab().state()));
         return switch (request.purpose()) {
             case CURRENT -> result(UiModalState.none(), notice);
@@ -252,7 +253,7 @@ final class SaveWorkflow {
 
     private static Result approveTarget(Context context, SaveRequest request,
                                         EditorEngine.SaveTargetInspection inspection, UiModalState origin) {
-        String conflict = workspaceSaveConflict(context, inspection.physicalTarget());
+        String conflict = workspaceSaveConflict(context, JvmDocumentStorage.pathOf(inspection.physicalResource()));
         if (conflict != null) {
             return approvalFailure(context, request, origin, conflict);
         }
@@ -323,7 +324,7 @@ final class SaveWorkflow {
         // Resolve every required filename before saving named tabs, preserving retry/cancel semantics.
         for (int index = 0; index < context.tabs().size(); index++) {
             TabSession tab = context.tabs().get(index);
-            if (tab.state().isDirty() && SaveTargetPolicy.requiresSaveAs(tab.state().getCurrentFile())) {
+            if (tab.state().isDirty() && SaveTargetPolicy.requiresSaveAs(JvmDocumentStorage.pathOf(tab.state().getCurrentResource()))) {
                 return prepareSaveAs(context, index, UiModalState.saveAsForQuit());
             }
         }
@@ -342,7 +343,7 @@ final class SaveWorkflow {
             return result(UiModalState.none(), Notice.unchanged());
         }
         if (choice == ConfirmChoice.SAVE) {
-            if (SaveTargetPolicy.requiresSaveAs(context.tabs().get(index).state().getCurrentFile())) {
+            if (SaveTargetPolicy.requiresSaveAs(JvmDocumentStorage.pathOf(context.tabs().get(index).state().getCurrentResource()))) {
                 return prepareSaveAs(context, index, UiModalState.saveAsForCloseTab(index));
             }
             if (context.tabs().get(index).state().isDirty()) {
@@ -355,7 +356,7 @@ final class SaveWorkflow {
 
     private static Result prepareSaveAs(Context context, int index, UiModalState modal) {
         TabSession tab = context.tabs().get(index);
-        String suggestion = suggestFilename(context, index, tab.state().getCurrentFile() != null);
+        String suggestion = suggestFilename(context, index, JvmDocumentStorage.pathOf(tab.state().getCurrentResource()) != null);
         return new Result(true, modal, index, -1, SaveFlowController.TextInputEffect.setText(suggestion),
             Notice.clear(), false, true);
     }
@@ -364,7 +365,7 @@ final class SaveWorkflow {
                                     boolean suggestCopy) {
         var filename = suggestCopy
             ? SaveFlowController.TextInputEffect.setText(
-                suggestWritableName(context, index, context.tabs().get(index).state().getCurrentFile()))
+                suggestWritableName(context, index, JvmDocumentStorage.pathOf(context.tabs().get(index).state().getCurrentResource())))
             : SaveFlowController.TextInputEffect.none();
         return new Result(true, modal.offerUtf8(), index, -1, filename,
             Notice.error(SaveTargetPolicy.saveErrorMessage(error)), false, false);
@@ -372,7 +373,7 @@ final class SaveWorkflow {
 
     private static String suggestFilename(Context context, int index, boolean writableCopy) {
         TabSession tab = context.tabs().get(index);
-        Path file = tab.state().getCurrentFile();
+        Path file = JvmDocumentStorage.pathOf(tab.state().getCurrentResource());
         return context.suggestions().suggestionFor(tab, () -> {
             if (writableCopy) {
                 return suggestWritableName(context, index, file);
@@ -399,7 +400,7 @@ final class SaveWorkflow {
 
     private static Result saveDirty(Context context, int index, SavePurpose purpose) {
         TabSession tab = context.tabs().get(index);
-        Path file = tab.state().getCurrentFile();
+        Path file = JvmDocumentStorage.pathOf(tab.state().getCurrentResource());
         UiModalState retry = purpose == SavePurpose.QUIT ? UiModalState.quitConfirm()
             : UiModalState.closeTabConfirm(index);
         try {

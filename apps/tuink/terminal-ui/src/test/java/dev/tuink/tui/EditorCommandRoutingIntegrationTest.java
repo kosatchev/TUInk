@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -119,7 +121,7 @@ class EditorCommandRoutingIntegrationTest {
 
             assertEquals("modified document", Files.readString(target));
             assertEquals("document", Files.readString(fixture.document));
-            assertEquals(target.toAbsolutePath().normalize(), fixture.active().state().getCurrentFile());
+            assertEquals(target.toAbsolutePath().normalize(), JvmDocumentStorage.pathOf(fixture.active().state().getCurrentResource()));
             assertFalse(fixture.active().state().isDirty());
             assertTrue(fixture.host.saveAsFocusManager.activeScopeId().isEmpty());
         }

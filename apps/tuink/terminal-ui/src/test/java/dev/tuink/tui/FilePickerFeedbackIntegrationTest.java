@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -59,7 +61,7 @@ class FilePickerFeedbackIntegrationTest {
                 window.event(KeyStroke.of(KeyStroke.Key.END));
                 window.event(KeyStroke.of(KeyStroke.Key.ENTER));
                 assertEquals(2, window.tabs.size());
-                assertEquals(denied, window.active().state().getCurrentFile());
+                assertEquals(denied, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
                 assertTrue(original.state().isDirty());
                 assertTrue(original.tabSession().engine().undo());
                 assertEquals(List.of("original"), original.tabSession().model().snapshotLines());

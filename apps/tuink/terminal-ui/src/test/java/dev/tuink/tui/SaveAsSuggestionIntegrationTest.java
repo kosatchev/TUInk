@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -30,7 +32,7 @@ class SaveAsSuggestionIntegrationTest {
             window.event(new TextInput("edited "));
             Path reserved = directory.resolve("document-copy.txt");
             window.command(TuinkCommand.TAB_NEW);
-            window.active().tabSession().engine().open(reserved);
+            window.active().tabSession().engine().open(JvmDocumentStorage.resource(reserved));
             window.frame();
             Files.setPosixFilePermissions(window.document, PosixFilePermissions.fromString("r--------"));
             assumeTrue(!Files.isWritable(window.document));
@@ -63,7 +65,7 @@ class SaveAsSuggestionIntegrationTest {
         Path reserved = directory.resolve("external-copy.txt");
         try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("original"))) {
             window.command(TuinkCommand.TAB_NEW);
-            window.active().tabSession().engine().open(reserved);
+            window.active().tabSession().engine().open(JvmDocumentStorage.resource(reserved));
             window.frame();
             window.command(TuinkCommand.TAB_PREVIOUS);
             window.event(new TextInput("edited "));
@@ -94,7 +96,7 @@ class SaveAsSuggestionIntegrationTest {
             window.event(new TextInput(manual.toString()));
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
             window.command(TuinkCommand.TAB_NEW);
-            window.active().tabSession().engine().open(manual);
+            window.active().tabSession().engine().open(JvmDocumentStorage.resource(manual));
             window.frame();
             window.command(TuinkCommand.TAB_PREVIOUS);
 

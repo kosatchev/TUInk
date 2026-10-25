@@ -56,6 +56,7 @@ class ArchitectureTest {
             "dev.tuink.core..",
             "dev.tuink.editor.document..",
             "dev.tuink.editor.diff..",
+            "dev.tuink.editor.storage..",
             "dev.tuink.editor.language..",
             "dev.tuink.unicode.."
         );
@@ -104,10 +105,27 @@ class ArchitectureTest {
             "dev.tuink.editor.document..", "org.eclipse.jgit.."
         );
 
-    static final ArchRule JVM_STORAGE_DEPENDS_ONLY_ON_ITS_SPI = classes()
+    static final ArchRule JVM_STORAGE_DEPENDS_ONLY_ON_SHARED_SERVICES = classes()
         .that().resideInAPackage("dev.tuink.storage.jvm..")
+        .should().onlyDependOnClassesThat(
+            JavaClass.Predicates.resideInAnyPackage(
+                "java..", "dev.tuink.storage.jvm..", "dev.tuink.editor.storage..", "dev.tuink.editor.document..")
+                .or(com.tngtech.archunit.core.domain.properties.HasName.Predicates.nameMatching(
+                    "dev\\.tuink\\.core\\.DocumentCodec(?:\\$.*)?"))
+        );
+
+    static final ArchRule SHARED_ENGINE_DOES_NOT_ACCESS_FILESYSTEM = noClasses()
+        .that().resideInAnyPackage("dev.tuink.core..", "dev.tuink.editor..")
+        .should().dependOnClassesThat().resideInAnyPackage(
+            "java.nio.file..", "java.nio.channels..", "java.lang.foreign..",
+            "dev.tuink.storage.jvm.."
+        )
+        .orShould().dependOnClassesThat().haveFullyQualifiedName("java.io.File");
+
+    static final ArchRule STORAGE_CONTRACT_STAYS_PORTABLE = classes()
+        .that().resideInAPackage("dev.tuink.editor.storage..")
         .should().onlyDependOnClassesThat().resideInAnyPackage(
-            "java..", "dev.tuink.storage.jvm..", "dev.tuink.core.storage.spi.."
+            "java..", "dev.tuink.editor.storage..", "dev.tuink.editor.document.."
         );
 
     static final ArchRule TUI_DOES_NOT_DEPEND_ON_APPLICATION_ENTRYPOINT = noClasses()
@@ -206,6 +224,7 @@ class ArchitectureTest {
             "dev.tuink.editor.command..",
             "dev.tuink.editor.document..",
             "dev.tuink.editor.diff..",
+            "dev.tuink.editor.storage..",
             "dev.tuink.editor.session.."
         );
 
@@ -336,7 +355,7 @@ class ArchitectureTest {
                 return SliceIdentifier.of("editor-session");
             }
             for (String contractPackage : new String[] {"editor.command", "editor.document", "editor.language",
-                "editor.highlight", "editor.diff"}) {
+                "editor.highlight", "editor.diff", "editor.storage"}) {
                 if (relative.equals(contractPackage) || relative.startsWith(contractPackage + ".")) {
                     return SliceIdentifier.of("editor-contract");
                 }
@@ -378,7 +397,9 @@ class ArchitectureTest {
         CONTEXTUAL_HIGHLIGHTER_DOES_NOT_EXPOSE_MUTABLE_MODEL.check(PRODUCTION_CLASSES);
         HIGHLIGHTER_IMPLEMENTATIONS_STAY_CORE_INDEPENDENT.check(PRODUCTION_CLASSES);
         DIFF_PROVIDER_STAYS_BEHIND_ITS_CONTRACT.check(PRODUCTION_CLASSES);
-        JVM_STORAGE_DEPENDS_ONLY_ON_ITS_SPI.check(PRODUCTION_CLASSES);
+        JVM_STORAGE_DEPENDS_ONLY_ON_SHARED_SERVICES.check(PRODUCTION_CLASSES);
+        SHARED_ENGINE_DOES_NOT_ACCESS_FILESYSTEM.check(PRODUCTION_CLASSES);
+        STORAGE_CONTRACT_STAYS_PORTABLE.check(PRODUCTION_CLASSES);
         TUI_DOES_NOT_DEPEND_ON_APPLICATION_ENTRYPOINT.check(PRODUCTION_CLASSES);
         FILE_TREE_MODEL_STAYS_TERMINAL_INDEPENDENT.check(PRODUCTION_CLASSES);
         APP_USES_ONLY_THE_TUI_FACADE.check(PRODUCTION_CLASSES);

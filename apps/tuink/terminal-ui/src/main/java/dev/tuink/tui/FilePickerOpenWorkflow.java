@@ -2,8 +2,10 @@ package dev.tuink.tui;
 
 import dev.tuink.core.TabSession;
 import dev.tuink.core.AmbiguousDocumentEncodingException;
-import dev.tuink.core.DocumentOpenMode;
-import dev.tuink.core.TextModel;
+import dev.tuink.editor.storage.DocumentOpenMode;
+import dev.tuink.editor.storage.DocumentLoad;
+import dev.tuink.storage.jvm.FileBaseline;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import dev.tuink.tui.ui.NotificationPresentation;
 import java.io.IOException;
 import java.nio.file.AccessDeniedException;
@@ -42,8 +44,9 @@ final class FilePickerOpenWorkflow {
             Objects.requireNonNull(mode, "mode");
         }
 
-        TextModel.PreparedLoad read() throws IOException {
-            return TextModel.prepareLoad(path, mode);
+        DocumentLoad read() throws IOException {
+            var resource = JvmDocumentStorage.resource(path);
+            return resource.storage().load(resource, mode, false);
         }
     }
 
@@ -119,7 +122,7 @@ final class FilePickerOpenWorkflow {
             new OpenRequest(target, mode));
     }
 
-    static Result complete(OpenRequest request, TextModel.PreparedLoad loaded, IOException failure,
+    static Result complete(OpenRequest request, DocumentLoad loaded, IOException failure,
                            List<TabSession> tabs, int activeTabIndex,
                            Supplier<TuiDocumentSession> newDocument) {
         Objects.requireNonNull(request, "request");
@@ -129,7 +132,7 @@ final class FilePickerOpenWorkflow {
         Path target = request.path();
         // Tabs may have changed while the read was running. Compare the file
         // actually read, including when its selected symlink was retargeted.
-        Path identity = loaded == null ? target : loaded.baseline().target();
+        Path identity = loaded == null ? target : ((FileBaseline) loaded.baseline()).target();
         int existing = WorkspaceDocuments.findOpenFile(tabs, activeTabIndex, identity);
         if (existing >= 0) return switched(target, existing);
         if (loaded != null) {

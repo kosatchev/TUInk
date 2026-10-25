@@ -3,6 +3,7 @@ plugins {
 }
 
 dependencies {
+    testImplementation project(':editor-storage-jvm')
     api project(':editor-contract')
     api project(':core')
     api project(':tuiframe-core')

@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.editor.language.LanguageRegistry;
+import dev.tuink.editor.storage.DocumentFileMetadata;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import dev.tuink.unicode.GraphemeText;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
@@ -20,7 +22,7 @@ class EditorEngineSingleReplaceMemoryTest {
 
     private static void probe(String mode) throws Exception {
         String classpath = String.join(File.pathSeparator, location(EditorEngineSingleReplaceMemoryTest.class),
-            location(EditorEngine.class), location(GraphemeText.class), location(LanguageRegistry.class));
+            location(EditorEngine.class), location(GraphemeText.class), location(LanguageRegistry.class), LinuxXattrTestRuntime.classpath());
         Process process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx64m", "-cp", classpath, MemoryProbe.class.getName(), mode)
             .redirectErrorStream(true).start();
@@ -44,7 +46,7 @@ class EditorEngineSingleReplaceMemoryTest {
                 Files.writeString(file, "a".repeat(1_048_576) + "needle" + "a".repeat(1_048_576));
                 TextModel model = new TextModel(new SimpleLineBuffer());
                 EditorEngine engine = new EditorEngine(model, new EditorState(), new LogicalEditorTextLayout(model));
-                engine.openExisting(file);
+                engine.openExisting(JvmDocumentStorage.resource(file));
                 engine.setGutterDiffMode(GutterDiffMode.DISABLED);
                 engine.setAutoPairsEnabled(false);
                 engine.insertInput("X");

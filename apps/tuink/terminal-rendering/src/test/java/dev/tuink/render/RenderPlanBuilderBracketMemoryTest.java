@@ -1,5 +1,7 @@
 package dev.tuink.render;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -30,7 +32,7 @@ class RenderPlanBuilderBracketMemoryTest {
                 for (int index = 0; index < 128; index++) output.write(block);
             }
             String classpath = String.join(File.pathSeparator, location(getClass()), location(RenderPlanBuilder.class),
-                location(TextModel.class), location(TerminalText.class), location(DocumentView.class));
+                location(TextModel.class), location(TerminalText.class), location(DocumentView.class), location(dev.tuink.storage.jvm.JvmDocumentStorage.class));
             Process child = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                 "-Xmx64m", "-cp", classpath, DenseBracketProbe.class.getName(), file.toString())
                 .redirectErrorStream(true).start();
@@ -52,7 +54,7 @@ class RenderPlanBuilderBracketMemoryTest {
     public static final class DenseBracketProbe {
         public static void main(String[] args) throws Exception {
             TextModel model = new TextModel(new SimpleLineBuffer());
-            model.load(Path.of(args[0]));
+            model.load(JvmDocumentStorage.resource(Path.of(args[0])));
             int length = model.getLine(0).length();
             TerminalEditorTextLayout layout = new TerminalEditorTextLayout(model);
             for (boolean matching : new boolean[] {true, false}) {

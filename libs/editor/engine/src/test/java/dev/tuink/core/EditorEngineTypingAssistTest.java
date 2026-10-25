@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+import dev.tuink.verification.MemoryDocumentStorage;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -246,7 +248,7 @@ class EditorEngineTypingAssistTest {
         TextModel model = new TextModel(new SimpleLineBuffer());
         model.replaceLines(lines);
         EditorState state = new EditorState();
-        state.setCurrentFile(Path.of(fileName));
+        state.setCurrentResource(new MemoryDocumentStorage().resource(Path.of(fileName).toString()));
         EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model));
         return new Fixture(model, state, engine);
     }

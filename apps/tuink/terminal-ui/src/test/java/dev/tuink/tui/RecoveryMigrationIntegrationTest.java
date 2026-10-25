@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -8,11 +10,11 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.tuink.core.BomKind;
-import dev.tuink.core.DocumentFileMetadata;
+import dev.tuink.editor.storage.BomKind;
+import dev.tuink.editor.storage.DocumentFileMetadata;
 import dev.tuink.core.Position;
 import dev.tuink.core.RecoverySnapshot;
-import dev.tuink.core.SaveDisposition;
+import dev.tuink.editor.storage.SaveDisposition;
 import dev.tuink.core.ViewportState;
 import dev.tuink.tui.flow.RecoveryStore;
 import dev.tuink.tui.flow.RecoveryStoreFixtures;
@@ -74,7 +76,7 @@ class RecoveryMigrationIntegrationTest {
             assertEquals(edited, fixture.active().documentSession().document().snapshot().lines());
             assertEquals(restored.model().revision(), fixture.active().documentSession().document().snapshot().revision());
             assertEquals(metadata, restored.model().fileMetadata());
-            assertEquals(currentFile.toAbsolutePath().normalize(), restored.state().getCurrentFile());
+            assertEquals(currentFile.toAbsolutePath().normalize(), JvmDocumentStorage.pathOf(restored.state().getCurrentResource()));
             assertEquals(SaveDisposition.REPLACE_EXISTING, restored.state().getSaveDisposition());
             assertEquals(new Position(0, 3), restored.state().getCursor());
             assertEquals(new Position(0, 0), restored.state().getSelectionAnchor());
@@ -95,7 +97,7 @@ class RecoveryMigrationIntegrationTest {
             RecoverySnapshot captured = fixture.recoverySnapshots.get(ENTRY_ID);
             assertEquals(metadata, captured.fileMetadata());
             assertEquals(expectedViewport, captured.viewport());
-            assertEquals(loaded.entries().getFirst().snapshot().fileBaseline(), captured.fileBaseline());
+            assertEquals(JvmDocumentStorage.baselineOf(loaded.entries().getFirst().snapshot().fileBaseline()), JvmDocumentStorage.baselineOf(captured.fileBaseline()));
 
             restored.engine().save();
             assertArrayEquals(encode(edited, metadata), Files.readAllBytes(currentFile));
@@ -125,7 +127,7 @@ class RecoveryMigrationIntegrationTest {
             assertEquals(edited, fixture.active().documentSession().document().snapshot().lines());
             assertEquals(metadata, restored.model().fileMetadata());
             assertEquals(SaveDisposition.CREATE_NEW, restored.state().getSaveDisposition());
-            assertNull(restored.model().fileBaseline());
+            assertNull(JvmDocumentStorage.baselineOf(restored.model().fileBaseline()));
 
             byte[] appeared = "another writer's file".getBytes(StandardCharsets.UTF_8);
             Files.write(target, appeared);

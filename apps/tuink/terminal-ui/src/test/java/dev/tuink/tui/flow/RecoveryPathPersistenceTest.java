@@ -1,5 +1,7 @@
 package dev.tuink.tui.flow;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -37,7 +39,7 @@ class RecoveryPathPersistenceTest {
         }
         assertNotEquals(original, neighbor);
         TabSession source = session();
-        source.engine().openExisting(original);
+        source.engine().openExisting(JvmDocumentStorage.resource(original));
         source.engine().insertInput("edited ");
         RecoverySnapshot expected = storedPrecisionSnapshot(source);
         Path recovery = directory.resolve("recovery");
@@ -50,8 +52,8 @@ class RecoveryPathPersistenceTest {
             assertTrue(discovered.skipped().isEmpty());
             RecoverySnapshot restored = discovered.entries().getFirst().snapshot();
             assertEquals(expected, restored);
-            assertEquals(original, restored.currentFile());
-            assertEquals(original.toRealPath(), restored.fileBaseline().target());
+            assertEquals(original, JvmDocumentStorage.pathOf(restored.currentResource()));
+            assertEquals(original.toRealPath(), JvmDocumentStorage.baselineOf(restored.fileBaseline()).target());
             assertEquals(expected, reader.loadAll().entries().getFirst().snapshot());
             Properties metadata = readMetadata(recovery.resolve("draft.meta.properties"));
             assertEquals("8", metadata.getProperty("format"));
@@ -75,7 +77,7 @@ class RecoveryPathPersistenceTest {
         Path target = rawPath("new-%FF.txt");
         Path wrong = directory.resolve("new-\uFFFD.txt");
         TabSession source = session();
-        source.engine().open(target);
+        source.engine().open(JvmDocumentStorage.resource(target));
         source.engine().insertInput("draft");
         try (RecoveryStore store = new RecoveryStore(directory.resolve("recovery"))) {
             store.save("draft", source.engine().captureRecoverySnapshot());
@@ -84,7 +86,7 @@ class RecoveryPathPersistenceTest {
 
             restored.engine().save();
 
-            assertEquals(target, restored.state().getCurrentFile());
+            assertEquals(target, JvmDocumentStorage.pathOf(restored.state().getCurrentResource()));
             assertEquals("draft", Files.readString(target));
             assertFalse(Files.exists(wrong));
         }
@@ -94,7 +96,7 @@ class RecoveryPathPersistenceTest {
     void unicodeSpacesAndUriReservedCharactersRoundTripAsAscii() throws Exception {
         Path original = Files.writeString(directory.resolve("данные #50% + 中😀.txt"), "original");
         TabSession source = session();
-        source.engine().openExisting(original);
+        source.engine().openExisting(JvmDocumentStorage.resource(original));
         source.engine().insertInput("draft ");
         RecoverySnapshot expected = storedPrecisionSnapshot(source);
         try (RecoveryStore store = new RecoveryStore(directory.resolve("recovery"))) {
@@ -111,7 +113,7 @@ class RecoveryPathPersistenceTest {
     void pathDecodingDoesNotDependOnWhetherAnExternalProcessMadeTheTargetADirectory() throws Exception {
         Path original = Files.writeString(directory.resolve("original.txt"), "original");
         TabSession source = session();
-        source.engine().openExisting(original);
+        source.engine().openExisting(JvmDocumentStorage.resource(original));
         source.engine().insertInput("draft ");
         RecoverySnapshot expected = storedPrecisionSnapshot(source);
         Files.delete(original);
@@ -130,7 +132,7 @@ class RecoveryPathPersistenceTest {
     void malformedForeignAndNoncanonicalUriFieldsAreRejectedWithoutChangingTheSnapshot() throws Exception {
         Path original = Files.writeString(directory.resolve("original.txt"), "original");
         TabSession source = session();
-        source.engine().openExisting(original);
+        source.engine().openExisting(JvmDocumentStorage.resource(original));
         source.engine().insertInput("draft ");
         RecoverySnapshot snapshot = source.engine().captureRecoverySnapshot();
         try (RecoveryStore store = new RecoveryStore(directory.resolve("recovery"))) {
@@ -180,7 +182,7 @@ class RecoveryPathPersistenceTest {
     private void assertRejectedFormatMutation(String key, String value) throws Exception {
         Path original = Files.writeString(directory.resolve("original.txt"), "original");
         TabSession source = session();
-        source.engine().openExisting(original);
+        source.engine().openExisting(JvmDocumentStorage.resource(original));
         source.engine().insertInput("draft ");
         RecoverySnapshot snapshot = source.engine().captureRecoverySnapshot();
         try (RecoveryStore store = new RecoveryStore(directory.resolve("recovery"))) {
@@ -191,8 +193,8 @@ class RecoveryPathPersistenceTest {
             fields.setProperty(key, value);
             if (key.equals("format")) {
                 fields.remove("pathPlatform");
-                fields.setProperty("currentFile", snapshot.currentFile().toString());
-                fields.setProperty("fileBaseline.target", snapshot.fileBaseline().target().toString());
+                fields.setProperty("currentFile", JvmDocumentStorage.pathOf(snapshot.currentResource()).toString());
+                fields.setProperty("fileBaseline.target", JvmDocumentStorage.baselineOf(snapshot.fileBaseline()).target().toString());
             }
             writeMetadata(metadata, fields);
             byte[] metadataBytes = Files.readAllBytes(metadata);
@@ -223,8 +225,8 @@ class RecoveryPathPersistenceTest {
     private static RecoverySnapshot storedPrecisionSnapshot(TabSession source) {
         RecoverySnapshot captured = source.engine().captureRecoverySnapshot();
         return new RecoverySnapshot(captured.lines(), captured.cursor(), captured.viewport(), captured.selectionAnchor(),
-            captured.dirty(), captured.currentFile(), captured.saveDisposition(), captured.fileMetadata(),
-            captured.fileBaseline(), captured.createdAt().truncatedTo(ChronoUnit.MILLIS));
+            captured.dirty(), captured.currentResource(), captured.saveDisposition(), captured.fileMetadata(),
+            JvmDocumentStorage.baselineOf(captured.fileBaseline()), captured.createdAt().truncatedTo(ChronoUnit.MILLIS));
     }
 
     private static Properties readMetadata(Path path) throws IOException {

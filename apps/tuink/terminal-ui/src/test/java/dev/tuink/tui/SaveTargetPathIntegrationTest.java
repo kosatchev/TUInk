@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -42,7 +44,7 @@ class SaveTargetPathIntegrationTest {
 
             assertEquals("draft", Files.readString(actual));
             assertEquals("unrelated original", Files.readString(unrelated));
-            assertEquals(actual, window.active().state().getCurrentFile());
+            assertEquals(actual, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
             assertFalse(window.active().state().isDirty());
         }
     }
@@ -55,10 +57,10 @@ class SaveTargetPathIntegrationTest {
         Path unrelated = Files.writeString(directory.resolve("target.txt"), "unrelated");
         Path requested = directory.resolve("link/../target.txt");
         var tab = TuiDocumentSession.create(new EditorClipboard()).view();
-        tab.engine().openExisting(actual);
+        tab.engine().openExisting(JvmDocumentStorage.resource(actual));
 
-        assertTrue(tab.engine().isCurrentSaveTarget(requested));
-        assertFalse(tab.engine().isCurrentSaveTarget(unrelated));
+        assertTrue(tab.engine().isCurrentSaveTarget(JvmDocumentStorage.resource(requested)));
+        assertFalse(tab.engine().isCurrentSaveTarget(JvmDocumentStorage.resource(unrelated)));
         assertNull(SaveTargetPolicy.validateSaveTarget(requested));
     }
 

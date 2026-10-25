@@ -1,5 +1,7 @@
 package dev.tuink.tui.flow;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -9,14 +11,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-import dev.tuink.core.BomKind;
-import dev.tuink.core.DocumentFileMetadata;
+import dev.tuink.editor.storage.BomKind;
+import dev.tuink.editor.storage.DocumentFileMetadata;
 import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.EditorState;
-import dev.tuink.core.FileBaseline;
+import dev.tuink.storage.jvm.FileBaseline;
 import dev.tuink.core.Position;
 import dev.tuink.core.RecoverySnapshot;
-import dev.tuink.core.SaveDisposition;
+import dev.tuink.editor.storage.SaveDisposition;
 import dev.tuink.core.TabSession;
 import dev.tuink.core.ViewportState;
 import dev.tuink.render.TerminalEditorTextLayout;
@@ -275,7 +277,7 @@ class RecoveryStoreTest {
             new ViewportState(0, 0, 0, 0),
             null,
             true,
-            expectedAbsent,
+            JvmDocumentStorage.resource(expectedAbsent),
             SaveDisposition.CREATE_NEW,
             DocumentFileMetadata.newDocument(1),
             null,
@@ -297,24 +299,24 @@ class RecoveryStoreTest {
     void recoveryRoundTripRetainsFileBaselineAndRejectsExternalChanges() throws IOException {
         Path directory = tempDir.resolve("recovery");
         RecoverySnapshot snapshot = openedFileSnapshot();
-        assertNotNull(snapshot.fileBaseline());
+        assertNotNull(JvmDocumentStorage.baselineOf(snapshot.fileBaseline()));
         RecoveryStore store = newStore(directory);
         store.save("session", snapshot);
         Properties metadata = readMetadata(directory.resolve("session.meta.properties"));
         assertEquals("8", metadata.getProperty("format"));
         assertEquals("true", metadata.getProperty("fileBaseline.present"));
-        assertEquals(snapshot.fileBaseline().target().toUri().toASCIIString(), metadata.getProperty("fileBaseline.target"));
-        assertEquals(snapshot.fileBaseline().sha256(), metadata.getProperty("fileBaseline.sha256"));
-        assertEquals(Long.toString(snapshot.fileBaseline().byteSize()), metadata.getProperty("fileBaseline.byteSize"));
+        assertEquals(JvmDocumentStorage.baselineOf(snapshot.fileBaseline()).target().toUri().toASCIIString(), metadata.getProperty("fileBaseline.target"));
+        assertEquals(JvmDocumentStorage.baselineOf(snapshot.fileBaseline()).sha256(), metadata.getProperty("fileBaseline.sha256"));
+        assertEquals(Long.toString(JvmDocumentStorage.baselineOf(snapshot.fileBaseline()).byteSize()), metadata.getProperty("fileBaseline.byteSize"));
 
-        Files.writeString(snapshot.currentFile(), "external edit", StandardCharsets.UTF_8);
+        Files.writeString(JvmDocumentStorage.pathOf(snapshot.currentResource()), "external edit", StandardCharsets.UTF_8);
         RecoverySnapshot recovered = store.loadAll().entries().get(0).snapshot();
         assertEquals(snapshot, recovered);
         TabSession restored = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
         restored.engine().restoreRecoverySnapshot(recovered);
 
         assertThrows(IOException.class, restored.engine()::save);
-        assertEquals("external edit", Files.readString(snapshot.currentFile()));
+        assertEquals("external edit", Files.readString(JvmDocumentStorage.pathOf(snapshot.currentResource())));
         assertTrue(restored.state().isDirty());
     }
 
@@ -333,15 +335,15 @@ class RecoveryStoreTest {
 
         RecoverySnapshot recovered = store.loadAll().entries().getFirst().snapshot();
 
-        assertEquals(new FileBaseline(snapshot.fileBaseline().target(), snapshot.fileBaseline().sha256()),
-            recovered.fileBaseline());
+        assertEquals(new FileBaseline(JvmDocumentStorage.baselineOf(snapshot.fileBaseline()).target(), JvmDocumentStorage.baselineOf(snapshot.fileBaseline()).sha256()),
+            JvmDocumentStorage.baselineOf(recovered.fileBaseline()));
         assertEquals(snapshot.lines(), recovered.lines());
         assertArrayEquals(before, Files.readAllBytes(metadata), "discovery must preserve old metadata");
         TabSession restored = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
         restored.engine().restoreRecoverySnapshot(recovered);
         restored.engine().save();
         assertFalse(restored.state().isDirty());
-        assertTrue(restored.model().fileBaseline().byteSize() >= 0);
+        assertTrue(JvmDocumentStorage.baselineOf(restored.model().fileBaseline()).byteSize() >= 0);
     }
 
     @Test
@@ -370,7 +372,7 @@ class RecoveryStoreTest {
             original.viewport(),
             original.selectionAnchor(),
             original.dirty(),
-            original.currentFile(),
+            original.currentResource(),
             original.saveDisposition(),
             original.fileMetadata(),
             null,
@@ -384,7 +386,7 @@ class RecoveryStoreTest {
         restored.engine().restoreRecoverySnapshot(recovered);
 
         assertThrows(IOException.class, restored.engine()::save);
-        assertEquals("original", Files.readString(original.currentFile()));
+        assertEquals("original", Files.readString(JvmDocumentStorage.pathOf(original.currentResource())));
         assertTrue(restored.state().isDirty());
     }
 
@@ -1058,7 +1060,7 @@ class RecoveryStoreTest {
         Path ready = tempDir.resolve("peer-ready");
         String classpath = String.join(java.io.File.pathSeparator,
             classLocation(RecoveryNamespacePeer.class), classLocation(RecoveryStore.class),
-            classLocation(RecoveryLimits.class), classLocation(RecoverySnapshot.class));
+            classLocation(RecoveryLimits.class), classLocation(RecoverySnapshot.class), classLocation(dev.tuink.storage.jvm.JvmDocumentStorage.class), classLocation(dev.tuink.editor.document.DocumentId.class));
         Process peer = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-cp", classpath, RecoveryNamespacePeer.class.getName(), directory.toString(), ready.toString())
             .redirectErrorStream(true).start();
@@ -1187,7 +1189,7 @@ class RecoveryStoreTest {
         Path file = tempDir.resolve("document.txt");
         Files.writeString(file, "original", StandardCharsets.UTF_8);
         TabSession session = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
-        session.engine().open(file);
+        session.engine().open(JvmDocumentStorage.resource(file));
         session.engine().insertInput("edited ");
         RecoverySnapshot captured = session.engine().captureRecoverySnapshot();
         return new RecoverySnapshot(
@@ -1196,10 +1198,10 @@ class RecoveryStoreTest {
             captured.viewport(),
             captured.selectionAnchor(),
             captured.dirty(),
-            captured.currentFile(),
+            captured.currentResource(),
             captured.saveDisposition(),
             captured.fileMetadata(),
-            captured.fileBaseline(),
+            JvmDocumentStorage.baselineOf(captured.fileBaseline()),
             Instant.parse("2026-07-24T00:00:00Z")
         );
     }
@@ -1211,7 +1213,7 @@ class RecoveryStoreTest {
             new ViewportState(1, 2, 3, 4),
             new Position(0, 2),
             true,
-            Path.of("/tmp/example.txt"),
+            JvmDocumentStorage.resource(Path.of("/tmp/example.txt")),
             SaveDisposition.REPLACE_EXISTING,
             new DocumentFileMetadata(
                 StandardCharsets.UTF_8,

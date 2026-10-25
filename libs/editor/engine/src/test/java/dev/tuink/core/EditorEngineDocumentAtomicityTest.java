@@ -6,6 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.editor.storage.BomKind;
+import dev.tuink.editor.storage.DocumentFileMetadata;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+import dev.tuink.verification.MemoryDocumentStorage;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
@@ -213,7 +217,7 @@ class EditorEngineDocumentAtomicityTest {
         )) {
             Fixture fixture = fixture(new TextModel(new SimpleLineBuffer()));
             EditorEngine engine = fixture.engine();
-            engine.state().setCurrentFile(Path.of("example.java"));
+            engine.state().setCurrentResource(new MemoryDocumentStorage().resource(Path.of("example.java").toString()));
             engine.insertChar('Z');
             engine.insertNewline();
             assertTrue(engine.undo());

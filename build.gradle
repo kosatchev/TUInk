@@ -76,7 +76,7 @@ def allowedProjectDependencies = [
     ':core'            : [':unicode-text', ':editor-contract'] as Set,
     ':editor-session'  : [':editor-contract', ':core'] as Set,
     ':editor-diff-jgit': [':editor-contract'] as Set,
-    ':editor-storage-jvm': [':core'] as Set,
+    ':editor-storage-jvm': [':core', ':editor-contract'] as Set,
     ':render'          : [':tuiframe-core', ':editor-contract', ':core'] as Set,
     ':highlight-regex' : [':editor-contract', ':render'] as Set,
     ':tui'             : [':tuiframe-core', ':tuiframe-jline', ':tuiframe-widgets', ':editor-contract', ':core',
@@ -85,7 +85,10 @@ def allowedProjectDependencies = [
     ':app'            : [':tui'] as Set
 ]
 def allowedTestProjectDependencies = [
-    ':core': [':editor-diff-jgit', ':editor-storage-jvm'] as Set
+    ':core': [':editor-diff-jgit', ':editor-storage-jvm'] as Set,
+    ':editor-storage-jvm': [':unicode-text'] as Set,
+    ':editor-session': [':editor-storage-jvm'] as Set,
+    ':render': [':editor-storage-jvm'] as Set
 ]
 def expectedProjectGroups = [
     ':tuiframe-core'   : 'dev.tuiframe',
@@ -131,10 +134,22 @@ def coreJava17ApiConsumer = configurations.create('coreJava17ApiConsumer') {
         attribute(org.gradle.api.attributes.java.TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE, 17)
     }
 }
+def sessionJava17ApiConsumer = configurations.create('sessionJava17ApiConsumer') {
+    description = 'Compile variant consumed by a Java 17 client depending only on editor-session.'
+    canBeConsumed = false
+    canBeResolved = true
+    attributes {
+        attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage, Usage.JAVA_API))
+        attribute(Category.CATEGORY_ATTRIBUTE, objects.named(Category, Category.LIBRARY))
+        attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, objects.named(LibraryElements, LibraryElements.JAR))
+        attribute(org.gradle.api.attributes.java.TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE, 17)
+    }
+}
 dependencies {
     portableJava17Consumer project(':editor-session')
     portableJava17Consumer project(':highlight-regex')
     add('coreJava17ApiConsumer', project(':core'))
+    add('sessionJava17ApiConsumer', project(':editor-session'))
 }
 
 def verifyCoreJava17Api = tasks.register('verifyCoreJava17Api', JavaCompile) {
@@ -143,6 +158,20 @@ def verifyCoreJava17Api = tasks.register('verifyCoreJava17Api', JavaCompile) {
     source(file('verification/compatibility/jvm/PortableCoreApiProbe.java'))
     classpath = coreJava17ApiConsumer
     destinationDirectory = layout.buildDirectory.dir('compatibility/java17-core-api')
+    sourceCompatibility = '17'
+    targetCompatibility = '17'
+    options.release = 17
+    javaCompiler = providers.provider {
+        projectsByPath[':core'].tasks.named('compileJava', JavaCompile).get().javaCompiler.get()
+    }
+}
+
+def verifySessionJava17Api = tasks.register('verifySessionJava17Api', JavaCompile) {
+    group = 'verification'
+    description = 'Compile a portable document I/O client using only the public session API.'
+    source(file('verification/compatibility/jvm/PortableSessionIoApiProbe.java'))
+    classpath = sessionJava17ApiConsumer
+    destinationDirectory = layout.buildDirectory.dir('compatibility/java17-session-api')
     sourceCompatibility = '17'
     targetCompatibility = '17'
     options.release = 17
@@ -256,6 +285,7 @@ def verifyProjectDependencies = tasks.register('verifyProjectDependencies') {
 tasks.named('check') {
     dependsOn(verifyProjectDependencies)
     dependsOn(verifyCoreJava17Api)
+    dependsOn(verifySessionJava17Api)
     dependsOn(subprojects.collect { it.tasks.named('check') })
 }
 

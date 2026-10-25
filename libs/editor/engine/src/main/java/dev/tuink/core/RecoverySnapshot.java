@@ -1,6 +1,9 @@
 package dev.tuink.core;
 
-import java.nio.file.Path;
+import dev.tuink.editor.storage.DocumentResource;
+import dev.tuink.editor.storage.ResourceVersion;
+import dev.tuink.editor.storage.DocumentFileMetadata;
+import dev.tuink.editor.storage.SaveDisposition;
 import java.time.Instant;
 import java.util.List;
 
@@ -13,10 +16,10 @@ public record RecoverySnapshot(
     ViewportState viewport,
     Position selectionAnchor,
     boolean dirty,
-    Path currentFile,
+    DocumentResource currentResource,
     SaveDisposition saveDisposition,
     DocumentFileMetadata fileMetadata,
-    FileBaseline fileBaseline,
+    ResourceVersion fileBaseline,
     Instant createdAt
 ) {
     public RecoverySnapshot {
@@ -36,17 +39,16 @@ public record RecoverySnapshot(
         if (viewport.topLine() >= lines.size()) {
             throw new IllegalArgumentException("Viewport top line is outside recovery document");
         }
-        currentFile = currentFile == null ? null : currentFile.toAbsolutePath().normalize();
         saveDisposition = saveDisposition == null
-            ? (currentFile == null ? SaveDisposition.CREATE_NEW : SaveDisposition.REPLACE_EXISTING)
+            ? (currentResource == null ? SaveDisposition.CREATE_NEW : SaveDisposition.REPLACE_EXISTING)
             : saveDisposition;
-        if (currentFile == null && saveDisposition != SaveDisposition.CREATE_NEW) {
+        if (currentResource == null && saveDisposition != SaveDisposition.CREATE_NEW) {
             throw new IllegalArgumentException(
                 "A recovery snapshot without a current path cannot replace an existing file"
             );
         }
         if (fileBaseline != null
-            && (currentFile == null || saveDisposition != SaveDisposition.REPLACE_EXISTING)) {
+            && (currentResource == null || saveDisposition != SaveDisposition.REPLACE_EXISTING)) {
             throw new IllegalArgumentException("A file baseline requires an existing current file");
         }
         createdAt = createdAt == null ? Instant.now() : createdAt;
@@ -71,10 +73,10 @@ public record RecoverySnapshot(
             viewport,
             state.getSelectionAnchor(),
             state.isDirty(),
-            state.getCurrentFile(),
+            state.getCurrentResource(),
             state.getSaveDisposition(),
             model.fileMetadata(),
-            state.getCurrentFile() != null && state.getSaveDisposition() == SaveDisposition.REPLACE_EXISTING
+            state.getCurrentResource() != null && state.getSaveDisposition() == SaveDisposition.REPLACE_EXISTING
                 ? model.fileBaseline() : null,
             Instant.now()
         );
@@ -87,10 +89,10 @@ public record RecoverySnapshot(
         ViewportState viewport,
         Position selectionAnchor,
         boolean dirty,
-        Path currentFile,
+        DocumentResource currentResource,
         SaveDisposition saveDisposition,
         DocumentFileMetadata fileMetadata,
-        FileBaseline fileBaseline,
+        ResourceVersion fileBaseline,
         Instant createdAt
     ) {
         public Prepared {
@@ -99,14 +101,14 @@ public record RecoverySnapshot(
 
         public RecoverySnapshot materialize() {
             return new RecoverySnapshot(lines.stream().map(LineText::toString).toList(), cursor, viewport,
-                selectionAnchor, dirty, currentFile, saveDisposition, fileMetadata, fileBaseline, createdAt);
+                selectionAnchor, dirty, currentResource, saveDisposition, fileMetadata, fileBaseline, createdAt);
         }
     }
 
     public void restore(TextModel model, EditorState state) {
         model.replaceLines(lines, fileMetadata);
         model.restoreFileBaseline(fileBaseline);
-        state.setCurrentFile(currentFile);
+        state.setCurrentResource(currentResource);
         state.setSaveDisposition(saveDisposition);
         state.setFileEncoding(fileMetadata.charset());
         state.setLineSeparator(fileMetadata.defaultLineSeparator());

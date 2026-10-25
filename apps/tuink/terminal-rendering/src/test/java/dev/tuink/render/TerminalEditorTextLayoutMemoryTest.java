@@ -1,5 +1,7 @@
 package dev.tuink.render;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -29,7 +31,7 @@ class TerminalEditorTextLayoutMemoryTest {
             for (int index = 0; index < 384; index++) output.write(block);
         }
         String classpath = String.join(File.pathSeparator, location(getClass()), location(RenderPlanBuilder.class),
-            location(TextModel.class), location(TerminalText.class), location(DocumentView.class));
+            location(TextModel.class), location(TerminalText.class), location(DocumentView.class), location(dev.tuink.storage.jvm.JvmDocumentStorage.class));
         Process child = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx64m", "-cp", classpath, NarrowWrapProbe.class.getName(), file.toString())
             .redirectErrorStream(true).start();
@@ -53,7 +55,7 @@ class TerminalEditorTextLayoutMemoryTest {
                 }
             }
             String classpath = String.join(File.pathSeparator, location(getClass()), location(RenderPlanBuilder.class),
-                location(TextModel.class), location(TerminalText.class), location(DocumentView.class));
+                location(TextModel.class), location(TerminalText.class), location(DocumentView.class), location(dev.tuink.storage.jvm.JvmDocumentStorage.class));
             Process child = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                 "-Xmx" + example[1] + "m", "-cp", classpath, BoundedRenderProbe.class.getName(), file.toString())
                 .redirectErrorStream(true).start();
@@ -81,7 +83,7 @@ class TerminalEditorTextLayoutMemoryTest {
             }
             String classpath = String.join(File.pathSeparator, location(TerminalEditorTextLayoutMemoryTest.class),
                 location(TerminalEditorTextLayout.class), location(TextModel.class), location(TerminalText.class),
-                location(DocumentView.class));
+                location(DocumentView.class), location(dev.tuink.storage.jvm.JvmDocumentStorage.class));
             Process process = new ProcessBuilder(
                 Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                 "-Xmx" + example[1] + "m", "-cp", classpath, FirstLayoutProbe.class.getName(), file.toString()
@@ -103,7 +105,7 @@ class TerminalEditorTextLayoutMemoryTest {
     public static final class NarrowWrapProbe {
         public static void main(String[] args) throws Exception {
             TextModel model = new TextModel(new SimpleLineBuffer());
-            model.load(Path.of(args[0]));
+            model.load(JvmDocumentStorage.resource(Path.of(args[0])));
             int length = model.getLine(0).length();
             TerminalEditorTextLayout layout = new TerminalEditorTextLayout(model);
             RenderPlanBuilder builder = RenderPlanBuilder.standalone(line -> java.util.List.of(), layout);
@@ -143,7 +145,7 @@ class TerminalEditorTextLayoutMemoryTest {
     public static final class FirstLayoutProbe {
         public static void main(String[] args) throws Exception {
             TextModel model = new TextModel(new SimpleLineBuffer());
-            model.load(Path.of(args[0]));
+            model.load(JvmDocumentStorage.resource(Path.of(args[0])));
             int length = model.getLine(0).length();
             TerminalEditorTextLayout layout = new TerminalEditorTextLayout(model);
             require(layout.maxVisualLineWidth(4) == length, "First frame has the wrong line width");
@@ -164,7 +166,7 @@ class TerminalEditorTextLayoutMemoryTest {
     public static final class BoundedRenderProbe {
         public static void main(String[] args) throws Exception {
             TextModel model = new TextModel(new SimpleLineBuffer());
-            model.load(Path.of(args[0]));
+            model.load(JvmDocumentStorage.resource(Path.of(args[0])));
             RenderPlanBuilder builder = RenderPlanBuilder.standalone(line -> {
                 throw new AssertionError("Oversized input reached a legacy full-line highlighter");
             }, new TerminalEditorTextLayout(model));

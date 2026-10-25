@@ -5,10 +5,14 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.editor.storage.BomKind;
+import dev.tuink.editor.storage.DocumentFileMetadata;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+import dev.tuink.verification.MemoryDocumentStorage;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -96,7 +100,7 @@ class EditorEngineKeyboardAtomicityTest {
         List<String> original = List.of("if ready:", "    run()", "    else");
         model.replaceLines(original);
         EditorState state = new EditorState();
-        state.setCurrentFile(Path.of("main.py"));
+        state.setCurrentResource(new MemoryDocumentStorage().resource(Path.of("main.py").toString()));
         EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model));
         engine.moveDocumentEnd(false);
         long revision = model.revision();

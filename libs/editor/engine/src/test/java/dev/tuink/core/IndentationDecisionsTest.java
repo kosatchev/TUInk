@@ -80,10 +80,10 @@ class IndentationDecisionsTest {
             if (malformed) lines.set(0, "value = \"unfinished");
             lines.addAll(List.of("if ready:", "    run()", "    else:"));
             IndentationContext context = new IndentationContext(lines::get);
-            context.synchronize(1, 1, 0, lines.size(), Path.of("main.py"));
+            context.synchronize(1, 1, 0, lines.size(), "main.py");
             int last = lines.size() - 1;
             for (int attempt = 0; attempt < 4; attempt++) context.codeBeforeCursor(last, 9);
-            IndentationDecisions decisions = new IndentationDecisions(lines.size(), lines::get, Path.of("main.py"),
+            IndentationDecisions decisions = new IndentationDecisions(lines.size(), lines::get, "main.py",
                 4, TabInsertMode.ALWAYS_SPACES_4, context);
 
             assertEquals(malformed ? 0 : 4, decisions.keywordOutdent(new Position(last, 9)),
@@ -110,10 +110,10 @@ class IndentationDecisionsTest {
             lines.addAll(Collections.nCopies(distance - 1, "    run()"));
             lines.add("    else:");
             IndentationContext context = new IndentationContext(lines::get);
-            context.synchronize(1, 1, 0, lines.size(), Path.of("main.py"));
+            context.synchronize(1, 1, 0, lines.size(), "main.py");
             int last = lines.size() - 1;
             for (int attempt = 0; attempt < 4; attempt++) context.codeBeforeCursor(last, 9);
-            IndentationDecisions decisions = new IndentationDecisions(lines.size(), lines::get, Path.of("main.py"),
+            IndentationDecisions decisions = new IndentationDecisions(lines.size(), lines::get, "main.py",
                 4, TabInsertMode.ALWAYS_SPACES_4, context);
 
             assertEquals(distance == 256 ? 4 : 0, decisions.keywordOutdent(new Position(last, 9)),
@@ -146,7 +146,7 @@ class IndentationDecisionsTest {
     void indentUnitAndRemovalUseTheSameConfiguredWidth() {
         List<String> lines = List.of("    run()");
         for (TabInsertMode mode : TabInsertMode.values()) {
-            IndentationDecisions decisions = new IndentationDecisions(1, lines::get, Path.of("main.py"), 4, mode);
+            IndentationDecisions decisions = new IndentationDecisions(1, lines::get, "main.py", 4, mode);
             String prefix = "\t  ";
             assertEquals(prefix, decisions.removeUnit(prefix + decisions.unit(0, prefix), 0), mode.name());
         }
@@ -166,11 +166,11 @@ class IndentationDecisionsTest {
     }
 
     private static String autoUnit(List<String> lines) {
-        return new IndentationDecisions(lines.size(), lines::get, Path.of("notes.txt"), 4, TabInsertMode.AUTO)
+        return new IndentationDecisions(lines.size(), lines::get, "notes.txt", 4, TabInsertMode.AUTO)
             .unit(0, "");
     }
 
     private static IndentationDecisions decisions(String file, List<String> lines) {
-        return new IndentationDecisions(lines.size(), lines::get, Path.of(file), 4, TabInsertMode.ALWAYS_SPACES_4);
+        return new IndentationDecisions(lines.size(), lines::get, file, 4, TabInsertMode.ALWAYS_SPACES_4);
     }
 }

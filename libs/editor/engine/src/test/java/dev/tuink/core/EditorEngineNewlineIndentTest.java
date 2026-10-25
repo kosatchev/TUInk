@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+import dev.tuink.verification.MemoryDocumentStorage;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -210,7 +212,7 @@ class EditorEngineNewlineIndentTest {
         TextModel model = new TextModel(new SimpleLineBuffer());
         model.replaceLines(List.of(text));
         EditorState state = new EditorState();
-        state.setCurrentFile(Path.of(filename));
+        state.setCurrentResource(new MemoryDocumentStorage().resource(Path.of(filename).toString()));
         EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model));
         engine.moveEnd();
         return new Fixture(model, state, engine);

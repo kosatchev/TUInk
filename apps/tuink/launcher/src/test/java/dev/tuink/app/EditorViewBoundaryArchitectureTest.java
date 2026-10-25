@@ -53,7 +53,8 @@ class EditorViewBoundaryArchitectureTest {
         classes()
             .that().haveFullyQualifiedName("dev.tuink.core.EditorDocumentState")
             .should().onlyDependOnClassesThat()
-            .haveNameMatching("(?:java\\..*|dev\\.tuink\\.core\\.(?:EditorDocumentState|SaveDisposition))")
+            .haveNameMatching("(?:java\\..*|dev\\.tuink\\.core\\.EditorDocumentState|"
+                + "dev\\.tuink\\.editor\\.storage\\..*)")
             .check(PRODUCTION);
         classes()
             .that().haveFullyQualifiedName("dev.tuink.core.EditorViewState")

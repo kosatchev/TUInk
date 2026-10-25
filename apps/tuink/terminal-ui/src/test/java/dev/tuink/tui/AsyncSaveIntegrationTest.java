@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
@@ -77,14 +79,14 @@ class AsyncSaveIntegrationTest {
             var otherBuilder = window.context.renderPlanBuilder();
 
             scenario.executor.runNextOnWorker();
-            assertEquals(window.document, saved.state().getCurrentFile());
+            assertEquals(window.document, JvmDocumentStorage.pathOf(saved.state().getCurrentResource()));
             assertTrue(saved.state().isDirty());
             window.frame();
             scenario.finishOperation();
 
             assertSame(other, window.active().tabSession());
             assertSame(otherBuilder, window.context.renderPlanBuilder());
-            assertEquals(target, saved.state().getCurrentFile());
+            assertEquals(target, JvmDocumentStorage.pathOf(saved.state().getCurrentResource()));
             assertFalse(saved.state().isDirty());
             assertNotSame(previousBuilder, window.tabs.getFirst().renderPlanBuilder());
             assertSame(saved.textLayout(), window.tabs.getFirst().renderPlanBuilder().textLayout());
@@ -193,7 +195,7 @@ class AsyncSaveIntegrationTest {
             var first = window.active().tabSession();
             window.command(TuinkCommand.TAB_NEW);
             Path secondPath = Files.writeString(directory.resolve("second.txt"), "original");
-            window.active().tabSession().engine().openExisting(secondPath);
+            window.active().tabSession().engine().openExisting(JvmDocumentStorage.resource(secondPath));
             window.frame();
             window.event(new TextInput("second "));
             var second = window.active().tabSession();

@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import dev.tuink.diff.jgit.JgitLineDiff;
 import dev.tuink.editor.diff.LineDiff;
 import dev.tuink.editor.document.ImmutableText;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -35,7 +36,7 @@ class EditorGutterDiffIntegrationTest {
         assertTrue(engine.undo());
         assertTrue(engine.redo());
         assertEquals("draft", model.getLine(0));
-        assertNull(engine.state().getCurrentFile());
+        assertNull(JvmDocumentStorage.pathOf(engine.state().getCurrentResource()));
     }
 
     @ParameterizedTest
@@ -84,7 +85,7 @@ class EditorGutterDiffIntegrationTest {
         for (int line : List.of(0, 8_000, 15_999)) {
             assertEquals(new GutterDiffMarker(GutterDiffFlag.MODIFIED, false), engine.gutterDiffMarkerForLine(line));
         }
-        engine.saveAs(directory.resolve("rewritten.txt"));
+        engine.saveAs(JvmDocumentStorage.resource(directory.resolve("rewritten.txt")));
         for (int line : List.of(0, 8_000, 15_999)) {
             assertEquals(new GutterDiffMarker(GutterDiffFlag.MODIFIED, true), engine.gutterDiffMarkerForLine(line));
         }

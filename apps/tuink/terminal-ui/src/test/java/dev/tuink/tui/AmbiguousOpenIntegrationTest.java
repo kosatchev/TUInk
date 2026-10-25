@@ -1,10 +1,12 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 import dev.tuiframe.input.KeyStroke;
 import dev.tuiframe.input.TextInput;
-import dev.tuink.core.BomKind;
+import dev.tuink.editor.storage.BomKind;
 import dev.tuink.tui.command.TuinkCommand;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -66,7 +68,7 @@ class AmbiguousOpenIntegrationTest {
             window.event(new TextInput("y"));
 
             assertEquals(2, window.tabs.size());
-            assertEquals(file, window.active().state().getCurrentFile());
+            assertEquals(file, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
             assertEquals(List.of("\0A\0"), window.active().tabSession().model().snapshotLines());
             assertEquals(StandardCharsets.UTF_16LE, window.active().state().getFileEncoding());
             assertEquals(BomKind.UTF_16_LE, window.active().tabSession().model().fileMetadata().bomKind());

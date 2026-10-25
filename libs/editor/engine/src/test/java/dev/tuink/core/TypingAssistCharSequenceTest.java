@@ -14,7 +14,7 @@ class TypingAssistCharSequenceTest {
     @Test
     void indentationReadsOnlyTheCursorPrefixOfALongImmutableLine() {
         VirtualText line = new VirtualText("    if ready:", 'x');
-        IndentationDecisions decisions = new IndentationDecisions(1, index -> line, Path.of("main.py"),
+        IndentationDecisions decisions = new IndentationDecisions(1, index -> line, "main.py",
             4, TabInsertMode.ALWAYS_SPACES_4);
         assertEquals("        ", decisions.newLineIndent(new Position(0, 13)));
         assertTrue(line.reads < 200);
@@ -25,7 +25,7 @@ class TypingAssistCharSequenceTest {
     void keywordOutdentDoesNotMaterializeTheSuffixAfterTheTypedClause() {
         VirtualText line = new VirtualText("    else:", 'x');
         List<CharSequence> lines = List.of("if ready:", "    work()", line);
-        IndentationDecisions decisions = new IndentationDecisions(lines.size(), lines::get, Path.of("main.py"),
+        IndentationDecisions decisions = new IndentationDecisions(lines.size(), lines::get, "main.py",
             4, TabInsertMode.ALWAYS_SPACES_4);
         assertEquals(4, decisions.keywordOutdent(new Position(2, 9)));
         assertTrue(line.reads < 200);
@@ -36,7 +36,7 @@ class TypingAssistCharSequenceTest {
     void oversizedLexicalPrefixesAndPreviousLinesAreRejectedBeforeCharacterAccess() {
         VirtualText line = new VirtualText("/*", 'x');
         IndentationContext context = new IndentationContext(index -> index == 0 ? line : "if ready:");
-        context.synchronize(1, 1, 0, 2, Path.of("main.py"));
+        context.synchronize(1, 1, 0, 2, "main.py");
         assertNull(context.codeBeforeCursor(0, line.length()));
         assertNull(context.codeBeforeCursor(1, 9));
         assertEquals(0, line.reads);
@@ -46,7 +46,7 @@ class TypingAssistCharSequenceTest {
     @Test
     void whitespaceAssistsHaveABoundedCharacterBudgetAcrossAllNeighbouringLines() {
         VirtualText line = new VirtualText("", ' ');
-        IndentationDecisions decisions = new IndentationDecisions(1000, index -> line, Path.of("main.py"),
+        IndentationDecisions decisions = new IndentationDecisions(1000, index -> line, "main.py",
             4, TabInsertMode.AUTO);
         assertEquals("    ", decisions.unit(500, ""));
         assertTrue(line.reads < IndentationContext.MAX_SCAN_CODE_UNITS);

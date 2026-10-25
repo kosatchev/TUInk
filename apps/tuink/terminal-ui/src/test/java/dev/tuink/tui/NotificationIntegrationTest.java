@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.nio.file.Path;
@@ -20,7 +22,7 @@ class NotificationIntegrationTest {
     void savingAFilenameContainingNewlineDisplaysItsExactSafeIdentity() throws Exception {
         try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("original"))) {
             Path file = Files.writeString(directory.resolve("first\nsecond.txt"), "contents");
-            window.active().tabSession().engine().openExisting(file);
+            window.active().tabSession().engine().openExisting(JvmDocumentStorage.resource(file));
             window.frame();
             window.event(new TextInput("draft "));
             window.command(TuinkCommand.DOCUMENT_SAVE);

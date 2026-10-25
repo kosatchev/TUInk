@@ -6,7 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.tuink.core.SaveDisposition;
+import dev.tuink.editor.storage.SaveDisposition;
 import dev.tuink.tui.flow.SaveContinuation;
 import dev.tuink.tui.flow.UiModalMode;
 import dev.tuink.tui.flow.UiModalState;

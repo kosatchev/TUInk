@@ -7,6 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.editor.storage.BomKind;
+import dev.tuink.editor.storage.DocumentFileMetadata;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+import dev.tuink.verification.MemoryDocumentStorage;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -117,7 +121,7 @@ class EditorEnginePasteTest {
         for (boolean reversed : List.of(false, true)) {
             Files.writeString(path, original, StandardCharsets.UTF_8);
             Fixture fixture = fixture("");
-            fixture.engine.open(path);
+            fixture.engine.open(JvmDocumentStorage.resource(path));
             Position start = new Position(0, 1);
             Position end = new Position(2, 2);
             fixture.engine.restoreSelection(reversed ? start : end, reversed ? end : start);
@@ -154,7 +158,7 @@ class EditorEnginePasteTest {
         for (boolean reversed : List.of(false, true)) {
             Files.write(path, original);
             Fixture fixture = fixture("");
-            fixture.engine.open(path);
+            fixture.engine.open(JvmDocumentStorage.resource(path));
             Position start = new Position(0, 1);
             Position end = new Position(2, 2);
             fixture.engine.restoreSelection(reversed ? start : end, reversed ? end : start);
@@ -231,7 +235,7 @@ class EditorEnginePasteTest {
         TextModel model = new TextModel(new SimpleLineBuffer());
         model.replaceLines(List.of(lines));
         EditorState state = new EditorState();
-        state.setCurrentFile(Path.of("script.py"));
+        state.setCurrentResource(new MemoryDocumentStorage().resource(Path.of("script.py").toString()));
         EditorClipboard clipboard = new EditorClipboard();
         EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model), clipboard);
         return new Fixture(model, state, clipboard, engine);

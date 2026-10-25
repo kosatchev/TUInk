@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static dev.tuink.tui.SaveWorkflowTestSupport.finish;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -44,7 +46,7 @@ class SaveAsSuggestionWorkflowTest {
         assertNotEquals(first, next);
         assertFalse(Files.exists(first, LinkOption.NOFOLLOW_LINKS));
         assertFalse(Files.exists(next, LinkOption.NOFOLLOW_LINKS));
-        assertEquals(first, owner.state().getCurrentFile());
+        assertEquals(first, JvmDocumentStorage.pathOf(owner.state().getCurrentResource()));
         assertTrue(source.state().isDirty());
     }
 
@@ -135,7 +137,7 @@ class SaveAsSuggestionWorkflowTest {
         assertEquals(quitting ? UiModalState.saveAsForQuit() : UiModalState.saveAsForCloseTab(1), result.modalState());
         assertNotEquals(preferred, SavePathInput.parse(result.filename().text()));
         assertFalse(Files.exists(preferred));
-        assertEquals(preferred, owner.state().getCurrentFile());
+        assertEquals(preferred, JvmDocumentStorage.pathOf(owner.state().getCurrentResource()));
         assertTrue(target.state().isDirty());
     }
 
@@ -249,7 +251,7 @@ class SaveAsSuggestionWorkflowTest {
 
     private static TabSession open(Path path) throws Exception {
         TabSession tab = emptyTab();
-        tab.engine().open(path);
+        tab.engine().open(JvmDocumentStorage.resource(path));
         return tab;
     }
 }

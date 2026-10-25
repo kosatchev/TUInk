@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -34,7 +36,7 @@ class SaveAsWorkspaceIntegrationTest {
 
             assertBlocked(window, window.document);
             assertSame(source, window.active());
-            assertNull(source.state().getCurrentFile());
+            assertNull(JvmDocumentStorage.pathOf(source.state().getCurrentResource()));
             assertTrue(source.state().isDirty());
             assertEquals(ownerLines, owner.tabSession().model().snapshotLines());
             assertEquals(ownerCursor, owner.state().getCursor());
@@ -80,7 +82,7 @@ class SaveAsWorkspaceIntegrationTest {
         try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("original"))) {
             Path absent = directory.resolve("reserved.txt");
             var owner = window.active();
-            owner.tabSession().engine().open(absent);
+            owner.tabSession().engine().open(JvmDocumentStorage.resource(absent));
             window.event(new TextInput("owner draft"));
             window.command(TuinkCommand.TAB_NEW);
             window.event(new TextInput("source draft"));
@@ -117,7 +119,7 @@ class SaveAsWorkspaceIntegrationTest {
             assertEquals("original", Files.readString(window.document));
             assertEquals("unrelated", Files.readString(unrelated));
             assertEquals(List.of("source draft"), window.active().tabSession().model().snapshotLines());
-            assertNull(window.active().state().getCurrentFile());
+            assertNull(JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
             assertTrue(window.active().state().isDirty());
             assertEquals(window.document.getFileName(), Files.readSymbolicLink(link));
 
@@ -125,7 +127,7 @@ class SaveAsWorkspaceIntegrationTest {
             fillFilename(window, retry);
 
             assertEquals("source draft", Files.readString(retry));
-            assertEquals(retry, window.active().state().getCurrentFile());
+            assertEquals(retry, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
             assertFalse(window.active().state().isDirty());
             assertEquals("original", Files.readString(window.document));
             assertEquals("unrelated", Files.readString(unrelated));
@@ -172,7 +174,7 @@ class SaveAsWorkspaceIntegrationTest {
         try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("original"))) {
             Path other = Files.writeString(directory.resolve("other.txt"), "other original");
             Path link = Files.createSymbolicLink(directory.resolve("opening-alias.txt"), window.document.getFileName());
-            window.active().tabSession().engine().openExisting(link);
+            window.active().tabSession().engine().openExisting(JvmDocumentStorage.resource(link));
             window.event(new TextInput("draft "));
             Files.delete(link);
             Files.createSymbolicLink(link, other.getFileName());
@@ -188,7 +190,7 @@ class SaveAsWorkspaceIntegrationTest {
 
             assertEquals("draft original", Files.readString(other));
             assertEquals("original", Files.readString(window.document));
-            assertEquals(other, window.active().state().getCurrentFile());
+            assertEquals(other, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
             assertFalse(window.active().state().isDirty());
             assertTrue(window.notification.message.startsWith("Saved "));
             assertEquals(other.getFileName(), Files.readSymbolicLink(link));
@@ -201,7 +203,7 @@ class SaveAsWorkspaceIntegrationTest {
         try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("original"))) {
             Path other = Files.writeString(directory.resolve("unrelated.txt"), "other original");
             Path link = Files.createSymbolicLink(directory.resolve("current-alias.txt"), window.document.getFileName());
-            window.active().tabSession().engine().openExisting(link);
+            window.active().tabSession().engine().openExisting(JvmDocumentStorage.resource(link));
             window.event(new TextInput("draft "));
             Files.delete(link);
             Files.createSymbolicLink(link, other.getFileName());
@@ -244,7 +246,7 @@ class SaveAsWorkspaceIntegrationTest {
     void aRecoveredDocumentsExistingIdentityCanStillBeSavedWithSaveAs() throws Exception {
         try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("original"))) {
             var recovered = window.host.newEditorTab();
-            recovered.tabSession().engine().openExisting(window.document);
+            recovered.tabSession().engine().openExisting(JvmDocumentStorage.resource(window.document));
             recovered.tabSession().engine().insertInput("recovered ");
             window.restore(List.of(new RecoveryStore.Entry("draft", recovered.tabSession().engine().captureRecoverySnapshot())));
 

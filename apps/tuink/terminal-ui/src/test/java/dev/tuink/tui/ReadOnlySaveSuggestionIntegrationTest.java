@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -89,7 +91,7 @@ class ReadOnlySaveSuggestionIntegrationTest {
                 } else {
                     assertTrue(window.controller.running());
                     assertEquals(1, window.tabs.size());
-                    assertNull(window.active().state().getCurrentFile());
+                    assertNull(JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
                     assertEquals(List.of(""), window.active().tabSession().model().snapshotLines());
                 }
             } finally {
@@ -117,7 +119,7 @@ class ReadOnlySaveSuggestionIntegrationTest {
     }
 
     private static void assertSavedCopy(EditorWindowFixture window, Path copy) throws Exception {
-        assertEquals(copy, window.active().state().getCurrentFile());
+        assertEquals(copy, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
         assertFalse(window.active().state().isDirty());
         assertEquals("ABalpha", Files.readString(copy));
         assertEquals("Aalpha", Files.readString(window.document));

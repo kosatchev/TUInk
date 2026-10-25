@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -99,7 +101,7 @@ class WorkspaceDocumentsTest {
 
     private static TabSession open(Path path) throws Exception {
         TabSession tab = TuiDocumentSession.create(new EditorClipboard()).view();
-        tab.engine().open(path);
+        tab.engine().open(JvmDocumentStorage.resource(path));
         return tab;
     }
 }

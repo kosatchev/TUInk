@@ -6,6 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import dev.tuink.editor.storage.DocumentFileMetadata;
+import dev.tuink.editor.storage.SaveDisposition;
+import dev.tuink.storage.jvm.FileBaseline;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import java.nio.charset.Charset;
 import java.nio.charset.UnmappableCharacterException;
 import java.nio.file.Files;
@@ -30,15 +34,15 @@ class DocumentEncodingExceptionTest {
         Path copy = directory.resolve("copy.txt");
         Files.write(source, original);
         TextModel model = new TextModel(new SimpleLineBuffer());
-        model.load(source);
+        model.load(JvmDocumentStorage.resource(source));
         model.insertText(new Position(1, model.getLine(1).length()), inserted + "private-tail");
         DocumentFileMetadata metadata = model.fileMetadata();
-        FileBaseline baseline = model.fileBaseline();
+        FileBaseline baseline = JvmDocumentStorage.baselineOf(model.fileBaseline());
         long revision = model.revision();
 
         for (Path target : List.of(source, copy)) {
             DocumentEncodingException failure = assertThrows(DocumentEncodingException.class,
-                () -> model.save(target, metadata, target.equals(source)
+                () -> model.save(JvmDocumentStorage.resource(target), metadata, target.equals(source)
                     ? SaveDisposition.REPLACE_EXISTING : SaveDisposition.CREATE_NEW));
 
             assertEquals(charset.name(), failure.charsetName());
@@ -49,7 +53,7 @@ class DocumentEncodingExceptionTest {
             assertArrayEquals(original, Files.readAllBytes(source));
             assertFalse(Files.exists(copy));
             assertEquals(metadata, model.fileMetadata());
-            assertEquals(baseline, model.fileBaseline());
+            assertEquals(baseline, JvmDocumentStorage.baselineOf(model.fileBaseline()));
             assertEquals(revision, model.revision());
         }
     }

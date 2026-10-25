@@ -13,7 +13,7 @@ import dev.tuink.editor.document.DocumentSnapshot;
 import dev.tuink.editor.highlight.ContextualSyntaxHighlighter;
 import dev.tuink.editor.highlight.SemanticStyleKey;
 import dev.tuink.editor.highlight.TokenSpan;
-import java.nio.file.Path;
+import dev.tuink.verification.MemoryDocumentStorage;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -48,7 +48,7 @@ class MarkdownEditingBoundaryContractTest {
                 TextModel model = new TextModel(new SimpleLineBuffer());
                 model.replaceLines(lines);
                 EditorState state = new EditorState();
-                state.setCurrentFile(Path.of("notes.md"));
+                state.setCurrentResource(new MemoryDocumentStorage().resource("notes.md"));
                 EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model));
                 engine.setTabWidth(tabWidth);
                 engine.setAutoIndentEnabled(false);
@@ -93,7 +93,7 @@ class MarkdownEditingBoundaryContractTest {
                 TextModel model = new TextModel(new SimpleLineBuffer());
                 model.replaceLines(lines);
                 EditorState state = new EditorState();
-                state.setCurrentFile(Path.of("notes.md"));
+                state.setCurrentResource(new MemoryDocumentStorage().resource("notes.md"));
                 EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model));
                 engine.setTabWidth(tabWidth);
                 engine.setAutoIndentEnabled(false);

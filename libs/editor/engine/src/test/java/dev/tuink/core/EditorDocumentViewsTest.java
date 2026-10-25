@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.diff.jgit.JgitLineDiff;
 import dev.tuink.editor.diff.LineDiff;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -220,7 +221,7 @@ class EditorDocumentViewsTest {
         EditorDocument document = document("alpha");
         TabSession first = document.attach(LogicalEditorTextLayout::new, new EditorClipboard(), new JgitLineDiff());
         Path file = directory.resolve("shared.txt");
-        first.engine().saveAs(file);
+        first.engine().saveAs(JvmDocumentStorage.resource(file));
         first.engine().insertInput("X");
         long generation = document.baselines.generation;
 
@@ -228,7 +229,7 @@ class EditorDocumentViewsTest {
 
         assertEquals(generation, document.baselines.generation);
         assertTrue(second.state().isDirty());
-        assertEquals(file, second.state().getCurrentFile());
+        assertEquals(file, JvmDocumentStorage.pathOf(second.state().getCurrentResource()));
         first.engine().setGutterDiffMode(GutterDiffMode.DISABLED);
         assertEquals(GutterDiffFlag.NONE, first.engine().gutterDiffMarkerForLine(0).flag());
         assertEquals(GutterDiffFlag.MODIFIED, second.engine().gutterDiffMarkerForLine(0).flag(),

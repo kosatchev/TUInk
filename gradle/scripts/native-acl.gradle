@@ -91,7 +91,7 @@ def smokeTasks = [:]
     String smokeImageName = target == 'musl' ? 'tuink-acl-smoke-musl' : 'tuink-acl-smoke'
     graalvmNative.binaries.create(binaryName) {
         imageName = smokeImageName
-        mainClass = 'dev.tuink.core.NativeAclSmoke'
+        mainClass = 'dev.tuink.storage.jvm.NativeAclSmoke'
         classpath(sourceSets.nativeAclTest.runtimeClasspath, nativeAclTestJar)
         buildArgs.addAll(tuinkBaseNativeBuildArgs())
         buildArgs.add("-march=${tuinkNativeMarch}")

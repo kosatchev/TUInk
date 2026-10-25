@@ -23,6 +23,15 @@ not promise Android support: the [external engine probe](../verification/compati
 checks JVM execution and D8/R8 processing; ART, Android storage and lifecycle
 remain separate gates.
 
+The shared engine has no filesystem dependency. Neutral storage contracts live
+in `editor-contract`; public session I/O separates owner capture/approval and
+completion from worker reads, inspection and writes. `editor-storage-jvm` owns
+paths, byte baselines, permissions and file publication. Its capabilities promise
+read, exclusive creation and replacement; advisory checks and atomic rename do
+not provide conditional write against arbitrary external writers. Receipts report
+the publication method actually used. An uncertain write outcome preserves the
+dirty draft and its recovery state rather than advancing the savepoint.
+
 Before any Java or plugin API becomes public, it must have its own version
 policy and automated contract checks. Storage schema versions and plugin/API
 versions remain independent.

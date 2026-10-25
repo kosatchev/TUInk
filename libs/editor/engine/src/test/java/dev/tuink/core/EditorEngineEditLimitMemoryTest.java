@@ -4,7 +4,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.editor.language.LanguageRegistry;
+import dev.tuink.editor.storage.DocumentFileMetadata;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import dev.tuink.unicode.GraphemeText;
+import dev.tuink.verification.MemoryDocumentStorage;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -22,7 +25,7 @@ class EditorEngineEditLimitMemoryTest {
     private static void runProbe(String mode, int heapMiB) throws Exception {
         String classpath = String.join(File.pathSeparator, location(EditorEngineEditLimitMemoryTest.class),
             location(EditorEngine.class), location(TextModel.class), location(GraphemeText.class),
-            location(LanguageRegistry.class));
+            location(LanguageRegistry.class), LinuxXattrTestRuntime.classpath());
         Process process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx" + heapMiB + "m", "-cp", classpath, MemoryProbe.class.getName(), mode)
             .redirectErrorStream(true).start();
@@ -78,7 +81,7 @@ class EditorEngineEditLimitMemoryTest {
             TextModel model = new TextModel(new SimpleLineBuffer());
             model.replaceLines(lines);
             EditorState state = new EditorState();
-            state.setCurrentFile(Path.of("limits.java"));
+            state.setCurrentResource(new MemoryDocumentStorage().resource(Path.of("limits.java").toString()));
             EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model));
             engine.setGutterDiffMode(GutterDiffMode.DISABLED);
             return engine;

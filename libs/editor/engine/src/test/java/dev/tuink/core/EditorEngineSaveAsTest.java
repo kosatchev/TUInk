@@ -1,15 +1,18 @@
 package dev.tuink.core;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.editor.storage.BomKind;
+import dev.tuink.editor.storage.SaveDisposition;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -22,7 +25,7 @@ class EditorEngineSaveAsTest {
         TextModel model = new TextModel(new SimpleLineBuffer());
         EditorState state = new EditorState();
         Path original = tempDir.resolve("original.txt");
-        state.setCurrentFile(original);
+        state.setCurrentResource(JvmDocumentStorage.resource(original));
         state.setDirty(true);
         EditorEngine engine = new EditorEngine(model, state, new TestEditorTextLayout(model));
 
@@ -30,9 +33,9 @@ class EditorEngineSaveAsTest {
         Files.writeString(regularFileUsedAsParent, "blocking parent");
         Path impossibleTarget = regularFileUsedAsParent.resolve("target.txt");
 
-        assertThrows(IOException.class, () -> engine.saveAs(impossibleTarget));
+        assertThrows(IOException.class, () -> engine.saveAs(JvmDocumentStorage.resource(impossibleTarget)));
 
-        assertEquals(original, state.getCurrentFile());
+        assertEquals(original, JvmDocumentStorage.pathOf(state.getCurrentResource()));
         assertTrue(state.isDirty());
     }
 
@@ -48,12 +51,12 @@ class EditorEngineSaveAsTest {
         TextModel model = new TextModel(new SimpleLineBuffer());
         EditorState state = new EditorState();
         EditorEngine engine = new EditorEngine(model, state, new TestEditorTextLayout(model));
-        engine.open(source);
+        engine.open(JvmDocumentStorage.resource(source));
 
-        engine.saveAs(target);
+        engine.saveAs(JvmDocumentStorage.resource(target));
 
         assertArrayEquals(original, Files.readAllBytes(target));
-        assertEquals(target, state.getCurrentFile());
+        assertEquals(target, JvmDocumentStorage.pathOf(state.getCurrentResource()));
         assertFalse(state.isDirty());
     }
 
@@ -67,11 +70,11 @@ class EditorEngineSaveAsTest {
         state.setDirty(true);
         EditorEngine engine = new EditorEngine(model, state, new TestEditorTextLayout(model));
 
-        assertThrows(IOException.class, () -> engine.saveAs(target));
+        assertThrows(IOException.class, () -> engine.saveAs(JvmDocumentStorage.resource(target)));
         assertEquals("external", Files.readString(target, StandardCharsets.UTF_8));
         assertTrue(state.isDirty());
 
-        engine.saveAs(target, SaveDisposition.REPLACE_EXISTING);
+        engine.saveAs(JvmDocumentStorage.resource(target), SaveDisposition.REPLACE_EXISTING);
         assertEquals("editor", Files.readString(target, StandardCharsets.UTF_8));
         assertFalse(state.isDirty());
     }
@@ -82,7 +85,7 @@ class EditorEngineSaveAsTest {
         TextModel model = new TextModel(new SimpleLineBuffer());
         EditorState state = new EditorState();
         EditorEngine engine = new EditorEngine(model, state, new TestEditorTextLayout(model));
-        engine.open(target);
+        engine.open(JvmDocumentStorage.resource(target));
         engine.insertInput("editor");
         assertEquals(SaveDisposition.CREATE_NEW, state.getSaveDisposition());
 
@@ -110,7 +113,7 @@ class EditorEngineSaveAsTest {
             sourceState,
             new TestEditorTextLayout(sourceModel)
         );
-        source.open(target);
+        source.open(JvmDocumentStorage.resource(target));
         source.insertInput("recovered");
 
         TextModel restoredModel = new TextModel(new SimpleLineBuffer());

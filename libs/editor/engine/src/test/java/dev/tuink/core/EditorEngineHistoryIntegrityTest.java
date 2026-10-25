@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
@@ -26,7 +27,7 @@ class EditorEngineHistoryIntegrityTest {
         assertTrue(fixture.engine.redo());
         assertTrue(fixture.state.isDirty());
 
-        fixture.engine.saveAs(tempDir.resolve("operation.txt"));
+        fixture.engine.saveAs(JvmDocumentStorage.resource(tempDir.resolve("operation.txt")));
         assertFalse(fixture.state.isDirty());
         assertTrue(fixture.engine.undo());
         assertEquals(List.of(""), fixture.model.snapshotLines());
@@ -44,7 +45,7 @@ class EditorEngineHistoryIntegrityTest {
             new Position(0, 3),
             "ONE"
         )));
-        fixture.engine.saveAs(tempDir.resolve("snapshot.txt"));
+        fixture.engine.saveAs(JvmDocumentStorage.resource(tempDir.resolve("snapshot.txt")));
 
         assertTrue(fixture.engine.undo());
         assertEquals(List.of("one"), fixture.model.snapshotLines());

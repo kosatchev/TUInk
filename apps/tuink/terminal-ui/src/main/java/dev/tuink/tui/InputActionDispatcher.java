@@ -10,7 +10,7 @@ import static dev.tuink.tui.command.TuinkCommand.MENU_VIEW;
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.ClipboardLimitException;
 import dev.tuink.core.DocumentEditLimitException;
-import dev.tuink.core.DocumentFileMetadata;
+import dev.tuink.editor.storage.DocumentFileMetadata;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.GutterDiffMode;
 import dev.tuink.core.TabInsertMode;
@@ -399,7 +399,7 @@ final class InputActionDispatcher {
     private static String historyMessage(String action, DocumentFileMetadata before, DocumentFileMetadata after) {
         return before.charset().equals(after.charset()) && before.bomKind() == after.bomKind()
             ? action : action + ": encoding restored to " + after.charset().displayName()
-                + (after.bomKind() == dev.tuink.core.BomKind.NONE ? " without BOM" : " with BOM");
+                + (after.bomKind() == dev.tuink.editor.storage.BomKind.NONE ? " without BOM" : " with BOM");
     }
 
     private static GutterDiffMode nextGutterDiffMode(GutterDiffMode mode) {

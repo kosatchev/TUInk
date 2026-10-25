@@ -4,6 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.editor.storage.BomKind;
+import dev.tuink.editor.storage.DocumentFileMetadata;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -180,7 +183,7 @@ class EditorEngineDeletionHistoryTest {
         Fixture fixture = fixture(List.of("abc"));
         fixture.engine.moveCursorTo(new Position(0, 3));
         fixture.engine.backspace();
-        fixture.engine.saveAs(tempDir.resolve("saved.txt"));
+        fixture.engine.saveAs(JvmDocumentStorage.resource(tempDir.resolve("saved.txt")));
         assertFalse(fixture.state.isDirty());
 
         fixture.engine.backspace();

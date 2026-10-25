@@ -7,6 +7,11 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.editor.storage.BomKind;
+import dev.tuink.editor.storage.DocumentFileMetadata;
+import dev.tuink.editor.storage.SaveDisposition;
+import dev.tuink.storage.jvm.FileBaseline;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
@@ -191,20 +196,20 @@ class MixedLineSeparatorEditingTest {
         Path source = write("source.txt", "a\rb\nc");
         Path occupied = write("occupied.txt", "keep");
         TextModel model = new TextModel(new SimpleLineBuffer());
-        model.load(source);
+        model.load(JvmDocumentStorage.resource(source));
         model.deleteRange(new Position(1, 0), new Position(1, 1));
         DocumentFileMetadata before = model.fileMetadata();
-        FileBaseline baseline = model.fileBaseline();
+        FileBaseline baseline = JvmDocumentStorage.baselineOf(model.fileBaseline());
         long revision = model.revision();
 
-        assertThrows(IOException.class, () -> model.save(occupied, before, SaveDisposition.CREATE_NEW));
+        assertThrows(IOException.class, () -> model.save(JvmDocumentStorage.resource(occupied), before, SaveDisposition.CREATE_NEW));
 
         assertEquals("keep", Files.readString(occupied));
         assertEquals("a\rb\nc", Files.readString(source));
         assertEquals(before, model.fileMetadata());
-        assertEquals(baseline, model.fileBaseline());
+        assertEquals(baseline, JvmDocumentStorage.baselineOf(model.fileBaseline()));
         assertEquals(revision, model.revision());
-        model.save(source);
+        model.save(JvmDocumentStorage.resource(source));
         assertEquals(List.of("\r", "\r\n"), model.fileMetadata().lineSeparators());
         assertReopened(source, List.of("a", "", "c"), model.fileMetadata());
     }
@@ -227,7 +232,7 @@ class MixedLineSeparatorEditingTest {
         restoredEngine.restoreRecoverySnapshot(snapshot);
         assertEquals(List.of("\r", "\r\n"), restored.fileMetadata().lineSeparators());
         Path file = directory.resolve("recovered.txt");
-        restoredEngine.saveAs(file);
+        restoredEngine.saveAs(JvmDocumentStorage.resource(file));
         assertReopened(file, List.of("a", "", "c"), restored.fileMetadata());
     }
 
@@ -236,7 +241,7 @@ class MixedLineSeparatorEditingTest {
         Path file = write("conflict.txt", "a\rb\nc");
         Fixture fixture = open(file);
         DocumentFileMetadata original = fixture.model.fileMetadata();
-        FileBaseline baseline = fixture.model.fileBaseline();
+        FileBaseline baseline = JvmDocumentStorage.baselineOf(fixture.model.fileBaseline());
         fixture.engine.moveCursorTo(new Position(1, 1));
         fixture.engine.backspace();
         DocumentFileMetadata edited = fixture.model.fileMetadata();
@@ -247,7 +252,7 @@ class MixedLineSeparatorEditingTest {
         assertEquals("outside", Files.readString(file));
         assertEquals(List.of("a", "", "c"), fixture.model.snapshotLines());
         assertEquals(edited, fixture.model.fileMetadata());
-        assertEquals(baseline, fixture.model.fileBaseline());
+        assertEquals(baseline, JvmDocumentStorage.baselineOf(fixture.model.fileBaseline()));
         assertTrue(fixture.state.isDirty());
         assertTrue(fixture.engine.undo());
         assertEquals(List.of("a", "b", "c"), fixture.model.snapshotLines());
@@ -258,7 +263,7 @@ class MixedLineSeparatorEditingTest {
         assertEquals(List.of("a", "", "c"), fixture.model.snapshotLines());
         assertEquals(edited, fixture.model.fileMetadata());
         assertEquals(new Position(1, 0), fixture.state.getCursor());
-        assertEquals(baseline, fixture.model.fileBaseline());
+        assertEquals(baseline, JvmDocumentStorage.baselineOf(fixture.model.fileBaseline()));
         assertTrue(fixture.state.isDirty());
         assertEquals("outside", Files.readString(file));
     }
@@ -299,21 +304,21 @@ class MixedLineSeparatorEditingTest {
         TextModel model = new TextModel(new SimpleLineBuffer());
         EditorState state = new EditorState();
         EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model));
-        engine.openExisting(file);
+        engine.openExisting(JvmDocumentStorage.resource(file));
         return new Fixture(model, state, engine);
     }
 
     private static void assertReopened(Path file, List<String> lines, DocumentFileMetadata metadata) throws IOException {
         TextModel reopened = new TextModel(new SimpleLineBuffer());
-        reopened.load(file);
+        reopened.load(JvmDocumentStorage.resource(file));
         assertEquals(lines, reopened.snapshotLines());
         assertEquals(metadata, reopened.fileMetadata());
     }
 
     private static void assertBaseline(Fixture fixture, Path file) throws Exception {
-        assertEquals(file.toRealPath(), fixture.model.fileBaseline().target());
+        assertEquals(file.toRealPath(), JvmDocumentStorage.baselineOf(fixture.model.fileBaseline()).target());
         assertEquals(HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(file))),
-            fixture.model.fileBaseline().sha256());
+            JvmDocumentStorage.baselineOf(fixture.model.fileBaseline()).sha256());
     }
 
     private static byte[] encoded(String text, Charset charset, BomKind bom) {

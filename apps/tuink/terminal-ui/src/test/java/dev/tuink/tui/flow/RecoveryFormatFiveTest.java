@@ -1,5 +1,7 @@
 package dev.tuink.tui.flow;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -8,14 +10,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-import dev.tuink.core.BomKind;
-import dev.tuink.core.DocumentFileMetadata;
+import dev.tuink.editor.storage.BomKind;
+import dev.tuink.editor.storage.DocumentFileMetadata;
 import dev.tuink.core.EditorClipboard;
-import dev.tuink.core.FileBaseline;
+import dev.tuink.storage.jvm.FileBaseline;
 import dev.tuink.core.LogicalEditorTextLayout;
 import dev.tuink.core.Position;
 import dev.tuink.core.RecoverySnapshot;
-import dev.tuink.core.SaveDisposition;
+import dev.tuink.editor.storage.SaveDisposition;
 import dev.tuink.core.TabSession;
 import dev.tuink.core.ViewportState;
 import java.io.IOException;
@@ -44,7 +46,7 @@ class RecoveryFormatFiveTest {
             List.of("\r\n", "\n", "\r"));
         RecoverySnapshot expected = new RecoverySnapshot(List.of("изменено", "second", "last", ""),
             new Position(1, 2), new ViewportState(1, 0, 0, 0), new Position(0, 1), true,
-            original, SaveDisposition.REPLACE_EXISTING, metadata, baseline(original), Instant.ofEpochMilli(1234));
+            JvmDocumentStorage.resource(original), SaveDisposition.REPLACE_EXISTING, metadata, baseline(original), Instant.ofEpochMilli(1234));
         LegacyFixture fixture = writeFormatFive("published", expected);
         byte[] metadataBefore = Files.readAllBytes(fixture.metadata());
         byte[] textBefore = Files.readAllBytes(fixture.text());
@@ -86,7 +88,7 @@ class RecoveryFormatFiveTest {
 
         try (RecoveryStore store = new RecoveryStore(directory.resolve("recovery"))) {
             RecoverySnapshot restored = store.discover().entries().getFirst().snapshot();
-            assertEquals(-1L, restored.fileBaseline().byteSize());
+            assertEquals(-1L, JvmDocumentStorage.baselineOf(restored.fileBaseline()).byteSize());
             TabSession session = session();
             session.engine().restoreRecoverySnapshot(restored);
             assertThrows(IOException.class, session.engine()::save);
@@ -105,9 +107,9 @@ class RecoveryFormatFiveTest {
 
         try (RecoveryStore store = new RecoveryStore(directory.resolve("recovery"))) {
             RecoverySnapshot restored = store.loadAll().entries().getFirst().snapshot();
-            assertEquals(original, restored.currentFile());
+            assertEquals(original, JvmDocumentStorage.pathOf(restored.currentResource()));
             assertEquals(SaveDisposition.CREATE_NEW, restored.saveDisposition());
-            assertNull(restored.fileBaseline());
+            assertNull(JvmDocumentStorage.baselineOf(restored.fileBaseline()));
             TabSession session = session();
             session.engine().restoreRecoverySnapshot(restored);
             assertThrows(IOException.class, session.engine()::save);
@@ -231,15 +233,16 @@ class RecoveryFormatFiveTest {
 
     private static void assertDetached(RecoverySnapshot snapshot) {
         assertEquals(List.of("draft", ""), snapshot.lines());
-        assertNull(snapshot.currentFile());
-        assertNull(snapshot.fileBaseline());
+        assertNull(JvmDocumentStorage.pathOf(snapshot.currentResource()));
+        assertNull(JvmDocumentStorage.baselineOf(snapshot.fileBaseline()));
         assertEquals(SaveDisposition.CREATE_NEW, snapshot.saveDisposition());
         assertTrue(snapshot.dirty(), "an unnamed recovered document must keep its quit/save safeguards");
     }
 
     private static RecoverySnapshot snapshot(Path current, SaveDisposition disposition, FileBaseline baseline, boolean dirty) {
         return new RecoverySnapshot(List.of("draft", ""), new Position(0, 2), new ViewportState(0, 0, 0, 0), null,
-            dirty, current, disposition, DocumentFileMetadata.newDocument(2), baseline, Instant.ofEpochMilli(1234));
+            dirty, current == null ? null : JvmDocumentStorage.resource(current), disposition,
+            DocumentFileMetadata.newDocument(2), baseline, Instant.ofEpochMilli(1234));
     }
 
     private static FileBaseline baseline(Path file) throws Exception {
@@ -257,17 +260,17 @@ class RecoveryFormatFiveTest {
         p.setProperty("createdAtEpochMillis", Long.toString(snapshot.createdAt().toEpochMilli()));
         p.setProperty("textGeneration", GENERATION);
         p.setProperty("dirty", Boolean.toString(snapshot.dirty()));
-        p.setProperty("currentFile.present", Boolean.toString(snapshot.currentFile() != null));
-        p.setProperty("currentFile", snapshot.currentFile() == null ? "" : snapshot.currentFile().toString());
+        p.setProperty("currentFile.present", Boolean.toString(JvmDocumentStorage.pathOf(snapshot.currentResource()) != null));
+        p.setProperty("currentFile", JvmDocumentStorage.pathOf(snapshot.currentResource()) == null ? "" : JvmDocumentStorage.pathOf(snapshot.currentResource()).toString());
         p.setProperty("saveDisposition", snapshot.saveDisposition().name());
         p.setProperty("fileEncoding", snapshot.fileMetadata().charset().name());
         p.setProperty("bomKind", snapshot.fileMetadata().bomKind().name());
         p.setProperty("defaultLineSeparator", separator(snapshot.fileMetadata().defaultLineSeparator()));
         p.setProperty("lineSeparators", String.join(",", snapshot.fileMetadata().lineSeparators().stream()
             .map(RecoveryFormatFiveTest::separator).toList()));
-        p.setProperty("fileBaseline.present", Boolean.toString(snapshot.fileBaseline() != null));
-        p.setProperty("fileBaseline.target", snapshot.fileBaseline() == null ? "" : snapshot.fileBaseline().target().toString());
-        p.setProperty("fileBaseline.sha256", snapshot.fileBaseline() == null ? "" : snapshot.fileBaseline().sha256());
+        p.setProperty("fileBaseline.present", Boolean.toString(JvmDocumentStorage.baselineOf(snapshot.fileBaseline()) != null));
+        p.setProperty("fileBaseline.target", JvmDocumentStorage.baselineOf(snapshot.fileBaseline()) == null ? "" : JvmDocumentStorage.baselineOf(snapshot.fileBaseline()).target().toString());
+        p.setProperty("fileBaseline.sha256", JvmDocumentStorage.baselineOf(snapshot.fileBaseline()) == null ? "" : JvmDocumentStorage.baselineOf(snapshot.fileBaseline()).sha256());
         p.setProperty("cursor.line", Integer.toString(snapshot.cursor().line()));
         p.setProperty("cursor.col", Integer.toString(snapshot.cursor().col()));
         p.setProperty("viewport.topLine", Integer.toString(snapshot.viewport().topLine()));

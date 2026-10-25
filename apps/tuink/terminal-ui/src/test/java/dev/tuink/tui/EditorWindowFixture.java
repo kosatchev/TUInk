@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -138,7 +140,7 @@ final class EditorWindowFixture implements AutoCloseable {
         document = directory.resolve("document.txt");
         Files.writeString(document, String.join("\n", lines));
         tabs.add(host.newEditorTab());
-        tabs.getFirst().tabSession().engine().open(document);
+        tabs.getFirst().tabSession().engine().open(JvmDocumentStorage.resource(document));
         context = new TerminalEditorApp.SessionContext(tabs, 0);
         tree = new OpenFileTreeController(directory, true, false);
         AppSettings settings = settingsSession.initialSettings();

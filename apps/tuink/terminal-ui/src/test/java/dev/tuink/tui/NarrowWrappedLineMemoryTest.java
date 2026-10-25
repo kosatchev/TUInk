@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -37,7 +39,7 @@ class NarrowWrappedLineMemoryTest {
             for (int index = 0; index < 256; index++) output.write(chunk);
         }
         Set<String> locations = new LinkedHashSet<>();
-        for (Class<?> type : List.of(getClass(), EditorWindowFixture.class, TerminalEditorApp.class,
+        for (Class<?> type : List.of(getClass(), EditorWindowFixture.class, dev.tuink.storage.jvm.JvmDocumentStorage.class, TerminalEditorApp.class,
             TerminalText.class, TextField.class,
             ScreenPresenter.class, TextModel.class, DocumentView.class, EditorDocumentSession.class,
             RegexHighlighter.class, TerminalEditorTextLayout.class,
@@ -71,7 +73,7 @@ class NarrowWrappedLineMemoryTest {
             Path file = Path.of(args[0]);
             try (EditorWindowFixture window = new EditorWindowFixture(file.getParent(), false, List.of(""))) {
                 var session = window.active().tabSession();
-                session.engine().open(file);
+                session.engine().open(JvmDocumentStorage.resource(file));
                 int originalLength = session.model().getLine(0).length();
                 window.ui.wrapLinesSetting = true;
                 window.ui.syntaxHighlightingSetting = false;

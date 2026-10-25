@@ -1,9 +1,9 @@
 package dev.tuink.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
@@ -22,7 +22,7 @@ class IndentationContextTest {
                     List<String> lines = List.of(prefix + "description: " + style + indicator,
                         mappingIndent + " ".repeat(indicator) + "items:", mappingIndent + "items:");
                     IndentationContext context = new IndentationContext(lines::get);
-                    context.synchronize(1, 1, 0, lines.size(), Path.of("config.yaml"));
+                    context.synchronize(1, 1, 0, lines.size(), "config.yaml");
 
                     assertNull(context.codeBeforeCursor(1, lines.get(1).length()), lines.toString());
                     assertEquals(lines.get(2), context.codeBeforeCursor(2, lines.get(2).length()), lines.toString());
@@ -41,7 +41,7 @@ class IndentationContextTest {
                     : List.of(prefix + "description: |", mappingIndent + "         ",
                         mappingIndent + "    items:", mappingIndent + "items:");
                 IndentationContext context = new IndentationContext(lines::get);
-                context.synchronize(1, 1, 0, lines.size(), Path.of("config.yaml"));
+                context.synchronize(1, 1, 0, lines.size(), "config.yaml");
 
                 assertNull(context.codeBeforeCursor(1, lines.get(1).length()), lines.toString());
                 if (!empty) assertNull(context.codeBeforeCursor(2, lines.get(2).length()), lines.toString());
@@ -75,7 +75,7 @@ class IndentationContextTest {
             reads.incrementAndGet();
             return line == last ? current.get() : "work()";
         });
-        context.synchronize(1, 1, 0, last + 1, Path.of("main.py"));
+        context.synchronize(1, 1, 0, last + 1, "main.py");
         String code = null;
         for (int attempt = 0; attempt < 20 && code == null; attempt++) {
             reads.set(0);
@@ -85,7 +85,7 @@ class IndentationContextTest {
         assertNotNull(code, "repeated bounded queries must eventually reach this nearby target");
         for (int revision = 2; revision < 102; revision++) {
             current.set("if ready:" + " ".repeat(revision));
-            context.synchronize(1, revision, last, last + 1, Path.of("main.py"));
+            context.synchronize(1, revision, last, last + 1, "main.py");
             reads.set(0);
             assertNotNull(context.codeBeforeCursor(last, current.get().length()));
             assertEquals(1, reads.get(), "typing on the cached line must not scan its document prefix again");
@@ -120,13 +120,13 @@ class IndentationContextTest {
             reads.incrementAndGet();
             return line == 0 ? "/*" + "x".repeat(IndentationContext.MAX_SCAN_CODE_UNITS) : "if (ready) {";
         });
-        context.synchronize(1, 1, 0, 10_000_000, Path.of("Main.java"));
+        context.synchronize(1, 1, 0, 10_000_000, "Main.java");
         assertNull(context.codeBeforeCursor(9_999_999, 12));
         assertEquals(2, reads.get());
     }
 
     private static void synchronize(IndentationContext context, TextModel model, String file) {
         context.synchronize(model.contentEpoch(), model.revision(), model.firstChangedLineSince(context.revision()),
-            model.lineCount(), Path.of(file));
+            model.lineCount(), file);
     }
 }

@@ -80,8 +80,12 @@ JGit diff is an optional `LineDiff` implementation in `editor-diff-jgit`, explic
 attached by the TUI composition adapter; headless views neither load it nor
 schedule gutter work. Linux FFM access lives in `editor-storage-jvm` behind a
 small service SPI. Neither provider enters the shared engine's runtime closure.
-Local file APIs remain transitional core surfaces and still need extraction
-before a platform-neutral storage/application API is complete.
+Resource/version, format, load/save and capability contracts live in
+`editor-contract`. `core` only uses those contracts and a stream-based codec;
+`editor-storage-jvm` owns paths and filesystem transactions. Public session I/O
+captures on the owner, inspects and writes on a worker, then publishes a matching
+receipt on the owner. Android storage and full command convergence remain future
+work.
 
 The session owns one canonical `DocumentId`, shared with live render/highlighter
 adapters. Cache identity and resource binding are separate identities. Snapshot
@@ -89,6 +93,11 @@ lines share final immutable block values; UTF-16/line-separator summaries are
 maintained during block edits. Explicit String access may materialize a line.
 Required workspace-edit and history-replay snapshots/results are prepared before
 text/history publication, so a preparation failure aborts the mutation.
+Empty Undo/Redo results are also prepared before invalidating the view's navigation
+revision. Allocation failure in that preparation or while starting a prepared open
+is reported as an edit-limit failure without changing the document or view guards.
+Publishing edits only invalidates derived gutter diff state; it does not call the
+optional diff provider before publishing foreign-view clamps and recovery state.
 
 ## Implementation and compatibility
 

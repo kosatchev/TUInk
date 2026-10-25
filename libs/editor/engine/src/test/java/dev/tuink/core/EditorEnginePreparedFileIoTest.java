@@ -7,6 +7,14 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.editor.storage.BomKind;
+import dev.tuink.editor.storage.DocumentFileMetadata;
+import dev.tuink.editor.storage.DocumentLoad;
+import dev.tuink.editor.storage.DocumentOpenMode;
+import dev.tuink.editor.storage.SaveDisposition;
+import dev.tuink.editor.storage.SavedDocument;
+import dev.tuink.storage.jvm.FileBaseline;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
@@ -31,10 +39,10 @@ class EditorEnginePreparedFileIoTest {
         engine.insertChar('X');
         Path target = directory.resolve("detached.txt");
         Observed before = observe(engine);
-        EditorEngine.PreparedSave prepared = engine.prepareSaveAs(target, SaveDisposition.CREATE_NEW, true);
+        EditorEngine.PreparedSave prepared = engine.prepareSaveAs(JvmDocumentStorage.resource(target), SaveDisposition.CREATE_NEW, true);
         assertEquals(before, observe(engine));
 
-        TextModel.SavedFile saved;
+        SavedDocument saved;
         try (var worker = Executors.newSingleThreadExecutor()) {
             saved = worker.submit(prepared::write).get();
         }
@@ -42,11 +50,11 @@ class EditorEnginePreparedFileIoTest {
         assertEquals("Xa😀b\rmiddle\ntail", Files.readString(target));
         assertEquals(before, observe(engine), "Only owner-thread completion may adopt a write");
         engine.completeSaved(prepared, saved);
-        assertEquals(target, engine.state().getCurrentFile());
+        assertEquals(target, JvmDocumentStorage.pathOf(engine.state().getCurrentResource()));
         assertEquals(StandardCharsets.UTF_8, model.fileMetadata().charset());
         assertEquals(BomKind.NONE, model.fileMetadata().bomKind());
         assertEquals(List.of("\r", "\n"), model.fileMetadata().lineSeparators());
-        assertEquals(saved.baseline(), model.fileBaseline());
+        assertEquals(saved.baseline(), JvmDocumentStorage.baselineOf(model.fileBaseline()));
         assertFalse(engine.state().isDirty());
         Observed completed = observe(engine);
         assertThrows(IllegalStateException.class, () -> engine.completeSaved(prepared, saved));
@@ -58,12 +66,12 @@ class EditorEnginePreparedFileIoTest {
         EditorEngine engine = engine(new OwnerThreadModel());
         engine.insertInput("captured😀");
         Path target = directory.resolve("snapshot.txt");
-        EditorEngine.PreparedSave prepared = engine.prepareSaveAs(target, SaveDisposition.CREATE_NEW, false);
+        EditorEngine.PreparedSave prepared = engine.prepareSaveAs(JvmDocumentStorage.resource(target), SaveDisposition.CREATE_NEW, false);
         engine.moveCursorTo(engine.state().getCursor());
         engine.insertInput(" live edit");
         Observed edited = observe(engine);
 
-        TextModel.SavedFile saved;
+        SavedDocument saved;
         try (var worker = Executors.newSingleThreadExecutor()) {
             saved = worker.submit(prepared::write).get();
         }
@@ -91,9 +99,9 @@ class EditorEnginePreparedFileIoTest {
         List<String> editedLines = engine.model().snapshotLines();
         Observed before = observe(engine);
         Path target = directory.resolve("utf8.txt");
-        EditorEngine.PreparedSave prepared = engine.prepareSaveAs(target, SaveDisposition.CREATE_NEW, true);
+        EditorEngine.PreparedSave prepared = engine.prepareSaveAs(JvmDocumentStorage.resource(target), SaveDisposition.CREATE_NEW, true);
 
-        TextModel.SavedFile saved = prepared.write();
+        SavedDocument saved = prepared.write();
 
         assertEquals(before, observe(engine));
         assertArrayEquals(originalBytes, Files.readAllBytes(source));
@@ -131,7 +139,7 @@ class EditorEnginePreparedFileIoTest {
         assertEquals(before, observe(engine));
         assertArrayEquals(sourceBytes, Files.readAllBytes(source));
         Path occupied = Files.writeString(directory.resolve("occupied.txt"), "someone else's file");
-        EditorEngine.PreparedSave conversion = engine.prepareSaveAs(occupied, SaveDisposition.CREATE_NEW, true);
+        EditorEngine.PreparedSave conversion = engine.prepareSaveAs(JvmDocumentStorage.resource(occupied), SaveDisposition.CREATE_NEW, true);
         assertEquals(before, observe(engine));
 
         assertThrows(FileAlreadyExistsException.class, conversion::write);
@@ -165,7 +173,7 @@ class EditorEnginePreparedFileIoTest {
     @Test
     void completionRejectsChangedPathDispositionOrBaselineEvenWhenTextIsUnchanged() throws IOException {
         List<Consumer<EditorEngine>> changes = List.of(
-            engine -> engine.state().setCurrentFile(directory.resolve("other.txt")),
+            engine -> engine.state().setCurrentResource(JvmDocumentStorage.resource(directory.resolve("other.txt"))),
             engine -> engine.state().setSaveDisposition(SaveDisposition.CREATE_NEW),
             engine -> engine.model().restoreFileBaseline(null)
         );
@@ -174,7 +182,7 @@ class EditorEnginePreparedFileIoTest {
             EditorEngine engine = open(source);
             engine.insertInput("mine ");
             EditorEngine.PreparedSave prepared = engine.prepareSave();
-            TextModel.SavedFile saved = prepared.write();
+            SavedDocument saved = prepared.write();
             changes.get(index).accept(engine);
             Observed changed = observe(engine);
 
@@ -190,9 +198,9 @@ class EditorEnginePreparedFileIoTest {
         final class FailingSnapshotModel extends TextModel {
             boolean fail;
             FailingSnapshotModel() { super(new SimpleLineBuffer()); }
-            @Override public List<LineText> snapshotTextLines() {
+            @Override public LineText lineText(int line) {
                 if (fail) throw new OutOfMemoryError("save input snapshot allocation");
-                return super.snapshotTextLines();
+                return super.lineText(line);
             }
         }
         FailingSnapshotModel model = new FailingSnapshotModel();
@@ -204,7 +212,7 @@ class EditorEnginePreparedFileIoTest {
         model.fail = true;
 
         IOException failure = assertThrows(IOException.class,
-            () -> engine.prepareSaveAs(directory.resolve("memory.txt"), SaveDisposition.CREATE_NEW, true));
+            () -> engine.prepareSaveAs(JvmDocumentStorage.resource(directory.resolve("memory.txt")), SaveDisposition.CREATE_NEW, true));
 
         model.fail = false;
         assertInstanceOf(OutOfMemoryError.class, failure.getCause());
@@ -220,7 +228,7 @@ class EditorEnginePreparedFileIoTest {
         engine.insertInput("unfinished");
         Observed before = observe(engine);
 
-        TextModel.PreparedLoad prepared = TextModel.prepareLoad(source, DocumentOpenMode.DETECT);
+        DocumentLoad prepared = TextModel.prepareLoad(JvmDocumentStorage.resource(source), DocumentOpenMode.DETECT);
 
         assertEquals(before, observe(engine));
         assertThrows(UnsupportedOperationException.class, () -> prepared.lines().set(0, "different"));
@@ -228,8 +236,8 @@ class EditorEnginePreparedFileIoTest {
         engine.openPrepared(prepared);
         assertEquals(List.of("first", "second", "third"), engine.model().snapshotLines());
         assertEquals(prepared.metadata(), engine.model().fileMetadata());
-        assertEquals(prepared.baseline(), engine.model().fileBaseline());
-        assertEquals(source, engine.state().getCurrentFile());
+        assertEquals(prepared.baseline(), JvmDocumentStorage.baselineOf(engine.model().fileBaseline()));
+        assertEquals(source, JvmDocumentStorage.pathOf(engine.state().getCurrentResource()));
         assertEquals(new Position(0, 0), engine.state().getCursor());
         assertFalse(engine.state().isDirty());
         assertFalse(engine.undo());
@@ -238,7 +246,7 @@ class EditorEnginePreparedFileIoTest {
 
     private EditorEngine open(Path path) throws IOException {
         EditorEngine engine = engine(new OwnerThreadModel());
-        engine.openExisting(path);
+        engine.openExisting(JvmDocumentStorage.resource(path));
         return engine;
     }
 
@@ -262,8 +270,8 @@ class EditorEnginePreparedFileIoTest {
 
     private static Observed observe(EditorEngine engine) {
         EditorDocumentHistory history = engine.document().history;
-        return new Observed(engine.model().snapshotLines(), engine.model().fileMetadata(), engine.model().fileBaseline(),
-            engine.state().getCurrentFile(), engine.state().getSaveDisposition(), engine.state().viewMemento(),
+        return new Observed(engine.model().snapshotLines(), engine.model().fileMetadata(), JvmDocumentStorage.baselineOf(engine.model().fileBaseline()),
+            JvmDocumentStorage.pathOf(engine.state().getCurrentResource()), engine.state().getSaveDisposition(), engine.state().viewMemento(),
             engine.state().getFileEncoding(), engine.state().getLineSeparator(), engine.state().isDirty(),
             engine.model().revision(), engine.recoveryRevision(), engine.navigationRevision(),
             List.copyOf(history.undoStack), List.copyOf(history.redoStack), history.currentDocumentStateId,

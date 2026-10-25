@@ -1,12 +1,14 @@
 package dev.tuink.core;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import dev.tuink.editor.storage.SaveDisposition;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -40,7 +42,7 @@ class TextModelSaveTest {
         );
         Files.setPosixFilePermissions(target, permissions);
 
-        modelWith("#!/bin/sh\necho updated").save(target);
+        modelWith("#!/bin/sh\necho updated").save(JvmDocumentStorage.resource(target));
 
         assertEquals("#!/bin/sh\necho updated", Files.readString(target));
         assertEquals(permissions, Files.getPosixFilePermissions(target));
@@ -51,9 +53,9 @@ class TextModelSaveTest {
     void noEditSavePreservesSpecialUnixPermissionBits(int mode) throws IOException {
         Path target = fileWithUnixMode(mode);
         TextModel model = new TextModel(new SimpleLineBuffer());
-        model.load(target);
+        model.load(JvmDocumentStorage.resource(target));
 
-        model.saveIfUnchanged(target, model.fileMetadata(), SaveDisposition.REPLACE_EXISTING);
+        model.saveIfUnchanged(JvmDocumentStorage.resource(target), model.fileMetadata(), SaveDisposition.REPLACE_EXISTING);
 
         assertEquals("original", Files.readString(target));
         assertEquals(mode, (int) Files.getAttribute(target, "unix:mode") & 07777);
@@ -65,10 +67,10 @@ class TextModelSaveTest {
         Path target = fileWithUnixMode(mode);
         Path link = Files.createSymbolicLink(tempDir.resolve("alias.txt"), target.getFileName());
         TextModel model = new TextModel(new SimpleLineBuffer());
-        model.load(link);
+        model.load(JvmDocumentStorage.resource(link));
         model.insertText(new Position(0, 0), "edited ");
 
-        model.saveIfUnchanged(link, model.fileMetadata(), SaveDisposition.REPLACE_EXISTING);
+        model.saveIfUnchanged(JvmDocumentStorage.resource(link), model.fileMetadata(), SaveDisposition.REPLACE_EXISTING);
 
         assertEquals("edited original", Files.readString(target));
         assertEquals(mode, (int) Files.getAttribute(target, "unix:mode") & 07777);
@@ -100,7 +102,7 @@ class TextModelSaveTest {
         );
         Files.createSymbolicLink(link, target.getFileName());
 
-        modelWith("new").save(link);
+        modelWith("new").save(JvmDocumentStorage.resource(link));
 
         assertTrue(Files.isSymbolicLink(link));
         assertEquals(target.getFileName(), Files.readSymbolicLink(link));
@@ -115,7 +117,7 @@ class TextModelSaveTest {
         Path link = tempDir.resolve("broken.txt");
         Files.createSymbolicLink(link, missingTarget.getFileName());
 
-        assertThrows(NoSuchFileException.class, () -> modelWith("new").save(link));
+        assertThrows(NoSuchFileException.class, () -> modelWith("new").save(JvmDocumentStorage.resource(link)));
 
         assertTrue(Files.isSymbolicLink(link));
         assertEquals(missingTarget.getFileName(), Files.readSymbolicLink(link));
@@ -128,7 +130,7 @@ class TextModelSaveTest {
         Path target = tempDir.resolve("new.txt");
         TextModel model = modelWith("new");
 
-        model.save(target, model.fileMetadata(), SaveDisposition.CREATE_NEW);
+        model.save(JvmDocumentStorage.resource(target), model.fileMetadata(), SaveDisposition.CREATE_NEW);
 
         Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(target);
         assertEquals("new", Files.readString(target));
@@ -148,7 +150,7 @@ class TextModelSaveTest {
         Files.createLink(otherLink, target);
         assumeTrue(Files.isSameFile(target, otherLink), "hard links are not supported");
 
-        modelWith("new").save(target);
+        modelWith("new").save(JvmDocumentStorage.resource(target));
 
         assertEquals("new", Files.readString(target));
         assertEquals("old", Files.readString(otherLink));
@@ -165,7 +167,7 @@ class TextModelSaveTest {
         view.write("audit.binary", ByteBuffer.wrap(value));
         view.write("audit.empty", ByteBuffer.allocate(0));
 
-        modelWith("updated").save(target);
+        modelWith("updated").save(JvmDocumentStorage.resource(target));
 
         assertEquals("updated", Files.readString(target));
         assertArrayEquals(value, readUserAttribute(target, "audit.binary"));
@@ -185,7 +187,7 @@ class TextModelSaveTest {
             .write("audit", ByteBuffer.wrap(new byte[] {7, 8, 9}));
         Files.createSymbolicLink(link, target.getFileName());
 
-        modelWith("updated").save(link);
+        modelWith("updated").save(JvmDocumentStorage.resource(link));
 
         assertTrue(Files.isSymbolicLink(link));
         assertEquals(owner, Files.getOwner(target));

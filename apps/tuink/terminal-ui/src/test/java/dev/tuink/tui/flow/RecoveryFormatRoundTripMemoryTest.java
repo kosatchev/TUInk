@@ -1,15 +1,17 @@
 package dev.tuink.tui.flow;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.tuink.core.BomKind;
-import dev.tuink.core.DocumentFileMetadata;
+import dev.tuink.editor.storage.BomKind;
+import dev.tuink.editor.storage.DocumentFileMetadata;
 import dev.tuink.core.EditorState;
-import dev.tuink.core.FileBaseline;
+import dev.tuink.storage.jvm.FileBaseline;
 import dev.tuink.core.Position;
 import dev.tuink.core.RecoverySnapshot;
-import dev.tuink.core.SaveDisposition;
+import dev.tuink.editor.storage.SaveDisposition;
 import dev.tuink.core.SimpleLineBuffer;
 import dev.tuink.core.TextModel;
 import dev.tuink.core.ViewportState;
@@ -38,7 +40,7 @@ class RecoveryFormatRoundTripMemoryTest {
     void acceptedManyLineAndLegacyEncodedDocumentsRoundTripTheirOwnRecoveryStorage(@TempDir Path directory)
         throws Exception {
         String classpath = String.join(File.pathSeparator, location(getClass()), location(RecoveryStore.class),
-            location(RecoverySnapshot.class), location(ImmutableText.class));
+            location(RecoverySnapshot.class), location(ImmutableText.class), location(dev.tuink.storage.jvm.JvmDocumentStorage.class));
         Process child = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx1g", "-cp", classpath, RoundTripProbe.class.getName(), directory.toString())
             .redirectErrorStream(true).start();
@@ -93,7 +95,7 @@ class RecoveryFormatRoundTripMemoryTest {
             };
             var metadata = new DocumentFileMetadata(StandardCharsets.UTF_8, BomKind.NONE, "\n", separators);
             RecoverySnapshot snapshot = new RecoverySnapshot(lines, new Position(LINE_COUNT - 1, 10),
-                new ViewportState(LINE_COUNT - 2, 0, 0, 0), new Position(0, 0), true, source,
+                new ViewportState(LINE_COUNT - 2, 0, 0, 0), new Position(0, 0), true, JvmDocumentStorage.resource(source),
                 SaveDisposition.REPLACE_EXISTING, metadata, baseline, CREATED);
             Path recovery = directory.resolve("recovery");
             try (RecoveryStore store = new RecoveryStore(recovery)) { store.save("draft", snapshot); }
@@ -127,7 +129,7 @@ class RecoveryFormatRoundTripMemoryTest {
                 RecoverySnapshot restored = discovered.entries().getFirst().snapshot();
                 require(restored.lines().size() == LINE_COUNT, "line count changed");
                 require(restored.lines().getLast().equals("dirty tail"), "unsaved tail changed");
-                require(restored.currentFile().equals(source) && restored.fileBaseline().equals(baseline), "identity changed");
+                require(JvmDocumentStorage.pathOf(restored.currentResource()).equals(source) && JvmDocumentStorage.baselineOf(restored.fileBaseline()).equals(baseline), "identity changed");
                 require(restored.saveDisposition() == SaveDisposition.REPLACE_EXISTING && restored.dirty(), "save intent changed");
                 for (int index = 0; index < LINE_COUNT - 1; index++) {
                     require(restored.fileMetadata().lineSeparators().get(index).equals(separator(index, mixed)), "EOL changed");
@@ -160,7 +162,7 @@ class RecoveryFormatRoundTripMemoryTest {
             FileBaseline baseline = new FileBaseline(source, digest(source));
             var metadata = DocumentFileMetadata.canonical(Charset.forName("windows-1251"), BomKind.NONE, "\r\n", 1);
             RecoverySnapshot snapshot = new RecoverySnapshot(List.of("Б".repeat(LEGACY_CHARACTERS)),
-                new Position(0, LEGACY_CHARACTERS), null, null, true, source, SaveDisposition.REPLACE_EXISTING,
+                new Position(0, LEGACY_CHARACTERS), null, null, true, JvmDocumentStorage.resource(source), SaveDisposition.REPLACE_EXISTING,
                 metadata, baseline, CREATED);
             Path recovery = directory.resolve("recovery");
             try (RecoveryStore store = new RecoveryStore(recovery)) { store.save("draft", snapshot); }
@@ -191,7 +193,7 @@ class RecoveryFormatRoundTripMemoryTest {
                 require(restored.lines().size() == 1 && text.length() == LEGACY_CHARACTERS, "expanded text was truncated");
                 for (int index = 0; index < text.length(); index++) require(text.charAt(index) == 'Б', "dirty Unicode text changed");
                 require(restored.fileMetadata().equals(expected), "legacy encoding metadata changed");
-                require(restored.currentFile().equals(source) && restored.fileBaseline().equals(baseline), "legacy identity changed");
+                require(JvmDocumentStorage.pathOf(restored.currentResource()).equals(source) && JvmDocumentStorage.baselineOf(restored.fileBaseline()).equals(baseline), "legacy identity changed");
                 TextModel model = new TextModel(new SimpleLineBuffer());
                 EditorState state = new EditorState();
                 restored.restore(model, state);

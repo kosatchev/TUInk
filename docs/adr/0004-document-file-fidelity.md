@@ -77,7 +77,10 @@ special bits must retain the access ACL's exact mask and named entries.
 On the default Linux filesystem provider, libc's extended-attribute functions
 preserve `system.posix_acl_access`, which Java's ACL view does not expose.
 The bundled `editor-storage-jvm` provider uses Java 25's Foreign Function and
-Memory API; the shared engine accesses a Java 17 SPI without native API types.
+Memory API. Its service SPI and filesystem implementation stay in that adapter;
+the shared engine uses Java 17 resource/version contracts without native or path
+types. `DocumentCodec` handles bounded stream decoding and exact encoding while
+the adapter owns physical identity, conflict checks, metadata and publication.
 Missing, broken or ambiguous providers fail the save instead of claiming that
 ACLs are unsupported. Native builds substitute the platform implementation
 with libc calls linked at build time. No external ACL utility or `libacl` is required.

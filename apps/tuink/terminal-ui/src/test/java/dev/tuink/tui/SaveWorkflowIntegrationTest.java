@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
@@ -36,7 +38,7 @@ class SaveWorkflowIntegrationTest {
                     window.event(new TextInput("y"));
                 }
                 assertEquals("draft original", Files.readString(target));
-                assertEquals(target, window.active().state().getCurrentFile());
+                assertEquals(target, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
                 assertFalse(window.active().state().isDirty());
                 assertEquals("", window.filename.text());
                 assertNotSame(builder, window.context.renderPlanBuilder());
@@ -60,7 +62,7 @@ class SaveWorkflowIntegrationTest {
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
             window.event(new TextInput("after "));
             assertEquals("untouched", Files.readString(target));
-            assertEquals(window.document, window.active().state().getCurrentFile());
+            assertEquals(window.document, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
             assertEquals(List.of("draft after original"), window.active().tabSession().model().snapshotLines());
         }
     }
@@ -98,7 +100,7 @@ class SaveWorkflowIntegrationTest {
             assertEquals("replace me", Files.readString(target));
             assertFalse(first.state().isDirty());
             assertFalse(second.state().isDirty());
-            assertEquals(retry, window.active().state().getCurrentFile());
+            assertEquals(retry, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
         }
     }
 

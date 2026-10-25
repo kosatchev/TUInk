@@ -23,7 +23,9 @@ The shared engine libraries use Java 17 bytecode/API and publish matching Gradle
 variants; their desktop integration tests and the application still use Java 25.
 Optional JGit and Linux FFM providers are outside the shared runtime dependency
 graph. The [external engine probe](../verification/compatibility/android/README.md) runs the
-shared JARs on a selected JDK and compiles them with Android D8/R8. Actual ART,
+shared JARs, including public session I/O with in-memory storage, on a selected
+JDK and compiles them with Android D8/R8. `check` compiles separate Java 17 API
+consumers depending only on `core` or `editor-session`. Actual ART,
 Android storage/IME and Windows platform acceptance are separate gates.
 
 Linux access ACL support calls libc directly. Neither the tests nor JVM and

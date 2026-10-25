@@ -4,7 +4,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.editor.language.LanguageRegistry;
+import dev.tuink.editor.storage.DocumentFileMetadata;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import dev.tuink.unicode.GraphemeText;
+import dev.tuink.verification.MemoryDocumentStorage;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -24,7 +27,7 @@ class EditorEngineLineCommentMemoryTest {
 
     private static void probe(String mode) throws Exception {
         String classpath = String.join(File.pathSeparator, location(EditorEngineLineCommentMemoryTest.class),
-            location(EditorEngine.class), location(GraphemeText.class), location(LanguageRegistry.class));
+            location(EditorEngine.class), location(GraphemeText.class), location(LanguageRegistry.class), LinuxXattrTestRuntime.classpath());
         Process process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx128m", "-cp", classpath, MemoryProbe.class.getName(), mode)
             .redirectErrorStream(true).start();
@@ -47,7 +50,7 @@ class EditorEngineLineCommentMemoryTest {
             TextModel model = new TextModel(new SimpleLineBuffer());
             model.replaceLines(Collections.nCopies(count, "x"));
             EditorState state = new EditorState();
-            state.setCurrentFile(Path.of("Demo.java"));
+            state.setCurrentResource(new MemoryDocumentStorage().resource(Path.of("Demo.java").toString()));
             EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model));
             engine.setGutterDiffMode(GutterDiffMode.DISABLED);
             engine.insertInput("X");

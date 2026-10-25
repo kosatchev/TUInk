@@ -1,7 +1,6 @@
 package dev.tuink.core;
 
 import dev.tuink.editor.language.LanguageId;
-import java.nio.file.Path;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
@@ -20,7 +19,7 @@ final class IndentationContext {
     private long contentEpoch = Long.MIN_VALUE;
     private long revision = -1;
     private LanguageId language;
-    private Path file;
+    private String file;
     private int lineCount;
     private int retainedWeight;
 
@@ -39,7 +38,7 @@ final class IndentationContext {
         revision = -1;
     }
 
-    void synchronize(long epoch, long nextRevision, int firstChangedLine, int count, Path nextFile) {
+    void synchronize(long epoch, long nextRevision, int firstChangedLine, int count, String nextFile) {
         LanguageId nextLanguage = LanguageProfiles.language(nextFile);
         if (contentEpoch != epoch || revision > nextRevision || language != nextLanguage) {
             checkpoints.clear();

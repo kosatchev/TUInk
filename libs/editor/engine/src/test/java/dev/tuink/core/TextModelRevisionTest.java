@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -40,7 +41,7 @@ class TextModelRevisionTest {
         model.deleteBackward(new Position(0, 0));
         model.deleteForward(new Position(0, 0));
         model.deleteRange(new Position(0, 0), new Position(0, 0));
-        model.save(tempDir.resolve("empty.txt"));
+        model.save(JvmDocumentStorage.resource(tempDir.resolve("empty.txt")));
 
         assertEquals(0, model.revision());
         assertEquals(0, model.contentEpoch());
@@ -68,7 +69,7 @@ class TextModelRevisionTest {
         Path empty = tempDir.resolve("empty.txt");
         Files.writeString(empty, "");
 
-        model.load(empty);
+        model.load(JvmDocumentStorage.resource(empty));
 
         assertEquals(List.of(""), model.snapshotLines());
         assertEquals(revision + 1, model.revision());
@@ -81,7 +82,7 @@ class TextModelRevisionTest {
         TextModel second = new TextModel(new SimpleLineBuffer());
         long identity = first.cacheIdentity();
 
-        assertThrows(IOException.class, () -> first.load(tempDir.resolve("missing.txt")));
+        assertThrows(IOException.class, () -> first.load(JvmDocumentStorage.resource(tempDir.resolve("missing.txt"))));
 
         assertEquals(0, first.revision());
         assertEquals(0, first.contentEpoch());
@@ -193,11 +194,11 @@ class TextModelRevisionTest {
         Path source = tempDir.resolve("loaded.txt");
         Files.writeString(source, "loaded");
         before = model.revision();
-        model.load(source);
+        model.load(JvmDocumentStorage.resource(source));
         assertEquals(0, model.firstChangedLineSince(before));
         before = model.revision();
         model.insertText(new Position(0, 0), "");
-        model.save(source);
+        model.save(JvmDocumentStorage.resource(source));
         assertEquals(model.lineCount(), model.firstChangedLineSince(before));
     }
 

@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -49,7 +51,7 @@ class SaveAsTargetApprovalIntegrationTest {
 
             assertEquals("approved original", Files.readString(approved));
             assertEquals("foreign original", Files.readString(foreign));
-            assertEquals(window.document, window.active().state().getCurrentFile());
+            assertEquals(window.document, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
             assertTrue(window.active().state().isDirty());
             assertTrue(window.notification.message.startsWith("Save failed:"));
             assertEquals(alias.toString(), window.filename.text());
@@ -75,7 +77,7 @@ class SaveAsTargetApprovalIntegrationTest {
 
             assertEquals("remote", Files.readString(target));
             assertTrue(window.active().state().isDirty());
-            assertEquals(window.document, window.active().state().getCurrentFile());
+            assertEquals(window.document, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
             assertTrue(window.notification.message.startsWith("Save failed:"));
             assertTrue(window.active().tabSession().engine().undo(), "failed approval adds no history entry");
             assertEquals(List.of("original"), window.active().tabSession().model().snapshotLines());
@@ -102,7 +104,7 @@ class SaveAsTargetApprovalIntegrationTest {
             assertTrue(window.active().state().isDirty(), "only the owner may publish the savepoint");
             window.frame();
             assertFalse(window.active().state().isDirty());
-            assertEquals(target, window.active().state().getCurrentFile());
+            assertEquals(target, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
         }
     }
 
@@ -123,7 +125,7 @@ class SaveAsTargetApprovalIntegrationTest {
             assertTrue(scenario.executor.tasks.isEmpty(), "shutdown must not enqueue the next save phase");
             assertFalse(Files.exists(target));
             assertTrue(window.active().state().isDirty());
-            assertEquals(window.document, window.active().state().getCurrentFile());
+            assertEquals(window.document, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
             window.recoveryManager.finishSession(window.host.toTabSessions(window.tabs), false);
             assertTrue(window.recoverySnapshots.values().stream()
                 .anyMatch(snapshot -> snapshot.lines().equals(List.of("draft original"))));
@@ -137,7 +139,7 @@ class SaveAsTargetApprovalIntegrationTest {
             Path other = Files.writeString(directory.resolve("other.txt"), "other original");
             Path alias = Files.createSymbolicLink(directory.resolve("alias.txt"), window.document);
             window.command(TuinkCommand.TAB_NEW);
-            window.active().tabSession().engine().openExisting(other);
+            window.active().tabSession().engine().openExisting(JvmDocumentStorage.resource(other));
             window.command(TuinkCommand.TAB_PREVIOUS);
             window.event(new TextInput("draft "));
             SaveWorkflowIntegrationTest.submitFilename(window, alias);

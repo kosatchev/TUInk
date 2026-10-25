@@ -7,6 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import dev.tuink.editor.storage.DocumentFileMetadata;
+import dev.tuink.editor.storage.SaveDisposition;
+import dev.tuink.storage.jvm.FileBaseline;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,7 +28,7 @@ class EditorEngineFileConflictTest {
         EditorEngine engine = open(path);
         var modified = Files.getLastModifiedTime(path);
         engine.insertInput("mine ");
-        FileBaseline baseline = engine.model().fileBaseline();
+        FileBaseline baseline = JvmDocumentStorage.baselineOf(engine.model().fileBaseline());
         Files.writeString(path, "remote");
         Files.setLastModifiedTime(path, modified);
 
@@ -34,7 +38,7 @@ class EditorEngineFileConflictTest {
         assertEquals("remote", Files.readString(path));
         assertEquals("mine before", engine.model().getLine(0));
         assertTrue(engine.state().isDirty());
-        assertEquals(baseline, engine.model().fileBaseline());
+        assertEquals(baseline, JvmDocumentStorage.baselineOf(engine.model().fileBaseline()));
         engine.undo();
         assertFalse(engine.state().isDirty());
         assertEquals("before", engine.model().getLine(0));
@@ -59,13 +63,13 @@ class EditorEngineFileConflictTest {
         EditorEngine engine = open(path);
         engine.insertInput("first ");
         engine.save();
-        FileBaseline firstSave = engine.model().fileBaseline();
+        FileBaseline firstSave = JvmDocumentStorage.baselineOf(engine.model().fileBaseline());
         engine.insertInput("second ");
         engine.save();
 
         assertEquals("first second before", Files.readString(path));
         assertFalse(engine.state().isDirty());
-        assertFalse(firstSave.equals(engine.model().fileBaseline()));
+        assertFalse(firstSave.equals(JvmDocumentStorage.baselineOf(engine.model().fileBaseline())));
         engine.undo();
         engine.save();
         assertEquals("first before", Files.readString(path));
@@ -78,7 +82,7 @@ class EditorEngineFileConflictTest {
         engine.insertInput("mine ");
         Files.writeString(path, "remote");
 
-        assertThrows(IOException.class, () -> engine.saveAs(path, SaveDisposition.REPLACE_EXISTING));
+        assertThrows(IOException.class, () -> engine.saveAs(JvmDocumentStorage.resource(path), SaveDisposition.REPLACE_EXISTING));
 
         assertEquals("remote", Files.readString(path));
         assertTrue(engine.state().isDirty());
@@ -92,13 +96,13 @@ class EditorEngineFileConflictTest {
         Files.writeString(path, "remote");
         Path copy = directory.resolve("copy.txt");
 
-        engine.saveAs(copy);
+        engine.saveAs(JvmDocumentStorage.resource(copy));
         engine.insertInput("new ");
         engine.save();
 
         assertEquals("remote", Files.readString(path));
         assertEquals("mine new before", Files.readString(copy));
-        assertEquals(copy, engine.state().getCurrentFile());
+        assertEquals(copy, JvmDocumentStorage.pathOf(engine.state().getCurrentResource()));
         assertFalse(engine.state().isDirty());
     }
 
@@ -108,7 +112,7 @@ class EditorEngineFileConflictTest {
         EditorEngine source = open(path);
         source.insertInput("mine ");
         RecoverySnapshot snapshot = source.captureRecoverySnapshot();
-        assertNotNull(snapshot.fileBaseline());
+        assertNotNull(JvmDocumentStorage.baselineOf(snapshot.fileBaseline()));
         Files.writeString(path, "remote");
         EditorEngine restored = emptyEngine();
         restored.restoreRecoverySnapshot(snapshot);
@@ -140,7 +144,7 @@ class EditorEngineFileConflictTest {
         EditorEngine restored = open(path);
         restored.restoreRecoverySnapshot(new RecoverySnapshot(
             List.of("draft"), new Position(0, 0), new ViewportState(0, 0, 0, 0),
-            null, true, path, SaveDisposition.REPLACE_EXISTING,
+            null, true, JvmDocumentStorage.resource(path), SaveDisposition.REPLACE_EXISTING,
             DocumentFileMetadata.newDocument(1), null, null
         ));
 
@@ -181,10 +185,10 @@ class EditorEngineFileConflictTest {
         engine.insertInput("mine ");
         Files.writeString(path, "remote");
 
-        assertThrows(IOException.class, () -> engine.saveAs(alias, SaveDisposition.REPLACE_EXISTING));
+        assertThrows(IOException.class, () -> engine.saveAs(JvmDocumentStorage.resource(alias), SaveDisposition.REPLACE_EXISTING));
 
         assertEquals("remote", Files.readString(path));
-        assertEquals(path, engine.state().getCurrentFile());
+        assertEquals(path, JvmDocumentStorage.pathOf(engine.state().getCurrentResource()));
         assertTrue(Files.isSymbolicLink(alias));
     }
 
@@ -197,7 +201,7 @@ class EditorEngineFileConflictTest {
         EditorEngine engine = open(path);
         engine.insertInput("mine ");
 
-        engine.saveAs(alias, SaveDisposition.REPLACE_EXISTING);
+        engine.saveAs(JvmDocumentStorage.resource(alias), SaveDisposition.REPLACE_EXISTING);
         engine.insertInput("new ");
         engine.save();
 
@@ -219,11 +223,11 @@ class EditorEngineFileConflictTest {
         Files.delete(link);
         Files.createSymbolicLink(link, other);
 
-        assertThrows(IOException.class, () -> engine.saveAs(original, SaveDisposition.REPLACE_EXISTING));
+        assertThrows(IOException.class, () -> engine.saveAs(JvmDocumentStorage.resource(original), SaveDisposition.REPLACE_EXISTING));
 
         assertEquals("remote", Files.readString(original));
         assertEquals("other", Files.readString(other));
-        assertEquals(link, engine.state().getCurrentFile());
+        assertEquals(link, JvmDocumentStorage.pathOf(engine.state().getCurrentResource()));
         assertTrue(engine.state().isDirty());
     }
 
@@ -238,16 +242,16 @@ class EditorEngineFileConflictTest {
         Files.delete(link);
         Files.createSymbolicLink(link, other.getFileName());
 
-        assertTrue(engine.isCurrentSaveTarget(link), "the original spelling keeps its baseline guard");
-        assertTrue(engine.isCurrentSaveTarget(original));
-        assertFalse(engine.isCurrentSaveTarget(other), "the live alias must not claim another physical target");
+        assertTrue(engine.isCurrentSaveTarget(JvmDocumentStorage.resource(link)), "the original spelling keeps its baseline guard");
+        assertTrue(engine.isCurrentSaveTarget(JvmDocumentStorage.resource(original)));
+        assertFalse(engine.isCurrentSaveTarget(JvmDocumentStorage.resource(other)), "the live alias must not claim another physical target");
         assertThrows(IOException.class, engine::save);
-        assertThrows(IOException.class, () -> engine.saveAs(link, SaveDisposition.REPLACE_EXISTING));
-        engine.saveAs(other, SaveDisposition.REPLACE_EXISTING);
+        assertThrows(IOException.class, () -> engine.saveAs(JvmDocumentStorage.resource(link), SaveDisposition.REPLACE_EXISTING));
+        engine.saveAs(JvmDocumentStorage.resource(other), SaveDisposition.REPLACE_EXISTING);
 
         assertEquals("before", Files.readString(original));
         assertEquals("mine before", Files.readString(other));
-        assertEquals(other, engine.state().getCurrentFile());
+        assertEquals(other, JvmDocumentStorage.pathOf(engine.state().getCurrentResource()));
         assertFalse(engine.state().isDirty());
         assertEquals(other.getFileName(), Files.readSymbolicLink(link));
     }
@@ -262,10 +266,10 @@ class EditorEngineFileConflictTest {
         Files.delete(original);
         Files.createSymbolicLink(original, other.getFileName());
 
-        assertTrue(engine.isCurrentSaveTarget(original));
-        assertFalse(engine.isCurrentSaveTarget(other));
-        assertThrows(IOException.class, () -> engine.saveAs(original, SaveDisposition.REPLACE_EXISTING));
-        engine.saveAs(other, SaveDisposition.REPLACE_EXISTING);
+        assertTrue(engine.isCurrentSaveTarget(JvmDocumentStorage.resource(original)));
+        assertFalse(engine.isCurrentSaveTarget(JvmDocumentStorage.resource(other)));
+        assertThrows(IOException.class, () -> engine.saveAs(JvmDocumentStorage.resource(original), SaveDisposition.REPLACE_EXISTING));
+        engine.saveAs(JvmDocumentStorage.resource(other), SaveDisposition.REPLACE_EXISTING);
 
         assertEquals("mine before", Files.readString(other));
         assertTrue(Files.isSymbolicLink(original));
@@ -276,17 +280,17 @@ class EditorEngineFileConflictTest {
         Path original = write("deleted-owned.txt", "before");
         EditorEngine engine = open(original);
         engine.insertInput("mine ");
-        FileBaseline baseline = engine.model().fileBaseline();
+        FileBaseline baseline = JvmDocumentStorage.baselineOf(engine.model().fileBaseline());
         Files.delete(original);
 
-        assertTrue(engine.isCurrentSaveTarget(original));
-        assertThrows(IOException.class, () -> engine.saveAs(original, SaveDisposition.CREATE_NEW));
+        assertTrue(engine.isCurrentSaveTarget(JvmDocumentStorage.resource(original)));
+        assertThrows(IOException.class, () -> engine.saveAs(JvmDocumentStorage.resource(original), SaveDisposition.CREATE_NEW));
         assertFalse(Files.exists(original));
-        assertEquals(baseline, engine.model().fileBaseline());
+        assertEquals(baseline, JvmDocumentStorage.baselineOf(engine.model().fileBaseline()));
         assertTrue(engine.state().isDirty());
         Path copy = directory.resolve("deleted-owned-copy.txt");
-        assertFalse(engine.isCurrentSaveTarget(copy));
-        engine.saveAs(copy, SaveDisposition.CREATE_NEW);
+        assertFalse(engine.isCurrentSaveTarget(JvmDocumentStorage.resource(copy)));
+        engine.saveAs(JvmDocumentStorage.resource(copy), SaveDisposition.CREATE_NEW);
 
         assertEquals("mine before", Files.readString(copy));
         assertFalse(Files.exists(original));
@@ -305,8 +309,8 @@ class EditorEngineFileConflictTest {
         Files.delete(link);
         Files.createSymbolicLink(link, other.getFileName());
 
-        assertTrue(engine.isCurrentSaveTarget(original));
-        assertThrows(IOException.class, () -> engine.saveAs(original, SaveDisposition.CREATE_NEW));
+        assertTrue(engine.isCurrentSaveTarget(JvmDocumentStorage.resource(original)));
+        assertThrows(IOException.class, () -> engine.saveAs(JvmDocumentStorage.resource(original), SaveDisposition.CREATE_NEW));
         assertFalse(Files.exists(original));
         assertEquals("other", Files.readString(other));
         assertTrue(engine.state().isDirty());
@@ -337,7 +341,7 @@ class EditorEngineFileConflictTest {
 
     private static EditorEngine open(Path path) throws IOException {
         EditorEngine engine = emptyEngine();
-        engine.open(path);
+        engine.open(JvmDocumentStorage.resource(path));
         return engine;
     }
 

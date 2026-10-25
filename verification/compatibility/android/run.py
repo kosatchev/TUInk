@@ -28,12 +28,18 @@ def main():
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     root = next(parent for parent in Path(__file__).resolve().parents
-                       if (parent / 'settings.gradle').is_file() and (parent / 'gradlew').is_file())
+                if (parent / 'settings.gradle').is_file() and (parent / 'gradlew').is_file())
     version = next(line.split("=", 1)[1] for line in (root / "gradle.properties").read_text().splitlines()
                    if line.startswith("version="))
-    module_directories = {'app': 'apps/tuink/launcher', 'tui': 'apps/tuink/terminal-ui', 'render': 'apps/tuink/terminal-rendering', 'tuinvoke': 'apps/tuinvoke', 'tuinspect': 'apps/tuinspect', 'editor-contract': 'libs/editor/api', 'core': 'libs/editor/engine', 'editor-session': 'libs/editor/session', 'editor-storage-jvm': 'libs/editor/storage-jvm', 'editor-diff-jgit': 'libs/editor/diff-jgit', 'highlight-regex': 'libs/editor/highlight-regex', 'tuiframe-core': 'libs/tuiframe/core', 'tuiframe-jline': 'libs/tuiframe/jline', 'tuiframe-widgets': 'libs/tuiframe/widgets', 'unicode-text': 'libs/unicode-text', 'tui-core': 'libs/tuiframe/core', 'tui-jline': 'libs/tuiframe/jline', 'tui-widgets': 'libs/tuiframe/widgets'}
-    jars = [root / module_directories[module] / "build/libs" / f"{module}-{version}.jar"
-            for module in ("editor-contract", "unicode-text", "core", "editor-session", "highlight-regex")]
+    modules = {
+        'editor-contract': 'libs/editor/api',
+        'unicode-text': 'libs/unicode-text',
+        'core': 'libs/editor/engine',
+        'editor-session': 'libs/editor/session',
+        'highlight-regex': 'libs/editor/highlight-regex',
+    }
+    jars = [root / directory / "build/libs" / f"{module}-{version}.jar"
+            for module, directory in modules.items()]
     android = args.sdk / "platforms" / f"android-{args.compile_api}" / "android.jar"
     dexer = args.sdk / "build-tools" / args.build_tools / "lib/d8.jar"
     java = args.jdk / "bin/java"
@@ -50,7 +56,8 @@ def main():
         classes = work / "classes"
         classes.mkdir()
         run([javac, "--release", "17", "-cp", os.pathsep.join(map(str, jars)), "-d", classes,
-             root / "verification/compatibility/android/PortableEngineProbe.java"])
+             root / "verification/compatibility/android/PortableEngineProbe.java",
+             root / "verification/fixtures/java/dev/tuink/verification/MemoryDocumentStorage.java"])
         run([runtime_java, "-Xmx256m", "-cp", os.pathsep.join(map(str, [classes, *jars])),
              "dev.tuink.compat.PortableEngineProbe"])
         probe = work / "probe.jar"

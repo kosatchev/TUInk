@@ -1,5 +1,7 @@
 package dev.tuink.tui.render;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -77,7 +79,7 @@ class RenderRasterizerUnicodeTest {
             Path file = directory.resolve(base + ".txt");
             Files.writeString(file, original);
             TextModel model = new TextModel(new SimpleLineBuffer());
-            model.load(file);
+            model.load(JvmDocumentStorage.resource(file));
             RenderPlanBuilder builder = RenderPlanBuilder.standalone(ignored -> List.of(), new TerminalEditorTextLayout(model));
             RenderPlan plan = builder.build(model, new EditorState(), 8, 80, "top", "bottom", null,
                 SearchOptions.DEFAULT, null, null, null, null, false, false);

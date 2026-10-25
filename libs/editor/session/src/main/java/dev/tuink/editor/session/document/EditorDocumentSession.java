@@ -16,6 +16,13 @@ import dev.tuink.editor.document.TextEdit;
 import dev.tuink.editor.document.TextPosition;
 import dev.tuink.editor.document.WorkspaceEdit;
 import dev.tuink.editor.session.edit.WorkspaceEditValidator;
+import dev.tuink.editor.storage.DocumentLoad;
+import dev.tuink.editor.storage.DocumentResource;
+import dev.tuink.editor.storage.DocumentFileMetadata;
+import dev.tuink.editor.storage.ResourceBinding;
+import dev.tuink.editor.storage.SavedDocument;
+import dev.tuink.editor.storage.SaveDisposition;
+import java.io.IOException;
 import java.util.AbstractList;
 import java.util.List;
 import java.util.Objects;
@@ -58,6 +65,93 @@ public final class EditorDocumentSession {
     /** Stable logical identity; reading it never captures or publishes document text. */
     public DocumentId documentId() {
         return documentId;
+    }
+
+    /** Owner-thread storage/savepoint state, independent of the text revision. */
+    public Status status() {
+        requireOwnerThread();
+        return new Status(engine.resourceBinding(), engine.model().fileMetadata(),
+            engine.state().isDirty(), engine.recoveryRevision());
+    }
+
+    public record Status(ResourceBinding binding, DocumentFileMetadata metadata, boolean dirty,
+                         long recoveryRevision) {}
+
+    /**
+     * Publishes a detached read on the owner thread. Snapshot publication remains
+     * demand driven, as it is for attached frontend edits: call snapshot() on the
+     * owner before submitting document-derived background work.
+     */
+    public void openPrepared(DocumentLoad loaded) {
+        requireOwnerThread();
+        engine.openPrepared(loaded);
+    }
+
+    /** Captures immutable current-save inputs without calling a storage provider. */
+    public PreparedSave prepareSave() throws IOException {
+        requireOwnerThread();
+        return new PreparedSave(engine.prepareSave());
+    }
+
+    /** Captures a Save As plan. Run inspectTarget() on the host's I/O worker. */
+    public SavePreparation prepareSaveAsInput(DocumentResource resource, SaveDisposition disposition, boolean utf8)
+        throws IOException {
+        requireOwnerThread();
+        return new SavePreparation(engine.prepareSaveAsInput(resource, disposition, utf8));
+    }
+
+    /** Approves exactly the detached observation while its owner state remains unchanged. */
+    public PreparedSave approveSaveAs(SaveTargetInspection inspection) throws IOException {
+        requireOwnerThread();
+        Objects.requireNonNull(inspection, "inspection");
+        return new PreparedSave(engine.approveSaveAs(inspection.inspection));
+    }
+
+    /**
+     * Completes the matching write on the owner. Hosts keep document edits locked
+     * between capture and completion; failure leaves the draft and savepoint intact.
+     */
+    public void completeSaved(PreparedSave prepared, SavedDocument saved) {
+        requireOwnerThread();
+        engine.completeSaved(Objects.requireNonNull(prepared, "prepared").prepared, saved);
+    }
+
+    /** Opaque owner capture; inspection reads no mutable document state. */
+    public static final class SavePreparation {
+        private final EditorEngine.SavePreparation preparation;
+
+        private SavePreparation(EditorEngine.SavePreparation preparation) {
+            this.preparation = preparation;
+        }
+
+        public SaveTargetInspection inspectTarget() throws IOException {
+            return new SaveTargetInspection(preparation.inspectTarget());
+        }
+
+        public SaveDisposition disposition() { return preparation.disposition(); }
+    }
+
+    /** An inspected target bound to one capture, ready for owner approval. */
+    public static final class SaveTargetInspection {
+        private final EditorEngine.SaveTargetInspection inspection;
+
+        private SaveTargetInspection(EditorEngine.SaveTargetInspection inspection) {
+            this.inspection = inspection;
+        }
+
+        public DocumentResource requestedResource() { return inspection.requestedResource(); }
+        public DocumentResource physicalResource() { return inspection.physicalResource(); }
+        public boolean exists() { return inspection.exists(); }
+        public boolean currentTarget() { return inspection.currentTarget(); }
+    }
+
+    /** Single-use detached write; completion accepts only the receipt it produced. */
+    public static final class PreparedSave {
+        private final EditorEngine.PreparedSave prepared;
+
+        private PreparedSave(EditorEngine.PreparedSave prepared) { this.prepared = prepared; }
+
+        public SavedDocument write() throws IOException { return prepared.write(); }
     }
 
     /**

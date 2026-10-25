@@ -8,6 +8,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import dev.tuink.editor.storage.DocumentFileMetadata;
+import dev.tuink.editor.storage.SaveDisposition;
+import dev.tuink.storage.jvm.FileBaseline;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import java.io.IOException;
 import java.net.StandardProtocolFamily;
 import java.net.UnixDomainSocketAddress;
@@ -38,12 +42,12 @@ class TextModelSpecialTargetTest {
 
         for (Path target : List.of(fifo, alias)) {
             for (SaveDisposition disposition : SaveDisposition.values()) {
-                assertSpecialFileRejected(target, () -> model.save(target, metadata, disposition));
+                assertSpecialFileRejected(target, () -> model.save(JvmDocumentStorage.resource(target), metadata, disposition));
                 assertEquals(identity, Files.readAttributes(fifo, BasicFileAttributes.class).fileKey());
                 assertTrue(Files.readAttributes(fifo, BasicFileAttributes.class).isOther());
                 assertTrue(Files.isSymbolicLink(alias));
                 assertEquals(metadata, model.fileMetadata());
-                assertNull(model.fileBaseline());
+                assertNull(JvmDocumentStorage.baselineOf(model.fileBaseline()));
             }
         }
     }
@@ -58,7 +62,7 @@ class TextModelSpecialTargetTest {
             TextModel model = draft();
             for (Path target : List.of(socket, alias)) {
                 assertSpecialFileRejected(target,
-                    () -> model.save(target, model.fileMetadata(), SaveDisposition.REPLACE_EXISTING));
+                    () -> model.save(JvmDocumentStorage.resource(target), model.fileMetadata(), SaveDisposition.REPLACE_EXISTING));
                 assertTrue(Files.readAttributes(socket, BasicFileAttributes.class).isOther());
                 assertTrue(Files.isSymbolicLink(alias));
             }
@@ -75,9 +79,9 @@ class TextModelSpecialTargetTest {
                 ? Files.createSymbolicLink(scenario.resolve("alias"), original.getFileName()) : original;
             TextModel model = new TextModel(new SimpleLineBuffer());
             EditorEngine engine = new EditorEngine(model, new EditorState(), new LogicalEditorTextLayout(model));
-            engine.open(target);
+            engine.open(JvmDocumentStorage.resource(target));
             engine.insertInput("draft ");
-            FileBaseline baseline = model.fileBaseline();
+            FileBaseline baseline = JvmDocumentStorage.baselineOf(model.fileBaseline());
             Files.delete(target);
             if (symlink) {
                 Path fifo = createFifo(scenario.resolve("pipe"));
@@ -94,7 +98,7 @@ class TextModelSpecialTargetTest {
                 assertEquals("original", Files.readString(original));
             }
             assertEquals("draft original", model.getLine(0));
-            assertEquals(baseline, model.fileBaseline());
+            assertEquals(baseline, JvmDocumentStorage.baselineOf(model.fileBaseline()));
             assertTrue(engine.state().isDirty());
             engine.undo();
             assertFalse(engine.state().isDirty());

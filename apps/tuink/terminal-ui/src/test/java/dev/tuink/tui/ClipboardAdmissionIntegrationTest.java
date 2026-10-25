@@ -22,7 +22,7 @@ class ClipboardAdmissionIntegrationTest {
         var locations = new LinkedHashSet<String>();
         for (Class<?> type : List.of(getClass(), EditorWindowFixture.class)) locations.add(location(type));
         for (String name : List.of(
-            "dev.tuink.tui.TerminalEditorApp", "dev.tuink.core.EditorEngine",
+            "dev.tuink.tui.TerminalEditorApp", "dev.tuink.storage.jvm.JvmDocumentStorage", "dev.tuink.core.EditorEngine",
             "dev.tuink.editor.language.LanguageRegistry", "dev.tuink.unicode.GraphemeText",
             "dev.tuink.editor.session.document.EditorDocumentSession", "dev.tuink.render.RenderPlanBuilder",
             "dev.tuink.highlight.regex.RegexHighlighter", "dev.tuiframe.cell.CellBuffer",

@@ -1,5 +1,7 @@
 package dev.tuink.tui.flow;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -259,7 +261,7 @@ class AppSettingsSaveIsolationTest {
     private static Process settingsProcess(String mode, Path target) throws Exception {
         String classpath = String.join(File.pathSeparator, location(AppSettingsSaveIsolationTest.class),
             location(AppSettingsStore.class), location(AppSettings.class), location(GutterDiffMode.class),
-            location(Class.forName("dev.tuink.unicode.GraphemeText")), location(dev.tuink.editor.document.DocumentId.class));
+            location(Class.forName("dev.tuink.unicode.GraphemeText")), location(dev.tuink.editor.document.DocumentId.class), location(dev.tuink.storage.jvm.JvmDocumentStorage.class));
         ProcessBuilder process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx96m", "-Duser.home=" + System.getProperty("user.home"),
             "-cp", classpath, SettingsWriter.class.getName(), mode, target.toString());
@@ -290,7 +292,7 @@ class AppSettingsSaveIsolationTest {
                 TextModel model = new TextModel(new SimpleLineBuffer());
                 editor = new EditorEngine(model, new EditorState(), new LogicalEditorTextLayout(model));
                 editor.setGutterDiffMode(GutterDiffMode.DISABLED);
-                editor.openExisting(fileSystem.wrap(target));
+                editor.openExisting(JvmDocumentStorage.resource(fileSystem.wrap(target)));
                 editor.pasteText("# document edits\n");
             } else { editor = null; }
             try (var executor = Executors.newSingleThreadExecutor()) {
@@ -561,7 +563,7 @@ class AppSettingsSaveIsolationTest {
         TextModel model = new TextModel(new SimpleLineBuffer());
         EditorEngine editor = new EditorEngine(model, new EditorState(), new LogicalEditorTextLayout(model));
         editor.setGutterDiffMode(GutterDiffMode.DISABLED);
-        editor.openExisting(fileSystem.wrap(target));
+        editor.openExisting(JvmDocumentStorage.resource(fileSystem.wrap(target)));
         editor.pasteText("draft ");
         fileSystem.provider.beforeAtomicFailure = () -> Files.writeString(target, "external writer\n");
 

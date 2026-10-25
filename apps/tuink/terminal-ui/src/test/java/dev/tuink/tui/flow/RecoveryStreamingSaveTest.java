@@ -6,10 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.tuink.core.DocumentFileMetadata;
+import dev.tuink.editor.storage.DocumentFileMetadata;
 import dev.tuink.core.Position;
 import dev.tuink.core.RecoverySnapshot;
-import dev.tuink.core.SaveDisposition;
+import dev.tuink.editor.storage.SaveDisposition;
 import dev.tuink.core.ViewportState;
 import java.io.File;
 import java.io.IOException;
@@ -30,7 +30,7 @@ class RecoveryStreamingSaveTest {
     @Test
     void updatingALargeSnapshotDoesNotMaterializeThePreviousDocumentInASmallHeap() throws Exception {
         String classpath = String.join(File.pathSeparator, location(getClass()), location(RecoveryStore.class),
-            location(RecoverySnapshot.class));
+            location(RecoverySnapshot.class), location(dev.tuink.storage.jvm.JvmDocumentStorage.class), location(dev.tuink.editor.document.DocumentId.class));
         Process child = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx64m", "-cp", classpath, UpdateProbe.class.getName(), directory.toString())
             .redirectErrorStream(true).start();

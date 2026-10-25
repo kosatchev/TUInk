@@ -1,5 +1,9 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
+import dev.tuink.editor.storage.DocumentLoad;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -9,10 +13,10 @@ import static org.junit.jupiter.api.Assertions.fail;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import dev.tuink.core.AmbiguousDocumentEncodingException;
-import dev.tuink.core.DocumentOpenMode;
+import dev.tuink.editor.storage.DocumentOpenMode;
 import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.Position;
-import dev.tuink.core.SaveDisposition;
+import dev.tuink.editor.storage.SaveDisposition;
 import dev.tuink.core.TabSession;
 import dev.tuink.core.TextModel;
 import java.io.IOException;
@@ -92,7 +96,7 @@ class FilePickerOpenWorkflowTest {
             assertEquals(List.of("selected", "contents"), tab.model().snapshotLines());
             assertEquals(SaveDisposition.REPLACE_EXISTING, tab.state().getSaveDisposition());
             assertFalse(tab.state().isDirty());
-            assertEquals(file, tab.state().getCurrentFile());
+            assertEquals(file, JvmDocumentStorage.pathOf(tab.state().getCurrentResource()));
             tab.engine().pasteClipboard();
             assertEquals("clipboardselected", tab.model().getLine(0));
         }
@@ -102,7 +106,7 @@ class FilePickerOpenWorkflowTest {
     void openingAnExistingDirtyDocumentReturnsItsIndexWithoutReloadingOrAllocating() throws Exception {
         Path file = Files.writeString(directory.resolve("selected.txt"), "saved");
         var existing = TuiDocumentSession.create(new EditorClipboard()).view();
-        existing.engine().open(file);
+        existing.engine().open(JvmDocumentStorage.resource(file));
         existing.engine().insertInput("draft ");
         existing.engine().moveCursorTo(new Position(0, 2));
         long revision = existing.model().revision();
@@ -128,7 +132,7 @@ class FilePickerOpenWorkflowTest {
     void preparedReadIsPublishedWithoutReopeningTheFile() throws Exception {
         Path file = Files.writeString(directory.resolve("read-once.txt"), "decoded contents");
         var request = new FilePickerOpenWorkflow.OpenRequest(file, DocumentOpenMode.DETECT);
-        TextModel.PreparedLoad loaded = request.read();
+        DocumentLoad loaded = request.read();
         Files.delete(file);
 
         var result = FilePickerOpenWorkflow.complete(request, loaded, null, List.of(), -1,
@@ -136,7 +140,7 @@ class FilePickerOpenWorkflowTest {
 
         assertNotNull(result.openedDocument());
         assertEquals(List.of("decoded contents"), result.openedDocument().view().model().snapshotLines());
-        assertEquals(file, result.openedDocument().view().state().getCurrentFile());
+        assertEquals(file, JvmDocumentStorage.pathOf(result.openedDocument().view().state().getCurrentResource()));
         assertFalse(Files.exists(file));
     }
 
@@ -147,10 +151,10 @@ class FilePickerOpenWorkflowTest {
         Path symlink = Files.createSymbolicLink(directory.resolve("symbolic.txt"), file.getFileName());
         Path hardlink = Files.createLink(directory.resolve("hard.txt"), file);
         var request = new FilePickerOpenWorkflow.OpenRequest(file, DocumentOpenMode.DETECT);
-        TextModel.PreparedLoad loaded = request.read();
+        DocumentLoad loaded = request.read();
         for (Path alias : List.of(file, symlink, hardlink)) {
             var existing = TuiDocumentSession.create(new EditorClipboard()).view();
-            existing.engine().open(alias);
+            existing.engine().open(JvmDocumentStorage.resource(alias));
             existing.engine().insertInput("draft ");
             existing.engine().moveCursorTo(new Position(0, 2));
             long revision = existing.model().revision();
@@ -174,11 +178,11 @@ class FilePickerOpenWorkflowTest {
         Path second = Files.writeString(directory.resolve("second.txt"), "second");
         Path selected = Files.createSymbolicLink(directory.resolve("selected.txt"), first.getFileName());
         var request = new FilePickerOpenWorkflow.OpenRequest(selected, DocumentOpenMode.DETECT);
-        TextModel.PreparedLoad loaded = request.read();
+        DocumentLoad loaded = request.read();
         Files.delete(selected);
         Files.createSymbolicLink(selected, second.getFileName());
         var other = TuiDocumentSession.create(new EditorClipboard()).view();
-        other.engine().open(second);
+        other.engine().open(JvmDocumentStorage.resource(second));
 
         var result = FilePickerOpenWorkflow.complete(request, loaded, null, List.of(other), 0,
             () -> TuiDocumentSession.create(new EditorClipboard()));
@@ -186,7 +190,7 @@ class FilePickerOpenWorkflowTest {
         assertEquals(-1, result.activateTabIndex());
         assertNotNull(result.openedDocument());
         assertEquals(List.of("first"), result.openedDocument().view().model().snapshotLines());
-        assertEquals(first, result.openedDocument().view().model().fileBaseline().target());
+        assertEquals(first, JvmDocumentStorage.baselineOf(result.openedDocument().view().model().fileBaseline()).target());
         assertEquals(List.of("second"), other.model().snapshotLines());
     }
 
@@ -247,7 +251,7 @@ class FilePickerOpenWorkflowTest {
                                                           List<TabSession> tabs, int active,
                                                           Supplier<TuiDocumentSession> newDocument) {
         var request = requested.pendingOpen();
-        TextModel.PreparedLoad loaded;
+        DocumentLoad loaded;
         try {
             loaded = request.read();
         } catch (IOException failure) {

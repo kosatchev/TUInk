@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -8,7 +10,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import dev.tuiframe.input.KeyStroke;
 import dev.tuiframe.input.TextInput;
-import dev.tuink.core.SaveDisposition;
+import dev.tuink.editor.storage.SaveDisposition;
 import dev.tuink.tui.command.TuinkCommand;
 import java.io.RandomAccessFile;
 import java.nio.file.Files;
@@ -69,7 +71,7 @@ class FilePickerOpenIntegrationTest {
             assertEquals(1, window.tabs.size());
             assertSame(original, window.active());
             assertEquals(List.of("draft original"), original.tabSession().model().snapshotLines());
-            assertEquals(window.document, original.state().getCurrentFile());
+            assertEquals(window.document, JvmDocumentStorage.pathOf(original.state().getCurrentResource()));
             assertEquals(SaveDisposition.REPLACE_EXISTING, original.state().getSaveDisposition());
             assertTrue(original.state().isDirty());
             assertEquals(revision, original.tabSession().model().revision());
@@ -104,7 +106,7 @@ class FilePickerOpenIntegrationTest {
             assertSame(original, window.tabs.getFirst());
             assertEquals(List.of("draft original"), original.tabSession().model().snapshotLines());
             assertTrue(original.state().isDirty());
-            assertEquals(target, window.active().state().getCurrentFile());
+            assertEquals(target, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
             assertEquals(SaveDisposition.REPLACE_EXISTING, window.active().state().getSaveDisposition());
             assertEquals(List.of("selected", "contents"), window.active().tabSession().model().snapshotLines());
             assertFalse(window.active().state().isDirty());
@@ -125,7 +127,7 @@ class FilePickerOpenIntegrationTest {
             window.host.clipboard.setText("shared clipboard");
             Path other = Files.writeString(directory.resolve("a-other.txt"), "other");
             window.command(TuinkCommand.TAB_NEW);
-            window.active().tabSession().engine().open(other);
+            window.active().tabSession().engine().open(JvmDocumentStorage.resource(other));
             window.frame();
             selectLastFile(window, window.document);
 
@@ -159,7 +161,7 @@ class FilePickerOpenIntegrationTest {
 
             assertEquals(1, window.tabs.size());
             assertSame(original, window.active());
-            assertEquals(window.document, original.state().getCurrentFile());
+            assertEquals(window.document, JvmDocumentStorage.pathOf(original.state().getCurrentResource()));
             assertEquals("draft original", Files.readString(window.document));
             assertFalse(original.state().isDirty());
             assertTrue(Files.isSymbolicLink(alias));

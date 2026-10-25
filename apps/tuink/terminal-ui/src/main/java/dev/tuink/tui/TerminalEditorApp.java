@@ -1,5 +1,6 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
@@ -246,7 +247,7 @@ public class TerminalEditorApp {
         TextField searchReplaceInput = new TextField(TextField.PastePolicy.PRESERVE_TABS);
         SearchController.SearchUiOptions searchUi = SearchController.SearchUiOptions.DEFAULT;
         TopMenuController topMenu = new TopMenuController();
-        Path initialOpenFileRoot = FilePickerOpenWorkflow.initialRoot(state.getCurrentFile());
+        Path initialOpenFileRoot = FilePickerOpenWorkflow.initialRoot(JvmDocumentStorage.pathOf(state.getCurrentResource()));
         try {
             RecoveryStore.DiscoveryResult recoveryLoad = recoveryStore.discover();
             startupRecoveryEntries.addAll(recoveryLoad.entries());
@@ -276,9 +277,9 @@ public class TerminalEditorApp {
             Path file = cli.file();
             try {
                 if (cli.openAsUtf16Le()) {
-                    engine.openExisting(file, dev.tuink.core.DocumentOpenMode.UTF_16LE);
+                    engine.openExisting(JvmDocumentStorage.resource(file), dev.tuink.editor.storage.DocumentOpenMode.UTF_16LE);
                 } else {
-                    engine.open(file);
+                    engine.open(JvmDocumentStorage.resource(file));
                 }
                 renderPlanBuilder = tabs.get(activeTabIndex).documentSession()
                     .newRenderPlanBuilder(resolveHighlighter(file));
@@ -1152,7 +1153,7 @@ public class TerminalEditorApp {
     }
 
     private String buildStateIndicators(EditorState state, boolean readingMode) {
-        String ro = SaveTargetPolicy.isReadOnlyFile(state.getCurrentFile()) ? "RO" : "RW";
+        String ro = SaveTargetPolicy.isReadOnlyFile(JvmDocumentStorage.pathOf(state.getCurrentResource())) ? "RO" : "RW";
         String enc = state.getFileEncoding() == null ? "UTF-8" : state.getFileEncoding().name();
         String eol = switch (state.getLineSeparator()) {
             case EditorState.LINE_SEPARATOR_CRLF -> "CRLF";
@@ -1460,14 +1461,14 @@ public class TerminalEditorApp {
         for (EditorTab tab : tabs) {
             if (tab.state().isDirty()) {
                 dirtyTabs.add(tab);
-                dirtyPaths.add(tab.state().getCurrentFile());
+                dirtyPaths.add(JvmDocumentStorage.pathOf(tab.state().getCurrentResource()));
             }
         }
         boolean multiple = dirtyTabs.size() > 1;
         String primaryLabel;
         if (multiple) {
             primaryLabel = "Save All";
-        } else if (dirtyTabs.size() == 1 && SaveTargetPolicy.requiresSaveAs(dirtyTabs.get(0).state().getCurrentFile())) {
+        } else if (dirtyTabs.size() == 1 && SaveTargetPolicy.requiresSaveAs(JvmDocumentStorage.pathOf(dirtyTabs.get(0).state().getCurrentResource()))) {
             primaryLabel = "Save As";
         } else {
             primaryLabel = "Save";
@@ -1498,7 +1499,7 @@ public class TerminalEditorApp {
         EditorTab pendingTab = closeTabIndex >= 0 && closeTabIndex < tabs.size()
             ? tabs.get(closeTabIndex)
             : null;
-        String primaryLabel = pendingTab != null && SaveTargetPolicy.requiresSaveAs(pendingTab.state().getCurrentFile()) ? "Save As" : "Save";
+        String primaryLabel = pendingTab != null && SaveTargetPolicy.requiresSaveAs(JvmDocumentStorage.pathOf(pendingTab.state().getCurrentResource())) ? "Save As" : "Save";
         return ConfirmBarView.build(
             buildCloseTabPrompt(tabs, closeTabIndex),
             cols,
@@ -1517,7 +1518,7 @@ public class TerminalEditorApp {
         if (closeTabIndex < 0 || closeTabIndex >= tabs.size()) {
             return "Close modified tab? (y/N)";
         }
-        Path path = tabs.get(closeTabIndex).state().getCurrentFile();
+        Path path = JvmDocumentStorage.pathOf(tabs.get(closeTabIndex).state().getCurrentResource());
         String name = path == null ? "--no name--" : dev.tuink.tui.ui.PathPresentation.name(path);
         return "Close modified tab: " + name + " ? (y/N)";
     }
@@ -1553,7 +1554,7 @@ public class TerminalEditorApp {
                 TabSession tabSession = documentSession.view();
                 tabSession.engine().restoreRecoverySnapshot(snapshot);
                 RenderPlanBuilder builder = documentSession.newRenderPlanBuilder(
-                    resolveHighlighter(tabSession.state().getCurrentFile()));
+                    resolveHighlighter(JvmDocumentStorage.pathOf(tabSession.state().getCurrentResource())));
                 EditorTab tab = new EditorTab(documentSession, builder);
                 tab.viewportController().onRecoveredViewport();
                 prepared.add(new PreparedRecoveredTab(tab,
@@ -1676,7 +1677,7 @@ public class TerminalEditorApp {
             EditorTab tab = tabs.get(i);
             boolean hasMatch = matchFlags != null && i < matchFlags.length && matchFlags[i];
             out.add(new TabBarView.TabItem(
-                tab.state().getCurrentFile(),
+                JvmDocumentStorage.pathOf(tab.state().getCurrentResource()),
                 tab.state().isDirty(),
                 hasMatch
             ));
@@ -1690,7 +1691,7 @@ public class TerminalEditorApp {
             EditorTab tab = tabs.get(i);
             boolean hasMatch = matchFlags != null && i < matchFlags.length && matchFlags[i];
             out.add(new TopMenuView.TabItem(
-                tab.state().getCurrentFile(),
+                JvmDocumentStorage.pathOf(tab.state().getCurrentResource()),
                 tab.state().isDirty(),
                 hasMatch
             ));

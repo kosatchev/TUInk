@@ -7,6 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import dev.tuink.editor.storage.SaveDisposition;
+import dev.tuink.editor.storage.SavedDocument;
+import dev.tuink.storage.jvm.FileBaseline;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,12 +28,12 @@ class PreparedSaveTargetApprovalTest {
     void ownerCaptureDoesNotResolveTheFilesystemAndInspectionNeverReadsTheLiveModel() throws Exception {
         EditorEngine engine = engine();
         engine.insertInput("captured");
-        var unavailable = engine.prepareSaveAsInput(directory.resolve("absent-parent/file.txt"),
+        var unavailable = engine.prepareSaveAsInput(JvmDocumentStorage.resource(directory.resolve("absent-parent/file.txt")),
             SaveDisposition.CREATE_NEW, false);
         assertThrows(IOException.class, unavailable::inspectTarget);
 
         Path target = Files.writeString(directory.resolve("target.txt"), "before");
-        var preparation = engine.prepareSaveAsInput(target, SaveDisposition.REPLACE_EXISTING, false);
+        var preparation = engine.prepareSaveAsInput(JvmDocumentStorage.resource(target), SaveDisposition.REPLACE_EXISTING, false);
         EditorEngine.SaveTargetInspection inspection;
         try (var worker = Executors.newSingleThreadExecutor()) {
             inspection = worker.submit(preparation::inspectTarget).get();
@@ -37,7 +41,7 @@ class PreparedSaveTargetApprovalTest {
         assertEquals("before", Files.readString(target));
         assertTrue(engine.state().isDirty());
         var approved = engine.approveSaveAs(inspection);
-        TextModel.SavedFile saved;
+        SavedDocument saved;
         try (var worker = Executors.newSingleThreadExecutor()) {
             saved = worker.submit(approved::write).get();
         }
@@ -54,7 +58,7 @@ class PreparedSaveTargetApprovalTest {
         Path first = Files.writeString(directory.resolve("first.txt"), "first");
         Path second = Files.writeString(directory.resolve("second.txt"), "second");
         Path alias = Files.createSymbolicLink(directory.resolve("alias.txt"), first);
-        var inspection = engine.prepareSaveAsInput(alias, SaveDisposition.REPLACE_EXISTING, false).inspectTarget();
+        var inspection = engine.prepareSaveAsInput(JvmDocumentStorage.resource(alias), SaveDisposition.REPLACE_EXISTING, false).inspectTarget();
         Files.delete(alias);
         Files.createSymbolicLink(alias, second);
 
@@ -65,7 +69,7 @@ class PreparedSaveTargetApprovalTest {
         assertEquals("second", Files.readString(second));
         assertEquals(second, alias.toRealPath());
         assertTrue(engine.state().isDirty());
-        assertEquals(null, engine.state().getCurrentFile());
+        assertEquals(null, JvmDocumentStorage.pathOf(engine.state().getCurrentResource()));
         assertTrue(engine.undo());
         assertEquals(List.of(""), engine.model().snapshotLines());
     }
@@ -79,7 +83,7 @@ class PreparedSaveTargetApprovalTest {
         Files.writeString(first.resolve("file.txt"), "first");
         Files.writeString(second.resolve("file.txt"), "second");
         Path parent = Files.createSymbolicLink(directory.resolve("parent"), first);
-        var approved = engine.prepareSaveAs(parent.resolve("file.txt"), SaveDisposition.REPLACE_EXISTING, false);
+        var approved = engine.prepareSaveAs(JvmDocumentStorage.resource(parent.resolve("file.txt")), SaveDisposition.REPLACE_EXISTING, false);
         Files.delete(parent);
         Files.createSymbolicLink(parent, second);
 
@@ -96,7 +100,7 @@ class PreparedSaveTargetApprovalTest {
         engine.insertInput("draft");
         Path target = Files.writeString(directory.resolve("target.txt"), "before");
         var modified = Files.getLastModifiedTime(target);
-        var approved = engine.prepareSaveAs(target, SaveDisposition.REPLACE_EXISTING, false);
+        var approved = engine.prepareSaveAs(JvmDocumentStorage.resource(target), SaveDisposition.REPLACE_EXISTING, false);
         Files.writeString(target, "remote");
         Files.setLastModifiedTime(target, modified);
 
@@ -115,7 +119,7 @@ class PreparedSaveTargetApprovalTest {
         var attributes = Files.readAttributes(parent, BasicFileAttributes.class);
         assumeTrue(attributes.fileKey() != null, "provider does not expose physical directory identity");
         Path target = parent.resolve("new.txt");
-        var approved = engine.prepareSaveAs(target, SaveDisposition.CREATE_NEW, false);
+        var approved = engine.prepareSaveAs(JvmDocumentStorage.resource(target), SaveDisposition.CREATE_NEW, false);
         Files.move(parent, directory.resolve("old-destination"));
         Files.createDirectory(parent);
 
@@ -132,7 +136,7 @@ class PreparedSaveTargetApprovalTest {
         Path target = Files.writeString(directory.resolve("target.txt"), "before");
         var attributes = Files.readAttributes(target, BasicFileAttributes.class);
         assumeTrue(attributes.fileKey() != null, "provider does not expose physical file identity");
-        var approved = engine.prepareSaveAs(target, SaveDisposition.REPLACE_EXISTING, false);
+        var approved = engine.prepareSaveAs(JvmDocumentStorage.resource(target), SaveDisposition.REPLACE_EXISTING, false);
         Path replacement = Files.writeString(directory.resolve("replacement.txt"), "before");
         Files.setLastModifiedTime(replacement, attributes.lastModifiedTime());
         Files.move(replacement, target, StandardCopyOption.REPLACE_EXISTING);
@@ -149,7 +153,7 @@ class PreparedSaveTargetApprovalTest {
         EditorEngine engine = engine();
         engine.insertInput("draft");
         Path target = Files.writeString(directory.resolve("target.txt"), "before");
-        var inspection = engine.prepareSaveAsInput(target, SaveDisposition.REPLACE_EXISTING, true).inspectTarget();
+        var inspection = engine.prepareSaveAsInput(JvmDocumentStorage.resource(target), SaveDisposition.REPLACE_EXISTING, true).inspectTarget();
         engine.insertNewline();
         assertTrue(engine.undo());
 
@@ -168,7 +172,7 @@ class PreparedSaveTargetApprovalTest {
                 if (Thread.currentThread() != owner) throw new AssertionError("worker read the live document");
             }
             @Override public LineText lineText(int index) { checkOwner(); return super.lineText(index); }
-            @Override public FileBaseline fileBaseline() { checkOwner(); return super.fileBaseline(); }
+            @Override public FileBaseline fileBaseline() { checkOwner(); return JvmDocumentStorage.baselineOf(super.fileBaseline()); }
         }
         TextModel model = new OwnerModel();
         EditorEngine engine = new EditorEngine(model, new EditorState(), new LogicalEditorTextLayout(model));

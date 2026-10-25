@@ -2,7 +2,7 @@ package dev.tuink.tui;
 
 import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.TabSession;
-import dev.tuink.core.TextModel;
+import dev.tuink.editor.storage.DocumentLoad;
 import dev.tuink.diff.jgit.JgitLineDiff;
 import dev.tuink.editor.document.DocumentId;
 import dev.tuink.editor.session.document.CoreSessionBridge;
@@ -32,8 +32,8 @@ final class TuiDocumentSession {
     }
 
     /** Publish an already decoded document without accessing its file again. */
-    TuiDocumentSession openPrepared(TextModel.PreparedLoad prepared) {
-        view.engine().openPrepared(prepared);
+    TuiDocumentSession openPrepared(DocumentLoad prepared) {
+        document.openPrepared(prepared);
         return this;
     }
 

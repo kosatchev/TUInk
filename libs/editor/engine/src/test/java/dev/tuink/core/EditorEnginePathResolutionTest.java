@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import dev.tuink.editor.storage.SaveDisposition;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -31,9 +33,9 @@ class EditorEnginePathResolutionTest {
         Files.writeString(unrelated, "unrelated");
         EditorEngine engine = emptyEngine();
 
-        engine.open(requested);
+        engine.open(JvmDocumentStorage.resource(requested));
         assertEquals("expected", engine.model().getLine(0));
-        assertEquals(actual, engine.state().getCurrentFile());
+        assertEquals(actual, JvmDocumentStorage.pathOf(engine.state().getCurrentResource()));
         engine.insertInput("edited ");
         engine.save();
 
@@ -56,11 +58,11 @@ class EditorEnginePathResolutionTest {
             EditorEngine engine = emptyEngine();
             engine.insertInput("draft");
 
-            engine.saveAs(requested, overwrite ? SaveDisposition.REPLACE_EXISTING : SaveDisposition.CREATE_NEW);
+            engine.saveAs(JvmDocumentStorage.resource(requested), overwrite ? SaveDisposition.REPLACE_EXISTING : SaveDisposition.CREATE_NEW);
 
             assertEquals("draft", Files.readString(actual));
             assertEquals("unrelated", Files.readString(unrelated));
-            assertEquals(actual, engine.state().getCurrentFile());
+            assertEquals(actual, JvmDocumentStorage.pathOf(engine.state().getCurrentResource()));
             assertFalse(engine.state().isDirty());
         }
     }
@@ -71,7 +73,7 @@ class EditorEnginePathResolutionTest {
         TextModel model = new TextModel(new SimpleLineBuffer());
         model.insertText(new Position(0, 0), "draft");
 
-        model.save(requested, model.fileMetadata(), SaveDisposition.CREATE_NEW);
+        model.save(JvmDocumentStorage.resource(requested), model.fileMetadata(), SaveDisposition.CREATE_NEW);
 
         assertEquals("draft", Files.readString(directory.resolve("real/new.txt")));
         assertFalse(Files.exists(directory.resolve("new.txt")));
@@ -85,7 +87,7 @@ class EditorEnginePathResolutionTest {
         EditorEngine engine = emptyEngine();
         engine.insertInput("draft");
 
-        assertThrows(java.nio.file.FileAlreadyExistsException.class, () -> engine.saveAs(requested));
+        assertThrows(java.nio.file.FileAlreadyExistsException.class, () -> engine.saveAs(JvmDocumentStorage.resource(requested)));
 
         assertEquals("requested original", Files.readString(actual));
         assertEquals("unrelated original", Files.readString(unrelated));
@@ -97,11 +99,11 @@ class EditorEnginePathResolutionTest {
         Path requested = pathThroughParentLink("existing.txt");
         Path actual = Files.writeString(directory.resolve("real/existing.txt"), "before");
         EditorEngine engine = emptyEngine();
-        engine.open(actual);
+        engine.open(JvmDocumentStorage.resource(actual));
         engine.insertInput("mine ");
         Files.writeString(actual, "external");
 
-        assertThrows(IOException.class, () -> engine.saveAs(requested, SaveDisposition.REPLACE_EXISTING));
+        assertThrows(IOException.class, () -> engine.saveAs(JvmDocumentStorage.resource(requested), SaveDisposition.REPLACE_EXISTING));
 
         assertEquals("external", Files.readString(actual));
         assertTrue(engine.state().isDirty());
@@ -114,9 +116,9 @@ class EditorEnginePathResolutionTest {
         Path other = Files.writeString(directory.resolve("real/second.txt"), "before");
         Path alias = Files.createSymbolicLink(directory.resolve("real/alias.txt"), actual.getFileName());
         EditorEngine engine = emptyEngine();
-        engine.open(requested);
-        assertEquals(alias, engine.state().getCurrentFile());
-        assertEquals(actual, engine.model().fileBaseline().target());
+        engine.open(JvmDocumentStorage.resource(requested));
+        assertEquals(alias, JvmDocumentStorage.pathOf(engine.state().getCurrentResource()));
+        assertEquals(actual, JvmDocumentStorage.baselineOf(engine.model().fileBaseline()).target());
         engine.insertInput("mine ");
         Files.delete(alias);
         Files.createSymbolicLink(alias, other.getFileName());
@@ -134,8 +136,8 @@ class EditorEnginePathResolutionTest {
         EditorEngine engine = emptyEngine();
         engine.insertInput("keep");
         for (Path invalid : List.of(link.resolve("../new.txt"), directory.resolve("."), directory.resolve(".."))) {
-            assertThrows(IOException.class, () -> engine.open(invalid), invalid.toString());
-            assertThrows(IOException.class, () -> engine.saveAs(invalid), invalid.toString());
+            assertThrows(IOException.class, () -> engine.open(JvmDocumentStorage.resource(invalid)), invalid.toString());
+            assertThrows(IOException.class, () -> engine.saveAs(JvmDocumentStorage.resource(invalid)), invalid.toString());
             assertEquals(List.of("keep"), engine.model().snapshotLines());
             assertTrue(engine.state().isDirty());
         }
@@ -149,9 +151,9 @@ class EditorEnginePathResolutionTest {
         EditorEngine engine = emptyEngine();
         engine.insertInput("keep");
 
-        assertThrows(java.nio.file.NoSuchFileException.class, () -> engine.open(requested));
+        assertThrows(java.nio.file.NoSuchFileException.class, () -> engine.open(JvmDocumentStorage.resource(requested)));
         assertThrows(java.nio.file.NoSuchFileException.class,
-            () -> engine.saveAs(requested, SaveDisposition.REPLACE_EXISTING));
+            () -> engine.saveAs(JvmDocumentStorage.resource(requested), SaveDisposition.REPLACE_EXISTING));
 
         assertTrue(Files.isSymbolicLink(alias));
         assertFalse(Files.exists(directory.resolve("real/missing.txt")));

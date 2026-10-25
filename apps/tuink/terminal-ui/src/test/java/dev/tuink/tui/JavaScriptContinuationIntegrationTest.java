@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -99,7 +101,7 @@ class JavaScriptContinuationIntegrationTest {
             for (int attempt = 0; attempt < 10; attempt++) {
                 if (window.tree.state().selectedId() != null && window.tree.state().selectedId().path().equals(file)) {
                     window.event(KeyStroke.of(KeyStroke.Key.ENTER));
-                    assertEquals(file, window.active().state().getCurrentFile());
+                    assertEquals(file, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
                     assertTrue(window.host.effectiveSyntaxHighlighting(window.ui.syntaxHighlightingSetting));
                     return window;
                 }

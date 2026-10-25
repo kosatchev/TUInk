@@ -1,6 +1,6 @@
 package dev.tuink.storage.jvm;
 
-import dev.tuink.core.storage.spi.LinuxXattrAccess;
+import dev.tuink.storage.jvm.spi.LinuxXattrAccess;
 import java.io.IOException;
 
 /** JVM platform adapter. Constructing the service does not initialize its FFM bindings. */

@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+import dev.tuink.verification.MemoryDocumentStorage;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -249,7 +251,7 @@ class EditorEngineYamlListTest {
         TextModel model = new TextModel(new SimpleLineBuffer());
         model.replaceLines(lines);
         EditorState state = new EditorState();
-        state.setCurrentFile(Path.of("config." + extension));
+        state.setCurrentResource(new MemoryDocumentStorage().resource(Path.of("config." + extension).toString()));
         EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model));
         engine.moveCursorTo(new Position(lines.size() - 1, lines.getLast().length()));
         return new Fixture(model, state, engine);

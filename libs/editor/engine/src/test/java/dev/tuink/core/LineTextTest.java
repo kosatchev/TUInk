@@ -6,9 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.editor.storage.DocumentSave;
+import dev.tuink.editor.storage.SaveDisposition;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+import dev.tuink.verification.MemoryDocumentStorage;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Random;
-import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 
 class LineTextTest {
@@ -120,11 +124,11 @@ class LineTextTest {
         model.insertChar(new Position(0, 500_000), 'b');
         LineText.Work before = LineText.work();
 
-        TextModel.SaveRequest prepared = model.prepareSave(Path.of("detached.txt"), model.fileMetadata(),
-            SaveDisposition.CREATE_NEW, false);
+        DocumentSave prepared = model.prepareSave(new MemoryDocumentStorage().resource("detached.txt"), model.fileMetadata(),
+            SaveDisposition.CREATE_NEW);
 
         assertEquals(before.materializedCodeUnits(), LineText.work().materializedCodeUnits());
-        assertSame(model.lineText(0), prepared.lines().getFirst());
+        assertSame(model.lineText(0).immutableText(), prepared.lines().getFirst());
         assertThrows(UnsupportedOperationException.class, prepared.lines()::clear);
         model.insertChar(new Position(0, 0), 'c');
         assertEquals(1_000_001, prepared.lines().getFirst().length());

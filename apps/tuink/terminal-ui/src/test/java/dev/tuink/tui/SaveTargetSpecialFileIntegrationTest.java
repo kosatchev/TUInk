@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -65,7 +67,7 @@ class SaveTargetSpecialFileIntegrationTest {
                 assertTrue(window.notification.message.contains("not a regular file"), window.notification.message);
                 assertFalse(window.screenRow(window.height - 2).contains("Overwrite"));
                 assertEquals(target.toString(), window.filename.text());
-                assertEquals(window.document, window.active().state().getCurrentFile());
+                assertEquals(window.document, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
                 assertTrue(Files.readAttributes(special, BasicFileAttributes.class).isOther());
                 assertTrue(Files.isSymbolicLink(alias));
             }

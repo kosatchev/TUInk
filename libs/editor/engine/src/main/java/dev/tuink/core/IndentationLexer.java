@@ -1,7 +1,6 @@
 package dev.tuink.core;
 
 import dev.tuink.editor.language.LanguageId;
-import java.nio.file.Path;
 import java.util.Arrays;
 
 /** Small lexical guard for editing decisions, independent of presentation syntax rules. */
@@ -42,7 +41,7 @@ final class IndentationLexer {
     }
 
     /** The caller charges the bounded prefix length before requesting a code array. */
-    static Result scan(CharSequence text, int end, Path file, State before, boolean produceCode) {
+    static Result scan(CharSequence text, int end, String file, State before, boolean produceCode) {
         if (end < 0 || end > text.length() || end > IndentationContext.MAX_SCAN_CODE_UNITS) {
             return null;
         }

@@ -9,6 +9,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import dev.tuink.editor.storage.BomKind;
+import dev.tuink.editor.storage.DocumentFileMetadata;
+import dev.tuink.editor.storage.SaveDisposition;
+import dev.tuink.editor.storage.StorageWriteException;
+import dev.tuink.storage.jvm.FileBaseline;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.ByteBuffer;
@@ -33,8 +39,8 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileAttribute;
 import java.nio.file.attribute.FileAttributeView;
 import java.nio.file.attribute.PosixFilePermission;
-import java.nio.file.attribute.UserPrincipalLookupService;
 import java.nio.file.attribute.UserDefinedFileAttributeView;
+import java.nio.file.attribute.UserPrincipalLookupService;
 import java.nio.file.spi.FileSystemProvider;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -63,7 +69,7 @@ class TextModelNewFileCommitTest {
         assertTrue(fixture.provider().sharedInodeAtLink);
         assertEquals(0, fixture.provider().exclusiveOpenAttempts);
         assertSame(fixture.metadata(), fixture.model().fileMetadata());
-        assertEquals(fixture.target(), fixture.model().fileBaseline().target());
+        assertEquals(fixture.target(), JvmDocumentStorage.baselineOf(fixture.model().fileBaseline()).target());
         assertNoStagedFiles();
     }
 
@@ -72,13 +78,13 @@ class TextModelNewFileCommitTest {
         assumeHardLinks();
         Fixture fixture = fixture(CommitBehavior.LINK_RACE, false);
         DocumentFileMetadata beforeMetadata = fixture.model().fileMetadata();
-        FileBaseline beforeBaseline = fixture.model().fileBaseline();
+        FileBaseline beforeBaseline = JvmDocumentStorage.baselineOf(fixture.model().fileBaseline());
 
         assertThrows(FileAlreadyExistsException.class, fixture::save);
 
         assertEquals(EXTERNAL, Files.readString(fixture.target()));
         assertSame(beforeMetadata, fixture.model().fileMetadata());
-        assertSame(beforeBaseline, fixture.model().fileBaseline());
+        assertSame(beforeBaseline, JvmDocumentStorage.baselineOf(fixture.model().fileBaseline()));
         assertEquals(0, fixture.provider().exclusiveOpenAttempts);
         assertNoStagedFiles();
     }
@@ -95,7 +101,7 @@ class TextModelNewFileCommitTest {
         assertTrue(fixture.provider().requestedPermissions.contains(PosixFilePermission.OWNER_WRITE));
         assertFalse(fixture.provider().requestedPermissions.contains(PosixFilePermission.OWNER_EXECUTE));
         assertSame(fixture.metadata(), fixture.model().fileMetadata());
-        assertNotNull(fixture.model().fileBaseline());
+        assertNotNull(JvmDocumentStorage.baselineOf(fixture.model().fileBaseline()));
         assertNoStagedFiles();
     }
 
@@ -110,7 +116,7 @@ class TextModelNewFileCommitTest {
 
         byte[] expected = ("\uFEFF" + first + "\r\n" + second).getBytes(StandardCharsets.UTF_16LE);
         assertArrayEquals(expected, Files.readAllBytes(fixture.target()));
-        assertEquals(FileBaseline.fromBytes(fixture.target(), expected), fixture.model().fileBaseline());
+        assertEquals(FileBaseline.fromBytes(fixture.target(), expected), JvmDocumentStorage.baselineOf(fixture.model().fileBaseline()));
         assertEquals(1, fixture.provider().successfulExclusiveOpens);
         assertNoStagedFiles();
     }
@@ -142,14 +148,14 @@ class TextModelNewFileCommitTest {
     void rejectsAFileCreatedBeforeThePortableExclusiveOpen() throws IOException {
         Fixture fixture = fixture(CommitBehavior.OPEN_RACE, false);
         DocumentFileMetadata beforeMetadata = fixture.model().fileMetadata();
-        FileBaseline beforeBaseline = fixture.model().fileBaseline();
+        FileBaseline beforeBaseline = JvmDocumentStorage.baselineOf(fixture.model().fileBaseline());
 
         FileAlreadyExistsException failure = assertThrows(FileAlreadyExistsException.class, fixture::save);
 
         assertFalse(failure.getMessage().contains("incomplete"));
         assertEquals(EXTERNAL, Files.readString(fixture.target()));
         assertSame(beforeMetadata, fixture.model().fileMetadata());
-        assertSame(beforeBaseline, fixture.model().fileBaseline());
+        assertSame(beforeBaseline, JvmDocumentStorage.baselineOf(fixture.model().fileBaseline()));
         assertEquals(0, fixture.provider().successfulExclusiveOpens);
         assertNoStagedFiles();
     }
@@ -158,15 +164,17 @@ class TextModelNewFileCommitTest {
     void retainsPartialNewFileAndMetadataWhenPortableWritingFails() throws IOException {
         Fixture fixture = fixture(CommitBehavior.WRITE_FAILURE, false);
         DocumentFileMetadata beforeMetadata = fixture.model().fileMetadata();
-        FileBaseline beforeBaseline = fixture.model().fileBaseline();
+        FileBaseline beforeBaseline = JvmDocumentStorage.baselineOf(fixture.model().fileBaseline());
 
-        IOException failure = assertThrows(IOException.class, fixture::save);
+        StorageWriteException failure = assertThrows(StorageWriteException.class, fixture::save);
 
-        assertTrue(failure.getMessage().contains("may contain incomplete data"));
+        assertEquals(StorageWriteException.Outcome.UNKNOWN, failure.outcome());
+        assertEquals(fixture.target(), JvmDocumentStorage.pathOf(failure.resource()));
+        assertEquals("Injected write failure", failure.getCause().getMessage());
         assertArrayEquals(new byte[]{fixture.expectedBytes()[0], fixture.expectedBytes()[1]},
             Files.readAllBytes(fixture.target()));
         assertSame(beforeMetadata, fixture.model().fileMetadata());
-        assertSame(beforeBaseline, fixture.model().fileBaseline());
+        assertSame(beforeBaseline, JvmDocumentStorage.baselineOf(fixture.model().fileBaseline()));
         assertNoStagedFiles();
     }
 
@@ -174,13 +182,13 @@ class TextModelNewFileCommitTest {
     void neverDeletesAnExternalReplacementAfterPortableWritingFails() throws IOException {
         Fixture fixture = fixture(CommitBehavior.WRITE_FAILURE_REPLACED, false);
         DocumentFileMetadata beforeMetadata = fixture.model().fileMetadata();
-        FileBaseline beforeBaseline = fixture.model().fileBaseline();
+        FileBaseline beforeBaseline = JvmDocumentStorage.baselineOf(fixture.model().fileBaseline());
 
         assertThrows(IOException.class, fixture::save);
 
         assertEquals(EXTERNAL, Files.readString(fixture.target()));
         assertSame(beforeMetadata, fixture.model().fileMetadata());
-        assertSame(beforeBaseline, fixture.model().fileBaseline());
+        assertSame(beforeBaseline, JvmDocumentStorage.baselineOf(fixture.model().fileBaseline()));
         assertNoStagedFiles();
     }
 
@@ -189,18 +197,18 @@ class TextModelNewFileCommitTest {
         Path original = tempDir.resolve("existing.txt");
         Files.writeString(original, "original");
         TextModel model = new TextModel(new SimpleLineBuffer());
-        model.load(original);
+        model.load(JvmDocumentStorage.resource(original));
         model.insertText(new Position(0, 0), "edited ");
         DocumentFileMetadata metadata = model.fileMetadata();
-        FileBaseline baseline = model.fileBaseline();
+        FileBaseline baseline = JvmDocumentStorage.baselineOf(model.fileBaseline());
         CommitFileSystem fileSystem = new CommitFileSystem(original, CommitBehavior.ATTRIBUTE_FAILURE, false);
 
-        IOException failure = assertThrows(IOException.class, () -> model.save(fileSystem.wrap(original)));
+        IOException failure = assertThrows(IOException.class, () -> model.save(JvmDocumentStorage.resource(fileSystem.wrap(original))));
 
         assertTrue(failure.getMessage().contains("preserve file attributes"));
         assertEquals("original", Files.readString(original));
         assertSame(metadata, model.fileMetadata());
-        assertSame(baseline, model.fileBaseline());
+        assertSame(baseline, JvmDocumentStorage.baselineOf(model.fileBaseline()));
         assertNoStagedFiles();
     }
 
@@ -208,7 +216,7 @@ class TextModelNewFileCommitTest {
         Path original = tempDir.resolve("original.txt");
         Files.writeString(original, "original");
         TextModel model = new TextModel(new SimpleLineBuffer());
-        model.load(original);
+        model.load(JvmDocumentStorage.resource(original));
         model.replaceLines(List.of("edited", "content"));
         DocumentFileMetadata metadata = DocumentFileMetadata.canonical(
             StandardCharsets.UTF_16LE, BomKind.UTF_16_LE, "\r\n", model.lineCount()
@@ -249,7 +257,7 @@ class TextModelNewFileCommitTest {
         byte[] expectedBytes, CommitProvider provider
     ) {
         void save() throws IOException {
-            model.save(target, metadata, SaveDisposition.CREATE_NEW);
+            model.save(JvmDocumentStorage.resource(target), metadata, SaveDisposition.CREATE_NEW);
         }
     }
 

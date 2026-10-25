@@ -4,6 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.editor.language.LanguageRegistry;
+import dev.tuink.editor.storage.BomKind;
+import dev.tuink.editor.storage.DocumentFileMetadata;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import dev.tuink.unicode.GraphemeText;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
@@ -21,7 +24,7 @@ class EditorEnginePasteMemoryTest {
 
     private static void probe(String mode, int heapMiB) throws Exception {
         String classpath = String.join(File.pathSeparator, location(EditorEnginePasteMemoryTest.class),
-            location(EditorEngine.class), location(GraphemeText.class), location(LanguageRegistry.class));
+            location(EditorEngine.class), location(GraphemeText.class), location(LanguageRegistry.class), LinuxXattrTestRuntime.classpath());
         Process process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx" + heapMiB + "m", "-cp", classpath, MemoryProbe.class.getName(), mode)
             .redirectErrorStream(true).start();
@@ -50,7 +53,7 @@ class EditorEnginePasteMemoryTest {
                 Path file = Files.createTempFile("tuink-paste-memory-", ".txt");
                 try {
                     Files.writeString(file, "x\n".repeat(190_000));
-                    engine.openExisting(file);
+                    engine.openExisting(JvmDocumentStorage.resource(file));
                 } finally {
                     Files.delete(file);
                 }

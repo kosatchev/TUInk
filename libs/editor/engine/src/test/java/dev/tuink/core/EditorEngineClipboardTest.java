@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.editor.storage.DocumentFileMetadata;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -207,7 +209,7 @@ class EditorEngineClipboardTest {
         RecoverySnapshot snapshot = source.engine().captureRecoverySnapshot();
         Path opened = tempDir.resolve("opened.txt");
         Files.writeString(opened, "disk");
-        source.engine().open(opened);
+        source.engine().open(JvmDocumentStorage.resource(opened));
 
         TabSession restored = tab(clipboard, "");
         restored.engine().restoreRecoverySnapshot(snapshot);
@@ -249,7 +251,7 @@ class EditorEngineClipboardTest {
             clipboard.setText("😀\rnew\r\nx");
             TabSession destination = tab(clipboard, "");
             EditorEngine engine = destination.engine();
-            engine.open(path);
+            engine.open(JvmDocumentStorage.resource(path));
             Position start = new Position(0, 1);
             Position end = new Position(2, 2);
             engine.restoreSelection(reverse ? start : end, reverse ? end : start);

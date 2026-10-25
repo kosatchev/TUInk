@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -8,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuiframe.input.KeyStroke;
 import dev.tuiframe.input.TextInput;
-import dev.tuink.core.DocumentFileMetadata;
+import dev.tuink.editor.storage.DocumentFileMetadata;
 import dev.tuink.core.RecoverySnapshot;
 import dev.tuink.tui.ui.SaveAsBarView;
 import dev.tuink.tui.command.TuinkCommand;
@@ -95,7 +97,7 @@ class SaveEncodingErrorIntegrationTest {
             Path scenario = directory.resolve(Boolean.toString(quitting));
             try (EditorWindowFixture window = new EditorWindowFixture(scenario, false, List.of("placeholder"))) {
                 Files.write(window.document, ORIGINAL.getBytes(LEGACY_CHARSET));
-                window.active().tabSession().engine().openExisting(window.document);
+                window.active().tabSession().engine().openExisting(JvmDocumentStorage.resource(window.document));
                 window.frame();
                 window.ui.confirmOnCloseSetting = true;
                 if (!quitting) {
@@ -131,13 +133,13 @@ class SaveEncodingErrorIntegrationTest {
             window.event(new TextInput("😀"));
             var model = window.active().tabSession().model();
             var metadata = model.fileMetadata();
-            var baseline = model.fileBaseline();
+            var baseline = JvmDocumentStorage.baselineOf(model.fileBaseline());
             window.event(ctrl(KeyStroke.Key.S));
             window.event(new TextInput("y"));
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
             assertEquals(metadata, model.fileMetadata());
-            assertEquals(baseline, model.fileBaseline());
-            assertEquals(window.document, window.active().state().getCurrentFile());
+            assertEquals(baseline, JvmDocumentStorage.baselineOf(model.fileBaseline()));
+            assertEquals(window.document, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
             assertTrue(window.active().state().isDirty());
             window.command(TuinkCommand.EDIT_UNDO);
             assertEquals(List.of("Привет", ""), model.snapshotLines());
@@ -181,7 +183,7 @@ class SaveEncodingErrorIntegrationTest {
         EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("placeholder"));
         try {
             Files.write(window.document, ORIGINAL.getBytes(LEGACY_CHARSET));
-            window.active().tabSession().engine().open(window.document);
+            window.active().tabSession().engine().open(JvmDocumentStorage.resource(window.document));
             window.frame();
             return window;
         } catch (Exception | Error failure) {

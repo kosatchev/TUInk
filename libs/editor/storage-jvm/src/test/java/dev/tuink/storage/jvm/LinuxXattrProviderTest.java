@@ -3,7 +3,8 @@ package dev.tuink.storage.jvm;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
-import dev.tuink.core.storage.spi.LinuxXattrAccess;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+import dev.tuink.storage.jvm.spi.LinuxXattrAccess;
 import java.util.List;
 import java.util.ServiceLoader;
 import org.junit.jupiter.api.Test;

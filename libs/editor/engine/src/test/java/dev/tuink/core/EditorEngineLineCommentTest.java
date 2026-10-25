@@ -5,6 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.editor.storage.BomKind;
+import dev.tuink.editor.storage.DocumentFileMetadata;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+import dev.tuink.verification.MemoryDocumentStorage;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
@@ -115,7 +119,7 @@ class EditorEngineLineCommentTest {
         assertEquals(CommentSyntaxProfile.GENERIC, LanguageProfiles.resolveCommentSyntax(null));
         assertEquals(
             CommentSyntaxProfile.GENERIC,
-            LanguageProfiles.resolveCommentSyntax(Path.of("README"))
+            LanguageProfiles.resolveCommentSyntax("README")
         );
     }
 
@@ -153,7 +157,7 @@ class EditorEngineLineCommentTest {
         EditorDocument document = new EditorDocument(model);
         TabSession first = document.attach(LogicalEditorTextLayout::new, new EditorClipboard());
         TabSession second = document.attach(LogicalEditorTextLayout::new, new EditorClipboard());
-        first.state().setCurrentFile(Path.of("Demo.java"));
+        first.state().setCurrentResource(new MemoryDocumentStorage().resource(Path.of("Demo.java").toString()));
         first.engine().selectAll();
         EditorViewMemento before = first.state().viewMemento();
         second.state().setCursor(new Position(1, 2));
@@ -183,7 +187,7 @@ class EditorEngineLineCommentTest {
         TextModel model = new TextModel(new FailingBuffer(fail));
         model.replaceLines(List.of("first", "second", "third"));
         EditorState state = new EditorState();
-        state.setCurrentFile(Path.of("Demo.java"));
+        state.setCurrentResource(new MemoryDocumentStorage().resource(Path.of("Demo.java").toString()));
         EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model));
         engine.setAutoPairsEnabled(false);
         engine.insertInput("X");
@@ -226,7 +230,7 @@ class EditorEngineLineCommentTest {
         TextModel model = new TextModel(new SimpleLineBuffer());
         model.insertText(new Position(0, 0), text);
         EditorState state = new EditorState();
-        state.setCurrentFile(Path.of(fileName));
+        state.setCurrentResource(new MemoryDocumentStorage().resource(Path.of(fileName).toString()));
         return new Fixture(model, state, new EditorEngine(model, state, new TestEditorTextLayout(model)));
     }
 

@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.editor.diff.LineDiff;
 import dev.tuink.editor.diff.LineEdit;
-import java.nio.file.Path;
+import dev.tuink.verification.MemoryDocumentStorage;
 import java.util.List;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
@@ -87,7 +87,7 @@ class EditorEnginePublicationBoundaryTest {
         EditorClipboard clipboard = new EditorClipboard();
         ThrowingDiff diff = new ThrowingDiff();
         EditorEngine engine = document.attach(LogicalEditorTextLayout::new, clipboard, diff).engine();
-        engine.state().setCurrentFile(Path.of("Document.java"));
+        engine.state().setCurrentResource(new MemoryDocumentStorage().resource("Document.java"));
         engine.moveEnd();
         TabSession foreign = document.attach(LogicalEditorTextLayout::new, clipboard);
         foreign.engine().restoreSelection(new Position(0, 8), new Position(0, 7));

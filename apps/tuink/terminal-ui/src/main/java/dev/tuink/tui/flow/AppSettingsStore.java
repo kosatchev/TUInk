@@ -1,7 +1,7 @@
 package dev.tuink.tui.flow;
 
 import dev.tuink.core.GutterDiffMode;
-import dev.tuink.core.FileSaveGuard;
+import dev.tuink.storage.jvm.FileSaveGuard;
 import dev.tuink.core.TabInsertMode;
 import dev.tuink.tui.style.UiStyles;
 import java.io.ByteArrayInputStream;

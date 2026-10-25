@@ -8,6 +8,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import dev.tuink.editor.storage.DocumentFileMetadata;
+import dev.tuink.editor.storage.DocumentResource;
+import dev.tuink.editor.storage.DocumentSave;
+import dev.tuink.editor.storage.SaveDisposition;
+import dev.tuink.storage.jvm.FileBaseline;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
@@ -47,14 +53,14 @@ class TextModelSaveTargetIdentityTest {
         var model = new RedirectingModel();
         EditorState state = new EditorState();
         EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model));
-        engine.openExisting(source);
+        engine.openExisting(JvmDocumentStorage.resource(source));
         engine.insertInput("draft ");
         engine.moveCursorTo(new Position(1, 2));
         state.setSelectionAnchor(new Position(0, 1));
         state.setViewport(new ViewportState(1, 0, 2, 2));
         List<String> edited = model.snapshotLines();
         DocumentFileMetadata metadata = model.fileMetadata();
-        FileBaseline baseline = model.fileBaseline();
+        FileBaseline baseline = JvmDocumentStorage.baselineOf(model.fileBaseline());
         long revision = model.revision();
         Position cursor = state.getCursor();
         Position selection = state.getSelectionAnchor();
@@ -62,7 +68,7 @@ class TextModelSaveTargetIdentityTest {
         model.duringNextEncoding(() -> redirect(alias, second.getFileName()));
 
         IOException failure = assertThrows(IOException.class,
-            () -> engine.saveAs(alias, SaveDisposition.REPLACE_EXISTING));
+            () -> engine.saveAs(JvmDocumentStorage.resource(alias), SaveDisposition.REPLACE_EXISTING));
 
         assertTrue(failure.getMessage().contains("Save target changed"));
         assertEquals(second.getFileName(), Files.readSymbolicLink(alias));
@@ -72,8 +78,8 @@ class TextModelSaveTargetIdentityTest {
         assertEquals(edited, model.snapshotLines());
         assertEquals(revision, model.revision());
         assertSame(metadata, model.fileMetadata());
-        assertSame(baseline, model.fileBaseline());
-        assertEquals(source, state.getCurrentFile());
+        assertSame(baseline, JvmDocumentStorage.baselineOf(model.fileBaseline()));
+        assertEquals(source, JvmDocumentStorage.pathOf(state.getCurrentResource()));
         assertEquals(SaveDisposition.REPLACE_EXISTING, state.getSaveDisposition());
         assertTrue(state.isDirty());
         assertEquals(cursor, state.getCursor());
@@ -91,7 +97,7 @@ class TextModelSaveTargetIdentityTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void aRedirectedParentAliasCannotPublishIntoItsPreviouslyResolvedDirectory(boolean overwrite) throws Exception {
+    void aRedirectedParentAliasAfterWriteStartsKeepsTheApprovedPhysicalTarget(boolean overwrite) throws Exception {
         Path first = Files.createDirectory(directory.resolve("first"));
         Path second = Files.createDirectory(directory.resolve("second"));
         Path alias = Files.createSymbolicLink(directory.resolve("parent"), first.getFileName());
@@ -106,17 +112,17 @@ class TextModelSaveTargetIdentityTest {
         DocumentFileMetadata metadata = model.fileMetadata();
         model.duringNextEncoding(() -> redirect(alias, second.getFileName()));
 
-        assertThrows(IOException.class, () -> model.save(alias.resolve("target.txt"), metadata,
-            overwrite ? SaveDisposition.REPLACE_EXISTING : SaveDisposition.CREATE_NEW));
+        model.save(JvmDocumentStorage.resource(alias.resolve("target.txt")), metadata,
+            overwrite ? SaveDisposition.REPLACE_EXISTING : SaveDisposition.CREATE_NEW);
 
-        assertSame(metadata, model.fileMetadata());
-        assertNull(model.fileBaseline());
+        assertEquals(metadata, model.fileMetadata());
+        assertEquals("draft", Files.readString(firstFile));
+        assertEquals(FileBaseline.fromBytes(firstFile, "draft".getBytes(metadata.charset())),
+            JvmDocumentStorage.baselineOf(model.fileBaseline()));
         assertEquals(second.getFileName(), Files.readSymbolicLink(alias));
         if (overwrite) {
-            assertEquals("before first", Files.readString(firstFile));
             assertEquals("before second", Files.readString(secondFile));
         } else {
-            assertFalse(Files.exists(firstFile));
             assertFalse(Files.exists(secondFile));
         }
         assertNoStagedFiles();
@@ -131,11 +137,11 @@ class TextModelSaveTargetIdentityTest {
         model.insertText(new Position(0, 0), "draft");
         model.duringNextEncoding(() -> redirect(alias, secondAlias.getFileName()));
 
-        model.save(alias, model.fileMetadata(), SaveDisposition.REPLACE_EXISTING);
+        model.save(JvmDocumentStorage.resource(alias), model.fileMetadata(), SaveDisposition.REPLACE_EXISTING);
 
         assertEquals("draft", Files.readString(target));
         assertEquals("draft", Files.readString(alias));
-        assertEquals(target, model.fileBaseline().target());
+        assertEquals(target, JvmDocumentStorage.baselineOf(model.fileBaseline()).target());
         assertEquals(secondAlias.getFileName(), Files.readSymbolicLink(alias));
         assertTrue(Files.isSymbolicLink(alias));
         assertNoStagedFiles();
@@ -154,12 +160,12 @@ class TextModelSaveTargetIdentityTest {
         engine.insertInput("draft");
         model.duringNextEncoding(() -> redirect(alias, second.getFileName()));
 
-        engine.saveAs(alias.resolve("target.txt"), SaveDisposition.REPLACE_EXISTING);
+        engine.saveAs(JvmDocumentStorage.resource(alias.resolve("target.txt")), SaveDisposition.REPLACE_EXISTING);
 
         assertEquals("draft", Files.readString(firstFile));
         assertEquals("before second", Files.readString(secondFile));
-        assertEquals(firstFile, state.getCurrentFile());
-        assertEquals(firstFile, model.fileBaseline().target());
+        assertEquals(firstFile, JvmDocumentStorage.pathOf(state.getCurrentResource()));
+        assertEquals(firstFile, JvmDocumentStorage.baselineOf(model.fileBaseline()).target());
         assertEquals(second.getFileName(), Files.readSymbolicLink(alias));
         assertFalse(state.isDirty());
         assertNoStagedFiles();
@@ -173,10 +179,10 @@ class TextModelSaveTargetIdentityTest {
         model.duringNextEncoding(() -> Files.writeString(target, "another writer"));
 
         assertThrows(FileAlreadyExistsException.class,
-            () -> model.save(target, model.fileMetadata(), SaveDisposition.CREATE_NEW));
+            () -> model.save(JvmDocumentStorage.resource(target), model.fileMetadata(), SaveDisposition.CREATE_NEW));
 
         assertEquals("another writer", Files.readString(target));
-        assertNull(model.fileBaseline());
+        assertNull(JvmDocumentStorage.baselineOf(model.fileBaseline()));
         assertNoStagedFiles();
     }
 
@@ -202,14 +208,9 @@ class TextModelSaveTargetIdentityTest {
 
         void duringNextEncoding(FileChange next) { change = next; }
 
-        @Override public SaveRequest prepareSave(Path path, DocumentFileMetadata metadata,
-                                                SaveDisposition disposition, boolean checkBaseline) {
-            return super.prepareSave(path, atEncodingBoundary(metadata), disposition, checkBaseline);
-        }
-
-        @Override public void save(Path path, DocumentFileMetadata metadata, SaveDisposition disposition)
-            throws IOException {
-            super.save(path, atEncodingBoundary(metadata), disposition);
+        @Override public DocumentSave prepareSave(DocumentResource resource, DocumentFileMetadata metadata,
+                                                  SaveDisposition disposition) {
+            return super.prepareSave(resource, atEncodingBoundary(metadata), disposition);
         }
 
         private DocumentFileMetadata atEncodingBoundary(DocumentFileMetadata metadata) {

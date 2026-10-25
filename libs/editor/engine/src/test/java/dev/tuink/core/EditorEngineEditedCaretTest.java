@@ -5,7 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.editor.storage.BomKind;
+import dev.tuink.editor.storage.DocumentFileMetadata;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import dev.tuink.unicode.GraphemeText;
+import dev.tuink.verification.MemoryDocumentStorage;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
@@ -139,7 +143,7 @@ class EditorEngineEditedCaretTest {
     @Test
     void commentBatchesNormalizeOnlyTheEditingViewAndUndoFromAnotherViewNormalizesItsOwnCaret() {
         EditorEngine engine = engine("e\u0301x");
-        engine.state().setCurrentFile(Path.of("sample.py"));
+        engine.state().setCurrentResource(new MemoryDocumentStorage().resource(Path.of("sample.py").toString()));
         assertTrue(engine.findNext("e"));
         engine.toggleLineComment();
         assertEquals("# e\u0301x", engine.model().getLine(0));

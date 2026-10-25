@@ -7,5 +7,7 @@ dependencies {
     implementation project(':unicode-text')
     api project(':editor-contract')
     testImplementation project(':editor-diff-jgit')
-    testRuntimeOnly project(':editor-storage-jvm')
+    testImplementation project(':editor-storage-jvm')
 }
+
+sourceSets.test.java.srcDir(rootProject.file('verification/fixtures/java'))

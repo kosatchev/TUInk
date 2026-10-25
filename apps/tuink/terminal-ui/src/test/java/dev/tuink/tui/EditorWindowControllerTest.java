@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -119,7 +121,7 @@ class EditorWindowControllerTest {
         try (EditorWindowFixture fixture = new EditorWindowFixture(directory, false)) {
             fixture.event(ctrl(KeyStroke.Key.N));
             assertEquals(2, fixture.tabs.size());
-            fixture.active().tabSession().engine().open(fixture.document);
+            fixture.active().tabSession().engine().open(JvmDocumentStorage.resource(fixture.document));
             fixture.frame();
             fixture.wheel(PointerEvent.Kind.SCROLL_DOWN, 7);
             fixture.wheel(PointerEvent.Kind.SCROLL_RIGHT, 2);

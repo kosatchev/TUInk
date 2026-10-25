@@ -3,5 +3,7 @@ plugins {
 }
 
 dependencies {
+    api project(':editor-contract')
     implementation project(':core')
+    testImplementation project(':unicode-text')
 }

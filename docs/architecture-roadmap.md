@@ -14,11 +14,11 @@ TUInk развивается как приложение-редактор пов
 | `tuiframe-core` | geometry, physical events, cell metrics, line layout/cache, `Canvas`, `CellBuffer`, `Frame`, capabilities и event loop |
 | `tuiframe-jline` | JLine lifecycle, decoder, raw mode, signals, ANSI presenter и cleanup |
 | `tuiframe-widgets` | layout, focus, hit testing, общий захват мыши, theme и reusable widgets |
-| `editor-contract` | immutable command/document DTO и блочный текст, UTF-16 ranges, `WorkspaceEdit`, semantic highlighting/diff ports и общий каталог языков |
+| `editor-contract` | immutable command/document DTO и блочный текст, UTF-16 ranges, `WorkspaceEdit`, storage/resource contracts, semantic highlighting/diff ports и общий каталог языков |
 | `core` | общий документ/history, отдельные позиции views, search, editor operations и terminal-neutral `EditorTextLayout` port |
 | `editor-session` | command registry, owner-thread `EditorDocumentSession`, validation и bounded async ingress |
 | `editor-diff-jgit` | опциональный bounded JGit diff; явно подключается к terminal view |
-| `editor-storage-jvm` | опциональный JVM FFM provider для Linux xattr/ACL; локальные file APIs пока остаются в `core` |
+| `editor-storage-jvm` | JVM filesystem adapter: paths, версии, безопасная публикация файлов, permissions и Linux FFM xattr/ACL |
 | `render` | `EditorTextLayout` adapter, координаты/навигация представления, editor layout и render planning |
 | `highlight-regex` | встроенная bounded regex-based подсветка с semantic token output, без зависимости от terminal render |
 | `tui` | TUInk keymap, controllers, palettes, editor rasterization и widget adapters |
@@ -31,12 +31,14 @@ project modules. `tuiframe-jline` и `tuiframe-widgets` зависят от
 и расширения, сохраняя собственные правила обработки языка.
 `editor-session` экспортирует `editor-contract`, а `core` использует как
 implementation dependency. Их production runtime не включает JGit, FFM provider
-или TUIframe. Обычные file APIs пока остаются переходной поверхностью `core` и
-не являются Android storage API.
+или TUIframe. `core` содержит stream-based `DocumentCodec`, но не обращается к
+filesystem. `editor-contract` задаёт opaque resource/version, format, capabilities
+и load/save receipts; `editor-session` открывает split-phase I/O API без типов
+`core`. Filesystem adapter подключается явно в TUI. Android `Uri` adapter ещё
+не реализован.
 
-Следующие этапы ещё не реализованы: вынос application I/O из `core` за
-resource/capability ports, перенос всех document commands через session API и
-единый owner workspace. Пока production TUI изменяет документ через описанный
+Следующие этапы ещё не реализованы: перенос всех document commands через session
+API и единый owner workspace. Пока production TUI изменяет документ через описанный
 в ADR внутренний `CoreSessionBridge`. Общий Java baseline, immutable snapshots и
 semantic providers готовят эти переносы; Android/Windows clients, ART и IME
 проверки остаются отдельными работами.

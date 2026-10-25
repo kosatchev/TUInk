@@ -2,6 +2,9 @@ package dev.tuink.core;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import dev.tuink.editor.storage.BomKind;
+import dev.tuink.editor.storage.SaveDisposition;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
@@ -24,7 +27,7 @@ class DocumentUtf8ConversionTest {
         long textRevision = engine.model().revision();
         Path target = directory.resolve("utf8.txt");
 
-        engine.saveAsUtf8(target, SaveDisposition.CREATE_NEW);
+        engine.saveAsUtf8(JvmDocumentStorage.resource(target), SaveDisposition.CREATE_NEW);
 
         assertArrayEquals("😀Привет\r\nмир\nконец\r".getBytes(StandardCharsets.UTF_8), Files.readAllBytes(target));
         assertEquals(BomKind.NONE, engine.model().fileMetadata().bomKind());
@@ -57,16 +60,16 @@ class DocumentUtf8ConversionTest {
         engine.insertInput("😀");
         engine.undo(); // A failed conversion must also preserve redo.
         var format = engine.model().fileMetadata();
-        var baseline = engine.model().fileBaseline();
-        Path source = engine.state().getCurrentFile();
+        var baseline = JvmDocumentStorage.baselineOf(engine.model().fileBaseline());
+        Path source = JvmDocumentStorage.pathOf(engine.state().getCurrentResource());
         Path occupied = Files.writeString(directory.resolve("occupied.txt"), "untouched");
 
-        assertThrows(IOException.class, () -> engine.saveAsUtf8(occupied, SaveDisposition.CREATE_NEW));
+        assertThrows(IOException.class, () -> engine.saveAsUtf8(JvmDocumentStorage.resource(occupied), SaveDisposition.CREATE_NEW));
 
         assertEquals("untouched", Files.readString(occupied));
         assertEquals(format, engine.model().fileMetadata());
-        assertEquals(baseline, engine.model().fileBaseline());
-        assertEquals(source, engine.state().getCurrentFile());
+        assertEquals(baseline, JvmDocumentStorage.baselineOf(engine.model().fileBaseline()));
+        assertEquals(source, JvmDocumentStorage.pathOf(engine.state().getCurrentResource()));
         assertFalse(engine.state().isDirty());
         assertTrue(engine.redo());
         assertEquals("😀Привет", engine.model().getLine(0));
@@ -78,9 +81,9 @@ class DocumentUtf8ConversionTest {
         EditorEngine engine = legacy();
         engine.insertInput("😀");
         var metadata = engine.model().fileMetadata();
-        Path source = engine.state().getCurrentFile();
+        Path source = JvmDocumentStorage.pathOf(engine.state().getCurrentResource());
         Files.writeString(source, "external");
-        assertThrows(IOException.class, () -> engine.saveAsUtf8(source, SaveDisposition.REPLACE_EXISTING));
+        assertThrows(IOException.class, () -> engine.saveAsUtf8(JvmDocumentStorage.resource(source), SaveDisposition.REPLACE_EXISTING));
         assertEquals("external", Files.readString(source));
         assertEquals(metadata, engine.model().fileMetadata());
         assertTrue(engine.undo());
@@ -93,7 +96,7 @@ class DocumentUtf8ConversionTest {
         Files.write(source, new byte[] {(byte) 0xFF, (byte) 0xFE, 65, 0});
         EditorEngine engine = open(source);
         Path target = directory.resolve("utf8.txt");
-        engine.saveAsUtf8(target, SaveDisposition.CREATE_NEW);
+        engine.saveAsUtf8(JvmDocumentStorage.resource(target), SaveDisposition.CREATE_NEW);
         assertArrayEquals(new byte[] {65}, Files.readAllBytes(target));
         assertTrue(engine.undo());
         assertEquals(StandardCharsets.UTF_16LE, engine.state().getFileEncoding());
@@ -108,7 +111,7 @@ class DocumentUtf8ConversionTest {
     private EditorEngine open(Path path) throws IOException {
         TextModel model = new TextModel(new SimpleLineBuffer());
         EditorEngine engine = new EditorEngine(model, new EditorState(), new LogicalEditorTextLayout(model));
-        engine.openExisting(path);
+        engine.openExisting(JvmDocumentStorage.resource(path));
         return engine;
     }
 }

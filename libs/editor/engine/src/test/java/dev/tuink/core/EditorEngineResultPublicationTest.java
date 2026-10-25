@@ -2,6 +2,7 @@ package dev.tuink.core;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import dev.tuink.editor.storage.DocumentFileMetadata;
 import java.util.List;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;

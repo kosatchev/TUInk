@@ -153,7 +153,7 @@ class UserDirectoriesTest {
     private static String probeClasspath() throws Exception {
         return String.join(File.pathSeparator,
             location(UserDirectoriesTest.class), location(UserDirectories.class), location(AppSettings.class),
-            location(dev.tuink.core.RecoverySnapshot.class), location(dev.tuink.editor.document.DocumentId.class));
+            location(dev.tuink.core.RecoverySnapshot.class), location(dev.tuink.editor.document.DocumentId.class), location(dev.tuink.storage.jvm.JvmDocumentStorage.class));
     }
 
     private static String location(Class<?> type) throws Exception {

@@ -6,13 +6,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import dev.tuink.editor.document.ImmutableText;
+import dev.tuink.editor.storage.DocumentOpenMode;
+import dev.tuink.editor.storage.SaveDisposition;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import dev.tuink.unicode.GraphemeText;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
-import java.nio.charset.StandardCharsets;
 import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
@@ -31,7 +34,7 @@ class TextModelLoadTest {
         model.insertText(new Position(0, 0), "unfinished work");
         long revision = model.revision();
 
-        IOException failure = assertThrows(IOException.class, () -> model.load(tempDir));
+        IOException failure = assertThrows(IOException.class, () -> model.load(JvmDocumentStorage.resource(tempDir)));
 
         assertTrue(failure.getMessage().contains("Not a regular file"));
         assertEquals(List.of("unfinished work"), model.snapshotLines());
@@ -41,7 +44,7 @@ class TextModelLoadTest {
     @Test
     void missingFilesStillReportNoSuchFile() {
         TextModel model = new TextModel(new SimpleLineBuffer());
-        assertThrows(NoSuchFileException.class, () -> model.load(tempDir.resolve("new.txt")));
+        assertThrows(NoSuchFileException.class, () -> model.load(JvmDocumentStorage.resource(tempDir.resolve("new.txt"))));
     }
 
     @Test
@@ -61,16 +64,16 @@ class TextModelLoadTest {
             TextModel model = new TextModel(new SimpleLineBuffer());
             EditorState state = new EditorState();
             EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model));
-            engine.open(original);
+            engine.open(JvmDocumentStorage.resource(original));
             engine.insertInput("draft ");
             engine.restoreSelection(new Position(1, 3), new Position(0, 2));
             var lines = model.snapshotLines();
             var metadata = model.fileMetadata();
-            var baseline = model.fileBaseline();
+            var baseline = JvmDocumentStorage.baselineOf(model.fileBaseline());
             long revision = model.revision();
             long epoch = model.contentEpoch();
 
-            IOException error = assertThrows(IOException.class, () -> engine.openExisting(target));
+            IOException error = assertThrows(IOException.class, () -> engine.openExisting(JvmDocumentStorage.resource(target)));
 
             assertTrue(error.getMessage().contains(encoding));
             if (encoding.endsWith("LE")) {
@@ -78,10 +81,10 @@ class TextModelLoadTest {
             }
             assertEquals(lines, model.snapshotLines());
             assertEquals(metadata, model.fileMetadata());
-            assertEquals(baseline, model.fileBaseline());
+            assertEquals(baseline, JvmDocumentStorage.baselineOf(model.fileBaseline()));
             assertEquals(revision, model.revision());
             assertEquals(epoch, model.contentEpoch());
-            assertEquals(original, state.getCurrentFile());
+            assertEquals(original, JvmDocumentStorage.pathOf(state.getCurrentResource()));
             assertEquals(new Position(1, 3), state.getCursor());
             assertEquals(new Position(0, 2), state.getSelectionAnchor());
             assertTrue(state.isDirty());
@@ -100,24 +103,24 @@ class TextModelLoadTest {
         Path original = tempDir.resolve("original.txt");
         Files.writeString(original, "original\r\ncontents");
         TextModel model = new TextModel(new SimpleLineBuffer());
-        model.load(original);
+        model.load(JvmDocumentStorage.resource(original));
         model.insertText(new Position(0, 0), "draft ");
         var lines = model.snapshotLines();
         var metadata = model.fileMetadata();
-        var baseline = model.fileBaseline();
+        var baseline = JvmDocumentStorage.baselineOf(model.fileBaseline());
         long revision = model.revision();
         Path oversized = tempDir.resolve("oversized.txt");
-        for (long size : new long[] {TextModel.MAX_LOAD_BYTES + 1L, 2_147_483_648L}) {
+        for (long size : new long[] {DocumentCodec.MAX_LOAD_BYTES + 1L, 2_147_483_648L}) {
             try (RandomAccessFile file = new RandomAccessFile(oversized.toFile(), "rw")) {
                 file.setLength(size);
             }
 
-            IOException error = assertThrows(IOException.class, () -> model.load(oversized));
+            IOException error = assertThrows(IOException.class, () -> model.load(JvmDocumentStorage.resource(oversized)));
 
             assertTrue(error.getMessage().contains("File too large to open"));
             assertEquals(lines, model.snapshotLines());
             assertEquals(metadata, model.fileMetadata());
-            assertEquals(baseline, model.fileBaseline());
+            assertEquals(baseline, JvmDocumentStorage.baselineOf(model.fileBaseline()));
             assertEquals(revision, model.revision());
         }
     }
@@ -128,13 +131,14 @@ class TextModelLoadTest {
         ByteArrayInputStream input = new ByteArrayInputStream(growing);
 
         IOException error = assertThrows(IOException.class,
-            () -> TextModel.readDocumentBytes(input, tempDir.resolve("growing.txt"), 10));
+            () -> DocumentCodec.read(input, DocumentOpenMode.DETECT,
+                new DocumentCodec.LoadLimits(10, 1_000_000L), "growing.txt"));
 
         assertTrue(error.getMessage().contains("File too large to open"));
         assertEquals(growing.length - 11, input.available(), "read only the limit plus one sentinel byte");
-        assertEquals("0123456789", new String(TextModel.readDocumentBytes(
+        assertEquals(List.of("0123456789"), DocumentCodec.read(
             new ByteArrayInputStream("0123456789".getBytes(StandardCharsets.UTF_8)),
-            tempDir.resolve("fits.txt"), 10), StandardCharsets.UTF_8));
+            DocumentOpenMode.DETECT, new DocumentCodec.LoadLimits(10, 1_000_000L), "fits.txt").lines());
     }
 
     @Test
@@ -146,7 +150,7 @@ class TextModelLoadTest {
             classpathLocation(TextModelLoadTest.class),
             classpathLocation(TextModel.class),
             classpathLocation(GraphemeText.class),
-            classpathLocation(ImmutableText.class));
+            classpathLocation(ImmutableText.class), LinuxXattrTestRuntime.classpath());
         Process process = new ProcessBuilder(java.toString(), "-Xmx64m", "-cp", classpath,
             DenseFileProbe.class.getName(), dense.toString()).redirectErrorStream(true).start();
         try {
@@ -164,7 +168,7 @@ class TextModelLoadTest {
             model.insertText(new Position(0, 0), "unfinished work");
             long revision = model.revision();
             try {
-                model.load(Path.of(args[0]));
+                model.load(JvmDocumentStorage.resource(Path.of(args[0])));
                 throw new AssertionError("A line-dense document exceeded the load memory budget");
             } catch (IOException expected) {
                 if (!expected.getMessage().contains("available memory")) {
@@ -185,10 +189,10 @@ class TextModelLoadTest {
         Path link = Files.createSymbolicLink(tempDir.resolve("alias.txt"), target.getFileName());
         TextModel model = new TextModel(new SimpleLineBuffer());
 
-        model.load(link);
+        model.load(JvmDocumentStorage.resource(link));
 
         assertEquals(List.of("ordinary", "file"), model.snapshotLines());
-        assertEquals(target.toRealPath(), model.fileBaseline().target());
+        assertEquals(target.toRealPath(), JvmDocumentStorage.baselineOf(model.fileBaseline()).target());
         assertEquals(List.of("\r\n"), model.fileMetadata().lineSeparators());
     }
 
@@ -228,7 +232,7 @@ class TextModelLoadTest {
             classpathLocation(SimpleLineBuffer.class),
             classpathLocation(GraphemeText.class),
             classpathLocation(ImmutableText.class)
-        );
+        , LinuxXattrTestRuntime.classpath());
         Process process = new ProcessBuilder(
             java.toString(), "-Xmx64m", "-cp", classpath, FifoProbe.class.getName(),
             fifo.toString(), link.toString(), replacedFile.toString()
@@ -258,7 +262,7 @@ class TextModelLoadTest {
             long revision = model.revision();
             for (int index = 0; index < 2; index++) {
                 try {
-                    model.load(Path.of(args[index]));
+                    model.load(JvmDocumentStorage.resource(Path.of(args[index])));
                     throw new AssertionError("Accepted a FIFO: " + args[index]);
                 } catch (IOException expected) {
                     if (!expected.getMessage().contains("Not a regular file")) {
@@ -271,12 +275,12 @@ class TextModelLoadTest {
             }
 
             Path replaced = Path.of(args[2]);
-            model.load(replaced);
+            model.load(JvmDocumentStorage.resource(replaced));
             model.insertText(new Position(0, 0), "edited ");
             Files.delete(replaced);
             Files.createSymbolicLink(replaced, Path.of(args[0]));
             try {
-                model.saveIfUnchanged(replaced, model.fileMetadata(), SaveDisposition.REPLACE_EXISTING);
+                model.saveIfUnchanged(JvmDocumentStorage.resource(replaced), model.fileMetadata(), SaveDisposition.REPLACE_EXISTING);
                 throw new AssertionError("Accepted a file replaced by a FIFO");
             } catch (IOException expected) {
                 if (!expected.getMessage().contains("File changed outside TUInk")) {

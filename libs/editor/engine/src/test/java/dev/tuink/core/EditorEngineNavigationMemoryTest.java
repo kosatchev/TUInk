@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.editor.language.LanguageRegistry;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import dev.tuink.unicode.GraphemeText;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
@@ -29,7 +30,7 @@ class EditorEngineNavigationMemoryTest {
                 output.write("Ā".getBytes(StandardCharsets.UTF_8));
             }
             String classpath = String.join(File.pathSeparator, location(getClass()), location(EditorEngine.class),
-                location(GraphemeText.class), location(LanguageRegistry.class));
+                location(GraphemeText.class), location(LanguageRegistry.class), LinuxXattrTestRuntime.classpath());
             Process child = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                 "-Xmx" + example[1] + "m", "-cp", classpath, NavigationProbe.class.getName(), file.toString())
                 .redirectErrorStream(true).start();
@@ -51,7 +52,7 @@ class EditorEngineNavigationMemoryTest {
         public static void main(String[] args) throws Exception {
             TextModel model = new TextModel(new SimpleLineBuffer());
             EditorEngine engine = new EditorEngine(model, new EditorState(), new LogicalEditorTextLayout(model));
-            engine.open(Path.of(args[0]));
+            engine.open(JvmDocumentStorage.resource(Path.of(args[0])));
             int originalLength = model.getLine(0).length();
             for (int cycle = 0; cycle < 3; cycle++) {
                 engine.moveHome();

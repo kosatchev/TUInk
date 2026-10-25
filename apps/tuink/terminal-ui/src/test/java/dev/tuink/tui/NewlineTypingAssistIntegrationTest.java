@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
@@ -20,7 +22,7 @@ class NewlineTypingAssistIntegrationTest {
         List<String> original = List.of("def work():", "    result = call(", "        value,", "    )");
         try (EditorWindowFixture window = new EditorWindowFixture(directory, false, original)) {
             var engine = window.active().tabSession().engine();
-            engine.saveAs(directory.resolve("main.py"));
+            engine.saveAs(JvmDocumentStorage.resource(directory.resolve("main.py")));
             engine.moveCursorTo(new Position(3, 5));
             window.frame();
 
@@ -40,7 +42,7 @@ class NewlineTypingAssistIntegrationTest {
     @Test
     void successiveEntersContinueFinishAndLeaveAMarkdownListWithIndependentUndo() throws Exception {
         try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("- item"))) {
-            window.active().tabSession().engine().saveAs(directory.resolve("notes.md"));
+            window.active().tabSession().engine().saveAs(JvmDocumentStorage.resource(directory.resolve("notes.md")));
             window.event(KeyStroke.of(KeyStroke.Key.END));
 
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));

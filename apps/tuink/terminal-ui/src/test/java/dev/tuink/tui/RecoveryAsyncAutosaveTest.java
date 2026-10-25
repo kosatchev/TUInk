@@ -1,11 +1,13 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.RecoverySnapshot;
 import dev.tuink.core.TabSession;
-import dev.tuink.core.SaveDisposition;
+import dev.tuink.editor.storage.SaveDisposition;
 import dev.tuink.render.TerminalEditorTextLayout;
 import java.io.IOException;
 import java.nio.charset.Charset;
@@ -30,15 +32,15 @@ class RecoveryAsyncAutosaveTest {
     void formatOnlyUndoRefreshesRecoveryEvenWhenTheTextRevisionMatches(@TempDir Path directory) throws Exception {
         Path source = Files.write(directory.resolve("legacy.txt"), "Привет".getBytes(Charset.forName("windows-1251")));
         var tab = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
-        tab.engine().openExisting(source);
+        tab.engine().openExisting(JvmDocumentStorage.resource(source));
         tab.engine().insertInput("😀");
         long textRevision = tab.model().revision();
         var store = new MemoryStore();
         var manager = new TerminalEditorApp.RecoveryAutosaveManager(store, Runnable::run);
         assertNull(manager.autosaveDirtyTabs(List.of(tab), 0));
-        assertEquals(source, store.snapshots.values().iterator().next().currentFile());
+        assertEquals(source, JvmDocumentStorage.pathOf(store.snapshots.values().iterator().next().currentResource()));
         Path converted = directory.resolve("converted.txt");
-        tab.engine().saveAsUtf8(converted, SaveDisposition.CREATE_NEW);
+        tab.engine().saveAsUtf8(JvmDocumentStorage.resource(converted), SaveDisposition.CREATE_NEW);
         assertTrue(tab.engine().undo());
         assertEquals(textRevision, tab.model().revision());
         assertTrue(tab.state().isDirty());
@@ -47,8 +49,8 @@ class RecoveryAsyncAutosaveTest {
 
         assertEquals(2, store.events.stream().filter("save"::equals).count());
         RecoverySnapshot snapshot = store.snapshots.values().iterator().next();
-        assertEquals(converted, snapshot.currentFile());
-        assertEquals(tab.model().fileBaseline(), snapshot.fileBaseline());
+        assertEquals(converted, JvmDocumentStorage.pathOf(snapshot.currentResource()));
+        assertEquals(JvmDocumentStorage.baselineOf(tab.model().fileBaseline()), JvmDocumentStorage.baselineOf(snapshot.fileBaseline()));
         assertEquals(tab.model().fileMetadata(), snapshot.fileMetadata());
         assertEquals(List.of("😀Привет"), snapshot.lines());
         assertNull(manager.finishSession(List.of(tab), true));

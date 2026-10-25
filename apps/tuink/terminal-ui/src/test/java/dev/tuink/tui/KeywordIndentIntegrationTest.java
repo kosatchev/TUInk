@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
@@ -128,7 +130,7 @@ class KeywordIndentIntegrationTest {
     private EditorWindowFixture prepared(String filename, List<String> lines) throws Exception {
         EditorWindowFixture window = new EditorWindowFixture(directory, false, lines);
         var engine = window.active().tabSession().engine();
-        engine.saveAs(directory.resolve(filename));
+        engine.saveAs(JvmDocumentStorage.resource(directory.resolve(filename)));
         engine.moveCursorTo(new Position(lines.size() - 1, lines.getLast().length()));
         window.frame();
         return window;

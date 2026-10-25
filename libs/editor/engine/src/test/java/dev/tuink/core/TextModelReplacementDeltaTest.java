@@ -7,6 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.editor.storage.BomKind;
+import dev.tuink.editor.storage.DocumentFileMetadata;
+import dev.tuink.storage.jvm.FileBaseline;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -196,24 +200,24 @@ class TextModelReplacementDeltaTest {
     void canonicalizedReplacementRoundTripsUtf16BomAndLeavesTheDiskBaselineToSave() throws Exception {
         TextModel model = model(List.of("a", "b", "c"), metadata(List.of("\r", "\n")));
         Path file = directory.resolve("utf16.txt");
-        model.save(file);
-        FileBaseline baseline = model.fileBaseline();
+        model.save(JvmDocumentStorage.resource(file));
+        FileBaseline baseline = JvmDocumentStorage.baselineOf(model.fileBaseline());
 
         TextModel.ReplacementDelta delta = model.replaceRange(new Position(1, 0), new Position(1, 1), "");
-        assertSame(baseline, model.fileBaseline());
-        model.save(file);
+        assertSame(baseline, JvmDocumentStorage.baselineOf(model.fileBaseline()));
+        model.save(JvmDocumentStorage.resource(file));
         byte[] encoded = Files.readAllBytes(file);
         assertArrayEquals(new byte[] {(byte) 0xff, (byte) 0xfe}, java.util.Arrays.copyOf(encoded, 2));
         TextModel reopened = new TextModel(new SimpleLineBuffer());
-        reopened.load(file);
+        reopened.load(JvmDocumentStorage.resource(file));
         assertEquals(model.snapshotLines(), reopened.snapshotLines());
         assertEquals(model.fileMetadata().charset(), reopened.fileMetadata().charset());
         assertEquals(model.fileMetadata().bomKind(), reopened.fileMetadata().bomKind());
         assertEquals(model.fileMetadata().lineSeparators(), reopened.fileMetadata().lineSeparators());
 
-        FileBaseline saved = model.fileBaseline();
+        FileBaseline saved = JvmDocumentStorage.baselineOf(model.fileBaseline());
         model.replayReplacement(delta.inverse());
-        assertSame(saved, model.fileBaseline());
+        assertSame(saved, JvmDocumentStorage.baselineOf(model.fileBaseline()));
         assertEquals(List.of("a", "b", "c"), model.snapshotLines());
     }
 
@@ -227,7 +231,7 @@ class TextModelReplacementDeltaTest {
     private static void assertRejectedWithoutMutation(TextModel model, Runnable edit) {
         List<String> lines = model.snapshotLines();
         DocumentFileMetadata metadata = model.fileMetadata();
-        FileBaseline baseline = model.fileBaseline();
+        FileBaseline baseline = JvmDocumentStorage.baselineOf(model.fileBaseline());
         long revision = model.revision();
         long epoch = model.contentEpoch();
 
@@ -235,7 +239,7 @@ class TextModelReplacementDeltaTest {
 
         assertEquals(lines, model.snapshotLines());
         assertSame(metadata, model.fileMetadata());
-        assertSame(baseline, model.fileBaseline());
+        assertSame(baseline, JvmDocumentStorage.baselineOf(model.fileBaseline()));
         assertEquals(revision, model.revision());
         assertEquals(epoch, model.contentEpoch());
         assertEquals(List.of(), model.lineChangesSince(revision));

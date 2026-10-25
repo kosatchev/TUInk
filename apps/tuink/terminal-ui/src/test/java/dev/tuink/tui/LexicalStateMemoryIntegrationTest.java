@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -39,7 +41,7 @@ class LexicalStateMemoryIntegrationTest {
             markdown ? "- ".repeat(300_000) + "x\n" + "  ".repeat(300_000) + "continuation"
                 : "(".repeat(300_000) + "\n0\n" + ")".repeat(300_000) + ";");
         Set<String> locations = new LinkedHashSet<>();
-        for (Class<?> type : List.of(getClass(), EditorWindowFixture.class, TerminalEditorApp.class,
+        for (Class<?> type : List.of(getClass(), EditorWindowFixture.class, dev.tuink.storage.jvm.JvmDocumentStorage.class, TerminalEditorApp.class,
             TerminalText.class, TextField.class, ScreenPresenter.class, TextModel.class,
             DocumentView.class, EditorDocumentSession.class, RegexHighlighter.class,
             TerminalEditorTextLayout.class, org.junit.jupiter.api.Assertions.class)) {
@@ -83,7 +85,7 @@ class LexicalStateMemoryIntegrationTest {
                 for (int index = 2; index < args.length; index++) {
                     Path file = Path.of(args[index]);
                     TuiDocumentSession document = TuiDocumentSession.create(window.host.clipboard);
-                    document.view().engine().openExisting(file);
+                    document.view().engine().openExisting(JvmDocumentStorage.resource(file));
                     int firstLineLength = document.view().model().getLine(0).length();
                     var builder = document.newRenderPlanBuilder(window.host.resolveHighlighter(file));
                     window.tabs.add(new TerminalEditorApp.EditorTab(document, builder));

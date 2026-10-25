@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.diff.jgit.JgitLineDiff;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
@@ -112,7 +113,7 @@ class EditorGutterDiffSchedulingTest {
         assertTrue(fixture.engine.refreshGutterDiffIfDue());
         long revision = fixture.model.revision();
         TabSession other = fixture.engine.document().attach(LogicalEditorTextLayout::new, new EditorClipboard());
-        other.engine().saveAs(directory.resolve("saved.txt"));
+        other.engine().saveAs(JvmDocumentStorage.resource(directory.resolve("saved.txt")));
 
         assertEquals(revision, fixture.model.revision());
         assertEquals(50_000_000L, fixture.deadline());

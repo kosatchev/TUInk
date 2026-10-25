@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -95,7 +97,7 @@ class FieldTabPasteIntegrationTest {
             assertEquals(name, Files.readString(target));
             assertFalse(Files.exists(Path.of(name.replace('\t', ' '))), "a space filename must not replace the tab filename");
             assertFalse(Files.exists(directory.resolve(" chosen .txt")), "collapsed whitespace must not change the target");
-            assertEquals(target, window.active().state().getCurrentFile());
+            assertEquals(target, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
             assertFalse(window.active().state().isDirty());
         }
     }

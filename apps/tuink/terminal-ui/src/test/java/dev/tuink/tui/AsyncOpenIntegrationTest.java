@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.storage.jvm.JvmDocumentStorage;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -48,7 +50,7 @@ class AsyncOpenIntegrationTest {
             assertFalse(window.documentIo.busy());
             assertEquals(3, window.tabs.size());
             var loaded = window.active().tabSession();
-            assertEquals(selected, loaded.state().getCurrentFile());
+            assertEquals(selected, JvmDocumentStorage.pathOf(loaded.state().getCurrentResource()));
             assertEquals(List.of("loaded contents"), loaded.model().snapshotLines());
             assertFalse(loaded.state().isDirty());
             assertTrue(original.state().isDirty());
@@ -69,7 +71,7 @@ class AsyncOpenIntegrationTest {
             Path alias = Files.createSymbolicLink(directory.resolve("alias.txt"), selected.getFileName());
             window.command(TuinkCommand.TAB_NEW);
             var existing = window.active().tabSession();
-            existing.engine().openExisting(alias);
+            existing.engine().openExisting(JvmDocumentStorage.resource(alias));
             window.frame();
             window.event(new TextInput("draft "));
             long revision = existing.model().revision();
@@ -80,7 +82,7 @@ class AsyncOpenIntegrationTest {
 
             assertEquals(2, window.tabs.size());
             assertSame(existing, window.active().tabSession());
-            assertEquals(alias, existing.state().getCurrentFile());
+            assertEquals(alias, JvmDocumentStorage.pathOf(existing.state().getCurrentResource()));
             assertEquals(revision, existing.model().revision());
             assertEquals(cursor, existing.state().getCursor());
             assertEquals(List.of("draft disk"), existing.model().snapshotLines());
@@ -180,7 +182,7 @@ class AsyncOpenIntegrationTest {
             assertEquals("opened contents", Files.readString(selected));
             assertEquals(2, window.tabs.size());
             assertFalse(window.tabs.stream().anyMatch(tab -> tab.tabSession() == second));
-            assertEquals(selected, window.active().state().getCurrentFile());
+            assertEquals(selected, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
             assertEquals(List.of("opened contents"), window.active().tabSession().model().snapshotLines());
             assertFalse(window.active().state().isDirty());
         }
@@ -206,7 +208,7 @@ class AsyncOpenIntegrationTest {
             window.event(KeyStroke.of(KeyStroke.Key.ARROW_RIGHT));
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             assertEquals(1, window.tabs.size());
-            assertEquals(selected, window.active().state().getCurrentFile());
+            assertEquals(selected, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
             assertEquals("original", Files.readString(window.document));
         }
     }
@@ -283,7 +285,7 @@ class AsyncOpenIntegrationTest {
             scenario.executor.runNextOnWorker();
             window.frame();
             assertEquals(2, window.tabs.size());
-            assertEquals(selected, window.active().state().getCurrentFile());
+            assertEquals(selected, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
             assertEquals(List.of("\0A\0"), window.active().tabSession().model().snapshotLines());
             assertTrue(original.state().isDirty());
             assertEquals(List.of("draft original"), original.model().snapshotLines());

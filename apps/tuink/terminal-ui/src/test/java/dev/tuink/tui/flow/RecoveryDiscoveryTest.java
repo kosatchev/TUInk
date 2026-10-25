@@ -97,7 +97,7 @@ class RecoveryDiscoveryTest {
             }
         }
         String classpath = String.join(java.io.File.pathSeparator, location(RecoveryStore.class),
-            location(getClass()), location(RecoverySnapshot.class));
+            location(getClass()), location(RecoverySnapshot.class), location(dev.tuink.storage.jvm.JvmDocumentStorage.class), location(dev.tuink.editor.document.DocumentId.class));
         Process child = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx64m", "-cp", classpath,
             BudgetProbe.class.getName(), directory.toString()).redirectErrorStream(true).start();

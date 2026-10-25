@@ -1,15 +1,27 @@
 package dev.tuink.core;
 
 import dev.tuink.core.TextModel.ReplacementDelta;
+import dev.tuink.editor.storage.DocumentResource;
+import dev.tuink.editor.storage.DocumentStorage;
+import dev.tuink.editor.storage.ResourceId;
+import dev.tuink.editor.storage.ResourceBinding;
+import dev.tuink.editor.storage.ResourceVersion;
+import dev.tuink.editor.storage.DocumentLoad;
+import dev.tuink.editor.storage.DocumentSave;
+import dev.tuink.editor.storage.SavedDocument;
+import dev.tuink.editor.storage.SaveAuthorization;
+import dev.tuink.editor.storage.SaveTarget;
+import dev.tuink.editor.storage.StorageWriteException;
+import dev.tuink.editor.storage.DocumentFileMetadata;
+import dev.tuink.editor.storage.BomKind;
+import dev.tuink.editor.storage.DocumentOpenMode;
+import dev.tuink.editor.storage.SaveDisposition;
 import dev.tuink.editor.diff.LineDiff;
 import dev.tuink.editor.diff.LineEdit;
 import dev.tuink.unicode.GraphemeText;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.NoSuchFileException;
-import java.nio.file.Path;
 import java.util.AbstractList;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -440,59 +452,55 @@ public class EditorEngine {
         }
     }
 
-    public void open(Path path) throws IOException {
-        open(path, true, DocumentOpenMode.DETECT);
+    /** Explicit synchronous convenience; interactive hosts run the detached read on a worker. */
+    public void open(DocumentResource resource) throws IOException {
+        open(resource, true, DocumentOpenMode.DETECT);
     }
 
-    /** Opens an existing file without treating a missing target as a new document. */
-    public void openExisting(Path path) throws IOException {
-        openExisting(path, DocumentOpenMode.DETECT);
+    public void openExisting(DocumentResource resource) throws IOException {
+        openExisting(resource, DocumentOpenMode.DETECT);
     }
 
-    public void openExisting(Path path, DocumentOpenMode openMode) throws IOException {
-        open(path, false, openMode);
+    public void openExisting(DocumentResource resource, DocumentOpenMode mode) throws IOException {
+        open(resource, false, mode);
     }
 
-    private void open(Path path, boolean createIfMissing, DocumentOpenMode openMode) throws IOException {
-        if (path == null) {
-            throw new IOException("No file selected");
-        }
-        Path normalizedPath = TextModel.resolveDocumentPath(path);
-        SaveDisposition openedDisposition;
+    private void open(DocumentResource resource, boolean allowMissing, DocumentOpenMode mode) throws IOException {
+        if (resource == null) throw new IOException("No file selected");
+        openPrepared(resource.storage().load(resource, mode, allowMissing));
+    }
+
+    /** Publishes a detached read without reopening its resource. */
+    public void openPrepared(DocumentLoad prepared) {
+        Objects.requireNonNull(prepared, "prepared");
+        TextModel.LocalEdit edit = null;
+        boolean published = false;
         try {
-            TextModel.LoadMetadata loaded = openMode == DocumentOpenMode.DETECT
-                ? model.load(normalizedPath) : model.load(normalizedPath, openMode);
-            state.setFileEncoding(loaded.charset());
-            state.setLineSeparator(loaded.lineSeparator());
-            openedDisposition = SaveDisposition.REPLACE_EXISTING;
-        } catch (NoSuchFileException missing) {
-            if (!createIfMissing || Files.isSymbolicLink(normalizedPath)) {
-                throw missing;
-            }
-            model.replaceLines(
-                List.of(""),
-                DocumentFileMetadata.newDocument(1)
-            );
-            model.restoreFileBaseline(null);
-            state.setFileEncoding(StandardCharsets.UTF_8);
-            state.setLineSeparator(EditorState.LINE_SEPARATOR_LF);
-            openedDisposition = SaveDisposition.CREATE_NEW;
+            edit = model.beginLocalEdit();
+            model.applyPreparedLoad(prepared);
+            edit.preparePublication();
+            List<LineText> baseline = model.snapshotTextLines();
+            EditorDocument.PreparedChange views = document.prepareChange(model.lineCount(), model::lineText, state);
+            Position start = new Position(0, 0);
+            // Capacity changes do not change visible gutter state. All later fills
+            // use existing storage and enum/Boolean constants after text publication.
+            prepareGutterDiffCapacity(model.lineCount());
+            edit.publish();
+            published = true;
+            finishOpen(prepared.resource(), prepared.disposition(), baseline, start, views);
+        } catch (OutOfMemoryError exhausted) {
+            if (published) throw exhausted;
+            throw new DocumentEditLimitException();
+        } finally {
+            if (!published && edit != null) edit.abort();
         }
-        finishOpen(normalizedPath, openedDisposition);
     }
 
-    /** Publish a detached read on the owner thread without reopening the filesystem. */
-    public void openPrepared(TextModel.PreparedLoad prepared) {
-        model.applyPreparedLoad(prepared);
-        state.setFileEncoding(prepared.metadata().charset());
-        state.setLineSeparator(prepared.metadata().defaultLineSeparator());
-        finishOpen(prepared.path(), SaveDisposition.REPLACE_EXISTING);
-    }
-
-    private void finishOpen(Path normalizedPath, SaveDisposition openedDisposition) {
-        state.setCurrentFile(normalizedPath);
-        state.setSaveDisposition(openedDisposition);
-        state.setCursor(new Position(0, 0));
+    private void finishOpen(DocumentResource resource, SaveDisposition disposition, List<LineText> baseline,
+                            Position start, EditorDocument.PreparedChange views) {
+        state.setCurrentResource(resource);
+        state.setSaveDisposition(disposition);
+        state.setCursor(start);
         state.invalidateNavigation();
         state.setTopLine(0);
         state.setLeftColumn(0);
@@ -502,9 +510,17 @@ public class EditorEngine {
         history.undoStack.clear();
         history.redoStack.clear();
         breakCoalescing();
-        resetGutterDiffBaselinesOnOpen();
+        resetGutterDiffBaselinesOnOpen(baseline);
         beginNewDocumentState();
-        markCurrentAsSaved();
+        history.savedDocumentStateId = history.currentDocumentStateId;
+        document.publishChange(views);
+    }
+
+    private void prepareGutterDiffCapacity(int lines) {
+        ((ArrayList<GutterDiffFlag>) gutterDiff.savedDiffFlags).ensureCapacity(lines);
+        ((ArrayList<Boolean>) gutterDiff.savedDeletedMarkers).ensureCapacity(lines);
+        ((ArrayList<GutterDiffFlag>) gutterDiff.openDiffFlags).ensureCapacity(lines);
+        ((ArrayList<Boolean>) gutterDiff.openDeletedMarkers).ensureCapacity(lines);
     }
 
     public void save() throws IOException {
@@ -512,66 +528,66 @@ public class EditorEngine {
         completeSaved(prepared, prepared.write());
     }
 
-    public void saveAs(Path path) throws IOException {
-        saveAs(path, SaveDisposition.CREATE_NEW);
+    public void saveAs(DocumentResource resource) throws IOException {
+        saveAs(resource, SaveDisposition.CREATE_NEW);
     }
 
-    public void saveAs(Path path, SaveDisposition disposition) throws IOException {
-        saveAs(path, disposition, model.fileMetadata());
+    public void saveAs(DocumentResource resource, SaveDisposition disposition) throws IOException {
+        saveAs(resource, disposition, model.fileMetadata());
     }
 
-    /** Explicit, lossless conversion: UTF-8 without a BOM, with every existing EOL retained. */
-    public void saveAsUtf8(Path path, SaveDisposition disposition) throws IOException {
+    /** Explicit, lossless conversion: UTF-8 without a BOM, retaining every existing EOL. */
+    public void saveAsUtf8(DocumentResource resource, SaveDisposition disposition) throws IOException {
         DocumentFileMetadata original = model.fileMetadata();
-        saveAs(path, disposition, new DocumentFileMetadata(StandardCharsets.UTF_8, BomKind.NONE,
+        saveAs(resource, disposition, new DocumentFileMetadata(StandardCharsets.UTF_8, BomKind.NONE,
             original.defaultLineSeparator(), original.lineSeparators()));
     }
 
-    private void saveAs(Path path, SaveDisposition disposition, DocumentFileMetadata metadata) throws IOException {
-        SavePreparation preparation = prepareSaveInput(path, disposition, metadata);
+    private void saveAs(DocumentResource resource, SaveDisposition disposition, DocumentFileMetadata metadata)
+        throws IOException {
+        SavePreparation preparation = prepareSaveInput(resource, disposition, metadata);
         PreparedSave prepared = approveSaveAs(preparation.inspectTarget());
         completeSaved(prepared, prepared.write());
     }
 
     public PreparedSave prepareSave() throws IOException {
-        return new PreparedSave(prepareSaveInput(state.getCurrentFile(), state.getSaveDisposition(), model.fileMetadata()),
-            null, true);
+        return new PreparedSave(prepareSaveInput(state.getCurrentResource(), state.getSaveDisposition(),
+            model.fileMetadata()), new SaveAuthorization.Current());
     }
 
-    public PreparedSave prepareSaveAs(Path path, SaveDisposition disposition, boolean utf8) throws IOException {
-        return approveSaveAs(prepareSaveAsInput(path, disposition, utf8).inspectTarget());
+    public PreparedSave prepareSaveAs(DocumentResource resource, SaveDisposition disposition, boolean utf8)
+        throws IOException {
+        return approveSaveAs(prepareSaveAsInput(resource, disposition, utf8).inspectTarget());
     }
 
-    /** Captures owner state only. Target inspection may run on a worker before owner approval. */
-    public SavePreparation prepareSaveAsInput(Path path, SaveDisposition disposition, boolean utf8) throws IOException {
+    /** Captures owner state only. Inspection runs detached before owner approval. */
+    public SavePreparation prepareSaveAsInput(DocumentResource resource, SaveDisposition disposition, boolean utf8)
+        throws IOException {
         try {
             DocumentFileMetadata metadata = model.fileMetadata();
             if (utf8) metadata = new DocumentFileMetadata(StandardCharsets.UTF_8, BomKind.NONE,
                 metadata.defaultLineSeparator(), metadata.lineSeparators());
-            return prepareSaveInput(path, disposition, metadata);
+            return prepareSaveInput(resource, disposition, metadata);
         } catch (OutOfMemoryError exhausted) {
             throw new IOException("Not enough memory to prepare the save", exhausted);
         }
     }
 
-    private SavePreparation prepareSaveInput(Path path, SaveDisposition disposition, DocumentFileMetadata metadata)
-        throws IOException {
+    private SavePreparation prepareSaveInput(DocumentResource resource, SaveDisposition disposition,
+                                             DocumentFileMetadata metadata) throws IOException {
         try {
-            return prepareSavePlan(path, disposition, metadata);
+            return prepareSavePlan(resource, disposition, metadata);
         } catch (OutOfMemoryError | DocumentEditLimitException exhausted) {
             throw new IOException("Not enough memory to prepare the save", exhausted);
         }
     }
 
-    private SavePreparation prepareSavePlan(Path path, SaveDisposition disposition, DocumentFileMetadata metadata)
-        throws IOException {
-        if (path == null) {
-            throw new IOException("No file selected");
-        }
+    private SavePreparation prepareSavePlan(DocumentResource resource, SaveDisposition disposition,
+                                            DocumentFileMetadata metadata) throws IOException {
+        if (resource == null) throw new IOException("No file selected");
         boolean formatChanged = !DocumentPreferences.from(model.fileMetadata())
             .equals(DocumentPreferences.from(metadata));
-        // Allocate the complete history transition before writing to disk. A
-        // failed encoding/write must leave history, format and savepoint intact.
+        // Allocate mandatory history before an external commit can succeed.
         Deque<HistoryEntry> preparedHistory = null;
         long convertedStateId = history.nextDocumentStateId + 1;
         if (formatChanged) {
@@ -582,26 +598,27 @@ public class EditorEngine {
             preparedHistory = new ArrayDeque<>(history.undoStack);
             pushWithLimit(preparedHistory, conversion);
         }
-        return new SavePreparation(this, model.prepareSave(path, metadata, disposition, false),
-            state.getCurrentFile(), state.getSaveDisposition(), model.revision(),
-            history.currentDocumentStateId, preparedHistory, convertedStateId);
+        return new SavePreparation(this, model.prepareSave(resource, metadata, disposition),
+            resourceBinding(), model.revision(), history.currentDocumentStateId, preparedHistory, convertedStateId);
     }
 
-    /** Binds an inspected address/version to the unchanged owner; performs no filesystem I/O. */
+    /** Binds the inspected observation to its unchanged owner; performs no provider operation. */
     public PreparedSave approveSaveAs(SaveTargetInspection inspection) throws IOException {
         Objects.requireNonNull(inspection, "inspection");
         SavePreparation preparation = inspection.preparation;
         if (!preparation.belongsToUnchanged(this)) {
             throw new IOException("Document changed while inspecting the Save As target. Choose the target again.");
         }
-        return new PreparedSave(preparation, inspection.target, inspection.currentTarget);
+        return new PreparedSave(preparation, new SaveAuthorization.Approved(inspection.target));
     }
 
-    /** Caller keeps document edits locked until the matching detached write completes. */
-    public void completeSaved(PreparedSave prepared, TextModel.SavedFile saved) {
+    /** Caller keeps document edits locked until the detached write completes. */
+    public void completeSaved(PreparedSave prepared, SavedDocument saved) {
+        Objects.requireNonNull(prepared, "prepared");
+        Objects.requireNonNull(saved, "saved");
         SavePreparation plan = prepared.preparation;
-        if (prepared.completed || !plan.belongsToUnchanged(this)) {
-            throw new IllegalStateException("Saved result does not belong to the unchanged document");
+        if (prepared.completed || saved != prepared.receipt || !plan.belongsToUnchanged(this)) {
+            throw new IllegalStateException("Saved result does not belong to the unchanged document and write");
         }
         model.completeSave(saved);
         if (plan.convertedHistory != null) {
@@ -611,7 +628,7 @@ public class EditorEngine {
             history.currentDocumentStateId = plan.convertedStateId;
         }
         prepared.completed = true;
-        state.setCurrentFile(saved.path());
+        state.setCurrentResource(saved.resource());
         state.setSaveDisposition(SaveDisposition.REPLACE_EXISTING);
         state.setDirty(false);
         breakCoalescing();
@@ -624,38 +641,48 @@ public class EditorEngine {
         document.reflectFileMetadata();
     }
 
+    public ResourceBinding resourceBinding() {
+        DocumentResource resource = state.getCurrentResource();
+        SaveDisposition disposition = state.getSaveDisposition();
+        ResourceVersion version = resource != null && disposition == SaveDisposition.REPLACE_EXISTING
+            ? model.fileBaseline() : null;
+        return new ResourceBinding(resource, disposition, version);
+    }
+
     public static final class SavePreparation {
         private final EditorEngine owner;
         private final Thread ownerThread;
-        private final TextModel.SaveRequest request;
-        private final Path originalPath;
-        private final SaveDisposition originalDisposition;
+        private final DocumentSave request;
+        private final ResourceBinding originalBinding;
+        private final ResourceVersion originalBaseline;
         private final long revision;
         private final long stateId;
         private final Deque<HistoryEntry> convertedHistory;
         private final long convertedStateId;
 
-        private SavePreparation(EditorEngine owner, TextModel.SaveRequest request,
-                             Path originalPath, SaveDisposition originalDisposition, long revision, long stateId,
-                             Deque<HistoryEntry> convertedHistory, long convertedStateId) {
+        private SavePreparation(EditorEngine owner, DocumentSave request, ResourceBinding originalBinding,
+                                long revision, long stateId, Deque<HistoryEntry> convertedHistory,
+                                long convertedStateId) {
             this.owner = owner;
             this.ownerThread = Thread.currentThread();
             this.request = request;
-            this.originalPath = originalPath;
-            this.originalDisposition = originalDisposition;
+            this.originalBinding = originalBinding;
+            this.originalBaseline = request.baseline();
             this.revision = revision;
             this.stateId = stateId;
             this.convertedHistory = convertedHistory;
             this.convertedStateId = convertedStateId;
         }
 
-        /** Detached, read-only preflight. Does not access the live owner or write the target. */
+        /** Detached preflight; never reads the live owner or modifies a resource. */
         public SaveTargetInspection inspectTarget() throws IOException {
             try {
-                PreparedSaveTarget target = PreparedSaveTarget.inspect(request.path());
-                boolean current = isCurrentSaveTarget(request.path(), target.requested(),
-                    originalPath, originalDisposition, request.baseline());
-                return new SaveTargetInspection(this, target, current);
+                SaveTarget target = request.resource().storage().inspect(request.resource(), originalBinding);
+                if (target.requestedResource().storage() != request.resource().storage()
+                    || target.physicalResource().storage() != request.resource().storage()) {
+                    throw new IOException("Storage returned a target from another provider");
+                }
+                return new SaveTargetInspection(this, target);
             } catch (OutOfMemoryError exhausted) {
                 throw new IOException("Not enough memory to inspect the Save As target", exhausted);
             }
@@ -666,47 +693,81 @@ public class EditorEngine {
         private boolean belongsToUnchanged(EditorEngine engine) {
             return owner == engine && Thread.currentThread() == ownerThread && engine.model.revision() == revision
                 && engine.history.currentDocumentStateId == stateId
-                && Objects.equals(engine.state.getCurrentFile(), originalPath)
-                && engine.state.getSaveDisposition() == originalDisposition
-                && Objects.equals(engine.model.fileBaseline(), request.baseline());
+                && Objects.equals(engine.state.getCurrentResource(), originalBinding.resource())
+                && engine.state.getSaveDisposition() == originalBinding.disposition()
+                && Objects.equals(engine.model.fileBaseline(), originalBaseline);
         }
     }
 
-    /** A detached inspection belonging to exactly one captured Save As request. */
+    /** A provider observation belonging to exactly one captured Save As request. */
     public static final class SaveTargetInspection {
         private final SavePreparation preparation;
-        private final PreparedSaveTarget target;
-        private final boolean currentTarget;
+        private final SaveTarget target;
 
-        private SaveTargetInspection(SavePreparation preparation, PreparedSaveTarget target, boolean currentTarget) {
+        private SaveTargetInspection(SavePreparation preparation, SaveTarget target) {
             this.preparation = preparation;
             this.target = target;
-            this.currentTarget = currentTarget;
         }
 
-        public Path requestedPath() { return target.requested(); }
-        public Path physicalTarget() { return target.target(); }
+        public DocumentResource requestedResource() { return target.requestedResource(); }
+        public DocumentResource physicalResource() { return target.physicalResource(); }
         public boolean exists() { return target.exists(); }
-        public boolean currentTarget() { return currentTarget; }
+        public boolean currentTarget() { return target.currentTarget(); }
     }
 
     public static final class PreparedSave {
         private final SavePreparation preparation;
-        private final PreparedSaveTarget target;
-        private final boolean checkBaseline;
+        private final SaveAuthorization authorization;
+        private final DocumentStorage storage;
+        private final ResourceId expectedResourceId;
+        private final StorageWriteException unconfirmedSave;
+        private volatile SavedDocument receipt;
+        private boolean started;
         private boolean completed;
 
-        private PreparedSave(SavePreparation preparation, PreparedSaveTarget target, boolean checkBaseline) {
+        private PreparedSave(SavePreparation preparation, SaveAuthorization authorization) {
             this.preparation = preparation;
-            this.target = target;
-            this.checkBaseline = checkBaseline;
+            this.authorization = authorization;
+            storage = preparation.request.resource().storage();
+            DocumentResource expected = authorization instanceof SaveAuthorization.Approved approved
+                ? approved.target().requestedResource() : preparation.request.resource();
+            expectedResourceId = expected.id();
+            // A provider may already have published when a receipt cannot be
+            // validated, including under heap exhaustion. Prepare this outcome
+            // before calling it so that retaining UNKNOWN needs no allocation.
+            unconfirmedSave = new StorageWriteException("Storage did not confirm the expected resource and document"
+                + ". Verify its contents before retrying; the editor retains your draft.", null,
+                StorageWriteException.Outcome.UNKNOWN, expected);
         }
 
-        /** Writes only the approved address/version or the current document's loaded baseline. */
-        public TextModel.SavedFile write() throws IOException {
-            TextModel.SaveRequest request = preparation.request;
-            return target == null ? request.write(TextModel.resolveDocumentPath(request.path()), true)
-                : request.write(target, checkBaseline);
+        /** Executes one detached write; its receipt is accepted only by this operation. */
+        public synchronized SavedDocument write() throws IOException {
+            if (started) throw new IllegalStateException("A prepared save may be written only once");
+            started = true;
+            DocumentSave request = preparation.request;
+            SavedDocument saved;
+            try {
+                saved = storage.write(request, authorization);
+            } catch (OutOfMemoryError exhausted) {
+                throw unconfirmed(exhausted);
+            }
+            boolean matches;
+            try {
+                matches = saved != null && saved.resource().storage() == storage
+                    && expectedResourceId.equals(saved.resource().id())
+                    && saved.metadata().isCompatibleWithLineCount(request.lines().size());
+            } catch (RuntimeException | Error invalidReceipt) {
+                throw unconfirmed(invalidReceipt);
+            }
+            if (!matches) throw unconfirmedSave;
+            receipt = saved;
+            return saved;
+        }
+
+        private StorageWriteException unconfirmed(Throwable cause) {
+            try { unconfirmedSave.addSuppressed(cause); }
+            catch (RuntimeException | Error unavailable) { /* The preallocated outcome still retains the draft. */ }
+            return unconfirmedSave;
         }
     }
 
@@ -715,44 +776,8 @@ public class EditorEngine {
         return model.revision() + document.recoveryGeneration;
     }
 
-    /** Whether Save As must retain this document's original-file conflict checks. */
-    public boolean isCurrentSaveTarget(Path path) throws IOException {
-        return path != null && isCurrentSaveTarget(path, TextModel.resolveDocumentPath(path));
-    }
-
-    private boolean isCurrentSaveTarget(Path requested, Path resolved) throws IOException {
-        return isCurrentSaveTarget(requested, resolved, state.getCurrentFile(), state.getSaveDisposition(),
-            model.fileBaseline());
-    }
-
-    private static boolean isCurrentSaveTarget(Path requested, Path resolved, Path currentFile,
-                                              SaveDisposition originalDisposition, FileBaseline baseline) throws IOException {
-        boolean ownsCurrentName = originalDisposition == SaveDisposition.REPLACE_EXISTING;
-        if (ownsCurrentName && currentFile != null
-            && (requested.toAbsolutePath().equals(currentFile.toAbsolutePath())
-                || resolved.equals(currentFile.toAbsolutePath()))) {
-            // The spelling originally opened remains guarded even when its
-            // symlink was redirected or its file has since been removed.
-            return true;
-        }
-        if (baseline == null) {
-            // A recovered existing file without a baseline must still refuse
-            // unverified overwrites through its known name or physical aliases.
-            return ownsCurrentName && isSameSaveTarget(resolved, currentFile);
-        }
-        Path loadedTarget = baseline.target();
-        if (resolved.equals(loadedTarget)) return true;
-        // Alias identity belongs to the physical target loaded by this
-        // document, not to whichever file the opening alias points to now.
-        return Files.exists(loadedTarget) && loadedTarget.equals(loadedTarget.toRealPath())
-            && isSameSaveTarget(resolved, loadedTarget);
-    }
-
-    private static boolean isSameSaveTarget(Path requested, Path known) throws IOException {
-        return known != null && (
-            requested.equals(known.toAbsolutePath())
-                || (Files.exists(requested) && Files.exists(known) && Files.isSameFile(requested, known))
-        );
+    public boolean isCurrentSaveTarget(DocumentResource resource) throws IOException {
+        return resource != null && resource.storage().isCurrentTarget(resource, resourceBinding());
     }
 
     public void moveLeft() {
@@ -1183,7 +1208,7 @@ public class EditorEngine {
     }
 
     public LineCommentResult toggleLineComment() {
-        CommentSyntaxProfile syntax = LanguageProfiles.resolveCommentSyntax(state.getCurrentFile());
+        CommentSyntaxProfile syntax = LanguageProfiles.resolveCommentSyntax(currentNameHint());
         String marker = syntax.lineCommentPrefix();
         if (marker == null) {
             return new LineCommentResult(LineCommentAction.UNSUPPORTED, 0);
@@ -1641,13 +1666,13 @@ public class EditorEngine {
     }
 
     private IndentationDecisions indentationDecisions() {
-        return new IndentationDecisions(model.lineCount(), model::lineText, state.getCurrentFile(), tabWidth,
+        return new IndentationDecisions(model.lineCount(), model::lineText, currentNameHint(), tabWidth,
             tabInsertMode, indentationContext());
     }
 
     private IndentationContext indentationContext() {
         indentationContext.synchronize(model.contentEpoch(), model.revision(),
-            model.firstChangedLineSince(indentationContext.revision()), model.lineCount(), state.getCurrentFile());
+            model.firstChangedLineSince(indentationContext.revision()), model.lineCount(), currentNameHint());
         return indentationContext;
     }
 
@@ -1894,8 +1919,13 @@ public class EditorEngine {
         return i;
     }
 
+    private String currentNameHint() {
+        DocumentResource resource = state.getCurrentResource();
+        return resource == null ? null : resource.nameHint();
+    }
+
     private LanguageProfile languageProfile() {
-        return LanguageProfiles.resolve(state.getCurrentFile());
+        return LanguageProfiles.resolve(currentNameHint());
     }
 
     private boolean isAutoIndentActive() {
@@ -2261,8 +2291,11 @@ public class EditorEngine {
     }
 
     private void resetGutterDiffBaselinesOnOpen() {
+        resetGutterDiffBaselinesOnOpen(model.snapshotTextLines());
+    }
+
+    private void resetGutterDiffBaselinesOnOpen(List<LineText> snapshot) {
         cachedGraphemes = null;
-        List<LineText> snapshot = model.snapshotTextLines();
         document.baselines.openLines = snapshot;
         document.baselines.savedLines = snapshot;
         document.baselines.generation++;

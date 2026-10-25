@@ -6,6 +6,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.editor.storage.BomKind;
+import dev.tuink.editor.storage.DocumentFileMetadata;
+import dev.tuink.editor.storage.DocumentLoad;
+import dev.tuink.editor.storage.SaveDisposition;
+import dev.tuink.storage.jvm.JvmDocumentStorage;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
@@ -31,13 +36,13 @@ class TextModelFileFidelityTest {
         Files.write(source, original);
         TextModel model = new TextModel(new SimpleLineBuffer());
 
-        TextModel.LoadMetadata loaded = model.load(source);
-        model.save(target);
+        DocumentLoad loaded = model.load(JvmDocumentStorage.resource(source));
+        model.save(JvmDocumentStorage.resource(target));
 
         assertEquals(List.of("first", "second", "third", "last", ""), model.snapshotLines());
-        assertEquals(StandardCharsets.UTF_8, loaded.charset());
-        assertEquals(BomKind.UTF_8, loaded.fileMetadata().bomKind());
-        assertEquals(EditorState.LINE_SEPARATOR_CRLF, loaded.lineSeparator());
+        assertEquals(StandardCharsets.UTF_8, loaded.metadata().charset());
+        assertEquals(BomKind.UTF_8, loaded.metadata().bomKind());
+        assertEquals(EditorState.LINE_SEPARATOR_CRLF, loaded.metadata().defaultLineSeparator());
         assertEquals(
             List.of(
                 EditorState.LINE_SEPARATOR_CRLF,
@@ -45,7 +50,7 @@ class TextModelFileFidelityTest {
                 EditorState.LINE_SEPARATOR_CR,
                 EditorState.LINE_SEPARATOR_CRLF
             ),
-            loaded.fileMetadata().lineSeparators()
+            loaded.metadata().lineSeparators()
         );
         assertArrayEquals(original, Files.readAllBytes(target));
     }
@@ -72,7 +77,7 @@ class TextModelFileFidelityTest {
         Path withoutFinalEol = tempDir.resolve("without-final-eol.txt");
         Files.writeString(source, "a\n", StandardCharsets.UTF_8);
         TextModel loaded = new TextModel(new SimpleLineBuffer());
-        loaded.load(source);
+        loaded.load(JvmDocumentStorage.resource(source));
         TextModel inserted = new TextModel(new SimpleLineBuffer());
         inserted.insertText(new Position(0, 0), "a\n");
 
@@ -81,7 +86,7 @@ class TextModelFileFidelityTest {
         assertEquals(inserted.fileMetadata(), loaded.fileMetadata());
 
         assertEquals(new Position(0, 1), loaded.deleteBackward(new Position(1, 0)));
-        loaded.save(withoutFinalEol);
+        loaded.save(JvmDocumentStorage.resource(withoutFinalEol));
         assertEquals(List.of("a"), loaded.snapshotLines());
         assertEquals(List.of(), loaded.fileMetadata().lineSeparators());
         assertEquals("a", Files.readString(withoutFinalEol, StandardCharsets.UTF_8));
@@ -100,7 +105,7 @@ class TextModelFileFidelityTest {
         EditorState state = new EditorState();
         EditorEngine engine = new EditorEngine(model, state, new TestEditorTextLayout(model));
 
-        engine.open(path);
+        engine.open(JvmDocumentStorage.resource(path));
         engine.save();
 
         assertArrayEquals(original, Files.readAllBytes(path));
@@ -112,10 +117,10 @@ class TextModelFileFidelityTest {
         Path target = tempDir.resolve("edited.txt");
         Files.writeString(source, "a\r\nb\nc\r\n", StandardCharsets.UTF_8);
         TextModel model = new TextModel(new SimpleLineBuffer());
-        model.load(source);
+        model.load(JvmDocumentStorage.resource(source));
 
         model.insertNewline(new Position(1, 1));
-        model.save(target);
+        model.save(JvmDocumentStorage.resource(target));
 
         assertEquals(
             List.of(
@@ -138,7 +143,7 @@ class TextModelFileFidelityTest {
             TextModel model = new TextModel(new SimpleLineBuffer());
             EditorState state = new EditorState();
             EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model));
-            engine.open(source);
+            engine.open(JvmDocumentStorage.resource(source));
             DocumentFileMetadata metadata = model.fileMetadata();
             Position start = new Position(0, 0);
             Position end = new Position(2, 1);
@@ -174,13 +179,13 @@ class TextModelFileFidelityTest {
         Path restoredFile = tempDir.resolve("restored.txt");
         Files.write(source, original);
         TextModel sourceModel = new TextModel(new SimpleLineBuffer());
-        sourceModel.load(source);
+        sourceModel.load(JvmDocumentStorage.resource(source));
         EditorState sourceState = new EditorState();
         RecoverySnapshot snapshot = RecoverySnapshot.capture(sourceModel, sourceState);
         TextModel restoredModel = new TextModel(new SimpleLineBuffer());
 
         snapshot.restore(restoredModel, new EditorState());
-        restoredModel.save(restoredFile);
+        restoredModel.save(JvmDocumentStorage.resource(restoredFile));
 
         assertArrayEquals(original, Files.readAllBytes(restoredFile));
     }
@@ -192,7 +197,7 @@ class TextModelFileFidelityTest {
         TextModel model = new TextModel(new SimpleLineBuffer());
         EditorState state = new EditorState();
         EditorEngine engine = new EditorEngine(model, state, new TestEditorTextLayout(model));
-        engine.open(source);
+        engine.open(JvmDocumentStorage.resource(source));
         state.setCursor(new Position(1, 0));
 
         engine.backspace();
@@ -219,7 +224,7 @@ class TextModelFileFidelityTest {
         TextModel model = new TextModel(new SimpleLineBuffer());
         EditorState state = new EditorState();
         EditorEngine engine = new EditorEngine(model, state, new TestEditorTextLayout(model));
-        engine.open(source);
+        engine.open(JvmDocumentStorage.resource(source));
         DocumentFileMetadata originalMetadata = model.fileMetadata();
 
         engine.beginSelectionAt(new Position(0, 1));
@@ -228,7 +233,7 @@ class TextModelFileFidelityTest {
         DocumentFileMetadata editedMetadata = model.fileMetadata();
 
         engine.undo();
-        model.save(restored);
+        model.save(JvmDocumentStorage.resource(restored));
         assertEquals(originalMetadata, model.fileMetadata());
         assertArrayEquals(original, Files.readAllBytes(restored));
 
@@ -246,9 +251,9 @@ class TextModelFileFidelityTest {
         TextModel model = new TextModel(new SimpleLineBuffer());
         EditorState state = new EditorState();
         EditorEngine engine = new EditorEngine(model, state, new TestEditorTextLayout(model));
-        engine.open(source);
+        engine.open(JvmDocumentStorage.resource(source));
 
-        engine.open(tempDir.resolve("new.txt"));
+        engine.open(JvmDocumentStorage.resource(tempDir.resolve("new.txt")));
 
         assertEquals(StandardCharsets.UTF_8, model.fileMetadata().charset());
         assertEquals(BomKind.NONE, model.fileMetadata().bomKind());
@@ -265,10 +270,10 @@ class TextModelFileFidelityTest {
         Path source = tempDir.resolve("cp1251.txt");
         Files.write(source, original);
         TextModel model = new TextModel(new SimpleLineBuffer());
-        model.load(source);
+        model.load(JvmDocumentStorage.resource(source));
         model.insertText(new Position(0, model.getLine(0).length()), "😀");
 
-        assertThrows(IOException.class, () -> model.save(source));
+        assertThrows(IOException.class, () -> model.save(JvmDocumentStorage.resource(source)));
 
         assertArrayEquals(original, Files.readAllBytes(source));
         assertEquals(windows1251, model.fileMetadata().charset());
@@ -284,7 +289,7 @@ class TextModelFileFidelityTest {
         model.insertText(new Position(0, 0), "safe");
         long revision = model.revision();
 
-        assertThrows(IOException.class, () -> model.load(source));
+        assertThrows(IOException.class, () -> model.load(JvmDocumentStorage.resource(source)));
 
         assertEquals(List.of("safe"), model.snapshotLines());
         assertEquals(revision, model.revision());
@@ -298,7 +303,7 @@ class TextModelFileFidelityTest {
         model.insertText(new Position(0, 0), "safe");
         long revision = model.revision();
 
-        assertThrows(IOException.class, () -> model.load(source));
+        assertThrows(IOException.class, () -> model.load(JvmDocumentStorage.resource(source)));
 
         assertEquals(List.of("safe"), model.snapshotLines());
         assertEquals(revision, model.revision());
@@ -342,7 +347,7 @@ class TextModelFileFidelityTest {
             model.insertText(new Position(0, 0), "TUInk 😀");
             Path target = tempDir.resolve("explicit-" + charset.name() + ".txt");
 
-            model.save(target, charset, EditorState.LINE_SEPARATOR_LF);
+            model.save(JvmDocumentStorage.resource(target), charset, EditorState.LINE_SEPARATOR_LF);
 
             BomKind expectedBom = StandardCharsets.UTF_16LE.equals(charset)
                 ? BomKind.UTF_16_LE
@@ -350,7 +355,7 @@ class TextModelFileFidelityTest {
             byte[] bytes = Files.readAllBytes(target);
             assertTrue(startsWith(bytes, expectedBom.bytes()));
             TextModel reopened = new TextModel(new SimpleLineBuffer());
-            reopened.load(target);
+            reopened.load(JvmDocumentStorage.resource(target));
             assertEquals(List.of("TUInk 😀"), reopened.snapshotLines());
             assertEquals(charset, reopened.fileMetadata().charset());
             assertEquals(expectedBom, reopened.fileMetadata().bomKind());
@@ -398,11 +403,11 @@ class TextModelFileFidelityTest {
         Files.write(source, original);
         TextModel model = new TextModel(new SimpleLineBuffer());
 
-        TextModel.LoadMetadata loaded = model.load(source);
-        model.save(target);
+        DocumentLoad loaded = model.load(JvmDocumentStorage.resource(source));
+        model.save(JvmDocumentStorage.resource(target));
 
-        assertEquals(charset, loaded.charset());
-        assertEquals(bomKind, loaded.fileMetadata().bomKind());
+        assertEquals(charset, loaded.metadata().charset());
+        assertEquals(bomKind, loaded.metadata().bomKind());
         assertArrayEquals(original, Files.readAllBytes(target));
     }
 

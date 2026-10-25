@@ -6,6 +6,8 @@ import hashlib
 import os
 import re
 import shutil
+import socket
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -34,6 +36,7 @@ class ArchiveInstallTest(unittest.TestCase):
         temporary_files = self.root / "tmp"
         temporary_files.mkdir()
         sudo = tools / "sudo"
+        self.sudo_log = self.root / "sudo.log"
         sudo.write_text(
             "#!/usr/bin/env bash\n"
             "set -euo pipefail\n"
@@ -43,6 +46,7 @@ class ArchiveInstallTest(unittest.TestCase):
             "    exit 98\n"
             "  fi\n"
             "done\n"
+            'printf "%s\\n" "$*" >> "${TUINK_TEST_SUDO_LOG}"\n'
             "exec \"$@\"\n",
             encoding="utf-8",
         )
@@ -52,6 +56,7 @@ class ArchiveInstallTest(unittest.TestCase):
             "PATH": f"{tools}:{os.environ['PATH']}",
             "TMPDIR": str(temporary_files),
             "TUINK_TEST_ROOT": str(self.root),
+            "TUINK_TEST_SUDO_LOG": str(self.sudo_log),
         }
         for name in ("install.sh", "uninstall.sh"):
             source = (SCRIPT_DIR / name).read_text(encoding="utf-8")
@@ -87,6 +92,38 @@ class ArchiveInstallTest(unittest.TestCase):
             self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
             self.assertIn("Refusing", result.stderr)
         return result
+
+    def installation_state(self):
+        """Snapshot without following links or opening FIFOs and other special files."""
+        paths = [self.install_dir, *self.install_dir.rglob("*"), self.link]
+        state = {}
+        for path in paths:
+            if not path.exists() and not path.is_symlink():
+                continue
+            metadata = path.lstat()
+            payload = None
+            if stat.S_ISLNK(metadata.st_mode):
+                payload = path.readlink()
+            elif stat.S_ISREG(metadata.st_mode):
+                payload = path.read_bytes()
+            state[path] = (metadata.st_mode, metadata.st_mtime_ns, payload)
+        return state
+
+    def assert_refused_without_mutation(self, script):
+        before = self.installation_state()
+        sudo_before = self.sudo_log.read_bytes()
+        self.run_script(script, success=False)
+        self.assertEqual(before, self.installation_state())
+        self.assertEqual(sudo_before, self.sudo_log.read_bytes(), "refusal must precede sudo calls")
+
+    def replace_license_bundle(self, files):
+        source = self.archive / "licenses"
+        shutil.rmtree(source)
+        source.mkdir()
+        for relative, text in files.items():
+            path = source / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
 
     def test_install_preserves_archive_and_provides_online_readme(self):
         # Exercise every supported link kind independently of README content.
@@ -279,6 +316,168 @@ class ArchiveInstallTest(unittest.TestCase):
                 destination.unlink()
                 destination.write_bytes(original)
         self.assertEqual(original_binary, (self.install_dir / "tuink").read_bytes())
+
+    def test_nonregular_top_level_destinations_refuse_upgrade_and_uninstall_before_mutation(self):
+        self.run_script("install.sh")
+        self.binary.write_text("replacement must not be installed", encoding="utf-8")
+        names = ("tuink", "install.sh", "uninstall.sh", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md")
+        kinds = ("directory", "directory-link", "fifo", "fifo-link", "socket", "device-link")
+        for kind in kinds:
+            for name in names:
+                with self.subTest(kind=kind, name=name):
+                    destination = self.install_dir / name
+                    backup = self.root / "managed-file-backup"
+                    foreign = self.root / "foreign-target"
+                    destination.rename(backup)
+                    listener = None
+                    try:
+                        target = foreign if kind.endswith("-link") else destination
+                        if kind.startswith("directory"):
+                            target.mkdir()
+                            (target / "keep.txt").write_text("keep me", encoding="utf-8")
+                        elif kind.startswith("fifo"):
+                            os.mkfifo(target)
+                        elif kind == "socket":
+                            listener = socket.socket(socket.AF_UNIX)
+                            listener.bind(str(target))
+                        elif kind == "device-link":
+                            target = Path("/dev/null")
+                            self.assertTrue(stat.S_ISCHR(target.stat().st_mode))
+                        if kind.endswith("-link"):
+                            destination.symlink_to(target)
+                        for script in ("install.sh", "uninstall.sh"):
+                            self.assert_refused_without_mutation(script)
+                        if kind.startswith("directory"):
+                            self.assertEqual("keep me", (target / "keep.txt").read_text())
+                        elif kind.startswith("fifo"):
+                            self.assertTrue(stat.S_ISFIFO(target.lstat().st_mode))
+                    finally:
+                        if listener is not None:
+                            listener.close()
+                        if destination.is_dir() and not destination.is_symlink():
+                            shutil.rmtree(destination)
+                        elif destination.exists() or destination.is_symlink():
+                            destination.unlink()
+                        if foreign.is_dir():
+                            shutil.rmtree(foreign)
+                        elif foreign.exists():
+                            foreign.unlink()
+                        backup.rename(destination)
+
+    def test_missing_and_safe_symlink_top_level_files_can_be_repaired_and_uninstalled(self):
+        names = ("tuink", "install.sh", "uninstall.sh", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md")
+        foreign = self.root / "foreign-file"
+        foreign.write_text("keep me", encoding="utf-8")
+        for kind in ("missing", "regular-link", "dangling-link"):
+            with self.subTest(kind=kind):
+                self.run_script("install.sh")
+                for operation in ("install.sh", "uninstall.sh"):
+                    for name in names:
+                        destination = self.install_dir / name
+                        destination.unlink()
+                        if kind != "missing":
+                            target = foreign if kind == "regular-link" else self.root / "absent-target"
+                            destination.symlink_to(target)
+                    self.run_script(operation)
+                    self.assertEqual("keep me", foreign.read_text())
+                    self.assertFalse((self.root / "absent-target").exists())
+                    if operation == "install.sh":
+                        for name in names:
+                            self.assertTrue((self.install_dir / name).is_file())
+                            self.assertFalse((self.install_dir / name).is_symlink())
+                self.assertFalse(self.install_dir.exists())
+                self.assertFalse(self.link.is_symlink())
+
+    def test_ownership_metadata_remains_regular_and_required_before_any_mutation(self):
+        self.run_script("install.sh")
+        self.binary.write_text("replacement must not be installed", encoding="utf-8")
+        foreign = self.root / "foreign-marker"
+        for name in (".tuink-archive-install", ".tuink-license-files"):
+            destination = self.install_dir / name
+            for kind in ("missing", "directory", "fifo", "regular-link", "dangling-link"):
+                with self.subTest(kind=kind, name=name):
+                    backup = self.root / "metadata-backup"
+                    destination.rename(backup)
+                    try:
+                        if kind == "directory":
+                            destination.mkdir()
+                        elif kind == "fifo":
+                            os.mkfifo(destination)
+                        elif kind == "regular-link":
+                            foreign.write_bytes(backup.read_bytes())
+                            destination.symlink_to(foreign)
+                        elif kind == "dangling-link":
+                            destination.symlink_to(self.root / "absent-target")
+                        for script in ("install.sh", "uninstall.sh"):
+                            self.assert_refused_without_mutation(script)
+                        if kind == "regular-link":
+                            self.assertEqual(backup.read_bytes(), foreign.read_bytes())
+                    finally:
+                        if destination.is_dir() and not destination.is_symlink():
+                            destination.rmdir()
+                        elif destination.exists() or destination.is_symlink():
+                            destination.unlink()
+                        backup.rename(destination)
+
+    def test_replacing_license_subtree_allows_uninstall_and_fresh_reinstall(self):
+        self.replace_license_bundle({
+            "old-sdk/legal/runtime/LICENSE": "old license",
+            "old-sdk/missing/deep/NOTICE": "already removed license",
+        })
+        self.run_script("install.sh")
+        old = self.install_dir / "licenses" / "old-sdk"
+        (old / "missing/deep/NOTICE").unlink()
+        self.replace_license_bundle({"new-sdk/legal/runtime/LICENSE": "new license"})
+        self.run_script("install.sh")
+        self.assertFalse(old.exists(), "upgrade must prune former managed empty parent directories")
+        self.assertEqual("new license", (self.install_dir / "licenses/new-sdk/legal/runtime/LICENSE").read_text())
+        self.run_script("uninstall.sh")
+        self.assertFalse(self.install_dir.exists())
+        self.run_script("install.sh")
+        self.run_script("uninstall.sh")
+        self.assertFalse(self.install_dir.exists())
+
+    def test_replacing_license_subtree_preserves_foreign_descendants_and_siblings(self):
+        self.replace_license_bundle({
+            "old-sdk/legal/runtime/LICENSE": "old license",
+            "old-sdk/obsolete/legal/NOTICE": "obsolete notice",
+        })
+        self.run_script("install.sh")
+        licenses = self.install_dir / "licenses"
+        foreign = licenses / "old-sdk/legal/runtime/personal/keep.txt"
+        foreign.parent.mkdir()
+        foreign.write_text("keep me", encoding="utf-8")
+        foreign_empty = licenses / "old-sdk/legal/runtime/foreign-empty"
+        foreign_empty.mkdir()
+        foreign_sibling = licenses / "foreign-sibling/empty"
+        foreign_sibling.mkdir(parents=True)
+        self.replace_license_bundle({"new-sdk/legal/runtime/LICENSE": "new license"})
+        self.run_script("install.sh")
+        self.assertFalse((licenses / "old-sdk/obsolete").exists())
+        self.assertFalse((licenses / "old-sdk/legal/runtime/LICENSE").exists())
+        for operation in (None, "uninstall.sh"):
+            if operation is not None:
+                self.run_script(operation)
+            self.assertEqual("keep me", foreign.read_text())
+            self.assertTrue(foreign_empty.is_dir())
+            self.assertTrue(foreign_sibling.is_dir())
+            self.assertEqual([], list(foreign_empty.iterdir()))
+            self.assertEqual([], list(foreign_sibling.iterdir()))
+        self.assertFalse((licenses / "new-sdk").exists())
+        self.assertFalse((self.install_dir / ".tuink-archive-install").exists())
+        self.assertFalse(self.link.is_symlink())
+
+    def test_license_file_directory_transitions_refuse_upgrade_before_mutation(self):
+        for old_path, new_path in (("bundle/LICENSE", "bundle/LICENSE/NOTICE"),
+                                   ("bundle/LICENSE/NOTICE", "bundle/LICENSE")):
+            with self.subTest(old=old_path, new=new_path):
+                self.replace_license_bundle({old_path: "installed license"})
+                self.run_script("install.sh")
+                self.binary.write_text("replacement must not be installed", encoding="utf-8")
+                self.replace_license_bundle({new_path: "replacement license"})
+                self.assert_refused_without_mutation("install.sh")
+                self.run_script("uninstall.sh")
+                self.assertFalse(self.install_dir.exists())
 
     def test_license_bundle_is_installed_exactly_and_removed(self):
         source = self.archive / "licenses"

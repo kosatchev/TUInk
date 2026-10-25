@@ -9,6 +9,8 @@ Changes on the development branch after [v0.16.0](0.16.0.md).
 - Share immutable text blocks in document snapshots and prepare mandatory session
   results before committing edits or history replay. Render and session consumers
   use the same document identity.
+- Remove retired empty license directories during archive upgrades, and reject
+  unexpected managed-file types before installation or removal changes any files.
 - Prepare bulk edits and undo/redo text, history and shared-view positions before
   publishing their state; failed preparation retains the previous draft.
 - Continue sequential search from accepted matches with a bounded result cache

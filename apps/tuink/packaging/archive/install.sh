@@ -14,10 +14,20 @@ LICENSE_SOURCE_DIR="${SCRIPT_DIR}/licenses"
 LICENSE_INSTALL_DIR="${INSTALL_DIR}/licenses"
 LICENSE_MANIFEST_PATH="${INSTALL_DIR}/.tuink-license-files"
 LICENSE_MANIFEST_VALUE="# tuink-license-files-v1"
+MANAGED_FILES=("${LINK_NAME}" install.sh uninstall.sh README.md LICENSE THIRD_PARTY_NOTICES.md)
 
 refuse() {
   echo "Refusing to install: $*" >&2
   exit 1
+}
+
+validate_managed_file() {
+  local path="$1"
+  # install -T replaces a symlink itself; never adopt a directory or special file.
+  # A missing file (including a dangling symlink) can be restored by this install.
+  if [[ -e "${path}" && ! -f "${path}" ]]; then
+    refuse "managed file destination is not a regular file: ${path}"
+  fi
 }
 
 validate_license_path() {
@@ -94,8 +104,8 @@ else
   NEW_INSTALL=true
 fi
 
-for name in "${LINK_NAME}" install.sh uninstall.sh; do
-  [[ ! -d "${INSTALL_DIR}/${name}" ]] || refuse "managed file destination is a directory: ${INSTALL_DIR}/${name}"
+for name in "${MANAGED_FILES[@]}"; do
+  validate_managed_file "${INSTALL_DIR}/${name}"
 done
 
 [[ -d "${LICENSE_SOURCE_DIR}" && ! -L "${LICENSE_SOURCE_DIR}" ]] || refuse "archive licenses directory is missing or symlinked"
@@ -107,6 +117,7 @@ if [[ -e "${LICENSE_INSTALL_DIR}" && ! -d "${LICENSE_INSTALL_DIR}" ]]; then
 fi
 
 declare -A PREVIOUS_LICENSE_FILES=()
+declare -A PREVIOUS_LICENSE_DIRECTORIES=()
 if [[ -e "${LICENSE_INSTALL_DIR}" || -e "${LICENSE_MANIFEST_PATH}" || -L "${LICENSE_MANIFEST_PATH}" ]]; then
   [[ -f "${LICENSE_MANIFEST_PATH}" && ! -L "${LICENSE_MANIFEST_PATH}" ]] || refuse "installed licenses have no regular ownership manifest"
   {
@@ -116,6 +127,11 @@ if [[ -e "${LICENSE_INSTALL_DIR}" || -e "${LICENSE_MANIFEST_PATH}" || -L "${LICE
       validate_license_path "${relative}"
       [[ ! -d "${LICENSE_INSTALL_DIR}/${relative}" ]] || refuse "managed license file became a directory: ${relative}"
       PREVIOUS_LICENSE_FILES["${relative}"]=true
+      parent="${relative}"
+      while [[ "${parent}" == */* ]]; do
+        parent="${parent%/*}"
+        PREVIOUS_LICENSE_DIRECTORIES["${parent}"]=true
+      done
     done
   } < "${LICENSE_MANIFEST_PATH}"
   [[ ${#PREVIOUS_LICENSE_FILES[@]} -gt 0 ]] || refuse "license ownership manifest has no files"
@@ -150,8 +166,8 @@ if [[ -f "${README_INSTALL_SOURCE}" ]]; then
   # Keep its README links usable after the extracted archive is removed.
   sed -E \
     -e "s@(\]\()(docs/assets/[^)]*)(\))@\1https://raw.githubusercontent.com/kosatchev/tuink/${DOCUMENTATION_REF}/\2\3@g" \
-    -e "s@(\]\()(docs/[^)]*/|verification/performance/[^)]*/)(\))@\1https://github.com/kosatchev/tuink/tree/${DOCUMENTATION_REF}/\2\3@g" \
-    -e "s@(\]\()(docs/[^)]*|verification/performance/[^)]*|CONTRIBUTING[.]md|SECURITY[.]md)(\))@\1https://github.com/kosatchev/tuink/blob/${DOCUMENTATION_REF}/\2\3@g" \
+    -e "s@(\]\()(docs/[^)]*/|apps/[^)]*/|verification/[^)]*/)(\))@\1https://github.com/kosatchev/tuink/tree/${DOCUMENTATION_REF}/\2\3@g" \
+    -e "s@(\]\()(docs/[^)]*|apps/[^)]*|verification/[^)]*|CONTRIBUTING[.]md|SECURITY[.]md)(\))@\1https://github.com/kosatchev/tuink/blob/${DOCUMENTATION_REF}/\2\3@g" \
     "${README_INSTALL_SOURCE}" > "${README_TEMP}"
   README_INSTALL_SOURCE="${README_TEMP}"
 fi
@@ -172,6 +188,13 @@ done
 for relative in "${!PREVIOUS_LICENSE_FILES[@]}"; do
   sudo rm -f -- "${LICENSE_INSTALL_DIR}/${relative}"
 done
+if [[ ${#PREVIOUS_LICENSE_DIRECTORIES[@]} -gt 0 ]]; then
+  # Only former managed file parents are candidates. Nonempty directories,
+  # including foreign descendants, survive; siblings are never traversed.
+  while IFS= read -r relative; do
+    sudo rmdir -- "${LICENSE_INSTALL_DIR}/${relative}" 2>/dev/null || true
+  done < <(printf '%s\n' "${!PREVIOUS_LICENSE_DIRECTORIES[@]}" | LC_ALL=C sort -r)
+fi
 sudo install -d -m 0755 -- "${LICENSE_INSTALL_DIR}"
 declare -A LICENSE_PARENTS=()
 {

@@ -9,10 +9,20 @@ MARKER_VALUE="tuink-archive-install-v1"
 LICENSE_INSTALL_DIR="${INSTALL_DIR}/licenses"
 LICENSE_MANIFEST_PATH="${INSTALL_DIR}/.tuink-license-files"
 LICENSE_MANIFEST_VALUE="# tuink-license-files-v1"
+MANAGED_FILES=(tuink install.sh uninstall.sh README.md LICENSE THIRD_PARTY_NOTICES.md)
 
 refuse() {
   echo "Refusing to uninstall: $*" >&2
   exit 1
+}
+
+validate_managed_file() {
+  local path="$1"
+  # rm -f removes regular/dangling symlinks themselves, but directories and
+  # special files are unexpected contents and must be refused before cleanup.
+  if [[ -e "${path}" && ! -f "${path}" ]]; then
+    refuse "managed file destination is not a regular file: ${path}"
+  fi
 }
 
 if [[ -L "${INSTALL_DIR}" ]]; then
@@ -48,6 +58,10 @@ if [[ -L "${LINK_PATH}" ]]; then
 elif [[ -e "${LINK_PATH}" ]]; then
   refuse "${LINK_PATH} exists and is not the managed TUInk symlink"
 fi
+
+for name in "${MANAGED_FILES[@]}"; do
+  validate_managed_file "${INSTALL_DIR}/${name}"
+done
 
 [[ -d "${LICENSE_INSTALL_DIR}" && ! -L "${LICENSE_INSTALL_DIR}" ]] || refuse "installed licenses directory is missing or symlinked"
 [[ -f "${LICENSE_MANIFEST_PATH}" && ! -L "${LICENSE_MANIFEST_PATH}" ]] || refuse "installed licenses have no regular ownership manifest"
@@ -98,7 +112,7 @@ if [[ "${LINK_PRESENT}" == true ]]; then
   fi
 fi
 
-for name in tuink install.sh uninstall.sh README.md LICENSE THIRD_PARTY_NOTICES.md; do
+for name in "${MANAGED_FILES[@]}"; do
   sudo rm -f -- "${INSTALL_DIR}/${name}"
 done
 declare -A LICENSE_DIRECTORIES=()

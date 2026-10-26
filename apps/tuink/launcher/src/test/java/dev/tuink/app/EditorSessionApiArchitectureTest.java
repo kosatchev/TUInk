@@ -19,7 +19,6 @@ import org.junit.jupiter.api.Test;
 
 class EditorSessionApiArchitectureTest {
     private static final String CORE_PACKAGE = "dev.tuink.core.";
-    private static final String CORE_BRIDGE = "dev.tuink.editor.session.document.CoreSessionBridge";
 
     @Test
     void editorSessionPublicApiDoesNotExposeMutableCoreTypes() throws ClassNotFoundException {
@@ -30,7 +29,7 @@ class EditorSessionApiArchitectureTest {
 
         for (var imported : production) {
             Class<?> type = Class.forName(imported.getName(), false, getClass().getClassLoader());
-            if (!Modifier.isPublic(type.getModifiers()) || type.getName().equals(CORE_BRIDGE)) {
+            if (!Modifier.isPublic(type.getModifiers())) {
                 continue;
             }
             inspectType(type.getName() + " extends", type.getGenericSuperclass(), violations);
@@ -67,16 +66,17 @@ class EditorSessionApiArchitectureTest {
     }
 
     @Test
-    void mutableCoreBridgeIsRestrictedToDocumentInternalsAndTheTuiCompositionAdapter() {
+    void ownedBackendIsRestrictedToSessionAndFrontendComposition() {
         JavaClasses production = new ClassFileImporter()
             .withImportOption(new ImportOption.DoNotIncludeTests())
             .importPackages("dev.tuink");
         noClasses()
-            .that().resideOutsideOfPackage("dev.tuink.editor.session.document..")
+            .that().resideOutsideOfPackage("dev.tuink.core..")
+            .and().resideOutsideOfPackage("dev.tuink.editor.session..")
             .and().doNotHaveFullyQualifiedName("dev.tuink.tui.TuiDocumentSession")
             .should().dependOnClassesThat()
-            .haveNameMatching("dev\\.tuink\\.editor\\.session\\.document\\.CoreSessionBridge(?:\\$.*)?")
-            .because("only the composition adapter may attach core views; portable clients use snapshots and edits")
+            .haveNameMatching("dev\\.tuink\\.core\\.CoreDocumentBackend(?:\\$.*)?")
+            .because("only frontend composition connects an owned backend; document handlers use the session")
             .check(production);
     }
 
@@ -99,7 +99,7 @@ class EditorSessionApiArchitectureTest {
 
     private static boolean mentionsCore(Type type) {
         if (type instanceof Class<?> raw) {
-            return raw.getName().startsWith(CORE_PACKAGE) || raw.getName().equals(CORE_BRIDGE)
+            return raw.getName().startsWith(CORE_PACKAGE)
                 || raw.isArray() && mentionsCore(raw.getComponentType());
         }
         if (type instanceof ParameterizedType parameterized) {

@@ -2,7 +2,9 @@ package dev.tuink.editor.session.document;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import dev.tuink.core.CoreDocumentBackend;
 import dev.tuink.core.EditorClipboard;
+import dev.tuink.core.TabSession;
 import dev.tuink.core.LogicalEditorTextLayout;
 import dev.tuink.editor.document.DocumentId;
 import dev.tuink.editor.document.TextEdit;
@@ -31,7 +33,9 @@ class JvmStorageSessionRoundTripTest {
         byte[] original = "\uFEFForiginal\r\ntail\r".getBytes(StandardCharsets.UTF_8);
         Files.write(source, original);
         var resource = JvmDocumentStorage.resource(source);
-        var session = EditorDocumentSession.create(new DocumentId("jvm-source"), List.of(""));
+        TabSession view = TabSession.createEmpty(LogicalEditorTextLayout::new, new EditorClipboard());
+        var backend = CoreDocumentBackend.adopt(new DocumentId("jvm-source"), view);
+        var session = EditorDocumentSession.connect(backend);
         session.openPrepared(worker(() -> resource.storage().load(resource, DocumentOpenMode.DETECT, false)));
         prepend(session, "draft ");
         long revision = session.snapshot().revision();
@@ -53,11 +57,11 @@ class JvmStorageSessionRoundTripTest {
         assertFalse(session.status().dirty());
 
         prepend(session, "recovered ");
-        var view = CoreSessionBridge.attach(session, LogicalEditorTextLayout::new, new EditorClipboard());
         var checkpoint = view.engine().captureRecoverySnapshot();
-        var restored = EditorDocumentSession.create(new DocumentId("jvm-restored"), List.of(""));
-        var restoredView = CoreSessionBridge.attach(restored, LogicalEditorTextLayout::new, new EditorClipboard());
-        restoredView.engine().restoreRecoverySnapshot(checkpoint);
+        TabSession restoredView = TabSession.createEmpty(LogicalEditorTextLayout::new, new EditorClipboard());
+        var restoredBackend = CoreDocumentBackend.adopt(new DocumentId("jvm-restored"), restoredView);
+        var restored = EditorDocumentSession.connect(restoredBackend);
+        restored.restoreRecovery(restoredBackend.defaultViewId(), checkpoint);
         assertEquals(session.snapshot().lines(), restored.snapshot().lines());
         assertTrue(restored.status().dirty());
         var save = restored.prepareSave();

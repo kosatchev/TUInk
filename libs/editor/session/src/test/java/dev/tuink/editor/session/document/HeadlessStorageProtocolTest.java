@@ -2,7 +2,9 @@ package dev.tuink.editor.session.document;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import dev.tuink.core.CoreDocumentBackend;
 import dev.tuink.core.DocumentEditLimitException;
+import dev.tuink.core.TabSession;
 import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.EditorDocument;
 import dev.tuink.core.LineText;
@@ -29,7 +31,9 @@ class HeadlessStorageProtocolTest {
         MemoryDocumentStorage storage = new MemoryDocumentStorage();
         storage.put("source.java", "original\r\ntail\r".getBytes(StandardCharsets.UTF_8));
         var source = storage.resource("source.java");
-        var session = session();
+        TabSession view = TabSession.createEmpty(LogicalEditorTextLayout::new, new EditorClipboard());
+        CoreDocumentBackend backend = CoreDocumentBackend.adopt(new DocumentId("source"), view);
+        var session = EditorDocumentSession.connect(backend);
         DocumentLoad loaded = worker(() -> storage.load(source, DocumentOpenMode.DETECT, false));
         int calls = storage.calls();
         session.openPrepared(loaded);
@@ -52,12 +56,12 @@ class HeadlessStorageProtocolTest {
         assertTrue(session.redo());
         assertFalse(session.status().dirty());
 
-        var view = CoreSessionBridge.attach(session, LogicalEditorTextLayout::new, new EditorClipboard());
         prepend(session, "unsaved ");
         var checkpoint = view.engine().captureRecoverySnapshot();
-        var recovered = session();
-        var recoveredView = CoreSessionBridge.attach(recovered, LogicalEditorTextLayout::new, new EditorClipboard());
-        recoveredView.engine().restoreRecoverySnapshot(checkpoint);
+        TabSession recoveredView = TabSession.createEmpty(LogicalEditorTextLayout::new, new EditorClipboard());
+        CoreDocumentBackend recoveredBackend = CoreDocumentBackend.adopt(new DocumentId("recovered"), recoveredView);
+        var recovered = EditorDocumentSession.connect(recoveredBackend);
+        recovered.restoreRecovery(recoveredBackend.defaultViewId(), checkpoint);
         assertEquals(session.snapshot().lines(), recovered.snapshot().lines());
         var recoveredSave = recovered.prepareSave();
         recovered.completeSaved(recoveredSave, worker(recoveredSave::write));
@@ -202,7 +206,8 @@ class HeadlessStorageProtocolTest {
             }
         }
         var model = new FailingModel();
-        var session = new EditorDocumentSession(new DocumentId("open-rollback"), new EditorDocument(model));
+        var view = new EditorDocument(model).attach(LogicalEditorTextLayout::new, new EditorClipboard());
+        var session = EditorDocumentSession.connect(CoreDocumentBackend.adopt(new DocumentId("open-rollback"), view));
         session.openPrepared(worker(() -> storage.load(storage.resource("old.txt"), DocumentOpenMode.DETECT, false)));
         prepend(session, "draft ");
         assertTrue(session.undo());

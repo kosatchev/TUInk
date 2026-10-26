@@ -105,19 +105,6 @@ public record RecoverySnapshot(
         }
     }
 
-    public void restore(TextModel model, EditorState state) {
-        model.replaceLines(lines, fileMetadata);
-        model.restoreFileBaseline(fileBaseline);
-        state.setCurrentResource(currentResource);
-        state.setSaveDisposition(saveDisposition);
-        state.setFileEncoding(fileMetadata.charset());
-        state.setLineSeparator(fileMetadata.defaultLineSeparator());
-        state.setViewport(viewport);
-        state.setCursor(model.clamp(cursor));
-        state.setSelectionAnchor(selectionAnchor);
-        state.setDirty(dirty);
-    }
-
     private static void requirePositionInDocument(
         Position position,
         List<String> lines,

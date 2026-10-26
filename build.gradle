@@ -88,7 +88,8 @@ def allowedTestProjectDependencies = [
     ':core': [':editor-diff-jgit', ':editor-storage-jvm'] as Set,
     ':editor-storage-jvm': [':unicode-text'] as Set,
     ':editor-session': [':editor-storage-jvm'] as Set,
-    ':render': [':editor-storage-jvm'] as Set
+    ':render': [':editor-storage-jvm'] as Set,
+    ':tui': [':unicode-text'] as Set
 ]
 def expectedProjectGroups = [
     ':tuiframe-core'   : 'dev.tuiframe',

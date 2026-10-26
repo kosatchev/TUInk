@@ -334,20 +334,46 @@ public class EditorEngine {
         if (snapshot == null) {
             return;
         }
-        snapshot.restore(model, state);
+        TextModel.LocalEdit edit = null;
+        boolean published = false;
+        try {
+            edit = model.beginLocalEdit();
+            model.replaceLines(snapshot.lines(), snapshot.fileMetadata());
+            model.restoreFileBaseline(snapshot.fileBaseline());
+            edit.preparePublication();
+            List<LineText> baseline = model.snapshotTextLines();
+            EditorViewMemento origin = new EditorViewMemento(state.viewId(), model.clamp(snapshot.cursor()),
+                snapshot.viewport(), snapshot.selectionAnchor());
+            EditorDocument.PreparedChange views = document.prepareChange(model.lineCount(), model::lineText, state);
+            prepareGutterDiffCapacity(model.lineCount());
+            edit.publish();
+            published = true;
+            finishRecovery(snapshot, origin, baseline, views);
+        } catch (OutOfMemoryError exhausted) {
+            if (published) throw exhausted;
+            throw new DocumentEditLimitException();
+        } finally {
+            if (!published && edit != null) edit.abort();
+        }
+    }
+
+    /** All storage, view clamps and diff capacity belong to the already prepared restore. */
+    private void finishRecovery(RecoverySnapshot snapshot, EditorViewMemento origin, List<LineText> baseline,
+                                EditorDocument.PreparedChange views) {
+        state.setCurrentResource(snapshot.currentResource());
+        state.setSaveDisposition(snapshot.saveDisposition());
+        state.setViewport(origin.viewport());
+        state.setCursor(origin.cursor());
+        state.setSelectionAnchor(origin.selectionAnchor());
         state.invalidateNavigation();
         history.undoStack.clear();
         history.redoStack.clear();
         breakCoalescing();
-        resetGutterDiffBaselinesOnOpen();
+        resetGutterDiffBaselinesOnOpen(baseline);
         beginNewDocumentState();
-        if (snapshot.dirty()) {
-            history.savedDocumentStateId = -1L;
-            state.setDirty(true);
-        } else {
-            markCurrentAsSaved();
-        }
-        document.changed();
+        history.savedDocumentStateId = snapshot.dirty() ? -1L : history.currentDocumentStateId;
+        state.setDirty(snapshot.dirty());
+        document.publishChange(views);
     }
 
     public GutterDiffMarker gutterDiffMarkerForLine(int lineIndex) {

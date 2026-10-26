@@ -181,10 +181,19 @@ class TextModelFileFidelityTest {
         TextModel sourceModel = new TextModel(new SimpleLineBuffer());
         sourceModel.load(JvmDocumentStorage.resource(source));
         EditorState sourceState = new EditorState();
+        sourceState.setCursor(new Position(1, 3));
+        sourceState.setSelectionAnchor(new Position(0, 1));
+        sourceState.setViewport(new ViewportState(1, 0, 2, 3));
         RecoverySnapshot snapshot = RecoverySnapshot.capture(sourceModel, sourceState);
         TextModel restoredModel = new TextModel(new SimpleLineBuffer());
+        EditorState restoredState = new EditorState();
+        EditorEngine restoredEngine = new EditorEngine(restoredModel, restoredState,
+            new TestEditorTextLayout(restoredModel));
 
-        snapshot.restore(restoredModel, new EditorState());
+        restoredEngine.restoreRecoverySnapshot(snapshot);
+        assertEquals(snapshot.cursor(), restoredState.getCursor());
+        assertEquals(snapshot.selectionAnchor(), restoredState.getSelectionAnchor());
+        assertEquals(snapshot.viewport(), restoredState.viewport());
         restoredModel.save(JvmDocumentStorage.resource(restoredFile));
 
         assertArrayEquals(original, Files.readAllBytes(restoredFile));

@@ -7,7 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.editor.storage.BomKind;
 import dev.tuink.editor.storage.DocumentFileMetadata;
+import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
+import dev.tuink.core.LogicalEditorTextLayout;
 import dev.tuink.storage.jvm.FileBaseline;
 import dev.tuink.core.Position;
 import dev.tuink.core.RecoverySnapshot;
@@ -16,6 +18,7 @@ import dev.tuink.core.SimpleLineBuffer;
 import dev.tuink.core.TextModel;
 import dev.tuink.core.ViewportState;
 import dev.tuink.editor.document.ImmutableText;
+import dev.tuink.unicode.GraphemeText;
 import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.IOException;
@@ -40,7 +43,8 @@ class RecoveryFormatRoundTripMemoryTest {
     void acceptedManyLineAndLegacyEncodedDocumentsRoundTripTheirOwnRecoveryStorage(@TempDir Path directory)
         throws Exception {
         String classpath = String.join(File.pathSeparator, location(getClass()), location(RecoveryStore.class),
-            location(RecoverySnapshot.class), location(ImmutableText.class), location(dev.tuink.storage.jvm.JvmDocumentStorage.class));
+            location(RecoverySnapshot.class), location(ImmutableText.class), location(GraphemeText.class),
+            location(dev.tuink.storage.jvm.JvmDocumentStorage.class));
         Process child = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx1g", "-cp", classpath, RoundTripProbe.class.getName(), directory.toString())
             .redirectErrorStream(true).start();
@@ -136,7 +140,8 @@ class RecoveryFormatRoundTripMemoryTest {
                 }
                 TextModel model = new TextModel(new SimpleLineBuffer());
                 EditorState state = new EditorState();
-                restored.restore(model, state);
+                EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model));
+                engine.restoreRecoverySnapshot(restored);
                 require(model.lineCount() == LINE_COUNT && model.getLine(LINE_COUNT - 1).equals("dirty tail"), "restore lost text");
                 require(state.getCursor().equals(new Position(LINE_COUNT - 1, 10)), "cursor changed");
                 require(state.viewport().topLine() == LINE_COUNT - 2 && state.getSelectionAnchor().equals(new Position(0, 0)),
@@ -196,7 +201,8 @@ class RecoveryFormatRoundTripMemoryTest {
                 require(JvmDocumentStorage.pathOf(restored.currentResource()).equals(source) && JvmDocumentStorage.baselineOf(restored.fileBaseline()).equals(baseline), "legacy identity changed");
                 TextModel model = new TextModel(new SimpleLineBuffer());
                 EditorState state = new EditorState();
-                restored.restore(model, state);
+                EditorEngine engine = new EditorEngine(model, state, new LogicalEditorTextLayout(model));
+                engine.restoreRecoverySnapshot(restored);
                 require(model.getLine(0).equals(text) && state.isDirty(), "expanded text could not restore");
                 require(digest(source).equals(baseline.sha256()), "saved legacy bytes changed");
                 require(digest(recovery.resolve("draft.meta.properties")).equals(metadataDigest), "metadata was rewritten");

@@ -13,6 +13,7 @@ dependencies {
     implementation project(':highlight-regex')
     implementation project(':editor-diff-jgit')
     implementation project(':editor-storage-jvm')
+    testImplementation project(':unicode-text')
 }
 
 def tuinkVersion = project.version.toString()

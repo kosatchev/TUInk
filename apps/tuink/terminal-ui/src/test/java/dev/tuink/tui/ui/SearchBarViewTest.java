@@ -4,7 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.tuink.core.SearchOptions;
+import dev.tuink.editor.search.SearchOptions;
 import dev.tuiframe.cell.Canvas;
 import dev.tuiframe.cell.Cell;
 import dev.tuiframe.cell.CellBuffer;

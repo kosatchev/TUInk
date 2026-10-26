@@ -7,7 +7,7 @@ import dev.tuiframe.widget.TextField;
 import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.LogicalEditorTextLayout;
 import dev.tuink.core.SearchLimitException;
-import dev.tuink.core.SearchOptions;
+import dev.tuink.editor.search.SearchOptions;
 import dev.tuink.core.TabSearch;
 import dev.tuink.core.TabSession;
 import java.io.File;

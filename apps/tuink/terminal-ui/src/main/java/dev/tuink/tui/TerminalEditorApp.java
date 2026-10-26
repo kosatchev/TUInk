@@ -7,7 +7,7 @@ import dev.tuink.core.EditorState;
 import dev.tuink.core.EditorTextLayout;
 import dev.tuink.core.Position;
 import dev.tuink.core.RecoverySnapshot;
-import dev.tuink.core.SearchOptions;
+import dev.tuink.editor.search.SearchOptions;
 import dev.tuink.core.TabSession;
 import dev.tuink.core.TabSessions;
 import dev.tuink.core.TextModel;

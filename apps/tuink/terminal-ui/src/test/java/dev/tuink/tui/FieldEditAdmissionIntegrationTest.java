@@ -11,7 +11,7 @@ import dev.tuiframe.input.TextInput;
 import dev.tuiframe.widget.FocusManager;
 import dev.tuiframe.widget.TextField;
 import dev.tuink.core.EditorClipboard;
-import dev.tuink.core.SearchOptions;
+import dev.tuink.editor.search.SearchOptions;
 import dev.tuink.tui.command.TuinkCommand;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.ui.SaveAsBarView;

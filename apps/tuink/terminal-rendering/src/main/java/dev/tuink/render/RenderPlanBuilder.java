@@ -9,7 +9,7 @@ import dev.tuink.core.LineText;
 import dev.tuink.core.Position;
 import dev.tuink.core.SearchLimitException;
 import dev.tuink.core.SearchMatcher;
-import dev.tuink.core.SearchOptions;
+import dev.tuink.editor.search.SearchOptions;
 import dev.tuink.core.TextModel;
 import dev.tuink.editor.document.DocumentId;
 import dev.tuink.editor.document.DocumentView;

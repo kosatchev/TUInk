@@ -1,4 +1,4 @@
-package dev.tuink.core;
+package dev.tuink.editor.search;
 
 /**
  * Options for search/replace behavior.

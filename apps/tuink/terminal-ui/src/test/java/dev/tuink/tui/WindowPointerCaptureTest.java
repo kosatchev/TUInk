@@ -21,7 +21,7 @@ import dev.tuiframe.widget.PointerCaptureCancellation;
 import dev.tuiframe.widget.PointerCaptureRequest;
 import dev.tuiframe.widget.RoutedTarget;
 import dev.tuiframe.widget.TextField;
-import dev.tuink.core.SearchOptions;
+import dev.tuink.editor.search.SearchOptions;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.file.FileTreeModel;
 import dev.tuink.tui.ui.FileTreeView;

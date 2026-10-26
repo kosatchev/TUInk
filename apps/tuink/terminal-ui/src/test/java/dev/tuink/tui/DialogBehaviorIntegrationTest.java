@@ -26,7 +26,7 @@ import dev.tuiframe.widget.RoutedTarget;
 import dev.tuiframe.widget.TextField;
 import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.Position;
-import dev.tuink.core.SearchOptions;
+import dev.tuink.editor.search.SearchOptions;
 import dev.tuink.core.TabSession;
 import dev.tuink.render.TerminalEditorTextLayout;
 import dev.tuink.render.EditorViewNavigation;

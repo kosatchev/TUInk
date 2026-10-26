@@ -3,7 +3,7 @@ package dev.tuink.tui;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import dev.tuink.core.Position;
-import dev.tuink.core.SearchOptions;
+import dev.tuink.editor.search.SearchOptions;
 import dev.tuink.core.SimpleLineBuffer;
 import dev.tuink.core.TextModel;
 import java.util.concurrent.atomic.AtomicInteger;

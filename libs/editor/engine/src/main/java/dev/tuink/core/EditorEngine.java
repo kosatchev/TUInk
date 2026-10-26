@@ -1,5 +1,7 @@
 package dev.tuink.core;
 
+import dev.tuink.editor.search.SearchOptions;
+
 import dev.tuink.core.TextModel.ReplacementDelta;
 import dev.tuink.editor.storage.DocumentResource;
 import dev.tuink.editor.storage.DocumentStorage;

@@ -10,7 +10,7 @@ import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.scroll.ScrollLayout;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.Position;
-import dev.tuink.core.SearchOptions;
+import dev.tuink.editor.search.SearchOptions;
 import dev.tuink.core.SimpleLineBuffer;
 import dev.tuink.core.TextModel;
 import dev.tuink.render.RenderPlan;

@@ -11,7 +11,7 @@ import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.LineText;
 import dev.tuink.core.Position;
-import dev.tuink.core.SearchOptions;
+import dev.tuink.editor.search.SearchOptions;
 import dev.tuink.core.SimpleLineBuffer;
 import dev.tuink.core.TabSession;
 import dev.tuink.core.TextModel;

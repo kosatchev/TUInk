@@ -1,6 +1,6 @@
 package dev.tuink.tui;
 
-import dev.tuink.core.SearchOptions;
+import dev.tuink.editor.search.SearchOptions;
 import dev.tuink.core.SearchLimitException;
 import dev.tuink.core.SearchWorkBudget;
 import dev.tuink.core.TabSearch;

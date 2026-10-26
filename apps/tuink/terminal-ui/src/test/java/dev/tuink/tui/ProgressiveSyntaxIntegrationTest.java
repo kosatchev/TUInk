@@ -46,7 +46,7 @@ class ProgressiveSyntaxIntegrationTest {
             window.frame();
             assertEquals(keyword, window.screenStyle(sourceRow, sourceColumn));
             assertTrue(builder.build(session.model(), session.state(), 8, 80, "top", "bottom", null,
-                dev.tuink.core.SearchOptions.DEFAULT, null, null, null, null, false, false)
+                dev.tuink.editor.search.SearchOptions.DEFAULT, null, null, null, null, false, false)
                 .lines().stream().allMatch(line -> !line.spans().isEmpty()));
         }
     }

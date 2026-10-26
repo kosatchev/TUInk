@@ -1,5 +1,7 @@
 package dev.tuink.core;
 
+import dev.tuink.editor.search.SearchOptions;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.List;

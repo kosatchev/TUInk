@@ -1,6 +1,6 @@
 package dev.tuink.tui;
 
-import dev.tuink.core.SearchOptions;
+import dev.tuink.editor.search.SearchOptions;
 import java.util.Objects;
 
 /** Caches the application search-summary count across cursor-only frames. */

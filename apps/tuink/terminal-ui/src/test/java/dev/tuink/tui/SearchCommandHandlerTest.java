@@ -27,7 +27,7 @@ class SearchCommandHandlerTest {
         Position anchor = new Position(0, 10);
         current.engine().restoreSelection(cursor, anchor);
         long revision = current.model().revision();
-        var options = new SearchController.SearchUiOptions(true, dev.tuink.core.SearchOptions.MatchMode.WILDCARD, false);
+        var options = new SearchController.SearchUiOptions(true, dev.tuink.editor.search.SearchOptions.MatchMode.WILDCARD, false);
         var context = new SearchCommandHandler.Context(List.of(current), 0, false, options,
             "a".repeat(64) + "?a", "replacement");
 
@@ -58,7 +58,7 @@ class SearchCommandHandlerTest {
         Position anchor = new Position(0, 80);
         current.engine().restoreSelection(cursor, anchor);
         long revision = current.model().revision();
-        var options = new SearchController.SearchUiOptions(true, dev.tuink.core.SearchOptions.MatchMode.WILDCARD, true);
+        var options = new SearchController.SearchUiOptions(true, dev.tuink.editor.search.SearchOptions.MatchMode.WILDCARD, true);
         var context = new SearchCommandHandler.Context(List.of(current, tab("other")), 0, false, options, query, "replace");
 
         for (TuinkCommand command : List.of(TuinkCommand.SEARCH_NEXT, TuinkCommand.SEARCH_PREVIOUS,
@@ -214,7 +214,7 @@ class SearchCommandHandlerTest {
     private static SearchCommandHandler.Context context(List<TabSession> tabs, boolean allTabs,
         boolean reading, String query, String replacement) {
         return new SearchCommandHandler.Context(tabs, 0, reading,
-            new SearchController.SearchUiOptions(false, dev.tuink.core.SearchOptions.MatchMode.SUBSTRING, allTabs),
+            new SearchController.SearchUiOptions(false, dev.tuink.editor.search.SearchOptions.MatchMode.SUBSTRING, allTabs),
             query, replacement);
     }
 

@@ -1,7 +1,7 @@
 package dev.tuink.tui;
 
 import dev.tuink.core.EditorState;
-import dev.tuink.core.SearchOptions;
+import dev.tuink.editor.search.SearchOptions;
 import dev.tuink.core.TextModel;
 import dev.tuink.render.EditorLayout;
 import dev.tuink.render.RenderPlan;

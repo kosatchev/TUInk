@@ -6,7 +6,7 @@ import dev.tuink.core.DocumentEditLimitException;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.LanguageProfiles;
 import dev.tuink.core.Position;
-import dev.tuink.core.SearchOptions;
+import dev.tuink.editor.search.SearchOptions;
 import dev.tuink.core.TabSession;
 import dev.tuink.core.TextModel;
 import dev.tuink.tui.flow.ConfirmChoice;

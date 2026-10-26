@@ -1,5 +1,7 @@
 package dev.tuink.core;
 
+import dev.tuink.editor.search.SearchOptions;
+
 import java.util.List;
 import java.util.Objects;
 

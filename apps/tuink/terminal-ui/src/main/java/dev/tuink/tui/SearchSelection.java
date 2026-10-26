@@ -3,7 +3,7 @@ package dev.tuink.tui;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.Position;
 import dev.tuink.core.SearchMatcher;
-import dev.tuink.core.SearchOptions;
+import dev.tuink.editor.search.SearchOptions;
 import dev.tuink.core.TextModel;
 
 /** Distinct selection policies for explicit search, automatic highlighting and navigation. */

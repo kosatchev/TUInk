@@ -46,9 +46,7 @@ public final class EditorDocument {
 
     /** Optional frontend services are view-local and never change the shared document/history. */
     public TabSession attach(EditorTextLayout.Factory layoutFactory, EditorClipboard clipboard, LineDiff lineDiff) {
-        if (Thread.currentThread() != ownerThread) {
-            throw new IllegalStateException("Editor document views must attach on the document owner thread");
-        }
+        requireOwnerThread();
         Objects.requireNonNull(layoutFactory, "layoutFactory");
         Objects.requireNonNull(clipboard, "clipboard");
         Objects.requireNonNull(lineDiff, "lineDiff");
@@ -56,6 +54,12 @@ public final class EditorDocument {
         EditorTextLayout layout = layoutFactory.create(model);
         EditorEngine engine = new EditorEngine(this, viewState, layout, clipboard, lineDiff);
         return new TabSession(model, viewState, layout, engine);
+    }
+
+    void requireOwnerThread() {
+        if (Thread.currentThread() != ownerThread) {
+            throw new IllegalStateException("Editor document mutation requires its owner thread");
+        }
     }
 
     boolean register(EditorState viewState) {
@@ -112,7 +116,18 @@ public final class EditorDocument {
         }
     }
 
-    record PreparedChange(List<ViewChange> views) {}
+    record PreparedChange(List<ViewChange> views) {
+        /** Projects exactly the already prepared clamp, without changing the live view. */
+        EditorViewMemento projectedView(EditorState view) {
+            for (int index = 0; index < views.size(); index++) {
+                ViewChange change = views.get(index);
+                if (change.view() == view) {
+                    return new EditorViewMemento(view.viewId(), change.cursor(), view.viewport(), change.anchor());
+                }
+            }
+            return view.viewMemento();
+        }
+    }
     private record ViewChange(EditorState view, Position cursor, Position anchor) {}
 
     private static Position clamp(Position position, int lineCount, IntFunction<? extends CharSequence> lines) {

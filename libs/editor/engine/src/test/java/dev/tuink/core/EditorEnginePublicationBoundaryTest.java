@@ -8,10 +8,17 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.editor.command.DocumentCommand;
+import dev.tuink.editor.command.DocumentCommandResult;
+import dev.tuink.editor.command.DocumentCommandTarget;
 import dev.tuink.editor.diff.LineDiff;
 import dev.tuink.editor.diff.LineEdit;
+import dev.tuink.editor.document.DocumentId;
+import dev.tuink.editor.document.ViewId;
 import dev.tuink.verification.MemoryDocumentStorage;
+import java.lang.reflect.Field;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 
@@ -121,6 +128,120 @@ class EditorEnginePublicationBoundaryTest {
         assertFalse(engine.state().isDirty());
         assertTrue(engine.redo());
         assertEquals(List.of("first", "tail"), model.snapshotLines());
+    }
+
+    @Test
+    void failedMergedTypingResultPreservesTheEntryPayloadAndTheNextTypingGroup() {
+        TextModel model = new TextModel(new SimpleLineBuffer());
+        FaultResultEngine engine = new FaultResultEngine(model, new EditorState());
+        executeInput(engine, "A");
+        EditorDocumentHistory history = engine.document().history;
+        EditorEngine.HistoryEntry entry = history.undoStack.peek();
+        HistoryPayload payload = historyPayload(entry);
+        assertEquals(1, payload.operations().size());
+        assertNull(engine.state().getSelectionAnchor(), "The refused input must have no selection");
+        // Keep this setup eligible for coalescing even if the test is descheduled.
+        history.lastEditAtNanos = System.nanoTime() + TimeUnit.DAYS.toNanos(1);
+        long coalescingAt = history.lastEditAtNanos;
+        EditorEngine.EditKind coalescingKind = history.lastEditKind;
+        Position coalescingCursor = history.lastEditCursorAfter;
+        long coalescingView = history.lastEditViewId;
+        long revision = model.revision();
+        long epoch = model.contentEpoch();
+        long recovery = engine.recoveryRevision();
+        long navigation = engine.navigationRevision();
+        long currentState = history.currentDocumentStateId;
+        long nextState = history.nextDocumentStateId;
+        EditorViewMemento view = engine.state().viewMemento();
+        engine.expectedMergedEntry = entry;
+        engine.failResult = true;
+
+        try {
+            assertThrows(DocumentEditLimitException.class, () -> executeInput(engine, "B"));
+        } finally {
+            engine.failResult = false;
+        }
+
+        assertEquals(1, engine.failedResults, "The failure must follow preparation of a real history merge");
+        assertEquals("A", model.getLine(0));
+        assertEquals(revision, model.revision());
+        assertEquals(epoch, model.contentEpoch());
+        assertEquals(recovery, engine.recoveryRevision());
+        assertEquals(navigation, engine.navigationRevision());
+        assertEquals(view, engine.state().viewMemento());
+        assertEquals(currentState, history.currentDocumentStateId);
+        assertEquals(nextState, history.nextDocumentStateId);
+        assertEquals(coalescingAt, history.lastEditAtNanos);
+        assertEquals(coalescingKind, history.lastEditKind);
+        assertEquals(coalescingCursor, history.lastEditCursorAfter);
+        assertEquals(coalescingView, history.lastEditViewId);
+        assertEquals(1, history.undoStack.size());
+        assertSame(entry, history.undoStack.peek());
+        assertEquals(payload, historyPayload(entry), "Failed input must not mutate the existing entry payload");
+        assertTrue(history.redoStack.isEmpty());
+
+        executeInput(engine, "C");
+
+        assertEquals("AC", model.getLine(0));
+        assertEquals(1, history.undoStack.size(), "The next successful input still belongs to the original group");
+        assertSame(entry, history.undoStack.peek());
+        assertEquals(2, historyPayload(entry).operations().size());
+        assertTrue(engine.undo());
+        assertEquals("", model.getLine(0));
+        assertFalse(engine.state().isDirty());
+        assertFalse(engine.undo());
+        assertTrue(engine.redo());
+        assertEquals("AC", model.getLine(0), "Redo includes only successful input");
+        assertFalse(engine.redo());
+    }
+
+    private static DocumentCommandResult.Applied executeInput(EditorEngine engine, String text) {
+        return engine.executeCommand(new DocumentCommandTarget(new DocumentId("publication-boundary"),
+            new ViewId(engine.state().viewId()), engine.model().revision(), engine.recoveryRevision(),
+            engine.navigationRevision()), new DocumentCommand.Input(text));
+    }
+
+    private static HistoryPayload historyPayload(EditorEngine.HistoryEntry entry) {
+        return new HistoryPayload(List.copyOf((List<?>) field(entry.getClass(), entry, "ops")),
+            field(entry.getClass(), entry, "afterView"),
+            (Long) field(entry.getClass(), entry, "afterStateId"));
+    }
+
+    private static Object field(Class<?> declaringClass, Object target, String name) {
+        try {
+            Field field = declaringClass.getDeclaredField(name);
+            field.setAccessible(true);
+            return field.get(target);
+        } catch (ReflectiveOperationException failure) {
+            throw new AssertionError(failure);
+        }
+    }
+
+    private record HistoryPayload(List<?> operations, Object afterView, long afterStateId) {}
+
+    private static final class FaultResultEngine extends EditorEngine {
+        private boolean failResult;
+        private int failedResults;
+        private EditorEngine.HistoryEntry expectedMergedEntry;
+
+        private FaultResultEngine(TextModel model, EditorState state) {
+            super(model, state, new LogicalEditorTextLayout(model));
+        }
+
+        @Override protected DocumentCommandResult.Applied prepareCommandResult(DocumentCommandTarget target,
+            long revision, boolean textChanged, boolean viewChanged, boolean performed, int affectedCount,
+            DocumentCommandResult.CommentAction commentAction) {
+            if (failResult) {
+                Object prepared = field(EditorEngine.class, this, "keyboardHistory");
+                assertSame(expectedMergedEntry, field(prepared.getClass(), prepared, "merged"),
+                    "The failure must exercise preparation of an append to the existing entry");
+                assertEquals("AB", model().getLine(0), "The refused input is already staged");
+                failedResults++;
+                throw new OutOfMemoryError("mandatory result for merged typing");
+            }
+            return super.prepareCommandResult(target, revision, textChanged, viewChanged, performed,
+                affectedCount, commentAction);
+        }
     }
 
     private static final class ThrowingDiff implements LineDiff {

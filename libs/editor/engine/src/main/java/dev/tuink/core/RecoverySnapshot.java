@@ -4,6 +4,8 @@ import dev.tuink.editor.storage.DocumentResource;
 import dev.tuink.editor.storage.ResourceVersion;
 import dev.tuink.editor.storage.DocumentFileMetadata;
 import dev.tuink.editor.storage.SaveDisposition;
+import dev.tuink.editor.recovery.RecoveryDocument;
+import dev.tuink.editor.document.TextPosition;
 import java.time.Instant;
 import java.util.List;
 
@@ -21,7 +23,7 @@ public record RecoverySnapshot(
     DocumentFileMetadata fileMetadata,
     ResourceVersion fileBaseline,
     Instant createdAt
-) {
+) implements RecoveryDocument {
     public RecoverySnapshot {
         lines = LogicalDocumentLines.copyOfOrEmptyDocument(lines);
         cursor = cursor == null ? new Position(0, 0) : cursor;
@@ -56,6 +58,16 @@ public record RecoverySnapshot(
 
     public static RecoverySnapshot capture(TextModel model, EditorState state) {
         return prepare(model, state).materialize();
+    }
+
+    @Override
+    public TextPosition caret() {
+        return new TextPosition(cursor.line(), cursor.col());
+    }
+
+    @Override
+    public TextPosition anchor() {
+        return selectionAnchor == null ? null : new TextPosition(selectionAnchor.line(), selectionAnchor.col());
     }
 
     /** Capture immutable text blocks and view fields without flattening document lines. */

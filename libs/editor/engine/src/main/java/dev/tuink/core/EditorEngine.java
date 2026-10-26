@@ -1,8 +1,11 @@
 package dev.tuink.core;
 
-import dev.tuink.editor.search.SearchOptions;
-
 import dev.tuink.core.TextModel.ReplacementDelta;
+import dev.tuink.editor.command.DocumentCommand;
+import dev.tuink.editor.command.DocumentCommandResult;
+import dev.tuink.editor.command.DocumentCommandTarget;
+import dev.tuink.editor.document.TextPosition;
+import dev.tuink.editor.search.SearchOptions;
 import dev.tuink.editor.storage.DocumentResource;
 import dev.tuink.editor.storage.DocumentStorage;
 import dev.tuink.editor.storage.ResourceId;
@@ -71,6 +74,7 @@ public class EditorEngine {
     private PreparedKeyboardHistory keyboardHistory;
     private boolean keyboardCommand;
     private String keyboardClipboard;
+    private CommandExecution commandExecution;
 
     public EditorEngine(TextModel model, EditorState state, EditorTextLayout textLayout) {
         this(model, state, textLayout, new EditorClipboard());
@@ -183,6 +187,193 @@ public class EditorEngine {
 
     public int tabWidth() {
         return tabWidth;
+    }
+
+    /**
+     * Executes a validated session command against this originating view. Mandatory
+     * results are prepared at the same boundary as text/history publication; ordinary
+     * input does not capture or publish a whole-document snapshot.
+     */
+    public DocumentCommandResult.Applied executeCommand(DocumentCommandTarget target, DocumentCommand command) {
+        Objects.requireNonNull(target, "target");
+        Objects.requireNonNull(command, "command");
+        if (commandExecution != null) throw new IllegalStateException("A document command is already executing");
+        CommandExecution execution = null;
+        try {
+            execution = new CommandExecution(target);
+            commandExecution = execution;
+            Boolean performed = dispatchCommand(command);
+            if (execution.result == null) {
+                execution.performed = performed;
+                execution.prepare(model.revision(), state.viewMemento());
+            }
+            execution.committed = true;
+            return execution.result;
+        } catch (OutOfMemoryError exhausted) {
+            if (execution != null && execution.committed) throw exhausted;
+            throw new DocumentEditLimitException();
+        } finally {
+            if (execution != null && !execution.committed) execution.restore();
+            commandExecution = null;
+        }
+    }
+
+    private Boolean dispatchCommand(DocumentCommand command) {
+        if (command instanceof DocumentCommand.Input input) {
+            insertInput(input.text());
+            return null;
+        }
+        if (command instanceof DocumentCommand.Paste paste) {
+            commandExecution.performed = true;
+            return pasteText(paste.text());
+        }
+        if (command instanceof DocumentCommand.MoveTo move) {
+            navigateTo(position(move.position()), move.selecting());
+            return null;
+        }
+        if (command instanceof DocumentCommand.Edit edit) {
+            return switch (edit.action()) {
+                case INSERT_TAB -> { insertTab(); yield null; }
+                case NEWLINE -> { insertNewline(); yield null; }
+                case BACKSPACE -> { backspace(); yield null; }
+                case DELETE_FORWARD -> { deleteForward(); yield null; }
+                case COPY -> state.hasSelection() ? copySelection() : copyCurrentLine();
+                case CUT -> state.hasSelection() ? cutSelection() : cutCurrentLine();
+                case PASTE -> {
+                    commandExecution.performed = true;
+                    yield pasteClipboard();
+                }
+                case SELECT_ALL -> selectAll();
+                case UNDO -> {
+                    commandExecution.performed = true;
+                    yield undo();
+                }
+                case REDO -> {
+                    commandExecution.performed = true;
+                    yield redo();
+                }
+                case TOGGLE_LINE_COMMENT -> {
+                    LineCommentResult result = toggleLineComment();
+                    if (commandExecution.result == null) commandExecution.comment(result);
+                    yield result.lineCount() > 0;
+                }
+            };
+        }
+        if (command instanceof DocumentCommand.Navigate navigate) {
+            boolean selecting = navigate.selecting();
+            switch (navigate.action()) {
+                case LEFT -> moveLeft(selecting);
+                case RIGHT -> moveRight(selecting);
+                case WORD_LEFT -> moveWordLeft(selecting);
+                case WORD_RIGHT -> moveWordRight(selecting);
+                case HOME -> moveHome(selecting);
+                case END -> moveEnd(selecting);
+                case HOME_SMART -> moveHomeSmart(selecting);
+                case END_SMART -> moveEndSmart(selecting);
+                case DOCUMENT_START -> moveDocumentStart(selecting);
+                case DOCUMENT_END -> moveDocumentEnd(selecting);
+            }
+            return null;
+        }
+        if (command instanceof DocumentCommand.Select select) {
+            switch (select.action()) {
+                case MOVE -> moveCursorTo(position(select.cursor()));
+                case BEGIN -> beginSelectionAt(position(select.cursor()));
+                case EXTEND -> extendSelectionTo(position(select.cursor()));
+                case RESTORE -> restoreSelection(position(select.cursor()), position(select.anchor()));
+                case FINISH -> finishSelection();
+                case WORD -> { return selectWordAt(position(select.cursor())); }
+            }
+            return null;
+        }
+        if (command instanceof DocumentCommand.Search search) {
+            return switch (search.action()) {
+                case NEXT -> findNext(search.query(), search.options());
+                case PREVIOUS -> findPrevious(search.query(), search.options());
+                case REPLACE -> {
+                    commandExecution.performed = true;
+                    yield replaceCurrentOrNext(search.query(), search.replacement(), search.options());
+                }
+                case REPLACE_ALL -> {
+                    int count = replaceAll(search.query(), search.replacement(), search.options());
+                    commandExecution.affectedCount = count;
+                    yield count > 0;
+                }
+            };
+        }
+        throw new IllegalArgumentException("Unsupported document command: " + command);
+    }
+
+    private static Position position(TextPosition position) {
+        return position == null ? null : new Position(position.line(), position.utf16Offset());
+    }
+
+    /** Allocation seam used to verify that a mandatory result cannot follow the text commit. */
+    protected DocumentCommandResult.Applied prepareCommandResult(DocumentCommandTarget target, long revision,
+        boolean textChanged, boolean viewChanged, boolean performed, int affectedCount,
+        DocumentCommandResult.CommentAction commentAction) {
+        return new DocumentCommandResult.Applied(target, revision, textChanged, viewChanged,
+            performed, affectedCount, commentAction);
+    }
+
+    private void prepareCommandPublication(long revision, EditorViewMemento view) {
+        if (commandExecution != null) commandExecution.prepare(revision, view);
+    }
+
+    private void prepareCommandPublication(EditorDocument.PreparedChange views) {
+        if (commandExecution != null) {
+            commandExecution.prepare(model.revision(), views == null ? state.viewMemento() : views.projectedView(state));
+        }
+    }
+
+    private void commandPublished() {
+        if (commandExecution != null) commandExecution.committed = true;
+    }
+
+    private final class CommandExecution {
+        private final DocumentCommandTarget target;
+        private final EditorViewMemento before = state.viewMemento();
+        private final long revisionBefore = model.revision();
+        private final long navigationBefore = state.navigationRevision();
+        private final String clipboardBefore = clipboard.text();
+        private final EditKind coalescingKind = history.lastEditKind;
+        private final long coalescingAt = history.lastEditAtNanos;
+        private final Position coalescingCursor = history.lastEditCursorAfter;
+        private final long coalescingView = history.lastEditViewId;
+        private Boolean performed;
+        private int affectedCount = -1;
+        private DocumentCommandResult.CommentAction commentAction = DocumentCommandResult.CommentAction.NONE;
+        private DocumentCommandResult.Applied result;
+        private boolean committed;
+
+        private CommandExecution(DocumentCommandTarget target) { this.target = target; }
+
+        private void prepare(long revision, EditorViewMemento view) {
+            if (result != null) throw new IllegalStateException("A command must publish at most one mutation");
+            boolean textChanged = revision != revisionBefore;
+            boolean viewChanged = !before.equals(view);
+            boolean actual = performed == null ? textChanged || viewChanged : performed;
+            result = prepareCommandResult(target, revision, textChanged, viewChanged, actual,
+                affectedCount < 0 ? actual ? 1 : 0 : affectedCount, commentAction);
+        }
+
+        private void comment(LineCommentResult result) {
+            performed = result.lineCount() > 0;
+            affectedCount = result.lineCount();
+            commentAction = DocumentCommandResult.CommentAction.valueOf(result.action().name());
+        }
+
+        private void restore() {
+            state.restoreEditState(before, navigationBefore);
+            clipboard.setText(clipboardBefore);
+            history.lastEditKind = coalescingKind;
+            history.lastEditAtNanos = coalescingAt;
+            history.lastEditCursorAfter = coalescingCursor;
+            history.lastEditViewId = coalescingView;
+            cachedGraphemes = null;
+            indentationContext.reset();
+            markdownContext.reset();
+        }
     }
 
     /**
@@ -323,6 +514,7 @@ public class EditorEngine {
     public void finishSelection() {
         if (state.getSelectionAnchor() != null && state.getSelectionAnchor().equals(state.getCursor())) {
             state.clearSelection();
+            state.invalidateNavigation();
         }
     }
 
@@ -857,13 +1049,17 @@ public class EditorEngine {
     }
 
     public void moveWordLeft() {
+        moveWordLeft(false);
+    }
+
+    public void moveWordLeft(boolean selecting) {
         state.invalidateNavigation();
         Position previous = state.getCursor();
         Position p = model.clamp(previous);
         int line = p.line();
         int col = p.col();
         if (line == 0 && col == 0) {
-            moveCursor(p, false, previous);
+            moveCursor(p, selecting, previous);
             return;
         }
         if (col == 0 && line > 0) {
@@ -892,10 +1088,14 @@ public class EditorEngine {
                 target = previousBoundary;
             }
         }
-        moveCursor(new Position(line, target), false, previous);
+        moveCursor(new Position(line, target), selecting, previous);
     }
 
     public void moveWordRight() {
+        moveWordRight(false);
+    }
+
+    public void moveWordRight(boolean selecting) {
         state.invalidateNavigation();
         Position previous = state.getCursor();
         Position p = model.clamp(previous);
@@ -903,7 +1103,7 @@ public class EditorEngine {
         int col = p.col();
         int lastLine = model.lineCount() - 1;
         if (line == lastLine && col >= model.lineLength(line)) {
-            moveCursor(p, false, previous);
+            moveCursor(p, selecting, previous);
             return;
         }
         LineText text = model.lineText(line);
@@ -933,7 +1133,7 @@ public class EditorEngine {
                 target = nextBoundary;
             }
         }
-        moveCursor(new Position(line, target), false, previous);
+        moveCursor(new Position(line, target), selecting, previous);
     }
 
     public boolean selectWordAt(Position requested) {
@@ -1324,11 +1524,16 @@ public class EditorEngine {
                 uncomment ? LineCommentAction.UNCOMMENTED : LineCommentAction.COMMENTED, nonBlankCount
             );
             views = document.prepareChange(prepared.buffer().lineCount(), prepared.buffer()::lineText, state);
+            if (commandExecution != null) {
+                commandExecution.comment(result);
+                prepareCommandPublication(model.revision() + 1, after.view());
+            }
         } catch (OutOfMemoryError exhausted) {
             // The active buffer, view and history have not been touched.
             throw new DocumentEditLimitException();
         }
         model.publishLineReplacements(prepared);
+        commandPublished();
         history.undoStack = nextUndo;
         history.nextDocumentStateId = afterStateId;
         history.currentDocumentStateId = afterStateId;
@@ -1625,6 +1830,10 @@ public class EditorEngine {
         DocumentFileMetadata metadata = model.fileMetadata();
         ReplacementBuilder admission = ReplacementBuilder.counting(model.lineCount());
         ReplacementResult counted = composeSearchReplacements(matcher, replacementText, admission, metadata, context);
+        if (commandExecution != null) {
+            commandExecution.performed = counted.matchCount() > 0;
+            commandExecution.affectedCount = counted.matchCount();
+        }
         if (counted.firstChange() != null) {
             ReplacementBuilder builder = admission.materializer();
             ReplacementResult built = composeSearchReplacements(matcher, replacementText, builder, metadata, context);
@@ -2028,8 +2237,10 @@ public class EditorEngine {
             edit.preparePublication();
             EditorDocument.PreparedChange views = document.prepareChange();
             T result = prepareResult.apply(true);
+            prepareCommandPublication(views);
             edit.publish();
             published = true;
+            commandPublished();
             history.undoStack = prepared.undo();
             history.redoStack = prepared.redo();
             history.currentDocumentStateId = prepared.stateId();
@@ -2071,8 +2282,13 @@ public class EditorEngine {
             T result = action.get();
             edit.preparePublication();
             EditorDocument.PreparedChange views = keyboardHistory == null ? null : document.prepareChange();
+            if (commandExecution != null && result instanceof Boolean performed) {
+                commandExecution.performed = performed;
+            }
+            prepareCommandPublication(views);
             edit.publish();
             published = true;
+            commandPublished();
             if (keyboardHistory != null) {
                 publishKeyboardHistory(keyboardHistory);
                 document.publishChange(views);
@@ -2172,12 +2388,14 @@ public class EditorEngine {
             pushWithLimit(nextUndo, entry);
             int lineCount = prepared.buffer() == null ? model.lineCount() : prepared.buffer().lineCount();
             views = document.prepareChange(lineCount, prepared::resultingLine, state);
+            prepareCommandPublication(model.revision() + 1, after.view());
         } catch (OutOfMemoryError exhausted) {
             // Preparation only owns temporary data. The active model and history
             // still describe the complete pre-command document.
             throw new DocumentEditLimitException();
         }
         model.publishReplacement(prepared);
+        commandPublished();
         history.undoStack = nextUndo;
         history.nextDocumentStateId = afterStateId;
         history.currentDocumentStateId = afterStateId;
@@ -2815,8 +3033,10 @@ public class EditorEngine {
         Position safeStart = model.clamp(start);
         int maxCol = model.lineLength(safeStart.line());
         int endCol = Math.min(maxCol, safeStart.col() + Math.max(length, 0));
+        Position end = new Position(safeStart.line(), endCol);
         state.setSelectionAnchor(safeStart);
-        state.setCursor(new Position(safeStart.line(), endCol));
+        state.setCursor(end);
+        state.invalidateNavigation();
     }
 
     private boolean matchesSelectedText(SearchNavigation navigation, SelectionRange selected,

@@ -55,7 +55,10 @@ class ArchitectureTest {
             "java..",
             "dev.tuink.core..",
             "dev.tuink.editor.document..",
+            "dev.tuink.editor.command..",
             "dev.tuink.editor.search..",
+            "dev.tuink.editor.backend..",
+            "dev.tuink.editor.recovery..",
             "dev.tuink.editor.diff..",
             "dev.tuink.editor.storage..",
             "dev.tuink.editor.language..",
@@ -200,7 +203,9 @@ class ArchitectureTest {
         .that().resideInAPackage("dev.tuink.editor.command..")
         .should().onlyDependOnClassesThat().resideInAnyPackage(
             "java..",
-            "dev.tuink.editor.command.."
+            "dev.tuink.editor.command..",
+            "dev.tuink.editor.document..",
+            "dev.tuink.editor.search.."
         );
 
     static final ArchRule DOCUMENT_CONTRACT_IS_SELF_CONTAINED = classes()
@@ -210,9 +215,26 @@ class ArchitectureTest {
             "dev.tuink.editor.document.."
         );
 
+    static final ArchRule BACKEND_PORT_STAYS_PORTABLE = classes()
+        .that().resideInAPackage("dev.tuink.editor.backend..")
+        .should().onlyDependOnClassesThat().resideInAnyPackage(
+            "java..", "dev.tuink.editor.backend..", "dev.tuink.editor.command..",
+            "dev.tuink.editor.document..", "dev.tuink.editor.recovery..", "dev.tuink.editor.storage.."
+        );
+
+    static final ArchRule RECOVERY_CONTRACT_STAYS_PORTABLE = classes()
+        .that().resideInAPackage("dev.tuink.editor.recovery..")
+        .should().onlyDependOnClassesThat().resideInAnyPackage(
+            "java..", "dev.tuink.editor.recovery..", "dev.tuink.editor.document..", "dev.tuink.editor.storage.."
+        );
+
     static final ArchRule SEARCH_CONTRACT_IS_SELF_CONTAINED = classes()
         .that().resideInAPackage("dev.tuink.editor.search..")
         .should().onlyDependOnClassesThat().resideInAnyPackage("java..", "dev.tuink.editor.search..");
+
+    static final ArchRule EDITOR_CONTRACT_PACKAGES_ARE_ACYCLIC = slices()
+        .matching("dev.tuink.editor.(*)..")
+        .should().beFreeOfCycles();
 
     static final ArchRule LANGUAGE_CONTRACT_IS_SELF_CONTAINED = classes()
         .that().resideInAPackage("dev.tuink.editor.language..")
@@ -228,6 +250,8 @@ class ArchitectureTest {
             "dev.tuink.core..",
             "dev.tuink.editor.command..",
             "dev.tuink.editor.document..",
+            "dev.tuink.editor.backend..",
+            "dev.tuink.editor.recovery..",
             "dev.tuink.editor.diff..",
             "dev.tuink.editor.storage..",
             "dev.tuink.editor.session.."
@@ -360,7 +384,8 @@ class ArchitectureTest {
                 return SliceIdentifier.of("editor-session");
             }
             for (String contractPackage : new String[] {"editor.command", "editor.document", "editor.language",
-                "editor.search", "editor.highlight", "editor.diff", "editor.storage"}) {
+                "editor.search", "editor.backend", "editor.recovery",
+                "editor.highlight", "editor.diff", "editor.storage"}) {
                 if (relative.equals(contractPackage) || relative.startsWith(contractPackage + ".")) {
                     return SliceIdentifier.of("editor-contract");
                 }
@@ -437,9 +462,12 @@ class ArchitectureTest {
         EDITOR_INPUT_COMBINES_ONLY_PHYSICAL_EVENTS_AND_SEMANTIC_COMMANDS.check(PRODUCTION_CLASSES);
         COMMAND_CONTRACT_IS_SELF_CONTAINED.check(PRODUCTION_CLASSES);
         DOCUMENT_CONTRACT_IS_SELF_CONTAINED.check(PRODUCTION_CLASSES);
-        SEARCH_CONTRACT_IS_SELF_CONTAINED.check(PRODUCTION_CLASSES);
         LANGUAGE_CONTRACT_IS_SELF_CONTAINED.check(PRODUCTION_CLASSES);
         EDITOR_SESSION_STAYS_FRONTEND_INDEPENDENT.check(PRODUCTION_CLASSES);
+        BACKEND_PORT_STAYS_PORTABLE.check(PRODUCTION_CLASSES);
+        RECOVERY_CONTRACT_STAYS_PORTABLE.check(PRODUCTION_CLASSES);
+        SEARCH_CONTRACT_IS_SELF_CONTAINED.check(PRODUCTION_CLASSES);
+        EDITOR_CONTRACT_PACKAGES_ARE_ACYCLIC.check(PRODUCTION_CLASSES);
         KEYMAP_LAYER_STAYS_EDITOR_INDEPENDENT.check(PRODUCTION_CLASSES);
         GENERIC_KEYMAP_DOES_NOT_IMPORT_PHYSICAL_INPUT.check(PRODUCTION_CLASSES);
         TUINK_KEYMAP_DOES_NOT_IMPORT_DECODER_OR_RESOLVED_INPUT.check(PRODUCTION_CLASSES);

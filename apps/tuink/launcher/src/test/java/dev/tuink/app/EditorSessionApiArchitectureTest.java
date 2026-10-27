@@ -22,6 +22,18 @@ class EditorSessionApiArchitectureTest {
     private static final String CORE_PACKAGE = "dev.tuink.core.";
 
     @Test
+    void rawSaveCapturesRemainInternalToTheSessionCoordinator() throws ClassNotFoundException {
+        Class<?> session = Class.forName("dev.tuink.editor.session.document.EditorDocumentSession");
+        Set<String> internals = Set.of("prepareSave", "prepareSaveAsInput", "approveSaveAs", "completeSaved");
+        for (var method : session.getDeclaredMethods()) {
+            if (internals.contains(method.getName())) {
+                assertTrue(!Modifier.isPublic(method.getModifiers()) && !Modifier.isProtected(method.getModifiers()),
+                    () -> "Raw save protocol bypasses the coordinator: " + method);
+            }
+        }
+    }
+
+    @Test
     void editorSessionPublicApiDoesNotExposeMutableCoreTypes() throws ClassNotFoundException {
         JavaClasses production = new ClassFileImporter()
             .withImportOption(new ImportOption.DoNotIncludeTests())

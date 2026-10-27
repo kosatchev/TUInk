@@ -13,7 +13,14 @@ import dev.tuink.editor.document.TextEdit;
 import dev.tuink.editor.document.TextRange;
 import dev.tuink.editor.document.WorkspaceEdit;
 import dev.tuink.editor.session.document.EditorDocumentSession;
+import dev.tuink.editor.session.document.DocumentIoCoordinator;
+import dev.tuink.editor.session.document.PreparedDocumentOpen;
 import dev.tuink.editor.session.document.WorkspaceEditResult;
+import dev.tuink.editor.session.recovery.RecoveryCoordinator;
+import dev.tuink.editor.session.recovery.RecoveryParticipant;
+import dev.tuink.editor.session.recovery.RecoveryPersistence;
+import dev.tuink.editor.session.recovery.PreparedCheckpoint;
+import dev.tuink.editor.recovery.RecoveryDocument;
 import dev.tuink.editor.storage.DocumentOpenMode;
 import dev.tuink.editor.storage.SaveDisposition;
 import dev.tuink.verification.MemoryDocumentStorage;
@@ -101,7 +108,8 @@ public final class PortableEngineProbe {
         var session = EditorDocumentSession.create(new DocumentId("portable-storage"), List.of(""));
         var worker = Executors.newSingleThreadExecutor();
         try {
-            var loaded = worker.submit(() -> storage.load(source, DocumentOpenMode.DETECT, false)).get();
+            var open = new PreparedDocumentOpen(source, DocumentOpenMode.DETECT, false);
+            var loaded = open.accept(worker.submit(open::read).get());
             int calls = storage.calls();
             session.openPrepared(loaded);
             require(storage.calls() == calls, "open publication must not call storage");
@@ -119,18 +127,26 @@ public final class PortableEngineProbe {
                 "portable storage edit");
             require(session.status().dirty(), "edit must mark the loaded document dirty");
             long revision = session.snapshot().revision();
-            var captured = session.prepareSaveAsInput(target, SaveDisposition.CREATE_NEW, false);
+            var io = session.io();
+            var inspect = io.beginSaveAs(target, SaveDisposition.CREATE_NEW, false);
             require(storage.calls() == calls, "save capture must not call storage");
-            var inspected = worker.submit(captured::inspectTarget).get();
-            require(!inspected.exists() && !inspected.currentTarget(), "new Save As target");
+            require(session.execute(session.defaultViewId(), new DocumentCommand.Input("blocked"))
+                instanceof DocumentCommandResult.Rejected blocked
+                && blocked.reason() == DocumentCommandResult.RejectionReason.DOCUMENT_BUSY,
+                "coordinator must lock document mutations");
+            var inspected = worker.submit(inspect::perform).get();
             calls = storage.calls();
-            var approved = session.approveSaveAs(inspected);
+            var observation = io.accept(inspect, inspected);
+            require(observation instanceof DocumentIoCoordinator.Approval, "inspection yields exact approval");
+            var confirmation = ((DocumentIoCoordinator.Approval) observation).confirmation();
+            require(!confirmation.exists() && !confirmation.currentTarget(), "new Save As target");
+            var ready = (DocumentIoCoordinator.Ready) io.approve(confirmation);
             require(storage.calls() == calls, "save approval must not call storage");
-            var receipt = worker.submit(approved::write).get();
+            var written = worker.submit(ready.work()::perform).get();
             require(session.status().dirty() && session.status().binding().resource().equals(source),
                 "worker write must not publish owner state");
             calls = storage.calls();
-            session.completeSaved(approved, receipt);
+            require(io.accept(ready.work(), written) instanceof DocumentIoCoordinator.Saved, "owner save completion");
             require(storage.calls() == calls, "save completion must not call storage");
             require(!session.status().dirty() && session.status().binding().resource().equals(target),
                 "completed Save As binding and savepoint");
@@ -144,6 +160,44 @@ public final class PortableEngineProbe {
                 && session.snapshot().line(0).equals("draft alpha😀"), "redo must return to the saved state");
             require(Arrays.equals(saved, storage.bytes("copy.java")) && Arrays.equals(original, storage.bytes("source.java")),
                 "history operations must not write resources");
+            session.undo();
+            var dirty = session.status();
+            storage.failNextWrite(MemoryDocumentStorage.WriteFailure.AFTER_COMMIT);
+            var uncertain = io.beginSave();
+            var uncertainResult = io.accept(uncertain, worker.submit(uncertain::perform).get());
+            require(uncertainResult instanceof DocumentIoCoordinator.Failed failure
+                && failure.kind() == DocumentIoCoordinator.FailureKind.UNKNOWN, "uncertain commit remains explicit");
+            require(session.status().equals(dirty) && session.status().dirty(), "uncertain write retains savepoint and draft");
+            var checkpoint = session.prepareRecovery(session.defaultViewId());
+            var draft = worker.submit(checkpoint::materialize).get();
+            require(draft.dirty() && draft.lines().equals(session.snapshot().lines()), "neutral recovery capture");
+            var persisted = new java.util.concurrent.ConcurrentHashMap<String, RecoveryDocument>();
+            var released = new java.util.concurrent.atomic.AtomicBoolean();
+            var recovery = new RecoveryCoordinator<RecoveryDocument>(new RecoveryPersistence<>() {
+                public void save(String id, RecoveryDocument value) { persisted.put(id, value); }
+                public void delete(String id) { persisted.remove(id); }
+                public void release(String id) { released.set(true); }
+            }, worker, System::nanoTime, () -> "portable-draft");
+            RecoveryParticipant<RecoveryDocument> participant = new RecoveryParticipant<>() {
+                public DocumentId documentId() { return session.documentId(); }
+                public Status status() { return new Status(session.status().dirty(), session.status().recoveryRevision()); }
+                public PreparedCheckpoint<RecoveryDocument> prepareCheckpoint() {
+                    var captured = session.prepareRecovery(session.defaultViewId());
+                    return captured::materialize;
+                }
+            };
+            recovery.synchronize(List.of(participant), RecoveryCoordinator.RemovalDisposition.PRESERVE);
+            recovery.tick(System.nanoTime());
+            worker.submit(() -> {}).get();
+            recovery.tick(System.nanoTime());
+            require(persisted.get("portable-draft").lines().equals(draft.lines()), "portable recovery persistence");
+            recovery.synchronize(List.of(), RecoveryCoordinator.RemovalDisposition.PRESERVE);
+            recovery.tick(System.nanoTime());
+            worker.submit(() -> {}).get();
+            recovery.tick(System.nanoTime());
+            require(released.get() && persisted.containsKey("portable-draft"), "detach preserves persisted recovery");
+            require(recovery.deleteEntries(List.of("portable-draft")).successful() && persisted.isEmpty(),
+                "explicit discard deletes detached recovery");
         } finally {
             worker.shutdownNow();
         }

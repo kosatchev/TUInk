@@ -8,6 +8,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 /** One file operation in flight; only its immutable result crosses back to the owner. */
@@ -41,10 +42,14 @@ final class DocumentIoController implements AutoCloseable {
         Pending<T> next = new Pending<>(new FutureTask<>(operation), completion);
         pending = next;
         try {
-            executor.execute(next.task());
+            executor.execute(next);
         } catch (RuntimeException | OutOfMemoryError failure) {
-            pending = null;
-            completion.accept(new Completion<>(null, new IOException("Cannot start the file operation", failure)));
+            // An executor can start a task before reporting a submission
+            // failure. Preserve its real outcome once a worker has claimed it.
+            if (next.rejectBeforeStart()) {
+                pending = null;
+                completion.accept(new Completion<>(null, new IOException("Cannot start the file operation", failure)));
+            }
         }
     }
 
@@ -91,10 +96,23 @@ final class DocumentIoController implements AutoCloseable {
         boolean succeeded() { return failure == null; }
     }
 
-    private record Pending<T>(FutureTask<T> task, Consumer<Completion<T>> completion) {
-        Pending {
-            Objects.requireNonNull(completion, "completion");
+    private static final class Pending<T> implements Runnable {
+        private final FutureTask<T> task;
+        private final Consumer<Completion<T>> completion;
+        private final AtomicInteger claim = new AtomicInteger();
+
+        private Pending(FutureTask<T> task, Consumer<Completion<T>> completion) {
+            this.task = task;
+            this.completion = Objects.requireNonNull(completion, "completion");
         }
+
+        FutureTask<T> task() { return task; }
+
+        @Override public void run() {
+            if (claim.compareAndSet(0, 1)) task.run();
+        }
+
+        boolean rejectBeforeStart() { return claim.compareAndSet(0, 2); }
 
         void publish() {
             Completion<T> result;

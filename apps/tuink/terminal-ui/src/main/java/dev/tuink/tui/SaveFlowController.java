@@ -1,180 +1,47 @@
 package dev.tuink.tui;
 
-import dev.tuink.editor.storage.SaveDisposition;
-import dev.tuink.tui.flow.UiModalState;
 import dev.tuink.tui.flow.SavePathInput;
+import dev.tuink.tui.flow.UiModalState;
 import dev.tuink.tui.command.TuinkCommand;
-import java.io.IOException;
 import java.nio.file.Path;
-import java.util.function.Function;
-import java.util.function.Predicate;
 
+/** Pure filename-input decisions; resource inspection belongs to the document session. */
 final class SaveFlowController {
-    private SaveFlowController() {
-    }
+    private SaveFlowController() {}
 
-    static SaveAsResult handleSaveAsInput(
-        TuinkCommand command,
-        UiModalState modalState,
-        String saveAsText,
-        Function<Path, String> validateSaveTarget,
-        Predicate<Path> pathExists,
-        Predicate<Path> isReadOnlyFile,
-        CurrentSaveTarget isCurrentSaveTarget,
-        Function<Path, String> suggestWritableName
-    ) {
-        if (!modalState.isSaveAs()) {
-            return result(false, modalState, TextInputEffect.none(), false, null, null);
+    static SaveAsResult handleSaveAsInput(TuinkCommand command, UiModalState modal, String draft) {
+        if (!modal.isSaveAs()) return result(false, modal, TextInputEffect.none(), false, null, null);
+        if (command == TuinkCommand.UI_ESCAPE || command == TuinkCommand.APP_QUIT) {
+            return result(true, UiModalState.none(), TextInputEffect.clear(), true, null, null);
         }
-        if (command == null) {
-            return result(true, modalState, TextInputEffect.none(), false, null, null);
+        if (command != TuinkCommand.EDIT_INSERT_NEWLINE) {
+            return result(true, modal, TextInputEffect.none(), false, null, null);
         }
-        return switch (command) {
-            case EDIT_INSERT_NEWLINE -> handleEnter(
-                modalState,
-                saveAsText,
-                validateSaveTarget,
-                pathExists,
-                isReadOnlyFile,
-                isCurrentSaveTarget,
-                suggestWritableName
-            );
-            case UI_ESCAPE, APP_QUIT -> result(
-                true,
-                UiModalState.none(),
-                TextInputEffect.clear(),
-                true,
-                null,
-                null
-            );
-            default -> result(true, modalState, TextInputEffect.none(), false, null, null);
-        };
-    }
-
-    private static SaveAsResult handleEnter(
-        UiModalState modalState,
-        String saveAsText,
-        Function<Path, String> validateSaveTarget,
-        Predicate<Path> pathExists,
-        Predicate<Path> isReadOnlyFile,
-        CurrentSaveTarget isCurrentSaveTarget,
-        Function<Path, String> suggestWritableName
-    ) {
-        String target = saveAsText;
-        if (target.isEmpty()) {
-            return result(true, modalState, TextInputEffect.none(), false, "Save failed: file name is empty", null);
-        }
-
-        final Path path;
+        if (draft.isEmpty()) return rejected(modal, "Save failed: file name is empty");
+        final Path target;
         try {
-            path = SavePathInput.parse(target);
-        } catch (RuntimeException e) {
-            return result(
-                true,
-                modalState,
-                TextInputEffect.none(),
-                false,
-                "Save failed: invalid target path",
-                null
-            );
+            target = SavePathInput.parse(draft);
+        } catch (IllegalArgumentException invalid) {
+            return rejected(modal, "Save failed: invalid target path");
         }
-        String validation = validateSaveTarget.apply(path);
-        if (validation != null) {
-            return result(true, modalState, TextInputEffect.none(), false, validation, null);
+        Path leaf = target.toAbsolutePath().getFileName();
+        if (leaf == null || leaf.toString().equals(".") || leaf.toString().equals("..")) {
+            return rejected(modal, "Save failed: target is a directory: " + target.toAbsolutePath());
         }
-        if (isReadOnlyFile.test(path)) {
-            return result(
-                true,
-                modalState,
-                TextInputEffect.setText(suggestWritableName.apply(path)),
-                false,
-                "Save failed: target is read-only: " + path + ". Choose another name.",
-                null
-            );
-        }
-        boolean targetExists = pathExists.test(path);
-        boolean sameFile;
-        try {
-            sameFile = targetExists && isCurrentSaveTarget.matches(path);
-        } catch (IOException error) {
-            return result(true, modalState, TextInputEffect.none(), false,
-                SaveTargetPolicy.saveErrorMessage(error), null);
-        }
-        if (targetExists && !sameFile) {
-            return result(
-                true,
-                modalState.confirmOverwrite(path),
-                TextInputEffect.none(),
-                true,
-                null,
-                null
-            );
-        }
-        return result(
-            true,
-            modalState,
-            TextInputEffect.none(),
-            false,
-            null,
-            path,
-            targetExists ? SaveDisposition.REPLACE_EXISTING : SaveDisposition.CREATE_NEW
-        );
+        return result(true, modal, TextInputEffect.none(), false, null, target);
     }
 
-    @FunctionalInterface
-    interface CurrentSaveTarget {
-        boolean matches(Path path) throws IOException;
+    private static SaveAsResult rejected(UiModalState modal, String error) {
+        return result(true, modal, TextInputEffect.none(), false, error, null);
     }
 
-    private static SaveAsResult result(
-        boolean consumed,
-        UiModalState modalState,
-        TextInputEffect textInputEffect,
-        boolean clearNotification,
-        String errorMessage,
-        Path saveNowPath
-    ) {
-        return result(
-            consumed,
-            modalState,
-            textInputEffect,
-            clearNotification,
-            errorMessage,
-            saveNowPath,
-            saveNowPath == null ? null : SaveDisposition.CREATE_NEW
-        );
+    private static SaveAsResult result(boolean consumed, UiModalState modal, TextInputEffect filename,
+                                       boolean clearNotice, String error, Path target) {
+        return new SaveAsResult(consumed, modal, filename, clearNotice, error, target);
     }
 
-    private static SaveAsResult result(
-        boolean consumed,
-        UiModalState modalState,
-        TextInputEffect textInputEffect,
-        boolean clearNotification,
-        String errorMessage,
-        Path saveNowPath,
-        SaveDisposition saveDisposition
-    ) {
-        return new SaveAsResult(
-            consumed,
-            modalState,
-            textInputEffect,
-            clearNotification,
-            errorMessage,
-            saveNowPath,
-            saveDisposition
-        );
-    }
-
-    record SaveAsResult(
-        boolean consumed,
-        UiModalState modalState,
-        TextInputEffect textInputEffect,
-        boolean clearNotification,
-        String errorMessage,
-        Path saveNowPath,
-        SaveDisposition saveDisposition
-    ) {
-    }
+    record SaveAsResult(boolean consumed, UiModalState modalState, TextInputEffect textInputEffect,
+                        boolean clearNotification, String errorMessage, Path saveNowPath) {}
 
     record TextInputEffect(TextInputEffectKind kind, String text) {
         static TextInputEffect none() {

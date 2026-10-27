@@ -14,9 +14,9 @@ TUInk развивается как приложение-редактор пов
 | `tuiframe-core` | geometry, physical events, cell metrics, line layout/cache, `Canvas`, `CellBuffer`, `Frame`, capabilities и event loop |
 | `tuiframe-jline` | JLine lifecycle, decoder, raw mode, signals, ANSI presenter и cleanup |
 | `tuiframe-widgets` | layout, focus, hit testing, общий захват мыши, theme и reusable widgets |
-| `editor-contract` | immutable command/document DTO и блочный текст, UTF-16 ranges, `WorkspaceEdit`, storage/resource contracts, semantic highlighting/diff ports и общий каталог языков |
+| `editor-contract` | immutable command/document DTO и блочный текст, UTF-16 ranges, `WorkspaceEdit`, storage/resource/recovery contracts, semantic highlighting/diff ports и общий каталог языков |
 | `core` | общий документ/history, отдельные позиции views, search, editor operations и terminal-neutral `EditorTextLayout` port |
-| `editor-session` | command registry, owner-thread `EditorDocumentSession`, validation и bounded async ingress |
+| `editor-session` | command registry, owner-thread `EditorDocumentSession`, validation, I/O/recovery coordinators и bounded async ingress |
 | `editor-diff-jgit` | опциональный bounded JGit diff; явно подключается к terminal view |
 | `editor-storage-jvm` | JVM filesystem adapter: paths, версии, безопасная публикация файлов, permissions и Linux FFM xattr/ACL |
 | `render` | `EditorTextLayout` adapter, координаты/навигация представления, editor layout и render planning |
@@ -33,16 +33,18 @@ project modules. `tuiframe-jline` и `tuiframe-widgets` зависят от
 implementation dependency. Их production runtime не включает JGit, FFM provider
 или TUIframe. `core` содержит stream-based `DocumentCodec`, но не обращается к
 filesystem. `editor-contract` задаёт opaque resource/version, format, capabilities
-и load/save receipts; `editor-session` открывает split-phase I/O API без типов
-`core`. Filesystem adapter подключается явно в TUI. Android `Uri` adapter ещё
-не реализован.
+и load/save receipts. `editor-session` предоставляет одноразовые detached I/O
+tasks, owner approval/publication и recovery coordination без типов `core` в
+публичном API. Ошибки encoding и неопределённой записи принадлежат storage
+контракту. Filesystem adapter подключается явно в TUI. Android `Uri` adapter
+ещё не реализован.
 
 Production TUI выполняет document commands через тот же `EditorDocumentSession`,
 что headless consumer. Нейтральный backend port скрывает mutable core; frontend
-создаёт и сохраняет собственный terminal view для render/geometry. Следующие
-этапы — application coordinators и единый owner workspace. Общий Java baseline,
-immutable snapshots и semantic providers готовят эти переносы; Android/Windows clients, ART и IME
-проверки остаются отдельными работами.
+создаёт и сохраняет собственный terminal view для render/geometry. Общие
+I/O/recovery coordinators используются TUI и headless consumer; следующий
+этап — единый owner workspace и lifetime документов/views. Android/Windows
+clients, ART, IME и платформенные storage adapters остаются отдельными работами.
 
 Общие модули публикуют Java 17 bytecode/API и Gradle variants; compiler и desktop
 integration tests используют JDK 25. JVM storage adapter требует Java 25.
@@ -65,8 +67,9 @@ TUInk связывает разные типы scopes через `WindowPointerC
 события; callbacks и placements не сохраняются менеджером между кадрами.
 `Button`, `Modal`, `TextField`, `ListView`, `TabBar`, `MenuBar` и `TreeView`
 остаются независимыми от editor state и filesystem. TUInk владеет file tree
-model, metadata worker, selection/viewport state и open/save/search/recovery
-flows. `FrameComposition` объединяет geometry и placements одного кадра;
+model, metadata worker, selection/viewport state и представление
+open/save/search/recovery flows. Общий протокол I/O и recovery lifecycle
+принадлежит `editor-session`. `FrameComposition` объединяет geometry и placements одного кадра;
 заимствованные mutable editor references используются только в синхронном
 render на owner thread. Полные placements файлового диалога и справки готовятся
 до рисования и используются input, focus, pointer capture, cursor и paint.
@@ -86,14 +89,27 @@ UTF-16 offsets. Case-insensitive режим сравнивает code points п�
 `Character.toLowerCase(Character.toUpperCase(cp))`, без нормализации текста
 и многосимвольных замен.
 
-`SaveWorkflow` выполняет save/Save As/overwrite/quit/close transitions через
-существующие `UiModalState`, `SaveContinuation` и `SaveAsSuggestionStore`.
-`SaveFlowController` проверяет submit, `SaveTargetPolicy` задаёт прикладные
-предложения пути и сообщения. Window применяет результат в одном месте и
-обновляет highlighter сохранённой вкладки до смены активной вкладки.
-`FilePickerOpenWorkflow` возвращает документ только после успешного
-`openExisting`; окно создаёт его представление и активирует вкладку.
-Обычный CLI open по-прежнему допускает создание нового документа.
+`SaveWorkflow` связывает save/Save As/overwrite с `UiModalState`,
+`SaveContinuation` и `SaveAsSuggestionStore`. `SaveTargetPolicy` задаёт
+предложения пути и сообщения; quit/close continuations остаются во frontend.
+Единственный публичный save API session — сохранённый `DocumentIoCoordinator`:
+owner capture, detached inspection, approval точного target/version, detached
+write и owner publication. Executor принадлежит host. Session блокирует изменение
+документа во всех save phases; navigation, selection и copy остаются доступны.
+Window применяет presentation effects и обновляет highlighter исходной вкладки.
+`PreparedDocumentOpen` допускает один detached read и owner admission точного
+результата. `FilePickerOpenWorkflow` проверяет workspace aliases и создаёт
+представление после admission; отменённый read не публикует вкладку. Обычный
+CLI open по-прежнему допускает создание нового документа.
+
+`RecoveryCoordinator` владеет checkpoint scheduling, entry ownership,
+подготовленным adoption восстановленных drafts и разрешением cleanup.
+`RecoveryPersistence` и executor задаются host. `prepareRecovery` захватывает
+immutable document inputs на owner, background materialization выполняется на worker;
+TUI отдельно добавляет свой viewport в существующий recovery wire format.
+Одновременно удерживается одна checkpoint operation; изменения во время записи
+попадают в следующую версию. Незавершённый или неопределённый document save
+сохраняет draft и recovery. Detach view не даёт разрешения удалить checkpoint.
 
 `core` сохраняет terminal-neutral layout port. `render` реализует его через
 `TerminalEditorTextLayout`; один adapter/cache на attached view используется editing,
@@ -165,8 +181,8 @@ Snapshot создаётся по запросу owner thread, а background read
 и Save As. Core objects остаются внутри composition/render, document commands
 выполняются только через session. Архитектурные тесты запрещают frontend обходить
 эту границу и проверяют публичный API без исключения для mutable bridge.
-Application effect coordinators и workspace lifetime остаются отдельной работой;
-текущие host/backend ports ещё не являются стабильным plugin API.
+Общие I/O/recovery coordinators выделены; workspace lifetime остаётся отдельной
+работой. Текущие host/backend ports ещё не являются стабильным plugin API.
 
 Владение общими DTO описывает [ADR 0001](adr/0001-editor-contract-ownership.md),
 разделение document/session и frontend view state —
@@ -243,10 +259,11 @@ Capability mapping и terminal matrix также требуют проверки
 устаревшие и foreign-owner вызовы отвергаются до mutation. Небольшой результат
 готовится до commit, full snapshot публикуется отдельно по запросу. Backend
 исполняет команду через engine исходного view, сохраняя coalescing и origin Undo.
-Для дальнейшего переноса application coordination нужны:
+Общие open/save/recovery protocols уже вынесены из TUI. Для дальнейшего
+разделения application и frontend state нужны:
 
 - `StateDelta`, `ChangeSet`, effects и revision-tagged events для application coordination;
-- effect ports для file I/O, clipboard, settings и async work;
+- effect ports для clipboard, settings и остальных application effects;
 - управление lifetime views поверх существующих logical view snapshots;
 - детерминированная layout/view-model preparation из state, viewport и
   decorations.
@@ -254,6 +271,26 @@ Capability mapping и terminal matrix также требуют проверки
 Headless commands и macro/repeat должны работать через `CommandInvocation`
 без terminal input. Выделение меньшего `editor-core` позволит убрать из
 session runtime ненужные зависимости существующего `core`.
+
+### Workspace и platform adapters
+
+Следующий перенос объединит владение документами, attached views, активным
+документом и временем жизни операций. Сейчас frontend по-прежнему хранит tabs,
+active index и проверяет workspace conflicts. Проверки filesystem aliases,
+сопоставление physical target с открытым документом, read-only policy и
+предложения доступных имён частично выполняются на owner thread. Выделение
+общих coordinators само по себе не устраняет эти filesystem обращения.
+Они требуют общего workspace resource index и отдельного detached admission.
+
+При временном отсоединении view host сохраняет document participant и запрашивает
+lifetime checkpoint. Исключение документа с `PRESERVE` сохраняет уже записанные
+draft entries; оно не заменяет capture последних правок перед suspend.
+Единый workspace owner должен сделать это различие частью document lifetime.
+
+Android storage/lifecycle/IME adapter и Windows frontend пока отложены. Общий
+Java 17 API и внешние JVM/D8/R8 пробы проверяют переносимую границу; Android ART,
+реальные provider grants, suspend/process death и Windows filesystem/UI поведение
+потребуют собственных runtime проверок при появлении соответствующих adapters.
 
 ### Registries, built-ins и semantic presentation
 
@@ -351,5 +388,6 @@ model/engine/view owners, а прикладным workflows — от `TerminalEd
 
 Terminal conformance определяется конечным экраном, корректными событиями и
 cleanup; конкретные ANSI bytes могут меняться при улучшении presenter.
-Ближайшие приоритеты — независимый log viewer и portable session command/effect
-API поверх разделённого state, затем общие registries и plugin host.
+Ближайшие приоритеты editor — единый workspace owner и remaining application
+effects, затем общие registries и plugin host. Независимый log viewer остаётся
+отдельной проверкой TUIframe.

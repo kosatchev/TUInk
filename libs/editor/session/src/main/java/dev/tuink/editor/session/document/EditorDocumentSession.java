@@ -37,6 +37,7 @@ public final class EditorDocumentSession {
     private final ViewId defaultViewId;
     private final DocumentBackend backend;
     private final Thread ownerThread;
+    private final DocumentIoCoordinator io;
     private volatile DocumentSnapshot publishedSnapshot;
 
     private EditorDocumentSession(DocumentBackend backend) {
@@ -49,6 +50,7 @@ public final class EditorDocumentSession {
         if (!backend.ownsView(defaultViewId)) throw new IllegalArgumentException("The default view must be registered");
         this.ownerThread = Thread.currentThread();
         this.publishedSnapshot = captureSnapshot();
+        this.io = new DocumentIoCoordinator(this);
     }
 
     /** Connects an owned backend without exporting its mutable document or views. */
@@ -62,6 +64,9 @@ public final class EditorDocumentSession {
     }
 
     public ViewId defaultViewId() { return defaultViewId; }
+
+    /** The retained owner coordinator; detaching a frontend does not replace it. */
+    public DocumentIoCoordinator io() { return io; }
 
     /** Captures an immediate input target without capturing document text. */
     public DocumentCommandTarget commandTarget(ViewId viewId) {
@@ -97,7 +102,20 @@ public final class EditorDocumentSession {
         if (backend.revision() != target.revision()) return rejected(target, DocumentCommandResult.RejectionReason.STALE_DOCUMENT);
         if (backend.stateRevision() != target.stateRevision()) return rejected(target, DocumentCommandResult.RejectionReason.STALE_DOCUMENT_STATE);
         if (backend.viewRevision(target.viewId()) != target.viewRevision()) return rejected(target, DocumentCommandResult.RejectionReason.STALE_VIEW);
+        if (io.busy() && mutatesDocument(command)) return rejected(target, DocumentCommandResult.RejectionReason.DOCUMENT_BUSY);
         return backend.execute(target, command);
+    }
+
+    private static boolean mutatesDocument(DocumentCommand command) {
+        if (command instanceof DocumentCommand.Input || command instanceof DocumentCommand.Paste) return true;
+        if (command instanceof DocumentCommand.Edit edit) {
+            return edit.action() != DocumentCommand.EditAction.COPY && edit.action() != DocumentCommand.EditAction.SELECT_ALL;
+        }
+        if (command instanceof DocumentCommand.Search search) {
+            return search.action() == DocumentCommand.SearchAction.REPLACE
+                || search.action() == DocumentCommand.SearchAction.REPLACE_ALL;
+        }
+        return false;
     }
 
     private static DocumentCommandResult.Rejected rejected(DocumentCommandTarget target,
@@ -127,12 +145,14 @@ public final class EditorDocumentSession {
      */
     public void openPrepared(DocumentLoad loaded) {
         requireOwnerThread();
+        requireIoIdle();
         backend.openPrepared(loaded);
     }
 
     /** Restores neutral draft data; its frontend restores preallocated viewport state after success. */
     public void restoreRecovery(ViewId viewId, RecoveryDocument checkpoint) {
         requireOwnerThread();
+        requireIoIdle();
         backend.restoreRecovery(Objects.requireNonNull(viewId, "viewId"), Objects.requireNonNull(checkpoint, "checkpoint"));
     }
 
@@ -143,21 +163,28 @@ public final class EditorDocumentSession {
     }
 
     /** Captures immutable current-save inputs without calling a storage provider. */
-    public PreparedSave prepareSave() throws IOException {
+    PreparedSave prepareSave() throws IOException {
         requireOwnerThread();
+        requireIoIdle();
         return new PreparedSave(this, backend.prepareSave());
     }
 
     /** Captures a Save As plan. Run inspectTarget() on the host's I/O worker. */
-    public SavePreparation prepareSaveAsInput(DocumentResource resource, SaveDisposition disposition, boolean utf8)
+    SavePreparation prepareSaveAsInput(DocumentResource resource, SaveDisposition disposition, boolean utf8)
         throws IOException {
         requireOwnerThread();
+        requireIoIdle();
         return new SavePreparation(this, backend.prepareSaveAsInput(resource, disposition, utf8));
     }
 
     /** Approves exactly the detached observation while its owner state remains unchanged. */
-    public PreparedSave approveSaveAs(SaveTargetInspection inspection) throws IOException {
+    PreparedSave approveSaveAs(SaveTargetInspection inspection) throws IOException {
         requireOwnerThread();
+        requireIoIdle();
+        return approveSaveAsInternal(inspection);
+    }
+
+    private PreparedSave approveSaveAsInternal(SaveTargetInspection inspection) throws IOException {
         Objects.requireNonNull(inspection, "inspection");
         if (inspection.owner != this) throw new IllegalArgumentException("Save inspection belongs to another session");
         return new PreparedSave(this, backend.approveSaveAs(inspection.inspection));
@@ -167,15 +194,51 @@ public final class EditorDocumentSession {
      * Completes the matching write on the owner. Hosts keep document edits locked
      * between capture and completion; failure leaves the draft and savepoint intact.
      */
-    public void completeSaved(PreparedSave prepared, SavedDocument saved) {
+    void completeSaved(PreparedSave prepared, SavedDocument saved) {
         requireOwnerThread();
+        requireIoIdle();
+        completeSavedInternal(prepared, saved);
+    }
+
+    private void completeSavedInternal(PreparedSave prepared, SavedDocument saved) {
         Objects.requireNonNull(prepared, "prepared");
         if (prepared.owner != this) throw new IllegalArgumentException("Prepared save belongs to another session");
         backend.completeSaved(prepared.prepared, saved);
     }
 
+    PreparedSave prepareCoordinatedSave(DocumentIoCoordinator coordinator) throws IOException {
+        requireCoordinator(coordinator);
+        return new PreparedSave(this, backend.prepareSave());
+    }
+
+    SavePreparation prepareCoordinatedSaveAs(DocumentIoCoordinator coordinator, DocumentResource resource,
+                                           SaveDisposition disposition, boolean utf8) throws IOException {
+        requireCoordinator(coordinator);
+        return new SavePreparation(this, backend.prepareSaveAsInput(resource, disposition, utf8));
+    }
+
+    PreparedSave approveCoordinatedSaveAs(DocumentIoCoordinator coordinator, SaveTargetInspection inspection)
+        throws IOException {
+        requireCoordinator(coordinator);
+        return approveSaveAsInternal(inspection);
+    }
+
+    void completeCoordinatedSave(DocumentIoCoordinator coordinator, PreparedSave prepared, SavedDocument saved) {
+        requireCoordinator(coordinator);
+        completeSavedInternal(prepared, saved);
+    }
+
+    private void requireCoordinator(DocumentIoCoordinator coordinator) {
+        requireOwnerThread();
+        if (coordinator != io) throw new IllegalArgumentException("Coordinator belongs to another session");
+    }
+
+    private void requireIoIdle() {
+        if (io.busy()) throw new IllegalStateException("Document is busy saving");
+    }
+
     /** Opaque owner capture; inspection reads no mutable document state. */
-    public static final class SavePreparation {
+    static final class SavePreparation {
         private final EditorDocumentSession owner;
         private final DocumentBackend.SavePreparation preparation;
 
@@ -184,15 +247,15 @@ public final class EditorDocumentSession {
             this.preparation = preparation;
         }
 
-        public SaveTargetInspection inspectTarget() throws IOException {
+        SaveTargetInspection inspectTarget() throws IOException {
             return new SaveTargetInspection(owner, preparation.inspectTarget());
         }
 
-        public SaveDisposition disposition() { return preparation.disposition(); }
+        SaveDisposition disposition() { return preparation.disposition(); }
     }
 
     /** An inspected target bound to one capture, ready for owner approval. */
-    public static final class SaveTargetInspection {
+    static final class SaveTargetInspection {
         private final EditorDocumentSession owner;
         private final DocumentBackend.SaveTargetInspection inspection;
 
@@ -201,14 +264,14 @@ public final class EditorDocumentSession {
             this.inspection = inspection;
         }
 
-        public DocumentResource requestedResource() { return inspection.requestedResource(); }
-        public DocumentResource physicalResource() { return inspection.physicalResource(); }
-        public boolean exists() { return inspection.exists(); }
-        public boolean currentTarget() { return inspection.currentTarget(); }
+        DocumentResource requestedResource() { return inspection.requestedResource(); }
+        DocumentResource physicalResource() { return inspection.physicalResource(); }
+        boolean exists() { return inspection.exists(); }
+        boolean currentTarget() { return inspection.currentTarget(); }
     }
 
     /** Single-use detached write; completion accepts only the receipt it produced. */
-    public static final class PreparedSave {
+    static final class PreparedSave {
         private final EditorDocumentSession owner;
         private final DocumentBackend.PreparedSave prepared;
 
@@ -217,7 +280,7 @@ public final class EditorDocumentSession {
             this.prepared = prepared;
         }
 
-        public SavedDocument write() throws IOException { return prepared.write(); }
+        SavedDocument write() throws IOException { return prepared.write(); }
     }
 
     /**
@@ -246,6 +309,10 @@ public final class EditorDocumentSession {
         }
         current = publishIfChanged();
 
+        if (io.busy()) {
+            return new WorkspaceEditResult.Rejected(WorkspaceEditResult.RejectionReason.DOCUMENT_BUSY, current, List.of());
+        }
+
         List<WorkspaceEditValidator.Violation> violations =
             WorkspaceEditValidator.validate(current, proposed);
         if (!violations.isEmpty()) {
@@ -270,6 +337,7 @@ public final class EditorDocumentSession {
     /** Undoes exactly one committed session mutation. */
     public boolean undo() {
         requireOwnerThread();
+        requireIoIdle();
         WorkspaceEditResult.Applied result = backend.undo(this::prepareMutationResult);
         publishedSnapshot = result.snapshot();
         return result.changed();
@@ -278,6 +346,7 @@ public final class EditorDocumentSession {
     /** Redoes exactly one mutation from the same document history as every attached view. */
     public boolean redo() {
         requireOwnerThread();
+        requireIoIdle();
         WorkspaceEditResult.Applied result = backend.redo(this::prepareMutationResult);
         publishedSnapshot = result.snapshot();
         return result.changed();

@@ -1,9 +1,12 @@
 package dev.tuink.tui;
 
+import dev.tuink.editor.storage.DocumentEncodingException;
+
 import dev.tuink.core.TabSession;
 import dev.tuink.editor.storage.AmbiguousDocumentEncodingException;
 import dev.tuink.editor.storage.DocumentOpenMode;
 import dev.tuink.editor.storage.DocumentLoad;
+import dev.tuink.editor.session.document.PreparedDocumentOpen;
 import dev.tuink.storage.jvm.FileBaseline;
 import dev.tuink.storage.jvm.JvmDocumentStorage;
 import dev.tuink.tui.ui.NotificationPresentation;
@@ -38,16 +41,22 @@ final class FilePickerOpenWorkflow {
     }
 
     /** The worker owns decoding; publishing this result belongs to the UI thread. */
-    record OpenRequest(Path path, DocumentOpenMode mode) {
+    record OpenRequest(Path path, DocumentOpenMode mode, PreparedDocumentOpen operation) {
+        OpenRequest(Path path, DocumentOpenMode mode) {
+            this(path, mode, new PreparedDocumentOpen(JvmDocumentStorage.resource(path), mode, false));
+        }
+
         OpenRequest {
             Objects.requireNonNull(path, "path");
             Objects.requireNonNull(mode, "mode");
+            Objects.requireNonNull(operation, "operation");
         }
 
         DocumentLoad read() throws IOException {
-            var resource = JvmDocumentStorage.resource(path);
-            return resource.storage().load(resource, mode, false);
+            return operation.read();
         }
+
+        void cancel() { operation.cancel(); }
     }
 
     /** Plain failure data; the dialog owns its terminal presentation. */
@@ -126,8 +135,15 @@ final class FilePickerOpenWorkflow {
                            List<TabSession> tabs, int activeTabIndex,
                            Supplier<TuiDocumentSession> newDocument) {
         Objects.requireNonNull(request, "request");
+        if (request.operation().cancelled()) return unchanged(false);
         if ((loaded == null) == (failure == null)) {
             throw new IllegalArgumentException("An open completion requires either loaded text or a failure");
+        }
+        if (loaded != null) {
+            loaded = request.operation().accept(loaded);
+            if (loaded == null) return unchanged(false);
+        } else {
+            request.cancel();
         }
         Path target = request.path();
         // Tabs may have changed while the read was running. Compare the file

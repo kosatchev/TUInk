@@ -37,6 +37,7 @@ public sealed interface WorkspaceEditResult
 
     enum RejectionReason {
         WRONG_OWNER_THREAD,
+        DOCUMENT_BUSY,
         EDIT_LIMIT_EXCEEDED,
         VALIDATION_FAILED
     }

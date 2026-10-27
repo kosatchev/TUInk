@@ -236,6 +236,23 @@ class ArchitectureTest {
         .matching("dev.tuink.editor.(*)..")
         .should().beFreeOfCycles();
 
+    static final ArchRule RECOVERY_COORDINATION_STAYS_PORTABLE = classes()
+        .that().resideInAPackage("dev.tuink.editor.session.recovery..")
+        .should().onlyDependOnClassesThat().resideInAnyPackage(
+            "java..", "dev.tuink.editor.document..", "dev.tuink.editor.session.recovery.."
+        );
+
+    static final ArchRule IO_COORDINATION_STAYS_PORTABLE = classes()
+        .that().haveNameMatching("dev\\.tuink\\.editor\\.session\\.document\\.(DocumentIoCoordinator|PreparedDocumentOpen)(?:\\$.*)?")
+        .should().onlyDependOnClassesThat().resideInAnyPackage(
+            "java..", "dev.tuink.editor.document..", "dev.tuink.editor.storage..", "dev.tuink.editor.session.document.."
+        );
+
+    static final ArchRule COORDINATORS_DO_NOT_ACCESS_FILESYSTEM = noClasses()
+        .that().resideInAPackage("dev.tuink.editor.session.recovery..")
+        .or().haveNameMatching("dev\\.tuink\\.editor\\.session\\.document\\.(DocumentIoCoordinator|PreparedDocumentOpen)(?:\\$.*)?")
+        .should().dependOnClassesThat().resideInAPackage("java.nio.file..");
+
     static final ArchRule LANGUAGE_CONTRACT_IS_SELF_CONTAINED = classes()
         .that().resideInAPackage("dev.tuink.editor.language..")
         .should().onlyDependOnClassesThat().resideInAnyPackage(
@@ -468,6 +485,9 @@ class ArchitectureTest {
         RECOVERY_CONTRACT_STAYS_PORTABLE.check(PRODUCTION_CLASSES);
         SEARCH_CONTRACT_IS_SELF_CONTAINED.check(PRODUCTION_CLASSES);
         EDITOR_CONTRACT_PACKAGES_ARE_ACYCLIC.check(PRODUCTION_CLASSES);
+        RECOVERY_COORDINATION_STAYS_PORTABLE.check(PRODUCTION_CLASSES);
+        IO_COORDINATION_STAYS_PORTABLE.check(PRODUCTION_CLASSES);
+        COORDINATORS_DO_NOT_ACCESS_FILESYSTEM.check(PRODUCTION_CLASSES);
         KEYMAP_LAYER_STAYS_EDITOR_INDEPENDENT.check(PRODUCTION_CLASSES);
         GENERIC_KEYMAP_DOES_NOT_IMPORT_PHYSICAL_INPUT.check(PRODUCTION_CLASSES);
         TUINK_KEYMAP_DOES_NOT_IMPORT_DECODER_OR_RESOLVED_INPUT.check(PRODUCTION_CLASSES);

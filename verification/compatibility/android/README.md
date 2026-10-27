@@ -7,6 +7,9 @@ undo/redo, stale-result rejection, search, text ownership, UTF-16 boundaries,
 semantic highlighting and grapheme segmentation on the JVM. It also loads,
 edits and saves a document through the public session API and an in-memory
 storage adapter, checking owner/worker phases, BOM, mixed EOL and savepoints.
+The save coordinator also rejects concurrent edits and retains a dirty savepoint
+after an uncertain write. Recovery runs through the portable coordinator and
+checks that detaching preserves a draft until explicit discard.
 It then processes the same JARs and fixture with D8 and R8.
 
 Ordinary typing, coalesced Undo/Redo and replacement also run through typed

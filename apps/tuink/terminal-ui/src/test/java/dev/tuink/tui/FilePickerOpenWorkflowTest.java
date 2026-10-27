@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuink.editor.storage.DocumentEncodingException;
+
 import dev.tuink.storage.jvm.JvmDocumentStorage;
 
 import dev.tuink.editor.storage.DocumentLoad;
@@ -150,9 +152,9 @@ class FilePickerOpenWorkflowTest {
         Path file = Files.writeString(directory.resolve("original.txt"), "disk");
         Path symlink = Files.createSymbolicLink(directory.resolve("symbolic.txt"), file.getFileName());
         Path hardlink = Files.createLink(directory.resolve("hard.txt"), file);
-        var request = new FilePickerOpenWorkflow.OpenRequest(file, DocumentOpenMode.DETECT);
-        DocumentLoad loaded = request.read();
         for (Path alias : List.of(file, symlink, hardlink)) {
+            var request = new FilePickerOpenWorkflow.OpenRequest(file, DocumentOpenMode.DETECT);
+            DocumentLoad loaded = request.read();
             var existing = TuiDocumentSession.create(new EditorClipboard()).view();
             existing.engine().open(JvmDocumentStorage.resource(alias));
             existing.engine().insertInput("draft ");
@@ -218,12 +220,12 @@ class FilePickerOpenWorkflowTest {
     @Test
     void completionPreservesPathSpecificAndGenericFailureMessages() {
         Path file = directory.resolve("selected.txt");
-        var request = new FilePickerOpenWorkflow.OpenRequest(file, DocumentOpenMode.DETECT);
         List<IOException> failures = List.of(new NoSuchFileException(file.toString()),
             new AccessDeniedException(file.toString()), new FileSystemException(file.toString(), null, "device unavailable"),
             new IOException("read failed"), new IOException());
         List<String> reasons = List.of("file no longer exists", "permission denied", "device unavailable", "read failed", "I/O error");
         for (int index = 0; index < failures.size(); index++) {
+            var request = new FilePickerOpenWorkflow.OpenRequest(file, DocumentOpenMode.DETECT);
             var result = FilePickerOpenWorkflow.complete(request, null, failures.get(index), List.of(), -1,
                 () -> fail("failed reads must not allocate documents"));
             assertTrue(result.openFileMode());

@@ -8,6 +8,7 @@ import dev.tuink.core.EditorState;
 import dev.tuink.core.LanguageProfiles;
 import dev.tuink.core.Position;
 import dev.tuink.editor.search.SearchOptions;
+import dev.tuink.editor.session.document.DocumentIoCoordinator;
 import dev.tuink.core.TabSession;
 import dev.tuink.core.TextModel;
 import dev.tuink.tui.flow.ConfirmChoice;
@@ -108,6 +109,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     private final AppSettingsSession settingsSession;
     private final DocumentIoController documentIo;
     private SaveWorkflow.SaveRequest pendingSave;
+    private FilePickerOpenWorkflow.OpenRequest pendingOpen;
     private SaveWorkflow.OverwriteApproval overwriteApproval;
     private FilePickerOpenWorkflow.Result deferredOpenResult;
     private boolean quitAfterDocumentIo;
@@ -1573,7 +1575,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             }
             Integer closeIndex = tabInput.closeIndex();
             if (closeIndex != null && closeIndex < tabs.size()) {
-                if (pendingSave != null && tabs.get(closeIndex).tabSession() == pendingSave.tab()) {
+                if (tabs.get(closeIndex).documentSession().document().io().busy()) {
                     notification.info("Saving this document; wait before closing its tab");
                     return;
                 }
@@ -1859,13 +1861,13 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 : "Waiting for the file operation before quitting");
             return;
         }
-        if (action == TuinkCommand.TAB_CLOSE && pendingSave != null
-            && sessionContext.engine() == pendingSave.tab().engine()) {
+        if (action == TuinkCommand.TAB_CLOSE && activeDocument().document().io().busy()) {
             notification.info("Saving this document; wait before closing its tab");
             return;
         }
-        if (documentIo.busy() && (action == TuinkCommand.DOCUMENT_SAVE
-            || action == TuinkCommand.DOCUMENT_SAVE_AS || action == TuinkCommand.DOCUMENT_OPEN)
+        if ((documentIo.busy() || activeDocument().document().io().busy())
+                && (action == TuinkCommand.DOCUMENT_SAVE || action == TuinkCommand.DOCUMENT_SAVE_AS)
+            || documentIo.busy() && action == TuinkCommand.DOCUMENT_OPEN
             || deferredOpenResult != null && action == TuinkCommand.DOCUMENT_OPEN) {
             notification.info("A file operation is already in progress");
             return;
@@ -1906,7 +1908,9 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             state.isDirty(),
             activeTabIndex,
             JvmDocumentStorage.pathOf(state.getCurrentResource()),
-            JvmDocumentStorage.pathOf(state.getCurrentResource()) != null && SaveTargetPolicy.isReadOnlyFile(JvmDocumentStorage.pathOf(state.getCurrentResource()))
+            (action == TuinkCommand.DOCUMENT_SAVE || action == TuinkCommand.DOCUMENT_SAVE_AS)
+                && JvmDocumentStorage.pathOf(state.getCurrentResource()) != null
+                && SaveTargetPolicy.isReadOnlyFile(JvmDocumentStorage.pathOf(state.getCurrentResource()))
         );
         var themeBefore = host.theme;
         host.applyEditorActionResult(editorAction, sessionContext, tabs, activeTabIndex,
@@ -1941,10 +1945,12 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 return;
             }
             var request = result.pendingOpen();
+            pendingOpen = request;
             openFileMode = false;
             pickerNotice = null;
             notification.info("Opening document…");
             documentIo.submit(request::read, completion -> {
+                pendingOpen = null;
                 if (closingDocumentIo) {
                     return;
                 }
@@ -2087,10 +2093,14 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
 
     private void startSave(SaveWorkflow.SaveRequest unsubmitted) {
         // Completing a read-only inspection during close must not start a new write.
-        if (closingDocumentIo) return;
+        if (closingDocumentIo) {
+            unsubmitted.session().document().io().stop();
+            return;
+        }
         SaveWorkflow.SaveRequest request = unsubmitted.submission() == null
             ? unsubmitted.submitted(saveAsInput.text(), filenameRevision) : unsubmitted;
         if (documentIo.busy()) {
+            request.session().document().io().cancel(request.operation());
             notification.info("A file operation is already in progress; retry saving after it finishes");
             modalState = request.origin();
             return;
@@ -2101,13 +2111,27 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         notification.info(request.inspecting() ? "Checking save target…" : "Saving document…");
         documentIo.submit(request::perform, completion -> {
             pendingSave = null;
-            if (!completion.succeeded()) {
+            var transition = request.accept(completion.value(), completion.failure());
+            if (transition instanceof DocumentIoCoordinator.Ignored) {
+                afterDocumentIo();
+                return;
+            }
+            if (closingDocumentIo) {
+                // Publish a started write before final recovery, without
+                // starting a quit/close continuation during shutdown.
+                if (transition instanceof DocumentIoCoordinator.Failed failed) {
+                    notification.error(SaveTargetPolicy.saveErrorMessage(failed.failure()));
+                }
+                return;
+            }
+            SaveWorkflow.Result result = SaveWorkflow.complete(saveContext(), request, transition);
+            boolean succeeded = completion.succeeded() && completion.value().succeeded()
+                && result.notice().kind() != SaveWorkflow.NoticeKind.ERROR;
+            if (!succeeded) {
                 // The deferred exit depended on this write succeeding. Keep the
                 // failed draft visible even when ordinary close confirmation is off.
                 quitAfterDocumentIo = false;
             }
-            SaveWorkflow.Result result = SaveWorkflow.complete(saveContext(), request,
-                completion.value(), completion.failure());
             if (request.inspecting() && result.pendingSave() == null) {
                 // A target prompt or inspection failure needs an explicit owner decision.
                 quitAfterDocumentIo = false;
@@ -2115,11 +2139,11 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             boolean standalone = request.purpose() == SaveWorkflow.SavePurpose.CURRENT
                     || request.purpose() == SaveWorkflow.SavePurpose.SAVE_AS
                         && request.origin().saveContinuation() == SaveContinuation.NONE;
-            if (request.inspecting() && completion.succeeded() && result.pendingSave() != null && standalone) {
+            if (request.inspecting() && succeeded && result.pendingSave() != null && standalone) {
                 // Advancing inspection to writing is still the original operation.
                 // Keep any independent modal/filename opened while it was pending.
                 startSave(result.pendingSave());
-            } else if (!request.inspecting() && completion.succeeded() && standalone) {
+            } else if (!request.inspecting() && succeeded && standalone) {
                 // The original save prompt was dismissed when the write started. A modal or
                 // filename opened since then belongs to the user's independent interaction.
                 if (result.refreshSavedHighlighter()) {
@@ -2131,7 +2155,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 applySaveNotice(result.notice());
             } else {
                 if (request.purpose() == SaveWorkflow.SavePurpose.SAVE_AS
-                    && (!completion.succeeded() || request.inspecting() && result.pendingSave() == null)
+                    && (!succeeded || request.inspecting() && result.pendingSave() == null)
                     && filenameRevision != submittedFilenameRevision
                     && (result.modalState().isSaveAs() || result.modalState().isSaveOverwriteConfirm()
                         || result.modalState().isSaveUtf8Confirm())
@@ -2155,7 +2179,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     }
 
     private boolean rejectSavingDocumentEdit() {
-        if (pendingSave == null || sessionContext.engine() != pendingSave.tab().engine()) {
+        if (!activeDocument().document().io().busy()) {
             return false;
         }
         notification.info("Saving this document; editing will resume when the write finishes");
@@ -2178,6 +2202,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     void closeDocumentIo() {
         closingDocumentIo = true;
         deferredOpenResult = null;
+        if (pendingOpen != null) pendingOpen.cancel();
+        for (TerminalEditorApp.EditorTab tab : tabs) tab.documentSession().document().io().stop();
         documentIo.close();
     }
 

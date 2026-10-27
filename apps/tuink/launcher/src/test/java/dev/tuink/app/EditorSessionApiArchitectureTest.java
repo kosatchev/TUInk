@@ -15,6 +15,7 @@ import java.lang.reflect.TypeVariable;
 import java.lang.reflect.WildcardType;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class EditorSessionApiArchitectureTest {
@@ -66,7 +67,7 @@ class EditorSessionApiArchitectureTest {
     }
 
     @Test
-    void ownedBackendIsRestrictedToSessionAndFrontendComposition() {
+    void frontendCompositionCannotExportOrBypassTheDocumentCommandGate() {
         JavaClasses production = new ClassFileImporter()
             .withImportOption(new ImportOption.DoNotIncludeTests())
             .importPackages("dev.tuink");
@@ -78,6 +79,33 @@ class EditorSessionApiArchitectureTest {
             .haveNameMatching("dev\\.tuink\\.core\\.CoreDocumentBackend(?:\\$.*)?")
             .because("only frontend composition connects an owned backend; document handlers use the session")
             .check(production);
+
+        Set<String> mutations = Set.of("insertChar", "insertInput", "insertTab", "insertNewline", "backspace",
+            "deleteForward", "toggleLineComment", "copySelection", "copyCurrentLine", "cutSelection", "cutCurrentLine",
+            "pasteClipboard", "pasteText", "selectAll", "undo", "redo", "applyTextReplacements", "executeCommand",
+            "findNext", "findPrevious", "replaceCurrentOrNext", "replaceAll", "moveCursorTo", "navigateTo",
+            "beginSelectionAt", "extendSelectionTo", "restoreSelection", "finishSelection", "selectWordAt",
+            "moveLeft", "moveRight", "moveWordLeft", "moveWordRight", "moveHome", "moveEnd", "moveHomeSmart",
+            "moveEndSmart", "moveDocumentStart", "moveDocumentEnd", "open", "openExisting", "openPrepared",
+            "save", "saveAs", "saveAsUtf8", "prepareSave", "prepareSaveAs", "prepareSaveAsInput", "approveSaveAs",
+            "completeSaved", "restoreRecoverySnapshot");
+        Set<String> modelMutations = Set.of("replaceLines", "replaceRange", "setLine", "insertLine", "deleteLine",
+            "load", "applyPreparedLoad", "save", "saveIfUnchanged", "completeSave", "restoreFileBaseline",
+            "publishReplacement", "beginLocalEdit");
+        List<String> bypasses = new ArrayList<>();
+        for (var origin : production) {
+            String name = origin.getName();
+            if (!name.startsWith("dev.tuink.tui.") && !name.startsWith("dev.tuink.render.")) continue;
+            for (var call : origin.getMethodCallsFromSelf()) {
+                String owner = call.getTarget().getOwner().getName();
+                String method = call.getTarget().getName();
+                if (owner.equals("dev.tuink.core.EditorEngine") && mutations.contains(method)
+                    || owner.equals("dev.tuink.core.TextModel") && modelMutations.contains(method)) {
+                    bypasses.add(call.getDescription());
+                }
+            }
+        }
+        assertTrue(bypasses.isEmpty(), () -> "Frontend bypasses the session mutation gate:\n  " + String.join("\n  ", bypasses));
     }
 
     private static void inspect(Member member, Type type, List<String> violations) {

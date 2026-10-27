@@ -1,6 +1,9 @@
 package dev.tuink.tui.ui;
 
 import dev.tuink.core.EditorEngine;
+import dev.tuink.editor.command.DocumentCommand;
+import dev.tuink.editor.command.DocumentCommandResult;
+import dev.tuink.editor.document.TextPosition;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.EditorTextLayout;
 import dev.tuink.core.Position;
@@ -14,6 +17,7 @@ import dev.tuiframe.scroll.Scrollbar;
 import dev.tuiframe.scroll.ScrollInteraction;
 import java.util.Objects;
 import java.util.function.LongSupplier;
+import java.util.function.Function;
 
 /**
  * UI helper for the main editor text area.
@@ -23,6 +27,7 @@ public final class EditorView {
     private static final long EDGE_AUTO_SCROLL_INTERVAL_NANOS = 50_000_000L;
     private static final long DOUBLE_CLICK_WINDOW_NANOS = 450_000_000L;
     private final LongSupplier nanoClock;
+    private Function<DocumentCommand, DocumentCommandResult.Applied> commands;
 
     public enum ScrollAxis {
         NONE,
@@ -43,6 +48,17 @@ public final class EditorView {
 
     public EditorView(LongSupplier nanoClock) {
         this.nanoClock = Objects.requireNonNull(nanoClock, "nanoClock");
+    }
+
+    /** Binds pointer actions to the window's current registered document view. */
+    public void bindCommands(Function<DocumentCommand, DocumentCommandResult.Applied> commands) {
+        this.commands = Objects.requireNonNull(commands, "commands");
+    }
+
+    private boolean select(DocumentCommand.SelectionAction action, Position position) {
+        if (commands == null) throw new IllegalStateException("Pointer commands require a registered document view");
+        return commands.apply(new DocumentCommand.Select(action, position == null ? null
+            : new TextPosition(position.line(), position.col()), null)).performed();
     }
 
     public CursorPosition cursorFromPlan(RenderPlan plan, int contentTopRow) {
@@ -86,11 +102,11 @@ public final class EditorView {
             mouseSelecting = true;
             if (extendSelection) {
                 resetClickSequence();
-                engine.extendSelectionTo(hit);
-            } else if (isDoubleClick(hit) && engine.selectWordAt(hit)) {
+                select(DocumentCommand.SelectionAction.EXTEND, hit);
+            } else if (isDoubleClick(hit) && select(DocumentCommand.SelectionAction.WORD, hit)) {
                 selectedWordByDoubleClick = true;
             } else {
-                engine.beginSelectionAt(hit);
+                select(DocumentCommand.SelectionAction.BEGIN, hit);
             }
         } else {
             mouseSelecting = false;
@@ -199,7 +215,7 @@ public final class EditorView {
             contentTopRow
         );
         if (hit != null) {
-            engine.extendSelectionTo(hit);
+            select(DocumentCommand.SelectionAction.EXTEND, hit);
             ensureCursorVisible(engine, plan, contentRows);
         }
         return !oldCursor.equals(state.getCursor()) || oldTop != state.getTopLine()
@@ -268,7 +284,7 @@ public final class EditorView {
             return;
         }
         mouseSelecting = false;
-        engine.finishSelection();
+        select(DocumentCommand.SelectionAction.FINISH, null);
     }
 
     public boolean isMouseSelecting() {

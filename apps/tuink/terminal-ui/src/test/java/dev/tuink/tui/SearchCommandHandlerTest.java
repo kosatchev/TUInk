@@ -28,7 +28,7 @@ class SearchCommandHandlerTest {
         current.engine().restoreSelection(cursor, anchor);
         long revision = current.model().revision();
         var options = new SearchController.SearchUiOptions(true, dev.tuink.editor.search.SearchOptions.MatchMode.WILDCARD, false);
-        var context = new SearchCommandHandler.Context(List.of(current), 0, false, options,
+        var context = new SearchCommandHandler.Context(List.of(TuiDocumentSession.adopt(current)), 0, false, options,
             "a".repeat(64) + "?a", "replacement");
 
         // Admission consumes 132 updates. The second pass builds one replacement
@@ -59,7 +59,7 @@ class SearchCommandHandlerTest {
         current.engine().restoreSelection(cursor, anchor);
         long revision = current.model().revision();
         var options = new SearchController.SearchUiOptions(true, dev.tuink.editor.search.SearchOptions.MatchMode.WILDCARD, true);
-        var context = new SearchCommandHandler.Context(List.of(current, tab("other")), 0, false, options, query, "replace");
+        var context = new SearchCommandHandler.Context(List.of(TuiDocumentSession.adopt(current), TuiDocumentSession.adopt(tab("other"))), 0, false, options, query, "replace");
 
         for (TuinkCommand command : List.of(TuinkCommand.SEARCH_NEXT, TuinkCommand.SEARCH_PREVIOUS,
             TuinkCommand.SEARCH_REPLACE, TuinkCommand.SEARCH_REPLACE_ALL)) {
@@ -136,7 +136,7 @@ class SearchCommandHandlerTest {
 
         assertEquals(1, next.activeTabIndex());
         assertEquals(new Position(0, 13), second.state().getCursor());
-        var fromSecond = new SearchCommandHandler.Context(tabs, 1, false, initial.options(), "needle", "");
+        var fromSecond = new SearchCommandHandler.Context(tabs.stream().map(TuiDocumentSession::adopt).toList(), 1, false, initial.options(), "needle", "");
         SearchCommandHandler.Result wrapped = SearchCommandHandler.execute(TuinkCommand.SEARCH_NEXT, fromSecond, () -> false);
         assertEquals(0, wrapped.activeTabIndex());
         assertEquals(new Position(0, 6), first.state().getCursor());
@@ -213,7 +213,7 @@ class SearchCommandHandlerTest {
 
     private static SearchCommandHandler.Context context(List<TabSession> tabs, boolean allTabs,
         boolean reading, String query, String replacement) {
-        return new SearchCommandHandler.Context(tabs, 0, reading,
+        return new SearchCommandHandler.Context(tabs.stream().map(TuiDocumentSession::adopt).toList(), 0, reading,
             new SearchController.SearchUiOptions(false, dev.tuink.editor.search.SearchOptions.MatchMode.SUBSTRING, allTabs),
             query, replacement);
     }

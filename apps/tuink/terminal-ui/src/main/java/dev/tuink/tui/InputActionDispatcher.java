@@ -15,6 +15,8 @@ import dev.tuink.core.EditorState;
 import dev.tuink.core.GutterDiffMode;
 import dev.tuink.core.TabInsertMode;
 import dev.tuink.editor.command.CommandInvocation;
+import dev.tuink.editor.command.DocumentCommand;
+import dev.tuink.editor.command.DocumentCommandResult;
 import dev.tuink.render.EditorViewNavigation;
 import dev.tuink.tui.command.TuinkCommand;
 import dev.tuink.tui.ui.ViewportController.CursorPolicy;
@@ -221,9 +223,9 @@ final class InputActionDispatcher {
             case EDIT_COPY -> {
                 try {
                     if (ctx.engine().hasSelection()) {
-                        statusMessage = ctx.engine().copySelection() ? "Copied selection" : "Nothing to copy";
+                        statusMessage = ctx.execute(DocumentCommand.EditAction.COPY).performed() ? "Copied selection" : "Nothing to copy";
                     } else {
-                        statusMessage = ctx.engine().copyCurrentLine() ? "Copied line" : "Nothing to copy";
+                        statusMessage = ctx.execute(DocumentCommand.EditAction.COPY).performed() ? "Copied line" : "Nothing to copy";
                     }
                 } catch (ClipboardLimitException limit) {
                     return DispatchResult.handled(limit.getMessage(), StatusLevel.ERROR);
@@ -233,9 +235,9 @@ final class InputActionDispatcher {
             case EDIT_CUT -> {
                 try {
                     if (ctx.engine().hasSelection()) {
-                        statusMessage = ctx.engine().cutSelection() ? "Cut selection" : "Nothing to cut";
+                        statusMessage = ctx.execute(DocumentCommand.EditAction.CUT).performed() ? "Cut selection" : "Nothing to cut";
                     } else {
-                        statusMessage = ctx.engine().cutCurrentLine() ? "Cut line" : "Nothing to cut";
+                        statusMessage = ctx.execute(DocumentCommand.EditAction.CUT).performed() ? "Cut line" : "Nothing to cut";
                     }
                 } catch (ClipboardLimitException limit) {
                     return DispatchResult.handled(limit.getMessage(), StatusLevel.ERROR);
@@ -244,7 +246,7 @@ final class InputActionDispatcher {
             }
             case EDIT_PASTE -> {
                 try {
-                    statusMessage = ctx.engine().pasteClipboard() ? "Pasted" : "Clipboard empty";
+                    statusMessage = ctx.execute(DocumentCommand.EditAction.PASTE).performed() ? "Pasted" : "Clipboard empty";
                 } catch (DocumentEditLimitException limit) {
                     return DispatchResult.handled(limit.getMessage(), StatusLevel.ERROR);
                 }
@@ -252,39 +254,40 @@ final class InputActionDispatcher {
             }
             case EDIT_UNDO -> {
                 DocumentFileMetadata before = ctx.engine().model().fileMetadata();
-                statusMessage = ctx.engine().undo()
+                statusMessage = ctx.execute(DocumentCommand.EditAction.UNDO).performed()
                     ? historyMessage("Undo", before, ctx.engine().model().fileMetadata()) : "Nothing to undo";
                 return DispatchResult.handled(statusMessage);
             }
             case EDIT_REDO -> {
                 DocumentFileMetadata before = ctx.engine().model().fileMetadata();
-                statusMessage = ctx.engine().redo()
+                statusMessage = ctx.execute(DocumentCommand.EditAction.REDO).performed()
                     ? historyMessage("Redo", before, ctx.engine().model().fileMetadata()) : "Nothing to redo";
                 return DispatchResult.handled(statusMessage);
             }
             case EDIT_SELECT_ALL -> {
-                statusMessage = ctx.engine().selectAll() ? "Selected all" : "Nothing to select";
+                statusMessage = ctx.execute(DocumentCommand.EditAction.SELECT_ALL).performed() ? "Selected all" : "Nothing to select";
                 return DispatchResult.handled(statusMessage);
             }
             case EDIT_TOGGLE_LINE_COMMENT -> {
-                EditorEngine.LineCommentResult result;
+                DocumentCommandResult.Applied result;
                 try {
-                    result = ctx.engine().toggleLineComment();
+                    result = ctx.execute(DocumentCommand.EditAction.TOGGLE_LINE_COMMENT);
                 } catch (DocumentEditLimitException limit) {
                     return DispatchResult.handled("Comment change is too large for available memory. Select fewer lines.",
                         StatusLevel.ERROR);
                 }
-                return switch (result.action()) {
+                return switch (result.commentAction()) {
                     case COMMENTED -> DispatchResult.handled(
-                        "Commented " + lineCountLabel(result.lineCount())
+                        "Commented " + lineCountLabel(result.affectedCount())
                     );
                     case UNCOMMENTED -> DispatchResult.handled(
-                        "Uncommented " + lineCountLabel(result.lineCount())
+                        "Uncommented " + lineCountLabel(result.affectedCount())
                     );
                     case UNSUPPORTED -> DispatchResult.handled(
                         "Line comments are not supported for this file type",
                         StatusLevel.WARNING
                     );
+                    case NONE -> throw new IllegalStateException("Comment command returned no action");
                     case NO_CONTENT -> DispatchResult.handled(
                         "No non-empty lines to comment",
                         StatusLevel.WARNING
@@ -292,7 +295,7 @@ final class InputActionDispatcher {
                 };
             }
             case EDIT_INSERT_TAB -> {
-                ctx.engine().insertTab();
+                ctx.execute(DocumentCommand.EditAction.INSERT_TAB);
                 return DispatchResult.handled("");
             }
             case CURSOR_UP -> {
@@ -304,11 +307,11 @@ final class InputActionDispatcher {
                 return DispatchResult.followCursor();
             }
             case CURSOR_LEFT -> {
-                ctx.engine().moveLeft();
+                ctx.navigate(DocumentCommand.Navigation.LEFT, false);
                 return DispatchResult.followCursor();
             }
             case CURSOR_RIGHT -> {
-                ctx.engine().moveRight();
+                ctx.navigate(DocumentCommand.Navigation.RIGHT, false);
                 return DispatchResult.followCursor();
             }
             case CURSOR_SELECT_UP -> {
@@ -320,19 +323,19 @@ final class InputActionDispatcher {
                 return DispatchResult.followCursor();
             }
             case CURSOR_SELECT_LEFT -> {
-                ctx.engine().moveLeft(true);
+                ctx.navigate(DocumentCommand.Navigation.LEFT, true);
                 return DispatchResult.followCursor();
             }
             case CURSOR_SELECT_RIGHT -> {
-                ctx.engine().moveRight(true);
+                ctx.navigate(DocumentCommand.Navigation.RIGHT, true);
                 return DispatchResult.followCursor();
             }
             case CURSOR_WORD_LEFT -> {
-                ctx.engine().moveWordLeft();
+                ctx.navigate(DocumentCommand.Navigation.WORD_LEFT, false);
                 return DispatchResult.followCursor();
             }
             case CURSOR_WORD_RIGHT -> {
-                ctx.engine().moveWordRight();
+                ctx.navigate(DocumentCommand.Navigation.WORD_RIGHT, false);
                 return DispatchResult.followCursor();
             }
             case CURSOR_PAGE_UP -> {
@@ -348,39 +351,39 @@ final class InputActionDispatcher {
             case CURSOR_HOME, CURSOR_SELECT_HOME -> {
                 boolean selecting = command == TuinkCommand.CURSOR_SELECT_HOME;
                 if (ui.smartHomeEndSetting) {
-                    ctx.engine().moveHomeSmart(selecting);
+                    ctx.navigate(DocumentCommand.Navigation.HOME_SMART, selecting);
                 } else {
-                    ctx.engine().moveHome(selecting);
+                    ctx.navigate(DocumentCommand.Navigation.HOME, selecting);
                 }
                 return DispatchResult.followCursor();
             }
             case CURSOR_END, CURSOR_SELECT_END -> {
                 boolean selecting = command == TuinkCommand.CURSOR_SELECT_END;
                 if (ui.smartHomeEndSetting) {
-                    ctx.engine().moveEndSmart(selecting);
+                    ctx.navigate(DocumentCommand.Navigation.END_SMART, selecting);
                 } else {
-                    ctx.engine().moveEnd(selecting);
+                    ctx.navigate(DocumentCommand.Navigation.END, selecting);
                 }
                 return DispatchResult.followCursor();
             }
             case CURSOR_DOCUMENT_START, CURSOR_SELECT_DOCUMENT_START -> {
-                ctx.engine().moveDocumentStart(command == TuinkCommand.CURSOR_SELECT_DOCUMENT_START);
+                ctx.navigate(DocumentCommand.Navigation.DOCUMENT_START, command == TuinkCommand.CURSOR_SELECT_DOCUMENT_START);
                 return DispatchResult.followCursor();
             }
             case CURSOR_DOCUMENT_END, CURSOR_SELECT_DOCUMENT_END -> {
-                ctx.engine().moveDocumentEnd(command == TuinkCommand.CURSOR_SELECT_DOCUMENT_END);
+                ctx.navigate(DocumentCommand.Navigation.DOCUMENT_END, command == TuinkCommand.CURSOR_SELECT_DOCUMENT_END);
                 return DispatchResult.followCursor();
             }
             case EDIT_BACKSPACE -> {
-                ctx.engine().backspace();
+                ctx.execute(DocumentCommand.EditAction.BACKSPACE);
                 return DispatchResult.handled(statusMessage);
             }
             case EDIT_DELETE_FORWARD -> {
-                ctx.engine().deleteForward();
+                ctx.execute(DocumentCommand.EditAction.DELETE_FORWARD);
                 return DispatchResult.handled(statusMessage);
             }
             case EDIT_INSERT_NEWLINE -> {
-                ctx.engine().insertNewline();
+                ctx.execute(DocumentCommand.EditAction.NEWLINE);
                 return DispatchResult.handled(statusMessage);
             }
             case UI_ESCAPE, SEARCH_REPLACE -> {
@@ -417,16 +420,26 @@ final class InputActionDispatcher {
         Consumer<Boolean> mouseTrackingController,
         int contentRows,
         int contentColumns,
-        EditorViewNavigation navigation
+        EditorViewNavigation navigation,
+        TuiDocumentSession documentSession
     ) {
         DispatchContext {
             if (mouseTrackingController == null) {
                 throw new IllegalArgumentException("mouseTrackingController must not be null");
             }
-            if (engine == null ? navigation != null || state != null
-                : navigation == null || navigation.engine() != engine || engine.state() != state) {
-                throw new IllegalArgumentException("navigation must belong to the context's editor view");
+            if (engine == null ? navigation != null || state != null || documentSession != null
+                : navigation == null || navigation.engine() != engine || engine.state() != state
+                    || documentSession == null || documentSession.view().engine() != engine) {
+                throw new IllegalArgumentException("navigation and commands must belong to the context's editor view");
             }
+        }
+
+        DocumentCommandResult.Applied execute(DocumentCommand.EditAction action) {
+            return documentSession.execute(new DocumentCommand.Edit(action));
+        }
+
+        void navigate(DocumentCommand.Navigation action, boolean selecting) {
+            documentSession.execute(new DocumentCommand.Navigate(action, selecting));
         }
     }
 

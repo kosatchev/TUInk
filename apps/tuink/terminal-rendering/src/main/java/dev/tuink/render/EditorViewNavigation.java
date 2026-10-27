@@ -8,6 +8,7 @@ import dev.tuink.core.TextModel;
 import dev.tuink.render.EditorViewCoordinates.Geometry;
 import dev.tuink.render.EditorViewCoordinates.Top;
 import java.util.Objects;
+import java.util.function.BiConsumer;
 
 /**
  * Navigation context belonging to one editor view. The engine applies text targets and owns history;
@@ -16,6 +17,7 @@ import java.util.Objects;
 public final class EditorViewNavigation {
     private static final int H_SCROLL_MARGIN = 12;
     private final EditorEngine engine;
+    private final BiConsumer<Position, Boolean> navigate;
     private int preferredColumn = -1;
     private Geometry preferredGeometry;
     private long seenNavigationRevision = -1;
@@ -23,8 +25,9 @@ public final class EditorViewNavigation {
     private Position seenCursor;
     private Position seenAnchor;
 
-    public EditorViewNavigation(EditorEngine engine) {
+    public EditorViewNavigation(EditorEngine engine, BiConsumer<Position, Boolean> navigate) {
         this.engine = Objects.requireNonNull(engine, "engine");
+        this.navigate = Objects.requireNonNull(navigate, "navigate");
     }
 
     public EditorEngine engine() {
@@ -54,7 +57,7 @@ public final class EditorViewNavigation {
         preferredGeometry = geometry;
         int targetRow = (int) Math.clamp((long) previous.row() + delta, 0L, Math.max(0, coordinates.totalRows() - 1));
         Position target = targetRow == previous.row() ? state.getCursor() : coordinates.positionAt(targetRow, preferredColumn);
-        engine.navigateTo(target, selecting);
+        navigate.accept(target, selecting);
         rememberNavigation();
     }
 

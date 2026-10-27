@@ -267,7 +267,7 @@ class EditorViewNavigationTest {
         model.replaceLines(List.of(lines));
         EditorState state = new EditorState();
         EditorEngine engine = new EditorEngine(model, state, new TerminalEditorTextLayout(model));
-        return new Fixture(model, state, engine, new EditorViewNavigation(engine));
+        return new Fixture(model, state, engine, new EditorViewNavigation(engine, engine::navigateTo));
     }
 
     private record Fixture(TextModel model, EditorState state, EditorEngine engine, EditorViewNavigation navigation) {

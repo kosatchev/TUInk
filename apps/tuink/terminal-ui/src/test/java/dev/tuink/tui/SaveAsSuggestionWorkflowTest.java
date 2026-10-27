@@ -39,7 +39,7 @@ class SaveAsSuggestionWorkflowTest {
         SaveWorkflow.Context context = context(new ArrayList<>(List.of(source)), 0);
         Path first = suggested(context, false);
         TabSession owner = open(first);
-        context.tabs().add(owner);
+        context.documents().add(TuiDocumentSession.adopt(owner));
 
         Path next = suggested(context, false);
 
@@ -85,11 +85,11 @@ class SaveAsSuggestionWorkflowTest {
         SaveWorkflow.Context context = context(tabs, 0);
         Path first = suggested(context, true);
         SaveWorkflow.saveAsInput(context, TuinkCommand.UI_ESCAPE, UiModalState.saveAs(), first.toString());
-        tabs.add(open(first));
+        context.documents().add(TuiDocumentSession.adopt(open(first)));
         Path second = suggested(context, true);
         assertEquals(directory.resolve("source-copy-1.txt"), second);
 
-        tabs.add(open(second));
+        context.documents().add(TuiDocumentSession.adopt(open(second)));
         var failed = SaveWorkflow.saveAsInput(context, TuinkCommand.EDIT_INSERT_NEWLINE,
             UiModalState.saveAs(), second.toString());
         assertTrue(failed.notice().message().contains("already open in tab"));
@@ -107,7 +107,7 @@ class SaveAsSuggestionWorkflowTest {
         SaveWorkflow.Context context = context(tabs, 0);
         Path selected = suggested(context, true);
         context.suggestions().rememberDraft(source, selected.toString());
-        tabs.add(open(selected));
+        context.documents().add(TuiDocumentSession.adopt(open(selected)));
 
         assertEquals(selected, suggested(context, true));
         var result = SaveWorkflow.saveAsInput(context, TuinkCommand.EDIT_INSERT_NEWLINE,
@@ -242,7 +242,7 @@ class SaveAsSuggestionWorkflowTest {
     }
 
     private static SaveWorkflow.Context context(List<TabSession> tabs, int active) {
-        return new SaveWorkflow.Context(tabs, active, new SaveAsSuggestionStore());
+        return new SaveWorkflow.Context(new java.util.ArrayList<>(tabs.stream().map(TuiDocumentSession::adopt).toList()), active, new SaveAsSuggestionStore());
     }
 
     private static TabSession emptyTab() {

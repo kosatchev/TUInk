@@ -12,6 +12,15 @@ public final class TabSearch {
     private TabSearch() {
     }
 
+    /** Publishes a resolved match through the caller's registered document/view boundary. */
+    @FunctionalInterface
+    public interface SelectionSink {
+        void select(TabSession tab, Position cursor, Position anchor);
+    }
+
+    private static final SelectionSink CORE_SELECTION = (tab, cursor, anchor) ->
+        tab.engine().restoreSelection(cursor, anchor);
+
     public static int countMatches(List<TabSession> tabs, String query, SearchOptions options) {
         return countMatches(tabs, query, options, SearchWorkBudget.current());
     }
@@ -86,7 +95,18 @@ public final class TabSearch {
     }
 
     public static int findNextAcrossTabs(List<TabSession> tabs, int activeTabIndex, String query, SearchOptions options,
+                                         SelectionSink selection) {
+        return findNextAcrossTabs(tabs, activeTabIndex, query, options, SearchWorkBudget.current(), selection);
+    }
+
+    public static int findNextAcrossTabs(List<TabSession> tabs, int activeTabIndex, String query, SearchOptions options,
                                          SearchOperationContext context) {
+        return findNextAcrossTabs(tabs, activeTabIndex, query, options, context, CORE_SELECTION);
+    }
+
+    public static int findNextAcrossTabs(List<TabSession> tabs, int activeTabIndex, String query, SearchOptions options,
+                                         SearchOperationContext context, SelectionSink selection) {
+        Objects.requireNonNull(selection, "selection");
         Objects.requireNonNull(context, "context");
         if (tabs == null || tabs.isEmpty() || query == null || query.isEmpty()) {
             return -1;
@@ -98,7 +118,7 @@ public final class TabSearch {
         Position from = forwardOrigin(active, navigation, context);
         MatchPosition activeTail = firstAtOrAfter(active, navigation, from, context);
         if (activeTail != null) {
-            select(active.engine(), activeTail);
+            select(selection, active, activeTail);
             return safeActive;
         }
         for (int step = 1; step < tabs.size(); step++) {
@@ -106,13 +126,13 @@ public final class TabSearch {
             TabSession tab = tabs.get(idx);
             MatchPosition match = firstMatch(tab, navigation, context);
             if (match != null) {
-                select(tab.engine(), match);
+                select(selection, tab, match);
                 return idx;
             }
         }
         MatchPosition wrapped = firstBefore(active, navigation, from, context);
         if (wrapped != null) {
-            select(active.engine(), wrapped);
+            select(selection, active, wrapped);
             return safeActive;
         }
         return -1;
@@ -123,7 +143,18 @@ public final class TabSearch {
     }
 
     public static int findPreviousAcrossTabs(List<TabSession> tabs, int activeTabIndex, String query, SearchOptions options,
+                                             SelectionSink selection) {
+        return findPreviousAcrossTabs(tabs, activeTabIndex, query, options, SearchWorkBudget.current(), selection);
+    }
+
+    public static int findPreviousAcrossTabs(List<TabSession> tabs, int activeTabIndex, String query, SearchOptions options,
                                              SearchOperationContext context) {
+        return findPreviousAcrossTabs(tabs, activeTabIndex, query, options, context, CORE_SELECTION);
+    }
+
+    public static int findPreviousAcrossTabs(List<TabSession> tabs, int activeTabIndex, String query, SearchOptions options,
+                                         SearchOperationContext context, SelectionSink selection) {
+        Objects.requireNonNull(selection, "selection");
         Objects.requireNonNull(context, "context");
         if (tabs == null || tabs.isEmpty() || query == null || query.isEmpty()) {
             return -1;
@@ -135,7 +166,7 @@ public final class TabSearch {
         Position from = backwardOrigin(active, navigation, context);
         MatchPosition activeHead = lastBefore(active, navigation, from, context);
         if (activeHead != null) {
-            select(active.engine(), activeHead);
+            select(selection, active, activeHead);
             return safeActive;
         }
         for (int step = 1; step < tabs.size(); step++) {
@@ -143,13 +174,13 @@ public final class TabSearch {
             TabSession tab = tabs.get(idx);
             MatchPosition match = lastMatch(tab, navigation, context);
             if (match != null) {
-                select(tab.engine(), match);
+                select(selection, tab, match);
                 return idx;
             }
         }
         MatchPosition wrapped = lastAtOrAfter(active, navigation, from, context);
         if (wrapped != null) {
-            select(active.engine(), wrapped);
+            select(selection, active, wrapped);
             return safeActive;
         }
         return -1;
@@ -299,8 +330,8 @@ public final class TabSearch {
             : Integer.compare(left.line(), right.line());
     }
 
-    private static void select(EditorEngine engine, MatchPosition match) {
-        engine.restoreSelection(
+    private static void select(SelectionSink selection, TabSession tab, MatchPosition match) {
+        selection.select(tab,
             new Position(match.line(), match.endUtf16()),
             new Position(match.line(), match.startUtf16())
         );

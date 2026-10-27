@@ -217,12 +217,15 @@ class EditorViewTest {
         TerminalEditorTextLayout textLayout = new TerminalEditorTextLayout(model);
         EditorEngine engine = new EditorEngine(model, state, textLayout);
         AtomicLong clock = new AtomicLong(1_000_000_000L);
+        EditorView view = new EditorView(clock::get);
+        view.bindCommands(dev.tuink.tui.TuiSessionTestSupport.commands(
+            new dev.tuink.core.TabSession(model, state, textLayout, engine)));
         return new Fixture(
             model,
             state,
             textLayout,
             engine,
-            new EditorView(clock::get),
+            view,
             columns,
             clock
         );

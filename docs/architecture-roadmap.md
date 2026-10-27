@@ -37,10 +37,11 @@ filesystem. `editor-contract` задаёт opaque resource/version, format, capa
 `core`. Filesystem adapter подключается явно в TUI. Android `Uri` adapter ещё
 не реализован.
 
-Следующие этапы ещё не реализованы: перенос всех document commands через session
-API и единый owner workspace. Пока production TUI изменяет документ через описанный
-в ADR внутренний `CoreSessionBridge`. Общий Java baseline, immutable snapshots и
-semantic providers готовят эти переносы; Android/Windows clients, ART и IME
+Production TUI выполняет document commands через тот же `EditorDocumentSession`,
+что headless consumer. Нейтральный backend port скрывает mutable core; frontend
+создаёт и сохраняет собственный terminal view для render/geometry. Следующие
+этапы — application coordinators и единый owner workspace. Общий Java baseline,
+immutable snapshots и semantic providers готовят эти переносы; Android/Windows clients, ART и IME
 проверки остаются отдельными работами.
 
 Общие модули публикуют Java 17 bytecode/API и Gradle variants; compiler и desktop
@@ -148,7 +149,7 @@ overlay строк. До публикации готовятся history, view s
 Другие стратегии хранения используют независимый sibling buffer, если явно
 не поддерживают подготовленную публикацию.
 
-`EditorDocumentSession` владеет общим `EditorDocument`, публикует immutable
+`EditorDocumentSession` управляет общим документом через нейтральный backend, публикует immutable
 `DocumentSnapshot` и принимает revision-guarded `WorkspaceEdit`. У документа
 одни text model, file state, history и savepoint chain. `EditorDocumentState`
 хранит общие metadata, `EditorViewState` — отдельные cursor/selection/viewport,
@@ -159,13 +160,13 @@ Snapshot создаётся по запросу owner thread, а background read
 опубликованный immutable snapshot. Обычный ввод не копирует весь документ после
 каждой клавиши; перед запуском background work owner запрашивает текущую версию.
 
-`TuiDocumentSession` присоединяет terminal view через внутренний
-`CoreSessionBridge` и сохраняет его `TabSession` identity для recovery и Save As.
-Публичность bridge нужна для внутренней границы Java-модулей; архитектурные
-тесты запрещают его использование другими frontend-классами и утечку через
-portable facade. Перенос всех действий в frontend-neutral typed command/effect
-API остаётся следующей работой; прямые core-вызовы этого внутреннего адаптера не
-являются стабильным plugin API.
+`TuiDocumentSession` создаёт terminal view и подключает его нейтральный
+`DocumentBackend` к session. Его `TabSession` identity сохраняется для recovery
+и Save As. Core objects остаются внутри composition/render, document commands
+выполняются только через session. Архитектурные тесты запрещают frontend обходить
+эту границу и проверяют публичный API без исключения для mutable bridge.
+Application effect coordinators и workspace lifetime остаются отдельной работой;
+текущие host/backend ports ещё не являются стабильным plugin API.
 
 Владение общими DTO описывает [ADR 0001](adr/0001-editor-contract-ownership.md),
 разделение document/session и frontend view state —
@@ -235,16 +236,18 @@ Capability mapping и terminal matrix также требуют проверки
 
 Общий документ и независимые core views уже разделены, TUInk подключён к
 `EditorDocumentSession`, а viewport и навигация принадлежат представлению.
-Следующий этап — сделать session единственной portable точкой изменения editor
-state для обычного редактирования, menu, recovery и внешних providers. Для
-этого нужны:
+Обычный ввод, paste, clipboard, Undo/Redo, logical navigation, pointer selection
+и search/replace уже проходят через типизированные session commands. Target
+содержит `DocumentId`, стабильный `ViewId`, версии текста, состояния документа и
+положения view; смена формата или savepoint тоже делает старый target неактуальным;
+устаревшие и foreign-owner вызовы отвергаются до mutation. Небольшой результат
+готовится до commit, full snapshot публикуется отдельно по запросу. Backend
+исполняет команду через engine исходного view, сохраняя coalescing и origin Undo.
+Для дальнейшего переноса application coordination нужны:
 
-- typed commands, `StateDelta`, `ChangeSet`, effects и revision-tagged events;
+- `StateDelta`, `ChangeSet`, effects и revision-tagged events для application coordination;
 - effect ports для file I/O, clipboard, settings и async work;
-- frontend-neutral view snapshots и управление views поверх существующего
-  физического разделения document/view state;
-- перенос оставшихся прямых вызовов `EditorEngine` за portable session ports
-  с сохранением общей history и origin-view mementos;
+- управление lifetime views поверх существующих logical view snapshots;
 - детерминированная layout/view-model preparation из state, viewport и
   decorations.
 

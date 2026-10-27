@@ -2,6 +2,7 @@ package dev.tuink.tui;
 
 import dev.tuink.storage.jvm.JvmDocumentStorage;
 import dev.tuink.core.EditorEngine;
+import dev.tuink.editor.command.DocumentCommand;
 import dev.tuink.core.DocumentEditLimitException;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.LanguageProfiles;
@@ -131,6 +132,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         this.sessionContext = resources.sessionContext();
         this.startupRecoveryEntries = resources.startupRecoveryEntries();
         this.tabs = resources.tabs();
+        this.editorView.bindCommands(command -> activeDocument().execute(command));
         this.terminal = resources.terminal();
         this.topMenu = resources.topMenu();
         this.uiSessionState = resources.uiSessionState();
@@ -349,12 +351,14 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             confirmScopeId = null;
             confirmBarPlacement = null;
         }
-        if (plan != null && editorView.scrollSelectionIfDue(
-            model, state, plan, contentRows, engine, contentTopRow, System.nanoTime()
-        )) {
-            viewportController.onEditorTextInteraction();
-            eventLoop.invalidate();
-        }
+        if (plan != null) runDocumentPointerAction(() -> {
+            if (editorView.scrollSelectionIfDue(
+                model, state, plan, contentRows, engine, contentTopRow, System.nanoTime()
+            )) {
+                viewportController.onEditorTextInteraction();
+                eventLoop.invalidate();
+            }
+        });
     }
 
     @Override
@@ -814,6 +818,18 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         return frame;
     }
 
+    /** A refused pointer command ends its gesture without terminating the editor loop. */
+    private void runDocumentPointerAction(Runnable action) {
+        try {
+            action.run();
+        } catch (DocumentEditLimitException refused) {
+            cancelPointerCapture(PointerCaptureCancellation.RELEASE);
+            cancelDocumentPointerInteraction();
+            notification.error(refused.getMessage());
+            eventLoop.invalidate();
+        }
+    }
+
     private void routeDocumentPointer(PointerEvent event) {
         var scope = documentPointerScope();
         var target = scope.target("document").orElseThrow();
@@ -839,7 +855,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             if (!(event instanceof PointerEvent pointer) || !context.enabled()) {
                 return InteractionResult.ignored();
             }
-            handleDocumentPointer(pointer);
+            runDocumentPointerAction(() -> handleDocumentPointer(pointer));
             return InteractionResult.<Void>handled().withPointerCapture(pointerCaptureActive()
                 ? PointerCaptureRequest.ACQUIRE : PointerCaptureRequest.RELEASE);
         }
@@ -1066,7 +1082,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             host.focusSearch(searchBarPlacement, SearchController.focusForAction(command));
         }
         SearchCommandHandler.Result result = SearchCommandHandler.execute(command,
-            new SearchCommandHandler.Context(host.toTabSessions(tabs), activeTabIndex,
+            new SearchCommandHandler.Context(tabs.stream().map(TerminalEditorApp.EditorTab::documentSession).toList(), activeTabIndex,
                 uiSessionState.readingModeSetting, searchUi, searchQueryInput.text(), searchReplaceInput.text()),
             this::revealCurrentSelection);
         tabs.get(result.activeTabIndex()).viewportController().onCommandResult(result.cursorPolicy());
@@ -1605,7 +1621,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                     long revisionBefore = model.revision();
                     Position cursorBefore = state.getCursor();
                     try {
-                        engine.pasteText(paste.text());
+                        activeDocument().execute(new DocumentCommand.Paste(paste.text()));
                     } catch (DocumentEditLimitException limit) {
                         notification.error(limit.getMessage());
                         return;
@@ -1817,7 +1833,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 long revisionBefore = model.revision();
                 Position cursorBefore = state.getCursor();
                 try {
-                    engine.insertInput(charInput.text());
+                    activeDocument().execute(new DocumentCommand.Input(charInput.text()));
                 } catch (DocumentEditLimitException limit) {
                     notification.error(limit.getMessage());
                     return;
@@ -1986,8 +2002,12 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         }
     }
 
+    private TuiDocumentSession activeDocument() {
+        return tabs.get(sessionContext.activeTabIndex()).documentSession();
+    }
+
     private SaveWorkflow.Context saveContext() {
-        return new SaveWorkflow.Context(tabs.stream().map(TerminalEditorApp.EditorTab::tabSession).toList(),
+        return new SaveWorkflow.Context(tabs.stream().map(TerminalEditorApp.EditorTab::documentSession).toList(),
             sessionContext.activeTabIndex(), saveAsSuggestions, overwriteApproval);
     }
 
@@ -2166,7 +2186,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         boolean mouseBefore = uiSessionState.mouseModeSetting;
         InputActionDispatcher.DispatchResult result = InputActionDispatcher.dispatch(command, uiSessionState,
             new InputActionDispatcher.DispatchContext(engine, state, topMenu,
-                terminal::setMouseTracking, contentRows, contentCols, navigation));
+                terminal::setMouseTracking, contentRows, contentCols, navigation,
+                tabs.get(sessionContext.activeTabIndex()).documentSession()));
         if (uiSessionState.readingModeSetting != readingBefore) {
             settingsSession.readingModeChanged();
         }

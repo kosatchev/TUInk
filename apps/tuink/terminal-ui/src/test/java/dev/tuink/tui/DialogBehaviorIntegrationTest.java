@@ -433,7 +433,7 @@ class DialogBehaviorIntegrationTest {
                     document.tab.engine().insertInput(paste.text());
                 } else if (command != null) {
                     assertTrue(InputActionDispatcher.dispatch(command, document.ui,
-                        new InputActionDispatcher.DispatchContext(document.tab.engine(), document.tab.state(),
+                        TuiSessionTestSupport.context(document.tab.engine(), document.tab.state(),
                             new TopMenuController(), ignored -> {}, 6, 30, document.navigation)).handled());
                 }
             }
@@ -444,7 +444,7 @@ class DialogBehaviorIntegrationTest {
     private static final class Document {
         private final EditorClipboard clipboard = new EditorClipboard();
         private final TabSession tab = TabSession.createEmpty(TerminalEditorTextLayout::new, clipboard);
-        private final EditorViewNavigation navigation = new EditorViewNavigation(tab.engine());
+        private final EditorViewNavigation navigation = dev.tuink.tui.TuiSessionTestSupport.navigation(tab.engine());
         private final UiSessionState ui = new UiSessionState();
         private final List<String> beforeEdit;
         private final List<String> original;

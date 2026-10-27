@@ -240,7 +240,7 @@ class DialogCommandPolicyTest {
                     DialogCommandPolicy.action(PHYSICAL_KEY, command));
                 if (!decision.consumed()) {
                     InputActionDispatcher.dispatch(command, fixture.ui,
-                        new InputActionDispatcher.DispatchContext(fixture.tab.engine(), fixture.tab.state(),
+                        TuiSessionTestSupport.context(fixture.tab.engine(), fixture.tab.state(),
                             fixture.topMenu, ignored -> {}, 3, 12, fixture.navigation));
                 }
                 assertTrue(decision.consumed(), mode + " " + command);
@@ -280,7 +280,7 @@ class DialogCommandPolicyTest {
         TabSession tab = TabSession.createEmpty(TerminalEditorTextLayout::new, clipboard);
         tab.engine().insertInput("alpha 👩‍💻 e\u0301\nsecond 中🦀\nthird line");
         tab.state().setCursor(new Position(1, 3));
-        return new Fixture(tab, clipboard, new UiSessionState(), new TopMenuController(), new EditorViewNavigation(tab.engine()));
+        return new Fixture(tab, clipboard, new UiSessionState(), new TopMenuController(), dev.tuink.tui.TuiSessionTestSupport.navigation(tab.engine()));
     }
 
     private static Decision routeContent(Fixture fixture, TuiInputEvent event, TuinkCommand command) {
@@ -301,7 +301,7 @@ class DialogCommandPolicyTest {
             fixture.tab.engine().insertInput(paste.text());
         } else if (command != null) {
             assertTrue(InputActionDispatcher.dispatch(command, fixture.ui,
-                new InputActionDispatcher.DispatchContext(fixture.tab.engine(), fixture.tab.state(),
+                TuiSessionTestSupport.context(fixture.tab.engine(), fixture.tab.state(),
                     fixture.topMenu, ignored -> {}, 3, 12, fixture.navigation)).handled(), command.toString());
         }
         return decision;

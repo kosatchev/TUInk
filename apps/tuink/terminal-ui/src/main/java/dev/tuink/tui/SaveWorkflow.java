@@ -4,7 +4,7 @@ import dev.tuink.storage.jvm.JvmDocumentStorage;
 import dev.tuink.editor.storage.SaveDisposition;
 import dev.tuink.core.DocumentEncodingException;
 import dev.tuink.core.TabSession;
-import dev.tuink.core.EditorEngine;
+import dev.tuink.editor.session.document.EditorDocumentSession;
 import dev.tuink.editor.storage.SavedDocument;
 import dev.tuink.tui.command.TuinkCommand;
 import dev.tuink.tui.flow.ConfirmChoice;
@@ -24,13 +24,16 @@ import java.util.List;
 final class SaveWorkflow {
     private SaveWorkflow() {}
 
-    record Context(List<TabSession> tabs, int activeTabIndex, SaveAsSuggestionStore suggestions,
+    record Context(List<TuiDocumentSession> documents, int activeTabIndex, SaveAsSuggestionStore suggestions,
                    OverwriteApproval overwriteApproval) {
-        Context(List<TabSession> tabs, int activeTabIndex, SaveAsSuggestionStore suggestions) {
-            this(tabs, activeTabIndex, suggestions, null);
+        Context(List<TuiDocumentSession> documents, int activeTabIndex, SaveAsSuggestionStore suggestions) {
+            this(documents, activeTabIndex, suggestions, null);
         }
-        TabSession active() {
-            return tabs.get(activeTabIndex);
+        List<TabSession> tabs() { return documents.stream().map(TuiDocumentSession::view).toList(); }
+        TabSession active() { return activeDocument().view(); }
+        TuiDocumentSession activeDocument() { return documents.get(activeTabIndex); }
+        TuiDocumentSession document(TabSession tab) {
+            return documents.stream().filter(document -> document.view() == tab).findFirst().orElseThrow();
         }
     }
 
@@ -64,25 +67,27 @@ final class SaveWorkflow {
     enum SavePurpose { CURRENT, SAVE_AS, QUIT, CLOSE_TAB }
 
     sealed interface SaveOperation permits InspectTarget, WriteFile {}
-    record InspectTarget(EditorEngine.SavePreparation preparation) implements SaveOperation {}
-    record WriteFile(EditorEngine.PreparedSave prepared) implements SaveOperation {}
+    record InspectTarget(EditorDocumentSession.SavePreparation preparation) implements SaveOperation {}
+    record WriteFile(EditorDocumentSession.PreparedSave prepared) implements SaveOperation {}
 
     /** Captured owner state is inspected first, approved on the owner, then written detached. */
     record SaveSubmission(String filename, long filenameRevision) {}
 
-    record SaveRequest(TabSession tab, SaveOperation operation, UiModalState origin, SavePurpose purpose,
+    record SaveRequest(TuiDocumentSession session, SaveOperation operation, UiModalState origin, SavePurpose purpose,
                        SaveSubmission submission) {
-        SaveRequest(TabSession tab, SaveOperation operation, UiModalState origin, SavePurpose purpose) {
-            this(tab, operation, origin, purpose, null);
+        SaveRequest(TuiDocumentSession session, SaveOperation operation, UiModalState origin, SavePurpose purpose) {
+            this(session, operation, origin, purpose, null);
         }
-        SaveRequest(TabSession tab, EditorEngine.PreparedSave prepared, UiModalState origin, SavePurpose purpose) {
-            this(tab, new WriteFile(prepared), origin, purpose, null);
+        SaveRequest(TuiDocumentSession session, EditorDocumentSession.PreparedSave prepared, UiModalState origin, SavePurpose purpose) {
+            this(session, new WriteFile(prepared), origin, purpose, null);
         }
+
+        TabSession tab() { return session.view(); }
 
         boolean inspecting() { return operation instanceof InspectTarget; }
 
         SaveRequest submitted(String filename, long revision) {
-            return new SaveRequest(tab, operation, origin, purpose, new SaveSubmission(filename, revision));
+            return new SaveRequest(session, operation, origin, purpose, new SaveSubmission(filename, revision));
         }
 
         Object perform() throws IOException {
@@ -91,7 +96,7 @@ final class SaveWorkflow {
         }
     }
 
-    record OverwriteApproval(SaveRequest request, EditorEngine.SaveTargetInspection inspection) {}
+    record OverwriteApproval(SaveRequest request, EditorDocumentSession.SaveTargetInspection inspection) {}
 
     static SaveFlowController.TextInputEffect initialFilename(Context context, EditorActionController.SaveAsPreset preset) {
         if (preset == EditorActionController.SaveAsPreset.NONE) {
@@ -105,7 +110,7 @@ final class SaveWorkflow {
     static Result saveCurrent(Context context) {
         TabSession tab = context.active();
         try {
-            return pending(new SaveRequest(tab, tab.engine().prepareSave(), UiModalState.none(), SavePurpose.CURRENT));
+            return pending(new SaveRequest(context.document(tab), context.document(tab).document().prepareSave(), UiModalState.none(), SavePurpose.CURRENT));
         } catch (IOException error) {
             if (error instanceof DocumentEncodingException) {
                 return offerUtf8(context, context.activeTabIndex(), UiModalState.saveAs(), error, true);
@@ -118,7 +123,10 @@ final class SaveWorkflow {
         TabSession tab = context.active();
         SaveFlowController.SaveAsResult decision = SaveFlowController.handleSaveAsInput(command, modal, draft,
             target -> validateSaveAsTarget(context, target),
-            Files::exists, SaveTargetPolicy::isReadOnlyFile, path -> tab.engine().isCurrentSaveTarget(JvmDocumentStorage.resource(path)),
+            Files::exists, SaveTargetPolicy::isReadOnlyFile, path -> {
+                var resource = JvmDocumentStorage.resource(path);
+                return resource.storage().isCurrentTarget(resource, context.document(tab).document().status().binding());
+            },
             target -> suggestWritableName(context, context.activeTabIndex(), target));
         context.suggestions().rememberInput(tab, draft);
         if (decision.textInputEffect().kind() == SaveFlowController.TextInputEffectKind.SET_TEXT) {
@@ -171,8 +179,8 @@ final class SaveWorkflow {
                 Notice.error(conflict), false, true);
         }
         try {
-            return pending(new SaveRequest(tab,
-                new InspectTarget(tab.engine().prepareSaveAsInput(JvmDocumentStorage.resource(target), disposition,
+            return pending(new SaveRequest(context.document(tab),
+                new InspectTarget(context.document(tab).document().prepareSaveAsInput(JvmDocumentStorage.resource(target), disposition,
                     modal.saveFormat() == DocumentSaveFormat.UTF8)),
                 modal, SavePurpose.SAVE_AS));
         } catch (IOException error) {
@@ -191,8 +199,8 @@ final class SaveWorkflow {
         }
         UiModalState origin = remapOrigin(request.origin(), index);
         if (request.inspecting() && failure == null) {
-            EditorEngine.SaveTargetInspection inspection = (EditorEngine.SaveTargetInspection) completed;
-            Context owner = new Context(context.tabs(), index, context.suggestions());
+            EditorDocumentSession.SaveTargetInspection inspection = (EditorDocumentSession.SaveTargetInspection) completed;
+            Context owner = new Context(context.documents(), index, context.suggestions());
             String conflict = workspaceSaveConflict(owner, JvmDocumentStorage.pathOf(inspection.physicalResource()));
             if (conflict != null) {
                 return new Result(true, saveAsOrigin(origin), index, -1, SaveFlowController.TextInputEffect.none(),
@@ -231,7 +239,7 @@ final class SaveWorkflow {
                 Notice.error(SaveTargetPolicy.saveErrorMessage(failure)), false, retry.isSaveAs());
         }
         SavedDocument saved = (SavedDocument) completed;
-        request.tab().engine().completeSaved(((WriteFile) request.operation()).prepared(), saved);
+        request.session().document().completeSaved(((WriteFile) request.operation()).prepared(), saved);
         rememberSavedPath(context, request.tab(), JvmDocumentStorage.pathOf(request.tab().state().getCurrentResource()));
         Notice notice = Notice.success(SaveTargetPolicy.savedMessage(request.tab().state()));
         return switch (request.purpose()) {
@@ -252,13 +260,13 @@ final class SaveWorkflow {
     }
 
     private static Result approveTarget(Context context, SaveRequest request,
-                                        EditorEngine.SaveTargetInspection inspection, UiModalState origin) {
+                                        EditorDocumentSession.SaveTargetInspection inspection, UiModalState origin) {
         String conflict = workspaceSaveConflict(context, JvmDocumentStorage.pathOf(inspection.physicalResource()));
         if (conflict != null) {
             return approvalFailure(context, request, origin, conflict);
         }
         try {
-            return pending(new SaveRequest(request.tab(), new WriteFile(request.tab().engine().approveSaveAs(inspection)),
+            return pending(new SaveRequest(request.session(), new WriteFile(request.session().document().approveSaveAs(inspection)),
                 origin, request.purpose(), request.submission()));
         } catch (IOException failure) {
             return approvalFailure(context, request, origin, SaveTargetPolicy.saveErrorMessage(failure));
@@ -410,7 +418,7 @@ final class SaveWorkflow {
             if (SaveTargetPolicy.isReadOnlyFile(file)) {
                 throw new IOException("File is read-only. Use Save As. " + file);
             }
-            return pending(new SaveRequest(tab, tab.engine().prepareSave(), retry, purpose));
+            return pending(new SaveRequest(context.document(tab), context.document(tab).document().prepareSave(), retry, purpose));
         } catch (IOException error) {
             if (error instanceof DocumentEncodingException) {
                 return offerUtf8(context, index, purpose == SavePurpose.QUIT ? UiModalState.saveAsForQuit()

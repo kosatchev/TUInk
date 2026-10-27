@@ -4,6 +4,8 @@ import dev.tuink.core.SearchMatcher;
 import dev.tuink.editor.search.SearchOptions;
 import dev.tuink.core.SearchWorkBudget;
 import dev.tuink.editor.document.DocumentId;
+import dev.tuink.editor.command.DocumentCommand;
+import dev.tuink.editor.command.DocumentCommandResult;
 import dev.tuink.editor.document.DocumentSnapshot;
 import dev.tuink.editor.document.ImmutableText;
 import dev.tuink.editor.document.TextPosition;
@@ -60,8 +62,33 @@ public final class PortableEngineProbe {
 
         GraphemeText graphemes = GraphemeText.of("e\u0301👩‍💻");
         require(graphemes.graphemeCount() == 2, "grapheme segmentation");
+        commandRoundTrip();
         storageRoundTrip();
         System.out.println("PASS: shared engine (edit, undo/redo, stale guards, search, snapshots, highlighting, graphemes, portable I/O)");
+    }
+
+    private static void commandRoundTrip() {
+        var session = EditorDocumentSession.create(new DocumentId("portable-commands"), List.of("original😀", "tail"));
+        var view = session.defaultViewId();
+        var target = session.commandTarget(view);
+        var input = session.execute(target, new DocumentCommand.Input("X"));
+        require(input instanceof DocumentCommandResult.Applied applied && applied.textChanged(), "typed input command");
+        session.execute(view, new DocumentCommand.Input("Y"));
+        require(session.execute(target, new DocumentCommand.Input("stale")) instanceof DocumentCommandResult.Rejected,
+            "stale command must be rejected");
+        var undo = new DocumentCommand.Edit(DocumentCommand.EditAction.UNDO);
+        var redo = new DocumentCommand.Edit(DocumentCommand.EditAction.REDO);
+        session.execute(view, undo);
+        require(session.snapshot().line(0).equals("original😀"), "command typing coalescing and undo");
+        session.execute(view, redo);
+        require(session.snapshot().line(0).equals("XYoriginal😀"), "command redo");
+        var replaced = session.execute(view, new DocumentCommand.Search(DocumentCommand.SearchAction.REPLACE_ALL,
+            "original", "changed", dev.tuink.editor.search.SearchOptions.DEFAULT));
+        require(replaced instanceof DocumentCommandResult.Applied applied && applied.affectedCount() == 1,
+            "command replacement count");
+        require(session.snapshot().line(0).equals("XYchanged😀"), "command replacement text");
+        session.execute(view, undo);
+        require(session.snapshot().line(0).equals("XYoriginal😀"), "command replacement undo");
     }
 
     /** Public session I/O with a provider compiled only against the shared libraries. */

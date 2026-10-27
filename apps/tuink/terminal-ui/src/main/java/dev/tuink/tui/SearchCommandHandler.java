@@ -1,6 +1,7 @@
 package dev.tuink.tui;
 
-import dev.tuink.core.EditorEngine;
+import dev.tuink.editor.command.DocumentCommand;
+import dev.tuink.editor.document.TextPosition;
 import dev.tuink.core.DocumentEditLimitException;
 import dev.tuink.editor.search.SearchOptions;
 import dev.tuink.core.SearchLimitException;
@@ -16,8 +17,17 @@ import java.util.function.BooleanSupplier;
 final class SearchCommandHandler {
     private SearchCommandHandler() {}
 
-    record Context(List<TabSession> tabs, int activeTabIndex, boolean readingMode,
-        SearchController.SearchUiOptions options, String query, String replacement) {}
+    record Context(List<TuiDocumentSession> documents, int activeTabIndex, boolean readingMode,
+        SearchController.SearchUiOptions options, String query, String replacement) {
+        List<TabSession> tabs() { return documents.stream().map(TuiDocumentSession::view).toList(); }
+        TuiDocumentSession document(TabSession view) {
+            return documents.stream().filter(document -> document.view() == view).findFirst().orElseThrow();
+        }
+        void select(TabSession view, dev.tuink.core.Position cursor, dev.tuink.core.Position anchor) {
+            document(view).execute(new DocumentCommand.Select(DocumentCommand.SelectionAction.RESTORE,
+                new TextPosition(cursor.line(), cursor.col()), new TextPosition(anchor.line(), anchor.col())));
+        }
+    }
 
     record Result(int activeTabIndex, int matchedCount, boolean documentChanged, CursorPolicy cursorPolicy, String status,
         InputActionDispatcher.StatusLevel statusLevel) {}
@@ -34,7 +44,7 @@ final class SearchCommandHandler {
 
     private static Result executeSearch(TuinkCommand command, Context context, BooleanSupplier revealCurrentSelection) {
         var current = context.tabs().get(context.activeTabIndex());
-        EditorEngine engine = current.engine();
+        TuiDocumentSession document = context.document(current);
         SearchOptions options = SearchController.toSearchOptions(context.options());
         boolean allTabs = context.options().allTabs();
         int activeTabIndex = context.activeTabIndex();
@@ -50,12 +60,13 @@ final class SearchCommandHandler {
                     && revealCurrentSelection.getAsBoolean();
                 if (!found && allTabs) {
                     int foundTab = next
-                        ? TabSearch.findNextAcrossTabs(context.tabs(), activeTabIndex, context.query(), options)
-                        : TabSearch.findPreviousAcrossTabs(context.tabs(), activeTabIndex, context.query(), options);
+                        ? TabSearch.findNextAcrossTabs(context.tabs(), activeTabIndex, context.query(), options, context::select)
+                        : TabSearch.findPreviousAcrossTabs(context.tabs(), activeTabIndex, context.query(), options, context::select);
                     found = foundTab >= 0;
                     if (found) activeTabIndex = foundTab;
                 } else if (!found) {
-                    found = next ? engine.findNext(context.query(), options) : engine.findPrevious(context.query(), options);
+                    found = document.execute(new DocumentCommand.Search(next ? DocumentCommand.SearchAction.NEXT
+                        : DocumentCommand.SearchAction.PREVIOUS, context.query(), "", options)).performed();
                 }
                 if (found) policy = CursorPolicy.FOLLOW_CURSOR;
                 matchedCount = found ? 1 : 0;
@@ -68,7 +79,8 @@ final class SearchCommandHandler {
                     long before = current.model().revision();
                     var cursor = current.state().getCursor();
                     var anchor = current.state().getSelectionAnchor();
-                    boolean found = engine.replaceCurrentOrNext(context.query(), context.replacement(), options);
+                    boolean found = document.execute(new DocumentCommand.Search(DocumentCommand.SearchAction.REPLACE,
+                        context.query(), context.replacement(), options)).performed();
                     boolean changed = before != current.model().revision();
                     matchedCount = found ? 1 : 0;
                     documentChanged = changed;
@@ -77,7 +89,8 @@ final class SearchCommandHandler {
                     status = changed ? "Replaced match" : found ? "Match found; text unchanged" : "Nothing to replace";
                 } else {
                     long before = current.model().revision();
-                    int matched = engine.replaceAll(context.query(), context.replacement(), options);
+                    int matched = document.execute(new DocumentCommand.Search(DocumentCommand.SearchAction.REPLACE_ALL,
+                        context.query(), context.replacement(), options)).affectedCount();
                     matchedCount = matched;
                     documentChanged = before != current.model().revision();
                     if (documentChanged) {

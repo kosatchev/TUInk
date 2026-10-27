@@ -276,11 +276,11 @@ public class TerminalEditorApp {
         if (cli.file() != null) {
             Path file = cli.file();
             try {
-                if (cli.openAsUtf16Le()) {
-                    engine.openExisting(JvmDocumentStorage.resource(file), dev.tuink.editor.storage.DocumentOpenMode.UTF_16LE);
-                } else {
-                    engine.open(JvmDocumentStorage.resource(file));
-                }
+                var resource = JvmDocumentStorage.resource(file);
+                var mode = cli.openAsUtf16Le() ? dev.tuink.editor.storage.DocumentOpenMode.UTF_16LE
+                    : dev.tuink.editor.storage.DocumentOpenMode.DETECT;
+                tabs.get(activeTabIndex).documentSession().openPrepared(
+                    resource.storage().load(resource, mode, !cli.openAsUtf16Le()));
                 renderPlanBuilder = tabs.get(activeTabIndex).documentSession()
                     .newRenderPlanBuilder(resolveHighlighter(file));
                 sessionContext.replaceActiveRenderPlanBuilder(renderPlanBuilder);
@@ -1552,7 +1552,8 @@ public class TerminalEditorApp {
                 }
                 TuiDocumentSession documentSession = TuiDocumentSession.create(clipboard);
                 TabSession tabSession = documentSession.view();
-                tabSession.engine().restoreRecoverySnapshot(snapshot);
+                documentSession.document().restoreRecovery(documentSession.viewId(), snapshot);
+                tabSession.state().setViewport(snapshot.viewport());
                 RenderPlanBuilder builder = documentSession.newRenderPlanBuilder(
                     resolveHighlighter(JvmDocumentStorage.pathOf(tabSession.state().getCurrentResource())));
                 EditorTab tab = new EditorTab(documentSession, builder);
@@ -1706,7 +1707,7 @@ public class TerminalEditorApp {
         EditorViewNavigation navigation
     ) {
         EditorTab(TuiDocumentSession documentSession, RenderPlanBuilder renderPlanBuilder) {
-            this(documentSession, renderPlanBuilder, new ViewportController(), new EditorViewNavigation(documentSession.view().engine()));
+            this(documentSession, renderPlanBuilder, new ViewportController(), new EditorViewNavigation(documentSession.view().engine(), documentSession::navigate));
         }
 
         EditorTab {

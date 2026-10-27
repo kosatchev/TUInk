@@ -46,7 +46,7 @@ class SaveWorkflowTest {
         var inspected = finish(context, SaveWorkflow.saveAsInput(context, TuinkCommand.EDIT_INSERT_NEWLINE,
             UiModalState.saveAsForQuit(), target.toString()));
         UiModalState overwrite = inspected.modalState();
-        var approvedContext = new SaveWorkflow.Context(context.tabs(), context.activeTabIndex(),
+        var approvedContext = new SaveWorkflow.Context(context.documents(), context.activeTabIndex(),
             context.suggestions(), inspected.overwriteApproval());
         var confirmed = finish(approvedContext, SaveWorkflow.overwrite(approvedContext, overwrite, ConfirmChoice.SAVE));
         assertEquals(overwrite.offerUtf8(), confirmed.modalState());
@@ -103,7 +103,7 @@ class SaveWorkflowTest {
     }
 
     private SaveWorkflow.Context context(List<TabSession> tabs) {
-        return new SaveWorkflow.Context(tabs, 0, new SaveAsSuggestionStore());
+        return new SaveWorkflow.Context(new java.util.ArrayList<>(tabs.stream().map(TuiDocumentSession::adopt).toList()), 0, new SaveAsSuggestionStore());
     }
 
     private TabSession namedDirtyTab(String filename) throws Exception {

@@ -1,6 +1,8 @@
 package dev.tuink.compat;
 
 import dev.tuink.editor.document.DocumentId;
+import dev.tuink.editor.command.DocumentCommand;
+import dev.tuink.editor.command.DocumentCommandResult;
 import dev.tuink.editor.session.document.EditorDocumentSession;
 import dev.tuink.editor.storage.DocumentOpenMode;
 import dev.tuink.editor.storage.DocumentResource;
@@ -23,5 +25,10 @@ final class PortableSessionIoApiProbe {
         EditorDocumentSession.PreparedSave prepared = session.approveSaveAs(observation);
         session.completeSaved(prepared, prepared.write());
         session.status().binding().resource().id();
+    }
+
+    static DocumentCommandResult type(EditorDocumentSession session, String text) {
+        var target = session.commandTarget(session.defaultViewId());
+        return session.execute(target, new DocumentCommand.Input(text));
     }
 }

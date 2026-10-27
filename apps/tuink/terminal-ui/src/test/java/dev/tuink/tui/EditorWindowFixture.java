@@ -207,6 +207,8 @@ final class EditorWindowFixture implements AutoCloseable {
     }
 
     void event(TuiInputEvent event) {
+        // The production runner synchronizes owner state before polling input.
+        controller.prepareTurn();
         controller.handlePoll(new TuiEventLoop.Poll<>(event, event instanceof ResizeEvent, false));
         frame();
     }

@@ -21,7 +21,7 @@ class WrappedCursorNavigationTest {
     @Test
     void arrowsTraverseDisplayedRowsWithinOneLogicalLineInBothDirections() {
         EditorEngine engine = engine("abcdefghij");
-        EditorViewNavigation navigation = new EditorViewNavigation(engine);
+        EditorViewNavigation navigation = new EditorViewNavigation(engine, engine::navigateTo);
         engine.moveCursorTo(new Position(0, 1));
 
         for (int col : new int[] {5, 9, 9}) {
@@ -37,7 +37,7 @@ class WrappedCursorNavigationTest {
     @Test
     void fullyFilledFinalSegmentHasANavigableInsertionRow() {
         EditorEngine engine = engine("abcdefgh");
-        EditorViewNavigation navigation = new EditorViewNavigation(engine);
+        EditorViewNavigation navigation = new EditorViewNavigation(engine, engine::navigateTo);
         assertEquals(List.of(0, 4, 8), engine.textLayout().wrapStarts(0, 4, false, 4));
 
         navigation.moveDown(true, 4, true, false);
@@ -56,7 +56,7 @@ class WrappedCursorNavigationTest {
     @Test
     void preferredColumnSurvivesShortWrappedAndLogicalRows() {
         EditorEngine engine = engine("abcdefghij\nx\nabcdefghij");
-        EditorViewNavigation navigation = new EditorViewNavigation(engine);
+        EditorViewNavigation navigation = new EditorViewNavigation(engine, engine::navigateTo);
         engine.moveCursorTo(new Position(0, 3));
         List<Position> expected = List.of(
             new Position(0, 7), new Position(0, 10), new Position(1, 1), new Position(2, 3)
@@ -74,7 +74,7 @@ class WrappedCursorNavigationTest {
     @Test
     void wordWrappingUsesTheSameSegmentsAsRendering() {
         EditorEngine engine = engine("one two three four");
-        EditorViewNavigation navigation = new EditorViewNavigation(engine);
+        EditorViewNavigation navigation = new EditorViewNavigation(engine, engine::navigateTo);
         assertEquals(List.of(0, 8, 14), engine.textLayout().wrapStarts(0, 8, true, 4));
         engine.moveCursorTo(new Position(0, 2));
         navigation.moveDown(false, 8, true, true);
@@ -88,7 +88,7 @@ class WrappedCursorNavigationTest {
     @Test
     void verticalMovementKeepsCombiningSequencesAndWideGraphemesIntact() {
         EditorEngine engine = engine("Ae\u0301😀中B");
-        EditorViewNavigation navigation = new EditorViewNavigation(engine);
+        EditorViewNavigation navigation = new EditorViewNavigation(engine, engine::navigateTo);
         assertEquals(List.of(0, 5), engine.textLayout().wrapStarts(0, 4, false, 4));
         engine.moveCursorTo(new Position(0, 1));
         navigation.moveDown(false, 4, true, false);
@@ -100,7 +100,7 @@ class WrappedCursorNavigationTest {
     @Test
     void anOversizedTabDoesNotTrapVerticalNavigationInOneSegment() {
         EditorEngine engine = engine("\tX");
-        EditorViewNavigation navigation = new EditorViewNavigation(engine);
+        EditorViewNavigation navigation = new EditorViewNavigation(engine, engine::navigateTo);
         assertEquals(List.of(0, 1, 2), engine.textLayout().wrapStarts(0, 1, false, 4));
         navigation.moveDown(false, 1, true, false);
         assertEquals(new Position(0, 1), engine.state().getCursor());
@@ -113,7 +113,7 @@ class WrappedCursorNavigationTest {
     @Test
     void changingWidthRecomputesThePreferredColumnFromTheNewSegment() {
         EditorEngine engine = engine("abcdefghijklmnop");
-        EditorViewNavigation navigation = new EditorViewNavigation(engine);
+        EditorViewNavigation navigation = new EditorViewNavigation(engine, engine::navigateTo);
         engine.moveCursorTo(new Position(0, 3));
         navigation.moveDown(false, 4, true, false);
         assertEquals(new Position(0, 7), engine.state().getCursor());
@@ -124,7 +124,7 @@ class WrappedCursorNavigationTest {
     @Test
     void pageKeysMoveAndScrollByDisplayedRows() {
         EditorEngine engine = engine("abcdefghijklmnopqrstuvwxyz1234");
-        EditorViewNavigation navigation = new EditorViewNavigation(engine);
+        EditorViewNavigation navigation = new EditorViewNavigation(engine, engine::navigateTo);
         engine.moveCursorTo(new Position(0, 1));
         navigation.pageDown(3, 4, true, false);
         assertEquals(new Position(0, 13), engine.state().getCursor());
@@ -137,7 +137,7 @@ class WrappedCursorNavigationTest {
     @Test
     void pageKeysPreserveExistingSelectionWhileScrollingWrappedRows() {
         EditorEngine engine = engine("abcdefghijklmnopqrstuvwxyz1234");
-        EditorViewNavigation navigation = new EditorViewNavigation(engine);
+        EditorViewNavigation navigation = new EditorViewNavigation(engine, engine::navigateTo);
         engine.moveCursorTo(new Position(0, 1));
         navigation.moveDown(true, 4, true, false);
         navigation.pageDown(3, 4, true, false);
@@ -150,7 +150,7 @@ class WrappedCursorNavigationTest {
     @Test
     void disablingWrappingRestoresLogicalRowNavigation() {
         EditorEngine engine = engine("abcdefghij\nabcdefghij");
-        EditorViewNavigation navigation = new EditorViewNavigation(engine);
+        EditorViewNavigation navigation = new EditorViewNavigation(engine, engine::navigateTo);
         engine.moveCursorTo(new Position(0, 5));
         navigation.moveDown(false, 4, true, false);
         assertEquals(new Position(0, 9), engine.state().getCursor());
@@ -161,7 +161,7 @@ class WrappedCursorNavigationTest {
     @Test
     void changingTabWidthRecomputesThePreferredVisualColumn() {
         EditorEngine engine = engine("abcde\n\tZ\nabcdefgh");
-        EditorViewNavigation navigation = new EditorViewNavigation(engine);
+        EditorViewNavigation navigation = new EditorViewNavigation(engine, engine::navigateTo);
         engine.moveCursorTo(new Position(0, 3));
         navigation.moveDown(false, 8, true, false);
         assertEquals(new Position(1, 1), engine.state().getCursor());
@@ -173,7 +173,7 @@ class WrappedCursorNavigationTest {
     @Test
     void openingAnotherFileResetsThePreferredColumn(@TempDir Path directory) throws IOException {
         EditorEngine engine = engine("abcdefghij");
-        EditorViewNavigation navigation = new EditorViewNavigation(engine);
+        EditorViewNavigation navigation = new EditorViewNavigation(engine, engine::navigateTo);
         engine.moveCursorTo(new Position(0, 3));
         navigation.moveDown(false, 4, true, false);
         Path file = directory.resolve("next.txt");

@@ -36,8 +36,8 @@ class InputActionDispatcherTest {
             var before = state.viewMemento();
             var metadata = model.fileMetadata();
             long revision = model.revision();
-            var context = new InputActionDispatcher.DispatchContext(engine, state, null,
-                ignored -> {}, 3, 20, new EditorViewNavigation(engine));
+            var context = TuiSessionTestSupport.context(engine, state, null,
+                ignored -> {}, 3, 20, dev.tuink.tui.TuiSessionTestSupport.navigation(engine));
             refuseStorage.set(true);
 
             var result = InputActionDispatcher.dispatch(command, new UiSessionState(), context);
@@ -74,20 +74,38 @@ class InputActionDispatcherTest {
     }
 
     @Test
+    void selectingDownThroughTheTerminalSessionClampsAGraphemeInteriorAnchor() {
+        TabSession tab = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
+        tab.model().replaceLines(List.of("a\u0301", "next"));
+        tab.state().setCursor(new Position(0, 1));
+        var session = TuiDocumentSession.adopt(tab);
+        var navigation = new EditorViewNavigation(tab.engine(), session::navigate);
+        var context = new InputActionDispatcher.DispatchContext(tab.engine(), tab.state(), null,
+            ignored -> {}, 3, 20, navigation, session);
+
+        var result = InputActionDispatcher.dispatch(TuinkCommand.CURSOR_SELECT_DOWN, new UiSessionState(), context);
+
+        assertTrue(result.handled());
+        assertEquals(new Position(0, 0), tab.state().getSelectionAnchor());
+        assertEquals(1, tab.state().getCursor().line());
+        assertEquals(List.of("a\u0301", "next"), tab.model().snapshotLines());
+    }
+
+    @Test
     void successiveDispatchContextsReuseTheViewColumnAndRejectedEditsDoNotResetIt() {
         TabSession tab = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
         tab.engine().insertInput("0123456789\nx\nabcdefghij");
         tab.engine().moveCursorTo(new Position(0, 8));
-        var navigation = new EditorViewNavigation(tab.engine());
+        var navigation = dev.tuink.tui.TuiSessionTestSupport.navigation(tab.engine());
         UiSessionState ui = new UiSessionState();
-        var firstFrame = new InputActionDispatcher.DispatchContext(tab.engine(), tab.state(), null,
+        var firstFrame = TuiSessionTestSupport.context(tab.engine(), tab.state(), null,
             ignored -> {}, 3, 20, navigation);
         InputActionDispatcher.dispatch(TuinkCommand.CURSOR_DOWN, ui, firstFrame);
         assertEquals(new Position(1, 1), tab.state().getCursor());
         ui.readingModeSetting = true;
         InputActionDispatcher.dispatch(TuinkCommand.EDIT_CUT, ui, firstFrame);
 
-        var nextFrame = new InputActionDispatcher.DispatchContext(tab.engine(), tab.state(), null,
+        var nextFrame = TuiSessionTestSupport.context(tab.engine(), tab.state(), null,
             ignored -> {}, 3, 40, navigation);
         InputActionDispatcher.dispatch(TuinkCommand.CURSOR_DOWN, ui, nextFrame);
 
@@ -102,8 +120,8 @@ class InputActionDispatcherTest {
         tab.engine().moveHome();
         UiSessionState ui = new UiSessionState();
         ui.wrapLinesSetting = true;
-        InputActionDispatcher.DispatchContext context = new InputActionDispatcher.DispatchContext(
-            tab.engine(), tab.state(), null, ignored -> {}, 3, 4, new EditorViewNavigation(tab.engine())
+        InputActionDispatcher.DispatchContext context = TuiSessionTestSupport.context(
+            tab.engine(), tab.state(), null, ignored -> {}, 3, 4, dev.tuink.tui.TuiSessionTestSupport.navigation(tab.engine())
         );
 
         InputActionDispatcher.dispatch(TuinkCommand.CURSOR_DOWN, ui, context);
@@ -159,8 +177,8 @@ class InputActionDispatcherTest {
     void readingModePreservesTextAndHistoryUntilEditingIsEnabledAgain() {
         TabSession tab = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
         UiSessionState ui = new UiSessionState();
-        InputActionDispatcher.DispatchContext context = new InputActionDispatcher.DispatchContext(
-            tab.engine(), tab.state(), null, ignored -> {}, 24, 80, new EditorViewNavigation(tab.engine())
+        InputActionDispatcher.DispatchContext context = TuiSessionTestSupport.context(
+            tab.engine(), tab.state(), null, ignored -> {}, 24, 80, dev.tuink.tui.TuiSessionTestSupport.navigation(tab.engine())
         );
         tab.engine().insertInput("abc");
         long editedRevision = tab.model().revision();
@@ -242,8 +260,8 @@ class InputActionDispatcherTest {
         EditorClipboard clipboard = new EditorClipboard();
         TabSession tab = TabSession.createEmpty(TerminalEditorTextLayout::new, clipboard);
         UiSessionState ui = new UiSessionState();
-        var context = new InputActionDispatcher.DispatchContext(tab.engine(), tab.state(), null,
-            ignored -> {}, 3, 8, new EditorViewNavigation(tab.engine()));
+        var context = TuiSessionTestSupport.context(tab.engine(), tab.state(), null,
+            ignored -> {}, 3, 8, dev.tuink.tui.TuiSessionTestSupport.navigation(tab.engine()));
         for (TuinkCommand noEffect : List.of(TuinkCommand.EDIT_PASTE, TuinkCommand.EDIT_UNDO,
             TuinkCommand.EDIT_REDO, TuinkCommand.EDIT_DELETE_FORWARD, TuinkCommand.EDIT_BACKSPACE,
             TuinkCommand.EDIT_COPY)) {
@@ -267,8 +285,8 @@ class InputActionDispatcherTest {
         tab.engine().moveHome();
         UiSessionState ui = new UiSessionState();
         ui.wrapLinesSetting = true;
-        var context = new InputActionDispatcher.DispatchContext(tab.engine(), tab.state(), null,
-            ignored -> {}, 3, 4, new EditorViewNavigation(tab.engine()));
+        var context = TuiSessionTestSupport.context(tab.engine(), tab.state(), null,
+            ignored -> {}, 3, 4, dev.tuink.tui.TuiSessionTestSupport.navigation(tab.engine()));
         InputActionDispatcher.dispatch(TuinkCommand.CURSOR_SELECT_DOWN, ui, context);
         Position cursor = tab.state().getCursor();
 
@@ -282,7 +300,7 @@ class InputActionDispatcherTest {
     private static InputActionDispatcher.DispatchContext context(
         java.util.function.Consumer<Boolean> mouseTrackingController
     ) {
-        return new InputActionDispatcher.DispatchContext(
+        return TuiSessionTestSupport.context(
             null,
             null,
             null,

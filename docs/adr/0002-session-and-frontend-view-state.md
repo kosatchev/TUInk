@@ -23,8 +23,9 @@ The model has two explicit lifetimes:
 View-local commands identify their frontend view. Text mutations are still
 serialized by the document session and increment the shared document revision.
 Portable clients observe immutable editor/document snapshots and do not receive
-mutable `TextModel`, `EditorState`, or `EditorEngine`. TUInk's internal composition
-adapter is an explicit exception described below; it is not the portable API.
+mutable `TextModel`, `EditorState`, or `EditorEngine`. TUInk composition retains
+its core implementation privately; the portable session API exposes only neutral
+values and ports.
 
 Terminal line layout and terminal-width caches therefore remain owned by the
 TUI view. `TerminalEditorTextLayout` is the single TUInk adapter to TUIframe's
@@ -47,15 +48,15 @@ Document history owns text mutations. A view's cursor/selection snapshot can be
 associated with an undo entry to preserve current Undo/Redo behavior, but this
 does not give the shared document ownership of every attached view's cursor.
 
-All cursor and selection changes pass through the logical target API of
-`EditorEngine`, preserving edit grouping and navigation invalidation. The
+Frontend cursor and selection changes pass through typed session commands and
+the engine's logical target API, preserving edit grouping and navigation invalidation. The
 engine does not offer viewport navigation entry points. `EditorViewNavigation`
 owns preferred visual columns, and `EditorViewCoordinates` supplies the shared
 mapping used by navigation, pointer input, render planning, and resize anchors.
 New portable contracts must not expose viewport, terminal style, layout-cache
 keys, or mutable core objects.
 
-`EditorDocumentSession` owns one `EditorDocument`, publishes immutable
+`EditorDocumentSession` owns one neutral `DocumentBackend`, publishes immutable
 `DocumentSnapshot`s, and accepts revision-guarded `WorkspaceEdit`s only on its
 owner thread. Its logical headless view and attached TUI views use the same text,
 file state, history, and savepoint chain. Snapshot publication is demand driven:
@@ -66,14 +67,22 @@ does not copy and revalidate the whole document after each key. Before starting
 background work, the owner captures a current snapshot; workspace-edit
 validation also refreshes on the owner thread before checking revision gates.
 
-`CoreSessionBridge` is a public Java class solely to cross internal module
-boundaries. Architecture tests exclude that exact class from the portable API
-scan and restrict its production consumers to `session.document` internals and
-`TuiDocumentSession`. Other public session types cannot expose either mutable
-core objects or the bridge. `TuiDocumentSession` owns the terminal attachment and
-its stable `TabSession` identity. Explicit publication and owner-thread snapshot
-requests cross its document boundary; background readers are not promised an
-unpublished UI revision.
+The session never attaches or returns a mutable core view. `CoreDocumentBackend`
+implements the neutral host port and registers existing views by their stable
+`ViewId`. TUI composition creates its terminal view, retains it for rendering
+and geometry, and connects its backend to the session. Architecture checks forbid
+frontend calls to engine text, selection, history and I/O mutators; all public
+session types are checked for core API leakage without an exemption.
+
+Built-in `DocumentCommand`s cover input, literal paste, clipboard, history,
+logical navigation, pointer selection and search/replace. Execution targets a
+document and registered view with expected text, semantic document state and view
+revisions. Format-only save/history publications invalidate captured commands even
+when the text stays unchanged; view moves invalidate deferred positional commands.
+Each command uses its originating engine and the shared document history, so
+coalescing and origin/foreign-view Undo retain their existing behavior. Commands
+return bounded receipts prepared before publication, with no mandatory full
+snapshot per key. Explicit snapshot publication remains separate.
 
 `editor-session` has a non-exported implementation dependency on `core`.
 JGit diff is an optional `LineDiff` implementation in `editor-diff-jgit`, explicitly
@@ -84,8 +93,9 @@ Resource/version, format, load/save and capability contracts live in
 `editor-contract`. `core` only uses those contracts and a stream-based codec;
 `editor-storage-jvm` owns paths and filesystem transactions. Public session I/O
 captures on the owner, inspects and writes on a worker, then publishes a matching
-receipt on the owner. Android storage and full command convergence remain future
-work.
+receipt on the owner. Recovery restore prepares text, versions, diff baselines and
+view clamps before publication. Portable application coordinators, workspace
+lifetime and Android storage remain future work.
 
 The session owns one canonical `DocumentId`, shared with live render/highlighter
 adapters. Cache identity and resource binding are separate identities. Snapshot

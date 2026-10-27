@@ -217,6 +217,8 @@ class EditorViewWrappedPointerTest {
             this.state = state;
             this.layout = layout;
             this.engine = engine;
+            view.bindCommands(dev.tuink.tui.TuiSessionTestSupport.commands(
+                new dev.tuink.core.TabSession(model, state, layout, engine)));
             this.wrapLines = wrapLines;
             this.width = width;
             this.wrapByWords = wrapByWords;

@@ -101,7 +101,7 @@ class ViewportControllerTest {
         EditorEngine engine = new EditorEngine(model, state, new TerminalEditorTextLayout(model));
         ViewportController controller = new ViewportController();
         engine.moveCursorTo(new Position(0, 1));
-        EditorViewNavigation navigation = new EditorViewNavigation(engine);
+        EditorViewNavigation navigation = dev.tuink.tui.TuiSessionTestSupport.navigation(engine);
         navigation.moveDown(true, 4, true, false);
 
         for (int expectedTop : new int[] {3, 5}) {

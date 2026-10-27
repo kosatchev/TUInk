@@ -9,6 +9,10 @@ edits and saves a document through the public session API and an in-memory
 storage adapter, checking owner/worker phases, BOM, mixed EOL and savepoints.
 It then processes the same JARs and fixture with D8 and R8.
 
+Ordinary typing, coalesced Undo/Redo and replacement also run through typed
+session commands with document/view targets. They use the same dispatch as TUI
+input, without exposing a mutable core view to the consumer.
+
 Build the inputs with the repository's Java 25 toolchain:
 
 ```sh

@@ -126,7 +126,7 @@ class SaveAsTargetApprovalIntegrationTest {
             assertFalse(Files.exists(target));
             assertTrue(window.active().state().isDirty());
             assertEquals(window.document, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
-            window.recoveryManager.finishSession(window.host.toTabSessions(window.tabs), false);
+            window.recoveryManager.finishSession(window.host.toDocumentSessions(window.tabs), false);
             assertTrue(window.recoverySnapshots.values().stream()
                 .anyMatch(snapshot -> snapshot.lines().equals(List.of("draft original"))));
         }

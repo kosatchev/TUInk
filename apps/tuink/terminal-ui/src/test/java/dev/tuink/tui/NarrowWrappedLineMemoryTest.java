@@ -108,7 +108,7 @@ class NarrowWrappedLineMemoryTest {
                     "Resizing damaged the edit's undo history");
                 window.command(TuinkCommand.EDIT_REDO);
                 require(session.state().isDirty(), "Redo did not restore the unsaved edit");
-                String warning = window.recoveryManager.finishSession(window.host.toTabSessions(window.tabs), false);
+                String warning = window.recoveryManager.finishSession(window.host.toDocumentSessions(window.tabs), false);
                 require(warning == null, "Final recovery failed: " + warning);
                 require(window.recoverySnapshots.size() == 1, "The dirty document lost its recovery snapshot");
                 var snapshot = window.recoverySnapshots.values().iterator().next();

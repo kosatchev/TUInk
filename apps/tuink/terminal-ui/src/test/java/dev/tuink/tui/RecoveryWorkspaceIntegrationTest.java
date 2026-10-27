@@ -142,7 +142,7 @@ class RecoveryWorkspaceIntegrationTest {
             assertEquals(List.of("first disk"), window.tabs.get(1).tabSession().model().snapshotLines());
             assertEquals(List.of("second disk"), window.tabs.get(2).tabSession().model().snapshotLines());
             assertEquals(1, window.context.activeTabIndex());
-            window.recoveryManager.autosaveDirtyTabs(window.host.toTabSessions(window.tabs), Long.MAX_VALUE);
+            window.recoveryManager.autosaveDirtyTabs(window.host.toDocumentSessions(window.tabs), Long.MAX_VALUE);
             assertTrue(window.recoverySnapshots.containsKey(first.id()));
             assertTrue(window.recoverySnapshots.containsKey(second.id()));
             assertEquals("disk", Files.readString(window.document));

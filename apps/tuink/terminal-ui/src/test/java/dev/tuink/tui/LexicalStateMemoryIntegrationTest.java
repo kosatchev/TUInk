@@ -109,7 +109,7 @@ class LexicalStateMemoryIntegrationTest {
                 require(!source.state().isDirty(), "Rendering damaged the original undo savepoint");
                 window.command(TuinkCommand.EDIT_REDO);
                 require(source.state().isDirty(), "Rendering damaged the original redo history");
-                String warning = window.recoveryManager.finishSession(window.host.toTabSessions(window.tabs), false);
+                String warning = window.recoveryManager.finishSession(window.host.toDocumentSessions(window.tabs), false);
                 require(warning == null, "Recovery failed: " + warning);
                 require(window.recoverySnapshots.values().stream()
                     .anyMatch(snapshot -> snapshot.lines().equals(List.of("unsaved original"))),

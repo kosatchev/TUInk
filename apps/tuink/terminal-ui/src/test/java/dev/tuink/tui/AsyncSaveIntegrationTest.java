@@ -155,7 +155,7 @@ class AsyncSaveIntegrationTest {
             var saved = window.active().tabSession();
             window.recoverySnapshots.put(recoveryId, saved.engine().captureRecoverySnapshot());
             window.recoveryManager.publishRestoration(window.recoveryManager.prepareRestoration(List.of(
-                new TerminalEditorApp.RecoveryAutosaveManager.RestoredSnapshot(saved, recoveryId)), System.nanoTime()));
+                new TerminalEditorApp.RecoveryAutosaveManager.RestoredSnapshot(window.active().documentSession(), recoveryId)), System.nanoTime()));
             assertTrue(window.recoverySnapshots.containsKey(recoveryId));
             window.command(TuinkCommand.APP_QUIT);
             window.event(new TextInput("y"));
@@ -172,7 +172,7 @@ class AsyncSaveIntegrationTest {
             });
             List<String> warnings = new ArrayList<>();
             TerminalEditorApp.runWithRecovery(runtime, window.controller, window.recoveryManager,
-                () -> window.host.toTabSessions(window.tabs), warnings::add);
+                () -> window.host.toDocumentSessions(window.tabs), warnings::add);
 
             assertEquals(0, inputPolls.get(), "quit completed during prepareTurn; input must not be polled");
             assertFalse(window.controller.running());

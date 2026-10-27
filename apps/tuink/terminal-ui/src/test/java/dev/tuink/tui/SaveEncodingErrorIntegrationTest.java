@@ -59,7 +59,7 @@ class SaveEncodingErrorIntegrationTest {
             assertArrayEquals(ORIGINAL.getBytes(LEGACY_CHARSET), Files.readAllBytes(window.document));
             assertEquals(metadata, window.active().tabSession().model().fileMetadata());
             assertTrue(window.active().state().isDirty());
-            assertNull(window.recoveryManager.finishSession(List.of(window.active().tabSession()), false));
+            assertNull(window.recoveryManager.finishSession(List.of(window.active().documentSession()), false));
             RecoverySnapshot recovery = window.recoverySnapshots.values().iterator().next();
             assertEquals(List.of("😀Привет", ""), recovery.lines());
             assertEquals(metadata, recovery.fileMetadata());

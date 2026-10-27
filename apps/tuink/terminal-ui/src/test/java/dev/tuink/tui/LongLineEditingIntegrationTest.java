@@ -68,12 +68,12 @@ class LongLineEditingIntegrationTest {
             var session = window.active().tabSession();
             session.engine().insertInput("x");
             LineText.Work before = LineText.work();
-            assertNull(window.recoveryManager.autosaveDirtyTabs(List.of(session), 0L));
+            assertNull(window.recoveryManager.autosaveDirtyTabs(List.of(window.active().documentSession()), 0L));
             assertEquals(before.materializedCodeUnits(), LineText.work().materializedCodeUnits());
             session.engine().insertInput("y");
 
             recovery.remove().run();
-            assertNull(window.recoveryManager.autosaveDirtyTabs(List.of(session), 1L));
+            assertNull(window.recoveryManager.autosaveDirtyTabs(List.of(window.active().documentSession()), 1L));
 
             RecoverySnapshot saved = window.recoverySnapshots.values().iterator().next();
             assertTrue(saved.lines().getFirst().startsWith("xa"));

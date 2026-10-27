@@ -30,6 +30,16 @@ import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 
 class RecoveryAutosaveManagerTest {
+    private final Map<TabSession, TuiDocumentSession> documents = new java.util.IdentityHashMap<>();
+
+    private TuiDocumentSession document(TabSession view) {
+        return documents.computeIfAbsent(view, TuiDocumentSession::adopt);
+    }
+
+    private List<TuiDocumentSession> documents(TabSession... views) {
+        return java.util.Arrays.stream(views).map(this::document).toList();
+    }
+
     @Test
     void autosaveCapturesDeletionBeforeTheNextFrameNormalizesTheViewport() {
         TabSession session = scrolledSessionAfterDeletingAllText();
@@ -38,7 +48,7 @@ class RecoveryAutosaveManagerTest {
         TerminalEditorApp.RecoveryAutosaveManager manager =
             new TerminalEditorApp.RecoveryAutosaveManager(persistence, Runnable::run);
 
-        assertNull(manager.autosaveDirtyTabs(List.of(session), 0L));
+        assertNull(manager.autosaveDirtyTabs(documents(session), 0L));
 
         RecoverySnapshot saved = persistence.snapshots.values().iterator().next();
         assertEquals(List.of(""), saved.lines());
@@ -63,7 +73,7 @@ class RecoveryAutosaveManagerTest {
         List<String> warnings = new ArrayList<>();
 
         TerminalEditorApp.runWithRecovery(
-            loop, new FakeFrontend(), manager, () -> List.of(session), warnings::add
+            loop, new FakeFrontend(), manager, () -> documents(session), warnings::add
         );
 
         RecoverySnapshot saved = persistence.snapshots.values().iterator().next();
@@ -89,7 +99,7 @@ class RecoveryAutosaveManagerTest {
         FakeFrontend frontend = new FakeFrontend();
         List<String> warnings = new ArrayList<>();
 
-        TerminalEditorApp.runWithRecovery(loop, frontend, manager, () -> List.of(session), warnings::add);
+        TerminalEditorApp.runWithRecovery(loop, frontend, manager, () -> documents(session), warnings::add);
 
         assertFalse(loop.running());
         assertTrue(frontend.running());
@@ -115,7 +125,7 @@ class RecoveryAutosaveManagerTest {
         List<String> warnings = new ArrayList<>();
 
         TerminalEditorApp.runWithRecovery(
-            loop, new FakeFrontend(), manager, () -> List.of(session), warnings::add
+            loop, new FakeFrontend(), manager, () -> documents(session), warnings::add
         );
 
         assertEquals(1, persistence.snapshots.size());
@@ -143,12 +153,12 @@ class RecoveryAutosaveManagerTest {
         FakeFrontend frontend = new FakeFrontend();
         frontend.onPoll = poll -> {
             session.engine().insertInput(((TextInput) poll.event()).text());
-            assertNull(manager.autosaveDirtyTabs(List.of(session), 1L));
+            assertNull(manager.autosaveDirtyTabs(documents(session), 1L));
             assertEquals(List.of(), persistence.saveAttempts);
         };
         List<String> warnings = new ArrayList<>();
 
-        TerminalEditorApp.runWithRecovery(loop, frontend, manager, () -> List.of(session), warnings::add);
+        TerminalEditorApp.runWithRecovery(loop, frontend, manager, () -> documents(session), warnings::add);
 
         assertTrue(frontend.running());
         assertEquals(List.of("draft!"), persistence.snapshots.get("startup-entry").lines());
@@ -172,7 +182,7 @@ class RecoveryAutosaveManagerTest {
         frontend.onPoll = poll -> frontend.running = false;
         List<String> warnings = new ArrayList<>();
 
-        TerminalEditorApp.runWithRecovery(loop, frontend, manager, () -> List.of(session), warnings::add);
+        TerminalEditorApp.runWithRecovery(loop, frontend, manager, () -> documents(session), warnings::add);
 
         assertTrue(loop.running());
         assertFalse(frontend.running());
@@ -198,7 +208,7 @@ class RecoveryAutosaveManagerTest {
         List<String> warnings = new ArrayList<>();
 
         IOException thrown = assertThrows(IOException.class, () -> TerminalEditorApp.runWithRecovery(
-            loop, new FakeFrontend(), manager, () -> List.of(session), warnings::add
+            loop, new FakeFrontend(), manager, () -> documents(session), warnings::add
         ));
 
         assertSame(inputFailure, thrown);
@@ -230,7 +240,7 @@ class RecoveryAutosaveManagerTest {
 
         IllegalStateException thrown = assertThrows(
             IllegalStateException.class,
-            () -> TerminalEditorApp.runWithRecovery(loop, frontend, manager, () -> List.of(session), warnings::add)
+            () -> TerminalEditorApp.runWithRecovery(loop, frontend, manager, () -> documents(session), warnings::add)
         );
 
         assertSame(renderFailure, thrown);
@@ -251,14 +261,14 @@ class RecoveryAutosaveManagerTest {
             new TerminalEditorApp.RecoveryAutosaveManager(persistence, () -> 3_000_000_002L, Runnable::run);
         publishSnapshot(manager, session, "startup-entry", 0L);
         session.engine().insertInput(" latest edit");
-        assertTrue(manager.autosaveDirtyTabs(List.of(session), 3_000_000_000L)
+        assertTrue(manager.autosaveDirtyTabs(documents(session), 3_000_000_000L)
             .contains("Recovery autosave failed"));
-        assertNull(manager.autosaveDirtyTabs(List.of(session), 3_000_000_001L));
+        assertNull(manager.autosaveDirtyTabs(documents(session), 3_000_000_001L));
         TuiEventLoop<TuiInputEvent> loop = new TuiEventLoop<>(timeout -> TuiEventLoop.Read.end());
         List<String> warnings = new ArrayList<>();
 
         TerminalEditorApp.runWithRecovery(
-            loop, new FakeFrontend(), manager, () -> List.of(session), warnings::add
+            loop, new FakeFrontend(), manager, () -> documents(session), warnings::add
         );
 
         assertSame(previous, persistence.snapshots.get("startup-entry"));
@@ -287,7 +297,7 @@ class RecoveryAutosaveManagerTest {
         });
 
         IOException thrown = assertThrows(IOException.class, () -> TerminalEditorApp.runWithRecovery(
-            loop, new FakeFrontend(), manager, () -> List.of(session), warning -> { }
+            loop, new FakeFrontend(), manager, () -> documents(session), warning -> { }
         ));
 
         assertSame(inputFailure, thrown);
@@ -309,15 +319,15 @@ class RecoveryAutosaveManagerTest {
             new TerminalEditorApp.RecoveryAutosaveManager(persistence, Runnable::run);
 
         publishSnapshot(manager, restored, "startup-entry", 0L);
-        manager.syncTabs(List.of(restored));
+        manager.syncTabs(documents(restored));
 
-        assertNull(manager.autosaveDirtyTabs(List.of(restored), 1L));
+        assertNull(manager.autosaveDirtyTabs(documents(restored), 1L));
         assertEquals(List.of(), persistence.deleteAttempts);
         assertEquals(List.of(), persistence.saveAttempts);
         assertEquals(snapshot, persistence.snapshots.get("startup-entry"));
 
         restored.engine().insertInput("!");
-        assertNull(manager.autosaveDirtyTabs(List.of(restored), 3_000_000_000L));
+        assertNull(manager.autosaveDirtyTabs(documents(restored), 3_000_000_000L));
 
         assertEquals(List.of("startup-entry"), persistence.saveAttempts);
         assertEquals(List.of(), persistence.deleteAttempts);
@@ -388,20 +398,20 @@ class RecoveryAutosaveManagerTest {
         TerminalEditorApp.RecoveryAutosaveManager manager =
             new TerminalEditorApp.RecoveryAutosaveManager(persistence, Runnable::run);
 
-        assertTrue(manager.autosaveDirtyTabs(List.of(session), 0L).contains("Recovery autosave failed"));
+        assertTrue(manager.autosaveDirtyTabs(documents(session), 0L).contains("Recovery autosave failed"));
         for (int turn = 1; turn < 100; turn++) {
-            assertNull(manager.autosaveDirtyTabs(List.of(session), turn * 16_000_000L));
+            assertNull(manager.autosaveDirtyTabs(documents(session), turn * 16_000_000L));
         }
         assertEquals(1, persistence.saveAttempts.size());
         assertTrue(persistence.snapshots.isEmpty());
 
         session.engine().insertInput(" latest");
         persistence.failAllSaves = false;
-        assertNull(manager.autosaveDirtyTabs(List.of(session), 2_000_000_000L));
+        assertNull(manager.autosaveDirtyTabs(documents(session), 2_000_000_000L));
 
         assertEquals(2, persistence.saveAttempts.size());
         assertEquals(List.of("draft latest"), persistence.snapshots.values().iterator().next().lines());
-        assertNull(manager.autosaveDirtyTabs(List.of(session), 4_000_000_000L));
+        assertNull(manager.autosaveDirtyTabs(documents(session), 4_000_000_000L));
         assertEquals(2, persistence.saveAttempts.size());
     }
 
@@ -411,20 +421,20 @@ class RecoveryAutosaveManagerTest {
         TabSession session = dirtySession("draft");
         TerminalEditorApp.RecoveryAutosaveManager manager =
             new TerminalEditorApp.RecoveryAutosaveManager(persistence, Runnable::run);
-        assertNull(manager.autosaveDirtyTabs(List.of(session), 0L));
+        assertNull(manager.autosaveDirtyTabs(documents(session), 0L));
         RecoverySnapshot committed = persistence.snapshots.values().iterator().next();
         session.engine().insertInput(" latest");
         persistence.failAllSaves = true;
 
-        assertTrue(manager.autosaveDirtyTabs(List.of(session), 2_000_000_000L)
+        assertTrue(manager.autosaveDirtyTabs(documents(session), 2_000_000_000L)
             .contains("Recovery autosave failed"));
-        assertNull(manager.autosaveDirtyTabs(List.of(session), 2_000_000_001L));
-        assertNull(manager.autosaveDirtyTabs(List.of(session), 3_999_999_999L));
+        assertNull(manager.autosaveDirtyTabs(documents(session), 2_000_000_001L));
+        assertNull(manager.autosaveDirtyTabs(documents(session), 3_999_999_999L));
         assertEquals(2, persistence.saveAttempts.size());
         assertSame(committed, persistence.snapshots.values().iterator().next());
 
         persistence.failAllSaves = false;
-        assertNull(manager.autosaveDirtyTabs(List.of(session), 4_000_000_000L));
+        assertNull(manager.autosaveDirtyTabs(documents(session), 4_000_000_000L));
         assertEquals(3, persistence.saveAttempts.size());
         assertEquals(List.of("draft latest"), persistence.snapshots.values().iterator().next().lines());
     }
@@ -451,7 +461,7 @@ class RecoveryAutosaveManagerTest {
 
         assertSame(drainFailure, assertThrows(IllegalStateException.class,
             () -> TerminalEditorApp.finishRecoveryAfterIo(() -> { throw drainFailure; }, manager,
-                () -> List.of(session), true, warning -> {})));
+                () -> documents(session), true, warning -> {})));
 
         assertEquals(List.of("latest draft"), persistence.snapshots.values().iterator().next().lines());
     }
@@ -465,7 +475,7 @@ class RecoveryAutosaveManagerTest {
 
         assertSame(drainFailure, assertThrows(IllegalStateException.class,
             () -> TerminalEditorApp.finishRecoveryAfterIo(() -> { throw drainFailure; }, manager,
-                () -> List.of(dirtySession("latest draft")), false, warning -> {})));
+                () -> documents(dirtySession("latest draft")), false, warning -> {})));
 
         assertEquals(List.of(persistence.uncheckedSaveFailure), List.of(drainFailure.getSuppressed()));
     }
@@ -479,7 +489,7 @@ class RecoveryAutosaveManagerTest {
         var manager = new TerminalEditorApp.RecoveryAutosaveManager(persistence, Runnable::run);
 
         manager.prepareRestoration(List.of(
-            new TerminalEditorApp.RecoveryAutosaveManager.RestoredSnapshot(staged, "startup-entry")), 0L);
+            new TerminalEditorApp.RecoveryAutosaveManager.RestoredSnapshot(document(staged), "startup-entry")), 0L);
         assertNull(manager.finishSession(List.of(), false));
 
         assertSame(snapshot, persistence.snapshots.get("startup-entry"));
@@ -495,7 +505,7 @@ class RecoveryAutosaveManagerTest {
         persistence.snapshots.put("startup-entry", snapshot);
         var manager = new TerminalEditorApp.RecoveryAutosaveManager(persistence, Runnable::run);
         var prepared = manager.prepareRestoration(List.of(
-            new TerminalEditorApp.RecoveryAutosaveManager.RestoredSnapshot(staged, "startup-entry")), 0L);
+            new TerminalEditorApp.RecoveryAutosaveManager.RestoredSnapshot(document(staged), "startup-entry")), 0L);
         manager.syncTabs(List.of());
 
         assertThrows(IllegalStateException.class, () -> manager.publishRestoration(prepared));
@@ -505,10 +515,10 @@ class RecoveryAutosaveManagerTest {
         assertEquals(List.of(), persistence.deleteAttempts);
     }
 
-    private static void publishSnapshot(TerminalEditorApp.RecoveryAutosaveManager manager,
+    private void publishSnapshot(TerminalEditorApp.RecoveryAutosaveManager manager,
         TabSession session, String entryId, long nowNanos) {
         manager.publishRestoration(manager.prepareRestoration(List.of(
-            new TerminalEditorApp.RecoveryAutosaveManager.RestoredSnapshot(session, entryId)), nowNanos));
+            new TerminalEditorApp.RecoveryAutosaveManager.RestoredSnapshot(document(session), entryId)), nowNanos));
     }
 
     private static TabSession dirtySession(String text) {

@@ -61,7 +61,7 @@ class RecoveryRestorePublicationTest {
                 assertEquals(tab.documentSession().document().documentId(), tab.renderPlanBuilder().documentId());
                 assertSame(tab.tabSession().textLayout(), tab.renderPlanBuilder().textLayout());
             }
-            assertNull(window.recoveryManager.finishSession(window.host.toTabSessions(window.tabs), false));
+            assertNull(window.recoveryManager.finishSession(window.host.toDocumentSessions(window.tabs), false));
             assertEquals(Set.of("first", "broken", "last"), window.recoverySnapshots.keySet());
             assertEquals(broken.snapshot(), window.recoverySnapshots.get("broken"));
             assertEquals(first.snapshot().lines(), window.recoverySnapshots.get("first").lines());
@@ -88,7 +88,7 @@ class RecoveryRestorePublicationTest {
                 () -> window.host.restoreRecoveredTabs(entries, window.tabs, window.context, window.recoveryManager, 0L)));
 
             assertEquals(List.of(existing), window.tabs);
-            assertNull(window.recoveryManager.finishSession(window.host.toTabSessions(window.tabs), false));
+            assertNull(window.recoveryManager.finishSession(window.host.toDocumentSessions(window.tabs), false));
             assertEquals(Set.of("first"), window.recoverySnapshots.keySet());
             assertSame(first.snapshot(), window.recoverySnapshots.get("first"));
         }
@@ -111,7 +111,7 @@ class RecoveryRestorePublicationTest {
 
             assertEquals(List.of(placeholder), tabs);
             assertSame(placeholder.tabSession().engine(), context.engine());
-            assertNull(window.recoveryManager.finishSession(window.host.toTabSessions(tabs), false));
+            assertNull(window.recoveryManager.finishSession(window.host.toDocumentSessions(tabs), false));
             assertEquals(Set.of("first", "last"), window.recoverySnapshots.keySet());
             assertSame(first.snapshot(), window.recoverySnapshots.get("first"));
             assertSame(last.snapshot(), window.recoverySnapshots.get("last"));
@@ -141,10 +141,34 @@ class RecoveryRestorePublicationTest {
             tabs.fail = false;
             assertEquals(2, tabs.size());
             assertEquals(first.snapshot().lines(), tabs.get(1).tabSession().model().snapshotLines());
-            assertNull(window.recoveryManager.finishSession(window.host.toTabSessions(tabs), false));
+            assertNull(window.recoveryManager.finishSession(window.host.toDocumentSessions(tabs), false));
             assertEquals(Set.of("first"), window.recoverySnapshots.keySet());
             assertEquals(first.snapshot().lines(), window.recoverySnapshots.get("first").lines());
             assertTrue(window.recoverySnapshots.get("first").dirty());
+        }
+    }
+
+    @Test
+    void placeholderRemovalFailureAfterAppendingKeepsPublishedDraftOwnership() throws Exception {
+        try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("disk document"))) {
+            var placeholder = window.host.newEditorTab();
+            OutOfMemoryError removalFailure = new OutOfMemoryError("placeholder removal failed");
+            var tabs = new ArrayList<TerminalEditorApp.EditorTab>(List.of(placeholder)) {
+                @Override public TerminalEditorApp.EditorTab removeFirst() { throw removalFailure; }
+            };
+            var context = new TerminalEditorApp.SessionContext(tabs, 0);
+            var first = entry("first", "recovered draft");
+            window.recoverySnapshots.put(first.id(), first.snapshot());
+
+            assertSame(removalFailure, assertThrows(OutOfMemoryError.class,
+                () -> window.host.restoreRecoveredTabs(List.of(first), tabs, context, window.recoveryManager, 0L)));
+
+            assertEquals(2, tabs.size());
+            assertSame(placeholder, tabs.getFirst());
+            tabs.get(1).documentSession().execute(new dev.tuink.editor.command.DocumentCommand.Input("latest "));
+            assertNull(window.recoveryManager.finishSession(window.host.toDocumentSessions(tabs), false));
+            assertEquals(Set.of("first"), window.recoverySnapshots.keySet(), "published draft retains its stable entry");
+            assertEquals(List.of("latest recovered draft"), window.recoverySnapshots.get("first").lines());
         }
     }
 

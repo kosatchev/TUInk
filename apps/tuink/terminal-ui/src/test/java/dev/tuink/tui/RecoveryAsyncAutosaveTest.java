@@ -19,7 +19,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -28,6 +27,16 @@ import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 
 class RecoveryAsyncAutosaveTest {
+    private final Map<TabSession, TuiDocumentSession> documents = new java.util.IdentityHashMap<>();
+
+    private TuiDocumentSession document(TabSession view) {
+        return documents.computeIfAbsent(view, TuiDocumentSession::adopt);
+    }
+
+    private List<TuiDocumentSession> documents(TabSession... views) {
+        return java.util.Arrays.stream(views).map(this::document).toList();
+    }
+
     @Test
     void formatOnlyUndoRefreshesRecoveryEvenWhenTheTextRevisionMatches(@TempDir Path directory) throws Exception {
         Path source = Files.write(directory.resolve("legacy.txt"), "Привет".getBytes(Charset.forName("windows-1251")));
@@ -37,7 +46,7 @@ class RecoveryAsyncAutosaveTest {
         long textRevision = tab.model().revision();
         var store = new MemoryStore();
         var manager = new TerminalEditorApp.RecoveryAutosaveManager(store, Runnable::run);
-        assertNull(manager.autosaveDirtyTabs(List.of(tab), 0));
+        assertNull(manager.autosaveDirtyTabs(documents(tab), 0));
         assertEquals(source, JvmDocumentStorage.pathOf(store.snapshots.values().iterator().next().currentResource()));
         Path converted = directory.resolve("converted.txt");
         tab.engine().saveAsUtf8(JvmDocumentStorage.resource(converted), SaveDisposition.CREATE_NEW);
@@ -45,7 +54,7 @@ class RecoveryAsyncAutosaveTest {
         assertEquals(textRevision, tab.model().revision());
         assertTrue(tab.state().isDirty());
 
-        assertNull(manager.autosaveDirtyTabs(List.of(tab), 3_000_000_000L));
+        assertNull(manager.autosaveDirtyTabs(documents(tab), 3_000_000_000L));
 
         assertEquals(2, store.events.stream().filter("save"::equals).count());
         RecoverySnapshot snapshot = store.snapshots.values().iterator().next();
@@ -53,10 +62,11 @@ class RecoveryAsyncAutosaveTest {
         assertEquals(JvmDocumentStorage.baselineOf(tab.model().fileBaseline()), JvmDocumentStorage.baselineOf(snapshot.fileBaseline()));
         assertEquals(tab.model().fileMetadata(), snapshot.fileMetadata());
         assertEquals(List.of("😀Привет"), snapshot.lines());
-        assertNull(manager.finishSession(List.of(tab), true));
+        assertNull(manager.finishSession(documents(tab), true));
     }
 
     @Test
+    @Timeout(5)
     void failureToStartTheWriterCannotLeaveShutdownWaitingForAnUnscheduledOperation() throws Exception {
         var tab = session("latest draft");
         var store = new MemoryStore();
@@ -64,17 +74,12 @@ class RecoveryAsyncAutosaveTest {
             throw new OutOfMemoryError("unable to create native thread");
         });
 
-        String warning = manager.autosaveDirtyTabs(List.of(tab), 0);
+        String warning = manager.autosaveDirtyTabs(documents(tab), 0);
 
         assertNotNull(warning);
         assertTrue(warning.contains("unable to create native thread"));
-        // A regression must fail within a deadline even though shutdown waits
-        // uninterruptibly for a real outstanding operation to finish.
-        var finalFlush = new FutureTask<>(() -> manager.finishSession(List.of(tab), false));
-        Thread finisher = new Thread(finalFlush, "recovery-failed-start-test");
-        finisher.setDaemon(true);
-        finisher.start();
-        assertNull(finalFlush.get(2, TimeUnit.SECONDS));
+        // Shutdown must finish on the owner even when no worker could be scheduled.
+        assertNull(manager.finishSession(documents(tab), false));
         assertEquals(List.of("latest draft"), store.snapshots.values().iterator().next().lines());
     }
 
@@ -85,7 +90,7 @@ class RecoveryAsyncAutosaveTest {
         var queue = new ArrayDeque<Runnable>();
         var store = new MemoryStore();
         var manager = new TerminalEditorApp.RecoveryAutosaveManager(store, queue::addLast);
-        List<TabSession> tabs = List.of(first, second);
+        List<TuiDocumentSession> tabs = documents(first, second);
 
         assertNull(manager.autosaveDirtyTabs(tabs, 0));
         for (int edit = 0; edit < 100; edit++) {
@@ -127,19 +132,19 @@ class RecoveryAsyncAutosaveTest {
         };
         var manager = new TerminalEditorApp.RecoveryAutosaveManager(store);
         try {
-            assertNull(manager.autosaveDirtyTabs(List.of(tab), 0));
+            assertNull(manager.autosaveDirtyTabs(documents(tab), 0));
             assertTrue(entered.await(2, TimeUnit.SECONDS));
             assertNotSame(Thread.currentThread(), ioThread.get());
             tab.engine().insertInput(" latest");
             tab.engine().moveLeft();
             var cursor = tab.state().getCursor();
             for (int turn = 0; turn < 100; turn++) {
-                assertNull(manager.autosaveDirtyTabs(List.of(tab), 3_000_000_000L + turn));
+                assertNull(manager.autosaveDirtyTabs(documents(tab), 3_000_000_000L + turn));
             }
             assertEquals(1, calls.get());
             release.countDown();
 
-            assertNull(manager.finishSession(List.of(tab), false));
+            assertNull(manager.finishSession(documents(tab), false));
 
             assertEquals(2, calls.get());
             RecoverySnapshot saved = store.snapshots.values().iterator().next();
@@ -147,7 +152,7 @@ class RecoveryAsyncAutosaveTest {
             assertEquals(cursor, saved.cursor(), "EOF captures view changes even without a new text revision");
         } finally {
             release.countDown();
-            manager.finishSession(List.of(tab), true);
+            manager.finishSession(documents(tab), true);
         }
     }
 
@@ -166,8 +171,8 @@ class RecoveryAsyncAutosaveTest {
         };
         var manager = new TerminalEditorApp.RecoveryAutosaveManager(store);
         try {
-            manager.syncTabs(List.of(tab));
-            manager.autosaveDirtyTabs(List.of(tab), 0);
+            manager.syncTabs(documents(tab));
+            manager.autosaveDirtyTabs(documents(tab), 0);
             assertTrue(entered.await(2, TimeUnit.SECONDS));
             manager.syncTabs(List.of());
             assertNull(manager.autosaveDirtyTabs(List.of(), 3_000_000_000L));
@@ -195,14 +200,14 @@ class RecoveryAsyncAutosaveTest {
             }
         };
         var manager = new TerminalEditorApp.RecoveryAutosaveManager(store, queue::addLast);
-        assertNull(manager.autosaveDirtyTabs(List.of(tab), 0));
+        assertNull(manager.autosaveDirtyTabs(documents(tab), 0));
         queue.removeFirst().run();
-        assertTrue(manager.autosaveDirtyTabs(List.of(tab), 1).contains("simulated slow disk failure"));
-        assertNull(manager.autosaveDirtyTabs(List.of(tab), 2));
+        assertTrue(manager.autosaveDirtyTabs(documents(tab), 1).contains("simulated slow disk failure"));
+        assertNull(manager.autosaveDirtyTabs(documents(tab), 2));
         assertTrue(queue.isEmpty());
-        assertNull(manager.autosaveDirtyTabs(List.of(tab), 2_000_000_000L));
+        assertNull(manager.autosaveDirtyTabs(documents(tab), 2_000_000_000L));
         queue.removeFirst().run();
-        assertNull(manager.finishSession(List.of(tab), false));
+        assertNull(manager.finishSession(documents(tab), false));
         assertEquals(List.of("draft"), store.snapshots.values().iterator().next().lines());
     }
 
@@ -211,9 +216,9 @@ class RecoveryAsyncAutosaveTest {
         var tab = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
         var store = new MemoryStore();
         var manager = new TerminalEditorApp.RecoveryAutosaveManager(store, Runnable::run);
-        manager.syncTabs(List.of(tab));
-        assertNull(manager.autosaveDirtyTabs(List.of(tab), 0));
-        assertNull(manager.finishSession(List.of(tab), true));
+        manager.syncTabs(documents(tab));
+        assertNull(manager.autosaveDirtyTabs(documents(tab), 0));
+        assertNull(manager.finishSession(documents(tab), true));
         assertTrue(store.events.isEmpty());
     }
 

@@ -1,6 +1,12 @@
 package dev.tuink.tui;
 
 import dev.tuink.storage.jvm.JvmDocumentStorage;
+import dev.tuink.editor.session.recovery.RecoveryCoordinator;
+import dev.tuink.editor.session.recovery.RecoveryParticipant;
+import dev.tuink.editor.session.recovery.PreparedCheckpoint;
+import dev.tuink.editor.document.DocumentId;
+import dev.tuink.editor.document.TextPosition;
+import dev.tuink.core.ViewportState;
 import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.EditorEngine;
 import dev.tuink.core.EditorState;
@@ -90,13 +96,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -114,8 +117,6 @@ public class TerminalEditorApp {
     private static final long NOTIFY_DURATION_NANOS = 3_000_000_000L;
     static final long OPEN_DIALOG_DOUBLE_CLICK_NANOS = 450_000_000L;
     private static final int PROFILE_LOG_EVERY_FRAMES = 30;
-    private static final long RECOVERY_AUTOSAVE_DEBOUNCE_NANOS = 2_000_000_000L;
-    private static final long RECOVERY_ERROR_NOTIFY_COOLDOWN_NANOS = 5_000_000_000L;
     final EditorClipboard clipboard = new EditorClipboard();
     final DialogAttention modalAttention = new DialogAttention();
     UiStyles.Theme theme = UiStyles.Theme.CYAN;
@@ -356,7 +357,7 @@ public class TerminalEditorApp {
                         new DocumentIoController()
                     )),
                     recoveryAutosave,
-                    () -> toTabSessions(tabs),
+                    () -> toDocumentSessions(tabs),
                     warning -> System.err.println("Warning: " + warning)
                 );
             } finally {
@@ -1564,7 +1565,7 @@ public class TerminalEditorApp {
                 EditorTab tab = new EditorTab(documentSession, builder);
                 tab.viewportController().onRecoveredViewport();
                 prepared.add(new PreparedRecoveredTab(tab,
-                    new RecoveryAutosaveManager.RestoredSnapshot(tabSession, entry.id())));
+                    new RecoveryAutosaveManager.RestoredSnapshot(documentSession, entry.id())));
             } catch (IOException | RuntimeException | OutOfMemoryError error) {
                 failed.add(entry);
                 failureDetails.add(entry.id() + ": " + (error.getMessage() == null
@@ -1597,12 +1598,12 @@ public class TerminalEditorApp {
             }
             throw publicationFailure;
         }
-        if (replacePlaceholder) {
-            tabs.removeFirst();
-        }
         // The registry commit allocates nothing; activation can fail without
         // turning a published draft into an abandoned startup entry.
         recoveryAutosave.publishRestoration(ownership);
+        if (replacePlaceholder) {
+            tabs.removeFirst();
+        }
         sessionContext.activate(replacePlaceholder ? 0 : previousSize);
         return result;
     }
@@ -1667,6 +1668,10 @@ public class TerminalEditorApp {
         }
         tabs.remove(closeTabIndex);
         return TabSessions.closeIndex(size, activeTabIndex, closeTabIndex);
+    }
+
+    List<TuiDocumentSession> toDocumentSessions(List<EditorTab> tabs) {
+        return tabs.stream().map(EditorTab::documentSession).toList();
     }
 
     List<TabSession> toTabSessions(List<EditorTab> tabs) {
@@ -1893,7 +1898,7 @@ public class TerminalEditorApp {
         TuiEventLoop<TuiInputEvent> eventLoop,
         TuiApplicationRunner.Frontend<TuiInputEvent> frontend,
         RecoveryAutosaveManager recovery,
-        Supplier<List<TabSession>> tabs,
+        Supplier<List<TuiDocumentSession>> tabs,
         Consumer<String> reportWarning
     ) throws IOException {
         boolean completed = false;
@@ -1921,7 +1926,7 @@ public class TerminalEditorApp {
     }
 
     static void finishRecoveryAfterIo(Runnable drain, RecoveryAutosaveManager recovery,
-        Supplier<List<TabSession>> tabs, boolean exitConfirmed, Consumer<String> reportWarning) {
+        Supplier<List<TuiDocumentSession>> tabs, boolean exitConfirmed, Consumer<String> reportWarning) {
         Throwable drainFailure = null;
         try {
             drain.run();
@@ -1939,72 +1944,34 @@ public class TerminalEditorApp {
         }
     }
 
-    interface RecoveryPersistence {
-        void save(String entryId, RecoverySnapshot snapshot) throws IOException;
+    interface RecoveryPersistence extends dev.tuink.editor.session.recovery.RecoveryPersistence<RecoverySnapshot> {}
 
-        void delete(String entryId) throws IOException;
-
-        void release(String entryId) throws IOException;
-    }
-
+    /** Terminal checkpoint envelope and lifecycle/executor adapter. Coordination lives in editor-session. */
     static final class RecoveryAutosaveManager {
-        private final RecoveryPersistence store;
-        private final LongSupplier nanoClock;
-        private final Executor ioExecutor;
+        private final RecoveryCoordinator<RecoverySnapshot> coordinator;
+        private final Map<TuiDocumentSession, RecoveryParticipant<RecoverySnapshot>> participants =
+            new IdentityHashMap<>();
         private final ExecutorService ownedWorker;
-        private Map<TabSession, RuntimeRecoveryState> runtime = new IdentityHashMap<>();
-        private Map<String, Long> pendingDeletes = new LinkedHashMap<>();
-        private long ownershipRevision;
-        private long lastErrorNotifyAtNanos = Long.MIN_VALUE;
-        // Only one immutable snapshot is retained by I/O. No executor backlog
-        // or per-tab pending snapshots can pin earlier versions of documents.
-        private RecoveryIoOperation inFlight;
-        private int nextTabIndex;
 
         private RecoveryAutosaveManager(RecoveryStore store) {
             this(new RecoveryPersistence() {
-                @Override
-                public void save(String entryId, RecoverySnapshot snapshot) throws IOException {
-                    store.save(entryId, snapshot);
-                }
-
-                @Override
-                public void delete(String entryId) throws IOException {
-                    store.delete(entryId);
-                }
-
-                @Override
-                public void release(String entryId) throws IOException {
-                    store.release(entryId);
-                }
+                @Override public void save(String id, RecoverySnapshot snapshot) throws IOException { store.save(id, snapshot); }
+                @Override public void delete(String id) throws IOException { store.delete(id); }
+                @Override public void release(String id) throws IOException { store.release(id); }
             });
         }
 
-        RecoveryAutosaveManager(RecoveryPersistence store) {
-            this(store, System::nanoTime);
+        RecoveryAutosaveManager(RecoveryPersistence store) { this(store, System::nanoTime); }
+        RecoveryAutosaveManager(RecoveryPersistence store, LongSupplier clock) {
+            this(store, clock, newRecoveryWorker(), true);
         }
-
-        RecoveryAutosaveManager(RecoveryPersistence store, LongSupplier nanoClock) {
-            this(store, nanoClock, newRecoveryWorker(), true);
+        RecoveryAutosaveManager(RecoveryPersistence store, Executor executor) { this(store, System::nanoTime, executor); }
+        RecoveryAutosaveManager(RecoveryPersistence store, LongSupplier clock, Executor executor) {
+            this(store, clock, executor, false);
         }
-
-        RecoveryAutosaveManager(RecoveryPersistence store, Executor ioExecutor) {
-            this(store, System::nanoTime, ioExecutor);
-        }
-
-        RecoveryAutosaveManager(RecoveryPersistence store, LongSupplier nanoClock, Executor ioExecutor) {
-            this(store, nanoClock, ioExecutor, false);
-        }
-
-        private RecoveryAutosaveManager(RecoveryPersistence store, LongSupplier nanoClock,
-            Executor ioExecutor, boolean ownsWorker) {
-            if (store == null) {
-                throw new IllegalArgumentException("store must not be null");
-            }
-            this.store = store;
-            this.nanoClock = Objects.requireNonNull(nanoClock, "nanoClock");
-            this.ioExecutor = Objects.requireNonNull(ioExecutor, "ioExecutor");
-            ownedWorker = ownsWorker ? (ExecutorService) ioExecutor : null;
+        private RecoveryAutosaveManager(RecoveryPersistence store, LongSupplier clock, Executor executor, boolean ownsWorker) {
+            coordinator = new RecoveryCoordinator<>(store, executor, clock);
+            ownedWorker = ownsWorker ? (ExecutorService) executor : null;
         }
 
         private static ExecutorService newRecoveryWorker() {
@@ -2015,480 +1982,114 @@ public class TerminalEditorApp {
             });
         }
 
-        void syncTabs(List<TabSession> tabs) {
-            ownershipRevision++;
-            Map<TabSession, Boolean> active = new IdentityHashMap<>();
-            if (tabs != null) {
-                for (TabSession session : tabs) {
-                    if (session == null) {
-                        continue;
-                    }
-                    active.put(session, Boolean.TRUE);
-                    runtime.computeIfAbsent(
-                        session,
-                        key -> new RuntimeRecoveryState(UUID.randomUUID().toString())
-                    );
+        private RecoveryParticipant<RecoverySnapshot> participant(TuiDocumentSession document) {
+            return participants.computeIfAbsent(document, source -> new RecoveryParticipant<>() {
+                @Override public DocumentId documentId() { return source.document().documentId(); }
+                @Override public Status status() {
+                    var status = source.document().status();
+                    return new Status(status.dirty(), status.recoveryRevision());
                 }
-            }
-            var iterator = runtime.entrySet().iterator();
-            while (iterator.hasNext()) {
-                Map.Entry<TabSession, RuntimeRecoveryState> entry = iterator.next();
-                if (!active.containsKey(entry.getKey())) {
-                    if (entry.getValue().hasSnapshot() || ownsInFlight(entry.getValue())) {
-                        queueDelete(entry.getValue().entryId());
-                    }
-                    iterator.remove();
+                @Override public PreparedCheckpoint<RecoverySnapshot> prepareCheckpoint() {
+                    var capture = source.document().prepareRecovery(source.viewId());
+                    var liveViewport = source.view().state().viewport();
+                    int topLine = Math.min(liveViewport.topLine(), source.view().model().lineCount() - 1);
+                    var viewport = topLine == liveViewport.topLine() ? liveViewport
+                        : new ViewportState(topLine, 0, liveViewport.leftColumn(), liveViewport.leftVisualColumn());
+                    return () -> {
+                        var draft = capture.materialize();
+                        return new RecoverySnapshot(draft.lines(), position(draft.caret()), viewport,
+                            position(draft.anchor()), draft.dirty(), draft.currentResource(), draft.saveDisposition(),
+                            draft.fileMetadata(), draft.fileBaseline(), draft.createdAt());
+                    };
                 }
-            }
+            });
         }
 
-        record RestoredSnapshot(TabSession session, String entryId) {
+        private static Position position(TextPosition position) {
+            return position == null ? null : new Position(position.line(), position.utf16Offset());
+        }
+
+        private List<RecoveryParticipant<RecoverySnapshot>> participantList(List<TuiDocumentSession> documents) {
+            return documents.stream().map(this::participant).toList();
+        }
+
+        void syncTabs(List<TuiDocumentSession> documents) {
+            coordinator.synchronize(participantList(documents),
+                RecoveryCoordinator.RemovalDisposition.DISCARD);
+            participants.keySet().retainAll(documents);
+        }
+
+        record RestoredSnapshot(TuiDocumentSession session, String entryId) {
             RestoredSnapshot {
                 Objects.requireNonNull(session, "session");
-                if (entryId == null || entryId.isBlank()) {
-                    throw new IllegalArgumentException("recovery entryId is required");
-                }
+                if (entryId == null || entryId.isBlank()) throw new IllegalArgumentException("recovery entryId is required");
             }
         }
 
-        /** Owns no live registry state until the corresponding tabs are published. */
         static final class PreparedRestoration {
-            private final RecoveryAutosaveManager owner;
-            private final long revision;
-            private final Map<TabSession, RuntimeRecoveryState> runtime;
-            private final Map<String, Long> pendingDeletes;
-            private boolean published;
-
-            private PreparedRestoration(RecoveryAutosaveManager owner,
-                Map<TabSession, RuntimeRecoveryState> runtime, Map<String, Long> pendingDeletes) {
-                this.owner = owner;
-                this.revision = owner.ownershipRevision;
-                this.runtime = runtime;
-                this.pendingDeletes = pendingDeletes;
+            private final RecoveryCoordinator.PreparedRestoration<RecoverySnapshot> prepared;
+            private PreparedRestoration(RecoveryCoordinator.PreparedRestoration<RecoverySnapshot> prepared) {
+                this.prepared = prepared;
             }
         }
 
         PreparedRestoration prepareRestoration(List<RestoredSnapshot> snapshots, long nowNanos) {
-            Map<TabSession, RuntimeRecoveryState> nextRuntime = new IdentityHashMap<>(runtime);
-            Map<String, Long> nextDeletes = new LinkedHashMap<>(pendingDeletes);
-            for (RestoredSnapshot snapshot : snapshots) {
-                RuntimeRecoveryState adopted = new RuntimeRecoveryState(snapshot.entryId());
-                adopted.markSaved(snapshot.session().engine().recoveryRevision(), nowNanos);
-                RuntimeRecoveryState replaced = nextRuntime.put(snapshot.session(), adopted);
-                nextDeletes.remove(snapshot.entryId());
-                if (replaced != null && !snapshot.entryId().equals(replaced.entryId())
-                    && (replaced.hasSnapshot() || ownsInFlight(replaced))) {
-                    nextDeletes.putIfAbsent(replaced.entryId(), Long.MIN_VALUE);
-                }
-            }
-            return new PreparedRestoration(this, nextRuntime, nextDeletes);
+            return new PreparedRestoration(coordinator.prepareRestoration(snapshots.stream()
+                .map(item -> new RecoveryCoordinator.RestoredParticipant<>(
+                    participant(item.session()), item.entryId())).toList(), nowNanos));
         }
 
-        /** Allocation-free owner commit, immediately after publishing the prepared tabs. */
-        void publishRestoration(PreparedRestoration prepared) {
-            if (prepared.owner != this || prepared.published || prepared.revision != ownershipRevision) {
-                throw new IllegalStateException("Recovery publication is stale or belongs to another session");
-            }
-            runtime = prepared.runtime;
-            pendingDeletes = prepared.pendingDeletes;
-            prepared.published = true;
-            ownershipRevision++;
+        void publishRestoration(PreparedRestoration prepared) { coordinator.publishRestoration(prepared.prepared); }
+
+        String autosaveDirtyTabs(List<TuiDocumentSession> documents, long nowNanos) {
+            // Publish the current document membership before scheduling a checkpoint.
+            syncTabs(documents);
+            return coordinator.tick(nowNanos);
         }
 
-        String autosaveDirtyTabs(List<TabSession> tabs, long nowNanos) {
-            ownershipRevision++;
-            return autosaveDirtyTabs(tabs, nowNanos, false);
-        }
-
-        private String autosaveDirtyTabs(List<TabSession> tabs, long nowNanos, boolean force) {
-            String warning = collectCompletion(nowNanos, force);
-            if (inFlight != null) return warning;
-            warning = firstNonNull(warning, retryPendingDeletes(nowNanos, force));
-            if (inFlight != null) return warning;
-            if (tabs == null || tabs.isEmpty()) {
-                return warning;
-            }
-            int start = Math.floorMod(nextTabIndex, tabs.size());
-            for (int offset = 0; offset < tabs.size(); offset++) {
-                int index = (start + offset) % tabs.size();
-                TabSession session = tabs.get(index);
-                if (session == null) {
-                    continue;
-                }
-                RuntimeRecoveryState state = runtime.computeIfAbsent(
-                    session,
-                    key -> new RuntimeRecoveryState(UUID.randomUUID().toString())
-                );
-                if (!session.state().isDirty()) {
-                    if (state.hasSnapshot()) {
-                        if (!force && !state.cleanupDue(nowNanos)) {
-                            continue;
-                        }
-                        state.markCleanupAttempt(nowNanos);
-                        if (!force) {
-                            submit(new RecoveryIoOperation(state, -1, nowNanos, null));
-                            nextTabIndex = index + 1;
-                            warning = firstNonNull(warning, collectCompletion(nowNanos, false));
-                            if (inFlight != null) return warning;
-                            continue;
-                        }
-                        try {
-                            store.delete(state.entryId());
-                            pendingDeletes.remove(state.entryId());
-                            state.clearSnapshotState();
-                        } catch (IOException e) {
-                            warning = firstNonNull(
-                                warning,
-                                failureWarning("Recovery cleanup failed", e, nowNanos, force)
-                            );
-                        }
-                    }
-                    continue;
-                }
-
-                long revision = session.engine().recoveryRevision();
-                if (!force && state.hasSnapshot() && revision == state.lastRevision()) {
-                    continue;
-                }
-                if (!force && !state.saveDue(nowNanos)) {
-                    continue;
-                }
-                state.markSaveAttempt(nowNanos);
-                try {
-                    // Capture on the owner thread; the worker never reads a
-                    // live model, cursor, history, or runtime bookkeeping.
-                    RecoverySnapshot.Prepared snapshot = RecoverySnapshot.prepare(session.model(), session.state());
-                    if (force) {
-                        store.save(state.entryId(), snapshot.materialize());
-                        state.markSaved(revision, nowNanos);
-                    } else {
-                        submit(new RecoveryIoOperation(state, revision, nowNanos, snapshot));
-                        nextTabIndex = index + 1;
-                        warning = firstNonNull(warning, collectCompletion(nowNanos, false));
-                        if (inFlight != null) return warning;
-                    }
-                } catch (IOException | RuntimeException | OutOfMemoryError e) {
-                    if (force && e instanceof RuntimeException unchecked) throw unchecked;
-                    if (force && e instanceof OutOfMemoryError exhausted) throw exhausted;
-                    warning = firstNonNull(
-                        warning,
-                        failureWarning("Recovery autosave failed", ioFailure(e), nowNanos, force)
-                    );
-                }
-            }
-            return warning;
-        }
-
-        DeletionResult deleteEntries(List<? extends RecoveryStore.PendingSnapshot> entries) {
-            ownershipRevision++;
-            if (entries == null || entries.isEmpty()) {
-                return new DeletionResult(0, List.of(), List.of());
-            }
-            int deleted = 0;
-            List<RecoveryStore.PendingSnapshot> failed = new ArrayList<>();
-            List<String> failureDetails = new ArrayList<>();
-            for (RecoveryStore.PendingSnapshot entry : entries) {
-                if (entry == null) {
-                    continue;
-                }
-                try {
-                    store.delete(entry.id());
-                    pendingDeletes.remove(entry.id());
-                    deleted++;
-                } catch (IOException e) {
-                    failed.add(entry);
-                    failureDetails.add(entry.id() + ": " + messageOf(e));
-                }
-            }
-            return new DeletionResult(deleted, failed, failureDetails);
-        }
-
-        ReleaseResult releaseEntries(List<? extends RecoveryStore.PendingSnapshot> entries) {
-            ownershipRevision++;
-            List<RecoveryStore.PendingSnapshot> failed = new ArrayList<>();
-            List<String> failureDetails = new ArrayList<>();
-            for (RecoveryStore.PendingSnapshot entry : entries) {
-                try {
-                    store.release(entry.id());
-                } catch (IOException error) {
-                    failed.add(entry);
-                    failureDetails.add(entry.id() + ": " + messageOf(error));
-                }
-            }
-            return new ReleaseResult(failed, failureDetails);
-        }
-
-        String finishSession(List<TabSession> tabs, boolean exitConfirmed) {
-            ownershipRevision++;
-            // Shutdown is outside the interactive event loop. Drain the single
-            // outstanding write before any final save, discard, or release.
-            awaitInFlight();
-            String warning = collectCompletion(nanoClock.getAsLong(), true);
-            try {
-                syncTabs(tabs);
-                if (exitConfirmed) {
-                    return firstNonNull(warning, clearRuntimeSnapshots());
-                }
-                // Capture the final owner-thread state even when its text
-                // revision did not change or the normal debounce is active.
-                return firstNonNull(warning, autosaveDirtyTabs(tabs, nanoClock.getAsLong(), true));
-            } finally {
+        String finishSession(List<TuiDocumentSession> documents, boolean exitConfirmed) {
+            try { return coordinator.finish(participantList(documents), exitConfirmed); }
+            finally {
+                participants.keySet().retainAll(documents);
                 if (ownedWorker != null) ownedWorker.shutdown();
             }
         }
 
-        private String clearRuntimeSnapshots() {
-            for (RuntimeRecoveryState state : runtime.values()) {
-                if (state.hasSnapshot()) queueDelete(state.entryId());
-            }
-            runtime.clear();
-            return retryPendingDeletes(nanoClock.getAsLong(), true);
+        DeletionResult deleteEntries(List<? extends RecoveryStore.PendingSnapshot> entries) {
+            var result = coordinator.deleteEntries(entries.stream().map(RecoveryStore.PendingSnapshot::id).toList());
+            var failedIds = result.failures().stream().map(RecoveryCoordinator.EntryFailure::entryId).toList();
+            return new DeletionResult(result.completedCount(), entries.stream().filter(entry -> failedIds.contains(entry.id()))
+                .map(RecoveryStore.PendingSnapshot.class::cast).toList(), details(result));
         }
 
-        private void queueDelete(String entryId) {
-            if (entryId == null || entryId.isBlank()) {
-                return;
-            }
-            pendingDeletes.putIfAbsent(entryId, Long.MIN_VALUE);
+        ReleaseResult releaseEntries(List<? extends RecoveryStore.PendingSnapshot> entries) {
+            var result = coordinator.releaseEntries(entries.stream().map(RecoveryStore.PendingSnapshot::id).toList());
+            var failedIds = result.failures().stream().map(RecoveryCoordinator.EntryFailure::entryId).toList();
+            return new ReleaseResult(entries.stream().filter(entry -> failedIds.contains(entry.id()))
+                .map(RecoveryStore.PendingSnapshot.class::cast).toList(), details(result));
         }
 
-        private String retryPendingDeletes(long nowNanos, boolean force) {
-            String warning = null;
-            var iterator = pendingDeletes.entrySet().iterator();
-            while (iterator.hasNext()) {
-                Map.Entry<String, Long> pending = iterator.next();
-                if (!force && !delayElapsed(nowNanos, pending.getValue(), RECOVERY_AUTOSAVE_DEBOUNCE_NANOS)) {
-                    continue;
-                }
-                pending.setValue(nowNanos);
-                if (!force) {
-                    submit(new RecoveryIoOperation(new RuntimeRecoveryState(pending.getKey()), -1, nowNanos, null));
-                    String completed = collectCompletion(nowNanos, false);
-                    // collectCompletion may remove the current map entry.
-                    return completed;
-                }
-                try {
-                    store.delete(pending.getKey());
-                    iterator.remove();
-                } catch (IOException e) {
-                    warning = firstNonNull(
-                        warning,
-                        failureWarning("Recovery cleanup failed", e, nowNanos, force)
-                    );
-                }
-            }
-            return warning;
-        }
-
-        private boolean ownsInFlight(RuntimeRecoveryState state) {
-            return inFlight != null && inFlight.state == state;
-        }
-
-        private void submit(RecoveryIoOperation operation) {
-            if (inFlight != null) throw new IllegalStateException("Recovery operation already pending");
-            inFlight = operation;
-            try {
-                ioExecutor.execute(operation);
-            } catch (RuntimeException | Error rejected) {
-                operation.failure = rejected;
-                operation.done.countDown();
-            }
-        }
-
-        private String collectCompletion(long nowNanos, boolean force) {
-            RecoveryIoOperation operation = inFlight;
-            if (operation == null || operation.done.getCount() != 0) return null;
-            inFlight = null;
-            if (operation.failure != null) {
-                return failureWarning(operation.snapshot == null ? "Recovery cleanup failed" : "Recovery autosave failed",
-                    ioFailure(operation.failure), nowNanos, force);
-            }
-            if (operation.snapshot == null) {
-                pendingDeletes.remove(operation.state.entryId());
-                operation.state.clearSnapshotState();
-            } else {
-                operation.state.markSaved(operation.revision, operation.attemptedAtNanos);
-            }
-            return null;
-        }
-
-        private void awaitInFlight() {
-            if (inFlight == null) return;
-            boolean interrupted = false;
-            while (true) {
-                try {
-                    inFlight.done.await();
-                    break;
-                } catch (InterruptedException interruption) {
-                    interrupted = true;
-                }
-            }
-            if (interrupted) Thread.currentThread().interrupt();
-        }
-
-        private static IOException ioFailure(Throwable error) {
-            return error instanceof IOException io ? io : new IOException(
-                error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage(), error);
-        }
-
-        private final class RecoveryIoOperation implements Runnable {
-            private final RuntimeRecoveryState state;
-            private final long revision;
-            private final long attemptedAtNanos;
-            private final RecoverySnapshot.Prepared snapshot;
-            private final CountDownLatch done = new CountDownLatch(1);
-            private Throwable failure;
-
-            private RecoveryIoOperation(RuntimeRecoveryState state, long revision, long attemptedAtNanos,
-                RecoverySnapshot.Prepared snapshot) {
-                this.state = state;
-                this.revision = revision;
-                this.attemptedAtNanos = attemptedAtNanos;
-                this.snapshot = snapshot;
-            }
-
-            @Override public void run() {
-                try {
-                    if (snapshot == null) store.delete(state.entryId());
-                    else store.save(state.entryId(), snapshot.materialize());
-                } catch (IOException | RuntimeException | Error error) {
-                    failure = error;
-                } finally {
-                    done.countDown();
-                }
-            }
-        }
-
-        private String failureWarning(String prefix, IOException error, long nowNanos, boolean force) {
-            if (force) {
-                return prefix + ": " + messageOf(error);
-            }
-            if (!delayElapsed(
-                nowNanos,
-                lastErrorNotifyAtNanos,
-                RECOVERY_ERROR_NOTIFY_COOLDOWN_NANOS
-            )) {
-                return null;
-            }
-            lastErrorNotifyAtNanos = nowNanos;
-            return prefix + ": " + messageOf(error);
-        }
-
-        private static boolean delayElapsed(long nowNanos, long previousNanos, long delayNanos) {
-            return previousNanos == Long.MIN_VALUE || nowNanos - previousNanos >= delayNanos;
-        }
-
-        private static String firstNonNull(String current, String candidate) {
-            return current != null ? current : candidate;
-        }
-
-        private static String messageOf(IOException error) {
-            return error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
+        private static List<String> details(RecoveryCoordinator.BatchResult result) {
+            return result.failures().stream().map(item -> item.entryId() + ": "
+                + (item.error().getMessage() == null ? item.error().getClass().getSimpleName() : item.error().getMessage())).toList();
         }
 
         record ReleaseResult(List<RecoveryStore.PendingSnapshot> failedEntries, List<String> failureDetails) {
-            ReleaseResult {
-                failedEntries = List.copyOf(failedEntries);
-                failureDetails = List.copyOf(failureDetails);
-            }
-
-            boolean successful() {
-                return failedEntries.isEmpty();
-            }
-
+            ReleaseResult { failedEntries = List.copyOf(failedEntries); failureDetails = List.copyOf(failureDetails); }
+            boolean successful() { return failedEntries.isEmpty(); }
             String failureMessage() {
-                if (successful()) {
-                    return "";
-                }
-                return "Failed to postpone " + failedEntries.size()
-                    + " recovery snapshot(s); their data was kept for retry or restore: "
-                    + String.join("; ", failureDetails);
+                return successful() ? "" : "Failed to postpone " + failedEntries.size()
+                    + " recovery snapshot(s); their data was kept for retry or restore: " + String.join("; ", failureDetails);
             }
         }
 
-        record DeletionResult(
-            int deletedCount,
-            List<RecoveryStore.PendingSnapshot> failedEntries,
-            List<String> failureDetails
-        ) {
-            DeletionResult {
-                failedEntries = List.copyOf(failedEntries);
-                failureDetails = List.copyOf(failureDetails);
-            }
-
-            boolean successful() {
-                return failedEntries.isEmpty();
-            }
-
+        record DeletionResult(int deletedCount, List<RecoveryStore.PendingSnapshot> failedEntries, List<String> failureDetails) {
+            DeletionResult { failedEntries = List.copyOf(failedEntries); failureDetails = List.copyOf(failureDetails); }
+            boolean successful() { return failedEntries.isEmpty(); }
             String failureMessage() {
-                if (successful()) {
-                    return "";
-                }
-                return "Failed to discard " + failedEntries.size()
-                    + " recovery snapshot(s); they were kept for retry or restore: "
-                    + String.join("; ", failureDetails);
+                return successful() ? "" : "Failed to discard " + failedEntries.size()
+                    + " recovery snapshot(s); they were kept for retry or restore: " + String.join("; ", failureDetails);
             }
-        }
-    }
-
-    private static final class RuntimeRecoveryState {
-        private final String entryId;
-        private long lastRevision = Long.MIN_VALUE;
-        private long lastSaveAttemptAtNanos = Long.MIN_VALUE;
-        private long lastCleanupAttemptAtNanos = Long.MIN_VALUE;
-        private boolean hasSnapshot;
-
-        private RuntimeRecoveryState(String entryId) {
-            this.entryId = entryId;
-        }
-
-        private String entryId() {
-            return entryId;
-        }
-
-        private long lastRevision() {
-            return lastRevision;
-        }
-
-        private boolean hasSnapshot() {
-            return hasSnapshot;
-        }
-
-        private void markSaved(long revision, long nowNanos) {
-            lastRevision = revision;
-            lastSaveAttemptAtNanos = nowNanos;
-            lastCleanupAttemptAtNanos = Long.MIN_VALUE;
-            hasSnapshot = true;
-        }
-
-        private boolean saveDue(long nowNanos) {
-            return RecoveryAutosaveManager.delayElapsed(
-                nowNanos,
-                lastSaveAttemptAtNanos,
-                RECOVERY_AUTOSAVE_DEBOUNCE_NANOS
-            );
-        }
-
-        private void markSaveAttempt(long nowNanos) {
-            lastSaveAttemptAtNanos = nowNanos;
-        }
-
-        private boolean cleanupDue(long nowNanos) {
-            return RecoveryAutosaveManager.delayElapsed(
-                nowNanos,
-                lastCleanupAttemptAtNanos,
-                RECOVERY_AUTOSAVE_DEBOUNCE_NANOS
-            );
-        }
-
-        private void markCleanupAttempt(long nowNanos) {
-            lastCleanupAttemptAtNanos = nowNanos;
-        }
-
-        private void clearSnapshotState() {
-            hasSnapshot = false;
-            lastSaveAttemptAtNanos = Long.MIN_VALUE;
-            lastCleanupAttemptAtNanos = Long.MIN_VALUE;
         }
     }
 

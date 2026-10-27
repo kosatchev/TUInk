@@ -92,7 +92,7 @@ class RecoveryMigrationIntegrationTest {
             assertEquals(new Position(0, 3), restored.state().getCursor());
             assertSame(restored, fixture.active().tabSession());
 
-            assertNull(fixture.recoveryManager.finishSession(List.of(fixture.active().tabSession()), false));
+            assertNull(fixture.recoveryManager.finishSession(List.of(fixture.active().documentSession()), false));
             assertEquals(Set.of(ENTRY_ID), fixture.recoverySnapshots.keySet(), "the adopted entry must keep its stable session identity");
             RecoverySnapshot captured = fixture.recoverySnapshots.get(ENTRY_ID);
             assertEquals(metadata, captured.fileMetadata());

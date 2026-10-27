@@ -120,7 +120,7 @@ class RecoveryPromptIntegrationTest {
             window.event(KeyStroke.of(KeyStroke.Key.ARROW_RIGHT));
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             assertFalse(window.controller.running());
-            assertNull(window.recoveryManager.finishSession(window.host.toTabSessions(window.tabs), true));
+            assertNull(window.recoveryManager.finishSession(window.host.toDocumentSessions(window.tabs), true));
             assertEquals("other document", Files.readString(window.document));
             assertAvailableToAnotherOpenStore(recoveryDirectory, List.of(ENTRY_ID));
         }

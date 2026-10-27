@@ -81,7 +81,7 @@ class TinyMenuIntegrationTest {
             var session = window.active().tabSession();
             List<String> draft = List.of("draft😀 unchanged");
             long revision = session.model().revision();
-            assertNull(window.recoveryManager.finishSession(List.of(session), false));
+            assertNull(window.recoveryManager.finishSession(List.of(window.active().documentSession()), false));
             var recovery = Map.copyOf(window.recoverySnapshots);
             assertEquals(1, recovery.size());
             assertEquals(draft, recovery.values().iterator().next().lines());

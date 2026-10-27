@@ -44,7 +44,7 @@ class SafeConfirmationIntegrationTest {
             assertEquals("draft original", Files.readString(window.document));
             assertFalse(edited.state().isDirty());
             assertEquals(closeTab, window.controller.running());
-            assertNull(window.recoveryManager.finishSession(window.host.toTabSessions(window.tabs), !closeTab));
+            assertNull(window.recoveryManager.finishSession(window.host.toDocumentSessions(window.tabs), !closeTab));
             assertTrue(store.loadAll().entries().isEmpty());
         }
     }
@@ -69,7 +69,7 @@ class SafeConfirmationIntegrationTest {
             assertEquals("original", Files.readString(window.document));
             String row = prompt(window);
             assertFalse(row.contains("Unsaved") || row.contains("Close ") || row.contains("Enlarge"), row);
-            assertNull(window.recoveryManager.finishSession(window.host.toTabSessions(window.tabs), false));
+            assertNull(window.recoveryManager.finishSession(window.host.toDocumentSessions(window.tabs), false));
         }
         try (RecoveryStore next = RecoveryStoreFixtures.open(recoveryDirectory)) {
             List<RecoveryStore.Entry> entries = next.loadAll().entries();
@@ -100,7 +100,7 @@ class SafeConfirmationIntegrationTest {
 
             assertEquals(closeTab, window.controller.running());
             assertEquals("original", Files.readString(window.document));
-            assertNull(window.recoveryManager.finishSession(window.host.toTabSessions(window.tabs), !closeTab));
+            assertNull(window.recoveryManager.finishSession(window.host.toDocumentSessions(window.tabs), !closeTab));
             assertTrue(store.loadAll().entries().isEmpty());
         }
         try (RecoveryStore next = RecoveryStoreFixtures.open(recoveryDirectory)) {

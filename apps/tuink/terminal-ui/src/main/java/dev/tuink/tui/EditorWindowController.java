@@ -283,7 +283,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         if (host.modalAttention.synchronize(TerminalEditorApp.modalInputOwner(modalState, openFileMode), System.nanoTime())) {
             eventLoop.invalidate();
         }
-        List<TabSession> recoveryTabSessions = host.toTabSessions(tabs);
+        List<TuiDocumentSession> recoveryTabSessions = host.toDocumentSessions(tabs);
         recoveryAutosave.syncTabs(recoveryTabSessions);
         String recoveryWarning = modalState.isRecoveryConfirm() ? null
             : recoveryAutosave.autosaveDirtyTabs(recoveryTabSessions, System.nanoTime());

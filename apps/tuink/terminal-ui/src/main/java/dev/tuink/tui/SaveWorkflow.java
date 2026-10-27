@@ -2,7 +2,7 @@ package dev.tuink.tui;
 
 import dev.tuink.storage.jvm.JvmDocumentStorage;
 import dev.tuink.editor.storage.SaveDisposition;
-import dev.tuink.core.DocumentEncodingException;
+import dev.tuink.editor.storage.DocumentEncodingException;
 import dev.tuink.core.TabSession;
 import dev.tuink.editor.session.document.EditorDocumentSession;
 import dev.tuink.editor.storage.SavedDocument;

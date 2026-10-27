@@ -7,6 +7,7 @@ import dev.tuink.editor.backend.DocumentBackend;
 import dev.tuink.editor.document.DocumentId;
 import dev.tuink.editor.document.DocumentSnapshot;
 import dev.tuink.editor.recovery.RecoveryDocument;
+import dev.tuink.editor.recovery.RecoveryCheckpoint;
 import dev.tuink.editor.document.TextEdit;
 import dev.tuink.editor.document.TextPosition;
 import dev.tuink.editor.document.ViewId;
@@ -185,6 +186,13 @@ public final class CoreDocumentBackend implements DocumentBackend {
     public void openPrepared(DocumentLoad loaded) {
         requireOwnerThread();
         defaultView.engine().openPrepared(loaded);
+    }
+
+    @Override
+    public RecoveryCheckpoint prepareRecovery(ViewId viewId) {
+        TabSession view = requireView(viewId);
+        RecoverySnapshot.Prepared prepared = RecoverySnapshot.prepare(document.model(), view.state());
+        return prepared::materialize;
     }
 
     @Override

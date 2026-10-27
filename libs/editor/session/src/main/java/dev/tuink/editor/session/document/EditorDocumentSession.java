@@ -8,6 +8,7 @@ import dev.tuink.editor.command.DocumentCommandTarget;
 import dev.tuink.editor.backend.DocumentBackend;
 import dev.tuink.editor.document.DocumentId;
 import dev.tuink.editor.recovery.RecoveryDocument;
+import dev.tuink.editor.recovery.RecoveryCheckpoint;
 import dev.tuink.editor.document.ViewId;
 import dev.tuink.editor.document.ViewSnapshot;
 import dev.tuink.editor.document.DocumentSnapshot;
@@ -133,6 +134,12 @@ public final class EditorDocumentSession {
     public void restoreRecovery(ViewId viewId, RecoveryDocument checkpoint) {
         requireOwnerThread();
         backend.restoreRecovery(Objects.requireNonNull(viewId, "viewId"), Objects.requireNonNull(checkpoint, "checkpoint"));
+    }
+
+    /** Captures immutable draft inputs even while a save is awaiting its outcome. */
+    public RecoveryCheckpoint prepareRecovery(ViewId viewId) {
+        requireOwnerThread();
+        return backend.prepareRecovery(Objects.requireNonNull(viewId, "viewId"));
     }
 
     /** Captures immutable current-save inputs without calling a storage provider. */

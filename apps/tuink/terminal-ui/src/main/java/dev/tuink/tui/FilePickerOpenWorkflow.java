@@ -1,7 +1,7 @@
 package dev.tuink.tui;
 
 import dev.tuink.core.TabSession;
-import dev.tuink.core.AmbiguousDocumentEncodingException;
+import dev.tuink.editor.storage.AmbiguousDocumentEncodingException;
 import dev.tuink.editor.storage.DocumentOpenMode;
 import dev.tuink.editor.storage.DocumentLoad;
 import dev.tuink.storage.jvm.FileBaseline;

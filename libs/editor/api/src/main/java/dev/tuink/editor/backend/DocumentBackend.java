@@ -6,6 +6,7 @@ import dev.tuink.editor.document.ViewSnapshot;
 import dev.tuink.editor.document.DocumentSnapshot;
 import dev.tuink.editor.document.WorkspaceEdit;
 import dev.tuink.editor.recovery.RecoveryDocument;
+import dev.tuink.editor.recovery.RecoveryCheckpoint;
 import dev.tuink.editor.command.DocumentCommand;
 import dev.tuink.editor.command.DocumentCommandResult;
 import dev.tuink.editor.command.DocumentCommandTarget;
@@ -44,6 +45,7 @@ public interface DocumentBackend {
     <T> T redo(Function<Boolean, T> prepareResult);
 
     void openPrepared(DocumentLoad loaded);
+    RecoveryCheckpoint prepareRecovery(ViewId viewId);
     void restoreRecovery(ViewId viewId, RecoveryDocument checkpoint);
     PreparedSave prepareSave() throws IOException;
     SavePreparation prepareSaveAsInput(DocumentResource resource, SaveDisposition disposition, boolean utf8)

@@ -1,4 +1,4 @@
-package dev.tuink.core;
+package dev.tuink.editor.storage;
 
 import java.io.IOException;
 
@@ -7,6 +7,6 @@ public final class AmbiguousDocumentEncodingException extends IOException {
     private static final long serialVersionUID = 1L;
 
     public AmbiguousDocumentEncodingException() {
-        super("Ambiguous UTF-16LE / UTF-32LE encoding. Use --open-as-utf16le for UTF-16LE, or convert UTF-32 to UTF-8.");
+        super("Ambiguous UTF-16LE / UTF-32LE encoding. Choose UTF-16LE explicitly, or convert UTF-32 to UTF-8.");
     }
 }

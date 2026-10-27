@@ -279,13 +279,18 @@ public class TerminalEditorApp {
                 var resource = JvmDocumentStorage.resource(file);
                 var mode = cli.openAsUtf16Le() ? dev.tuink.editor.storage.DocumentOpenMode.UTF_16LE
                     : dev.tuink.editor.storage.DocumentOpenMode.DETECT;
-                tabs.get(activeTabIndex).documentSession().openPrepared(
-                    resource.storage().load(resource, mode, !cli.openAsUtf16Le()));
+                var open = new dev.tuink.editor.session.document.PreparedDocumentOpen(
+                    resource, mode, !cli.openAsUtf16Le());
+                tabs.get(activeTabIndex).documentSession().openPrepared(open.accept(open.read()));
                 renderPlanBuilder = tabs.get(activeTabIndex).documentSession()
                     .newRenderPlanBuilder(resolveHighlighter(file));
                 sessionContext.replaceActiveRenderPlanBuilder(renderPlanBuilder);
             } catch (IOException e) {
-                notification.error("Open failed: " + e.getMessage());
+                String reason = e.getMessage();
+                if (e instanceof dev.tuink.editor.storage.AmbiguousDocumentEncodingException) {
+                    reason += " Use --open-as-utf16le to select UTF-16LE.";
+                }
+                notification.error("Open failed: " + reason);
             }
         }
 

@@ -1,5 +1,9 @@
 package dev.tuink.core;
 
+import dev.tuink.editor.storage.AmbiguousDocumentEncodingException;
+
+import dev.tuink.editor.storage.DocumentEncodingException;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 import dev.tuink.editor.storage.DocumentOpenMode;

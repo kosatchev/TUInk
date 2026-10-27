@@ -1,7 +1,7 @@
 package dev.tuink.tui;
 
 import dev.tuink.storage.jvm.JvmDocumentStorage;
-import dev.tuink.core.DocumentEncodingException;
+import dev.tuink.editor.storage.DocumentEncodingException;
 import dev.tuink.core.EditorState;
 import dev.tuink.tui.flow.SaveTargetSuggester;
 import dev.tuink.tui.flow.SavePathInput;

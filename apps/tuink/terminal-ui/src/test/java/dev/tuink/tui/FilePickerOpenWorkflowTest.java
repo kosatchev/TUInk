@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-import dev.tuink.core.AmbiguousDocumentEncodingException;
+import dev.tuink.editor.storage.AmbiguousDocumentEncodingException;
 import dev.tuink.editor.storage.DocumentOpenMode;
 import dev.tuink.core.EditorClipboard;
 import dev.tuink.core.Position;

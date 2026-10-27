@@ -1,4 +1,4 @@
-package dev.tuink.core;
+package dev.tuink.editor.storage;
 
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
@@ -12,7 +12,7 @@ public final class DocumentEncodingException extends CharacterCodingException {
     private final String charsetName;
     private final int codePoint;
 
-    DocumentEncodingException(Charset charset, int codePoint, CharacterCodingException cause) {
+    public DocumentEncodingException(Charset charset, int codePoint, CharacterCodingException cause) {
         charsetName = Objects.requireNonNull(charset, "charset").name();
         if (!Character.isValidCodePoint(codePoint)) {
             throw new IllegalArgumentException("codePoint must be a valid Unicode code point");

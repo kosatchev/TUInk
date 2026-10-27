@@ -1,5 +1,9 @@
 package dev.tuink.core;
 
+import dev.tuink.editor.storage.AmbiguousDocumentEncodingException;
+
+import dev.tuink.editor.storage.DocumentEncodingException;
+
 import dev.tuink.editor.storage.BomKind;
 import dev.tuink.editor.storage.DocumentFileMetadata;
 import dev.tuink.editor.storage.DocumentOpenMode;

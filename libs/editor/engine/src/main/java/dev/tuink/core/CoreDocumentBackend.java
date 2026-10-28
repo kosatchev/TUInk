@@ -32,7 +32,7 @@ import java.util.function.Function;
 public final class CoreDocumentBackend implements DocumentBackend {
     private final DocumentId documentId;
     private final EditorDocument document;
-    private final TabSession defaultView;
+    private TabSession defaultView;
     private final ViewId defaultViewId;
     private final Thread ownerThread;
     private final Map<ViewId, TabSession> views = new HashMap<>();
@@ -72,9 +72,15 @@ public final class CoreDocumentBackend implements DocumentBackend {
             throw new IllegalArgumentException("A registered view must belong to this document");
         }
         ViewId id = new ViewId(view.state().viewId());
+        if (view.state().detachedView()) throw new IllegalArgumentException("A retired view cannot be registered again");
         TabSession previous = views.putIfAbsent(id, view);
         if (previous != null && previous != view) {
             throw new IllegalArgumentException("View identity is already registered");
+        }
+        if (previous == null && views.size() == 1 && defaultView != view) {
+            // A logical document engine can bridge an interval without views.
+            document.detach(defaultView.state());
+            defaultView = view;
         }
         return id;
     }
@@ -87,6 +93,27 @@ public final class CoreDocumentBackend implements DocumentBackend {
     public boolean ownsView(ViewId viewId) {
         requireOwnerThread();
         return views.containsKey(Objects.requireNonNull(viewId, "viewId"));
+    }
+
+    @Override
+    public ViewId attachView() {
+        requireOwnerThread();
+        return registerView(document.attach(LogicalEditorTextLayout::new, new EditorClipboard()));
+    }
+
+    @Override
+    public void detachView(ViewId viewId) {
+        TabSession removed = requireView(viewId);
+        TabSession replacement = defaultView;
+        if (removed == defaultView) {
+            replacement = views.values().stream().filter(view -> view != removed).findFirst().orElse(null);
+            if (replacement == null) {
+                replacement = document.attach(LogicalEditorTextLayout::new, new EditorClipboard());
+            }
+        }
+        document.detach(removed.state());
+        views.remove(viewId);
+        defaultView = replacement;
     }
 
     @Override
@@ -214,14 +241,16 @@ public final class CoreDocumentBackend implements DocumentBackend {
     @Override
     public PreparedSave prepareSave() throws IOException {
         requireOwnerThread();
-        return new Save(defaultView.engine().prepareSave());
+        EditorEngine engine = defaultView.engine();
+        return new Save(engine, engine.prepareSave());
     }
 
     @Override
     public SavePreparation prepareSaveAsInput(DocumentResource resource, SaveDisposition disposition, boolean utf8)
         throws IOException {
         requireOwnerThread();
-        return new Preparation(defaultView.engine().prepareSaveAsInput(resource, disposition, utf8));
+        EditorEngine engine = defaultView.engine();
+        return new Preparation(engine, engine.prepareSaveAsInput(resource, disposition, utf8));
     }
 
     @Override
@@ -230,7 +259,7 @@ public final class CoreDocumentBackend implements DocumentBackend {
         if (!(inspection instanceof Inspection captured) || captured.owner != this) {
             throw new IllegalArgumentException("Save inspection belongs to another document backend");
         }
-        return new Save(defaultView.engine().approveSaveAs(captured.inspection));
+        return new Save(captured.engine, captured.engine.approveSaveAs(captured.inspection));
     }
 
     @Override
@@ -239,7 +268,7 @@ public final class CoreDocumentBackend implements DocumentBackend {
         if (!(prepared instanceof Save captured) || captured.owner != this) {
             throw new IllegalArgumentException("Prepared save belongs to another document backend");
         }
-        defaultView.engine().completeSaved(captured.prepared, saved);
+        captured.engine.completeSaved(captured.prepared, saved);
     }
 
     private TabSession requireView(ViewId viewId) {
@@ -266,24 +295,36 @@ public final class CoreDocumentBackend implements DocumentBackend {
 
     private final class Save implements PreparedSave {
         private final CoreDocumentBackend owner = CoreDocumentBackend.this;
+        private final EditorEngine engine;
         private final EditorEngine.PreparedSave prepared;
-        private Save(EditorEngine.PreparedSave prepared) { this.prepared = prepared; }
+        private Save(EditorEngine engine, EditorEngine.PreparedSave prepared) {
+            this.engine = engine;
+            this.prepared = prepared;
+        }
         @Override public SavedDocument write() throws IOException { return prepared.write(); }
     }
 
     private final class Preparation implements SavePreparation {
+        private final EditorEngine engine;
         private final EditorEngine.SavePreparation preparation;
-        private Preparation(EditorEngine.SavePreparation preparation) { this.preparation = preparation; }
+        private Preparation(EditorEngine engine, EditorEngine.SavePreparation preparation) {
+            this.engine = engine;
+            this.preparation = preparation;
+        }
         @Override public SaveTargetInspection inspectTarget() throws IOException {
-            return new Inspection(preparation.inspectTarget());
+            return new Inspection(engine, preparation.inspectTarget());
         }
         @Override public SaveDisposition disposition() { return preparation.disposition(); }
     }
 
     private final class Inspection implements SaveTargetInspection {
         private final CoreDocumentBackend owner = CoreDocumentBackend.this;
+        private final EditorEngine engine;
         private final EditorEngine.SaveTargetInspection inspection;
-        private Inspection(EditorEngine.SaveTargetInspection inspection) { this.inspection = inspection; }
+        private Inspection(EditorEngine engine, EditorEngine.SaveTargetInspection inspection) {
+            this.engine = engine;
+            this.inspection = inspection;
+        }
         @Override public DocumentResource requestedResource() { return inspection.requestedResource(); }
         @Override public DocumentResource physicalResource() { return inspection.physicalResource(); }
         @Override public boolean exists() { return inspection.exists(); }

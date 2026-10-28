@@ -6,6 +6,7 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class EditorViewState {
     private static final AtomicLong NEXT_ID = new AtomicLong();
     final long id = NEXT_ID.incrementAndGet();
+    boolean detached;
     Position cursor = new Position(0, 0);
     Position selectionAnchor;
     int topLine;

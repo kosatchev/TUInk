@@ -30,6 +30,10 @@ public interface DocumentBackend {
     boolean isOwnerThread();
     ViewId defaultViewId();
     boolean ownsView(ViewId viewId);
+    /** Attaches a new logical editing position to the existing document/history. */
+    ViewId attachView();
+    /** Retires this identity permanently; document operations outlive individual views. */
+    void detachView(ViewId viewId);
     long revision();
     /** Advances for document publications, including history/format changes without text edits. */
     long stateRevision();

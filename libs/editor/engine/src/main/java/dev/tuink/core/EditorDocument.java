@@ -73,6 +73,13 @@ public final class EditorDocument {
         return first;
     }
 
+    /** A retired view no longer participates in document position updates. */
+    void detach(EditorState viewState) {
+        requireOwnerThread();
+        views.removeIf(reference -> reference.get() == null || reference.get() == viewState);
+        viewState.detachView();
+    }
+
     void reflectFileMetadata() {
         state.fileEncoding = model.fileMetadata().charset();
         state.lineSeparator = model.fileMetadata().defaultLineSeparator();

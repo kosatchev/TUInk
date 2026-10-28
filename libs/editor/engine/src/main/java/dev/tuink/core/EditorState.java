@@ -33,6 +33,9 @@ public class EditorState {
         return view.id;
     }
 
+    boolean detachedView() { return view.detached; }
+    void detachView() { view.detached = true; }
+
     public EditorViewMemento viewMemento() {
         return new EditorViewMemento(view.id, view.cursor, viewport(), view.selectionAnchor);
     }

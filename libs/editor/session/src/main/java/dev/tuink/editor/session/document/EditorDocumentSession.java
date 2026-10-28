@@ -39,6 +39,7 @@ public final class EditorDocumentSession {
     private final Thread ownerThread;
     private final DocumentIoCoordinator io;
     private volatile DocumentSnapshot publishedSnapshot;
+    private EditorWorkspace<?> workspace;
 
     private EditorDocumentSession(DocumentBackend backend) {
         this.backend = Objects.requireNonNull(backend, "backend");
@@ -64,6 +65,64 @@ public final class EditorDocumentSession {
     }
 
     public ViewId defaultViewId() { return defaultViewId; }
+
+    /** True only for a currently attached view; retired IDs never become valid again. */
+    public boolean ownsView(ViewId viewId) {
+        requireOwnerThread();
+        return backend.ownsView(Objects.requireNonNull(viewId, "viewId"));
+    }
+
+    /** Creates an independent logical position over the same text and undo history. */
+    public ViewId attachView() {
+        requireOwnerThread();
+        return backend.attachView();
+    }
+
+    /**
+     * Retires a view without discarding the document, recovery or in-flight save.
+     * Views admitted to a workspace must be removed through that owner; a
+     * prepared view whose admission was abandoned can still be retired here.
+     */
+    public void detachView(ViewId viewId) {
+        requireOwnerThread();
+        Objects.requireNonNull(viewId, "viewId");
+        if (workspace != null) {
+            var admitted = workspace.find(viewId);
+            if (admitted != null && admitted.document() == this) {
+                throw new IllegalStateException("Workspace owns document view lifetime");
+            }
+        }
+        backend.detachView(viewId);
+    }
+
+    /** Internal owner handshake used after workspace removal has been prepared. */
+    void detachWorkspaceView(EditorWorkspace<?> owner, ViewId viewId) {
+        requireOwnerThread();
+        if (workspace != Objects.requireNonNull(owner, "owner")) throw new IllegalArgumentException("Wrong workspace owner");
+        backend.detachView(Objects.requireNonNull(viewId, "viewId"));
+    }
+
+    /** The current workspace owner, or null while the document has no workspace attachments. */
+    public EditorWorkspace<?> workspace() {
+        requireOwnerThread();
+        return workspace;
+    }
+
+    /** Internal ownership handshake; a document cannot belong to two workspace owners. */
+    void claimWorkspace(EditorWorkspace<?> owner) {
+        requireOwnerThread();
+        Objects.requireNonNull(owner, "owner");
+        if (!owner.isOwnerThread()) throw new IllegalStateException("Workspace belongs to another owner thread");
+        if (workspace != null && workspace != owner) throw new IllegalStateException("Document already belongs to another workspace");
+        workspace = owner;
+    }
+
+    /** Releases the document after the last workspace attachment has been retired. */
+    void releaseWorkspace(EditorWorkspace<?> owner) {
+        requireOwnerThread();
+        if (workspace != Objects.requireNonNull(owner, "owner")) throw new IllegalArgumentException("Wrong workspace owner");
+        workspace = null;
+    }
 
     /** The retained owner coordinator; detaching a frontend does not replace it. */
     public DocumentIoCoordinator io() { return io; }
@@ -368,7 +427,7 @@ public final class EditorDocumentSession {
         return backend.snapshot();
     }
 
-    private boolean isOwnerThread() {
+    public boolean isOwnerThread() {
         return Thread.currentThread() == ownerThread;
     }
 

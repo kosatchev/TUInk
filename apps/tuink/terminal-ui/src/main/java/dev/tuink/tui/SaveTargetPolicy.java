@@ -1,13 +1,13 @@
 package dev.tuink.tui;
 
 import dev.tuink.storage.jvm.JvmDocumentStorage;
+import dev.tuink.storage.jvm.JvmFileAdvisory;
 import dev.tuink.editor.storage.DocumentEncodingException;
 import dev.tuink.core.EditorState;
 import dev.tuink.tui.flow.SaveTargetSuggester;
 import dev.tuink.tui.flow.SavePathInput;
 import dev.tuink.tui.ui.PathPresentation;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Locale;
 import java.util.function.Predicate;
@@ -57,48 +57,20 @@ final class SaveTargetPolicy {
     }
 
     static String validateSaveTarget(Path path) {
-        Path absolute = path.toAbsolutePath();
-        Path leaf = absolute.getFileName();
-        if (leaf == null || leaf.toString().equals(".") || leaf.toString().equals("..")) {
-            return "Save failed: target is a directory: " + absolute;
-        }
-        Path target;
-        try {
-            target = Files.isSymbolicLink(absolute) ? absolute.toRealPath()
-                : absolute.getParent().toRealPath().resolve(leaf);
-        } catch (IOException error) {
-            return "Save failed: cannot resolve target path: " + absolute + ": " + error.getMessage();
-        }
-        Path parent = target.getParent();
-        if (parent != null) {
-            if (!Files.exists(parent)) {
-                return "Save failed: directory does not exist: " + parent;
-            }
-            if (!Files.isDirectory(parent)) {
-                return "Save failed: parent path is not a directory: " + parent;
-            }
-            if (!Files.isWritable(parent)) {
-                return "Save failed: no write access to directory: " + parent;
-            }
-        }
-        if (Files.isDirectory(target)) {
-            return "Save failed: target is a directory: " + target;
-        }
-        if (Files.exists(target) && !Files.isRegularFile(target)) {
-            return "Save failed: target is not a regular file: " + target;
-        }
-        return null;
+        JvmFileAdvisory.SaveIssue issue = JvmFileAdvisory.inspectSaveTarget(path);
+        if (issue == null) return null;
+        return "Save failed: " + switch (issue.kind()) {
+            case TARGET_DIRECTORY -> "target is a directory: " + issue.path();
+            case UNRESOLVED_PATH -> "cannot resolve target path: " + issue.path() + ": " + issue.detail();
+            case MISSING_DIRECTORY -> "directory does not exist: " + issue.path();
+            case PARENT_NOT_DIRECTORY -> "parent path is not a directory: " + issue.path();
+            case DIRECTORY_NOT_WRITABLE -> "no write access to directory: " + issue.path();
+            case TARGET_NOT_REGULAR -> "target is not a regular file: " + issue.path();
+        };
     }
 
     static boolean isReadOnlyFile(Path path) {
-        if (path == null) {
-            return false;
-        }
-        try {
-            return Files.exists(path) && !Files.isWritable(path);
-        } catch (SecurityException e) {
-            return true;
-        }
+        return JvmFileAdvisory.isReadOnlyFile(path);
     }
 
     static String suggestWritableName(Path path, Predicate<Path> occupied) {

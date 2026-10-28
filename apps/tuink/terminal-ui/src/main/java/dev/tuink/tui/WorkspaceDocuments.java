@@ -1,10 +1,8 @@
 package dev.tuink.tui;
 
 import dev.tuink.storage.jvm.JvmDocumentStorage;
+import dev.tuink.storage.jvm.JvmFileAdvisory;
 import dev.tuink.core.TabSession;
-import dev.tuink.storage.jvm.FileBaseline;
-import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
@@ -34,29 +32,6 @@ final class WorkspaceDocuments {
     }
 
     private static boolean matches(TabSession tab, Path requested) {
-        Path current = JvmDocumentStorage.pathOf(tab.state().getCurrentResource());
-        if (current == null || requested == null) {
-            return false;
-        }
-        Path target = requested.toAbsolutePath();
-        Path namedTarget;
-        try {
-            namedTarget = target.getParent().toRealPath().resolve(target.getFileName());
-        } catch (IOException | SecurityException unavailable) {
-            namedTarget = target;
-        }
-        Path physical = tab.model().fileBaseline() == null ? current : ((FileBaseline) tab.model().fileBaseline()).target();
-        if (namedTarget.equals(current)
-            && (tab.model().fileBaseline() == null
-                || physical.equals(current) && !Files.isSymbolicLink(current))) {
-            return true;
-        }
-        // The spelling used to open a symlink can now point at another file.
-        // Alias lookup follows the physical target actually loaded by this document.
-        try {
-            return physical.equals(physical.toRealPath()) && Files.isSameFile(target, physical);
-        } catch (IOException | SecurityException unavailable) {
-            return false;
-        }
+        return JvmFileAdvisory.matchesOpenResource(tab.engine().resourceBinding(), requested);
     }
 }

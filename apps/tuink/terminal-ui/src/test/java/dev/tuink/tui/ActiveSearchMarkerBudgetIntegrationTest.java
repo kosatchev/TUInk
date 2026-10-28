@@ -24,7 +24,7 @@ class ActiveSearchMarkerBudgetIntegrationTest {
         try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of(original))) {
             var inactive = window.host.newEditorTab();
             inactive.tabSession().model().replaceLines(List.of("a".repeat(4_100_000) + "z"));
-            window.tabs.add(inactive);
+            window.context.addAll(List.of(inactive));
             window.frame();
             window.command(TuinkCommand.SEARCH_OPEN);
             window.focusSearch(SearchFocus.WILDCARD);

@@ -88,8 +88,7 @@ class LexicalStateMemoryIntegrationTest {
                     document.view().engine().openExisting(JvmDocumentStorage.resource(file));
                     int firstLineLength = document.view().model().getLine(0).length();
                     var builder = document.newRenderPlanBuilder(window.host.resolveHighlighter(file));
-                    window.tabs.add(new TerminalEditorApp.EditorTab(document, builder));
-                    window.context.activate(window.tabs.size() - 1);
+                    window.context.addNewTabAndActivate(new TerminalEditorApp.EditorTab(document, builder));
                     window.frame();
                     window.resize(24, 20);
                     window.command(TuinkCommand.CURSOR_DOCUMENT_END);

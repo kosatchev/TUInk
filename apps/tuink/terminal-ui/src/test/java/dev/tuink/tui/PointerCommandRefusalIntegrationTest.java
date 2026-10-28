@@ -41,7 +41,7 @@ class PointerCommandRefusalIntegrationTest {
             RefusingResultEngine engine = new RefusingResultEngine(model, state, layout, window.host.clipboard, refuse);
             engine.openExisting(JvmDocumentStorage.resource(window.document));
             TuiDocumentSession session = TuiDocumentSession.adopt(new TabSession(model, state, layout, engine));
-            window.tabs.set(0, new TerminalEditorApp.EditorTab(session, session.newRenderPlanBuilder(line -> List.of())));
+            window.context.replace(0, new TerminalEditorApp.EditorTab(session, session.newRenderPlanBuilder(line -> List.of())));
             window.context.activate(0);
             window.frame();
             if (kind != PointerEvent.Kind.PRESS) window.pointer(PointerEvent.Kind.PRESS, 3, 8);

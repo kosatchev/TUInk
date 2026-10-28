@@ -3,6 +3,7 @@ package dev.tuink.tui;
 import dev.tuink.storage.jvm.JvmDocumentStorage;
 import dev.tuink.core.EditorEngine;
 import dev.tuink.editor.command.DocumentCommand;
+import dev.tuink.editor.document.ViewId;
 import dev.tuink.core.DocumentEditLimitException;
 import dev.tuink.core.EditorState;
 import dev.tuink.core.LanguageProfiles;
@@ -133,7 +134,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         this.searchReplaceInput = resources.searchReplaceInput();
         this.sessionContext = resources.sessionContext();
         this.startupRecoveryEntries = resources.startupRecoveryEntries();
-        this.tabs = resources.tabs();
+        this.tabs = sessionContext.tabs();
         this.editorView.bindCommands(command -> activeDocument().execute(command));
         this.terminal = resources.terminal();
         this.topMenu = resources.topMenu();
@@ -162,7 +163,6 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         TextField searchReplaceInput,
         TerminalEditorApp.SessionContext sessionContext,
         List<RecoveryStore.PendingSnapshot> startupRecoveryEntries,
-        List<TerminalEditorApp.EditorTab> tabs,
         TerminalAccess terminal,
         TopMenuController topMenu,
         UiSessionState uiSessionState,
@@ -242,6 +242,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
 
     @Override
     public void prepareTurn() {
+        synchronizeModalTarget();
         while (documentIo.collect()) {
             eventLoop.invalidate();
         }
@@ -1575,17 +1576,17 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             }
             Integer closeIndex = tabInput.closeIndex();
             if (closeIndex != null && closeIndex < tabs.size()) {
-                if (tabs.get(closeIndex).documentSession().document().io().busy()) {
+                ViewId closeView = tabs.get(closeIndex).documentSession().viewId();
+                if (!sessionContext.canClose(closeView)) {
                     notification.info("Saving this document; wait before closing its tab");
                     return;
                 }
-                if (tabs.get(closeIndex).state().isDirty()
+                if (tabs.get(closeIndex).state().isDirty() && !sessionContext.hasOtherViews(closeView)
                     && uiSessionState.confirmOnCloseSetting) {
-                    modalState = UiModalState.closeTabConfirm(closeIndex);
+                    modalState = UiModalState.closeTabConfirm(closeIndex)
+                        .bindTo(tabs.get(closeIndex).documentSession().viewId());
                 } else {
-                    sessionContext.activate(
-                        host.closeTab(tabs, activeTabIndex, closeIndex, saveAsSuggestions)
-                    );
+                    host.closeTab(sessionContext, tabs.get(closeIndex).documentSession().viewId(), saveAsSuggestions);
                 }
                 topMenu.close();
                 editorView.cancelMouseSelection();
@@ -1722,7 +1723,6 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 if (routedConfirmDecision == ConfirmChoice.SAVE) {
                     var restored = host.restoreRecoveredTabs(
                         startupRecoveryEntries,
-                        tabs,
                         sessionContext,
                         recoveryAutosave,
                         System.nanoTime()
@@ -1861,7 +1861,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 : "Waiting for the file operation before quitting");
             return;
         }
-        if (action == TuinkCommand.TAB_CLOSE && activeDocument().document().io().busy()) {
+        if (action == TuinkCommand.TAB_CLOSE && !sessionContext.canClose(sessionContext.activeViewId())) {
             notification.info("Saving this document; wait before closing its tab");
             return;
         }
@@ -1905,7 +1905,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             modalState,
             uiSessionState.confirmOnCloseSetting,
             host.hasDirtyTabs(tabs),
-            state.isDirty(),
+            state.isDirty() && !sessionContext.hasOtherViews(sessionContext.activeViewId()),
             activeTabIndex,
             JvmDocumentStorage.pathOf(state.getCurrentResource()),
             (action == TuinkCommand.DOCUMENT_SAVE || action == TuinkCommand.DOCUMENT_SAVE_AS)
@@ -1923,7 +1923,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             uiSessionState.searchMode = false;
         }
         running = editorAction.running();
-        modalState = editorAction.modalState();
+        modalState = editorAction.modalState().bindTo(sessionContext.activeViewId());
         if (editorAction.requestOpenFile()) {
             topMenu.close();
             openFileMode = true;
@@ -1976,12 +1976,12 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             TuiDocumentSession document = result.openedDocument();
             RenderPlanBuilder builder = document.newRenderPlanBuilder(
                 host.resolveHighlighter(JvmDocumentStorage.pathOf(document.view().state().getCurrentResource())));
-            tabs.add(new TerminalEditorApp.EditorTab(document, builder));
+            sessionContext.addAll(List.of(new TerminalEditorApp.EditorTab(document, builder)));
             if (!documentPromptActive) {
-                sessionContext.activate(tabs.size() - 1);
+                sessionContext.activate(document.viewId());
             }
         } else if (result.activateTabIndex() >= 0 && !documentPromptActive) {
-            sessionContext.activate(result.activateTabIndex());
+            if (result.activateViewId() != null) sessionContext.activate(result.activateViewId());
         }
         openFileMode = result.openFileMode();
         if (result.pendingExplicitOpenPath() != null) {
@@ -2009,7 +2009,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     }
 
     private TuiDocumentSession activeDocument() {
-        return tabs.get(sessionContext.activeTabIndex()).documentSession();
+        return sessionContext.active().documentSession();
     }
 
     private SaveWorkflow.Context saveContext() {
@@ -2054,14 +2054,14 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             sessionContext.activate(result.activateTabIndex());
         }
         if (result.closeTabIndex() >= 0) {
-            sessionContext.activate(host.closeTab(tabs, sessionContext.activeTabIndex(), result.closeTabIndex(), saveAsSuggestions));
+            host.closeTab(sessionContext, tabs.get(result.closeTabIndex()).documentSession().viewId(), saveAsSuggestions);
         }
         if (!applyFilenameEffect(result.filename())) {
             return;
         }
         applySaveNotice(result.notice());
         running = result.running();
-        modalState = result.modalState();
+        modalState = result.modalState().bindTo(sessionContext.activeViewId());
         overwriteApproval = result.overwriteApproval();
         if (result.focusFilename()) {
             blockingContentFocused = false;
@@ -2077,17 +2077,35 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     private void refreshSavedHighlighter(TabSession savedTab) {
         for (int index = 0; index < tabs.size(); index++) {
             TerminalEditorApp.EditorTab tab = tabs.get(index);
-            if (tab.tabSession() == savedTab) {
+            if (tab.tabSession().engine().document() == savedTab.engine().document()) {
                 RenderPlanBuilder builder = tab.documentSession().newRenderPlanBuilder(
                     host.resolveHighlighter(JvmDocumentStorage.pathOf(savedTab.state().getCurrentResource())));
-                tabs.set(index, new TerminalEditorApp.EditorTab(tab.documentSession(), builder,
+                sessionContext.update(new TerminalEditorApp.EditorTab(tab.documentSession(), builder,
                     tab.viewportController(), tab.navigation()));
                 if (index == sessionContext.activeTabIndex()) {
                     sessionContext.activate(index);
                     renderPlanBuilder = builder;
                 }
-                return;
             }
+        }
+    }
+
+    /** Resolve retained dialog identities before painting or consuming their next input. */
+    private void synchronizeModalTarget() {
+        modalState = modalState.bindTo(sessionContext.activeViewId());
+        ViewId target = modalState.targetViewId();
+        if (target == null) return;
+        int index = sessionContext.indexOf(target);
+        if (index < 0) {
+            if (overwriteApproval != null && target.equals(overwriteApproval.request().session().viewId())) {
+                overwriteApproval.request().session().document().io().cancel(overwriteApproval.inspection());
+                overwriteApproval = null;
+            }
+            modalState = UiModalState.none();
+            notification.info("The document view for this dialog was closed");
+        } else if (modalState.isCloseTabConfirm()
+                || modalState.saveContinuation() == SaveContinuation.CLOSE_TAB) {
+            modalState = modalState.withCloseTabIndex(index);
         }
     }
 

@@ -49,7 +49,7 @@ import java.util.stream.IntStream;
 /** Real editor event/frame pipeline with an in-memory terminal and recovery port. */
 final class EditorWindowFixture implements AutoCloseable {
     final TerminalEditorApp host = new TerminalEditorApp();
-    final List<TerminalEditorApp.EditorTab> tabs = new ArrayList<>();
+    final List<TerminalEditorApp.EditorTab> tabs;
     final TerminalEditorApp.SessionContext context;
     final TerminalEditorApp.NotificationState notification = host.new NotificationState();
     final TextField query = new TextField(TextField.PastePolicy.PRESERVE_TABS);
@@ -139,9 +139,10 @@ final class EditorWindowFixture implements AutoCloseable {
         Files.createDirectories(directory);
         document = directory.resolve("document.txt");
         Files.writeString(document, String.join("\n", lines));
-        tabs.add(host.newEditorTab());
-        tabs.getFirst().tabSession().engine().open(JvmDocumentStorage.resource(document));
-        context = new TerminalEditorApp.SessionContext(tabs, 0);
+        var initial = host.newEditorTab();
+        initial.tabSession().engine().open(JvmDocumentStorage.resource(document));
+        context = new TerminalEditorApp.SessionContext(List.of(initial), 0);
+        tabs = context.tabs();
         tree = new OpenFileTreeController(directory, true, false);
         AppSettings settings = settingsSession.initialSettings();
         host.theme = settings.theme();
@@ -184,7 +185,7 @@ final class EditorWindowFixture implements AutoCloseable {
             SearchController.SearchUiOptions.DEFAULT,
             notification, tree, recoveryManager, host.new RenderFrameController(renderer, editorView, true, presenter),
             renderer, filename, new SaveAsSuggestionStore(), presenter, query, replacement, context,
-            new ArrayList<>(startupRecoveryEntries), tabs,
+            new ArrayList<>(startupRecoveryEntries),
             new EditorWindowController.TerminalAccess(() -> width, () -> height, enabled -> {}),
             menu, ui, settingsSession, documentIo));
         try {
@@ -203,7 +204,7 @@ final class EditorWindowFixture implements AutoCloseable {
         for (RecoveryStore.Entry entry : entries) {
             recoverySnapshots.put(entry.id(), entry.snapshot());
         }
-        return host.restoreRecoveredTabs(entries, tabs, context, recoveryManager, 0L).restoredCount();
+        return host.restoreRecoveredTabs(entries, context, recoveryManager, 0L).restoredCount();
     }
 
     void event(TuiInputEvent event) {

@@ -1,5 +1,6 @@
 package dev.tuink.tui.flow;
 
+import dev.tuink.editor.document.ViewId;
 import java.nio.file.Path;
 
 public record UiModalState(
@@ -8,8 +9,14 @@ public record UiModalState(
     int pendingCloseTabIndex,
     SaveContinuation saveContinuation,
     DocumentSaveFormat saveFormat,
-    Path pendingOpenPath
+    Path pendingOpenPath,
+    ViewId targetViewId
 ) {
+    public UiModalState(UiModalMode mode, Path pendingOverwritePath, int pendingCloseTabIndex,
+                        SaveContinuation saveContinuation, DocumentSaveFormat saveFormat, Path pendingOpenPath) {
+        this(mode, pendingOverwritePath, pendingCloseTabIndex, saveContinuation, saveFormat, pendingOpenPath, null);
+    }
+
     public UiModalState(UiModalMode mode, Path pendingOverwritePath, int pendingCloseTabIndex,
                         SaveContinuation saveContinuation) {
         this(mode, pendingOverwritePath, pendingCloseTabIndex, saveContinuation, DocumentSaveFormat.ORIGINAL, null);
@@ -51,6 +58,25 @@ public record UiModalState(
             && pendingCloseTabIndex != -1) {
             throw new IllegalArgumentException("Tab index requires a close-tab flow");
         }
+        if (targetViewId != null && !saveFlowMode && mode != UiModalMode.CLOSE_TAB_CONFIRM) {
+            throw new IllegalArgumentException("A view target requires a document save or close dialog");
+        }
+    }
+
+    /** Binds a document dialog once; subsequent selection changes cannot redirect it. */
+    public UiModalState bindTo(ViewId viewId) {
+        if (targetViewId != null || !isSaveAs() && !isSaveOverwriteConfirm()
+            && !isSaveUtf8Confirm() && !isCloseTabConfirm()) return this;
+        return new UiModalState(mode, pendingOverwritePath, pendingCloseTabIndex, saveContinuation,
+            saveFormat, pendingOpenPath, java.util.Objects.requireNonNull(viewId, "viewId"));
+    }
+
+    /** Refreshes a close target's display index without changing its identity. */
+    public UiModalState withCloseTabIndex(int tabIndex) {
+        if (!isCloseTabConfirm() && saveContinuation != SaveContinuation.CLOSE_TAB) return this;
+        if (tabIndex == pendingCloseTabIndex) return this;
+        return new UiModalState(mode, pendingOverwritePath, tabIndex, saveContinuation,
+            saveFormat, pendingOpenPath, targetViewId);
     }
 
     public static UiModalState none() {
@@ -123,7 +149,7 @@ public record UiModalState(
             throw new IllegalStateException("Encoding choice requires a save flow");
         }
         return new UiModalState(UiModalMode.SAVE_UTF8_CONFIRM, null, pendingCloseTabIndex, saveContinuation,
-            DocumentSaveFormat.ORIGINAL, null);
+            DocumentSaveFormat.ORIGINAL, null, targetViewId);
     }
 
     public UiModalState utf8SaveAs() {
@@ -131,7 +157,7 @@ public record UiModalState(
             throw new IllegalStateException("UTF-8 Save As requires explicit confirmation");
         }
         return new UiModalState(UiModalMode.SAVE_AS, null, pendingCloseTabIndex, saveContinuation,
-            DocumentSaveFormat.UTF8, null);
+            DocumentSaveFormat.UTF8, null, targetViewId);
     }
 
     public boolean isRecoveryConfirm() {
@@ -168,7 +194,8 @@ public record UiModalState(
             pendingCloseTabIndex,
             saveContinuation,
             saveFormat,
-            null
+            null,
+            targetViewId
         );
     }
 
@@ -176,7 +203,7 @@ public record UiModalState(
         if (!isSaveOverwriteConfirm()) {
             throw new IllegalStateException("Only overwrite confirmation can return to Save As");
         }
-        return new UiModalState(UiModalMode.SAVE_AS, null, pendingCloseTabIndex, saveContinuation, saveFormat, null);
+        return new UiModalState(UiModalMode.SAVE_AS, null, pendingCloseTabIndex, saveContinuation, saveFormat, null, targetViewId);
     }
 
     private static UiModalState state(

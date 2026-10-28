@@ -11,8 +11,6 @@ import dev.tuink.tui.flow.RecoveryStore;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.AbstractList;
-import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -47,7 +45,7 @@ class RecoveryRestorePublicationTest {
                 }
             };
 
-            var result = window.host.restoreRecoveredTabs(List.of(first, failing, last), window.tabs,
+            var result = window.host.restoreRecoveredTabs(List.of(first, failing, last),
                 window.context, window.recoveryManager, 0L);
 
             assertEquals(2, result.restoredCount());
@@ -85,7 +83,7 @@ class RecoveryRestorePublicationTest {
             };
 
             assertSame(allocationFailure, assertThrows(OutOfMemoryError.class,
-                () -> window.host.restoreRecoveredTabs(entries, window.tabs, window.context, window.recoveryManager, 0L)));
+                () -> window.host.restoreRecoveredTabs(entries, window.context, window.recoveryManager, 0L)));
 
             assertEquals(List.of(existing), window.tabs);
             assertNull(window.recoveryManager.finishSession(window.host.toDocumentSessions(window.tabs), false));
@@ -96,22 +94,24 @@ class RecoveryRestorePublicationTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void aFailedOrPartialAppendPreservesThePlaceholderAndEveryCommittedDraft(boolean partial) throws Exception {
+    void duplicateRecoveryIdentityCannotPublishAnyDraftOrRemoveTheExistingEditor(boolean placeholder) throws Exception {
         try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("disk document"))) {
-            var placeholder = window.host.newEditorTab();
-            FailingAppendList tabs = new FailingAppendList(List.of(placeholder), partial);
-            var context = new TerminalEditorApp.SessionContext(tabs, 0);
+            if (placeholder) window.context.replace(0, window.host.newEditorTab());
+            var existing = window.active();
+            var selected = window.context.activeViewId();
             var first = entry("first", "first draft");
             var last = entry("last", "last draft");
             window.recoverySnapshots.put(first.id(), first.snapshot());
             window.recoverySnapshots.put(last.id(), last.snapshot());
 
-            assertSame(tabs.failure, assertThrows(OutOfMemoryError.class,
-                () -> window.host.restoreRecoveredTabs(List.of(first, last), tabs, context, window.recoveryManager, 0L)));
+            assertThrows(IllegalArgumentException.class,
+                () -> window.host.restoreRecoveredTabs(List.of(first, last, first),
+                    window.context, window.recoveryManager, 0L));
 
-            assertEquals(List.of(placeholder), tabs);
-            assertSame(placeholder.tabSession().engine(), context.engine());
-            assertNull(window.recoveryManager.finishSession(window.host.toDocumentSessions(tabs), false));
+            assertEquals(List.of(existing), window.tabs);
+            assertEquals(selected, window.context.activeViewId());
+            assertSame(existing.tabSession().engine(), window.context.engine());
+            assertNull(window.recoveryManager.finishSession(window.host.toDocumentSessions(window.tabs), false));
             assertEquals(Set.of("first", "last"), window.recoverySnapshots.keySet());
             assertSame(first.snapshot(), window.recoverySnapshots.get("first"));
             assertSame(last.snapshot(), window.recoverySnapshots.get("last"));
@@ -119,54 +119,43 @@ class RecoveryRestorePublicationTest {
     }
 
     @Test
-    void activationFailureAfterPublicationKeepsTheStableBackingEntry() throws Exception {
+    void anEntryAlreadyOwnedByALiveDocumentCannotBeAdoptedByAnotherDraft() throws Exception {
         try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("disk document"))) {
-            class FailingActivationList extends ArrayList<TerminalEditorApp.EditorTab> {
-                boolean fail;
-                FailingActivationList() { super(window.tabs); }
-                @Override public TerminalEditorApp.EditorTab get(int index) {
-                    if (fail && index > 0) throw new OutOfMemoryError("activation failed");
-                    return super.get(index);
-                }
-            }
-            var tabs = new FailingActivationList();
-            var context = new TerminalEditorApp.SessionContext(tabs, 0);
             var first = entry("first", "recovered draft");
-            window.recoverySnapshots.put(first.id(), first.snapshot());
-            tabs.fail = true;
+            window.restore(List.of(first));
+            var live = window.active();
+            live.documentSession().execute(new dev.tuink.editor.command.DocumentCommand.Input("latest "));
+            var previousTabs = List.copyOf(window.tabs);
 
-            assertThrows(OutOfMemoryError.class,
-                () -> window.host.restoreRecoveredTabs(List.of(first), tabs, context, window.recoveryManager, 0L));
+            assertThrows(IllegalArgumentException.class,
+                () -> window.host.restoreRecoveredTabs(List.of(first), window.context, window.recoveryManager, 0L));
 
-            tabs.fail = false;
-            assertEquals(2, tabs.size());
-            assertEquals(first.snapshot().lines(), tabs.get(1).tabSession().model().snapshotLines());
-            assertNull(window.recoveryManager.finishSession(window.host.toDocumentSessions(tabs), false));
+            assertEquals(previousTabs, window.tabs);
+            assertSame(live, window.active());
+            assertNull(window.recoveryManager.finishSession(window.host.toDocumentSessions(window.tabs), false));
             assertEquals(Set.of("first"), window.recoverySnapshots.keySet());
-            assertEquals(first.snapshot().lines(), window.recoverySnapshots.get("first").lines());
+            assertEquals(List.of("latest recovered draft"), window.recoverySnapshots.get("first").lines());
             assertTrue(window.recoverySnapshots.get("first").dirty());
         }
     }
 
     @Test
-    void placeholderRemovalFailureAfterAppendingKeepsPublishedDraftOwnership() throws Exception {
+    void replacingThePlaceholderRetainsPublishedDraftOwnershipAfterSelectionChanges() throws Exception {
         try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("disk document"))) {
             var placeholder = window.host.newEditorTab();
-            OutOfMemoryError removalFailure = new OutOfMemoryError("placeholder removal failed");
-            var tabs = new ArrayList<TerminalEditorApp.EditorTab>(List.of(placeholder)) {
-                @Override public TerminalEditorApp.EditorTab removeFirst() { throw removalFailure; }
-            };
-            var context = new TerminalEditorApp.SessionContext(tabs, 0);
+            window.context.replace(0, placeholder);
             var first = entry("first", "recovered draft");
             window.recoverySnapshots.put(first.id(), first.snapshot());
 
-            assertSame(removalFailure, assertThrows(OutOfMemoryError.class,
-                () -> window.host.restoreRecoveredTabs(List.of(first), tabs, context, window.recoveryManager, 0L)));
+            window.host.restoreRecoveredTabs(List.of(first), window.context, window.recoveryManager, 0L);
 
-            assertEquals(2, tabs.size());
-            assertSame(placeholder, tabs.getFirst());
-            tabs.get(1).documentSession().execute(new dev.tuink.editor.command.DocumentCommand.Input("latest "));
-            assertNull(window.recoveryManager.finishSession(window.host.toDocumentSessions(tabs), false));
+            assertEquals(1, window.tabs.size());
+            var restored = window.active();
+            assertTrue(window.context.indexOf(placeholder.documentSession().viewId()) < 0);
+            window.context.addNewTabAndActivate(window.host.newEditorTab());
+            window.context.activate(restored.documentSession().viewId());
+            restored.documentSession().execute(new dev.tuink.editor.command.DocumentCommand.Input("latest "));
+            assertNull(window.recoveryManager.finishSession(window.host.toDocumentSessions(window.tabs), false));
             assertEquals(Set.of("first"), window.recoverySnapshots.keySet(), "published draft retains its stable entry");
             assertEquals(List.of("latest recovered draft"), window.recoverySnapshots.get("first").lines());
         }
@@ -177,16 +166,4 @@ class RecoveryRestorePublicationTest {
             new RecoverySnapshot(List.of(text), null, null, null, true, null, null, null, null, null));
     }
 
-    private static final class FailingAppendList extends ArrayList<TerminalEditorApp.EditorTab> {
-        private final boolean partial;
-        private final OutOfMemoryError failure = new OutOfMemoryError("tab publication failed");
-        private FailingAppendList(List<TerminalEditorApp.EditorTab> existing, boolean partial) {
-            super(existing);
-            this.partial = partial;
-        }
-        @Override public boolean addAll(Collection<? extends TerminalEditorApp.EditorTab> additions) {
-            if (partial) super.add(additions.iterator().next());
-            throw failure;
-        }
-    }
 }

@@ -5,6 +5,9 @@ import dev.tuink.editor.session.recovery.RecoveryCoordinator;
 import dev.tuink.editor.session.recovery.RecoveryParticipant;
 import dev.tuink.editor.session.recovery.PreparedCheckpoint;
 import dev.tuink.editor.document.DocumentId;
+import dev.tuink.editor.document.ViewId;
+import dev.tuink.editor.session.document.EditorDocumentSession;
+import dev.tuink.editor.session.document.EditorWorkspace;
 import dev.tuink.editor.document.TextPosition;
 import dev.tuink.core.ViewportState;
 import dev.tuink.core.EditorClipboard;
@@ -203,9 +206,8 @@ public class TerminalEditorApp {
         AppSettingsSession settingsSession = new AppSettingsSession(loadedSettings, cli);
         AppSettings initialSettings = settingsSession.initialSettings();
         applyTheme(initialSettings.theme());
-        List<EditorTab> tabs = new ArrayList<>();
-        tabs.add(newEditorTab());
-        SessionContext sessionContext = new SessionContext(tabs, 0);
+        SessionContext sessionContext = new SessionContext(List.of(newEditorTab()), 0);
+        List<EditorTab> tabs = sessionContext.tabs();
         int activeTabIndex = sessionContext.activeTabIndex();
         TextModel model = sessionContext.model();
         EditorState state = sessionContext.state();
@@ -349,7 +351,6 @@ public class TerminalEditorApp {
                         searchReplaceInput,
                         sessionContext,
                         startupRecoveryEntries,
-                        tabs,
                         new EditorWindowController.TerminalAccess(terminal::width, terminal::height, terminal::setMouseTracking),
                         topMenu,
                         uiSessionState,
@@ -410,7 +411,7 @@ public class TerminalEditorApp {
                 int nextIndex = switchTab(tabs, activeTabIndex, -1);
                 sessionContext.activate(nextIndex);
             }
-            case CLOSE_TAB -> sessionContext.activate(closeCurrentTab(tabs, activeTabIndex, saveAsSuggestions));
+            case CLOSE_TAB -> closeTab(sessionContext, tabs.get(activeTabIndex).documentSession().viewId(), saveAsSuggestions);
         }
 
     }
@@ -1536,11 +1537,11 @@ public class TerminalEditorApp {
 
     RecoveryRestoreResult restoreRecoveredTabs(
         List<? extends RecoveryStore.PendingSnapshot> entries,
-        List<EditorTab> tabs,
         SessionContext sessionContext,
         RecoveryAutosaveManager recoveryAutosave,
         long nowNanos
     ) {
+        List<EditorTab> tabs = sessionContext.tabs();
         if (entries == null || entries.isEmpty()) {
             return new RecoveryRestoreResult(0, List.of(), List.of());
         }
@@ -1585,26 +1586,14 @@ public class TerminalEditorApp {
             prepared.stream().map(PreparedRecoveredTab::ownership).toList(), nowNanos);
         boolean replacePlaceholder = tabs.size() == 1
             && WorkspaceDocuments.isPristinePlaceholder(tabs.getFirst().tabSession());
-        int previousSize = tabs.size();
-        try {
-            tabs.addAll(restored);
-        } catch (RuntimeException | Error publicationFailure) {
-            // ArrayList allocates before appending. A collection port may also
-            // fail after a partial append; retain all pre-existing tabs.
-            try {
-                while (tabs.size() > previousSize) tabs.remove(tabs.size() - 1);
-            } catch (RuntimeException | Error rollbackFailure) {
-                publicationFailure.addSuppressed(rollbackFailure);
-            }
-            throw publicationFailure;
-        }
+        sessionContext.addAll(restored);
         // The registry commit allocates nothing; activation can fail without
         // turning a published draft into an abandoned startup entry.
         recoveryAutosave.publishRestoration(ownership);
         if (replacePlaceholder) {
-            tabs.removeFirst();
+            sessionContext.workspace.remove(tabs.getFirst().documentSession().viewId());
         }
-        sessionContext.activate(replacePlaceholder ? 0 : previousSize);
+        sessionContext.workspace.select(restored.getFirst().documentSession().viewId());
         return result;
     }
 
@@ -1643,31 +1632,17 @@ public class TerminalEditorApp {
         return TabSessions.switchByDelta(tabs.size(), currentIndex, delta);
     }
 
-    private int closeCurrentTab(List<EditorTab> tabs, int activeTabIndex, SaveAsSuggestionStore saveAsSuggestions) {
-        int size = tabs.size();
-        saveAsSuggestions.remove(tabs.get(activeTabIndex).tabSession());
-        if (tabs.size() <= 1) {
-            tabs.set(0, newEditorTab());
-            return 0;
-        }
-        tabs.remove(activeTabIndex);
-        return TabSessions.closeIndex(size, activeTabIndex, activeTabIndex);
-    }
-
-    int closeTab(
-        List<EditorTab> tabs,
-        int activeTabIndex,
-        int closeTabIndex,
-        SaveAsSuggestionStore saveAsSuggestions
-    ) {
-        int size = tabs.size();
-        saveAsSuggestions.remove(tabs.get(closeTabIndex).tabSession());
-        if (tabs.size() <= 1) {
-            tabs.set(0, newEditorTab());
-            return 0;
-        }
-        tabs.remove(closeTabIndex);
-        return TabSessions.closeIndex(size, activeTabIndex, closeTabIndex);
+    void closeTab(SessionContext context, ViewId viewId,
+                  SaveAsSuggestionStore saveAsSuggestions) {
+        var entry = context.workspace.find(viewId);
+        if (entry == null) return;
+        if (!context.canClose(viewId)) throw new IllegalStateException("Document is busy saving");
+        // Allocate the replacement before retiring the last visible editor.
+        EditorTab replacement = context.tabs().size() == 1 ? newEditorTab() : null;
+        if (replacement != null) context.addAll(List.of(replacement));
+        context.workspace.remove(viewId);
+        saveAsSuggestions.remove(entry.attachment().tabSession());
+        if (replacement != null) context.activate(replacement.documentSession().viewId());
     }
 
     List<TuiDocumentSession> toDocumentSessions(List<EditorTab> tabs) {
@@ -1757,55 +1732,86 @@ public class TerminalEditorApp {
     }
 
     static final class SessionContext {
-        private final List<EditorTab> tabs;
-        private int activeTabIndex;
-        private TextModel model;
-        private EditorState state;
-        private EditorEngine engine;
-        private RenderPlanBuilder renderPlanBuilder;
+        private final EditorWorkspace<EditorTab> workspace = new EditorWorkspace<>();
 
         SessionContext(List<EditorTab> tabs, int activeTabIndex) {
-            this.tabs = tabs;
+            addAll(tabs);
             activate(activeTabIndex);
         }
 
         void activate(int nextActiveTabIndex) {
-            this.activeTabIndex = Math.max(0, Math.min(nextActiveTabIndex, tabs.size() - 1));
-            EditorTab active = tabs.get(this.activeTabIndex);
-            this.model = active.model();
-            this.state = active.state();
-            this.engine = active.engine();
-            this.renderPlanBuilder = active.renderPlanBuilder();
+            workspace.selectIndex(Math.max(0, Math.min(nextActiveTabIndex, tabs().size() - 1)));
         }
 
-        private void addNewTabAndActivate(EditorTab tab) {
-            tabs.add(tab);
-            activate(tabs.size() - 1);
+        void addNewTabAndActivate(EditorTab tab) {
+            workspace.add(tab.documentSession().document(), tab.documentSession().viewId(), tab);
+        }
+
+        void addAll(List<EditorTab> tabs) {
+            workspace.addAll(tabs.stream().map(tab ->
+                new EditorWorkspace.Entry<>(
+                    tab.documentSession().document(), tab.documentSession().viewId(), tab)).toList());
+        }
+
+        List<EditorTab> tabs() { return workspace.attachments(); }
+
+        EditorTab active() { return workspace.active().attachment(); }
+
+        ViewId activeViewId() { return workspace.active().viewId(); }
+
+        int indexOf(ViewId viewId) { return workspace.indexOf(viewId); }
+
+        void remove(ViewId viewId) { workspace.remove(viewId); }
+
+        boolean hasOtherViews(ViewId viewId) {
+            var entry = workspace.find(viewId);
+            return entry != null && workspace.entries().stream()
+                .anyMatch(other -> other.document() == entry.document() && !other.viewId().equals(viewId));
+        }
+
+        boolean canClose(ViewId viewId) {
+            var entry = workspace.find(viewId);
+            return entry != null && (!entry.document().io().busy() || hasOtherViews(viewId));
+        }
+
+        boolean activate(ViewId viewId) {
+            if (workspace.find(viewId) == null) return false;
+            workspace.select(viewId);
+            return true;
+        }
+
+        void update(EditorTab tab) { workspace.updateAttachment(tab.documentSession().viewId(), tab); }
+
+        void replace(int index, EditorTab replacement) {
+            var old = tabs().get(index).documentSession().viewId();
+            boolean selected = old.equals(activeViewId());
+            addAll(List.of(replacement));
+            workspace.remove(old);
+            if (selected) workspace.select(replacement.documentSession().viewId());
         }
 
         void replaceActiveRenderPlanBuilder(RenderPlanBuilder nextRenderPlanBuilder) {
-            tabs.set(activeTabIndex, tabs.get(activeTabIndex).withRenderPlanBuilder(nextRenderPlanBuilder));
-            this.renderPlanBuilder = nextRenderPlanBuilder;
+            update(active().withRenderPlanBuilder(nextRenderPlanBuilder));
         }
 
         int activeTabIndex() {
-            return activeTabIndex;
+            return workspace.activeIndex();
         }
 
         TextModel model() {
-            return model;
+            return active().model();
         }
 
         EditorState state() {
-            return state;
+            return active().state();
         }
 
         EditorEngine engine() {
-            return engine;
+            return active().engine();
         }
 
         RenderPlanBuilder renderPlanBuilder() {
-            return renderPlanBuilder;
+            return active().renderPlanBuilder();
         }
     }
 
@@ -1949,7 +1955,7 @@ public class TerminalEditorApp {
     /** Terminal checkpoint envelope and lifecycle/executor adapter. Coordination lives in editor-session. */
     static final class RecoveryAutosaveManager {
         private final RecoveryCoordinator<RecoverySnapshot> coordinator;
-        private final Map<TuiDocumentSession, RecoveryParticipant<RecoverySnapshot>> participants =
+        private final Map<EditorDocumentSession, TuiRecoveryParticipant> participants =
             new IdentityHashMap<>();
         private final ExecutorService ownedWorker;
 
@@ -1983,26 +1989,34 @@ public class TerminalEditorApp {
         }
 
         private RecoveryParticipant<RecoverySnapshot> participant(TuiDocumentSession document) {
-            return participants.computeIfAbsent(document, source -> new RecoveryParticipant<>() {
-                @Override public DocumentId documentId() { return source.document().documentId(); }
-                @Override public Status status() {
-                    var status = source.document().status();
-                    return new Status(status.dirty(), status.recoveryRevision());
-                }
-                @Override public PreparedCheckpoint<RecoverySnapshot> prepareCheckpoint() {
-                    var capture = source.document().prepareRecovery(source.viewId());
-                    var liveViewport = source.view().state().viewport();
-                    int topLine = Math.min(liveViewport.topLine(), source.view().model().lineCount() - 1);
-                    var viewport = topLine == liveViewport.topLine() ? liveViewport
-                        : new ViewportState(topLine, 0, liveViewport.leftColumn(), liveViewport.leftVisualColumn());
-                    return () -> {
-                        var draft = capture.materialize();
-                        return new RecoverySnapshot(draft.lines(), position(draft.caret()), viewport,
-                            position(draft.anchor()), draft.dirty(), draft.currentResource(), draft.saveDisposition(),
-                            draft.fileMetadata(), draft.fileBaseline(), draft.createdAt());
-                    };
-                }
-            });
+            TuiRecoveryParticipant participant = participants.computeIfAbsent(document.document(),
+                ignored -> new TuiRecoveryParticipant(document));
+            participant.source = document;
+            return participant;
+        }
+
+        /** Retained document identity survives detaching or replacing its terminal projection. */
+        private static final class TuiRecoveryParticipant implements RecoveryParticipant<RecoverySnapshot> {
+            private TuiDocumentSession source;
+            private TuiRecoveryParticipant(TuiDocumentSession source) { this.source = source; }
+            @Override public DocumentId documentId() { return source.document().documentId(); }
+            @Override public Status status() {
+                var status = source.document().status();
+                return new Status(status.dirty(), status.recoveryRevision());
+            }
+            @Override public PreparedCheckpoint<RecoverySnapshot> prepareCheckpoint() {
+                var capture = source.document().prepareRecovery(source.viewId());
+                var liveViewport = source.view().state().viewport();
+                int topLine = Math.min(liveViewport.topLine(), source.view().model().lineCount() - 1);
+                var viewport = topLine == liveViewport.topLine() ? liveViewport
+                    : new ViewportState(topLine, 0, liveViewport.leftColumn(), liveViewport.leftVisualColumn());
+                return () -> {
+                    var draft = capture.materialize();
+                    return new RecoverySnapshot(draft.lines(), position(draft.caret()), viewport,
+                        position(draft.anchor()), draft.dirty(), draft.currentResource(), draft.saveDisposition(),
+                        draft.fileMetadata(), draft.fileBaseline(), draft.createdAt());
+                };
+            }
         }
 
         private static Position position(TextPosition position) {
@@ -2010,13 +2024,19 @@ public class TerminalEditorApp {
         }
 
         private List<RecoveryParticipant<RecoverySnapshot>> participantList(List<TuiDocumentSession> documents) {
-            return documents.stream().map(this::participant).toList();
+            var seen = java.util.Collections.newSetFromMap(
+                new IdentityHashMap<EditorDocumentSession, Boolean>());
+            return documents.stream().filter(view -> seen.add(view.document())).map(this::participant).toList();
+        }
+
+        private void retainParticipants(List<TuiDocumentSession> documents) {
+            participants.keySet().retainAll(documents.stream().map(TuiDocumentSession::document).toList());
         }
 
         void syncTabs(List<TuiDocumentSession> documents) {
             coordinator.synchronize(participantList(documents),
                 RecoveryCoordinator.RemovalDisposition.DISCARD);
-            participants.keySet().retainAll(documents);
+            retainParticipants(documents);
         }
 
         record RestoredSnapshot(TuiDocumentSession session, String entryId) {
@@ -2050,7 +2070,7 @@ public class TerminalEditorApp {
         String finishSession(List<TuiDocumentSession> documents, boolean exitConfirmed) {
             try { return coordinator.finish(participantList(documents), exitConfirmed); }
             finally {
-                participants.keySet().retainAll(documents);
+                retainParticipants(documents);
                 if (ownedWorker != null) ownedWorker.shutdown();
             }
         }

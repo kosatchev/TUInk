@@ -1,6 +1,8 @@
 package dev.tuink.tui;
 
 import dev.tuink.storage.jvm.JvmDocumentStorage;
+import dev.tuink.storage.jvm.JvmFileAdvisory;
+import dev.tuink.editor.document.ViewId;
 import dev.tuink.editor.storage.SaveDisposition;
 import dev.tuink.editor.storage.DocumentEncodingException;
 import dev.tuink.core.TabSession;
@@ -14,8 +16,6 @@ import dev.tuink.tui.flow.SaveTargetSuggester;
 import dev.tuink.tui.flow.UiModalState;
 import dev.tuink.tui.ui.PathPresentation;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.List;
 
@@ -31,6 +31,13 @@ final class SaveWorkflow {
         List<TabSession> tabs() { return documents.stream().map(TuiDocumentSession::view).toList(); }
         TabSession active() { return activeDocument().view(); }
         TuiDocumentSession activeDocument() { return documents.get(activeTabIndex); }
+        int indexOf(ViewId viewId) {
+            for (int index = 0; index < documents.size(); index++) {
+                if (documents.get(index).viewId().equals(viewId)) return index;
+            }
+            return -1;
+        }
+        Context at(int index) { return new Context(documents, index, suggestions, overwriteApproval); }
         TuiDocumentSession document(TabSession tab) {
             return documents.stream().filter(document -> document.view() == tab).findFirst().orElseThrow();
         }
@@ -128,13 +135,14 @@ final class SaveWorkflow {
     }
 
     static Result saveAsInput(Context context, TuinkCommand command, UiModalState modal, String draft) {
+        int target = modal.targetViewId() == null ? context.activeTabIndex() : context.indexOf(modal.targetViewId());
+        if (target < 0) return cancelledDialog(context, modal);
+        context = context.at(target);
         TabSession tab = context.active();
         context.suggestions().rememberInput(tab, draft);
         SaveFlowController.SaveAsResult decision = SaveFlowController.handleSaveAsInput(command, modal, draft);
-        if (command == TuinkCommand.UI_ESCAPE || command == TuinkCommand.APP_QUIT) {
-            OverwriteApproval approval = context.overwriteApproval();
-            if (approval != null) approval.request().session().document().io().cancel(approval.inspection());
-        }
+        // A filename prompt owns no approval. Only the exact overwrite dialog
+        // may cancel the inspection which it presents.
         if (decision.saveNowPath() != null) {
             // The detached inspection decides which bytes an overwrite would
             // replace. This input decision performs no preflight stat.
@@ -147,24 +155,46 @@ final class SaveWorkflow {
     }
 
     static Result overwrite(Context context, UiModalState modal, ConfirmChoice choice) {
+        OverwriteApproval approval = context.overwriteApproval();
+        if (approval != null && !matchesApproval(context, modal, approval)) {
+            return retainOverwrite(approval);
+        }
         return switch (choice) {
             case SAVE -> approveOverwrite(context, modal);
-            case DISCARD -> cancelOverwrite(context, modal.backToSaveAs());
-            case CANCEL -> cancelOverwrite(context, UiModalState.none());
+            case DISCARD -> cancelOverwrite(context, modal, modal.backToSaveAs());
+            case CANCEL -> cancelOverwrite(context, modal, UiModalState.none());
         };
     }
 
-    private static Result cancelOverwrite(Context context, UiModalState modal) {
+    private static Result cancelOverwrite(Context context, UiModalState source, UiModalState next) {
         OverwriteApproval approval = context.overwriteApproval();
-        if (approval != null) approval.request().session().document().io().cancel(approval.inspection());
-        return result(modal, Notice.clear());
+        if (approval != null && matchesApproval(context, source, approval)) {
+            approval.request().session().document().io().cancel(approval.inspection());
+        }
+        return result(next, Notice.clear());
+    }
+
+    private static boolean matchesApproval(Context context, UiModalState modal, OverwriteApproval approval) {
+        ViewId target = modal.targetViewId() == null ? context.activeDocument().viewId() : modal.targetViewId();
+        return approval.request().session().viewId().equals(target)
+            && java.util.Objects.equals(JvmDocumentStorage.pathOf(approval.inspection().requestedResource()),
+                modal.pendingOverwritePath());
+    }
+
+    private static Result retainOverwrite(OverwriteApproval approval) {
+        UiModalState modal = saveAsOrigin(approval.request().origin())
+            .confirmOverwrite(JvmDocumentStorage.pathOf(approval.inspection().requestedResource()))
+            .bindTo(approval.request().session().viewId());
+        return new Result(true, modal, -1, -1, SaveFlowController.TextInputEffect.none(),
+            Notice.unchanged(), false, false, null, approval);
     }
 
     private static Result approveOverwrite(Context context, UiModalState modal) {
         OverwriteApproval approval = context.overwriteApproval();
-        if (approval == null || approval.request().tab() != context.active()
-            || !JvmDocumentStorage.pathOf(approval.inspection().requestedResource()).equals(modal.pendingOverwritePath())) {
-            if (approval != null) approval.request().session().document().io().cancel(approval.inspection());
+        int target = modal.targetViewId() == null ? context.activeTabIndex() : context.indexOf(modal.targetViewId());
+        if (target < 0) return cancelledDialog(context, modal);
+        context = context.at(target);
+        if (approval == null || !matchesApproval(context, modal, approval)) {
             return result(modal.backToSaveAs(), Notice.error("Save target was not inspected. Choose the target again."));
         }
         return approveTarget(context, approval.request(), approval.inspection(), modal);
@@ -206,18 +236,34 @@ final class SaveWorkflow {
 
     static Result complete(Context context, SaveRequest request, DocumentIoCoordinator.Transition transition) {
         DocumentIoCoordinator io = request.session().document().io();
-        int index = context.tabs().indexOf(request.tab());
+        if (transition instanceof DocumentIoCoordinator.Ignored) {
+            return result(UiModalState.none(), Notice.unchanged());
+        }
+        int index = context.indexOf(request.session().viewId());
+        if (index < 0) {
+            // The write belongs to the document, even if its initiating view was
+            // detached. A surviving view may present its outcome, but cannot
+            // inherit the removed view's close continuation.
+            for (int candidate = 0; candidate < context.documents().size(); candidate++) {
+                if (context.documents().get(candidate).document() == request.session().document()) {
+                    index = candidate;
+                    TuiDocumentSession surviving = context.documents().get(candidate);
+                    request = new SaveRequest(surviving, request.operation(),
+                        survivingOrigin(request.origin(), surviving.viewId()),
+                        request.purpose() == SavePurpose.CLOSE_TAB ? SavePurpose.CURRENT : request.purpose(),
+                        request.submission());
+                    break;
+                }
+            }
+        }
         if (index < 0) {
             io.cancel(request.operation());
             return result(UiModalState.none(), Notice.error("Save completed for a document that is no longer open"));
         }
         UiModalState origin = remapOrigin(request.origin(), index);
-        if (transition instanceof DocumentIoCoordinator.Ignored) {
-            return result(UiModalState.none(), Notice.unchanged());
-        }
         if (transition instanceof DocumentIoCoordinator.Approval approval) {
             DocumentIoCoordinator.Confirmation inspection = approval.confirmation();
-            Context owner = new Context(context.documents(), index, context.suggestions());
+            Context owner = context.at(index);
             String conflict = workspaceSaveConflict(owner, JvmDocumentStorage.pathOf(inspection.physicalResource()));
             if (conflict != null) {
                 io.cancel(inspection);
@@ -247,6 +293,7 @@ final class SaveWorkflow {
                     case CLOSE_TAB -> UiModalState.saveAsForCloseTab(index);
                     case SAVE_AS -> origin;
                 };
+                if (origin.targetViewId() != null) conversion = conversion.bindTo(request.session().viewId());
                 return offerUtf8(context, index, conversion, failure, request.purpose() != SavePurpose.SAVE_AS);
             }
             UiModalState retry = switch (request.purpose()) {
@@ -255,6 +302,7 @@ final class SaveWorkflow {
                 case CLOSE_TAB -> UiModalState.closeTabConfirm(index);
                 case SAVE_AS -> saveAsOrigin(origin);
             };
+            if (origin.targetViewId() != null) retry = retry.bindTo(request.session().viewId());
             return new Result(true, retry, index, -1, SaveFlowController.TextInputEffect.none(),
                 Notice.error(SaveTargetPolicy.saveErrorMessage(failure)), false, retry.isSaveAs());
         }
@@ -282,6 +330,12 @@ final class SaveWorkflow {
 
     private static Result approveTarget(Context context, SaveRequest request,
                                         DocumentIoCoordinator.Confirmation inspection, UiModalState origin) {
+        int index = context.indexOf(request.session().viewId());
+        if (index < 0) {
+            request.session().document().io().cancel(inspection);
+            return cancelledDialog(context, origin);
+        }
+        context = context.at(index);
         String conflict = workspaceSaveConflict(context, JvmDocumentStorage.pathOf(inspection.physicalResource()));
         if (conflict != null) {
             request.session().document().io().cancel(inspection);
@@ -299,7 +353,7 @@ final class SaveWorkflow {
     }
 
     private static Result approvalFailure(Context context, SaveRequest request, UiModalState origin, String message) {
-        return new Result(true, saveAsOrigin(origin), context.tabs().indexOf(request.tab()), -1,
+        return new Result(true, saveAsOrigin(origin), context.indexOf(request.session().viewId()), -1,
             SaveFlowController.TextInputEffect.none(), Notice.error(message), false, true);
     }
 
@@ -311,8 +365,23 @@ final class SaveWorkflow {
         if (modal.saveContinuation() != SaveContinuation.CLOSE_TAB) {
             return modal;
         }
-        return new UiModalState(modal.mode(), modal.pendingOverwritePath(), tabIndex, modal.saveContinuation(),
-            modal.saveFormat(), modal.pendingOpenPath());
+        return modal.withCloseTabIndex(tabIndex);
+    }
+
+    private static UiModalState survivingOrigin(UiModalState origin, ViewId survivingViewId) {
+        if (origin.isCloseTabConfirm()) return UiModalState.none();
+        if (!origin.isSaveAs() && !origin.isSaveOverwriteConfirm() && !origin.isSaveUtf8Confirm()) return origin;
+        return new UiModalState(origin.mode(), origin.pendingOverwritePath(), -1,
+            origin.saveContinuation() == SaveContinuation.CLOSE_TAB ? SaveContinuation.NONE : origin.saveContinuation(),
+            origin.saveFormat(), origin.pendingOpenPath(), survivingViewId);
+    }
+
+    private static Result cancelledDialog(Context context, UiModalState modal) {
+        OverwriteApproval approval = context.overwriteApproval();
+        if (approval != null && matchesApproval(context, modal, approval)) {
+            approval.request().session().document().io().cancel(approval.inspection());
+        }
+        return result(UiModalState.none(), Notice.error("The dialog's document view is no longer open"));
     }
 
     private static Result pending(SaveRequest request) {
@@ -322,7 +391,7 @@ final class SaveWorkflow {
 
     private static String workspaceSaveConflict(Context context, Path target) {
         int owner = WorkspaceDocuments.findOpenFile(context.tabs(), context.activeTabIndex(), target);
-        if (owner < 0 || owner == context.activeTabIndex()) {
+        if (owner < 0 || context.documents().get(owner).document() == context.activeDocument().document()) {
             return null;
         }
         return "Save failed: target is already open in tab " + (owner + 1)
@@ -333,8 +402,7 @@ final class SaveWorkflow {
         if (modal.saveContinuation() == SaveContinuation.QUIT) {
             return continueQuit(context, notice, SaveFlowController.TextInputEffect.clear());
         }
-        int closeIndex = modal.saveContinuation() == SaveContinuation.CLOSE_TAB
-            && validIndex(context, modal.pendingCloseTabIndex()) ? modal.pendingCloseTabIndex() : -1;
+        int closeIndex = modal.saveContinuation() == SaveContinuation.CLOSE_TAB ? closeIndex(context, modal) : -1;
         return new Result(true, UiModalState.none(), -1, closeIndex, SaveFlowController.TextInputEffect.clear(),
             notice, false, false);
     }
@@ -366,16 +434,19 @@ final class SaveWorkflow {
     }
 
     static Result closeTab(Context context, UiModalState modal, ConfirmChoice choice) {
-        int index = modal.pendingCloseTabIndex();
+        int index = closeIndex(context, modal);
         if (!validIndex(context, index) || choice == ConfirmChoice.CANCEL) {
             return result(UiModalState.none(), Notice.unchanged());
         }
         if (choice == ConfirmChoice.SAVE) {
             if (SaveTargetPolicy.requiresSaveAs(JvmDocumentStorage.pathOf(context.tabs().get(index).state().getCurrentResource()))) {
-                return prepareSaveAs(context, index, UiModalState.saveAsForCloseTab(index));
+                UiModalState saveAs = UiModalState.saveAsForCloseTab(index);
+                if (modal.targetViewId() != null) saveAs = saveAs.bindTo(modal.targetViewId());
+                return prepareSaveAs(context, index, saveAs);
             }
             if (context.tabs().get(index).state().isDirty()) {
-                return saveDirty(context, index, SavePurpose.CLOSE_TAB);
+                return saveDirty(context, index, SavePurpose.CLOSE_TAB,
+                    modal.targetViewId() == null ? UiModalState.closeTabConfirm(index) : modal.withCloseTabIndex(index));
             }
         }
         return new Result(true, UiModalState.none(), -1, index, SaveFlowController.TextInputEffect.none(),
@@ -420,17 +491,20 @@ final class SaveWorkflow {
     }
 
     private static boolean occupied(Context context, int index, Path target) {
-        if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+        if (JvmFileAdvisory.exists(target)) {
             return true;
         }
         return WorkspaceDocuments.findOtherOpenFile(context.tabs(), index, target) >= 0;
     }
 
     private static Result saveDirty(Context context, int index, SavePurpose purpose) {
+        return saveDirty(context, index, purpose, purpose == SavePurpose.QUIT ? UiModalState.quitConfirm()
+            : UiModalState.closeTabConfirm(index));
+    }
+
+    private static Result saveDirty(Context context, int index, SavePurpose purpose, UiModalState retry) {
         TabSession tab = context.tabs().get(index);
         Path file = JvmDocumentStorage.pathOf(tab.state().getCurrentResource());
-        UiModalState retry = purpose == SavePurpose.QUIT ? UiModalState.quitConfirm()
-            : UiModalState.closeTabConfirm(index);
         try {
             if (file == null) {
                 throw new IOException("Tab has no file path. Use Save As.");
@@ -441,8 +515,10 @@ final class SaveWorkflow {
             return pending(new SaveRequest(context.document(tab), context.document(tab).document().io().beginSave(), retry, purpose));
         } catch (IOException error) {
             if (error instanceof DocumentEncodingException) {
-                return offerUtf8(context, index, purpose == SavePurpose.QUIT ? UiModalState.saveAsForQuit()
-                    : UiModalState.saveAsForCloseTab(index), error, true);
+                UiModalState conversion = purpose == SavePurpose.QUIT ? UiModalState.saveAsForQuit()
+                    : UiModalState.saveAsForCloseTab(index);
+                if (retry.targetViewId() != null) conversion = conversion.bindTo(retry.targetViewId());
+                return offerUtf8(context, index, conversion, error, true);
             }
             return new Result(true, retry, index, -1, SaveFlowController.TextInputEffect.none(),
                 Notice.error(SaveTargetPolicy.saveErrorMessage(error)), false, false);
@@ -451,6 +527,10 @@ final class SaveWorkflow {
 
     private static boolean validIndex(Context context, int index) {
         return index >= 0 && index < context.tabs().size();
+    }
+
+    private static int closeIndex(Context context, UiModalState modal) {
+        return modal.targetViewId() == null ? modal.pendingCloseTabIndex() : context.indexOf(modal.targetViewId());
     }
 
     private static void rememberSavedPath(Context context, TabSession tab, Path file) {

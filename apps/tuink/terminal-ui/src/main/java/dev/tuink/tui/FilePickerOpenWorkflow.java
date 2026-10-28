@@ -3,6 +3,7 @@ package dev.tuink.tui;
 import dev.tuink.editor.storage.DocumentEncodingException;
 
 import dev.tuink.core.TabSession;
+import dev.tuink.editor.document.ViewId;
 import dev.tuink.editor.storage.AmbiguousDocumentEncodingException;
 import dev.tuink.editor.storage.DocumentOpenMode;
 import dev.tuink.editor.storage.DocumentLoad;
@@ -27,7 +28,13 @@ final class FilePickerOpenWorkflow {
 
     record Result(boolean openFileMode, TuiDocumentSession openedDocument, int activateTabIndex,
                   NoticeKind noticeKind, String message, Notice notice, Path pendingExplicitOpenPath,
-                  OpenRequest pendingOpen) {
+                  OpenRequest pendingOpen, ViewId activateViewId) {
+        Result(boolean openFileMode, TuiDocumentSession openedDocument, int activateTabIndex,
+               NoticeKind noticeKind, String message, Notice notice, Path pendingExplicitOpenPath,
+               OpenRequest pendingOpen) {
+            this(openFileMode, openedDocument, activateTabIndex, noticeKind, message, notice,
+                pendingExplicitOpenPath, pendingOpen, null);
+        }
         Result(boolean openFileMode, TuiDocumentSession openedDocument, int activateTabIndex,
                NoticeKind noticeKind, String message) {
             this(openFileMode, openedDocument, activateTabIndex, noticeKind, message,
@@ -125,7 +132,7 @@ final class FilePickerOpenWorkflow {
     private static Result open(Path target, DocumentOpenMode mode, List<TabSession> tabs, int activeTabIndex) {
         int existing = WorkspaceDocuments.findOpenFile(tabs, activeTabIndex, target);
         if (existing >= 0) {
-            return switched(target, existing);
+            return switched(target, existing, tabs.get(existing));
         }
         return new Result(false, null, -1, NoticeKind.UNCHANGED, null, null, null,
             new OpenRequest(target, mode));
@@ -150,7 +157,7 @@ final class FilePickerOpenWorkflow {
         // actually read, including when its selected symlink was retargeted.
         Path identity = loaded == null ? target : ((FileBaseline) loaded.baseline()).target();
         int existing = WorkspaceDocuments.findOpenFile(tabs, activeTabIndex, identity);
-        if (existing >= 0) return switched(target, existing);
+        if (existing >= 0) return switched(target, existing, tabs.get(existing));
         if (loaded != null) {
             TuiDocumentSession document = newDocument.get().openPrepared(loaded);
             return new Result(false, document, -1, NoticeKind.SUCCESS,
@@ -174,8 +181,9 @@ final class FilePickerOpenWorkflow {
             new Notice(reason, null));
     }
 
-    private static Result switched(Path target, int existing) {
+    private static Result switched(Path target, int existing, TabSession view) {
         return new Result(false, null, existing, NoticeKind.SUCCESS,
-            "Switched to " + NotificationPresentation.path(target));
+            "Switched to " + NotificationPresentation.path(target), null, null, null,
+            new ViewId(view.state().viewId()));
     }
 }

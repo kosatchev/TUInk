@@ -24,13 +24,15 @@ import java.util.UUID;
 /** TUInk composition boundary between the portable document session and its terminal view. */
 final class TuiDocumentSession {
     private final EditorDocumentSession document;
+    private final CoreDocumentBackend backend;
     private final TabSession view;
     private final ViewId viewId;
 
-    private TuiDocumentSession(EditorDocumentSession document, TabSession view) {
+    private TuiDocumentSession(EditorDocumentSession document, CoreDocumentBackend backend, TabSession view, ViewId viewId) {
         this.document = Objects.requireNonNull(document, "document");
+        this.backend = Objects.requireNonNull(backend, "backend");
         this.view = Objects.requireNonNull(view, "view");
-        this.viewId = document.defaultViewId();
+        this.viewId = Objects.requireNonNull(viewId, "viewId");
     }
 
     static TuiDocumentSession create(EditorClipboard clipboard) {
@@ -41,9 +43,18 @@ final class TuiDocumentSession {
 
     /** Connects one existing terminal view to the same command and storage session boundary. */
     static TuiDocumentSession adopt(TabSession view) {
-        EditorDocumentSession document = EditorDocumentSession.connect(
-            CoreDocumentBackend.adopt(new DocumentId(UUID.randomUUID().toString()), view));
-        return new TuiDocumentSession(document, view);
+        CoreDocumentBackend backend = CoreDocumentBackend.adopt(new DocumentId(UUID.randomUUID().toString()), view);
+        EditorDocumentSession document = EditorDocumentSession.connect(backend);
+        return new TuiDocumentSession(document, backend, view, document.defaultViewId());
+    }
+
+    /** A second terminal projection shares the session/history but owns its cursor and layout. */
+    TuiDocumentSession attachView(EditorClipboard clipboard) {
+        TabSession attached = view.engine().document().attach(TerminalEditorTextLayout::new, clipboard, new JgitLineDiff());
+        ViewId id = new ViewId(attached.state().viewId());
+        TuiDocumentSession prepared = new TuiDocumentSession(document, backend, attached, id);
+        backend.registerView(attached);
+        return prepared;
     }
 
     /** Publish an already decoded document without accessing its file again. */

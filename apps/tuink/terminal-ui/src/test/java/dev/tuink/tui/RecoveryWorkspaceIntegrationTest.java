@@ -97,7 +97,7 @@ class RecoveryWorkspaceIntegrationTest {
     void restoringReplacesOnlyThePristineUnnamedStartupPlaceholder() throws Exception {
         try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("saved"))) {
             var placeholder = window.host.newEditorTab();
-            window.tabs.set(0, placeholder);
+            window.context.replace(0, placeholder);
             window.context.activate(0);
 
             window.restore(List.of(draft("recovered", null, "draft")));
@@ -115,7 +115,7 @@ class RecoveryWorkspaceIntegrationTest {
             var original = window.host.newEditorTab();
             original.tabSession().engine().insertInput("redo me");
             original.tabSession().engine().undo();
-            window.tabs.set(0, original);
+            window.context.replace(0, original);
             window.context.activate(0);
 
             window.restore(List.of(draft("recovered", null, "other draft")));

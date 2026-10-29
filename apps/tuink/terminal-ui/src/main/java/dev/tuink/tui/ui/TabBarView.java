@@ -29,7 +29,7 @@ public final class TabBarView {
             TabItem required = Objects.requireNonNull(tab, "tab");
             mapped.add(new TabBar.Item(
                 DocumentCaption.name(required.file()), true,
-                required.hasMatch() ? "#" : "", required.dirty() ? "*" : "",
+                prefix(required.hasMatch(), required.searching(), required.awaitingAnswer()), required.dirty() ? "*" : "",
                 DocumentCaption.extensionCells(DocumentCaption.name(required.file())), PathPresentation.LABEL_POLICY
             ));
         }
@@ -47,8 +47,17 @@ public final class TabBarView {
      * and the Tabs menu.
      */
     public static String formatTabTitle(Path file, boolean dirty, boolean hasMatch) {
+        return formatTabTitle(file, dirty, hasMatch, false, false);
+    }
+
+    public static String formatTabTitle(Path file, boolean dirty, boolean hasMatch,
+                                        boolean searching, boolean awaitingAnswer) {
         String name = DocumentCaption.name(file);
-        return (hasMatch ? "#" : "") + name + (dirty ? "*" : "");
+        return prefix(hasMatch, searching, awaitingAnswer) + name + (dirty ? "*" : "");
+    }
+
+    private static String prefix(boolean hasMatch, boolean searching, boolean awaitingAnswer) {
+        return (awaitingAnswer ? "?" : "") + (searching ? "/" : "") + (hasMatch ? "#" : "");
     }
 
     /** Creates one immutable placement shared by painting and raw pointer routing. */
@@ -91,7 +100,10 @@ public final class TabBarView {
     }
 
     /** Editor-owned metadata mapped to a generic label and separately retained affixes. */
-    public record TabItem(Path file, boolean dirty, boolean hasMatch) {
+    public record TabItem(Path file, boolean dirty, boolean hasMatch, boolean searching, boolean awaitingAnswer) {
+        public TabItem(Path file, boolean dirty, boolean hasMatch) {
+            this(file, dirty, hasMatch, false, false);
+        }
     }
 
     /** Exact current-frame widget placement and coordinate context. */

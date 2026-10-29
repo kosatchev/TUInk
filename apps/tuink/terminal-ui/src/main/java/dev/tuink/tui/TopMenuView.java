@@ -210,7 +210,10 @@ final class TopMenuView {
         }
     }
 
-    record TabItem(Path file, boolean dirty, boolean hasMatch) {
+    record TabItem(Path file, boolean dirty, boolean hasMatch, boolean searching, boolean awaitingAnswer) {
+        TabItem(Path file, boolean dirty, boolean hasMatch) {
+            this(file, dirty, hasMatch, false, false);
+        }
     }
 
     /** One immutable placement shared by paint, hit routing, state and cursor. */
@@ -380,7 +383,8 @@ final class TopMenuView {
         for (int index = 0; index < tabs.size(); index++) {
             TabItem tab = Objects.requireNonNull(tabs.get(index), "tab");
             String marker = index == activeTabIndex ? "> " : "   ";
-            String title = TabBarView.formatTabTitle(tab.file(), tab.dirty(), tab.hasMatch());
+            String title = TabBarView.formatTabTitle(tab.file(), tab.dirty(), tab.hasMatch(),
+                tab.searching(), tab.awaitingAnswer());
             entries.add(new EntrySpec(
                 commandRouter.tabActivationInvocation(index),
                 marker + title,

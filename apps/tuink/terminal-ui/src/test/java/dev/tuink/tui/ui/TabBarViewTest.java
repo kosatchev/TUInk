@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import dev.tuiframe.cell.Canvas;
 import dev.tuiframe.cell.Cell;
 import dev.tuiframe.cell.CellBuffer;
+import dev.tuiframe.cell.CellText;
 import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.style.CellColor;
@@ -80,6 +81,55 @@ class TabBarViewTest {
             Path.of("/").toString(),
             TabBarView.formatTabTitle(Path.of("/"), false, false)
         );
+    }
+
+    @Test
+    void inactiveTabsShowTheirOwnQuestionAndSearchMarkers() {
+        Rect bounds = new Rect(0, 1, 50, 1);
+        TabBarView.Placement placed = TabBarView.build(List.of(
+            new TabBarView.TabItem(Path.of("one.txt"), true, false, true, true),
+            new TabBarView.TabItem(Path.of("two.txt"), false, true, true, false)
+        ), 1, TabBar.State.initial()).place(bounds, new Rect(0, 0, 50, 3));
+        CellBuffer buffer = filled(3, 50);
+
+        placed.paint(new Canvas(buffer), THEME);
+
+        String text = row(buffer, 1, 0, 50);
+        assertTrue(text.contains("[?/one.txt* x]"), text);
+        assertTrue(text.contains("[/#two.txt x]"), text);
+        assertEquals(ITEM, buffer.get(1, 1).style());
+        assertEquals(new TabBar.TabPressed(0, placed.state()),
+            placed.handle(pointer(1, 1)).output().orElseThrow());
+        assertEquals("?/one.txt*", TabBarView.formatTabTitle(Path.of("one.txt"), true, false, true, true));
+        assertEquals("/#two.txt", TabBarView.formatTabTitle(Path.of("two.txt"), false, true, true, false));
+    }
+
+    @Test
+    void questionSearchMatchAndDirtyMarkersSurviveUnicodeFilenameTruncation() {
+        Path file = Path.of("folder", "e\u0301👩‍💻界-long-file-name.java");
+        var item = new TabBarView.TabItem(file, true, true, true, true);
+        for (int width = 4; width <= 44; width++) {
+            Rect bounds = new Rect(0, 1, width, 1);
+            TabBarView.Placement placed = TabBarView.build(List.of(item), 0, TabBar.State.initial())
+                .place(bounds, new Rect(0, 0, width, 3));
+            CellBuffer buffer = filled(3, width);
+
+            placed.paint(new Canvas(buffer), THEME);
+
+            String text = row(buffer, 1, 0, width);
+            assertTrue(text.contains("?/#"), "width=" + width + ": " + text);
+            assertTrue(text.contains("*"), "width=" + width + ": " + text);
+            if (width >= 16) assertTrue(text.contains(".java*"), text);
+            int close = text.indexOf(" x]");
+            if (close >= 0) {
+                int closeColumn = CellText.width(text.substring(0, close)) + 1;
+                assertEquals(new TabBar.ClosePressed(0, placed.state()),
+                    placed.handle(pointer(1, closeColumn)).output().orElseThrow());
+            }
+        }
+        assertEquals(file, item.file(), "presentation markers do not become part of the resource name");
+        assertEquals("?/#e\u0301👩‍💻界-long-file-name.java*",
+            TabBarView.formatTabTitle(file, true, true, true, true));
     }
 
     @Test

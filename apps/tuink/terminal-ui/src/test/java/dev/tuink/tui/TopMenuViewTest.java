@@ -74,6 +74,22 @@ class TopMenuViewTest {
     }
 
     @Test
+    void tabMenuRetainsQuestionAndSearchMarkersOnInactiveAndActiveTabs() {
+        TopMenuView view = TopMenuView.build(ui(), List.of(
+            new TopMenuView.TabItem(Path.of("first.txt"), true, false, true, true),
+            new TopMenuView.TabItem(Path.of("中.txt"), false, true, true, false)
+        ), 1, "Cyan", new CommandRouter(), MenuBar.State.open(TopMenuController.TABS_INDEX));
+
+        var inactive = item(view, TopMenuController.TABS_INDEX, 5);
+        var active = item(view, TopMenuController.TABS_INDEX, 6);
+
+        assertEquals("   ?/first.txt*", inactive.label());
+        assertEquals("> /#中.txt", active.label());
+        assertEquals("0", inactive.value().argument("index").orElseThrow());
+        assertEquals("1", active.value().argument("index").orElseThrow());
+    }
+
+    @Test
     void derivesSettingsLabelsAndDisabledWordWrapFromOneUiSnapshot() {
         UiSessionState ui = ui();
         ui.wrapLinesSetting = false;

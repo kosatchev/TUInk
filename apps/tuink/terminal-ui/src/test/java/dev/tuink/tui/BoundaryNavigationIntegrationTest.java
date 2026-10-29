@@ -119,8 +119,8 @@ class BoundaryNavigationIntegrationTest {
                 assertEquals(new Position(0, 0), window.active().state().getCursor());
                 assertEquals(List.of("document", "last"), window.active().tabSession().model().snapshotLines());
             }
-            if (saveAs) assertEquals(SaveAsBarView.Target.SAVE, window.host.saveAsFocusManager.focused().orElseThrow());
-            else assertEquals(SearchFocus.CASE, window.host.searchFocusManager.focused().orElseThrow());
+            if (saveAs) assertEquals(SaveAsBarView.Target.SAVE, window.host.saveAsFocusManager().focused().orElseThrow());
+            else assertEquals(SearchFocus.CASE, window.host.searchFocusManager().focused().orElseThrow());
         }
     }
 }

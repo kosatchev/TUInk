@@ -331,7 +331,7 @@ class SearchClipboardIntegrationTest {
             replacement = window.replacement;
             ui = window.ui;
             clipboard = window.host.clipboard;
-            focus = window.host.searchFocusManager;
+            focus = window.host.searchFocusManager();
             model = window.active().tabSession().model();
             state = window.active().state();
             engine = window.active().tabSession().engine();

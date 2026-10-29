@@ -126,8 +126,25 @@ The workspace accepts a prepared batch only after validating the complete
 membership and allocating its next immutable registry. One document session
 cannot belong to two workspaces. The TUI `SessionContext` derives its active
 model, state, engine and renderer from workspace selection; it keeps no second
-mutable list of tabs or cached active-document pointers. Window focus, dialogs
-and geometry remain frontend state.
+mutable list of tabs or cached active-document pointers. Focus, dialogs and
+geometry remain frontend state.
+
+Each terminal workspace attachment retains a `TabUiState` for its `ViewId`.
+It owns search controls and options, filename input, local dialogs, picker and
+help state, notifications and focus managers. Manual tab selection preserves
+these controls; the window prepares only the active view's placements and
+cancels pointer capture when the view changes. Only quit confirmation and
+startup recovery remain application-wide modals. Dialog and search badges are
+projections of this retained UI state and never become document names or identity.
+
+An explicit cross-tab search result copies query, replacement, options and focus
+intent into independent destination controls while retaining the origin's search.
+Ordinary tab switching does not copy or close search. Replace operations still
+target the active document. After the user selects another tab, open/save
+completion messages and prompts update the initiating view's UI without replacing
+the selected tab's dialog or forcing activation. The
+frontend file executor retains one operation in flight; view-local dialogs do
+not change the document-level save lock shared by every view of that document.
 
 Removing a view permanently retires its ID and rejects deferred commands for it.
 Attaching a logical view does not admit it into a workspace. If admission is

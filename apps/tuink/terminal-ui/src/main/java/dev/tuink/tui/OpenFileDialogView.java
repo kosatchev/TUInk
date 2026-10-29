@@ -68,7 +68,8 @@ final class OpenFileDialogView {
             buttonTarget(Control.OK, buttons.ok(), space, tree.enabled(), true),
             buttonTarget(Control.CANCEL, buttons.cancel(), space, tree.enabled(), true),
             buttonTarget(Control.HIDDEN, hidden, space, tree.enabled(), false),
-            buttonTarget(Control.CLOSE, close, space, tree.enabled(), false)
+            buttonTarget(Control.CLOSE, close, space,
+                tree.enabled(), false)
         );
         PlacedModal frame = new Modal(layout.width(), layout.height(),
             tree.loading() ? " Open File (Loading...) " : " Open File ")

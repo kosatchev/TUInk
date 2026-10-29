@@ -49,10 +49,13 @@ TUIframe provides the shared behavior in `tuiframe-widgets`:
 works with inline prompts that have no frame.
 
 TUInk classifies its commands in `DialogCommandPolicy` and supplies the actual
-control scopes, document geometry, clipboard adapter, and rendering. File,
-tab, and menu commands remain unavailable from a document behind a blocking
-or exclusive operation. Escape and the existing per-dialog Ctrl+Q actions
-continue through the dialog's cancellation policy.
+control scopes, document geometry, clipboard adapter, and rendering. File and
+menu commands aimed at a document behind its blocking or exclusive dialog remain
+unavailable. Tab navigation is routed before view-local blocking input so another
+tab remains usable and the originating dialog retains its controls and focus.
+Only quit confirmation and startup recovery keep application-wide ownership.
+Escape and the existing per-dialog Ctrl+Q actions continue through the dialog's
+cancellation policy.
 
 Quit and close-tab confirmations map `Y` to Save and `N`, Escape, or Ctrl+Q
 to Cancel. Discard requires explicitly activating its button. These choices

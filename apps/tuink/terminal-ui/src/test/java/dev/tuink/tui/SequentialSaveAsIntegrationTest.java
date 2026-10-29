@@ -93,7 +93,7 @@ class SequentialSaveAsIntegrationTest {
             window.command(TuinkCommand.APP_QUIT);
             window.event(new TextInput("y"));
             assertEquals(second.toString(), window.filename.text());
-            assertEquals(SaveAsBarView.Target.FIELD, window.host.saveAsFocusManager.focused().orElseThrow());
+            assertEquals(SaveAsBarView.Target.FIELD, window.host.saveAsFocusManager().focused().orElseThrow());
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
 
             assertFalse(window.controller.running());
@@ -102,7 +102,7 @@ class SequentialSaveAsIntegrationTest {
     }
 
     private static void setFilename(EditorWindowFixture window, Path target) {
-        assertEquals(SaveAsBarView.Target.FIELD, window.host.saveAsFocusManager.focused().orElseThrow());
+        assertEquals(SaveAsBarView.Target.FIELD, window.host.saveAsFocusManager().focused().orElseThrow());
         window.event(KeyStroke.of(KeyStroke.Key.A, KeyStroke.Modifier.CTRL));
         window.event(new TextInput(target.toString()));
         assertEquals(target.toString(), window.filename.text());
@@ -117,9 +117,9 @@ class SequentialSaveAsIntegrationTest {
             window.pointer(PointerEvent.Kind.RELEASE, row, column);
         } else {
             window.event(KeyStroke.of(KeyStroke.Key.TAB));
-            assertEquals(SaveAsBarView.Target.SAVE, window.host.saveAsFocusManager.focused().orElseThrow());
+            assertEquals(SaveAsBarView.Target.SAVE, window.host.saveAsFocusManager().focused().orElseThrow());
             window.frame();
-            assertEquals(SaveAsBarView.Target.SAVE, window.host.saveAsFocusManager.focused().orElseThrow());
+            assertEquals(SaveAsBarView.Target.SAVE, window.host.saveAsFocusManager().focused().orElseThrow());
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
         }
     }

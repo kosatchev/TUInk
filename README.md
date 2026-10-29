@@ -244,6 +244,14 @@ of the viewport. Editing commands rejected in reading mode leave the viewing
 position unchanged. Keyboard input ends an active mouse drag before handling
 the key.
 
+Each tab also retains its search text, replacement, options, dialogs, and control
+focus. Tab shortcuts and tab-bar clicks remain available while search, Save As,
+the file picker, help, or a document confirmation is open. Return to the tab to
+resume its controls. Quit confirmation and startup recovery apply to the whole
+application.
+Tab titles and the Tab menu show `?` for a pending dialog, `/` for open search,
+`#` for search matches, and `*` for unsaved changes, including on inactive tabs.
+
 With line wrapping enabled, Up/Down and Page Up/Page Down navigate displayed
 rows; Shift+Up/Down extend the selection by displayed rows. A fully filled
 final wrap segment has an extra empty row for the cursor after the text.
@@ -258,6 +266,9 @@ match and `Ctrl+R` to replace. Activate the `Replace all` button to replace all 
 in the active tab.
 The `All tabs` option extends matching and next/previous navigation to all open tabs.
 `Replace` and `Replace all` change the active tab.
+A result in another tab carries a copy of the current query, replacement, and
+options into that tab. The original tab keeps its search; later edits to either
+tab's controls are independent. Ordinary tab switching leaves each search unchanged.
 `Enter` advances to the next match from a text field. Enter or Space activates
 the focused button, including option toggles. `Tab` and
 `Shift+Tab` cycle through fields, options, buttons, and the document; `Esc`
@@ -314,8 +325,8 @@ A failed save keeps the prompt open and returns focus to the filename. Its error
 stays visible until the filename changes or the prompt closes. Submitting an empty
 filename shows an error and preserves any pending quit or close-tab operation.
 
-Help and the file picker keep focus inside the dialog and block all document
-input, including selection, copying, and scrolling. `Tab` / `Shift+Tab` cycle
+Help and the file picker keep focus inside the dialog and block input to that
+tab's document, including selection, copying, and scrolling. `Tab` / `Shift+Tab` cycle
 only through their controls. Input aimed at the document briefly highlights
 the dialog, focuses its first available control, and is discarded.
 
@@ -338,6 +349,9 @@ being written allows navigation and copying; text edits and closing that tab
 wait until the write finishes. Other tabs remain usable. Quit waits for the
 current file operation before continuing its unsaved-work checks. Shutdown also
 finishes an already started write before taking final recovery snapshots.
+One document read or write runs at a time; keeping dialogs open in several tabs
+does not start concurrent file operations. If you switch tabs during an operation,
+its completion messages and prompts stay with the tab that started it.
 
 In confirmation prompts, `Tab` / `Shift+Tab` cycle through buttons and the
 document. With a button focused, Left/Right move between buttons, and `Enter`

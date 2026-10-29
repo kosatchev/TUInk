@@ -38,8 +38,11 @@ class SearchTabMarkerCacheIntegrationTest {
 
             window.event(ctrl(KeyStroke.Key.F));
 
-            assertEquals("needle", window.query.text());
-            assertTrue(window.screenRow(window.height - 1).contains("Find 0"));
+            assertEquals("", window.query.text());
+            assertTrue(window.active().uiState().searchMode);
+            assertTrue(window.screenRow(1).contains("/--no name--"), window.screenRow(1));
+            assertFalse(window.screenRow(window.height - 1).contains("Find "),
+                window.screenRow(window.height - 1));
             assertFalse(window.screenRow(1).contains("#--no name--"), window.screenRow(1));
             assertEquals(List.of("other"), window.active().tabSession().model().snapshotLines());
         }

@@ -142,7 +142,7 @@ class SearchReplaceFeedbackIntegrationTest {
             replace(window, SearchFocus.ALL_BUTTON);
             assertEquals("Matched 2 occurrence(s); replacement applied. Undo: Esc, then Ctrl+Z",
                 window.notification.message);
-            assertEquals(SearchFocus.ALL_BUTTON, window.host.searchFocusManager.focused().orElseThrow());
+            assertEquals(SearchFocus.ALL_BUTTON, window.host.searchFocusManager().focused().orElseThrow());
 
             window.event(KeyStroke.of(KeyStroke.Key.Z, KeyStroke.Modifier.CTRL));
             assertEquals(List.of("beta beta"), window.active().tabSession().model().snapshotLines());

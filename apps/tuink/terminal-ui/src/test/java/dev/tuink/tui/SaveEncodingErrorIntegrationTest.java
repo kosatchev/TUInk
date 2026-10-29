@@ -45,7 +45,7 @@ class SaveEncodingErrorIntegrationTest {
 
             assertEncodingError(window);
             assertArrayEquals(ORIGINAL.getBytes(LEGACY_CHARSET), Files.readAllBytes(window.document));
-            assertEquals(ConfirmChoice.CANCEL, window.host.confirmFocusManager.focused().orElseThrow());
+            assertEquals(ConfirmChoice.CANCEL, window.host.confirmFocusManager().focused().orElseThrow());
             window.event(KeyStroke.of(KeyStroke.Key.ENTER)); // Safe default cancels the conversion.
             Path target = directory.resolve("new-name.txt");
             window.event(ctrl(KeyStroke.Key.K));
@@ -53,7 +53,7 @@ class SaveEncodingErrorIntegrationTest {
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
 
             assertEncodingError(window);
-            assertEquals(ConfirmChoice.CANCEL, window.host.confirmFocusManager.focused().orElseThrow());
+            assertEquals(ConfirmChoice.CANCEL, window.host.confirmFocusManager().focused().orElseThrow());
             assertEquals(target.toString(), window.filename.text());
             assertFalse(Files.exists(target));
             assertArrayEquals(ORIGINAL.getBytes(LEGACY_CHARSET), Files.readAllBytes(window.document));
@@ -73,7 +73,7 @@ class SaveEncodingErrorIntegrationTest {
             window.event(ctrl(KeyStroke.Key.S));
             window.event(new TextInput("y"));
             assertTrue(window.screenRow(window.height - 2).startsWith("Save UTF-8: "));
-            assertEquals(SaveAsBarView.Target.FIELD, window.host.saveAsFocusManager.focused().orElseThrow());
+            assertEquals(SaveAsBarView.Target.FIELD, window.host.saveAsFocusManager().focused().orElseThrow());
             Path target = directory.resolve("utf8-copy.txt");
             replaceFilename(window, target);
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));

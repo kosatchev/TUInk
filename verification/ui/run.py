@@ -350,6 +350,48 @@ class Regressions:
             session.finish()
         assert document.read_text(encoding="utf-8") == original
 
+    def tab_scoped_ui(self):
+        document = self.fixture("a", "needle original")
+        with self.session("tab-scoped-ui", document) as session:
+            target = session.root / "b.txt"
+            session.send(b"\x06needle")
+            session.expect(lambda: "Find: needle" in session.screen.text, "the first tab's search")
+            session.send(b"\x0e")
+            session.expect(lambda: "Tab 2/2" in session.screen.text, "a separate draft tab")
+            session.send(b"draft\x0b")
+            session.expect(lambda: "Save As: " in session.screen.text, "the draft's Save As prompt")
+            session.send(b"\x01\x1b[200~b.txt\x1b[201~")
+            session.expect(lambda: "Save As: b.txt" in session.screen.text
+                           and re.search(r"/#?a\.txt", session.screen.lines[1])
+                           and "?--no name--*" in session.screen.lines[1],
+                           "the inactive search badge and the draft's question badge")
+
+            session.send(b"\x1b[27;5;9~")  # Ctrl+Tab (xterm modifyOtherKeys)
+            session.expect(lambda: "Find: needle" in session.screen.text
+                           and "Save As: " not in session.screen.text
+                           and "?--no name--*" in session.screen.lines[1],
+                           "restoring the first tab's search while the draft awaits its answer")
+            session.send(b"\x1b", 0.7)
+            session.expect(lambda: "Find: " not in session.screen.text
+                           and not re.search(r"/#?a\.txt", session.screen.lines[1]),
+                           "closing only the first tab's search")
+            session.send(b"X")
+            session.save(document, "Xneedle original")
+            assert "?--no name--*" in session.screen.lines[1], session.screen.text
+
+            session.send(b"\x1b[27;5;9~")
+            session.expect(lambda: "Save As: b.txt" in session.screen.text
+                           and "?--no name--*" in session.screen.lines[1],
+                           "restoring the draft's unsubmitted filename")
+            session.send(b"\r")
+            session.expect_saved(target, "draft", "saving the draft after editing the other tab")
+            session.expect(lambda: "a.txt" in session.screen.lines[1] and "b.txt" in session.screen.lines[1]
+                           and "?" not in session.screen.lines[1] and "*" not in session.screen.lines[1],
+                           "both clean tabs with the answered question badge cleared")
+            session.finish()
+        assert document.read_text(encoding="utf-8") == "Xneedle original"
+        assert target.read_text(encoding="utf-8") == "draft"
+
     def history(self):
         document = self.fixture("history", "base\n")
         with self.session("history", document) as session:
@@ -1273,7 +1315,7 @@ class Regressions:
         assert document.read_text(encoding="utf-8") == original
 
 
-SCENARIOS = ("reading", "focus", "field", "resize", "large-wrap", "tabs", "history", "grapheme-edit-caret", "selection-autoscroll", "long-copy-name", "navigation", "fragmented-keys", "quit-confirmation", "gutter-idle", "paste", "settings", "settings-conflict", "recovery", "recovery-format5", "recovery-memory", "linux-keys", "enhanced-text", "long-unicode-edit", "save-as-workspace", "settings-memory", "syntax-memory", "unix-path-recovery", "literal-indentation", "field-memory", "document-caption", "save-name-suggestion", "replacement-memory", "paste-memory", "recovery-lock-cleanup", "xdg-profile", "cli-path-identity", "save-as-retarget", "field-edit-caret", "field-memory-growth", "identical-replace-budget", "clipboard-memory", "cpp-raw-indentation")
+SCENARIOS = ("reading", "focus", "field", "resize", "large-wrap", "tabs", "tab-scoped-ui", "history", "grapheme-edit-caret", "selection-autoscroll", "long-copy-name", "navigation", "fragmented-keys", "quit-confirmation", "gutter-idle", "paste", "settings", "settings-conflict", "recovery", "recovery-format5", "recovery-memory", "linux-keys", "enhanced-text", "long-unicode-edit", "save-as-workspace", "settings-memory", "syntax-memory", "unix-path-recovery", "literal-indentation", "field-memory", "document-caption", "save-name-suggestion", "replacement-memory", "paste-memory", "recovery-lock-cleanup", "xdg-profile", "cli-path-identity", "save-as-retarget", "field-edit-caret", "field-memory-growth", "identical-replace-budget", "clipboard-memory", "cpp-raw-indentation")
 
 
 def classpath_manifest(classpath):

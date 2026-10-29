@@ -83,7 +83,10 @@ render на owner thread. Полные placements файлового диало�
 окно применяет viewport и notification effects. `SearchSelection` разделяет
 ограниченную автоподстановку Ctrl+F, автоматическую подсветку и точную проверку
 текущего совпадения. `SearchPresentation` владеет count/tab-marker caches;
-ключи учитывают identity модели и revision. Поля и focus остаются у окна.
+ключи учитывают identity модели и revision. Поля, параметры, caches и focus
+удерживает `TabUiState` своего `ViewId`; обычная смена вкладки сохраняет поиск.
+Переход к результату в другой вкладке копирует значения поиска в её независимые
+controls, сохраняя исходную вкладку. Замена по-прежнему действует на активный документ.
 Literal-поиск в `SearchMatcher` использует KMP по Unicode code points:
 подготовка запроса и проход строки линейны, результаты сохраняют исходные
 UTF-16 offsets. Case-insensitive режим сравнивает code points после
@@ -288,9 +291,19 @@ session runtime ненужные зависимости существующег
 `T` — принадлежащая frontend проекция с layout, renderer и viewport controllers.
 `SessionContext` не содержит собственного mutable списка вкладок, active index
 или сохранённых model/state/engine: они выводятся из selection владельца.
-Окно по-прежнему отвечает за focus, modal, layout и presentation effects.
+`TabUiState` удерживает поиск, диалоги, поля ввода, picker и help state,
+notifications и focus managers каждого frontend view. Окно готовит layout и
+presentation effects выбранной вкладки; смена view отменяет pointer capture
+и пересоздаёт placements. Только quit confirmation и startup recovery остаются
+общими modal приложения. Переключение вкладок доступно до маршрутизации локального
+блокирующего ввода. Значки `?` и `/` в TabBar и Tab menu выводятся из сохранённого
+состояния диалога и поиска, включая неактивные вкладки.
 Open/save/close результаты адресуют документы и views стабильными IDs; удаление
 вкладки не перенаправляет завершение операции на занявший её индекс документ.
+Результат, завершившийся после перехода пользователя в другую вкладку, обновляет
+UI исходного view и не переключает выбранную вкладку.
+Вкладочные диалоги сохраняют один общий file worker с одной I/O operation in-flight;
+session save-lock остаётся общим для всех views одного документа.
 
 Проверки aliases, physical target, read-only и существования имени находятся в
 JVM adapter `JvmFileAdvisory`, без `Path` в workspace API. Это advisory host

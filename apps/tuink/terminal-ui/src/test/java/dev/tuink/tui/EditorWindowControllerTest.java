@@ -112,7 +112,7 @@ class EditorWindowControllerTest {
             assertEquals("field value😀", fixture.host.clipboard.text());
             assertEquals(document, fixture.active().tabSession().model().snapshotLines());
             assertFalse(fixture.active().state().isDirty());
-            assertEquals(SearchFocus.FIND, fixture.host.searchFocusManager.focused().orElseThrow());
+            assertEquals(SearchFocus.FIND, fixture.host.searchFocusManager().focused().orElseThrow());
         }
     }
 
@@ -175,7 +175,7 @@ class EditorWindowControllerTest {
             assertFalse(fixture.query.mouseSelecting());
             fixture.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
             assertTrue(fixture.ui.searchMode);
-            assertEquals(SearchFocus.FIND, fixture.host.searchFocusManager.focused().orElseThrow());
+            assertEquals(SearchFocus.FIND, fixture.host.searchFocusManager().focused().orElseThrow());
             fixture.event(ctrl(KeyStroke.Key.A));
             fixture.event(new TextInput("resumed"));
             assertEquals("resumed", fixture.query.text());
@@ -279,23 +279,23 @@ class EditorWindowControllerTest {
             fixture.event(KeyStroke.of(KeyStroke.Key.ENTER));
             Point thumb = fixture.verticalThumb(false);
             fixture.pointer(PointerEvent.Kind.PRESS, thumb.y(), thumb.x());
-            assertNotNull(fixture.host.helpScrollState.drag());
+            assertNotNull(fixture.host.helpScrollState().drag());
             fixture.pointer(PointerEvent.Kind.DRAG, fixture.height + 5, 0);
-            int draggedTop = fixture.host.helpScrollState.firstVisibleIndex();
+            int draggedTop = fixture.host.helpScrollState().firstVisibleIndex();
             assertTrue(draggedTop > 0);
             fixture.pointer(PointerEvent.Kind.RELEASE, 0, 0);
-            assertNull(fixture.host.helpScrollState.drag());
+            assertNull(fixture.host.helpScrollState().drag());
             fixture.pointer(PointerEvent.Kind.DRAG, 0, fixture.width - 1);
-            assertEquals(draggedTop, fixture.host.helpScrollState.firstVisibleIndex());
+            assertEquals(draggedTop, fixture.host.helpScrollState().firstVisibleIndex());
 
             thumb = fixture.verticalThumb(false);
             fixture.pointer(PointerEvent.Kind.PRESS, thumb.y(), thumb.x());
-            assertNotNull(fixture.host.helpScrollState.drag());
+            assertNotNull(fixture.host.helpScrollState().drag());
             fixture.event(KeyStroke.of(KeyStroke.Key.HOME));
-            assertNull(fixture.host.helpScrollState.drag());
-            assertEquals(0, fixture.host.helpScrollState.firstVisibleIndex());
+            assertNull(fixture.host.helpScrollState().drag());
+            assertEquals(0, fixture.host.helpScrollState().firstVisibleIndex());
             fixture.pointer(PointerEvent.Kind.DRAG, fixture.height + 5, 0);
-            assertEquals(0, fixture.host.helpScrollState.firstVisibleIndex());
+            assertEquals(0, fixture.host.helpScrollState().firstVisibleIndex());
             assertFalse(fixture.active().state().isDirty());
         }
     }
@@ -386,11 +386,11 @@ class EditorWindowControllerTest {
 
     private static void assertFieldFocus(EditorWindowFixture fixture, FieldTarget target) {
         if (target == FieldTarget.SAVE_AS) {
-            assertEquals(SaveAsBarView.Target.FIELD, fixture.host.saveAsFocusManager.focused().orElseThrow());
+            assertEquals(SaveAsBarView.Target.FIELD, fixture.host.saveAsFocusManager().focused().orElseThrow());
         } else {
             assertFalse(fixture.ui.searchEditorFocused);
             assertEquals(target == FieldTarget.FIND ? SearchFocus.FIND : SearchFocus.REPLACE,
-                fixture.host.searchFocusManager.focused().orElseThrow());
+                fixture.host.searchFocusManager().focused().orElseThrow());
         }
     }
 

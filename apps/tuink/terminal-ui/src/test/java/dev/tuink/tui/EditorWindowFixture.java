@@ -51,15 +51,15 @@ final class EditorWindowFixture implements AutoCloseable {
     final TerminalEditorApp host = new TerminalEditorApp();
     final List<TerminalEditorApp.EditorTab> tabs;
     final TerminalEditorApp.SessionContext context;
-    final TerminalEditorApp.NotificationState notification = host.new NotificationState();
-    final TextField query = new TextField(TextField.PastePolicy.PRESERVE_TABS);
-    final TextField replacement = new TextField(TextField.PastePolicy.PRESERVE_TABS);
-    final TextField filename = new TextField(TextField.PastePolicy.PRESERVE_TABS);
+    TerminalEditorApp.NotificationState notification = host.new NotificationState();
+    TextField query = new TextField(TextField.PastePolicy.PRESERVE_TABS);
+    TextField replacement = new TextField(TextField.PastePolicy.PRESERVE_TABS);
+    TextField filename = new TextField(TextField.PastePolicy.PRESERVE_TABS);
     final EditorView editorView = new EditorView();
     final TopMenuController menu = new TopMenuController();
     final Keymap<KeyStroke> keymap = TuinkKeymap.defaults();
     final TuiEventLoop<TuiInputEvent> loop = new TuiEventLoop<>(timeout -> TuiEventLoop.Read.idle());
-    final OpenFileTreeController tree;
+    OpenFileTreeController tree;
     final UiSessionState ui;
     final AppSettingsSession settingsSession;
     final EditorWindowController controller;
@@ -209,8 +209,10 @@ final class EditorWindowFixture implements AutoCloseable {
 
     void event(TuiInputEvent event) {
         // The production runner synchronizes owner state before polling input.
+        bindActiveUi();
         controller.prepareTurn();
         controller.handlePoll(new TuiEventLoop.Poll<>(event, event instanceof ResizeEvent, false));
+        bindActiveUi();
         frame();
     }
 
@@ -231,7 +233,9 @@ final class EditorWindowFixture implements AutoCloseable {
     }
 
     void frame() {
+        bindActiveUi();
         controller.prepareTurn();
+        bindActiveUi();
         loop.invalidate();
         TuiEventLoop.FrameTicket ticket = loop.beginFrame();
         assertNotNull(ticket);
@@ -244,6 +248,16 @@ final class EditorWindowFixture implements AutoCloseable {
             loop.endFrame(ticket, completed && rendered);
         }
         controller.frameEnded(rendered);
+        bindActiveUi();
+    }
+
+    private void bindActiveUi() {
+        TabUiState state = active().uiState();
+        query = state.searchQueryInput;
+        replacement = state.searchReplaceInput;
+        filename = state.saveAsInput;
+        if (state.openFileTree != null) tree = state.openFileTree;
+        notification = controller.notificationState();
     }
 
     /** Exercise semantic commands through a user key binding and the real router. */
@@ -257,13 +271,13 @@ final class EditorWindowFixture implements AutoCloseable {
         if (target == null) {
             // Explicitly cleared focus is a public FocusManager state. Only the
             // stable scope identity is needed; no production geometry is copied.
-            host.searchFocusManager.clear(new FocusScope<SearchFocus, Object>(
+            host.searchFocusManager().clear(new FocusScope<SearchFocus, Object>(
                 TerminalEditorApp.SEARCH_SCOPE_ID, FocusResetPolicy.CLEARED, List.of(), List.of(), List.of()));
             frame();
             return;
         }
         for (int step = 0; step <= SearchFocus.values().length; step++) {
-            if (!ui.searchEditorFocused && host.searchFocusManager.focused().orElse(null) == target) {
+            if (!active().uiState().searchEditorFocused && host.searchFocusManager().focused().orElse(null) == target) {
                 return;
             }
             event(KeyStroke.of(KeyStroke.Key.TAB));
@@ -273,7 +287,7 @@ final class EditorWindowFixture implements AutoCloseable {
 
     void focusDocument() {
         for (int step = 0; step <= SearchFocus.values().length; step++) {
-            if (ui.searchEditorFocused) {
+            if (active().uiState().searchEditorFocused) {
                 return;
             }
             event(KeyStroke.of(KeyStroke.Key.TAB));

@@ -95,7 +95,7 @@ class RecoveryPromptIntegrationTest {
              EditorWindowFixture window = new EditorWindowFixture(directory.resolve("first-window"), false,
                  List.of("other document"), store.loadAll().entries(), persistence(store))) {
             if (columns == 80) {
-                assertEquals(ConfirmChoice.CANCEL, window.host.confirmFocusManager.focused().orElseThrow());
+                assertEquals(ConfirmChoice.CANCEL, window.host.confirmFocusManager().focused().orElseThrow());
                 assertTrue(prompt(window).contains("[Later]"));
             }
             window.resize(24, columns);
@@ -149,14 +149,14 @@ class RecoveryPromptIntegrationTest {
         try (RecoveryStore store = RecoveryStoreFixtures.open(recoveryDirectory);
              EditorWindowFixture window = new EditorWindowFixture(directory.resolve("window"), false,
                  List.of("other document"), store.loadAll().entries(), persistence(store))) {
-            assertEquals(ConfirmChoice.CANCEL, window.host.confirmFocusManager.focused().orElseThrow());
+            assertEquals(ConfirmChoice.CANCEL, window.host.confirmFocusManager().focused().orElseThrow());
             if (pointer) {
                 int deleteColumn = prompt(window).indexOf("[Delete]");
                 assertTrue(deleteColumn >= 0);
                 window.pointer(PointerEvent.Kind.PRESS, window.height - 2, deleteColumn);
             } else {
                 window.event(KeyStroke.of(KeyStroke.Key.ARROW_LEFT));
-                assertEquals(ConfirmChoice.DISCARD, window.host.confirmFocusManager.focused().orElseThrow());
+                assertEquals(ConfirmChoice.DISCARD, window.host.confirmFocusManager().focused().orElseThrow());
                 window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             }
 

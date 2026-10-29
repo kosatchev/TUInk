@@ -129,6 +129,7 @@ public class TerminalEditorApp {
     final FocusManager<HelpOverlayInputRouter.Target> helpFocusManager = new FocusManager<>();
     private HelpPage helpScrollPage;
     private ListView.WrappedText helpText;
+    private HelpPage helpTextPage;
     ListView.State helpScrollState = ListView.State.initial();
     private final Theme confirmWidgetTheme = this::resolveConfirmWidgetStyle;
     final FocusManager<ConfirmChoice> confirmFocusManager = new FocusManager<>();
@@ -136,6 +137,7 @@ public class TerminalEditorApp {
     final FocusManager<SaveAsBarView.Target> saveAsFocusManager = new FocusManager<>();
     private final Theme searchWidgetTheme = this::resolveSearchWidgetStyle;
     final FocusManager<SearchFocus> searchFocusManager = new FocusManager<>();
+    private Supplier<TabUiState> tabUiSource;
     private final Theme colorTabBarWidgetTheme = key -> resolveTabBarWidgetStyle(key, true);
     private final Theme monoTabBarWidgetTheme = key -> resolveTabBarWidgetStyle(key, false);
     private final Theme colorTopMenuWidgetTheme = key -> resolveTopMenuWidgetStyle(key, true);
@@ -146,6 +148,94 @@ public class TerminalEditorApp {
     boolean profileEnabled = false;
     final FrameProfiler frameProfiler = new FrameProfiler();
     private FrameComposition.OpenTreeDiffKey lastOpenTreeDiffKey;
+
+    void bindTabUi(Supplier<TabUiState> tabUiSource) {
+        this.tabUiSource = Objects.requireNonNull(tabUiSource, "tabUiSource");
+    }
+
+    private TabUiState selectedTabUi() {
+        return tabUiSource == null ? null : tabUiSource.get();
+    }
+
+    FocusManager<SearchFocus> searchFocusManager() {
+        TabUiState ui = selectedTabUi();
+        return ui == null ? searchFocusManager : ui.searchFocusManager;
+    }
+
+    FocusManager<ConfirmChoice> confirmFocusManager() {
+        TabUiState ui = selectedTabUi();
+        return ui == null ? confirmFocusManager : ui.confirmFocusManager;
+    }
+
+    FocusManager<SaveAsBarView.Target> saveAsFocusManager() {
+        TabUiState ui = selectedTabUi();
+        return ui == null ? saveAsFocusManager : ui.saveAsFocusManager;
+    }
+
+    FocusManager<HelpOverlayInputRouter.Target> helpFocusManager() {
+        TabUiState ui = selectedTabUi();
+        return ui == null ? helpFocusManager : ui.helpFocusManager;
+    }
+
+    ListView.State helpScrollState() {
+        TabUiState ui = selectedTabUi();
+        return ui == null ? helpScrollState : ui.helpScrollState;
+    }
+
+    void setHelpScrollState(ListView.State state) {
+        Objects.requireNonNull(state, "state");
+        TabUiState ui = selectedTabUi();
+        if (ui == null) helpScrollState = state;
+        else ui.helpScrollState = state;
+    }
+
+    private HelpPage helpScrollPage() {
+        TabUiState ui = selectedTabUi();
+        return ui == null ? helpScrollPage : ui.helpScrollPage;
+    }
+
+    private void setHelpScrollPage(HelpPage page) {
+        TabUiState ui = selectedTabUi();
+        if (ui == null) helpScrollPage = page;
+        else ui.helpScrollPage = page;
+    }
+
+    private ListView.WrappedText helpText() {
+        TabUiState ui = selectedTabUi();
+        return ui == null ? helpText : ui.helpText;
+    }
+
+    private HelpPage helpTextPage() {
+        TabUiState ui = selectedTabUi();
+        return ui == null ? helpTextPage : ui.helpTextPage;
+    }
+
+    private void setHelpText(HelpPage page, ListView.WrappedText text) {
+        TabUiState ui = selectedTabUi();
+        if (ui == null) {
+            helpText = text;
+            helpTextPage = page;
+        } else {
+            ui.helpText = text;
+            ui.helpTextPage = page;
+        }
+    }
+
+    private HelpOverlayPlacement helpOverlayCache() {
+        TabUiState ui = selectedTabUi();
+        return ui == null ? helpOverlayCache : ui.helpOverlayCache;
+    }
+
+    private void setHelpOverlayCache(HelpOverlayPlacement placement) {
+        TabUiState ui = selectedTabUi();
+        if (ui == null) helpOverlayCache = placement;
+        else ui.helpOverlayCache = placement;
+    }
+
+    DialogAttention modalAttention() {
+        TabUiState ui = selectedTabUi();
+        return ui == null ? modalAttention : ui.modalAttention;
+    }
 
     public static void main(String[] args) throws Exception {
         int exitCode = launch(args);
@@ -488,30 +578,30 @@ public class TerminalEditorApp {
         if (placement == null) {
             return;
         }
-        placement.paint(canvas, confirmWidgetTheme, confirmFocusManager);
+        placement.paint(canvas, confirmWidgetTheme, confirmFocusManager());
     }
 
     private void paintSaveAsField(Canvas canvas, SaveAsBarView.Placement placement) {
         if (placement == null) {
             return;
         }
-        placement.paint(canvas, saveAsWidgetTheme, saveAsFocusManager);
+        placement.paint(canvas, saveAsWidgetTheme, saveAsFocusManager());
     }
 
     private void paintSearchBar(Canvas canvas, SearchBarView.Placement placement) {
         if (placement == null) {
             return;
         }
-        placement.paint(canvas, searchWidgetTheme, searchFocusManager);
+        placement.paint(canvas, searchWidgetTheme, searchFocusManager());
     }
 
     SearchFocus currentSearchFocus() {
-        return searchFocusManager.focused().orElse(SearchFocus.FIND);
+        return searchFocusManager().focused().orElse(SearchFocus.FIND);
     }
 
     void focusSearch(SearchBarView.Placement placement, SearchFocus target) {
         if (placement != null && target != null) {
-            searchFocusManager.focus(placement.focusScope(), target);
+            searchFocusManager().focus(placement.focusScope(), target);
         }
     }
 
@@ -786,14 +876,14 @@ public class TerminalEditorApp {
         }
     }
 
-    private HelpDialogLayout helpDialogLayout(int rows, int cols, int contentRows) {
+    private HelpDialogLayout helpDialogLayout(Rect viewport, int contentRows) {
         int preferredWidth = 68;
         // Frame borders and one footer row surround the help viewport.
         int preferredHeight = contentRows + 3;
-        int width = Math.max(24, Math.min(preferredWidth, cols - 4));
-        int height = Math.max(8, Math.min(preferredHeight, rows - 4));
-        int left = Math.max(0, (cols - width) / 2);
-        int top = Math.max(0, (rows - height) / 2);
+        int width = Math.min(viewport.width(), Math.max(24, Math.min(preferredWidth, viewport.width() - 4)));
+        int height = Math.min(viewport.height(), Math.max(8, Math.min(preferredHeight, viewport.height() - 4)));
+        int left = viewport.x() + Math.max(0, (viewport.width() - width) / 2);
+        int top = viewport.y() + Math.max(0, (viewport.height() - height) / 2);
         return new HelpDialogLayout(top, left, width, height);
     }
 
@@ -809,35 +899,47 @@ public class TerminalEditorApp {
     }
 
     HelpOverlayPlacement helpOverlayPlacement(int rows, int cols, HelpPage page) {
+        return helpOverlayPlacement(rows, cols, page, 0);
+    }
+
+    HelpOverlayPlacement helpOverlayPlacement(int rows, int cols, HelpPage page, int topInset) {
         if (page == null) {
             resetHelpScroll();
             return null;
         }
-        HelpDialogLayout layout = helpDialogLayout(rows, cols, page.rows().size());
-        int visibleRows = rows < 8 || cols < 24 ? 0 : Math.max(0, layout.height() - 3);
-        if (helpScrollPage != page) {
-            helpScrollPage = page;
-            helpScrollState = ListView.State.initial();
-            helpText = ListView.wrappedText(page.rows());
+        int height = Math.max(0, rows);
+        int inset = Math.clamp(topInset, 0, height);
+        Rect viewport = new Rect(0, inset, Math.max(0, cols), height - inset);
+        if (helpTextPage() != page) {
+            ListView.WrappedText prepared = ListView.wrappedText(page.rows());
+            setHelpText(page, prepared);
         }
-        HelpOverlayPlacement cached = helpOverlayCache;
-        Rect viewport = new Rect(0, 0, cols, rows);
-        if (cached != null && !cached.viewport().equals(viewport) && helpScrollState.drag() != null) {
-            helpScrollState = new ListView.State(-1, helpScrollState.firstVisibleIndex());
+        if (helpScrollPage() != page) {
+            ListView.State initial = ListView.State.initial();
+            setHelpScrollState(initial);
+            setHelpScrollPage(page);
+        }
+        HelpDialogLayout layout = helpDialogLayout(viewport, page.rows().size());
+        int visibleRows = viewport.height() < 8 || viewport.width() < 24 ? 0 : Math.max(0, layout.height() - 3);
+        HelpOverlayPlacement cached = helpOverlayCache();
+        ListView.State scroll = helpScrollState();
+        if (cached != null && !cached.viewport().equals(viewport) && scroll.drag() != null) {
+            scroll = new ListView.State(-1, scroll.firstVisibleIndex());
+            setHelpScrollState(scroll);
         }
         if (cached != null
             && cached.page() == page
-            && cached.content().state().equals(helpScrollState)
+            && cached.content().state().equals(scroll)
             && cached.layout().equals(layout)
             && cached.viewport().equals(viewport)) {
             return cached;
         }
-        ListView.Placement content = helpText.layout(
+        ListView.Placement content = helpText().layout(
             new Rect(layout.left() + 2, layout.top() + 1, Math.max(0, layout.width() - 4), visibleRows),
-            helpScrollState,
+            scroll,
             cached != null && cached.page() == page ? cached.content() : null
         );
-        helpScrollState = content.state();
+        setHelpScrollState(content.state());
         Modal frame = infoDialogFrame(layout, page.title());
         Button close = helpCloseButton(layout);
         RoutedTarget<HelpOverlayInputRouter.Target, Button.Action> closeTarget = new RoutedTarget<>(
@@ -846,8 +948,8 @@ public class TerminalEditorApp {
                 new Rect(close.col(), close.row(), close.width(), 1)
             ),
             FocusSpace.root(viewport),
-            rows >= 8 && cols >= 24,
-            rows >= 8 && cols >= 24
+            viewport.height() >= 8 && viewport.width() >= 24,
+            viewport.height() >= 8 && viewport.width() >= 24
         );
         HelpOverlayPlacement prepared = new HelpOverlayPlacement(
             page,
@@ -863,15 +965,15 @@ public class TerminalEditorApp {
                 closeTarget
             )
         );
-        helpOverlayCache = prepared;
+        setHelpOverlayCache(prepared);
         return prepared;
     }
 
     void resetHelpScroll() {
-        helpScrollPage = null;
-        helpText = null;
-        helpScrollState = ListView.State.initial();
-        helpOverlayCache = null;
+        setHelpScrollPage(null);
+        setHelpText(null, null);
+        setHelpScrollState(ListView.State.initial());
+        setHelpOverlayCache(null);
     }
 
     private static String helpFooter(ListView.Placement content, int textWidth) {
@@ -896,7 +998,7 @@ public class TerminalEditorApp {
             event, new FocusContext(visible, visible, FocusSpace.root(overlay.viewport()))
         );
         if (scrolled.output().orElse(null) instanceof ListView.StateChanged changed) {
-            helpScrollState = changed.state();
+            setHelpScrollState(changed.state());
         }
         if (capture != null) {
             capture.observe(surfaceId, EditorWindowController.helpContentScope(overlay), "content", scrolled);
@@ -905,7 +1007,7 @@ public class TerminalEditorApp {
             return new HelpOverlayInputRouter.Result(true, false);
         }
         HelpOverlayInputRouter.Result result = HelpOverlayInputRouter.route(
-            helpFocusManager, overlay.focusScope(), overlay.frame(), event
+            helpFocusManager(), overlay.focusScope(), overlay.frame(), event
         );
         if (result.closeRequested()) {
             resetHelpScroll();
@@ -954,7 +1056,7 @@ public class TerminalEditorApp {
         closeTarget.placement().paint(
             canvas,
             widgetTheme,
-            helpFocusManager.context(overlay.focusScope(), closeTarget.id())
+            helpFocusManager().context(overlay.focusScope(), closeTarget.id())
                 .orElseThrow()
                 .widgetState()
         );
@@ -1093,7 +1195,8 @@ public class TerminalEditorApp {
     }
 
     void deactivateConfirmFocus() {
-        confirmFocusManager.activeScopeId().ifPresent(confirmFocusManager::deactivate);
+        FocusManager<ConfirmChoice> focus = confirmFocusManager();
+        focus.activeScopeId().ifPresent(focus::deactivate);
     }
 
     HelpPage activeHelpPage(boolean helpHintsMode, boolean helpLicensesMode, boolean helpAuthorMode) {
@@ -1302,7 +1405,7 @@ public class TerminalEditorApp {
         int desiredCursorCol = editorCursor.col();
         Point searchCursor = searchBarPlacement == null
             ? null
-            : searchBarPlacement.cursorPosition(searchFocusManager).orElse(null);
+            : searchBarPlacement.cursorPosition(searchFocusManager()).orElse(null);
         boolean searchOwnsCursor = searchBarPlacement != null && !search.editorFocused();
         boolean blockingContentFocused = composition.layers().contentFocused();
         boolean topMenuOpen = topMenuPlacement != null && topMenuPlacement.state().isOpen();
@@ -1330,7 +1433,7 @@ public class TerminalEditorApp {
         if (saveAsMode && !blockingContentFocused) {
             Point saveAsCursor = saveAsBarPlacement == null
                 ? null
-                : saveAsBarPlacement.cursorPosition(saveAsFocusManager).orElse(null);
+                : saveAsBarPlacement.cursorPosition(saveAsFocusManager()).orElse(null);
             if (saveAsCursor == null) {
                 desiredCursorVisible = false;
             } else {
@@ -1641,6 +1744,7 @@ public class TerminalEditorApp {
         EditorTab replacement = context.tabs().size() == 1 ? newEditorTab() : null;
         if (replacement != null) context.addAll(List.of(replacement));
         context.workspace.remove(viewId);
+        entry.attachment().uiState().close();
         saveAsSuggestions.remove(entry.attachment().tabSession());
         if (replacement != null) context.activate(replacement.documentSession().viewId());
     }
@@ -1665,7 +1769,9 @@ public class TerminalEditorApp {
             out.add(new TabBarView.TabItem(
                 JvmDocumentStorage.pathOf(tab.state().getCurrentResource()),
                 tab.state().isDirty(),
-                hasMatch
+                hasMatch,
+                tab.uiState().hasSearch(),
+                tab.uiState().awaitingAnswer()
             ));
         }
         return out;
@@ -1679,7 +1785,9 @@ public class TerminalEditorApp {
             out.add(new TopMenuView.TabItem(
                 JvmDocumentStorage.pathOf(tab.state().getCurrentResource()),
                 tab.state().isDirty(),
-                hasMatch
+                hasMatch,
+                tab.uiState().hasSearch(),
+                tab.uiState().awaitingAnswer()
             ));
         }
         return out;
@@ -1689,16 +1797,23 @@ public class TerminalEditorApp {
         TuiDocumentSession documentSession,
         RenderPlanBuilder renderPlanBuilder,
         ViewportController viewportController,
-        EditorViewNavigation navigation
+        EditorViewNavigation navigation,
+        TabUiState uiState
     ) {
         EditorTab(TuiDocumentSession documentSession, RenderPlanBuilder renderPlanBuilder) {
             this(documentSession, renderPlanBuilder, new ViewportController(), new EditorViewNavigation(documentSession.view().engine(), documentSession::navigate));
+        }
+
+        EditorTab(TuiDocumentSession documentSession, RenderPlanBuilder renderPlanBuilder,
+                  ViewportController viewportController, EditorViewNavigation navigation) {
+            this(documentSession, renderPlanBuilder, viewportController, navigation, new TabUiState());
         }
 
         EditorTab {
             if (documentSession == null
                 || renderPlanBuilder == null
                 || viewportController == null
+                || uiState == null
                 || navigation == null || navigation.engine() != documentSession.view().engine()
                 || renderPlanBuilder.textLayout() != documentSession.view().textLayout()
                 || !renderPlanBuilder.documentId().equals(documentSession.document().documentId())) {
@@ -1727,7 +1842,7 @@ public class TerminalEditorApp {
         }
 
         private EditorTab withRenderPlanBuilder(RenderPlanBuilder nextBuilder) {
-            return new EditorTab(documentSession, nextBuilder, viewportController, navigation);
+            return new EditorTab(documentSession, nextBuilder, viewportController, navigation, uiState);
         }
     }
 

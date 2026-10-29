@@ -49,7 +49,8 @@ class AsyncOpenIntegrationTest {
 
             assertFalse(window.documentIo.busy());
             assertEquals(3, window.tabs.size());
-            var loaded = window.active().tabSession();
+            assertSame(other, window.active().tabSession(), "a background open must keep the current tab active");
+            var loaded = window.tabs.getLast().tabSession();
             assertEquals(selected, JvmDocumentStorage.pathOf(loaded.state().getCurrentResource()));
             assertEquals(List.of("loaded contents"), loaded.model().snapshotLines());
             assertFalse(loaded.state().isDirty());

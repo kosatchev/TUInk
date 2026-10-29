@@ -57,10 +57,10 @@ class EditorCommandRoutingIntegrationTest {
             fixture.command(TuinkCommand.EDIT_UNDO);
             fixture.command(TuinkCommand.EDIT_REDO);
             assertEquals("ax \ty zc", fixture.filename.text());
-            assertEquals(SaveAsBarView.Target.FIELD, fixture.host.saveAsFocusManager.focused().orElseThrow());
+            assertEquals(SaveAsBarView.Target.FIELD, fixture.host.saveAsFocusManager().focused().orElseThrow());
 
             fixture.command(TuinkCommand.UI_ESCAPE);
-            assertTrue(fixture.host.saveAsFocusManager.activeScopeId().isEmpty());
+            assertTrue(fixture.host.saveAsFocusManager().activeScopeId().isEmpty());
             assertEquals(List.of("document"), fixture.active().tabSession().model().snapshotLines());
             assertEquals(revision, fixture.active().tabSession().model().revision());
             assertEquals(new Position(0, 0), fixture.active().state().getCursor());
@@ -76,14 +76,14 @@ class EditorCommandRoutingIntegrationTest {
             fixture.command(TuinkCommand.EDIT_SELECT_ALL);
             fixture.event(new TextInput(target.toString()));
             fixture.command(TuinkCommand.EDIT_INSERT_TAB);
-            assertEquals(SaveAsBarView.Target.SAVE, fixture.host.saveAsFocusManager.focused().orElseThrow());
+            assertEquals(SaveAsBarView.Target.SAVE, fixture.host.saveAsFocusManager().focused().orElseThrow());
             fixture.host.clipboard.setText("unchanged clipboard");
             for (boolean noFocus : List.of(false, true)) {
                 if (noFocus) {
-                    fixture.host.saveAsFocusManager.clear(new FocusScope<SaveAsBarView.Target, Object>(
+                    fixture.host.saveAsFocusManager().clear(new FocusScope<SaveAsBarView.Target, Object>(
                         TerminalEditorApp.SAVE_AS_SCOPE_ID, FocusResetPolicy.CLEARED, List.of(), List.of(), List.of()));
                     fixture.frame();
-                    assertTrue(fixture.host.saveAsFocusManager.focused().isEmpty());
+                    assertTrue(fixture.host.saveAsFocusManager().focused().isEmpty());
                 }
                 for (TuinkCommand command : List.of(TuinkCommand.EDIT_SELECT_ALL, TuinkCommand.EDIT_COPY,
                     TuinkCommand.EDIT_CUT, TuinkCommand.EDIT_PASTE, TuinkCommand.EDIT_BACKSPACE,
@@ -97,9 +97,9 @@ class EditorCommandRoutingIntegrationTest {
             }
             fixture.command(TuinkCommand.EDIT_INSERT_NEWLINE);
             assertFalse(Files.exists(target));
-            assertTrue(fixture.host.saveAsFocusManager.focused().isEmpty());
+            assertTrue(fixture.host.saveAsFocusManager().focused().isEmpty());
             fixture.command(TuinkCommand.UI_ESCAPE);
-            assertTrue(fixture.host.saveAsFocusManager.activeScopeId().isEmpty());
+            assertTrue(fixture.host.saveAsFocusManager().activeScopeId().isEmpty());
         }
     }
 
@@ -114,7 +114,7 @@ class EditorCommandRoutingIntegrationTest {
             fixture.event(new TextInput(target.toString()));
             if (buttonFocused) {
                 fixture.command(TuinkCommand.EDIT_INSERT_TAB);
-                assertEquals(SaveAsBarView.Target.SAVE, fixture.host.saveAsFocusManager.focused().orElseThrow());
+                assertEquals(SaveAsBarView.Target.SAVE, fixture.host.saveAsFocusManager().focused().orElseThrow());
             }
 
             fixture.command(TuinkCommand.EDIT_INSERT_NEWLINE);
@@ -123,7 +123,7 @@ class EditorCommandRoutingIntegrationTest {
             assertEquals("document", Files.readString(fixture.document));
             assertEquals(target.toAbsolutePath().normalize(), JvmDocumentStorage.pathOf(fixture.active().state().getCurrentResource()));
             assertFalse(fixture.active().state().isDirty());
-            assertTrue(fixture.host.saveAsFocusManager.activeScopeId().isEmpty());
+            assertTrue(fixture.host.saveAsFocusManager().activeScopeId().isEmpty());
         }
     }
 
@@ -134,12 +134,12 @@ class EditorCommandRoutingIntegrationTest {
             fixture.event(KeyStroke.of(KeyStroke.Key.F, KeyStroke.Modifier.CTRL));
             fixture.command(TuinkCommand.EDIT_SELECT_ALL);
             fixture.event(new TextInput("needle"));
-            assertEquals(SearchFocus.FIND, fixture.host.searchFocusManager.focused().orElseThrow());
+            assertEquals(SearchFocus.FIND, fixture.host.searchFocusManager().focused().orElseThrow());
 
             fixture.command(TuinkCommand.DOCUMENT_SAVE);
             assertEquals("modified needle document", Files.readString(fixture.document));
             assertEquals("needle", fixture.query.text());
-            assertEquals(SearchFocus.FIND, fixture.host.searchFocusManager.focused().orElseThrow());
+            assertEquals(SearchFocus.FIND, fixture.host.searchFocusManager().focused().orElseThrow());
             assertFalse(fixture.active().state().isDirty());
 
             fixture.command(TuinkCommand.TAB_NEW);
@@ -167,18 +167,18 @@ class EditorCommandRoutingIntegrationTest {
                 aliased.command(step % 2 == 0 ? TuinkCommand.EDIT_INSERT_TAB : TuinkCommand.SEARCH_FOCUS_NEXT);
                 if (search) {
                     assertEquals(physical.ui.searchEditorFocused, aliased.ui.searchEditorFocused);
-                    assertEquals(physical.host.searchFocusManager.focused(), aliased.host.searchFocusManager.focused());
+                    assertEquals(physical.host.searchFocusManager().focused(), aliased.host.searchFocusManager().focused());
                     visitedDocument |= physical.ui.searchEditorFocused;
                 } else {
-                    assertEquals(physical.host.saveAsFocusManager.focused(), aliased.host.saveAsFocusManager.focused());
-                    visitedDocument |= physical.host.saveAsFocusManager.focused().isEmpty();
+                    assertEquals(physical.host.saveAsFocusManager().focused(), aliased.host.saveAsFocusManager().focused());
+                    visitedDocument |= physical.host.saveAsFocusManager().focused().isEmpty();
                 }
             }
             assertTrue(visitedDocument, "the dialog mode includes the document in its focus cycle");
             if (search) {
-                assertEquals(SearchFocus.FIND, aliased.host.searchFocusManager.focused().orElseThrow());
+                assertEquals(SearchFocus.FIND, aliased.host.searchFocusManager().focused().orElseThrow());
             } else {
-                assertEquals(SaveAsBarView.Target.FIELD, aliased.host.saveAsFocusManager.focused().orElseThrow());
+                assertEquals(SaveAsBarView.Target.FIELD, aliased.host.saveAsFocusManager().focused().orElseThrow());
             }
             assertEquals(List.of("document"), aliased.active().tabSession().model().snapshotLines());
             assertFalse(aliased.active().state().isDirty());

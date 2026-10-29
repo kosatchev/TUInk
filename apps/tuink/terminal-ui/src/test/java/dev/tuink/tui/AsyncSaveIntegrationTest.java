@@ -389,8 +389,13 @@ class AsyncSaveIntegrationTest {
             Files.writeString(firstTarget, "created externally");
             scenario.executor.runNextOnWorker();
             window.frame();
+            assertSame(second, window.active().tabSession());
+            assertEquals(secondTarget.toString(), window.filename.text());
+            assertTrue(window.active().uiState().modalState.isSaveAs());
+            window.command(TuinkCommand.TAB_PREVIOUS);
             assertSame(first, window.active().tabSession());
             assertEquals(firstTarget.toString(), window.filename.text());
+            assertTrue(window.active().uiState().modalState.isSaveOverwriteConfirm());
             assertTrue(first.state().isDirty());
             assertTrue(second.state().isDirty());
             assertEquals("created externally", Files.readString(firstTarget));
@@ -398,8 +403,8 @@ class AsyncSaveIntegrationTest {
 
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
             window.command(TuinkCommand.TAB_NEXT);
-            window.command(TuinkCommand.TAB_CLOSE);
-            window.event(new TextInput("y"));
+            assertSame(second, window.active().tabSession());
+            assertTrue(window.active().uiState().modalState.isSaveAs());
             assertEquals(secondTarget.toString(), window.filename.text());
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             scenario.executor.runNextOnWorker();

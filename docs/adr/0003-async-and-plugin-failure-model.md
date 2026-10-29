@@ -85,6 +85,32 @@ permits cleanup. Finalization attempts the remaining documents after a runtime o
 memory failure, then propagates that failure. Executors and their shutdown, UI
 prompts, viewport serialization, and platform lifecycle remain host responsibilities.
 
+### Workspace lifetime (2026-10-29 amendment)
+
+`EditorWorkspace` is the owner-thread registry for documents, attached views and
+selection. Prepared membership batches validate every document/view and allocate
+the next registry before publication. The frontend consumes its read-only live
+projection; it does not retain a second mutable tab list. Workspace changes are
+addressed by stable `DocumentId` and `ViewId`, with indices calculated only for
+current presentation. Closing an unrelated tab cannot redirect save completion
+or an open/close continuation to its replacement index.
+
+Retiring one view rejects its deferred command targets without discarding the
+shared document. Its pending write still publishes the receipt on the retained
+document coordinator. The last view remains registered until save admission is
+finished. A close continuation for an already retired view does not close a
+different view of the same document. The recovery host retains one participant
+per document and rebinds its view capture to a surviving attachment, preserving
+the same recovery entry and ownership. Restore prepares recovery adoption before
+atomic workspace admission and publishes ownership before subsequent selection
+or placeholder cleanup.
+
+JVM alias lookup, read-only and filename-availability checks are isolated in
+`JvmFileAdvisory`. These synchronous host hints can become stale; they neither
+reserve names nor replace the exact worker inspection/approval protocol. Moving
+the remaining hints to detached lookup admission is a separate latency change.
+Android suspend/process-death, ART, IME and Windows clients remain deferred.
+
 ## Consequences
 
 - Ordering, overload, wakeup, fairness, and shutdown have testable contracts.

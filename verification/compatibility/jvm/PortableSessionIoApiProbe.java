@@ -4,6 +4,7 @@ import dev.tuink.editor.document.DocumentId;
 import dev.tuink.editor.command.DocumentCommand;
 import dev.tuink.editor.command.DocumentCommandResult;
 import dev.tuink.editor.session.document.EditorDocumentSession;
+import dev.tuink.editor.session.document.EditorWorkspace;
 import dev.tuink.editor.session.document.DocumentIoCoordinator;
 import dev.tuink.editor.session.document.PreparedDocumentOpen;
 import dev.tuink.editor.recovery.RecoveryDocument;
@@ -39,5 +40,24 @@ final class PortableSessionIoApiProbe {
     static DocumentCommandResult type(EditorDocumentSession session, String text) {
         var target = session.commandTarget(session.defaultViewId());
         return session.execute(target, new DocumentCommand.Input(text));
+    }
+
+    static EditorWorkspace<String> workspace(EditorDocumentSession session) {
+        var workspace = new EditorWorkspace<String>();
+        var original = session.defaultViewId();
+        var captured = session.commandTarget(original);
+        workspace.add(session, original, "first layout");
+        var attached = session.attachView();
+        workspace.addAll(List.of(new EditorWorkspace.Entry<>(session, attached, "second layout")));
+        workspace.select(attached);
+        workspace.remove(original);
+        session.execute(attached, new DocumentCommand.Edit(DocumentCommand.EditAction.UNDO));
+        if (!(session.execute(captured, new DocumentCommand.Input("retired")) instanceof DocumentCommandResult.Rejected)) {
+            throw new AssertionError("Retired view must reject deferred commands");
+        }
+        workspace.updateAttachment(attached, "replacement layout");
+        workspace.attachments().get(workspace.activeIndex());
+        workspace.document(session.documentId()).prepareRecovery(workspace.active().viewId());
+        return workspace;
     }
 }

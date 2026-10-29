@@ -34,6 +34,27 @@ class EditorSessionApiArchitectureTest {
     }
 
     @Test
+    void workspaceOwnsMembershipAndItsSessionHandshakesRemainInternal() throws ClassNotFoundException {
+        Class<?> session = Class.forName("dev.tuink.editor.session.document.EditorDocumentSession");
+        Set<String> handshakes = Set.of("claimWorkspace", "releaseWorkspace", "detachWorkspaceView");
+        for (var method : session.getDeclaredMethods()) {
+            if (handshakes.contains(method.getName())) {
+                assertTrue(!Modifier.isPublic(method.getModifiers()) && !Modifier.isProtected(method.getModifiers()),
+                    () -> "Workspace lifetime can be bypassed through a public handshake: " + method);
+            }
+        }
+        Class<?> context = Class.forName("dev.tuink.tui.TerminalEditorApp$SessionContext");
+        Set<String> duplicated = Set.of("java.util.List", "dev.tuink.core.TextModel", "dev.tuink.core.EditorState",
+            "dev.tuink.core.EditorEngine", "dev.tuink.render.RenderPlanBuilder");
+        for (var field : context.getDeclaredFields()) {
+            if (!Modifier.isStatic(field.getModifiers())) {
+                assertTrue(!duplicated.contains(field.getType().getName()) && field.getType() != int.class,
+                    () -> "Frontend context duplicates workspace membership or active projection: " + field);
+            }
+        }
+    }
+
+    @Test
     void editorSessionPublicApiDoesNotExposeMutableCoreTypes() throws ClassNotFoundException {
         JavaClasses production = new ClassFileImporter()
             .withImportOption(new ImportOption.DoNotIncludeTests())

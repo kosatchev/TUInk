@@ -16,6 +16,13 @@ Ordinary typing, coalesced Undo/Redo and replacement also run through typed
 session commands with document/view targets. They use the same dispatch as TUI
 input, without exposing a mutable core view to the consumer.
 
+The public `EditorWorkspace` probe admits two views of one document, preserves
+selection across batch admission and view retirement, and verifies shared Undo
+with independent positions. Deferred commands to a retired view are rejected;
+the surviving view supplies recovery. A document cannot be admitted by two
+workspace owners, and a foreign thread cannot retire a view. These cases run on
+the selected JVM 17 runtime and are also included in the D8/R8 inputs.
+
 Build the inputs with the repository's Java 25 toolchain:
 
 ```sh

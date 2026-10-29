@@ -16,18 +16,23 @@ paths with subtly different revision and range semantics.
 
 ## Decision
 
-`editor-contract` owns the presentation-independent immutable values:
+`editor-contract` owns the presentation-independent values and ports:
 
 - `CommandId`, `CommandInvocation`, `CommandDescriptor`, and argument schemas;
 - `DocumentId`, `DocumentSnapshot`, `TextPosition`, `TextRange`, `TextEdit`, and
-  `WorkspaceEdit`.
+  `WorkspaceEdit`;
 - `LanguageId` and `LanguageRegistry`, the JDK-only filename/extension identity
   shared by editing and highlighting. The registry owns aliases, including
   Python stubs/windowed scripts, Markdown aliases and C++ source/header suffixes.
   Indentation, comments, lexical scanning and colors remain consumer policies.
+- `DocumentCommand`, its target and result, `DocumentBackend`, and the storage
+  and recovery contracts used by the document owner and platform providers.
 
-`core` depends on `editor-contract` only for the neutral language identity;
-highlighters use the same registry without depending on mutable core classes.
+`core` implements `DocumentBackend` through `CoreDocumentBackend` and uses the
+shared command, document, language, storage and recovery contracts. The session
+accesses the mutable implementation through that port without exporting its
+document or views. Highlighters use the same language registry without depending
+on mutable core classes.
 
 `editor-session` owns the reusable command registry and document execution
 boundary: workspace edit validation, revision gates, and external-event ingress.
@@ -55,16 +60,18 @@ points. The host validates all ranges and surrogate boundaries before mutation;
 the complete result is composed in ascending range order using original-document
 coordinates and published atomically.
 
-Mutable document state is owned by an `EditorDocumentSession` bound to its
-creating thread. Background consumers receive only immutable snapshots. A
-workspace edit submitted from another thread, for another document, for a
-stale revision, or with an invalid range is rejected before core state is read
-or changed. Accepted batches cross one narrow core replacement boundary and
-produce one undo entry.
+Mutable document state is accessed through an `EditorDocumentSession` bound to
+its creating thread. Background consumers receive only immutable snapshots. A
+workspace edit submitted from another thread is rejected using the last
+published snapshot without reading mutable core state. On the owner thread,
+validation first publishes the current snapshot, then rejects edits for another
+document, a stale revision or an invalid range before changing document content.
+Accepted batches cross one narrow core replacement boundary and produce one
+undo entry.
 
 Both modules are internal/incubating until plugin compatibility fixtures exist.
 
-## Migration status (2026-10-15)
+## Current implementation
 
 The registry, argument schemas, revision gates, and workspace edit boundary are
 implemented. TUInk's `CommandRecipient` selects the document, search controls, or
@@ -76,9 +83,13 @@ executes document search operations; file flows remain application intents.
 the resulting viewport policy, including rejected commands, instead of asking
 the viewport to predict success before execution.
 
-The built-in bridge still resolves registered invocations to TUInk's command enum
-for frontend execution. Registration does not imply execution inside the
-document session. Widget, view, and file behavior stays in its owning layer.
+The built-in registry resolves invocations to TUInk's frontend command enum.
+Document operations then pass through `TuiDocumentSession` as typed
+`DocumentCommand` values to `EditorDocumentSession.execute()`. This gate checks
+the owner thread, document and view identities, text/state/view revisions, and
+whether an in-flight save permits the command before invoking the backend.
+Registration alone does not execute a document command. Widget, frontend view,
+and file workflow behavior stays in its owning layer.
 
 ## Consequences
 
@@ -88,6 +99,6 @@ document session. Widget, view, and file behavior stays in its owning layer.
   dispatch semantics no longer belong to that frontend.
 - Adding another shared DTO requires an explicit contract decision, not waiting
   for a Gradle cycle to appear.
-- The registry-to-built-in bridge remains internal. Document handlers may move
-  behind the session registry incrementally; frontend behavior retains frontend
-  receivers and does not become document-engine behavior.
+- The registry-to-built-in bridge remains internal. Typed document execution
+  passes through the session gate; frontend behavior retains frontend receivers
+  and does not become document-engine behavior.

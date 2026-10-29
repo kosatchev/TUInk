@@ -16,7 +16,7 @@ TUInk развивается как приложение-редактор пов
 | `tuiframe-widgets` | layout, focus, hit testing, общий захват мыши, theme и reusable widgets |
 | `editor-contract` | immutable command/document DTO и блочный текст, UTF-16 ranges, `WorkspaceEdit`, storage/resource/recovery contracts, semantic highlighting/diff ports и общий каталог языков |
 | `core` | общий документ/history, отдельные позиции views, search, editor operations и terminal-neutral `EditorTextLayout` port |
-| `editor-session` | command registry, owner-thread `EditorDocumentSession`, validation, I/O/recovery coordinators и bounded async ingress |
+| `editor-session` | command registry, owner-thread `EditorDocumentSession` и `EditorWorkspace`, document/view lifetime, validation, I/O/recovery coordinators и bounded async ingress |
 | `editor-diff-jgit` | опциональный bounded JGit diff; явно подключается к terminal view |
 | `editor-storage-jvm` | JVM filesystem adapter: paths, версии, безопасная публикация файлов, permissions и Linux FFM xattr/ACL |
 | `render` | `EditorTextLayout` adapter, координаты/навигация представления, editor layout и render planning |
@@ -42,8 +42,9 @@ tasks, owner approval/publication и recovery coordination без типов `co
 Production TUI выполняет document commands через тот же `EditorDocumentSession`,
 что headless consumer. Нейтральный backend port скрывает mutable core; frontend
 создаёт и сохраняет собственный terminal view для render/geometry. Общие
-I/O/recovery coordinators используются TUI и headless consumer; следующий
-этап — единый owner workspace и lifetime документов/views. Android/Windows
+I/O/recovery coordinators используются TUI и headless consumer. `EditorWorkspace`
+владеет ordered membership документов/views и выбором активного view; TUI получает
+из него read-only проекцию вкладок. Android/Windows
 clients, ART, IME и платформенные storage adapters остаются отдельными работами.
 
 Общие модули публикуют Java 17 bytecode/API и Gradle variants; compiler и desktop
@@ -97,6 +98,8 @@ owner capture, detached inspection, approval точного target/version, deta
 write и owner publication. Executor принадлежит host. Session блокирует изменение
 документа во всех save phases; navigation, selection и copy остаются доступны.
 Window применяет presentation effects и обновляет highlighter исходной вкладки.
+Save/close continuations адресуют исходный `ViewId`; индексы вычисляются заново
+для текущего отображения и не служат identity фонового результата.
 `PreparedDocumentOpen` допускает один detached read и owner admission точного
 результата. `FilePickerOpenWorkflow` проверяет workspace aliases и создаёт
 представление после admission; отменённый read не публикует вкладку. Обычный
@@ -110,6 +113,9 @@ TUI отдельно добавляет свой viewport в существую�
 Одновременно удерживается одна checkpoint operation; изменения во время записи
 попадают в следующую версию. Незавершённый или неопределённый document save
 сохраняет draft и recovery. Detach view не даёт разрешения удалить checkpoint.
+Несколько views одного документа используют одного retained recovery participant;
+после закрытия исходного view checkpoint захватывает позицию оставшегося view,
+сохраняя document/entry identity.
 
 `core` сохраняет terminal-neutral layout port. `render` реализует его через
 `TerminalEditorTextLayout`; один adapter/cache на attached view используется editing,
@@ -181,8 +187,12 @@ Snapshot создаётся по запросу owner thread, а background read
 и Save As. Core objects остаются внутри composition/render, document commands
 выполняются только через session. Архитектурные тесты запрещают frontend обходить
 эту границу и проверяют публичный API без исключения для mutable bridge.
-Общие I/O/recovery coordinators выделены; workspace lifetime остаётся отдельной
-работой. Текущие host/backend ports ещё не являются стабильным plugin API.
+`EditorWorkspace` — единственный владелец membership и selection. Один session
+не может одновременно принадлежать двум workspaces. Добавление подготовленного
+набора views валидируется и выделяет память до публикации; удалённый `ViewId`
+навсегда перестаёт принимать команды. Последний view документа остаётся в
+workspace до завершения его save operation; удаление другого view не меняет
+адресата save receipt. Текущие host/backend ports ещё не являются стабильным plugin API.
 
 Владение общими DTO описывает [ADR 0001](adr/0001-editor-contract-ownership.md),
 разделение document/session и frontend view state —
@@ -264,7 +274,7 @@ Capability mapping и terminal matrix также требуют проверки
 
 - `StateDelta`, `ChangeSet`, effects и revision-tagged events для application coordination;
 - effect ports для clipboard, settings и остальных application effects;
-- управление lifetime views поверх существующих logical view snapshots;
+- отдельные платформенные lifecycle/IME правила поверх общего lifetime views;
 - детерминированная layout/view-model preparation из state, viewport и
   decorations.
 
@@ -274,18 +284,28 @@ session runtime ненужные зависимости существующег
 
 ### Workspace и platform adapters
 
-Следующий перенос объединит владение документами, attached views, активным
-документом и временем жизни операций. Сейчас frontend по-прежнему хранит tabs,
-active index и проверяет workspace conflicts. Проверки filesystem aliases,
-сопоставление physical target с открытым документом, read-only policy и
-предложения доступных имён частично выполняются на owner thread. Выделение
-общих coordinators само по себе не устраняет эти filesystem обращения.
-Они требуют общего workspace resource index и отдельного detached admission.
+`EditorWorkspace<T>` хранит ordered document/view membership и выбранный `ViewId`.
+`T` — принадлежащая frontend проекция с layout, renderer и viewport controllers.
+`SessionContext` не содержит собственного mutable списка вкладок, active index
+или сохранённых model/state/engine: они выводятся из selection владельца.
+Окно по-прежнему отвечает за focus, modal, layout и presentation effects.
+Open/save/close результаты адресуют документы и views стабильными IDs; удаление
+вкладки не перенаправляет завершение операции на занявший её индекс документ.
+
+Проверки aliases, physical target, read-only и существования имени находятся в
+JVM adapter `JvmFileAdvisory`, без `Path` в workspace API. Это advisory host
+проверки: они частично исполняются синхронно на owner thread, не резервируют имя
+и не дают права перезаписи. Save approval по-прежнему связывается с detached
+inspection конкретного target/version. Отдельный detached lookup/suggestion
+admission остаётся возможной работой по задержкам файлового диалога.
 
 При временном отсоединении view host сохраняет document participant и запрашивает
 lifetime checkpoint. Исключение документа с `PRESERVE` сохраняет уже записанные
 draft entries; оно не заменяет capture последних правок перед suspend.
-Единый workspace owner должен сделать это различие частью document lifetime.
+Workspace retirement отдельного view сохраняет документ, пока у него есть другой
+view. Последний view нельзя убрать при незавершённом save. Окончательное удаление
+документа по-прежнему требует выбранного host решения о recovery; общий owner
+сам по себе не обещает сохранение перед Android suspend.
 
 Android storage/lifecycle/IME adapter и Windows frontend пока отложены. Общий
 Java 17 API и внешние JVM/D8/R8 пробы проверяют переносимую границу; Android ART,
@@ -388,6 +408,6 @@ model/engine/view owners, а прикладным workflows — от `TerminalEd
 
 Terminal conformance определяется конечным экраном, корректными событиями и
 cleanup; конкретные ANSI bytes могут меняться при улучшении presenter.
-Ближайшие приоритеты editor — единый workspace owner и remaining application
-effects, затем общие registries и plugin host. Независимый log viewer остаётся
+Ближайшие приоритеты editor — remaining application effects и отдельные
+платформенные adapters/lifecycle, затем общие registries и plugin host. Независимый log viewer остаётся
 отдельной проверкой TUIframe.

@@ -13,6 +13,7 @@ import dev.tuink.editor.document.TextEdit;
 import dev.tuink.editor.document.TextRange;
 import dev.tuink.editor.document.WorkspaceEdit;
 import dev.tuink.editor.session.document.EditorDocumentSession;
+import dev.tuink.editor.session.document.EditorWorkspace;
 import dev.tuink.editor.session.document.DocumentIoCoordinator;
 import dev.tuink.editor.session.document.PreparedDocumentOpen;
 import dev.tuink.editor.session.document.WorkspaceEditResult;
@@ -70,8 +71,54 @@ public final class PortableEngineProbe {
         GraphemeText graphemes = GraphemeText.of("e\u0301👩‍💻");
         require(graphemes.graphemeCount() == 2, "grapheme segmentation");
         commandRoundTrip();
+        workspaceRoundTrip();
         storageRoundTrip();
-        System.out.println("PASS: shared engine (edit, undo/redo, stale guards, search, snapshots, highlighting, graphemes, portable I/O)");
+        System.out.println("PASS: shared engine (edit, undo/redo, stale guards, search, snapshots, highlighting, graphemes, workspace, portable I/O)");
+    }
+
+    private static void workspaceRoundTrip() throws Exception {
+        var workspace = new EditorWorkspace<String>();
+        var document = EditorDocumentSession.create(new DocumentId("portable-workspace"), List.of("abcdef"));
+        var first = document.defaultViewId();
+        var second = document.attachView();
+        workspace.add(document, first, "first layout");
+        workspace.addAll(List.of(new EditorWorkspace.Entry<>(document, second, "second layout")));
+        require(workspace.active().viewId().equals(first), "batch admission preserves selection");
+        document.execute(first, new DocumentCommand.MoveTo(new TextPosition(0, 3), false));
+        document.execute(first, new DocumentCommand.Input("X"));
+        document.execute(second, new DocumentCommand.MoveTo(new TextPosition(0, 1), false));
+        var deferred = document.commandTarget(first);
+        workspace.select(second);
+        workspace.remove(first);
+        require(workspace.active().viewId().equals(second) && workspace.activeIndex() == 0,
+            "retiring another view preserves selected identity");
+        require(document.execute(deferred, new DocumentCommand.Input("stale"))
+            instanceof DocumentCommandResult.Rejected rejection
+            && rejection.reason() == DocumentCommandResult.RejectionReason.UNKNOWN_VIEW, "retired view command");
+        document.execute(second, new DocumentCommand.Edit(DocumentCommand.EditAction.UNDO));
+        require(document.snapshot().line(0).equals("abcdef")
+            && document.view(second).cursor().equals(new TextPosition(0, 1)), "shared history and independent cursor");
+        document.execute(second, new DocumentCommand.Edit(DocumentCommand.EditAction.REDO));
+        require(document.snapshot().line(0).equals("abcXdef"), "redo after first view closes");
+        require(document.prepareRecovery(workspace.active().viewId()).materialize().lines().equals(document.snapshot().lines()),
+            "recovery uses a surviving view");
+        var foreignWorkspace = new EditorWorkspace<String>();
+        try {
+            foreignWorkspace.add(document, second, "foreign owner");
+            throw new AssertionError("Document admitted by two workspaces");
+        } catch (IllegalStateException expected) {
+            require(foreignWorkspace.entries().isEmpty() && document.workspace() == workspace, "exclusive workspace owner");
+        }
+        var foreignThread = new java.util.concurrent.FutureTask<>(() -> {
+            try {
+                workspace.remove(second);
+                return false;
+            } catch (IllegalStateException expected) { return true; }
+        });
+        new Thread(foreignThread, "portable-workspace-owner-probe").start();
+        require(foreignThread.get(), "workspace thread ownership");
+        workspace.remove(second);
+        require(workspace.active() == null && document.workspace() == null, "last view retires membership");
     }
 
     private static void commandRoundTrip() {

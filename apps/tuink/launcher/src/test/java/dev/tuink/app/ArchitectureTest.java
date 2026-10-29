@@ -243,14 +243,14 @@ class ArchitectureTest {
         );
 
     static final ArchRule IO_COORDINATION_STAYS_PORTABLE = classes()
-        .that().haveNameMatching("dev\\.tuink\\.editor\\.session\\.document\\.(DocumentIoCoordinator|PreparedDocumentOpen)(?:\\$.*)?")
+        .that().haveNameMatching("dev\\.tuink\\.editor\\.session\\.document\\.(DocumentIoCoordinator|PreparedDocumentOpen|EditorWorkspace)(?:\\$.*)?")
         .should().onlyDependOnClassesThat().resideInAnyPackage(
             "java..", "dev.tuink.editor.document..", "dev.tuink.editor.storage..", "dev.tuink.editor.session.document.."
         );
 
     static final ArchRule COORDINATORS_DO_NOT_ACCESS_FILESYSTEM = noClasses()
         .that().resideInAPackage("dev.tuink.editor.session.recovery..")
-        .or().haveNameMatching("dev\\.tuink\\.editor\\.session\\.document\\.(DocumentIoCoordinator|PreparedDocumentOpen)(?:\\$.*)?")
+        .or().haveNameMatching("dev\\.tuink\\.editor\\.session\\.document\\.(DocumentIoCoordinator|PreparedDocumentOpen|EditorWorkspace)(?:\\$.*)?")
         .should().dependOnClassesThat().resideInAPackage("java.nio.file..");
 
     static final ArchRule LANGUAGE_CONTRACT_IS_SELF_CONTAINED = classes()

@@ -13,12 +13,14 @@ safely shareable between frontends.
 
 ## Decision
 
-The model has two explicit lifetimes:
+The model has three explicit ownership boundaries:
 
 1. `EditorDocumentSession` owns text, file metadata, revision, history, dirty state,
-   workspace effects, and serialized mutation on the session thread.
+   document effects, and serialized mutation on the session thread.
 2. Each attached frontend view owns cursor/selection, viewport, focus,
    layout/cache, presentation preferences, and its navigation revision.
+3. `EditorWorkspace<T>` owns ordered document/view membership and selection by
+   stable `ViewId`. Its opaque attachments hold frontend presentation objects.
 
 View-local commands identify their frontend view. Text mutations are still
 serialized by the document session and increment the shared document revision.
@@ -67,7 +69,8 @@ does not copy and revalidate the whole document after each key. Before starting
 background work, the owner captures a current snapshot; workspace-edit
 validation also refreshes on the owner thread before checking revision gates.
 
-The session never attaches or returns a mutable core view. `CoreDocumentBackend`
+The session can attach a logical view by returning its stable ID; it never
+returns a mutable core view. `CoreDocumentBackend`
 implements the neutral host port and registers existing views by their stable
 `ViewId`. TUI composition creates its terminal view, retains it for rendering
 and geometry, and connects its backend to the session. Architecture checks forbid
@@ -94,8 +97,8 @@ Resource/version, format, load/save and capability contracts live in
 `editor-storage-jvm` owns paths and filesystem transactions. Public session I/O
 captures on the owner, inspects and writes on a worker, then publishes a matching
 receipt on the owner. Recovery restore prepares text, versions, diff baselines and
-view clamps before publication. Portable application coordinators, workspace
-lifetime and Android storage remain future work.
+view clamps before publication. Portable I/O/recovery coordinators and workspace
+membership are implemented; Android storage and platform lifecycle remain future work.
 
 The session owns one canonical `DocumentId`, shared with live render/highlighter
 adapters. Cache identity and resource binding are separate identities. Snapshot
@@ -118,6 +121,27 @@ facade over these two components; it no longer retains a second copy of their
 fields. Each attached engine has its own derived `EditorGutterDiffState` and
 layout; attaching a view does not initialize another history or reset document
 savepoint baselines.
+
+The workspace accepts a prepared batch only after validating the complete
+membership and allocating its next immutable registry. One document session
+cannot belong to two workspaces. The TUI `SessionContext` derives its active
+model, state, engine and renderer from workspace selection; it keeps no second
+mutable list of tabs or cached active-document pointers. Window focus, dialogs
+and geometry remain frontend state.
+
+Removing a view permanently retires its ID and rejects deferred commands for it.
+Attaching a logical view does not admit it into a workspace. If admission is
+abandoned or rejected, the host can retire the prepared view with
+`EditorDocumentSession.detachView`; admitted views must be removed through their
+workspace owner.
+Other views retain the same document, history, save coordinator and independent
+positions. A captured save retains its originating engine until receipt
+publication even if that view detaches. The last workspace view cannot retire
+while a save is pending. After the last view closes, a neutral logical engine
+keeps document operations independent of the closed frontend layout; attaching
+a new view replaces that temporary engine. `defaultViewId()` remains the
+initial identity and may be retired: callers use the selected entry's `viewId()`
+for commands and recovery after view removal.
 
 History entries associate document changes with an `EditorViewMemento` carrying
 the initiating view identity. Undo/Redo restores that memento only for that view;

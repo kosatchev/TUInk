@@ -181,8 +181,11 @@ class Regressions:
     def field_memory_growth(self):
         document = self.fixture("field-memory-growth", "original")
         payload = b"\x1b[200~" + ("界" * 1_048_576).encode() + b"\x1b[201~"
-        with self.session("field-memory-growth", document, max_heap_mb=128) as session:
+        # Leave time for repeated 3 MiB PTY input as well as field admission.
+        with self.session("field-memory-growth", document, max_heap_mb=128, timeout=90) as session:
             session.send(b"draft \x06" + b"\t" * 5)
+            session.expect(lambda: any(line.startswith("Replace:") for line in session.screen.lines),
+                           "replacement field after keyboard focus traversal")
             accepted = 0
             for _ in range(8):
                 before = next(line for line in session.screen.lines if line.startswith("Replace:"))

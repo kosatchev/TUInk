@@ -1,6 +1,7 @@
 package dev.tuiframe.widget;
 
 import dev.tuiframe.input.TuiInputEvent;
+import java.util.function.Function;
 
 /**
  * Interactive capability bound to final placement geometry. A placement may
@@ -15,6 +16,15 @@ public interface PlacedInteractiveWidget<A> extends PlacedWidget {
      */
     default boolean interactionReady() {
         return !bounds().isEmpty();
+    }
+
+    /**
+     * Maps typed output while preserving this placement's geometry, readiness,
+     * paint and independent interaction effects. The result exposes capture and
+     * cursor capabilities exactly when this placement exposes them.
+     */
+    default <B> PlacedInteractiveWidget<B> mapOutput(Function<? super A, ? extends B> mapper) {
+        return OutputMappedPlacement.create(this, mapper);
     }
 
     InteractionResult<A> handle(TuiInputEvent event, FocusContext context);

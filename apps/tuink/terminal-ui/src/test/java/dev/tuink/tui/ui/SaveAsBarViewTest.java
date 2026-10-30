@@ -12,17 +12,23 @@ import dev.tuiframe.cell.CellText;
 import dev.tuiframe.geometry.Point;
 import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.input.KeyStroke;
+import dev.tuiframe.input.PasteEvent;
 import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.input.TextInput;
 import dev.tuiframe.input.TuiInputEvent;
 import dev.tuiframe.style.CellColor;
 import dev.tuiframe.style.CellStyle;
 import dev.tuiframe.widget.Button;
+import dev.tuiframe.widget.FocusContext;
 import dev.tuiframe.widget.FocusManager;
 import dev.tuiframe.widget.FocusResetPolicy;
 import dev.tuiframe.widget.FocusScope;
 import dev.tuiframe.widget.FocusSpace;
 import dev.tuiframe.widget.PlacedInteractiveWidget;
+import dev.tuiframe.widget.PlacedCursorSource;
+import dev.tuiframe.widget.PlacedPointerCapture;
+import dev.tuiframe.widget.PointerCaptureCancellation;
+import dev.tuiframe.widget.PointerCaptureRequest;
 import dev.tuiframe.widget.RoutedTarget;
 import dev.tuiframe.widget.TextField;
 import dev.tuiframe.widget.Theme;
@@ -68,8 +74,8 @@ class SaveAsBarViewTest {
     void mappedButtonsCannotFocusOrActivateWhenTheirOwnBoundsClipTheLabel() {
         var button = new Button("Save").layout(new Rect(2, 1, 1, 1));
         List<PlacedInteractiveWidget<?>> mapped = List.of(
-            new SaveAsBarView.ButtonPlacement(button, SaveAsBarView.Action.SUBMITTED),
-            new SearchBarView.ButtonPlacement(button, SearchBarView.Action.REPLACE));
+            button.mapOutput(ignored -> SaveAsBarView.Action.SUBMITTED),
+            button.mapOutput(ignored -> SearchBarView.Action.REPLACE));
         for (var placement : mapped) {
             var target = new RoutedTarget<>("action", placement, FocusSpace.root(viewport(24, 80)));
             var scope = FocusScope.single(new Object(), FocusResetPolicy.FIRST_FOCUSABLE, target);
@@ -93,6 +99,44 @@ class SaveAsBarViewTest {
                 assertTrue(focus.focused().isEmpty());
             }
         }
+    }
+
+    @Test
+    void realControlsKeepFormActionsAndOnlyTheFieldExposesCursorAndCapture() {
+        TextField field = new TextField();
+        var view = SaveAsBarView.build(field, 40);
+        Object scope = new Object();
+        var placement = view.place(scope, 2, viewport(5, 40));
+        var fieldTarget = target(placement);
+        var context = new FocusContext(true, true, fieldTarget.space());
+        assertTrue(fieldTarget.placement() instanceof PlacedCursorSource);
+        assertTrue(fieldTarget.placement() instanceof PlacedPointerCapture<?>);
+        assertEquals(SaveAsBarView.Action.VALUE_CHANGED,
+            fieldTarget.placement().handle(new TextInput("draft.txt"), context).output().orElseThrow());
+        assertEquals("draft.txt", field.text());
+        placement = view.place(scope, 2, viewport(5, 40));
+        fieldTarget = target(placement);
+        assertEquals(SaveAsBarView.Action.SUBMITTED,
+            fieldTarget.placement().handle(KeyStroke.of(KeyStroke.Key.ENTER), context).output().orElseThrow());
+        assertEquals(SaveAsBarView.Action.INPUT_REJECTED,
+            fieldTarget.placement().handle(new PasteEvent("discarded", true), context).output().orElseThrow());
+        for (var id : List.of(SaveAsBarView.Target.SAVE, SaveAsBarView.Target.CANCEL)) {
+            var button = placement.focusScope().target(id).orElseThrow();
+            assertFalse(button.placement() instanceof PlacedCursorSource);
+            assertFalse(button.placement() instanceof PlacedPointerCapture<?>);
+            assertEquals(id == SaveAsBarView.Target.SAVE ? SaveAsBarView.Action.SUBMITTED : SaveAsBarView.Action.CANCELLED,
+                button.placement().handle(KeyStroke.of(KeyStroke.Key.ENTER),
+                    new FocusContext(true, true, button.space())).output().orElseThrow());
+        }
+        Rect bounds = fieldTarget.placement().bounds();
+        var press = fieldTarget.placement().handle(new PointerEvent(bounds.y(), bounds.x(),
+            PointerEvent.Kind.PRESS, PointerEvent.Button.LEFT, Set.of()), context);
+        assertTrue(press.output().isEmpty());
+        assertEquals(PointerCaptureRequest.ACQUIRE, press.pointerCaptureRequest());
+        var cancellation = ((PlacedPointerCapture<?>) fieldTarget.placement())
+            .cancelPointerCapture(PointerCaptureCancellation.KEYBOARD_INPUT);
+        assertTrue(cancellation.output().isEmpty());
+        assertEquals(PointerCaptureRequest.RELEASE, cancellation.pointerCaptureRequest());
     }
 
     @Test

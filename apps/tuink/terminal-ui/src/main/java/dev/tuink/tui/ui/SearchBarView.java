@@ -11,12 +11,9 @@ import dev.tuiframe.widget.FocusManager;
 import dev.tuiframe.widget.FocusResetPolicy;
 import dev.tuiframe.widget.FocusScope;
 import dev.tuiframe.widget.FocusSpace;
-import dev.tuiframe.widget.InteractionResult;
 import dev.tuiframe.widget.InteractionVisibility;
 import dev.tuiframe.widget.PlacedCursorSource;
 import dev.tuiframe.widget.PlacedInteractiveWidget;
-import dev.tuiframe.widget.PlacedPointerCapture;
-import dev.tuiframe.widget.PointerCaptureCancellation;
 import dev.tuiframe.widget.RoutedTarget;
 import dev.tuiframe.widget.TextField;
 import dev.tuiframe.widget.Theme;
@@ -156,7 +153,7 @@ public final class SearchBarView {
         addTarget(
             targets,
             SearchFocus.FIND,
-            new FieldPlacement(queryPlacement, Action.QUERY_CHANGED),
+            queryPlacement.mapOutput(action -> fieldAction(action, Action.QUERY_CHANGED)),
             safeClip
         );
         TextField.Placement replacementPlacement = replacementField.layout(
@@ -165,7 +162,7 @@ public final class SearchBarView {
         addTarget(
             targets,
             SearchFocus.REPLACE,
-            new FieldPlacement(replacementPlacement, Action.REPLACEMENT_CHANGED),
+            replacementPlacement.mapOutput(action -> fieldAction(action, Action.REPLACEMENT_CHANGED)),
             safeClip
         );
         boolean replacementContextVisible = queryPlacement.bounds().width() >= MIN_FIELD_WIDTH
@@ -179,7 +176,7 @@ public final class SearchBarView {
             addTarget(
                 targets,
                 spec.target(),
-                new ButtonPlacement(placedButton, spec.action()),
+                placedButton.mapOutput(ignored -> spec.action()),
                 safeClip,
                 replacementContextVisible || (spec.action() != Action.REPLACE && spec.action() != Action.REPLACE_ALL)
             );
@@ -389,104 +386,12 @@ public final class SearchBarView {
         ));
     }
 
-    private static InteractionResult<Action> mapped(
-        InteractionResult<?> source,
-        Action output
-    ) {
-        return source.mapOutput(value -> Objects.requireNonNull(output, "output"));
-    }
-
-    private record FieldPlacement(
-        TextField.Placement delegate,
-        Action changedAction
-    ) implements PlacedPointerCapture<Action>, PlacedCursorSource {
-        private FieldPlacement {
-            Objects.requireNonNull(delegate, "delegate");
-            if (changedAction != Action.QUERY_CHANGED
-                && changedAction != Action.REPLACEMENT_CHANGED) {
-                throw new IllegalArgumentException("field placement requires a changed action");
-            }
-        }
-
-        @Override
-        public Rect bounds() {
-            return delegate.bounds();
-        }
-
-        @Override
-        public boolean interactionReady() {
-            return delegate.interactionReady();
-        }
-
-        @Override
-        public void paint(Canvas canvas, Theme theme, dev.tuiframe.widget.WidgetState state) {
-            delegate.paint(canvas, theme, state);
-        }
-
-        @Override
-        public boolean pointerCaptureActive() {
-            return delegate.pointerCaptureActive();
-        }
-
-        @Override
-        public InteractionResult<Action> cancelPointerCapture(PointerCaptureCancellation reason) {
-            return delegate.cancelPointerCapture(reason).mapOutput(value -> changedAction);
-        }
-
-        @Override
-        public InteractionResult<Action> handle(
-            dev.tuiframe.input.TuiInputEvent event,
-            FocusContext context
-        ) {
-            InteractionResult<TextField.Action> result = delegate.handle(event, context);
-            if (result.output().isEmpty()) {
-                return mapped(result, changedAction);
-            }
-            Action action = switch (result.output().orElseThrow()) {
-                case VALUE_CHANGED -> changedAction;
-                case SUBMITTED -> Action.FIND_NEXT;
-                case INPUT_REJECTED -> Action.INPUT_REJECTED;
-            };
-            return mapped(result, action);
-        }
-
-        @Override
-        public Optional<Point> cursorPosition(FocusContext context) {
-            return delegate.cursorPosition(context);
-        }
-    }
-
-    record ButtonPlacement(
-        PlacedInteractiveWidget<Button.Action> delegate,
-        Action action
-    ) implements PlacedInteractiveWidget<Action> {
-        ButtonPlacement {
-            Objects.requireNonNull(delegate, "delegate");
-            Objects.requireNonNull(action, "action");
-        }
-
-        @Override
-        public Rect bounds() {
-            return delegate.bounds();
-        }
-
-        @Override
-        public boolean interactionReady() {
-            return delegate.interactionReady();
-        }
-
-        @Override
-        public void paint(Canvas canvas, Theme theme, dev.tuiframe.widget.WidgetState state) {
-            delegate.paint(canvas, theme, state);
-        }
-
-        @Override
-        public InteractionResult<Action> handle(
-            dev.tuiframe.input.TuiInputEvent event,
-            FocusContext context
-        ) {
-            return mapped(delegate.handle(event, context), action);
-        }
+    private static Action fieldAction(TextField.Action action, Action changedAction) {
+        return switch (action) {
+            case VALUE_CHANGED -> changedAction;
+            case SUBMITTED -> Action.FIND_NEXT;
+            case INPUT_REJECTED -> Action.INPUT_REJECTED;
+        };
     }
 
     private record ButtonTarget(SearchFocus target, Button button, Action action) {

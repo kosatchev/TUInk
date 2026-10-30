@@ -11,9 +11,15 @@ import dev.tuiframe.cell.CellBuffer;
 import dev.tuiframe.cell.CellText;
 import dev.tuiframe.geometry.Point;
 import dev.tuiframe.geometry.Rect;
+import dev.tuiframe.input.KeyStroke;
+import dev.tuiframe.input.PasteEvent;
+import dev.tuiframe.input.TextInput;
 import dev.tuiframe.style.CellColor;
 import dev.tuiframe.style.CellStyle;
 import dev.tuiframe.widget.FocusManager;
+import dev.tuiframe.widget.FocusContext;
+import dev.tuiframe.widget.PlacedCursorSource;
+import dev.tuiframe.widget.PlacedPointerCapture;
 import dev.tuiframe.widget.RoutedTarget;
 import dev.tuiframe.widget.TextField;
 import dev.tuiframe.widget.Theme;
@@ -84,6 +90,43 @@ class SearchBarViewTest {
             RoutedTarget<SearchFocus, SearchBarView.Action> routed = target(placement, target);
             assertTrue(routed.interactive(), target.toString());
             assertTrue(routed.focusEligible(), target.toString());
+        }
+    }
+
+    @Test
+    void mappedFieldsKeepTheirOwnChangeActionsAndShareFindNextOnSubmission() {
+        TextField query = new TextField();
+        TextField replacement = new TextField();
+        var view = view(query, replacement, 80);
+        Object scope = new Object();
+        var placement = view.place(scope, 2, viewport(5, 80));
+        var find = target(placement, SearchFocus.FIND);
+        var replace = target(placement, SearchFocus.REPLACE);
+        assertEquals(SearchBarView.Action.QUERY_CHANGED,
+            find.placement().handle(new TextInput("needle"), new FocusContext(true, true, find.space())).output().orElseThrow());
+        assertEquals(SearchBarView.Action.REPLACEMENT_CHANGED,
+            replace.placement().handle(new TextInput("swap"), new FocusContext(true, true, replace.space())).output().orElseThrow());
+        assertEquals("needle", query.text());
+        assertEquals("swap", replacement.text());
+        placement = view.place(scope, 2, viewport(5, 80));
+        for (SearchFocus id : TARGET_ORDER) {
+            var control = target(placement, id);
+            boolean field = id == SearchFocus.FIND || id == SearchFocus.REPLACE;
+            assertEquals(field, control.placement() instanceof PlacedCursorSource, id.toString());
+            assertEquals(field, control.placement() instanceof PlacedPointerCapture<?>, id.toString());
+            if (field) {
+                var context = new FocusContext(true, true, control.space());
+                assertEquals(SearchBarView.Action.FIND_NEXT,
+                    control.placement().handle(KeyStroke.of(KeyStroke.Key.ENTER), context).output().orElseThrow());
+                assertEquals(SearchBarView.Action.INPUT_REJECTED,
+                    control.placement().handle(new PasteEvent("discarded", true), context).output().orElseThrow());
+            }
+        }
+        for (var id : List.of(SearchFocus.PREV_BUTTON, SearchFocus.REPLACE_BUTTON)) {
+            var button = target(placement, id);
+            assertEquals(id == SearchFocus.PREV_BUTTON ? SearchBarView.Action.FIND_PREVIOUS : SearchBarView.Action.REPLACE,
+                button.placement().handle(KeyStroke.of(KeyStroke.Key.ENTER),
+                    new FocusContext(true, true, button.space())).output().orElseThrow());
         }
     }
 

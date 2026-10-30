@@ -63,6 +63,12 @@ allocated bounds fit inside the clip. Transparent placement adapters forward
 this capability; fields and scrolling surfaces require their viewport to fit,
 not their whole text content.
 
+`PlacedInteractiveWidget.mapOutput` adapts a control's typed actions without
+changing its placement behavior. It forwards hit testing, readiness, painting,
+focus and capture effects, and exposes cursor and pointer-capture capabilities
+only when the original placement provides them. Search and Save As supply their
+own action mappings through this shared adapter.
+
 Form actions have additional application-owned context requirements: a readable
 confirmation question, a filename viewport, or both search fields. Each placement
 computes this condition once and exposes it to physical and semantic command

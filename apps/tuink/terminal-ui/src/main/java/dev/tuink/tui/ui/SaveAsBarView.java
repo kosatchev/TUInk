@@ -4,23 +4,18 @@ import dev.tuiframe.cell.Canvas;
 import dev.tuiframe.cell.CellText;
 import dev.tuiframe.geometry.Point;
 import dev.tuiframe.geometry.Rect;
-import dev.tuiframe.input.TuiInputEvent;
 import dev.tuiframe.widget.Button;
 import dev.tuiframe.widget.FocusContext;
 import dev.tuiframe.widget.FocusManager;
 import dev.tuiframe.widget.FocusResetPolicy;
 import dev.tuiframe.widget.FocusScope;
 import dev.tuiframe.widget.FocusSpace;
-import dev.tuiframe.widget.InteractionResult;
 import dev.tuiframe.widget.InteractionVisibility;
 import dev.tuiframe.widget.PlacedCursorSource;
 import dev.tuiframe.widget.PlacedInteractiveWidget;
-import dev.tuiframe.widget.PlacedPointerCapture;
-import dev.tuiframe.widget.PointerCaptureCancellation;
 import dev.tuiframe.widget.RoutedTarget;
 import dev.tuiframe.widget.TextField;
 import dev.tuiframe.widget.Theme;
-import dev.tuiframe.widget.WidgetState;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -85,13 +80,13 @@ public final class SaveAsBarView {
         boolean filenameVisible = fieldWidth >= MIN_FIELD_WIDTH
             && InteractionVisibility.FULL_BOUNDS.allows(fieldBounds, safeInteractionClip);
         addTarget(targets, Target.FIELD,
-            new FieldPlacement(field.layout(fieldBounds)), safeInteractionClip);
+            field.layout(fieldBounds).mapOutput(SaveAsBarView::fieldAction), safeInteractionClip);
         addTarget(targets, Target.SAVE,
-            new ButtonPlacement(save.layout(new Rect(saveStart, topRow, buttonsVisible ? save.width() : 0, 1)),
-                Action.SUBMITTED), safeInteractionClip, filenameVisible);
+            save.layout(new Rect(saveStart, topRow, buttonsVisible ? save.width() : 0, 1))
+                .mapOutput(ignored -> Action.SUBMITTED), safeInteractionClip, filenameVisible);
         addTarget(targets, Target.CANCEL,
-            new ButtonPlacement(cancel.layout(new Rect(cancelStart, topRow, buttonsVisible ? cancel.width() : 0, 1)),
-                Action.CANCELLED), safeInteractionClip);
+            cancel.layout(new Rect(cancelStart, topRow, buttonsVisible ? cancel.width() : 0, 1))
+                .mapOutput(ignored -> Action.CANCELLED), safeInteractionClip);
         FocusScope<Target, Action> focusScope = new FocusScope<>(
             scopeId,
             FocusResetPolicy.FIRST_FOCUSABLE,
@@ -210,74 +205,11 @@ public final class SaveAsBarView {
         targets.add(new RoutedTarget<>(id, placement, FocusSpace.root(clip), true, enabled));
     }
 
-    private static InteractionResult<Action> mapped(InteractionResult<?> result, Action action) {
-        return result.mapOutput(value -> action);
-    }
-
-    private record FieldPlacement(TextField.Placement delegate)
-        implements PlacedPointerCapture<Action>, PlacedCursorSource {
-        @Override
-        public Rect bounds() {
-            return delegate.bounds();
-        }
-
-        @Override
-        public boolean interactionReady() {
-            return delegate.interactionReady();
-        }
-
-        @Override
-        public void paint(Canvas canvas, Theme theme, WidgetState state) {
-            delegate.paint(canvas, theme, state);
-        }
-
-        @Override
-        public boolean pointerCaptureActive() {
-            return delegate.pointerCaptureActive();
-        }
-
-        @Override
-        public InteractionResult<Action> cancelPointerCapture(PointerCaptureCancellation reason) {
-            return delegate.cancelPointerCapture(reason).mapOutput(value -> Action.VALUE_CHANGED);
-        }
-
-        @Override
-        public InteractionResult<Action> handle(TuiInputEvent event, FocusContext context) {
-            InteractionResult<TextField.Action> result = delegate.handle(event, context);
-            Action action = result.output().map(value -> switch (value) {
-                case VALUE_CHANGED -> Action.VALUE_CHANGED;
-                case SUBMITTED -> Action.SUBMITTED;
-                case INPUT_REJECTED -> Action.INPUT_REJECTED;
-            }).orElse(Action.VALUE_CHANGED);
-            return mapped(result, action);
-        }
-
-        @Override
-        public Optional<Point> cursorPosition(FocusContext context) {
-            return delegate.cursorPosition(context);
-        }
-    }
-
-    record ButtonPlacement(PlacedInteractiveWidget<Button.Action> delegate, Action action)
-        implements PlacedInteractiveWidget<Action> {
-        @Override
-        public Rect bounds() {
-            return delegate.bounds();
-        }
-
-        @Override
-        public boolean interactionReady() {
-            return delegate.interactionReady();
-        }
-
-        @Override
-        public void paint(Canvas canvas, Theme theme, WidgetState state) {
-            delegate.paint(canvas, theme, state);
-        }
-
-        @Override
-        public InteractionResult<Action> handle(TuiInputEvent event, FocusContext context) {
-            return mapped(delegate.handle(event, context), action);
-        }
+    private static Action fieldAction(TextField.Action action) {
+        return switch (action) {
+            case VALUE_CHANGED -> Action.VALUE_CHANGED;
+            case SUBMITTED -> Action.SUBMITTED;
+            case INPUT_REJECTED -> Action.INPUT_REJECTED;
+        };
     }
 }

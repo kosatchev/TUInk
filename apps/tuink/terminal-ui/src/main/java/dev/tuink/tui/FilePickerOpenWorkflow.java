@@ -10,11 +10,9 @@ import dev.tuink.editor.storage.DocumentLoad;
 import dev.tuink.editor.session.document.PreparedDocumentOpen;
 import dev.tuink.storage.jvm.FileBaseline;
 import dev.tuink.storage.jvm.JvmDocumentStorage;
+import dev.tuink.tui.file.FileFailureReason;
 import dev.tuink.tui.ui.NotificationPresentation;
 import java.io.IOException;
-import java.nio.file.AccessDeniedException;
-import java.nio.file.FileSystemException;
-import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
@@ -166,17 +164,9 @@ final class FilePickerOpenWorkflow {
         if (failure instanceof AmbiguousDocumentEncodingException) {
             return new Result(false, null, -1, NoticeKind.UNCHANGED, null, null, target, null);
         }
-        if (failure instanceof NoSuchFileException) {
-            return failure("file no longer exists", target);
-        }
-        if (failure instanceof AccessDeniedException) {
-            return failure("permission denied", target);
-        }
-        if (failure instanceof FileSystemException filesystem && filesystem.getReason() != null
-            && !filesystem.getReason().isBlank()) {
-            return failure(filesystem.getReason(), target);
-        }
-        String reason = failure.getMessage() == null ? "I/O error" : failure.getMessage();
+        FileFailureReason.Description described = FileFailureReason.describe(failure);
+        String reason = described.detail() == null ? "I/O error" : described.detail();
+        if (described.canAttachPath()) return failure(reason, target);
         return new Result(true, null, -1, NoticeKind.ERROR, "Open failed: " + reason,
             new Notice(reason, null));
     }

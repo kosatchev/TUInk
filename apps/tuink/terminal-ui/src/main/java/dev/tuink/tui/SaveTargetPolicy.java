@@ -4,6 +4,7 @@ import dev.tuink.storage.jvm.JvmDocumentStorage;
 import dev.tuink.storage.jvm.JvmFileAdvisory;
 import dev.tuink.editor.storage.DocumentEncodingException;
 import dev.tuink.core.EditorState;
+import dev.tuink.tui.file.FileFailureReason;
 import dev.tuink.tui.flow.SaveTargetSuggester;
 import dev.tuink.tui.flow.SavePathInput;
 import dev.tuink.tui.ui.PathPresentation;
@@ -42,18 +43,13 @@ final class SaveTargetPolicy {
                 + String.format(Locale.ROOT, "%04X", encoding.codePoint())
                 + ". Choose Save as UTF-8 to keep this text.";
         }
-        String msg = e.getMessage() == null ? "Unknown I/O error" : e.getMessage();
-        String lower = msg.toLowerCase();
-        if (lower.contains("permission denied") || lower.contains("access denied")) {
-            return "Save failed: permission denied";
-        }
-        if (lower.contains("no space") || lower.contains("not enough space")) {
-            return "Save failed: no space left on device";
-        }
-        if (lower.contains("is a directory")) {
-            return "Save failed: target is a directory";
-        }
-        return "Save failed: " + msg;
+        FileFailureReason.Description reason = FileFailureReason.describe(e);
+        return "Save failed: " + switch (reason.kind()) {
+            case ACCESS_DENIED -> "permission denied";
+            case NO_SPACE -> "no space left on device";
+            case DIRECTORY -> "target is a directory";
+            case MISSING, OTHER -> reason.detail() == null ? "Unknown I/O error" : reason.detail();
+        };
     }
 
     static String validateSaveTarget(Path path) {

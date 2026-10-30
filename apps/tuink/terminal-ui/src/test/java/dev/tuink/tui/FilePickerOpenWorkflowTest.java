@@ -237,6 +237,23 @@ class FilePickerOpenWorkflowTest {
     }
 
     @Test
+    void filenameWordsCannotTurnAnUnspecifiedFilesystemFailureIntoAnotherReason() {
+        for (String name : List.of("permission denied.txt", "no space.txt", "is a directory.txt")) {
+            Path file = directory.resolve(name);
+            var exception = new FileSystemException(file.toString());
+            var request = new FilePickerOpenWorkflow.OpenRequest(file, DocumentOpenMode.DETECT);
+            var result = FilePickerOpenWorkflow.complete(request, null, exception, List.of(), -1,
+                () -> fail("a failed read must not allocate a document"));
+
+            assertTrue(result.openFileMode());
+            assertEquals(FilePickerOpenWorkflow.NoticeKind.ERROR, result.noticeKind());
+            assertEquals("Open failed: " + exception.getMessage(), result.message());
+            assertEquals(exception.getMessage(), result.notice().summary());
+            assertNull(result.notice().path());
+        }
+    }
+
+    @Test
     void initialRootUsesTheActiveFileParentOrWorkingDirectory() {
         assertEquals(directory, FilePickerOpenWorkflow.initialRoot(directory.resolve("document.txt")));
         assertEquals(Path.of(".").toAbsolutePath().normalize(), FilePickerOpenWorkflow.initialRoot(null));

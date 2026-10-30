@@ -1,7 +1,6 @@
 package dev.tuink.tui.file;
 
 import java.io.IOException;
-import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
@@ -350,8 +349,8 @@ public final class FileTreeModel implements AutoCloseable {
             throw stopped;
         } catch (IOException | RuntimeException failed) {
             state.budget.reserveEntry(directory);
-            String reason = failed instanceof AccessDeniedException ? "permission denied"
-                : failed.getMessage() == null ? failed.getClass().getSimpleName() : failed.getMessage();
+            FileFailureReason.Description described = FileFailureReason.describe(failed);
+            String reason = described.detail() == null ? failed.getClass().getSimpleName() : described.detail();
             if (reason.length() > 240) {
                 reason = reason.substring(0, 240) + "…";
             }

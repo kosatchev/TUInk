@@ -296,6 +296,31 @@ class FileTreeModelTest {
     }
 
     @Test
+    void directoryFailureReasonsKeepFallbacksAndTheirExistingLengthBound() throws Exception {
+        String longReason = "r".repeat(300);
+        List<Exception> failures = List.of(new java.nio.file.NoSuchFileException("permission denied.txt"),
+            new java.nio.file.FileSystemException("no space.txt", null, "device unavailable"),
+            new IOException(), new IllegalStateException(),
+            new java.nio.file.FileSystemException("selected.txt", null, longReason));
+        List<String> reasons = List.of("file no longer exists", "device unavailable", "IOException",
+            "IllegalStateException", "r".repeat(240) + "…");
+        for (int index = 0; index < failures.size(); index++) {
+            Exception failure = failures.get(index);
+            String reason = reasons.get(index);
+            try (FileTreeModel model = new FileTreeModel(root, false, false, (directory, hidden, consumer) -> {
+                if (failure instanceof IOException io) throw io;
+                throw (RuntimeException) failure;
+            })) {
+                awaitLoaded(model);
+                assertEquals(List.of(new FileTreeModel.DirectoryFailure(root, reason)),
+                    model.snapshot().failures());
+                assertTrue(model.snapshot().entries().stream()
+                    .anyMatch(entry -> entry.kind() == FileTreeModel.Kind.ERROR && entry.name().contains(reason)));
+            }
+        }
+    }
+
+    @Test
     void snapshotSortsDirectoriesBeforeFilesAndAppliesHiddenFilter() throws IOException {
         Path alphaDirectory = Files.createDirectory(root.resolve("Alpha-dir"));
         Path zetaDirectory = Files.createDirectory(root.resolve("zeta-dir"));

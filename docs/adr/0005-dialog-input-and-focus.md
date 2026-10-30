@@ -48,6 +48,28 @@ TUIframe provides the shared behavior in `tuiframe-widgets`:
 `Modal` and `PlacedModal` remain visual frame primitives. The behavior API also
 works with inline prompts that have no frame.
 
+`RoutedTarget` derives current-frame interaction availability from the authored
+enabled flag, placement bounds, parent clip, and `InteractionVisibility` policy.
+`FULL_BOUNDS` requires a nonempty control wholly inside its clip; scrollable
+surfaces can explicitly use `VISIBLE_INTERSECTION`. `FocusManager` and
+`DialogFocusTraversal` use the same derived eligibility. Buttons and text fields
+also reject ordinary direct input when their placements are clipped. A scope
+with the `CLEARED` reset policy clears an unavailable focus target instead of
+automatically choosing another action after a resize.
+
+`PlacedInteractiveWidget.interactionReady()` also checks the allocation itself.
+A button requires room for its complete rendered label even when its smaller
+allocated bounds fit inside the clip. Transparent placement adapters forward
+this capability; fields and scrolling surfaces require their viewport to fit,
+not their whole text content.
+
+Form actions have additional application-owned context requirements: a readable
+confirmation question, a filename viewport, or both search fields. Each placement
+computes this condition once and exposes it to physical and semantic command
+routes. Action availability does not require its button to be visible: Enter can
+submit a readable filename while the Save button is hidden. Safe cancellation
+remains available without visible controls.
+
 TUInk classifies its commands in `DialogCommandPolicy` and supplies the actual
 control scopes, document geometry, clipboard adapter, and rendering. File and
 menu commands aimed at a document behind its blocking or exclusive dialog remain
@@ -81,6 +103,11 @@ capture coordinator owns delivery of drag/release beyond the current hit box and
 termination on surface/focus/geometry changes. Capture identity is stable across
 frames; delivery resolves the current placement instead of retaining an obsolete
 placement. The widget owns the gesture data; the coordinator owns delivery.
+Capture routing can deliver a drag or release beyond the hit box while the owner
+still intersects its clip. A widget can require stronger visibility: TextField
+cancels if its own bounds become clipped, preserving its selection and viewport.
+Continuation does not admit a new press or keyboard activation on an unavailable
+control.
 TUInk reports active-surface transitions and adapts its document gesture to this
 contract. Document wrapping anchors and reading-mode command effects belong to
 TUInk, which owns the text model and command semantics.

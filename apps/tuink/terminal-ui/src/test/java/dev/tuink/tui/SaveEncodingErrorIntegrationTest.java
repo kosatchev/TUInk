@@ -149,6 +149,24 @@ class SaveEncodingErrorIntegrationTest {
     }
 
     @Test
+    void narrowEncodingPromptCannotConvertByMnemonicOrEnter() throws Exception {
+        try (EditorWindowFixture window = legacyWindow()) {
+            window.event(new TextInput("😀"));
+            window.event(ctrl(KeyStroke.Key.S));
+            window.resize(8, 20);
+            window.event(new TextInput("y"));
+            window.event(KeyStroke.of(KeyStroke.Key.ENTER));
+            assertEquals(LEGACY_CHARSET, window.active().state().getFileEncoding());
+            assertTrue(window.active().state().isDirty());
+            assertArrayEquals(ORIGINAL.getBytes(LEGACY_CHARSET), Files.readAllBytes(window.document));
+            window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
+            window.resize(24, 80);
+            window.event(new TextInput("x"));
+            assertTrue(window.active().tabSession().model().getLine(0).contains("x"));
+        }
+    }
+
+    @Test
     void aNewUtf8TabCanSaveTheCompleteDraftThroughTheInternalClipboard() throws Exception {
         try (EditorWindowFixture window = legacyWindow()) {
             window.event(new TextInput("😀"));

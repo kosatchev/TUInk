@@ -78,7 +78,7 @@ final class WindowPointerCapture {
         }
         RoutedTarget<K, A> target = scope.target(targetId).orElseThrow();
         RoutedTarget<Object, A> adapted = new RoutedTarget<>(target.id(), target.placement(), target.space(),
-            target.focusable(), target.enabled());
+            target.focusable(), target.enabled(), target.visibility());
         manager.apply(surfaceId, scope.id(), adapted, result);
     }
 
@@ -114,7 +114,7 @@ final class WindowPointerCapture {
                     ? new CapturingAdapter<>(scope, target, focusManager, adopt)
                     : new Adapter<>(scope, target, focusManager, adopt);
                 targets.add(new RoutedTarget<>(target.id(), adapter, target.space(),
-                    target.focusable(), target.enabled()));
+                    target.focusable(), target.enabled(), target.visibility()));
             }
             scopes.add(new FocusScope<>(scope.id(), scope.resetPolicy(), targets,
                 scope.tabOrder().stream().map(id -> (Object) id).toList(),
@@ -140,6 +140,11 @@ final class WindowPointerCapture {
         @Override
         public Rect bounds() {
             return target.placement().bounds();
+        }
+
+        @Override
+        public boolean interactionReady() {
+            return target.placement().interactionReady();
         }
 
         @Override

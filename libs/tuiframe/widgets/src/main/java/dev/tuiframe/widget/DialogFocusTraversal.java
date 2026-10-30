@@ -22,7 +22,8 @@ public final class DialogFocusTraversal {
     /**
      * Moves through eligible controls in scope order and then through the content area.
      *
-     * <p>Controls must be enabled, focusable, nonempty and fully inside their parent clip.
+     * <p>Controls must satisfy {@link RoutedTarget#focusEligible()}: enabled, focusable,
+     * nonempty and fully inside their parent clip unless they declare intersection visibility.
      * Hidden content is skipped. Selecting content, or finding no available stop, explicitly
      * clears the control focus so placement reconciliation cannot steal content ownership.
      * Non-traversal keys leave both owners unchanged.</p>
@@ -110,8 +111,6 @@ public final class DialogFocusTraversal {
     }
 
     private static boolean eligible(RoutedTarget<?, ?> target) {
-        return target != null && target.enabled() && target.focusable()
-            && !target.placement().bounds().isEmpty()
-            && target.space().parentClip().contains(target.placement().bounds());
+        return target != null && target.focusEligible();
     }
 }

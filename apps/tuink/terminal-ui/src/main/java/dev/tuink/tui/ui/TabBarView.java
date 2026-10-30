@@ -6,6 +6,7 @@ import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.input.TuiInputEvent;
 import dev.tuiframe.widget.FocusContext;
 import dev.tuiframe.widget.FocusSpace;
+import dev.tuiframe.widget.InteractionVisibility;
 import dev.tuiframe.widget.InteractionResult;
 import dev.tuiframe.widget.TabBar;
 import dev.tuiframe.widget.Theme;
@@ -89,8 +90,7 @@ public final class TabBarView {
 
     private Placement placement(TabBar.Placement widgetPlacement, Rect interactionClip) {
         Rect requiredClip = Objects.requireNonNull(interactionClip, "interactionClip");
-        boolean enabled = !widgetPlacement.bounds().isEmpty()
-            && requiredClip.contains(widgetPlacement.bounds());
+        boolean enabled = InteractionVisibility.FULL_BOUNDS.allows(widgetPlacement.bounds(), requiredClip);
         FocusContext context = new FocusContext(
             false,
             enabled,

@@ -159,7 +159,7 @@ public final class PointerCaptureManager<K> {
     }
 
     private static boolean visible(RoutedTarget<?, ?> target) {
-        return target.space().parentClip().intersects(target.placement().bounds());
+        return InteractionVisibility.VISIBLE_INTERSECTION.allows(target.placement().bounds(), target.space().parentClip());
     }
 
     @SuppressWarnings("unchecked")
@@ -182,6 +182,16 @@ public final class PointerCaptureManager<K> {
         public Target {
             Objects.requireNonNull(scopeId, "scopeId");
             Objects.requireNonNull(target, "target");
+        }
+
+        /**
+         * Capture continuation uses visible intersection even when normal input
+         * requires full bounds. Keep the caller's actual keyboard-focus state.
+         * Individual widgets may impose stricter geometry and cancel their gesture.
+         */
+        public FocusContext context(boolean focused) {
+            boolean available = target.enabled() && visible(target);
+            return new FocusContext(focused && available, available, target.space());
         }
     }
 

@@ -699,7 +699,8 @@ public final class TextField implements InteractiveWidget<TextField.Action> {
         public InteractionResult<Action> handle(TuiInputEvent event, FocusContext context) {
             Objects.requireNonNull(event, "event");
             Objects.requireNonNull(context, "context");
-            if (!context.enabled()) {
+            if (!context.enabled()
+                || !InteractionVisibility.FULL_BOUNDS.allows(bounds, context.space().parentClip())) {
                 owner.cancelMouseSelection();
                 return InteractionResult.ignored();
             }
@@ -762,7 +763,8 @@ public final class TextField implements InteractiveWidget<TextField.Action> {
         @Override
         public Optional<Point> cursorPosition(FocusContext context) {
             Objects.requireNonNull(context, "context");
-            if (!context.focused() || !context.enabled() || bounds.isEmpty()) {
+            if (!context.focused() || !context.enabled()
+                || !InteractionVisibility.FULL_BOUNDS.allows(bounds, context.space().parentClip())) {
                 return Optional.empty();
             }
             Point cursorPoint = new Point(bounds.x() + cursorColumn, bounds.y());
@@ -775,10 +777,6 @@ public final class TextField implements InteractiveWidget<TextField.Action> {
             PointerEvent pointer,
             FocusContext context
         ) {
-            if (bounds.isEmpty() || !context.space().parentClip().contains(bounds)) {
-                owner.cancelMouseSelection();
-                return InteractionResult.ignored();
-            }
             if (captures(pointer)) {
                 if (!context.focused()) {
                     owner.cancelMouseSelection();

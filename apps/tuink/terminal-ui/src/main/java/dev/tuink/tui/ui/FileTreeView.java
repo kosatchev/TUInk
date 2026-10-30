@@ -10,6 +10,7 @@ import dev.tuiframe.scroll.ScrollLayout;
 import dev.tuiframe.widget.FocusContext;
 import dev.tuiframe.widget.FocusSpace;
 import dev.tuiframe.widget.InteractionResult;
+import dev.tuiframe.widget.InteractionVisibility;
 import dev.tuiframe.widget.PlacedPointerCapture;
 import dev.tuiframe.widget.PointerCaptureCancellation;
 import dev.tuiframe.widget.Theme;
@@ -130,8 +131,7 @@ public final class FileTreeView {
             tree.layout(widgetBounds, reconciled.widgetState());
         State normalized = visible ? adopt(placed.state(), reconciled, false) : reconciled;
         boolean enabled = visible
-            && !placed.bounds().isEmpty()
-            && requiredClip.contains(placed.bounds());
+            && InteractionVisibility.FULL_BOUNDS.allows(placed.bounds(), requiredClip);
         if (!enabled) {
             normalized = normalized.cancelPointerInteraction();
         }
@@ -462,6 +462,11 @@ public final class FileTreeView {
                 @Override
                 public Rect bounds() {
                     return placed.bounds();
+                }
+
+                @Override
+                public boolean interactionReady() {
+                    return placed.interactionReady();
                 }
 
                 @Override

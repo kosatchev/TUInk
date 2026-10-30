@@ -65,6 +65,10 @@ class AmbiguousOpenIntegrationTest {
             window.event(new TextInput("draft "));
             var source = window.active();
             selectAndOpen(window, file);
+            window.resize(24, 20);
+            window.event(new TextInput("y"));
+            assertEquals(1, window.tabs.size(), "A hidden question cannot authorize explicit decoding");
+            window.resize(24, 80);
             window.event(new TextInput("y"));
 
             assertEquals(2, window.tabs.size());

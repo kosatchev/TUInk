@@ -53,7 +53,7 @@ class DialogBehaviorIntegrationTest {
     private static final KeyStroke BACK_TAB = KeyStroke.of(KeyStroke.Key.TAB, KeyStroke.Modifier.SHIFT);
 
     @Test
-    void blockedConfirmationInputFocusesTheFirstVisibleChoiceWithoutReplayingTheDecision() {
+    void blockedConfirmationInputNeverReplaysTheDecisionOrExposesAClippedQuestion() {
         for (boolean clipPrimary : List.of(false, true)) {
             for (TuiInputEvent event : forbiddenContentInput()) {
                 ConfirmBarView view = ConfirmBarView.build("Unsaved document", 120);
@@ -71,8 +71,12 @@ class DialogBehaviorIntegrationTest {
 
                 assertEquals(Decision.BLOCK, gate.route(event), event.toString());
 
-                ConfirmChoice first = clipPrimary ? ConfirmChoice.DISCARD : ConfirmChoice.SAVE;
-                assertEquals(first, focus.focused().orElseThrow());
+                ConfirmChoice first = ConfirmChoice.SAVE;
+                if (clipPrimary) {
+                    assertTrue(focus.focused().isEmpty(), "a clipped question must not offer a decision");
+                } else {
+                    assertEquals(first, focus.focused().orElseThrow());
+                }
                 assertFalse(gate.contentFocused);
                 assertTrue(gate.attention.highlighted());
                 assertTrue(gate.controlOutputs.isEmpty(), "the rejected event cannot decide the newly focused action");
@@ -82,7 +86,7 @@ class DialogBehaviorIntegrationTest {
                 // Only a new, deliberate Enter may activate the redirected choice.
                 assertEquals(Decision.ALLOW, gate.route(KeyStroke.of(KeyStroke.Key.ENTER)));
                 var result = assertInstanceOf(ConfirmBarInputRouter.Result.class, gate.controlOutputs.getFirst());
-                assertEquals(first, result.decision());
+                assertEquals(clipPrimary ? null : first, result.decision());
                 gate.document.assertUnchanged();
                 gate.document.assertHistoryIntact();
             }

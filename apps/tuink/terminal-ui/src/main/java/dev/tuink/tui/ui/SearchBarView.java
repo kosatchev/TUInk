@@ -12,6 +12,7 @@ import dev.tuiframe.widget.FocusResetPolicy;
 import dev.tuiframe.widget.FocusScope;
 import dev.tuiframe.widget.FocusSpace;
 import dev.tuiframe.widget.InteractionResult;
+import dev.tuiframe.widget.InteractionVisibility;
 import dev.tuiframe.widget.PlacedCursorSource;
 import dev.tuiframe.widget.PlacedInteractiveWidget;
 import dev.tuiframe.widget.PlacedPointerCapture;
@@ -31,6 +32,8 @@ public final class SearchBarView {
     public static final String FIND_LABEL = "Find: ";
     public static final String REPLACE_LABEL = "Replace: ";
     private static final int RIGHT_MARGIN = 1;
+    // A two-cell glyph and its insertion cursor must fit side by side.
+    private static final int MIN_FIELD_WIDTH = 3;
 
     private final TextField queryField;
     private final TextField replacementField;
@@ -89,8 +92,8 @@ public final class SearchBarView {
         int actionLeftWidth = leftWidth(actionTargets, safeColumns);
         int findLabelWidth = CellText.width(FIND_LABEL);
         int replaceLabelWidth = CellText.width(REPLACE_LABEL);
-        boolean optionsVisible = optionLeftWidth - findLabelWidth >= 1;
-        boolean actionsVisible = actionLeftWidth - replaceLabelWidth >= 1;
+        boolean optionsVisible = optionLeftWidth - findLabelWidth >= MIN_FIELD_WIDTH;
+        boolean actionsVisible = actionLeftWidth - replaceLabelWidth >= MIN_FIELD_WIDTH;
         if (!optionsVisible) {
             optionLeftWidth = safeColumns;
         }
@@ -165,6 +168,10 @@ public final class SearchBarView {
             new FieldPlacement(replacementPlacement, Action.REPLACEMENT_CHANGED),
             safeClip
         );
+        boolean replacementContextVisible = queryPlacement.bounds().width() >= MIN_FIELD_WIDTH
+            && replacementPlacement.bounds().width() >= MIN_FIELD_WIDTH
+            && InteractionVisibility.FULL_BOUNDS.allows(queryPlacement.bounds(), safeClip)
+            && InteractionVisibility.FULL_BOUNDS.allows(replacementPlacement.bounds(), safeClip);
         for (ButtonSpec spec : buttons) {
             PlacedInteractiveWidget<Button.Action> placedButton = spec.button().layout(
                 new Rect(spec.column(), topRow + spec.row(), spec.visible() ? spec.button().width() : 0, 1)
@@ -173,7 +180,8 @@ public final class SearchBarView {
                 targets,
                 spec.target(),
                 new ButtonPlacement(placedButton, spec.action()),
-                safeClip
+                safeClip,
+                replacementContextVisible || (spec.action() != Action.REPLACE && spec.action() != Action.REPLACE_ALL)
             );
         }
 
@@ -184,7 +192,7 @@ public final class SearchBarView {
             SearchNavigation.order(),
             SearchNavigation.order()
         );
-        return new Placement(row1, row2, scope, queryField, replacementField);
+        return new Placement(row1, row2, scope, queryField, replacementField, replacementContextVisible);
     }
 
     /** Typed application intents emitted by the composed reusable controls. */
@@ -210,19 +218,22 @@ public final class SearchBarView {
         private final FocusScope<SearchFocus, Action> focusScope;
         private final TextField queryField;
         private final TextField replacementField;
+        private final boolean replacementContextVisible;
 
         private Placement(
             String row1,
             String row2,
             FocusScope<SearchFocus, Action> focusScope,
             TextField queryField,
-            TextField replacementField
+            TextField replacementField,
+            boolean replacementContextVisible
         ) {
             this.row1 = Objects.requireNonNull(row1, "row1");
             this.row2 = Objects.requireNonNull(row2, "row2");
             this.focusScope = Objects.requireNonNull(focusScope, "focusScope");
             this.queryField = Objects.requireNonNull(queryField, "queryField");
             this.replacementField = Objects.requireNonNull(replacementField, "replacementField");
+            this.replacementContextVisible = replacementContextVisible;
         }
 
         public String text() {
@@ -243,7 +254,7 @@ public final class SearchBarView {
 
         /** The enabled buffer for an explicitly selected recipient; never falls back to Find. */
         public Optional<TextField> field(SearchFocus targetId) {
-            if (targetId == null || !focusScope.target(targetId).map(RoutedTarget::enabled).orElse(false)) {
+            if (targetId == null || !focusScope.target(targetId).map(RoutedTarget::interactive).orElse(false)) {
                 return Optional.empty();
             }
             return switch (targetId) {
@@ -251,6 +262,11 @@ public final class SearchBarView {
                 case REPLACE -> Optional.of(replacementField);
                 default -> Optional.empty();
             };
+        }
+
+        /** Replacement needs both editable values on screen, including a cell beside each caret. */
+        public boolean replacementContextVisible() {
+            return replacementContextVisible;
         }
 
         public Rect targetBounds(SearchFocus target) {
@@ -300,8 +316,8 @@ public final class SearchBarView {
             boolean active = focusManager.activeScopeId().filter(focusScope.id()::equals).isPresent();
             boolean focused = active
                 && focusManager.focused().filter(target.id()::equals).isPresent()
-                && target.enabled();
-            return new FocusContext(focused, target.enabled(), target.space());
+                && target.interactive();
+            return new FocusContext(focused, target.interactive(), target.space());
         }
     }
 
@@ -354,14 +370,22 @@ public final class SearchBarView {
         PlacedInteractiveWidget<Action> placement,
         Rect interactionClip
     ) {
-        Rect bounds = placement.bounds();
-        boolean interactive = !bounds.isEmpty() && interactionClip.contains(bounds);
+        addTarget(targets, id, placement, interactionClip, true);
+    }
+
+    private static void addTarget(
+        List<RoutedTarget<SearchFocus, Action>> targets,
+        SearchFocus id,
+        PlacedInteractiveWidget<Action> placement,
+        Rect interactionClip,
+        boolean enabled
+    ) {
         targets.add(new RoutedTarget<>(
             id,
             placement,
             FocusSpace.root(interactionClip),
-            interactive,
-            interactive
+            true,
+            enabled
         ));
     }
 
@@ -387,6 +411,11 @@ public final class SearchBarView {
         @Override
         public Rect bounds() {
             return delegate.bounds();
+        }
+
+        @Override
+        public boolean interactionReady() {
+            return delegate.interactionReady();
         }
 
         @Override
@@ -427,11 +456,11 @@ public final class SearchBarView {
         }
     }
 
-    private record ButtonPlacement(
+    record ButtonPlacement(
         PlacedInteractiveWidget<Button.Action> delegate,
         Action action
     ) implements PlacedInteractiveWidget<Action> {
-        private ButtonPlacement {
+        ButtonPlacement {
             Objects.requireNonNull(delegate, "delegate");
             Objects.requireNonNull(action, "action");
         }
@@ -439,6 +468,11 @@ public final class SearchBarView {
         @Override
         public Rect bounds() {
             return delegate.bounds();
+        }
+
+        @Override
+        public boolean interactionReady() {
+            return delegate.interactionReady();
         }
 
         @Override

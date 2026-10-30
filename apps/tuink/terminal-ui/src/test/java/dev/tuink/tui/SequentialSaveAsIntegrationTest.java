@@ -67,7 +67,7 @@ class SequentialSaveAsIntegrationTest {
     }
 
     @Test
-    void cancellingTheNextFilenameKeepsItsDraftAndCanResume() throws Exception {
+    void cancellingTheNextFilenameKeepsItsDraftAndCanResumeAfterResize() throws Exception {
         try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("original"))) {
             window.command(TuinkCommand.TAB_NEW);
             window.event(new TextInput("first"));
@@ -93,6 +93,10 @@ class SequentialSaveAsIntegrationTest {
             window.command(TuinkCommand.APP_QUIT);
             window.event(new TextInput("y"));
             assertEquals(second.toString(), window.filename.text());
+            window.resize(24, 10);
+            window.event(KeyStroke.of(KeyStroke.Key.ENTER));
+            assertFalse(Files.exists(second));
+            window.resize(24, 80);
             assertEquals(SaveAsBarView.Target.FIELD, window.host.saveAsFocusManager().focused().orElseThrow());
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
 

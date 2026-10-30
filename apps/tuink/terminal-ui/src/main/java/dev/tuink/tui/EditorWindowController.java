@@ -61,6 +61,7 @@ import dev.tuiframe.widget.TabBar;
 import dev.tuiframe.widget.TextField;
 import dev.tuiframe.widget.Theme;
 import dev.tuink.tui.ui.ConfirmBarView;
+import dev.tuink.tui.ui.ConfirmPromptText;
 import dev.tuink.tui.ui.EditorView;
 import dev.tuink.tui.ui.InlinePromptBar;
 import dev.tuink.tui.ui.NotificationBar;
@@ -615,7 +616,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             boolean opening = modalState().isOpenUtf16Confirm();
             String primaryLabel = opening ? "Open UTF-16LE" : "Save UTF-8";
             String question = opening
-                ? ("Ambiguous: " + dev.tuink.tui.ui.PathPresentation.name(modalState().pendingOpenPath()) + " as UTF-16LE?")
+                ? ConfirmPromptText.fileQuestion("Ambiguous: ", modalState().pendingOpenPath(), " as UTF-16LE?",
+                    ConfirmBarView.promptWidth(cols, primaryLabel, "Cancel", false, "Cancel"))
                 : "Save as UTF-8 without BOM?";
             confirmBar = ConfirmBarView.buildAlternative(
                 question, cols, primaryLabel);
@@ -623,7 +625,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 EditorStyleAdapter.toEditor(host.styles.promptAlert()), 1, 1);
         } else if (saveOverwriteConfirmMode) {
             confirmBar = ConfirmBarView.build(
-                host.buildOverwritePrompt(pendingOverwritePath),
+                host.buildOverwritePrompt(pendingOverwritePath, cols),
                 cols
             );
             inlinePromptBar = InlinePromptBar.of(
@@ -807,7 +809,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         Rect dialogViewport = new Rect(0, dialogTopInset, cols, Math.max(0, rows - dialogTopInset));
         if (ui().openFileMode) {
             openFileLayout = OpenFileDialogController.layoutForTerminal(rows, cols, dialogTopInset);
-            boolean treeVisible = dialogViewport.height() >= 8 && cols >= 24;
+            boolean treeVisible = !CompactDialogView.required(dialogViewport.height(), cols);
             int treeLeft = openFileLayout.left() + 2;
             Rect treeBounds = new Rect(
                 treeLeft,
@@ -969,14 +971,14 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     static FocusScope<String, ListView.Action> helpContentScope(TerminalEditorApp.HelpOverlayPlacement help) {
         return FocusScope.single(HELP_CONTENT_POINTER_SCOPE, FocusResetPolicy.CLEARED,
             new RoutedTarget<>("content", help.content(), FocusSpace.root(help.viewport()), false,
-                !help.content().bounds().isEmpty()));
+                true));
     }
 
     private FocusScope<String, Void> documentPointerScope() {
         Rect bounds = new Rect(0, contentTopRow, cols, Math.max(0, editorPointerRows));
         return FocusScope.single(DOCUMENT_POINTER_SCOPE, FocusResetPolicy.CLEARED,
             new RoutedTarget<>("document", new DocumentPointerTarget(bounds),
-                FocusSpace.root(new Rect(0, 0, cols, rows)), false, plan != null && !bounds.isEmpty()));
+                FocusSpace.root(new Rect(0, 0, cols, rows)), false, plan != null));
     }
 
     private WindowPointerCapture.Frame pointerFrame() {
@@ -1031,7 +1033,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         var scope = documentPointerScope();
         var target = scope.target("document").orElseThrow();
         InteractionResult<Void> result = target.placement().handle(event,
-            new FocusContext(false, target.enabled(), target.space()));
+            new FocusContext(false, target.interactive(), target.space()));
         pointerCapture.observe(this, scope, "document", result);
     }
 
@@ -1266,6 +1268,11 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     private void executeSearchDocumentCommand(TuinkCommand command) {
         TabUiState source = ui();
         if (command.editsDocumentText() && rejectSavingDocumentEdit()) {
+            return;
+        }
+        if ((command == TuinkCommand.SEARCH_REPLACE || command == TuinkCommand.SEARCH_REPLACE_ALL)
+            && (searchBarPlacement == null || !searchBarPlacement.replacementContextVisible())) {
+            notice().warning("Enlarge terminal to show Find and Replace fields before replacing");
             return;
         }
         if (command == TuinkCommand.CURSOR_PAGE_UP || command == TuinkCommand.CURSOR_PAGE_DOWN) {
@@ -1594,6 +1601,13 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                     saveAsBarPlacement, physicalCommand, host.clipboard);
             }
             SaveAsBarView.Action fieldAction = saveAsInputResult.action();
+            if (fieldAction == SaveAsBarView.Action.SUBMIT_REJECTED) {
+                // Keep a pending save failure visible until its filename is edited.
+                if (notice().message == null) {
+                    notice().warning("Enlarge terminal to show the filename before saving");
+                }
+                return;
+            }
             if (fieldAction == SaveAsBarView.Action.INPUT_REJECTED) {
                 notice().error("Text is too large; nothing changed");
                 return;

@@ -269,24 +269,24 @@ class ConfirmBarInputRouterTest {
         Fixture fixture = standard(ConfirmBarInputRouter.Policy.quit(), 1);
 
         assertTrue(fixture.focus.focused().isEmpty());
-        assertFalse(fixture.target(ConfirmChoice.SAVE).focusable());
-        assertFalse(fixture.target(ConfirmChoice.CANCEL).focusable());
+        assertFalse(fixture.target(ConfirmChoice.SAVE).focusEligible());
+        assertFalse(fixture.target(ConfirmChoice.CANCEL).focusEligible());
         assertCapturedWithoutDecision(fixture.route(KeyStroke.of(KeyStroke.Key.ENTER)));
         fixture.route(KeyStroke.of(KeyStroke.Key.END));
         assertTrue(fixture.focus.focused().isEmpty());
     }
 
     @Test
-    void visibleSaveDoesNotReplaceAClippedSafeDefault() {
+    void actionWidthWithoutTheQuestionDoesNotOfferAnyChoice() {
         Fixture fixture = standard(ConfirmBarInputRouter.Policy.quit(), 6);
 
-        assertTrue(fixture.target(ConfirmChoice.SAVE).focusable());
-        assertFalse(fixture.target(ConfirmChoice.CANCEL).focusable());
+        assertFalse(fixture.target(ConfirmChoice.SAVE).focusEligible());
+        assertFalse(fixture.target(ConfirmChoice.CANCEL).focusEligible());
         assertTrue(fixture.focus.focused().isEmpty());
         assertCapturedWithoutDecision(fixture.route(KeyStroke.of(KeyStroke.Key.ENTER)));
 
         fixture.route(KeyStroke.of(KeyStroke.Key.TAB));
-        assertEquals(ConfirmChoice.SAVE, fixture.focus.focused().orElseThrow());
+        assertTrue(fixture.focus.focused().isEmpty());
     }
 
     @Test
@@ -305,7 +305,72 @@ class ConfirmBarInputRouterTest {
         narrow.activate(wide.focus);
 
         assertTrue(wide.focus.focused().isEmpty());
-        assertTrue(narrow.focusScope().target(ConfirmChoice.SAVE).orElseThrow().focusable());
+        assertFalse(narrow.focusScope().target(ConfirmChoice.SAVE).orElseThrow().focusEligible());
+    }
+
+    @Test
+    void compactConfirmationsAllowOnlySafeCancellationAcrossEveryPolicy() {
+        List<ConfirmBarInputRouter.Policy> policies = List.of(
+            ConfirmBarInputRouter.Policy.recovery(), ConfirmBarInputRouter.Policy.overwrite(),
+            ConfirmBarInputRouter.Policy.quit(), ConfirmBarInputRouter.Policy.closeTab()
+        );
+        List<TuiInputEvent> events = List.of(
+            new TextInput("y"), new TextInput("Y"), new TextInput("n"), new TextInput("N"),
+            KeyStroke.of(KeyStroke.Key.ESCAPE), KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL),
+            KeyStroke.of(KeyStroke.Key.ENTER), new TextInput(" "), KeyStroke.of(KeyStroke.Key.TAB),
+            KeyStroke.of(KeyStroke.Key.HOME), KeyStroke.of(KeyStroke.Key.END),
+            pointer(4, 0, PointerEvent.Kind.PRESS, PointerEvent.Button.LEFT)
+        );
+        for (ConfirmBarInputRouter.Policy policy : policies) {
+            ConfirmBarView view = policy == ConfirmBarInputRouter.Policy.recovery()
+                ? ConfirmBarView.buildRecovery("Recover?", 12)
+                : ConfirmBarView.build("Confirm?", 12);
+            Fixture fixture = fixture(view, policy, 12, new Object());
+            for (TuiInputEvent event : events) {
+                ConfirmBarInputRouter.Result result = fixture.route(event);
+                boolean safeCancel = event instanceof TextInput text && text.text().equalsIgnoreCase("n")
+                    || event.equals(KeyStroke.of(KeyStroke.Key.ESCAPE))
+                    || event.equals(KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL));
+                assertTrue(result.consumed(), event.toString());
+                assertEquals(safeCancel ? ConfirmChoice.CANCEL : null, result.decision(), event.toString());
+                assertTrue(fixture.focus.focused().isEmpty());
+            }
+        }
+    }
+
+    @Test
+    void compactModeCannotBeBypassedByEnteringAPreviouslyFocusedChoice() {
+        Object scopeId = new Object();
+        Fixture wide = fixture(ConfirmBarView.build("Quit?", 80),
+            ConfirmBarInputRouter.Policy.quit(), 80, scopeId);
+        wide.focus.focus(wide.scope(), ConfirmChoice.DISCARD);
+        ConfirmBarView.Placement narrow = ConfirmBarView.build("Quit?", 12)
+            .place(scopeId, 4, viewport(6, 12));
+        Fixture compact = new Fixture(wide.focus, narrow, wide.policy);
+
+        assertCapturedWithoutDecision(compact.route(KeyStroke.of(KeyStroke.Key.ENTER)));
+        assertCapturedWithoutDecision(compact.route(new TextInput("y")));
+        assertTrue(compact.focus.focused().isEmpty());
+
+        ConfirmBarView.Placement restored = ConfirmBarView.build("Quit?", 80)
+            .place(scopeId, 4, viewport(6, 80));
+        Fixture expanded = new Fixture(wide.focus, restored, wide.policy);
+        assertEquals(ConfirmChoice.SAVE, expanded.route(new TextInput("y")).decision());
+    }
+
+    @Test
+    void mnemonicCannotActivateAClippedActionEvenWhenTheQuestionIsVisible() {
+        ConfirmBarView.Placement placement = ConfirmBarView.build("Quit?", 80)
+            .place(new Object(), 4, viewport(6, 55));
+        Fixture fixture = new Fixture(new FocusManager<>(), placement, ConfirmBarInputRouter.Policy.quit());
+
+        assertTrue(placement.decisionsAvailable());
+        assertTrue(fixture.target(ConfirmChoice.SAVE).enabled());
+        assertFalse(fixture.target(ConfirmChoice.SAVE).interactive());
+        assertCapturedWithoutDecision(fixture.route(new TextInput("y")));
+        assertEquals(ConfirmChoice.CANCEL,
+            fixture.route(KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL)).decision());
+        assertEquals(ConfirmChoice.CANCEL, fixture.route(KeyStroke.of(KeyStroke.Key.ESCAPE)).decision());
     }
 
     private static Fixture standard(ConfirmBarInputRouter.Policy policy, int cols) {

@@ -57,36 +57,41 @@ final class OpenFileDialogView {
         Objects.requireNonNull(layout, "layout");
         Objects.requireNonNull(tree, "tree");
         FocusSpace space = FocusSpace.root(Objects.requireNonNull(interactionClip, "interactionClip"));
+        CompactDialogView.Placement compact = CompactDialogView.required(interactionClip.height(), interactionClip.width())
+            ? CompactDialogView.place(interactionClip,
+                notice != null && interactionClip.height() < 3
+                    ? NotificationPresentation.fitReasonWithPath(notice.summary(), notice.path(), interactionClip.width())
+                    : "Open file")
+            : null;
         var buttons = OpenFileDialogController.buttonsForLayout(layout);
         String hiddenLabel = showHiddenFiles ? "[hidden:x]" : "[hidden: ]";
         Button hidden = Button.plain(layout.top() + 1,
             Math.max(layout.left() + 1, layout.right() - hiddenLabel.length()), hiddenLabel);
-        Button close = Button.plain(layout.top(), layout.right() - 2, "X");
+        Button close = compact == null ? Button.plain(layout.top(), layout.right() - 2, "X") : compact.closeButton();
         List<RoutedTarget<Control, Button.Action>> targets = List.of(
             new RoutedTarget<>(Control.LIST, new TreeFocusTarget(tree.bounds()), space,
-                tree.enabled(), tree.enabled()),
+                true, tree.enabled()),
             buttonTarget(Control.OK, buttons.ok(), space, tree.enabled(), true),
             buttonTarget(Control.CANCEL, buttons.cancel(), space, tree.enabled(), true),
             buttonTarget(Control.HIDDEN, hidden, space, tree.enabled(), false),
             buttonTarget(Control.CLOSE, close, space,
-                tree.enabled(), false)
+                compact != null || tree.enabled(), compact != null)
         );
-        PlacedModal frame = new Modal(layout.width(), layout.height(),
+        PlacedModal frame = compact != null ? compact.frame() : new Modal(layout.width(), layout.height(),
             tree.loading() ? " Open File (Loading...) " : " Open File ")
             .layout(new Rect(layout.left(), layout.top(), layout.width(), layout.height()));
         return new Placement(layout, frame, tree, new FocusScope<>(
             scopeId, FocusResetPolicy.FIRST_FOCUSABLE, targets,
-            List.of(Control.LIST, Control.OK, Control.CANCEL),
+            compact == null ? List.of(Control.LIST, Control.OK, Control.CANCEL) : List.of(Control.CLOSE),
             List.of(Control.CLOSE, Control.HIDDEN, Control.CANCEL, Control.OK, Control.LIST)
-        ), showHiddenFiles, notice);
+        ), showHiddenFiles, compact, notice);
     }
 
     private static RoutedTarget<Control, Button.Action> buttonTarget(
         Control id, Button button, FocusSpace space, boolean enabled, boolean focusable
     ) {
         Rect bounds = new Rect(button.col(), button.row(), button.width(), 1);
-        boolean available = enabled && space.parentClip().contains(bounds);
-        return new RoutedTarget<>(id, button.layout(bounds), space, available && focusable, available);
+        return new RoutedTarget<>(id, button.layout(bounds), space, focusable, enabled);
     }
 
     /** The only retained focus owner; the public enum is just its application-facing projection. */
@@ -94,6 +99,8 @@ final class OpenFileDialogView {
         private final FocusManager<Control> manager = new FocusManager<>();
         private FocusScope<Control, Button.Action> scope;
         private OpenFileInputRouter.Focus pendingFocus = OpenFileInputRouter.Focus.LIST;
+        private boolean compact;
+        private Control focusBeforeCompact;
 
         OpenFileInputRouter.Focus focus() {
             return scope == null ? pendingFocus : external(manager.focused().orElse(Control.LIST));
@@ -101,7 +108,7 @@ final class OpenFileDialogView {
 
         void focus(OpenFileInputRouter.Focus focus) {
             Objects.requireNonNull(focus, "focus");
-            if (scope == null) {
+            if (scope == null || compact) {
                 pendingFocus = focus;
             } else {
                 manager.focus(scope, control(focus));
@@ -109,12 +116,22 @@ final class OpenFileDialogView {
         }
 
         private void bind(Placement placement) {
+            boolean enteringCompact = placement.compactDialog() != null;
+            if (enteringCompact && !compact) {
+                focusBeforeCompact = manager.focused().orElse(Control.LIST);
+            }
             scope = placement.focusScope();
             manager.context(scope, Control.LIST);
-            if (pendingFocus != null) {
+            if (!enteringCompact && pendingFocus != null) {
                 manager.focus(scope, control(pendingFocus));
                 pendingFocus = null;
+            } else if (!enteringCompact && compact && focusBeforeCompact != null) {
+                manager.focus(scope, focusBeforeCompact);
             }
+            if (!enteringCompact) {
+                focusBeforeCompact = null;
+            }
+            compact = enteringCompact;
         }
 
         FocusManager<Control> manager() {
@@ -128,6 +145,7 @@ final class OpenFileDialogView {
         FileTreeView.Placement tree,
         FocusScope<Control, Button.Action> focusScope,
         boolean showHiddenFiles,
+        CompactDialogView.Placement compactDialog,
         FilePickerOpenWorkflow.Notice notice
     ) {
         Placement {
@@ -157,7 +175,7 @@ final class OpenFileDialogView {
             return focusScope.tabOrder().stream()
                 .filter(id -> {
                     var target = focusScope.target(id).orElseThrow();
-                    return target.enabled() && target.focusable();
+                    return target.focusEligible();
                 })
                 .map(OpenFileDialogView::external)
                 .toList();
@@ -169,12 +187,20 @@ final class OpenFileDialogView {
                 var target = focusScope.target(id).orElseThrow();
                 boolean highlighted = id == Control.HIDDEN ? showHiddenFiles
                     : !contentFocused && control(focused) == id;
-                target.placement().paint(canvas, theme, new WidgetState(highlighted, target.enabled()));
+                target.placement().paint(canvas, theme, new WidgetState(highlighted, target.interactive()));
             }
             paintNotice(canvas, theme, new Rect(layout.left() + 1, layout.bottom() - 1,
                 Math.max(0, layout.width() - 2), 1));
         }
 
+        void paintCompact(Canvas canvas, Theme theme, WidgetState closeState) {
+            compactDialog.paint(canvas, theme, closeState);
+            Rect bounds = compactDialog.bounds();
+            if (notice != null && bounds.height() >= 3) {
+                paintNotice(canvas, theme, new Rect(bounds.x() + 1, bounds.y() + 1,
+                    Math.max(0, bounds.width() - 2), 1));
+            }
+        }
 
         private void paintNotice(Canvas canvas, Theme theme, Rect bounds) {
             if (bounds.isEmpty()) return;

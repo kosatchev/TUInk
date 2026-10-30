@@ -12,6 +12,7 @@ import dev.tuiframe.widget.FocusResetPolicy;
 import dev.tuiframe.widget.FocusScope;
 import dev.tuiframe.widget.FocusSpace;
 import dev.tuiframe.widget.InteractionResult;
+import dev.tuiframe.widget.InteractionVisibility;
 import dev.tuiframe.widget.PlacedCursorSource;
 import dev.tuiframe.widget.PlacedInteractiveWidget;
 import dev.tuiframe.widget.PlacedPointerCapture;
@@ -30,6 +31,8 @@ public final class SaveAsBarView {
     public static final String DEFAULT_LABEL = "Save As: ";
     private static final List<Target> ORDER = List.of(Target.FIELD, Target.SAVE, Target.CANCEL);
     private static final int RIGHT_MARGIN = 1;
+    // Keep room for a two-cell filename glyph beside the insertion cursor.
+    private static final int MIN_FIELD_WIDTH = 3;
 
     private final String row;
     private final TextField field;
@@ -49,7 +52,7 @@ public final class SaveAsBarView {
         this.row = CellText.fit(requiredLabel, safeColumns);
         this.fieldStart = Math.min(labelWidth, safeColumns);
         int buttonsWidth = save.width() + 1 + cancel.width();
-        long required = (long) labelWidth + 1 + 1 + buttonsWidth + RIGHT_MARGIN;
+        long required = (long) labelWidth + MIN_FIELD_WIDTH + 1 + buttonsWidth + RIGHT_MARGIN;
         this.buttonsVisible = safeColumns >= required;
         this.saveStart = buttonsVisible ? safeColumns - buttonsWidth - RIGHT_MARGIN : safeColumns;
         this.cancelStart = buttonsVisible ? saveStart + save.width() + 1 : safeColumns;
@@ -79,11 +82,13 @@ public final class SaveAsBarView {
         Rect safeInteractionClip = Objects.requireNonNull(interactionClip, "interactionClip");
         List<RoutedTarget<Target, Action>> targets = new ArrayList<>(ORDER.size());
         Rect fieldBounds = new Rect(fieldStart, topRow, fieldWidth, 1);
+        boolean filenameVisible = fieldWidth >= MIN_FIELD_WIDTH
+            && InteractionVisibility.FULL_BOUNDS.allows(fieldBounds, safeInteractionClip);
         addTarget(targets, Target.FIELD,
             new FieldPlacement(field.layout(fieldBounds)), safeInteractionClip);
         addTarget(targets, Target.SAVE,
             new ButtonPlacement(save.layout(new Rect(saveStart, topRow, buttonsVisible ? save.width() : 0, 1)),
-                Action.SUBMITTED), safeInteractionClip);
+                Action.SUBMITTED), safeInteractionClip, filenameVisible);
         addTarget(targets, Target.CANCEL,
             new ButtonPlacement(cancel.layout(new Rect(cancelStart, topRow, buttonsVisible ? cancel.width() : 0, 1)),
                 Action.CANCELLED), safeInteractionClip);
@@ -94,7 +99,7 @@ public final class SaveAsBarView {
             ORDER,
             ORDER
         );
-        return new Placement(row, focusScope, field);
+        return new Placement(row, focusScope, field, filenameVisible);
     }
 
     public enum Target {
@@ -106,6 +111,7 @@ public final class SaveAsBarView {
     public enum Action {
         VALUE_CHANGED,
         SUBMITTED,
+        SUBMIT_REJECTED,
         INPUT_REJECTED,
         CANCELLED
     }
@@ -115,15 +121,18 @@ public final class SaveAsBarView {
         private final String row;
         private final FocusScope<Target, Action> focusScope;
         private final TextField field;
+        private final boolean submissionAvailable;
 
         private Placement(
             String row,
             FocusScope<Target, Action> focusScope,
-            TextField field
+            TextField field,
+            boolean submissionAvailable
         ) {
             this.row = Objects.requireNonNull(row, "row");
             this.focusScope = Objects.requireNonNull(focusScope, "focusScope");
             this.field = Objects.requireNonNull(field, "field");
+            this.submissionAvailable = submissionAvailable;
         }
 
         public String row() {
@@ -135,12 +144,17 @@ public final class SaveAsBarView {
         }
 
         public Optional<TextField> field(Target targetId) {
-            return targetId == Target.FIELD && focusScope.target(Target.FIELD).orElseThrow().enabled()
+            return targetId == Target.FIELD && focusScope.target(Target.FIELD).orElseThrow().interactive()
                 ? Optional.of(field) : Optional.empty();
         }
 
         public Rect fieldBounds() {
             return targetBounds(Target.FIELD);
+        }
+
+        /** Saving requires a visible filename viewport with space beside its caret. */
+        public boolean submissionAvailable() {
+            return submissionAvailable;
         }
 
         public Rect targetBounds(Target target) {
@@ -181,15 +195,19 @@ public final class SaveAsBarView {
             boolean active = focusManager.activeScopeId().filter(focusScope.id()::equals).isPresent();
             boolean focused = active
                 && focusManager.focused().filter(target.id()::equals).isPresent()
-                && target.enabled();
-            return new FocusContext(focused, target.enabled(), target.space());
+                && target.interactive();
+            return new FocusContext(focused, target.interactive(), target.space());
         }
     }
 
     private static void addTarget(List<RoutedTarget<Target, Action>> targets, Target id,
         PlacedInteractiveWidget<Action> placement, Rect clip) {
-        boolean interactive = !placement.bounds().isEmpty() && clip.contains(placement.bounds());
-        targets.add(new RoutedTarget<>(id, placement, FocusSpace.root(clip), interactive, interactive));
+        addTarget(targets, id, placement, clip, true);
+    }
+
+    private static void addTarget(List<RoutedTarget<Target, Action>> targets, Target id,
+        PlacedInteractiveWidget<Action> placement, Rect clip, boolean enabled) {
+        targets.add(new RoutedTarget<>(id, placement, FocusSpace.root(clip), true, enabled));
     }
 
     private static InteractionResult<Action> mapped(InteractionResult<?> result, Action action) {
@@ -201,6 +219,11 @@ public final class SaveAsBarView {
         @Override
         public Rect bounds() {
             return delegate.bounds();
+        }
+
+        @Override
+        public boolean interactionReady() {
+            return delegate.interactionReady();
         }
 
         @Override
@@ -235,11 +258,16 @@ public final class SaveAsBarView {
         }
     }
 
-    private record ButtonPlacement(PlacedInteractiveWidget<Button.Action> delegate, Action action)
+    record ButtonPlacement(PlacedInteractiveWidget<Button.Action> delegate, Action action)
         implements PlacedInteractiveWidget<Action> {
         @Override
         public Rect bounds() {
             return delegate.bounds();
+        }
+
+        @Override
+        public boolean interactionReady() {
+            return delegate.interactionReady();
         }
 
         @Override

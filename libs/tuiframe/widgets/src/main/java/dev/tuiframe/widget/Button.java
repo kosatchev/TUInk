@@ -139,6 +139,11 @@ public final class Button implements InteractiveWidget<Button.Action> {
         }
 
         @Override
+        public boolean interactionReady() {
+            return !bounds.isEmpty() && button.renderedWidth > 0 && bounds.width() >= button.renderedWidth;
+        }
+
+        @Override
         public void paint(Canvas canvas, Theme theme, WidgetState state) {
             Objects.requireNonNull(theme, "theme");
             Objects.requireNonNull(state, "state");
@@ -152,7 +157,8 @@ public final class Button implements InteractiveWidget<Button.Action> {
         public InteractionResult<Action> handle(TuiInputEvent event, FocusContext context) {
             Objects.requireNonNull(event, "event");
             Objects.requireNonNull(context, "context");
-            if (!context.enabled()) {
+            if (!context.enabled() || !interactionReady()
+                || !InteractionVisibility.FULL_BOUNDS.allows(bounds, context.space().parentClip())) {
                 return InteractionResult.ignored();
             }
             if (event instanceof PointerEvent pointer) {

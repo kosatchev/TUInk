@@ -62,6 +62,97 @@ class PointerCaptureManagerTest {
     }
 
     @Test
+    void activeContainerCaptureContinuesAndReleasesAfterItsClipShrinksWithoutAResizeEvent() {
+        var initial = list(ListView.State.initial());
+        var initialTarget = target("list", initial, ROOT, false);
+        PointerCaptureManager<String> manager = new PointerCaptureManager<>();
+        var press = pressScrollbar(initial);
+        manager.apply(SURFACE, "help", initialTarget, press);
+        var state = assertInstanceOf(ListView.StateChanged.class, press.output().orElseThrow()).state();
+
+        FocusSpace partial = FocusSpace.root(new Rect(0, 0, 8, 8));
+        var current = list(state);
+        var currentTarget = target("list", current, partial, false);
+        var currentScope = scope("help", currentTarget);
+        assertTrue(currentTarget.enabled());
+        assertFalse(currentTarget.interactive(), "ordinary input defaults to full bounds");
+        assertTrue(manager.reconcile(SURFACE, List.of(currentScope)).isEmpty());
+        PointerEvent drag = pointer(20, 30, PointerEvent.Kind.DRAG);
+        var owner = manager.route(SURFACE, List.of(currentScope), drag).orElseThrow();
+
+        var moved = owner.target().placement().handle(drag, owner.context(false));
+
+        assertTrue(moved.consumed());
+        state = assertInstanceOf(ListView.StateChanged.class, moved.output().orElseThrow()).state();
+        assertTrue(state.firstVisibleIndex() > 0);
+        assertTrue(state.drag() != null);
+        manager.apply(SURFACE, "help", currentTarget, moved);
+        current = list(state);
+        currentTarget = target("list", current, partial, false);
+        currentScope = scope("help", currentTarget);
+        PointerEvent release = new PointerEvent(23, 79, PointerEvent.Kind.RELEASE,
+            PointerEvent.Button.NONE, Set.of());
+        owner = manager.route(SURFACE, List.of(currentScope), release).orElseThrow();
+
+        var released = owner.target().placement().handle(release, owner.context(false));
+
+        assertTrue(released.consumed());
+        assertEquals(PointerCaptureRequest.RELEASE, released.pointerCaptureRequest());
+        assertEquals(null, assertInstanceOf(ListView.StateChanged.class, released.output().orElseThrow()).state().drag());
+        manager.apply(SURFACE, "help", currentTarget, released);
+        assertTrue(manager.captured().isEmpty());
+        assertTrue(manager.route(SURFACE, List.of(currentScope), release).isEmpty(),
+            "the release is delivered once and never replayed to the old owner");
+    }
+
+    @Test
+    void geometryLossAndAuthoredDisableKeepDistinctCaptureCancellationReasons() {
+        for (boolean disabled : List.of(false, true)) {
+            var probe = new PlacedPointerCapture<PointerCaptureCancellation>() {
+                private boolean active = true;
+
+                @Override
+                public Rect bounds() {
+                    return BOUNDS;
+                }
+
+                @Override
+                public void paint(dev.tuiframe.cell.Canvas canvas, Theme theme, WidgetState state) {
+                }
+
+                @Override
+                public InteractionResult<PointerCaptureCancellation> handle(TuiInputEvent event, FocusContext context) {
+                    return InteractionResult.ignored();
+                }
+
+                @Override
+                public boolean pointerCaptureActive() {
+                    return active;
+                }
+
+                @Override
+                public InteractionResult<PointerCaptureCancellation> cancelPointerCapture(PointerCaptureCancellation reason) {
+                    active = false;
+                    return InteractionResult.output(reason).withPointerCapture(PointerCaptureRequest.RELEASE);
+                }
+            };
+            PointerCaptureManager<String> manager = new PointerCaptureManager<>();
+            var original = new RoutedTarget<>("probe", probe, ROOT, false, true);
+            manager.apply(SURFACE, "scope", original,
+                InteractionResult.<PointerCaptureCancellation>handled().withPointerCapture(PointerCaptureRequest.ACQUIRE));
+            var unavailable = new RoutedTarget<>("probe", probe,
+                disabled ? ROOT : FocusSpace.root(new Rect(50, 20, 2, 2)), false, !disabled);
+
+            var cancellation = manager.reconcile(SURFACE, List.of(scope("scope", unavailable))).orElseThrow();
+
+            assertEquals(disabled ? PointerCaptureCancellation.DISABLED : PointerCaptureCancellation.HIDDEN,
+                cancellation.result().output().orElseThrow());
+            assertFalse(probe.pointerCaptureActive());
+            assertTrue(manager.captured().isEmpty());
+        }
+    }
+
+    @Test
     void equalTargetIdsInDifferentScopesDoNotRedirectCapture() {
         TextField first = field();
         TextField second = field();

@@ -77,6 +77,45 @@ class TextFieldInteractiveTest {
     }
 
     @Test
+    void directHandlersCannotEditOrSubmitAnEmptyOrExternallyClippedField() {
+        for (Rect bounds : List.of(new Rect(3, 1, 6, 1), new Rect(3, 1, 0, 1),
+            new Rect(3, 1, 6, 0), new Rect(3, 3, 3, 1))) {
+            TextField field = new TextField();
+            field.set("A😀tail");
+            field.selectAll();
+            int caret = field.cursor();
+            var placement = field.layout(bounds);
+            FocusContext clipped = new FocusContext(true, true,
+                FocusSpace.root(new Rect(0, 0, 8, 3)));
+            for (TuiInputEvent event : List.of(new TextInput("X"), new PasteEvent("replacement"),
+                KeyStroke.of(KeyStroke.Key.ENTER), KeyStroke.of(KeyStroke.Key.BACKSPACE),
+                KeyStroke.of(KeyStroke.Key.DELETE), KeyStroke.of(KeyStroke.Key.ARROW_LEFT))) {
+                assertFalse(placement.handle(event, clipped).consumed(), bounds + ": " + event);
+                assertEquals("A😀tail", field.text());
+                assertEquals("A😀tail", field.selectedText());
+                assertEquals(caret, field.cursor());
+            }
+            assertTrue(placement.cursorPosition(clipped).isEmpty());
+        }
+    }
+
+    @Test
+    void fullyVisibleFieldViewportStillEditsTextLongerThanItsVisibleWidth() {
+        TextField field = new TextField();
+        field.set("A😀a long value with a hidden prefix");
+        var placement = field.layout(new Rect(2, 1, 3, 1));
+        FocusContext visible = new FocusContext(true, true,
+            FocusSpace.root(new Rect(0, 0, 5, 3)));
+
+        assertEquals(TextField.Action.VALUE_CHANGED,
+            placement.handle(new TextInput("X"), visible).output().orElseThrow());
+
+        assertEquals("A😀a long value with a hidden prefixX", field.text());
+        assertEquals(TextField.Action.SUBMITTED,
+            field.layout(placement.bounds()).handle(KeyStroke.of(KeyStroke.Key.ENTER), visible).output().orElseThrow());
+    }
+
+    @Test
     void focusedRawTextAndExactKeysProduceTypedEffects() {
         TextField field = new TextField();
 

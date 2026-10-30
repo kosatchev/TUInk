@@ -27,10 +27,11 @@ class LocalDialogViewportTest {
     Path directory;
 
     @Test
-    void helpPaintingPreservesTabChrome() {
+    void helpPaintingPreservesChromeEvenWhenNoContentRowRemains() {
         HelpPage page = new HelpPage("Help", List.of("A visible help row"));
         TerminalEditorApp host = new TerminalEditorApp();
-        for (int[] size : List.of(new int[] {24, 80}, new int[] {10, 24})) {
+        for (int[] size : List.of(new int[] {24, 80}, new int[] {10, 24},
+            new int[] {7, 80}, new int[] {24, 23}, new int[] {3, 1}, new int[] {2, 80})) {
             int rows = size[0];
             int columns = size[1];
             CellBuffer cells = new CellBuffer(rows, columns);
@@ -73,9 +74,9 @@ class LocalDialogViewportTest {
     }
 
     @Test
-    void localDialogsKeepBothTabHeadersClickableAndEscapeWorks() throws Exception {
+    void compactLocalDialogsKeepBothTabHeadersClickableAndEscapeWorksWithoutContentRows() throws Exception {
         for (TuinkCommand owner : List.of(TuinkCommand.DOCUMENT_OPEN, TuinkCommand.HELP_KEY_HINTS)) {
-            for (int[] size : List.of(new int[] {24, 80})) {
+            for (int[] size : List.of(new int[] {7, 80}, new int[] {24, 23}, new int[] {2, 80})) {
                 Path root = directory.resolve(owner + "-" + size[0] + "-" + size[1]);
                 try (EditorWindowFixture window = new EditorWindowFixture(root, false, List.of("alpha"))) {
                     var first = window.active();

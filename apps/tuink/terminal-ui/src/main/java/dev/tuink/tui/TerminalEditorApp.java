@@ -74,10 +74,12 @@ import dev.tuiframe.widget.Modal;
 import dev.tuiframe.widget.PlacedModal;
 import dev.tuiframe.widget.RoutedTarget;
 import dev.tuiframe.widget.WidgetStyleRole;
+import dev.tuiframe.widget.WidgetState;
 import dev.tuiframe.widget.TextField;
 import dev.tuiframe.widget.Theme;
 import dev.tuiframe.widget.WidgetThemeKeys;
 import dev.tuink.tui.ui.ConfirmBarView;
+import dev.tuink.tui.ui.ConfirmPromptText;
 import dev.tuink.tui.ui.DirtyTabSummary;
 import dev.tuink.tui.ui.EditorView;
 import dev.tuink.tui.ui.InlinePromptBar;
@@ -759,13 +761,10 @@ public class TerminalEditorApp {
         int rows = composition.document().layout().rows();
         int cols = composition.document().layout().cols();
         if (layers.openFile().visible()) {
-            return rows < 8 || cols < 24
-                ? new Rect(0, 0, 0, 0) : layers.openFile().dialog().frame().bounds();
+            return layers.openFile().dialog().frame().bounds();
         }
         if (layers.help() != null) {
-            HelpOverlayPlacement overlay = layers.help();
-            return overlay.viewport().height() < 8 || overlay.viewport().width() < 24
-                ? new Rect(0, 0, 0, 0) : overlay.frame().bounds();
+            return layers.help().frame().bounds();
         }
         return blockingSurface(rows, cols, composition.document().layout().contentTopRow(),
             composition.surface().inlinePrompt().height(), layers.saveAsMode() || layers.confirm() != null);
@@ -849,13 +848,17 @@ public class TerminalEditorApp {
         Canvas canvas, int rows, int cols, FrameComposition.OpenFile openFile,
         boolean colorEnabled, boolean highlighted, boolean contentFocused
     ) {
-        if (!openFile.visible() || rows < 8 || cols < 24) {
+        if (!openFile.visible()) {
             return;
         }
         OpenDialogLayout layout = openFile.layout();
         OpenFileDialogView.Placement dialog = openFile.dialog();
         Theme childTheme = (colorEnabled ? colorFileTreeWidgetTheme : monoFileTreeWidgetTheme)
             .withSurface(styles.dialog(), highlighted ? blockingAccent(colorEnabled) : styles.dialogBorder());
+        if (dialog.compactDialog() != null) {
+            dialog.paintCompact(canvas, childTheme, WidgetState.FOCUSED);
+            return;
+        }
         dialog.frame().paint(canvas, childTheme);
         String pathLine = " " + openFile.rootLabel();
         drawMenuLine(
@@ -919,8 +922,24 @@ public class TerminalEditorApp {
             setHelpScrollState(initial);
             setHelpScrollPage(page);
         }
+        if (CompactDialogView.required(viewport.height(), viewport.width())) {
+            CompactDialogView.Placement compact = CompactDialogView.place(viewport, page.title());
+            Rect bounds = compact.bounds();
+            Button close = compact.closeButton();
+            RoutedTarget<HelpOverlayInputRouter.Target, Button.Action> target = new RoutedTarget<>(
+                HelpOverlayInputRouter.Target.CLOSE, close.layout(CompactDialogView.closeBounds(close)),
+                FocusSpace.root(viewport), true, true);
+            // Keep the last visible text placement and its source anchor while
+            // the compact owner temporarily has no scrollable help content.
+            return new HelpOverlayPlacement(page,
+                ListView.text(0, index -> "", ListView.State.initial()).layout(
+                    new Rect(bounds.x(), bounds.y(), 0, 0)),
+                "", new HelpDialogLayout(bounds.y(), bounds.x(), bounds.width(), bounds.height()),
+                viewport, compact.frame(), close,
+                FocusScope.single(HelpOverlayInputRouter.Scope.HELP, FocusResetPolicy.FIRST_FOCUSABLE, target));
+        }
         HelpDialogLayout layout = helpDialogLayout(viewport, page.rows().size());
-        int visibleRows = viewport.height() < 8 || viewport.width() < 24 ? 0 : Math.max(0, layout.height() - 3);
+        int visibleRows = Math.max(0, layout.height() - 3);
         HelpOverlayPlacement cached = helpOverlayCache();
         ListView.State scroll = helpScrollState();
         if (cached != null && !cached.viewport().equals(viewport) && scroll.drag() != null) {
@@ -948,8 +967,8 @@ public class TerminalEditorApp {
                 new Rect(close.col(), close.row(), close.width(), 1)
             ),
             FocusSpace.root(viewport),
-            viewport.height() >= 8 && viewport.width() >= 24,
-            viewport.height() >= 8 && viewport.width() >= 24
+            true,
+            true
         );
         HelpOverlayPlacement prepared = new HelpOverlayPlacement(
             page,
@@ -1031,13 +1050,19 @@ public class TerminalEditorApp {
         boolean colorEnabled,
         boolean highlighted
     ) {
-        if (overlay == null || overlay.viewport().height() < 8 || overlay.viewport().width() < 24) {
+        if (overlay == null) {
             return;
         }
         HelpDialogLayout layout = overlay.layout();
         Theme widgetTheme = colorEnabled ? colorOverlayWidgetTheme : monoOverlayWidgetTheme;
         if (highlighted) {
             widgetTheme = widgetTheme.withSurface(styles.dialog(), blockingAccent(colorEnabled));
+        }
+        if (CompactDialogView.required(overlay.viewport().height(), overlay.viewport().width())) {
+            var target = overlay.focusScope().target(HelpOverlayInputRouter.Target.CLOSE).orElseThrow();
+            CompactDialogView.paint(canvas, overlay.frame(), overlay.close(), widgetTheme,
+                helpFocusManager().context(overlay.focusScope(), target.id()).orElseThrow().widgetState());
+            return;
         }
         overlay.frame().paint(canvas, widgetTheme);
         int textCol = layout.left() + 2;
@@ -1558,8 +1583,9 @@ public class TerminalEditorApp {
         }
     }
 
-    String buildOverwritePrompt(Path path) {
-        return "Overwrite existing file: " + dev.tuink.tui.ui.PathPresentation.name(path) + " ? (y/N)";
+    String buildOverwritePrompt(Path path, int cols) {
+        int promptWidth = ConfirmBarView.promptWidth(cols, "Save", "Discard", true, "Cancel");
+        return ConfirmPromptText.fileQuestion("Overwrite: ", path, " ? (y/N)", promptWidth);
     }
 
     ConfirmBarView buildQuitConfirmBar(
@@ -1591,8 +1617,12 @@ public class TerminalEditorApp {
             true,
             "Cancel"
         );
+        String minimumContext = "Unsaved (" + dirtyPaths.size() + ")";
+        String prompt = CellText.width(minimumContext) + 3 <= promptWidth
+            ? DirtyTabSummary.build(dirtyPaths, promptWidth)
+            : minimumContext;
         return ConfirmBarView.build(
-            DirtyTabSummary.build(dirtyPaths, promptWidth),
+            prompt,
             cols,
             primaryLabel,
             secondaryLabel,
@@ -1611,7 +1641,9 @@ public class TerminalEditorApp {
             : null;
         String primaryLabel = pendingTab != null && SaveTargetPolicy.requiresSaveAs(JvmDocumentStorage.pathOf(pendingTab.state().getCurrentResource())) ? "Save As" : "Save";
         return ConfirmBarView.build(
-            buildCloseTabPrompt(tabs, closeTabIndex),
+            buildCloseTabPrompt(tabs, closeTabIndex, ConfirmBarView.promptWidth(
+                cols, primaryLabel, "Discard", true, "Cancel"
+            )),
             cols,
             primaryLabel,
             "Discard",
@@ -1624,13 +1656,12 @@ public class TerminalEditorApp {
         return "Recovery snapshots: " + count + ". Restore now? (y/N)";
     }
 
-    private String buildCloseTabPrompt(List<EditorTab> tabs, int closeTabIndex) {
+    private String buildCloseTabPrompt(List<EditorTab> tabs, int closeTabIndex, int promptWidth) {
         if (closeTabIndex < 0 || closeTabIndex >= tabs.size()) {
             return "Close modified tab? (y/N)";
         }
         Path path = JvmDocumentStorage.pathOf(tabs.get(closeTabIndex).state().getCurrentResource());
-        String name = path == null ? "--no name--" : dev.tuink.tui.ui.PathPresentation.name(path);
-        return "Close modified tab: " + name + " ? (y/N)";
+        return ConfirmPromptText.fileQuestion("Close: ", path, " ? (y/N)", promptWidth);
     }
 
     record RecoveryRestoreResult(int restoredCount, List<RecoveryStore.PendingSnapshot> failedEntries,

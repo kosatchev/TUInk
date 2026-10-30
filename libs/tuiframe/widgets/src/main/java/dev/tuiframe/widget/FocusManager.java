@@ -148,6 +148,11 @@ public final class FocusManager<K> {
             explicitlyCleared = scope.resetPolicy() == FocusResetPolicy.CLEARED;
             focused = explicitlyCleared ? null : firstFocusableId(scope).orElse(null);
         } else if (!eligible(target(scope, focused))) {
+            // A dialog may deliberately start cleared so a disappearing safe
+            // choice must not silently transfer Enter/Space to its first action.
+            if (scope.resetPolicy() == FocusResetPolicy.CLEARED) {
+                explicitlyCleared = true;
+            }
             focused = explicitlyCleared ? null : firstFocusableId(scope).orElse(null);
         }
         return scopeChanged || !Objects.equals(before, focused);
@@ -219,7 +224,7 @@ public final class FocusManager<K> {
     }
 
     private static boolean eligible(RoutedTarget<?, ?> target) {
-        return target != null && target.enabled() && target.focusable();
+        return target != null && target.focusEligible();
     }
 
     private record Move(boolean handled, boolean changed) {

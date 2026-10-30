@@ -147,6 +147,22 @@ final class OpenFileInputRouter {
         if (event instanceof PointerEvent pointer && !pointer.modifiers().isEmpty()) {
             return captured(current.resetClickTracking(), requiredFocus);
         }
+        if (dialog.compactDialog() != null) {
+            var compact = dialog.compactDialog();
+            if (event instanceof PointerEvent pointer && pointer.modifiers().isEmpty()
+                && pointer.kind() == PointerEvent.Kind.PRESS && pointer.button() == PointerEvent.Button.LEFT
+                && compact.frame().closeHit(pointer.row(), pointer.column())) {
+                return intent(current.resetClickTracking(), requiredFocus, new CloseDialog());
+            }
+            var route = focusState.manager().route(dialog.focusScope(), event);
+            if (!route.navigationConsumed() && route.target().isPresent()) {
+                var interaction = route.target().orElseThrow().placement().handle(event, route.context().orElseThrow());
+                if (interaction.output().orElse(null) == Button.Action.ACTIVATED) {
+                    return intent(current.resetClickTracking(), requiredFocus, new CloseDialog());
+                }
+            }
+            return captured(current.resetClickTracking(), requiredFocus);
+        }
         if (!placement.enabled()) {
             return captured(current.resetClickTracking(), requiredFocus);
         }

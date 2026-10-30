@@ -11,14 +11,24 @@ import dev.tuiframe.cell.CellBuffer;
 import dev.tuiframe.cell.CellText;
 import dev.tuiframe.geometry.Point;
 import dev.tuiframe.geometry.Rect;
+import dev.tuiframe.input.KeyStroke;
+import dev.tuiframe.input.PointerEvent;
+import dev.tuiframe.input.TextInput;
+import dev.tuiframe.input.TuiInputEvent;
 import dev.tuiframe.style.CellColor;
 import dev.tuiframe.style.CellStyle;
+import dev.tuiframe.widget.Button;
 import dev.tuiframe.widget.FocusManager;
+import dev.tuiframe.widget.FocusResetPolicy;
+import dev.tuiframe.widget.FocusScope;
+import dev.tuiframe.widget.FocusSpace;
+import dev.tuiframe.widget.PlacedInteractiveWidget;
 import dev.tuiframe.widget.RoutedTarget;
 import dev.tuiframe.widget.TextField;
 import dev.tuiframe.widget.Theme;
 import dev.tuiframe.widget.WidgetThemeKeys;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class SaveAsBarViewTest {
@@ -55,6 +65,37 @@ class SaveAsBarViewTest {
     };
 
     @Test
+    void mappedButtonsCannotFocusOrActivateWhenTheirOwnBoundsClipTheLabel() {
+        var button = new Button("Save").layout(new Rect(2, 1, 1, 1));
+        List<PlacedInteractiveWidget<?>> mapped = List.of(
+            new SaveAsBarView.ButtonPlacement(button, SaveAsBarView.Action.SUBMITTED),
+            new SearchBarView.ButtonPlacement(button, SearchBarView.Action.REPLACE));
+        for (var placement : mapped) {
+            var target = new RoutedTarget<>("action", placement, FocusSpace.root(viewport(24, 80)));
+            var scope = FocusScope.single(new Object(), FocusResetPolicy.FIRST_FOCUSABLE, target);
+            FocusManager<String> focus = new FocusManager<>();
+            focus.focus(scope, "action");
+
+            assertTrue(target.space().parentClip().contains(placement.bounds()));
+            assertFalse(placement.interactionReady());
+            assertFalse(target.interactive());
+            assertFalse(target.focusEligible());
+            assertTrue(focus.focused().isEmpty());
+            for (TuiInputEvent event : List.of(KeyStroke.of(KeyStroke.Key.ENTER),
+                KeyStroke.of(KeyStroke.Key.SPACE), new TextInput(" "),
+                new PointerEvent(1, 2, PointerEvent.Kind.PRESS, PointerEvent.Button.LEFT, Set.of()))) {
+                var route = focus.route(scope, event);
+                if (route.target().isPresent()) {
+                    var interaction = route.target().orElseThrow().placement()
+                        .handle(event, route.context().orElseThrow());
+                    assertTrue(interaction.output().isEmpty());
+                }
+                assertTrue(focus.focused().isEmpty());
+            }
+        }
+    }
+
+    @Test
     void rasterRowContainsOnlyLabelAndControlsShareOneRowWithoutOverlapping() {
         int columns = 30;
         TextField field = new TextField();
@@ -70,8 +111,8 @@ class SaveAsBarViewTest {
         assertEquals(3, target.placement().bounds().y());
         assertEquals(4, target.placement().bounds().width());
         assertEquals(placement.fieldBounds(), target.placement().bounds());
-        assertTrue(target.enabled());
-        assertTrue(target.focusable());
+        assertTrue(target.interactive());
+        assertTrue(target.focusEligible());
         assertEquals(new Rect(14, 3, 6, 1), placement.targetBounds(SaveAsBarView.Target.SAVE));
         assertEquals(new Rect(21, 3, 8, 1), placement.targetBounds(SaveAsBarView.Target.CANCEL));
         assertTrue(placement.fieldBounds().rightExclusive() < placement.targetBounds(SaveAsBarView.Target.SAVE).x());
@@ -109,19 +150,50 @@ class SaveAsBarViewTest {
     @Test
     void widthThresholdPreservesAUsableFieldBeforeShowingBothCompleteButtons() {
         TextField field = new TextField();
-        int minimum = CellText.width(SaveAsBarView.DEFAULT_LABEL) + 1 + 1 + "[Save] [Cancel]".length() + 1;
+        int minimum = CellText.width(SaveAsBarView.DEFAULT_LABEL) + 3 + 1 + "[Save] [Cancel]".length() + 1;
         var narrow = SaveAsBarView.build(field, minimum - 1).place(new Object(), 2, viewport(4, minimum - 1));
         assertEquals(minimum - 1 - CellText.width(SaveAsBarView.DEFAULT_LABEL), narrow.fieldBounds().width());
         for (SaveAsBarView.Target id : List.of(SaveAsBarView.Target.SAVE, SaveAsBarView.Target.CANCEL)) {
             assertTrue(narrow.targetBounds(id).isEmpty());
-            assertFalse(narrow.focusScope().target(id).orElseThrow().enabled());
-            assertFalse(narrow.focusScope().target(id).orElseThrow().focusable());
+            assertTrue(narrow.focusScope().target(id).orElseThrow().enabled());
+            assertFalse(narrow.focusScope().target(id).orElseThrow().interactive());
+            assertFalse(narrow.focusScope().target(id).orElseThrow().focusEligible());
         }
         var full = SaveAsBarView.build(field, minimum).place(new Object(), 2, viewport(4, minimum));
-        assertEquals(1, full.fieldBounds().width());
+        assertEquals(3, full.fieldBounds().width());
+        assertTrue(full.submissionAvailable());
         assertEquals(minimum - 1, full.targetBounds(SaveAsBarView.Target.CANCEL).rightExclusive());
         assertTrue(full.focusScope().tabOrder().stream()
-            .map(id -> full.focusScope().target(id).orElseThrow()).allMatch(RoutedTarget::enabled));
+            .map(id -> full.focusScope().target(id).orElseThrow()).allMatch(RoutedTarget::interactive));
+    }
+
+    @Test
+    void growingFromTwentySixColumnsKeepsTheFilenameVisibleBeforeOfferingButtons() {
+        TextField field = new TextField();
+        field.set("document.txt");
+        for (int columns : List.of(26, 27, 28, 29)) {
+            var placement = SaveAsBarView.build(field, columns).place(new Object(), 2, viewport(4, columns));
+            assertEquals(columns < 29 ? columns - 9 : 3, placement.fieldBounds().width());
+            assertTrue(placement.submissionAvailable());
+            assertEquals(columns >= 29, placement.focusScope().target(SaveAsBarView.Target.SAVE)
+                .orElseThrow().interactive());
+        }
+    }
+
+    @Test
+    void clippingTheFilenameDisablesSaveEvenWhenBothButtonsAreCompletelyVisible() {
+        TextField field = new TextField();
+        field.set("draft.txt");
+        SaveAsBarView view = SaveAsBarView.build(field, 48);
+        var full = view.place(new Object(), 2, viewport(4, 48));
+        int left = full.fieldBounds().rightExclusive() - 1;
+        var clipped = view.place(new Object(), 2, new Rect(left, 0, 48 - left, 4));
+
+        assertTrue(target(clipped).enabled());
+        assertFalse(target(clipped).interactive());
+        assertFalse(clipped.submissionAvailable());
+        assertFalse(clipped.focusScope().target(SaveAsBarView.Target.SAVE).orElseThrow().enabled());
+        assertTrue(clipped.focusScope().target(SaveAsBarView.Target.CANCEL).orElseThrow().interactive());
     }
 
     @Test
@@ -208,6 +280,7 @@ class SaveAsBarViewTest {
 
         assertEquals("Save As:  ", visibleCellRow(tinyBuffer, row));
         assertEquals(new Point(tinyColumns - 1, row), tiny.cursorPosition(tinyFocus).orElseThrow());
+        assertFalse(tiny.submissionAvailable());
     }
 
     @Test
@@ -242,8 +315,8 @@ class SaveAsBarViewTest {
         empty.activate(emptyFocus);
 
         assertTrue(empty.fieldBounds().isEmpty());
-        assertFalse(target(empty).enabled());
-        assertFalse(target(empty).focusable());
+        assertFalse(target(empty).interactive());
+        assertFalse(target(empty).focusEligible());
         assertTrue(emptyFocus.focused().isEmpty());
         assertTrue(empty.cursorPosition(emptyFocus).isEmpty());
 
@@ -254,8 +327,8 @@ class SaveAsBarViewTest {
         FocusManager<SaveAsBarView.Target> clippedFocus = new FocusManager<>();
         clipped.activate(clippedFocus);
 
-        assertFalse(target(clipped).enabled());
-        assertFalse(target(clipped).focusable());
+        assertFalse(target(clipped).interactive());
+        assertFalse(target(clipped).focusEligible());
         assertTrue(clippedFocus.focused().isEmpty());
         assertTrue(clipped.cursorPosition(clippedFocus).isEmpty());
 

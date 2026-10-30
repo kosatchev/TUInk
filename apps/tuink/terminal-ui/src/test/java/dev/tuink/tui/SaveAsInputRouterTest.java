@@ -14,6 +14,8 @@ import dev.tuiframe.input.TextInput;
 import dev.tuiframe.input.TuiInputEvent;
 import dev.tuiframe.widget.FocusManager;
 import dev.tuiframe.widget.TextField;
+import dev.tuink.core.EditorClipboard;
+import dev.tuink.tui.command.TuinkCommand;
 import dev.tuink.tui.ui.SaveAsBarView;
 import java.util.List;
 import java.util.Set;
@@ -108,7 +110,7 @@ class SaveAsInputRouterTest {
                 PointerEvent.Button.LEFT)));
             assertEquals(SaveAsBarView.Target.FIELD, focus.focused().orElseThrow());
             assertEquals("draft.txt", field.text());
-            assertFalse(placement.focusScope().target(target).orElseThrow().enabled());
+            assertFalse(placement.focusScope().target(target).orElseThrow().interactive());
         }
     }
 
@@ -299,7 +301,7 @@ class SaveAsInputRouterTest {
         assertTrue(fixture.focus.focused().isEmpty());
         assertCaptured(fixture.route(new TextInput("hidden")));
         assertCaptured(fixture.route(new PasteEvent("hidden", false)));
-        assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.ENTER)));
+        assertAction(SaveAsBarView.Action.SUBMIT_REJECTED, fixture.route(KeyStroke.of(KeyStroke.Key.ENTER)));
         assertCaptured(fixture.route(
             KeyStroke.of(KeyStroke.Key.BACKSPACE, KeyStroke.Modifier.SHIFT)
         ));
@@ -341,6 +343,44 @@ class SaveAsInputRouterTest {
         assertAction(SaveAsBarView.Action.VALUE_CHANGED, visible.route(new TextInput("visible")));
         assertEquals("visible", field.text());
         assertEquals(SaveAsBarView.Target.FIELD, visible.focus.focused().orElseThrow());
+    }
+
+    @Test
+    void aCaretOnlyOrTooNarrowFilenameCannotSubmitThroughPhysicalOrSemanticEnter() {
+        for (int columns : List.of(10, 11)) {
+            TextField field = new TextField();
+            field.set("draft-中😀.txt");
+            Fixture fixture = fixture(field, columns, new Object());
+            int caret = field.cursor();
+
+            assertAction(SaveAsBarView.Action.SUBMIT_REJECTED, fixture.route(KeyStroke.of(KeyStroke.Key.ENTER)));
+            assertAction(SaveAsBarView.Action.SUBMIT_REJECTED, SaveAsInputRouter.routeCommand(fixture.focus,
+                fixture.placement, TuinkCommand.EDIT_INSERT_NEWLINE, new EditorClipboard()));
+            assertEquals("draft-中😀.txt", field.text());
+            assertEquals(caret, field.cursor());
+            assertIgnored(fixture.route(KeyStroke.of(KeyStroke.Key.ESCAPE)));
+            assertIgnored(fixture.route(KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL)));
+        }
+    }
+
+    @Test
+    void saveCannotBypassAClippedFilenameWhileCancelRemainsAvailable() {
+        TextField field = new TextField();
+        field.set("draft.txt");
+        SaveAsBarView view = SaveAsBarView.build(field, 48);
+        var full = view.place(new Object(), 2, viewport(4, 48));
+        int left = full.fieldBounds().rightExclusive() - 1;
+        var clipped = view.place(new Object(), 2, new Rect(left, 0, 48 - left, 4));
+        var focus = new FocusManager<SaveAsBarView.Target>();
+        Fixture fixture = new Fixture(field, focus, clipped);
+        clipped.activate(focus);
+        Rect save = clipped.targetBounds(SaveAsBarView.Target.SAVE);
+
+        assertFalse(clipped.focusScope().target(SaveAsBarView.Target.SAVE).orElseThrow().enabled());
+        assertCaptured(fixture.route(pointer(save.y(), save.x(), PointerEvent.Kind.PRESS, PointerEvent.Button.LEFT)));
+        assertEquals("draft.txt", field.text());
+        assertEquals(SaveAsBarView.Target.CANCEL, focus.focused().orElseThrow());
+        assertAction(SaveAsBarView.Action.CANCELLED, fixture.route(KeyStroke.of(KeyStroke.Key.ENTER)));
     }
 
     private static Fixture fixture(int columns, Object scopeId) {

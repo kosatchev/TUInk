@@ -53,7 +53,7 @@ class PathIdentityIntegrationTest {
     }
 
     @Test
-    void overwriteShowsTheExactEncodedNameAndWritesOnlyThatPath() throws Exception {
+    void overwriteShowsTheExactEncodedNameRejectsANarrowDecisionAndWritesOnlyThatPath() throws Exception {
         assumeTrue(File.separatorChar == '/');
         List<Path> paths = distinctPaths();
         for (Path path : paths) Files.writeString(path, "untouched");
@@ -67,6 +67,11 @@ class PathIdentityIntegrationTest {
                 window.event(KeyStroke.of(KeyStroke.Key.ENTER));
                 assertTrue(window.screenRow(window.height - 2).contains(PathPresentation.name(target)),
                     window.screenRow(window.height - 2));
+                window.resize(8, 30);
+                window.event(new TextInput("y"));
+                assertEquals("untouched", Files.readString(target));
+                assertTrue(window.controller.running());
+                window.resize(24, 80);
                 window.event(new TextInput("y"));
                 assertEquals("edited initial", Files.readString(target));
                 assertEquals(target, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));

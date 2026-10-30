@@ -25,7 +25,7 @@ class FilePickerFeedbackIntegrationTest {
 
     @ParameterizedTest
     @CsvSource({"8,80", "9,80", "10,80", "24,80", "8,24"})
-    void permissionFailureHasAStableLocalRowAndSurvivesNavigation(int rows, int columns)
+    void permissionFailureHasAStableLocalRowAndSurvivesNavigationAndCompactResize(int rows, int columns)
         throws Exception {
         assumeTrue(directory.getFileSystem().supportedFileAttributeViews().contains("posix"));
         Path denied = Files.writeString(directory.resolve("z-unreadable.txt"), "selected");
@@ -55,6 +55,10 @@ class FilePickerFeedbackIntegrationTest {
                 window.event(KeyStroke.of(KeyStroke.Key.TAB));
                 assertStatus(window, "permission denied");
 
+                window.resize(7, 23);
+                assertOnScreen(window, "permission denied");
+                window.resize(rows, columns);
+                assertStatus(window, "permission denied");
 
                 Files.setPosixFilePermissions(denied, PosixFilePermissions.fromString("rw-------"));
                 window.event(KeyStroke.of(KeyStroke.Key.TAB, KeyStroke.Modifier.SHIFT));
@@ -105,6 +109,8 @@ class FilePickerFeedbackIntegrationTest {
                 window.event(KeyStroke.of(KeyStroke.Key.ARROW_RIGHT));
                 window.await(() -> window.tree.directoryFailure() != null);
                 assertStatus(window, "permission denied");
+                window.resize(7, 23);
+                assertOnScreen(window, "permission denied");
                 assertEquals(1, window.tabs.size());
             }
         } finally {

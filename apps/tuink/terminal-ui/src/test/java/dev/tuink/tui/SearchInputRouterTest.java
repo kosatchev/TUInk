@@ -472,7 +472,7 @@ class SearchInputRouterTest {
         assertTrue(fixture.focus.focused().isEmpty());
 
         Rect partialCase = fixture.placement.targetBounds(SearchFocus.CASE);
-        assertFalse(fixture.placement.focusScope().target(SearchFocus.CASE).orElseThrow().enabled());
+        assertFalse(fixture.placement.focusScope().target(SearchFocus.CASE).orElseThrow().interactive());
         assertIgnored(fixture.route(pointer(
             partialCase.y(),
             partialCase.x(),

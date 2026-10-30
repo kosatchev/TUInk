@@ -55,6 +55,7 @@ import dev.tuiframe.widget.FocusSpace;
 import dev.tuiframe.widget.FocusScope;
 import dev.tuiframe.widget.FocusResetPolicy;
 import dev.tuiframe.widget.InteractionResult;
+import dev.tuiframe.widget.InteractionVisibility;
 import dev.tuiframe.widget.MenuBar;
 import dev.tuiframe.widget.PlacedPointerCapture;
 import dev.tuiframe.widget.PointerCaptureCancellation;
@@ -160,7 +161,7 @@ final class TopMenuView {
         MenuBar.Placement<CommandInvocation> placed = widget.layout(
             bounds, readWidth + dirtyWidth
         );
-        boolean enabled = !placed.bounds().isEmpty();
+        boolean enabled = InteractionVisibility.FULL_BOUNDS.allows(placed.bounds(), bounds);
         FocusContext context = new FocusContext(
             enabled && placed.state().isOpen(),
             enabled,
@@ -232,6 +233,11 @@ final class TopMenuView {
         @Override
         public Rect bounds() {
             return widgetPlacement.bounds();
+        }
+
+        @Override
+        public boolean interactionReady() {
+            return widgetPlacement.interactionReady();
         }
 
         FocusScope<String, MenuBar.Action<CommandInvocation>> captureScope() {

@@ -61,6 +61,59 @@ class FocusManagerTest {
     }
 
     @Test
+    void defaultTargetsExcludeEmptyOffscreenAndPartiallyClippedControlsFromKeyboardFocus() {
+        FocusManager<String> manager = new FocusManager<>();
+        FocusSpace clipped = FocusSpace.root(new Rect(0, 0, 8, 3));
+        var hidden = target("hidden", placement(new Rect(0, 3, 3, 1)), clipped);
+        var partial = target("partial", placement(new Rect(6, 1, 3, 1)), clipped);
+        var empty = target("empty", placement(new Rect(0, 1, 0, 1)), clipped);
+        var visible = target("visible", placement(new Rect(1, 1, 3, 1)), clipped);
+        var scope = scope("dialog", hidden, partial, empty, visible);
+
+        assertTrue(hidden.enabled(), "authored flags remain separate from frame availability");
+        assertFalse(hidden.interactive());
+        assertFalse(partial.focusEligible());
+        assertFalse(empty.interactive());
+        assertEquals("visible", manager.route(scope, new TextInput("x")).target().orElseThrow().id());
+        manager.focus(scope, "partial");
+        assertEquals("visible", manager.focused().orElseThrow());
+        assertEquals("visible", manager.route(scope, KeyStroke.of(KeyStroke.Key.TAB)).target().orElseThrow().id());
+
+        var pointer = manager.route(scope, pointer(1, 7, PointerEvent.Kind.PRESS, PointerEvent.Button.LEFT));
+        assertEquals("partial", pointer.target().orElseThrow().id(), "disabled visible cells still block targets behind them");
+        assertFalse(pointer.context().orElseThrow().enabled());
+        assertEquals("visible", manager.focused().orElseThrow());
+        assertTrue(manager.route(scope, pointer(1, 8, PointerEvent.Kind.PRESS, PointerEvent.Button.LEFT)).target().isEmpty());
+    }
+
+    @Test
+    void clearedScopeDoesNotTransferClippedCancelFocusToSaveOnResize() {
+        FocusManager<String> manager = new FocusManager<>();
+        var save = Button.plain("Save").layout(new Rect(0, 1, 4, 1));
+        var cancel = Button.plain("Cancel").layout(new Rect(10, 1, 6, 1));
+        FocusSpace full = FocusSpace.root(new Rect(0, 0, 20, 3));
+        FocusSpace narrow = FocusSpace.root(new Rect(0, 0, 13, 3));
+        var original = new FocusScope<>("confirm", FocusResetPolicy.CLEARED,
+            List.of(new RoutedTarget<>("save", save, full), new RoutedTarget<>("cancel", cancel, full)),
+            List.of("save", "cancel"), List.of("cancel", "save"));
+        var clipped = new FocusScope<>("confirm", FocusResetPolicy.CLEARED,
+            List.of(new RoutedTarget<>("save", save, narrow), new RoutedTarget<>("cancel", cancel, narrow)),
+            List.of("save", "cancel"), List.of("cancel", "save"));
+        manager.focus(original, "cancel");
+
+        var enter = manager.route(clipped, KeyStroke.of(KeyStroke.Key.ENTER));
+
+        assertTrue(enter.focusChanged());
+        assertTrue(enter.target().isEmpty());
+        assertTrue(manager.focused().isEmpty());
+        assertFalse(manager.context(clipped, "cancel").orElseThrow().enabled());
+        assertTrue(manager.route(original, KeyStroke.of(KeyStroke.Key.SPACE)).target().isEmpty(),
+            "growing the terminal must not silently select a different action");
+        assertEquals("save", manager.route(original, KeyStroke.of(KeyStroke.Key.TAB)).target().orElseThrow().id(),
+            "explicit navigation can choose the first action again");
+    }
+
+    @Test
     void exactTabAndShiftTabWrapWhileCommandModifiedTabBubbles() {
         FocusManager<String> manager = new FocusManager<>();
         FocusScope<String, String> scope = scope(

@@ -110,12 +110,12 @@ final class ConfirmBarInputRouter {
         if (event instanceof TextInput text) {
             ConfirmChoice mnemonic = mnemonicDecision(text.text(), policy);
             if (mnemonic != null) {
-                return decide(focusManager, scope, mnemonic);
+                return decide(focusManager, placement, mnemonic);
             }
         }
 
         if (event instanceof KeyStroke stroke) {
-            Result keyResult = handleKey(focusManager, scope, policy, stroke);
+            Result keyResult = handleKey(focusManager, placement, policy, stroke);
             if (keyResult != null) {
                 return keyResult;
             }
@@ -127,7 +127,7 @@ final class ConfirmBarInputRouter {
                 .handle(event, route.context().orElseThrow());
             focusManager.apply(scope, target.id(), interaction.focusRequest());
             if (interaction.output().orElse(null) == Button.Action.ACTIVATED) {
-                return decide(focusManager, scope, target.id());
+                return decide(focusManager, placement, target.id());
             }
             if (interaction.consumed()) {
                 return Result.CAPTURED;
@@ -137,20 +137,21 @@ final class ConfirmBarInputRouter {
         // Only close-tab confirmation lets pointer misses continue to the
         // application, where its tab-strip close/scroll policy still applies.
         // Other confirmation modes capture misses before any editor chrome.
-        return event instanceof PointerEvent && policy.pointerMissBubbles()
+        return event instanceof PointerEvent && policy.pointerMissBubbles() && placement.decisionsAvailable()
             ? Result.IGNORED
             : Result.CAPTURED;
     }
 
     private static Result handleKey(
         FocusManager<ConfirmChoice> focusManager,
-        FocusScope<ConfirmChoice, Button.Action> scope,
+        ConfirmBarView.Placement placement,
         Policy policy,
         KeyStroke stroke
     ) {
+        FocusScope<ConfirmChoice, Button.Action> scope = placement.focusScope();
         if (stroke.key() == KeyStroke.Key.Q
             && stroke.modifiers().equals(Set.of(KeyStroke.Modifier.CTRL))) {
-            return decide(focusManager, scope, policy.ctrlQDecision());
+            return decide(focusManager, placement, policy.ctrlQDecision());
         }
         if (!stroke.modifiers().isEmpty()) {
             return null;
@@ -172,7 +173,7 @@ final class ConfirmBarInputRouter {
                 focusLast(focusManager, scope);
                 yield Result.CAPTURED;
             }
-            case ESCAPE -> decide(focusManager, scope, policy.escapeDecision());
+            case ESCAPE -> decide(focusManager, placement, policy.escapeDecision());
             default -> null;
         };
     }
@@ -193,9 +194,14 @@ final class ConfirmBarInputRouter {
 
     private static Result decide(
         FocusManager<ConfirmChoice> focusManager,
-        FocusScope<ConfirmChoice, Button.Action> scope,
+        ConfirmBarView.Placement placement,
         ConfirmChoice decision
     ) {
+        FocusScope<ConfirmChoice, Button.Action> scope = placement.focusScope();
+        if (decision != ConfirmChoice.CANCEL
+            && (!placement.decisionsAvailable() || !eligible(scope.target(decision).orElse(null)))) {
+            return Result.CAPTURED;
+        }
         if (scope.target(decision).isPresent()) {
             focusManager.focus(scope, decision);
         }
@@ -237,6 +243,6 @@ final class ConfirmBarInputRouter {
     }
 
     private static boolean eligible(RoutedTarget<?, ?> target) {
-        return target != null && target.enabled() && target.focusable();
+        return target != null && target.focusEligible();
     }
 }

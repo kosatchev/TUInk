@@ -87,19 +87,54 @@ class ConfirmBarViewTest {
 
     @Test
     void tinyViewportDoesNotActivatePartiallyVisibleDangerousTargets() {
-        ConfirmBarView.Placement placement = ConfirmBarView.build("Confirm?", 1)
+        ConfirmBarView view = ConfirmBarView.build("Confirm?", 1);
+        ConfirmBarView.Placement placement = view
             .place(new Object(), 1, viewport(3, 1));
         FocusManager<ConfirmChoice> focus = new FocusManager<>();
         placement.activate(focus);
 
         assertTrue(focus.focused().isEmpty());
-        assertFalse(target(placement, ConfirmChoice.SAVE).focusable());
-        assertFalse(target(placement, ConfirmChoice.DISCARD).focusable());
-        assertFalse(target(placement, ConfirmChoice.CANCEL).focusable());
+        assertFalse(target(placement, ConfirmChoice.SAVE).focusEligible());
+        assertFalse(target(placement, ConfirmChoice.DISCARD).focusEligible());
+        assertFalse(target(placement, ConfirmChoice.CANCEL).focusEligible());
 
         CellBuffer buffer = new CellBuffer(3, 1);
+        CellText.draw(new Canvas(buffer), 0, 1, view.row(), NORMAL);
         placement.paint(new Canvas(buffer), THEME, focus);
-        assertEquals("[", buffer.get(1, 0).grapheme());
+        assertEquals("E", buffer.get(1, 0).grapheme(), "hidden buttons must not overwrite the resize hint");
+    }
+
+    @Test
+    void missingOrClippedQuestionShowsAResizeHintInsteadOfActionButtons() {
+        for (String prompt : new String[] {"", " ", "A question too long for the available prompt area"}) {
+            ConfirmBarView view = ConfirmBarView.build(prompt, 40);
+            ConfirmBarView.Placement placement = view.place(new Object(), 1, viewport(3, 40));
+
+            assertTrue(view.row().contains("Enlarge"));
+            assertTrue(view.row().contains("Esc cancels"));
+            assertFalse(view.row().contains("[Save]"));
+            assertFalse(placement.decisionsAvailable());
+            for (ConfirmChoice choice : placement.focusScope().tabOrder()) {
+                assertFalse(target(placement, choice).enabled());
+            }
+        }
+    }
+
+    @Test
+    void clippedQuestionCannotLeaveVisibleDecisionButtonsActive() {
+        ConfirmBarView.Placement placement = ConfirmBarView.build("Confirm?", 80)
+            .place(new Object(), 1, new Rect(20, 0, 60, 3));
+
+        assertFalse(placement.decisionsAvailable());
+        assertFalse(target(placement, ConfirmChoice.SAVE).enabled());
+    }
+
+    @Test
+    void compactRecoveryHintAdvertisesSafeEscapeCancellation() {
+        ConfirmBarView view = ConfirmBarView.buildRecovery("Recover?", 20);
+
+        assertTrue(view.row().contains("Enlarge"));
+        assertTrue(view.row().contains("Esc cancels"));
     }
 
     @Test

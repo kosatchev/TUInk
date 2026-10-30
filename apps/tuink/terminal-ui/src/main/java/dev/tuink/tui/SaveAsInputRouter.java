@@ -82,7 +82,7 @@ final class SaveAsInputRouter {
 
         FocusScope<SaveAsBarView.Target, SaveAsBarView.Action> scope = placement.focusScope();
         boolean interactive = scope.tabOrder().stream().map(id -> scope.target(id).orElseThrow())
-            .anyMatch(target -> target.enabled() && target.focusable());
+            .anyMatch(RoutedTarget::focusEligible);
 
         // The application owns cancellation even when the field is hidden.
         if (event instanceof KeyStroke stroke && isApplicationOwnedCancel(stroke)) {
@@ -108,7 +108,8 @@ final class SaveAsInputRouter {
             }
             if (interaction.output().isPresent()) {
                 SaveAsBarView.Action action = interaction.output().orElseThrow();
-                return Result.action(action);
+                return Result.action(action == SaveAsBarView.Action.SUBMITTED && !placement.submissionAvailable()
+                    ? SaveAsBarView.Action.SUBMIT_REJECTED : action);
             }
             if (interaction.consumed()) {
                 return Result.CAPTURED;
@@ -117,6 +118,10 @@ final class SaveAsInputRouter {
 
         if (event instanceof PasteEvent paste && paste.truncated()) {
             return Result.action(SaveAsBarView.Action.INPUT_REJECTED);
+        }
+        if (!placement.submissionAvailable() && event instanceof KeyStroke stroke
+            && stroke.key() == KeyStroke.Key.ENTER && stroke.modifiers().isEmpty()) {
+            return Result.action(SaveAsBarView.Action.SUBMIT_REJECTED);
         }
         if (!interactive) {
             return Result.CAPTURED;

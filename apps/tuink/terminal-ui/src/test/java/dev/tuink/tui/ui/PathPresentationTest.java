@@ -78,6 +78,24 @@ class PathPresentationTest {
             PathPresentation.LABEL_POLICY.fitMiddle("a\t%FF-long.txt", 9, 4, 3));
     }
 
+    @Test
+    void encodedConfirmationRequiresTheCompleteBasenameButOrdinaryLongNamesStillFit() {
+        assumeTrue(File.separatorChar == '/');
+        Path path = raw("long-name-%FF-%FE-target.txt");
+        String label = PathPresentation.name(path);
+        int minimum = CellText.width("Overwrite: " + label + " ? (y/N)");
+        String shortQuestion = ConfirmPromptText.fileQuestion("Overwrite: ", path, " ? (y/N)", minimum - 1);
+        assertTrue(CellText.width(shortQuestion) > minimum - 1);
+        String question = ConfirmPromptText.fileQuestion("Overwrite: ", path, " ? (y/N)", minimum);
+        assertTrue(question.contains(label));
+        assertEquals(minimum, CellText.width(question));
+        String longNormal = ConfirmPromptText.fileQuestion("Overwrite: ", directory.resolve("a".repeat(180) + ".txt"),
+            " ? (y/N)", 54);
+        assertTrue(longNormal.contains("…"));
+        assertTrue(CellText.width(longNormal) <= 54);
+        assertFalse(longNormal.contains("file:"));
+    }
+
     private Path raw(String name) {
         return Path.of(URI.create(directory.toUri().toASCIIString() + name));
     }

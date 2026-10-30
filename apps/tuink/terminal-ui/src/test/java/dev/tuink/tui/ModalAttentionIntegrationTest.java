@@ -83,7 +83,7 @@ class ModalAttentionIntegrationTest {
     }
 
     @Test
-    void inactiveAttentionAndHiddenTinyDialogsNeverRecolorTheDocument() throws Exception {
+    void inactiveAttentionLeavesTheDocumentAndTinyAttentionStaysOnItsVisibleCompactFrame() throws Exception {
         TerminalEditorApp app = new TerminalEditorApp();
         for (FrameComposition composition : List.of(promptFrame(12, 60, true, false),
             dialogFrame(24, 80, true, false), dialogFrame(24, 80, false, false))) {
@@ -101,11 +101,14 @@ class ModalAttentionIntegrationTest {
             for (boolean help : List.of(true, false)) {
                 FrameComposition composition = dialogFrame(size[0], size[1], help, true);
                 CellBuffer buffer = background(size[0], size[1]);
-                Cell[][] before = snapshot(buffer);
+                Cell[][] document = snapshot(buffer);
                 paintDialog(app, buffer, composition, true);
-                assertTrue(app.blockingSurface(composition).isEmpty());
+                Rect expected = app.blockingSurface(composition);
+                assertFalse(expected.isEmpty());
+                assertEquals(expected, changedBounds(document, buffer));
+                Cell[][] before = snapshot(buffer);
                 app.paintBlockingAttention(buffer, composition, true);
-                assertAttention(before, buffer, new Rect(0, 0, 0, 0), true, WARNING);
+                assertAttention(before, buffer, expected, true, WARNING);
             }
         }
     }

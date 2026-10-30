@@ -79,6 +79,34 @@ class DialogFocusTraversalTest {
     }
 
     @Test
+    void declaredContainerIntersectionIsSharedByFocusManagerAndDialogTraversal() {
+        var container = new ListView(20, index -> "row " + index, ListView.State.initial())
+            .layout(new Rect(2, 1, 8, 3));
+        FocusSpace clipped = new FocusSpace(new Point(100, 50), new Rect(0, 0, 7, 5));
+        var full = new RoutedTarget<>("list", container, clipped);
+        var intersection = new RoutedTarget<>("list", container, clipped, true, true,
+            InteractionVisibility.VISIBLE_INTERSECTION);
+        assertFalse(full.interactive());
+        assertTrue(intersection.interactive());
+        var scope = FocusScope.single("container", FocusResetPolicy.CLEARED, intersection);
+        FocusManager<String> focus = new FocusManager<>();
+
+        DialogFocusTraversal.focusFirst(focus, scope);
+
+        assertEquals("list", focus.focused().orElseThrow());
+        var route = focus.route(scope, KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
+        assertTrue(route.context().orElseThrow().enabled());
+        assertTrue(route.target().orElseThrow().placement()
+            .handle(KeyStroke.of(KeyStroke.Key.ARROW_DOWN), route.context().orElseThrow()).output().isPresent());
+        assertTrue(DialogFocusTraversal.advance(focus, scope, false, true, TAB));
+        assertFalse(DialogFocusTraversal.advance(focus, scope, true, true, BACK_TAB));
+        assertEquals("list", focus.focused().orElseThrow());
+        assertFalse(InteractionVisibility.VISIBLE_INTERSECTION.allows(new Rect(7, 1, 0, 3), clipped.parentClip()));
+        assertFalse(InteractionVisibility.VISIBLE_INTERSECTION.allows(new Rect(7, 1, 3, 3), clipped.parentClip()),
+            "touching an edge does not create a visible viewport");
+    }
+
+    @Test
     void resizingAwayAllControlsClearsFocusAndRestoringThemRejoinsTheRing() {
         FocusManager<String> focus = new FocusManager<>();
         Object id = new Object();

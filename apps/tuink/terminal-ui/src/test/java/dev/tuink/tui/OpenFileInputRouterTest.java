@@ -17,6 +17,7 @@ import dev.tuiframe.scroll.ScrollInteraction;
 import dev.tuiframe.scroll.Scrollbar;
 import dev.tuink.tui.file.FileTreeModel;
 import dev.tuink.tui.ui.FileTreeView;
+import dev.tuink.tui.ui.OpenFileDialogController;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -498,6 +499,40 @@ class OpenFileInputRouterTest {
                     KeyStroke.of(KeyStroke.Key.ESCAPE)
                 ).intent()
             );
+        }
+    }
+
+    @Test
+    void compactCloseOwnsFocusAndReturningToTheNormalDialogRestoresItsControl() throws IOException {
+        Files.createFile(root.resolve("note.txt"));
+        try (FileTreeModel model = new FileTreeModel(root, false, false)) {
+            FileTreeView view = FileTreeView.fromSnapshot(awaitLoaded(model), false, false);
+            FileTreeView.Placement tree = view.place(BOUNDS, FileTreeView.State.initial(), CLIP, true);
+            OpenFileDialogView.Placement normal = OpenFileDialogTestSupport.placement(tree);
+            OpenFileDialogView.FocusState focus = new OpenFileDialogView.FocusState();
+            normal.activate(focus);
+            focus.focus(OpenFileInputRouter.Focus.OK);
+
+            Rect tinyViewport = new Rect(0, 0, 23, 7);
+            OpenFileDialogView.Placement compact = OpenFileDialogView.place(normal.focusScope().id(),
+                OpenFileDialogController.layoutForTerminal(7, 23),
+                view.place(BOUNDS, tree.state(), tinyViewport, false, false), false, tinyViewport);
+            compact.activate(focus);
+            assertEquals(OpenFileDialogView.Control.CLOSE, focus.manager().focused().orElseThrow());
+            var close = compact.compactDialog().closeButton();
+            OpenFileInputRouter.Result modifiedClick = OpenFileInputRouter.route(compact, focus,
+                new PointerEvent(close.row(), close.cursorCol(), PointerEvent.Kind.PRESS, PointerEvent.Button.LEFT,
+                    Set.of(KeyStroke.Modifier.CTRL)), 0L, DOUBLE_CLICK_NANOS);
+            assertTrue(modifiedClick.consumed());
+            assertNull(modifiedClick.intent(), "compact controls must keep the file picker's modifier policy");
+            OpenFileInputRouter.Result tab = OpenFileInputRouter.route(compact, focus,
+                KeyStroke.of(KeyStroke.Key.TAB), 0L, DOUBLE_CLICK_NANOS);
+            assertTrue(tab.consumed());
+            assertNull(tab.intent());
+            assertEquals(OpenFileDialogView.Control.CLOSE, focus.manager().focused().orElseThrow());
+
+            normal.activate(focus);
+            assertEquals(OpenFileInputRouter.Focus.OK, focus.focus());
         }
     }
 

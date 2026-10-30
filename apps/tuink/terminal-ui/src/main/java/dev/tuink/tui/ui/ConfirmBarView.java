@@ -7,6 +7,7 @@ import dev.tuiframe.widget.FocusManager;
 import dev.tuiframe.widget.FocusResetPolicy;
 import dev.tuiframe.widget.FocusScope;
 import dev.tuiframe.widget.FocusSpace;
+import dev.tuiframe.widget.InteractionVisibility;
 import dev.tuiframe.widget.RoutedTarget;
 import dev.tuiframe.widget.Theme;
 import dev.tuiframe.widget.WidgetState;
@@ -22,11 +23,21 @@ public final class ConfirmBarView {
     private final String row;
     private final List<ChoiceButton> choices;
     private final ConfirmChoice initialChoice;
+    private final boolean decisionsAvailable;
+    private final int questionWidth;
 
-    private ConfirmBarView(String row, List<ChoiceButton> choices, ConfirmChoice initialChoice) {
+    private ConfirmBarView(
+        String row,
+        List<ChoiceButton> choices,
+        ConfirmChoice initialChoice,
+        boolean decisionsAvailable,
+        int questionWidth
+    ) {
         this.row = Objects.requireNonNull(row, "row");
         this.choices = List.copyOf(Objects.requireNonNull(choices, "choices"));
         this.initialChoice = Objects.requireNonNull(initialChoice, "initialChoice");
+        this.decisionsAvailable = decisionsAvailable;
+        this.questionWidth = questionWidth;
     }
 
     public static ConfirmBarView build(String prompt, int cols) {
@@ -42,8 +53,9 @@ public final class ConfirmBarView {
         ConfirmBarView prototype = build(prompt, cols, primaryLabel, "Cancel", false, "Cancel");
         List<ChoiceButton> choices = List.of(prototype.choices.get(0),
             new ChoiceButton(ConfirmChoice.CANCEL, prototype.choices.get(1).button()));
-        String row = prototype.row;
-        return new ConfirmBarView(row, choices, ConfirmChoice.CANCEL);
+        String row = prototype.decisionsAvailable ? prototype.row : compactHint(cols, true);
+        return new ConfirmBarView(row, choices, ConfirmChoice.CANCEL,
+            prototype.decisionsAvailable, prototype.questionWidth);
     }
 
     public static ConfirmBarView build(
@@ -55,7 +67,12 @@ public final class ConfirmBarView {
         String cancelLabel
     ) {
         String actionsCluster = actionsCluster(primaryLabel, secondaryLabel, includeCancel, cancelLabel);
-        String row = alignLeftRight(prompt, actionsCluster, cols, 1);
+        int availablePromptWidth = promptWidth(cols, primaryLabel, secondaryLabel, includeCancel, cancelLabel);
+        String question = prompt == null ? "" : prompt;
+        boolean decisionsAvailable = !question.isBlank() && CellText.width(question) <= availablePromptWidth;
+        String row = decisionsAvailable
+            ? alignLeftRight(question, actionsCluster, cols, 1)
+            : compactHint(cols, includeCancel);
         int actionsStart = Math.max(0, rightClusterStart(row, actionsCluster));
         Button primaryButton = new Button(0, actionsStart, primaryLabel);
         Button secondaryButton = new Button(0, actionsStart + primaryButton.width() + 1, secondaryLabel);
@@ -71,7 +88,9 @@ public final class ConfirmBarView {
         return new ConfirmBarView(
             row,
             choices,
-            includeCancel ? ConfirmChoice.CANCEL : ConfirmChoice.SAVE
+            includeCancel ? ConfirmChoice.CANCEL : ConfirmChoice.SAVE,
+            decisionsAvailable,
+            CellText.width(question)
         );
     }
 
@@ -98,18 +117,19 @@ public final class ConfirmBarView {
         Objects.requireNonNull(scopeId, "scopeId");
         Rect safeInteractionClip = Objects.requireNonNull(interactionClip, "interactionClip");
         FocusSpace space = FocusSpace.root(safeInteractionClip);
+        boolean questionVisible = decisionsAvailable
+            && InteractionVisibility.FULL_BOUNDS.allows(new Rect(0, topRow, questionWidth, 1), safeInteractionClip);
         List<RoutedTarget<ConfirmChoice, Button.Action>> targets = new ArrayList<>(choices.size());
         List<ConfirmChoice> tabOrder = new ArrayList<>(choices.size());
         for (ChoiceButton choice : choices) {
             Button button = choice.button();
             Rect bounds = new Rect(button.col(), topRow, button.width(), 1);
-            boolean interactive = safeInteractionClip.contains(bounds);
             targets.add(new RoutedTarget<>(
                 choice.choice(),
                 button.layout(bounds),
                 space,
-                interactive,
-                interactive
+                true,
+                questionVisible
             ));
             tabOrder.add(choice.choice());
         }
@@ -122,7 +142,19 @@ public final class ConfirmBarView {
             tabOrder,
             pointerOrder
         );
-        return new Placement(focusScope, initialChoice);
+        return new Placement(focusScope, initialChoice, questionVisible);
+    }
+
+    private static String compactHint(int cols, boolean includeCancel) {
+        List<String> hints = includeCancel
+            ? List.of("Enlarge window; Esc cancels", "Enlarge; Esc cancels", "Enlarge; Esc", "Enlarge")
+            : List.of("Enlarge window to choose", "Enlarge");
+        for (String hint : hints) {
+            if (CellText.width(hint) <= cols) {
+                return clipPad(hint, cols);
+            }
+        }
+        return clipPad("Enlarge", cols);
     }
 
     private static String actionsCluster(
@@ -192,17 +224,24 @@ public final class ConfirmBarView {
     public static final class Placement {
         private final FocusScope<ConfirmChoice, Button.Action> focusScope;
         private final ConfirmChoice initialChoice;
+        private final boolean decisionsAvailable;
 
         private Placement(
             FocusScope<ConfirmChoice, Button.Action> focusScope,
-            ConfirmChoice initialChoice
+            ConfirmChoice initialChoice,
+            boolean decisionsAvailable
         ) {
             this.focusScope = Objects.requireNonNull(focusScope, "focusScope");
             this.initialChoice = Objects.requireNonNull(initialChoice, "initialChoice");
+            this.decisionsAvailable = decisionsAvailable;
         }
 
         public FocusScope<ConfirmChoice, Button.Action> focusScope() {
             return focusScope;
+        }
+
+        public boolean decisionsAvailable() {
+            return decisionsAvailable;
         }
 
         /** Applies initial focus only when entering this prompt instance. */
@@ -213,20 +252,8 @@ public final class ConfirmBarView {
                 .isEmpty();
             if (entering) {
                 focusManager.focus(focusScope, initialChoice);
-                return;
-            }
-            ConfirmChoice focused = focusManager.focused().orElse(null);
-            if (focused == null) {
-                // Keep an explicitly safe no-focus state after an unavailable
-                // default or an application-requested clear.
-                focusManager.clear(focusScope);
-                return;
-            }
-            RoutedTarget<ConfirmChoice, Button.Action> target = focusScope.target(focused).orElse(null);
-            if (!eligible(target)) {
-                // A resize must never turn a hidden safe default into the first
-                // remaining dangerous action.
-                focusManager.clear(focusScope);
+            } else {
+                focusManager.context(focusScope, initialChoice);
             }
         }
 
@@ -235,19 +262,19 @@ public final class ConfirmBarView {
             Objects.requireNonNull(canvas, "canvas");
             Objects.requireNonNull(theme, "theme");
             Objects.requireNonNull(focusManager, "focusManager");
+            if (!decisionsAvailable) {
+                return;
+            }
             ConfirmChoice focused = focusManager.focused().orElse(null);
             for (ConfirmChoice id : focusScope.tabOrder()) {
                 RoutedTarget<ConfirmChoice, Button.Action> target = focusScope.target(id).orElseThrow();
                 target.placement().paint(
                     canvas,
                     theme,
-                    new WidgetState(Objects.equals(focused, id) && target.enabled(), target.enabled())
+                    new WidgetState(Objects.equals(focused, id) && target.interactive(), target.interactive())
                 );
             }
         }
 
-        private static boolean eligible(RoutedTarget<?, ?> target) {
-            return target != null && target.enabled() && target.focusable();
-        }
     }
 }

@@ -13,9 +13,11 @@ import dev.tuiframe.geometry.Size;
 import dev.tuiframe.input.KeyStroke;
 import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.input.TextInput;
+import dev.tuiframe.input.TuiInputEvent;
 import dev.tuiframe.style.CellColor;
 import dev.tuiframe.style.CellStyle;
 import java.util.Set;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class ButtonTest {
@@ -197,6 +199,86 @@ class ButtonTest {
                 new FocusContext(false, false, space)
             ).consumed()
         );
+    }
+
+    @Test
+    void directHandlersRejectEmptyHiddenAndPartialButtonsDespiteEnabledFocusedContext() {
+        Button button = Button.plain("中e\u0301Go");
+        Rect bounds = new Rect(2, 1, button.width(), 1);
+        var placed = button.layout(bounds);
+        for (Rect clip : List.of(new Rect(0, 0, bounds.rightExclusive() - 1, 4),
+            new Rect(3, 0, 20, 4), new Rect(0, 2, 20, 2), new Rect(0, 0, 0, 0))) {
+            FocusSpace space = new FocusSpace(new Point(5, 3), clip);
+            FocusContext context = new FocusContext(true, true, space);
+            for (TuiInputEvent event : List.of(KeyStroke.of(KeyStroke.Key.ENTER),
+                KeyStroke.of(KeyStroke.Key.SPACE), new TextInput(" "),
+                new PointerEvent(4, 8, PointerEvent.Kind.PRESS, PointerEvent.Button.LEFT, Set.of()))) {
+                assertFalse(placed.handle(event, context).consumed(), clip + ": " + event);
+            }
+        }
+        FocusContext visible = new FocusContext(true, true, FocusSpace.root(new Rect(0, 0, 20, 4)));
+        for (Rect empty : List.of(new Rect(2, 1, 0, 1), new Rect(2, 1, button.width(), 0))) {
+            assertFalse(button.layout(empty).handle(KeyStroke.of(KeyStroke.Key.ENTER), visible).consumed());
+        }
+        assertEquals(Button.Action.ACTIVATED,
+            placed.handle(KeyStroke.of(KeyStroke.Key.ENTER), visible).output().orElseThrow());
+    }
+
+    @Test
+    void measuredUnicodeButtonsCannotReceiveFocusOrActivateUntilTheirCompleteLabelFits() {
+        FocusSpace space = FocusSpace.root(new Rect(0, 0, 80, 24));
+        FocusContext forcedFocus = new FocusContext(true, true, space);
+        for (Button button : List.of(Button.plain("a中b"), new Button("中e\u0301👩‍💻"))) {
+            Size measured = button.measure(new Size(2, 1));
+            assertEquals(new Size(2, 1), measured);
+            var narrow = button.layout(new Rect(2, 1, measured.width(), measured.height()));
+            var narrowTarget = new RoutedTarget<>("button", narrow, space);
+            var narrowScope = FocusScope.single("dialog", FocusResetPolicy.FIRST_FOCUSABLE, narrowTarget);
+            FocusManager<String> focus = new FocusManager<>();
+
+            assertFalse(narrow.interactionReady());
+            assertFalse(narrowTarget.interactive());
+            assertFalse(narrowTarget.focusEligible());
+            assertFalse(new RoutedTarget<>("button", narrow, space, true, true,
+                InteractionVisibility.VISIBLE_INTERSECTION).interactive(), "clip policy cannot bypass intrinsic fit");
+            focus.focus(narrowScope, "button");
+            assertTrue(focus.focused().isEmpty());
+            assertTrue(focus.route(narrowScope, KeyStroke.of(KeyStroke.Key.TAB)).target().isEmpty());
+            for (TuiInputEvent event : List.of(KeyStroke.of(KeyStroke.Key.ENTER),
+                KeyStroke.of(KeyStroke.Key.SPACE), new TextInput(" "),
+                new PointerEvent(1, 2, PointerEvent.Kind.PRESS, PointerEvent.Button.LEFT, Set.of()))) {
+                assertFalse(narrow.handle(event, forcedFocus).consumed(), "direct input: " + event);
+                var routed = focus.route(narrowScope, event);
+                if (routed.target().isPresent()) {
+                    assertFalse(routed.context().orElseThrow().enabled());
+                    assertFalse(routed.target().orElseThrow().placement()
+                        .handle(event, routed.context().orElseThrow()).consumed());
+                }
+                assertTrue(focus.focused().isEmpty());
+            }
+
+            var grown = button.layout(new Rect(2, 1, button.width(), 1));
+            var grownTarget = new RoutedTarget<>("button", grown, space);
+            var grownScope = FocusScope.single("dialog", FocusResetPolicy.FIRST_FOCUSABLE, grownTarget);
+            assertTrue(grown.interactionReady());
+            assertTrue(grownTarget.focusEligible());
+            var enter = focus.route(grownScope, KeyStroke.of(KeyStroke.Key.ENTER));
+            assertEquals("button", focus.focused().orElseThrow());
+            assertEquals(Button.Action.ACTIVATED, enter.target().orElseThrow().placement()
+                .handle(KeyStroke.of(KeyStroke.Key.ENTER), enter.context().orElseThrow()).output().orElseThrow());
+            assertEquals(Button.Action.ACTIVATED,
+                grown.handle(new PointerEvent(1, 2, PointerEvent.Kind.PRESS, PointerEvent.Button.LEFT, Set.of()),
+                    forcedFocus).output().orElseThrow());
+        }
+    }
+
+    @Test
+    void anEmptyPlainLabelCannotCreateAnInvisibleActionInPaddedBounds() {
+        var placement = Button.plain("").layout(new Rect(2, 1, 4, 1));
+        FocusSpace space = FocusSpace.root(new Rect(0, 0, 80, 24));
+        assertFalse(placement.interactionReady());
+        assertFalse(new RoutedTarget<>("empty", placement, space).focusEligible());
+        assertFalse(placement.handle(KeyStroke.of(KeyStroke.Key.ENTER), new FocusContext(true, true, space)).consumed());
     }
 
     private static CellBuffer filled(int rows, int cols) {

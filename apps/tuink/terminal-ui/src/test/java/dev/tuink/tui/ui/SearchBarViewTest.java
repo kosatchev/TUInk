@@ -2,6 +2,7 @@ package dev.tuink.tui.ui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.editor.search.SearchOptions;
@@ -317,6 +318,62 @@ class SearchBarViewTest {
         assertTrue(focus.focused().isEmpty());
         assertTrue(placement.cursorPosition(focus).isEmpty());
         assertEquals("query", query.text());
+    }
+
+    @Test
+    void paintAndCursorLookupIgnoreAnotherScopeWithTheSameFieldId() {
+        TextField query = new TextField();
+        query.set("query");
+        var placement = view(query, new TextField(), 60).place(new Object(), 2, viewport(5, 60));
+        Object otherScope = new Object();
+        var other = view(new TextField(), new TextField(), 60).place(otherScope, 2, viewport(5, 60));
+        for (boolean cleared : List.of(false, true)) {
+            FocusManager<SearchFocus> focus = new FocusManager<>();
+            other.activate(focus);
+            if (cleared) focus.clear(other.focusScope());
+            var focusedBefore = focus.focused();
+            assertEquals(cleared, focusedBefore.isEmpty());
+            var cursorBefore = other.cursorPosition(focus);
+            CellBuffer buffer = new CellBuffer(5, 60);
+
+            placement.paint(new Canvas(buffer), THEME, focus);
+
+            assertTrue(placement.cursorPosition(focus).isEmpty());
+            assertSame(otherScope, focus.activeScopeId().orElseThrow());
+            assertEquals(focusedBefore, focus.focused());
+            assertEquals(cursorBefore, other.cursorPosition(focus));
+            assertEquals(NORMAL, buffer.get(2, placement.targetBounds(SearchFocus.FIND).x()).style());
+            assertEquals("query", query.text());
+        }
+    }
+
+    @Test
+    void readingAClippedSnapshotDoesNotReconcileTheRetainedFieldFocus() {
+        TextField replacement = new TextField();
+        replacement.set("replacement");
+        SearchBarView view = view(new TextField(), replacement, 60);
+        Object scope = new Object();
+        var full = view.place(scope, 2, viewport(5, 60));
+        FocusManager<SearchFocus> focus = new FocusManager<>();
+        full.activate(focus);
+        focus.focus(full.focusScope(), SearchFocus.REPLACE);
+        var cursorBefore = full.cursorPosition(focus);
+        assertTrue(cursorBefore.isPresent());
+        int caretBefore = replacement.cursor();
+        var clipped = view.place(scope, 2, viewport(3, 60));
+        CellBuffer buffer = new CellBuffer(5, 60);
+
+        clipped.paint(new Canvas(buffer), THEME, focus);
+
+        assertTrue(clipped.cursorPosition(focus).isEmpty());
+        assertSame(scope, focus.activeScopeId().orElseThrow());
+        assertEquals(SearchFocus.REPLACE, focus.focused().orElseThrow());
+        assertEquals(DISABLED, buffer.get(3, clipped.targetBounds(SearchFocus.REPLACE).x()).style());
+        assertEquals("replacement", replacement.text());
+        assertEquals(caretBefore, replacement.cursor());
+        assertEquals(cursorBefore, full.cursorPosition(focus));
+        full.paint(new Canvas(buffer), THEME, focus);
+        assertEquals(FOCUSED, buffer.get(3, full.targetBounds(SearchFocus.REPLACE).x()).style());
     }
 
     private static SearchBarView view(

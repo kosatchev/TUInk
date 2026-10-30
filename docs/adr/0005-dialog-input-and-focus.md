@@ -57,6 +57,13 @@ also reject ordinary direct input when their placements are clipped. A scope
 with the `CLEARED` reset policy clears an unavailable focus target instead of
 automatically choosing another action after a resize.
 
+`FocusManager.peekContext` reads a target's current focus and availability for
+painting and cursor placement without entering or reconciling its scope. It
+leaves retained focus and explicit clearing intact, including when a target has
+become clipped or another scope is active. Input routing and `context` still
+perform activation and reconciliation. Search and Save As use this shared read
+operation instead of maintaining their own focus projections.
+
 `PlacedInteractiveWidget.interactionReady()` also checks the allocation itself.
 A button requires room for its complete rendered label even when its smaller
 allocated bounds fit inside the clip. Transparent placement adapters forward

@@ -61,6 +61,138 @@ class FocusManagerTest {
     }
 
     @Test
+    void peekingAnUnactivatedOrDeactivatedScopeDoesNotApplyItsResetPolicy() {
+        FocusSpace space = new FocusSpace(new Point(10, 5), new Rect(0, 0, 8, 3));
+        for (FocusResetPolicy policy : List.of(FocusResetPolicy.FIRST_FOCUSABLE, FocusResetPolicy.CLEARED)) {
+            FocusManager<String> manager = new FocusManager<>();
+            Object scopeId = new Object();
+            var scope = FocusScope.single(scopeId, policy,
+                target("only", placement(new Rect(1, 1, 2, 1)), space));
+
+            FocusContext observed = manager.peekContext(scope, "only").orElseThrow();
+
+            assertFalse(observed.focused());
+            assertTrue(observed.enabled());
+            assertSame(space, observed.space());
+            assertTrue(manager.peekContext(scope, "missing").isEmpty());
+            assertThrows(NullPointerException.class, () -> manager.peekContext(null, "only"));
+            assertThrows(NullPointerException.class, () -> manager.peekContext(scope, null));
+            assertTrue(manager.activeScopeId().isEmpty());
+            assertTrue(manager.focused().isEmpty());
+
+            FocusContext activated = manager.context(scope, "only").orElseThrow();
+            assertEquals(policy == FocusResetPolicy.FIRST_FOCUSABLE, activated.focused());
+            assertSame(scopeId, manager.activeScopeId().orElseThrow());
+            assertTrue(manager.deactivate(scopeId));
+            assertFalse(manager.peekContext(scope, "only").orElseThrow().focused());
+            assertTrue(manager.activeScopeId().isEmpty());
+            assertTrue(manager.focused().isEmpty());
+        }
+    }
+
+    @Test
+    void peekingAForeignScopeWithTheSameTargetIdPreservesFocusAndExplicitClear() {
+        record ScopeId(String value) {}
+        FocusManager<String> manager = new FocusManager<>();
+        ScopeId activeId = new ScopeId("active");
+        var active = scope(activeId, target("first", 0), target("selected", 4));
+        FocusSpace foreignSpace = new FocusSpace(new Point(20, 10), new Rect(0, 0, 12, 3));
+        var foreign = scope(new Object(), target("selected", placement(new Rect(4, 0, 2, 1)), foreignSpace));
+        manager.focus(active, "selected");
+
+        FocusContext observed = manager.peekContext(foreign, "selected").orElseThrow();
+
+        assertFalse(observed.focused());
+        assertTrue(observed.enabled());
+        assertSame(foreignSpace, observed.space());
+        assertSame(activeId, manager.activeScopeId().orElseThrow());
+        assertEquals("selected", manager.focused().orElseThrow());
+        assertTrue(manager.peekContext(active, "selected").orElseThrow().focused());
+        var rebuilt = scope(new ScopeId("active"), target("first", 0), target("selected", 4));
+        assertTrue(manager.peekContext(rebuilt, "selected").orElseThrow().focused(),
+            "scope identity uses value equality across rebuilt snapshots");
+        assertSame(activeId, manager.activeScopeId().orElseThrow());
+
+        manager.clear(active);
+        assertFalse(manager.peekContext(foreign, "selected").orElseThrow().focused());
+        assertFalse(manager.peekContext(active, "selected").orElseThrow().focused());
+        assertSame(activeId, manager.activeScopeId().orElseThrow());
+        assertTrue(manager.focused().isEmpty());
+        assertFalse(manager.context(active, "selected").orElseThrow().focused(),
+            "observing another scope must not undo an explicit clear");
+        assertTrue(manager.route(active, new TextInput("x")).target().isEmpty());
+        assertEquals("first", manager.route(active, KeyStroke.of(KeyStroke.Key.TAB)).target().orElseThrow().id());
+    }
+
+    @Test
+    void peekingUnavailableControlsDoesNotReconcileTheRetainedFocus() {
+        record Unavailable(String name, RoutedTarget<String, String> target, boolean enabled) {}
+        FocusSpace narrow = FocusSpace.root(new Rect(0, 0, 5, 3));
+        var unavailable = List.of(
+            new Unavailable("shrunk", target("selected", placement(new Rect(4, 0, 2, 1)), narrow), false),
+            new Unavailable("disabled", disabledTarget("selected", 4), false),
+            new Unavailable("intrinsic label clipping", target("selected",
+                Button.plain("Selected").layout(new Rect(4, 0, 2, 1)).mapOutput(ignored -> "selected"), ROOT), false),
+            new Unavailable("not focusable", new RoutedTarget<>("selected",
+                placement(new Rect(4, 0, 2, 1)), ROOT, false, true), true));
+        for (Unavailable variant : unavailable) {
+            FocusManager<String> manager = new FocusManager<>();
+            Object scopeId = new Object();
+            var original = scope(scopeId, target("first", 0), target("selected", 4));
+            var current = scope(scopeId, target("first", 0), variant.target());
+            manager.focus(original, "selected");
+
+            FocusContext observed = manager.peekContext(current, "selected").orElseThrow();
+
+            assertFalse(observed.focused(), variant.name());
+            assertEquals(variant.enabled(), observed.enabled(), variant.name());
+            assertSame(variant.target().space(), observed.space());
+            assertFalse(manager.peekContext(current, "first").orElseThrow().focused());
+            assertSame(scopeId, manager.activeScopeId().orElseThrow());
+            assertEquals("selected", manager.focused().orElseThrow(), variant.name());
+            assertTrue(manager.peekContext(original, "selected").orElseThrow().focused(),
+                "a later visible placement can reuse the identity without reactivating it");
+
+            manager.context(current, "selected");
+            assertEquals("first", manager.focused().orElseThrow(),
+                "only an activating operation may reconcile the unavailable selection");
+            assertTrue(manager.peekContext(current, "first").orElseThrow().focused());
+        }
+    }
+
+    @Test
+    void peekingAMissingTargetKeepsItsIdentityUntilRealInputReconcilesTheScope() {
+        for (FocusResetPolicy policy : List.of(FocusResetPolicy.FIRST_FOCUSABLE, FocusResetPolicy.CLEARED)) {
+            FocusManager<String> manager = new FocusManager<>();
+            Object scopeId = new Object();
+            var original = new FocusScope<>(scopeId, policy,
+                List.of(target("first", 0), target("selected", 4)),
+                List.of("first", "selected"), List.of("selected", "first"));
+            var missing = FocusScope.single(scopeId, policy, target("first", 0));
+            manager.focus(original, "selected");
+
+            assertTrue(manager.peekContext(missing, "selected").isEmpty());
+            assertFalse(manager.peekContext(missing, "first").orElseThrow().focused());
+            assertEquals("selected", manager.focused().orElseThrow());
+            assertSame(scopeId, manager.activeScopeId().orElseThrow());
+            assertTrue(manager.peekContext(original, "selected").orElseThrow().focused());
+
+            var routed = manager.route(missing, new TextInput("x"));
+
+            assertTrue(routed.focusChanged());
+            if (policy == FocusResetPolicy.CLEARED) {
+                assertTrue(routed.target().isEmpty());
+                assertTrue(manager.focused().isEmpty());
+                assertFalse(manager.context(original, "selected").orElseThrow().focused(),
+                    "restoring the target after real reconciliation must retain the safe cleared state");
+            } else {
+                assertEquals("first", routed.target().orElseThrow().id());
+                assertEquals("first", manager.focused().orElseThrow());
+            }
+        }
+    }
+
+    @Test
     void defaultTargetsExcludeEmptyOffscreenAndPartiallyClippedControlsFromKeyboardFocus() {
         FocusManager<String> manager = new FocusManager<>();
         FocusSpace clipped = FocusSpace.root(new Rect(0, 0, 8, 3));

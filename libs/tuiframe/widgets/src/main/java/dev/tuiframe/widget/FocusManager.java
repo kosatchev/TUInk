@@ -33,8 +33,19 @@ public final class FocusManager<K> {
     public <A> Optional<FocusContext> context(FocusScope<K, A> scope, K id) {
         FocusScope<K, A> required = Objects.requireNonNull(scope, "scope");
         activate(required);
+        return peekContext(required, id);
+    }
+
+    /**
+     * Reads this frame's target context without activating or reconciling its
+     * scope. Targets in other scopes are unfocused; current placement determines
+     * availability. A missing or unavailable target leaves retained focus intact.
+     */
+    public <A> Optional<FocusContext> peekContext(FocusScope<K, A> scope, K id) {
+        FocusScope<K, A> required = Objects.requireNonNull(scope, "scope");
+        boolean active = activeScope && Objects.equals(activeScopeId, required.id());
         return required.target(Objects.requireNonNull(id, "id"))
-            .map(target -> target.context(Objects.equals(focused, target.id())));
+            .map(target -> target.context(active && Objects.equals(focused, target.id())));
     }
 
     public <A> boolean focus(FocusScope<K, A> scope, K id) {

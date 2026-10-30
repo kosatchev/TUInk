@@ -349,6 +349,62 @@ class SaveAsBarViewTest {
     }
 
     @Test
+    void paintAndCursorLookupIgnoreAnotherScopeWithTheSameFieldId() {
+        TextField field = new TextField();
+        field.set("draft.txt");
+        var placement = SaveAsBarView.build(field, 48).place(new Object(), 2, viewport(4, 48));
+        Object otherScope = new Object();
+        var other = SaveAsBarView.build(new TextField(), 48).place(otherScope, 2, viewport(4, 48));
+        for (boolean cleared : List.of(false, true)) {
+            FocusManager<SaveAsBarView.Target> focus = new FocusManager<>();
+            other.activate(focus);
+            if (cleared) focus.clear(other.focusScope());
+            var focusedBefore = focus.focused();
+            assertEquals(cleared, focusedBefore.isEmpty());
+            var cursorBefore = other.cursorPosition(focus);
+            CellBuffer buffer = new CellBuffer(4, 48);
+
+            placement.paint(new Canvas(buffer), THEME, focus);
+
+            assertTrue(placement.cursorPosition(focus).isEmpty());
+            assertSame(otherScope, focus.activeScopeId().orElseThrow());
+            assertEquals(focusedBefore, focus.focused());
+            assertEquals(cursorBefore, other.cursorPosition(focus));
+            assertEquals(NORMAL, buffer.get(2, placement.fieldBounds().x()).style());
+            assertEquals("draft.txt", field.text());
+        }
+    }
+
+    @Test
+    void readingAClippedSnapshotDoesNotReconcileTheRetainedFieldFocus() {
+        TextField field = new TextField();
+        field.set("draft.txt");
+        SaveAsBarView view = SaveAsBarView.build(field, 48);
+        Object scope = new Object();
+        var full = view.place(scope, 2, viewport(4, 48));
+        FocusManager<SaveAsBarView.Target> focus = new FocusManager<>();
+        full.activate(focus);
+        var cursorBefore = full.cursorPosition(focus);
+        assertTrue(cursorBefore.isPresent());
+        int caretBefore = field.cursor();
+        int left = full.fieldBounds().rightExclusive() - 1;
+        var clipped = view.place(scope, 2, new Rect(left, 0, 48 - left, 4));
+        CellBuffer buffer = new CellBuffer(4, 48);
+
+        clipped.paint(new Canvas(buffer), THEME, focus);
+
+        assertTrue(clipped.cursorPosition(focus).isEmpty());
+        assertSame(scope, focus.activeScopeId().orElseThrow());
+        assertEquals(SaveAsBarView.Target.FIELD, focus.focused().orElseThrow());
+        assertEquals(DISABLED, buffer.get(2, clipped.fieldBounds().x()).style());
+        assertEquals("draft.txt", field.text());
+        assertEquals(caretBefore, field.cursor());
+        assertEquals(cursorBefore, full.cursorPosition(focus));
+        full.paint(new Canvas(buffer), THEME, focus);
+        assertEquals(FOCUSED, buffer.get(2, full.fieldBounds().x()).style());
+    }
+
+    @Test
     void emptyOrPartiallyClippedFieldIsDisabledAndHasNoCursor() {
         int labelWidth = CellText.width(SaveAsBarView.DEFAULT_LABEL);
         TextField field = new TextField();

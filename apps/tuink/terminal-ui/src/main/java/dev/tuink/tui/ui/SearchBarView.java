@@ -286,7 +286,7 @@ public final class SearchBarView {
             Objects.requireNonNull(focusManager, "focusManager");
             for (SearchFocus id : SearchNavigation.order()) {
                 RoutedTarget<SearchFocus, Action> target = focusScope.target(id).orElseThrow();
-                FocusContext context = focusContext(focusManager, target);
+                FocusContext context = focusManager.peekContext(focusScope, id).orElseThrow();
                 target.placement().paint(canvas, theme, context.widgetState());
             }
         }
@@ -302,19 +302,8 @@ public final class SearchBarView {
             if (target == null || !(target.placement() instanceof PlacedCursorSource cursorSource)) {
                 return Optional.empty();
             }
-            FocusContext context = focusContext(focusManager, target);
+            FocusContext context = focusManager.peekContext(focusScope, focused).orElseThrow();
             return cursorSource.cursorPosition(context).flatMap(context.space()::terminalPoint);
-        }
-
-        private FocusContext focusContext(
-            FocusManager<SearchFocus> focusManager,
-            RoutedTarget<SearchFocus, Action> target
-        ) {
-            boolean active = focusManager.activeScopeId().filter(focusScope.id()::equals).isPresent();
-            boolean focused = active
-                && focusManager.focused().filter(target.id()::equals).isPresent()
-                && target.interactive();
-            return new FocusContext(focused, target.interactive(), target.space());
         }
     }
 

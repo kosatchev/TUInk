@@ -169,7 +169,8 @@ public final class SaveAsBarView {
             Objects.requireNonNull(focusManager, "focusManager");
             for (Target id : ORDER) {
                 RoutedTarget<Target, Action> target = focusScope.target(id).orElseThrow();
-                target.placement().paint(canvas, theme, focusContext(focusManager, target).widgetState());
+                FocusContext context = focusManager.peekContext(focusScope, id).orElseThrow();
+                target.placement().paint(canvas, theme, context.widgetState());
             }
         }
 
@@ -180,18 +181,9 @@ public final class SaveAsBarView {
             if (!(target.placement() instanceof PlacedCursorSource cursorSource)) {
                 return Optional.empty();
             }
-            FocusContext context = focusContext(focusManager, target);
+            FocusContext context = focusManager.peekContext(focusScope, Target.FIELD).orElseThrow();
             return cursorSource.cursorPosition(context)
                 .flatMap(context.space()::terminalPoint);
-        }
-
-        private FocusContext focusContext(FocusManager<Target> focusManager, RoutedTarget<Target, Action> target) {
-            Objects.requireNonNull(focusManager, "focusManager");
-            boolean active = focusManager.activeScopeId().filter(focusScope.id()::equals).isPresent();
-            boolean focused = active
-                && focusManager.focused().filter(target.id()::equals).isPresent()
-                && target.interactive();
-            return new FocusContext(focused, target.interactive(), target.space());
         }
     }
 

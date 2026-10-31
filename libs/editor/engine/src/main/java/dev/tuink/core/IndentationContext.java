@@ -10,9 +10,9 @@ import java.util.function.IntFunction;
 final class IndentationContext {
     static final int MAX_SCAN_CODE_UNITS = 65_536;
     static final int MAX_SCAN_LINES = 1024;
-    // Incoming states for the current line and every line in the 256-line
-    // structural assist window, including its oldest permitted owner.
-    private static final int MAX_CHECKPOINTS = 257;
+    // Incoming states for the current line and every line in the structural
+    // assist window, including its oldest permitted owner.
+    private static final int MAX_CHECKPOINTS = StructuralIndentLookback.MAX_LINES + 1;
     private static final int MAX_STATE_WEIGHT = 4096;
     private final IntFunction<? extends CharSequence> lines;
     private final TreeMap<Integer, IndentationLexer.State> checkpoints = new TreeMap<>();

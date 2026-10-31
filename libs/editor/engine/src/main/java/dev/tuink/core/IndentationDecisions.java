@@ -7,8 +7,7 @@ import java.util.function.IntFunction;
 
 /** Computes indentation choices without changing document text, view state or history. */
 final class IndentationDecisions {
-    private static final int ASSIST_LOOKBACK_LINES = 256;
-    private static final int ASSIST_LOOKBACK_CHARS = 16_384;
+    private static final int ASSIST_SCAN_CODE_UNITS = 16_384;
     private final int lineCount;
     private final IntFunction<? extends CharSequence> lines;
     private final String file;
@@ -80,14 +79,10 @@ final class IndentationDecisions {
                 pending.push(before.charAt(index));
             }
         }
-        int remainingChars = ASSIST_LOOKBACK_CHARS;
-        int firstLine = Math.max(0, lineIndex - ASSIST_LOOKBACK_LINES);
-        for (int previous = lineIndex - 1; previous >= firstLine; previous--) {
-            CharSequence text = lines.apply(previous);
-            remainingChars -= text.length();
-            if (remainingChars < 0) {
-                return false;
-            }
+        StructuralIndentLookback lookback = new StructuralIndentLookback(lineIndex, lines);
+        while (lookback.previous()) {
+            int previous = lookback.lineIndex();
+            CharSequence text = lookback.text();
             String code = syntax.codeBeforeCursor(previous, text.length());
             // The context must prove both the lexical boundary and the
             // structural match before removing user-supplied whitespace.
@@ -474,14 +469,10 @@ final class IndentationDecisions {
     }
 
     private boolean shouldDedentPythonClause(int lineIndex, String keyword, String currentIndent, String reduced) {
-        int firstLine = Math.max(0, lineIndex - ASSIST_LOOKBACK_LINES);
-        int remainingChars = ASSIST_LOOKBACK_CHARS;
-        for (int previous = lineIndex - 1; previous >= firstLine; previous--) {
-            CharSequence text = lines.apply(previous);
-            remainingChars -= text.length();
-            if (remainingChars < 0) {
-                return false;
-            }
+        StructuralIndentLookback lookback = new StructuralIndentLookback(lineIndex, lines);
+        while (lookback.previous()) {
+            int previous = lookback.lineIndex();
+            CharSequence text = lookback.text();
             String code = syntax.codeBeforeCursor(previous, text.length());
             if (code == null) {
                 return false;
@@ -567,16 +558,12 @@ final class IndentationDecisions {
     }
 
     private boolean shouldDedentCodeClause(int lineIndex, String keyword, String currentIndent, String reduced) {
-        int firstLine = Math.max(0, lineIndex - ASSIST_LOOKBACK_LINES);
-        int remainingChars = ASSIST_LOOKBACK_CHARS;
         int closedBraces = 0;
         boolean label = keyword.equals("case") || keyword.equals("default");
-        for (int previous = lineIndex - 1; previous >= firstLine; previous--) {
-            CharSequence text = lines.apply(previous);
-            remainingChars -= text.length();
-            if (remainingChars < 0) {
-                return false;
-            }
+        StructuralIndentLookback lookback = new StructuralIndentLookback(lineIndex, lines);
+        while (lookback.previous()) {
+            int previous = lookback.lineIndex();
+            CharSequence text = lookback.text();
             String code = syntax.codeBeforeCursor(previous, text.length());
             if (code == null) {
                 return false;
@@ -695,7 +682,7 @@ final class IndentationDecisions {
 
     /** Shared across neighbouring lines, so long whitespace prefixes cannot multiply work. */
     private static final class AssistScanBudget {
-        private int remaining = ASSIST_LOOKBACK_CHARS;
+        private int remaining = ASSIST_SCAN_CODE_UNITS;
         private boolean exhausted;
 
         private boolean readUnit() {

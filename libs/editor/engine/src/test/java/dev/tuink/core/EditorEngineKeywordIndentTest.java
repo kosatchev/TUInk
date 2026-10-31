@@ -240,6 +240,67 @@ class EditorEngineKeywordIndentTest {
     }
 
     @Test
+    void pythonClauseLookbackIncludesItsExactLineAndRawUtf16Boundaries() {
+        String owner = "if ready:";
+        for (int distance : new int[] {256, 257}) {
+            List<String> lines = new ArrayList<>(List.of(owner));
+            lines.addAll(Collections.nCopies(distance - 1, "    # filler 😀"));
+            lines.add("    else");
+            Fixture fixture = fixture("main.py", lines);
+
+            fixture.engine.insertChar(':');
+
+            assertEquals((distance == 256 ? "" : "    ") + "else:",
+                fixture.model.getLine(lines.size() - 1), "owner distance " + distance);
+        }
+        for (int codeUnits : new int[] {16_384, 16_385}) {
+            String comment = commentWithUtf16Length("    #", codeUnits - owner.length());
+            Fixture fixture = fixture("main.py", List.of(owner, comment, "    else"));
+
+            fixture.engine.insertChar(':');
+
+            assertEquals((codeUnits == 16_384 ? "" : "    ") + "else:",
+                fixture.model.getLine(2), "raw UTF-16 distance " + codeUnits);
+        }
+    }
+
+    @Test
+    void switchSiblingLookbackIncludesItsExactLineAndRawUtf16Boundaries() {
+        String sibling = "    case 1:";
+        for (int distance : new int[] {256, 257}) {
+            List<String> lines = new ArrayList<>(List.of("switch (value) {", sibling));
+            lines.addAll(Collections.nCopies(distance - 1, "        // filler 😀"));
+            lines.add("        default");
+            Fixture fixture = fixture("Main.java", lines);
+
+            fixture.engine.insertChar(':');
+
+            assertEquals((distance == 256 ? "    " : "        ") + "default:",
+                fixture.model.getLine(lines.size() - 1), "sibling distance " + distance);
+        }
+        for (int codeUnits : new int[] {16_384, 16_385}) {
+            String comment = commentWithUtf16Length("        //", codeUnits - sibling.length());
+            Fixture fixture = fixture("Main.java", List.of("switch (value) {", sibling, comment, "        default"));
+
+            fixture.engine.insertChar(':');
+
+            assertEquals((codeUnits == 16_384 ? "    " : "        ") + "default:",
+                fixture.model.getLine(3), "raw UTF-16 distance " + codeUnits);
+        }
+    }
+
+    @Test
+    void javaClauseGetsAFreshClosingLookbackBudgetAtTheCharacterBoundary() {
+        String owner = "    if (ready) {";
+        String comment = commentWithUtf16Length("        //", 16_384 - owner.length());
+        Fixture fixture = fixture("Main.java", List.of(owner, comment, "        }", "        else"));
+
+        fixture.engine.insertChar(' ');
+
+        assertEquals("    else ", fixture.model.getLine(3));
+    }
+
+    @Test
     void aDedentAndItsTriggerRestoreCursorMetadataAndSavepointTogether() {
         List<String> original = List.of("if ready:", "    run()", "    else");
         Fixture fixture = fixture("main.py", original);
@@ -262,6 +323,11 @@ class EditorEngineKeywordIndentTest {
         assertTrue(fixture.engine.redo());
         assertEquals("else:", fixture.model.getLine(2));
         assertEquals(new Position(2, 5), fixture.state.getCursor());
+    }
+
+    private static String commentWithUtf16Length(String prefix, int codeUnits) {
+        int payloadUnits = codeUnits - prefix.length();
+        return prefix + "😀".repeat(payloadUnits / 2) + "x".repeat(payloadUnits % 2);
     }
 
     private static void type(EditorEngine engine, String text) {

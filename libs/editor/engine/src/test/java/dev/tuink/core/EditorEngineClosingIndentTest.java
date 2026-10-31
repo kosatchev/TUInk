@@ -107,6 +107,25 @@ class EditorEngineClosingIndentTest {
         ), "        ");
     }
 
+    @Test
+    void closingLookbackIncludesItsExactLineAndRawUtf16Boundaries() {
+        String owner = "    void work() {";
+        for (int distance : new int[] {256, 257}) {
+            List<String> lines = new ArrayList<>(List.of(owner));
+            lines.addAll(Collections.nCopies(distance - 1, "        // filler 😀"));
+            lines.add("        }");
+
+            assertNewlineIndent("Main.java", lines, distance == 256 ? "    " : "        ");
+        }
+        for (int codeUnits : new int[] {16_384, 16_385}) {
+            int payloadUnits = codeUnits - owner.length() - "        //".length();
+            String comment = "        //" + "😀".repeat(payloadUnits / 2) + "x".repeat(payloadUnits % 2);
+
+            assertNewlineIndent("Main.java", List.of(owner, comment, "        }"),
+                codeUnits == 16_384 ? "    " : "        ");
+        }
+    }
+
     private static void assertNewlineIndent(String filename, List<String> lines, String expected) {
         Fixture fixture = fixture(filename, lines);
         Position before = fixture.state.getCursor();

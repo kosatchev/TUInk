@@ -425,7 +425,8 @@ The portable ZIP requires Java 25 or newer.
 
 ```bash
 unzip tuink-<version>.zip
-./tuink-<version>/bin/tuink README.md
+cd tuink-<version>
+./bin/tuink README.md
 ```
 
 ## Options and configuration

@@ -16,6 +16,7 @@ import dev.tuink.editor.storage.SaveDisposition;
 import dev.tuink.editor.storage.SaveTarget;
 import dev.tuink.editor.storage.SavedDocument;
 import dev.tuink.editor.storage.StorageCapability;
+import dev.tuink.editor.storage.StorageOperation;
 import dev.tuink.editor.storage.StorageWriteException;
 import java.io.IOException;
 import java.io.InputStream;
@@ -121,8 +122,13 @@ public final class JvmDocumentStorage implements DocumentStorage {
     }
 
     @Override public SaveTarget inspect(DocumentResource resource, ResourceBinding current) throws IOException {
+        return inspect(resource, current, StorageOperation.untracked());
+    }
+
+    @Override public SaveTarget inspect(DocumentResource resource, ResourceBinding current,
+                                        StorageOperation operation) throws IOException {
         Path spelling = ownPath(resource);
-        PreparedSaveTarget target = PreparedSaveTarget.inspect(spelling);
+        PreparedSaveTarget target = PreparedSaveTarget.inspect(spelling, operation);
         boolean ownsTarget = isCurrentTarget(spelling, target.requested(), current);
         return new FileSaveTarget(this, resource.id(), target, fileResource(target.requested()),
             fileResource(target.target()), ownsTarget);
@@ -154,8 +160,15 @@ public final class JvmDocumentStorage implements DocumentStorage {
     }
 
     @Override public SavedDocument write(DocumentSave request, SaveAuthorization authorization) throws IOException {
+        return write(request, authorization, StorageOperation.untracked());
+    }
+
+    @Override public SavedDocument write(DocumentSave request, SaveAuthorization authorization,
+                                         StorageOperation operation) throws IOException {
         Objects.requireNonNull(request, "request");
         Objects.requireNonNull(authorization, "authorization");
+        Objects.requireNonNull(operation, "operation");
+        operation.checkCancelled();
         Path spelling = ownPath(request.resource());
         FileSaveTarget approved = null;
         if (authorization instanceof SaveAuthorization.Approved approval) {
@@ -181,7 +194,8 @@ public final class JvmDocumentStorage implements DocumentStorage {
             + savedResource.displayName() + ". Verify its contents before retrying; the editor retains your draft.",
             null, StorageWriteException.Outcome.UNKNOWN, savedResource);
         try {
-            if (approved != null) approved.target.beginWrite();
+            operation.progress(StorageOperation.Phase.VERIFYING, 0L, -1L);
+            if (approved != null) approved.target.beginWrite(operation);
             Path requested = approved == null ? resolveDocumentPath(spelling) : approved.target.requested();
             Path target;
             try {
@@ -192,15 +206,17 @@ public final class JvmDocumentStorage implements DocumentStorage {
             }
             // Validate the address that will receive the staged bytes. Resolving
             // a changing opening alias again could verify one file and replace another.
-            if (verifyOriginal) requireUnchangedFile(baseline, target);
+            if (verifyOriginal) requireUnchangedFile(baseline, target, operation);
             boolean targetExists = requireRegularSaveTargetOrMissing(target);
             String prefix = "." + sanitizePrefix(target.getFileName().toString()) + ".";
             if (prefix.length() < 3) prefix = ".tuink.";
+            operation.checkCancelled();
             tempFile = createSaveTempFile(target.getParent(), prefix, targetExists);
             DocumentCodec.EncodedContent encoded;
             try (OutputStream output = publicationFiles.openStaged(tempFile)) {
-                encoded = DocumentCodec.write(output, request.lines(), request.metadata());
+                encoded = DocumentCodec.write(output, request.lines(), request.metadata(), operation);
             }
+            operation.checkCancelled();
             FileBaseline savedBaseline = new FileBaseline(target, encoded.fingerprint().sha256(), encoded.fingerprint().byteSize());
             // Every possible successful receipt exists before a filesystem call
             // can publish bytes. Choosing one after commit cannot allocate.
@@ -210,17 +226,18 @@ public final class JvmDocumentStorage implements DocumentStorage {
                 new SavedDocument(savedResource, encoded.metadata(), savedBaseline, PublicationKind.REPLACEMENT),
                 new SavedDocument(savedResource, encoded.metadata(), savedBaseline, PublicationKind.STREAM_WRITE));
             guard = FileSaveGuard.acquire(target);
-            requireReadyToPublish(approved, baseline, verifyOriginal, requested, target);
+            requireReadyToPublish(approved, baseline, verifyOriginal, requested, target, operation);
             boolean currentTargetExists = requireRegularSaveTargetOrMissing(target);
             if (disposition == SaveDisposition.CREATE_NEW && currentTargetExists) {
                 throw new FileAlreadyExistsException(target.toString());
             }
             FileSaveAttributes attributes = currentTargetExists ? FileSaveAttributes.read(target) : null;
             if (attributes != null) attributes.apply(tempFile);
-            requireReadyToPublish(approved, baseline, verifyOriginal, requested, target);
+            requireReadyToPublish(approved, baseline, verifyOriginal, requested, target, operation);
             if (disposition == SaveDisposition.CREATE_NEW) {
-                return publishNewFile(tempFile, target, publication, receipts);
+                return publishNewFile(tempFile, target, publication, receipts, operation, encoded.fingerprint().byteSize());
             }
+            operation.beginPublication();
             publication.attempted = true;
             try {
                 publicationFiles.move(tempFile, target, true);
@@ -230,7 +247,9 @@ public final class JvmDocumentStorage implements DocumentStorage {
                 // This specified failure means no move occurred. Recheck all
                 // conditions before attempting the weaker portable operation.
                 publication.attempted = false;
-                requireReadyToPublish(approved, baseline, verifyOriginal, requested, target);
+                operation.resumePreparation();
+                requireReadyToPublish(approved, baseline, verifyOriginal, requested, target, operation);
+                operation.beginPublication();
                 publication.attempted = true;
                 publicationFiles.move(tempFile, target, false);
                 publication.committed = true;
@@ -271,8 +290,9 @@ public final class JvmDocumentStorage implements DocumentStorage {
     }
 
     private void requireReadyToPublish(FileSaveTarget approved, FileBaseline baseline, boolean verifyOriginal,
-                                               Path requested, Path target) throws IOException {
-        if (verifyOriginal) requireUnchangedFile(baseline, target);
+                                               Path requested, Path target, StorageOperation operation) throws IOException {
+        operation.checkCancelled();
+        if (verifyOriginal) requireUnchangedFile(baseline, target, operation);
         if (!target.equals(FileSaveGuard.canonicalTarget(requested))) {
             throw new IOException("Save target changed outside TUInk during saving: " + requested
                 + ". Choose the target again and retry Save As.");
@@ -280,16 +300,19 @@ public final class JvmDocumentStorage implements DocumentStorage {
         requireRegularSaveTargetOrMissing(target);
         // The stronger approval stamp is checked last: a byte-identical atomic
         // replacement must not pass merely because the loaded baseline matches.
-        if (approved != null) approved.target.requireUnchanged();
+        if (approved != null) approved.target.requireUnchanged(operation);
+        operation.checkCancelled();
     }
 
-    private SavedDocument publishNewFile(Path tempFile, Path target, Publication publication, SaveReceipts receipts)
+    private SavedDocument publishNewFile(Path tempFile, Path target, Publication publication, SaveReceipts receipts,
+                                         StorageOperation operation, long stagedSize)
         throws IOException {
         // Allocate the portable fallback's state even before the first publication
         // attempt; a successful link returns its preallocated receipt immediately.
         byte[] buffer = new byte[8192];
         ByteBuffer bytes = ByteBuffer.wrap(buffer);
         Throwable linkFailure;
+        operation.beginPublication();
         publication.attempted = true;
         try {
             publicationFiles.createLink(target, tempFile);
@@ -301,6 +324,7 @@ public final class JvmDocumentStorage implements DocumentStorage {
         } catch (UnsupportedOperationException unsupported) {
             publication.attempted = false;
             linkFailure = unsupported;
+            operation.resumePreparation();
         } catch (IOException ambiguous) {
             // Some providers cannot link. Retain the uncertainty if an attempted
             // link could have published before reporting its failure.
@@ -308,6 +332,7 @@ public final class JvmDocumentStorage implements DocumentStorage {
         }
         boolean linkMayHavePublished = publication.attempted;
         SeekableByteChannel output;
+        if (!operation.publishing()) operation.beginPublication();
         publication.attempted = true;
         try {
             output = publicationFiles.createNew(target);
@@ -320,10 +345,14 @@ public final class JvmDocumentStorage implements DocumentStorage {
             throw openFailure;
         }
         try (output; InputStream input = Files.newInputStream(tempFile)) {
+            long copied = 0L;
+            operation.progress(StorageOperation.Phase.PUBLISHING, copied, stagedSize);
             int read;
             while ((read = input.read(buffer)) != -1) {
                 bytes.clear().limit(read);
                 while (bytes.hasRemaining()) output.write(bytes);
+                copied += read;
+                operation.progress(StorageOperation.Phase.PUBLISHING, copied, stagedSize);
             }
         } catch (IOException | RuntimeException | Error incomplete) {
             // Never delete by name: another writer may already have replaced it.
@@ -346,10 +375,11 @@ public final class JvmDocumentStorage implements DocumentStorage {
         throw new IOException("File version belongs to another storage provider");
     }
 
-    private void requireUnchangedFile(FileBaseline baseline, Path requested) throws IOException {
+    private void requireUnchangedFile(FileBaseline baseline, Path requested, StorageOperation operation)
+        throws IOException {
         if (baseline == null) throw new IOException("Cannot verify the original file: " + requested
             + ". Use Save As with a different name, or reopen the file.");
-        baseline.requireUnchanged(requested, baselineInput);
+        baseline.requireUnchanged(requested, baselineInput, operation);
     }
 
     /** Resolves parent aliases before dot segments while retaining a final symlink alias. */

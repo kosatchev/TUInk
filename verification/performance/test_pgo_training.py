@@ -1,9 +1,6 @@
 """Offline checks for PGO corpus, isolation, exit policy, and merge eligibility."""
 
 from pathlib import Path
-
-REPOSITORY_ROOT = next(parent for parent in Path(__file__).resolve().parents
-                       if (parent / 'settings.gradle').is_file() and (parent / 'gradlew').is_file())
 import re
 import signal
 import subprocess
@@ -55,7 +52,7 @@ class PgoTrainingTest(unittest.TestCase):
                 training.training_corpus(language, chunks)
 
     def test_settings_use_exact_current_store_keys(self):
-        source = (REPOSITORY_ROOT / "apps/tuink/terminal-ui/src/main/java/dev/tuink/tui/flow/AppSettingsStore.java").read_text()
+        source = (training.REPOSITORY_ROOT / "apps/tuink/terminal-ui/src/main/java/dev/tuink/tui/flow/AppSettingsStore.java").read_text()
         expected_keys = set(re.findall(r'private static final String KEY_\w+ = "([^"]+)";', source))
         self.assertTrue(expected_keys)
         for mouse, wrap in ((False, True), (True, False)):
@@ -98,8 +95,9 @@ class PgoTrainingTest(unittest.TestCase):
 
             def observe(predicate, description):
                 self.assertFalse(predicate(), "Worker bytes and the previous Saved notice are insufficient")
-                self.screen(session, "File draft.txt", "Saving document…")
-                self.assertFalse(predicate(), "The UI owner must finish save admission")
+                for notice in ("Checking save target", "Checking file changes", "Preparing save", "Finishing save"):
+                    self.screen(session, "File draft.txt Saved previous.txt", notice + "…")
+                    self.assertFalse(predicate(), "Progress cannot acknowledge completion beside old Saved text")
                 self.screen(session, "File draft.txt", "Saved draft.txt")
                 document.write_bytes(b"old draft")
                 self.assertFalse(predicate(), "The owner acknowledgement must match the expected bytes")
@@ -139,7 +137,7 @@ class PgoTrainingTest(unittest.TestCase):
                     self.assertEqual(["edit", "fresh boundary"], events)
                     events.append("Ctrl+S")
                     document.write_bytes(b"new draft")
-                    self.screen(session, "File draft.txt *", "Saving document…")
+                    self.screen(session, "File draft.txt *", "Finishing save…")
                     events.append("worker publication")
 
             with patch.object(session, "wait_for", side_effect=observe), patch.object(session, "send", side_effect=submit):
@@ -186,7 +184,7 @@ class PgoTrainingTest(unittest.TestCase):
                 else:
                     self.assertEqual(training.CTRL_S, data)
                     self.assertEqual(["navigation"], events)
-                    self.screen(session, "File draft.txt", "Saving document…")
+                    self.screen(session, "File draft.txt", "Preparing save · Esc to cancel")
                     events.append("Ctrl+S")
 
             with patch.object(session, "wait_for", side_effect=observe), patch.object(session, "send", side_effect=submit):

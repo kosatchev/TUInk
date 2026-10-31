@@ -13,6 +13,8 @@ import time
 
 from vt import Screen
 
+SAVE_PROGRESS_LABELS = ("Checking save target", "Checking file changes", "Preparing save", "Finishing save")
+
 
 class Session:
     def __init__(self, root, java, classpath, document=None, home=None, mono=False, options=None,
@@ -120,7 +122,8 @@ class Session:
         def completed():
             # Both acknowledgements matter: bytes alone precede completion,
             # while a stale notice can survive the following dirty frame.
-            if ("Saved " not in self.screen.text or "Saving document" in self.screen.text
+            if ("Saved " not in self.screen.text
+                    or any(label in self.screen.text for label in SAVE_PROGRESS_LABELS)
                     or "*" in self.screen.lines[0] or "Save As: " in self.screen.text):
                 return False
             try:

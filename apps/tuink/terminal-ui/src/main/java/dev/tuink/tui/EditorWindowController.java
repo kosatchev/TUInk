@@ -80,6 +80,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.function.IntSupplier;
+import java.util.function.Supplier;
 
 /** Owns frame preparation and event handling for one terminal editor window. */
 final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiInputEvent> {
@@ -353,6 +354,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     private void closeView(int index) {
         var tab = tabs.get(index);
         ViewId viewId = tab.documentSession().viewId();
+        cancelPendingSave(viewId);
         if (!sessionContext.canClose(viewId)) {
             withUi(viewId, tab.uiState(), () -> notice().info("Saving this document; wait before closing its tab"));
         } else if (tab.uiState().awaitingAnswer()) {
@@ -424,6 +426,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         while (documentIo.collect()) {
             eventLoop.invalidate();
         }
+        documentIo.checkQuitWait(System.nanoTime());
+        updateSaveProgress();
         syncSearchProjection();
         if (ui().deferredOpenResult != null && modalState().isNone() && !documentIo.busy() && !closingDocumentIo) {
             FilePickerOpenWorkflow.Result ready = ui().deferredOpenResult;
@@ -439,6 +443,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         activeTabIndex = sessionContext.activeTabIndex();
         model = sessionContext.model();
         state = sessionContext.state();
+        if (host.refreshFileAccess(state)) eventLoop.invalidate();
         engine = sessionContext.engine();
         renderPlanBuilder = sessionContext.renderPlanBuilder();
         if (syntaxRetryAtNanos != Long.MIN_VALUE) {
@@ -950,7 +955,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 TerminalEditorApp.earlierDeadline(engine.nanosUntilGutterDiffRefresh(nowNanos),
                     syntaxRetryAtNanos == Long.MIN_VALUE ? -1L : Math.max(0L, syntaxRetryAtNanos - nowNanos)))
         );
-        return TerminalEditorApp.earlierDeadline(presentationDeadline,
+        return TerminalEditorApp.earlierDeadline(
+            TerminalEditorApp.earlierDeadline(presentationDeadline, host.nanosUntilFileAccessRefresh(nowNanos)),
             documentIo.busy() ? SYNTAX_RETRY_DELAY_NANOS : -1L);
     }
 
@@ -2012,6 +2018,9 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         }
 
         if (modalState().isSaveAs()) {
+            if (key.command() == TuinkCommand.UI_ESCAPE || key.command() == TuinkCommand.APP_QUIT) {
+                cancelPendingSave(interactionView());
+            }
             applySaveResult(SaveWorkflow.saveAsInput(saveContext(), key.command(), modalState(), ui().saveAsInput.text()));
             return;
         }
@@ -2094,16 +2103,21 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         if (action.editsDocumentText() && rejectSavingDocumentEdit()) {
             return;
         }
-        if (action == TuinkCommand.APP_QUIT && documentIo.busy()) {
-            boolean alreadyQuitting = pendingSave != null && (pendingSave.purpose() == SaveWorkflow.SavePurpose.QUIT
-                || pendingSave.origin().saveContinuation() == SaveContinuation.QUIT);
-            if (!alreadyQuitting) {
-                quitAfterDocumentIo = true;
-            }
-            notice().info(alreadyQuitting ? "Saving documents before quitting"
-                : "Waiting for the file operation before quitting");
+        if (action == TuinkCommand.UI_ESCAPE
+                && cancelPendingSave(interactionView()) != DocumentIoCoordinator.CancelResult.IDLE) {
             return;
         }
+        if (action == TuinkCommand.APP_QUIT) {
+            cancelPendingOpen();
+            cancelPendingSave(null);
+        }
+        if (action == TuinkCommand.APP_QUIT && documentIo.busy()) {
+            quitAfterDocumentIo = true;
+            documentIo.beginQuitWait(System.nanoTime());
+            notice().info(pendingSave == null ? "Waiting for the file operation before quitting" : "Finishing save…");
+            return;
+        }
+        if (action == TuinkCommand.TAB_CLOSE) cancelPendingSave(sessionContext.activeViewId());
         if (action == TuinkCommand.TAB_CLOSE && !sessionContext.canClose(sessionContext.activeViewId())) {
             notice().info("Saving this document; wait before closing its tab");
             return;
@@ -2446,11 +2460,18 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         pendingSave = request;
         long submittedFilenameRevision = request.submission().filenameRevision();
         String submittedFilename = request.submission().filename();
-        notice().info(request.inspecting() ? "Checking save target…" : "Saving document…");
-        documentIo.submit(request::perform, completion -> {
+        notice().info(SaveProgressPresentation.message(request.operation().progress(), saveEscapeAvailable()));
+        Consumer<DocumentIoController.Completion<DocumentIoCoordinator.Completion>> onComplete = completion -> {
             pendingSave = null;
             var transition = request.accept(completion.value(), completion.failure());
             if (transition instanceof DocumentIoCoordinator.Ignored) {
+                if (!closingDocumentIo && completion.value() != null && completion.value().cancelled()) {
+                    ViewId cancelledOwnerId = liveSaveView(request);
+                    TabUiState cancelledOwner = cancelledOwnerId == null ? null : stateFor(cancelledOwnerId);
+                    if (cancelledOwner != null) {
+                        withUi(cancelledOwnerId, cancelledOwner, globalFlow, () -> notice().info("Save cancelled"));
+                    }
+                }
                 afterDocumentIo();
                 return;
             }
@@ -2473,7 +2494,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 quitAfterDocumentIo = false;
             }
             afterDocumentIo();
-        });
+        };
+        documentIo.submitSave(request::perform, onComplete);
     }
 
     private ViewId liveSaveView(SaveWorkflow.SaveRequest request) {
@@ -2494,6 +2516,9 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         boolean succeeded = performed && result.notice().kind() != SaveWorkflow.NoticeKind.ERROR;
         if (!succeeded || request.inspecting() && result.pendingSave() == null) {
             // A failed write or target question needs an owner decision before any deferred exit.
+            quitAfterDocumentIo = false;
+        }
+        if (succeeded && isGlobalSave(request) && transition instanceof DocumentIoCoordinator.Saved) {
             quitAfterDocumentIo = false;
         }
         boolean standalone = request.purpose() == SaveWorkflow.SavePurpose.CURRENT
@@ -2536,6 +2561,51 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         return true;
     }
 
+    /** Revoke publication rights before dropping a preparation worker's late reply. */
+    private DocumentIoCoordinator.CancelResult cancelPendingSave(ViewId owner) {
+        SaveWorkflow.SaveRequest request = pendingSave;
+        if (request == null || owner != null && !owner.equals(request.session().viewId())) {
+            return DocumentIoCoordinator.CancelResult.IDLE;
+        }
+        DocumentIoCoordinator.CancelResult result = request.session().document().io().cancel(request.operation());
+        if (result == DocumentIoCoordinator.CancelResult.CANCELLED) {
+            documentIo.cancelSave();
+            pendingSave = null;
+            quitAfterDocumentIo = false;
+            reportSaveStatus(request, () -> "Save cancelled", false);
+        } else if (result == DocumentIoCoordinator.CancelResult.DRAINING_WRITE) {
+            reportSaveStatus(request, () -> "Finishing save…", false);
+        }
+        return result;
+    }
+
+    private void updateSaveProgress() {
+        SaveWorkflow.SaveRequest request = pendingSave;
+        if (request == null || closingDocumentIo) return;
+        if (isGlobalSave(request) && request.operation().publishing()) {
+            documentIo.beginQuitWait(System.nanoTime());
+        }
+        reportSaveStatus(request,
+            () -> SaveProgressPresentation.message(request.operation().progress(), saveEscapeAvailable()), true);
+    }
+
+    private boolean saveEscapeAvailable() {
+        return !ui().searchMode && !ui().openFileMode && modalState().isNone() && !topMenu.isOpen();
+    }
+
+    private void reportSaveStatus(SaveWorkflow.SaveRequest request, Supplier<String> text, boolean preserveAlerts) {
+        ViewId ownerId = liveSaveView(request);
+        TabUiState owner = ownerId == null ? null : stateFor(ownerId);
+        if (owner == null) return;
+        withUi(ownerId, owner, isGlobalSave(request), () -> {
+            if (preserveAlerts && notice().requiresAttention()) return;
+            String message = text.get();
+            boolean changed = !message.equals(notice().message);
+            notice().info(message);
+            if (changed) eventLoop.invalidate();
+        });
+    }
+
     private void afterDocumentIo() {
         if (quitAfterDocumentIo && !documentIo.busy() && !closingDocumentIo) {
             quitAfterDocumentIo = false;
@@ -2548,14 +2618,37 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         eventLoop.invalidate();
     }
 
-    /** Finish a started write before recovery captures its final owner-thread state. */
+    private void cancelPendingOpen() {
+        FilePickerOpenWorkflow.OpenRequest request = pendingOpen;
+        if (request == null) return;
+        request.cancel();
+        documentIo.cancelRead();
+        pendingOpen = null;
+        for (TabUiState owner : knownUiStates) {
+            if (owner.pendingOpen == request) owner.pendingOpen = null;
+        }
+        for (TerminalEditorApp.EditorTab tab : tabs) {
+            if (tab.uiState().pendingOpen == request) tab.uiState().pendingOpen = null;
+        }
+        quitAfterDocumentIo = false;
+    }
+
+    /** Cancel preparation and bound publication waiting before final recovery capture. */
     void closeDocumentIo() {
+        host.closeFileAccess();
         closingDocumentIo = true;
         for (TabUiState owner : knownUiStates) owner.close();
         for (TerminalEditorApp.EditorTab tab : tabs) tab.uiState().close();
         globalUi.close();
-        if (pendingOpen != null) pendingOpen.cancel();
+        cancelPendingOpen();
+        SaveWorkflow.SaveRequest stoppingSave = pendingSave;
+        DocumentIoCoordinator.CancelResult stoppedSave = stoppingSave == null
+            ? DocumentIoCoordinator.CancelResult.IDLE : stoppingSave.session().document().io().stop();
         for (TerminalEditorApp.EditorTab tab : tabs) tab.documentSession().document().io().stop();
+        if (stoppingSave != null && stoppedSave == DocumentIoCoordinator.CancelResult.CANCELLED) {
+            documentIo.cancelSave();
+            pendingSave = null;
+        }
         documentIo.close();
     }
 

@@ -2,11 +2,14 @@ package dev.tuink.storage.jvm;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import dev.tuink.core.*;
+import dev.tuink.editor.storage.StorageOperation;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -69,18 +72,30 @@ class FileBaselineTest {
     }
 
     @Test
-    void anUnknownLegacySizeCannotCauseAnUnboundedScan() throws IOException {
+    void anUnknownSizeUsesTheObservedLengthAndCanBeCancelledWithoutASizeCap() throws IOException {
         Path path = directory.resolve("legacy.txt");
         byte[] original = "original".getBytes(StandardCharsets.UTF_8);
         Files.write(path, original);
         FileBaseline known = FileBaseline.fromBytes(path, original);
         FileBaseline legacy = new FileBaseline(path, known.sha256());
         legacy.requireUnchanged(path);
+        long size = 3L << 30;
         try (RandomAccessFile file = new RandomAccessFile(path.toFile(), "rw")) {
-            file.setLength(1L << 30);
+            file.setLength(size);
         }
+        StorageOperation operation = new StorageOperation(StorageOperation.Phase.VERIFYING);
 
-        assertThrows(IOException.class, () -> legacy.requireUnchanged(path,
-            ignored -> fail("Unknown baselines must not scan files beyond the load limit")));
+        assertThrows(InterruptedIOException.class, () -> legacy.requireUnchanged(path, ignored -> {
+            assertEquals(size, operation.snapshot().totalBytes());
+            return new ByteArrayInputStream(original) {
+                @Override public synchronized int read(byte[] bytes, int offset, int length) {
+                    int count = super.read(bytes, offset, length);
+                    operation.requestCancellation();
+                    return count;
+                }
+            };
+        }, operation));
+        assertTrue(operation.cancelled());
+        assertEquals(size, Files.size(path));
     }
 }

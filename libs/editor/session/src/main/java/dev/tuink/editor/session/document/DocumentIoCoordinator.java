@@ -5,6 +5,7 @@ import dev.tuink.editor.storage.DocumentResource;
 import dev.tuink.editor.storage.SaveDisposition;
 import dev.tuink.editor.storage.SavedDocument;
 import dev.tuink.editor.storage.StorageWriteException;
+import dev.tuink.editor.storage.StorageOperation;
 import java.io.IOException;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -13,7 +14,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Owner-thread save protocol. The host executes returned work on its own worker
  * and returns its opaque completion to the same coordinator. No executor, UI or
  * frontend lifetime is owned here. Detaching a view therefore does not discard
- * a draft or cancel an already started external write.
+ * a draft or interrupt external publication.
  */
 public final class DocumentIoCoordinator {
     public enum State { IDLE, INSPECTING, AWAITING_APPROVAL, WRITING, STOPPED }
@@ -165,12 +166,11 @@ public final class DocumentIoCoordinator {
         return result;
     }
 
-    /** Cancels read-only phases and unstarted writes; started writes must drain. */
+    /** Cancels preparation; a publication that won the fence must return its real outcome. */
     public CancelResult cancel() {
         requireOwner();
         if (active == null) return CancelResult.IDLE;
-        if (active.state == State.WRITING && !active.work.cancelBeforeStart()) return CancelResult.DRAINING_WRITE;
-        if (active.work != null) active.work.cancelBeforeStart();
+        if (active.work != null && !active.work.cancelPreparation()) return CancelResult.DRAINING_WRITE;
         active = null;
         return CancelResult.CANCELLED;
     }
@@ -193,7 +193,7 @@ public final class DocumentIoCoordinator {
         return cancel();
     }
 
-    /** Prevents new work. A write already claimed by a worker remains collectible. */
+    /** Prevents new work. An external publication already in progress remains collectible. */
     public CancelResult stop() {
         requireOwner();
         stopped = true;
@@ -246,7 +246,7 @@ public final class DocumentIoCoordinator {
         public boolean requiresOverwriteConfirmation() { return exists() && !currentTarget(); }
     }
 
-    /** One-shot detached task. Cancellation and worker start use the same atomic claim. */
+    /** One-shot detached task; preparation cancellation races the provider's publication fence. */
     public static final class Work {
         private final DocumentIoCoordinator owner;
         private final Operation operation;
@@ -257,6 +257,7 @@ public final class DocumentIoCoordinator {
         private final AtomicInteger execution = new AtomicInteger(); // fresh, started, finished, cancelled
         private final Completion completion;
         private final IOException unexpectedFailure;
+        private final StorageOperation storageOperation;
 
         private Work(DocumentIoCoordinator owner, Operation operation, EditorDocumentSession.SavePreparation preparation,
                      DocumentResource resource) {
@@ -275,6 +276,8 @@ public final class DocumentIoCoordinator {
             this.preparation = preparation;
             this.prepared = prepared;
             this.resource = resource;
+            storageOperation = new StorageOperation(kind == WorkKind.INSPECT
+                ? StorageOperation.Phase.INSPECTING : StorageOperation.Phase.STAGING);
             completion = new Completion(this);
             unexpectedFailure = new IOException(kind == WorkKind.WRITE
                 ? "The write did not return a confirmed outcome. The editor retains your draft; verify the resource before retrying."
@@ -285,6 +288,8 @@ public final class DocumentIoCoordinator {
         public WorkKind kind() { return kind; }
         public SaveDisposition disposition() { return operation.disposition; }
         public DocumentResource resource() { return resource; }
+        public StorageOperation.Progress progress() { return storageOperation.snapshot(); }
+        public boolean publishing() { return storageOperation.publishing(); }
 
         public Completion perform() {
             if (!execution.compareAndSet(0, 1)) {
@@ -292,13 +297,16 @@ public final class DocumentIoCoordinator {
                 throw new IllegalStateException("Document work may execute only once");
             }
             try {
-                if (kind == WorkKind.INSPECT) completion.inspection = preparation.inspectTarget();
-                else completion.receipt = prepared.write();
+                storageOperation.checkCancelled();
+                if (kind == WorkKind.INSPECT) completion.inspection = preparation.inspectTargetWithOperation(storageOperation);
+                else completion.receipt = prepared.writeWithOperation(storageOperation);
             } catch (IOException failure) {
                 completion.failure = failure;
                 completion.failureKind = failure instanceof StorageWriteException write
                     && write.outcome() == StorageWriteException.Outcome.UNKNOWN ? FailureKind.UNKNOWN
                     : FailureKind.FAILED_BEFORE_COMMIT;
+                completion.cancelled = storageOperation.cancelled()
+                    && completion.failureKind == FailureKind.FAILED_BEFORE_COMMIT;
             } catch (RuntimeException | OutOfMemoryError failure) {
                 try { unexpectedFailure.addSuppressed(failure); }
                 catch (RuntimeException | Error ignored) { /* Mandatory outcome was allocated before I/O. */ }
@@ -316,6 +324,14 @@ public final class DocumentIoCoordinator {
             completion.finished = true;
             return true;
         }
+
+        private boolean cancelPreparation() {
+            // A confirmed receipt must advance the savepoint even before the owner collects it.
+            if (kind == WorkKind.WRITE && execution.get() == 2) return false;
+            if (!storageOperation.requestCancellation()) return false;
+            cancelBeforeStart();
+            return true;
+        }
     }
 
     /** Opaque worker result; its provenance and publication rights cannot be reconstructed. */
@@ -331,5 +347,6 @@ public final class DocumentIoCoordinator {
         private Completion(Work work) { this.work = work; }
         public boolean succeeded() { return finished && failure == null && !cancelled; }
         public IOException failure() { return failure; }
+        public boolean cancelled() { return finished && cancelled; }
     }
 }

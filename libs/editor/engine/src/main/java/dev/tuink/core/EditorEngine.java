@@ -17,6 +17,7 @@ import dev.tuink.editor.storage.SavedDocument;
 import dev.tuink.editor.storage.SaveAuthorization;
 import dev.tuink.editor.storage.SaveTarget;
 import dev.tuink.editor.storage.StorageWriteException;
+import dev.tuink.editor.storage.StorageOperation;
 import dev.tuink.editor.storage.DocumentFileMetadata;
 import dev.tuink.editor.storage.BomKind;
 import dev.tuink.editor.storage.DocumentOpenMode;
@@ -896,8 +897,14 @@ public class EditorEngine {
 
         /** Detached preflight; never reads the live owner or modifies a resource. */
         public SaveTargetInspection inspectTarget() throws IOException {
+            return inspectTargetWithOperation(StorageOperation.untracked());
+        }
+
+        public SaveTargetInspection inspectTargetWithOperation(StorageOperation operation) throws IOException {
             try {
-                SaveTarget target = request.resource().storage().inspect(request.resource(), originalBinding);
+                operation.checkCancelled();
+                SaveTarget target = request.resource().storage().inspect(request.resource(), originalBinding, operation);
+                operation.checkCancelled();
                 if (target.requestedResource().storage() != request.resource().storage()
                     || target.physicalResource().storage() != request.resource().storage()) {
                     throw new IOException("Storage returned a target from another provider");
@@ -962,12 +969,17 @@ public class EditorEngine {
 
         /** Executes one detached write; its receipt is accepted only by this operation. */
         public synchronized SavedDocument write() throws IOException {
+            return writeWithOperation(StorageOperation.untracked());
+        }
+
+        public synchronized SavedDocument writeWithOperation(StorageOperation operation) throws IOException {
             if (started) throw new IllegalStateException("A prepared save may be written only once");
             started = true;
+            operation.checkCancelled();
             DocumentSave request = preparation.request;
             SavedDocument saved;
             try {
-                saved = storage.write(request, authorization);
+                saved = storage.write(request, authorization, operation);
             } catch (OutOfMemoryError exhausted) {
                 throw unconfirmed(exhausted);
             }

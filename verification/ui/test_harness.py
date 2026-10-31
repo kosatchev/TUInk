@@ -95,8 +95,9 @@ class SaveObservationTest(unittest.TestCase):
 
             def observe(predicate, description, timeout):
                 self.assertFalse(predicate(), "worker bytes and a stale Saved notice are insufficient")
-                self.screen(session, "File draft.txt", "Saving document…")
-                self.assertFalse(predicate(), "the owner must acknowledge completion")
+                for notice in ("Checking save target", "Checking file changes", "Preparing save", "Finishing save"):
+                    self.screen(session, "File draft.txt Saved previous.txt", notice + "…")
+                    self.assertFalse(predicate(), "progress cannot acknowledge completion even beside old Saved text")
                 self.screen(session, "File draft.txt", "Saved draft.txt")
                 document.write_bytes(b"old draft")
                 self.assertFalse(predicate(), "UI acknowledgement must match the expected bytes")

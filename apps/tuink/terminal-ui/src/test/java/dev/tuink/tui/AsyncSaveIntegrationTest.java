@@ -15,12 +15,15 @@ import dev.tuiframe.input.TextInput;
 import dev.tuiframe.input.TuiInputEvent;
 import dev.tuiframe.runtime.TuiEventLoop;
 import dev.tuink.tui.command.TuinkCommand;
+import java.io.RandomAccessFile;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -46,9 +49,6 @@ class AsyncSaveIntegrationTest {
             var cursor = saved.state().getCursor();
             window.event(KeyStroke.of(KeyStroke.Key.ARROW_RIGHT));
             assertFalse(cursor.equals(saved.state().getCursor()));
-            window.command(TuinkCommand.TAB_CLOSE);
-            assertEquals(1, window.tabs.size());
-
             window.command(TuinkCommand.TAB_NEW);
             window.event(new TextInput("other draft"));
             var other = window.active().tabSession();
@@ -128,7 +128,7 @@ class AsyncSaveIntegrationTest {
     }
 
     @Test
-    void quitWaitsForAnAlreadyStartedSave() throws Exception {
+    void quitCancelsAnUnstartedSaveBeforeAskingAboutTheDirtyDraft() throws Exception {
         try (Scenario scenario = scenario()) {
             EditorWindowFixture window = scenario.window;
             window.ui.confirmOnCloseSetting = true;
@@ -136,12 +136,315 @@ class AsyncSaveIntegrationTest {
             window.command(TuinkCommand.DOCUMENT_SAVE);
             window.command(TuinkCommand.APP_QUIT);
             assertTrue(window.controller.running());
+            assertFalse(window.documentIo.busy());
+            assertTrue(window.screenRow(window.rowStartingWith("Unsaved (1)")).contains("Discard"));
             scenario.executor.runNextOnWorker();
-            assertTrue(window.controller.running());
             window.frame();
+            assertEquals("original", Files.readString(window.document));
+            assertTrue(window.active().state().isDirty());
+            window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
+            window.command(TuinkCommand.DOCUMENT_SAVE);
+            scenario.finishOperation();
+            assertTrue(window.controller.running());
+            assertEquals("draft original", Files.readString(window.document));
+            assertFalse(window.active().state().isDirty());
+        }
+    }
+
+    @Test
+    void quitCollectsAPublishedSaveBeforeProcessingTheExitRequest() throws Exception {
+        try (Scenario scenario = scenario()) {
+            EditorWindowFixture window = scenario.window;
+            window.ui.confirmOnCloseSetting = true;
+            window.event(new TextInput("draft "));
+            window.command(TuinkCommand.DOCUMENT_SAVE);
+            scenario.executor.runNextOnWorker();
+            assertEquals("draft original", Files.readString(window.document));
+            assertTrue(window.active().state().isDirty(), "publication has not reached the owner yet");
+            window.command(TuinkCommand.APP_QUIT);
+            assertFalse(window.documentIo.busy(), "the owner collects the receipt before polling the next input");
             assertFalse(window.controller.running());
             assertEquals("draft original", Files.readString(window.document));
             assertFalse(window.active().state().isDirty());
+        }
+    }
+
+    @Test
+    void escapeCancelsTheQueuedInspectionAndItsLateTaskCannotAffectAFreshSave() throws Exception {
+        try (Scenario scenario = scenario()) {
+            EditorWindowFixture window = scenario.window;
+            window.event(new TextInput("draft "));
+            var owner = window.active().tabSession();
+            Path cancelledTarget = Files.writeString(directory.resolve("cancelled.txt"), "untouched");
+            SaveWorkflowIntegrationTest.submitFilename(window, cancelledTarget);
+            assertTrue(window.documentIo.busy());
+
+            window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
+
+            assertFalse(window.documentIo.busy());
+            assertTrue(owner.state().isDirty());
+            assertEquals(window.document, JvmDocumentStorage.pathOf(owner.state().getCurrentResource()));
+            assertEquals(List.of("draft original"), owner.model().snapshotLines());
+            assertEquals("original", Files.readString(window.document));
+            assertEquals("untouched", Files.readString(cancelledTarget));
+
+            Path freshTarget = directory.resolve("fresh.txt");
+            SaveWorkflowIntegrationTest.submitFilename(window, freshTarget);
+            assertTrue(window.documentIo.busy());
+            scenario.executor.runNextOnWorker();
+            window.frame();
+
+            assertTrue(window.documentIo.busy(), "the cancelled task must not release the newer operation");
+            assertFalse(window.active().uiState().modalState.isSaveOverwriteConfirm());
+            assertFalse(Files.exists(freshTarget));
+            assertEquals("untouched", Files.readString(cancelledTarget));
+            scenario.finishOperation();
+
+            assertEquals("draft original", Files.readString(freshTarget));
+            assertEquals("untouched", Files.readString(cancelledTarget));
+            assertEquals("original", Files.readString(window.document));
+            assertEquals(freshTarget, JvmDocumentStorage.pathOf(owner.state().getCurrentResource()));
+            assertFalse(owner.state().isDirty());
+            assertTrue(window.controller.running());
+        }
+    }
+
+    @Test
+    void saveProgressAndEscapeCancellationStayWithTheirDocumentTab() throws Exception {
+        try (Scenario scenario = scenario()) {
+            EditorWindowFixture window = scenario.window;
+            window.event(new TextInput("draft "));
+            var owner = window.active().tabSession();
+            window.command(TuinkCommand.DOCUMENT_SAVE);
+            window.frame();
+            assertTrue(window.notification.message.contains("Esc to cancel"));
+            window.command(TuinkCommand.TAB_NEW);
+            window.event(new TextInput("other draft"));
+            var other = window.active().tabSession();
+            window.frame();
+            assertTrue(window.notification.message == null || !window.notification.message.contains("Esc to cancel"));
+
+            window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
+            assertTrue(window.documentIo.busy(), "another tab's Esc cannot cancel the owner's save");
+            window.command(TuinkCommand.TAB_PREVIOUS);
+            window.frame();
+            assertTrue(window.notification.message.contains("Esc to cancel"));
+            window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
+            assertFalse(window.documentIo.busy());
+            assertTrue(owner.state().isDirty());
+            scenario.executor.runNextOnWorker();
+            window.frame();
+            assertEquals("original", Files.readString(window.document));
+            window.command(TuinkCommand.DOCUMENT_SAVE);
+            scenario.finishOperation();
+            assertEquals("draft original", Files.readString(window.document));
+            assertFalse(owner.state().isDirty());
+            assertTrue(other.state().isDirty());
+            assertEquals(List.of("other draft"), other.model().snapshotLines());
+        }
+    }
+
+    @Test
+    void searchKeepsEscapeUntilItClosesAndTheSaveHintMatchesThatPriority() throws Exception {
+        try (Scenario scenario = scenario()) {
+            EditorWindowFixture window = scenario.window;
+            window.event(new TextInput("draft "));
+            window.command(TuinkCommand.DOCUMENT_SAVE);
+            window.command(TuinkCommand.SEARCH_OPEN);
+            window.frame();
+            assertTrue(window.ui.searchMode);
+            assertFalse(window.notification.message.contains("Esc to cancel"));
+
+            window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
+            window.frame();
+            assertFalse(window.ui.searchMode);
+            assertTrue(window.documentIo.busy(), "the first Esc closes search");
+            assertTrue(window.notification.message.contains("Esc to cancel"));
+            window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
+            assertFalse(window.documentIo.busy());
+            assertTrue(window.active().state().isDirty());
+            scenario.executor.runNextOnWorker();
+            window.frame();
+            assertEquals("original", Files.readString(window.document));
+            assertEquals(List.of("draft original"), window.active().tabSession().model().snapshotLines());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void backgroundSaveProgressPreservesPriorityAlertsAndCancellationStillWorks(boolean warning) throws Exception {
+        try (Scenario scenario = scenario()) {
+            EditorWindowFixture window = scenario.window;
+            window.event(new TextInput("draft "));
+            window.command(TuinkCommand.DOCUMENT_SAVE);
+            String alert = "Keep this operation warning visible";
+            if (warning) window.notification.warning(alert);
+            else window.notification.error(alert);
+
+            window.frame();
+            assertEquals(alert, window.notification.message);
+            assertTrue(window.documentIo.busy());
+            window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
+            assertFalse(window.documentIo.busy());
+            assertTrue(window.active().state().isDirty());
+            scenario.executor.runNextOnWorker();
+            window.frame();
+            assertEquals("original", Files.readString(window.document));
+            assertEquals(List.of("draft original"), window.active().tabSession().model().snapshotLines());
+        }
+    }
+
+    @Test
+    void aLargeOverwriteTargetCanBeConfirmedAndSaved() throws Exception {
+        try (Scenario scenario = scenario()) {
+            EditorWindowFixture window = scenario.window;
+            window.event(new TextInput("draft "));
+            var owner = window.active().tabSession();
+            var cursor = owner.state().getCursor();
+            Path target = directory.resolve("large-target.bin");
+            long targetSize = 128L << 20;
+            try (RandomAccessFile file = new RandomAccessFile(target.toFile(), "rw")) {
+                file.setLength(targetSize);
+            }
+            SaveWorkflowIntegrationTest.submitFilename(window, target);
+            scenario.executor.runNextOnWorker();
+            window.frame();
+
+            assertFalse(window.documentIo.busy());
+            assertTrue(window.active().documentSession().document().io().busy(), "approval retains the observation");
+            assertTrue(window.active().uiState().modalState.isSaveOverwriteConfirm());
+            assertEquals(targetSize, Files.size(target));
+            assertEquals("original", Files.readString(window.document));
+            assertEquals(window.document, JvmDocumentStorage.pathOf(owner.state().getCurrentResource()));
+            assertEquals(cursor, owner.state().getCursor());
+            assertEquals(List.of("draft original"), owner.model().snapshotLines());
+            assertTrue(owner.state().isDirty());
+
+            window.event(new TextInput("y"));
+            scenario.finishOperation();
+
+            assertEquals("draft original", Files.readString(target));
+            assertEquals("original", Files.readString(window.document));
+            assertEquals(target, JvmDocumentStorage.pathOf(owner.state().getCurrentResource()));
+            assertFalse(owner.state().isDirty());
+            assertTrue(window.controller.running());
+        }
+    }
+
+    @Test
+    void quitCancelsTheQueuedInspectionAndCancellingQuitStillAllowsASave() throws Exception {
+        try (Scenario scenario = scenario()) {
+            EditorWindowFixture window = scenario.window;
+            window.ui.confirmOnCloseSetting = true;
+            window.event(new TextInput("draft "));
+            var owner = window.active().tabSession();
+            Path target = Files.writeString(directory.resolve("cancelled.txt"), "untouched");
+            SaveWorkflowIntegrationTest.submitFilename(window, target);
+
+            window.event(KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL));
+
+            assertFalse(window.documentIo.busy(), "quit must not wait for a read-only inspection");
+            assertTrue(window.controller.running(), "unsaved work still requires the ordinary quit decision");
+            assertTrue(window.screenRow(window.rowStartingWith("Unsaved (1)")).contains("Discard"));
+            assertTrue(owner.state().isDirty());
+            assertEquals("untouched", Files.readString(target));
+            assertEquals("original", Files.readString(window.document));
+            window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
+            scenario.executor.runNextOnWorker();
+            window.frame();
+
+            assertFalse(window.documentIo.busy());
+            assertTrue(window.controller.running());
+            assertFalse(window.active().uiState().modalState.isSaveOverwriteConfirm());
+            assertEquals(List.of("draft original"), owner.model().snapshotLines());
+            assertEquals(window.document, JvmDocumentStorage.pathOf(owner.state().getCurrentResource()));
+            window.command(TuinkCommand.DOCUMENT_SAVE);
+            scenario.finishOperation();
+
+            assertEquals("draft original", Files.readString(window.document));
+            assertEquals("untouched", Files.readString(target));
+            assertFalse(owner.state().isDirty());
+            assertTrue(window.controller.running(), "the cancelled quit cannot resume after a later save");
+        }
+    }
+
+    @Test
+    void quitWithoutConfirmationDoesNotWaitForAQueuedInspection() throws Exception {
+        try (Scenario scenario = scenario()) {
+            EditorWindowFixture window = scenario.window;
+            window.ui.confirmOnCloseSetting = false;
+            window.event(new TextInput("draft "));
+            Path target = Files.writeString(directory.resolve("cancelled.txt"), "untouched");
+            SaveWorkflowIntegrationTest.submitFilename(window, target);
+
+            window.event(KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL));
+
+            assertFalse(window.documentIo.busy());
+            assertFalse(window.controller.running());
+            scenario.executor.runNextOnWorker();
+            assertEquals("untouched", Files.readString(target));
+            assertEquals("original", Files.readString(window.document));
+            assertEquals(List.of("draft original"), window.active().tabSession().model().snapshotLines());
+            assertTrue(window.active().state().isDirty());
+        }
+    }
+
+    @Test
+    void quitCancelsAnUnstartedSaveQueuedBehindAnInspectionThatIgnoresInterruption() throws Exception {
+        try (Scenario scenario = scenario()) {
+            EditorWindowFixture window = scenario.window;
+            window.ui.confirmOnCloseSetting = true;
+            window.event(new TextInput("draft "));
+            var owner = window.active().tabSession();
+            CountDownLatch started = new CountDownLatch(1);
+            CountDownLatch release = new CountDownLatch(1);
+            AtomicInteger readCompletions = new AtomicInteger();
+            window.documentIo.submitSave(() -> {
+                started.countDown();
+                boolean released = false;
+                while (!released) {
+                    try {
+                        release.await();
+                        released = true;
+                    } catch (InterruptedException ignored) {
+                        // Simulate a provider whose read does not promptly observe cancellation.
+                    }
+                }
+                return "late inspection";
+            }, completion -> readCompletions.incrementAndGet());
+            Thread reader = new Thread(scenario.executor.tasks.removeFirst(), "test-unresponsive-inspection");
+            reader.start();
+            try {
+                assertTrue(started.await(5, TimeUnit.SECONDS));
+                assertTrue(window.documentIo.cancelSave());
+                window.command(TuinkCommand.DOCUMENT_SAVE);
+                assertTrue(window.documentIo.busy());
+                assertTrue(window.active().documentSession().document().io().busy());
+
+                window.event(KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL));
+
+                assertFalse(window.documentIo.busy());
+                assertFalse(window.active().documentSession().document().io().busy());
+                assertTrue(window.controller.running());
+                assertTrue(window.screenRow(window.rowStartingWith("Unsaved (1)")).contains("Discard"));
+                assertTrue(owner.state().isDirty());
+                assertEquals(List.of("draft original"), owner.model().snapshotLines());
+                assertEquals(window.document, JvmDocumentStorage.pathOf(owner.state().getCurrentResource()));
+                assertEquals("original", Files.readString(window.document));
+                window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
+            } finally {
+                release.countDown();
+                reader.join(5_000L);
+                assertFalse(reader.isAlive(), "the released inspection must finish");
+            }
+            scenario.executor.runNextOnWorker();
+            window.frame();
+
+            assertFalse(window.documentIo.busy());
+            assertEquals(0, readCompletions.get(), "the abandoned read must never publish a late result");
+            assertTrue(owner.state().isDirty());
+            assertEquals("original", Files.readString(window.document));
+            assertTrue(window.controller.running());
         }
     }
 
@@ -316,18 +619,27 @@ class AsyncSaveIntegrationTest {
     }
 
     @Test
-    void repeatedQuitDuringAQuitSaveKeepsTheNextUnnamedDocumentContinuation() throws Exception {
+    void repeatedQuitCancelsPreparationBeforeTheOrdinaryUnsavedDecision() throws Exception {
         try (Scenario scenario = scenario()) {
             EditorWindowFixture window = scenario.window;
             window.ui.confirmOnCloseSetting = true;
             window.event(new TextInput("named "));
             window.command(TuinkCommand.APP_QUIT);
             window.event(new TextInput("y"));
-            window.command(TuinkCommand.APP_QUIT);
             window.command(TuinkCommand.TAB_NEW);
             window.event(new TextInput("new draft"));
+            window.command(TuinkCommand.APP_QUIT);
+            assertFalse(window.documentIo.busy());
+            assertTrue(window.controller.running());
+            assertTrue(window.screenRow(window.rowStartingWith("Unsaved (2)")).contains("Discard"));
             scenario.executor.runNextOnWorker();
             window.frame();
+            assertEquals("original", Files.readString(window.document));
+            assertTrue(window.tabs.stream().allMatch(tab -> tab.state().isDirty()));
+            window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
+            window.command(TuinkCommand.TAB_PREVIOUS);
+            window.command(TuinkCommand.APP_QUIT);
+            window.event(new TextInput("y"));
 
             Path target = directory.resolve("new-draft.txt");
             window.event(KeyStroke.of(KeyStroke.Key.A, KeyStroke.Modifier.CTRL));
@@ -335,7 +647,6 @@ class AsyncSaveIntegrationTest {
             assertEquals(target.toString(), window.filename.text());
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             assertTrue(window.documentIo.busy());
-            window.command(TuinkCommand.APP_QUIT);
             scenario.executor.runNextOnWorker();
             window.frame();
             scenario.finishOperation();
@@ -346,10 +657,42 @@ class AsyncSaveIntegrationTest {
     }
 
     @Test
-    void theTabBarsCloseCellCannotCloseAnInactiveDocumentBeingSaved() throws Exception {
+    void repeatedQuitAfterPublicationKeepsTheNextUnnamedDocumentContinuation() throws Exception {
+        try (Scenario scenario = scenario()) {
+            EditorWindowFixture window = scenario.window;
+            window.ui.confirmOnCloseSetting = true;
+            window.event(new TextInput("named "));
+            window.command(TuinkCommand.APP_QUIT);
+            window.event(new TextInput("y"));
+            window.command(TuinkCommand.TAB_NEW);
+            window.event(new TextInput("new draft"));
+
+            // Publication may finish after prepareTurn and before the next input is read.
+            window.controller.prepareTurn();
+            scenario.executor.runNextOnWorker();
+            window.controller.handlePoll(new TuiEventLoop.Poll<>(
+                KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL), false, false));
+            window.frame();
+            assertTrue(window.active().uiState().modalState.isSaveAs());
+            assertTrue(window.controller.running());
+            Path target = directory.resolve("new-draft.txt");
+            window.event(KeyStroke.of(KeyStroke.Key.A, KeyStroke.Modifier.CTRL));
+            window.event(new TextInput(target.toString()));
+            window.event(KeyStroke.of(KeyStroke.Key.ENTER));
+            scenario.finishOperation();
+
+            assertFalse(window.controller.running());
+            assertEquals("new draft", Files.readString(target));
+            assertEquals("named original", Files.readString(window.document));
+        }
+    }
+
+    @Test
+    void theTabBarsCloseCellCancelsPreparationBeforeAskingAboutAnInactiveDirtyDocument() throws Exception {
         try (Scenario scenario = scenario()) {
             EditorWindowFixture window = scenario.window;
             window.ui.showTabBarSetting = true;
+            window.ui.confirmOnCloseSetting = true;
             window.ui.mouseModeSetting = true;
             window.ui.mouseModeAvailable = true;
             window.event(new TextInput("draft "));
@@ -362,8 +705,16 @@ class AsyncSaveIntegrationTest {
             window.pointer(PointerEvent.Kind.RELEASE, 1, closeColumn);
             assertEquals(2, window.tabs.size());
             assertSame(saved, window.tabs.getFirst().tabSession());
+            assertFalse(window.documentIo.busy());
+            assertTrue(window.tabs.getFirst().uiState().modalState.isCloseTabConfirm());
             scenario.executor.runNextOnWorker();
             window.frame();
+            assertTrue(saved.state().isDirty());
+            assertEquals("original", Files.readString(window.document));
+            window.command(TuinkCommand.TAB_PREVIOUS);
+            window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
+            window.command(TuinkCommand.DOCUMENT_SAVE);
+            scenario.finishOperation();
             assertFalse(saved.state().isDirty());
         }
     }
@@ -422,10 +773,12 @@ class AsyncSaveIntegrationTest {
     void aFailedWriteCancelsTheDeferredQuitEvenWhenCloseConfirmationIsDisabled() throws Exception {
         try (Scenario scenario = scenario()) {
             EditorWindowFixture window = scenario.window;
-            window.ui.confirmOnCloseSetting = false;
+            window.ui.confirmOnCloseSetting = true;
             window.event(new TextInput("draft "));
-            window.command(TuinkCommand.DOCUMENT_SAVE);
             window.command(TuinkCommand.APP_QUIT);
+            window.event(new TextInput("y"));
+            assertTrue(window.documentIo.busy());
+            window.ui.confirmOnCloseSetting = false;
             Files.writeString(window.document, "external");
             scenario.executor.runNextOnWorker();
             window.frame();
@@ -433,9 +786,10 @@ class AsyncSaveIntegrationTest {
             assertTrue(window.controller.running());
             assertFalse(window.documentIo.busy());
             assertTrue(window.active().state().isDirty());
-            assertTrue(window.notification.message.startsWith("Save failed:"));
+            assertTrue(window.controller.notificationState().message.startsWith("Save failed:"));
             assertEquals(List.of("draft original"), window.active().tabSession().model().snapshotLines());
             assertEquals("external", Files.readString(window.document));
+            window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
             window.event(new TextInput("after "));
             assertEquals(List.of("draft after original"), window.active().tabSession().model().snapshotLines());
         }

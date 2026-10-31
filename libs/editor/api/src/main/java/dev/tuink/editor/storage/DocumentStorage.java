@@ -13,6 +13,11 @@ import java.io.IOException;
 public interface DocumentStorage {
     DocumentLoad load(DocumentResource resource, DocumentOpenMode mode, boolean allowMissing) throws IOException;
     SaveTarget inspect(DocumentResource resource, ResourceBinding current) throws IOException;
+    default SaveTarget inspect(DocumentResource resource, ResourceBinding current, StorageOperation operation)
+        throws IOException {
+        operation.checkCancelled();
+        return inspect(resource, current);
+    }
     boolean isCurrentTarget(DocumentResource resource, ResourceBinding current) throws IOException;
 
     /**
@@ -23,4 +28,12 @@ public interface DocumentStorage {
      * A physical baseline may identify a different resource behind an alias.
      */
     SavedDocument write(DocumentSave request, SaveAuthorization authorization) throws IOException;
+
+    /** Providers that expose preparation must override this and fence immediately before publication. */
+    default SavedDocument write(DocumentSave request, SaveAuthorization authorization, StorageOperation operation)
+        throws IOException {
+        // An opaque provider may publish at any point in its old write method.
+        operation.beginPublication();
+        return write(request, authorization);
+    }
 }

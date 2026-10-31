@@ -176,6 +176,59 @@ class Regressions:
         assert first.read_text(encoding="utf-8") == "first original"
         assert alias.is_symlink() and alias.resolve() == second
 
+    def legacy_encoding(self):
+        original = "Привет\r\n".encode("cp1251")
+        document = self.root / "legacy-encoding.txt"
+        document.write_bytes(original)
+        converted = "😀Привет\r\n".encode("utf-8")
+        with self.session("legacy-encoding", document) as session:
+            target = session.root / "utf8-copy.txt"
+            session.expect(lambda: "Привет" in session.screen.text, "the decoded CP1251 document")
+            session.send("😀".encode("utf-8"))
+            session.expect(lambda: "😀Привет" in session.screen.text and "*" in session.screen.lines[0],
+                           "an edited character outside CP1251")
+            session.send(b"\x13")
+            session.expect(lambda: "Save as UTF-8 without BOM?" in session.screen.text
+                           and "windows-1251" in session.screen.text and "U+1F600" in session.screen.text,
+                           "the encoding error and explicit UTF-8 question")
+            assert document.read_bytes() == original, "an encoding failure changed the original bytes"
+            session.send(b"\r")  # The safe default declines conversion.
+            session.expect(lambda: "Save as UTF-8 without BOM?" not in session.screen.text
+                           and "Save UTF-8: " not in session.screen.text,
+                           "declining UTF-8 conversion")
+            assert session.poll() is None, "declining conversion closed the dirty document"
+            assert document.read_bytes() == original
+            assert not target.exists()
+
+            session.send(b"\x13")
+            session.expect(lambda: "Save as UTF-8 without BOM?" in session.screen.text,
+                           "a fresh explicit conversion decision")
+            session.send(b"y")
+            expect_field_line(session, "Save UTF-8: ", "the confirmed UTF-8 filename field")
+            session.send(b"\x01\x1b[200~utf8-copy.txt\x1b[201~")
+            expect_field_line(session, "Save UTF-8: ", "the UTF-8 copy filename", contains=target.name)
+            session.send(b"\r")
+            session.expect_saved(target, converted, "the owner-admitted UTF-8 copy with CRLF")
+            assert document.read_bytes() == original
+
+            session.send(b"\x1a")
+            session.expect(lambda: "encoding restored to windows-1251" in session.screen.text
+                           and "*" in session.screen.lines[0] and "😀Привет" in session.screen.text,
+                           "format Undo retains the emoji and marks the legacy format dirty")
+            assert document.read_bytes() == original
+            assert target.read_bytes() == converted, "format Undo must not rewrite the saved copy"
+            session.send(b"\x19")
+            session.expect(lambda: "encoding restored to UTF-8" in session.screen.text
+                           and "*" not in session.screen.lines[0] and "😀Привет" in session.screen.text,
+                           "format Redo returns to the saved UTF-8 state")
+            assert document.read_bytes() == original
+            assert target.read_bytes() == converted
+            session.finish()
+        assert document.read_bytes() == original
+        assert target.read_bytes() == converted
+        assert not list((session.home / ".config/tuink/recovery").glob("*.meta.properties")), \
+            "the clean UTF-8 document left recovery entries"
+
     def field_edit_caret(self):
         original = "original"
         document = self.fixture("field-edit-caret", original)
@@ -661,7 +714,7 @@ class Regressions:
                            "the undone gutter marker clearing while idle")
             assert document_row("XLINE00000|").startswith("~"), session.screen.text
             session.snapshot("idle-undo-marker-cleared")
-            session.send(b"\x13")
+            session.save(document, "X" + original, "saving the remaining gutter edit")
             session.finish()
         assert document.read_text(encoding="utf-8") == "X" + original
 
@@ -1338,7 +1391,7 @@ class Regressions:
         assert document.read_text(encoding="utf-8") == original
 
 
-SCENARIOS = ("reading", "focus", "field", "resize", "large-wrap", "tabs", "tab-scoped-ui", "history", "grapheme-edit-caret", "selection-autoscroll", "long-copy-name", "navigation", "fragmented-keys", "quit-confirmation", "gutter-idle", "paste", "settings", "settings-conflict", "recovery", "recovery-format5", "recovery-memory", "linux-keys", "enhanced-text", "long-unicode-edit", "save-as-workspace", "settings-memory", "syntax-memory", "unix-path-recovery", "literal-indentation", "field-memory", "document-caption", "save-name-suggestion", "replacement-memory", "paste-memory", "recovery-lock-cleanup", "xdg-profile", "cli-path-identity", "save-as-retarget", "field-edit-caret", "field-memory-growth", "identical-replace-budget", "clipboard-memory", "cpp-raw-indentation")
+SCENARIOS = ("reading", "focus", "field", "resize", "large-wrap", "tabs", "tab-scoped-ui", "history", "grapheme-edit-caret", "selection-autoscroll", "long-copy-name", "navigation", "fragmented-keys", "quit-confirmation", "gutter-idle", "paste", "settings", "settings-conflict", "recovery", "recovery-format5", "recovery-memory", "linux-keys", "enhanced-text", "long-unicode-edit", "save-as-workspace", "settings-memory", "syntax-memory", "unix-path-recovery", "literal-indentation", "field-memory", "document-caption", "save-name-suggestion", "replacement-memory", "paste-memory", "recovery-lock-cleanup", "xdg-profile", "cli-path-identity", "save-as-retarget", "legacy-encoding", "field-edit-caret", "field-memory-growth", "identical-replace-budget", "clipboard-memory", "cpp-raw-indentation")
 
 
 def classpath_manifest(classpath):

@@ -20,6 +20,7 @@ import dev.tuink.editor.storage.DocumentFileMetadata;
 import dev.tuink.editor.storage.ResourceBinding;
 import dev.tuink.editor.storage.SavedDocument;
 import dev.tuink.editor.storage.SaveDisposition;
+import dev.tuink.editor.storage.StorageOperation;
 import java.io.IOException;
 import java.util.List;
 import java.util.Objects;
@@ -309,6 +310,9 @@ public final class EditorDocumentSession {
         SaveTargetInspection inspectTarget() throws IOException {
             return new SaveTargetInspection(owner, preparation.inspectTarget());
         }
+        SaveTargetInspection inspectTargetWithOperation(StorageOperation operation) throws IOException {
+            return new SaveTargetInspection(owner, preparation.inspectTargetWithOperation(operation));
+        }
 
         SaveDisposition disposition() { return preparation.disposition(); }
     }
@@ -340,6 +344,9 @@ public final class EditorDocumentSession {
         }
 
         SavedDocument write() throws IOException { return prepared.write(); }
+        SavedDocument writeWithOperation(StorageOperation operation) throws IOException {
+            return prepared.writeWithOperation(operation);
+        }
     }
 
     /**

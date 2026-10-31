@@ -38,6 +38,7 @@ class NotificationIntegrationTest {
     @ValueSource(strings = {"success", "info", "warning", "error"})
     void everyLevelDisplaysExternalControlsOnExactlyOneRow(String level) throws Exception {
         try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("original"))) {
+            window.await(() -> window.screenRow(window.height - 1).contains("RW | ENC:"));
             List<String> before = java.util.stream.IntStream.range(0, window.height)
                 .mapToObj(window::screenRow).toList();
             String raw = "A\nB\rC\tD\u001B\u0085界";

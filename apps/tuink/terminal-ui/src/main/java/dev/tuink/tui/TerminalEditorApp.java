@@ -150,6 +150,32 @@ public class TerminalEditorApp {
     boolean profileEnabled = false;
     final FrameProfiler frameProfiler = new FrameProfiler();
     private FrameComposition.OpenTreeDiffKey lastOpenTreeDiffKey;
+    private final FileAccessAdvisory fileAccess;
+
+    public TerminalEditorApp() {
+        this(new FileAccessAdvisory());
+    }
+
+    TerminalEditorApp(FileAccessAdvisory fileAccess) {
+        this.fileAccess = Objects.requireNonNull(fileAccess, "fileAccess");
+    }
+
+    boolean refreshFileAccess(EditorState state) {
+        return fileAccess.refresh(JvmDocumentStorage.pathOf(state.getCurrentResource()), System.nanoTime());
+    }
+
+    long nanosUntilFileAccessRefresh(long nowNanos) {
+        return fileAccess.nanosUntilRefresh(nowNanos);
+    }
+
+    void closeFileAccess() {
+        fileAccess.close();
+    }
+
+    private boolean suggestsSaveAs(EditorState state) {
+        Path path = JvmDocumentStorage.pathOf(state.getCurrentResource());
+        return path == null || fileAccess.isReadOnly(path);
+    }
 
     void bindTabUi(Supplier<TabUiState> tabUiSource) {
         this.tabUiSource = Objects.requireNonNull(tabUiSource, "tabUiSource");
@@ -1288,7 +1314,7 @@ public class TerminalEditorApp {
     }
 
     private String buildStateIndicators(EditorState state, boolean readingMode) {
-        String ro = SaveTargetPolicy.isReadOnlyFile(JvmDocumentStorage.pathOf(state.getCurrentResource())) ? "RO" : "RW";
+        String ro = fileAccess.indicator(JvmDocumentStorage.pathOf(state.getCurrentResource()));
         String enc = state.getFileEncoding() == null ? "UTF-8" : state.getFileEncoding().name();
         String eol = switch (state.getLineSeparator()) {
             case EditorState.LINE_SEPARATOR_CRLF -> "CRLF";
@@ -1604,7 +1630,7 @@ public class TerminalEditorApp {
         String primaryLabel;
         if (multiple) {
             primaryLabel = "Save All";
-        } else if (dirtyTabs.size() == 1 && SaveTargetPolicy.requiresSaveAs(JvmDocumentStorage.pathOf(dirtyTabs.get(0).state().getCurrentResource()))) {
+        } else if (dirtyTabs.size() == 1 && suggestsSaveAs(dirtyTabs.get(0).state())) {
             primaryLabel = "Save As";
         } else {
             primaryLabel = "Save";
@@ -1639,7 +1665,7 @@ public class TerminalEditorApp {
         EditorTab pendingTab = closeTabIndex >= 0 && closeTabIndex < tabs.size()
             ? tabs.get(closeTabIndex)
             : null;
-        String primaryLabel = pendingTab != null && SaveTargetPolicy.requiresSaveAs(JvmDocumentStorage.pathOf(pendingTab.state().getCurrentResource())) ? "Save As" : "Save";
+        String primaryLabel = pendingTab != null && suggestsSaveAs(pendingTab.state()) ? "Save As" : "Save";
         return ConfirmBarView.build(
             buildCloseTabPrompt(tabs, closeTabIndex, ConfirmBarView.promptWidth(
                 cols, primaryLabel, "Discard", true, "Cancel"
@@ -2001,6 +2027,10 @@ public class TerminalEditorApp {
             this.expiresAtNanos = 0L;
         }
 
+        boolean requiresAttention() {
+            return kind == Kind.ERROR || kind == Kind.WARNING;
+        }
+
         void clearErrorOnUserAction() {
             if (kind == Kind.ERROR) {
                 clear();
@@ -2086,12 +2116,16 @@ public class TerminalEditorApp {
             drainFailure = failure;
             throw failure;
         } finally {
+            // A restored stop request must not pre-cancel the final NIO checkpoint.
+            boolean interrupted = Thread.interrupted();
             try {
                 String warning = recovery.finishSession(tabs.get(), exitConfirmed && drainFailure == null);
                 if (warning != null) reportWarning.accept(warning);
             } catch (RuntimeException | Error recoveryFailure) {
                 if (drainFailure == null) throw recoveryFailure;
                 drainFailure.addSuppressed(recoveryFailure);
+            } finally {
+                if (interrupted) Thread.currentThread().interrupt();
             }
         }
     }

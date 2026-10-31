@@ -6,6 +6,12 @@ Changes on the development branch after [v0.16.0](0.16.0.md).
   redirected opening symlink cannot make an ordinary save overwrite another file.
 - Coordinate Unix save locks across bind-mounted aliases of the same directory
   entry while retaining the previous lock for existing canonical paths.
+- Show progress and allow cancelling file verification and save preparation,
+  including overwrites of large existing files. Retain exact-content approval
+  checks. Bound publication waiting on quit/shutdown and preserve recovery
+  permission for unconfirmed outcomes; abandon pending opens without waiting.
+- Sample footer and confirmation access hints in the background instead of
+  querying filesystem permissions during rendering.
 - Describe file failures consistently across open, save and directory loading;
   recognize typed access failures without mistaking words in filenames for
   permission or disk-space errors.

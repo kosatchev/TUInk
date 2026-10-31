@@ -7,6 +7,8 @@ import dev.tuink.editor.storage.DocumentEncodingException;
 import dev.tuink.editor.storage.BomKind;
 import dev.tuink.editor.storage.DocumentFileMetadata;
 import dev.tuink.editor.storage.DocumentOpenMode;
+import dev.tuink.editor.storage.StorageOperation;
+import dev.tuink.editor.document.ImmutableText;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -107,17 +109,33 @@ public final class DocumentCodec {
     /** One encoder spans all logical lines. The caller owns and closes the output stream. */
     public static EncodedContent write(OutputStream output, List<? extends CharSequence> lines,
                                        DocumentFileMetadata metadata) throws IOException {
+        return write(output, lines, metadata, StorageOperation.untracked());
+    }
+
+    /** Streaming save preparation; cancellation leaves publication to the storage provider. */
+    public static EncodedContent write(OutputStream output, List<? extends CharSequence> lines,
+                                       DocumentFileMetadata metadata, StorageOperation operation) throws IOException {
         Objects.requireNonNull(output, "output");
         Objects.requireNonNull(lines, "lines");
-        DocumentFileMetadata checked = normalizeLineSeparators(
-            requireCompatibleMetadata(metadata, lines.size()), lines.size(),
-            line -> lines.get(line).length() == 0, 1, lines.size() - 2);
-        StagedEncoder encoded = new StagedEncoder(output, checked.charset());
+        Objects.requireNonNull(operation, "operation");
+        operation.progress(StorageOperation.Phase.STAGING, 0L, -1L);
+        DocumentFileMetadata checked = requireCompatibleMetadata(metadata, lines.size());
+        // Metadata normalization can itself span millions of logical lines.
+        int lastLine = lines.size() - 2;
+        for (int first = 1; first <= lastLine;) {
+            operation.checkCancelled();
+            int last = first + Math.min(8191, lastLine - first);
+            checked = normalizeLineSeparators(checked, lines.size(),
+                line -> lines.get(line).length() == 0, first, last);
+            first = last + 1;
+        }
+        StagedEncoder encoded = new StagedEncoder(output, checked.charset(), operation);
         byte[] bom = checked.bomKind().bytes();
         encoded.writeBytes(bom, bom.length);
         var separators = checked.lineSeparators().iterator();
         for (CharSequence line : lines) {
-            encoded.append(line.toString());
+            operation.checkCancelled();
+            encoded.append(line);
             if (separators.hasNext()) encoded.append(separators.next());
         }
         encoded.finish();
@@ -322,27 +340,41 @@ public final class DocumentCodec {
         private final CharBuffer input = CharBuffer.allocate(8192);
         private final ByteBuffer bytes = ByteBuffer.allocate(8192);
         private final MessageDigest digest = newDigest();
+        private final StorageOperation operation;
         private long byteSize;
 
-        StagedEncoder(OutputStream output, Charset charset) {
+        StagedEncoder(OutputStream output, Charset charset, StorageOperation operation) {
             this.output = output;
             this.charset = charset;
+            this.operation = operation;
             encoder = charset.newEncoder()
                 .onMalformedInput(CodingErrorAction.REPORT)
                 .onUnmappableCharacter(CodingErrorAction.REPORT);
         }
 
-        void append(String text) throws IOException {
+        void append(CharSequence text) throws IOException {
             int offset = 0;
             while (offset < text.length()) {
+                operation.checkCancelled();
                 int end = offset + Math.min(input.remaining(), text.length() - offset);
-                input.put(text, offset, end);
+                int position = input.position();
+                if (text instanceof ImmutableText immutable) {
+                    immutable.getChars(offset, end, input.array(), position);
+                } else if (text instanceof LineText immutable) {
+                    immutable.getChars(offset, end, input.array(), position);
+                } else if (text instanceof String string) {
+                    string.getChars(offset, end, input.array(), position);
+                } else {
+                    for (int index = offset; index < end; index++) input.array()[position++] = text.charAt(index);
+                }
+                input.position(input.position() + end - offset);
                 offset = end;
                 if (!input.hasRemaining()) encode(false);
             }
         }
 
         private void encode(boolean endOfInput) throws IOException {
+            operation.checkCancelled();
             input.flip();
             CoderResult result;
             do {
@@ -377,9 +409,11 @@ public final class DocumentCodec {
         }
 
         private void writeBytes(byte[] data, int length) throws IOException {
+            operation.checkCancelled();
             output.write(data, 0, length);
             digest.update(data, 0, length);
             byteSize += length;
+            operation.progress(StorageOperation.Phase.STAGING, byteSize, -1L);
         }
     }
 

@@ -134,6 +134,9 @@ conflict. Use Save As with a different name to keep both versions, or reopen
 the file. This check also applies to recovered documents. Locks coordinate
 TUInk instances of the same user across configuration profiles. Other editors
 do not use these locks: a change after the final check can still be overwritten.
+Save As checks existing destinations with streaming reads. Longer checks and
+save preparation show their progress and can be cancelled with Esc, retaining
+the original file and your draft.
 Before assigning a new filename, Save As checks open documents. A target belonging
 to another tab must be saved from that tab or replaced with a different name. This
 includes physical file aliases and filenames reserved by unsaved named documents.
@@ -346,9 +349,12 @@ counts may end in `+` when their counting budget is reached.
 
 Document reads and writes run in the background. During a save, the document
 being written allows navigation and copying; text edits and closing that tab
-wait until the write finishes. Other tabs remain usable. Quit waits for the
-current file operation before continuing its unsaved-work checks. Shutdown also
-finishes an already started write before taking final recovery snapshots.
+wait until saving finishes or is cancelled. Other tabs remain usable. Esc cancels
+file verification and preparation of the saved copy. Quit also cancels those
+steps and abandons a pending open before checking unsaved work. Once the final
+file update starts, quit waits up to five seconds for its outcome. A timeout
+reports an unconfirmed save and attempts to retain the draft for recovery;
+verify the target file before retrying. The timeout does not interrupt publication.
 One document read or write runs at a time; keeping dialogs open in several tabs
 does not start concurrent file operations. If you switch tabs during an operation,
 its completion messages and prompts stay with the tab that started it.

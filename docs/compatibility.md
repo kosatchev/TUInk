@@ -83,7 +83,9 @@ the read cannot bypass the byte limit. A rejected load reports an I/O error and
 preserves the existing document, file metadata, baseline, revision and undo history.
 
 Interactive opening reads into an independent immutable result in a worker;
-the owner thread attaches the document only after successful completion. A
+the owner thread attaches the document only after successful completion. Quit
+and shutdown revoke that admission and abandon the read without waiting for
+the provider; a late result cannot create a tab. A
 second open-file identity check uses the file actually read, including when a
 symbolic link changes during the operation. File-picker scans share entry and
 memory budgets across all expanded directories. A directory exceeding the
@@ -115,14 +117,41 @@ result on the owner thread. The affected document cannot be edited or closed
 while its save is pending; navigation and other tabs remain usable. Only one
 document file operation is in flight, with no growing queue of captured drafts.
 Path, encoding, saved-file baseline and savepoint change only after a successful
-write. Explicit UTF-8 conversion retains its separate undo entry. Shutdown drains
-the active operation before final recovery capture; a write already publishing
-its target does not promise cancellation.
+write. Explicit UTF-8 conversion retains its separate undo entry. Verification
+and staging can be cancelled without waiting for their worker result; a late
+result cannot approve or publish a target. Cancellation and the start of external
+publication share an atomic decision. If publication has started, quit and
+shutdown wait up to five seconds for its real outcome. A timeout stops the
+frontend with an explicit unknown-outcome error and attempts final recovery
+without changing the savepoint or granting snapshot cleanup permission. The
+provider is not interrupted and may still finish updating the target; verify
+that file before retrying. This limit covers document I/O, not recovery storage.
+
+An interrupted save or a concurrent parent-directory rename can leave its staged
+file behind. The old pathname may no longer reach that file during cleanup.
+Staging contains the intended saved text and, after attribute preparation, can
+have the destination's permissions. Inspect these files and recovery data before
+removing leftovers; their presence does not confirm a successful save.
+
+The footer's RO/RW indicator and confirmation labels use a background access
+observation refreshed about once per second. Until an observation is available,
+the footer shows `??`; rendering never waits for a filesystem access check.
+These hints do not authorize writing. Command-time path and identity advisory
+checks can still access the filesystem synchronously.
 
 Save As first inspects the target in the worker, then binds approval to its
 resolved address and observed contents. The write rechecks that approval before
 staging and publication. A changed target requires a new approval; a queued save
 cannot silently follow a retargeted symbolic link.
+
+Existing destinations have no separate overwrite-size limit. Inspection and
+verification read in bounded buffers and report progress, checking cancellation
+between chunks. Reads are bounded by the observed byte count plus one byte;
+subsequent verification rejects size or identity changes before scanning again.
+Staging also uses bounded buffers and cancellation checks, including within long
+logical lines. Cancelling or requesting exit retains the draft and original file
+until publication has begun. Providers that do not expose their preparation
+boundary conservatively treat the entire write as publication.
 
 Saving to a new name never overwrites a file created concurrently. Where hard
 links are supported, TUInk atomically publishes the complete staged bytes and
@@ -132,6 +161,10 @@ file if writing or closing fails; the error identifies that path, and document
 metadata and the saved-file baseline remain unchanged. TUInk does not delete the
 destination after such a failure because another writer may have replaced it.
 Existing-file replacement retains its atomic-move behavior and baseline checks.
+On this portable fallback, publication includes the final copy and cannot promise
+a short duration or cancellation. Unsupported publication attempts that definitely
+left the destination untouched return to cancellable preparation before retrying;
+an uncertain outcome never does.
 
 The saved-file baseline includes the original byte count. A changed count rejects
 the save before reading file contents; the digest check reads at most that count
@@ -384,8 +417,8 @@ It does not authorize general historical readers or migration chains. Format 8 a
 retains `fileBaseline.byteSize` so an externally grown file can be rejected before
 reading its content during Save. Discovery and Restore leave compatible older
 metadata and text unchanged; a later ordinary autosave writes format 8. Older baselines have an
-unknown byte count (`-1`); their conflict checks read at most the current 64 MiB
-load limit and refuse larger files with the usual Save As/reopen guidance.
+unknown byte count (`-1`); their conflict checks use the observed file size
+plus one byte, with streaming progress and cancellation.
 
 Format 5 has neither `pathPlatform` nor `fileBaseline.byteSize`. Its `currentFile`
 and `fileBaseline.target` are absolute normalized native display strings,
@@ -463,6 +496,8 @@ are captured from the current state on a later turn rather than queued as extra
 snapshots. Completion and retry state are applied on the owner thread. Shutdown
 drains the outstanding operation before final synchronous saves or cleanup,
 so an old write cannot recreate a discarded snapshot.
+Final recovery temporarily clears a pre-existing thread interrupt so it does
+not pre-cancel a NIO checkpoint, then restores the interrupt flag.
 
 Paste and single Replace admission check replacement text, changed-line objects,
 whole-document reference arrays, metadata, and compact undo deltas. Text,

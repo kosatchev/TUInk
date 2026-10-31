@@ -12,9 +12,6 @@ import importlib.util
 import json
 import os
 from pathlib import Path
-
-REPOSITORY_ROOT = next(parent for parent in Path(__file__).resolve().parents
-                       if (parent / 'settings.gradle').is_file() and (parent / 'gradlew').is_file())
 import pty
 import selectors
 import signal
@@ -28,6 +25,8 @@ import unittest
 
 sys.dont_write_bytecode = True
 
+REPOSITORY_ROOT = next(parent for parent in Path(__file__).resolve().parents
+                       if (parent / 'settings.gradle').is_file() and (parent / 'gradlew').is_file())
 TERMINAL_ORACLE = REPOSITORY_ROOT / "verification/ui/vt.py"
 _oracle_spec = importlib.util.spec_from_file_location("tuink_pgo_vt", TERMINAL_ORACLE)
 _oracle = importlib.util.module_from_spec(_oracle_spec)
@@ -47,6 +46,7 @@ CTRL_F, CTRL_G = b"\x06", b"\x07"
 CTRL_X, CTRL_V, CTRL_Q = b"\x18", b"\x16", b"\x11"
 ESCAPE, HOME, PAGE_UP = b"\x1b[27u", b"\x1b[H", b"\x1b[5~"
 DOWN, UP, SHIFT_DOWN = b"\x1b[B", b"\x1b[A", b"\x1b[1;2B"
+SAVE_PROGRESS_LABELS = ("Checking save target", "Checking file changes", "Preparing save", "Finishing save")
 
 
 def sha256(data: bytes) -> str:
@@ -254,7 +254,8 @@ class EditorSession:
     def wait_for_saved_bytes(self, document: Path, expected: bytes):
         def saved():
             if ("*" in self.screen.lines[0] or "Saved " not in self.screen.text
-                    or "Saving document" in self.screen.text or "Save As: " in self.screen.text):
+                    or any(label in self.screen.text for label in SAVE_PROGRESS_LABELS)
+                    or "Save As: " in self.screen.text):
                 return False
             try:
                 return document.read_bytes() == expected

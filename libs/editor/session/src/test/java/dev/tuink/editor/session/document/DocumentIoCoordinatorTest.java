@@ -42,6 +42,9 @@ class DocumentIoCoordinatorTest {
         assertEquals(DocumentIoCoordinator.State.WRITING, io.state());
         var completion = worker(work::perform);
         assertTrue(completion.succeeded());
+        assertEquals(DocumentIoCoordinator.CancelResult.DRAINING_WRITE, io.cancel(work));
+        assertTrue(work.publishing());
+        assertFalse(work.progress().cancellable());
         assertTrue(session.status().dirty());
         assertEquals("draft original", text(storage, "source"));
         calls = storage.calls();
@@ -283,10 +286,11 @@ class DocumentIoCoordinatorTest {
         assertFalse(session.io().busy());
     }
 
-    @Test
-    void stoppingDuringAStartedWriteDrainsItBeforeReleasingTheDraftLock() throws Exception {
+    @ParameterizedTest
+    @EnumSource(value = BlockingStorage.Phase.class, names = {"OPAQUE_WRITE", "PUBLICATION"})
+    void stoppingDuringPublicationDrainsItBeforeReleasingTheDraftLock(BlockingStorage.Phase phase) throws Exception {
         var memory = new MemoryDocumentStorage();
-        var storage = new BlockingStorage(memory);
+        var storage = new BlockingStorage(memory, phase);
         memory.put("source", "text".getBytes(StandardCharsets.UTF_8));
         var resource = storage.resource("source");
         var session = EditorDocumentSession.create(new DocumentId("draining"), List.of(""));
@@ -298,6 +302,7 @@ class DocumentIoCoordinatorTest {
         writer.start();
         try {
             assertTrue(storage.started.await(5, TimeUnit.SECONDS));
+            assertTrue(work.publishing());
             assertEquals(DocumentIoCoordinator.CancelResult.DRAINING_WRITE, session.io().stop());
             assertEquals(DocumentIoCoordinator.State.WRITING, session.io().state());
             assertBusy(session.execute(session.defaultViewId(), new DocumentCommand.Input("forbidden")));
@@ -313,6 +318,72 @@ class DocumentIoCoordinatorTest {
         assertEquals(DocumentIoCoordinator.State.STOPPED, session.io().state());
         assertThrows(IllegalStateException.class, () -> session.io().beginSave());
         assertEquals("draft text", text(memory, "source"));
+    }
+
+    @Test
+    void cancellingStartedPreparationRetainsDraftHistoryAndAllowsAnotherSave() throws Exception {
+        var memory = new MemoryDocumentStorage();
+        var storage = new BlockingStorage(memory, BlockingStorage.Phase.PREPARATION);
+        memory.put("source", "original".getBytes(StandardCharsets.UTF_8));
+        var session = EditorDocumentSession.create(new DocumentId("preparing"), List.of(""));
+        session.openPrepared(worker(() -> storage.load(storage.resource("source"), DocumentOpenMode.DETECT, false)));
+        input(session, "draft ");
+        var work = session.io().beginSave();
+        AtomicReference<DocumentIoCoordinator.Completion> completion = new AtomicReference<>();
+        Thread writer = new Thread(() -> completion.set(work.perform()), "coordinator-preparation-test");
+        writer.start();
+        try {
+            assertTrue(storage.started.await(5, TimeUnit.SECONDS));
+            assertEquals(StorageOperation.Phase.STAGING, work.progress().phase());
+            assertTrue(work.progress().cancellable());
+            assertEquals(DocumentIoCoordinator.CancelResult.CANCELLED, session.io().cancel(work));
+            assertFalse(session.io().busy());
+            input(session, "newer ");
+        } finally {
+            storage.release.countDown();
+            writer.join(5_000);
+        }
+        assertFalse(writer.isAlive());
+        assertTrue(completion.get().cancelled());
+        assertInstanceOf(DocumentIoCoordinator.Ignored.class, session.io().accept(work, completion.get()));
+        assertEquals("original", text(memory, "source"));
+        assertEquals(List.of("draft newer original"), session.snapshot().lines());
+        assertTrue(session.status().dirty());
+        assertTrue(session.undo());
+        assertTrue(session.redo());
+        var next = session.io().beginSave();
+        assertInstanceOf(DocumentIoCoordinator.Saved.class, session.io().accept(next, worker(next::perform)));
+        assertEquals("draft newer original", text(memory, "source"));
+        assertFalse(session.status().dirty());
+        assertEquals(DocumentIoCoordinator.CancelResult.IDLE, session.io().cancel(next));
+    }
+
+    @Test
+    void aDeferredCancelAfterADefinitePublicationFailureReleasesThePreparation() throws Exception {
+        var memory = new MemoryDocumentStorage();
+        var storage = new BlockingStorage(memory, BlockingStorage.Phase.RETRY_AFTER_PUBLICATION);
+        memory.put("source", "original".getBytes(StandardCharsets.UTF_8));
+        var session = EditorDocumentSession.create(new DocumentId("fallback"), List.of(""));
+        session.openPrepared(worker(() -> storage.load(storage.resource("source"), DocumentOpenMode.DETECT, false)));
+        input(session, "draft ");
+        var work = session.io().beginSave();
+        AtomicReference<DocumentIoCoordinator.Completion> completion = new AtomicReference<>();
+        Thread writer = new Thread(() -> completion.set(work.perform()), "coordinator-fallback-test");
+        writer.start();
+        try {
+            assertTrue(storage.started.await(5, TimeUnit.SECONDS));
+            assertEquals(DocumentIoCoordinator.CancelResult.DRAINING_WRITE, session.io().cancel(work));
+            assertTrue(session.io().busy());
+        } finally {
+            storage.release.countDown();
+            writer.join(5_000);
+        }
+        assertFalse(writer.isAlive());
+        assertTrue(completion.get().cancelled());
+        assertInstanceOf(DocumentIoCoordinator.Ignored.class, session.io().accept(work, completion.get()));
+        assertFalse(session.io().busy());
+        assertTrue(session.status().dirty());
+        assertEquals("original", text(memory, "source"));
     }
 
     @Test
@@ -388,10 +459,16 @@ class DocumentIoCoordinatorTest {
 
     /** Delays the actual provider write after the coordinator has atomically claimed it. */
     private static final class BlockingStorage implements DocumentStorage {
+        private enum Phase { OPAQUE_WRITE, PREPARATION, PUBLICATION, RETRY_AFTER_PUBLICATION }
         private final MemoryDocumentStorage delegate;
+        private final Phase phase;
         private final CountDownLatch started = new CountDownLatch(1);
         private final CountDownLatch release = new CountDownLatch(1);
-        private BlockingStorage(MemoryDocumentStorage delegate) { this.delegate = delegate; }
+        private BlockingStorage(MemoryDocumentStorage delegate) { this(delegate, Phase.OPAQUE_WRITE); }
+        private BlockingStorage(MemoryDocumentStorage delegate, Phase phase) {
+            this.delegate = delegate;
+            this.phase = phase;
+        }
         private DocumentResource resource(String name) { return new Handle(delegate.resource(name), this); }
         private DocumentResource unwrap(DocumentResource resource) { return ((Handle) resource).delegate; }
         private DocumentResource wrap(DocumentResource resource) { return new Handle(resource, this); }
@@ -404,6 +481,20 @@ class DocumentIoCoordinatorTest {
         }
         @Override public boolean isCurrentTarget(DocumentResource resource, ResourceBinding binding) { return false; }
         @Override public SavedDocument write(DocumentSave request, SaveAuthorization authorization) throws IOException {
+            awaitRelease();
+            return writeDelegate(request, authorization);
+        }
+        @Override public SavedDocument write(DocumentSave request, SaveAuthorization authorization, StorageOperation operation)
+            throws IOException {
+            if (phase == Phase.OPAQUE_WRITE) return DocumentStorage.super.write(request, authorization, operation);
+            if (phase == Phase.PREPARATION) operation.progress(StorageOperation.Phase.STAGING, 0, -1);
+            else operation.beginPublication();
+            awaitRelease();
+            if (phase == Phase.RETRY_AFTER_PUBLICATION) operation.resumePreparation();
+            operation.beginPublication();
+            return writeDelegate(request, authorization);
+        }
+        private void awaitRelease() throws IOException {
             started.countDown();
             try {
                 if (!release.await(5, TimeUnit.SECONDS)) throw new IOException("write was not released");
@@ -411,6 +502,8 @@ class DocumentIoCoordinatorTest {
                 Thread.currentThread().interrupt();
                 throw new IOException(interrupted);
             }
+        }
+        private SavedDocument writeDelegate(DocumentSave request, SaveAuthorization authorization) throws IOException {
             var unwrapped = new DocumentSave(unwrap(request.resource()), request.lines(), request.metadata(),
                 request.baseline(), request.disposition());
             var saved = delegate.write(unwrapped, authorization);

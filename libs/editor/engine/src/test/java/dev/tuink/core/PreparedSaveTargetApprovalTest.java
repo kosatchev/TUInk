@@ -112,6 +112,30 @@ class PreparedSaveTargetApprovalTest {
     }
 
     @Test
+    void sameSizeChangesWhileAwaitingApprovalConflictEvenWithRestoredModificationTime() throws Exception {
+        EditorEngine engine = engine();
+        engine.insertInput("draft");
+        Path target = Files.writeString(directory.resolve("target.txt"), "before");
+        var modified = Files.getLastModifiedTime(target);
+        var inspection = engine.prepareSaveAsInput(JvmDocumentStorage.resource(target),
+            SaveDisposition.REPLACE_EXISTING, false).inspectTarget();
+        Files.writeString(target, "remote");
+        Files.setLastModifiedTime(target, modified);
+
+        var approved = engine.approveSaveAs(inspection);
+        assertThrows(IOException.class, approved::write);
+
+        assertEquals("remote", Files.readString(target));
+        assertEquals(List.of("draft"), engine.model().snapshotLines());
+        assertEquals(null, JvmDocumentStorage.pathOf(engine.state().getCurrentResource()));
+        assertTrue(engine.state().isDirty());
+        assertTrue(engine.undo());
+        assertEquals(List.of(""), engine.model().snapshotLines());
+        assertTrue(engine.redo());
+        assertEquals(List.of("draft"), engine.model().snapshotLines());
+    }
+
+    @Test
     void replacingTheParentDirectoryOfANewTargetRequiresFreshApproval() throws Exception {
         EditorEngine engine = engine();
         engine.insertInput("draft");

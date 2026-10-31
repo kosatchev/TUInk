@@ -141,8 +141,8 @@ final class SaveWorkflow {
         TabSession tab = context.active();
         context.suggestions().rememberInput(tab, draft);
         SaveFlowController.SaveAsResult decision = SaveFlowController.handleSaveAsInput(command, modal, draft);
-        // A filename prompt owns no approval. Only the exact overwrite dialog
-        // may cancel the inspection which it presents.
+        // A filename prompt owns no approval. The host separately revokes a
+        // pending save preparation when its owning view cancels Save As.
         if (decision.saveNowPath() != null) {
             // The detached inspection decides which bytes an overwrite would
             // replace. This input decision performs no preflight stat.

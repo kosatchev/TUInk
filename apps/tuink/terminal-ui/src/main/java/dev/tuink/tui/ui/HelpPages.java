@@ -115,6 +115,8 @@ public final class HelpPages {
             "Save errors return focus to the filename; empty names are rejected.",
             "Enlarge the terminal if the filename and caret cannot fit before saving.",
             "Esc / Ctrl+Q            Cancel Save As",
+            "Esc cancels file checks and save preparation; the draft is kept.",
+            "When the status says Finishing save, wait for saving to finish.",
             "",
             "CONFIRMATIONS",
             "Tab / Shift+Tab         Cycle buttons and document",

@@ -53,6 +53,7 @@ The scenarios protect the following user behavior:
 | `xdg-profile` | A configuration directory outside the home holds settings and recovery without touching the default profile |
 | `cli-path-identity` | Ambiguous native argv filenames are rejected before startup; ASCII file URIs open and save the distinct raw-byte and literal `�` files |
 | `save-as-retarget` | A retargeted opening symlink still conflicts on Save; explicitly choosing its new target requires confirmation and saves only that file |
+| `legacy-encoding` | An unencodable emoji keeps CP1251 bytes intact; safe cancellation and explicit UTF-8 Save As preserve CRLF, and format Undo/Redo retain the text and saved bytes |
 | `field-edit-caret` | Deleting an emoji separator keeps subsequent input after the newly joined grapheme in Find and Save As |
 | `field-memory-growth` | Dense Unicode field growth on a 128 MiB heap refuses a whole paste before exhaustion; editing and saving the document remain usable |
 | `identical-replace-budget` | A single identical replacement exceeding its wildcard budget preserves the caret, selection and document |

@@ -5,6 +5,7 @@ import dev.tuink.storage.jvm.JvmDocumentStorage;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -21,6 +22,7 @@ import java.util.List;
 import java.util.concurrent.Executor;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 
 class AsyncOpenIntegrationTest {
@@ -123,7 +125,7 @@ class AsyncOpenIntegrationTest {
     }
 
     @Test
-    void closingDrainsTheReadWithoutPublishingALateTab() throws Exception {
+    void closingDiscardsTheReadyReadWithoutPublishingALateTab() throws Exception {
         try (Scenario scenario = scenario()) {
             EditorWindowFixture window = scenario.window;
             Path selected = Files.writeString(directory.resolve("z-selected.txt"), "loaded contents");
@@ -140,7 +142,120 @@ class AsyncOpenIntegrationTest {
             assertSame(original, window.active().tabSession());
             assertEquals(List.of("draft original"), original.model().snapshotLines());
             window.frame();
-            assertEquals(1, window.tabs.size(), "later owner turns cannot publish the drained read");
+            assertEquals(1, window.tabs.size(), "later owner turns cannot publish the abandoned read");
+        }
+    }
+
+    @Test
+    @Timeout(10)
+    void closingAbandonsAReadWithoutWaitingForTheExecutor() throws Exception {
+        try (Scenario scenario = scenario()) {
+            EditorWindowFixture window = scenario.window;
+            Path selected = Files.writeString(directory.resolve("z-selected.txt"), "loaded contents");
+            requestOpen(window, selected);
+            var request = window.active().uiState().pendingOpen;
+            window.event(new TextInput("draft "));
+
+            window.controller.closeDocumentIo();
+
+            assertTrue(request.operation().cancelled());
+            assertFalse(window.documentIo.busy());
+            assertNull(window.active().uiState().pendingOpen);
+            scenario.executor.runNextOnWorker();
+            window.frame();
+            assertEquals(1, window.tabs.size());
+            assertEquals(List.of("draft original"), window.active().tabSession().model().snapshotLines());
+            assertTrue(window.active().state().isDirty());
+        }
+    }
+
+    @Test
+    void quitAbandonsTheReadBeforeAskingAboutTheDirtyDraft() throws Exception {
+        try (Scenario scenario = scenario()) {
+            EditorWindowFixture window = scenario.window;
+            window.ui.confirmOnCloseSetting = true;
+            Path selected = Files.writeString(directory.resolve("z-selected.txt"), "loaded contents");
+            requestOpen(window, selected);
+            var request = window.active().uiState().pendingOpen;
+            window.event(new TextInput("draft "));
+
+            window.command(TuinkCommand.APP_QUIT);
+
+            assertTrue(request.operation().cancelled());
+            assertFalse(window.documentIo.busy());
+            assertNull(window.active().uiState().pendingOpen);
+            assertTrue(window.controller.running());
+            assertTrue(window.screenRow(window.rowStartingWith("Unsaved (1)")).contains("Discard"));
+            scenario.executor.runNextOnWorker();
+            window.frame();
+            assertEquals(1, window.tabs.size(), "the abandoned open cannot escape the quit confirmation");
+            assertEquals(List.of("draft original"), window.active().tabSession().model().snapshotLines());
+            assertEquals("original", Files.readString(window.document));
+
+            window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
+            requestOpen(window, selected);
+            scenario.executor.runNextOnWorker();
+            window.frame();
+            assertEquals(2, window.tabs.size(), "cancelling quit permits a fresh open request");
+            assertEquals(selected, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
+        }
+    }
+
+    @Test
+    void closingTheRequestingTabAbandonsItsReadWithoutChangingTheSurvivingDraft() throws Exception {
+        try (Scenario scenario = scenario()) {
+            EditorWindowFixture window = scenario.window;
+            Path selected = Files.writeString(directory.resolve("z-selected.txt"), "loaded contents");
+            var origin = window.active();
+            requestOpen(window, selected);
+            var abandoned = origin.uiState().pendingOpen;
+            assertNotNull(abandoned);
+            window.command(TuinkCommand.TAB_NEW);
+            window.event(new TextInput("other draft"));
+            var surviving = window.active().tabSession();
+            var cursor = surviving.state().getCursor();
+            window.command(TuinkCommand.TAB_PREVIOUS);
+
+            window.command(TuinkCommand.TAB_CLOSE);
+
+            assertTrue(origin.uiState().closed);
+            assertTrue(abandoned.operation().cancelled());
+            assertEquals(1, window.tabs.size());
+            assertSame(surviving, window.active().tabSession());
+            assertTrue(window.documentIo.busy(), "the abandoned host task must still be collected");
+            scenario.executor.runNextOnWorker();
+            window.frame();
+
+            assertFalse(window.documentIo.busy());
+            assertEquals(1, window.tabs.size(), "the closed tab cannot publish its late read");
+            assertSame(surviving, window.active().tabSession());
+            assertEquals(cursor, surviving.state().getCursor());
+            assertEquals(List.of("other draft"), surviving.model().snapshotLines());
+            assertTrue(surviving.state().isDirty());
+            assertFalse(IntStream.range(0, window.height)
+                .anyMatch(row -> window.screenRow(row).contains("Open File")));
+            assertEquals("original", Files.readString(window.document));
+            assertEquals("loaded contents", Files.readString(selected));
+            window.command(TuinkCommand.EDIT_UNDO);
+            assertEquals(List.of(""), surviving.model().snapshotLines());
+            window.command(TuinkCommand.EDIT_REDO);
+            assertEquals(List.of("other draft"), surviving.model().snapshotLines());
+
+            window.command(TuinkCommand.DOCUMENT_OPEN);
+            window.tree.setRoot(directory);
+            window.await(() -> !window.tree.loading());
+            window.event(KeyStroke.of(KeyStroke.Key.END));
+            assertEquals(selected, window.tree.state().selectedId().path());
+            window.event(KeyStroke.of(KeyStroke.Key.ENTER));
+            assertTrue(window.documentIo.busy(), "the surviving view can start another read");
+            scenario.executor.runNextOnWorker();
+            window.frame();
+            assertFalse(window.documentIo.busy());
+            assertEquals(2, window.tabs.size());
+            assertEquals(selected, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
+            assertEquals(List.of("loaded contents"), window.active().tabSession().model().snapshotLines());
+            assertEquals(List.of("other draft"), surviving.model().snapshotLines());
+            assertTrue(surviving.state().isDirty());
         }
     }
 

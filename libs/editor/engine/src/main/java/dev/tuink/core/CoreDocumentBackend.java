@@ -17,6 +17,7 @@ import dev.tuink.editor.storage.DocumentLoad;
 import dev.tuink.editor.storage.DocumentResource;
 import dev.tuink.editor.storage.SavedDocument;
 import dev.tuink.editor.storage.SaveDisposition;
+import dev.tuink.editor.storage.StorageOperation;
 import java.io.IOException;
 import java.util.AbstractList;
 import java.util.HashMap;
@@ -302,6 +303,9 @@ public final class CoreDocumentBackend implements DocumentBackend {
             this.prepared = prepared;
         }
         @Override public SavedDocument write() throws IOException { return prepared.write(); }
+        @Override public SavedDocument writeWithOperation(StorageOperation operation) throws IOException {
+            return prepared.writeWithOperation(operation);
+        }
     }
 
     private final class Preparation implements SavePreparation {
@@ -313,6 +317,9 @@ public final class CoreDocumentBackend implements DocumentBackend {
         }
         @Override public SaveTargetInspection inspectTarget() throws IOException {
             return new Inspection(engine, preparation.inspectTarget());
+        }
+        @Override public SaveTargetInspection inspectTargetWithOperation(StorageOperation operation) throws IOException {
+            return new Inspection(engine, preparation.inspectTargetWithOperation(operation));
         }
         @Override public SaveDisposition disposition() { return preparation.disposition(); }
     }

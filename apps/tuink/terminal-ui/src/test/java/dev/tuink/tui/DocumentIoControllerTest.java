@@ -5,10 +5,40 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.Queue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import dev.tuink.editor.storage.StorageOperation;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 class DocumentIoControllerTest {
+    @Test
+    void receiptReadyAtTheQuitDeadlineCanStartTheNextSave() {
+        Queue<Runnable> queued = new ArrayDeque<>();
+        AtomicReference<String> published = new AtomicReference<>();
+        try (DocumentIoController io = new DocumentIoController(queued::add)) {
+            io.submitSave(() -> "first", result -> {
+                published.set(result.value());
+                io.submitSave(() -> "second", next -> published.set(next.value()));
+            });
+            io.beginQuitWait(100L);
+            queued.remove().run();
+
+            assertDoesNotThrow(() -> io.checkQuitWait(5_000_000_100L));
+
+            assertEquals("first", published.get());
+            assertTrue(io.busy(), "the ready receipt may continue a multi-document quit");
+            queued.remove().run();
+            assertTrue(io.collect());
+            assertEquals("second", published.get());
+            assertFalse(io.busy());
+        }
+    }
+
     @Test
     void workerResultsAreAppliedOnlyWhenCollectedByTheOwner() throws Exception {
         Queue<Runnable> queued = new ArrayDeque<>();
@@ -67,10 +97,303 @@ class DocumentIoControllerTest {
     void shutdownAppliesTheCompletedWriteBeforeRejectingFurtherWork() {
         AtomicReference<String> published = new AtomicReference<>();
         DocumentIoController io = new DocumentIoController(Runnable::run);
-        io.submit(() -> "saved", result -> published.set(result.value()));
-        io.close();
+        io.submitSave(() -> "saved", result -> published.set(result.value()));
+        io.close(0);
         assertEquals("saved", published.get());
         assertThrows(IllegalStateException.class, () -> io.submit(() -> "late", ignored -> {}));
         io.close();
+    }
+
+    @Test
+    void cancellingAQueuedReadCannotPublishIntoTheNextSave() {
+        Queue<Runnable> queued = new ArrayDeque<>();
+        AtomicInteger reads = new AtomicInteger();
+        AtomicInteger replies = new AtomicInteger();
+        AtomicReference<String> saved = new AtomicReference<>();
+        try (DocumentIoController io = new DocumentIoController(queued::add)) {
+            io.submit(() -> { reads.incrementAndGet(); return "old document"; },
+                ignored -> replies.incrementAndGet());
+            assertTrue(io.cancelRead());
+            assertFalse(io.busy());
+            io.submitSave(() -> "new save", result -> saved.set(result.value()));
+
+            queued.remove().run();
+            assertFalse(io.collect(), "an abandoned read cannot complete a later save");
+            assertTrue(io.busy());
+            assertNull(saved.get());
+            queued.remove().run();
+            assertTrue(io.collect());
+
+            assertEquals(0, reads.get());
+            assertEquals(0, replies.get());
+            assertEquals("new save", saved.get());
+            assertFalse(io.busy());
+        }
+    }
+
+    @Test
+    void readCancellationCannotAbandonSaveWork() {
+        Queue<Runnable> queued = new ArrayDeque<>();
+        AtomicReference<String> saved = new AtomicReference<>();
+        try (DocumentIoController io = new DocumentIoController(queued::add)) {
+            io.submitSave(() -> "saved", result -> saved.set(result.value()));
+            assertFalse(io.cancelRead());
+            assertTrue(io.busy());
+            queued.remove().run();
+            assertTrue(io.collect());
+            assertEquals("saved", saved.get());
+        }
+    }
+
+    @Test
+    @Timeout(15)
+    void shutdownDoesNotWaitForAReadProviderThatIgnoresInterruption() throws Exception {
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch interrupted = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch finished = new CountDownLatch(1);
+        AtomicInteger replies = new AtomicInteger();
+        DocumentIoController io = new DocumentIoController();
+        try {
+            io.submit(() -> {
+                started.countDown();
+                try {
+                    while (release.getCount() != 0) {
+                        try { release.await(); }
+                        catch (InterruptedException cancelled) { interrupted.countDown(); }
+                    }
+                    return "late document";
+                } finally {
+                    finished.countDown();
+                }
+            }, ignored -> replies.incrementAndGet());
+            assertTrue(started.await(5, TimeUnit.SECONDS));
+
+            io.close();
+
+            assertTrue(interrupted.await(5, TimeUnit.SECONDS));
+            assertEquals(1L, finished.getCount(), "shutdown returned before the blocked read finished");
+            assertFalse(io.busy());
+            assertFalse(io.collect());
+            assertEquals(0, replies.get());
+            release.countDown();
+            assertTrue(finished.await(5, TimeUnit.SECONDS));
+            assertFalse(io.collect(), "a result arriving after shutdown has no publication rights");
+            assertEquals(0, replies.get());
+        } finally {
+            release.countDown();
+            assertTrue(finished.await(5, TimeUnit.SECONDS));
+            io.close();
+        }
+    }
+
+    @Test
+    @Timeout(15)
+    void repeatedQuitRequestsKeepTheDeadlineWithoutInterruptingPublication() throws Exception {
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicReference<InterruptedException> interrupted = new AtomicReference<>();
+        AtomicInteger replies = new AtomicInteger();
+        StorageOperation operation = new StorageOperation(StorageOperation.Phase.STAGING);
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
+            new LinkedBlockingQueue<>(), task -> {
+                Thread thread = new Thread(task, "document-io-timeout-test");
+                thread.setDaemon(true);
+                return thread;
+            });
+        DocumentIoController io = new DocumentIoController(executor, true);
+        try {
+            io.submitSave(() -> {
+                operation.beginPublication();
+                started.countDown();
+                while (release.getCount() != 0) {
+                    try { release.await(); }
+                    catch (InterruptedException stopped) { interrupted.set(stopped); }
+                }
+                return "externally saved";
+            }, ignored -> replies.incrementAndGet());
+            assertTrue(started.await(5, TimeUnit.SECONDS));
+
+            io.beginQuitWait(100L);
+            io.beginQuitWait(4_000_000_100L);
+            assertDoesNotThrow(() -> io.checkQuitWait(5_000_000_099L));
+            assertTrue(io.busy(), "publication keeps its chance to finish before the original deadline");
+            assertTrue(operation.publishing());
+            assertNull(interrupted.get());
+            IllegalStateException failure = assertThrows(IllegalStateException.class,
+                () -> io.checkQuitWait(5_000_000_100L));
+
+            assertTrue(failure.getMessage().contains("unknown"));
+            assertTrue(failure.getMessage().contains("recovery"));
+            assertTrue(failure.getMessage().contains("verify"));
+            assertInstanceOf(java.util.concurrent.TimeoutException.class, failure.getCause());
+            assertTrue(operation.publishing());
+            assertFalse(operation.cancelled(), "an unconfirmed write is not a cancelled write");
+            assertFalse(io.busy());
+            assertFalse(io.collect());
+            assertEquals(0, replies.get());
+            assertTrue(executor.isShutdown());
+            assertFalse(executor.isTerminated(), "the provider is still waiting for its external result");
+            release.countDown();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+            assertNull(interrupted.get(), "the timeout must not interrupt an external publication");
+            assertFalse(io.collect());
+            assertEquals(0, replies.get(), "a late success cannot advance the owner's savepoint");
+        } finally {
+            release.countDown();
+            io.close();
+            executor.shutdown();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
+    void collectingAReceiptClearsTheQuitDeadlineBeforeTheNextOperation() {
+        Queue<Runnable> queued = new ArrayDeque<>();
+        AtomicReference<String> saved = new AtomicReference<>();
+        try (DocumentIoController io = new DocumentIoController(queued::add)) {
+            io.submitSave(() -> "first save", result -> saved.set(result.value()));
+            io.beginQuitWait(100L);
+            queued.remove().run();
+            assertTrue(io.collect());
+            assertEquals("first save", saved.get());
+            assertDoesNotThrow(() -> io.checkQuitWait(5_000_000_100L));
+
+            io.submitSave(() -> "next save", result -> saved.set(result.value()));
+            assertDoesNotThrow(() -> io.checkQuitWait(100_000_000_000L),
+                "a later operation must not inherit an earlier quit deadline");
+            assertTrue(io.busy());
+            assertEquals("first save", saved.get());
+            queued.remove().run();
+            assertTrue(io.collect());
+            assertEquals("next save", saved.get());
+        }
+    }
+
+    @Test
+    void cancellingAQueuedPreparationDiscardsItsReplyWithoutAffectingTheNextWrite() {
+        Queue<Runnable> queued = new ArrayDeque<>();
+        AtomicInteger reads = new AtomicInteger();
+        AtomicInteger replies = new AtomicInteger();
+        try (DocumentIoController io = new DocumentIoController(queued::add)) {
+            io.submitSave(() -> reads.incrementAndGet(), ignored -> replies.incrementAndGet());
+            assertTrue(io.cancelSave());
+            assertFalse(io.busy());
+            io.submit(() -> "saved", result -> assertEquals("saved", result.value()));
+            queued.remove().run();
+            assertFalse(io.collect(), "the abandoned reply cannot complete the newer write");
+            assertTrue(io.busy());
+            queued.remove().run();
+            assertTrue(io.collect());
+            assertEquals(0, reads.get());
+            assertEquals(0, replies.get());
+            assertFalse(io.busy());
+        }
+    }
+
+    @Test
+    void cancelledPreparationDoesNotHoldShutdownEvenWhenItsProviderHasNotReturned() throws Exception {
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch interrupted = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch finished = new CountDownLatch(1);
+        AtomicInteger replies = new AtomicInteger();
+        DocumentIoController io = new DocumentIoController();
+        try {
+            io.submitSave(() -> {
+                started.countDown();
+                try {
+                    release.await();
+                } catch (InterruptedException cancelled) {
+                    interrupted.countDown();
+                    release.await();
+                } finally {
+                    finished.countDown();
+                }
+                return "late inspection";
+            }, ignored -> replies.incrementAndGet());
+            assertTrue(started.await(5, TimeUnit.SECONDS));
+            assertTrue(io.cancelSave());
+            io.close();
+            assertTrue(interrupted.await(5, TimeUnit.SECONDS));
+            assertFalse(io.busy());
+            assertFalse(io.collect());
+            assertEquals(1L, finished.getCount(), "shutdown must not wait for a read-only provider");
+            assertEquals(0, replies.get());
+        } finally {
+            release.countDown();
+            assertTrue(finished.await(5, TimeUnit.SECONDS));
+            io.close();
+        }
+    }
+
+    @Test
+    void cancelledPreparationsDoNotAccumulateBehindAnAbandonedOperation() throws Exception {
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
+            new LinkedBlockingQueue<>(), task -> {
+                Thread thread = new Thread(task, "document-io-cancel-test");
+                thread.setDaemon(true);
+                return thread;
+            });
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger replies = new AtomicInteger();
+        DocumentIoController io = new DocumentIoController(executor, true);
+        try (io) {
+            io.submitSave(() -> {
+                started.countDown();
+                while (release.getCount() != 0) {
+                    try { release.await(); }
+                    catch (InterruptedException cancelled) { /* Simulate an uninterruptible provider. */ }
+                }
+                return "abandoned";
+            }, ignored -> replies.incrementAndGet());
+            assertTrue(started.await(5, TimeUnit.SECONDS));
+            assertTrue(io.cancelSave());
+            for (int attempt = 0; attempt < 32; attempt++) {
+                io.submitSave(() -> "queued preparation", ignored -> replies.incrementAndGet());
+                assertTrue(io.cancelSave());
+                assertTrue(executor.getQueue().isEmpty(), "cancelled work must release queued captures");
+            }
+            io.submitSave(() -> "unstarted write", ignored -> replies.incrementAndGet());
+            assertTrue(io.cancelSave());
+            assertTrue(executor.getQueue().isEmpty());
+            assertFalse(io.busy());
+            assertEquals(0, replies.get());
+        } finally {
+            release.countDown();
+            executor.shutdown();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
+    void publicationRefusesCancellationAndShutdownCollectsItsResult() throws Exception {
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicReference<String> applied = new AtomicReference<>();
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        StorageOperation operation = new StorageOperation(StorageOperation.Phase.STAGING);
+        DocumentIoController io = new DocumentIoController();
+        try {
+            io.submitSave(() -> {
+                operation.beginPublication();
+                started.countDown();
+                try { release.await(); }
+                catch (InterruptedException interrupted) { failure.set(interrupted); }
+                return "saved";
+            }, result -> applied.set(result.value()));
+            assertTrue(started.await(5, TimeUnit.SECONDS));
+            assertFalse(operation.requestCancellation(), "publication retains its real outcome");
+            assertTrue(io.busy(), "the host must keep the task when the session refuses cancellation");
+            release.countDown();
+            io.close();
+            assertNull(failure.get());
+            assertEquals("saved", applied.get());
+            assertFalse(io.busy());
+        } finally {
+            release.countDown();
+            io.close();
+        }
     }
 }

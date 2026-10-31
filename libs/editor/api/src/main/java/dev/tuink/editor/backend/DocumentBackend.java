@@ -16,6 +16,7 @@ import dev.tuink.editor.storage.DocumentResource;
 import dev.tuink.editor.storage.ResourceBinding;
 import dev.tuink.editor.storage.SavedDocument;
 import dev.tuink.editor.storage.SaveDisposition;
+import dev.tuink.editor.storage.StorageOperation;
 import java.io.IOException;
 import java.util.function.Function;
 
@@ -59,9 +60,19 @@ public interface DocumentBackend {
 
     record Status(ResourceBinding binding, DocumentFileMetadata metadata, boolean dirty, long recoveryRevision) {}
 
-    interface PreparedSave { SavedDocument write() throws IOException; }
+    interface PreparedSave {
+        SavedDocument write() throws IOException;
+        default SavedDocument writeWithOperation(StorageOperation operation) throws IOException {
+            operation.beginPublication();
+            return write();
+        }
+    }
     interface SavePreparation {
         SaveTargetInspection inspectTarget() throws IOException;
+        default SaveTargetInspection inspectTargetWithOperation(StorageOperation operation) throws IOException {
+            operation.checkCancelled();
+            return inspectTarget();
+        }
         SaveDisposition disposition();
     }
     interface SaveTargetInspection {

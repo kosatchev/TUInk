@@ -2,9 +2,11 @@ package dev.tuink.storage.jvm;
 
 import dev.tuink.editor.storage.ResourceId;
 import dev.tuink.editor.storage.ResourceVersion;
+import dev.tuink.editor.storage.StorageOperation;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InterruptedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
@@ -42,7 +44,11 @@ public record FileBaseline(Path target, String sha256, long byteSize) implements
     }
 
     void requireUnchanged(Path candidate) throws IOException {
-        requireUnchanged(candidate, Files::newInputStream);
+        requireUnchanged(candidate, Files::newInputStream, StorageOperation.untracked());
+    }
+
+    void requireUnchanged(Path candidate, StorageOperation operation) throws IOException {
+        requireUnchanged(candidate, Files::newInputStream, operation);
     }
 
     @FunctionalInterface
@@ -51,6 +57,11 @@ public record FileBaseline(Path target, String sha256, long byteSize) implements
     }
 
     void requireUnchanged(Path candidate, InputOpener inputOpener) throws IOException {
+        requireUnchanged(candidate, inputOpener, StorageOperation.untracked());
+    }
+
+    void requireUnchanged(Path candidate, InputOpener inputOpener, StorageOperation operation) throws IOException {
+        operation.checkCancelled();
         try {
             Path physicalTarget = candidate.toRealPath();
             BasicFileAttributes attributes = Files.readAttributes(physicalTarget, BasicFileAttributes.class);
@@ -58,8 +69,8 @@ public record FileBaseline(Path target, String sha256, long byteSize) implements
                 throw new IOException("Not a regular file: " + candidate);
             }
             long expectedSize = byteSize < 0 ? attributes.size() : byteSize;
-            if (attributes.size() != expectedSize || byteSize < 0 && expectedSize > JvmDocumentStorage.MAX_LOAD_BYTES) {
-                throw new IOException("File size changed or exceeds the verification limit for a legacy baseline");
+            if (attributes.size() != expectedSize) {
+                throw new IOException("File size changed since it was loaded or saved");
             }
             boolean sameTarget = target.equals(physicalTarget);
             if (!sameTarget && target.equals(target.toRealPath())) {
@@ -69,21 +80,29 @@ public record FileBaseline(Path target, String sha256, long byteSize) implements
             }
             if (sameTarget) {
                 MessageDigest current = digest();
+                operation.progress(StorageOperation.Phase.VERIFYING, 0L, expectedSize);
+                operation.checkCancelled();
                 try (InputStream input = inputOpener.open(physicalTarget)) {
                     byte[] buffer = new byte[8192];
                     long remaining = expectedSize;
                     while (remaining > 0) {
+                        operation.checkCancelled();
                         int read = input.read(buffer, 0, (int) Math.min(buffer.length, remaining));
                         if (read < 0) throw new IOException("File shrank during verification");
                         current.update(buffer, 0, read);
                         remaining -= read;
+                        operation.progress(StorageOperation.Phase.VERIFYING, expectedSize - remaining, expectedSize);
                     }
+                    operation.checkCancelled();
                     if (input.read() != -1) throw new IOException("File grew during verification");
+                    operation.checkCancelled();
                 }
                 if (sha256.equals(HexFormat.of().formatHex(current.digest()))) {
                     return;
                 }
             }
+        } catch (InterruptedIOException cancelled) {
+            throw cancelled;
         } catch (IOException failure) {
             throw new IOException(conflictMessage(candidate), failure);
         }

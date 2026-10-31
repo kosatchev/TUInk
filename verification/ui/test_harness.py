@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 import os
 from pathlib import Path
 import signal
@@ -6,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from run import recovery_snapshot_present
+from run import expect_field_line, recovery_snapshot_present
 from terminal import Session
 from vt import Screen
 
@@ -132,6 +133,113 @@ class SaveObservationTest(unittest.TestCase):
             with patch.object(session, "expect", side_effect=observe), patch.object(session, "send", side_effect=submit):
                 session.save(document, "new draft")
             self.assertEqual(["dirty frame", "worker publication", "owner completion"], events)
+
+
+class FieldObservationTest(unittest.TestCase):
+    @contextmanager
+    def session(self, *, initial=(), frames=(), exit_at=None, deadline=10):
+        clock = [0.0]
+        pending = list(frames)
+        session = Session.__new__(Session)
+        session.screen = Screen(6, 80)
+        session.deadline = deadline
+        session.timeout = deadline
+        session.status = None
+        session.fd = -1
+        session.drains = []
+        session.writes = []
+
+        def feed(rows):
+            session.screen.feed(b"\x1b[2J\x1b[H")
+            for row, text in enumerate(rows):
+                session.screen.feed((f"\x1b[{row + 1};1H" + text).encode("utf-8"))
+
+        def drain(seconds):
+            session.drains.append(seconds)
+            clock[0] = min(deadline, clock[0] + seconds)
+            while pending and pending[0][0] <= clock[0]:
+                _, rows = pending.pop(0)
+                feed(rows)
+
+        def poll():
+            if exit_at is not None and clock[0] >= exit_at:
+                session.status = 0
+            return session.status
+
+        def write(fd, data):
+            self.assertEqual(-1, fd)
+            session.writes.append(data)
+            return len(data)
+
+        session.drain, session.poll = drain, poll
+        feed(initial)
+        with patch("terminal.time.monotonic", side_effect=lambda: clock[0]), \
+                patch("terminal.os.write", side_effect=write):
+            yield session, clock
+
+    def test_delayed_find_and_replace_are_observed_after_the_send_drain_has_ended(self):
+        for prefix in ("Find: ", "Replace:"):
+            with self.subTest(prefix=prefix), self.session(
+                initial=("File draft.txt",), frames=((0.40, ("File draft.txt", prefix + "needle")),)
+            ) as (session, clock):
+                session.send(b"\x06")
+                session.send(b"needle")
+                self.assertAlmostEqual(0.36, clock[0])
+
+                row, line = expect_field_line(session, prefix, "delayed field", contains="needle")
+
+                self.assertEqual(1, row)
+                self.assertTrue(line.startswith(prefix + "needle"))
+                self.assertGreaterEqual(clock[0], 0.40)
+                self.assertEqual([b"\x06", b"needle"], session.writes)
+                self.assertGreater(len(session.drains), 2)
+
+    def test_an_existing_field_must_contain_the_expected_new_value(self):
+        with self.session(initial=("File draft.txt", "Find: old"),
+                          frames=((0.10, ("File draft.txt", "Find: new")),)) as (session, clock):
+            _, line = expect_field_line(session, "Find: ", "updated field", contains="new")
+
+            self.assertTrue(line.startswith("Find: new"))
+            self.assertGreaterEqual(clock[0], 0.10)
+
+    def test_save_as_content_cannot_be_acknowledged_by_document_text(self):
+        initial = ("File draft.txt", "Save As: ", "aaaaaaaa in the document")
+        with self.session(initial=initial,
+                          frames=((0.10, (initial[0], "Save As: aaaaaaaa", initial[2])),)) as (session, clock):
+            self.assertIn("Save As: ", session.screen.text)
+            self.assertIn("aaaaaaaa", session.screen.text)
+
+            row, line = expect_field_line(session, "Save As: ", "pasted filename", contains="aaaaaaaa")
+
+            self.assertEqual(1, row)
+            self.assertTrue(line.startswith("Save As: aaaaaaaa"))
+            self.assertGreaterEqual(clock[0], 0.10)
+
+    def test_a_missing_field_respects_both_local_and_scenario_deadlines(self):
+        for timeout, deadline, limit in ((0.12, 10, 0.12), (3, 0.10, 0.10)):
+            with self.subTest(timeout=timeout, deadline=deadline), self.session(deadline=deadline) as (session, clock):
+                with self.assertRaisesRegex(AssertionError, "Timed out waiting for missing field"):
+                    expect_field_line(session, "Find: ", "missing field", timeout=timeout)
+                self.assertGreaterEqual(clock[0], limit)
+                self.assertLessEqual(clock[0], limit + 0.05)
+
+    def test_exit_before_readiness_stops_polling(self):
+        with self.session(exit_at=0.10, frames=((0.40, ("Find: too late",)),)) as (session, clock):
+            with self.assertRaisesRegex(AssertionError, "Timed out waiting for exited field"):
+                expect_field_line(session, "Find: ", "exited field")
+            self.assertEqual(0, session.status)
+            self.assertAlmostEqual(0.10, clock[0])
+            self.assertEqual(2, len(session.drains))
+
+    def test_assertions_inside_a_predicate_still_propagate_immediately(self):
+        with self.session() as (session, clock):
+            def broken():
+                raise AssertionError("broken predicate")
+
+            with self.assertRaisesRegex(AssertionError, "broken predicate"):
+                session.expect(broken, "a valid predicate")
+            self.assertEqual([], session.drains)
+            self.assertEqual(0, clock[0])
 
 
 class LifecycleTest(unittest.TestCase):

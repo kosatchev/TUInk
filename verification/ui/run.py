@@ -41,6 +41,21 @@ def field_line(session):
     raise AssertionError(session.screen.text)
 
 
+def expect_field_line(session, prefix, description, *, contains=None, timeout=3):
+    """Wait for a labelled field and its visible content before using its coordinates."""
+    matched = None
+
+    def ready():
+        nonlocal matched
+        matched = next(((row, line) for row, line in enumerate(session.screen.lines)
+                        if line.startswith(prefix)
+                        and (contains is None or contains in line[len(prefix):])), None)
+        return matched is not None
+
+    session.expect(ready, description, timeout=timeout)
+    return matched
+
+
 def recovery_snapshot_present(directory, expected):
     for meta in directory.glob("*.meta.properties"):
         try:
@@ -168,7 +183,7 @@ class Regressions:
         with self.session("field-edit-caret", document) as session:
             session.send(b"\x06" + initial.encode())
             session.send(b"\x1b[H\x1b[C\x1b[3~B")
-            session.expect(lambda: expected in field_line(session)[1], "field caret after a newly joined emoji")
+            expect_field_line(session, "Find: ", "field caret after a newly joined emoji", contains=expected)
             session.send(b"\x1b[27u\x0b\x01" + initial.encode())
             session.send(b"\x1b[H\x1b[C\x1b[3~B\r")
             target = session.root / expected
@@ -279,17 +294,25 @@ class Regressions:
         for mono in (False, True):
             with self.session("field-mono" if mono else "field-color", mono=mono) as session:
                 session.send(b"\x06")
-                session.send(("0123456789" * 15).encode("utf-8"))
-                session.send(b"\x1b[H")
-                row, _ = field_line(session)
+                payload = "0123456789" * 15 + "|FIELD-END|"
+                session.send(b"\x1b[200~" + payload.encode("utf-8") + b"\x1b[201~")
+                row, _ = expect_field_line(session, "Find: ", "the complete, scrolled long field",
+                                           contains="|FIELD-END|")
+                # Keep this selection inside the visible field. An outside drag
+                # starts autoscroll, which is tested separately and has no stable
+                # viewport to capture while input is still being consumed.
                 session.mouse(0, row, 8)
-                session.mouse(32, row, 79)
-                session.mouse(0, row, 79, True)
+                session.mouse(32, row, 30)
+                session.mouse(0, row, 30, True)
                 before = field_line(session)
                 session.send(b"\x03")
                 assert field_line(session) == before, session.screen.text
                 session.send(b"\x1be")
+                session.expect(lambda: "Undo" in session.screen.text and "Redo" in session.screen.text,
+                               "the Edit menu after Copy")
                 session.send(b"\x1b", 0.7)
+                session.expect(lambda: "Undo" not in session.screen.text and "Redo" not in session.screen.text,
+                               "the Edit menu closed")
                 assert field_line(session) == before, session.screen.text
                 session.send(b"\x1b", 0.7)
                 session.finish()
@@ -1131,20 +1154,19 @@ class Regressions:
         with self.session("field-memory", document, max_heap_mb=128) as session:
             for key in (b"\x01", b"\x03", b"\x06", b"\x16"):
                 session.send(key)  # Copy the document, then paste into Find.
-            session.expect(lambda: "aaaaaaaa" in field_line(session)[1], "large clipboard in Find")
+            expect_field_line(session, "Find: ", "large clipboard in Find", contains="aaaaaaaa")
             for key in (b"\x1b[H", b"\x1b[F"):
                 session.send(key)
                 assert "aaaaaaaa" in field_line(session)[1], session.screen.text
             session.send(b"\x01\x7f")
-            row = next(index for index, line in enumerate(session.screen.lines) if line.startswith("Replace:"))
+            row, _ = expect_field_line(session, "Replace:", "replacement field before clipboard paste")
             session.mouse(0, row, 10)
             session.mouse(0, row, 10, True)
             session.send(b"\x16")
-            session.expect(lambda: "aaaaaaaa" in session.screen.lines[row], "large clipboard in Replace")
+            expect_field_line(session, "Replace:", "large clipboard in Replace", contains="aaaaaaaa")
             session.send(b"\x01\x7f\x1b", 0.7)
             session.send(b"\x0b\x01\x16")  # The same clipboard can enter Save As.
-            session.expect(lambda: "Save As: " in session.screen.text and "aaaaaaaa" in session.screen.text,
-                           "large clipboard in Save As")
+            expect_field_line(session, "Save As: ", "large clipboard in Save As", contains="aaaaaaaa")
             session.send(b"\x1b", 0.7)
             session.send(b"\x13")
             session.expect(lambda: "Saved " in session.screen.text, "saving after large field pastes")
@@ -1295,11 +1317,12 @@ class Regressions:
         document = self.fixture("replacement-memory", original)
         with self.session("replacement-memory", document, max_heap_mb=64) as session:
             session.send(b"\x06a")
-            row = next(index for index, line in enumerate(session.screen.lines) if line.startswith("Replace:"))
+            row, _ = expect_field_line(session, "Replace:", "replacement field before expanding paste")
             session.mouse(0, row, 10)
             session.mouse(0, row, 10, True)
             session.send(b"\x1b[200~" + b"b" * 64 + b"\x1b[201~")
-            assert "bbbbbbbb" in session.screen.lines[row], session.screen.text
+            row, _ = expect_field_line(session, "Replace:", "expanding replacement text", contains="bbbbbbbb")
+            session.expect(lambda: "Replace all" in session.screen.lines[row], "Replace all action after paste")
             column = session.screen.lines[row].index("Replace all") + 2
             session.mouse(0, row, column)
             session.mouse(0, row, column, True)

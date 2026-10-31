@@ -5,11 +5,12 @@ This separate gate builds the JVM install layout and exercises the real
 application through a POSIX pseudo-terminal. It is explicitly run by Linux CI;
 ordinary `check` remains independent of PTY availability.
 
-`./gradlew :app:uiHarnessTest` only validates the screen parser and process
-cleanup. It does not start Java. The parser observes text/cursor geometry,
-understands scroll regions and ANSI S/T scroll hints, and rejects unsupported
-output. Its Unicode checks cover combining marks and double-width cells; it is
-not intended to emulate every xterm feature or verify terminal colors.
+`./gradlew :app:uiHarnessTest` validates the screen parser, delayed field
+observations and process cleanup. It does not start Java. The parser observes
+text/cursor geometry, understands scroll regions and ANSI S/T scroll hints,
+and rejects unsupported output. Its Unicode checks cover combining marks and
+double-width cells; it is not intended to emulate every xterm feature or verify
+terminal colors.
 
 The scenarios protect the following user behavior:
 
@@ -75,3 +76,7 @@ SIGKILL termination after confirming the unsaved draft reached recovery storage.
 
 When adding a regression, assert an externally visible invariant and file bytes
 where relevant. Add parser self-tests before relying on new escape sequences.
+Wait for a field's labelled row and expected visible content before taking its
+coordinates or checking a newly entered value. Text elsewhere on the screen can
+belong to the document or an earlier control. Keep intentional timing intervals
+in fragmented-key and stability checks tied to the behavior those scenarios test.

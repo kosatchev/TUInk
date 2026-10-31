@@ -2,6 +2,7 @@ package dev.tuink.tui.flow;
 
 import dev.tuink.core.GutterDiffMode;
 import dev.tuink.storage.jvm.FileSaveGuard;
+import dev.tuink.storage.jvm.JvmFilePaths;
 import dev.tuink.core.TabInsertMode;
 import dev.tuink.tui.style.UiStyles;
 import java.io.ByteArrayInputStream;
@@ -177,7 +178,7 @@ public final class AppSettingsStore {
             throw new IOException("Settings target must be a file: " + path);
         }
         Files.createDirectories(target.getParent());
-        target = target.getParent().toRealPath().resolve(target.getFileName());
+        target = JvmFilePaths.resolveEntry(target);
         BasicFileAttributes attributes = null;
         try {
             attributes = Files.readAttributes(target, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
@@ -274,7 +275,7 @@ public final class AppSettingsStore {
                 throw new SettingsConflictException(loaded.requested, null);
             }
         } else {
-            Path current = requested.getParent().toRealPath().resolve(requested.getFileName());
+            Path current = JvmFilePaths.resolveEntry(requested);
             try {
                 BasicFileAttributes attributes = Files.readAttributes(current, BasicFileAttributes.class,
                     LinkOption.NOFOLLOW_LINKS);

@@ -40,6 +40,12 @@ It never selects another destination after approval. Retargeting before writing
 or changing the target leaf during staging fails without marking the document
 saved; changing the original parent alias during encoding cannot redirect the
 already canonicalized destination.
+JVM document, settings, advisory and save-lock code share the entry calculation
+in `JvmFilePaths.resolveEntry`: resolve the existing parent in filesystem order,
+then append the unchanged final component. This preserves parent-symlink and
+`..` semantics without choosing a leaf policy. Directory creation, type checks,
+final-link following and publication rechecks remain with their existing owners;
+an entry calculation alone does not authorize a write.
 Malformed BOM-declared input and text not representable in the retained charset
 fail explicitly; encoding never substitutes replacement characters silently.
 BOM-less UTF-16 is intentionally not auto-detected: UTF-16 input must declare

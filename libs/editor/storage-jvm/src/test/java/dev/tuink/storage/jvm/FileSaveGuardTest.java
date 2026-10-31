@@ -78,6 +78,51 @@ class FileSaveGuardTest {
     }
 
     @Test
+    void parentSymlinksResolveBeforeDotDotForGuardIdentity() throws IOException {
+        assumeTrue(directory.getFileSystem().supportedFileAttributeViews().contains("posix"));
+        for (boolean exists : List.of(false, true)) {
+            Path scenario = Files.createDirectory(directory.resolve(Boolean.toString(exists)));
+            Path physicalParent = Files.createDirectories(scenario.resolve("real/deep")).getParent();
+            Path linkContents = Path.of("real/deep");
+            Path link = Files.createSymbolicLink(scenario.resolve("link"), linkContents);
+            Path requested = link.resolve("../document.txt");
+            Path physical = physicalParent.resolve("document.txt");
+            if (exists) Files.writeString(physical, "physical original");
+            Path lexical = Files.writeString(scenario.resolve("document.txt"), "lexical original");
+            Path namespace = scenario.resolve("locks");
+            Path lockPath = FileSaveGuard.lockPath(physical, namespace);
+
+            assertEquals(lockPath, FileSaveGuard.lockPath(requested, namespace));
+            assertNotEquals(lockPath, FileSaveGuard.lockPath(lexical, namespace));
+            try (FileSaveGuard guard = FileSaveGuard.acquire(requested, namespace)) {
+                assertNotNull(guard);
+                assertThrows(IOException.class, () -> FileSaveGuard.acquire(physical, namespace));
+                try (FileSaveGuard independent = FileSaveGuard.acquire(lexical, namespace)) {
+                    assertNotNull(independent);
+                }
+            }
+
+            if (exists) assertEquals("physical original", Files.readString(physical));
+            else assertFalse(Files.exists(physical));
+            assertEquals("lexical original", Files.readString(lexical));
+            assertEquals(linkContents, Files.readSymbolicLink(link));
+        }
+    }
+
+    @Test
+    void directoryEndpointsAreRejectedBeforeCreatingTheLockNamespace() throws IOException {
+        int index = 0;
+        for (Path invalid : List.of(directory.getRoot(), directory.resolve("."), directory.resolve(".."))) {
+            Path namespace = directory.resolve("invalid-target-locks-" + index++);
+            assertFalse(Files.exists(namespace));
+
+            assertThrows(IOException.class, () -> FileSaveGuard.acquire(invalid, namespace));
+
+            assertFalse(Files.exists(namespace));
+        }
+    }
+
+    @Test
     void theFirstSaveCanCreateItsNamespaceInsideANewAbsoluteUserHome() throws IOException {
         Path home = directory.resolve("new-home");
         Path target = directory.resolve("new-document.txt");

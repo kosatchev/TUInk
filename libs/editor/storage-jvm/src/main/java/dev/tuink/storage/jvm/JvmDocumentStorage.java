@@ -361,7 +361,7 @@ public final class JvmDocumentStorage implements DocumentStorage {
         if (leaf == null || leaf.toString().equals(".") || leaf.toString().equals("..")) {
             throw new IOException("Document target must be a file: " + requested);
         }
-        return absolute.getParent().toRealPath().resolve(leaf);
+        return JvmFilePaths.resolveEntry(absolute);
     }
 
     private static boolean requireRegularSaveTargetOrMissing(Path target) throws IOException {

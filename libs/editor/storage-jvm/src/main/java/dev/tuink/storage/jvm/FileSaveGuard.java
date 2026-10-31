@@ -130,7 +130,7 @@ public final class FileSaveGuard implements AutoCloseable {
         if (leaf == null || leaf.toString().equals(".") || leaf.toString().equals("..")) {
             throw new IOException("Save target must be a file: " + requested);
         }
-        Path entry = absolute.getParent().toRealPath().resolve(leaf);
+        Path entry = JvmFilePaths.resolveEntry(absolute);
         try {
             BasicFileAttributes attributes = Files.readAttributes(entry, BasicFileAttributes.class);
             if (!attributes.isRegularFile()) throw new IOException("Save target is not a regular file: " + requested);

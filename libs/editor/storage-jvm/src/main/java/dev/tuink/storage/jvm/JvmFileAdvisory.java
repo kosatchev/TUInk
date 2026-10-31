@@ -35,7 +35,7 @@ public final class JvmFileAdvisory {
         if (target.getFileName() == null) return false;
         Path namedTarget;
         try {
-            namedTarget = target.getParent().toRealPath().resolve(target.getFileName());
+            namedTarget = JvmFilePaths.resolveEntry(target);
         } catch (IOException | SecurityException unavailable) {
             namedTarget = target;
         }
@@ -75,7 +75,7 @@ public final class JvmFileAdvisory {
         Path target;
         try {
             target = Files.isSymbolicLink(absolute) ? absolute.toRealPath()
-                : absolute.getParent().toRealPath().resolve(leaf);
+                : JvmFilePaths.resolveEntry(absolute);
         } catch (IOException error) {
             return new SaveIssue(SaveIssueKind.UNRESOLVED_PATH, absolute, error.getMessage());
         }

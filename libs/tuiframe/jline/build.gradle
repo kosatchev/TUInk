@@ -6,6 +6,6 @@ group = 'dev.tuiframe'
 
 dependencies {
     api project(':tuiframe-core')
-    api 'org.jline:jline-terminal:3.30.6'
-    runtimeOnly 'org.jline:jline-terminal-jni:3.30.6'
+    api 'org.jline:jline-terminal:3.30.17'
+    runtimeOnly 'org.jline:jline-terminal-jni:3.30.17'
 }

@@ -75,14 +75,28 @@ class TerminalTextTest {
 
     @Test
     void keepsNonzeroWidthFormatCharactersVisible() {
-        int[] codePoints = {0x00AD, 0x0890, 0x0891, 0x13439, 0x1343A, 0x1343B,
-            0x1343C, 0x1343D, 0x1343E, 0x1343F};
+        int[] codePoints = {0x00AD, 0x06DE};
         for (int codePoint : codePoints) {
             String text = Character.toString(codePoint);
             assertAll(
                 "U+%04X".formatted(codePoint),
                 () -> assertEquals(1, TerminalText.graphemeWidth(text)),
                 () -> assertEquals(text, TerminalText.sanitizeGrapheme(text))
+            );
+        }
+    }
+
+    @Test
+    void updatedBackendZeroWidthFormatsUseVisibleStandalonePlaceholders() {
+        int[] codePoints = {0x0604, 0x0605, 0x0890, 0x0891, 0x180E, 0x110BD, 0x110CD,
+            0x13430, 0x13439, 0x1343A, 0x1343B, 0x1343C, 0x1343D, 0x1343E, 0x1343F, 0x1BCA0};
+        for (int codePoint : codePoints) {
+            String text = Character.toString(codePoint);
+            assertAll(
+                "U+%04X".formatted(codePoint),
+                () -> assertEquals(0, TerminalText.graphemeWidth(text)),
+                () -> assertEquals("�", TerminalText.sanitizeGrapheme(text)),
+                () -> assertEquals(1, TerminalText.visualWidth(text, 4))
             );
         }
     }

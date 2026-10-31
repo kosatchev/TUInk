@@ -19,6 +19,11 @@ Changes on the development branch after [v0.16.0](0.16.0.md).
   querying filesystem permissions during rendering.
 - Require an explicit documentation revision when packaging sources without
   Git metadata, instead of guessing a release tag from the project version.
+- Update the terminal, JNI provider and native support modules to JLine
+  3.30.17, including its security fixes, without changing the Java toolchain
+  or the native SDK requirements. Align the shared terminal cell-width table
+  with its fixed Unicode ranges, retaining visible placeholders for isolated
+  zero-width clusters.
 - Package user documentation and the runtime notices for each distribution:
   omit native-runtime notice directories from JVM builds, and retain musl/zlib
   notices only in static musl archives. Link to source-only documentation at

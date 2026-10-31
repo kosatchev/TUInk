@@ -39,9 +39,9 @@ Notes:
 ## 2) JLine
 
 Artifact:
-- `org.jline:jline-terminal:3.30.6`
-- `org.jline:jline-terminal-jni:3.30.6`
-- `org.jline:jline-native:3.30.6`
+- `org.jline:jline-terminal:3.30.17`
+- `org.jline:jline-terminal-jni:3.30.17`
+- `org.jline:jline-native:3.30.17`
 
 License:
 - BSD 3-Clause License
@@ -54,8 +54,8 @@ Notes:
 - Used by the TUI terminal frontend. The aggregate JLine artifact and its
   unused remote telnet/SSH modules are not included.
 - The backend-independent cell-width compatibility policy lives in
-  `tuiframe-core` under `dev.tuiframe.text` and follows JLine 3.30.6 with
-  explicit zero-width corrections for U+061C, U+2064 and U+2066–U+2069.
+  `tuiframe-core` under `dev.tuiframe.text` and follows JLine 3.30.17. It
+  explicitly preserves zero width for U+061C, U+2064 and U+2066–U+2069.
   Standalone zero-width clusters use visible one-cell placeholders.
   Reusable line wrapping and version-aware terminal layout
   caching also live there. The editor core reaches terminal layout only

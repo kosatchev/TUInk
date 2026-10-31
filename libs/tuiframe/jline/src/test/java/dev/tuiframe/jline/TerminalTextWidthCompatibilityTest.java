@@ -1,5 +1,7 @@
 package dev.tuiframe.jline;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import dev.tuiframe.text.TerminalText;
 import org.jline.utils.WCWidth;
 import org.junit.jupiter.api.Test;
@@ -26,8 +28,24 @@ class TerminalTextWidthCompatibilityTest {
         }
     }
 
+    @Test
+    void updatedBaseRangesPreserveEmojiPresentationRules() {
+        // These visible bases were missing from the previous backend's wide table.
+        for (String text : new String[]{"⌚", "⏩", "♈", "\uD83E\uDEE9"}) {
+            assertEquals(2, TerminalText.graphemeWidth(text), text);
+        }
+        // The old broad supplementary range also included one-cell symbols.
+        for (String text : new String[]{"\u06DE", "\uD83C\uDC00", "♥", "♥\uFE0E", "a\uFE0F", "a\u200D"}) {
+            assertEquals(1, TerminalText.graphemeWidth(text), text);
+        }
+        for (String text : new String[]{"♥\uFE0F", "©\uFE0F", "1\uFE0F\u20E3", "👩\u200D💻", "🇺🇳", "☝🏽"}) {
+            assertEquals(2, TerminalText.graphemeWidth(text), text);
+        }
+    }
+
     private static int expectedSingleCodePointWidth(int codePoint) {
-        // These zero-width controls are absent from the table bundled with JLine 3.30.6.
+        // Keep these controls explicitly zero-width across upstream table revisions.
+        // JLine 3.30.17 already includes all six in its zero-width table.
         // They become one-cell replacement glyphs when sanitized for display.
         if (codePoint == 0x061C || codePoint == 0x2064
             || codePoint >= 0x2066 && codePoint <= 0x2069) {

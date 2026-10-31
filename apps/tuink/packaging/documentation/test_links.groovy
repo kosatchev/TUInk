@@ -36,22 +36,22 @@ def broken = { String label, Map archive, List locations ->
     }
 }
 
-// A nested documentation fixture: root README links resolve, but four nested links do not.
+// The actual regression: root README links resolve, but four nested links do not.
 def shipped = [
     'README.md': '[Build](docs/building.md)\n[Architecture](docs/architecture-roadmap.md)\n'
         + '[Compatibility](docs/compatibility.md)\n',
-    'docs/building.md': '[Engine probe](../guides/engine/README.md)\n'
-        + '[UI regressions](../guides/ui/README.md)\n',
-    'docs/architecture-roadmap.md': '[Android probe](../guides/engine/README.md)\n',
-    'docs/compatibility.md': '[Engine probe](../guides/engine/README.md)\n'
+    'docs/building.md': '[Engine probe](../verification/android/README.md)\n'
+        + '[UI regressions](../ui-regression/README.md)\n',
+    'docs/architecture-roadmap.md': '[Android probe](../verification/android/README.md)\n',
+    'docs/compatibility.md': '[Engine probe](../verification/android/README.md)\n'
 ]
 broken('the four missing links behind the release README', bundle(shipped), [
     ['docs/building.md', 1], ['docs/building.md', 2],
     ['docs/architecture-roadmap.md', 1], ['docs/compatibility.md', 1]
 ])
 def completed = shipped + [
-    'guides/engine/README.md': '# External engine probe\n',
-    'guides/ui/README.md': '# Terminal UI regressions\n'
+    'verification/android/README.md': '# External engine probe\n',
+    'ui-regression/README.md': '# Terminal UI regressions\n'
 ]
 clean('adding the two linked README files closes the bundle', bundle(completed))
 

@@ -17,6 +17,13 @@ Changes on the development branch after [v0.16.0](0.16.0.md).
   permission for unconfirmed outcomes; abandon pending opens without waiting.
 - Sample footer and confirmation access hints in the background instead of
   querying filesystem permissions during rendering.
+- Require an explicit documentation revision when packaging sources without
+  Git metadata, instead of guessing a release tag from the project version.
+- Package user documentation and the runtime notices for each distribution:
+  omit native-runtime notice directories from JVM builds, and retain musl/zlib
+  notices only in static musl archives. Link to source-only documentation at
+  the packaged revision and validate local links throughout the bundled
+  Markdown, including nested documents and reference-style links.
 - Escape external text at the terminal diagnostic boundary, including CLI
   errors, startup and recovery warnings, exception traces and JLine logs.
   Notifications share the same plain-text policy; actual paths remain exact.

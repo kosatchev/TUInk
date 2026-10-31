@@ -14,8 +14,8 @@ import unittest
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_DIR = next(parent for parent in Path(__file__).resolve().parents
-                       if (parent / 'settings.gradle').is_file() and (parent / 'gradlew').is_file())
+PROJECT_DIR = next(parent for parent in SCRIPT_DIR.parents
+                   if (parent / 'settings.gradle').is_file() and (parent / 'gradlew').is_file())
 
 
 class ArchiveInstallTest(unittest.TestCase):
@@ -133,6 +133,7 @@ class ArchiveInstallTest(unittest.TestCase):
             "[ADRs](docs/adr/)\n"
             "[Native toolchain](docs/building.md#native-toolchain)\n"
             "[Benchmarks](verification/performance/README.md)\n"
+            "[Applications](apps/README.md)\n"
             "[Contributing](CONTRIBUTING.md)\n"
             "[Security](SECURITY.md)\n"
             "[License](LICENSE)\n"
@@ -149,12 +150,13 @@ class ArchiveInstallTest(unittest.TestCase):
             f"https://github.com/kosatchev/tuink/tree/{self.documentation_ref}/docs/adr/",
             f"https://github.com/kosatchev/tuink/blob/{self.documentation_ref}/docs/building.md#native-toolchain",
             f"https://github.com/kosatchev/tuink/blob/{self.documentation_ref}/verification/performance/README.md",
+            f"https://github.com/kosatchev/tuink/blob/{self.documentation_ref}/apps/README.md",
             f"https://github.com/kosatchev/tuink/blob/{self.documentation_ref}/CONTRIBUTING.md",
             f"https://github.com/kosatchev/tuink/blob/{self.documentation_ref}/SECURITY.md",
         }
         for link in expected:
             self.assertIn(f"]({link})", readme)
-        self.assertNotRegex(readme, r"\]\((?:docs/|verification/performance/|CONTRIBUTING\.md|SECURITY\.md)")
+        self.assertNotRegex(readme, r"\]\((?:docs/|apps/|verification/|CONTRIBUTING\.md|SECURITY\.md)")
         self.assertIn("](LICENSE)", readme)
         self.assertIn("](THIRD_PARTY_NOTICES.md)", readme)
         self.assertEqual(self.install_dir / "tuink", self.link.readlink())
@@ -233,6 +235,42 @@ class ArchiveInstallTest(unittest.TestCase):
         self.assertFalse(self.install_dir.exists())
         self.assertFalse(self.link.is_symlink())
         self.run_script("uninstall.sh")
+
+    def test_full_notice_bundle_upgrades_through_glibc_and_musl(self):
+        self.run_script("install.sh")
+        foreign = self.install_dir / "licenses/musl-1.2.6/personal.txt"
+        foreign.write_text("keep my note", encoding="utf-8")
+        for target in ("glibc", "musl", "glibc"):
+            with self.subTest(target=target):
+                source = self.archive / "licenses"
+                shutil.rmtree(source)
+                source.mkdir()
+                selected = ["oracle-graalvm-25.0.4"]
+                if target == "musl":
+                    selected += ["musl-1.2.6", "zlib-1.3.2"]
+                for bundle in selected:
+                    shutil.copytree(PROJECT_DIR / "licenses" / bundle, source / bundle)
+                expected = {
+                    path.relative_to(source).as_posix(): path.read_bytes()
+                    for path in source.rglob("*") if path.is_file()
+                }
+                self.run_script("install.sh")
+                manifest = (self.install_dir / ".tuink-license-files").read_text().splitlines()
+                self.assertEqual("# tuink-license-files-v1", manifest[0])
+                self.assertEqual(sorted(expected), manifest[1:])
+                for relative, contents in expected.items():
+                    self.assertEqual(contents, (self.install_dir / "licenses" / relative).read_bytes())
+                self.assertEqual("keep my note", foreign.read_text())
+                if target == "glibc":
+                    self.assertFalse((self.install_dir / "licenses/musl-1.2.6/COPYRIGHT").exists())
+                    self.assertFalse((self.install_dir / "licenses/zlib-1.3.2").exists())
+                self.assertEqual(expected, {
+                    path.relative_to(source).as_posix(): path.read_bytes()
+                    for path in source.rglob("*") if path.is_file()
+                }, "installation must preserve the extracted archive")
+        self.run_script("uninstall.sh")
+        self.assertEqual([foreign], [path for path in self.install_dir.rglob("*") if path.is_file()])
+        self.assertFalse(self.link.is_symlink())
 
     def test_markerless_install_is_preserved(self):
         self.install_dir.mkdir(parents=True)

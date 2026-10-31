@@ -393,8 +393,9 @@ glibc, native musl, native glibc PGO и native musl PGO — можно одно�
 
 ## 7. DEB и полный релиз
 
-Для Debian-пакета дополнительно нужны `dpkg-deb`, `gzip`, `strip`, а для
-полного релиза — ещё Python 3.10+ и POSIX-окружение с псевдотерминалом:
+Для Debian-пакета дополнительно нужны Python 3.10+ (`python3`), `dpkg-deb`,
+`dpkg`, `gzip`, а также `strip` и `readelf` из `binutils`.
+Полный релиз дополнительно требует POSIX-окружения с псевдотерминалом:
 
 ```bash
 sudo apt install dpkg-dev gzip binutils python3

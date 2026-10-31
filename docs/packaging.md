@@ -21,6 +21,8 @@ all five without tests, benchmarks, or a Debian package:
 Use `./gradlew clean :app:release -Ptarget=all -Ppgo` for all five plus
 the glibc PGO Debian package, release verification, smoke benchmarks of all four
 native variants, and checksums. The default release keeps PGO disabled.
+The Linux UI regression and native ACL smoke gates run separately:
+`./gradlew :app:uiRegressionTest :app:nativeAclCheck -Ptarget=all`.
 A musl-only release (`-Pmusl`) omits the Debian package.
 PGO specifically requires
 **Oracle GraalVM 25.0.4+7.1 Native Image**; Oracle JDK alone and GraalVM Community
@@ -43,15 +45,37 @@ package when glibc is selected. Only selected outputs enter each manifest,
 even if other files remain from an earlier build.
 
 Release archives use reproducible file order and normalized timestamps.
-`SOURCE_DATE_EPOCH` can be set explicitly for Debian package timestamps.
+For a local Git checkout, set Debian package timestamps from the source commit,
+as the GitHub release workflow does:
+
+```bash
+export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+```
+
+Without this variable, Debian archive and file timestamps default to
+2000-01-01 UTC.
 Benchmark results are written separately below `build/performance/render/`;
 they are diagnostic build output and are not included in release archives.
 
-The JVM directory and ZIP, native archives and Debian package include
-`README.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `SECURITY.md`, available
-demo images and samples. Developer documents remain in the source tree;
-packaged links use the build's source revision online. Runtime notice
-directories are selected for each artifact.
+The JVM directory (`:app:dist`, an alias of `installDist`), JVM ZIP
+(`:app:distZip`), native archives and Debian package include `README.md`,
+`LICENSE`, `THIRD_PARTY_NOTICES.md`, `SECURITY.md`, the two demo GIFs in
+`docs/assets/`, and samples (`samples/`, or `examples/` in Debian packages).
+Build instructions, architecture documents, release history, benchmarks,
+contribution guides and verification probes remain in the source repository.
+Links from packaged documents to source-only material and notice bundles
+absent from that variant use the package's source revision online. Bundled
+documents, images and notices retain relative links for offline use.
+
+Local links and images in every bundled Markdown document are checked when
+building the JVM directory, archives and Debian staging tree. Targets are
+resolved relative to each document inside the package, including links to
+directories. Remote content and anchor names are outside this check.
+
+Run `./gradlew :app:verifyDistributionDocumentation` to stage and check the
+JVM, glibc and musl documentation sets without compiling a native binary. This
+gate is also part of `check`; `:app:documentationLinksTest` exercises the
+production rendering and link validation against fixtures.
 
 Runtime notice bundles are selected from the checked-in `licenses/` directory
 without reading the build machine's SDK at packaging time. TUInk's own source
@@ -192,9 +216,12 @@ images offline. The system installer copies the executable, scripts, README,
 license, third-party notices, and all notice bundles selected for that native
 variant. It leaves images, samples and `SECURITY.md` in the extracted archive;
 its README links to images, the security policy and developer documentation on
-the archive's source commit online, embedded during packaging. A source archive
-without Git metadata uses its matching `v<version>` release tag; an explicit
-`-PdocumentationRef=<full-commit-or-version-tag>` supports exported snapshots.
+the archive's source commit online, embedded during packaging. Builds from a
+source archive without Git metadata require
+`-PdocumentationRef=<full-commit-or-version-tag>` matching those sources. Use a
+full commit for a development snapshot, or the release tag for an archive of
+that exact release. The project version alone cannot identify the source
+revision, so packaging never chooses a tag automatically.
 
 The installer marks `/opt/tuink` as an archive-managed installation. It
 refuses to replace an existing non-TUInk file or symlink at
@@ -240,6 +267,15 @@ Build the package from the glibc native binary:
 profile. Both modes produce `tuink_<version>_<arch>.deb` with the same package
 identity and version; rebuilding replaces the output, and the packages cannot
 be installed side by side. Do not use `-Pmusl` or `-Ptarget=musl` for this task.
+
+To retain both packages, copy each output into a separate `glibc/` or
+`glibc-pgo/` directory outside `build/` before rebuilding or running `clean`.
+Generate a separate checksum manifest using those relative paths. The release
+workflow expects a single Debian package in `build/releases/`.
+
+`nativeDeb` does not update an existing `SHA256SUMS`. After replacing its
+output, run `:app:release` with the intended target and PGO flags to regenerate
+the release manifest.
 
 The package installs:
 

@@ -415,6 +415,9 @@ cd tuink-<version>-linux-<arch>
 The archive also includes `install.sh` and `uninstall.sh`. They manage only the
 marked TUInk installation under `/opt/tuink` and its
 `/usr/local/bin/tuink` link, and refuse to replace unrelated files.
+The scripts require Bash, `sudo`, and GNU coreutils. Uninstall refuses unexpected
+top-level entries and leaves the installation intact. Foreign files and directories
+under `licenses/` are preserved while the managed installation files are removed.
 
 ### JVM ZIP
 

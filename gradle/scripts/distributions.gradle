@@ -64,14 +64,22 @@ distributions {
 }
 
 def jvmDistZip = tasks.named('distZip', Zip) {
+    dependsOn(documentationLinksTest)
     destinationDirectory = distributionDir
     doLast {
         verifyDocumentationLinks.call(archiveOperations.zipTree(archiveFile.get()), jvmDocumentationRoot)
     }
 }
 
-// The unpacked JVM distribution and its ZIP share user documents, notices,
-// demo images and samples through distributions.main.contents above.
+tasks.named('installDist', Sync) {
+    dependsOn(documentationLinksTest)
+    doLast {
+        verifyDocumentationLinks.call(fileTree(destinationDir), '')
+    }
+}
+
+// The unpacked JVM distribution and ZIP share user documentation, application
+// license notices and samples through distributions.main.contents above.
 tasks.register('dist') {
     group = 'distribution'
     description = 'Build the unpacked JVM distribution with launchers, libraries and documentation.'
@@ -83,8 +91,8 @@ tasks.withType(AbstractArchiveTask).configureEach {
     reproducibleFileOrder = true
 }
 
-// All four native archives share documentation, Oracle runtime notices, samples,
-// installation scripts and executable-permission checks. Only optimized PGO
+// Native archives select the notices for their linked runtime libraries and
+// share user documentation, samples, scripts and permission checks. Only optimized PGO
 // outputs are packaged; training binaries and profiles are intermediate inputs.
 def registerNativeDistribution = { String target, boolean pgo ->
     String pgoSuffix = pgo ? 'Pgo' : ''
@@ -226,11 +234,4 @@ tasks.register('distributionArchives') {
     group = 'distribution'
     description = 'Build JVM/native archives; add Oracle PGO with -Ppgo. Use -Ptarget=all for all five variants.'
     dependsOn(jvmDistZip, releaseArchives)
-}
-
-tasks.named('installDist', Sync) {
-    dependsOn(documentationLinksTest)
-    doLast {
-        verifyDocumentationLinks.call(fileTree(destinationDir), '')
-    }
 }

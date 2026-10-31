@@ -66,7 +66,8 @@ checks that the minimum versions in `Depends` cover its required glibc/zlib ABI.
 
 | Goal | Command | Primary output |
 |---|---|---|
-| Run verification | `./gradlew check` | Tests plus architecture/dependency checks |
+| Run verification | `./gradlew check` | Tests plus architecture/dependency and offline documentation checks |
+| Check offline documentation | `./gradlew :app:verifyDistributionDocumentation` | JVM, glibc and musl documentation sets and local Markdown links; no native compilation |
 | Build JVM project | `./gradlew clean test build` | Module classes and JARs |
 | Run from sources | `./gradlew --console=plain :app:run` | Interactive process |
 | Unpacked JVM distribution | `./gradlew :app:dist` | `apps/tuink/launcher/build/install/tuink/` (alias of `installDist`) |
@@ -191,6 +192,21 @@ machine and include `README.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`,
 Developer documentation and native-runtime notice directories are omitted.
 Links to source-only documents and notices use the packaged source revision
 online.
+
+When building an exported source tree, such as a downloaded GitHub source ZIP,
+there is no Git metadata from which to read that revision. Pass
+`-PdocumentationRef=<full-commit-or-version-tag>` to `check`, distribution and
+release commands. Choose the full 40-character commit for a development
+snapshot, or the `v<major>.<minor>.<patch>` tag for that exact release archive.
+For example, from the matching release's source archive:
+
+```bash
+./gradlew check :app:distZip -PdocumentationRef=v0.16.0
+```
+
+The build refuses to guess a documentation tag from `version`: development
+sources can have the same version as an earlier release. Normal Git checkouts
+and worktrees use their own `HEAD` without this option.
 
 Gradle also creates module JARs as internal build products. They are not
 standalone fat/executable JAR distributions and do not carry the complete

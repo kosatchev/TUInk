@@ -1,10 +1,13 @@
-def releaseVersion = project.version.toString()
 apply from: rootProject.file('gradle/scripts/documentation-links.gradle')
+apply from: rootProject.file('gradle/scripts/documentation-reference.gradle')
 def documentationProblems = distributionDocumentationProblems
 def renderDocumentation = renderDistributionDocumentation
+def resolveDocumentationRef = resolveDistributionDocumentationRef
 def documentationLinkScript = rootProject.file('gradle/scripts/documentation-links.gradle')
+def documentationReferenceScript = rootProject.file('gradle/scripts/documentation-reference.gradle')
 def documentationLinkTests = rootProject.file('apps/tuink/packaging/documentation/test_links.groovy')
 def documentationRenderTests = rootProject.file('apps/tuink/packaging/documentation/test_render.groovy')
+def documentationReferenceTests = rootProject.file('apps/tuink/packaging/documentation/test_reference.groovy')
 def documentationContentsTests = rootProject.file('apps/tuink/packaging/documentation/test_contents.groovy')
 
 ext.verifyDistributionDocumentationLinks = { FileTree contents, String documentationRoot ->
@@ -27,43 +30,39 @@ def verifyDocumentationLinks = verifyDistributionDocumentationLinks
 def documentationLinksTest = tasks.register('documentationLinksTest') {
     group = 'verification'
     description = 'Check the production distribution-link validator against Markdown fixtures.'
-    inputs.files(documentationLinkScript, documentationLinkTests, documentationRenderTests)
+    inputs.files(documentationLinkScript, documentationLinkTests, documentationRenderTests,
+        documentationReferenceScript, documentationReferenceTests)
     doLast {
         new GroovyShell(getClass().classLoader, new Binding([findProblems: documentationProblems]))
             .evaluate(documentationLinkTests)
         new GroovyShell(getClass().classLoader, new Binding([renderDocumentation: renderDocumentation]))
             .evaluate(documentationRenderTests)
+        new GroovyShell(getClass().classLoader, new Binding([resolveReference: resolveDocumentationRef]))
+            .evaluate(documentationReferenceTests)
     }
 }
-// A version tag can precede a development snapshot's documentation.
-// Source archives without Git metadata retain their matching release tag.
-ext.distributionDocumentationRef = providers.gradleProperty('documentationRef').orElse(providers.provider {
-    if (rootProject.file('.git').exists()) {
-        def gitOutput = { List<String> arguments ->
-            providers.exec {
-                workingDir(rootProject.projectDir)
-                commandLine(['git'] + arguments)
-            }.standardOutput.asText.get().trim()
-        }
-        def gitRoot = new File(gitOutput(['rev-parse', '--show-toplevel']))
-        if (gitRoot.canonicalFile != rootProject.projectDir.canonicalFile) {
-            throw new GradleException('Archive documentation Git root does not match the project directory.')
-        }
-        return gitOutput(['rev-parse', 'HEAD'])
+// A project version can also describe a later development snapshot. An export
+// without Git must identify its documentation revision explicitly.
+ext.distributionDocumentationRef = providers.provider {
+    def gitOutput = { List<String> arguments ->
+        providers.exec {
+            workingDir(rootProject.projectDir)
+            commandLine(['git'] + arguments)
+        }.standardOutput.asText.get().trim()
     }
-    return "v${releaseVersion}".toString()
-}).map { ref ->
-    if (!(ref ==~ /([0-9a-f]{40}|v[0-9]+[.][0-9]+[.][0-9]+)/)) {
-        throw new GradleException('Archive documentation requires a full Git commit or v<major>.<minor>.<patch> tag.')
+    try {
+        resolveDocumentationRef.call(rootProject.projectDir,
+            providers.gradleProperty('documentationRef').orNull, gitOutput)
+    } catch (IllegalArgumentException invalid) {
+        throw new GradleException(invalid.message, invalid)
     }
-    ref
 }
 def archiveDocumentationRef = distributionDocumentationRef
 
 // Binary distributions carry user documentation. Development documents stay
 // in the source tree and are linked at this build's immutable source revision.
 def sourceDocumentation = rootProject.fileTree(rootProject.projectDir) {
-    include('docs/**', 'verification/performance/README.md', 'ui-regression/README.md',
+    include('docs/**', 'verification/performance/README.md', 'verification/ui/README.md',
         'verification/compatibility/android/README.md', 'licenses/**', 'CONTRIBUTING.md')
     exclude('docs/assets/**')
 }
@@ -90,7 +89,7 @@ nativeLicenseBundles.each { String target, List<String> licenseBundles ->
         filePermissions {
             unix('rw-r--r--')
         }
-        inputs.files(sourceDocumentation, documentationLinkScript)
+        inputs.files(sourceDocumentation, documentationLinkScript, documentationReferenceScript)
         inputs.property('documentationRef', archiveDocumentationRef)
         inputs.property('licenseBundles', licenseBundles)
         doLast {

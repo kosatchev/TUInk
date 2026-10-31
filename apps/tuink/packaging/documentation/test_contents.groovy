@@ -27,12 +27,10 @@ bundles.each { String target, File directory ->
             "${target}: changed source bytes in ${name}"
     }
     String readme = new File(directory, 'README.md').getText('UTF-8')
-    String sourceReadme = new File(sourceRoot, 'README.md').getText('UTF-8')
-    if (sourceReadme.contains("](docs/building.md")) assert readme.contains("https://github.com/kosatchev/tuink/blob/${documentationRef}/docs/building.md")
-    if (sourceReadme.contains('](LICENSE)')) assert readme.contains('](LICENSE)')
-    if (sourceReadme.contains('](THIRD_PARTY_NOTICES.md)')) assert readme.contains('](THIRD_PARTY_NOTICES.md)')
-    if (sourceReadme.contains('](docs/assets/tuink-menus.gif)')) assert readme.contains('](docs/assets/tuink-menus.gif)')
-    if (sourceReadme.contains('](SECURITY.md)')) assert readme.contains('](SECURITY.md)')
+    assert readme.contains("https://github.com/kosatchev/tuink/blob/${documentationRef}/docs/building.md")
+    assert readme.contains('](LICENSE)') && readme.contains('](THIRD_PARTY_NOTICES.md)')
+    assert readme.contains('](docs/assets/tuink-menus.gif)')
+    assert readme.contains('](SECURITY.md)')
     String notices = new File(directory, 'THIRD_PARTY_NOTICES.md').getText('UTF-8')
     ['oracle-graalvm-25.0.4', 'musl-1.2.6', 'zlib-1.3.2'].each { bundle ->
         String destination = "licenses/${bundle}/README.md"

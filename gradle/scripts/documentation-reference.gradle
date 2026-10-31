@@ -1,0 +1,22 @@
+/** Select documentation provenance without guessing a source archive's revision from its version. */
+ext.resolveDistributionDocumentationRef = { File projectRoot, String supplied, Closure<String> gitOutput ->
+    String ref = supplied
+    if (ref == null) {
+        if (!new File(projectRoot, '.git').exists()) {
+            throw new IllegalArgumentException(
+                'Source tree has no Git metadata. Supply -PdocumentationRef=<full-commit-or-version-tag> '
+                    + 'matching these sources when checking or packaging distribution documentation. '
+                    + 'The project version does not identify a source revision.')
+        }
+        File gitRoot = new File(gitOutput.call(['rev-parse', '--show-toplevel']))
+        if (gitRoot.canonicalFile != projectRoot.canonicalFile) {
+            throw new IllegalArgumentException('Archive documentation Git root does not match the project directory.')
+        }
+        ref = gitOutput.call(['rev-parse', 'HEAD'])
+    }
+    if (!(ref ==~ /([0-9a-f]{40}|v[0-9]+[.][0-9]+[.][0-9]+)/)) {
+        throw new IllegalArgumentException(
+            'Archive documentation requires a full Git commit or v<major>.<minor>.<patch> tag.')
+    }
+    ref
+}

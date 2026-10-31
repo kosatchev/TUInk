@@ -4,6 +4,7 @@ from pathlib import Path
 import signal
 import sys
 import tempfile
+import termios
 import unittest
 from unittest.mock import patch
 
@@ -244,6 +245,62 @@ class FieldObservationTest(unittest.TestCase):
 
 
 class LifecycleTest(unittest.TestCase):
+    def test_expected_startup_failure_keeps_overrides_in_the_child_and_restores_the_terminal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root / "fake-startup-failure"
+            executable.write_text(
+                f"#!{sys.executable}\n"
+                "import os, sys\n"
+                "print('CHILD_VALUE=' + os.environ.get('TUINK_PTY_TEST', 'missing'), flush=True)\n"
+                "sys.exit(2)\n", encoding="utf-8")
+            executable.chmod(0o700)
+            parent_value = os.environ.get("TUINK_PTY_TEST")
+            with Session(root / "session", executable, "unused", wait_for_startup=False,
+                         env_overrides={"TUINK_PTY_TEST": "child"}, terminal_baud=termios.B19200) as session:
+                session.expect(lambda: session.poll() is not None, "expected startup rejection", timeout=2)
+                session.drain(0.05)
+                self.assertEqual(2, session.status)
+                self.assertIn(b"CHILD_VALUE=child", session.log)
+                self.assertEqual(parent_value, os.environ.get("TUINK_PTY_TEST"))
+                session.expect_terminal_restored()
+
+    @staticmethod
+    def terminal_editor(root, corrupt_speed=False):
+        executable = root / "fake-terminal-editor"
+        executable.write_text(
+            f"#!{sys.executable}\n"
+            "import os, sys, termios, tty\n"
+            "original = termios.tcgetattr(0)\n"
+            "tty.setraw(0)\n"
+            "sys.stdout.write('\\x1b[1;1HFile\\x1b[24;1HLn 1/1, Col 1/1'); sys.stdout.flush()\n"
+            "while os.read(0, 1) != b'\\x11': pass\n"
+            + ("original[4] = original[5] = termios.B0\n" if corrupt_speed else "")
+            + "termios.tcsetattr(0, termios.TCSANOW, original)\n", encoding="utf-8")
+        executable.chmod(0o700)
+        return executable
+
+    def test_measured_terminal_survives_child_exit_with_its_original_attributes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = self.terminal_editor(root)
+            for baud in (termios.B9600, termios.B38400):
+                with self.subTest(baud=baud), Session(
+                        root / str(baud), executable, "unused", terminal_baud=baud) as session:
+                    self.assertEqual([baud, baud], session.original_terminal_attributes[4:6])
+                    session.finish()
+                    session.expect_terminal_restored()
+                    self.assertTrue((session.root / "terminal-attributes.json").is_file())
+
+    def test_terminal_comparison_detects_baud_loss_despite_restored_raw_flags(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = self.terminal_editor(root, corrupt_speed=True)
+            with Session(root / "session", executable, "unused", terminal_baud=termios.B9600) as session:
+                session.finish()
+                with self.assertRaisesRegex(AssertionError, "ispeed:.*ospeed:"):
+                    session.expect_terminal_restored()
+
     def test_exit_predicate_is_rechecked_after_reaping(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -281,12 +338,15 @@ class LifecycleTest(unittest.TestCase):
                 "sys.stdout.write('\\x1b[1;1HFile\\x1b[24;1HLn 1/1, Col 1/1'); sys.stdout.flush()\n"
                 "while True: time.sleep(1)\n", encoding="utf-8")
             executable.chmod(0o700)
-            session = Session(root / "session", executable, "unused")
+            session = Session(root / "session", executable, "unused", terminal_baud=termios.B9600)
+            slave = session.terminal_slave_fd
             session.deadline = 0
             with self.assertRaises(TimeoutError):
                 session.drain()
             session.close()
             self.assertEqual(-signal.SIGKILL, session.status)
+            with self.assertRaises(OSError):
+                os.fstat(slave)
             with self.assertRaises(ChildProcessError):
                 os.waitpid(session.pid, os.WNOHANG)
 

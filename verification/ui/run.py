@@ -11,9 +11,11 @@ REPOSITORY_ROOT = next(parent for parent in Path(__file__).resolve().parents
                        if (parent / 'settings.gradle').is_file() and (parent / 'gradlew').is_file())
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import termios
 import time
 import traceback
 
@@ -292,6 +294,86 @@ class Regressions:
             session.send(b"\x1b[27u\x1a\x13")
             session.finish()
         assert document.read_text(encoding="utf-8") == original
+
+    def terminal_diagnostics(self):
+        payload = "\x1b]0;TUINK_AUDIT_TITLE\x07\r\nforged\u202e"
+        term = "tuink-unknown-" + payload
+        visible = b"tuink-unknown-\\u001B]0;TUINK_AUDIT_TITLE\\u0007\\r\\nforged\\u202E"
+        with self.session("terminal-diagnostics", term=term, options=["--no-mouse"]) as session:
+            session.expect(lambda: b"Unable to retrieve infocmp for type " in session.log,
+                           "JLine warning for an unknown terminal type")
+            session.finish()
+            assert visible in session.log, "the JLine warning lost its escaped terminal type"
+            assert payload.encode("utf-8") not in session.log, "raw terminal data reached output"
+            assert b"\x1b]0;TUINK_AUDIT_TITLE" not in session.log, "OSC reached the terminal"
+
+    def terminal_attributes(self):
+        failures = []
+        for speed, baud in ((9600, termios.B9600), (38400, termios.B38400)):
+            for mode, options in (("default", None), ("primary", ["--no-alt-screen", "--no-mouse"])):
+                provider = "jni" if speed == 9600 and mode == "default" else None
+                name = f"terminal-attributes-{speed}-{mode}"
+                if provider is not None:
+                    name += "-requested-jni"
+                document = self.fixture(name, "original\n")
+                with self.session(name, document, options=options, terminal_baud=baud,
+                                  jline_provider=provider) as session:
+                    session.send(b"edited ")
+                    session.save(document, "edited original\n", "saving before terminal restoration")
+                    session.finish()
+                    try:
+                        session.expect_terminal_restored()
+                    except AssertionError as failure:
+                        failures.append(f"{name}: {failure}")
+        name = "terminal-attributes-sigint"
+        document = self.fixture(name, "original\n")
+        draft = "interrupted original\n"
+        with self.session(name, document, terminal_baud=termios.B9600) as session:
+            session.send(b"interrupted ")
+            session.expect(lambda: "*" in session.screen.lines[0] and "interrupted original" in session.screen.text,
+                           "a dirty draft before the external signal")
+            # A process signal must still stop the editor even though Ctrl+C is clipboard input.
+            os.kill(session.pid, signal.SIGINT)
+            session.expect(lambda: session.poll() is not None, "normal external SIGINT exit", timeout=5)
+            assert session.status == 0, f"external SIGINT exited {session.status}"
+            assert document.read_text(encoding="utf-8") == "original\n"
+            assert recovery_snapshot_present(session.home / ".config/tuink/recovery", draft), \
+                "external SIGINT lost the dirty draft's recovery snapshot"
+            try:
+                session.expect_terminal_restored()
+            except AssertionError as failure:
+                failures.append(f"{name}: {failure}")
+        assert not failures, "\n".join(failures)
+
+    def startup_dependencies(self):
+        failures = []
+        for missing in ("tty", "stty"):
+            for color in ("true", "false"):
+                name = f"startup-without-{missing}-dumb-color-{color}"
+                tools = self.root / (name + "-bin")
+                tools.mkdir()
+                for command in ("sh", "tty", "stty", "infocmp"):
+                    if command == missing:
+                        continue
+                    source = shutil.which(command)
+                    if source is None and command == "infocmp":
+                        continue
+                    assert source is not None, f"startup dependency test requires {command}"
+                    (tools / command).symlink_to(source)
+                with self.session(name, wait_for_startup=False, terminal_baud=termios.B19200,
+                                  env_overrides={"PATH": str(tools), "COLORTERM": "truecolor"},
+                                  jvm_properties={"org.jline.terminal.dumb.color": color}) as session:
+                    try:
+                        session.expect(lambda: session.poll() is not None,
+                                       f"startup rejection without {missing}", timeout=5)
+                        session.drain(0.05)
+                        assert session.status != 0, "startup without a required command succeeded"
+                        assert b"Interactive terminal is not available" in session.log, session.log
+                        assert b"\x1b" not in session.log, "startup failure emitted terminal control sequences"
+                        session.expect_terminal_restored()
+                    except AssertionError as failure:
+                        failures.append(f"{name}: {failure}")
+        assert not failures, "\n".join(failures)
 
     def reading(self):
         original = "\n".join(f"ROW{i:04d}|" + " ".join(f"C{j:03d}|" for j in range(50)) for i in range(120))
@@ -1391,7 +1473,7 @@ class Regressions:
         assert document.read_text(encoding="utf-8") == original
 
 
-SCENARIOS = ("reading", "focus", "field", "resize", "large-wrap", "tabs", "tab-scoped-ui", "history", "grapheme-edit-caret", "selection-autoscroll", "long-copy-name", "navigation", "fragmented-keys", "quit-confirmation", "gutter-idle", "paste", "settings", "settings-conflict", "recovery", "recovery-format5", "recovery-memory", "linux-keys", "enhanced-text", "long-unicode-edit", "save-as-workspace", "settings-memory", "syntax-memory", "unix-path-recovery", "literal-indentation", "field-memory", "document-caption", "save-name-suggestion", "replacement-memory", "paste-memory", "recovery-lock-cleanup", "xdg-profile", "cli-path-identity", "save-as-retarget", "legacy-encoding", "field-edit-caret", "field-memory-growth", "identical-replace-budget", "clipboard-memory", "cpp-raw-indentation")
+SCENARIOS = ("reading", "focus", "field", "resize", "large-wrap", "tabs", "tab-scoped-ui", "history", "grapheme-edit-caret", "selection-autoscroll", "long-copy-name", "navigation", "fragmented-keys", "quit-confirmation", "gutter-idle", "paste", "settings", "settings-conflict", "recovery", "recovery-format5", "recovery-memory", "linux-keys", "enhanced-text", "long-unicode-edit", "save-as-workspace", "settings-memory", "syntax-memory", "unix-path-recovery", "literal-indentation", "field-memory", "document-caption", "save-name-suggestion", "replacement-memory", "paste-memory", "recovery-lock-cleanup", "xdg-profile", "cli-path-identity", "save-as-retarget", "legacy-encoding", "field-edit-caret", "field-memory-growth", "identical-replace-budget", "clipboard-memory", "cpp-raw-indentation", "terminal-diagnostics", "terminal-attributes", "startup-dependencies")
 
 
 def classpath_manifest(classpath):

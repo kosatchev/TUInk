@@ -2,6 +2,7 @@
 
 import errno
 import fcntl
+import json
 import os
 from pathlib import Path
 import pty
@@ -16,9 +17,39 @@ from vt import Screen
 SAVE_PROGRESS_LABELS = ("Checking save target", "Checking file changes", "Preparing save", "Finishing save")
 
 
+def measured_pty_fork(baud):
+    """Retain the slave so exit cannot destroy the terminal being compared."""
+    master, slave = os.openpty()
+    try:
+        attributes = termios.tcgetattr(slave)
+        attributes[4] = attributes[5] = baud
+        termios.tcsetattr(slave, termios.TCSANOW, attributes)
+        before = termios.tcgetattr(slave)
+        pid = os.fork()
+    except BaseException:
+        os.close(master)
+        os.close(slave)
+        raise
+    if pid == 0:
+        try:
+            os.close(master)
+            os.setsid()
+            fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+            for target in (0, 1, 2):
+                os.dup2(slave, target)
+            if slave > 2:
+                os.close(slave)
+        except BaseException:
+            os._exit(127)
+        return 0, -1, None, None
+    return pid, master, slave, before
+
+
 class Session:
     def __init__(self, root, java, classpath, document=None, home=None, mono=False, options=None,
-                 term="xterm-256color", max_heap_mb=192, config_home=None, timeout=45):
+                 term="xterm-256color", max_heap_mb=192, config_home=None, timeout=45,
+                 terminal_baud=None, jline_provider=None, wait_for_startup=True,
+                 env_overrides=None, jvm_properties=None):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         home = Path(home) if home else self.root / "home"
@@ -31,14 +62,25 @@ class Session:
         self.closed = False
         self.timeout = timeout
         self.deadline = time.monotonic() + timeout
+        self.terminal_slave_fd = None
+        self.original_terminal_attributes = None
         args = [str(java), "--enable-native-access=ALL-UNNAMED", f"-Xmx{max_heap_mb}m",
-                f"-Duser.home={home}", "-cp", classpath, "dev.tuink.app.App"]
+                f"-Duser.home={home}"]
+        if jline_provider is not None:
+            args.append(f"-Dorg.jline.terminal.provider={jline_provider}")
+        for key, value in (jvm_properties or {}).items():
+            args.append(f"-D{key}={value}")
+        args.extend(("-cp", classpath, "dev.tuink.app.App"))
         args.extend(("--theme=cyan",) if options is None else options)
         if mono:
             args.append("--no-color")
         if document:
             args.append(str(document))
-        self.pid, self.fd = pty.fork()
+        if terminal_baud is None:
+            self.pid, self.fd = pty.fork()
+        else:
+            self.pid, self.fd, self.terminal_slave_fd, self.original_terminal_attributes = measured_pty_fork(
+                terminal_baud)
         if self.pid == 0:
             try:
                 fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
@@ -46,6 +88,7 @@ class Session:
                 env = dict(os.environ, TERM=term, HOME=str(home),
                            XDG_CONFIG_HOME=str(self.config_home), XDG_DATA_HOME=str(home / ".local/share"),
                            XDG_CACHE_HOME=str(home / ".cache"))
+                env.update(env_overrides or {})
                 # Noninteractive CI shells may inherit SIGINT as ignored.
                 # The editor must install its own terminal signal handlers.
                 for signum in (signal.SIGINT, signal.SIGQUIT, signal.SIGTERM):
@@ -53,6 +96,8 @@ class Session:
                 os.execve(str(java), args, env)
             except BaseException:
                 os._exit(127)
+        if not wait_for_startup:
+            return
         try:
             self.expect(lambda: "File" in self.screen.lines[0] and "Ln " in self.screen.text,
                         "editor startup", timeout=10)
@@ -151,6 +196,23 @@ class Session:
         if self.status != 0:
             raise AssertionError(f"normal quit exited {self.status}")
 
+    def expect_terminal_restored(self):
+        """Compare every termios field with its measured pre-exec value."""
+        if self.terminal_slave_fd is None:
+            raise RuntimeError("terminal_baud is required to retain the measured terminal")
+        if self.poll() is None:
+            raise AssertionError("terminal attributes must be checked after the child exits")
+        restored = termios.tcgetattr(self.terminal_slave_fd)
+        before = self.original_terminal_attributes
+        (self.root / "terminal-attributes.json").write_text(json.dumps(
+            {"before": before, "after": restored},
+            default=lambda value: value.hex(), indent=2) + "\n", encoding="utf-8")
+        names = ("iflag", "oflag", "cflag", "lflag", "ispeed", "ospeed", "cc")
+        changed = [f"{name}: {old!r} -> {new!r}"
+                   for name, old, new in zip(names, before, restored) if old != new]
+        if changed:
+            raise AssertionError("Terminal attributes were not restored: " + "; ".join(changed))
+
     def crash(self):
         os.kill(self.pid, signal.SIGKILL)
         self.expect(lambda: self.poll() is not None, "forced crash exit", timeout=5)
@@ -176,7 +238,12 @@ class Session:
                         _, status = os.waitpid(self.pid, 0)
                         self.status = os.waitstatus_to_exitcode(status)
             finally:
-                os.close(self.fd)
+                try:
+                    os.close(self.fd)
+                finally:
+                    if getattr(self, "terminal_slave_fd", None) is not None:
+                        os.close(self.terminal_slave_fd)
+                        self.terminal_slave_fd = None
 
     def __enter__(self):
         return self

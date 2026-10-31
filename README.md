@@ -47,6 +47,8 @@ The Gradle wrapper can run on a compatible JDK, such as 17, 21 or 25, and
 automatically downloads a Java 25 toolchain when needed.
 The packaged JVM ZIP runs on Java 25 or newer. See the
 [setup and transfer guide in Russian](docs/setup-ru.md) for a new computer.
+Interactive Linux runs also require `tty` and `stty` in `PATH`
+(`coreutils` on Debian/Ubuntu).
 
 Linux access ACLs are preserved directly through libc in both JVM and native
 distributions; the `acl` package and a separate `libacl` library are not required.

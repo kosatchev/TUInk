@@ -57,10 +57,10 @@ public final class TerminalRuntime implements AutoCloseable {
     private static TerminalRuntime attach(TerminalSession session, boolean colorEnabled) throws IOException {
         try {
             return new TerminalRuntime(session, colorEnabled);
-        } catch (RuntimeException failure) {
+        } catch (RuntimeException | Error failure) {
             try {
                 session.close();
-            } catch (IOException | RuntimeException cleanupFailure) {
+            } catch (IOException | RuntimeException | Error cleanupFailure) {
                 failure.addSuppressed(cleanupFailure);
             }
             throw failure;

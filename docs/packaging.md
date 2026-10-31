@@ -79,11 +79,11 @@ requiring the `acl` package or a separate `libacl` library. JVM runs use Java
 time, including in the fully static musl executable. An ACL read, write, or
 verification failure rejects the save before the original file is replaced.
 
-The static musl executable uses JLine's `exec` terminal provider. Interactive
-startup also requires the external `tty` and `stty` commands in `PATH` (provided
-by `coreutils` on Debian/Ubuntu). Static linking removes the shared-library
-requirement, while these terminal commands remain runtime
-dependencies. Check them on minimal systems or when using a restricted `PATH`:
+All Linux variants use JLine's `exec` terminal provider to avoid the JNI
+provider resetting terminal baud rates. Interactive startup requires the external
+`tty` and `stty` commands in `PATH` (provided by `coreutils` on Debian/Ubuntu).
+This includes the JVM ZIP, glibc binaries and fully static musl binaries.
+Check the commands on minimal systems or when using a restricted `PATH`:
 
 ```bash
 command -v tty stty
@@ -240,6 +240,7 @@ Build the package from the glibc native binary:
 profile. Both modes produce `tuink_<version>_<arch>.deb` with the same package
 identity and version; rebuilding replaces the output, and the packages cannot
 be installed side by side. Do not use `-Pmusl` or `-Ptarget=musl` for this task.
+
 The package installs:
 
 ```text

@@ -52,6 +52,9 @@ The scenarios protect the following user behavior:
 | `recovery-lock-cleanup` | Clean launches create no entry locks, and closing the last editor reclaims locks from a real background snapshot |
 | `xdg-profile` | A configuration directory outside the home holds settings and recovery without touching the default profile |
 | `cli-path-identity` | Ambiguous native argv filenames are rejected before startup; ASCII file URIs open and save the distinct raw-byte and literal `�` files |
+| `terminal-diagnostics` | An unknown `TERM` containing OSC, line breaks and bidi controls produces a visible escaped JLine warning, then the editor starts and exits normally |
+| `terminal-attributes` | At 9600 and 38400 baud, normal exit restores every measured termios field in default and `--no-alt-screen --no-mouse` modes; external SIGINT also exits normally, restores the terminal and retains the unsaved draft for recovery |
+| `startup-dependencies` | Missing `tty` or `stty` causes a bounded startup error without ANSI output or changed termios, with colored and uncolored dumb-terminal fallbacks |
 | `save-as-retarget` | A retargeted opening symlink still conflicts on Save; explicitly choosing its new target requires confirmation and saves only that file |
 | `legacy-encoding` | An unencodable emoji keeps CP1251 bytes intact; safe cancellation and explicit UTF-8 Save As preserve CRLF, and format Undo/Redo retain the text and saved bytes |
 | `field-edit-caret` | Deleting an emoji separator keeps subsequent input after the newly joined grapheme in Find and Save As |
@@ -74,6 +77,18 @@ is running. Every process has a bounded startup, scenario, and exit deadline,
 and cleanup reaps it on both success and failure. Successful scenarios require
 a normal Ctrl+Q exit; the first recovery process instead checks its expected
 SIGKILL termination after confirming the unsaved draft reached recovery storage.
+
+The terminal-attributes scenario measures the real PTY settings before child
+execution, retains a slave descriptor until after the child exits, and compares
+all flags, control characters and input/output speeds. It writes the measured
+values to `terminal-attributes.json` in each case directory. The test does not
+substitute assumed terminal defaults or ignore baud bits.
+One case supplies `-Dorg.jline.terminal.provider=jni` to verify that a JVM
+property cannot bypass the application's Linux provider choice and lose baud settings.
+The startup-dependencies scenario supplies an isolated child-only `PATH` with
+one required command omitted, sets `COLORTERM=truecolor`, and tests both values
+of `org.jline.terminal.dumb.color`. It retains the PTY through the failed startup
+and requires an error exit within five seconds.
 
 When adding a regression, assert an externally visible invariant and file bytes
 where relevant. Add parser self-tests before relying on new escape sequences.

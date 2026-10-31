@@ -45,6 +45,7 @@ public final class TerminalSession implements AutoCloseable {
     private final TerminalCapabilities capabilities;
     private final boolean backspaceSendsCtrlH;
     private final TerminalKeyMap keyMap;
+    private final TerminalLogScope logScope;
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final Thread shutdownHook;
     private boolean mouseTrackingEnabled;
@@ -53,12 +54,14 @@ public final class TerminalSession implements AutoCloseable {
         Backend backend,
         ShutdownHooks shutdownHooks,
         Options options,
-        Attributes originalAttributes
+        Attributes originalAttributes,
+        TerminalLogScope logScope
     ) {
         this.backend = backend;
         this.shutdownHooks = shutdownHooks;
         this.options = options;
         this.originalAttributes = originalAttributes;
+        this.logScope = logScope;
         this.writer = backend.writer();
         this.capabilities = Objects.requireNonNull(backend.capabilities(), "backend capabilities");
         this.backspaceSendsCtrlH = detectCtrlHBackspace(backend.backspaceSequence(), originalAttributes);
@@ -69,33 +72,51 @@ public final class TerminalSession implements AutoCloseable {
 
     public static TerminalSession open(Options options) throws IOException {
         Objects.requireNonNull(options, "options");
-        TerminalBuilder builder = TerminalBuilder.builder().system(true).encoding(StandardCharsets.UTF_8);
-        if (options.forceExecProvider()) {
-            // Static native images cannot always load jline-native from /tmp.
-            builder
-                .jni(false)
-                .ffm(false)
-                .jna(false)
-                .jansi(false)
-                .exec(true)
-                .providers("exec,dumb");
+        TerminalLogScope logScope = TerminalLogScope.open();
+        try {
+            TerminalBuilder builder = TerminalBuilder.builder().system(true).encoding(StandardCharsets.UTF_8);
+            if (options.forceExecProvider() || System.getProperty("os.name", "").startsWith("Linux")) {
+                // JLine 3's Linux JNI provider drops baud rates when setting attributes.
+                // The exec provider preserves them and also works in static images.
+                builder
+                    .provider("exec")
+                    .jni(false)
+                    .ffm(false)
+                    .jna(false)
+                    .jansi(false)
+                    .exec(true)
+                    .providers("exec,dumb");
+            }
+            return start(options, new JLineBackend(builder.build()), RuntimeShutdownHooks.INSTANCE, logScope);
+        } catch (IOException | RuntimeException | Error failure) {
+            try {
+                logScope.close();
+            } catch (RuntimeException | Error restorationFailure) {
+                failure.addSuppressed(restorationFailure);
+            }
+            throw failure;
         }
-        return start(options, new JLineBackend(builder.build()), RuntimeShutdownHooks.INSTANCE);
     }
 
     static TerminalSession start(Options options, Backend backend, ShutdownHooks shutdownHooks) throws IOException {
+        return start(options, backend, shutdownHooks, null);
+    }
+
+    private static TerminalSession start(Options options, Backend backend, ShutdownHooks shutdownHooks,
+        TerminalLogScope logScope) throws IOException {
         Objects.requireNonNull(options, "options");
         Objects.requireNonNull(backend, "backend");
         Objects.requireNonNull(shutdownHooks, "shutdownHooks");
 
-        if ("dumb".equalsIgnoreCase(backend.type())) {
+        if (Terminal.TYPE_DUMB.equalsIgnoreCase(backend.type())
+            || Terminal.TYPE_DUMB_COLOR.equalsIgnoreCase(backend.type())) {
             IOException failure = new IOException(
                 "Interactive terminal is not available (dumb terminal). "
                     + "Run this application in a real TTY."
             );
             try {
                 backend.close();
-            } catch (IOException | RuntimeException closeFailure) {
+            } catch (IOException | RuntimeException | Error closeFailure) {
                 failure.addSuppressed(closeFailure);
             }
             throw failure;
@@ -109,28 +130,28 @@ public final class TerminalSession implements AutoCloseable {
             raw.setLocalFlag(LocalFlag.ISIG, false);
             backend.attributes(raw);
 
-            session = new TerminalSession(backend, shutdownHooks, options, original);
+            session = new TerminalSession(backend, shutdownHooks, options, original, logScope);
             shutdownHooks.add(session.shutdownHook);
             session.writeInitialization();
             return session;
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | RuntimeException | Error e) {
             if (session != null) {
                 try {
                     session.close();
-                } catch (IOException | RuntimeException cleanupFailure) {
+                } catch (IOException | RuntimeException | Error cleanupFailure) {
                     e.addSuppressed(cleanupFailure);
                 }
             } else {
                 if (original != null) {
                     try {
                         backend.attributes(original);
-                    } catch (IOException | RuntimeException restoreFailure) {
+                    } catch (IOException | RuntimeException | Error restoreFailure) {
                         e.addSuppressed(restoreFailure);
                     }
                 }
                 try {
                     backend.close();
-                } catch (IOException | RuntimeException closeFailure) {
+                } catch (IOException | RuntimeException | Error closeFailure) {
                     e.addSuppressed(closeFailure);
                 }
             }
@@ -213,12 +234,31 @@ public final class TerminalSession implements AutoCloseable {
             return;
         }
 
+        Throwable failure = null;
+        try {
+            closeBackend();
+        } catch (IOException | RuntimeException | Error closeFailure) {
+            failure = closeFailure;
+            throw closeFailure;
+        } finally {
+            if (logScope != null) {
+                try {
+                    logScope.close();
+                } catch (RuntimeException | Error restorationFailure) {
+                    if (failure == null) throw restorationFailure;
+                    failure.addSuppressed(restorationFailure);
+                }
+            }
+        }
+    }
+
+    private void closeBackend() throws IOException {
         IOException failure = null;
         try {
             shutdownHooks.remove(shutdownHook);
         } catch (IllegalStateException ignored) {
             // The JVM is already shutting down or this is the shutdown hook.
-        } catch (RuntimeException e) {
+        } catch (RuntimeException | Error e) {
             failure = appendFailure(failure, "Failed to remove terminal shutdown hook", e);
         }
 
@@ -237,19 +277,19 @@ public final class TerminalSession implements AutoCloseable {
                 cleanup.append(CLEAR_AND_HOME);
             }
             write(cleanup.toString());
-        } catch (RuntimeException e) {
+        } catch (RuntimeException | Error e) {
             failure = appendFailure(failure, "Failed to restore terminal output state", e);
         }
 
         try {
             backend.attributes(originalAttributes);
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | RuntimeException | Error e) {
             failure = appendFailure(failure, "Failed to restore terminal attributes", e);
         }
 
         try {
             backend.close();
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | RuntimeException | Error e) {
             failure = appendFailure(failure, "Failed to close terminal", e);
         }
 
@@ -287,7 +327,7 @@ public final class TerminalSession implements AutoCloseable {
         }
     }
 
-    private static IOException appendFailure(IOException current, String message, Exception next) {
+    private static IOException appendFailure(IOException current, String message, Throwable next) {
         IOException wrapped = next instanceof IOException io ? io : new IOException(message, next);
         if (current == null) {
             return wrapped;

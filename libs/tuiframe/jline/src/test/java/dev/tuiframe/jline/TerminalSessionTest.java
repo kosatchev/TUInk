@@ -34,6 +34,8 @@ import org.jline.terminal.Attributes.LocalFlag;
 import org.jline.utils.NonBlockingReader;
 import org.jline.utils.InfoCmp.Capability;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class TerminalSessionTest {
     private static final String ENABLE_MOUSE = "\u001B[?1000h\u001B[?1002h\u001B[?1006h";
@@ -394,6 +396,33 @@ class TerminalSessionTest {
     }
 
     @Test
+    void aSignalRegistrationErrorRestoresTheStartedSessionBeforePropagatingWithCleanupSuppressed() {
+        for (boolean failOnResize : List.of(false, true)) {
+            FakeBackend backend = new FakeBackend("xterm");
+            AssertionError failure = new AssertionError("signal registration failed");
+            if (failOnResize) backend.resizeRegistrationError = failure;
+            else backend.interruptRegistrationError = failure;
+            backend.closeFailure = new IOException("backend cleanup failed");
+            FakeShutdownHooks hooks = new FakeShutdownHooks();
+
+            assertSame(failure, assertThrows(AssertionError.class,
+                () -> TerminalRuntime.start(new TerminalSession.Options(true, false, false),
+                    backend, hooks, true)));
+
+            assertTrue(backend.enteredRawMode);
+            assertTrue(backend.currentAttributes.getLocalFlag(LocalFlag.ISIG));
+            assertEquals(1, backend.attributesRestoreCount);
+            assertEquals(1, backend.closeCount);
+            assertEquals(1, hooks.removeCount);
+            assertEquals(null, hooks.current);
+            assertEquals(1, failure.getSuppressed().length);
+            assertSame(backend.closeFailure, failure.getSuppressed()[0]);
+            assertTrue(backend.output().endsWith(
+                "\u001B[0m" + DISABLE_MOUSE + DISABLE_BRACKETED_PASTE + "\u001B[?25h\u001B[?1049l"));
+        }
+    }
+
+    @Test
     void canToggleMouseTrackingWithoutDuplicatingSequences() throws Exception {
         FakeBackend backend = new FakeBackend("xterm");
         TerminalSession session = TerminalSession.start(
@@ -543,9 +572,10 @@ class TerminalSessionTest {
         session.close();
     }
 
-    @Test
-    void rejectsDumbTerminalBeforeEnteringRawMode() {
-        FakeBackend backend = new FakeBackend("dumb");
+    @ParameterizedTest
+    @ValueSource(strings = {"dumb", "DUMB", "DuMb", "dumb-color", "DUMB-COLOR", "DuMb-CoLoR"})
+    void rejectsDumbTerminalBeforeEnteringRawMode(String terminalType) {
+        FakeBackend backend = new FakeBackend(terminalType);
         FakeShutdownHooks hooks = new FakeShutdownHooks();
 
         IOException error = assertThrows(
@@ -559,28 +589,40 @@ class TerminalSessionTest {
 
         assertTrue(error.getMessage().contains("Interactive terminal is not available"));
         assertFalse(backend.enteredRawMode);
+        assertTrue(backend.currentAttributes.getLocalFlag(LocalFlag.ISIG));
+        assertEquals("", backend.output());
+        assertEquals(0, backend.attributesRestoreCount);
         assertEquals(1, backend.closeCount);
         assertEquals(0, hooks.addCount);
+        assertEquals(0, hooks.removeCount);
     }
 
-    @Test
-    void keepsDumbTerminalDiagnosisWhenBackendCloseFails() {
-        FakeBackend backend = new FakeBackend("dumb");
+    @ParameterizedTest
+    @ValueSource(strings = {"dumb", "DUMB", "DuMb", "dumb-color", "DUMB-COLOR", "DuMb-CoLoR"})
+    void keepsDumbTerminalDiagnosisWhenBackendCloseFails(String terminalType) {
+        FakeBackend backend = new FakeBackend(terminalType);
         backend.closeFailure = new IOException("close failed");
+        FakeShutdownHooks hooks = new FakeShutdownHooks();
 
         IOException error = assertThrows(
             IOException.class,
             () -> TerminalSession.start(
                 new TerminalSession.Options(true, true, false),
                 backend,
-                new FakeShutdownHooks()
+                hooks
             )
         );
 
         assertTrue(error.getMessage().contains("Interactive terminal is not available"));
         assertEquals(1, error.getSuppressed().length);
-        assertEquals("close failed", error.getSuppressed()[0].getMessage());
+        assertSame(backend.closeFailure, error.getSuppressed()[0]);
+        assertFalse(backend.enteredRawMode);
+        assertTrue(backend.currentAttributes.getLocalFlag(LocalFlag.ISIG));
+        assertEquals("", backend.output());
+        assertEquals(0, backend.attributesRestoreCount);
         assertEquals(1, backend.closeCount);
+        assertEquals(0, hooks.addCount);
+        assertEquals(0, hooks.removeCount);
     }
 
     @Test
@@ -654,6 +696,55 @@ class TerminalSessionTest {
         ));
     }
 
+    @Test
+    void anErrorBeforeSessionConstructionStillRestoresAttributesAndClosesTheBackend() {
+        FakeBackend backend = new FakeBackend("xterm");
+        AssertionError failure = new AssertionError("attributes unavailable");
+        backend.attributesReadFailure = failure;
+
+        assertSame(failure, assertThrows(AssertionError.class,
+            () -> TerminalSession.start(new TerminalSession.Options(true, false, false),
+                backend, new FakeShutdownHooks())));
+
+        assertEquals(1, backend.attributesRestoreCount);
+        assertEquals(1, backend.closeCount);
+        assertTrue(backend.currentAttributes.getLocalFlag(LocalFlag.ISIG));
+    }
+
+    @Test
+    void anErrorAfterSessionConstructionKeepsItsIdentityAndSuppressesCleanupFailure() {
+        FakeBackend backend = new FakeBackend("xterm");
+        backend.closeFailure = new IOException("cleanup failed");
+        FakeShutdownHooks hooks = new FakeShutdownHooks();
+        AssertionError failure = new AssertionError("hook unavailable");
+        hooks.addFailure = failure;
+
+        assertSame(failure, assertThrows(AssertionError.class,
+            () -> TerminalSession.start(new TerminalSession.Options(true, false, false), backend, hooks)));
+
+        assertEquals(1, backend.closeCount);
+        assertEquals(1, backend.attributesRestoreCount);
+        assertEquals(1, failure.getSuppressed().length);
+        assertSame(backend.closeFailure, failure.getSuppressed()[0]);
+    }
+
+    @Test
+    void anErrorRemovingTheShutdownHookDoesNotSkipTerminalRestoration() throws Exception {
+        FakeBackend backend = new FakeBackend("xterm");
+        FakeShutdownHooks hooks = new FakeShutdownHooks();
+        AssertionError failure = new AssertionError("hook removal failed");
+        hooks.removeError = failure;
+        TerminalSession session = TerminalSession.start(new TerminalSession.Options(true, false, false), backend, hooks);
+
+        IOException error = assertThrows(IOException.class, session::close);
+
+        assertSame(failure, error.getCause());
+        assertTrue(session.isClosed());
+        assertEquals(1, backend.attributesRestoreCount);
+        assertEquals(1, backend.closeCount);
+        assertTrue(backend.currentAttributes.getLocalFlag(LocalFlag.ISIG));
+    }
+
     /** Interprets screen switching, erasing and cursor movement for lifecycle tests. */
     private static final class ScreenBuffers {
         private final StringBuilder primary = new StringBuilder();
@@ -724,7 +815,10 @@ class TerminalSessionTest {
         private int attributesRestoreCount;
         private int closeCount;
         private IOException closeFailure;
+        private Error attributesReadFailure;
         private RuntimeException resizeRegistrationFailure;
+        private Error resizeRegistrationError;
+        private Error interruptRegistrationError;
         private Runnable resizeHandler;
         private Runnable interruptHandler;
         private Runnable beforeNextRead;
@@ -853,6 +947,7 @@ class TerminalSessionTest {
 
         @Override
         public Attributes attributes() {
+            if (attributesReadFailure != null) throw attributesReadFailure;
             return new Attributes(currentAttributes);
         }
 
@@ -876,6 +971,7 @@ class TerminalSessionTest {
 
         @Override
         public void onResize(Runnable handler) {
+            if (resizeRegistrationError != null) throw resizeRegistrationError;
             if (resizeRegistrationFailure != null) {
                 throw resizeRegistrationFailure;
             }
@@ -884,6 +980,7 @@ class TerminalSessionTest {
 
         @Override
         public void onInterrupt(Runnable handler) {
+            if (interruptRegistrationError != null) throw interruptRegistrationError;
             interruptHandler = handler;
         }
 
@@ -908,9 +1005,12 @@ class TerminalSessionTest {
         private int addCount;
         private int removeCount;
         private RuntimeException removeFailure;
+        private Error addFailure;
+        private Error removeError;
 
         @Override
         public void add(Thread hook) {
+            if (addFailure != null) throw addFailure;
             addCount++;
             added = hook;
             current = hook;
@@ -918,6 +1018,7 @@ class TerminalSessionTest {
 
         @Override
         public boolean remove(Thread hook) {
+            if (removeError != null) throw removeError;
             removeCount++;
             if (removeFailure != null) {
                 throw removeFailure;

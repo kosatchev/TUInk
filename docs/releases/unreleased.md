@@ -6,6 +6,11 @@ Changes on the development branch after [v0.16.0](0.16.0.md).
   redirected opening symlink cannot make an ordinary save overwrite another file.
 - Coordinate Unix save locks across bind-mounted aliases of the same directory
   entry while retaining the previous lock for existing canonical paths.
+- Reject both `dumb` and `dumb-color` terminal fallbacks at startup,
+  including when Linux `tty` or `stty` commands are unavailable.
+- Use JLine's exec terminal provider on Linux to preserve baud rates and
+  terminal attributes on exit. Interactive startup requires `tty` and `stty`
+  in `PATH`, including JVM and glibc distributions.
 - Show progress and allow cancelling file verification and save preparation,
   including overwrites of large existing files. Retain exact-content approval
   checks. Bound publication waiting on quit/shutdown and preserve recovery

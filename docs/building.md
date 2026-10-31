@@ -277,8 +277,8 @@ task's target.
 The legacy `-Ptarget=glibc|musl|all` selector remains supported for automation;
 do not combine `-Pmusl` with a conflicting `-Ptarget` value.
 
-Interactive musl runs use JLine's `exec` provider and require external `tty`
-and `stty` commands in `PATH`.
+Interactive Linux runs use JLine's `exec` provider and require external `tty`
+and `stty` commands in `PATH`, including JVM and glibc distributions.
 See [runtime dependencies and troubleshooting](packaging.md#complete-release).
 
 Native builds default to `-march=compatibility` so release binaries work on

@@ -17,6 +17,9 @@ Changes on the development branch after [v0.16.0](0.16.0.md).
   permission for unconfirmed outcomes; abandon pending opens without waiting.
 - Sample footer and confirmation access hints in the background instead of
   querying filesystem permissions during rendering.
+- Escape external text at the terminal diagnostic boundary, including CLI
+  errors, startup and recovery warnings, exception traces and JLine logs.
+  Notifications share the same plain-text policy; actual paths remain exact.
 - Describe file failures consistently across open, save and directory loading;
   recognize typed access failures without mistaking words in filenames for
   permission or disk-space errors.
@@ -73,3 +76,4 @@ Changes on the development branch after [v0.16.0](0.16.0.md).
   the current replacement feedback. UI regressions wait for saved file contents.
 - Retain Python 3.10 support for recovery regression checks by hashing snapshot
   files incrementally with SHA-256.
+- `--version` prints the generated application version and exits without opening the terminal or reading settings and recovery data.

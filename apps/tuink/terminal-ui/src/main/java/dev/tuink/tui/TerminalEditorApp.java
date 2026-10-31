@@ -265,8 +265,14 @@ public class TerminalEditorApp {
         return ui == null ? modalAttention : ui.modalAttention;
     }
 
-    public static void main(String[] args) throws Exception {
-        int exitCode = launch(args);
+    public static void main(String[] args) {
+        int exitCode;
+        try {
+            exitCode = launch(args);
+        } catch (Throwable failure) {
+            TerminalDiagnostics.failure(failure);
+            exitCode = 1;
+        }
         if (exitCode != 0) {
             System.exit(exitCode);
         }
@@ -282,7 +288,7 @@ public class TerminalEditorApp {
         try {
             cli = TuiCliOptions.parse(args);
         } catch (IllegalArgumentException e) {
-            System.err.println(e.getMessage());
+            TerminalDiagnostics.error(e.getMessage());
             printUsage(System.err);
             return 2;
         }
@@ -290,11 +296,15 @@ public class TerminalEditorApp {
             printUsage(System.out);
             return 0;
         }
+        if (cli.showVersion()) {
+            TerminalDiagnostics.line(System.out, "TUInk " + AppVersion.current());
+            return 0;
+        }
         RecoveryStore recoveryStore;
         try {
             recoveryStore = new RecoveryStore();
         } catch (IOException error) {
-            System.err.println("Cannot select settings/recovery profile: " + error.getMessage());
+            TerminalDiagnostics.error("Cannot select settings/recovery profile: " + error.getMessage());
             return 1;
         }
         try (recoveryStore) {
@@ -318,7 +328,7 @@ public class TerminalEditorApp {
             settingsSnapshot = AppSettingsStore.loadSnapshot();
             loadedSettings = settingsSnapshot.settings();
         } catch (IOException e) {
-            System.err.println("Warning: failed to load settings: " + e.getMessage());
+            TerminalDiagnostics.error("Warning: failed to load settings: " + e.getMessage());
         }
 
         AppSettingsSession settingsSession = new AppSettingsSession(loadedSettings, cli);
@@ -380,7 +390,7 @@ public class TerminalEditorApp {
                     "Skipped " + recoveryLoad.skipped().size()
                         + " incompatible recovery snapshot(s): " + ids
                 );
-                System.err.println(
+                TerminalDiagnostics.error(
                     "Warning: incompatible recovery snapshots were left unchanged in "
                         + recoveryStore.directory() + ": " + recoveryLoad.skipped()
                 );
@@ -389,7 +399,7 @@ public class TerminalEditorApp {
                 modalState = UiModalState.recoveryConfirm();
             }
         } catch (IOException e) {
-            System.err.println(
+            TerminalDiagnostics.error(
                 "Warning: failed to load recovery snapshots from " + recoveryStore.directory() + ": " + e.getMessage()
             );
         }
@@ -477,7 +487,7 @@ public class TerminalEditorApp {
                     )),
                     recoveryAutosave,
                     () -> toDocumentSessions(tabs),
-                    warning -> System.err.println("Warning: " + warning)
+                    warning -> TerminalDiagnostics.error("Warning: " + warning)
                 );
             } finally {
                 frameProfiler.close();
@@ -489,9 +499,9 @@ public class TerminalEditorApp {
             try {
                 AppSettingsStore.saveIfUnchanged(settingsSnapshot, preferences);
             } catch (AppSettingsStore.SettingsConflictException conflict) {
-                System.err.println("Warning: " + conflict.getMessage());
+                TerminalDiagnostics.error("Warning: " + conflict.getMessage());
             } catch (IOException e) {
-                System.err.println("Warning: failed to save settings: " + e.getMessage());
+                TerminalDiagnostics.error("Warning: failed to save settings: " + e.getMessage());
             }
         }
     }
@@ -2307,20 +2317,21 @@ public class TerminalEditorApp {
     }
 
     private void printUsage(PrintStream output) {
-        output.println("Usage: tuink [options] [--] [file]");
-        output.println("Development: ./gradlew --console=plain :app:run -PappArgs=\"[options] [--] [file]\"");
-        output.println("Options:");
-        output.println("  --no-mouse       Disable mouse tracking and mouse interactions");
-        output.println("  --no-alt-screen  Do not use alternate screen buffer");
-        output.println("  --no-color       Render in monochrome (no ANSI colors, keep text attributes)");
-        output.println("  --theme=<name>   UI palette: blue, cyan (default), light");
-        output.println("  --read           Start in reading mode (editing disabled)");
-        output.println("  --open-as-utf16le Interpret the selected BOM-marked file as UTF-16LE");
-        output.println("  --profile        Log render timings to stderr every " + PROFILE_LOG_EVERY_FRAMES + " frames");
-        output.println("  --profile-file   Create a new profile log file (also enables --profile)");
-        output.println("  --file-uri=<uri> Open an ASCII percent-encoded absolute file URI");
-        output.println("  --help, -h       Show this help");
-        output.println("  --              End options; the following argument is a literal file path");
+        TerminalDiagnostics.line(output, "Usage: tuink [options] [--] [file]");
+        TerminalDiagnostics.line(output, "Development: ./gradlew --console=plain :app:run -PappArgs=\"[options] [--] [file]\"");
+        TerminalDiagnostics.line(output, "Options:");
+        TerminalDiagnostics.line(output, "  --no-mouse       Disable mouse tracking and mouse interactions");
+        TerminalDiagnostics.line(output, "  --no-alt-screen  Do not use alternate screen buffer");
+        TerminalDiagnostics.line(output, "  --no-color       Render in monochrome (no ANSI colors, keep text attributes)");
+        TerminalDiagnostics.line(output, "  --theme=<name>   UI palette: blue, cyan (default), light");
+        TerminalDiagnostics.line(output, "  --read           Start in reading mode (editing disabled)");
+        TerminalDiagnostics.line(output, "  --open-as-utf16le Interpret the selected BOM-marked file as UTF-16LE");
+        TerminalDiagnostics.line(output, "  --profile        Log render timings to stderr every " + PROFILE_LOG_EVERY_FRAMES + " frames");
+        TerminalDiagnostics.line(output, "  --profile-file   Create a new profile log file (also enables --profile)");
+        TerminalDiagnostics.line(output, "  --file-uri=<uri> Open an ASCII percent-encoded absolute file URI");
+        TerminalDiagnostics.line(output, "  --help, -h       Show this help");
+        TerminalDiagnostics.line(output, "  --version        Show the application version");
+        TerminalDiagnostics.line(output, "  --              End options; the following argument is a literal file path");
     }
 
     private boolean shouldForceExecTerminalProvider() {

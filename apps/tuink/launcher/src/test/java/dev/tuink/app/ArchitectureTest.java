@@ -6,6 +6,8 @@ import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.sli
 
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaClass;
+import com.tngtech.archunit.core.domain.JavaMethodCall;
+import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.lang.ArchRule;
@@ -157,6 +159,22 @@ class ArchitectureTest {
             "dev.tuink.tui.terminal..",
             "dev.tuink.tui.ui.."
         );
+
+    // The profiler emits a fixed numeric format; all other frontend text goes
+    // through the shared diagnostic boundary before reaching a terminal stream.
+    static final ArchRule FRONTENDS_DO_NOT_WRITE_RAW_DIAGNOSTICS = noClasses()
+        .that().resideInAnyPackage("dev.tuink.app..", "dev.tuink.tui..")
+        .and().doNotHaveFullyQualifiedName("dev.tuink.tui.TerminalEditorApp$FrameProfiler")
+        .should().callMethodWhere(new DescribedPredicate<JavaMethodCall>("write raw stream diagnostics") {
+            @Override public boolean test(JavaMethodCall call) {
+                String owner = call.getTargetOwner().getName();
+                String method = call.getTarget().getName();
+                return method.equals("printStackTrace")
+                    || (owner.equals("java.io.PrintStream") || owner.equals("java.io.PrintWriter"))
+                        && java.util.Set.of("print", "println", "printf", "format", "write", "append")
+                            .contains(method);
+            }
+        });
 
     static final ArchRule JLINE_BACKEND_IS_EDITOR_INDEPENDENT = classes()
         .that().resideInAPackage("dev.tuiframe.jline..")
@@ -450,6 +468,7 @@ class ArchitectureTest {
         TUI_DOES_NOT_DEPEND_ON_APPLICATION_ENTRYPOINT.check(PRODUCTION_CLASSES);
         FILE_TREE_MODEL_STAYS_TERMINAL_INDEPENDENT.check(PRODUCTION_CLASSES);
         APP_USES_ONLY_THE_TUI_FACADE.check(PRODUCTION_CLASSES);
+        FRONTENDS_DO_NOT_WRITE_RAW_DIAGNOSTICS.check(PRODUCTION_CLASSES);
         TOP_LEVEL_SLICES_ARE_FREE_OF_CYCLES.check(PRODUCTION_CLASSES);
         TUI_SUBPACKAGE_SLICES_ARE_FREE_OF_CYCLES.check(PRODUCTION_CLASSES);
         TERMINAL_SUBPACKAGE_SLICES_ARE_FREE_OF_CYCLES.check(PRODUCTION_CLASSES);

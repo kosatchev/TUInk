@@ -3,12 +3,14 @@ package dev.tuink.tui.ui;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import dev.tuink.tui.AppVersion;
 import org.junit.jupiter.api.Test;
 
 class HelpPagesTest {
     @Test
     void versionComesFromGeneratedResource() {
-        assertEquals("0.16.0", HelpPages.appVersion());
+        assertEquals("0.16.0", AppVersion.current());
+        assertEquals("Version: " + AppVersion.current(), HelpPages.AUTHOR.rows().get(1));
     }
 
     @Test

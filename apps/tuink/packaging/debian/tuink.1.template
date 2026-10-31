@@ -48,6 +48,9 @@ Select the terminal interface. The GUI target is not implemented.
 .BR \-h ", " \-\-help
 Show command-line help.
 .TP
+.BR \-\-version
+Show the application version and exit without opening the terminal or reading settings and recovery data.
+.TP
 .BR \-\-
 End option parsing. The following argument is a literal file path, even if it starts with a dash.
 .SH FILES

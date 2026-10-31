@@ -17,6 +17,7 @@ record TuiCliOptions(
     boolean colorEnabled,
     Boolean readModeOverride,
     boolean showHelp,
+    boolean showVersion,
     UiStyles.Theme themeOverride,
     boolean profileEnabled,
     Path profileFile,
@@ -32,6 +33,7 @@ record TuiCliOptions(
         boolean colorEnabled = true;
         Boolean readModeOverride = null;
         boolean showHelp = false;
+        boolean showVersion = false;
         boolean profileEnabled = false;
         Path profileFile = null;
         UiStyles.Theme themeOverride = null;
@@ -60,6 +62,7 @@ record TuiCliOptions(
                 case "--open-as-utf16le" -> openAsUtf16Le = true;
                 case "--profile" -> profileEnabled = true;
                 case "--help", "-h" -> showHelp = true;
+                case "--version" -> showVersion = true;
                 default -> {
                     if ("--file-uri".equals(arg) || arg.startsWith("--file-uri=")) {
                         if (file != null) {
@@ -103,7 +106,7 @@ record TuiCliOptions(
             }
         }
 
-        if (openAsUtf16Le && file == null && !showHelp) {
+        if (openAsUtf16Le && file == null && !showHelp && !showVersion) {
             throw new IllegalArgumentException("--open-as-utf16le requires a file path");
         }
         return new TuiCliOptions(
@@ -113,6 +116,7 @@ record TuiCliOptions(
             colorEnabled,
             readModeOverride,
             showHelp,
+            showVersion,
             themeOverride,
             profileEnabled,
             profileFile,

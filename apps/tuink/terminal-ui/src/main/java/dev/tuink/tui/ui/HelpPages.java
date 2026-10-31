@@ -1,7 +1,6 @@
 package dev.tuink.tui.ui;
 
-import java.io.InputStream;
-import java.util.Properties;
+import dev.tuink.tui.AppVersion;
 
 public final class HelpPages {
     public static final HelpPage KEYMAP = new HelpPage(
@@ -168,7 +167,7 @@ public final class HelpPages {
         " About ",
         new String[] {
             "Application: TUInk",
-            "Version: " + appVersion(),
+            "Version: " + AppVersion.current(),
             "Author: Dmitry Kosatchev",
             "Contact: kosatchev@yandex.com",
             "",
@@ -182,22 +181,5 @@ public final class HelpPages {
     );
 
     private HelpPages() {
-    }
-
-    static String appVersion() {
-        try (InputStream in = HelpPages.class.getResourceAsStream("/tuink-version.properties")) {
-            if (in == null) {
-                return "dev";
-            }
-            Properties p = new Properties();
-            p.load(in);
-            String version = p.getProperty("version");
-            if (version == null || version.isBlank()) {
-                throw new IllegalStateException("Generated TUInk version resource has no version");
-            }
-            return version.trim();
-        } catch (java.io.IOException e) {
-            throw new IllegalStateException("Failed to read generated TUInk version resource", e);
-        }
     }
 }

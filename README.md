@@ -441,10 +441,16 @@ Usage: tuink [options] [file]
                    Write render timings to a new file
   --file-uri=<uri> Open an ASCII percent-encoded absolute file URI
   --help, -h       Show command-line help
+  --version        Show the application version
 ```
 
-Help exits with status `0`. Invalid command-line arguments exit with status `2`
-and write diagnostics to standard error.
+Help and version queries exit with status `0` without opening the terminal or
+reading settings and recovery data. Invalid command-line arguments exit with
+status `2` and write diagnostics to standard error.
+Fatal startup or runtime failures exit with status `1` after terminal cleanup.
+Diagnostics display terminal controls, embedded line breaks and bidi controls as
+visible escapes, including in filenames and exception traces. This presentation
+does not change the argument or filesystem path used by the editor.
 
 UI settings are stored in `$XDG_CONFIG_HOME/tuink/tuink.properties`, defaulting
 to `~/.config/tuink/tuink.properties` when the variable is unset, empty, or

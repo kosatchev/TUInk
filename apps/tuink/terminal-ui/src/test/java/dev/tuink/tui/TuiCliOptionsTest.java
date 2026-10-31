@@ -37,6 +37,7 @@ class TuiCliOptionsTest {
         assertTrue(options.colorEnabled());
         assertNull(options.readModeOverride());
         assertFalse(options.showHelp());
+        assertFalse(options.showVersion());
         assertNull(options.themeOverride());
         assertFalse(options.profileEnabled());
         assertNull(options.profileFile());
@@ -95,6 +96,18 @@ class TuiCliOptionsTest {
     void parsesHelpAliases() {
         assertTrue(TuiCliOptions.parse(new String[] {"--help"}).showHelp());
         assertTrue(TuiCliOptions.parse(new String[] {"-h"}).showHelp());
+    }
+
+    @Test
+    void versionIsAnOptionOnlyOutsideValuesAndTheLiteralFilename() {
+        assertTrue(TuiCliOptions.parse(new String[] {"--version"}).showVersion());
+        assertTrue(TuiCliOptions.parse(new String[] {"--open-as-utf16le", "--version"}).showVersion());
+        TuiCliOptions literal = TuiCliOptions.parse(new String[] {"--", "--version"});
+        assertEquals(Path.of("--version"), literal.file());
+        assertFalse(literal.showVersion());
+        TuiCliOptions profile = TuiCliOptions.parse(new String[] {"--profile-file", "--version"});
+        assertEquals(Path.of("--version"), profile.profileFile());
+        assertFalse(profile.showVersion());
     }
 
     @Test

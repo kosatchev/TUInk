@@ -2,6 +2,7 @@ package dev.tuink.tui.flow;
 
 public enum UiModalMode {
     NONE,
+    DOCUMENT_FORMAT,
     SAVE_AS,
     SAVE_OVERWRITE_CONFIRM,
     SAVE_UTF8_CONFIRM,

@@ -16,7 +16,8 @@ final class ModalInputPolicy {
         SAVE_AS,
         CONFIRM,
         HELP,
-        OPEN_FILE
+        OPEN_FILE,
+        FORMAT
     }
 
     private static final Set<KeyStroke.Modifier> SHIFT = Set.of(KeyStroke.Modifier.SHIFT);
@@ -36,7 +37,7 @@ final class ModalInputPolicy {
                 case SAVE_AS, NONE -> false;
                 case CONFIRM -> !isConfirmationText(text.text());
                 case HELP -> !" ".equals(text.text()) && !isHelpCommand(command);
-                case OPEN_FILE -> !" ".equals(text.text());
+                case OPEN_FILE, FORMAT -> !" ".equals(text.text());
             };
         }
         if (event instanceof PasteEvent paste) {
@@ -82,7 +83,7 @@ final class ModalInputPolicy {
             case BACKSPACE -> kind == Kind.SAVE_AS || kind == Kind.OPEN_FILE;
             case DELETE -> kind == Kind.SAVE_AS;
             case SPACE -> true;
-            case ARROW_UP, ARROW_DOWN, PAGE_UP, PAGE_DOWN -> kind == Kind.HELP || kind == Kind.OPEN_FILE;
+            case ARROW_UP, ARROW_DOWN, PAGE_UP, PAGE_DOWN -> kind == Kind.HELP || kind == Kind.OPEN_FILE || kind == Kind.FORMAT;
             default -> false;
         };
     }

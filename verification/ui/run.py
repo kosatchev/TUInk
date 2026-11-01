@@ -6,9 +6,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-
-REPOSITORY_ROOT = next(parent for parent in Path(__file__).resolve().parents
-                       if (parent / 'settings.gradle').is_file() and (parent / 'gradlew').is_file())
 import re
 import shutil
 import signal
@@ -230,6 +227,153 @@ class Regressions:
         assert target.read_bytes() == converted
         assert not list((session.home / ".config/tuink/recovery").glob("*.meta.properties")), \
             "the clean UTF-8 document left recovery entries"
+
+    def document_format(self):
+        original = "Привет\r\nмир\nконец\r"
+        normalized = "Привет\nмир\nконец\n"
+        document = self.fixture("document-format", original)
+        # The bytes and decoder are independent of the application's preset table.
+        formats = (
+            ("UTF-8", "utf-8", b"", "utf-8"),
+            ("UTF-8 BOM", "utf-8", b"\xef\xbb\xbf", "utf-8"),
+            ("UTF-16LE BOM", "utf-16-le", b"\xff\xfe", "utf-16le"),
+            ("UTF-16BE BOM", "utf-16-be", b"\xfe\xff", "utf-16be"),
+            ("Windows-1251", "cp1251", b"", "windows-1251"),
+            ("CP866", "cp866", b"", "cp866"),
+            ("KOI8-R", "koi8-r", b"", "koi8-r"),
+        )
+        saved = original.encode("utf-8")
+        copies = []
+        with self.session("document-format", document, timeout=90) as session:
+            session.expect(lambda: "Mixed" in session.screen.text, "the mixed line-ending indicator")
+            for index, (label, charset, bom, open_as) in enumerate(formats):
+                footer = next((row, line) for row, line in enumerate(session.screen.lines) if "ENC:" in line)
+                session.mouse(0, footer[0], footer[1].index("ENC:") + 1)
+                session.mouse(0, footer[0], footer[1].index("ENC:") + 1, release=True)
+                session.expect(lambda: "Document format" in session.screen.text and "Line endings" in session.screen.text,
+                               "the encoding and EOL panel")
+                # Encoding -> EOL -> Apply. EOL list is Keep/LF/CRLF/CR.
+                session.send(b"\x1b[H" + b"\x1b[B" * index + b"\t\x1b[H\x1b[B\t\r")
+                session.expect(lambda: "Line endings" not in session.screen.text and "*" in session.screen.lines[0],
+                               label + " applied in memory")
+                assert document.read_bytes() == saved, "Apply wrote the file before Save"
+                expected = bom + normalized.encode(charset)
+                session.save(document, expected, label + " exact saved bytes")
+
+                session.send(b"\x1a")
+                session.expect(lambda: "*" in session.screen.lines[0], "format Undo after Save")
+                assert document.read_bytes() == expected, "Undo rewrote the saved file"
+                if index == 0:
+                    session.expect(lambda: "Mixed" in session.screen.text, "Undo restores mixed endings")
+                session.send(b"\x19")
+                session.expect(lambda: "*" not in session.screen.lines[0], "format Redo returns to savepoint")
+                assert document.read_bytes() == expected
+                assert "Привет" in session.screen.text
+                copy = self.root / ("format-" + str(index) + ".txt")
+                copy.write_bytes(expected)
+                copies.append((copy, expected, open_as))
+                saved = expected
+            session.snapshot("all-formats-saved")
+            session.finish()
+        for index, (copy, expected, open_as) in enumerate(copies):
+            with self.session("document-format-open-" + str(index), copy,
+                              options=["--open-as", open_as]) as session:
+                session.expect(lambda: "Привет" in session.screen.text and "конец" in session.screen.text,
+                               "explicit " + open_as + " decoding in a new process")
+                assert copy.read_bytes() == expected
+                session.finish()
+
+    def format_errors(self):
+        document = self.fixture("format-errors", "😀Привет\r\n")
+        original = document.read_bytes()
+        with self.session("format-errors", document) as session:
+            def open_format():
+                footer = next((row, line) for row, line in enumerate(session.screen.lines) if "ENC:" in line)
+                session.mouse(0, footer[0], footer[1].index("ENC:") + 1)
+                session.mouse(0, footer[0], footer[1].index("ENC:") + 1, release=True)
+                session.expect(lambda: "Document format" in session.screen.text and "Line endings" in session.screen.text,
+                               "the format panel")
+
+            open_format()
+            session.send(b"\x1b[H" + b"\x1b[B" * 5 + b"\t\t\r")
+            session.expect(lambda: "U+1F600" in session.screen.text and "Line endings" in session.screen.text,
+                           "the unmappable character without closing the panel")
+            assert document.read_bytes() == original
+            assert "*" not in session.screen.lines[0], "failed validation made the document dirty"
+            session.send(b"\x1b[27u")
+            session.expect(lambda: "Line endings" not in session.screen.text, "Cancel after a format error")
+            assert "😀Привет" in session.screen.text
+
+            open_format()
+            session.send(b"\x1b[H\x1b[B")  # A changed draft must remain unapplied after resize/cancel.
+            session.resize(10, 40)
+            session.expect(lambda: "Enlarge terminal" in session.screen.text, "the compact format panel")
+            session.send(b"\x1b[27u")
+            session.resize(24, 80)
+            session.expect(lambda: "Document format" not in session.screen.text and "Ln " in session.screen.text,
+                           "safe cancellation from the compact panel")
+            assert "*" not in session.screen.lines[0]
+            assert document.read_bytes() == original
+            session.finish()
+
+    def format_reopen(self):
+        document = self.root / "format-reopen.txt"
+        original = "Привет\r\n".encode("cp866")
+        document.write_bytes(original)
+        with self.session("format-reopen", document, timeout=60) as session:
+            def choose_reopen(index):
+                session.send(b"\x1bi")
+                session.expect(lambda: "Reopen with encoding..." in session.screen.text, "the File menu reopen command")
+                row, line = next((row, line) for row, line in enumerate(session.screen.lines)
+                                 if "Reopen with encoding..." in line)
+                col = line.index("Reopen with encoding...") + 1
+                session.mouse(0, row, col)
+                session.mouse(0, row, col, release=True)
+                session.expect(lambda: "Reopen with encoding" in session.screen.text and "Encoding" in session.screen.text,
+                               "the explicit decoder panel")
+                session.send(b"\x1b[H" + b"\x1b[B" * index + b"\r\r")
+
+            # Auto retains its existing Windows-1251 fallback; an explicit re-read fixes it.
+            choose_reopen(5)  # Auto/UTF-8/UTF-16LE/UTF-16BE/Windows-1251/CP866/KOI8-R.
+            session.expect(lambda: "Привет" in session.screen.text and "Reopen with encoding" not in session.screen.text,
+                           "CP866 decoded into the existing tab")
+            assert "*" not in session.screen.lines[0]
+            assert document.read_bytes() == original
+
+            session.send(b"X")
+            session.expect(lambda: "XПривет" in session.screen.text, "the unsaved draft before Reopen")
+            choose_reopen(6)
+            session.expect(lambda: "Discard and reopen" in session.screen.text, "explicit discard confirmation")
+            session.send(b"\x1b[27u")
+            session.expect(lambda: "Reopen with encoding" not in session.screen.text and "XПривет" in session.screen.text,
+                           "Cancel retains the unsaved draft")
+            assert "*" in session.screen.lines[0]
+            assert document.read_bytes() == original
+
+            choose_reopen(5)
+            session.expect(lambda: "Discard and reopen" in session.screen.text, "a fresh discard confirmation")
+            row, line = next((row, line) for row, line in enumerate(session.screen.lines) if "Discard and reopen" in line)
+            col = line.index("Discard and reopen") + 1
+            session.mouse(0, row, col)
+            session.mouse(0, row, col, release=True)
+            session.expect(lambda: "Reopen with encoding" not in session.screen.text
+                           and "Привет" in session.screen.text and "XПривет" not in session.screen.text,
+                           "confirmed Reopen installs the file baseline")
+            assert "*" not in session.screen.lines[0]
+            session.send(b"\x1a")
+            session.expect(lambda: "Nothing to undo" in session.screen.text, "Reopen clears discarded edit history")
+            assert "XПривет" not in session.screen.text, "Reopen retained history for discarded text"
+            assert "*" not in session.screen.lines[0]
+
+            choose_reopen(1)  # Strict UTF-8 must fail on these CP866 bytes.
+            session.expect(lambda: "Reopen with encoding" in session.screen.text and "Invalid UTF-8" in session.screen.text,
+                           "a failed strict decoder reports the selected encoding")
+            session.send(b"\x1b[27u")
+            session.expect(lambda: "Reopen with encoding" not in session.screen.text and "Привет" in session.screen.text,
+                           "a read failure retains the prior document")
+            assert "*" not in session.screen.lines[0]
+            assert document.read_bytes() == original
+            session.finish()
 
     def field_edit_caret(self):
         original = "original"
@@ -1473,7 +1617,7 @@ class Regressions:
         assert document.read_text(encoding="utf-8") == original
 
 
-SCENARIOS = ("reading", "focus", "field", "resize", "large-wrap", "tabs", "tab-scoped-ui", "history", "grapheme-edit-caret", "selection-autoscroll", "long-copy-name", "navigation", "fragmented-keys", "quit-confirmation", "gutter-idle", "paste", "settings", "settings-conflict", "recovery", "recovery-format5", "recovery-memory", "linux-keys", "enhanced-text", "long-unicode-edit", "save-as-workspace", "settings-memory", "syntax-memory", "unix-path-recovery", "literal-indentation", "field-memory", "document-caption", "save-name-suggestion", "replacement-memory", "paste-memory", "recovery-lock-cleanup", "xdg-profile", "cli-path-identity", "save-as-retarget", "legacy-encoding", "field-edit-caret", "field-memory-growth", "identical-replace-budget", "clipboard-memory", "cpp-raw-indentation", "terminal-diagnostics", "terminal-attributes", "startup-dependencies")
+SCENARIOS = ("reading", "focus", "field", "resize", "large-wrap", "tabs", "tab-scoped-ui", "history", "grapheme-edit-caret", "selection-autoscroll", "long-copy-name", "navigation", "fragmented-keys", "quit-confirmation", "gutter-idle", "paste", "settings", "settings-conflict", "recovery", "recovery-format5", "recovery-memory", "linux-keys", "enhanced-text", "long-unicode-edit", "save-as-workspace", "settings-memory", "syntax-memory", "unix-path-recovery", "literal-indentation", "field-memory", "document-caption", "save-name-suggestion", "replacement-memory", "paste-memory", "recovery-lock-cleanup", "xdg-profile", "cli-path-identity", "save-as-retarget", "legacy-encoding", "document-format", "format-errors", "format-reopen", "field-edit-caret", "field-memory-growth", "identical-replace-budget", "clipboard-memory", "cpp-raw-indentation", "terminal-diagnostics", "terminal-attributes", "startup-dependencies")
 
 
 def classpath_manifest(classpath):
@@ -1490,10 +1634,12 @@ def classpath_manifest(classpath):
 
 
 def main():
+    repository_root = next(parent for parent in Path(__file__).resolve().parents
+                           if (parent / 'settings.gradle').is_file() and (parent / 'gradlew').is_file())
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--java", default=os.environ.get("JAVA_HOME", "") + "/bin/java" if os.environ.get("JAVA_HOME") else "java")
-    parser.add_argument("--classpath", default=str(REPOSITORY_ROOT / "apps/tuink/launcher/build/install/tuink/lib/*"))
-    parser.add_argument("--output-root", type=Path, default=REPOSITORY_ROOT / "build/ui-regression")
+    parser.add_argument("--classpath", default=str(repository_root / "apps/tuink/launcher/build/install/tuink/lib/*"))
+    parser.add_argument("--output-root", type=Path, default=repository_root / "build/ui-regression")
     parser.add_argument("scenarios", nargs="*", choices=SCENARIOS)
     args = parser.parse_args()
     java = shutil.which(args.java)

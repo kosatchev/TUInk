@@ -6,6 +6,11 @@ Changes on the development branch after [v0.16.0](0.16.0.md).
   redirected opening symlink cannot make an ordinary save overwrite another file.
 - Coordinate Unix save locks across bind-mounted aliases of the same directory
   entry while retaining the previous lock for existing canonical paths.
+- Choose the document encoding and line endings independently, with strict
+  character validation, Undo/Redo and preservation of mixed endings and the
+  final newline. Supported output formats are UTF-8 with or without BOM,
+  UTF-16LE/BE with BOM, Windows-1251, CP866 and KOI8-R. Reopen bytes explicitly
+  when an input encoding needs correcting, or select it with `--open-as`.
 - Reject both `dumb` and `dumb-color` terminal fallbacks at startup,
   including when Linux `tty` or `stty` commands are unavailable.
 - Use JLine's exec terminal provider on Linux to preserve baud rates and

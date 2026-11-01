@@ -133,6 +133,9 @@ class TopMenuViewTest {
                 "tuink.document.open",
                 "tuink.document.save",
                 "tuink.document.save-as",
+                "tuink.document.format",
+                "tuink.document.reopen-encoding",
+                "tuink.document.open-encoding",
                 "tuink.app.quit"
             ),
             commandIds(view(ui, MenuBar.State.open(TopMenuController.FILE_INDEX)), TopMenuController.FILE_INDEX)

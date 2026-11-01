@@ -117,7 +117,7 @@ result on the owner thread. The affected document cannot be edited or closed
 while its save is pending; navigation and other tabs remain usable. Only one
 document file operation is in flight, with no growing queue of captured drafts.
 Path, saved-file baseline and savepoint change only after a successful write.
-Document formatting changes output metadata in memory as an undoable edit;
+The Format panel changes output metadata in memory as an undoable edit;
 it does not write the file. The separate Save as UTF-8 error flow publishes its
 format change only after a successful save. Verification
 and staging can be cancelled without waiting for their worker result; a late

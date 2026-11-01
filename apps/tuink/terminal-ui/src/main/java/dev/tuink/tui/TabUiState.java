@@ -25,6 +25,8 @@ final class TabUiState implements AutoCloseable {
     SaveWorkflow.OverwriteApproval overwriteApproval;
     long filenameRevision;
     boolean openFileMode;
+    DocumentFormatDialogView.State formatDialog;
+    dev.tuink.editor.storage.DocumentOpenMode pickerOpenMode = dev.tuink.editor.storage.DocumentOpenMode.DETECT;
     FilePickerOpenWorkflow.Notice pickerNotice;
     FileTreeModel.DirectoryFailure lastPickerDirectoryFailure;
     final OpenFileDialogView.FocusState openFileFocusState = new OpenFileDialogView.FocusState();

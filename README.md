@@ -123,6 +123,7 @@ an error without changing open documents. Reads remain bounded if the file grows
 - recovery snapshots for unfinished edits;
 - preservation of detected charset, BOM, line-separator layout, and final-EOL
   state;
+- explicit document encoding and line-ending conversion with Undo;
 - preservation of existing POSIX permissions, owner/group, user-defined extended
   attributes, Linux POSIX access ACLs, and ACLs exposed by the filesystem provider;
 - safe saving through symbolic links without replacing the link itself.
@@ -150,12 +151,31 @@ UTF-8** with Cancel selected initially. The explicit conversion writes UTF-8
 without a BOM and preserves existing line endings. It becomes a separate undo
 step after a successful save; earlier text edits remain in history.
 
+Use **File → Format…** to choose UTF-8, UTF-8 with BOM, UTF-16LE or UTF-16BE
+with BOM, Windows-1251, CP866 or KOI8-R. Encoding and line endings can be changed
+independently. **Keep** retains each existing line ending, including a mixed
+layout; **LF**, **CRLF** and **CR** convert every line ending and set the ending
+used by Enter. Conversion preserves the presence or absence of a final newline.
+The footer includes BOM information and shows **Mixed** for differing endings.
+Click ENC or EOL to open the panel at that field. Tab moves between the lists
+and buttons; the arrow keys choose a value.
+
+Applying a format changes the document in memory and creates one Undo step.
+Use Save to write the result. Cancel leaves the document unchanged, and an
+unrepresentable character produces an error instead of replacement bytes.
+Converting the output encoding does not repair text decoded with the wrong
+encoding. Use **Reopen with encoding…** to read the original bytes again;
+discarding unsaved edits requires confirmation. A failed reopen retains the
+current document.
+
 Automatic detection uses BOMs, strict UTF-8 and the existing Windows-1251
-fallback. Use `--open-as=cp866` or `--open-as=koi8-r` for CP866 or KOI8-R input.
-Explicit UTF-8 recognizes its optional BOM. Explicit UTF-16LE and UTF-16BE
-require the corresponding BOM. UTF-16LE files starting with NUL can share the
-exact bytes of UTF-32LE files; `--open-as=utf-16le` (also `--open-as-utf16le`)
-resolves this ambiguity. UTF-32 editing is not supported.
+fallback. Use **File → Open with encoding…** or **Reopen with encoding…** for
+CP866 or KOI8-R, or pass `--open-as=cp866` / `--open-as=koi8-r`.
+Explicit UTF-8 also recognizes
+its optional BOM. Explicit UTF-16LE and UTF-16BE require the corresponding BOM.
+UTF-16LE files starting with NUL can share the exact bytes of UTF-32LE files;
+`--open-as=utf-16le` (also `--open-as-utf16le`) resolves this ambiguity. UTF-32
+editing is not supported.
 
 Existing-file saves copy supported filesystem attributes to the staged file
 before replacing the original. If those attributes cannot be preserved, saving
@@ -578,6 +598,53 @@ training, checksums and advanced settings.
 TUIframe is split into `tuiframe-core`, `tuiframe-jline`, and
 `tuiframe-widgets`. TUInk deliberately keeps editor-specific state and policy
 outside those reusable modules.
+
+## Repository layout
+
+Applications own their frontend code, packaging templates, and sample documents.
+Shared editor libraries and the general terminal toolkit live separately:
+
+```text
+apps/
+  tuink/
+    launcher/               # :app — CLI entrypoint and distribution assembly
+    terminal-ui/            # :tui — editor windows, commands, and dialogs
+    terminal-rendering/     # :render — editor text layout and rendering plans
+    packaging/              # TUInk installers, package templates, and checks
+    samples/                # documents for demonstrating the editor
+libs/
+  editor/
+    api/                    # :editor-contract
+    engine/                 # :core
+    session/                # :editor-session
+    storage-jvm/            # :editor-storage-jvm
+    diff-jgit/              # :editor-diff-jgit
+    highlight-regex/        # :highlight-regex
+  tuiframe/
+    core/                   # :tuiframe-core
+    jline/                  # :tuiframe-jline
+    widgets/                # :tuiframe-widgets
+  unicode-text/             # :unicode-text
+verification/
+  ui/                       # whole-application terminal scenarios
+  performance/              # rendering benchmarks and PGO training
+  compatibility/            # external JVM and Android toolchain consumers
+  fixtures/                 # shared test implementations
+docs/                       # guides, architecture decisions, and published media
+licenses/                   # third-party notice bundles for distributions
+gradle/                     # wrapper, dependency verification, and build scripts
+```
+
+The comments identify the Gradle project paths, which remain independent of
+physical directories through `settings.gradle`. Existing commands such as
+`./gradlew :app:run` and `./gradlew :core:test` are unchanged. Module tests stay
+in their module's `src/test`; `verification/` holds checks shared across modules
+or exercising an application as a whole. See [Contributing](CONTRIBUTING.md#architecture)
+for placement and dependency rules.
+
+Generated output stays in root or module `build/` directories. `.gradle/` is a
+local cache; ignored `.local/` holds working notes, toolchains, profiles, and
+diagnostic material. These local directories are outside the source layout.
 
 ## Development and documentation
 

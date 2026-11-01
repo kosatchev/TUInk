@@ -58,7 +58,8 @@ public record UiModalState(
             && pendingCloseTabIndex != -1) {
             throw new IllegalArgumentException("Tab index requires a close-tab flow");
         }
-        if (targetViewId != null && !saveFlowMode && mode != UiModalMode.CLOSE_TAB_CONFIRM) {
+        if (targetViewId != null && !saveFlowMode && mode != UiModalMode.CLOSE_TAB_CONFIRM
+            && mode != UiModalMode.DOCUMENT_FORMAT) {
             throw new IllegalArgumentException("A view target requires a document save or close dialog");
         }
     }
@@ -66,7 +67,7 @@ public record UiModalState(
     /** Binds a document dialog once; subsequent selection changes cannot redirect it. */
     public UiModalState bindTo(ViewId viewId) {
         if (targetViewId != null || !isSaveAs() && !isSaveOverwriteConfirm()
-            && !isSaveUtf8Confirm() && !isCloseTabConfirm()) return this;
+            && !isSaveUtf8Confirm() && !isCloseTabConfirm() && !isDocumentFormat()) return this;
         return new UiModalState(mode, pendingOverwritePath, pendingCloseTabIndex, saveContinuation,
             saveFormat, pendingOpenPath, java.util.Objects.requireNonNull(viewId, "viewId"));
     }
@@ -122,6 +123,12 @@ public record UiModalState(
     public boolean isNone() {
         return mode == UiModalMode.NONE;
     }
+
+    public static UiModalState documentFormat() {
+        return state(UiModalMode.DOCUMENT_FORMAT, null, -1, SaveContinuation.NONE);
+    }
+
+    public boolean isDocumentFormat() { return mode == UiModalMode.DOCUMENT_FORMAT; }
 
     public boolean isSaveAs() {
         return mode == UiModalMode.SAVE_AS;

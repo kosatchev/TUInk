@@ -192,7 +192,7 @@ class ModalAttentionIntegrationTest {
             text = "Unsaved document 中🦀\n" + view.row();
         }
         return composition(rows, cols, InlinePromptBar.of(text, Style.DEFAULT, 1),
-            new FrameComposition.Layers(null, null, saveAs, field, confirm, FrameComposition.OpenFile.hidden(), null, attention, false));
+            new FrameComposition.Layers(null, null, saveAs, field, confirm, FrameComposition.OpenFile.hidden(), null, null, attention, false));
     }
 
     private static FrameComposition dialogFrame(int rows, int cols, boolean help, boolean attention) {
@@ -209,7 +209,7 @@ class ModalAttentionIntegrationTest {
                     new Rect(0, 0, cols, rows)), OpenFileInputRouter.Focus.LIST);
         }
         return composition(rows, cols, InlinePromptBar.hidden(),
-            new FrameComposition.Layers(null, null, false, null, null, open, help ? new TerminalEditorApp().helpOverlayPlacement(rows, cols, HELP) : null, attention, false));
+            new FrameComposition.Layers(null, null, false, null, null, open, help ? new TerminalEditorApp().helpOverlayPlacement(rows, cols, HELP) : null, null, attention, false));
     }
 
     private static FrameComposition composition(int rows, int cols, InlinePromptBar prompt, FrameComposition.Layers layers) {

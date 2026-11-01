@@ -54,6 +54,28 @@ Keep each commit atomic. Include the tests and documentation required by its beh
 
 ## Architecture
 
+Use the [repository layout](README.md#repository-layout) to place new code:
+
+- `apps/<name>/` owns an application's frontend, launchers, product-specific
+  packaging, and sample documents. TUInk's `terminal-rendering` handles text
+  geometry and render plans; `terminal-ui` binds them to windows and commands.
+- `libs/editor/` owns the shared editor API, engine, session, and concrete
+  adapters. Keep terminal and filesystem dependencies out of the portable
+  API, engine, and session modules.
+- `libs/tuiframe/` owns reusable terminal runtime and widgets without editor
+  or application policy. `libs/unicode-text/` owns the independent text primitive.
+- Unit tests belong in their module's `src/test`. Shared fixtures, complete
+  application scenarios, performance tools, and external compatibility probes
+  belong under `verification/` in the corresponding named directory.
+- Shared build logic belongs in `gradle/`; documentation belongs in `docs/`.
+  Generated files belong in `build/`, and local research and diagnostics in
+  ignored `.local/`.
+
+Start new functionality in a Java package. Introduce a Gradle module when it
+needs independent reuse, dependency isolation, or a different runtime baseline.
+Physical paths are declared in `settings.gradle`; preserve existing Gradle
+project paths, Java packages, and artifact coordinates during directory moves.
+
 Respect module boundaries and keep dependencies directed toward stable abstractions. Terminal libraries, ANSI sequences, and JLine-specific types belong in terminal integration code; they must not leak into core editor or rendering models.
 
 Prefer small, typed state transitions over boolean flag combinations. Keep parsing, validation, state mutation, rendering, and I/O separable enough to test independently.

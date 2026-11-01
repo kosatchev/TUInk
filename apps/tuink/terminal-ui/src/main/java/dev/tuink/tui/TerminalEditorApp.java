@@ -765,6 +765,7 @@ public class TerminalEditorApp {
         if (modal.isSaveAs()) {
             return ModalInputPolicy.Kind.SAVE_AS;
         }
+        if (modal.isDocumentFormat()) return ModalInputPolicy.Kind.FORMAT;
         if (modal.isHelpHints() || modal.isHelpLicenses() || modal.isHelpAuthor()) {
             return ModalInputPolicy.Kind.HELP;
         }
@@ -801,6 +802,7 @@ public class TerminalEditorApp {
         if (layers.help() != null) {
             return layers.help().frame().bounds();
         }
+        if (layers.format() != null) return layers.format().bounds();
         return blockingSurface(rows, cols, composition.document().layout().contentTopRow(),
             composition.surface().inlinePrompt().height(), layers.saveAsMode() || layers.confirm() != null);
     }
@@ -821,7 +823,8 @@ public class TerminalEditorApp {
         DialogAttentionPainter.paint(
             buffer,
             blockingSurface(composition),
-            composition.layers().helpPage() != null || composition.layers().openFile().visible(),
+            composition.layers().helpPage() != null || composition.layers().openFile().visible()
+                || composition.layers().format() != null,
             accent
         );
     }
@@ -1288,13 +1291,16 @@ public class TerminalEditorApp {
         int totalTabs,
         String searchSummary
     ) {
-        final int leftMargin = 1;
-        final int rightMargin = 1;
+        return buildStatusBar(state, model, cols, readingMode, activeTabIndex, totalTabs, searchSummary, null, 0).text();
+    }
+
+    DocumentStatusBarView.Placement buildStatusBar(EditorState state, TextModel model, int cols,
+        boolean readingMode, int activeTabIndex, int totalTabs, String searchSummary,
+        dev.tuink.editor.format.DocumentFormatSummary summary, int row) {
         Position p = state.getCursor();
         int totalLines = model.lineCount();
         int lineCols = model.lineLength(p.line());
-        String indicators = buildStateIndicators(state, readingMode);
-        String left = " ".repeat(Math.max(0, leftMargin))
+        String left = " "
             + "Ln " + (p.line() + 1) + "/" + totalLines
             + ", Col " + (p.col() + 1) + "/" + lineCols;
         if (totalTabs > 1) {
@@ -1303,34 +1309,22 @@ public class TerminalEditorApp {
         if (searchSummary != null && !searchSummary.isBlank()) {
             left = left + "  " + searchSummary;
         }
-        if (cols <= 0) {
-            return "";
-        }
-        int leftWidth = CellText.width(left);
-        if (leftWidth >= cols) {
-            return CellText.clip(left, 0, cols);
-        }
-        String rightBlock = indicators + " ".repeat(Math.max(0, rightMargin));
-        int rightWidth = CellText.width(rightBlock);
-        if (rightWidth >= cols) {
-            return CellText.clip(rightBlock, 0, cols);
-        }
-        int free = cols - leftWidth;
-        if (free <= rightWidth) {
-            return left + CellText.clip(rightBlock, 0, Math.max(0, free));
-        }
-        return left + " ".repeat(free - rightWidth) + rightBlock;
-    }
-
-    private String buildStateIndicators(EditorState state, boolean readingMode) {
         String ro = fileAccess.indicator(JvmDocumentStorage.pathOf(state.getCurrentResource()));
-        String enc = state.getFileEncoding() == null ? "UTF-8" : state.getFileEncoding().name();
-        String eol = switch (state.getLineSeparator()) {
+        String enc = summary == null ? state.getFileEncoding() == null ? "UTF-8" : state.getFileEncoding().name()
+            : summary.charsetName() + (summary.bomKind() == dev.tuink.editor.storage.BomKind.NONE ? "" : "+BOM");
+        String defaultEol = switch (summary == null ? state.getLineSeparator() : summary.defaultLineSeparator()) {
             case EditorState.LINE_SEPARATOR_CRLF -> "CRLF";
             case EditorState.LINE_SEPARATOR_CR -> "CR";
             default -> "LF";
         };
-        return ro + " | ENC:" + enc + " | EOL:" + eol + " | " + (readingMode ? "READ" : "INS");
+        String eol = summary == null ? defaultEol : switch (summary.lineEnding()) {
+            case MIXED -> "Mixed";
+            case NONE -> defaultEol;
+            case LF -> "LF";
+            case CRLF -> "CRLF";
+            case CR -> "CR";
+        };
+        return DocumentStatusBarView.place(left, ro, enc, eol, readingMode, cols, row);
     }
 
     private RenderFrameResult renderFrame(
@@ -1458,6 +1452,11 @@ public class TerminalEditorApp {
             composition.layers().contentFocused()
         );
         paintHelpOverlay(canvas, helpOverlay, colorEnabled, composition.layers().blockedInputHighlight());
+        if (layers.format() != null) {
+            layers.format().paint(canvas,
+                (colorEnabled ? colorFileTreeWidgetTheme : monoFileTreeWidgetTheme)
+                    .withSurface(styles.dialog(), styles.dialog()));
+        }
         paintBlockingAttention(current, composition, colorEnabled);
 
         EditorView.CursorPosition editorCursor = editorView.cursorFromPlan(plan, contentTopRow);
@@ -1483,7 +1482,8 @@ public class TerminalEditorApp {
             && confirmBarPlacement == null
             && !topMenuOpen
             && !openFileMode
-            && !helpMode;
+            && !helpMode && layers.format() == null;
+        if (layers.format() != null) desiredCursorVisible = false;
         if (editorOwnsCursor && !plan.cursorInViewport()) {
             desiredCursorVisible = false;
         }

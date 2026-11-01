@@ -42,22 +42,22 @@ class DialogCommandPolicyTest {
     private static final KeyStroke PHYSICAL_KEY = KeyStroke.of(KeyStroke.Key.UNKNOWN);
 
     @Test
-    void helpAndOpenFileExcludeTheDocumentWhileInlinePromptsAndSearchPermitContentFocus() {
+    void exclusivePanelsExcludeTheDocumentWhileInlinePromptsAndSearchPermitContentFocus() {
         for (ModalInputPolicy.Kind kind : ModalInputPolicy.Kind.values()) {
             DialogMode expected = switch (kind) {
-                case HELP, OPEN_FILE -> DialogMode.EXCLUSIVE;
+                case HELP, OPEN_FILE, FORMAT -> DialogMode.EXCLUSIVE;
                 case SAVE_AS, CONFIRM -> DialogMode.BLOCKING;
                 case NONE -> DialogMode.NON_BLOCKING;
             };
             assertEquals(expected, DialogCommandPolicy.mode(kind), kind.toString());
-            assertEquals(kind != ModalInputPolicy.Kind.HELP && kind != ModalInputPolicy.Kind.OPEN_FILE,
+            assertEquals(expected != DialogMode.EXCLUSIVE,
                 DialogCommandPolicy.mode(kind).permitsContentFocus(), kind.toString());
         }
     }
 
     @Test
     void helpAndOpenFileRejectDocumentReadingAndCopyEvenIfContentOwnershipIsStale() {
-        for (ModalInputPolicy.Kind kind : List.of(ModalInputPolicy.Kind.HELP, ModalInputPolicy.Kind.OPEN_FILE)) {
+        for (ModalInputPolicy.Kind kind : List.of(ModalInputPolicy.Kind.HELP, ModalInputPolicy.Kind.OPEN_FILE, ModalInputPolicy.Kind.FORMAT)) {
             for (TuinkCommand command : READ_ONLY) {
                 Fixture fixture = fixture();
                 List<String> original = fixture.tab.model().snapshotLines();
@@ -188,6 +188,7 @@ class DialogCommandPolicyTest {
             DialogCommandPolicy.target(ModalInputPolicy.Kind.OPEN_FILE, OpenFileInputRouter.Focus.LIST, null, false));
         for (Target target : List.of(DialogCommandPolicy.target(ModalInputPolicy.Kind.CONFIRM, null, null, false),
             DialogCommandPolicy.target(ModalInputPolicy.Kind.HELP, null, null, false),
+            DialogCommandPolicy.target(ModalInputPolicy.Kind.FORMAT, null, null, false),
             DialogCommandPolicy.target(ModalInputPolicy.Kind.SAVE_AS, null, SaveAsBarView.Target.SAVE, false),
             DialogCommandPolicy.target(ModalInputPolicy.Kind.SAVE_AS, null, SaveAsBarView.Target.CANCEL, false),
             DialogCommandPolicy.target(ModalInputPolicy.Kind.OPEN_FILE, OpenFileInputRouter.Focus.OK, null, false),

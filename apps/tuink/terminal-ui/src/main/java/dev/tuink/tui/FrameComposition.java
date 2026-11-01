@@ -47,14 +47,15 @@ record FrameComposition(
             + (search.placement() != null ? 1 : 0)
             + (layers.confirm() != null ? 1 : 0)
             + (layers.openFile().visible() ? 1 : 0)
-            + (layers.helpPage() != null ? 1 : 0);
+            + (layers.helpPage() != null ? 1 : 0)
+            + (layers.format() != null ? 1 : 0);
         if (exclusiveOwners > 1) {
             throw new IllegalArgumentException("Only one prompt or modal frame owner is allowed");
         }
     }
 
     boolean allowsScrollHints() {
-        return !fullRedraw && !layers.blockedInputHighlight() && layers.helpPage() == null
+        return !fullRedraw && !layers.blockedInputHighlight() && layers.helpPage() == null && layers.format() == null
             && !(layers.contentFocused() && layers.openFile().visible());
     }
 
@@ -109,6 +110,7 @@ record FrameComposition(
         ConfirmBarView.Placement confirm,
         OpenFile openFile,
         TerminalEditorApp.HelpOverlayPlacement help,
+        DocumentFormatDialogView.Placement format,
         boolean blockedInputHighlight,
         boolean contentFocused
     ) {

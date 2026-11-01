@@ -126,6 +126,7 @@ class FrameCompositionTest {
             null,
             hidden,
             new TerminalEditorApp().helpOverlayPlacement(8, 40, HelpPages.KEYMAP),
+            null,
             false,
             false
         );
@@ -266,6 +267,7 @@ class FrameCompositionTest {
                 null,
                 null,
                 FrameComposition.OpenFile.hidden(),
+                null,
                 null,
                 false,
                 false

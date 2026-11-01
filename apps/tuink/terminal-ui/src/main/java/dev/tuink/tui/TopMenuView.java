@@ -321,6 +321,9 @@ final class TopMenuView {
             item(DOCUMENT_OPEN, "Open..."),
             item(DOCUMENT_SAVE, "Save"),
             item(DOCUMENT_SAVE_AS, "Save As..."),
+            item(TuinkCommand.DOCUMENT_FORMAT, "Format..."),
+            item(TuinkCommand.DOCUMENT_REOPEN_ENCODING, "Reopen with encoding..."),
+            item(TuinkCommand.DOCUMENT_OPEN_ENCODING, "Open with encoding..."),
             item(APP_QUIT, "Quit")
         );
     }

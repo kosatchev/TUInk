@@ -106,6 +106,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     private final UiSessionState uiSessionState;
     private final AppSettingsSession settingsSession;
     private final DocumentIoController documentIo;
+    private final DocumentFormatWorkflow formatWorkflow;
     private SaveWorkflow.SaveRequest pendingSave;
     private FilePickerOpenWorkflow.OpenRequest pendingOpen;
     private boolean quitAfterDocumentIo;
@@ -130,6 +131,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         this.uiSessionState = resources.uiSessionState();
         this.settingsSession = resources.settingsSession();
         this.documentIo = Objects.requireNonNull(resources.documentIo(), "documentIo");
+        this.formatWorkflow = new DocumentFormatWorkflow(documentIo);
         TabUiState initial = sessionContext.active().uiState();
         initial.searchQueryInput = resources.searchQueryInput();
         initial.searchReplaceInput = resources.searchReplaceInput();
@@ -205,6 +207,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     private FileTreeView.Placement openFileTreePlacement;
     private OpenFileDialogView.Placement openFileDialogPlacement;
     private TerminalEditorApp.HelpOverlayPlacement helpOverlayPlacement;
+    private DocumentFormatDialogView.Placement formatPlacement;
+    private DocumentStatusBarView.Placement statusBarPlacement;
 
     private int rows;
     private int cols;
@@ -346,6 +350,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         openFileDialogPlacement = null;
         openFileTreePlacement = null;
         helpOverlayPlacement = null;
+        formatPlacement = null;
+        statusBarPlacement = null;
         topMenu.close();
         syncSearchProjection();
         eventLoop.invalidate();
@@ -354,6 +360,10 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     private void closeView(int index) {
         var tab = tabs.get(index);
         ViewId viewId = tab.documentSession().viewId();
+        if (formatWorkflow.affects(tab.documentSession())) {
+            withUi(viewId, tab.uiState(), () -> notice().info("A format operation is in progress; cancel it before closing"));
+            return;
+        }
         cancelPendingSave(viewId);
         if (!sessionContext.canClose(viewId)) {
             withUi(viewId, tab.uiState(), () -> notice().info("Saving this document; wait before closing its tab"));
@@ -870,17 +880,24 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             cols,
             uiSessionState.readingModeSetting
         );
-        String bottomBar = host.buildBottomBar(
+        statusBarPlacement = host.buildStatusBar(
             state,
             model,
             cols,
             uiSessionState.readingModeSetting,
             activeTabIndex,
             tabs.size(),
-            searchSummary
+            searchSummary,
+            activeDocument().document().formatSummary(), rows - 1
         );
+        String bottomBar = statusBarPlacement.text();
         HelpPage helpPage = host.activeHelpPage(helpHintsMode, helpLicensesMode, helpAuthorMode);
         helpOverlayPlacement = helpPage == null ? null : host.helpOverlayPlacement(rows, cols, helpPage, dialogTopInset);
+        formatPlacement = modalState().isDocumentFormat() && ui().formatDialog != null
+            ? DocumentFormatDialogView.place(ui().formatDialog,
+                new Rect(0, dialogTopInset, cols, Math.max(0, rows - dialogTopInset)),
+                !uiSessionState.readingModeSetting || ui().formatDialog.purpose != DocumentFormatDialogView.Purpose.FORMAT)
+            : null;
         modalInputBounds = helpOverlayPlacement != null ? helpOverlayPlacement.frame().bounds()
             : openFileDialogPlacement != null ? openFileDialogPlacement.frame().bounds()
             : host.blockingSurface(rows, cols, contentTopRow, inlinePromptBar.height(), saveAsMode || confirmMode);
@@ -928,6 +945,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                     )
                     : FrameComposition.OpenFile.hidden(),
                 helpOverlayPlacement,
+                formatPlacement,
                 host.modalAttention().highlighted(),
                 focusUi().blockingContentFocused
             ),
@@ -989,6 +1007,9 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
 
     private WindowPointerCapture.Frame pointerFrame() {
         WindowPointerCapture.Frame frame = WindowPointerCapture.frame(this);
+        if (formatPlacement != null) {
+            frame.addScope(formatPlacement.scope(), formatPlacement.state().focus, Runnable::run);
+        }
         if (searchBarPlacement != null) {
             frame.addScope(searchBarPlacement.focusScope(), host.searchFocusManager(), ignored -> {});
         }
@@ -1543,6 +1564,42 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 return;
             }
         }
+        if (modalState().isDocumentFormat()) {
+            if (navigationCommand == TuinkCommand.APP_QUIT) {
+                closeFormatDialog();
+            } else if (navigationCommand == TuinkCommand.DOCUMENT_FORMAT_APPLY
+                || navigationCommand == TuinkCommand.DOCUMENT_FORMAT_CANCEL) {
+                invokeFormatCommand(navigationCommand);
+                return;
+            } else {
+                if (!(inputEvent instanceof PointerEvent)
+                    || uiSessionState.mouseModeSetting && uiSessionState.mouseModeAvailable) {
+                    if (formatPlacement != null) {
+                        DocumentFormatDialogView.Action action = formatPlacement.handle(inputEvent, pointerCapture, this);
+                        if (action != DocumentFormatDialogView.Action.NONE) {
+                            invokeFormatCommand(action == DocumentFormatDialogView.Action.APPLY
+                                ? TuinkCommand.DOCUMENT_FORMAT_APPLY : TuinkCommand.DOCUMENT_FORMAT_CANCEL);
+                        }
+                    }
+                }
+                eventLoop.invalidate();
+                return;
+            }
+        }
+        if (inputEvent instanceof PointerEvent pointer && pointer.kind() == PointerEvent.Kind.PRESS
+            && pointer.button() == PointerEvent.Button.LEFT && statusBarPlacement != null
+            && modalState().isNone() && !ui().openFileMode && !topMenu.isOpen()
+            && uiSessionState.mouseModeSetting && uiSessionState.mouseModeAvailable) {
+            boolean encoding = statusBarPlacement.encoding().contains(pointer.column(), pointer.row());
+            boolean endings = statusBarPlacement.endings().contains(pointer.column(), pointer.row());
+            if (encoding || endings) {
+                invokeFormatCommand(TuinkCommand.DOCUMENT_FORMAT);
+                if (ui().formatDialog != null) ui().formatDialog.requestedFocus = encoding
+                    ? DocumentFormatDialogView.Target.ENCODING : DocumentFormatDialogView.Target.EOL;
+                eventLoop.invalidate();
+                return;
+            }
+        }
         ModalInputPolicy.Kind blocker = TerminalEditorApp.modalInputKind(modalState(), ui().openFileMode);
         TuinkCommand physicalCommand = inputEvent instanceof KeyStroke stroke
             ? commandRouter.invocationFor(stroke)
@@ -1694,7 +1751,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             if (openInput.intent() != null) {
                 applyOpenFileResult(FilePickerOpenWorkflow.apply(openInput.intent(), openFileTree(),
                     host.toTabSessions(tabs), sessionContext.activeTabIndex(),
-                    () -> TuiDocumentSession.create(host.clipboard)));
+                    () -> TuiDocumentSession.create(host.clipboard), ui().pickerOpenMode));
                 return;
             }
             if (openInput.consumed()) {
@@ -1824,6 +1881,10 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             }
             Integer closeIndex = tabInput.closeIndex();
             if (closeIndex != null && closeIndex < tabs.size()) {
+                if (formatWorkflow.affects(tabs.get(closeIndex).documentSession())) {
+                    notice().info("A format operation is in progress; cancel it before closing");
+                    return;
+                }
                 ViewId closeView = tabs.get(closeIndex).documentSession().viewId();
                 if (!sessionContext.canClose(closeView)) {
                     notice().info("Saving this document; wait before closing its tab");
@@ -2100,6 +2161,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         }
 
         TuinkCommand action = key.command();
+        if (handleFormatCommand(action)) return;
         if (action.editsDocumentText() && rejectSavingDocumentEdit()) {
             return;
         }
@@ -2108,6 +2170,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             return;
         }
         if (action == TuinkCommand.APP_QUIT) {
+            formatWorkflow.cancel();
             cancelPendingOpen();
             cancelPendingSave(null);
         }
@@ -2115,6 +2178,10 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             quitAfterDocumentIo = true;
             documentIo.beginQuitWait(System.nanoTime());
             notice().info(pendingSave == null ? "Waiting for the file operation before quitting" : "Finishing save…");
+            return;
+        }
+        if (action == TuinkCommand.TAB_CLOSE && formatWorkflow.affects(activeDocument())) {
+            notice().info("A format operation is in progress; cancel it before closing");
             return;
         }
         if (action == TuinkCommand.TAB_CLOSE) cancelPendingSave(sessionContext.activeViewId());
@@ -2125,6 +2192,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         if (activeDocument().document().io().busy()
                 && (action == TuinkCommand.DOCUMENT_SAVE || action == TuinkCommand.DOCUMENT_SAVE_AS)
             || documentIo.busy() && action == TuinkCommand.DOCUMENT_SAVE && state.getCurrentResource() != null
+            || formatWorkflow.affects(activeDocument()) && (action == TuinkCommand.DOCUMENT_SAVE || action == TuinkCommand.DOCUMENT_SAVE_AS)
             || action == TuinkCommand.DOCUMENT_OPEN && (ui().pendingOpen != null || ui().deferredOpenResult != null)) {
             notice().info("A file operation is already in progress");
             return;
@@ -2178,6 +2246,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         running = editorAction.running();
         setModal(editorAction.modalState().bindTo(sessionContext.activeViewId()));
         if (editorAction.requestOpenFile()) {
+            ui().pickerOpenMode = dev.tuink.editor.storage.DocumentOpenMode.DETECT;
             topMenu.close();
             ui().openFileMode = true;
             ui().pickerNotice = null;
@@ -2189,6 +2258,99 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         if (editorAction.requestSaveCurrent()) {
             applySaveResult(SaveWorkflow.saveCurrent(saveContext()));
         }
+    }
+
+    private void invokeFormatCommand(TuinkCommand command) {
+        commandRouter.invoke(CommandInvocation.of(command.id())).ifPresent(this::handleFormatCommand);
+    }
+
+    private boolean handleFormatCommand(TuinkCommand command) {
+        DocumentFormatDialogView.Purpose purpose = switch (command) {
+            case DOCUMENT_FORMAT -> DocumentFormatDialogView.Purpose.FORMAT;
+            case DOCUMENT_OPEN_ENCODING -> DocumentFormatDialogView.Purpose.OPEN;
+            case DOCUMENT_REOPEN_ENCODING -> DocumentFormatDialogView.Purpose.REOPEN;
+            default -> null;
+        };
+        if (purpose != null) {
+            if (documentIo.busy() || activeDocument().document().io().busy()) {
+                notice().info("A file operation is already in progress");
+                return true;
+            }
+            if (purpose == DocumentFormatDialogView.Purpose.REOPEN && state.getCurrentResource() == null) {
+                notice().info("Save this document before reopening it with an encoding");
+                return true;
+            }
+            topMenu.close();
+            cancelPointerCapture(PointerCaptureCancellation.SURFACE_CHANGED);
+            ui().openFileMode = false;
+            ui().formatDialog = new DocumentFormatDialogView.State(purpose,
+                activeDocument().document().formatSummary(), DocumentFormatDialogView.Target.ENCODING);
+            setModal(UiModalState.documentFormat().bindTo(interactionView()));
+            cancelDocumentPointerInteraction();
+            eventLoop.invalidate();
+            return true;
+        }
+        if (command != TuinkCommand.DOCUMENT_FORMAT_APPLY && command != TuinkCommand.DOCUMENT_FORMAT_CANCEL) return false;
+        if (!modalState().isDocumentFormat() || ui().formatDialog == null) return true;
+        if (command == TuinkCommand.DOCUMENT_FORMAT_CANCEL) {
+            closeFormatDialog();
+            return true;
+        }
+        var draft = ui().formatDialog;
+        if (draft.busy) return true;
+        if (draft.purpose == DocumentFormatDialogView.Purpose.OPEN) {
+            var mode = draft.openMode();
+            closeFormatDialog();
+            ui().pickerOpenMode = mode;
+            ui().openFileMode = true;
+            ui().pickerNotice = null;
+            ui().lastPickerDirectoryFailure = null;
+            openFileTree().setRoot(FilePickerOpenWorkflow.initialRoot(JvmDocumentStorage.pathOf(state.getCurrentResource())));
+            ui().openFileFocusState.focus(OpenFileInputRouter.Focus.LIST);
+            eventLoop.invalidate();
+            return true;
+        }
+        if (draft.purpose == DocumentFormatDialogView.Purpose.FORMAT && uiSessionState.readingModeSetting) {
+            draft.error = "Reading mode: format changes are disabled";
+            return true;
+        }
+        if (draft.purpose == DocumentFormatDialogView.Purpose.REOPEN && state.isDirty() && !draft.confirmDiscard) {
+            draft.confirmDiscard = true;
+            draft.requestedFocus = DocumentFormatDialogView.Target.CANCEL;
+            eventLoop.invalidate();
+            return true;
+        }
+        ViewId viewId = interactionView();
+        TabUiState owner = ui();
+        TuiDocumentSession document = activeDocument();
+        formatWorkflow.apply(document, draft,
+            () -> !closingDocumentIo && !owner.closed && stateFor(viewId) == owner && owner.formatDialog == draft,
+            loaded -> WorkspaceDocuments.findOpenFile(tabs.stream()
+                .filter(tab -> tab.documentSession().document() != document.document())
+                .map(TerminalEditorApp.EditorTab::tabSession).toList(), -1,
+                ((dev.tuink.storage.jvm.FileBaseline) loaded.baseline()).target()) < 0,
+            outcome -> withUi(viewId, owner, () -> {
+                if (outcome.succeeded()) {
+                    owner.formatDialog = null;
+                    setModal(UiModalState.none());
+                    notice().success(outcome.message());
+                } else {
+                    draft.error = outcome.message();
+                    notice().error(outcome.message());
+                }
+                eventLoop.invalidate();
+            }));
+        eventLoop.invalidate();
+        return true;
+    }
+
+    private void closeFormatDialog() {
+        if (formatWorkflow.affects(activeDocument())) formatWorkflow.cancel();
+        cancelPointerCapture(PointerCaptureCancellation.SURFACE_CHANGED);
+        ui().formatDialog = null;
+        formatPlacement = null;
+        setModal(UiModalState.none());
+        eventLoop.invalidate();
     }
 
     private void applyOpenFileResult(FilePickerOpenWorkflow.Result result) {
@@ -2225,7 +2387,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             });
             return;
         }
-        boolean documentPromptActive = modalState().isSaveAs() || modalState().isSaveOverwriteConfirm()
+        boolean documentPromptActive = modalState().isDocumentFormat() || modalState().isSaveAs() || modalState().isSaveOverwriteConfirm()
             || modalState().isSaveUtf8Confirm() || modalState().isCloseTabConfirm();
         if (documentPromptActive && (result.openFileMode() || result.pendingExplicitOpenPath() != null)) {
             ui().deferredOpenResult = result;
@@ -2554,6 +2716,10 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     }
 
     private boolean rejectSavingDocumentEdit() {
+        if (formatWorkflow.affects(activeDocument())) {
+            notice().info("A format operation is in progress; cancel it to resume editing");
+            return true;
+        }
         if (!activeDocument().document().io().busy()) {
             return false;
         }
@@ -2637,6 +2803,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     void closeDocumentIo() {
         host.closeFileAccess();
         closingDocumentIo = true;
+        formatWorkflow.cancel();
         for (TabUiState owner : knownUiStates) owner.close();
         for (TerminalEditorApp.EditorTab tab : tabs) tab.uiState().close();
         globalUi.close();

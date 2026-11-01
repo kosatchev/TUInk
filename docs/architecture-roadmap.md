@@ -8,6 +8,13 @@ TUInk развивается как приложение-редактор пов
 
 ## Текущая архитектура
 
+Физические каталоги сгруппированы по владельцу: приложения — в `apps/`,
+библиотеки — в `libs/`, общие проверки — в `verification/`.
+[Карта репозитория](../README.md#repository-layout) сопоставляет каталоги
+с сохранёнными именами Gradle-проектов. В таблице ниже используются эти имена;
+например, `core` расположен в `libs/editor/engine`, а `render` — в
+`apps/tuink/terminal-rendering`.
+
 | Модуль | Ответственность |
 |---|---|
 | `unicode-text` | grapheme boundaries, UTF-16 mapping и Unicode text operations |
@@ -241,7 +248,7 @@ workspace до завершения его save operation; удаление др
 
 ### Проверка TUIframe вторым приложением
 
-Независимый `examples/log-viewer` должен использовать только API
+Независимый `apps/log-viewer` должен использовать только API
 `dev.tuiframe.*` из `tuiframe-core`, `tuiframe-jline` и `tuiframe-widgets`.
 Он проверит toolkit без editor core или готовой filesystem model:
 

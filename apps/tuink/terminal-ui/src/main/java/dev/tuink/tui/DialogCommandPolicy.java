@@ -29,7 +29,7 @@ final class DialogCommandPolicy {
 
     static DialogMode mode(ModalInputPolicy.Kind kind) {
         return switch (kind) {
-            case HELP, OPEN_FILE -> DialogMode.EXCLUSIVE;
+            case HELP, OPEN_FILE, FORMAT -> DialogMode.EXCLUSIVE;
             case NONE -> DialogMode.NON_BLOCKING;
             case SAVE_AS, CONFIRM -> DialogMode.BLOCKING;
         };
@@ -72,7 +72,7 @@ final class DialogCommandPolicy {
         }
         return switch (kind) {
             case SAVE_AS -> saveAsFocus == SaveAsBarView.Target.FIELD ? Target.TEXT_INPUT : Target.BUTTON;
-            case CONFIRM, HELP -> Target.BUTTON;
+            case CONFIRM, HELP, FORMAT -> Target.BUTTON;
             case OPEN_FILE -> openFocus == OpenFileInputRouter.Focus.LIST ? Target.OTHER_CONTROL : Target.BUTTON;
             case NONE -> Target.OTHER_CONTROL;
         };

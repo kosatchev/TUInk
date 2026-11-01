@@ -61,6 +61,17 @@ Show the application version and exit without opening the terminal or reading se
 .TP
 .BR \-\-
 End option parsing. The following argument is a literal file path, even if it starts with a dash.
+.SH DOCUMENT FORMAT
+Use File > Format or click ENC or EOL in the footer to choose UTF-8 with or
+without BOM, UTF-16LE or UTF-16BE with BOM, Windows-1251, CP866, or KOI8-R.
+Encoding and line endings are independent. Keep retains mixed endings;
+LF, CRLF, and CR convert all existing endings and set the ending used by Enter.
+The presence or absence of a final newline is preserved.
+.PP
+Apply changes the document in memory as one undoable edit. Save writes it to disk.
+Characters unavailable in the selected encoding produce an error without substitution.
+Reopen with encoding reads the original bytes again and clears Undo;
+discarding unsaved edits requires confirmation. Cancelling or a read error retains the draft.
 .SH FILES
 .TP
 .I ~/.config/tuink/tuink.properties

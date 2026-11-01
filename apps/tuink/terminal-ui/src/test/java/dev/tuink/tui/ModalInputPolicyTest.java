@@ -38,7 +38,7 @@ import org.junit.jupiter.api.Test;
 
 class ModalInputPolicyTest {
     private static final CommandRouter COMMANDS = new CommandRouter();
-    private static final List<Kind> BLOCKERS = List.of(Kind.SAVE_AS, Kind.CONFIRM, Kind.HELP, Kind.OPEN_FILE);
+    private static final List<Kind> BLOCKERS = List.of(Kind.SAVE_AS, Kind.CONFIRM, Kind.HELP, Kind.OPEN_FILE, Kind.FORMAT);
 
     @Test
     void boundEditingAndGlobalShortcutsRequestFeedbackBehindEachBlocker() {
@@ -76,7 +76,7 @@ class ModalInputPolicyTest {
             assertEquals(kind != Kind.NONE && kind != Kind.SAVE_AS, blocked(kind, new PasteEvent("text")));
             assertFalse(blocked(kind, new PasteEvent("partial", true)));
             for (String mnemonic : List.of("y", "Y", "n", "N")) {
-                assertEquals(kind == Kind.HELP || kind == Kind.OPEN_FILE, blocked(kind, new TextInput(mnemonic)));
+                assertEquals(kind == Kind.HELP || kind == Kind.OPEN_FILE || kind == Kind.FORMAT, blocked(kind, new TextInput(mnemonic)));
             }
             assertFalse(blocked(kind, new TextInput(" ")));
         }

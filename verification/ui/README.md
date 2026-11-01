@@ -57,6 +57,9 @@ The scenarios protect the following user behavior:
 | `startup-dependencies` | Missing `tty` or `stty` causes a bounded startup error without ANSI output or changed termios, with colored and uncolored dumb-terminal fallbacks |
 | `save-as-retarget` | A retargeted opening symlink still conflicts on Save; explicitly choosing its new target requires confirmation and saves only that file |
 | `legacy-encoding` | An unencodable emoji keeps CP1251 bytes intact; safe cancellation and explicit UTF-8 Save As preserve CRLF, and format Undo/Redo retain the text and saved bytes |
+| `document-format` | The footer opens Format; all seven output encodings save exact BOM/content bytes, Apply waits for Save, Undo restores mixed endings, Redo returns to the savepoint, and a fresh process explicitly decodes every format |
+| `format-errors` | An unmappable emoji leaves the document and file unchanged with an actionable error; cancelling a changed format draft also works after shrinking the terminal |
+| `format-reopen` | CP866 can be re-read in the existing tab; cancelling a dirty Reopen retains edits, explicit discard resets history, and a failed strict decoder retains the previous document |
 | `field-edit-caret` | Deleting an emoji separator keeps subsequent input after the newly joined grapheme in Find and Save As |
 | `field-memory-growth` | Dense Unicode field growth on a 128 MiB heap refuses a whole paste before exhaustion; editing and saving the document remain usable |
 | `identical-replace-budget` | A single identical replacement exceeding its wildcard budget preserves the caret, selection and document |

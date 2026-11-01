@@ -80,6 +80,12 @@ final class FilePickerOpenWorkflow {
     static Result apply(OpenFileInputRouter.Intent intent, OpenFileTreeController tree,
                         List<TabSession> tabs, int activeTabIndex,
                         Supplier<TuiDocumentSession> newDocument) {
+        return apply(intent, tree, tabs, activeTabIndex, newDocument, DocumentOpenMode.DETECT);
+    }
+
+    static Result apply(OpenFileInputRouter.Intent intent, OpenFileTreeController tree,
+                        List<TabSession> tabs, int activeTabIndex,
+                        Supplier<TuiDocumentSession> newDocument, DocumentOpenMode mode) {
         if (intent == null) {
             return unchanged(true);
         }
@@ -108,7 +114,7 @@ final class FilePickerOpenWorkflow {
                     ? "The selected tree entry cannot be opened" : "Select a file");
         }
         if (intent instanceof OpenFileInputRouter.OpenFile open) {
-            return open(open.file(), DocumentOpenMode.DETECT, tabs, activeTabIndex);
+            return open(open.file(), mode, tabs, activeTabIndex);
         }
         throw new IllegalStateException("Unsupported open-file intent: " + intent);
     }

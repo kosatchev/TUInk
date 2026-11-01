@@ -11,6 +11,11 @@ public enum TuinkCommand {
     DOCUMENT_OPEN("tuink.document.open", "Open document"),
     DOCUMENT_SAVE("tuink.document.save", "Save document"),
     DOCUMENT_SAVE_AS("tuink.document.save-as", "Save document as"),
+    DOCUMENT_FORMAT("tuink.document.format", "Change document format"),
+    DOCUMENT_FORMAT_APPLY("tuink.document.format.apply", "Apply document format"),
+    DOCUMENT_FORMAT_CANCEL("tuink.document.format.cancel", "Cancel document format"),
+    DOCUMENT_OPEN_ENCODING("tuink.document.open-encoding", "Open with encoding"),
+    DOCUMENT_REOPEN_ENCODING("tuink.document.reopen-encoding", "Reopen with encoding"),
 
     EDIT_UNDO("tuink.edit.undo", "Undo"),
     EDIT_REDO("tuink.edit.redo", "Redo"),

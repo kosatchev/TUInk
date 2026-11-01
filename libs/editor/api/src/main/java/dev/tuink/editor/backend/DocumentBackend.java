@@ -17,6 +17,8 @@ import dev.tuink.editor.storage.ResourceBinding;
 import dev.tuink.editor.storage.SavedDocument;
 import dev.tuink.editor.storage.SaveDisposition;
 import dev.tuink.editor.storage.StorageOperation;
+import dev.tuink.editor.format.DocumentFormatSpec;
+import dev.tuink.editor.format.PreparedFormatChange;
 import java.io.IOException;
 import java.util.function.Function;
 
@@ -43,6 +45,10 @@ public interface DocumentBackend {
     DocumentSnapshot snapshot();
     Status status();
     DocumentCommandResult.Applied execute(DocumentCommandTarget target, DocumentCommand command);
+    /** Captures immutable text and format; validation runs detached from the owner. */
+    PreparedFormatChange prepareFormatChange(DocumentFormatSpec spec);
+    /** Constant-time end-of-file projection without capturing document text. */
+    boolean finalNewline();
 
     /** Prepare the result against staged text before publishing text/history. */
     <T> T applyWorkspaceEdit(WorkspaceEdit edit, Function<Boolean, T> prepareResult);

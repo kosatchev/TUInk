@@ -18,6 +18,8 @@ import dev.tuink.editor.storage.DocumentResource;
 import dev.tuink.editor.storage.SavedDocument;
 import dev.tuink.editor.storage.SaveDisposition;
 import dev.tuink.editor.storage.StorageOperation;
+import dev.tuink.editor.format.DocumentFormatSpec;
+import dev.tuink.editor.format.PreparedFormatChange;
 import java.io.IOException;
 import java.util.AbstractList;
 import java.util.HashMap;
@@ -156,6 +158,19 @@ public final class CoreDocumentBackend implements DocumentBackend {
         EditorEngine engine = defaultView.engine();
         return new Status(engine.resourceBinding(), document.model().fileMetadata(),
             defaultView.state().isDirty(), engine.recoveryRevision());
+    }
+
+    @Override
+    public PreparedFormatChange prepareFormatChange(DocumentFormatSpec spec) {
+        requireOwnerThread();
+        return defaultView.engine().prepareFormatChange(spec);
+    }
+
+    @Override
+    public boolean finalNewline() {
+        requireOwnerThread();
+        TextModel model = document.model();
+        return model.lineCount() > 1 && model.lineText(model.lineCount() - 1).length() == 0;
     }
 
     @Override

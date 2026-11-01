@@ -6,6 +6,8 @@ import dev.tuink.editor.command.DocumentCommandResult;
 import dev.tuink.editor.command.DocumentCommandTarget;
 import dev.tuink.editor.document.TextPosition;
 import dev.tuink.editor.search.SearchOptions;
+import dev.tuink.editor.format.DocumentFormatSpec;
+import dev.tuink.editor.format.PreparedFormatChange;
 import dev.tuink.editor.storage.DocumentResource;
 import dev.tuink.editor.storage.DocumentStorage;
 import dev.tuink.editor.storage.ResourceId;
@@ -26,8 +28,10 @@ import dev.tuink.editor.diff.LineDiff;
 import dev.tuink.editor.diff.LineEdit;
 import dev.tuink.unicode.GraphemeText;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.nio.charset.UnsupportedCharsetException;
 import java.util.AbstractList;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -220,6 +224,9 @@ public class EditorEngine {
     }
 
     private Boolean dispatchCommand(DocumentCommand command) {
+        if (command instanceof DocumentCommand.SetDocumentFormat format) {
+            return applyDocumentFormat(format.prepared(), format.validation());
+        }
         if (command instanceof DocumentCommand.Input input) {
             insertInput(input.text());
             return null;
@@ -307,6 +314,112 @@ public class EditorEngine {
 
     private static Position position(TextPosition position) {
         return position == null ? null : new Position(position.line(), position.utf16Offset());
+    }
+
+    /** Captures immutable text; no encoder or resource work runs on the owner. */
+    public PreparedFormatChange prepareFormatChange(DocumentFormatSpec spec) {
+        document.requireOwnerThread();
+        Objects.requireNonNull(spec, "spec");
+        try {
+            return new FormatPreparation(document, model.revision(), recoveryRevision(),
+                model.snapshotTextLines(), model.fileMetadata(), spec);
+        } catch (OutOfMemoryError exhausted) {
+            throw new DocumentEditLimitException();
+        }
+    }
+
+    private boolean applyDocumentFormat(PreparedFormatChange prepared, PreparedFormatChange.Validation validation) {
+        document.requireOwnerThread();
+        if (!(prepared instanceof FormatPreparation plan) || plan.document != document
+            || validation != plan.validation || plan.validation == null) {
+            throw new IllegalArgumentException("Format validation belongs to another preparation");
+        }
+        if (plan.consumed || plan.revision != model.revision() || plan.stateRevision != recoveryRevision()) {
+            throw new IllegalStateException("Format preparation no longer matches the document");
+        }
+        if (plan.operation.cancelled()) throw new IllegalStateException("Format preparation was cancelled");
+        DocumentFileMetadata after = plan.validation.metadata;
+        if (!plan.validation.changed) {
+            plan.consumed = true;
+            if (commandExecution != null) commandExecution.performed = false;
+            return false;
+        }
+        boolean changed = prepareAndCommitDocumentEdit(() -> {
+            DocumentFileMetadata before = model.fileMetadata();
+            long afterStateId = history.nextDocumentStateId + 1;
+            Deque<HistoryEntry> undo = copyHistory(history.undoStack);
+            pushWithLimit(undo, new FormatHistoryEntry(before, after, history.currentDocumentStateId, afterStateId));
+            model.restoreFileMetadata(after);
+            if (commandExecution != null) commandExecution.performed = true;
+            return new PreparedDocumentHistory(undo, new ArrayDeque<>(), afterStateId, afterStateId);
+        }, result -> result);
+        plan.consumed = true;
+        return changed;
+    }
+
+    private static final class FormatPreparation implements PreparedFormatChange {
+        private final EditorDocument document;
+        private final long revision;
+        private final long stateRevision;
+        private final List<? extends CharSequence> lines;
+        private final DocumentFileMetadata original;
+        private final DocumentFormatSpec spec;
+        private boolean started;
+        private volatile FormatValidation validation;
+        private StorageOperation operation;
+        private boolean consumed;
+
+        private FormatPreparation(EditorDocument document, long revision, long stateRevision,
+                                  List<? extends CharSequence> lines, DocumentFileMetadata original,
+                                  DocumentFormatSpec spec) {
+            this.document = document;
+            this.revision = revision;
+            this.stateRevision = stateRevision;
+            this.lines = lines;
+            this.original = original;
+            this.spec = spec;
+        }
+
+        @Override
+        public synchronized Validation perform(StorageOperation operation) throws IOException {
+            if (started) throw new IllegalStateException("Format validation has already been performed");
+            started = true;
+            this.operation = Objects.requireNonNull(operation, "operation");
+            operation.checkCancelled();
+            try {
+                DocumentFileMetadata target = spec.metadata(original, lines.size());
+                DocumentCodec.EncodedContent encoded = DocumentCodec.write(OutputStream.nullOutputStream(), lines, target, operation);
+                operation.checkCancelled();
+                validation = new FormatValidation(encoded.metadata(), !sameFormat(original, encoded.metadata(), operation));
+                return validation;
+            } catch (UnsupportedCharsetException unavailable) {
+                throw new IOException("Requested document encoding unavailable: " + unavailable.getCharsetName(), unavailable);
+            }
+        }
+
+        private static boolean sameFormat(DocumentFileMetadata first, DocumentFileMetadata second,
+                                          StorageOperation operation) throws IOException {
+            if (!first.charset().equals(second.charset()) || first.bomKind() != second.bomKind()
+                || !first.defaultLineSeparator().equals(second.defaultLineSeparator())) return false;
+            if (first.lineSeparators() == second.lineSeparators()) return true;
+            var left = first.lineSeparators().iterator();
+            var right = second.lineSeparators().iterator();
+            int checked = 0;
+            while (left.hasNext() && right.hasNext()) {
+                if ((checked++ & 8191) == 0) operation.checkCancelled();
+                if (!left.next().equals(right.next())) return false;
+            }
+            return !left.hasNext() && !right.hasNext();
+        }
+    }
+
+    private static final class FormatValidation implements PreparedFormatChange.Validation {
+        private final DocumentFileMetadata metadata;
+        private final boolean changed;
+        private FormatValidation(DocumentFileMetadata metadata, boolean changed) {
+            this.metadata = metadata;
+            this.changed = changed;
+        }
     }
 
     /** Allocation seam used to verify that a mandatory result cannot follow the text commit. */
@@ -812,10 +925,8 @@ public class EditorEngine {
         Deque<HistoryEntry> preparedHistory = null;
         long convertedStateId = history.nextDocumentStateId + 1;
         if (formatChanged) {
-            ViewState before = captureViewState();
-            ViewState after = new ViewState(DocumentPreferences.from(metadata), before.view());
-            HistoryEntry conversion = new OperationHistoryEntry(EditKind.NONE, before, after,
-                List.of(), history.currentDocumentStateId, convertedStateId);
+            HistoryEntry conversion = new FormatHistoryEntry(model.fileMetadata(), metadata,
+                history.currentDocumentStateId, convertedStateId);
             preparedHistory = new ArrayDeque<>(history.undoStack);
             pushWithLimit(preparedHistory, conversion);
         }
@@ -2797,6 +2908,19 @@ public class EditorEngine {
         long undo(EditorEngine engine);
 
         long redo(EditorEngine engine);
+    }
+
+    /** Format operations alone retain a complete separator layout, without copying text. */
+    private record FormatHistoryEntry(DocumentFileMetadata before, DocumentFileMetadata after,
+                                      long beforeStateId, long afterStateId) implements HistoryEntry {
+        @Override public long undo(EditorEngine engine) {
+            engine.model.restoreFileMetadata(before);
+            return beforeStateId;
+        }
+        @Override public long redo(EditorEngine engine) {
+            engine.model.restoreFileMetadata(after);
+            return afterStateId;
+        }
     }
 
     private static final class SnapshotHistoryEntry implements HistoryEntry {

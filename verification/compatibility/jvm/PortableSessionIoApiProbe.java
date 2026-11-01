@@ -3,6 +3,9 @@ package dev.tuink.compat;
 import dev.tuink.editor.document.DocumentId;
 import dev.tuink.editor.command.DocumentCommand;
 import dev.tuink.editor.command.DocumentCommandResult;
+import dev.tuink.editor.format.DocumentEncoding;
+import dev.tuink.editor.format.DocumentFormatSpec;
+import dev.tuink.editor.format.LineEndingPolicy;
 import dev.tuink.editor.session.document.EditorDocumentSession;
 import dev.tuink.editor.session.document.EditorWorkspace;
 import dev.tuink.editor.session.document.DocumentIoCoordinator;
@@ -35,6 +38,14 @@ final class PortableSessionIoApiProbe {
 
     static RecoveryDocument checkpoint(EditorDocumentSession session) {
         return session.prepareRecovery(session.defaultViewId()).materialize();
+    }
+
+    static DocumentCommandResult convert(EditorDocumentSession session) throws IOException {
+        var prepared = session.prepareFormatChange(session.defaultViewId(),
+            new DocumentFormatSpec(DocumentEncoding.CP866, LineEndingPolicy.CRLF));
+        // A frontend runs perform() in its worker and admits completion on the owner.
+        var completion = prepared.perform();
+        return session.completeFormatChange(prepared, completion);
     }
 
     static DocumentCommandResult type(EditorDocumentSession session, String text) {

@@ -21,6 +21,9 @@ import dev.tuink.editor.storage.ResourceBinding;
 import dev.tuink.editor.storage.SavedDocument;
 import dev.tuink.editor.storage.SaveDisposition;
 import dev.tuink.editor.storage.StorageOperation;
+import dev.tuink.editor.storage.DocumentOpenMode;
+import dev.tuink.editor.format.DocumentFormatSpec;
+import dev.tuink.editor.format.DocumentFormatSummary;
 import java.io.IOException;
 import java.util.List;
 import java.util.Objects;
@@ -41,6 +44,8 @@ public final class EditorDocumentSession {
     private final DocumentIoCoordinator io;
     private volatile DocumentSnapshot publishedSnapshot;
     private EditorWorkspace<?> workspace;
+    private DocumentFileMetadata summaryMetadata;
+    private DocumentFormatSummary summary;
 
     private EditorDocumentSession(DocumentBackend backend) {
         this.backend = Objects.requireNonNull(backend, "backend");
@@ -167,7 +172,8 @@ public final class EditorDocumentSession {
     }
 
     private static boolean mutatesDocument(DocumentCommand command) {
-        if (command instanceof DocumentCommand.Input || command instanceof DocumentCommand.Paste) return true;
+        if (command instanceof DocumentCommand.Input || command instanceof DocumentCommand.Paste
+            || command instanceof DocumentCommand.SetDocumentFormat) return true;
         if (command instanceof DocumentCommand.Edit edit) {
             return edit.action() != DocumentCommand.EditAction.COPY && edit.action() != DocumentCommand.EditAction.SELECT_ALL;
         }
@@ -197,6 +203,86 @@ public final class EditorDocumentSession {
 
     public record Status(ResourceBinding binding, DocumentFileMetadata metadata, boolean dirty,
                          long recoveryRevision) {}
+
+    /** Cached by immutable metadata identity; no text or separator scan occurs on repeated frames. */
+    public DocumentFormatSummary formatSummary() {
+        requireOwnerThread();
+        DocumentFileMetadata metadata = backend.status().metadata();
+        boolean finalNewline = backend.finalNewline();
+        if (summaryMetadata != metadata || summary == null || summary.finalNewline() != finalNewline) {
+            DocumentFormatSummary prepared = DocumentFormatSummary.from(metadata, finalNewline);
+            summaryMetadata = metadata;
+            summary = prepared;
+        }
+        return summary;
+    }
+
+    /** Captures text/format revisions while allowing later cursor movement. */
+    public PreparedDocumentFormat prepareFormatChange(ViewId viewId, DocumentFormatSpec spec) {
+        requireOwnerThread();
+        requireIoIdle();
+        Objects.requireNonNull(spec, "spec");
+        DocumentCommandTarget target = commandTarget(viewId);
+        return new PreparedDocumentFormat(this, target, backend.prepareFormatChange(spec), spec);
+    }
+
+    /** Publishes exactly one matching validation through the normal document command path. */
+    public DocumentCommandResult completeFormatChange(PreparedDocumentFormat prepared,
+                                                       PreparedDocumentFormat.Completion completion) {
+        Objects.requireNonNull(prepared, "prepared");
+        if (!isOwnerThread()) return rejected(prepared.target, DocumentCommandResult.RejectionReason.WRONG_OWNER_THREAD);
+        if (prepared.owner != this) throw new IllegalArgumentException("Format preparation belongs to another session");
+        prepared.requireCompletion(completion);
+        DocumentCommandTarget target = prepared.target;
+        DocumentCommandResult.RejectionReason reason = null;
+        if (prepared.cancelled()) reason = DocumentCommandResult.RejectionReason.CANCELLED;
+        else if (!backend.ownsView(target.viewId())) reason = DocumentCommandResult.RejectionReason.UNKNOWN_VIEW;
+        else if (backend.revision() != target.revision()) reason = DocumentCommandResult.RejectionReason.STALE_DOCUMENT;
+        else if (backend.stateRevision() != target.stateRevision()) reason = DocumentCommandResult.RejectionReason.STALE_DOCUMENT_STATE;
+        else if (io.busy()) reason = DocumentCommandResult.RejectionReason.DOCUMENT_BUSY;
+        if (reason != null) {
+            DocumentCommandResult result = rejected(target, reason);
+            prepared.accepted();
+            return result;
+        }
+        DocumentCommandResult result = execute(commandTarget(target.viewId()),
+            new DocumentCommand.SetDocumentFormat(prepared.prepared, completion.validation));
+        prepared.accepted();
+        return result;
+    }
+
+    /** Explicit re-read of the current resource; unsaved text requires the host's prior approval. */
+    public PreparedDocumentReopen prepareReopen(ViewId viewId, DocumentOpenMode mode, boolean discardUnsaved) {
+        requireOwnerThread();
+        requireIoIdle();
+        DocumentCommandTarget target = commandTarget(viewId);
+        DocumentBackend.Status status = backend.status();
+        if (status.dirty() && !discardUnsaved) throw new IllegalStateException("Unsaved text requires explicit discard approval");
+        if (status.binding().resource() == null || status.binding().disposition() != SaveDisposition.REPLACE_EXISTING) {
+            throw new IllegalStateException("Reopen requires an existing resource");
+        }
+        return new PreparedDocumentReopen(this, target, status.binding().resource(), Objects.requireNonNull(mode, "mode"));
+    }
+
+    /** False means a cancelled, retired, changed or busy document; its current draft is retained. */
+    public boolean completeReopen(PreparedDocumentReopen prepared, DocumentLoad loaded) {
+        requireOwnerThread();
+        Objects.requireNonNull(prepared, "prepared");
+        if (prepared.owner != this) throw new IllegalArgumentException("Reopen preparation belongs to another session");
+        prepared.requireUnaccepted();
+        DocumentCommandTarget target = prepared.target;
+        if (prepared.cancelled() || io.busy() || !backend.ownsView(target.viewId())
+            || backend.revision() != target.revision() || backend.stateRevision() != target.stateRevision()) {
+            prepared.cancel();
+            prepared.markAccepted();
+            return false;
+        }
+        DocumentLoad accepted = prepared.accept(loaded);
+        prepared.markAccepted();
+        if (accepted == null) return false;
+        backend.openPrepared(accepted);
+        return true;
+    }
 
     /**
      * Publishes a detached read on the owner thread. Snapshot publication remains

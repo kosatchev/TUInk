@@ -58,6 +58,7 @@ class ArchitectureTest {
             "dev.tuink.core..",
             "dev.tuink.editor.document..",
             "dev.tuink.editor.command..",
+            "dev.tuink.editor.format..",
             "dev.tuink.editor.search..",
             "dev.tuink.editor.backend..",
             "dev.tuink.editor.recovery..",
@@ -223,6 +224,7 @@ class ArchitectureTest {
             "java..",
             "dev.tuink.editor.command..",
             "dev.tuink.editor.document..",
+            "dev.tuink.editor.format..",
             "dev.tuink.editor.search.."
         );
 
@@ -237,7 +239,14 @@ class ArchitectureTest {
         .that().resideInAPackage("dev.tuink.editor.backend..")
         .should().onlyDependOnClassesThat().resideInAnyPackage(
             "java..", "dev.tuink.editor.backend..", "dev.tuink.editor.command..",
-            "dev.tuink.editor.document..", "dev.tuink.editor.recovery..", "dev.tuink.editor.storage.."
+            "dev.tuink.editor.document..", "dev.tuink.editor.recovery..", "dev.tuink.editor.storage..",
+            "dev.tuink.editor.format.."
+        );
+
+    static final ArchRule FORMAT_CONTRACT_STAYS_PORTABLE = classes()
+        .that().resideInAPackage("dev.tuink.editor.format..")
+        .should().onlyDependOnClassesThat().resideInAnyPackage(
+            "java..", "dev.tuink.editor.format..", "dev.tuink.editor.storage.."
         );
 
     static final ArchRule RECOVERY_CONTRACT_STAYS_PORTABLE = classes()
@@ -261,14 +270,15 @@ class ArchitectureTest {
         );
 
     static final ArchRule IO_COORDINATION_STAYS_PORTABLE = classes()
-        .that().haveNameMatching("dev\\.tuink\\.editor\\.session\\.document\\.(DocumentIoCoordinator|PreparedDocumentOpen|EditorWorkspace)(?:\\$.*)?")
+        .that().haveNameMatching("dev\\.tuink\\.editor\\.session\\.document\\.(DocumentIoCoordinator|PreparedDocumentOpen|PreparedDocumentFormat|PreparedDocumentReopen|EditorWorkspace)(?:\\$.*)?")
         .should().onlyDependOnClassesThat().resideInAnyPackage(
-            "java..", "dev.tuink.editor.document..", "dev.tuink.editor.storage..", "dev.tuink.editor.session.document.."
+            "java..", "dev.tuink.editor.document..", "dev.tuink.editor.storage..", "dev.tuink.editor.session.document..",
+            "dev.tuink.editor.command..", "dev.tuink.editor.format.."
         );
 
     static final ArchRule COORDINATORS_DO_NOT_ACCESS_FILESYSTEM = noClasses()
         .that().resideInAPackage("dev.tuink.editor.session.recovery..")
-        .or().haveNameMatching("dev\\.tuink\\.editor\\.session\\.document\\.(DocumentIoCoordinator|PreparedDocumentOpen|EditorWorkspace)(?:\\$.*)?")
+        .or().haveNameMatching("dev\\.tuink\\.editor\\.session\\.document\\.(DocumentIoCoordinator|PreparedDocumentOpen|PreparedDocumentFormat|PreparedDocumentReopen|EditorWorkspace)(?:\\$.*)?")
         .should().dependOnClassesThat().resideInAPackage("java.nio.file..");
 
     static final ArchRule LANGUAGE_CONTRACT_IS_SELF_CONTAINED = classes()
@@ -285,6 +295,7 @@ class ArchitectureTest {
             "dev.tuink.core..",
             "dev.tuink.editor.command..",
             "dev.tuink.editor.document..",
+            "dev.tuink.editor.format..",
             "dev.tuink.editor.backend..",
             "dev.tuink.editor.recovery..",
             "dev.tuink.editor.diff..",
@@ -420,7 +431,7 @@ class ArchitectureTest {
             }
             for (String contractPackage : new String[] {"editor.command", "editor.document", "editor.language",
                 "editor.search", "editor.backend", "editor.recovery",
-                "editor.highlight", "editor.diff", "editor.storage"}) {
+                "editor.highlight", "editor.diff", "editor.storage", "editor.format"}) {
                 if (relative.equals(contractPackage) || relative.startsWith(contractPackage + ".")) {
                     return SliceIdentifier.of("editor-contract");
                 }
@@ -501,6 +512,7 @@ class ArchitectureTest {
         LANGUAGE_CONTRACT_IS_SELF_CONTAINED.check(PRODUCTION_CLASSES);
         EDITOR_SESSION_STAYS_FRONTEND_INDEPENDENT.check(PRODUCTION_CLASSES);
         BACKEND_PORT_STAYS_PORTABLE.check(PRODUCTION_CLASSES);
+        FORMAT_CONTRACT_STAYS_PORTABLE.check(PRODUCTION_CLASSES);
         RECOVERY_CONTRACT_STAYS_PORTABLE.check(PRODUCTION_CLASSES);
         SEARCH_CONTRACT_IS_SELF_CONTAINED.check(PRODUCTION_CLASSES);
         EDITOR_CONTRACT_PACKAGES_ARE_ACYCLIC.check(PRODUCTION_CLASSES);

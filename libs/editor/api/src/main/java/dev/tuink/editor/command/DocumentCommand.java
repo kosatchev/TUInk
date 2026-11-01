@@ -3,10 +3,19 @@ package dev.tuink.editor.command;
 import dev.tuink.editor.document.TextPosition;
 import dev.tuink.editor.document.Utf16Text;
 import dev.tuink.editor.search.SearchOptions;
+import dev.tuink.editor.format.PreparedFormatChange;
 import java.util.Objects;
 
 /** Built-in document operations, independent of keyboard, window and widget commands. */
 public sealed interface DocumentCommand {
+    /** Session-owner admission of an already validated, unchanged document format. */
+    record SetDocumentFormat(PreparedFormatChange prepared, PreparedFormatChange.Validation validation)
+        implements DocumentCommand {
+        public SetDocumentFormat {
+            Objects.requireNonNull(prepared, "prepared");
+            Objects.requireNonNull(validation, "validation");
+        }
+    }
     record Input(String text) implements DocumentCommand {
         public Input { Utf16Text.requireWellFormed(Objects.requireNonNull(text, "text"), "Input"); }
     }

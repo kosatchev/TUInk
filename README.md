@@ -149,9 +149,13 @@ If an edit cannot be encoded in the original charset, saving offers **Save as
 UTF-8** with Cancel selected initially. The explicit conversion writes UTF-8
 without a BOM and preserves existing line endings. It becomes a separate undo
 step after a successful save; earlier text edits remain in history.
-UTF-16LE files starting with NUL can share the exact bytes of UTF-32LE files.
-For ambiguous input, choose Open UTF-16LE in the picker or pass
-`--open-as-utf16le` for that file. UTF-32 editing is not supported.
+
+Automatic detection uses BOMs, strict UTF-8 and the existing Windows-1251
+fallback. Use `--open-as=cp866` or `--open-as=koi8-r` for CP866 or KOI8-R input.
+Explicit UTF-8 recognizes its optional BOM. Explicit UTF-16LE and UTF-16BE
+require the corresponding BOM. UTF-16LE files starting with NUL can share the
+exact bytes of UTF-32LE files; `--open-as=utf-16le` (also `--open-as-utf16le`)
+resolves this ambiguity. UTF-32 editing is not supported.
 
 Existing-file saves copy supported filesystem attributes to the staged file
 before replacing the original. If those attributes cannot be preserved, saving
@@ -439,6 +443,8 @@ Usage: tuink [options] [file]
   --no-color       Render without ANSI colors
   --theme=<name>   Select blue, cyan (default), or light
   --read           Start in reading mode
+  --open-as=<encoding>
+                   Choose auto, UTF-8, UTF-16LE/BE, Windows-1251, CP866 or KOI8-R
   --open-as-utf16le Interpret the selected BOM-marked file as UTF-16LE
   --profile        Log render timings
   --profile-file=<path>
@@ -447,6 +453,12 @@ Usage: tuink [options] [file]
   --help, -h       Show command-line help
   --version        Show the application version
 ```
+
+`--open-as` accepts `auto`, `utf-8`, `utf-16le`, `utf-16be`, `windows-1251`,
+`cp866` and `koi8-r`; the separated form `--open-as cp866 file.txt` is also supported.
+Without this option the editor detects the input encoding automatically.
+The specific decoders require an existing file; `auto` keeps the ordinary open
+behavior, including creation of a missing filename.
 
 Help and version queries exit with status `0` without opening the terminal or
 reading settings and recovery data. Invalid command-line arguments exit with

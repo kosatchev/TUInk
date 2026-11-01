@@ -408,10 +408,9 @@ public class TerminalEditorApp {
             Path file = cli.file();
             try {
                 var resource = JvmDocumentStorage.resource(file);
-                var mode = cli.openAsUtf16Le() ? dev.tuink.editor.storage.DocumentOpenMode.UTF_16LE
-                    : dev.tuink.editor.storage.DocumentOpenMode.DETECT;
+                var mode = cli.openMode();
                 var open = new dev.tuink.editor.session.document.PreparedDocumentOpen(
-                    resource, mode, !cli.openAsUtf16Le());
+                    resource, mode, mode == dev.tuink.editor.storage.DocumentOpenMode.DETECT);
                 tabs.get(activeTabIndex).documentSession().openPrepared(open.accept(open.read()));
                 renderPlanBuilder = tabs.get(activeTabIndex).documentSession()
                     .newRenderPlanBuilder(resolveHighlighter(file));
@@ -2326,6 +2325,8 @@ public class TerminalEditorApp {
         TerminalDiagnostics.line(output, "  --theme=<name>   UI palette: blue, cyan (default), light");
         TerminalDiagnostics.line(output, "  --read           Start in reading mode (editing disabled)");
         TerminalDiagnostics.line(output, "  --open-as-utf16le Interpret the selected BOM-marked file as UTF-16LE");
+        TerminalDiagnostics.line(output, "  --open-as=<name> Open an existing file as auto, utf-8, utf-16le, utf-16be,");
+        TerminalDiagnostics.line(output, "                   windows-1251, cp866 or koi8-r (also --open-as <name>)");
         TerminalDiagnostics.line(output, "  --profile        Log render timings to stderr every " + PROFILE_LOG_EVERY_FRAMES + " frames");
         TerminalDiagnostics.line(output, "  --profile-file   Create a new profile log file (also enables --profile)");
         TerminalDiagnostics.line(output, "  --file-uri=<uri> Open an ASCII percent-encoded absolute file URI");

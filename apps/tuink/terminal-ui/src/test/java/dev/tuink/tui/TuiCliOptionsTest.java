@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.tuink.editor.storage.DocumentOpenMode;
 import dev.tuink.tui.style.UiStyles;
 import java.nio.file.Path;
 import java.net.URI;
@@ -19,12 +20,54 @@ import org.junit.jupiter.params.provider.ValueSource;
 class TuiCliOptionsTest {
     @Test
     void explicitUtf16ChoiceAppliesOnlyToTheRequestedCommandLineFile() {
-        assertTrue(TuiCliOptions.parse(new String[] {"--open-as-utf16le", "file.txt"}).openAsUtf16Le());
-        assertFalse(TuiCliOptions.parse(new String[] {"file.txt"}).openAsUtf16Le());
+        assertEquals(DocumentOpenMode.UTF_16LE,
+            TuiCliOptions.parse(new String[] {"--open-as-utf16le", "file.txt"}).openMode());
+        assertEquals(DocumentOpenMode.DETECT, TuiCliOptions.parse(new String[] {"file.txt"}).openMode());
         assertThrows(IllegalArgumentException.class,
             () -> TuiCliOptions.parse(new String[] {"--open-as-utf16le"}));
         assertEquals(Path.of("--open-as-utf16le"),
             TuiCliOptions.parse(new String[] {"--", "--open-as-utf16le"}).file());
+    }
+
+    @Test
+    void acceptsEveryOpeningEncodingInBothArgumentForms() {
+        String[] names = {"auto", "utf-8", "utf-16le", "utf-16be", "windows-1251", "cp866", "koi8-r"};
+        DocumentOpenMode[] modes = {DocumentOpenMode.DETECT, DocumentOpenMode.UTF_8, DocumentOpenMode.UTF_16LE,
+            DocumentOpenMode.UTF_16BE, DocumentOpenMode.WINDOWS_1251, DocumentOpenMode.CP866, DocumentOpenMode.KOI8_R};
+        for (int index = 0; index < names.length; index++) {
+            for (String[] arguments : new String[][] {
+                {"--open-as=" + names[index], "file.txt"}, {"--open-as", names[index], "file.txt"}
+            }) {
+                TuiCliOptions options = TuiCliOptions.parse(arguments);
+                assertEquals(modes[index], options.openMode());
+                assertEquals(Path.of("file.txt"), options.file());
+            }
+        }
+    }
+
+    @Test
+    void explicitOpeningOptionsRequireAValueAndAFile() {
+        assertEquals("Missing value after --open-as", assertThrows(IllegalArgumentException.class,
+            () -> TuiCliOptions.parse(new String[] {"--open-as"})).getMessage());
+        for (String[] arguments : new String[][] {
+            {"--open-as="}, {"--open-as=unknown", "file.txt"}, {"--open-as", "--", "file.txt"},
+            {"--open-as", "--ui=gui", "file.txt"}, {"--open-as=utf-8"}, {"--open-as", "cp866"}
+        }) {
+            assertThrows(IllegalArgumentException.class, () -> TuiCliOptions.parse(arguments));
+        }
+        assertTrue(TuiCliOptions.parse(new String[] {"--open-as=koi8-r", "--help"}).showHelp());
+    }
+
+    @Test
+    void openingModeIsPerInvocationAndTheLastExplicitChoiceWins() {
+        assertEquals(DocumentOpenMode.CP866,
+            TuiCliOptions.parse(new String[] {"--open-as-utf16le", "--open-as", "cp866", "file.txt"}).openMode());
+        assertEquals(DocumentOpenMode.UTF_16LE,
+            TuiCliOptions.parse(new String[] {"--open-as=cp866", "--open-as-utf16le", "file.txt"}).openMode());
+        assertEquals(DocumentOpenMode.DETECT, TuiCliOptions.parse(new String[] {"file.txt"}).openMode());
+        TuiCliOptions literal = TuiCliOptions.parse(new String[] {"--open-as", "cp866", "--", "--open-as=utf-8"});
+        assertEquals(Path.of("--open-as=utf-8"), literal.file());
+        assertEquals(DocumentOpenMode.CP866, literal.openMode());
     }
 
     @Test
@@ -41,6 +84,7 @@ class TuiCliOptionsTest {
         assertNull(options.themeOverride());
         assertFalse(options.profileEnabled());
         assertNull(options.profileFile());
+        assertEquals(DocumentOpenMode.DETECT, options.openMode());
     }
 
     @Test
@@ -74,6 +118,10 @@ class TuiCliOptionsTest {
                 assertEquals(theme, UiStyles.Theme.parse(" " + theme.name() + " "));
                 assertEquals(theme, TuiCliOptions.parse(new String[] {"--theme=" + theme.name()}).themeOverride());
             }
+            assertEquals(DocumentOpenMode.WINDOWS_1251,
+                TuiCliOptions.parse(new String[] {"--open-as=WINDOWS-1251", "file.txt"}).openMode());
+            assertEquals(DocumentOpenMode.KOI8_R,
+                TuiCliOptions.parse(new String[] {"--open-as", " KOI8-R ", "file.txt"}).openMode());
         } finally {
             Locale.setDefault(original);
             Locale.setDefault(Locale.Category.DISPLAY, originalDisplay);
@@ -174,7 +222,7 @@ class TuiCliOptionsTest {
     @Test
     void nullArgumentsRemainInvalidBeforeAndAfterTheSeparatorAndAsOptionValues() {
         assertThrows(IllegalArgumentException.class, () -> TuiCliOptions.parse(null));
-        for (String[] args : new String[][] {{null}, {"--", null}, {"--profile-file", null}}) {
+        for (String[] args : new String[][] {{null}, {"--", null}, {"--profile-file", null}, {"--open-as", null}}) {
             IllegalArgumentException failure = assertThrows(IllegalArgumentException.class, () -> TuiCliOptions.parse(args));
             assertEquals("Command-line arguments must not be null", failure.getMessage());
         }

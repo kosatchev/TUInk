@@ -32,7 +32,7 @@ record AppArguments(UiTarget ui, List<String> forwarded) {
                 forwarded.add(arg);
                 continue;
             }
-            if ("--profile-file".equals(arg) || "--file-uri".equals(arg)) {
+            if ("--profile-file".equals(arg) || "--file-uri".equals(arg) || "--open-as".equals(arg)) {
                 forwarded.add(arg);
                 if (i + 1 < args.length) {
                     forwarded.add(args[++i]);

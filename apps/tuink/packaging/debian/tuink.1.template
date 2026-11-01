@@ -1,4 +1,4 @@
-.TH TUINK 1 "October 2026" "TUInk @VERSION@" "User Commands"
+.TH TUINK 1 "November 2026" "TUInk @VERSION@" "User Commands"
 .SH NAME
 tuink \- terminal text editor
 .SH SYNOPSIS
@@ -26,6 +26,14 @@ Select the UI palette: blue, cyan, or light.
 .TP
 .BR \-\-read
 Start in reading mode with editing disabled.
+.TP
+.BR \-\-open\-as= encoding
+Choose the input decoder for this open request: auto, utf-8, utf-16le,
+utf-16be, windows-1251, cp866, or koi8-r.
+The separated form, for example \fB\-\-open\-as cp866 file.txt\fR, is also accepted.
+Specific decoders require an existing file; auto retains ordinary file creation.
+UTF-8 preserves an optional BOM. UTF-16LE and UTF-16BE require the matching BOM.
+CP866 and KOI8-R must be selected explicitly; automatic detection does not guess them.
 .TP
 .BR \-\-open\-as\-utf16le
 Interpret the selected BOM-marked file as UTF-16LE for this open request only.

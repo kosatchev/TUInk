@@ -201,12 +201,43 @@ public final class DocumentCodec {
     }
 
     private static DetectedContent decodeWithDetectedCharset(byte[] data, DocumentOpenMode openMode) throws IOException {
-        if (openMode == DocumentOpenMode.UTF_16LE) {
-            if (!hasUtf16LeBom(data)) {
-                throw new IOException("Explicit UTF-16LE opening requires a UTF-16LE BOM");
+        switch (openMode) {
+            case UTF_8 -> {
+                boolean bom = hasUtf8Bom(data);
+                return new DetectedContent(StandardCharsets.UTF_8, bom ? BomKind.UTF_8 : BomKind.NONE,
+                    decodeExplicitCharset(data, bom ? 3 : 0, StandardCharsets.UTF_8));
             }
-            return new DetectedContent(StandardCharsets.UTF_16LE, BomKind.UTF_16_LE,
-                decodeStrict(data, 2, StandardCharsets.UTF_16LE));
+            case UTF_16LE -> {
+                if (!hasUtf16LeBom(data)) {
+                    throw new IOException("Explicit UTF-16LE opening requires a UTF-16LE BOM");
+                }
+                return new DetectedContent(StandardCharsets.UTF_16LE, BomKind.UTF_16_LE,
+                    decodeExplicitCharset(data, 2, StandardCharsets.UTF_16LE));
+            }
+            case UTF_16BE -> {
+                if (!hasUtf16BeBom(data)) {
+                    throw new IOException("Explicit UTF-16BE opening requires a UTF-16BE BOM");
+                }
+                return new DetectedContent(StandardCharsets.UTF_16BE, BomKind.UTF_16_BE,
+                    decodeExplicitCharset(data, 2, StandardCharsets.UTF_16BE));
+            }
+            case WINDOWS_1251, CP866, KOI8_R -> {
+                String name = switch (openMode) {
+                    case WINDOWS_1251 -> "windows-1251";
+                    case CP866 -> "IBM866";
+                    case KOI8_R -> "KOI8-R";
+                    default -> throw new IllegalStateException("Not a single-byte open mode");
+                };
+                Charset charset;
+                try {
+                    charset = Charset.forName(name);
+                } catch (UnsupportedCharsetException unavailable) {
+                    throw new IOException("Requested document encoding is unavailable: " + name, unavailable);
+                }
+                // An explicit single-byte request interprets even BOM-like prefixes as text.
+                return new DetectedContent(charset, BomKind.NONE, decodeExplicitCharset(data, 0, charset));
+            }
+            case DETECT -> { }
         }
         if (hasUtf32Bom(data, true) && isValidUtf32(data, true)) {
             // A valid UTF-32LE stream may also be valid UTF-16LE beginning with
@@ -252,6 +283,14 @@ public final class DocumentCodec {
             throw new IOException("Fallback document encoding is unavailable: windows-1251", unavailable);
         }
         return new DetectedContent(fallback, BomKind.NONE, decodeStrict(data, 0, fallback));
+    }
+
+    private static String decodeExplicitCharset(byte[] data, int offset, Charset charset) throws IOException {
+        try {
+            return decodeStrict(data, offset, charset);
+        } catch (CharacterCodingException invalid) {
+            throw new IOException("Invalid " + charset.name() + " input", invalid);
+        }
     }
 
     private static IOException unsupportedUtf32(String encoding) {

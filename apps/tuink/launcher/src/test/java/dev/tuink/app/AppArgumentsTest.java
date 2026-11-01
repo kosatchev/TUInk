@@ -84,8 +84,8 @@ class AppArgumentsTest {
     }
 
     @Test
-    void forwardsPathValuesWithoutInterpretingThemAsUiSelectorsOrSeparators() {
-        for (String flag : List.of("--profile-file", "--file-uri")) {
+    void forwardsOptionValuesWithoutInterpretingThemAsUiSelectorsOrSeparators() {
+        for (String flag : List.of("--profile-file", "--file-uri", "--open-as")) {
             for (String value : List.of("--ui=gui", "--ui", "--")) {
                 AppArguments options = AppArguments.parse(new String[] {flag, value, "--ui=tui", "--help"});
 
@@ -96,15 +96,28 @@ class AppArgumentsTest {
     }
 
     @Test
-    void leavesAMissingProfileValueForTheFrontendToDiagnose() {
+    void leavesMissingOptionValuesForTheFrontendToDiagnose() {
         assertEquals(List.of("--profile-file"), AppArguments.parse(new String[] {"--profile-file"}).forwarded());
         assertEquals(List.of("--file-uri"), AppArguments.parse(new String[] {"--file-uri"}).forwarded());
+        assertEquals(List.of("--open-as"), AppArguments.parse(new String[] {"--open-as"}).forwarded());
+    }
+
+    @Test
+    void forwardsBothOpeningEncodingFormsWithoutChangingTheirOrder() {
+        assertEquals(List.of("--open-as", "cp866", "file.txt"),
+            AppArguments.parse(new String[] {"--ui=tui", "--open-as", "cp866", "file.txt"}).forwarded());
+        assertEquals(List.of("--open-as=koi8-r", "file.txt"),
+            AppArguments.parse(new String[] {"--open-as=koi8-r", "--ui=tui", "file.txt"}).forwarded());
+        assertEquals(List.of("--", "--open-as=utf-8"),
+            AppArguments.parse(new String[] {"--ui=tui", "--", "--open-as=utf-8"}).forwarded());
     }
 
     @Test
     void nullArgumentsCannotBypassValidationAfterTheSeparatorOrAsValues() {
         assertThrows(IllegalArgumentException.class, () -> AppArguments.parse(null));
-        for (String[] args : new String[][] {{null}, {"--", null}, {"--ui", null}, {"--profile-file", null}}) {
+        for (String[] args : new String[][] {
+            {null}, {"--", null}, {"--ui", null}, {"--profile-file", null}, {"--open-as", null}
+        }) {
             assertThrows(IllegalArgumentException.class, () -> AppArguments.parse(args));
         }
     }

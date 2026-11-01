@@ -26,6 +26,10 @@ class AppCliTest {
             {"--file-uri"},
             {"--file-uri", "--ui=gui"},
             {"--file-uri=file:///bad%zz"},
+            {"--open-as"},
+            {"--open-as="},
+            {"--open-as=unknown", "file.txt"},
+            {"--open-as", "cp866"},
             {"ambiguous-�.txt"},
             {"--", "ambiguous-�.txt"},
             {"--profile-file=ambiguous-�.log"},
@@ -51,6 +55,7 @@ class AppCliTest {
             "--unknown-" + payload,
             "--ui=" + payload,
             "--theme=" + payload,
+            "--open-as=" + payload,
             "path-" + payload + "\0.txt"
         }) {
             Result result = run(new String[] {argument});
@@ -84,7 +89,8 @@ class AppCliTest {
     @Test
     void versionReturnsSuccessAndWritesOnlyTheGeneratedVersionToStandardOutput() throws Exception {
         for (String[] arguments : new String[][] {
-            {"--version"}, {"--ui=tui", "--version"}, {"--open-as-utf16le", "--version"}
+            {"--version"}, {"--ui=tui", "--version"}, {"--open-as-utf16le", "--version"},
+            {"--open-as=cp866", "--version"}, {"--open-as", "koi8-r", "--version"}
         }) {
             Result result = run(arguments);
 
@@ -100,8 +106,33 @@ class AppCliTest {
     }
 
     @Test
+    void openingEncodingChoicesAreAcceptedBeforeHelpWithoutOpeningATerminal() throws Exception {
+        for (String encoding : new String[] {"auto", "utf-8", "utf-16le", "utf-16be", "windows-1251", "cp866", "koi8-r"}) {
+            for (String[] arguments : new String[][] {
+                {"--open-as=" + encoding, "--help"}, {"--open-as", encoding, "--help"}
+            }) {
+                Result result = run(arguments);
+                assertEquals(0, result.exitCode());
+                assertTrue(result.output().contains("--open-as=<name>"), result.output());
+                assertEquals("", result.error());
+            }
+        }
+    }
+
+    @Test
+    void openingEncodingValuesAreDiagnosedByTheFrontendWithoutParsingUiSelectors() throws Exception {
+        for (String value : new String[] {"--ui=gui", "--ui", "--"}) {
+            Result result = run(new String[] {"--open-as", value, "--help"});
+
+            assertEquals(2, result.exitCode());
+            assertEquals("", result.output());
+            assertTrue(result.error().startsWith("Unknown opening encoding: " + value), result.error());
+        }
+    }
+
+    @Test
     void endOfOptionsPreservesLiteralUiSelectorsAndHelpLookingFilenames() throws Exception {
-        for (String filename : new String[] {"--ui=gui", "--ui", "--help", "-h", "--", "--version"}) {
+        for (String filename : new String[] {"--ui=gui", "--ui", "--help", "-h", "--", "--open-as=cp866", "--version"}) {
             Result help = run(new String[] {"--help", "--", filename});
             assertEquals(0, help.exitCode());
             assertTrue(help.output().contains("[--] [file]"));

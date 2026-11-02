@@ -9,8 +9,6 @@ import dev.tuink.editor.search.SearchOptions;
 import dev.tuink.editor.format.DocumentFormatSpec;
 import dev.tuink.editor.format.PreparedFormatChange;
 import dev.tuink.editor.storage.DocumentResource;
-import dev.tuink.editor.storage.DocumentStorage;
-import dev.tuink.editor.storage.ResourceId;
 import dev.tuink.editor.storage.ResourceBinding;
 import dev.tuink.editor.storage.ResourceVersion;
 import dev.tuink.editor.storage.DocumentLoad;
@@ -18,7 +16,7 @@ import dev.tuink.editor.storage.DocumentSave;
 import dev.tuink.editor.storage.SavedDocument;
 import dev.tuink.editor.storage.SaveAuthorization;
 import dev.tuink.editor.storage.SaveTarget;
-import dev.tuink.editor.storage.StorageWriteException;
+import dev.tuink.editor.storage.DocumentSavePlan;
 import dev.tuink.editor.storage.StorageOperation;
 import dev.tuink.editor.storage.DocumentFileMetadata;
 import dev.tuink.editor.storage.BomKind;
@@ -949,7 +947,7 @@ public class EditorEngine {
         Objects.requireNonNull(prepared, "prepared");
         Objects.requireNonNull(saved, "saved");
         SavePreparation plan = prepared.preparation;
-        if (prepared.completed || saved != prepared.receipt || !plan.belongsToUnchanged(this)) {
+        if (prepared.completed || !prepared.write.produced(saved) || !plan.belongsToUnchanged(this)) {
             throw new IllegalStateException("Saved result does not belong to the unchanged document and write");
         }
         model.completeSave(saved);
@@ -985,6 +983,7 @@ public class EditorEngine {
         private final EditorEngine owner;
         private final Thread ownerThread;
         private final DocumentSave request;
+        private final DocumentSavePlan plan;
         private final ResourceBinding originalBinding;
         private final ResourceVersion originalBaseline;
         private final long revision;
@@ -998,6 +997,7 @@ public class EditorEngine {
             this.owner = owner;
             this.ownerThread = Thread.currentThread();
             this.request = request;
+            this.plan = new DocumentSavePlan(request, originalBinding);
             this.originalBinding = originalBinding;
             this.originalBaseline = request.baseline();
             this.revision = revision;
@@ -1013,14 +1013,7 @@ public class EditorEngine {
 
         public SaveTargetInspection inspectTargetWithOperation(StorageOperation operation) throws IOException {
             try {
-                operation.checkCancelled();
-                SaveTarget target = request.resource().storage().inspect(request.resource(), originalBinding, operation);
-                operation.checkCancelled();
-                if (target.requestedResource().storage() != request.resource().storage()
-                    || target.physicalResource().storage() != request.resource().storage()) {
-                    throw new IOException("Storage returned a target from another provider");
-                }
-                return new SaveTargetInspection(this, target);
+                return new SaveTargetInspection(this, plan.inspect(operation));
             } catch (OutOfMemoryError exhausted) {
                 throw new IOException("Not enough memory to inspect the Save As target", exhausted);
             }
@@ -1055,62 +1048,21 @@ public class EditorEngine {
 
     public static final class PreparedSave {
         private final SavePreparation preparation;
-        private final SaveAuthorization authorization;
-        private final DocumentStorage storage;
-        private final ResourceId expectedResourceId;
-        private final StorageWriteException unconfirmedSave;
-        private volatile SavedDocument receipt;
-        private boolean started;
+        private final DocumentSavePlan.PreparedWrite write;
         private boolean completed;
 
         private PreparedSave(SavePreparation preparation, SaveAuthorization authorization) {
             this.preparation = preparation;
-            this.authorization = authorization;
-            storage = preparation.request.resource().storage();
-            DocumentResource expected = authorization instanceof SaveAuthorization.Approved approved
-                ? approved.target().requestedResource() : preparation.request.resource();
-            expectedResourceId = expected.id();
-            // A provider may already have published when a receipt cannot be
-            // validated, including under heap exhaustion. Prepare this outcome
-            // before calling it so that retaining UNKNOWN needs no allocation.
-            unconfirmedSave = new StorageWriteException("Storage did not confirm the expected resource and document"
-                + ". Verify its contents before retrying; the editor retains your draft.", null,
-                StorageWriteException.Outcome.UNKNOWN, expected);
+            this.write = preparation.plan.prepare(authorization);
         }
 
         /** Executes one detached write; its receipt is accepted only by this operation. */
         public synchronized SavedDocument write() throws IOException {
-            return writeWithOperation(StorageOperation.untracked());
+            return write.write();
         }
 
         public synchronized SavedDocument writeWithOperation(StorageOperation operation) throws IOException {
-            if (started) throw new IllegalStateException("A prepared save may be written only once");
-            started = true;
-            operation.checkCancelled();
-            DocumentSave request = preparation.request;
-            SavedDocument saved;
-            try {
-                saved = storage.write(request, authorization, operation);
-            } catch (OutOfMemoryError exhausted) {
-                throw unconfirmed(exhausted);
-            }
-            boolean matches;
-            try {
-                matches = saved != null && saved.resource().storage() == storage
-                    && expectedResourceId.equals(saved.resource().id())
-                    && saved.metadata().isCompatibleWithLineCount(request.lines().size());
-            } catch (RuntimeException | Error invalidReceipt) {
-                throw unconfirmed(invalidReceipt);
-            }
-            if (!matches) throw unconfirmedSave;
-            receipt = saved;
-            return saved;
-        }
-
-        private StorageWriteException unconfirmed(Throwable cause) {
-            try { unconfirmedSave.addSuppressed(cause); }
-            catch (RuntimeException | Error unavailable) { /* The preallocated outcome still retains the draft. */ }
-            return unconfirmedSave;
+            return write.write(operation);
         }
     }
 

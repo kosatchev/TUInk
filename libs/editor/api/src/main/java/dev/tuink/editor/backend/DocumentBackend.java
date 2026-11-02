@@ -1,5 +1,7 @@
 package dev.tuink.editor.backend;
 
+import dev.tuink.editor.storage.DocumentSaveOperations;
+
 import dev.tuink.editor.document.DocumentId;
 import dev.tuink.editor.document.ViewId;
 import dev.tuink.editor.document.ViewSnapshot;
@@ -12,14 +14,9 @@ import dev.tuink.editor.command.DocumentCommandResult;
 import dev.tuink.editor.command.DocumentCommandTarget;
 import dev.tuink.editor.storage.DocumentFileMetadata;
 import dev.tuink.editor.storage.DocumentLoad;
-import dev.tuink.editor.storage.DocumentResource;
 import dev.tuink.editor.storage.ResourceBinding;
-import dev.tuink.editor.storage.SavedDocument;
-import dev.tuink.editor.storage.SaveDisposition;
-import dev.tuink.editor.storage.StorageOperation;
 import dev.tuink.editor.format.DocumentFormatSpec;
 import dev.tuink.editor.format.PreparedFormatChange;
-import java.io.IOException;
 import java.util.function.Function;
 
 /**
@@ -28,7 +25,7 @@ import java.util.function.Function;
  * Except for stable identity/ownership queries and detached inspection/write,
  * calls require the backend's owner thread.
  */
-public interface DocumentBackend {
+public interface DocumentBackend extends DocumentSaveOperations {
     DocumentId documentId();
     boolean isOwnerThread();
     ViewId defaultViewId();
@@ -58,33 +55,5 @@ public interface DocumentBackend {
     void openPrepared(DocumentLoad loaded);
     RecoveryCheckpoint prepareRecovery(ViewId viewId);
     void restoreRecovery(ViewId viewId, RecoveryDocument checkpoint);
-    PreparedSave prepareSave() throws IOException;
-    SavePreparation prepareSaveAsInput(DocumentResource resource, SaveDisposition disposition, boolean utf8)
-        throws IOException;
-    PreparedSave approveSaveAs(SaveTargetInspection inspection) throws IOException;
-    void completeSaved(PreparedSave prepared, SavedDocument saved);
-
     record Status(ResourceBinding binding, DocumentFileMetadata metadata, boolean dirty, long recoveryRevision) {}
-
-    interface PreparedSave {
-        SavedDocument write() throws IOException;
-        default SavedDocument writeWithOperation(StorageOperation operation) throws IOException {
-            operation.beginPublication();
-            return write();
-        }
-    }
-    interface SavePreparation {
-        SaveTargetInspection inspectTarget() throws IOException;
-        default SaveTargetInspection inspectTargetWithOperation(StorageOperation operation) throws IOException {
-            operation.checkCancelled();
-            return inspectTarget();
-        }
-        SaveDisposition disposition();
-    }
-    interface SaveTargetInspection {
-        DocumentResource requestedResource();
-        DocumentResource physicalResource();
-        boolean exists();
-        boolean currentTarget();
-    }
 }

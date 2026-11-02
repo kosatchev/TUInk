@@ -68,6 +68,9 @@ public final class DocumentSnapshot implements DocumentView {
     /** Compatibility string view; each accessed line is materialized on demand. */
     public List<String> lines() { return strings; }
 
+    /** Immutable logical lines, sharing the snapshot's persistent text blocks without materialization. */
+    public List<ImmutableText> immutableLines() { return textLines; }
+
     public boolean contains(TextPosition position) {
         return position != null && position.line() < lineCount()
             && position.utf16Offset() <= lineText(position.line()).length();

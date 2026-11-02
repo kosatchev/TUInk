@@ -6,12 +6,14 @@ import dev.tuink.editor.command.DocumentCommand;
 import dev.tuink.editor.command.DocumentCommandResult;
 import dev.tuink.editor.command.DocumentCommandTarget;
 import dev.tuink.editor.backend.DocumentBackend;
+import dev.tuink.editor.storage.DocumentSaveOperations;
 import dev.tuink.editor.document.DocumentId;
 import dev.tuink.editor.recovery.RecoveryDocument;
 import dev.tuink.editor.recovery.RecoveryCheckpoint;
 import dev.tuink.editor.document.ViewId;
 import dev.tuink.editor.document.ViewSnapshot;
 import dev.tuink.editor.document.DocumentSnapshot;
+import dev.tuink.editor.storage.FrozenDocumentSource;
 import dev.tuink.editor.document.WorkspaceEdit;
 import dev.tuink.editor.session.edit.WorkspaceEditValidator;
 import dev.tuink.editor.storage.DocumentLoad;
@@ -36,7 +38,7 @@ import java.util.Objects;
  * return as revision-guarded {@link WorkspaceEdit}s. Headless workspace commands and
  * attached frontend commands use the same underlying document and history.</p>
  */
-public final class EditorDocumentSession {
+public final class EditorDocumentSession implements DocumentSaveSubject {
     private final DocumentId documentId;
     private final ViewId defaultViewId;
     private final DocumentBackend backend;
@@ -57,7 +59,7 @@ public final class EditorDocumentSession {
         if (!backend.ownsView(defaultViewId)) throw new IllegalArgumentException("The default view must be registered");
         this.ownerThread = Thread.currentThread();
         this.publishedSnapshot = captureSnapshot();
-        this.io = new DocumentIoCoordinator(this);
+        this.io = new DocumentIoCoordinator(this, new LiveSaveOperations());
     }
 
     /** Connects an owned backend without exporting its mutable document or views. */
@@ -203,6 +205,9 @@ public final class EditorDocumentSession {
 
     public record Status(ResourceBinding binding, DocumentFileMetadata metadata, boolean dirty,
                          long recoveryRevision) {}
+
+    @Override public ResourceBinding binding() { return status().binding(); }
+    @Override public DocumentFileMetadata metadata() { return status().metadata(); }
 
     /** Cached by immutable metadata identity; no text or separator scan occurs on repeated frames. */
     public DocumentFormatSummary formatSummary() {
@@ -384,7 +389,7 @@ public final class EditorDocumentSession {
     }
 
     /** Opaque owner capture; inspection reads no mutable document state. */
-    static final class SavePreparation {
+    static final class SavePreparation implements DocumentSaveOperations.SavePreparation {
         private final EditorDocumentSession owner;
         private final DocumentBackend.SavePreparation preparation;
 
@@ -393,18 +398,18 @@ public final class EditorDocumentSession {
             this.preparation = preparation;
         }
 
-        SaveTargetInspection inspectTarget() throws IOException {
+        public SaveTargetInspection inspectTarget() throws IOException {
             return new SaveTargetInspection(owner, preparation.inspectTarget());
         }
-        SaveTargetInspection inspectTargetWithOperation(StorageOperation operation) throws IOException {
+        public SaveTargetInspection inspectTargetWithOperation(StorageOperation operation) throws IOException {
             return new SaveTargetInspection(owner, preparation.inspectTargetWithOperation(operation));
         }
 
-        SaveDisposition disposition() { return preparation.disposition(); }
+        public SaveDisposition disposition() { return preparation.disposition(); }
     }
 
     /** An inspected target bound to one capture, ready for owner approval. */
-    static final class SaveTargetInspection {
+    static final class SaveTargetInspection implements DocumentSaveOperations.SaveTargetInspection {
         private final EditorDocumentSession owner;
         private final DocumentBackend.SaveTargetInspection inspection;
 
@@ -413,14 +418,14 @@ public final class EditorDocumentSession {
             this.inspection = inspection;
         }
 
-        DocumentResource requestedResource() { return inspection.requestedResource(); }
-        DocumentResource physicalResource() { return inspection.physicalResource(); }
-        boolean exists() { return inspection.exists(); }
-        boolean currentTarget() { return inspection.currentTarget(); }
+        public DocumentResource requestedResource() { return inspection.requestedResource(); }
+        public DocumentResource physicalResource() { return inspection.physicalResource(); }
+        public boolean exists() { return inspection.exists(); }
+        public boolean currentTarget() { return inspection.currentTarget(); }
     }
 
     /** Single-use detached write; completion accepts only the receipt it produced. */
-    static final class PreparedSave {
+    static final class PreparedSave implements DocumentSaveOperations.PreparedSave {
         private final EditorDocumentSession owner;
         private final DocumentBackend.PreparedSave prepared;
 
@@ -429,9 +434,33 @@ public final class EditorDocumentSession {
             this.prepared = prepared;
         }
 
-        SavedDocument write() throws IOException { return prepared.write(); }
-        SavedDocument writeWithOperation(StorageOperation operation) throws IOException {
+        public SavedDocument write() throws IOException { return prepared.write(); }
+        public SavedDocument writeWithOperation(StorageOperation operation) throws IOException {
             return prepared.writeWithOperation(operation);
+        }
+    }
+
+    /** Preserves the live backend's history/savepoint rules behind the common save protocol. */
+    private final class LiveSaveOperations implements DocumentSaveOperations {
+        @Override public EditorDocumentSession.PreparedSave prepareSave() throws IOException {
+            return prepareCoordinatedSave(io);
+        }
+        @Override public EditorDocumentSession.SavePreparation prepareSaveAsInput(DocumentResource resource, SaveDisposition disposition,
+            boolean utf8) throws IOException {
+            return prepareCoordinatedSaveAs(io, resource, disposition, utf8);
+        }
+        @Override public EditorDocumentSession.PreparedSave approveSaveAs(DocumentSaveOperations.SaveTargetInspection inspection)
+            throws IOException {
+            if (!(inspection instanceof EditorDocumentSession.SaveTargetInspection captured)) {
+                throw new IllegalArgumentException("Save inspection belongs to another subject");
+            }
+            return approveCoordinatedSaveAs(io, captured);
+        }
+        @Override public void completeSaved(DocumentSaveOperations.PreparedSave prepared, SavedDocument saved) {
+            if (!(prepared instanceof EditorDocumentSession.PreparedSave captured)) {
+                throw new IllegalArgumentException("Prepared save belongs to another subject");
+            }
+            completeCoordinatedSave(io, captured, saved);
         }
     }
 
@@ -442,6 +471,14 @@ public final class EditorDocumentSession {
      */
     public DocumentSnapshot snapshot() {
         return isOwnerThread() ? publishIfChanged() : publishedSnapshot;
+    }
+
+    /** Captures text, exact file format, and resource version in the same owner turn without I/O. */
+    public FrozenDocumentSource freezeSource() {
+        requireOwnerThread();
+        DocumentSnapshot text = snapshot();
+        DocumentBackend.Status status = backend.status();
+        return new FrozenDocumentSource(text, status.metadata(), status.binding());
     }
 
     /**

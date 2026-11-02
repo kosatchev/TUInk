@@ -1,6 +1,7 @@
 package dev.tuink.editor.session.document;
 
 import dev.tuink.editor.document.DocumentId;
+import dev.tuink.editor.storage.DocumentSaveOperations;
 import dev.tuink.editor.storage.DocumentResource;
 import dev.tuink.editor.storage.SaveDisposition;
 import dev.tuink.editor.storage.SavedDocument;
@@ -30,12 +31,16 @@ public final class DocumentIoCoordinator {
         implements Transition {}
     public record Ignored(DocumentId documentId, long operationId) implements Transition {}
 
-    private final EditorDocumentSession session;
+    private final DocumentSaveSubject subject;
+    private final DocumentSaveOperations operations;
     private Operation active;
     private long nextOperationId;
     private boolean stopped;
 
-    DocumentIoCoordinator(EditorDocumentSession session) { this.session = session; }
+    DocumentIoCoordinator(DocumentSaveSubject subject, DocumentSaveOperations operations) {
+        this.subject = Objects.requireNonNull(subject, "subject");
+        this.operations = Objects.requireNonNull(operations, "operations");
+    }
 
     public State state() {
         requireOwner();
@@ -48,9 +53,9 @@ public final class DocumentIoCoordinator {
     /** Captures current content and version; no provider call occurs here. */
     public Work beginSave() throws IOException {
         requireAvailable();
-        var prepared = session.prepareCoordinatedSave(this);
+        var prepared = operations.prepareSave();
         Operation operation = new Operation(nextId(), null);
-        Work work = new Work(this, operation, prepared, session.status().binding().resource());
+        Work work = new Work(this, operation, prepared, subject.binding().resource());
         operation.work = work;
         operation.state = State.WRITING;
         active = operation;
@@ -60,7 +65,7 @@ public final class DocumentIoCoordinator {
     /** Captures a Save As plan without inspecting or writing a resource. */
     public Work beginSaveAs(DocumentResource resource, SaveDisposition disposition, boolean utf8) throws IOException {
         requireAvailable();
-        var preparation = session.prepareCoordinatedSaveAs(this, resource, disposition, utf8);
+        var preparation = operations.prepareSaveAsInput(resource, disposition, utf8);
         Operation operation = new Operation(nextId(), Objects.requireNonNull(disposition, "disposition"));
         Work work = new Work(this, operation, preparation, resource);
         operation.work = work;
@@ -89,7 +94,7 @@ public final class DocumentIoCoordinator {
             return ignored;
         }
         if (completion.failure != null) {
-            Failed failed = new Failed(session.documentId(), work.operation.id, completion.failureKind, completion.failure);
+            Failed failed = new Failed(subject.documentId(), work.operation.id, completion.failureKind, completion.failure);
             completion.consumed = true;
             active = null;
             return failed;
@@ -97,7 +102,7 @@ public final class DocumentIoCoordinator {
         if (work.kind == WorkKind.INSPECT) {
             var inspection = completion.inspection;
             if (work.operation.disposition == SaveDisposition.CREATE_NEW && inspection.exists()) {
-                Failed failed = new Failed(session.documentId(), work.operation.id, FailureKind.FAILED_BEFORE_COMMIT,
+                Failed failed = new Failed(subject.documentId(), work.operation.id, FailureKind.FAILED_BEFORE_COMMIT,
                     new IOException("Save target appeared while it was being inspected. Choose the target again."));
                 completion.consumed = true;
                 active = null;
@@ -111,13 +116,13 @@ public final class DocumentIoCoordinator {
             return approval;
         }
         // Prepare both mandatory outcomes before the backend publishes its savepoint.
-        Saved saved = new Saved(session.documentId(), work.operation.id, completion.receipt);
+        Saved saved = new Saved(subject.documentId(), work.operation.id, completion.receipt);
         IOException unpublishedError = new IOException("Storage confirmed the write, but the editor could not publish"
             + " its savepoint. The draft is retained; verify the saved resource before retrying.");
-        Failed unpublished = new Failed(session.documentId(), work.operation.id,
+        Failed unpublished = new Failed(subject.documentId(), work.operation.id,
             FailureKind.CONFIRMED_NOT_PUBLISHED, unpublishedError);
         try {
-            session.completeCoordinatedSave(this, work.prepared, completion.receipt);
+            operations.completeSaved(work.prepared, completion.receipt);
         } catch (RuntimeException | OutOfMemoryError failure) {
             try { unpublishedError.addSuppressed(failure); }
             catch (RuntimeException | Error ignored) { /* The prepared failure still retains the draft. */ }
@@ -137,10 +142,10 @@ public final class DocumentIoCoordinator {
         if (confirmation.owner != this) throw new IllegalArgumentException("Approval belongs to another coordinator");
         if (active != confirmation.operation || active.confirmation != confirmation
             || active.state != State.AWAITING_APPROVAL) {
-            return new Ignored(session.documentId(), confirmation.operation.id);
+            return new Ignored(subject.documentId(), confirmation.operation.id);
         }
         try {
-            var prepared = session.approveCoordinatedSaveAs(this, confirmation.inspection);
+            var prepared = operations.approveSaveAs(confirmation.inspection);
             Work work = new Work(this, active, prepared, confirmation.requestedResource());
             Ready ready = new Ready(work);
             active.work = work;
@@ -148,7 +153,7 @@ public final class DocumentIoCoordinator {
             active.state = State.WRITING;
             return ready;
         } catch (IOException failure) {
-            Failed result = new Failed(session.documentId(), active.id, FailureKind.FAILED_BEFORE_COMMIT, failure);
+            Failed result = new Failed(subject.documentId(), active.id, FailureKind.FAILED_BEFORE_COMMIT, failure);
             active = null;
             return result;
         }
@@ -160,7 +165,7 @@ public final class DocumentIoCoordinator {
         requireWork(work);
         Objects.requireNonNull(failure, "failure");
         if (active != work.operation || active.work != work) return ignored(work);
-        Failed result = new Failed(session.documentId(), work.operation.id, FailureKind.FAILED_BEFORE_COMMIT, failure);
+        Failed result = new Failed(subject.documentId(), work.operation.id, FailureKind.FAILED_BEFORE_COMMIT, failure);
         if (!work.cancelBeforeStart()) throw new IllegalStateException("Started work must return its actual completion");
         active = null;
         return result;
@@ -205,7 +210,9 @@ public final class DocumentIoCoordinator {
         return ++nextOperationId;
     }
 
-    private void requireOwner() { session.requireOwnerThread(); }
+    private void requireOwner() {
+        if (!subject.isOwnerThread()) throw new IllegalStateException("Save operations belong to the subject owner thread");
+    }
     private void requireAvailable() {
         requireOwner();
         if (stopped || active != null) throw new IllegalStateException("Document I/O is unavailable");
@@ -214,7 +221,7 @@ public final class DocumentIoCoordinator {
         Objects.requireNonNull(work, "work");
         if (work.owner != this) throw new IllegalArgumentException("Work belongs to another coordinator");
     }
-    private Ignored ignored(Work work) { return new Ignored(session.documentId(), work.operation.id); }
+    private Ignored ignored(Work work) { return new Ignored(subject.documentId(), work.operation.id); }
 
     private static final class Operation {
         private final long id;
@@ -229,14 +236,14 @@ public final class DocumentIoCoordinator {
     public static final class Confirmation {
         private final DocumentIoCoordinator owner;
         private final Operation operation;
-        private final EditorDocumentSession.SaveTargetInspection inspection;
+        private final DocumentSaveOperations.SaveTargetInspection inspection;
         private Confirmation(DocumentIoCoordinator owner, Operation operation,
-                             EditorDocumentSession.SaveTargetInspection inspection) {
+                             DocumentSaveOperations.SaveTargetInspection inspection) {
             this.owner = owner;
             this.operation = operation;
             this.inspection = inspection;
         }
-        public DocumentId documentId() { return owner.session.documentId(); }
+        public DocumentId documentId() { return owner.subject.documentId(); }
         public long operationId() { return operation.id; }
         public DocumentResource requestedResource() { return inspection.requestedResource(); }
         public DocumentResource physicalResource() { return inspection.physicalResource(); }
@@ -251,24 +258,24 @@ public final class DocumentIoCoordinator {
         private final DocumentIoCoordinator owner;
         private final Operation operation;
         private final WorkKind kind;
-        private final EditorDocumentSession.SavePreparation preparation;
-        private final EditorDocumentSession.PreparedSave prepared;
+        private final DocumentSaveOperations.SavePreparation preparation;
+        private final DocumentSaveOperations.PreparedSave prepared;
         private final DocumentResource resource;
         private final AtomicInteger execution = new AtomicInteger(); // fresh, started, finished, cancelled
         private final Completion completion;
         private final IOException unexpectedFailure;
         private final StorageOperation storageOperation;
 
-        private Work(DocumentIoCoordinator owner, Operation operation, EditorDocumentSession.SavePreparation preparation,
+        private Work(DocumentIoCoordinator owner, Operation operation, DocumentSaveOperations.SavePreparation preparation,
                      DocumentResource resource) {
             this(owner, operation, WorkKind.INSPECT, preparation, null, resource);
         }
-        private Work(DocumentIoCoordinator owner, Operation operation, EditorDocumentSession.PreparedSave prepared,
+        private Work(DocumentIoCoordinator owner, Operation operation, DocumentSaveOperations.PreparedSave prepared,
                      DocumentResource resource) {
             this(owner, operation, WorkKind.WRITE, null, prepared, resource);
         }
         private Work(DocumentIoCoordinator owner, Operation operation, WorkKind kind,
-                     EditorDocumentSession.SavePreparation preparation, EditorDocumentSession.PreparedSave prepared,
+                     DocumentSaveOperations.SavePreparation preparation, DocumentSaveOperations.PreparedSave prepared,
                      DocumentResource resource) {
             this.owner = owner;
             this.operation = operation;
@@ -283,7 +290,7 @@ public final class DocumentIoCoordinator {
                 ? "The write did not return a confirmed outcome. The editor retains your draft; verify the resource before retrying."
                 : "The save target could not be inspected.");
         }
-        public DocumentId documentId() { return owner.session.documentId(); }
+        public DocumentId documentId() { return owner.subject.documentId(); }
         public long operationId() { return operation.id; }
         public WorkKind kind() { return kind; }
         public SaveDisposition disposition() { return operation.disposition; }
@@ -337,7 +344,7 @@ public final class DocumentIoCoordinator {
     /** Opaque worker result; its provenance and publication rights cannot be reconstructed. */
     public static final class Completion {
         private final Work work;
-        private EditorDocumentSession.SaveTargetInspection inspection;
+        private DocumentSaveOperations.SaveTargetInspection inspection;
         private SavedDocument receipt;
         private IOException failure;
         private FailureKind failureKind;

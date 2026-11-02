@@ -24,7 +24,8 @@ allprojects {
 // modules already checked against Java 17 belong here; this is not an Android
 // compatibility claim for the remaining editor runtime.
 def java17Libraries = [':unicode-text', ':editor-contract', ':core', ':editor-session',
-                       ':highlight-regex', ':editor-diff-jgit'] as Set
+                       ':highlight-regex', ':editor-diff-jgit', ':markdown-preview',
+                       ':markdown-commonmark', ':markdown-math', ':markdown-mermaid'] as Set
 
 subprojects {
     pluginManager.withPlugin('java') {
@@ -68,6 +69,10 @@ subprojects {
 }
 
 def allowedProjectDependencies = [
+    ':markdown-preview': [':editor-contract'] as Set,
+    ':markdown-commonmark': [':markdown-preview'] as Set,
+    ':markdown-math': [':markdown-preview'] as Set,
+    ':markdown-mermaid': [':markdown-preview'] as Set,
     ':unicode-text'    : [] as Set,
     ':tuiframe-core'   : [] as Set,
     ':tuiframe-jline'  : [':tuiframe-core'] as Set,
@@ -77,11 +82,12 @@ def allowedProjectDependencies = [
     ':editor-session'  : [':editor-contract', ':core'] as Set,
     ':editor-diff-jgit': [':editor-contract'] as Set,
     ':editor-storage-jvm': [':core', ':editor-contract'] as Set,
-    ':render'          : [':tuiframe-core', ':editor-contract', ':core'] as Set,
+    ':render'          : [':tuiframe-core', ':editor-contract', ':core', ':markdown-preview'] as Set,
     ':highlight-regex' : [':editor-contract', ':render'] as Set,
     ':tui'             : [':tuiframe-core', ':tuiframe-jline', ':tuiframe-widgets', ':editor-contract', ':core',
                          ':editor-session', ':render', ':highlight-regex', ':editor-diff-jgit',
-                         ':editor-storage-jvm'] as Set,
+                         ':editor-storage-jvm', ':markdown-preview', ':markdown-commonmark',
+                         ':markdown-math', ':markdown-mermaid'] as Set,
     ':app'            : [':tui'] as Set
 ]
 def allowedTestProjectDependencies = [
@@ -106,6 +112,10 @@ def externallyDependencyFreeProductionConfigurations = [
 ] as Set
 def projectsByPath = subprojects.collectEntries { [(it.path): it] }
 def portableRuntimeProjects = [
+    ':markdown-preview': [':markdown-preview', ':editor-contract'] as Set,
+    ':markdown-math': [':markdown-math', ':markdown-preview', ':editor-contract'] as Set,
+    ':markdown-mermaid': [':markdown-mermaid', ':markdown-preview', ':editor-contract'] as Set,
+    ':markdown-commonmark': [':markdown-commonmark', ':markdown-preview', ':editor-contract'] as Set,
     ':unicode-text': [':unicode-text'] as Set,
     ':editor-contract': [':editor-contract'] as Set,
     ':core': [':core', ':unicode-text', ':editor-contract'] as Set,
@@ -147,6 +157,9 @@ def sessionJava17ApiConsumer = configurations.create('sessionJava17ApiConsumer')
     }
 }
 dependencies {
+    portableJava17Consumer project(':markdown-commonmark')
+    portableJava17Consumer project(':markdown-math')
+    portableJava17Consumer project(':markdown-mermaid')
     portableJava17Consumer project(':editor-session')
     portableJava17Consumer project(':highlight-regex')
     add('coreJava17ApiConsumer', project(':core'))
@@ -262,7 +275,11 @@ def verifyProjectDependencies = tasks.register('verifyProjectDependencies') {
                         if (!allowedRuntime.contains(component.id.projectPath)) {
                             violations.add("${projectPath}:runtimeClasspath -> ${component.id.projectPath}")
                         }
-                    } else {
+                    } else if (!(projectPath == ':markdown-commonmark'
+                        && component.moduleVersion?.group == 'org.commonmark'
+                        && component.moduleVersion?.version == '0.24.0'
+                        && component.moduleVersion?.name in ['commonmark', 'commonmark-ext-gfm-tables',
+                            'commonmark-ext-gfm-strikethrough', 'commonmark-ext-task-list-items'])) {
                         violations.add("${projectPath}:runtimeClasspath -> ${component.id.displayName}")
                     }
                 }

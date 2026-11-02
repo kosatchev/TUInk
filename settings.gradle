@@ -19,7 +19,11 @@ def projectDirectories = [
     ':tuiframe-core': 'libs/tuiframe/core',
     ':tuiframe-jline': 'libs/tuiframe/jline',
     ':tuiframe-widgets': 'libs/tuiframe/widgets',
-    ':unicode-text': 'libs/unicode-text'
+    ':unicode-text': 'libs/unicode-text',
+    ':markdown-preview': 'libs/markdown/preview',
+    ':markdown-commonmark': 'libs/markdown/commonmark',
+    ':markdown-math': 'libs/markdown/math',
+    ':markdown-mermaid': 'libs/markdown/mermaid'
 ]
 projectDirectories.each { projectPath, directory ->
     include projectPath

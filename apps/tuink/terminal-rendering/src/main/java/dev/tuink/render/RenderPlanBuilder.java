@@ -164,6 +164,9 @@ public class RenderPlanBuilder {
     }
 
     /** Whether the last build retained syntax context work that needs another bounded frame. */
+    /** Stable primitive identity for presentation history; it never retains this builder or its document. */
+    public long renderIdentity() { return baseStyleOwnerId; }
+
     public boolean hasPendingSyntaxWork() {
         return pendingSyntaxWork;
     }

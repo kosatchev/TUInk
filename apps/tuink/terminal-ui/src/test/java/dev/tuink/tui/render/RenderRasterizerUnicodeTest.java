@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuiframe.text.TerminalText;
+import dev.tuiframe.memory.RenderMemoryBudget;
 import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.scroll.ScrollLayout;
 import dev.tuink.core.EditorState;
@@ -493,6 +494,78 @@ class RenderRasterizerUnicodeTest {
         }
     }
 
+    @Test
+    void sourceExpandsItsLegacyEmptyInteriorSpanWithoutChangingTheGenericSpanContract() {
+        Style interior = new Style(Color.BLUE, Color.YELLOW, true, true);
+        try (var rasterizer = new RenderRasterizer()) {
+            rasterizer.setVisibleWhitespace(false);
+            for (String text : List.of("e\u0301x", "😀x")) {
+                var line = line(text, List.of(new StyleSpan(1, 1, interior)), 1, 0, 0);
+                var actual = rasterizer.rasterize(directPlan(line, 4, 12), 4, 12);
+                var expected = referenceLine(line, 12, 4);
+                for (int column = 0; column < 12; column++) assertEquals(expected.get(1, column), actual.get(1, column));
+            }
+        }
+    }
+
+    @Test
+    void refusedPreparationStreamsTheVisibleSourceWithoutRetainingAnUnchargedIndex() {
+        var budget = RenderMemoryBudget.bounded(1);
+        var text = new CountingAscii(1_000_000);
+        try (var rasterizer = new RenderRasterizer(1, UiStyles.Theme.CYAN, budget)) {
+            rasterizer.setVisibleWhitespace(false);
+            var line = new LineVisual("", text, List.of(), GutterDiffMarker.NONE);
+            var frame = rasterizer.rasterize(directPlan(line, 4, 12), 4, 12);
+            for (int column = 0; column < 12; column++) assertEquals("A", frame.get(1, column).grapheme());
+            assertTrue(text.reads < 40, "reads=" + text.reads);
+            assertEquals(0, rasterizer.preparedLineCacheSize());
+            assertEquals(0, budget.usedBytes());
+        }
+        assertEquals(0, budget.usedBytes());
+    }
+
+    @Test
+    void clearingAndClosingReleaseRowsFallbackIdentitiesAndEveryFrameTail() {
+        var budget = RenderMemoryBudget.bounded(16 * 1024 * 1024);
+        try (var rasterizer = new RenderRasterizer(1, UiStyles.Theme.CYAN, budget)) {
+            List<LineVisual> lines = java.util.stream.IntStream.range(0, 20)
+                .mapToObj(index -> line("row-" + index, List.of(), 0, 0, 0)).toList();
+            rasterizer.rasterize(directPlan(lines, 24, 20), 24, 20);
+            rasterizer.rasterize(directPlan(lines.getFirst(), 3, 20), 3, 20);
+            assertTrue(budget.usedBytes() > 0);
+            rasterizer.setTabWidth(2);
+            assertEquals(0, budget.usedBytes(), "clearing includes rows outside the now-smaller frame");
+            rasterizer.rasterize(directPlan(lines.getFirst(), 3, 20), 3, 20);
+            assertTrue(budget.usedBytes() > 0);
+        }
+        assertEquals(0, budget.usedBytes());
+    }
+
+    @Test
+    void diagnosticsCountOnlyPreparedSourceIndexBuildsAndTheirLiveReservations() {
+        var budget = RenderMemoryBudget.bounded(100_000);
+        try (var rasterizer = new RenderRasterizer(1, UiStyles.Theme.CYAN, budget)) {
+            var plan = directPlan(line("e\u0301\t界", List.of(), 0, 0, 0), 4, 12);
+            rasterizer.rasterize(plan, 4, 12);
+            assertEquals(1, rasterizer.metricsBuilds());
+            assertEquals(1, rasterizer.preparedRowsMisses());
+            assertEquals(0, rasterizer.preparedRowsReused());
+            assertEquals(budget.usedBytes(), rasterizer.retainedRenderBytes());
+            assertTrue(rasterizer.retainedRenderBytes() > 0);
+            rasterizer.rasterize(plan, 4, 12);
+            assertEquals(1, rasterizer.metricsBuilds());
+            assertEquals(1, rasterizer.preparedRowsMisses());
+            assertEquals(1, rasterizer.preparedRowsReused());
+            assertEquals(budget.usedBytes(), rasterizer.retainedRenderBytes());
+            rasterizer.setTabWidth(2);
+            assertEquals(0, rasterizer.retainedRenderBytes());
+            rasterizer.rasterize(plan, 4, 12);
+            assertEquals(2, rasterizer.metricsBuilds());
+            assertEquals(budget.usedBytes(), rasterizer.retainedRenderBytes());
+        }
+        assertEquals(0, budget.usedBytes());
+    }
+
     private static CellBuffer referenceLine(LineVisual line, int cols, int tabWidth) {
         CellBuffer buffer = new CellBuffer(4, cols);
         int absoluteVisual = line.sourceVisualColumn();
@@ -571,8 +644,12 @@ class RenderRasterizerUnicodeTest {
     }
 
     private static RenderPlan directPlan(LineVisual line, int rows, int cols) {
+        return directPlan(List.of(line), rows, cols);
+    }
+
+    private static RenderPlan directPlan(List<LineVisual> lines, int rows, int cols) {
         return new RenderPlan(
-            List.of(line),
+            lines,
             "",
             "",
             null,
@@ -584,17 +661,30 @@ class RenderRasterizerUnicodeTest {
             true,
             false,
             false,
-            1,
+            lines.size(),
             0,
-            1,
+            lines.size(),
             0,
             0,
             cols,
             cols,
             0,
             0,
-            ScrollLayout.vertical(new Rect(0, 1, cols, 1), 1)
+            ScrollLayout.vertical(new Rect(0, 1, cols, lines.size()), lines.size())
         );
+    }
+
+    private static final class CountingAscii implements CharSequence {
+        private final int length;
+        private int reads;
+        CountingAscii(int length) { this.length = length; }
+        @Override public int length() { return length; }
+        @Override public char charAt(int index) {
+            if (index < 0 || index >= length) throw new IndexOutOfBoundsException(index);
+            reads++; return 'A';
+        }
+        @Override public CharSequence subSequence(int start, int end) { throw new AssertionError("No fallback slice copying"); }
+        @Override public String toString() { throw new AssertionError("No fallback source materialization"); }
     }
 
     private static RenderPlan plan(String line, EditorState state, int rows, int cols) {

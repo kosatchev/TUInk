@@ -1,10 +1,12 @@
 package dev.tuink.render;
 
+import dev.tuiframe.render.PreparedStyledRow;
+
 /**
  * Opaque identity for the stable, prepared portion of a line's styles.
  *
  * <p>Render-plan consumers may retain and compare this value, but only render-plan producers in
- * this package can create one. The identity deliberately exposes none of the cache inputs.</p>
+ * this package can create one. A terminal adapter can project the identity without retaining its producer.</p>
  */
 public final class BaseStyleIdentity {
     private final long ownerId;
@@ -59,6 +61,12 @@ public final class BaseStyleIdentity {
             sliceStart,
             sliceLength
         );
+    }
+
+    /** Exact prepared-row identity; no hashing or application-owner references are involved. */
+    public PreparedStyledRow.Key preparedRowKey(int tabWidth, int tabPhase) {
+        return new PreparedStyledRow.Key(ownerId, modelId, modelRevision, generation,
+            lineIndex, sliceStart, sliceLength, tabWidth, tabPhase);
     }
 
     @Override

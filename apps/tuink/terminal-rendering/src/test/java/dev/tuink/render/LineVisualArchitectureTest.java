@@ -53,4 +53,23 @@ class LineVisualArchitectureTest {
             () -> assertNotEquals(first, new Object())
         );
     }
+
+    @Test
+    void preparedRowProjectionKeepsEveryIdentityDimensionWithoutHashing() {
+        var identity = BaseStyleIdentity.of(11, 22, 33, 44, 55, 66, 77);
+        var key = identity.preparedRowKey(4, 3);
+        assertAll(
+            () -> assertEquals(11, key.producerId()),
+            () -> assertEquals(22, key.sourceId()),
+            () -> assertEquals(44, key.contentRevision()),
+            () -> assertEquals(33, key.styleRevision()),
+            () -> assertEquals(55, key.row()),
+            () -> assertEquals(66, key.sliceStart()),
+            () -> assertEquals(77, key.sliceLength()),
+            () -> assertEquals(4, key.tabWidth()),
+            () -> assertEquals(3, key.tabPhase()),
+            () -> assertNotEquals(key, identity.preparedRowKey(4, 2)),
+            () -> assertNotEquals(key, BaseStyleIdentity.of(11, 22, 34, 44, 55, 66, 77).preparedRowKey(4, 3))
+        );
+    }
 }

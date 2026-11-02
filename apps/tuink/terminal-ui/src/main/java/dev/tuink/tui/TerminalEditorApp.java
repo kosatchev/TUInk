@@ -489,6 +489,7 @@ public class TerminalEditorApp {
                     warning -> TerminalDiagnostics.error("Warning: " + warning)
                 );
             } finally {
+                renderer.close();
                 frameProfiler.close();
             }
         }

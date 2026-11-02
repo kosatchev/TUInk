@@ -3,6 +3,10 @@ package dev.tuink.tui.render;
 import dev.tuink.core.GutterDiffFlag;
 import dev.tuink.core.GutterDiffMarker;
 import dev.tuiframe.text.TerminalText;
+import dev.tuiframe.memory.RenderMemoryBudget;
+import dev.tuiframe.render.PreparedRowCache;
+import dev.tuiframe.render.PreparedStyledRow;
+import dev.tuiframe.render.PreparedRowPainter;
 import dev.tuink.render.BaseStyleIdentity;
 import dev.tuink.render.Color;
 import dev.tuink.render.LineVisual;
@@ -18,37 +22,41 @@ import dev.tuink.tui.style.UiStyles.Palette;
 import dev.tuink.tui.ui.EditorScrollbars;
 import dev.tuink.tui.ui.NotificationPresentation;
 import java.util.Arrays;
-import java.util.Iterator;
+import java.lang.ref.WeakReference;
+import java.util.AbstractList;
+import java.util.Objects;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Converts an abstract render plan into a cell buffer.
  */
-public class RenderRasterizer {
+public class RenderRasterizer implements AutoCloseable {
     private static final int MAX_PREPARED_LINES = 1024;
     private static final int MAX_PREPARED_CACHE_WEIGHT = 16 * 1024 * 1024;
     private static final int EDITOR_COLOR_COUNT = Color.values().length;
     private static final int CELL_STYLE_VARIANTS = EDITOR_COLOR_COUNT * EDITOR_COLOR_COUNT * 4;
-    private static final String[] ASCII_DISPLAY = createAsciiDisplay();
+    private static final AtomicLong FALLBACK_PRODUCERS = new AtomicLong(Long.MIN_VALUE);
 
     private Palette styles;
     private final int contentTopRow;
     private boolean highlightActiveGutter = true;
     private boolean visibleWhitespace = true;
     private int tabWidth = 4;
-    private final LinkedHashMap<PreparedLineKey, PreparedLine> preparedLineCache =
-        new LinkedHashMap<>(256, 0.75f, true);
-    private int preparedLineCacheWeight;
+    private final RenderMemoryBudget.Tracked memory;
+    private final PreparedRowCache preparedRows;
+    private final LinkedHashMap<FallbackKey, FallbackIdentity> fallbackIdentities = new LinkedHashMap<>(16, 0.75f, true);
+    private final long fallbackProducer = FALLBACK_PRODUCERS.getAndIncrement();
+    private long fallbackSequence;
     private long preparedLineCacheHits;
     private long preparedLineCacheMisses;
     private final CellStyle[] cellStyleCache = new CellStyle[CELL_STYLE_VARIANTS];
-    private CellStyle[] styleScratch = new CellStyle[0];
-    private PreparedLineKey[] previousFrameLineKeys = new PreparedLineKey[0];
-    private PreparedLine[] previousFrameLines = new PreparedLine[0];
-    private PreparedLineKey[] currentFrameLineKeys = new PreparedLineKey[0];
-    private PreparedLine[] currentFrameLines = new PreparedLine[0];
+    private final SourceOverlay overlay = new SourceOverlay();
+    private PreparedRowCache.Handle[] previousFrameLines = new PreparedRowCache.Handle[0];
+    private PreparedRowCache.Handle[] currentFrameLines = new PreparedRowCache.Handle[0];
+    private RenderMemoryBudget.Reservation frameArrays;
+    private boolean closed;
 
     public RenderRasterizer() {
         this(1, UiStyles.Theme.CYAN);
@@ -59,8 +67,15 @@ public class RenderRasterizer {
     }
 
     public RenderRasterizer(int contentTopRow, UiStyles.Theme theme) {
+        this(contentTopRow, theme, RenderMemoryBudget.bounded(MAX_PREPARED_CACHE_WEIGHT));
+    }
+
+    /** Injected admission shares the caller's ledger; the default remains the existing 16 MiB ceiling. */
+    public RenderRasterizer(int contentTopRow, UiStyles.Theme theme, RenderMemoryBudget memory) {
         this.contentTopRow = Math.max(1, contentTopRow);
         this.styles = UiStyles.forTheme(theme);
+        this.memory = RenderMemoryBudget.tracked(memory);
+        this.preparedRows = new PreparedRowCache(this.memory, MAX_PREPARED_LINES, MAX_PREPARED_CACHE_WEIGHT);
     }
 
     public void setTheme(UiStyles.Theme theme) {
@@ -89,6 +104,7 @@ public class RenderRasterizer {
     }
 
     public CellBuffer rasterize(RenderPlan plan, int rows, int cols, int contentTopRow) {
+        if (closed) throw new IllegalStateException("Rasterizer is closed");
         CellBuffer buffer = new CellBuffer(rows, cols);
         Canvas canvas = new Canvas(buffer);
         int contentCols = Math.max(1, cols - plan.scrollbarWidth());
@@ -97,28 +113,29 @@ public class RenderRasterizer {
         int visibleLineCount = Math.min(plan.lines().size(), plan.contentRows());
         beginPreparedLineFrame(visibleLineCount);
 
-        for (int row = 0; row < visibleLineCount; row++) {
-            LineVisual line = plan.lines().get(row);
-            int screenRow = row + topRow;
-            if (screenRow >= rows) {
-                break;
+        try {
+            for (int row = 0; row < visibleLineCount; row++) {
+                LineVisual line = plan.lines().get(row);
+                int screenRow = row + topRow;
+                if (screenRow >= rows) {
+                    break;
+                }
+                CellStyle gutterStyle = highlightActiveGutter && row == activeGutterRow
+                    ? styles.renderGutterActive()
+                    : styles.renderGutter();
+                drawGutter(buffer, screenRow, line, gutterStyle, contentCols);
+                boolean markLeadingWhitespace = shouldMarkLeadingWhitespace(plan, line);
+                drawHighlightedText(
+                    canvas,
+                    screenRow,
+                    plan.gutterWidth(),
+                    line,
+                    contentCols,
+                    markLeadingWhitespace,
+                    row
+                );
             }
-            CellStyle gutterStyle = highlightActiveGutter && row == activeGutterRow
-                ? styles.renderGutterActive()
-                : styles.renderGutter();
-            drawGutter(buffer, screenRow, line, gutterStyle, contentCols);
-            boolean markLeadingWhitespace = shouldMarkLeadingWhitespace(plan, line);
-            drawHighlightedText(
-                buffer,
-                screenRow,
-                plan.gutterWidth(),
-                line,
-                contentCols,
-                markLeadingWhitespace,
-                row
-            );
-        }
-        endPreparedLineFrame();
+        } finally { endPreparedLineFrame(); }
 
         int statusRow = Math.max(0, rows - 1);
 
@@ -164,81 +181,29 @@ public class RenderRasterizer {
         scrollbars.layout().paintCorner(canvas, scrollStyle);
     }
 
-    private void drawHighlightedText(
-        CellBuffer buffer,
-        int row,
-        int startCol,
-        LineVisual line,
-        int cols,
-        boolean markLeadingWhitespace,
-        int cacheSlot
-    ) {
-        List<StyleSpan> spans = line.spans();
-        int baseSpanCount = Math.max(0, Math.min(line.baseSpanCount(), spans.size()));
-        List<StyleSpan> baseSpans = baseSpanCount == 0
-            ? List.of()
-            : (baseSpanCount == spans.size() ? spans : spans.subList(0, baseSpanCount));
-        PreparedLine prepared = preparedLine(
-            line.sequence(),
-            baseSpans,
-            line.sourceVisualColumn(),
-            line.baseStyleKey(),
-            cacheSlot
-        );
-        int graphemeCount = prepared.metrics().graphemeCount();
-        CellStyle[] resolvedStyles = prepared.baseStyles();
-        if (baseSpanCount < spans.size()) {
-            ensureStyleScratch(graphemeCount);
-            System.arraycopy(prepared.baseStyles(), 0, styleScratch, 0, graphemeCount);
-            applySpans(
-                prepared.metrics(),
-                spans,
-                baseSpanCount,
-                spans.size(),
-                styleScratch
-            );
-            resolvedStyles = styleScratch;
-        }
-
-        for (int index = 0; index < graphemeCount; index++) {
-            CellStyle style = resolvedStyles[index];
-            boolean mark = visibleWhitespace
-                && (
-                    index >= prepared.trailingStart()
-                        || (markLeadingWhitespace && index < prepared.leadingEnd())
-                )
-                && (prepared.exactSpaces()[index] || prepared.tabs()[index]);
-            if (mark) {
-                style = markerStyle(style);
+    private void drawHighlightedText(Canvas canvas, int row, int startCol, LineVisual line, int cols,
+        boolean markLeadingWhitespace, int cacheSlot) {
+        CharSequence text = line.sequence() == null ? "" : line.sequence();
+        List<StyleSpan> spans = line.spans() == null ? List.of() : line.spans();
+        int baseCount = Math.min(line.baseSpanCount(), spans.size());
+        PreparedRowCache.Handle handle = preparedLine(line, text, spans, baseCount, cacheSlot);
+        try {
+            overlay.bind(spans, handle == null ? 0 : baseCount);
+            PreparedRowPainter.Overlay dynamic = overlay.empty() ? null : overlay;
+            int endColumn = handle == null
+                ? PreparedRowPainter.paintStreaming(canvas, text, tabWidth, Math.floorMod(line.sourceVisualColumn(), tabWidth),
+                    CellStyle.DEFAULT, row, startCol, Math.max(0, cols - startCol), line.leadingClippedCells(), dynamic,
+                    visibleWhitespace && markLeadingWhitespace, visibleWhitespace, styles.renderLeadingWhitespace())
+                : PreparedRowPainter.paint(canvas, handle.row(), row, startCol, Math.max(0, cols - startCol),
+                    line.leadingClippedCells(), dynamic, visibleWhitespace && markLeadingWhitespace,
+                    visibleWhitespace, styles.renderLeadingWhitespace());
+            if (endColumn >= 0 && line.lineBreakSelectionStyle() != null) {
+                int column = startCol + endColumn - line.leadingClippedCells();
+                if (column >= startCol && column < cols) canvas.put(column, row, " ", cellStyle(line.lineBreakSelectionStyle()));
             }
-            int screenCol = startCol
-                + prepared.visualOffsets()[index]
-                - line.leadingClippedCells();
-            int advance = prepared.advances()[index];
-
-            if (prepared.tabs()[index]) {
-                for (int cell = 0; cell < advance; cell++) {
-                    int target = screenCol + cell;
-                    if (target < startCol || target >= cols) {
-                        continue;
-                    }
-                    String shown = mark && cell == 0 && screenCol >= startCol ? "»" : " ";
-                    buffer.set(row, target, shown, style);
-                }
-            } else if (screenCol >= startCol && screenCol + advance <= cols) {
-                String shown = mark && prepared.exactSpaces()[index]
-                    ? "·"
-                    : prepared.display()[index];
-                buffer.set(row, screenCol, shown, style);
-            }
-        }
-        if (line.lineBreakSelectionStyle() != null) {
-            int endColumn = graphemeCount == 0 ? 0
-                : prepared.visualOffsets()[graphemeCount - 1] + prepared.advances()[graphemeCount - 1];
-            int screenCol = startCol + endColumn - line.leadingClippedCells();
-            if (screenCol >= startCol && screenCol < cols) {
-                buffer.set(row, screenCol, " ", cellStyle(line.lineBreakSelectionStyle()));
-            }
+        } finally {
+            overlay.clear();
+            if (handle != null && (cacheSlot >= currentFrameLines.length || currentFrameLines[cacheSlot] != handle)) handle.close();
         }
     }
 
@@ -352,213 +317,186 @@ public class RenderRasterizer {
         return hasLineNumberGutter(line.gutter());
     }
 
-    private CellStyle markerStyle(CellStyle base) {
-        CellStyle marker = styles.renderLeadingWhitespace();
-        if (base.equals(CellStyle.DEFAULT)) {
-            return marker;
-        }
-        // Keep background/attributes (selection/search), override only marker foreground.
-        return new CellStyle(marker.fg(), base.bg(), base.bold(), base.underline());
-    }
-
-    private PreparedLine preparedLine(
-        CharSequence text,
-        List<StyleSpan> baseSpans,
-        int sourceVisualColumn,
-        BaseStyleIdentity baseStyleKey,
-        int cacheSlot
-    ) {
-        CharSequence value = text == null ? "" : text;
-        int tabPhase = Math.floorMod(sourceVisualColumn, tabWidth);
-        CharSequence keyedText = baseStyleKey == null ? value : "";
-        List<StyleSpan> keyedBaseSpans = baseStyleKey == null ? baseSpans : List.of();
-        PreparedLineKey lookupKey = new PreparedLineKey(
-            keyedText,
-            keyedBaseSpans,
-            baseStyleKey,
-            tabWidth,
-            tabPhase
-        );
-        PreparedLine frameCached = previousFrameLine(lookupKey, cacheSlot);
+    private PreparedRowCache.Handle preparedLine(LineVisual line, CharSequence text, List<StyleSpan> spans,
+        int baseCount, int cacheSlot) {
+        int phase = Math.floorMod(line.sourceVisualColumn(), tabWidth);
+        PreparedStyledRow.Key key = line.baseStyleKey() == null ? fallbackIdentity(text, spans, baseCount, phase)
+            : line.baseStyleKey().preparedRowKey(tabWidth, phase);
+        if (key == null) { preparedLineCacheMisses++; return null; }
+        PreparedRowCache.Handle frameCached = takePreviousFrame(key, cacheSlot);
+        if (frameCached == null) frameCached = takePreviousFrame(key, cacheSlot + 1);
+        if (frameCached == null) frameCached = takePreviousFrame(key, cacheSlot - 1);
+        PreparedRowCache.Handle handle;
         if (frameCached != null) {
             preparedLineCacheHits++;
-            currentFrameLineKeys[cacheSlot] = lookupKey;
-            currentFrameLines[cacheSlot] = frameCached;
-            return frameCached;
+            handle = frameCached;
+        } else {
+            long hits = preparedRows.hits();
+            handle = preparedRows.acquire(key, text, CellStyle.DEFAULT, new SourceBaseSpans(text, spans, baseCount));
+            if (preparedRows.hits() != hits) preparedLineCacheHits++;
+            else preparedLineCacheMisses++;
         }
-        PreparedLine cached = preparedLineCache.get(lookupKey);
-        if (cached != null) {
-            preparedLineCacheHits++;
-            currentFrameLineKeys[cacheSlot] = lookupKey;
-            currentFrameLines[cacheSlot] = cached;
-            return cached;
-        }
-
-        preparedLineCacheMisses++;
-        TerminalText.Metrics metrics = TerminalText.metrics(value, tabWidth);
-        int count = metrics.graphemeCount();
-        String[] display = new String[count];
-        int[] advances = new int[count];
-        int[] visualOffsets = new int[count];
-        boolean[] tabs = new boolean[count];
-        boolean[] exactSpaces = new boolean[count];
-        CellStyle[] baseStyles = new CellStyle[count];
-        Arrays.fill(baseStyles, CellStyle.DEFAULT);
-        applySpans(metrics, baseSpans, 0, baseSpans.size(), baseStyles);
-
-        int absoluteVisual = tabPhase;
-        int leadingEnd = 0;
-        while (leadingEnd < count && metrics.isWhitespace(leadingEnd)) {
-            leadingEnd++;
-        }
-        int trailingStart = count;
-        while (trailingStart > 0 && metrics.isWhitespace(trailingStart - 1)) {
-            trailingStart--;
-        }
-        for (int index = 0; index < count; index++) {
-            int start = metrics.start(index);
-            int end = metrics.end(index);
-            boolean tab = metrics.isTab(index);
-            int width = Math.max(1, metrics.width(index));
-            int advance = tab
-                ? tabWidth - (absoluteVisual % tabWidth)
-                : width;
-            String shown = tab ? " " : displayGrapheme(value, start, end);
-            display[index] = shown;
-            advances[index] = advance;
-            visualOffsets[index] = absoluteVisual - tabPhase;
-            tabs[index] = tab;
-            exactSpaces[index] = end == start + 1 && value.charAt(start) == ' ';
-            absoluteVisual += advance;
-        }
-
-        PreparedLine prepared = new PreparedLine(
-            metrics,
-            display,
-            advances,
-            visualOffsets,
-            tabs,
-            exactSpaces,
-            baseStyles,
-            leadingEnd,
-            trailingStart,
-            preparedLineWeight(value, metrics, baseSpans.size())
-        );
-        List<StyleSpan> stableBaseSpans = keyedBaseSpans.isEmpty()
-            ? List.of()
-            : List.copyOf(keyedBaseSpans);
-        PreparedLineKey storedKey = new PreparedLineKey(
-            keyedText,
-            stableBaseSpans,
-            baseStyleKey,
-            tabWidth,
-            tabPhase
-        );
-        if (prepared.cacheWeight() <= MAX_PREPARED_CACHE_WEIGHT) {
-            preparedLineCache.put(storedKey, prepared);
-            preparedLineCacheWeight += prepared.cacheWeight();
-            trimPreparedLineCache();
-        }
-        currentFrameLineKeys[cacheSlot] = prepared.cacheWeight() <= MAX_PREPARED_CACHE_WEIGHT
-            ? storedKey
-            : lookupKey;
-        currentFrameLines[cacheSlot] = prepared;
-        return prepared;
+        if (cacheSlot < currentFrameLines.length) currentFrameLines[cacheSlot] = handle;
+        return handle;
     }
 
-    private PreparedLine previousFrameLine(PreparedLineKey key, int cacheSlot) {
-        PreparedLine sameRow = previousFrameLineAt(key, cacheSlot);
-        if (sameRow != null) {
-            return sameRow;
-        }
-        PreparedLine nextRow = previousFrameLineAt(key, cacheSlot + 1);
-        if (nextRow != null) {
-            return nextRow;
-        }
-        return previousFrameLineAt(key, cacheSlot - 1);
+    private PreparedRowCache.Handle takePreviousFrame(PreparedStyledRow.Key key, int slot) {
+        if (slot < 0 || slot >= previousFrameLines.length) return null;
+        var handle = previousFrameLines[slot];
+        if (handle == null || !key.equals(handle.key())) return null;
+        // Transfer the frame's real ownership, avoiding a new handle/lease allocation per unchanged row.
+        previousFrameLines[slot] = null;
+        return handle;
     }
 
-    private PreparedLine previousFrameLineAt(PreparedLineKey key, int cacheSlot) {
-        if (cacheSlot < 0 || cacheSlot >= previousFrameLineKeys.length) {
-            return null;
+    private PreparedStyledRow.Key fallbackIdentity(CharSequence text, List<StyleSpan> spans, int count, int phase) {
+        List<StyleSpan> base = count == 0 ? List.of() : count == spans.size() ? spans : spans.subList(0, count);
+        var lookup = new FallbackKey(text, base, tabWidth, phase, false);
+        var found = fallbackIdentities.get(lookup);
+        if (found != null) return found.key();
+        while (fallbackIdentities.size() >= MAX_PREPARED_LINES) evictFallbackIdentity();
+        long bytes = 256L + 2L * text.length() + 64L * count;
+        var reservation = memory.tryReserve(bytes);
+        if (reservation == null) {
+            preparedRows.clear();
+            reservation = memory.tryReserve(bytes);
+            while (reservation == null && !fallbackIdentities.isEmpty()) {
+                evictFallbackIdentity(); reservation = memory.tryReserve(bytes);
+            }
         }
-        PreparedLineKey previousKey = previousFrameLineKeys[cacheSlot];
-        return key.equals(previousKey) ? previousFrameLines[cacheSlot] : null;
+        if (reservation == null) return null;
+        try {
+            fallbackSequence = Math.incrementExact(fallbackSequence);
+            var key = new PreparedStyledRow.Key(fallbackProducer, fallbackSequence,
+                0, 0, 0, 0, text.length(), tabWidth, phase);
+            fallbackIdentities.put(new FallbackKey(text, List.copyOf(base), tabWidth, phase, true),
+                new FallbackIdentity(key, reservation));
+            return key;
+        } catch (RuntimeException | Error failure) { reservation.close(); throw failure; }
     }
 
-    private void beginPreparedLineFrame(int lineCount) {
-        if (currentFrameLineKeys.length >= lineCount) {
-            return;
+    private void evictFallbackIdentity() {
+        var iterator = fallbackIdentities.entrySet().iterator();
+        var entry = iterator.next(); iterator.remove(); entry.getValue().reservation().close();
+    }
+
+    private void beginPreparedLineFrame(int count) {
+        closeFrame(currentFrameLines);
+        if (currentFrameLines.length >= count) return;
+        int capacity = Math.max(count, currentFrameLines.length * 2 + 16);
+        long bytes = 64L + 16L * capacity;
+        var reservation = memory.tryReserve(bytes);
+        if (reservation == null) {
+            preparedRows.clear();
+            reservation = memory.tryReserve(bytes);
         }
-        int capacity = Math.max(lineCount, currentFrameLineKeys.length * 2 + 16);
-        previousFrameLineKeys = Arrays.copyOf(previousFrameLineKeys, capacity);
-        previousFrameLines = Arrays.copyOf(previousFrameLines, capacity);
-        currentFrameLineKeys = Arrays.copyOf(currentFrameLineKeys, capacity);
-        currentFrameLines = Arrays.copyOf(currentFrameLines, capacity);
+        if (reservation == null) {
+            closeFrame(previousFrameLines);
+            if (frameArrays != null) { frameArrays.close(); frameArrays = null; }
+            previousFrameLines = new PreparedRowCache.Handle[0]; currentFrameLines = new PreparedRowCache.Handle[0];
+            reservation = memory.tryReserve(bytes);
+        }
+        if (reservation == null) return;
+        try {
+            var previous = Arrays.copyOf(previousFrameLines, capacity);
+            var current = new PreparedRowCache.Handle[capacity];
+            previousFrameLines = previous; currentFrameLines = current;
+            if (frameArrays != null) frameArrays.close();
+            frameArrays = reservation;
+        } catch (RuntimeException | Error failure) { reservation.close(); throw failure; }
     }
 
     private void endPreparedLineFrame() {
-        PreparedLineKey[] completedKeys = currentFrameLineKeys;
-        currentFrameLineKeys = previousFrameLineKeys;
-        previousFrameLineKeys = completedKeys;
-        PreparedLine[] completedLines = currentFrameLines;
-        currentFrameLines = previousFrameLines;
-        previousFrameLines = completedLines;
+        closeFrame(previousFrameLines);
+        var completed = currentFrameLines; currentFrameLines = previousFrameLines; previousFrameLines = completed;
     }
 
-    private void applySpans(
-        TerminalText.Metrics metrics,
-        List<StyleSpan> spans,
-        int fromIndex,
-        int toIndex,
-        CellStyle[] target
-    ) {
-        int count = metrics.graphemeCount();
-        if (count == 0) {
-            return;
+    private static void closeFrame(PreparedRowCache.Handle[] frame) {
+        for (int index = 0; index < frame.length; index++) {
+            if (frame[index] != null) { frame[index].close(); frame[index] = null; }
         }
-        for (int index = fromIndex; index < toIndex; index++) {
-            StyleSpan span = spans.get(index);
-            int first = firstOverlappingGrapheme(metrics, span.start());
-            int afterLast = firstStartingAtOrAfter(metrics, span.end());
-            if (first < afterLast) {
-                CellStyle style = cellStyle(span.style());
-                Arrays.fill(target, first, afterLast, style);
+    }
+
+    private void clearPreparedLineCache() {
+        preparedRows.clear();
+        for (var identity : fallbackIdentities.values()) identity.reservation().close();
+        fallbackIdentities.clear();
+        closeFrame(previousFrameLines); closeFrame(currentFrameLines);
+        previousFrameLines = new PreparedRowCache.Handle[0]; currentFrameLines = new PreparedRowCache.Handle[0];
+        if (frameArrays != null) { frameArrays.close(); frameArrays = null; }
+    }
+
+    @Override public void close() {
+        if (closed) return;
+        closed = true; clearPreparedLineCache(); preparedRows.close();
+    }
+
+    /** Rows reused from the previous frame or the prepared-row LRU. */
+    public long preparedRowsReused() { return preparedLineCacheHits; }
+    public long preparedRowsMisses() { return preparedLineCacheMisses; }
+    /** Successful metric-index builds for Source rows; excludes requests, hits and refusals. */
+    public long metricsBuilds() { return preparedRows.metricsBuilds(); }
+    /** Live row, fallback-identity and frame-slot reservations, including evicted frame owners. */
+    public long retainedRenderBytes() { return memory.usedBytes(); }
+
+    int preparedLineCacheSize() { return preparedRows.size(); }
+    long preparedLineCacheHits() { return preparedLineCacheHits; }
+    long preparedLineCacheMisses() { return preparedLineCacheMisses; }
+
+    private final class SourceBaseSpans extends AbstractList<PreparedStyledRow.Span> {
+        private final CharSequence text;
+        private final List<StyleSpan> spans;
+        private final int count;
+        SourceBaseSpans(CharSequence text, List<StyleSpan> spans, int count) { this.text = text; this.spans = spans; this.count = count; }
+        @Override public int size() { return count; }
+        @Override public PreparedStyledRow.Span get(int index) {
+            if (index < 0 || index >= count) throw new IndexOutOfBoundsException(index);
+            var span = spans.get(index);
+            int start = span.start(), end = span.end();
+            if (start == end && start > 0 && start < text.length()) {
+                var geometry = TerminalText.streamingGeometry(text, tabWidth);
+                start = geometry.floorBoundary(start); end = geometry.ceilBoundary(end);
             }
+            return new PreparedStyledRow.Span(start, end, cellStyle(span.style()));
         }
     }
 
-    private int firstOverlappingGrapheme(TerminalText.Metrics metrics, int offset) {
-        int low = 0;
-        int high = metrics.graphemeCount();
-        while (low < high) {
-            int middle = (low + high) >>> 1;
-            if (metrics.end(middle) <= offset) {
-                low = middle + 1;
-            } else {
-                high = middle;
+    private final class SourceOverlay implements PreparedRowPainter.Overlay {
+        private List<StyleSpan> spans = List.of();
+        private int first;
+        void bind(List<StyleSpan> spans, int first) { this.spans = spans; this.first = first; }
+        boolean empty() { return first == spans.size(); }
+        void clear() { spans = List.of(); first = 0; }
+        @Override public CellStyle resolve(int start, int end, CellStyle base) {
+            CellStyle result = base;
+            for (int index = first; index < spans.size(); index++) {
+                var span = spans.get(index);
+                if (span.end() > start && span.start() < end) result = cellStyle(span.style());
             }
+            return result;
         }
-        return low;
     }
 
-    private int firstStartingAtOrAfter(TerminalText.Metrics metrics, int offset) {
-        int low = 0;
-        int high = metrics.graphemeCount();
-        while (low < high) {
-            int middle = (low + high) >>> 1;
-            if (metrics.start(middle) < offset) {
-                low = middle + 1;
-            } else {
-                high = middle;
-            }
-        }
-        return low;
-    }
+    private record FallbackIdentity(PreparedStyledRow.Key key, RenderMemoryBudget.Reservation reservation) {}
 
-    private void ensureStyleScratch(int required) {
-        if (styleScratch.length < required) {
-            styleScratch = new CellStyle[Math.max(required, styleScratch.length * 2 + 16)];
+    /** Exact text/span lookup for unversioned producers, never a hash promoted to identity. */
+    private static final class FallbackKey {
+        private final Object text;
+        private final List<StyleSpan> spans;
+        private final int tabWidth, phase, hash;
+        FallbackKey(CharSequence value, List<StyleSpan> spans, int tabWidth, int phase, boolean retain) {
+            text = value instanceof String ? value : retain ? new WeakReference<>(value) : value;
+            this.spans = spans; this.tabWidth = tabWidth; this.phase = phase;
+            int textHash = value instanceof String string ? string.hashCode() : System.identityHashCode(value);
+            hash = 31 * (31 * (31 * textHash + spans.hashCode()) + tabWidth) + phase;
+        }
+        private Object value() { return text instanceof WeakReference<?> weak ? weak.get() : text; }
+        @Override public int hashCode() { return hash; }
+        @Override public boolean equals(Object other) {
+            if (this == other) return true;
+            if (!(other instanceof FallbackKey key) || tabWidth != key.tabWidth || phase != key.phase || !spans.equals(key.spans)) return false;
+            Object first = value(), second = key.value();
+            return first != null && (first == second || first instanceof String && first.equals(second));
         }
     }
 
@@ -578,135 +516,7 @@ public class RenderRasterizer {
         return mapped;
     }
 
-    private void trimPreparedLineCache() {
-        Iterator<Map.Entry<PreparedLineKey, PreparedLine>> entries =
-            preparedLineCache.entrySet().iterator();
-        while (
-            entries.hasNext()
-                && (
-                    preparedLineCache.size() > MAX_PREPARED_LINES
-                        || preparedLineCacheWeight > MAX_PREPARED_CACHE_WEIGHT
-                )
-        ) {
-            Map.Entry<PreparedLineKey, PreparedLine> eldest = entries.next();
-            preparedLineCacheWeight -= eldest.getValue().cacheWeight();
-            entries.remove();
-        }
-    }
-
-    private void clearPreparedLineCache() {
-        preparedLineCache.clear();
-        preparedLineCacheWeight = 0;
-        Arrays.fill(previousFrameLineKeys, null);
-        Arrays.fill(previousFrameLines, null);
-        Arrays.fill(currentFrameLineKeys, null);
-        Arrays.fill(currentFrameLines, null);
-    }
-
-    int preparedLineCacheSize() {
-        return preparedLineCache.size();
-    }
-
-    long preparedLineCacheHits() {
-        return preparedLineCacheHits;
-    }
-
-    long preparedLineCacheMisses() {
-        return preparedLineCacheMisses;
-    }
-
     private static String displayGrapheme(CharSequence text, int start, int end) {
-        if (end == start + 1) {
-            char value = text.charAt(start);
-            if (value < ASCII_DISPLAY.length) {
-                return ASCII_DISPLAY[value];
-            }
-        }
-        return TerminalText.sanitizeGrapheme(text, start, end);
-    }
-
-    private static String[] createAsciiDisplay() {
-        String[] display = new String[128];
-        for (int value = 0; value < display.length; value++) {
-            display[value] = TerminalText.sanitizeGrapheme(Character.toString(value));
-        }
-        return display;
-    }
-
-    private static int preparedLineWeight(
-        CharSequence text,
-        TerminalText.Metrics metrics,
-        int baseSpanCount
-    ) {
-        long estimated = 64L
-            + (long) text.length() * Character.BYTES
-            + (long) metrics.storageWeight() * Integer.BYTES
-            + (long) baseSpanCount * 32L
-            + (long) metrics.graphemeCount() * 64L;
-        return (int) Math.min(Integer.MAX_VALUE, estimated);
-    }
-
-    private static final class PreparedLineKey {
-        private final CharSequence text;
-        private final List<StyleSpan> baseSpans;
-        private final BaseStyleIdentity baseStyleKey;
-        private final int tabWidth;
-        private final int tabPhase;
-        private final int hashCode;
-
-        private PreparedLineKey(
-            CharSequence text,
-            List<StyleSpan> baseSpans,
-            BaseStyleIdentity baseStyleKey,
-            int tabWidth,
-            int tabPhase
-        ) {
-            this.text = text;
-            this.baseSpans = baseSpans;
-            this.baseStyleKey = baseStyleKey;
-            this.tabWidth = tabWidth;
-            this.tabPhase = tabPhase;
-            int hash = 31 * tabWidth + tabPhase;
-            hash = 31 * hash + (baseStyleKey == null
-                ? text instanceof String string ? string.hashCode() : System.identityHashCode(text)
-                : baseStyleKey.hashCode());
-            this.hashCode = baseStyleKey == null ? 31 * hash + baseSpans.hashCode() : hash;
-        }
-
-        @Override
-        public boolean equals(Object other) {
-            if (this == other) {
-                return true;
-            }
-            if (!(other instanceof PreparedLineKey key)) {
-                return false;
-            }
-            if (tabWidth != key.tabWidth || tabPhase != key.tabPhase) {
-                return false;
-            }
-            if (baseStyleKey != null || key.baseStyleKey != null) {
-                return baseStyleKey != null && baseStyleKey.equals(key.baseStyleKey);
-            }
-            return (text == key.text || text instanceof String && text.equals(key.text)) && baseSpans.equals(key.baseSpans);
-        }
-
-        @Override
-        public int hashCode() {
-            return hashCode;
-        }
-    }
-
-    private record PreparedLine(
-        TerminalText.Metrics metrics,
-        String[] display,
-        int[] advances,
-        int[] visualOffsets,
-        boolean[] tabs,
-        boolean[] exactSpaces,
-        CellStyle[] baseStyles,
-        int leadingEnd,
-        int trailingStart,
-        int cacheWeight
-    ) {
+        return PreparedRowPainter.display(text, start, end);
     }
 }

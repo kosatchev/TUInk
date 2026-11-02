@@ -34,6 +34,7 @@ class ScreenPresenterTest {
         assertTrue(first.fullRedraw());
         assertEquals(writer.output().length(), first.emittedCharacters());
         assertEquals(0L, first.patchNanos());
+        assertEquals(0L, first.outputNanos());
         assertTrue(writer.output().contains("abc"));
         int flushesAfterFirstFrame = writer.flushCount();
         writer.clearOutput();
@@ -44,7 +45,14 @@ class ScreenPresenterTest {
         assertFalse(unchanged.fullRedraw());
         assertEquals(0, unchanged.emittedCharacters());
         assertEquals(0L, unchanged.patchNanos());
+        assertEquals(0L, unchanged.outputNanos());
         assertEquals("", writer.output());
+        assertEquals(flushesAfterFirstFrame, writer.flushCount());
+
+        ScreenPresenter.PresentResult measuredUnchanged = presenter.present(frame, true);
+        assertFalse(measuredUnchanged.updated());
+        assertEquals(0, measuredUnchanged.emittedCharacters());
+        assertEquals(0L, measuredUnchanged.outputNanos());
         assertEquals(flushesAfterFirstFrame, writer.flushCount());
     }
 
@@ -107,6 +115,7 @@ class ScreenPresenterTest {
         assertTrue(dimensionChanged.updated());
         assertTrue(dimensionChanged.fullRedraw());
         assertTrue(dimensionChanged.patchNanos() >= 0L);
+        assertTrue(dimensionChanged.outputNanos() >= 0L);
         assertTrue(writer.output().contains("new"));
     }
 

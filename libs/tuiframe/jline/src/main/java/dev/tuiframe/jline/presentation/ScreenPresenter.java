@@ -36,8 +36,8 @@ public final class ScreenPresenter {
     }
 
     /**
-     * Presents a frame and optionally measures only ANSI patch construction.
-     * Writer output and flushing are intentionally excluded from patch timing.
+     * Presents a frame and optionally measures ANSI patch construction and
+     * writer output/flush separately. Disabled measurements remain zero.
      */
     public synchronized PresentResult present(Frame frame, boolean measurePatchTime) {
         Objects.requireNonNull(frame, "frame");
@@ -59,7 +59,7 @@ public final class ScreenPresenter {
 
         if (patch.isEmpty() && !visibilityChanged && !positionCursor) {
             commit(frame, desiredPosition, desiredVisible);
-            return new PresentResult(false, fullRedraw, 0, patchNanos);
+            return new PresentResult(false, fullRedraw, 0, patchNanos, 0L);
         }
 
         String visibilitySequence = visibilityChanged
@@ -67,6 +67,7 @@ public final class ScreenPresenter {
             : "";
         String positionSequence = positionCursor ? moveTo(desiredPosition) : "";
         int emittedCharacters = patch.length() + visibilitySequence.length() + positionSequence.length();
+        long outputStart = measurePatchTime ? System.nanoTime() : 0L;
         try {
             if (!patch.isEmpty()) {
                 writer.print(patch);
@@ -87,8 +88,9 @@ public final class ScreenPresenter {
             throw failure;
         }
 
+        long outputNanos = measurePatchTime ? System.nanoTime() - outputStart : 0L;
         commit(frame, desiredPosition, desiredVisible);
-        return new PresentResult(true, fullRedraw, emittedCharacters, patchNanos);
+        return new PresentResult(true, fullRedraw, emittedCharacters, patchNanos, outputNanos);
     }
 
     /** Marks the physical screen and cursor as unknown for the next frame. */
@@ -114,10 +116,11 @@ public final class ScreenPresenter {
         boolean updated,
         boolean fullRedraw,
         int emittedCharacters,
-        long patchNanos
+        long patchNanos,
+        long outputNanos
     ) {
         public PresentResult {
-            if (emittedCharacters < 0 || patchNanos < 0L) {
+            if (emittedCharacters < 0 || patchNanos < 0L || outputNanos < 0L) {
                 throw new IllegalArgumentException("Presentation metrics must not be negative");
             }
         }

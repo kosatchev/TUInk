@@ -11,6 +11,7 @@ import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.screen.ScrollHint;
 import dev.tuiframe.style.CellColor;
 import dev.tuiframe.style.CellStyle;
+import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
 
 class AnsiDiffReferenceTerminalTest {
@@ -273,6 +274,41 @@ class AnsiDiffReferenceTerminalTest {
         assertTrue(downPatch.contains("\u001B[1T"));
         terminal.apply(downPatch);
         assertMatches(scrolledDown, terminal);
+    }
+
+    @Test
+    void matchedWideRowsDoNotRedrawForEmptyOrUnchangedSideRepairs() {
+        for (int left : new int[] {0, 5}) {
+            CellBuffer previous = widePreview(0, left);
+            CellBuffer current = widePreview(1, left);
+            Rect body = new Rect(left, 1, 79 - left, 10);
+            AnsiDiff diff = new AnsiDiff();
+            ReferenceTerminal terminal = terminalAt(previous, diff);
+            String ordinary = new AnsiDiff().diff(previous, current, TerminalCapabilities.DEFAULT, ScrollHint.none());
+            String patch = diff.diff(previous, current, TerminalCapabilities.DEFAULT, new ScrollHint.Vertical(body));
+
+            assertTrue(patch.contains("\u001B[1S"));
+            assertEquals(1, patch.codePoints().filter(codePoint -> codePoint == '中').count(),
+                "Only the entering row needs its text; empty/unchanged margins must not repaint wide rows");
+            assertTrue(patch.getBytes(StandardCharsets.UTF_8).length < ordinary.getBytes(StandardCharsets.UTF_8).length,
+                "A matched wide viewport with stable side cells must retain the scroll output benefit");
+            terminal.apply(patch);
+            assertMatches(current, terminal);
+        }
+    }
+
+    private static CellBuffer widePreview(int top, int left) {
+        CellBuffer buffer = new CellBuffer(12, 80);
+        putAscii(buffer, 0, "TITLE" + " ".repeat(75));
+        putAscii(buffer, 11, "STATUS" + " ".repeat(74));
+        for (int row = 1; row <= 10; row++) {
+            String prefix = "%04d ".formatted(top + row);
+            putAscii(buffer, row, "S".repeat(left) + prefix + "x".repeat(80 - left - prefix.length()));
+            buffer.set(row, left + 8, "中", CYAN);
+            buffer.set(row, left + 15, "😀", ACCENT);
+            buffer.set(row, 79, "│", CYAN);
+        }
+        return buffer;
     }
 
     private static ReferenceTerminal terminalAt(CellBuffer initial, AnsiDiff diff) {

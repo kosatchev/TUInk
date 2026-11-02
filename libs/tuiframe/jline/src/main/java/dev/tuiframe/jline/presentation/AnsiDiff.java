@@ -621,6 +621,11 @@ final class AnsiDiff {
         StringBuilder out,
         String activeStyleAnsi
     ) {
+        // A matching side needs no write, even when the row's text elsewhere contains wide cells.
+        int firstDiff = firstDifferentColumn(previous, current, previousRow, currentRow, fromCol, toCol);
+        if (firstDiff < 0) {
+            return new RowWrite(false, activeStyleAnsi);
+        }
         if (previous.rowHasWideCells(previousRow) || current.rowHasWideCells(currentRow)) {
             String resultingStyle = drawRowRange(
                 current,
@@ -632,10 +637,6 @@ final class AnsiDiff {
                 activeStyleAnsi
             );
             return new RowWrite(true, resultingStyle);
-        }
-        int firstDiff = firstDifferentColumn(previous, current, previousRow, currentRow, fromCol, toCol);
-        if (firstDiff < 0) {
-            return new RowWrite(false, activeStyleAnsi);
         }
         int lastDiff = lastDifferentColumn(previous, current, previousRow, currentRow, firstDiff, toCol);
         int c = firstDiff;

@@ -1,5 +1,6 @@
 package dev.tuiframe.text;
 
+import dev.tuiframe.memory.RenderMemoryBudget;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -17,7 +18,7 @@ import java.util.Objects;
  * width/word-wrap/tab-width combinations; indexing offscreen lines does not
  * retain their wrap-start lists.</p>
  */
-public final class TerminalTextLayoutCache {
+public final class TerminalTextLayoutCache implements AutoCloseable {
     private static final int DEFAULT_MAX_METRICS_LINES = 200_000;
     private static final int DEFAULT_MAX_METRICS_WEIGHT = 8_388_608;
     private static final int DEFAULT_MAX_WRAP_LAYOUTS = 4;
@@ -60,6 +61,13 @@ public final class TerminalTextLayoutCache {
 
     public record TextEdit(long sourceIdentity, int start, int removedLength, int insertedLength) {}
 
+    /** Bounds for an admitted metrics-only cache; wrapped layouts already belong to its consumer. */
+    public record MetricsLimits(int maxEntries, long maxBytes) {
+        public MetricsLimits {
+            if (maxEntries < 1 || maxBytes < 1) throw new IllegalArgumentException("Metrics limits must be positive");
+        }
+    }
+
     public record LineChange(int firstLine, int removedLineCount, int addedLineCount) {
         public LineChange {
             if (firstLine < 0 || removedLineCount < 0 || addedLineCount < 0) {
@@ -88,10 +96,136 @@ public final class TerminalTextLayoutCache {
     private long observedRevision;
     private long observedContentEpoch;
     private int observedLineCount;
+    private RenderMemoryBudget metricsBudget;
+    private MetricsLimits metricsLimits;
+    private LinkedHashMap<Integer, AdmittedMetrics> admittedMetrics;
+    private long admittedBytes;
+    private long admittedHits;
+    private long admittedMisses;
+    private long admittedBuilds;
+    private boolean closed;
 
     public TerminalTextLayoutCache(LineSource source) {
         this(source, false);
     }
+
+    /**
+     * Admitted metrics-only mode. Use acquireMetrics and close every returned handle.
+     * Raw metrics and wrapping APIs are unavailable because they return unowned references.
+     * Existing constructors preserve the editor's incremental and oversized-entry policies.
+     */
+    public TerminalTextLayoutCache(LineSource source, MetricsLimits limits, RenderMemoryBudget budget) {
+        this(source);
+        metricsLimits = Objects.requireNonNull(limits, "limits");
+        metricsBudget = Objects.requireNonNull(budget, "budget");
+        admittedMetrics = new LinkedHashMap<>(16, 0.75f, true);
+    }
+
+    /** One actual owner of a metric allocation. It never retains its cache or line source. */
+    public static final class MetricsHandle implements AutoCloseable {
+        private TerminalText.Metrics metrics;
+        private RenderMemoryBudget.Reservation reservation;
+        private MetricsHandle(TerminalText.Metrics metrics, RenderMemoryBudget.Reservation reservation) {
+            this.metrics = metrics; this.reservation = reservation;
+        }
+        public TerminalText.Metrics metrics() {
+            if (metrics == null) throw new IllegalStateException("Metrics handle is closed");
+            return metrics;
+        }
+        public MetricsHandle retain() {
+            MetricsHandle retained = new MetricsHandle(metrics(), null);
+            retained.reservation = reservation.retain();
+            return retained;
+        }
+        @Override public void close() {
+            if (reservation == null) return;
+            reservation.close(); reservation = null; metrics = null;
+        }
+    }
+
+    private record AdmittedMetrics(TerminalText.Metrics metrics, long lineIdentity, int tabWidth,
+                                   RenderMemoryBudget.Reservation reservation, long bytes) {
+        MetricsHandle borrow() {
+            MetricsHandle handle = new MetricsHandle(metrics, null);
+            handle.reservation = reservation.retain();
+            return handle;
+        }
+    }
+
+    /** Returns null on refusal before copying text or building metric arrays. */
+    public MetricsHandle acquireMetrics(int line, int tabWidth) {
+        if (closed) throw new IllegalStateException("Text layout cache is closed");
+        if (metricsBudget == null) throw new IllegalStateException("Metrics handles require an admitted cache");
+        long identity = source.cacheIdentity(), epoch = source.contentEpoch(), revision = source.revision();
+        if (!sourceObserved || observedCacheIdentity != identity || observedContentEpoch != epoch || observedRevision != revision)
+            clearAdmittedMetrics();
+        sourceObserved = true; observedCacheIdentity = identity; observedContentEpoch = epoch; observedRevision = revision;
+        int count = safeLineCount();
+        if (count == 0) return null;
+        int safeLine = Math.max(0, Math.min(count - 1, line));
+        int width = Math.max(1, tabWidth);
+        CharSequence text = requireLine(safeLine);
+        long lineIdentity = source.lineIdentity(safeLine);
+        AdmittedMetrics cached = admittedMetrics.get(safeLine);
+        if (cached != null && cached.tabWidth() == width && (lineIdentity != 0 && cached.lineIdentity() == lineIdentity
+            || text instanceof String && cached.metrics().sequence().equals(text))) {
+            admittedHits++; return cached.borrow();
+        }
+        if (cached != null) removeAdmitted(safeLine);
+        admittedMisses++;
+        long bytes = 1024L + 32L * text.length();
+        boolean cacheable = bytes <= metricsLimits.maxBytes();
+        if (cacheable) while (!admittedMetrics.isEmpty() && (admittedMetrics.size() >= metricsLimits.maxEntries()
+            || admittedBytes > metricsLimits.maxBytes() - bytes)) evictAdmitted();
+        RenderMemoryBudget.Reservation reservation = metricsBudget.tryReserve(bytes);
+        while (reservation == null && !admittedMetrics.isEmpty()) {
+            evictAdmitted(); reservation = metricsBudget.tryReserve(bytes);
+        }
+        if (reservation == null) return null;
+        try {
+            String owned;
+            if (text instanceof String string) owned = string;
+            else {
+                char[] copy = new char[text.length()];
+                for (int index = 0; index < copy.length; index++) copy[index] = text.charAt(index);
+                owned = new String(copy);
+            }
+            TerminalText.Metrics value = TerminalText.metrics(owned, width);
+            admittedBuilds++;
+            if (cacheable) {
+                var cacheReservation = reservation.retain();
+                AdmittedMetrics entry = null;
+                try {
+                    entry = new AdmittedMetrics(value, lineIdentity, width, cacheReservation, bytes);
+                    admittedMetrics.put(safeLine, entry); admittedBytes += bytes;
+                } catch (RuntimeException | Error failure) {
+                    if (entry != null) admittedMetrics.remove(safeLine, entry);
+                    cacheReservation.close(); throw failure;
+                }
+            }
+            return new MetricsHandle(value, reservation);
+        } catch (RuntimeException | Error failure) { reservation.close(); throw failure; }
+    }
+
+    public long admittedMetricsHits() { return admittedHits; }
+    public long admittedMetricsMisses() { return admittedMisses; }
+    /** Successful index builds in admitted mode, excluding requests, refusals and cache hits. */
+    public long admittedMetricsBuilds() { return admittedBuilds; }
+    public long admittedMetricsBytes() { return admittedBytes; }
+
+    /** Drops cache ownership; existing geometry/frame handles remain valid and charged. */
+    public void clear() { clearAdmittedMetrics(); clearAllCaches(); sourceObserved = false; }
+    @Override public void close() { clear(); closed = true; }
+    private void clearAdmittedMetrics() {
+        if (admittedMetrics == null) return;
+        for (var entry : admittedMetrics.values()) entry.reservation().close();
+        admittedMetrics.clear(); admittedBytes = 0;
+    }
+    private void removeAdmitted(int line) {
+        var removed = admittedMetrics.remove(line);
+        if (removed != null) { admittedBytes -= removed.bytes(); removed.reservation().close(); }
+    }
+    private void evictAdmitted() { removeAdmitted(admittedMetrics.keySet().iterator().next()); }
 
     /**
      * When requested by an editor, include a trailing empty row if the final
@@ -397,6 +531,8 @@ public final class TerminalTextLayoutCache {
     }
 
     private void synchronizeSource() {
+        if (closed) throw new IllegalStateException("Text layout cache is closed");
+        if (metricsBudget != null) throw new IllegalStateException("Admitted metrics cache requires owned handles");
         long cacheIdentity = source.cacheIdentity();
         long contentEpoch = source.contentEpoch();
         long revision = source.revision();

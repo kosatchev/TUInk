@@ -82,11 +82,47 @@ public final class TerminalText {
         return new GraphemeCursor(text == null ? "" : text);
     }
 
+    /** Allocation-bounded fallback: queries scan text and never construct metric arrays or retain a cache. */
+    public static Geometry streamingGeometry(CharSequence text, int tabWidth) {
+        return new StreamingGeometry(text == null ? "" : text, Math.max(1, tabWidth));
+    }
+
+    /** A validated zero-copy source range; materialization is deferred until explicitly requested. */
+    public static CharSequence slice(CharSequence text, int start, int end) {
+        Objects.checkFromToIndex(start, end, text.length());
+        return new TextRange(text, start, end);
+    }
+
     /**
      * Immutable grapheme boundaries and terminal-cell prefix columns for one
      * string and tab width.
      */
-    public static final class Metrics {
+    /** Read-only terminal geometry. A view shares its owner's index and requires that owner's lifetime. */
+    public interface Geometry {
+        String text();
+        CharSequence sequence();
+        int tabWidth();
+        int graphemeCount();
+        int start(int index);
+        int end(int index);
+        int width(int index);
+        boolean isTab(int index);
+        boolean isWhitespace(int index);
+        int visualColumnAtBoundary(int boundaryIndex);
+        int previousBoundary(int offset);
+        int nextBoundary(int offset);
+        int floorBoundary(int offset);
+        int ceilBoundary(int offset);
+        boolean isBoundary(int offset);
+        int visualColumnAt(int offset);
+        int visualWidth();
+        int offsetForVisualColumn(int column, Bias bias);
+
+        /** Boundary lookup is logarithmic; the view allocates no metric arrays or text copy. */
+        default Geometry view(int start, int end) { return new GeometryView(this, start, end); }
+    }
+
+    public static final class Metrics implements Geometry {
         private final CharSequence text;
         private final int tabWidth;
         private final boolean simpleAscii;
@@ -334,6 +370,158 @@ public final class TerminalText {
         private MetricIndex metricIndex() {
             return index != null ? index : MetricIndex.of(new MetricData(graphemeCount, simpleAscii,
                 boundaries, visualColumns, widths, whitespace, sparse, tabs, noWhitespace), tabWidth);
+        }
+    }
+
+    private static final class StreamingGeometry implements Geometry {
+        private final CharSequence text;
+        private final int tabWidth;
+        StreamingGeometry(CharSequence text, int tabWidth) { this.text = text; this.tabWidth = tabWidth; }
+        @Override public String text() { return text.toString(); }
+        @Override public CharSequence sequence() { return text; }
+        @Override public int tabWidth() { return tabWidth; }
+        @Override public int graphemeCount() {
+            int count = 0; var cursor = graphemeCursor(text); while (cursor.advance()) count++; return count;
+        }
+        private GraphemeCursor at(int index) {
+            if (index < 0) throw new IndexOutOfBoundsException(index);
+            var cursor = graphemeCursor(text);
+            for (int current = 0; cursor.advance(); current++) if (current == index) return cursor;
+            throw new IndexOutOfBoundsException(index);
+        }
+        @Override public int start(int index) { return at(index).start(); }
+        @Override public int end(int index) { return at(index).end(); }
+        @Override public int width(int index) { return at(index).width(); }
+        @Override public boolean isTab(int index) { return at(index).isTab(); }
+        @Override public boolean isWhitespace(int index) { return at(index).isWhitespace(); }
+        private int advance(GraphemeCursor cursor, int column) {
+            return cursor.isTab() ? tabWidth - column % tabWidth : Math.max(1, cursor.width());
+        }
+        @Override public int visualColumnAtBoundary(int boundary) {
+            int column = 0, index = 0; var cursor = graphemeCursor(text);
+            while (index < boundary && cursor.advance()) { column += advance(cursor, column); index++; }
+            return column;
+        }
+        @Override public int previousBoundary(int offset) {
+            int safe = Math.max(0, Math.min(text.length(), offset));
+            if (safe == 0) return 0;
+            var cursor = graphemeCursor(text);
+            while (cursor.advance()) if (cursor.end() >= safe) return cursor.start();
+            return text.length();
+        }
+        @Override public int nextBoundary(int offset) {
+            int safe = Math.max(0, Math.min(text.length(), offset)); var cursor = graphemeCursor(text);
+            while (cursor.advance()) if (cursor.end() > safe) return cursor.end();
+            return text.length();
+        }
+        @Override public int floorBoundary(int offset) {
+            int safe = Math.max(0, Math.min(text.length(), offset)), floor = 0; var cursor = graphemeCursor(text);
+            while (cursor.advance() && cursor.end() <= safe) floor = cursor.end();
+            return floor;
+        }
+        @Override public int ceilBoundary(int offset) {
+            int safe = Math.max(0, Math.min(text.length(), offset));
+            if (safe == 0) return 0;
+            var cursor = graphemeCursor(text);
+            while (cursor.advance()) if (cursor.end() >= safe) return cursor.end();
+            return text.length();
+        }
+        @Override public boolean isBoundary(int offset) {
+            if (offset < 0 || offset > text.length()) return false;
+            if (offset == 0) return true;
+            var cursor = graphemeCursor(text);
+            while (cursor.advance()) { if (cursor.end() == offset) return true; if (cursor.end() > offset) return false; }
+            return false;
+        }
+        @Override public int visualColumnAt(int offset) {
+            int safe = Math.max(0, Math.min(text.length(), offset)), column = 0; var cursor = graphemeCursor(text);
+            while (cursor.advance() && cursor.end() <= safe) column += advance(cursor, column);
+            return column;
+        }
+        @Override public int visualWidth() { return visualColumnAt(text.length()); }
+        @Override public int offsetForVisualColumn(int target, Bias bias) {
+            int safe = Math.max(0, target), column = 0; var cursor = graphemeCursor(text);
+            while (cursor.advance()) {
+                if (safe == column) return cursor.start();
+                int next = column + advance(cursor, column);
+                if (safe < next) return switch (bias == null ? Bias.NEAREST : bias) {
+                    case FLOOR -> cursor.start(); case CEIL -> cursor.end();
+                    case NEAREST -> safe - column <= next - safe ? cursor.start() : cursor.end();
+                };
+                if (safe == next) return cursor.end();
+                column = next;
+            }
+            return text.length();
+        }
+    }
+
+    private static final class GeometryView implements Geometry {
+        private final Geometry source;
+        private final int start;
+        private final int end;
+        private final int first;
+        private final int count;
+        private final int column;
+        GeometryView(Geometry source, int start, int end) {
+            if (start < 0 || end < start || end > source.sequence().length()
+                || !source.isBoundary(start) || !source.isBoundary(end))
+                throw new IllegalArgumentException("Geometry view must use grapheme boundaries");
+            this.source = source; this.start = start; this.end = end;
+            first = boundaryIndex(source, start);
+            count = boundaryIndex(source, end) - first;
+            column = source.visualColumnAtBoundary(first);
+        }
+        @Override public String text() { return sequence().toString(); }
+        @Override public CharSequence sequence() { return new TextRange(source.sequence(), start, end); }
+        @Override public int tabWidth() { return source.tabWidth(); }
+        @Override public int graphemeCount() { return count; }
+        private int checked(int index) {
+            if (index < 0 || index >= count) throw new IndexOutOfBoundsException(index);
+            return first + index;
+        }
+        @Override public int start(int index) { return source.start(checked(index)) - start; }
+        @Override public int end(int index) { return source.end(checked(index)) - start; }
+        @Override public int width(int index) { return source.width(checked(index)); }
+        @Override public boolean isTab(int index) { return source.isTab(checked(index)); }
+        @Override public boolean isWhitespace(int index) { return source.isWhitespace(checked(index)); }
+        @Override public int visualColumnAtBoundary(int index) {
+            return source.visualColumnAtBoundary(first + Math.max(0, Math.min(count, index))) - column;
+        }
+        private int offset(int offset) { return start + Math.max(0, Math.min(end - start, offset)); }
+        private int local(int offset) { return Math.max(0, Math.min(end - start, offset - start)); }
+        @Override public int previousBoundary(int offset) { return local(source.previousBoundary(offset(offset))); }
+        @Override public int nextBoundary(int offset) { return local(source.nextBoundary(offset(offset))); }
+        @Override public int floorBoundary(int offset) { return local(source.floorBoundary(offset(offset))); }
+        @Override public int ceilBoundary(int offset) { return local(source.ceilBoundary(offset(offset))); }
+        @Override public boolean isBoundary(int offset) { return offset >= 0 && offset <= end - start && source.isBoundary(start + offset); }
+        @Override public int visualColumnAt(int offset) { return source.visualColumnAt(offset(offset)) - column; }
+        @Override public int visualWidth() { return source.visualColumnAtBoundary(first + count) - column; }
+        @Override public int offsetForVisualColumn(int target, Bias bias) {
+            int safe = Math.max(0, Math.min(visualWidth(), target));
+            return local(source.offsetForVisualColumn(column + safe, bias));
+        }
+    }
+
+    private static int boundaryIndex(Geometry source, int offset) {
+        int low = 0, high = source.graphemeCount();
+        while (low < high) {
+            int middle = (low + high) >>> 1;
+            if (source.start(middle) < offset) low = middle + 1; else high = middle;
+        }
+        return low;
+    }
+
+    private record TextRange(CharSequence source, int start, int end) implements CharSequence {
+        @Override public int length() { return end - start; }
+        @Override public char charAt(int index) { Objects.checkIndex(index, length()); return source.charAt(start + index); }
+        @Override public CharSequence subSequence(int from, int to) {
+            Objects.checkFromToIndex(from, to, length()); return new TextRange(source, start + from, start + to);
+        }
+        @Override public String toString() {
+            if (source instanceof String string) return string.substring(start, end);
+            char[] chars = new char[length()];
+            for (int index = 0; index < chars.length; index++) chars[index] = source.charAt(start + index);
+            return new String(chars);
         }
     }
 

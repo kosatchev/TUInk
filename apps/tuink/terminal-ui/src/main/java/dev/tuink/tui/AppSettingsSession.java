@@ -8,21 +8,45 @@ import java.util.Objects;
 final class AppSettingsSession {
     private final AppSettings saved;
     private final AppSettings initial;
+    private final String saveUnavailableReason;
+    private AppSettings observedTemporarySettings;
     private boolean readingModeChanged;
     private boolean mouseModeChanged;
     private boolean themeChanged;
 
     AppSettingsSession(AppSettings saved, TuiCliOptions cli) {
+        this(saved, cli, null);
+    }
+
+    AppSettingsSession(AppSettings saved, TuiCliOptions cli, String saveUnavailableReason) {
         this.saved = Objects.requireNonNull(saved, "saved");
+        this.saveUnavailableReason = saveUnavailableReason;
         Objects.requireNonNull(cli, "cli");
         initial = withOverrides(saved,
             cli.readModeOverride() == null ? saved.readingMode() : cli.readModeOverride(),
             cli.mouseEnabledOverride() == null ? saved.mouseMode() : cli.mouseEnabledOverride(),
             cli.themeOverride() == null ? saved.theme() : cli.themeOverride());
+        observedTemporarySettings = canSavePreferences() ? null : initial;
     }
 
     AppSettings initialSettings() {
         return initial;
+    }
+
+    boolean canSavePreferences() { return saveUnavailableReason == null; }
+
+    String saveUnavailableWarning() {
+        if (canSavePreferences()) return null;
+        return "Settings changes apply only to this session. " + saveUnavailableReason
+            + ". Repair the settings file and restart.";
+    }
+
+    /** Only blocked sessions observe runtime changes; launch overrides are already in the baseline. */
+    boolean temporaryPreferencesChanged(AppSettings runtime) {
+        if (canSavePreferences()) return false;
+        boolean changed = !Objects.requireNonNull(runtime, "runtime").equals(observedTemporarySettings);
+        observedTemporarySettings = runtime;
+        return changed;
     }
 
     void readingModeChanged() {
@@ -50,7 +74,8 @@ final class AppSettingsSession {
             readingMode, base.confirmOnClose(), mouseMode, base.highlightActiveGutter(),
             base.smartHomeEnd(), base.autoIndent(), base.autoPairs(), base.autoList(),
             base.visibleWhitespace(), base.syntaxHighlighting(), base.rainbowBrackets(),
-            base.autoSelectionHighlight(), base.gutterDiffMode(), base.tabWidth(),
+            base.autoSelectionHighlight(),
+            base.gutterDiffMode(), base.tabWidth(),
             base.tabInsertMode(), theme);
     }
 }

@@ -135,6 +135,10 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         initial.openFileTree = resources.openFileTree();
         setModal(resources.initialModalState());
         host.bindTabUi(this::focusUi);
+        if (!settingsSession.canSavePreferences() && notice().message == null
+                && !resources.notification().isError()) {
+            notice().persistentWarning(settingsSession.saveUnavailableWarning());
+        }
     }
 
     record Resources(
@@ -2709,6 +2713,11 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     }
 
     private void reportTemporaryPreferencesChange() {
+        if (settingsSession.canSavePreferences()) return;
+        if (settingsSession.temporaryPreferencesChanged(uiSessionState.settingsSnapshot(host.theme))
+                && !notice().isError()) {
+            notice().persistentWarning(settingsSession.saveUnavailableWarning());
+        }
     }
 
     private void requestWindowClose(UiRecipient recipient) {

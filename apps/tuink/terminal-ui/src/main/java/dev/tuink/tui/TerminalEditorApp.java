@@ -1,9 +1,5 @@
 package dev.tuink.tui;
 
-import dev.tuink.editor.document.PresentationGroupId;
-
-import dev.tuink.editor.document.PresentationId;
-
 import dev.tuink.storage.jvm.JvmDocumentStorage;
 import dev.tuink.editor.session.recovery.RecoveryCoordinator;
 import dev.tuink.editor.session.recovery.RecoveryParticipant;
@@ -329,14 +325,16 @@ public class TerminalEditorApp {
 
         AppSettings loadedSettings = AppSettings.defaults();
         AppSettingsStore.LoadedSettings settingsSnapshot = null;
+        String settingsLoadFailure = null;
         try {
             settingsSnapshot = AppSettingsStore.loadSnapshot();
             loadedSettings = settingsSnapshot.settings();
         } catch (IOException e) {
+            settingsLoadFailure = Objects.toString(e.getMessage(), e.getClass().getSimpleName());
             TerminalDiagnostics.error("Warning: failed to load settings: " + e.getMessage());
         }
 
-        AppSettingsSession settingsSession = new AppSettingsSession(loadedSettings, cli);
+        AppSettingsSession settingsSession = new AppSettingsSession(loadedSettings, cli, settingsLoadFailure);
         AppSettings initialSettings = settingsSession.initialSettings();
         applyTheme(initialSettings.theme());
         SessionContext sessionContext = new SessionContext(List.of(newEditorTab()), 0);
@@ -345,6 +343,9 @@ public class TerminalEditorApp {
         EditorView editorView = new EditorView();
 
         NotificationState notification = new NotificationState();
+        if (!settingsSession.canSavePreferences()) {
+            notification.persistentWarning(settingsSession.saveUnavailableWarning());
+        }
         UiModalState modalState = UiModalState.none();
         RecoveryAutosaveManager recoveryAutosave = new RecoveryAutosaveManager(recoveryStore);
         List<RecoveryStore.PendingSnapshot> startupRecoveryEntries = new ArrayList<>();

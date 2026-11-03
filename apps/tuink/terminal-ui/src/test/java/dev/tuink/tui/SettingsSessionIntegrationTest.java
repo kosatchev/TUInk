@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import dev.tuink.tui.command.TuinkCommand;
 import dev.tuink.tui.flow.AppSettings;
 import dev.tuink.tui.style.UiStyles;
+import dev.tuiframe.input.KeyStroke;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -15,6 +16,59 @@ import org.junit.jupiter.api.io.TempDir;
 class SettingsSessionIntegrationTest {
     @TempDir
     Path directory;
+
+    @Test
+    void blockedPreferencesKeepTheirCauseAndWarnAfterSourceOrPreviewChanges() throws Exception {
+        String reason = "Unsupported settings file profile: unsupported format marker";
+        for (boolean preview : List.of(false)) {
+            AppSettingsSession session = new AppSettingsSession(AppSettings.defaults(),
+                TuiCliOptions.parse(new String[0]), reason);
+            try (EditorWindowFixture window = new EditorWindowFixture(directory.resolve("blocked-" + preview),
+                    "notes.md", List.of("keep"), session)) {
+                assertFalse(session.canSavePreferences());
+                assertTemporaryWarning(window, reason);
+                window.notification.info("Unrelated operation completed");
+                boolean before = window.ui.visibleWhitespaceSetting;
+
+                window.command(TuinkCommand.VIEW_TOGGLE_WHITESPACE);
+
+                assertEquals(!before, window.ui.visibleWhitespaceSetting);
+                assertTemporaryWarning(window, reason);
+                window.notification.info("A newer operation completed");
+                window.command(TuinkCommand.MENU_SETTINGS);
+                assertEquals("A newer operation completed", window.notification.message,
+                    "Opening a menu does not change preferences or republish the warning");
+            }
+        }
+    }
+
+    @Test
+    void blockedSessionTracksExplicitChoicesRelativeToItsCliOverrides() throws Exception {
+        String reason = "Settings file cannot be loaded";
+        AppSettingsSession session = new AppSettingsSession(AppSettings.defaults(),
+            TuiCliOptions.parse(new String[]{"--read", "--no-mouse", "--theme=light"}), reason);
+        try (EditorWindowFixture window = new EditorWindowFixture(directory, List.of("keep"), session)) {
+            assertTrue(window.ui.readingModeSetting);
+            assertFalse(window.ui.mouseModeSetting);
+            assertEquals(UiStyles.Theme.LIGHT, window.host.theme);
+            window.command(TuinkCommand.SETTINGS_TOGGLE_READING_MODE);
+            assertFalse(window.ui.readingModeSetting);
+            assertTemporaryWarning(window, reason);
+            window.command(TuinkCommand.SETTINGS_TOGGLE_MOUSE);
+            assertTrue(window.ui.mouseModeSetting);
+            assertTemporaryWarning(window, reason);
+            window.command(TuinkCommand.VIEW_CYCLE_THEME);
+            assertFalse(window.host.theme == UiStyles.Theme.LIGHT);
+            assertTemporaryWarning(window, reason);
+        }
+    }
+
+    private static void assertTemporaryWarning(EditorWindowFixture window, String reason) {
+        assertTrue(window.notification.message.startsWith("Settings changes apply only to this session."));
+        assertTrue(window.notification.message.contains(reason));
+        assertEquals(window.host.styles.notifyWarning(), window.notification.style());
+        assertEquals(-1L, window.notification.nanosUntilExpire(System.nanoTime()));
+    }
 
     @Test
     void launchOverridesChangeTheSessionWithoutChangingSavedPreferences() throws Exception {

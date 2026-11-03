@@ -17,7 +17,7 @@ public final class TuiSessionTestSupport {
         TopMenuController menu, Consumer<Boolean> mouse, int rows, int columns, EditorViewNavigation navigation) {
         TuiDocumentSession session = engine == null ? null : TuiDocumentSession.adopt(
             new TabSession(engine.model(), state, engine.textLayout(), engine));
-        return new InputActionDispatcher.DispatchContext(engine, state, menu, mouse, rows, columns, navigation, session);
+        return new InputActionDispatcher.DispatchContext(engine, state, menu, mouse, rows, columns, navigation, session, TestSurfaces.source(false));
     }
 
     public static EditorViewNavigation navigation(EditorEngine engine) {

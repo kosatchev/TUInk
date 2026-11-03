@@ -105,7 +105,7 @@ class SaveAsWorkspaceIntegrationTest {
             window.command(TuinkCommand.TAB_NEW);
             window.event(new TextInput("source draft"));
             SaveWorkflowIntegrationTest.submitFilename(window, link);
-            assertTrue(window.screenRow(window.height - 2).contains("Overwrite"));
+            assertTrue(window.promptText().contains("Overwrite"));
             Files.delete(link);
             Files.createSymbolicLink(link, window.document.getFileName());
 
@@ -184,7 +184,7 @@ class SaveAsWorkspaceIntegrationTest {
             assertTrue(window.active().state().isDirty());
             SaveWorkflowIntegrationTest.submitFilename(window, other);
 
-            assertTrue(window.screenRow(window.height - 2).contains("Overwrite"));
+            assertTrue(window.promptText().contains("Overwrite"));
             assertEquals("other original", Files.readString(other));
             window.event(new TextInput("y"));
 

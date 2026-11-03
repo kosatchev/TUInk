@@ -153,7 +153,8 @@ class SaveEncodingErrorIntegrationTest {
         try (EditorWindowFixture window = legacyWindow()) {
             window.event(new TextInput("😀"));
             window.event(ctrl(KeyStroke.Key.S));
-            window.resize(8, 20);
+            window.resize(5, 20);
+            assertTrue(window.promptText().contains("Enlarge"));
             window.event(new TextInput("y"));
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             assertEquals(LEGACY_CHARSET, window.active().state().getFileEncoding());

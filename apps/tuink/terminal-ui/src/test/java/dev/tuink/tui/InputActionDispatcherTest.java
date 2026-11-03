@@ -81,7 +81,7 @@ class InputActionDispatcherTest {
         var session = TuiDocumentSession.adopt(tab);
         var navigation = new EditorViewNavigation(tab.engine(), session::navigate);
         var context = new InputActionDispatcher.DispatchContext(tab.engine(), tab.state(), null,
-            ignored -> {}, 3, 20, navigation, session);
+            ignored -> {}, 3, 20, navigation, session, TestSurfaces.source(false));
 
         var result = InputActionDispatcher.dispatch(TuinkCommand.CURSOR_SELECT_DOWN, new UiSessionState(), context);
 
@@ -221,14 +221,11 @@ class InputActionDispatcherTest {
     void unavailableMouseModePreservesPreferenceAndReportsTheFallback() {
         UiSessionState ui = new UiSessionState();
         ui.mouseModeSetting = true;
-        ui.mouseModeAvailable = false;
         AtomicBoolean controllerCalled = new AtomicBoolean();
 
-        InputActionDispatcher.DispatchResult result = InputActionDispatcher.dispatch(
-            TuinkCommand.SETTINGS_TOGGLE_MOUSE,
-            ui,
-            context(ignored -> controllerCalled.set(true))
-        );
+        InputActionDispatcher.DispatchResult result = InputActionDispatcher.dispatchUi(
+            TuinkCommand.SETTINGS_TOGGLE_MOUSE, ui, TestSurfaces.source(ui).withRuntime(false, true), null,
+            ignored -> controllerCalled.set(true), () -> {});
 
         assertTrue(result.handled());
         assertEquals("Mouse mode is unavailable in this terminal", result.statusMessage());

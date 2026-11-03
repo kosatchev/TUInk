@@ -102,6 +102,24 @@ class SearchInputRouterTest {
     }
 
     @Test
+    void compactVerticalNavigationUsesPaintedRowsAndNeverMovesDownOnUp() {
+        Fixture fixture = fixture(new TextField(), new TextField(), 30, viewport(12, 30));
+        fixture.focus.focus(fixture.placement.focusScope(), SearchFocus.ALL);
+        int allRow = fixture.placement.targetBounds(SearchFocus.ALL).y();
+        assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.ARROW_UP)));
+        SearchFocus above = fixture.focus.focused().orElseThrow();
+        assertEquals(SearchFocus.CASE, above);
+        assertTrue(fixture.placement.targetBounds(above).y() < allRow);
+        assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.ARROW_DOWN)));
+        assertEquals(SearchFocus.ALL, fixture.focus.focused().orElseThrow());
+        assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.ARROW_DOWN)));
+        assertEquals(SearchFocus.NEXT_BUTTON, fixture.focus.focused().orElseThrow());
+        fixture.focus.focus(fixture.placement.focusScope(), SearchFocus.ALL_BUTTON);
+        assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.ARROW_DOWN)));
+        assertEquals(SearchFocus.ALL_BUTTON, fixture.focus.focused().orElseThrow(), "last painted row does not wrap upwards");
+    }
+
+    @Test
     void verticalArrowsAreCapturedWhenTheSearchBarIsEntirelyClipped() {
         TextField query = new TextField();
         query.set("keep");
@@ -473,7 +491,7 @@ class SearchInputRouterTest {
 
         Rect partialCase = fixture.placement.targetBounds(SearchFocus.CASE);
         assertFalse(fixture.placement.focusScope().target(SearchFocus.CASE).orElseThrow().interactive());
-        assertIgnored(fixture.route(pointer(
+        assertCaptured(fixture.route(pointer(
             partialCase.y(),
             partialCase.x(),
             PointerEvent.Kind.PRESS,

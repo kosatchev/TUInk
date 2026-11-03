@@ -19,6 +19,20 @@ class NotificationIntegrationTest {
     @TempDir Path directory;
 
     @Test
+    void aPersistentWarningSurvivesUserAcknowledgementAndHasNoExpiry() {
+        var host = new TerminalEditorApp();
+        var warning = host.new NotificationState();
+        warning.persistentWarning("Settings changes apply only to this session");
+        warning.clearErrorOnUserAction();
+        assertEquals("Settings changes apply only to this session", warning.message);
+        assertEquals(host.styles.notifyWarning(), warning.style());
+        assertTrue(warning.requiresAttention());
+        assertFalse(warning.isError());
+        assertEquals(-1L, warning.nanosUntilExpire(Long.MAX_VALUE));
+        assertFalse(warning.expireIfNeeded());
+    }
+
+    @Test
     void savingAFilenameContainingNewlineDisplaysItsExactSafeIdentity() throws Exception {
         try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("original"))) {
             Path file = Files.writeString(directory.resolve("first\nsecond.txt"), "contents");

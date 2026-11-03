@@ -80,6 +80,8 @@ final class TopMenuView {
     private static final String MENU_SUFFIX = " | ";
     private static final String READING_BADGE = " READ ";
 
+    private final CommandRouter commandRouter;
+    private final ActiveSurface surface;
     private final List<MenuBar.Menu<CommandInvocation>> menus;
     private final MenuBar<CommandInvocation> widget;
 
@@ -89,7 +91,8 @@ final class TopMenuView {
         int activeTabIndex,
         String themeLabel,
         CommandRouter commandRouter,
-        MenuBar.State state
+        MenuBar.State state,
+        ActiveSurface surface
     ) {
         Objects.requireNonNull(ui, "ui");
         List<TabItem> tabSnapshot = List.copyOf(Objects.requireNonNull(tabs, "tabs"));
@@ -104,16 +107,18 @@ final class TopMenuView {
             ? DEFAULT_THEME_LABEL
             : themeLabel;
         CommandRouter requiredRouter = Objects.requireNonNull(commandRouter, "commandRouter");
+        this.commandRouter = requiredRouter;
+        this.surface = Objects.requireNonNull(surface);
         MenuBar.State requiredState = Objects.requireNonNull(state, "state");
         int openMenuIndex = requiredState.isOpen() ? requiredState.openMenuIndex() : -1;
         this.menus = List.of(
-            menu(" File ", 2, openMenuIndex == TopMenuController.FILE_INDEX ? fileEntries() : List.of()),
-            menu(" Edit ", 1, openMenuIndex == TopMenuController.EDIT_INDEX ? editEntries() : List.of()),
+            menu(" File ", 2, openMenuIndex == TopMenuController.FILE_INDEX ? fileEntries(surface) : List.of()),
+            menu(" Edit ", 1, openMenuIndex == TopMenuController.EDIT_INDEX ? editEntries(surface) : List.of()),
             menu(
                 " View ",
                 1,
                 openMenuIndex == TopMenuController.VIEW_INDEX
-                    ? viewEntries(ui, normalizedTheme)
+                    ? viewEntries(ui, surface, normalizedTheme)
                     : List.of()
             ),
             menu(
@@ -126,22 +131,16 @@ final class TopMenuView {
             menu(
                 " Settings ",
                 1,
-                openMenuIndex == TopMenuController.SETTINGS_INDEX ? settingsEntries(ui) : List.of()
+                openMenuIndex == TopMenuController.SETTINGS_INDEX ? settingsEntries(ui, surface) : List.of()
             ),
             menu(" Help ", 1, openMenuIndex == TopMenuController.HELP_INDEX ? helpEntries() : List.of())
         );
         this.widget = new MenuBar<>(menus, requiredState);
     }
 
-    static TopMenuView build(
-        UiSessionState ui,
-        List<TabItem> tabs,
-        int activeTabIndex,
-        String themeLabel,
-        CommandRouter commandRouter,
-        MenuBar.State state
-    ) {
-        return new TopMenuView(ui, tabs, activeTabIndex, themeLabel, commandRouter, state);
+    static TopMenuView build(UiSessionState ui, List<TabItem> tabs, int activeTabIndex,
+        String themeLabel, CommandRouter commandRouter, MenuBar.State state, ActiveSurface surface) {
+        return new TopMenuView(ui, tabs, activeTabIndex, themeLabel, commandRouter, state, surface);
     }
 
     Placement place(Rect fullLayerBounds) {
@@ -211,7 +210,10 @@ final class TopMenuView {
         }
     }
 
-    record TabItem(Path file, boolean dirty, boolean hasMatch, boolean searching, boolean awaitingAnswer) {
+    record TabItem(Path file, boolean dirty, boolean hasMatch, boolean searching, boolean awaitingAnswer, String qualifier) {
+        TabItem(Path file, boolean dirty, boolean hasMatch, boolean searching, boolean awaitingAnswer) {
+            this(file, dirty, hasMatch, searching, awaitingAnswer, "");
+        }
         TabItem(Path file, boolean dirty, boolean hasMatch) {
             this(file, dirty, hasMatch, false, false);
         }
@@ -303,7 +305,7 @@ final class TopMenuView {
         }
     }
 
-    private static MenuBar.Menu<CommandInvocation> menu(
+    private MenuBar.Menu<CommandInvocation> menu(
         String label,
         int mnemonicGraphemeIndex,
         List<EntrySpec> specs
@@ -315,40 +317,44 @@ final class TopMenuView {
         );
     }
 
-    private static List<EntrySpec> fileEntries() {
+    private static List<EntrySpec> fileEntries(ActiveSurface surface) {
         return List.of(
             item(TAB_NEW, "New"),
             item(DOCUMENT_OPEN, "Open..."),
             item(DOCUMENT_SAVE, "Save"),
             item(DOCUMENT_SAVE_AS, "Save As..."),
-            item(TuinkCommand.DOCUMENT_FORMAT, "Format..."),
-            item(TuinkCommand.DOCUMENT_REOPEN_ENCODING, "Reopen with encoding..."),
+            item(TuinkCommand.DOCUMENT_FORMAT, surface.preview() ? "Format (source tab)" : "Format...", !surface.preview()),
+            item(TuinkCommand.DOCUMENT_REOPEN_ENCODING, surface.preview() ? "Reopen with encoding (source tab)" : "Reopen with encoding...", !surface.preview()),
             item(TuinkCommand.DOCUMENT_OPEN_ENCODING, "Open with encoding..."),
+            item(TuinkCommand.DOCUMENT_RECOVER_DRAFTS, "Recover drafts..."),
             item(APP_QUIT, "Quit")
         );
     }
 
-    private static List<EntrySpec> editEntries() {
+    private static List<EntrySpec> editEntries(ActiveSurface surface) {
+        boolean writable = surface.editableField() || surface.documentWritable();
+        boolean documentWritable = surface.documentWritable();
+        String reason = writable ? "" : " (read only)";
         return List.of(
-            item(EDIT_UNDO, "Undo"),
-            item(EDIT_REDO, "Redo"),
-            item(EDIT_CUT, "Cut"),
+            item(EDIT_UNDO, documentWritable ? "Undo" : "Undo (unavailable)", documentWritable),
+            item(EDIT_REDO, documentWritable ? "Redo" : "Redo (unavailable)", documentWritable),
+            item(EDIT_CUT, "Cut" + reason, writable),
             item(EDIT_COPY, "Copy"),
-            item(EDIT_PASTE, "Paste"),
-            item(EDIT_TOGGLE_LINE_COMMENT, "Toggle Line Comment"),
+            item(EDIT_PASTE, "Paste" + reason, writable),
+            item(EDIT_TOGGLE_LINE_COMMENT, documentWritable ? "Toggle Line Comment" : "Toggle Line Comment (unavailable)", documentWritable),
             item(EDIT_SELECT_ALL, "Select All"),
             item(SEARCH_OPEN, "Find")
         );
     }
 
-    private static List<EntrySpec> viewEntries(UiSessionState ui, String themeLabel) {
+    private static List<EntrySpec> viewEntries(UiSessionState ui, ActiveSurface surface, String themeLabel) {
         boolean wrapLines = ui.wrapLinesSetting;
         String wrapWords = checked(ui.wrapWordsSetting) + " Wrap by words";
         if (!wrapLines) {
             wrapWords += " (disabled)";
         }
         String syntaxLabel = checked(ui.syntaxHighlightingSetting) + " Syntax highlighting";
-        if (!ui.syntaxHighlightingAvailable) {
+        if (!surface.syntaxAvailable()) {
             syntaxLabel += " (unavailable in " + themeLabel + ")";
         }
         GutterDiffMode gutterDiff = ui.gutterDiffModeSetting == null
@@ -365,7 +371,7 @@ final class TopMenuView {
             ),
             item(VIEW_TOGGLE_WHITESPACE, checked(ui.visibleWhitespaceSetting) + " Visible tabs/spaces"),
             separator(),
-            item(VIEW_TOGGLE_SYNTAX, syntaxLabel, ui.syntaxHighlightingAvailable),
+            item(VIEW_TOGGLE_SYNTAX, syntaxLabel, surface.syntaxAvailable()),
             item(VIEW_TOGGLE_RAINBOW_BRACKETS, checked(ui.rainbowBracketsSetting) + " Rainbow brackets"),
             item(
                 VIEW_TOGGLE_SELECTION_HIGHLIGHT,
@@ -393,7 +399,7 @@ final class TopMenuView {
             TabItem tab = Objects.requireNonNull(tabs.get(index), "tab");
             String marker = index == activeTabIndex ? "> " : "   ";
             String title = TabBarView.formatTabTitle(tab.file(), tab.dirty(), tab.hasMatch(),
-                tab.searching(), tab.awaitingAnswer());
+                tab.searching(), tab.awaitingAnswer(), tab.qualifier());
             entries.add(new EntrySpec(
                 commandRouter.tabActivationInvocation(index),
                 marker + title,
@@ -404,7 +410,7 @@ final class TopMenuView {
         return List.copyOf(entries);
     }
 
-    private static List<EntrySpec> settingsEntries(UiSessionState ui) {
+    private static List<EntrySpec> settingsEntries(UiSessionState ui, ActiveSurface surface) {
         TabInsertMode insertMode = ui.tabInsertModeSetting == null
             ? TabInsertMode.AUTO
             : ui.tabInsertModeSetting;
@@ -412,7 +418,7 @@ final class TopMenuView {
             item(SETTINGS_TOGGLE_READING_MODE, checked(ui.readingModeSetting) + " Reading mode"),
             item(
                 SETTINGS_TOGGLE_MOUSE,
-                checked(ui.mouseModeSetting && ui.mouseModeAvailable) + " Mouse mode"
+                checked(ui.mouseModeSetting && surface.mouseAvailable()) + " Mouse mode"
             ),
             item(
                 SETTINGS_TOGGLE_CONFIRM_ON_CLOSE,
@@ -454,7 +460,7 @@ final class TopMenuView {
         return checked ? "[x]" : "[ ]";
     }
 
-    private static List<MenuBar.Entry<CommandInvocation>> prepareEntries(List<EntrySpec> specs) {
+    private List<MenuBar.Entry<CommandInvocation>> prepareEntries(List<EntrySpec> specs) {
         ArrayList<MenuBar.Entry<CommandInvocation>> result = new ArrayList<>(specs.size());
         Set<Integer> usedMnemonics = new HashSet<>();
         for (EntrySpec spec : specs) {
@@ -462,11 +468,12 @@ final class TopMenuView {
                 result.add(new MenuBar.Separator<>());
                 continue;
             }
-            int mnemonic = spec.enabled()
+            boolean enabled = spec.enabled() && TuinkCommand.fromId(spec.value().id()).map(surface::allows).orElse(true);
+            int mnemonic = enabled
                 ? mnemonicGraphemeIndex(spec.label(), usedMnemonics)
                 : -1;
-            result.add(new MenuBar.Item<>(spec.value(), spec.label(), mnemonic, spec.enabled(),
-                PathPresentation.LABEL_POLICY));
+            result.add(new MenuBar.Item<>(spec.value(), spec.label(), mnemonic, enabled,
+                PathPresentation.LABEL_POLICY, commandRouter.shortcutFor(spec.value())));
         }
         return List.copyOf(result);
     }

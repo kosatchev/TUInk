@@ -24,14 +24,15 @@ class NarrowConfirmationIntegrationTest {
     Path directory;
 
     @Test
-    void narrowQuitBlocksHiddenSaveAndDiscardAndAllowsCtrlQToCancel() throws Exception {
+    void narrowQuitBlocksHiddenSaveAndBothDiscardShortcutsAndAllowsEscapeToCancel() throws Exception {
         try (EditorWindowFixture window = window()) {
             window.event(new TextInput("X"));
-            window.resize(24, 12);
+            window.resize(24, 5);
             window.command(TuinkCommand.APP_QUIT);
 
-            assertEquals("Enlarge; Esc", prompt(window));
+            assertEquals("Enlar", prompt(window));
             window.event(new TextInput("y"));
+            window.event(new TextInput("n"));
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             window.event(new TextInput(" "));
             window.pointer(PointerEvent.Kind.PRESS, window.height - 2, 0);
@@ -39,11 +40,14 @@ class NarrowConfirmationIntegrationTest {
             assertTrue(window.controller.running());
             assertEquals("alpha", Files.readString(window.document));
             assertEquals("Xalpha", window.active().tabSession().model().getLine(0));
-            assertEquals("Enlarge; Esc", prompt(window));
+            assertEquals("Enlar", prompt(window));
 
             window.event(ctrlQ());
-            assertFalse(prompt(window).contains("Enlarge"));
+            assertEquals("Enlar", prompt(window));
+            assertTrue(window.controller.running());
             assertTrue(window.active().state().isDirty());
+            window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
+            assertTrue(window.promptText().isEmpty());
 
             window.resize(24, 80);
             window.command(TuinkCommand.APP_QUIT);
@@ -59,18 +63,19 @@ class NarrowConfirmationIntegrationTest {
         try (EditorWindowFixture window = window()) {
             window.command(TuinkCommand.TAB_NEW);
             window.event(new TextInput("UNSAVED"));
-            window.resize(24, 12);
+            window.resize(24, 5);
             window.command(TuinkCommand.TAB_CLOSE);
 
             window.event(new TextInput("Y"));
+            window.event(new TextInput("N"));
             window.event(KeyStroke.of(KeyStroke.Key.TAB));
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
 
             assertEquals(2, window.tabs.size());
             assertEquals("UNSAVED", window.active().tabSession().model().getLine(0));
-            assertEquals("Enlarge; Esc", prompt(window));
+            assertEquals("Enlar", prompt(window));
             window.event(ctrlQ());
-            assertFalse(prompt(window).contains("Enlarge"));
+            assertTrue(window.promptText().isEmpty());
             assertEquals(2, window.tabs.size());
 
             window.resize(24, 80);
@@ -105,12 +110,12 @@ class NarrowConfirmationIntegrationTest {
             requestOverwrite(window, victim);
 
             assertTrue(prompt(window).contains("victim.txt"));
-            assertTrue(prompt(window).contains("(y/N)"));
-            window.resize(24, 12);
+            assertTrue(prompt(window).contains("Ctrl+S"));
+            window.resize(24, 5);
             window.event(new TextInput("y"));
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             assertEquals("ORIGINAL", Files.readString(victim));
-            assertEquals("Enlarge; Esc", prompt(window));
+            assertEquals("Enlar", prompt(window));
 
             window.resize(24, 80);
             assertTrue(prompt(window).contains("victim.txt"));
@@ -130,7 +135,7 @@ class NarrowConfirmationIntegrationTest {
 
             assertTrue(prompt(window).contains("begin-"));
             assertTrue(prompt(window).contains("-ending.txt"));
-            assertTrue(prompt(window).contains("(y/N)"));
+            assertTrue(prompt(window).contains("Ctrl+S"));
             window.event(new TextInput("y"));
             assertEquals("Xalpha", Files.readString(victim));
         }
@@ -143,11 +148,11 @@ class NarrowConfirmationIntegrationTest {
             Path victim = directory.resolve("victim.txt");
             Files.writeString(victim, "ORIGINAL");
             requestOverwrite(window, victim);
-            window.resize(24, 12);
+            window.resize(24, 5);
             window.event(ctrlQ());
 
             assertEquals("ORIGINAL", Files.readString(victim));
-            assertFalse(prompt(window).contains("Enlarge"));
+            assertTrue(window.promptText().isEmpty());
             window.resize(24, 80);
             requestOverwrite(window, victim);
             assertTrue(prompt(window).contains("victim.txt"));
@@ -163,16 +168,16 @@ class NarrowConfirmationIntegrationTest {
         RecoveryStore.Entry entry = new RecoveryStore.Entry("recovery-entry", source.engine().captureRecoverySnapshot());
         try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("alpha"), List.of(entry))) {
             assertTrue(prompt(window).contains("Restore now?"));
-            window.resize(24, 12);
+            window.resize(24, 5);
 
-            assertEquals("Enlarge; Esc", prompt(window));
+            assertEquals("Enlar", prompt(window));
             window.event(new TextInput("y"));
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             window.pointer(PointerEvent.Kind.PRESS, window.height - 2, 0);
 
             assertEquals(1, window.tabs.size());
             assertTrue(window.recoverySnapshots.containsKey(entry.id()));
-            assertEquals("Enlarge; Esc", prompt(window));
+            assertEquals("Enlar", prompt(window));
 
             window.resize(24, 80);
             assertTrue(prompt(window).contains("Restore now?"));
@@ -189,7 +194,7 @@ class NarrowConfirmationIntegrationTest {
             window.command(TuinkCommand.TAB_CLOSE);
 
             assertTrue(prompt(window).contains("document.txt"));
-            assertTrue(prompt(window).contains("(y/N)"));
+            assertTrue(prompt(window).contains("Ctrl+S"));
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
             assertEquals(1, window.tabs.size());
         }
@@ -212,6 +217,6 @@ class NarrowConfirmationIntegrationTest {
     }
 
     private static String prompt(EditorWindowFixture window) {
-        return window.screenRow(window.height - 2).stripTrailing();
+        return window.promptText().lines().map(String::stripTrailing).collect(java.util.stream.Collectors.joining());
     }
 }

@@ -84,7 +84,7 @@ class TabScopedInteractionIntegrationTest {
         try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("original"))) {
             window.ui.showTabBarSetting = true;
             window.ui.mouseModeSetting = true;
-            window.ui.mouseModeAvailable = true;
+            window.mouseAvailable = true;
             var first = window.active();
             window.command(TuinkCommand.TAB_NEW);
             var second = window.active();

@@ -72,6 +72,25 @@ class MenuBarTest {
     };
 
     @Test
+    void alignsHintsAndKeepsNarrowActionsUsableWithoutTheirHints() {
+        MenuBar<String> bar = new MenuBar<>(List.of(new MenuBar.Menu<>("File", 0, List.of(
+            new MenuBar.Item<>("save", "Save", 0, true, LabelPolicy.DEFAULT, "Ctrl+S")))),
+            MenuBar.State.open(0));
+        CellBuffer buffer = filled(8, 40);
+        var wide = bar.layout(new Rect(0, 0, 40, 8));
+        wide.paint(new Canvas(buffer), THEME, WidgetState.FOCUSED);
+        assertTrue(cellText(buffer, 2, 0, 40).contains("Save  Ctrl+S"));
+        assertEquals("save", invokedValue(wide.handle(key(KeyStroke.Key.ENTER), FOCUSED)));
+
+        CellBuffer compact = filled(8, 8);
+        var narrow = bar.layout(new Rect(0, 0, 8, 8));
+        narrow.paint(new Canvas(compact), THEME, WidgetState.FOCUSED);
+        assertTrue(cellText(compact, 2, 0, 8).contains("Save"));
+        assertFalse(cellText(compact, 2, 0, 8).contains("Ctrl"));
+        assertEquals("save", invokedValue(narrow.handle(key(KeyStroke.Key.ENTER), FOCUSED)));
+    }
+
+    @Test
     void copiesTheDescriptorGraphAndValidatesThePublicModel() {
         List<MenuBar.Entry<String>> entrySource = new ArrayList<>();
         entrySource.add(item("old-value", "Old label", 0, true));

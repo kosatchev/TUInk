@@ -252,7 +252,7 @@ class FrameCompositionTest {
             4
         );
         return new FrameComposition(
-            new FrameComposition.Document(builder, model, state, layout, null),
+            new FrameComposition.Document(builder, model, state, layout),
             new FrameComposition.Surface(
                 new TopMenuView.TopBar(" File ", 6),
                 "status",

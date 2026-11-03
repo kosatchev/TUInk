@@ -24,6 +24,8 @@ import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class AsyncOpenIntegrationTest {
     @TempDir Path directory;
@@ -428,6 +430,38 @@ class AsyncOpenIntegrationTest {
             assertTrue(window.active().state().isDirty());
             assertFalse(IntStream.range(0, window.height)
                 .anyMatch(row -> window.screenRow(row).contains("Open File")));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void informationalOpenResultsCannotReplaceANewerOwnersAlert(boolean encoding) throws Exception {
+        try (Scenario scenario = scenario()) {
+            var window = scenario.window;
+            Path selected = encoding ? Files.write(directory.resolve("z-selected.txt"),
+                new byte[] {(byte) 0xFF, (byte) 0xFE, 0, 0, 65, 0, 0, 0})
+                : Files.writeString(directory.resolve("z-selected.txt"), "already opened elsewhere");
+            requestOpen(window, selected);
+            var owner = window.active();
+            if (!encoding) {
+                window.command(TuinkCommand.TAB_NEW);
+                window.active().tabSession().engine().openExisting(JvmDocumentStorage.resource(selected));
+                window.frame();
+                window.command(TuinkCommand.TAB_PREVIOUS);
+            }
+            window.event(new TextInput("draft "));
+            window.ui.confirmOnCloseSetting = true;
+            window.command(TuinkCommand.TAB_CLOSE);
+            assertTrue(owner.uiState().modalState.isCloseTabConfirm());
+            var focus = owner.uiState().confirmFocusManager.focused();
+            owner.uiState().notification.warning("New owner warning");
+            scenario.executor.runNextOnWorker(); window.frame();
+            assertEquals(owner.presentationId(), window.selected().presentationId());
+            assertTrue(owner.uiState().modalState.isCloseTabConfirm());
+            assertEquals(focus, owner.uiState().confirmFocusManager.focused());
+            assertEquals("New owner warning", owner.uiState().notification.message);
+            if (encoding) assertNotNull(owner.uiState().deferredOpenResult);
+            else assertEquals(2, window.tabs.size());
         }
     }
 

@@ -5,6 +5,7 @@ import dev.tuiframe.input.PasteEvent;
 import dev.tuiframe.input.TextInput;
 import dev.tuiframe.input.TuiInputEvent;
 import dev.tuiframe.widget.TextField;
+import dev.tuiframe.widget.DialogInputPolicy.Target;
 import dev.tuink.tui.command.TuinkCommand;
 import java.util.Objects;
 import java.util.Set;
@@ -26,13 +27,15 @@ final class ModalInputPolicy {
     private ModalInputPolicy() {
     }
 
-    static boolean blocked(Kind kind, TuiInputEvent event, TuinkCommand command) {
+    static boolean blocked(Kind kind, TuiInputEvent event, TuinkCommand command, Target target) {
         Objects.requireNonNull(kind, "kind");
         Objects.requireNonNull(event, "event");
+        Objects.requireNonNull(target, "target");
         if (kind == Kind.NONE) {
             return false;
         }
         if (event instanceof TextInput text) {
+            if (target == Target.TEXT_INPUT) return false;
             return switch (kind) {
                 case SAVE_AS, NONE -> false;
                 case CONFIRM -> !isConfirmationText(text.text());
@@ -41,8 +44,8 @@ final class ModalInputPolicy {
             };
         }
         if (event instanceof PasteEvent paste) {
-            // Save As owns paste; oversized content has its own rejection feedback.
-            return kind != Kind.SAVE_AS && !paste.truncated();
+            // Focused fields own paste; oversized content has its own rejection feedback.
+            return target != Target.TEXT_INPUT && !paste.truncated();
         }
         if (!(event instanceof KeyStroke stroke) || stroke.key() == KeyStroke.Key.UNKNOWN) {
             return false;
@@ -50,15 +53,15 @@ final class ModalInputPolicy {
         if (kind == Kind.HELP && isHelpCommand(command)) {
             return false;
         }
-        if (allowedKey(kind, stroke)) {
+        if (allowedKey(kind, stroke, target)) {
             return false;
         }
         // An unbound non-text key does not establish an attempted editor action.
         return command != null;
     }
 
-    private static boolean allowedKey(Kind kind, KeyStroke stroke) {
-        if (kind == Kind.SAVE_AS && (TextField.ownsEditingKey(stroke)
+    private static boolean allowedKey(Kind kind, KeyStroke stroke, Target target) {
+        if (target == Target.TEXT_INPUT && (TextField.ownsEditingKey(stroke)
             || stroke.modifiers().equals(CTRL) && switch (stroke.key()) {
                 case C, X, V -> true;
                 default -> false;

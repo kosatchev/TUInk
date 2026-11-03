@@ -255,11 +255,8 @@ class TerminalEditorInputRoutingTest {
     @Test
     void helpRequestedWhileSearchOwnsInputIsPromotedAndConsumed() {
         UiSessionState ui = new UiSessionState();
-        ui.helpHintsMode = true;
-
-        UiModalState modal = TerminalEditorApp.consumeRequestedHelpModal(ui, UiModalState.none());
-
-        assertTrue(modal.isHelpHints());
-        assertFalse(ui.helpHintsMode);
+        var result = InputActionDispatcher.dispatchUi(TuinkCommand.HELP_KEY_HINTS, ui,
+            TestSurfaces.source(ui), new TopMenuController(), ignored -> {}, () -> {});
+        assertEquals(InputActionDispatcher.Intent.HELP_HINTS, result.intent());
     }
 }

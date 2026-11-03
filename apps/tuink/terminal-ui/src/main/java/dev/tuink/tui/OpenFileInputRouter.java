@@ -5,24 +5,31 @@ import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.input.ResizeEvent;
 import dev.tuiframe.input.TuiInputEvent;
 import dev.tuiframe.widget.InteractionResult;
-import dev.tuiframe.widget.Button;
 import dev.tuiframe.widget.PointerCaptureRequest;
+import dev.tuink.core.EditorClipboard;
+import dev.tuink.tui.command.TuinkCommand;
 import dev.tuink.tui.file.FileTreeModel;
 import dev.tuink.tui.ui.FileTreeView;
 import java.nio.file.Path;
 import java.util.Objects;
 
-/** Raw-event owner policy for the open-file tree and its three focus stops. */
+/** Raw-event owner policy for the open-file tree, location field, and controls. */
 final class OpenFileInputRouter {
     enum Focus {
         LIST,
+        LOCATION,
+        HIDDEN,
         OK,
         CANCEL
     }
 
     sealed interface Intent
         permits ToggleDirectory, ChangeRoot, OpenFile, MoveToParentRoot,
-        CloseDialog, ToggleHidden, SelectionRejected {
+        CloseDialog, ToggleHidden, SelectionRejected, OpenLocation {
+    }
+
+    record OpenLocation(String value) implements Intent {
+        OpenLocation { Objects.requireNonNull(value, "value"); }
     }
 
     record ToggleDirectory(FileTreeModel.EntryId id, boolean expand) implements Intent {
@@ -61,7 +68,8 @@ final class OpenFileInputRouter {
     enum Rejection {
         NO_SELECTION,
         DIRECTORY,
-        ERROR
+        ERROR,
+        INPUT_TOO_LARGE
     }
 
     record Result(
@@ -92,6 +100,23 @@ final class OpenFileInputRouter {
     private OpenFileInputRouter() {
     }
 
+    static Result routeCommand(OpenFileDialogView.Placement dialog, OpenFileDialogView.FocusState focusState,
+        TuinkCommand command, EditorClipboard clipboard) {
+        dialog.activate(focusState);
+        var field = focusState.focus() == Focus.LOCATION ? dialog.location() : null;
+        var copied = ControlCommandRouter.clipboard(command, field, clipboard);
+        if (copied.handled()) {
+            return copied.inputRejected() ? intent(dialog.tree().state(), focusState.focus(),
+                new SelectionRejected(Rejection.INPUT_TOO_LARGE)) : captured(dialog.tree().state(), focusState.focus());
+        }
+        if (focusState.focus() == Focus.LOCATION && ControlCommandRouter.owns(command)) {
+            var event = ControlCommandRouter.eventFor(command).orElse(null);
+            return event == null ? captured(dialog.tree().state(), focusState.focus())
+                : route(dialog, focusState, event, 0, 0);
+        }
+        return ignored(dialog.tree().state(), focusState.focus());
+    }
+
     static Result route(
         OpenFileDialogView.Placement dialog,
         OpenFileDialogView.FocusState focusState,
@@ -111,7 +136,7 @@ final class OpenFileInputRouter {
         WindowPointerCapture capture,
         Object surfaceId
     ) {
-        Result result = routeInput(dialog, focusState, event, nowNanos, doubleClickWindowNanos);
+        Result result = routeInput(dialog, focusState, event, nowNanos, doubleClickWindowNanos, capture, surfaceId);
         if (capture != null) {
             capture.observe(surfaceId, dialog.captureScope(), OpenFileDialogView.Control.LIST,
                 InteractionResult.<FileTreeView.Action>handled().withPointerCapture(result.pointerCaptureRequest()));
@@ -124,7 +149,9 @@ final class OpenFileInputRouter {
         OpenFileDialogView.FocusState focusState,
         TuiInputEvent event,
         long nowNanos,
-        long doubleClickWindowNanos
+        long doubleClickWindowNanos,
+        WindowPointerCapture capture,
+        Object surfaceId
     ) {
         Objects.requireNonNull(dialog, "dialog");
         Objects.requireNonNull(focusState, "focusState");
@@ -144,7 +171,9 @@ final class OpenFileInputRouter {
             && stroke.modifiers().isEmpty() && stroke.key() == KeyStroke.Key.ESCAPE) {
             return intent(current.resetClickTracking(), requiredFocus, new CloseDialog());
         }
-        if (event instanceof PointerEvent pointer && !pointer.modifiers().isEmpty()) {
+        if (event instanceof PointerEvent pointer && !pointer.modifiers().isEmpty()
+            && !dialog.focusScope().target(OpenFileDialogView.Control.LOCATION).orElseThrow()
+                .placement().bounds().contains(pointer.column(), pointer.row())) {
             return captured(current.resetClickTracking(), requiredFocus);
         }
         if (dialog.compactDialog() != null) {
@@ -157,18 +186,23 @@ final class OpenFileInputRouter {
             var route = focusState.manager().route(dialog.focusScope(), event);
             if (!route.navigationConsumed() && route.target().isPresent()) {
                 var interaction = route.target().orElseThrow().placement().handle(event, route.context().orElseThrow());
-                if (interaction.output().orElse(null) == Button.Action.ACTIVATED) {
+                if (interaction.output().orElse(null) == OpenFileDialogView.Action.ACTIVATE) {
                     return intent(current.resetClickTracking(), requiredFocus, new CloseDialog());
                 }
             }
             return captured(current.resetClickTracking(), requiredFocus);
         }
-        if (!placement.enabled()) {
-            return captured(current.resetClickTracking(), requiredFocus);
-        }
         if (event instanceof KeyStroke stroke) {
+            if (stroke.key() == KeyStroke.Key.L && stroke.modifiers().equals(java.util.Set.of(KeyStroke.Modifier.CTRL))) {
+                dialog.location().selectAll();
+                focusState.focus(Focus.LOCATION);
+                return captured(current.resetClickTracking(), focusState.focus());
+            }
             if (stroke.key() == KeyStroke.Key.H
-                && stroke.modifiers().equals(java.util.Set.of(KeyStroke.Modifier.CTRL))) {
+                && stroke.modifiers().equals(java.util.Set.of(KeyStroke.Modifier.CTRL))
+                || stroke.key() == KeyStroke.Key.PERIOD
+                    && stroke.modifiers().equals(java.util.Set.of(KeyStroke.Modifier.ALT))) {
+                if (!placement.enabled()) return captured(current.resetClickTracking(), requiredFocus);
                 focusState.focus(Focus.LIST);
                 return intent(current.resetClickTracking(), focusState.focus(), new ToggleHidden());
             }
@@ -192,24 +226,36 @@ final class OpenFileInputRouter {
         if (routed.target().isPresent()) {
             var target = routed.target().orElseThrow();
             if (target.id() != OpenFileDialogView.Control.LIST) {
-                InteractionResult<Button.Action> interaction = target.placement().handle(
+                InteractionResult<OpenFileDialogView.Action> interaction = target.placement().handle(
                     event, routed.context().orElseThrow());
                 focusState.manager().apply(dialog.focusScope(), target.id(), interaction.focusRequest());
+                if (capture != null) capture.observe(surfaceId, dialog.focusScope(), target.id(), interaction);
                 Focus buttonFocus = focusState.focus();
                 if (interaction.output().isPresent()) {
+                    if (target.id() == OpenFileDialogView.Control.LOCATION) {
+                        return switch (interaction.output().orElseThrow()) {
+                            case LOCATION_SUBMITTED -> intent(current.resetClickTracking(), buttonFocus,
+                                new OpenLocation(dialog.location().text()));
+                            case INPUT_REJECTED -> intent(current.resetClickTracking(), buttonFocus,
+                                new SelectionRejected(Rejection.INPUT_TOO_LARGE));
+                            default -> captured(current.resetClickTracking(), buttonFocus);
+                        };
+                    }
                     return switch (target.id()) {
-                        case OK -> confirmSelection(placement, buttonFocus);
+                        case OK -> focusState.locationEdited()
+                            ? intent(current.resetClickTracking(), buttonFocus, new OpenLocation(dialog.location().text()))
+                            : confirmSelection(placement, buttonFocus);
                         case CANCEL, CLOSE -> intent(current.resetClickTracking(), buttonFocus, new CloseDialog());
                         case HIDDEN -> {
-                            focusState.focus(Focus.LIST);
                             yield intent(current.resetClickTracking(), focusState.focus(), new ToggleHidden());
                         }
-                        case LIST -> throw new IllegalStateException("tree is not a button");
+                        case LIST, LOCATION -> throw new IllegalStateException("not a button");
                     };
                 }
                 return captured(current.resetClickTracking(), buttonFocus);
             }
         }
+        if (!placement.enabled()) return captured(current.resetClickTracking(), focused);
         if (event instanceof KeyStroke stroke && focused == Focus.LIST) {
             return routeTreeKey(placement, stroke, nowNanos, doubleClickWindowNanos);
         }

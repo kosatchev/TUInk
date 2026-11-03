@@ -65,7 +65,7 @@ class ExpectedAbsentOverwriteIntegrationTest {
             assertEquals("external", Files.readString(target));
             assertTrue(window.active().state().isDirty());
             SaveWorkflowIntegrationTest.submitFilename(window, requested);
-            assertTrue(window.screenRow(window.height - 2).contains("Overwrite"));
+            assertTrue(window.promptText().contains("Overwrite"));
             window.event(new TextInput("y"));
 
             assertEquals("draft", Files.readString(target));

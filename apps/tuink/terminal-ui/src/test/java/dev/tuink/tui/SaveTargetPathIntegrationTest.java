@@ -38,7 +38,7 @@ class SaveTargetPathIntegrationTest {
             SaveWorkflowIntegrationTest.submitFilename(window, requested);
             assertEquals("requested original", Files.readString(actual));
             assertEquals("unrelated original", Files.readString(unrelated));
-            assertTrue(window.screenRow(window.height - 2).contains("Overwrite"));
+            assertTrue(window.promptText().contains("Overwrite"));
 
             window.event(new TextInput("y"));
 

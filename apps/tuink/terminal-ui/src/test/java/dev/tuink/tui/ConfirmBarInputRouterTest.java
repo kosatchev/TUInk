@@ -23,6 +23,23 @@ import org.junit.jupiter.api.Test;
 
 class ConfirmBarInputRouterTest {
     @Test
+    void exactCtrlSSavesWritingConfirmationsButDoesNotRestoreRecoveryOrChooseAnEncoding() {
+        for (var policy : List.of(ConfirmBarInputRouter.Policy.quit(), ConfirmBarInputRouter.Policy.closeTab(),
+            ConfirmBarInputRouter.Policy.overwrite())) {
+            var fixture = standard(policy, 80);
+            assertEquals(ConfirmChoice.SAVE,
+                fixture.route(KeyStroke.of(KeyStroke.Key.S, KeyStroke.Modifier.CTRL)).decision());
+            assertCapturedWithoutDecision(fixture.route(KeyStroke.of(KeyStroke.Key.S,
+                KeyStroke.Modifier.CTRL, KeyStroke.Modifier.SHIFT)));
+        }
+        for (var policy : List.of(ConfirmBarInputRouter.Policy.recovery(), ConfirmBarInputRouter.Policy.open())) {
+            assertCapturedWithoutDecision(standard(policy, 80).route(KeyStroke.of(KeyStroke.Key.S, KeyStroke.Modifier.CTRL)));
+        }
+        assertCapturedWithoutDecision(standard(ConfirmBarInputRouter.Policy.quit(), 5)
+            .route(KeyStroke.of(KeyStroke.Key.S, KeyStroke.Modifier.CTRL)));
+    }
+
+    @Test
     void threeButtonScopeStartsAtCancelAndUsesExactTabDirection() {
         Fixture fixture = standard(ConfirmBarInputRouter.Policy.quit(), 80);
 
@@ -110,16 +127,16 @@ class ConfirmBarInputRouterTest {
     }
 
     @Test
-    void applicationPoliciesSaveOnYesAndCancelOnNoEscapeAndCtrlQ() {
+    void applicationPoliciesRouteNoToDiscardOnlyWhenConfirmingUnsavedChanges() {
         Fixture quit = standard(ConfirmBarInputRouter.Policy.quit(), 80);
         assertEquals(ConfirmChoice.SAVE, quit.route(new TextInput("Y")).decision());
-        assertEquals(ConfirmChoice.CANCEL, quit.route(new TextInput("n")).decision());
+        assertEquals(ConfirmChoice.DISCARD, quit.route(new TextInput("n")).decision());
         assertEquals(
             ConfirmChoice.CANCEL,
             quit.route(KeyStroke.of(KeyStroke.Key.ESCAPE)).decision()
         );
         assertEquals(
-            ConfirmChoice.CANCEL,
+            ConfirmChoice.DISCARD,
             quit.route(KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL)).decision()
         );
 
@@ -129,6 +146,8 @@ class ConfirmBarInputRouterTest {
 
         Fixture closeTab = standard(ConfirmBarInputRouter.Policy.closeTab(), 80);
         assertEquals(ConfirmChoice.SAVE, closeTab.route(new TextInput("y")).decision());
+        assertEquals(ConfirmChoice.DISCARD, closeTab.route(new TextInput("N")).decision());
+        assertEquals(ConfirmChoice.CANCEL, closeTab.route(KeyStroke.of(KeyStroke.Key.ESCAPE)).decision());
 
         Fixture recovery = fixture(
             ConfirmBarView.buildRecovery("Recover?", 80),
@@ -149,7 +168,7 @@ class ConfirmBarInputRouterTest {
         List<Fixture> fixtures = allConfirmationModes();
         List<ConfirmChoice> expected = List.of(
             ConfirmChoice.CANCEL, ConfirmChoice.CANCEL,
-            ConfirmChoice.CANCEL, ConfirmChoice.CANCEL
+            ConfirmChoice.DISCARD, ConfirmChoice.CANCEL
         );
 
         for (int index = 0; index < fixtures.size(); index++) {
@@ -261,7 +280,7 @@ class ConfirmBarInputRouterTest {
             .place(new Object(), 3, viewport(5, 60));
         recovery.activate(original.focus);
         assertEquals(ConfirmChoice.CANCEL, original.focus.focused().orElseThrow());
-        assertEquals(ConfirmChoice.CANCEL, samePrompt.route(new TextInput("n")).decision());
+        assertEquals(ConfirmChoice.DISCARD, samePrompt.route(new TextInput("n")).decision());
     }
 
     @Test
@@ -329,8 +348,10 @@ class ConfirmBarInputRouterTest {
             for (TuiInputEvent event : events) {
                 ConfirmBarInputRouter.Result result = fixture.route(event);
                 boolean safeCancel = event instanceof TextInput text && text.text().equalsIgnoreCase("n")
+                        && policy.shortcuts().noDecision() == ConfirmChoice.CANCEL
                     || event.equals(KeyStroke.of(KeyStroke.Key.ESCAPE))
-                    || event.equals(KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL));
+                    || event.equals(KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL))
+                        && policy != ConfirmBarInputRouter.Policy.quit();
                 assertTrue(result.consumed(), event.toString());
                 assertEquals(safeCancel ? ConfirmChoice.CANCEL : null, result.decision(), event.toString());
                 assertTrue(fixture.focus.focused().isEmpty());
@@ -368,8 +389,9 @@ class ConfirmBarInputRouterTest {
         assertTrue(fixture.target(ConfirmChoice.SAVE).enabled());
         assertFalse(fixture.target(ConfirmChoice.SAVE).interactive());
         assertCapturedWithoutDecision(fixture.route(new TextInput("y")));
-        assertEquals(ConfirmChoice.CANCEL,
-            fixture.route(KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL)).decision());
+        assertCapturedWithoutDecision(fixture.route(new TextInput("n")));
+        assertCapturedWithoutDecision(
+            fixture.route(KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL)));
         assertEquals(ConfirmChoice.CANCEL, fixture.route(KeyStroke.of(KeyStroke.Key.ESCAPE)).decision());
     }
 

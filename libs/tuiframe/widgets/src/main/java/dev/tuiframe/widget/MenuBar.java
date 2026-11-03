@@ -191,9 +191,15 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
                     contentWidth,
                     item.labelPolicy()
                 );
-                rows.add(new PreparedRow<>(entryIndex, rowY, item, label));
+                PreparedLabel hint = prepareVisibleLabel(item.hint(), -1, contentWidth);
+                // Hints must never hide the action or make a previously usable row inactive.
+                if (hint.width() == 0 || !hint.text().equals(item.hint())
+                    || label.width() + 2 + hint.width() > contentWidth) {
+                    hint = null;
+                }
+                rows.add(new PreparedRow<>(entryIndex, rowY, item, label, hint));
             } else {
-                rows.add(new PreparedRow<>(entryIndex, rowY, entry, null));
+                rows.add(new PreparedRow<>(entryIndex, rowY, entry, null, null));
             }
         }
         Scrollbar scrollbar = geometry.verticalScrollbarBounds() == null ? null
@@ -210,7 +216,9 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
                 continue;
             }
             int labelWidth = boundedVisualWidth(item.label(), labelLimit);
-            maximum = Math.max(maximum, Math.min(availableWidth, labelWidth + chrome));
+            int hintWidth = boundedVisualWidth(item.hint(), labelLimit);
+            long preferred = (long) labelWidth + (hintWidth == 0 ? 0 : hintWidth + 2) + chrome;
+            maximum = Math.max(maximum, (int) Math.min(availableWidth, preferred));
             if (maximum == availableWidth) {
                 break;
             }
@@ -405,22 +413,32 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
     public sealed interface Entry<C> permits Item, Separator {
     }
 
-    /** Enabled or disabled popup activation row. */
+    /**
+     * Enabled or disabled popup activation row with an optional consumer-owned trailing hint.
+     * Hints align at the right edge when they fit and are omitted before action labels are clipped.
+     * Their meaning and keyboard bindings remain the consumer's responsibility.
+     */
     public record Item<C>(
         C value,
         String label,
         int mnemonicGraphemeIndex,
         boolean enabled,
-        LabelPolicy labelPolicy
+        LabelPolicy labelPolicy,
+        String hint
     ) implements Entry<C> {
         public Item(C value, String label, int mnemonicGraphemeIndex, boolean enabled) {
-            this(value, label, mnemonicGraphemeIndex, enabled, LabelPolicy.DEFAULT);
+            this(value, label, mnemonicGraphemeIndex, enabled, LabelPolicy.DEFAULT, "");
+        }
+
+        public Item(C value, String label, int mnemonicGraphemeIndex, boolean enabled, LabelPolicy labelPolicy) {
+            this(value, label, mnemonicGraphemeIndex, enabled, labelPolicy, "");
         }
 
         public Item {
             Objects.requireNonNull(value, "value");
             requireLabel(label, "label");
             Objects.requireNonNull(labelPolicy, "labelPolicy");
+            Objects.requireNonNull(hint, "hint");
             if (mnemonicGraphemeIndex < -1) {
                 throw new IllegalArgumentException("mnemonicGraphemeIndex must be -1 or greater");
             }
@@ -665,6 +683,10 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
                     rowStyle,
                     mnemonicStyle
                 );
+                if (row.hint() != null) {
+                    paintLabel(canvas, popup.contentBounds().rightExclusive() - 1 - row.hint().width(),
+                        row.y(), row.hint(), rowStyle, rowStyle);
+                }
             }
             int bottom = box.bottomExclusive() - 1;
             canvas.put(box.x(), bottom, "└", popupStyle);
@@ -973,7 +995,7 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
     private record PreparedTop(int menuIndex, Rect bounds, PreparedLabel label) {
     }
 
-    private record PreparedRow<C>(int entryIndex, int y, Entry<C> entry, PreparedLabel label) {
+    private record PreparedRow<C>(int entryIndex, int y, Entry<C> entry, PreparedLabel label, PreparedLabel hint) {
         private boolean activatable() {
             return entry instanceof Item<?> item && item.enabled() && label != null
                 && label.text().equals(item.label());

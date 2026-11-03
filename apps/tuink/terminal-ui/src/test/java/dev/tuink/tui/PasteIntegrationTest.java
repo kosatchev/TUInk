@@ -106,7 +106,7 @@ class PasteIntegrationTest {
     @Test
     void aModalFieldOwnsExternalPaste() throws Exception {
         try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("keep"))) {
-            window.event(ctrl(KeyStroke.Key.W));
+            window.event(ctrl(KeyStroke.Key.K));
             window.event(ctrl(KeyStroke.Key.A));
 
             window.event(new PasteEvent("draft.txt"));

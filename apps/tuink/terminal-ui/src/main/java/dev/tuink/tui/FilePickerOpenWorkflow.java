@@ -14,6 +14,9 @@ import dev.tuink.tui.file.FileFailureReason;
 import dev.tuink.tui.ui.NotificationPresentation;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Supplier;
@@ -26,7 +29,13 @@ final class FilePickerOpenWorkflow {
 
     record Result(boolean openFileMode, TuiDocumentSession openedDocument, int activateTabIndex,
                   NoticeKind noticeKind, String message, Notice notice, Path pendingExplicitOpenPath,
-                  OpenRequest pendingOpen, ViewId activateViewId) {
+                  OpenRequest pendingOpen, ViewId activateViewId, Path navigateDirectory) {
+        Result(boolean openFileMode, TuiDocumentSession openedDocument, int activateTabIndex,
+               NoticeKind noticeKind, String message, Notice notice, Path pendingExplicitOpenPath,
+               OpenRequest pendingOpen, ViewId activateViewId) {
+            this(openFileMode, openedDocument, activateTabIndex, noticeKind, message, notice,
+                pendingExplicitOpenPath, pendingOpen, activateViewId, null);
+        }
         Result(boolean openFileMode, TuiDocumentSession openedDocument, int activateTabIndex,
                NoticeKind noticeKind, String message, Notice notice, Path pendingExplicitOpenPath,
                OpenRequest pendingOpen) {
@@ -46,9 +55,12 @@ final class FilePickerOpenWorkflow {
     }
 
     /** The worker owns decoding; publishing this result belongs to the UI thread. */
-    record OpenRequest(Path path, DocumentOpenMode mode, PreparedDocumentOpen operation) {
+    record OpenRequest(Path path, DocumentOpenMode mode, PreparedDocumentOpen operation, boolean location) {
+        OpenRequest(Path path, DocumentOpenMode mode, PreparedDocumentOpen operation) {
+            this(path, mode, operation, false);
+        }
         OpenRequest(Path path, DocumentOpenMode mode) {
-            this(path, mode, new PreparedDocumentOpen(JvmDocumentStorage.resource(path), mode, false));
+            this(path, mode, new PreparedDocumentOpen(JvmDocumentStorage.resource(path), mode, false), false);
         }
 
         OpenRequest {
@@ -61,7 +73,22 @@ final class FilePickerOpenWorkflow {
             return operation.read();
         }
 
+        /** Filesystem inspection belongs to the same worker as decoding, never the field/router. */
+        OpenTarget inspect() throws IOException {
+            if (location && !operation.cancelled()
+                && Files.readAttributes(path, BasicFileAttributes.class).isDirectory()) {
+                return new OpenTarget(null, path);
+            }
+            return new OpenTarget(read(), null);
+        }
+
         void cancel() { operation.cancel(); }
+    }
+
+    record OpenTarget(DocumentLoad document, Path directory) {
+        OpenTarget {
+            if ((document == null) == (directory == null)) throw new IllegalArgumentException("one open target required");
+        }
     }
 
     /** Plain failure data; the dialog owns its terminal presentation. */
@@ -110,8 +137,24 @@ final class FilePickerOpenWorkflow {
         }
         if (intent instanceof OpenFileInputRouter.SelectionRejected rejected) {
             return new Result(true, null, -1, NoticeKind.WARNING,
-                rejected.reason() == OpenFileInputRouter.Rejection.ERROR
-                    ? "The selected tree entry cannot be opened" : "Select a file");
+                switch (rejected.reason()) {
+                    case ERROR -> "The selected tree entry cannot be opened";
+                    case INPUT_TOO_LARGE -> "Text is too large; nothing changed";
+                    default -> "Select a file";
+                });
+        }
+        if (intent instanceof OpenFileInputRouter.OpenLocation location) {
+            if (location.value().isEmpty()) {
+                return new Result(true, null, -1, NoticeKind.WARNING, "Enter a file or directory path");
+            }
+            try {
+                Path target = tree.root().resolve(Path.of(location.value())).toAbsolutePath().normalize();
+                return new Result(false, null, -1, NoticeKind.UNCHANGED, null, null, null,
+                    new OpenRequest(target, mode,
+                        new PreparedDocumentOpen(JvmDocumentStorage.resource(target), mode, false), true));
+            } catch (InvalidPathException failure) {
+                return new Result(true, null, -1, NoticeKind.WARNING, "Invalid file or directory path");
+            }
         }
         if (intent instanceof OpenFileInputRouter.OpenFile open) {
             return open(open.file(), mode, tabs, activeTabIndex);
@@ -175,6 +218,16 @@ final class FilePickerOpenWorkflow {
         if (described.canAttachPath()) return failure(reason, target);
         return new Result(true, null, -1, NoticeKind.ERROR, "Open failed: " + reason,
             new Notice(reason, null));
+    }
+
+    static Result completeInspected(OpenRequest request, OpenTarget target, IOException failure,
+        List<TabSession> tabs, int activeTabIndex, Supplier<TuiDocumentSession> newDocument) {
+        if (request.operation().cancelled()) return unchanged(false);
+        if (target != null && target.directory() != null) {
+            request.cancel();
+            return new Result(true, null, -1, NoticeKind.UNCHANGED, null, null, null, null, null, target.directory());
+        }
+        return complete(request, target == null ? null : target.document(), failure, tabs, activeTabIndex, newDocument);
     }
 
     private static Result switched(Path target, int existing, TabSession view) {

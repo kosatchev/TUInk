@@ -31,9 +31,9 @@ class AmbiguousOpenIntegrationTest {
             var cursor = source.state().getCursor();
             selectAndOpen(window, file);
             assertEquals(1, window.tabs.size());
-            assertTrue(window.screenRow(window.height - 2).contains("Ambiguous:"));
-            assertTrue(window.screenRow(window.height - 2).contains(file.getFileName().toString()));
-            assertTrue(window.screenRow(window.height - 2).contains("UTF-16LE"));
+            assertTrue(window.promptText().contains("Ambiguous:"));
+            assertTrue(window.promptText().contains(file.getFileName().toString()));
+            assertTrue(window.promptText().contains("UTF-16LE"));
 
             switch (cancel) {
                 case "enter" -> window.event(KeyStroke.of(KeyStroke.Key.ENTER));
@@ -65,7 +65,7 @@ class AmbiguousOpenIntegrationTest {
             window.event(new TextInput("draft "));
             var source = window.active();
             selectAndOpen(window, file);
-            window.resize(24, 20);
+            window.resize(3, 20);
             window.event(new TextInput("y"));
             assertEquals(1, window.tabs.size(), "A hidden question cannot authorize explicit decoding");
             window.resize(24, 80);
@@ -83,7 +83,7 @@ class AmbiguousOpenIntegrationTest {
             assertSame(source, window.active());
             selectAndOpen(window, file);
             assertEquals(1, window.tabs.size());
-            assertTrue(window.screenRow(window.height - 2).contains("Ambiguous:"),
+            assertTrue(window.promptText().contains("Ambiguous:"),
                 "An explicit decoding choice must be requested again on a later open");
         }
     }

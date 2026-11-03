@@ -1,34 +1,30 @@
 package dev.tuink.tui;
 
-import dev.tuiframe.cell.CellText;
 import dev.tuiframe.geometry.Rect;
+import java.util.List;
+import static dev.tuink.tui.StatusBarLayout.Field;
+import static dev.tuink.tui.StatusBarLayout.Key;
 
 /** Footer text and complete-label hit regions are prepared together. */
 final class DocumentStatusBarView {
     private DocumentStatusBarView() {}
 
-    static Placement place(String left, String access, String encoding, String endings, boolean reading,
-                           int columns, int row) {
-        int width = Math.max(0, columns);
-        String enc = "ENC:" + encoding;
-        String eol = "EOL:" + endings;
-        String prefix = access + " | ";
-        String right = prefix + enc + " | " + eol + " | " + (reading ? "READ" : "INS") + " ";
-        int leftWidth = CellText.width(left);
-        if (leftWidth >= width) return new Placement(CellText.clip(left, 0, width), empty(row), empty(row));
-        int rightWidth = CellText.width(right);
-        int start = rightWidth >= width ? 0 : Math.max(leftWidth, width - rightWidth);
-        int visible = width - start;
-        String text = (start == 0 ? "" : left + " ".repeat(start - leftWidth)) + CellText.clip(right, 0, visible);
-        int encodingStart = start + CellText.width(prefix);
-        int eolStart = encodingStart + CellText.width(enc) + 3;
-        Rect encBounds = encodingStart + CellText.width(enc) <= width
-            ? new Rect(encodingStart, row, CellText.width(enc), 1) : empty(row);
-        Rect eolBounds = eolStart + CellText.width(eol) <= width
-            ? new Rect(eolStart, row, CellText.width(eol), 1) : empty(row);
-        return new Placement(text, encBounds, eolBounds);
-    }
+    record Reading(String position, String compactPosition, String tabs, String shortcut, String search) {}
 
-    private static Rect empty(int row) { return new Rect(0, row, 0, 0); }
+    static Placement place(Reading left, String access, String encoding, String endings, boolean reading,
+                           int columns, int row) {
+        var fields = List.of(
+            Field.required(Key.POSITION, left.position(), left.compactPosition(), 70),
+            Field.required(Key.TABS, left.tabs(), left.tabs(), 80),
+            Field.required(Key.SWITCH, left.shortcut(), left.shortcut().isEmpty() ? "" : "Ctrl+P", 100, 20),
+            Field.required(Key.DETAIL, left.search(), left.search(), 65));
+        var right = List.of(
+            Field.optional(Key.ACCESS, access, 40),
+            Field.optional(Key.ENCODING, "ENC:" + encoding, 60),
+            Field.optional(Key.ENDINGS, "EOL:" + endings, 30),
+            Field.required(Key.MODE, reading ? "READ" : "INS", reading ? "READ" : "INS", 90));
+        var placed = StatusBarLayout.place(fields, right, columns, row);
+        return new Placement(placed.text(), placed.bounds(Key.ENCODING, row), placed.bounds(Key.ENDINGS, row));
+    }
     record Placement(String text, Rect encoding, Rect endings) {}
 }

@@ -65,9 +65,10 @@ class PathIdentityIntegrationTest {
                 window.event(KeyStroke.of(KeyStroke.Key.A, KeyStroke.Modifier.CTRL));
                 window.event(new TextInput(PathPresentation.full(target)));
                 window.event(KeyStroke.of(KeyStroke.Key.ENTER));
-                assertTrue(window.screenRow(window.height - 2).contains(PathPresentation.name(target)),
-                    window.screenRow(window.height - 2));
-                window.resize(8, 30);
+                String prompt = window.promptText().lines().map(String::stripTrailing).collect(Collectors.joining());
+                assertTrue(prompt.contains(PathPresentation.full(target)) || prompt.contains(PathPresentation.name(target)),
+                    window.promptText());
+                window.resize(4, 30);
                 window.event(new TextInput("y"));
                 assertEquals("untouched", Files.readString(target));
                 assertTrue(window.controller.running());

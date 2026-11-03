@@ -166,9 +166,9 @@ class EditorCommandRoutingIntegrationTest {
                 physical.event(KeyStroke.of(KeyStroke.Key.TAB));
                 aliased.command(step % 2 == 0 ? TuinkCommand.EDIT_INSERT_TAB : TuinkCommand.SEARCH_FOCUS_NEXT);
                 if (search) {
-                    assertEquals(physical.ui.searchEditorFocused, aliased.ui.searchEditorFocused);
+                    assertEquals(physical.selected().uiState().searchEditorFocused, aliased.selected().uiState().searchEditorFocused);
                     assertEquals(physical.host.searchFocusManager().focused(), aliased.host.searchFocusManager().focused());
-                    visitedDocument |= physical.ui.searchEditorFocused;
+                    visitedDocument |= physical.selected().uiState().searchEditorFocused;
                 } else {
                     assertEquals(physical.host.saveAsFocusManager().focused(), aliased.host.saveAsFocusManager().focused());
                     visitedDocument |= physical.host.saveAsFocusManager().focused().isEmpty();

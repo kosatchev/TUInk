@@ -82,6 +82,7 @@ final class TabUiState implements AutoCloseable {
             if (overwriteApproval != null) {
                 overwriteApproval.request().session().document().io().cancel(overwriteApproval.inspection());
             }
+
         } finally {
             pendingOpen = null;
             overwriteApproval = null;

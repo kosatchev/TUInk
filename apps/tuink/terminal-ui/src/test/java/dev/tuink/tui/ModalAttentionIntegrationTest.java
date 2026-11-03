@@ -91,8 +91,8 @@ class ModalAttentionIntegrationTest {
             Cell[][] before = snapshot(buffer);
             app.paintBlockingAttention(buffer, composition, true);
             assertAttention(before, buffer, new Rect(0, 0, 0, 0), false, WARNING);
-            if (composition.layers().helpPage() != null) {
-                assertFalse(composition.allowsScrollHints(), "document scrolling must not shift the help frame");
+            if (composition.layers().helpPage() != null || composition.layers().saveAsMode()) {
+                assertFalse(composition.allowsScrollHints(), "blocking layers invalidate document scroll reuse");
             } else {
                 assertTrue(composition.allowsScrollHints());
             }
@@ -220,7 +220,7 @@ class ModalAttentionIntegrationTest {
         TerminalEditorTextLayout textLayout = new TerminalEditorTextLayout(model);
         RenderPlanBuilder builder = RenderPlanBuilder.standalone(text -> List.of(), textLayout);
         EditorLayout layout = EditorLayout.resolve(model, textLayout, state, rows, cols, 1, prompt.height(), false, false, 4);
-        return new FrameComposition(new FrameComposition.Document(builder, model, state, layout, null),
+        return new FrameComposition(new FrameComposition.Document(builder, model, state, layout),
             new FrameComposition.Surface(new TopMenuView.TopBar(" File ", 6), "status", prompt, NotificationBar.hidden()),
             new FrameComposition.Search(false, "", SearchOptions.DEFAULT, false, null, false), layers, false, false, false);
     }

@@ -36,6 +36,7 @@ public final class SearchBarView {
     private final TextField replacementField;
     private final String row1;
     private final String row2;
+    private final String text;
     private final int queryStart;
     private final int queryWidth;
     private final int replacementStart;
@@ -91,6 +92,8 @@ public final class SearchBarView {
         int replaceLabelWidth = CellText.width(REPLACE_LABEL);
         boolean optionsVisible = optionLeftWidth - findLabelWidth >= MIN_FIELD_WIDTH;
         boolean actionsVisible = actionLeftWidth - replaceLabelWidth >= MIN_FIELD_WIDTH;
+        boolean compact = !optionsVisible || !actionsVisible;
+        if (compact) { optionLeftWidth = safeColumns; actionLeftWidth = safeColumns; }
         if (!optionsVisible) {
             optionLeftWidth = safeColumns;
         }
@@ -99,14 +102,23 @@ public final class SearchBarView {
         }
         this.queryStart = Math.min(findLabelWidth, optionLeftWidth);
         this.queryWidth = Math.max(0, optionLeftWidth - findLabelWidth);
-        this.replacementStart = Math.min(replaceLabelWidth, actionLeftWidth);
-        this.replacementWidth = Math.max(0, actionLeftWidth - replaceLabelWidth);
+        String replaceLabel = compact && safeColumns < 12 ? "Repl: " : REPLACE_LABEL;
+        int actualReplaceLabelWidth = CellText.width(replaceLabel);
+        this.replacementStart = Math.min(actualReplaceLabelWidth, actionLeftWidth);
+        this.replacementWidth = Math.max(0, actionLeftWidth - actualReplaceLabelWidth);
         this.row1 = CellText.fit(FIND_LABEL, safeColumns);
-        this.row2 = CellText.fit(REPLACE_LABEL, safeColumns);
+        this.row2 = CellText.fit(replaceLabel, safeColumns);
 
         ArrayList<ButtonSpec> placedButtons = new ArrayList<>(8);
-        appendButtons(placedButtons, optionTargets, optionsStart, 0, optionsVisible);
-        appendButtons(placedButtons, actionTargets, actionsStart, 1, actionsVisible);
+        List<String> rows = new ArrayList<>(List.of(row1, row2));
+        if (compact) {
+            appendFlow(placedButtons, optionTargets, rows, safeColumns);
+            appendFlow(placedButtons, actionTargets, rows, safeColumns);
+        } else {
+            appendButtons(placedButtons, optionTargets, optionsStart, 0, optionsVisible);
+            appendButtons(placedButtons, actionTargets, actionsStart, 1, actionsVisible);
+        }
+        this.text = String.join("\n", rows);
         this.buttons = List.copyOf(placedButtons);
     }
 
@@ -130,7 +142,7 @@ public final class SearchBarView {
 
     /** Raster content contains labels/background only; controls paint themselves. */
     public String text() {
-        return row1 + "\n" + row2;
+        return text;
     }
 
     public String row1() {
@@ -189,7 +201,7 @@ public final class SearchBarView {
             SearchNavigation.order(),
             SearchNavigation.order()
         );
-        return new Placement(row1, row2, scope, queryField, replacementField, replacementContextVisible);
+        return new Placement(row1, row2, text, scope, queryField, replacementField, replacementContextVisible);
     }
 
     /** Typed application intents emitted by the composed reusable controls. */
@@ -212,6 +224,7 @@ public final class SearchBarView {
     public static final class Placement {
         private final String row1;
         private final String row2;
+        private final String text;
         private final FocusScope<SearchFocus, Action> focusScope;
         private final TextField queryField;
         private final TextField replacementField;
@@ -220,6 +233,7 @@ public final class SearchBarView {
         private Placement(
             String row1,
             String row2,
+            String text,
             FocusScope<SearchFocus, Action> focusScope,
             TextField queryField,
             TextField replacementField,
@@ -227,6 +241,7 @@ public final class SearchBarView {
         ) {
             this.row1 = Objects.requireNonNull(row1, "row1");
             this.row2 = Objects.requireNonNull(row2, "row2");
+            this.text = Objects.requireNonNull(text, "text");
             this.focusScope = Objects.requireNonNull(focusScope, "focusScope");
             this.queryField = Objects.requireNonNull(queryField, "queryField");
             this.replacementField = Objects.requireNonNull(replacementField, "replacementField");
@@ -234,7 +249,7 @@ public final class SearchBarView {
         }
 
         public String text() {
-            return row1 + "\n" + row2;
+            return text;
         }
 
         public String row1() {
@@ -271,6 +286,28 @@ public final class SearchBarView {
                 .orElseThrow()
                 .placement()
                 .bounds();
+        }
+
+        /** Expanded bars navigate their painted rows; the ordinary two-row bar keeps its logical pairs. */
+        public SearchFocus verticalTarget(SearchFocus current, boolean up) {
+            if (text.indexOf('\n') == text.lastIndexOf('\n')) return SearchNavigation.vertical(current, up);
+            Rect origin = targetBounds(current);
+            SearchFocus best = current;
+            int nearestRow = Integer.MAX_VALUE;
+            long nearestColumn = Long.MAX_VALUE;
+            for (SearchFocus candidate : focusScope.tabOrder()) {
+                if (candidate == SearchFocus.FIND || candidate == SearchFocus.REPLACE) continue;
+                var target = focusScope.target(candidate).orElseThrow();
+                if (!target.focusEligible()) continue;
+                Rect bounds = target.placement().bounds();
+                int distance = up ? origin.y() - bounds.y() : bounds.y() - origin.y();
+                if (distance <= 0) continue;
+                long horizontal = Math.abs((2L * origin.x() + origin.width()) - (2L * bounds.x() + bounds.width()));
+                if (distance < nearestRow || distance == nearestRow && horizontal < nearestColumn) {
+                    best = candidate; nearestRow = distance; nearestColumn = horizontal;
+                }
+            }
+            return best;
         }
 
         /** Enters or reconciles the search scope without duplicating focus in application state. */
@@ -348,6 +385,24 @@ public final class SearchBarView {
             ));
             column += target.button().width() + 1;
         }
+    }
+
+    /** Narrow rows retain every action in the same focus scope instead of hiding whole clusters. */
+    private static void appendFlow(List<ButtonSpec> destination, List<ButtonTarget> targets,
+        List<String> rows, int columns) {
+        int column = 0;
+        boolean unavailable = false;
+        for (ButtonTarget target : targets) {
+            Button button = target.button();
+            if (button.width() > columns && target.target() == SearchFocus.ALL_BUTTON) button = new Button("Rpl all");
+            if (button.width() > columns && target.target() == SearchFocus.ALL) button = new Button("All");
+            boolean visible = button.width() <= columns;
+            if (column == 0 || column + button.width() > columns) { rows.add(" ".repeat(columns)); column = 0; }
+            destination.add(new ButtonSpec(target.target(), button, target.action(), rows.size() - 1, column, visible));
+            column += button.width() + 1;
+            unavailable |= !visible;
+        }
+        if (unavailable) rows.add(CellText.fit("Enlarge window", columns));
     }
 
     private static void addTarget(

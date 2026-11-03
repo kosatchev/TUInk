@@ -37,6 +37,53 @@ class FilePickerOpenWorkflowTest {
     @TempDir Path directory;
 
     @Test
+    void invalidLocationDoesNotStartIoOrAllocateADocument() {
+        try (OpenFileTreeController tree = new OpenFileTreeController(directory, false, false)) {
+            for (String value : List.of("", "invalid\u0000path")) {
+                var result = applyWithoutDocument(new OpenFileInputRouter.OpenLocation(value), tree);
+                assertTrue(result.openFileMode());
+                assertEquals(FilePickerOpenWorkflow.NoticeKind.WARNING, result.noticeKind());
+                assertNull(result.pendingOpen());
+                assertNull(result.openedDocument());
+                assertEquals(directory, tree.root());
+            }
+        }
+    }
+
+    @Test
+    void relativeLocationRetainsTheSelectedEncodingAndDirectoryCompletionIsOnlyANavigationIntent() throws Exception {
+        Path target = Files.createDirectory(directory.resolve("folder with spaces"));
+        try (OpenFileTreeController tree = new OpenFileTreeController(directory, false, false)) {
+            var result = FilePickerOpenWorkflow.apply(new OpenFileInputRouter.OpenLocation("folder with spaces"), tree,
+                List.of(), -1, () -> fail("location submission must not create a document"), DocumentOpenMode.WINDOWS_1251);
+            var request = result.pendingOpen();
+            assertEquals(target, request.path());
+            assertEquals(DocumentOpenMode.WINDOWS_1251, request.mode());
+            var inspected = request.inspect();
+            assertEquals(target, inspected.directory());
+            assertNull(inspected.document());
+            var completed = FilePickerOpenWorkflow.completeInspected(request, inspected, null, List.of(), -1,
+                () -> fail("directory completion must not create a document"));
+            assertTrue(completed.openFileMode());
+            assertEquals(target, completed.navigateDirectory());
+            assertEquals(directory, tree.root(), "the owner applies the navigation intent");
+        }
+    }
+
+    @Test
+    void cancelledLocationCannotPublishDirectoryNavigation() throws Exception {
+        try (OpenFileTreeController tree = new OpenFileTreeController(directory, false, false)) {
+            var result = applyWithoutDocument(new OpenFileInputRouter.OpenLocation(directory.toString()), tree);
+            var target = result.pendingOpen().inspect();
+            result.pendingOpen().cancel();
+            var completed = FilePickerOpenWorkflow.completeInspected(result.pendingOpen(), target, null, List.of(), -1,
+                () -> fail("cancelled location must not create a document"));
+            assertFalse(completed.openFileMode());
+            assertNull(completed.navigateDirectory());
+        }
+    }
+
+    @Test
     void treeAndCancelIntentsDoNotCreateDocuments() throws Exception {
         Path child = Files.createDirectory(directory.resolve("child"));
         try (OpenFileTreeController tree = new OpenFileTreeController(directory, true, false)) {

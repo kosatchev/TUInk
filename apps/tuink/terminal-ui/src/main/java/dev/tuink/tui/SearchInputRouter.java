@@ -12,7 +12,6 @@ import dev.tuiframe.widget.InteractionResult;
 import dev.tuiframe.widget.RoutedTarget;
 import dev.tuiframe.widget.TextField;
 import dev.tuink.tui.flow.SearchFocus;
-import dev.tuink.tui.flow.SearchNavigation;
 import dev.tuink.tui.ui.SearchBarView;
 import dev.tuink.tui.command.TuinkCommand;
 import dev.tuink.core.EditorClipboard;
@@ -117,7 +116,7 @@ final class SearchInputRouter {
             }
             if (stroke.key() == KeyStroke.Key.ARROW_UP
                 || stroke.key() == KeyStroke.Key.ARROW_DOWN) {
-                return routeVertical(focusManager, placement.focusScope(), stroke.key());
+                return routeVertical(focusManager, placement, stroke.key());
             }
             if (stroke.key() == KeyStroke.Key.ARROW_LEFT
                 || stroke.key() == KeyStroke.Key.ARROW_RIGHT) {
@@ -183,7 +182,7 @@ final class SearchInputRouter {
 
     private static Result routeVertical(
         FocusManager<SearchFocus> focusManager,
-        FocusScope<SearchFocus, SearchBarView.Action> scope,
+        SearchBarView.Placement placement,
         KeyStroke.Key key
     ) {
         SearchFocus current = focusManager.focused().orElse(null);
@@ -193,7 +192,7 @@ final class SearchInputRouter {
         if (isField(current)) {
             return Result.CAPTURED;
         }
-        focusManager.focus(scope, SearchNavigation.vertical(current, key == KeyStroke.Key.ARROW_UP));
+        focusManager.focus(placement.focusScope(), placement.verticalTarget(current, key == KeyStroke.Key.ARROW_UP));
         return Result.CAPTURED;
     }
 

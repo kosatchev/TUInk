@@ -12,7 +12,9 @@ import dev.tuiframe.widget.RoutedTarget;
 import dev.tuiframe.widget.Theme;
 import dev.tuiframe.widget.WidgetState;
 import dev.tuiframe.cell.CellText;
+import dev.tuiframe.text.TerminalText;
 import dev.tuink.tui.flow.ConfirmChoice;
+import dev.tuink.tui.flow.ConfirmationShortcuts;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -25,6 +27,7 @@ public final class ConfirmBarView {
     private final ConfirmChoice initialChoice;
     private final boolean decisionsAvailable;
     private final int questionWidth;
+    private final List<Rect> contextBounds;
 
     private ConfirmBarView(
         String row,
@@ -33,11 +36,107 @@ public final class ConfirmBarView {
         boolean decisionsAvailable,
         int questionWidth
     ) {
+        this(row, choices, initialChoice, decisionsAvailable, questionWidth,
+            List.of(new Rect(0, 0, questionWidth, 1)));
+    }
+
+    private ConfirmBarView(String row, List<ChoiceButton> choices, ConfirmChoice initialChoice,
+        boolean decisionsAvailable, int questionWidth, List<Rect> contextBounds) {
         this.row = Objects.requireNonNull(row, "row");
         this.choices = List.copyOf(Objects.requireNonNull(choices, "choices"));
         this.initialChoice = Objects.requireNonNull(initialChoice, "initialChoice");
         this.decisionsAvailable = decisionsAvailable;
         this.questionWidth = questionWidth;
+        this.contextBounds = List.copyOf(contextBounds);
+    }
+
+    /** Responsive application prompt. All context and hints must fit before an action can run. */
+    public static ConfirmBarView responsive(String prompt, int cols, int availableRows,
+        String primaryLabel, String secondaryLabel, boolean includeCancel, String cancelLabel,
+        ConfirmationShortcuts shortcuts) {
+        Objects.requireNonNull(shortcuts, "shortcuts");
+        String question = Objects.requireNonNullElse(prompt, "");
+        if (cols < 6 || availableRows < 1 || question.isBlank()) return build("", cols);
+        String primary = compactLabel(primaryLabel, cols), secondary = compactLabel(secondaryLabel, cols);
+        String cancel = compactLabel(cancelLabel, cols);
+        String hint = "Y" + (shortcuts.saveShortcut() ? "/Ctrl+S" : "") + "=" + primaryLabel;
+        String discardKeys = shortcuts.noDecision() == ConfirmChoice.DISCARD ? "N" : "";
+        if (shortcuts.ctrlQDecision() == ConfirmChoice.DISCARD)
+            discardKeys += (discardKeys.isEmpty() ? "" : "/") + "Ctrl+Q";
+        if (includeCancel && !discardKeys.isEmpty()) hint += "  " + discardKeys + "=" + secondaryLabel;
+        String cancelKeys = shortcuts.noDecision() == ConfirmChoice.CANCEL ? "N/Esc" : "Esc";
+        if (shortcuts.ctrlQDecision() == ConfirmChoice.CANCEL) cancelKeys += "/Ctrl+Q";
+        hint += "  " + cancelKeys + "=" + cancelLabel;
+        if (!secondary.equals(secondaryLabel)) hint += "  " + secondary + "=" + secondaryLabel;
+        List<String> lines = new ArrayList<>(wrap(hint, cols));
+        List<Rect> context = new ArrayList<>();
+        for (int row = 0; row < lines.size(); row++) context.add(new Rect(0, row, CellText.width(lines.get(row)), 1));
+        String cluster = actionsCluster(primary, secondary, includeCancel, cancel);
+        List<ChoiceButton> choices = new ArrayList<>();
+        if (CellText.width(question) + CellText.width(cluster) + 1 <= cols) {
+            int row = lines.size();
+            lines.add(alignLeftRight(question, cluster, cols, 1));
+            context.add(new Rect(0, row, CellText.width(question), 1));
+            int column = rightClusterStart(lines.get(row), cluster);
+            column = addChoice(choices, ConfirmChoice.SAVE, primary, row, column);
+            column = addChoice(choices, includeCancel ? ConfirmChoice.DISCARD : ConfirmChoice.CANCEL, secondary, row, column);
+            if (includeCancel) addChoice(choices, ConfirmChoice.CANCEL, cancel, row, column);
+        } else {
+            for (String line : wrap(question, cols)) {
+                context.add(new Rect(0, lines.size(), CellText.width(line), 1));
+                lines.add(CellText.fit(line, cols));
+            }
+            List<String> labels = includeCancel ? List.of(primary, secondary, cancel) : List.of(primary, secondary);
+            List<ConfirmChoice> ids = includeCancel ? List.of(ConfirmChoice.SAVE, ConfirmChoice.DISCARD, ConfirmChoice.CANCEL)
+                : List.of(ConfirmChoice.SAVE, ConfirmChoice.CANCEL);
+            int column = 0;
+            for (int index = 0; index < labels.size(); index++) {
+                Button button = new Button(labels.get(index));
+                if (column == 0 || column + button.width() > cols) { lines.add(" ".repeat(cols)); column = 0; }
+                int row = lines.size() - 1;
+                choices.add(new ChoiceButton(ids.get(index), new Button(row, column, labels.get(index))));
+                String text = lines.get(row);
+                lines.set(row, CellText.clip(text, 0, column) + button.renderedText()
+                    + CellText.clip(text, column + button.width(), cols - column - button.width()));
+                column += button.width() + 1;
+            }
+        }
+        if (lines.size() > availableRows || lines.size() > 32) return build("", cols);
+        return new ConfirmBarView(String.join("\n", lines), choices, ConfirmChoice.CANCEL, true,
+            CellText.width(question), context);
+    }
+
+    private static int addChoice(List<ChoiceButton> choices, ConfirmChoice id, String label, int row, int column) {
+        Button button = new Button(row, column, label);
+        choices.add(new ChoiceButton(id, button));
+        return column + button.width() + 1;
+    }
+
+    private static String compactLabel(String label, int cols) {
+        if (CellText.width(label) + 2 <= cols) return label;
+        return switch (label) {
+            case "Choose another name" -> cols >= 16 ? "Another name" : "Name";
+            case "Discard All" -> "Drop all";
+            case "Open UTF-16LE" -> "Open";
+            case "Save UTF-8" -> "Save";
+            case "Save All", "Save As" -> "Save";
+            default -> CellText.clip(label, 0, cols - 2);
+        };
+    }
+
+    private static List<String> wrap(String text, int cols) {
+        List<String> lines = new ArrayList<>();
+        StringBuilder line = new StringBuilder();
+        int cells = 0;
+        var cursor = TerminalText.graphemeCursor(text);
+        while (cursor.advance()) {
+            String grapheme = text.substring(cursor.start(), cursor.end());
+            int width = CellText.width(grapheme);
+            if (cells > 0 && cells + width > cols) { lines.add(line.toString()); line.setLength(0); cells = 0; }
+            line.append(grapheme); cells += width;
+        }
+        if (!line.isEmpty()) lines.add(line.toString());
+        return lines;
     }
 
     public static ConfirmBarView build(String prompt, int cols) {
@@ -117,13 +216,13 @@ public final class ConfirmBarView {
         Objects.requireNonNull(scopeId, "scopeId");
         Rect safeInteractionClip = Objects.requireNonNull(interactionClip, "interactionClip");
         FocusSpace space = FocusSpace.root(safeInteractionClip);
-        boolean questionVisible = decisionsAvailable
-            && InteractionVisibility.FULL_BOUNDS.allows(new Rect(0, topRow, questionWidth, 1), safeInteractionClip);
+        boolean questionVisible = decisionsAvailable && contextBounds.stream().allMatch(bounds ->
+            InteractionVisibility.FULL_BOUNDS.allows(new Rect(bounds.x(), topRow + bounds.y(), bounds.width(), bounds.height()), safeInteractionClip));
         List<RoutedTarget<ConfirmChoice, Button.Action>> targets = new ArrayList<>(choices.size());
         List<ConfirmChoice> tabOrder = new ArrayList<>(choices.size());
         for (ChoiceButton choice : choices) {
             Button button = choice.button();
-            Rect bounds = new Rect(button.col(), topRow, button.width(), 1);
+            Rect bounds = new Rect(button.col(), topRow + button.row(), button.width(), 1);
             targets.add(new RoutedTarget<>(
                 choice.choice(),
                 button.layout(bounds),

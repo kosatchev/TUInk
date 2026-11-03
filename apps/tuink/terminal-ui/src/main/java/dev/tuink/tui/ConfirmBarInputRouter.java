@@ -12,6 +12,7 @@ import dev.tuiframe.widget.FocusScope;
 import dev.tuiframe.widget.InteractionResult;
 import dev.tuiframe.widget.RoutedTarget;
 import dev.tuink.tui.flow.ConfirmChoice;
+import dev.tuink.tui.flow.ConfirmationShortcuts;
 import dev.tuink.tui.ui.ConfirmBarView;
 import java.util.List;
 import java.util.Objects;
@@ -19,50 +20,19 @@ import java.util.Set;
 
 /** TUInk policy adapter for one placed multi-target confirmation prompt. */
 final class ConfirmBarInputRouter {
-    record Policy(
-        ConfirmChoice yesDecision,
-        ConfirmChoice noDecision,
-        ConfirmChoice escapeDecision,
-        ConfirmChoice ctrlQDecision,
-        boolean pointerMissBubbles
-    ) {
-        private static final Policy RECOVERY = standard(ConfirmChoice.SAVE, false);
-        private static final Policy OVERWRITE = standard(ConfirmChoice.SAVE, false);
-        private static final Policy QUIT = standard(ConfirmChoice.SAVE, false);
-        private static final Policy CLOSE_TAB = standard(ConfirmChoice.SAVE, true);
+    record Policy(ConfirmationShortcuts shortcuts, boolean pointerMissBubbles) {
+        private static final Policy RECOVERY = new Policy(ConfirmationShortcuts.STANDARD, false);
+        private static final Policy OVERWRITE = new Policy(ConfirmationShortcuts.SAVE, false);
+        private static final Policy QUIT = new Policy(ConfirmationShortcuts.QUIT, false);
+        private static final Policy CLOSE_TAB = new Policy(ConfirmationShortcuts.SAVE_CHANGES, true);
 
-        Policy {
-            Objects.requireNonNull(yesDecision, "yesDecision");
-            Objects.requireNonNull(noDecision, "noDecision");
-            Objects.requireNonNull(escapeDecision, "escapeDecision");
-            Objects.requireNonNull(ctrlQDecision, "ctrlQDecision");
-        }
+        Policy { Objects.requireNonNull(shortcuts, "shortcuts"); }
 
-        static Policy recovery() {
-            return RECOVERY;
-        }
-
-        static Policy overwrite() {
-            return OVERWRITE;
-        }
-
-        static Policy quit() {
-            return QUIT;
-        }
-
-        static Policy closeTab() {
-            return CLOSE_TAB;
-        }
-
-        private static Policy standard(ConfirmChoice yesDecision, boolean pointerMissBubbles) {
-            return new Policy(
-                yesDecision,
-                ConfirmChoice.CANCEL,
-                ConfirmChoice.CANCEL,
-                ConfirmChoice.CANCEL,
-                pointerMissBubbles
-            );
-        }
+        static Policy recovery() { return RECOVERY; }
+        static Policy overwrite() { return OVERWRITE; }
+        static Policy quit() { return QUIT; }
+        static Policy closeTab() { return CLOSE_TAB; }
+        static Policy open() { return RECOVERY; }
     }
 
     record Result(boolean consumed, ConfirmChoice decision) {
@@ -108,7 +78,7 @@ final class ConfirmBarInputRouter {
         }
 
         if (event instanceof TextInput text) {
-            ConfirmChoice mnemonic = mnemonicDecision(text.text(), policy);
+            ConfirmChoice mnemonic = mnemonicDecision(text.text(), policy.shortcuts());
             if (mnemonic != null) {
                 return decide(focusManager, placement, mnemonic);
             }
@@ -151,7 +121,11 @@ final class ConfirmBarInputRouter {
         FocusScope<ConfirmChoice, Button.Action> scope = placement.focusScope();
         if (stroke.key() == KeyStroke.Key.Q
             && stroke.modifiers().equals(Set.of(KeyStroke.Modifier.CTRL))) {
-            return decide(focusManager, placement, policy.ctrlQDecision());
+            return decide(focusManager, placement, policy.shortcuts().ctrlQDecision());
+        }
+        if (policy.shortcuts().saveShortcut() && stroke.key() == KeyStroke.Key.S
+            && stroke.modifiers().equals(Set.of(KeyStroke.Modifier.CTRL))) {
+            return decide(focusManager, placement, ConfirmChoice.SAVE);
         }
         if (!stroke.modifiers().isEmpty()) {
             return null;
@@ -173,21 +147,21 @@ final class ConfirmBarInputRouter {
                 focusLast(focusManager, scope);
                 yield Result.CAPTURED;
             }
-            case ESCAPE -> decide(focusManager, placement, policy.escapeDecision());
+            case ESCAPE -> decide(focusManager, placement, ConfirmChoice.CANCEL);
             default -> null;
         };
     }
 
-    private static ConfirmChoice mnemonicDecision(String text, Policy policy) {
+    private static ConfirmChoice mnemonicDecision(String text, ConfirmationShortcuts shortcuts) {
         if (text == null || text.codePointCount(0, text.length()) != 1) {
             return null;
         }
         int codePoint = Character.toLowerCase(text.codePointAt(0));
         if (codePoint == 'y') {
-            return policy.yesDecision();
+            return ConfirmChoice.SAVE;
         }
         if (codePoint == 'n') {
-            return policy.noDecision();
+            return shortcuts.noDecision();
         }
         return null;
     }

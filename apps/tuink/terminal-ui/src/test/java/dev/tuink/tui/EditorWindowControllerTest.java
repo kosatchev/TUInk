@@ -68,7 +68,7 @@ class EditorWindowControllerTest {
 
             fixture.event(ctrl(KeyStroke.Key.F));
             fixture.event(new TextInput("needle"));
-            assertTrue(fixture.ui.searchMode);
+            assertTrue(fixture.selected().uiState().searchMode);
             assertFalse(fixture.editorView.isMouseSelecting());
             Position caret = fixture.active().state().getCursor();
             Position anchor = fixture.active().state().getSelectionAnchor();
@@ -86,7 +86,7 @@ class EditorWindowControllerTest {
             fixture.pointer(PointerEvent.Kind.DRAG, 6, 30);
             fixture.pointer(PointerEvent.Kind.RELEASE, 6, 30);
             assertTrue(fixture.active().state().hasSelection());
-            assertTrue(fixture.ui.searchEditorFocused);
+            assertTrue(fixture.selected().uiState().searchEditorFocused);
             assertEquals("needleX", fixture.query.text());
         }
     }
@@ -103,8 +103,10 @@ class EditorWindowControllerTest {
 
             fixture.event(KeyStroke.of(KeyStroke.Key.E, KeyStroke.Modifier.ALT));
             assertTrue(fixture.menu.isOpen());
-            fixture.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
-            fixture.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
+            for (int step = 0; fixture.menu.state().selectedEntryIndex() != 2 && step < 8; step++) {
+                fixture.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
+            }
+            assertEquals(2, fixture.menu.state().selectedEntryIndex(), "Cut must be reachable from field focus");
             fixture.event(KeyStroke.of(KeyStroke.Key.ENTER));
 
             assertFalse(fixture.menu.isOpen());
@@ -174,7 +176,7 @@ class EditorWindowControllerTest {
             fixture.event(KeyStroke.of(KeyStroke.Key.ENTER));
             assertFalse(fixture.query.mouseSelecting());
             fixture.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
-            assertTrue(fixture.ui.searchMode);
+            assertTrue(fixture.selected().uiState().searchMode);
             assertEquals(SearchFocus.FIND, fixture.host.searchFocusManager().focused().orElseThrow());
             fixture.event(ctrl(KeyStroke.Key.A));
             fixture.event(new TextInput("resumed"));
@@ -388,7 +390,7 @@ class EditorWindowControllerTest {
         if (target == FieldTarget.SAVE_AS) {
             assertEquals(SaveAsBarView.Target.FIELD, fixture.host.saveAsFocusManager().focused().orElseThrow());
         } else {
-            assertFalse(fixture.ui.searchEditorFocused);
+            assertFalse(fixture.selected().uiState().searchEditorFocused);
             assertEquals(target == FieldTarget.FIND ? SearchFocus.FIND : SearchFocus.REPLACE,
                 fixture.host.searchFocusManager().focused().orElseThrow());
         }

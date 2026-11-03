@@ -64,7 +64,7 @@ final class SearchPresentation {
             failedKey = key;
             // The input owns the original query. An empty render query prevents
             // another expensive scan and -1 never masquerades as zero matches.
-            failedSnapshot = new Snapshot("", options, -1, limit.getMessage(), new boolean[tabs.size()],
+            failedSnapshot = new Snapshot("", options, -1, limit.summary(), new boolean[tabs.size()],
                 limit.getMessage());
             return failedSnapshot;
         }

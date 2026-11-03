@@ -393,10 +393,20 @@ class SearchClipboardIntegrationTest {
             assertTrue(index >= 0, "command must appear in Edit menu");
             window.event(KeyStroke.of(KeyStroke.Key.F2));
             assertTrue(window.menu.isOpen());
-            for (int step = 0; step < index; step++) {
-                window.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
+            var descriptors = TopMenuView.build(ui, List.of(), -1, "Cyan", new CommandRouter(),
+                window.menu.state(), window.controller.activeSurface());
+            var item = (dev.tuiframe.widget.MenuBar.Item<?>) descriptors.menus()
+                .get(TopMenuController.EDIT_INDEX).entries().get(index);
+            if (!item.enabled()) {
+                // An unavailable command has no keyboard activation; close without invoking another row.
+                window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
+            } else {
+                for (int step = 0; window.menu.state().selectedEntryIndex() != index && step < editEntries.size(); step++) {
+                    window.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
+                }
+                assertEquals(index, window.menu.state().selectedEntryIndex());
+                window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             }
-            window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             assertFalse(window.menu.isOpen());
         }
 

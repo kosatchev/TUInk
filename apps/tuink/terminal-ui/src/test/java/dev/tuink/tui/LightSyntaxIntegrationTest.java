@@ -23,7 +23,7 @@ class LightSyntaxIntegrationTest {
             window.command(TuinkCommand.VIEW_CYCLE_THEME);
             window.command(TuinkCommand.VIEW_CYCLE_THEME);
             assertEquals(UiStyles.Theme.LIGHT, window.host.theme);
-            assertFalse(window.ui.syntaxHighlightingAvailable);
+            assertFalse(window.controller.activeSurface().syntaxAvailable());
             assertTrue(window.ui.syntaxHighlightingSetting);
 
             window.command(TuinkCommand.MENU_VIEW);
@@ -43,7 +43,7 @@ class LightSyntaxIntegrationTest {
 
             window.command(TuinkCommand.VIEW_CYCLE_THEME);
             assertEquals(UiStyles.Theme.CYAN, window.host.theme);
-            assertTrue(window.ui.syntaxHighlightingAvailable);
+            assertTrue(window.controller.activeSurface().syntaxAvailable());
             assertTrue(window.host.effectiveSyntaxHighlighting(window.ui.syntaxHighlightingSetting));
             assertEquals("keep", window.active().tabSession().model().getLine(0));
             assertFalse(window.active().state().isDirty());

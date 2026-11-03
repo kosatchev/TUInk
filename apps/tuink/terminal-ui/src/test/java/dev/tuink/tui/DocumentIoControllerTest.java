@@ -17,6 +17,85 @@ import org.junit.jupiter.api.Timeout;
 
 class DocumentIoControllerTest {
     @Test
+    void cancelledCompletedReceiptIsDisposedOnTheWorkerExactlyOnce() throws Exception {
+        Queue<Runnable> queued = new ArrayDeque<>();
+        AtomicInteger disposed = new AtomicInteger();
+        AtomicReference<Thread> cleanupThread = new AtomicReference<>();
+        Thread owner = Thread.currentThread();
+        try (var io = new DocumentIoController(queued::add)) {
+            io.submit(() -> "claimed draft", ignored -> fail("cancelled receipt must not publish"), value -> {
+                assertEquals("claimed draft", value);
+                cleanupThread.set(Thread.currentThread());
+                disposed.incrementAndGet();
+            });
+            queued.remove().run();
+            assertTrue(io.cancelRead());
+            assertFalse(io.cancelRead());
+            assertEquals(0, disposed.get(), "cancellation must not run filesystem cleanup on the UI owner");
+            Thread cleanup = new Thread(queued.remove());
+            cleanup.start();
+            cleanup.join(5000);
+            assertFalse(cleanup.isAlive());
+            assertEquals(1, disposed.get());
+            assertNotSame(owner, cleanupThread.get());
+            assertFalse(io.collect());
+        }
+    }
+
+    @Test
+    @Timeout(5)
+    void cancelledProviderThatFinishesLateDisposesItsReceiptBeforeReturning() throws Exception {
+        Queue<Runnable> queued = new ArrayDeque<>();
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch finish = new CountDownLatch(1);
+        AtomicInteger disposed = new AtomicInteger();
+        try (var io = new DocumentIoController(queued::add)) {
+            io.submit(() -> {
+                entered.countDown();
+                for (;;) {
+                    try { finish.await(); break; }
+                    catch (InterruptedException ignored) { /* This provider finishes its ownership transaction. */ }
+                }
+                return "late claim";
+            }, ignored -> fail("late receipt must not publish"), value -> disposed.incrementAndGet());
+            Thread worker = new Thread(queued.remove());
+            worker.start();
+            try {
+                assertTrue(entered.await(2, TimeUnit.SECONDS));
+                assertTrue(io.cancelRead());
+                assertFalse(io.busy());
+            } finally {
+                finish.countDown();
+                worker.join(2000);
+            }
+            assertFalse(worker.isAlive());
+            assertEquals(1, disposed.get());
+            assertFalse(io.collect());
+        }
+    }
+
+    @Test
+    void shutdownDisposesAReadyUnpublishedReceiptAndNormalPublicationTransfersOwnership() {
+        Queue<Runnable> queued = new ArrayDeque<>();
+        AtomicInteger disposed = new AtomicInteger();
+        AtomicInteger published = new AtomicInteger();
+        var io = new DocumentIoController(queued::add);
+        io.submit(() -> "accepted", result -> published.incrementAndGet(), value -> disposed.incrementAndGet());
+        queued.remove().run();
+        assertTrue(io.collect());
+        assertEquals(1, published.get());
+        assertEquals(0, disposed.get());
+        io.submit(() -> "unpublished", result -> fail("shutdown must not publish the prompt"),
+            value -> disposed.incrementAndGet());
+        queued.remove().run();
+        io.close(0);
+        assertEquals(0, disposed.get());
+        queued.remove().run();
+        assertEquals(1, disposed.get());
+        assertEquals(1, published.get());
+    }
+
+    @Test
     void receiptReadyAtTheQuitDeadlineCanStartTheNextSave() {
         Queue<Runnable> queued = new ArrayDeque<>();
         AtomicReference<String> published = new AtomicReference<>();
@@ -25,10 +104,10 @@ class DocumentIoControllerTest {
                 published.set(result.value());
                 io.submitSave(() -> "second", next -> published.set(next.value()));
             });
-            io.beginQuitWait(100L);
+            var expiring = io.pendingOperation();
             queued.remove().run();
 
-            assertDoesNotThrow(() -> io.checkQuitWait(5_000_000_100L));
+            assertDoesNotThrow(() -> io.expireSave(expiring));
 
             assertEquals("first", published.get());
             assertTrue(io.busy(), "the ready receipt may continue a multi-document quit");
@@ -83,11 +162,14 @@ class DocumentIoControllerTest {
     @Test
     void rejectedWorkerSubmissionUsesTheSameCompletionAndReleasesTheSlot() {
         AtomicReference<IOException> reported = new AtomicReference<>();
+        AtomicReference<DocumentIoController.Operation> rejected = new AtomicReference<>();
         try (DocumentIoController io = new DocumentIoController(task -> {
             throw new java.util.concurrent.RejectedExecutionException("worker unavailable");
         })) {
-            io.submit(() -> "never", result -> reported.set(result.failure()));
+            io.submit(() -> "never", result -> { rejected.set(result.operation()); reported.set(result.failure()); });
             assertNotNull(reported.get());
+            assertNotNull(rejected.get());
+            assertEquals(DocumentIoController.Kind.READ, rejected.get().kind());
             assertInstanceOf(java.util.concurrent.RejectedExecutionException.class, reported.get().getCause());
             assertFalse(io.busy());
         }
@@ -214,14 +296,20 @@ class DocumentIoControllerTest {
             }, ignored -> replies.incrementAndGet());
             assertTrue(started.await(5, TimeUnit.SECONDS));
 
-            io.beginQuitWait(100L);
-            io.beginQuitWait(4_000_000_100L);
-            assertDoesNotThrow(() -> io.checkQuitWait(5_000_000_099L));
+            var recipient = UiRecipient.window(new TabUiState(), null);
+            var requested = WindowCloseWorkflow.request(WindowCloseWorkflow.State.open(), recipient, io.pendingOperation());
+            var waiting = WindowCloseWorkflow.prepared(requested.state(), io.pendingOperation(),
+                WindowCloseWorkflow.Policy.LIVE_RECOVERY, WindowCloseWorkflow.Continuation.RECHECK_DOCUMENTS, 100L, true);
+            var repeated = WindowCloseWorkflow.request(waiting.state(), recipient, io.pendingOperation());
+            assertSame(waiting.state(), repeated.state());
+            assertEquals(WindowCloseWorkflow.Effect.NONE,
+                WindowCloseWorkflow.tick(repeated.state(), io.pendingOperation(), 5_000_000_099L).effect());
             assertTrue(io.busy(), "publication keeps its chance to finish before the original deadline");
             assertTrue(operation.publishing());
             assertNull(interrupted.get());
             IllegalStateException failure = assertThrows(IllegalStateException.class,
-                () -> io.checkQuitWait(5_000_000_100L));
+                () -> io.expireSave(WindowCloseWorkflow.tick(repeated.state(), io.pendingOperation(),
+                    5_000_000_100L).state().waiting().operation()));
 
             assertTrue(failure.getMessage().contains("unknown"));
             assertTrue(failure.getMessage().contains("recovery"));
@@ -253,20 +341,43 @@ class DocumentIoControllerTest {
         AtomicReference<String> saved = new AtomicReference<>();
         try (DocumentIoController io = new DocumentIoController(queued::add)) {
             io.submitSave(() -> "first save", result -> saved.set(result.value()));
-            io.beginQuitWait(100L);
+            var first = io.pendingOperation();
             queued.remove().run();
             assertTrue(io.collect());
             assertEquals("first save", saved.get());
-            assertDoesNotThrow(() -> io.checkQuitWait(5_000_000_100L));
+            assertDoesNotThrow(() -> io.expireSave(first));
 
             io.submitSave(() -> "next save", result -> saved.set(result.value()));
-            assertDoesNotThrow(() -> io.checkQuitWait(100_000_000_000L),
+            var next = io.pendingOperation();
+            assertNotSame(first, next);
+            assertDoesNotThrow(() -> io.expireSave(first),
                 "a later operation must not inherit an earlier quit deadline");
+            assertSame(next, io.pendingOperation());
             assertTrue(io.busy());
             assertEquals("first save", saved.get());
             queued.remove().run();
             assertTrue(io.collect());
             assertEquals("next save", saved.get());
+        }
+    }
+
+    @Test
+    void aForeignOrOldTokenCannotCollectOrExpireAnotherOperation() {
+        Queue<Runnable> queued = new ArrayDeque<>();
+        AtomicReference<DocumentIoController.Operation> completed = new AtomicReference<>();
+        try (DocumentIoController io = new DocumentIoController(queued::add)) {
+            io.submitSave(() -> "saved", result -> completed.set(result.operation()));
+            var pending = io.pendingOperation();
+            var foreign = new DocumentIoController.Operation(pending.sequence(), pending.kind());
+            assertFalse(io.collect(foreign));
+            assertDoesNotThrow(() -> io.expireSave(foreign));
+            assertSame(pending, io.pendingOperation());
+            queued.remove().run();
+            assertFalse(io.collect(foreign));
+            assertTrue(io.collect(pending));
+            assertSame(pending, completed.get());
+            assertNull(io.pendingOperation());
+            assertDoesNotThrow(() -> io.expireSave(pending));
         }
     }
 

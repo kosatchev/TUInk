@@ -1,11 +1,17 @@
 package dev.tuink.tui;
 
+import dev.tuink.editor.document.PresentationGroupId;
+
+import dev.tuink.editor.document.PresentationId;
+
 import dev.tuink.storage.jvm.JvmDocumentStorage;
 import dev.tuink.editor.session.recovery.RecoveryCoordinator;
 import dev.tuink.editor.session.recovery.RecoveryParticipant;
 import dev.tuink.editor.session.recovery.PreparedCheckpoint;
 import dev.tuink.editor.document.DocumentId;
 import dev.tuink.editor.document.ViewId;
+import dev.tuink.editor.document.PresentationId;
+import dev.tuink.editor.document.PresentationGroupId;
 import dev.tuink.editor.session.document.EditorDocumentSession;
 import dev.tuink.editor.session.document.EditorWorkspace;
 import dev.tuink.editor.document.TextPosition;
@@ -54,7 +60,7 @@ import dev.tuiframe.runtime.TuiApplicationRunner;
 import dev.tuiframe.runtime.TuiEventLoop;
 import dev.tuiframe.screen.Frame;
 import dev.tuiframe.screen.ScreenCursor;
-import dev.tuiframe.screen.ScrollHint;
+import dev.tuiframe.scroll.ViewportScrollPolicy;
 import dev.tuiframe.scroll.ScrollInteraction;
 import dev.tuiframe.style.CellStyle;
 import dev.tuiframe.style.CellColor;
@@ -149,7 +155,6 @@ public class TerminalEditorApp {
     private HelpOverlayPlacement helpOverlayCache;
     boolean profileEnabled = false;
     final FrameProfiler frameProfiler = new FrameProfiler();
-    private FrameComposition.OpenTreeDiffKey lastOpenTreeDiffKey;
     private final FileAccessAdvisory fileAccess;
 
     public TerminalEditorApp() {
@@ -336,11 +341,6 @@ public class TerminalEditorApp {
         applyTheme(initialSettings.theme());
         SessionContext sessionContext = new SessionContext(List.of(newEditorTab()), 0);
         List<EditorTab> tabs = sessionContext.tabs();
-        int activeTabIndex = sessionContext.activeTabIndex();
-        TextModel model = sessionContext.model();
-        EditorState state = sessionContext.state();
-        EditorEngine engine = sessionContext.engine();
-        RenderPlanBuilder renderPlanBuilder = sessionContext.renderPlanBuilder();
         RenderRasterizer renderer = new RenderRasterizer(1, theme);
         EditorView editorView = new EditorView();
 
@@ -350,35 +350,13 @@ public class TerminalEditorApp {
         List<RecoveryStore.PendingSnapshot> startupRecoveryEntries = new ArrayList<>();
         TextField saveAsInput = new TextField(TextField.PastePolicy.PRESERVE_TABS);
         SaveAsSuggestionStore saveAsSuggestions = new SaveAsSuggestionStore();
-        UiSessionState uiSessionState = UiSessionState.from(
-            false,
-            initialSettings.showTabBar(),
-            initialSettings.wrapLines(),
-            initialSettings.wrapWords(),
-            initialSettings.readingMode(),
-            initialSettings.confirmOnClose(),
-            initialSettings.mouseMode(),
-            initialSettings.highlightActiveGutter(),
-            initialSettings.smartHomeEnd(),
-            initialSettings.autoIndent(),
-            initialSettings.autoPairs(),
-            initialSettings.autoList(),
-            initialSettings.visibleWhitespace(),
-            initialSettings.syntaxHighlighting(),
-            initialSettings.rainbowBrackets(),
-            initialSettings.autoSelectionHighlight(),
-            initialSettings.gutterDiffMode(),
-            initialSettings.tabWidth(),
-            initialSettings.tabInsertMode(),
-            false,
-            false,
-            false
-        );
+        UiSessionState uiSessionState = UiSessionState.from(initialSettings);
         TextField searchQueryInput = new TextField(TextField.PastePolicy.PRESERVE_TABS);
         TextField searchReplaceInput = new TextField(TextField.PastePolicy.PRESERVE_TABS);
         SearchController.SearchUiOptions searchUi = SearchController.SearchUiOptions.DEFAULT;
         TopMenuController topMenu = new TopMenuController();
-        Path initialOpenFileRoot = FilePickerOpenWorkflow.initialRoot(JvmDocumentStorage.pathOf(state.getCurrentResource()));
+        Path initialOpenFileRoot = FilePickerOpenWorkflow.initialRoot(
+            JvmDocumentStorage.pathOf(sessionContext.state().getCurrentResource()));
         try {
             RecoveryStore.DiscoveryResult recoveryLoad = recoveryStore.discover();
             startupRecoveryEntries.addAll(recoveryLoad.entries());
@@ -404,27 +382,10 @@ public class TerminalEditorApp {
             );
         }
 
-        if (cli.file() != null) {
-            Path file = cli.file();
-            try {
-                var resource = JvmDocumentStorage.resource(file);
-                var mode = cli.openMode();
-                var open = new dev.tuink.editor.session.document.PreparedDocumentOpen(
-                    resource, mode, mode == dev.tuink.editor.storage.DocumentOpenMode.DETECT);
-                tabs.get(activeTabIndex).documentSession().openPrepared(open.accept(open.read()));
-                renderPlanBuilder = tabs.get(activeTabIndex).documentSession()
-                    .newRenderPlanBuilder(resolveHighlighter(file));
-                sessionContext.replaceActiveRenderPlanBuilder(renderPlanBuilder);
-            } catch (IOException e) {
-                String reason = e.getMessage();
-                if (e instanceof dev.tuink.editor.storage.AmbiguousDocumentEncodingException) {
-                    reason += " Use --open-as-utf16le to select UTF-16LE.";
-                }
-                notification.error("Open failed: " + reason);
-            }
-        }
+        openInitialDocument(cli, sessionContext, notification);
 
         try (
+            renderer;
             OpenFileTreeController openFileTree = new OpenFileTreeController(
                 initialOpenFileRoot,
                 true,
@@ -441,7 +402,6 @@ public class TerminalEditorApp {
         ) {
             TerminalCapabilities effectiveCapabilities = terminal.capabilities();
             boolean colorEnabled = effectiveCapabilities.colorEnabled();
-            uiSessionState.mouseModeAvailable = effectiveCapabilities.mouseTracking();
 
             ScreenPresenter screenPresenter = terminal.screenPresenter();
             try {
@@ -455,8 +415,6 @@ public class TerminalEditorApp {
                 );
                 UiModalState initialModalState = modalState;
                 SearchController.SearchUiOptions initialSearchUi = searchUi;
-
-
 
                 runWithRecovery(
                     eventLoop,
@@ -478,7 +436,7 @@ public class TerminalEditorApp {
                         searchReplaceInput,
                         sessionContext,
                         startupRecoveryEntries,
-                        new EditorWindowController.TerminalAccess(terminal::width, terminal::height, terminal::setMouseTracking),
+                        new EditorWindowController.TerminalAccess(terminal::width, terminal::height, terminal::setMouseTracking, effectiveCapabilities::mouseTracking),
                         topMenu,
                         uiSessionState,
                         settingsSession,
@@ -489,7 +447,6 @@ public class TerminalEditorApp {
                     warning -> TerminalDiagnostics.error("Warning: " + warning)
                 );
             } finally {
-                renderer.close();
                 frameProfiler.close();
             }
         }
@@ -503,6 +460,28 @@ public class TerminalEditorApp {
             } catch (IOException e) {
                 TerminalDiagnostics.error("Warning: failed to save settings: " + e.getMessage());
             }
+        }
+    }
+
+    /** Keep bootstrap document references out of the long-lived window-loop stack frame. */
+    private void openInitialDocument(TuiCliOptions cli, SessionContext sessionContext, NotificationState notification) {
+        if (cli.file() == null) return;
+        Path file = cli.file();
+        try {
+            var resource = JvmDocumentStorage.resource(file);
+            var mode = cli.openMode();
+            var open = new dev.tuink.editor.session.document.PreparedDocumentOpen(
+                resource, mode, mode == dev.tuink.editor.storage.DocumentOpenMode.DETECT);
+            sessionContext.active().documentSession().openPrepared(open.accept(open.read()));
+            RenderPlanBuilder builder = sessionContext.active().documentSession()
+                .newRenderPlanBuilder(resolveHighlighter(file));
+            sessionContext.replaceActiveRenderPlanBuilder(builder);
+        } catch (IOException e) {
+            String reason = e.getMessage();
+            if (e instanceof dev.tuink.editor.storage.AmbiguousDocumentEncodingException) {
+                reason += " Use --open-as-utf16le to select UTF-16LE.";
+            }
+            notification.error("Open failed: " + reason);
         }
     }
 
@@ -794,9 +773,12 @@ public class TerminalEditorApp {
 
     /** Geometry of the visible owner, shared by blocked-pointer feedback and painting. */
     Rect blockingSurface(FrameComposition composition) {
-        FrameComposition.Layers layers = composition.layers();
-        int rows = composition.document().layout().rows();
-        int cols = composition.document().layout().cols();
+        return blockingSurface(composition.document().layout().rows(), composition.document().layout().cols(),
+            composition.document().layout().contentTopRow(), composition.surface(), composition.layers());
+    }
+
+    private Rect blockingSurface(int rows, int cols, int contentTopRow,
+        FrameComposition.Surface surface, FrameComposition.Layers layers) {
         if (layers.openFile().visible()) {
             return layers.openFile().dialog().frame().bounds();
         }
@@ -804,8 +786,8 @@ public class TerminalEditorApp {
             return layers.help().frame().bounds();
         }
         if (layers.format() != null) return layers.format().bounds();
-        return blockingSurface(rows, cols, composition.document().layout().contentTopRow(),
-            composition.surface().inlinePrompt().height(), layers.saveAsMode() || layers.confirm() != null);
+        return blockingSurface(rows, cols, contentTopRow, surface.inlinePrompt().height(),
+            layers.saveAsMode() || layers.confirm() != null);
     }
 
     Rect blockingSurface(int rows, int cols, int contentTop, int promptHeight, boolean inline) {
@@ -817,15 +799,20 @@ public class TerminalEditorApp {
     }
 
     void paintBlockingAttention(CellBuffer buffer, FrameComposition composition, boolean colorEnabled) {
-        if (!composition.layers().blockedInputHighlight()) {
+        paintBlockingAttention(buffer, composition.document().layout().rows(), composition.document().layout().cols(),
+            composition.document().layout().contentTopRow(), composition.surface(), composition.layers(), colorEnabled);
+    }
+
+    private void paintBlockingAttention(CellBuffer buffer, int rows, int cols, int contentTopRow,
+        FrameComposition.Surface surface, FrameComposition.Layers layers, boolean colorEnabled) {
+        if (!layers.blockedInputHighlight()) {
             return;
         }
         CellStyle accent = blockingAccent(colorEnabled);
         DialogAttentionPainter.paint(
             buffer,
-            blockingSurface(composition),
-            composition.layers().helpPage() != null || composition.layers().openFile().visible()
-                || composition.layers().format() != null,
+            blockingSurface(rows, cols, contentTopRow, surface, layers),
+            layers.helpPage() != null || layers.openFile().visible() || layers.format() != null,
             accent
         );
     }
@@ -833,22 +820,6 @@ public class TerminalEditorApp {
     private CellStyle blockingAccent(boolean colorEnabled) {
         return colorEnabled ? styles.notifyWarning()
             : new CellStyle(CellColor.DEFAULT, CellColor.DEFAULT, true, true);
-    }
-
-    static UiModalState consumeRequestedHelpModal(UiSessionState ui, UiModalState current) {
-        if (ui.helpHintsMode) {
-            ui.helpHintsMode = false;
-            return UiModalState.helpHints();
-        }
-        if (ui.helpLicensesMode) {
-            ui.helpLicensesMode = false;
-            return UiModalState.helpLicenses();
-        }
-        if (ui.helpAuthorMode) {
-            ui.helpAuthorMode = false;
-            return UiModalState.helpAuthor();
-        }
-        return current;
     }
 
     private CellStyle focusedButtonStyle(CellStyle parentStyle) {
@@ -1240,7 +1211,8 @@ public class TerminalEditorApp {
     }
 
     ConfirmBarInputRouter.Policy confirmPolicy(UiModalState modalState) {
-        if (modalState.isSaveUtf8Confirm() || modalState.isOpenUtf16Confirm()) {
+        if (modalState.isOpenUtf16Confirm()) return ConfirmBarInputRouter.Policy.open();
+        if (modalState.isSaveUtf8Confirm()) {
             return ConfirmBarInputRouter.Policy.overwrite();
         }
         if (modalState.isRecoveryConfirm()) {
@@ -1301,15 +1273,11 @@ public class TerminalEditorApp {
         Position p = state.getCursor();
         int totalLines = model.lineCount();
         int lineCols = model.lineLength(p.line());
-        String left = " "
-            + "Ln " + (p.line() + 1) + "/" + totalLines
+        String position = "Ln " + (p.line() + 1) + "/" + totalLines
             + ", Col " + (p.col() + 1) + "/" + lineCols;
-        if (totalTabs > 1) {
-            left = left + "  Tab " + (activeTabIndex + 1) + "/" + totalTabs;
-        }
-        if (searchSummary != null && !searchSummary.isBlank()) {
-            left = left + "  " + searchSummary;
-        }
+        String compactPosition = "Ln " + (p.line() + 1) + "/" + totalLines + ", Col " + (p.col() + 1);
+        String tabs = totalTabs > 1 ? "Tab " + (activeTabIndex + 1) + "/" + totalTabs : "";
+        var left = new DocumentStatusBarView.Reading(position, compactPosition, tabs, "", searchSummary);
         String ro = fileAccess.indicator(JvmDocumentStorage.pathOf(state.getCurrentResource()));
         String enc = summary == null ? state.getFileEncoding() == null ? "UTF-8" : state.getFileEncoding().name()
             : summary.charsetName() + (summary.bomKind() == dev.tuink.editor.storage.BomKind.NONE ? "" : "+BOM");
@@ -1328,6 +1296,71 @@ public class TerminalEditorApp {
         return DocumentStatusBarView.place(left, ro, enc, eol, readingMode, cols, row);
     }
 
+    private void paintFrameOverlays(CellBuffer current, Canvas canvas, int rows, int cols, int contentTopRow,
+        FrameComposition.Surface surface, FrameComposition.Layers layers, SearchBarView.Placement search,
+        boolean colorEnabled) {
+        paintSaveAsField(canvas, layers.saveAs());
+        paintConfirmButtons(canvas, layers.confirm());
+        paintSearchBar(canvas, search);
+        if (layers.tabBar() != null) layers.tabBar().paint(canvas,
+            colorEnabled ? colorTabBarWidgetTheme : monoTabBarWidgetTheme);
+        if (layers.topMenu() != null) layers.topMenu().paint(canvas,
+            colorEnabled ? colorTopMenuWidgetTheme : monoTopMenuWidgetTheme);
+        drawTopFileNameBold(current, canvas, cols, surface.topBar());
+        drawOpenFileOverlay(canvas, rows, cols, layers.openFile(), colorEnabled,
+            layers.blockedInputHighlight(), layers.contentFocused());
+        paintHelpOverlay(canvas, layers.help(), colorEnabled, layers.blockedInputHighlight());
+        if (layers.format() != null) layers.format().paint(canvas,
+            (colorEnabled ? colorFileTreeWidgetTheme : monoFileTreeWidgetTheme).withSurface(styles.dialog(), styles.dialog()));
+        paintBlockingAttention(current, rows, cols, contentTopRow, surface, layers, colorEnabled);
+    }
+
+    /** Shared overlay ownership; the underlying content supplies only a completed cursor intent. */
+    private ScreenCursor frameCursor(int rows, int cols, int contentTopRow, FrameComposition.Surface surface,
+        FrameComposition.Layers layers, SearchBarView.Placement search, boolean searchEditorFocused,
+        ScreenCursor contentCursor) {
+        Point point = contentCursor.position();
+        Point searchCursor = search == null ? null : search.cursorPosition(searchFocusManager()).orElse(null);
+        boolean searchOwnsCursor = search != null && !searchEditorFocused;
+        boolean contentFocused = layers.contentFocused();
+        boolean menuOpen = layers.topMenu() != null && layers.topMenu().state().isOpen();
+        boolean openFile = layers.openFile().visible();
+        boolean help = layers.help() != null;
+        boolean visible = CursorPolicy.shouldShowCursor(layers.saveAsMode() && !contentFocused,
+            searchOwnsCursor, searchCursor != null, layers.confirm() != null && !contentFocused,
+            menuOpen, openFile && !contentFocused, help && !contentFocused);
+        boolean contentOwnsCursor = contentFocused || !layers.saveAsMode() && !searchOwnsCursor
+            && layers.confirm() == null && !menuOpen && !openFile && !help && layers.format() == null;
+        if (contentOwnsCursor) visible = contentCursor.visible();
+        if (layers.format() != null) visible = false;
+        if (contentFocused && blockingSurface(rows, cols, contentTopRow, surface, layers).contains(point.x(), point.y())) visible = false;
+        if (layers.saveAsMode() && !contentFocused) {
+            Point field = layers.saveAs() == null ? null : layers.saveAs().cursorPosition(saveAsFocusManager()).orElse(null);
+            if (field == null) visible = false;
+            else point = field;
+        } else if (openFile && !contentFocused) {
+            Point location = layers.openFile().dialog().cursorPosition(layers.openFile().focus()).orElse(null);
+            visible = location != null;
+            if (location != null) point = location;
+        } else if (searchOwnsCursor) {
+            if (searchCursor == null) visible = false;
+            else point = searchCursor;
+        } else if (menuOpen) {
+            Point menu = layers.topMenu().cursorPosition().orElse(null);
+            if (menu == null) visible = false;
+            else point = menu;
+        } else if (help && !contentFocused) {
+            Button close = layers.help().close();
+            point = new Point(Math.min(cols - 1, close.cursorCol()), Math.min(rows - 1, close.row()));
+        }
+        return new ScreenCursor(new Point(Math.max(0, Math.min(cols - 1, point.x())),
+            Math.max(0, Math.min(rows - 1, point.y()))), visible);
+    }
+
+    private void paintSurfaceLine(Canvas canvas, int row, int cols, String text, CellStyle style) {
+        CellText.drawClipped(canvas, 0, row, CellText.fit(Objects.requireNonNullElse(text, ""), cols), style, cols);
+    }
+
     private RenderFrameResult renderFrame(
         FrameComposition composition,
         RenderFrameController services
@@ -1341,7 +1374,6 @@ public class TerminalEditorApp {
         TextModel model = document.model();
         EditorState state = document.state();
         EditorLayout editorLayout = document.layout();
-        RenderPlan previousPlan = document.previousPlan();
         int rows = editorLayout.rows();
         int cols = editorLayout.cols();
         int contentTopRow = editorLayout.contentTopRow();
@@ -1420,179 +1452,30 @@ public class TerminalEditorApp {
         }
         CellBuffer current;
         if (profileEnabled) {
+            frameProfiler.beginRasterCache(renderer.metricsBuilds(), renderer.preparedRowsMisses(), renderer.preparedRowsReused());
             long rasterStart = System.nanoTime();
             current = renderer.rasterize(plan, rows, cols, contentTopRow);
             frameProfiler.rasterNanos = System.nanoTime() - rasterStart;
+            frameProfiler.endRasterCache(renderer.metricsBuilds(), renderer.preparedRowsMisses(),
+                renderer.preparedRowsReused(), renderer.retainedRenderBytes());
         } else {
             current = renderer.rasterize(plan, rows, cols, contentTopRow);
         }
         Canvas canvas = frameCanvas(current, rows, cols);
-        paintSaveAsField(canvas, saveAsBarPlacement);
-        paintConfirmButtons(canvas, confirmBarPlacement);
-        paintSearchBar(canvas, searchBarPlacement);
-        if (tabBarPlacement != null) {
-            tabBarPlacement.paint(
-                canvas,
-                colorEnabled ? colorTabBarWidgetTheme : monoTabBarWidgetTheme
-            );
-        }
-        if (topMenuPlacement != null) {
-            topMenuPlacement.paint(
-                canvas,
-                colorEnabled ? colorTopMenuWidgetTheme : monoTopMenuWidgetTheme
-            );
-        }
-        drawTopFileNameBold(current, canvas, cols, surface.topBar());
-        drawOpenFileOverlay(
-            canvas,
-            rows,
-            cols,
-            openFile,
-            colorEnabled,
-            composition.layers().blockedInputHighlight(),
-            composition.layers().contentFocused()
-        );
-        paintHelpOverlay(canvas, helpOverlay, colorEnabled, composition.layers().blockedInputHighlight());
-        if (layers.format() != null) {
-            layers.format().paint(canvas,
-                (colorEnabled ? colorFileTreeWidgetTheme : monoFileTreeWidgetTheme)
-                    .withSurface(styles.dialog(), styles.dialog()));
-        }
-        paintBlockingAttention(current, composition, colorEnabled);
+        paintFrameOverlays(current, canvas, rows, cols, contentTopRow, surface, layers, searchBarPlacement, colorEnabled);
 
         EditorView.CursorPosition editorCursor = editorView.cursorFromPlan(plan, contentTopRow);
-        int desiredCursorRow = editorCursor.row();
-        int desiredCursorCol = editorCursor.col();
-        Point searchCursor = searchBarPlacement == null
-            ? null
-            : searchBarPlacement.cursorPosition(searchFocusManager()).orElse(null);
-        boolean searchOwnsCursor = searchBarPlacement != null && !search.editorFocused();
-        boolean blockingContentFocused = composition.layers().contentFocused();
-        boolean topMenuOpen = topMenuPlacement != null && topMenuPlacement.state().isOpen();
-        boolean desiredCursorVisible = CursorPolicy.shouldShowCursor(
-            saveAsMode && !blockingContentFocused,
-            searchOwnsCursor,
-            searchCursor != null,
-            confirmBarPlacement != null && !blockingContentFocused,
-            topMenuOpen,
-            openFileMode && !blockingContentFocused,
-            helpMode && !blockingContentFocused
-        );
-        boolean editorOwnsCursor = blockingContentFocused || !saveAsMode
-            && !searchOwnsCursor
-            && confirmBarPlacement == null
-            && !topMenuOpen
-            && !openFileMode
-            && !helpMode && layers.format() == null;
-        if (layers.format() != null) desiredCursorVisible = false;
-        if (editorOwnsCursor && !plan.cursorInViewport()) {
-            desiredCursorVisible = false;
-        }
-        if (blockingContentFocused && blockingSurface(composition).contains(desiredCursorCol - 1, desiredCursorRow - 1)) {
-            desiredCursorVisible = false;
-        }
-        if (saveAsMode && !blockingContentFocused) {
-            Point saveAsCursor = saveAsBarPlacement == null
-                ? null
-                : saveAsBarPlacement.cursorPosition(saveAsFocusManager()).orElse(null);
-            if (saveAsCursor == null) {
-                desiredCursorVisible = false;
-            } else {
-                desiredCursorRow = saveAsCursor.y() + 1;
-                desiredCursorCol = saveAsCursor.x() + 1;
-            }
-        } else if (searchOwnsCursor) {
-            if (searchCursor == null) {
-                desiredCursorVisible = false;
-            } else {
-                desiredCursorRow = searchCursor.y() + 1;
-                desiredCursorCol = searchCursor.x() + 1;
-            }
-        } else if (topMenuOpen) {
-            Point menuCursor = topMenuPlacement.cursorPosition().orElse(null);
-            if (menuCursor == null) {
-                desiredCursorVisible = false;
-            } else {
-                desiredCursorRow = menuCursor.y() + 1;
-                desiredCursorCol = menuCursor.x() + 1;
-            }
-        } else if (helpOverlay != null && !blockingContentFocused) {
-            Button close = helpOverlay.close();
-            desiredCursorRow = Math.min(rows, close.row() + 1);
-            desiredCursorCol = Math.min(cols, close.cursorCol() + 1);
-        }
+        ScreenCursor contentCursor = new ScreenCursor(new Point(editorCursor.col() - 1, editorCursor.row() - 1), plan.cursorInViewport());
+        ScreenCursor cursor = frameCursor(rows, cols, contentTopRow, surface, layers, searchBarPlacement,
+            search.editorFocused(), contentCursor);
 
-        boolean canUseVerticalScrollFastPath = composition.allowsScrollHints()
-            && previousPlan != null
-            && plan.wrapLines() == previousPlan.wrapLines()
-            && plan.gutterWidth() == previousPlan.gutterWidth()
-            && plan.scrollbarWidth() == previousPlan.scrollbarWidth()
-            && plan.leftVisualColumn() == previousPlan.leftVisualColumn()
-            && plan.topLine() != previousPlan.topLine();
-        boolean canUseHorizontalScrollFastPath = composition.allowsScrollHints()
-            && previousPlan != null
-            && !plan.wrapLines()
-            && !state.hasSelection()
-            && plan.wrapLines() == previousPlan.wrapLines()
-            && plan.gutterWidth() == previousPlan.gutterWidth()
-            && plan.scrollbarWidth() == previousPlan.scrollbarWidth()
-            && plan.topLine() == previousPlan.topLine()
-            && plan.leftVisualColumn() != previousPlan.leftVisualColumn();
-        int horizontalDeltaColumns = previousPlan == null ? 0 : plan.leftVisualColumn() - previousPlan.leftVisualColumn();
-        int diffRegionTop = contentTopRow;
-        int diffRegionHeight = plan.contentRows();
-        int textStartCol = plan.gutterWidth();
-        int textEndCol = cols - plan.scrollbarWidth() - 1;
-        FrameComposition.OpenTreeDiffKey openTreeDiffKey = openFile.diffKey();
-        if (openFileMode && openFileTreePlacement != null) {
-            Rect treeContent = openFileTreePlacement.contentBounds();
-            diffRegionTop = treeContent.y();
-            diffRegionHeight = treeContent.height();
-            textStartCol = treeContent.x();
-            textEndCol = treeContent.rightExclusive() - 1;
-            textStartCol = Math.max(0, Math.min(cols - 1, textStartCol));
-            textEndCol = Math.max(textStartCol, Math.min(cols - 1, textEndCol));
-            canUseVerticalScrollFastPath = composition.allowsScrollHints()
-                && previousPlan != null
-                && openTreeDiffKey != null
-                && openTreeDiffKey.isVerticalScrollFrom(lastOpenTreeDiffKey);
-            canUseHorizontalScrollFastPath = false;
-            horizontalDeltaColumns = 0;
-        }
-
-        int regionLeft = Math.max(0, Math.min(cols, textStartCol));
-        int regionRight = Math.max(regionLeft, Math.min(cols, textEndCol + 1));
-        int regionTop = Math.max(0, Math.min(rows, diffRegionTop));
-        int regionBottom = Math.max(regionTop, Math.min(rows, diffRegionTop + diffRegionHeight));
-        Rect diffRegion = new Rect(
-            regionLeft,
-            regionTop,
-            regionRight - regionLeft,
-            regionBottom - regionTop
-        );
-        ScrollHint scrollHint = ScrollHint.none();
-        if (!diffRegion.isEmpty()) {
-            if (canUseHorizontalScrollFastPath && horizontalDeltaColumns != 0) {
-                scrollHint = new ScrollHint.Horizontal(diffRegion, horizontalDeltaColumns);
-            } else if (canUseVerticalScrollFastPath) {
-                scrollHint = new ScrollHint.Vertical(diffRegion);
-            }
-        }
-
-        Point cursorPosition = new Point(
-            Math.max(0, Math.min(cols - 1, desiredCursorCol - 1)),
-            Math.max(0, Math.min(rows - 1, desiredCursorRow - 1))
-        );
-        Frame frame = new Frame(
-            current,
-            new ScreenCursor(cursorPosition, desiredCursorVisible),
-            scrollHint
-        );
-        ScreenPresenter.PresentResult presentResult = screenPresenter.present(frame, profileEnabled);
-        if (profileEnabled) {
-            frameProfiler.diffNanos = presentResult.patchNanos();
-        }
-        lastOpenTreeDiffKey = openTreeDiffKey;
+        Rect body = new Rect(plan.gutterWidth(), contentTopRow,
+            Math.max(0, cols - plan.gutterWidth() - plan.scrollbarWidth()), plan.contentRows())
+            .intersection(new Rect(0, 0, cols, rows));
+        long generation = (plan.wrapLines() ? 1L : 0L) | (plan.wrapByWords() ? 2L : 0L);
+        var viewport = new ViewportScrollPolicy.Viewport("source:" + renderPlanBuilder.renderIdentity(), generation,
+            body, plan.topLine(), plan.leftVisualColumn(), !plan.wrapLines() && !state.hasSelection());
+        services.present(current, cursor, viewport, layers, composition.fullRedraw());
         return new RenderFrameResult(plan, true);
     }
 
@@ -1601,6 +1484,8 @@ public class TerminalEditorApp {
         private final EditorView editorView;
         private final boolean colorEnabled;
         private final ScreenPresenter screenPresenter;
+        private final ViewportScrollPolicy.Tracker scrollTracker = new ViewportScrollPolicy.Tracker();
+        private FrameComposition.OpenTreeDiffKey previousTree;
 
         RenderFrameController(
             RenderRasterizer renderer,
@@ -1617,17 +1502,51 @@ public class TerminalEditorApp {
         RenderFrameResult renderFrameIfNeeded(FrameComposition composition) {
             return renderFrame(composition, this);
         }
+
+        /** Both surfaces publish through the same terminal session and diagnostics. */
+        private Frame present(CellBuffer cells, ScreenCursor cursor, ViewportScrollPolicy.Viewport contentViewport,
+            FrameComposition.Layers layers, boolean fullRedraw) {
+            ViewportScrollPolicy.Viewport viewport = null;
+            FrameComposition.OpenTreeDiffKey tree = null;
+            if (layers.allowsScrollHints()) {
+                if (layers.openFile().visible()) {
+                    tree = layers.openFile().diffKey();
+                    if (tree != null) viewport = new ViewportScrollPolicy.Viewport("picker", 0,
+                        tree.surface().contentBounds().intersection(new Rect(0, 0, cells.cols(), cells.rows())),
+                        tree.firstVisibleIndex(), 0, false);
+                } else viewport = contentViewport;
+            }
+            if (fullRedraw) {
+                screenPresenter.invalidate();
+                scrollTracker.invalidate();
+            }
+            if (tree != null && (previousTree == null || !tree.surface().equals(previousTree.surface()))) scrollTracker.invalidate();
+            Frame frame = new Frame(cells, cursor, scrollTracker.next(viewport));
+            try {
+                var presented = screenPresenter.present(frame, profileEnabled);
+                if (profileEnabled) frameProfiler.presented(presented);
+                previousTree = tree;
+                return frame;
+            } catch (RuntimeException | Error failure) {
+                screenPresenter.invalidate();
+                scrollTracker.invalidate(); previousTree = null;
+                throw failure;
+            }
+        }
     }
 
-    String buildOverwritePrompt(Path path, int cols) {
-        int promptWidth = ConfirmBarView.promptWidth(cols, "Save", "Discard", true, "Cancel");
-        return ConfirmPromptText.fileQuestion("Overwrite: ", path, " ? (y/N)", promptWidth);
+    ConfirmBarView buildOverwriteConfirmBar(Path path, int cols, int availableRows) {
+        String question = ConfirmPromptText.wrappingFileQuestion("Overwrite: ", path, " ?",
+            responsiveQuestionWidth(cols, availableRows));
+        return ConfirmBarView.responsive(question, cols, availableRows,
+            "Replace", "Choose another name", true, "Cancel", ConfirmBarInputRouter.Policy.overwrite().shortcuts());
     }
 
-    ConfirmBarView buildQuitConfirmBar(
-        List<EditorTab> tabs,
-        int cols
-    ) {
+    private static int responsiveQuestionWidth(int cols, int availableRows) {
+        return Math.max(0, cols) * Math.max(1, Math.min(8, availableRows - 4));
+    }
+
+    ConfirmBarView buildQuitConfirmBar(List<EditorTab> tabs, int cols, int availableRows) {
         List<EditorTab> dirtyTabs = new ArrayList<>();
         List<Path> dirtyPaths = new ArrayList<>();
         for (EditorTab tab : tabs) {
@@ -1646,58 +1565,29 @@ public class TerminalEditorApp {
             primaryLabel = "Save";
         }
         String secondaryLabel = multiple ? "Discard All" : "Discard";
-        int promptWidth = ConfirmBarView.promptWidth(
-            cols,
-            primaryLabel,
-            secondaryLabel,
-            true,
-            "Cancel"
-        );
+        int promptWidth = responsiveQuestionWidth(cols, availableRows);
         String minimumContext = "Unsaved (" + dirtyPaths.size() + ")";
         String prompt = CellText.width(minimumContext) + 3 <= promptWidth
             ? DirtyTabSummary.build(dirtyPaths, promptWidth)
             : minimumContext;
-        return ConfirmBarView.build(
-            prompt,
-            cols,
-            primaryLabel,
-            secondaryLabel,
-            true,
-            "Cancel"
-        );
+        return ConfirmBarView.responsive(prompt, cols, availableRows,
+            primaryLabel, secondaryLabel, true, "Cancel", ConfirmBarInputRouter.Policy.quit().shortcuts());
     }
 
-    ConfirmBarView buildCloseTabConfirmBar(
-        List<EditorTab> tabs,
-        int closeTabIndex,
-        int cols
-    ) {
+    ConfirmBarView buildCloseTabConfirmBar(List<EditorTab> tabs, int closeTabIndex, int cols, int availableRows) {
         EditorTab pendingTab = closeTabIndex >= 0 && closeTabIndex < tabs.size()
             ? tabs.get(closeTabIndex)
             : null;
         String primaryLabel = pendingTab != null && suggestsSaveAs(pendingTab.state()) ? "Save As" : "Save";
-        return ConfirmBarView.build(
-            buildCloseTabPrompt(tabs, closeTabIndex, ConfirmBarView.promptWidth(
-                cols, primaryLabel, "Discard", true, "Cancel"
-            )),
-            cols,
-            primaryLabel,
-            "Discard",
-            true,
-            "Cancel"
-        );
+        return ConfirmBarView.responsive(
+            ConfirmPromptText.wrappingFileQuestion("Close: ", pendingTab == null ? null
+                : JvmDocumentStorage.pathOf(pendingTab.state().getCurrentResource()), " ?",
+                responsiveQuestionWidth(cols, availableRows)),
+            cols, availableRows, primaryLabel, "Discard", true, "Cancel", ConfirmBarInputRouter.Policy.closeTab().shortcuts());
     }
 
     String buildRecoveryPrompt(int count) {
         return "Recovery snapshots: " + count + ". Restore now? (y/N)";
-    }
-
-    private String buildCloseTabPrompt(List<EditorTab> tabs, int closeTabIndex, int promptWidth) {
-        if (closeTabIndex < 0 || closeTabIndex >= tabs.size()) {
-            return "Close modified tab? (y/N)";
-        }
-        Path path = JvmDocumentStorage.pathOf(tabs.get(closeTabIndex).state().getCurrentResource());
-        return ConfirmPromptText.fileQuestion("Close: ", path, " ? (y/N)", promptWidth);
     }
 
     record RecoveryRestoreResult(int restoredCount, List<RecoveryStore.PendingSnapshot> failedEntries,
@@ -1754,7 +1644,7 @@ public class TerminalEditorApp {
         List<EditorTab> restored = prepared.stream().map(PreparedRecoveredTab::tab).toList();
         var ownership = recoveryAutosave.prepareRestoration(
             prepared.stream().map(PreparedRecoveredTab::ownership).toList(), nowNanos);
-        boolean replacePlaceholder = tabs.size() == 1
+        boolean replacePlaceholder = sessionContext.presentations().size() == 1 && tabs.size() == 1
             && WorkspaceDocuments.isPristinePlaceholder(tabs.getFirst().tabSession());
         sessionContext.addAll(restored);
         // The registry commit allocates nothing; activation can fail without
@@ -1808,11 +1698,11 @@ public class TerminalEditorApp {
         if (entry == null) return;
         if (!context.canClose(viewId)) throw new IllegalStateException("Document is busy saving");
         // Allocate the replacement before retiring the last visible editor.
-        EditorTab replacement = context.tabs().size() == 1 ? newEditorTab() : null;
+        EditorTab replacement = context.presentations().size() == 1 ? newEditorTab() : null;
         if (replacement != null) context.addAll(List.of(replacement));
-        context.workspace.remove(viewId);
+        context.remove(viewId);
         entry.attachment().uiState().close();
-        saveAsSuggestions.remove(entry.attachment().tabSession());
+        saveAsSuggestions.remove(((EditorTab) entry.attachment()).tabSession());
         if (replacement != null) context.activate(replacement.documentSession().viewId());
     }
 
@@ -1844,6 +1734,15 @@ public class TerminalEditorApp {
         return out;
     }
 
+    List<TabBarView.TabItem> toPresentationTabItems(SessionContext context, boolean[] sourceMatchFlags) {
+        return toTabItems(context.tabs(), sourceMatchFlags);
+    }
+
+    List<TopMenuView.TabItem> toPresentationMenuTabs(SessionContext context, boolean[] matchFlags) {
+        return toPresentationTabItems(context, matchFlags).stream().map(tab -> new TopMenuView.TabItem(tab.file(),
+            tab.dirty(), tab.hasMatch(), tab.searching(), tab.awaitingAnswer(), tab.qualifier())).toList();
+    }
+
     List<TopMenuView.TabItem> toTopMenuTabs(List<EditorTab> tabs, boolean[] matchFlags) {
         List<TopMenuView.TabItem> out = new ArrayList<>(tabs.size());
         for (int i = 0; i < tabs.size(); i++) {
@@ -1865,8 +1764,10 @@ public class TerminalEditorApp {
         RenderPlanBuilder renderPlanBuilder,
         ViewportController viewportController,
         EditorViewNavigation navigation,
-        TabUiState uiState
-    ) {
+        TabUiState uiState,
+        PresentationId presentationId,
+        PresentationGroupId groupId
+    ) implements WindowTab {
         EditorTab(TuiDocumentSession documentSession, RenderPlanBuilder renderPlanBuilder) {
             this(documentSession, renderPlanBuilder, new ViewportController(), new EditorViewNavigation(documentSession.view().engine(), documentSession::navigate));
         }
@@ -1876,7 +1777,15 @@ public class TerminalEditorApp {
             this(documentSession, renderPlanBuilder, viewportController, navigation, new TabUiState());
         }
 
+        EditorTab(TuiDocumentSession documentSession, RenderPlanBuilder renderPlanBuilder,
+                  ViewportController viewportController, EditorViewNavigation navigation, TabUiState uiState) {
+            this(documentSession, renderPlanBuilder, viewportController, navigation, uiState,
+                PresentationId.create(), PresentationGroupId.create());
+        }
+
         EditorTab {
+            Objects.requireNonNull(presentationId, "presentationId");
+            Objects.requireNonNull(groupId, "groupId");
             if (documentSession == null
                 || renderPlanBuilder == null
                 || viewportController == null
@@ -1908,14 +1817,18 @@ public class TerminalEditorApp {
             return tabSession().textLayout();
         }
 
-        private EditorTab withRenderPlanBuilder(RenderPlanBuilder nextBuilder) {
-            return new EditorTab(documentSession, nextBuilder, viewportController, navigation, uiState);
+        EditorTab withGroup(PresentationGroupId nextGroup) {
+            return new EditorTab(documentSession, renderPlanBuilder, viewportController, navigation, uiState,
+                presentationId, nextGroup);
+        }
+
+        EditorTab withRenderPlanBuilder(RenderPlanBuilder nextBuilder) {
+            return new EditorTab(documentSession, nextBuilder, viewportController, navigation, uiState, presentationId, groupId);
         }
     }
 
     static final class SessionContext {
-        private final EditorWorkspace<EditorTab> workspace = new EditorWorkspace<>();
-
+        private final EditorWorkspace<WindowTab> workspace = new EditorWorkspace<>();
         SessionContext(List<EditorTab> tabs, int activeTabIndex) {
             addAll(tabs);
             activate(activeTabIndex);
@@ -1926,20 +1839,47 @@ public class TerminalEditorApp {
         }
 
         void addNewTabAndActivate(EditorTab tab) {
-            workspace.add(tab.documentSession().document(), tab.documentSession().viewId(), tab);
+            var next = new ArrayList<>(workspace.presentations());
+            next.add(sourcePresentation(tab));
+            workspace.replacePresentations(next, tab.presentationId());
         }
 
         void addAll(List<EditorTab> tabs) {
-            workspace.addAll(tabs.stream().map(tab ->
-                new EditorWorkspace.Entry<>(
-                    tab.documentSession().document(), tab.documentSession().viewId(), tab)).toList());
+            var next = new ArrayList<>(workspace.presentations());
+            for (var tab : tabs) next.add(sourcePresentation(tab));
+            var active = workspace.activePresentation();
+            workspace.replacePresentations(next, active == null ? null : active.id());
         }
 
-        List<EditorTab> tabs() { return workspace.attachments(); }
+        private static EditorWorkspace.Presentation<WindowTab> sourcePresentation(EditorTab tab) {
+            return new EditorWorkspace.Presentation<>(tab.presentationId(), tab.groupId(),
+                new EditorWorkspace.Editing(tab.documentSession().document(), tab.documentSession().viewId()), tab);
+        }
 
-        EditorTab active() { return workspace.active().attachment(); }
+        List<EditorTab> tabs() {
+            return java.util.Collections.unmodifiableList(new java.util.AbstractList<>() {
+                @Override public EditorTab get(int index) { return (EditorTab) workspace.entries().get(index).attachment(); }
+                @Override public int size() { return workspace.entries().size(); }
+            });
+        }
+        List<WindowTab> presentations() { return workspace.presentationAttachments(); }
+        WindowTab activePresentation() { return workspace.activePresentation().attachment(); }
+        int activePresentationIndex() { return workspace.activePresentationIndex(); }
+        void activatePresentation(int index) { workspace.selectPresentationIndex(index); }
+        boolean activatePresentation(PresentationId id) {
+            if (workspace.find(id) == null) return false;
+            workspace.select(id); return true;
+        }
+        EditorTab source(ViewId viewId) {
+            var entry = workspace.find(viewId);
+            return entry == null ? null : (EditorTab) entry.attachment();
+        }
+        EditorTab active() { return (EditorTab) activePresentation(); }
+        ViewId activeViewId() { return active() == null ? null : active().documentSession().viewId(); }
 
-        ViewId activeViewId() { return workspace.active().viewId(); }
+        WindowTab presentation(PresentationId id) {
+            var entry = workspace.find(id); return entry == null ? null : entry.attachment();
+        }
 
         int indexOf(ViewId viewId) { return workspace.indexOf(viewId); }
 
@@ -1965,11 +1905,12 @@ public class TerminalEditorApp {
         void update(EditorTab tab) { workspace.updateAttachment(tab.documentSession().viewId(), tab); }
 
         void replace(int index, EditorTab replacement) {
-            var old = tabs().get(index).documentSession().viewId();
-            boolean selected = old.equals(activeViewId());
-            addAll(List.of(replacement));
-            workspace.remove(old);
-            if (selected) workspace.select(replacement.documentSession().viewId());
+            EditorTab old = tabs().get(index);
+            var next = new ArrayList<EditorWorkspace.Presentation<WindowTab>>();
+            for (var item : workspace.presentations())
+                next.add(item.id().equals(old.presentationId()) ? sourcePresentation(replacement) : item);
+            var selected = workspace.activePresentation().id();
+            workspace.replacePresentations(next, selected.equals(old.presentationId()) ? replacement.presentationId() : selected);
         }
 
         void replaceActiveRenderPlanBuilder(RenderPlanBuilder nextRenderPlanBuilder) {
@@ -1977,7 +1918,8 @@ public class TerminalEditorApp {
         }
 
         int activeTabIndex() {
-            return workspace.activeIndex();
+            ViewId view = activeViewId();
+            return view == null ? -1 : workspace.indexOf(view);
         }
 
         TextModel model() {
@@ -2008,30 +1950,44 @@ public class TerminalEditorApp {
         String message;
         private Kind kind;
         private long expiresAtNanos;
+        private long revision;
+
+        long revision() { return revision; }
 
         private boolean visible() {
             return message != null;
         }
 
         void success(String message) {
+            revision++;
             this.message = message;
             this.kind = Kind.SUCCESS;
             this.expiresAtNanos = System.nanoTime() + NOTIFY_DURATION_NANOS;
         }
 
         void info(String message) {
+            revision++;
             this.message = message;
             this.kind = Kind.INFO;
             this.expiresAtNanos = System.nanoTime() + NOTIFY_DURATION_NANOS;
         }
 
         void warning(String message) {
+            revision++;
             this.message = message;
             this.kind = Kind.WARNING;
             this.expiresAtNanos = System.nanoTime() + NOTIFY_DURATION_NANOS;
         }
 
+        void persistentWarning(String message) {
+            revision++;
+            this.message = message;
+            this.kind = Kind.WARNING;
+            this.expiresAtNanos = 0L;
+        }
+
         void error(String message) {
+            revision++;
             this.message = message;
             this.kind = Kind.ERROR;
             this.expiresAtNanos = 0L;
@@ -2041,6 +1997,8 @@ public class TerminalEditorApp {
             return kind == Kind.ERROR || kind == Kind.WARNING;
         }
 
+        boolean isError() { return kind == Kind.ERROR; }
+
         void clearErrorOnUserAction() {
             if (kind == Kind.ERROR) {
                 clear();
@@ -2048,6 +2006,7 @@ public class TerminalEditorApp {
         }
 
         void clear() {
+            revision++;
             this.message = null;
             this.kind = null;
             this.expiresAtNanos = 0L;
@@ -2140,11 +2099,18 @@ public class TerminalEditorApp {
         }
     }
 
-    interface RecoveryPersistence extends dev.tuink.editor.session.recovery.RecoveryPersistence<RecoverySnapshot> {}
+    interface RecoveryPersistence extends dev.tuink.editor.session.recovery.RecoveryPersistence<RecoverySnapshot> {
+        default RecoveryStore.DiscoveryResult discoverAvailable() throws IOException {
+            return new RecoveryStore.DiscoveryResult(List.of(), List.of());
+        }
+    }
 
     /** Terminal checkpoint envelope and lifecycle/executor adapter. Coordination lives in editor-session. */
     static final class RecoveryAutosaveManager {
         private final RecoveryCoordinator<RecoverySnapshot> coordinator;
+        private final RecoveryPersistence persistence;
+        private final java.util.concurrent.atomic.AtomicReference<String> discoveryCleanupWarning =
+            new java.util.concurrent.atomic.AtomicReference<>();
         private final Map<EditorDocumentSession, TuiRecoveryParticipant> participants =
             new IdentityHashMap<>();
         private final ExecutorService ownedWorker;
@@ -2154,6 +2120,9 @@ public class TerminalEditorApp {
                 @Override public void save(String id, RecoverySnapshot snapshot) throws IOException { store.save(id, snapshot); }
                 @Override public void delete(String id) throws IOException { store.delete(id); }
                 @Override public void release(String id) throws IOException { store.release(id); }
+                @Override public RecoveryStore.DiscoveryResult discoverAvailable() throws IOException {
+                    return store.discoverAvailable();
+                }
             });
         }
 
@@ -2166,9 +2135,29 @@ public class TerminalEditorApp {
             this(store, clock, executor, false);
         }
         private RecoveryAutosaveManager(RecoveryPersistence store, LongSupplier clock, Executor executor, boolean ownsWorker) {
+            persistence = Objects.requireNonNull(store, "store");
             coordinator = new RecoveryCoordinator<>(store, executor, clock);
             ownedWorker = ownsWorker ? (ExecutorService) executor : null;
         }
+
+        RecoveryStore.DiscoveryResult discoverAvailable() throws IOException {
+            return persistence.discoverAvailable();
+        }
+
+        /** Worker-only disposal of newly claimed drafts whose prompt was never published. */
+        void releaseDiscovered(RecoveryStore.DiscoveryResult discovered) {
+            if (discovered == null) return;
+            for (var entry : discovered.entries()) {
+                try {
+                    persistence.release(entry.id());
+                } catch (IOException | RuntimeException failure) {
+                    discoveryCleanupWarning.compareAndSet(null,
+                        "Could not release recovery draft " + entry.id() + "; its data was kept: " + failure.getMessage());
+                }
+            }
+        }
+
+        String takeDiscoveryCleanupWarning() { return discoveryCleanupWarning.getAndSet(null); }
 
         private static ExecutorService newRecoveryWorker() {
             return Executors.newSingleThreadExecutor(task -> {
@@ -2341,18 +2330,41 @@ public class TerminalEditorApp {
     }
 
     final class FrameProfiler {
+        private final LongSupplier clock;
         private long frameStartNanos;
         long searchNanos;
         private long buildNanos;
+        private long compositionNanos;
         private long rasterNanos;
         private long diffNanos;
+        private long outputNanos;
         private long totalNanos;
+        private long inputNanos;
+        private long responseNanos;
+        private long pendingInputNanos;
+        private long firstPendingInputNanos;
+        private long pendingInputEvents;
+        private long inputEvents;
+        private int emittedCharacters;
+        private boolean rasterCacheAvailable;
+        private long rasterMetricsBefore, rasterMissesBefore, rasterReusedBefore;
+        private long metricsBuilds, cacheMisses, rowsReused, retainedCacheBytes;
+        private String surface = "source";
+        private boolean ready;
         private long frameIndex;
         private long stopwatchStartNanos;
         private PrintWriter out = new PrintWriter(System.err, true);
         private boolean closeOut;
 
-        private void setOutput(PrintWriter out, boolean closeOut) {
+        FrameProfiler() {
+            this(System::nanoTime);
+        }
+
+        FrameProfiler(LongSupplier clock) {
+            this.clock = Objects.requireNonNull(clock, "clock");
+        }
+
+        void setOutput(PrintWriter out, boolean closeOut) {
             if (out == null) {
                 return;
             }
@@ -2360,27 +2372,76 @@ public class TerminalEditorApp {
             this.closeOut = closeOut;
         }
 
-        void beginFrame() {
-            frameStartNanos = System.nanoTime();
+        long inputStarted() {
+            return clock.getAsLong();
+        }
+
+        void inputHandled(long started) {
+            if (pendingInputEvents == 0L) firstPendingInputNanos = started;
+            pendingInputNanos += Math.max(0L, clock.getAsLong() - started);
+            pendingInputEvents++;
+        }
+
+        void beginFrame(String surface) {
+            this.surface = Objects.requireNonNull(surface, "surface");
+            frameStartNanos = clock.getAsLong();
             stopwatchStartNanos = frameStartNanos;
             searchNanos = 0L;
             buildNanos = 0L;
+            compositionNanos = 0L;
             rasterNanos = 0L;
             diffNanos = 0L;
+            outputNanos = 0L;
+            emittedCharacters = 0;
+            rasterCacheAvailable = false;
+            ready = false;
+        }
+
+        void compositionFinished(boolean ready) {
+            compositionNanos = Math.max(0L, clock.getAsLong() - frameStartNanos);
+            this.ready = ready;
+        }
+
+        /** Samples only the admitted geometry/prepared-row work inside this raster pass. */
+        void beginRasterCache(long builds, long misses, long reused) {
+            rasterMetricsBefore = builds;
+            rasterMissesBefore = misses;
+            rasterReusedBefore = reused;
+        }
+
+        void endRasterCache(long builds, long misses, long reused, long retainedBytes) {
+            metricsBuilds = builds - rasterMetricsBefore;
+            cacheMisses = misses - rasterMissesBefore;
+            rowsReused = reused - rasterReusedBefore;
+            retainedCacheBytes = retainedBytes;
+            rasterCacheAvailable = true;
+        }
+
+        void presented(ScreenPresenter.PresentResult result) {
+            diffNanos = result.patchNanos();
+            outputNanos = result.outputNanos();
+            emittedCharacters = result.emittedCharacters();
         }
 
         long stopwatchNanos() {
-            long now = System.nanoTime();
+            long now = clock.getAsLong();
             long delta = now - stopwatchStartNanos;
             stopwatchStartNanos = now;
             return delta;
         }
 
         void endFrame(boolean rendered) {
+            long finished = clock.getAsLong();
+            inputNanos = pendingInputNanos;
+            inputEvents = pendingInputEvents;
+            responseNanos = inputEvents == 0L ? 0L : Math.max(0L, finished - firstPendingInputNanos);
+            // An input with no visible effect must not inflate a later frame's response.
+            pendingInputNanos = 0L;
+            pendingInputEvents = 0L;
             if (!rendered) {
                 return;
             }
-            totalNanos = System.nanoTime() - frameStartNanos;
+            totalNanos = Math.max(0L, finished - frameStartNanos);
             frameIndex++;
             if (frameIndex % PROFILE_LOG_EVERY_FRAMES == 0) {
                 log();
@@ -2390,14 +2451,28 @@ public class TerminalEditorApp {
         private void log() {
             out.printf(
                 Locale.ROOT,
-                "frame=%d build=%.2fms raster=%.2fms diff=%.2fms search=%.2fms total=%.2fms%n",
+                "frame=%d build=%.2fms raster=%.2fms diff=%.2fms search=%.2fms total=%.2fms"
+                    + " compose=%.2fms input=%.2fms output=%.2fms response=%.2fms chars=%d events=%d heap=%d surface=%s ready=%d",
                 frameIndex,
                 buildNanos / 1_000_000.0,
                 rasterNanos / 1_000_000.0,
                 diffNanos / 1_000_000.0,
                 searchNanos / 1_000_000.0,
-                totalNanos / 1_000_000.0
+                totalNanos / 1_000_000.0,
+                compositionNanos / 1_000_000.0,
+                inputNanos / 1_000_000.0,
+                outputNanos / 1_000_000.0,
+                responseNanos / 1_000_000.0,
+                emittedCharacters,
+                inputEvents,
+                Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory(),
+                surface,
+                ready ? 1 : 0
             );
+            if (rasterCacheAvailable) out.printf(Locale.ROOT,
+                " metrics_builds=%d cache_misses=%d rows_reused=%d retained_cache_bytes=%d",
+                metricsBuilds, cacheMisses, rowsReused, retainedCacheBytes);
+            out.println();
             out.flush();
         }
 

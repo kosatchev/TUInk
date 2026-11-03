@@ -111,7 +111,8 @@ class FrameCompositionGoldenTest {
             1,
             "Cyan",
             new CommandRouter(),
-            MenuBar.State.closed()
+            MenuBar.State.closed(),
+            TestSurfaces.source(new UiSessionState())
         );
         TopMenuView.TopBar topBar = menu.topBar(Path.of("中.txt"), true, COLS, false);
         CellText.draw(canvas, 0, 0, topBar.text(), TOP);

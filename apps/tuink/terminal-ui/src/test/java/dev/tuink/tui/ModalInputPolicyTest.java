@@ -22,6 +22,7 @@ import dev.tuiframe.widget.FocusSpace;
 import dev.tuiframe.widget.Modal;
 import dev.tuiframe.widget.RoutedTarget;
 import dev.tuiframe.widget.TextField;
+import dev.tuiframe.widget.DialogInputPolicy.Target;
 import dev.tuink.tui.ModalInputPolicy.Kind;
 import dev.tuink.tui.command.TuinkCommand;
 import dev.tuink.tui.file.FileTreeModel;
@@ -39,6 +40,22 @@ import org.junit.jupiter.api.Test;
 class ModalInputPolicyTest {
     private static final CommandRouter COMMANDS = new CommandRouter();
     private static final List<Kind> BLOCKERS = List.of(Kind.SAVE_AS, Kind.CONFIRM, Kind.HELP, Kind.OPEN_FILE, Kind.FORMAT);
+
+    @Test
+    void locationFieldOwnsTextAndClipboardButDoesNotAuthorizeGlobalCommands() {
+        for (TuiInputEvent event : List.of(new TextInput("путь with spaces"), new PasteEvent("file.md"),
+                ctrl(KeyStroke.Key.A), ctrl(KeyStroke.Key.C), ctrl(KeyStroke.Key.X), ctrl(KeyStroke.Key.V),
+                KeyStroke.of(KeyStroke.Key.ARROW_LEFT, KeyStroke.Modifier.SHIFT),
+                KeyStroke.of(KeyStroke.Key.HOME), KeyStroke.of(KeyStroke.Key.DELETE))) {
+            assertFalse(ModalInputPolicy.blocked(Kind.OPEN_FILE, event, command(event), Target.TEXT_INPUT),
+                event.toString());
+        }
+        for (KeyStroke event : List.of(ctrl(KeyStroke.Key.S), ctrl(KeyStroke.Key.N), ctrl(KeyStroke.Key.W))) {
+            assertTrue(ModalInputPolicy.blocked(Kind.OPEN_FILE, event, command(event), Target.TEXT_INPUT),
+                "A location field must not open document commands: " + event);
+        }
+        assertTrue(ModalInputPolicy.blocked(Kind.OPEN_FILE, new TextInput("file.md"), null, Target.BUTTON));
+    }
 
     @Test
     void boundEditingAndGlobalShortcutsRequestFeedbackBehindEachBlocker() {
@@ -92,7 +109,7 @@ class ModalInputPolicyTest {
                 new PointerEvent(0, 0, PointerEvent.Kind.SCROLL_DOWN, PointerEvent.Button.NONE, Set.of()),
                 KeyStroke.of(KeyStroke.Key.UNKNOWN)
             )) {
-                assertFalse(ModalInputPolicy.blocked(kind, event, TuinkCommand.EDIT_PASTE));
+                assertFalse(ModalInputPolicy.blocked(kind, event, TuinkCommand.EDIT_PASTE, Target.BUTTON));
             }
             KeyStroke unbound = KeyStroke.of(KeyStroke.Key.S, KeyStroke.Modifier.CTRL, KeyStroke.Modifier.ALT);
             assertNull(command(unbound));
@@ -206,7 +223,7 @@ class ModalInputPolicyTest {
         for (TuinkCommand command : List.of(
             TuinkCommand.HELP_KEY_HINTS, TuinkCommand.HELP_LICENSES, TuinkCommand.HELP_AUTHOR
         )) {
-            assertFalse(ModalInputPolicy.blocked(Kind.HELP, KeyStroke.of(KeyStroke.Key.F6), command));
+            assertFalse(ModalInputPolicy.blocked(Kind.HELP, KeyStroke.of(KeyStroke.Key.F6), command, Target.BUTTON));
         }
         assertTrue(blocked(Kind.HELP, KeyStroke.of(KeyStroke.Key.ARROW_LEFT)));
     }
@@ -255,7 +272,8 @@ class ModalInputPolicyTest {
                 assertNotNull(result);
                 assertTrue(result.consumed());
                 switch (focused) {
-                    case LIST -> assertNull(result.intent(), "space must not activate a tree item");
+                    case LIST, LOCATION -> assertNull(result.intent(), "space must not activate a tree item or submit a path");
+                    case HIDDEN -> assertInstanceOf(OpenFileInputRouter.ToggleHidden.class, result.intent());
                     case OK -> assertEquals(OpenFileInputRouter.Rejection.NO_SELECTION,
                         assertInstanceOf(OpenFileInputRouter.SelectionRejected.class, result.intent()).reason());
                     case CANCEL -> assertInstanceOf(OpenFileInputRouter.CloseDialog.class, result.intent());
@@ -265,7 +283,8 @@ class ModalInputPolicyTest {
     }
 
     private static boolean blocked(Kind kind, TuiInputEvent event) {
-        return ModalInputPolicy.blocked(kind, event, command(event));
+        return ModalInputPolicy.blocked(kind, event, command(event),
+            kind == Kind.SAVE_AS ? Target.TEXT_INPUT : Target.BUTTON);
     }
 
     private static TuinkCommand command(TuiInputEvent event) {

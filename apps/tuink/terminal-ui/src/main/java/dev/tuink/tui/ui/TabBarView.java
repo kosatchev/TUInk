@@ -29,9 +29,10 @@ public final class TabBarView {
         for (TabItem tab : List.copyOf(tabs)) {
             TabItem required = Objects.requireNonNull(tab, "tab");
             mapped.add(new TabBar.Item(
-                DocumentCaption.name(required.file()), true,
+                caption(required.file(), required.qualifier()), true,
                 prefix(required.hasMatch(), required.searching(), required.awaitingAnswer()), required.dirty() ? "*" : "",
-                DocumentCaption.extensionCells(DocumentCaption.name(required.file())), PathPresentation.LABEL_POLICY
+                DocumentCaption.extensionCells(DocumentCaption.name(required.file()))
+                    + dev.tuiframe.cell.CellText.width(qualifier(required.qualifier())), PathPresentation.LABEL_POLICY
             ));
         }
         this.items = List.copyOf(mapped);
@@ -56,6 +57,16 @@ public final class TabBarView {
         String name = DocumentCaption.name(file);
         return prefix(hasMatch, searching, awaitingAnswer) + name + (dirty ? "*" : "");
     }
+
+    public static String formatTabTitle(Path file, boolean dirty, boolean hasMatch,
+        boolean searching, boolean awaitingAnswer, String qualifier) {
+        return prefix(hasMatch, searching, awaitingAnswer) + caption(file, qualifier) + (dirty ? "*" : "");
+    }
+
+    private static String qualifier(String qualifier) {
+        return qualifier == null || qualifier.isBlank() ? "" : " · " + qualifier;
+    }
+    private static String caption(Path file, String qualifier) { return DocumentCaption.name(file) + qualifier(qualifier); }
 
     private static String prefix(boolean hasMatch, boolean searching, boolean awaitingAnswer) {
         return (awaitingAnswer ? "?" : "") + (searching ? "/" : "") + (hasMatch ? "#" : "");
@@ -100,7 +111,11 @@ public final class TabBarView {
     }
 
     /** Editor-owned metadata mapped to a generic label and separately retained affixes. */
-    public record TabItem(Path file, boolean dirty, boolean hasMatch, boolean searching, boolean awaitingAnswer) {
+    public record TabItem(Path file, boolean dirty, boolean hasMatch, boolean searching, boolean awaitingAnswer,
+                          String qualifier) {
+        public TabItem(Path file, boolean dirty, boolean hasMatch, boolean searching, boolean awaitingAnswer) {
+            this(file, dirty, hasMatch, searching, awaitingAnswer, "");
+        }
         public TabItem(Path file, boolean dirty, boolean hasMatch) {
             this(file, dirty, hasMatch, false, false);
         }

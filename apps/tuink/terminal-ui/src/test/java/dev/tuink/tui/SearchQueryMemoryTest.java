@@ -78,7 +78,9 @@ class SearchQueryMemoryTest {
             require(rejected.matchCount() == -1, "Memory refusal must be explicitly incomplete");
             require(rejected.query().isEmpty(), "A refused query must not reach render compilation");
             require(rejected.error().startsWith("Not enough memory to search"), "Missing memory-specific feedback");
-            require(rejected.summary().equals(rejected.error()), "The summary must show the refusal");
+            require(rejected.summary().equals("Not enough memory to search"), "The summary must show the short memory refusal");
+            require(rejected.error().equals("Not enough memory to search this query; shorten the query"),
+                "The full error must retain the memory guidance");
             require(field.text().equals(originalQuery), "Search refusal changed the field");
             for (int frame = 0; frame < 20; frame++) {
                 require(presentation.resolve(true, field.text(), ui, List.of(tab), 0) == rejected,

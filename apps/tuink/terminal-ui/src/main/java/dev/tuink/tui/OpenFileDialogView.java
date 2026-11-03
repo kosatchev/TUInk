@@ -3,6 +3,7 @@ package dev.tuink.tui;
 import dev.tuiframe.cell.Canvas;
 import dev.tuiframe.cell.CellText;
 import dev.tuiframe.geometry.Rect;
+import dev.tuiframe.geometry.Point;
 import dev.tuiframe.style.CellStyle;
 import dev.tuiframe.input.TuiInputEvent;
 import dev.tuiframe.widget.Button;
@@ -16,8 +17,10 @@ import dev.tuiframe.widget.InteractionResult;
 import dev.tuiframe.widget.Modal;
 import dev.tuiframe.widget.PlacedModal;
 import dev.tuiframe.widget.PlacedInteractiveWidget;
+import dev.tuiframe.widget.PlacedCursorSource;
 import dev.tuiframe.widget.RoutedTarget;
 import dev.tuiframe.widget.Theme;
+import dev.tuiframe.widget.TextField;
 import dev.tuiframe.widget.WidgetState;
 import dev.tuiframe.widget.WidgetThemeKeys;
 import dev.tuink.tui.ui.FileTreeView;
@@ -26,12 +29,16 @@ import dev.tuink.tui.ui.OpenFileDialogController.OpenDialogLayout;
 import dev.tuink.tui.ui.NotificationPresentation;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
+import java.nio.file.Path;
 
 /** Exact-frame composition and focus ownership for the open-file dialog. */
 final class OpenFileDialogView {
     enum Control {
-        LIST, OK, CANCEL, HIDDEN, CLOSE
+        LIST, LOCATION, OK, CANCEL, HIDDEN, CLOSE
     }
+
+    enum Action { ACTIVATE, LOCATION_CHANGED, LOCATION_SUBMITTED, INPUT_REJECTED }
 
     private OpenFileDialogView() {
     }
@@ -54,8 +61,14 @@ final class OpenFileDialogView {
         Rect interactionClip,
         FilePickerOpenWorkflow.Notice notice
     ) {
+        return place(scopeId, layout, tree, showHiddenFiles, interactionClip, notice, new TextField());
+    }
+
+    static Placement place(Object scopeId, OpenDialogLayout layout, FileTreeView.Placement tree,
+        boolean showHiddenFiles, Rect interactionClip, FilePickerOpenWorkflow.Notice notice, TextField location) {
         Objects.requireNonNull(layout, "layout");
         Objects.requireNonNull(tree, "tree");
+        Objects.requireNonNull(location, "location");
         FocusSpace space = FocusSpace.root(Objects.requireNonNull(interactionClip, "interactionClip"));
         CompactDialogView.Placement compact = CompactDialogView.required(interactionClip.height(), interactionClip.width())
             ? CompactDialogView.place(interactionClip,
@@ -64,16 +77,24 @@ final class OpenFileDialogView {
                     : "Open file")
             : null;
         var buttons = OpenFileDialogController.buttonsForLayout(layout);
-        String hiddenLabel = showHiddenFiles ? "[hidden:x]" : "[hidden: ]";
+        String hiddenLabel = showHiddenFiles ? "Hidden [x]" : "Hidden [ ]";
         Button hidden = Button.plain(layout.top() + 1,
             Math.max(layout.left() + 1, layout.right() - hiddenLabel.length()), hiddenLabel);
         Button close = compact == null ? Button.plain(layout.top(), layout.right() - 2, "X") : compact.closeButton();
-        List<RoutedTarget<Control, Button.Action>> targets = List.of(
+        int locationLeft = layout.left() + 7;
+        Rect locationBounds = new Rect(locationLeft, layout.top() + 1,
+            Math.max(0, hidden.col() - locationLeft - 1), 1);
+        List<RoutedTarget<Control, Action>> targets = List.of(
             new RoutedTarget<>(Control.LIST, new TreeFocusTarget(tree.bounds()), space,
                 true, tree.enabled()),
+            new RoutedTarget<>(Control.LOCATION, location.layout(locationBounds).mapOutput(action -> switch (action) {
+                case VALUE_CHANGED -> Action.LOCATION_CHANGED;
+                case SUBMITTED -> Action.LOCATION_SUBMITTED;
+                case INPUT_REJECTED -> Action.INPUT_REJECTED;
+            }), space, true, compact == null && locationBounds.width() >= 3),
             buttonTarget(Control.OK, buttons.ok(), space, tree.enabled(), true),
             buttonTarget(Control.CANCEL, buttons.cancel(), space, tree.enabled(), true),
-            buttonTarget(Control.HIDDEN, hidden, space, tree.enabled(), false),
+            buttonTarget(Control.HIDDEN, hidden, space, tree.enabled(), true),
             buttonTarget(Control.CLOSE, close, space,
                 compact != null || tree.enabled(), compact != null)
         );
@@ -82,25 +103,38 @@ final class OpenFileDialogView {
             .layout(new Rect(layout.left(), layout.top(), layout.width(), layout.height()));
         return new Placement(layout, frame, tree, new FocusScope<>(
             scopeId, FocusResetPolicy.FIRST_FOCUSABLE, targets,
-            compact == null ? List.of(Control.LIST, Control.OK, Control.CANCEL) : List.of(Control.CLOSE),
-            List.of(Control.CLOSE, Control.HIDDEN, Control.CANCEL, Control.OK, Control.LIST)
-        ), showHiddenFiles, compact, notice);
+            compact == null ? List.of(Control.LIST, Control.LOCATION, Control.HIDDEN, Control.OK, Control.CANCEL)
+                : List.of(Control.CLOSE),
+            List.of(Control.CLOSE, Control.HIDDEN, Control.CANCEL, Control.OK, Control.LOCATION, Control.LIST)
+        ), showHiddenFiles, compact, notice, location);
     }
 
-    private static RoutedTarget<Control, Button.Action> buttonTarget(
+    private static RoutedTarget<Control, Action> buttonTarget(
         Control id, Button button, FocusSpace space, boolean enabled, boolean focusable
     ) {
         Rect bounds = new Rect(button.col(), button.row(), button.width(), 1);
-        return new RoutedTarget<>(id, button.layout(bounds), space, focusable, enabled);
+        return new RoutedTarget<>(id, button.layout(bounds).mapOutput(ignored -> Action.ACTIVATE), space, focusable, enabled);
     }
 
     /** The only retained focus owner; the public enum is just its application-facing projection. */
     static final class FocusState {
         private final FocusManager<Control> manager = new FocusManager<>();
-        private FocusScope<Control, Button.Action> scope;
+        private FocusScope<Control, Action> scope;
+        private final TextField location = new TextField(TextField.PastePolicy.PRESERVE_TABS);
+        private Path locationRoot;
         private OpenFileInputRouter.Focus pendingFocus = OpenFileInputRouter.Focus.LIST;
         private boolean compact;
         private Control focusBeforeCompact;
+
+        TextField location() { return location; }
+
+        boolean locationEdited() {
+            return locationRoot != null && !location.text().equals(locationRoot.toString());
+        }
+
+        void synchronizeRoot(Path root) {
+            if (!Objects.equals(root, locationRoot) && location.set(root.toString())) locationRoot = root;
+        }
 
         OpenFileInputRouter.Focus focus() {
             return scope == null ? pendingFocus : external(manager.focused().orElse(Control.LIST));
@@ -143,10 +177,11 @@ final class OpenFileDialogView {
         OpenDialogLayout layout,
         PlacedModal frame,
         FileTreeView.Placement tree,
-        FocusScope<Control, Button.Action> focusScope,
+        FocusScope<Control, Action> focusScope,
         boolean showHiddenFiles,
         CompactDialogView.Placement compactDialog,
-        FilePickerOpenWorkflow.Notice notice
+        FilePickerOpenWorkflow.Notice notice,
+        TextField location
     ) {
         Placement {
             Objects.requireNonNull(layout, "layout");
@@ -161,7 +196,7 @@ final class OpenFileDialogView {
 
         /** Tree gesture delivery has its own output type and no keyboard-focus side effects. */
         FocusScope<Control, FileTreeView.Action> captureScope() {
-            RoutedTarget<Control, Button.Action> list = focusScope.target(Control.LIST).orElseThrow();
+            RoutedTarget<Control, Action> list = focusScope.target(Control.LIST).orElseThrow();
             return FocusScope.single(new TreeCaptureScopeId(focusScope.id()), FocusResetPolicy.CLEARED,
                 new RoutedTarget<>(Control.LIST, tree.captureTarget(), list.space(), false, tree.enabled()));
         }
@@ -183,14 +218,25 @@ final class OpenFileDialogView {
 
         /** Paints the same placed controls used for routing; Modal paints its own close mark. */
         void paintControls(Canvas canvas, Theme theme, OpenFileInputRouter.Focus focused, boolean contentFocused) {
-            for (Control id : List.of(Control.HIDDEN, Control.OK, Control.CANCEL)) {
+            var body = theme.resolveStyle(WidgetThemeKeys.MODAL_BODY);
+            canvas.fill(new Rect(layout.left() + 1, layout.top() + 1, Math.max(0, layout.width() - 2), 1), body);
+            CellText.drawClipped(canvas, layout.left() + 1, layout.top() + 1, "Path: ", body,
+                Math.max(0, layout.width() - 2));
+            for (Control id : List.of(Control.LOCATION, Control.HIDDEN, Control.OK, Control.CANCEL)) {
                 var target = focusScope.target(id).orElseThrow();
-                boolean highlighted = id == Control.HIDDEN ? showHiddenFiles
-                    : !contentFocused && control(focused) == id;
+                boolean highlighted = !contentFocused && control(focused) == id;
                 target.placement().paint(canvas, theme, new WidgetState(highlighted, target.interactive()));
             }
             paintNotice(canvas, theme, new Rect(layout.left() + 1, layout.bottom() - 1,
                 Math.max(0, layout.width() - 2), 1));
+        }
+
+        Optional<Point> cursorPosition(OpenFileInputRouter.Focus focus) {
+            if (focus != OpenFileInputRouter.Focus.LOCATION) return Optional.empty();
+            var target = focusScope.target(Control.LOCATION).orElseThrow();
+            if (!(target.placement() instanceof PlacedCursorSource source)) return Optional.empty();
+            var context = new FocusContext(true, target.interactive(), target.space());
+            return source.cursorPosition(context).flatMap(context.space()::terminalPoint);
         }
 
         void paintCompact(Canvas canvas, Theme theme, WidgetState closeState) {
@@ -220,6 +266,8 @@ final class OpenFileDialogView {
     private static Control control(OpenFileInputRouter.Focus focus) {
         return switch (focus) {
             case LIST -> Control.LIST;
+            case LOCATION -> Control.LOCATION;
+            case HIDDEN -> Control.HIDDEN;
             case OK -> Control.OK;
             case CANCEL -> Control.CANCEL;
         };
@@ -229,18 +277,20 @@ final class OpenFileDialogView {
         return switch (control) {
             case OK -> OpenFileInputRouter.Focus.OK;
             case CANCEL -> OpenFileInputRouter.Focus.CANCEL;
-            case LIST, HIDDEN, CLOSE -> OpenFileInputRouter.Focus.LIST;
+            case LOCATION -> OpenFileInputRouter.Focus.LOCATION;
+            case HIDDEN -> OpenFileInputRouter.Focus.HIDDEN;
+            case LIST, CLOSE -> OpenFileInputRouter.Focus.LIST;
         };
     }
 
-    private record TreeFocusTarget(Rect bounds) implements PlacedInteractiveWidget<Button.Action> {
+    private record TreeFocusTarget(Rect bounds) implements PlacedInteractiveWidget<Action> {
         @Override
         public void paint(Canvas canvas, Theme theme, WidgetState state) {
             // The file-tree adapter owns content painting; this target supplies focus geometry.
         }
 
         @Override
-        public InteractionResult<Button.Action> handle(TuiInputEvent event, FocusContext context) {
+        public InteractionResult<Action> handle(TuiInputEvent event, FocusContext context) {
             return InteractionResult.ignored();
         }
     }

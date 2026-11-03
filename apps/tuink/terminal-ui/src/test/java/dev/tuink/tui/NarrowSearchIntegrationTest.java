@@ -25,14 +25,14 @@ class NarrowSearchIntegrationTest {
             window.focusSearch(SearchFocus.ALL_BUTTON);
             window.resize(24, columns);
 
-            assertTrue(window.screenRow(window.height - 3).startsWith("Find: alpha"));
-            assertTrue(window.screenRow(window.height - 2).startsWith("Replace: beta"));
-            assertFalse(window.screenRow(window.height - 2).contains("[Replace all]"));
-            assertEquals(SearchFocus.FIND, window.host.searchFocusManager().focused().orElseThrow());
+            assertTrue(window.screenRow(window.rowStartingWith("Find: ")).startsWith("Find: alpha"));
+            assertTrue(window.screenRow(window.rowStartingWith("Replace: ")).startsWith("Replace: beta"));
+            assertTrue(screen(window).contains("[Replace all]"));
+            assertEquals(SearchFocus.ALL_BUTTON, window.host.searchFocusManager().focused().orElseThrow());
             window.focusSearch(SearchFocus.REPLACE);
             window.event(KeyStroke.of(KeyStroke.Key.A, KeyStroke.Modifier.CTRL));
             window.event(new TextInput("gamma"));
-            assertTrue(window.screenRow(window.height - 2).startsWith("Replace: gamma"));
+            assertTrue(window.screenRow(window.rowStartingWith("Replace: ")).startsWith("Replace: gamma"));
 
             window.event(KeyStroke.of(KeyStroke.Key.R, KeyStroke.Modifier.CTRL));
             assertEquals(List.of("gamma alpha"), window.active().tabSession().model().snapshotLines());
@@ -43,12 +43,12 @@ class NarrowSearchIntegrationTest {
 
     @ParameterizedTest
     @ValueSource(ints = {43, 44, 49, 50})
-    void longerLabelsAppearOnlyWhenTheirFieldsKeepEnoughRoom(int columns) throws Exception {
+    void longerLabelsWrapWithoutTakingSpaceFromTheFields(int columns) throws Exception {
         try (EditorWindowFixture window = searchWindow()) {
             window.resize(24, columns);
 
-            assertEquals(columns >= 44, window.screenRow(window.height - 3).contains("[All tabs: ]"));
-            assertEquals(columns >= 50, window.screenRow(window.height - 2).contains("[Replace all]"));
+            assertTrue(screen(window).contains("[All tabs: ]"));
+            assertTrue(screen(window).contains("[Replace all]"));
             assertEquals("alpha", window.query.text());
             assertEquals("beta", window.replacement.text());
 
@@ -68,7 +68,7 @@ class NarrowSearchIntegrationTest {
             window.event(new TextInput(query));
             window.focusSearch(SearchFocus.REPLACE);
             window.event(new TextInput(replacement));
-            window.resize(24, 11);
+            window.resize(24, 8);
             long revision = window.active().tabSession().model().revision();
 
             window.event(KeyStroke.of(KeyStroke.Key.R, KeyStroke.Modifier.CTRL));
@@ -83,8 +83,8 @@ class NarrowSearchIntegrationTest {
             assertEquals("Enlarge terminal to show Find and Replace fields before replacing", window.notification.message);
 
             window.resize(24, 12);
-            assertTrue(window.screenRow(window.height - 3).contains(query));
-            assertTrue(window.screenRow(window.height - 2).contains(replacement));
+            assertTrue(window.screenRow(window.rowStartingWith("Find: ")).contains(query));
+            assertTrue(window.screenRow(window.rowStartingWith("Replace: ")).contains(replacement));
             window.command(TuinkCommand.SEARCH_REPLACE_ALL);
             assertEquals(List.of(replacement + " " + replacement),
                 window.active().tabSession().model().snapshotLines());
@@ -92,7 +92,7 @@ class NarrowSearchIntegrationTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"24,1", "24,9", "24,10", "2,80", "3,80"})
+    @CsvSource({"24,1", "24,7", "24,8", "2,80", "3,80"})
     void hiddenFieldContextBlocksPhysicalAndSemanticReplacementUntilTheTerminalGrows(int rows, int columns)
         throws Exception {
         try (EditorWindowFixture window = searchWindow()) {
@@ -125,5 +125,10 @@ class NarrowSearchIntegrationTest {
         window.focusSearch(SearchFocus.REPLACE);
         window.event(new TextInput("beta"));
         return window;
+    }
+
+    private static String screen(EditorWindowFixture window) {
+        return java.util.stream.IntStream.range(0, window.height).mapToObj(window::screenRow)
+            .collect(java.util.stream.Collectors.joining("\n"));
     }
 }

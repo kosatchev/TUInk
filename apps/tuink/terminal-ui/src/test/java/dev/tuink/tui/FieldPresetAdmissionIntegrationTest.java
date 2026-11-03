@@ -30,7 +30,7 @@ class FieldPresetAdmissionIntegrationTest {
 
             window.command(TuinkCommand.SEARCH_OPEN);
 
-            assertFalse(window.ui.searchMode);
+            assertFalse(window.selected().uiState().searchMode);
             assertEquals("previous query", window.query.text());
             assertTrue(window.notification.message.startsWith("Not enough memory to open Find"));
             assertEquals(new Position(0, 8), window.active().state().getCursor());

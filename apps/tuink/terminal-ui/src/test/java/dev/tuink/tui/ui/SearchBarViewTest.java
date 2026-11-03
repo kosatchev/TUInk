@@ -219,13 +219,13 @@ class SearchBarViewTest {
     }
 
     @Test
-    void narrowRowsKeepFieldsEditableAndHideButtonClusters() {
+    void narrowRowsKeepFieldsEditableAndWrapEveryButtonIntoTheFocusScope() {
         TextField query = new TextField();
         query.set("alpha");
         TextField replacement = new TextField();
         replacement.set("beta");
         SearchBarView.Placement placement = view(query, replacement, 30)
-            .place(new Object(), 2, viewport(5, 30));
+            .place(new Object(), 2, viewport(12, 30));
         FocusManager<SearchFocus> focus = new FocusManager<>();
         placement.activate(focus);
 
@@ -235,13 +235,13 @@ class SearchBarViewTest {
         assertEquals(SearchFocus.FIND, focus.focused().orElseThrow());
         for (SearchFocus id : TARGET_ORDER) {
             if (id != SearchFocus.FIND && id != SearchFocus.REPLACE) {
-                assertTrue(placement.targetBounds(id).isEmpty());
+                assertFalse(placement.targetBounds(id).isEmpty());
                 assertTrue(target(placement, id).enabled());
-                assertFalse(target(placement, id).interactive());
+                assertTrue(target(placement, id).interactive());
             }
         }
 
-        CellBuffer buffer = new CellBuffer(5, 30);
+        CellBuffer buffer = new CellBuffer(12, 30);
         Canvas canvas = new Canvas(buffer);
         CellText.draw(canvas, 0, 2, placement.row1(), PROMPT);
         CellText.draw(canvas, 0, 3, placement.row2(), PROMPT);
@@ -254,18 +254,18 @@ class SearchBarViewTest {
     void longerLabelsNeverSqueezeEitherFieldBelowAGlyphAndCaret() {
         for (int columns : List.of(43, 44, 49, 50)) {
             SearchBarView.Placement placement = view(new TextField(), new TextField(), columns)
-                .place(new Object(), 2, viewport(5, columns));
+                .place(new Object(), 2, viewport(12, columns));
 
             assertTrue(placement.targetBounds(SearchFocus.FIND).width() >= 3, "columns=" + columns);
             assertTrue(placement.targetBounds(SearchFocus.REPLACE).width() >= 3, "columns=" + columns);
             assertTrue(placement.replacementContextVisible(), "columns=" + columns);
-            assertEquals(columns >= 44, target(placement, SearchFocus.ALL).interactive(), "columns=" + columns);
-            assertEquals(columns >= 50, target(placement, SearchFocus.ALL_BUTTON).interactive(), "columns=" + columns);
+            assertTrue(target(placement, SearchFocus.ALL).interactive(), "columns=" + columns);
+            assertTrue(target(placement, SearchFocus.ALL_BUTTON).interactive(), "columns=" + columns);
         }
     }
 
     @Test
-    void tinyAndPartiallyClippedFieldsCannotOfferReplacementContext() {
+    void compactLabelsPreserveFieldsAndPartialClipsCannotOfferReplacementContext() {
         int columns = 10;
         int topRow = 2;
         Rect fullTinyClip = viewport(5, columns);
@@ -276,13 +276,13 @@ class SearchBarViewTest {
 
         assertEquals(4, tiny.targetBounds(SearchFocus.FIND).width());
         assertTrue(target(tiny, SearchFocus.FIND).interactive());
-        assertFalse(target(tiny, SearchFocus.CASE).interactive());
+        assertTrue(target(tiny, SearchFocus.CASE).interactive());
         assertFalse(target(tiny, SearchFocus.WORD).interactive());
         assertFalse(target(tiny, SearchFocus.NEXT_BUTTON).interactive());
         assertFalse(target(tiny, SearchFocus.PREV_BUTTON).interactive());
         assertEquals(SearchFocus.FIND, tinyFocus.focused().orElseThrow());
         assertTrue(tiny.cursorPosition(tinyFocus).isPresent());
-        assertFalse(tiny.replacementContextVisible());
+        assertTrue(tiny.replacementContextVisible());
 
         Rect clipped = new Rect(0, 0, 4, 5);
         SearchBarView.Placement hidden = view(new TextField(), new TextField(), columns)

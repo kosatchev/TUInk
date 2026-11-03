@@ -80,7 +80,7 @@ class SafeConfirmationIntegrationTest {
 
     @ParameterizedTest
     @MethodSource("explicitDiscards")
-    void onlyTheExplicitDiscardButtonQuitsOrClosesWithoutSaving(boolean closeTab, boolean pointer)
+    void explicitDiscardButtonQuitsOrClosesWithoutSaving(boolean closeTab, boolean pointer)
         throws Exception {
         Path recoveryDirectory = directory.resolve("recovery");
         try (RecoveryStore store = RecoveryStoreFixtures.open(recoveryDirectory);
@@ -97,6 +97,28 @@ class SafeConfirmationIntegrationTest {
                 window.event(KeyStroke.of(KeyStroke.Key.ARROW_RIGHT));
                 window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             }
+
+            assertEquals(closeTab, window.controller.running());
+            assertEquals("original", Files.readString(window.document));
+            assertNull(window.recoveryManager.finishSession(window.host.toDocumentSessions(window.tabs), !closeTab));
+            assertTrue(store.loadAll().entries().isEmpty());
+        }
+        try (RecoveryStore next = RecoveryStoreFixtures.open(recoveryDirectory)) {
+            assertTrue(next.loadAll().entries().isEmpty());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void noDiscardsUnsavedChangesAndTheirRecoverySnapshotWithoutWriting(boolean closeTab) throws Exception {
+        Path recoveryDirectory = directory.resolve("recovery");
+        try (RecoveryStore store = RecoveryStoreFixtures.open(recoveryDirectory);
+             EditorWindowFixture window = window(store)) {
+            window.event(new TextInput("draft "));
+            assertEquals(1, store.loadAll().entries().size());
+            requestConfirmation(window, closeTab);
+
+            window.event(new TextInput("N"));
 
             assertEquals(closeTab, window.controller.running());
             assertEquals("original", Files.readString(window.document));
@@ -135,8 +157,9 @@ class SafeConfirmationIntegrationTest {
 
     private static Stream<Arguments> cancellations() {
         return Stream.of(false, true).flatMap(close -> Stream.of(80, 12).flatMap(columns ->
-            Stream.of(new TextInput("n"), KeyStroke.of(KeyStroke.Key.ESCAPE),
+            Stream.of(KeyStroke.of(KeyStroke.Key.ESCAPE),
                 KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL))
+                .filter(input -> close || !input.equals(KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL)))
                 .map(input -> Arguments.of(close, columns, input))));
     }
 

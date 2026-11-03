@@ -73,7 +73,8 @@ final class DialogCommandPolicy {
         return switch (kind) {
             case SAVE_AS -> saveAsFocus == SaveAsBarView.Target.FIELD ? Target.TEXT_INPUT : Target.BUTTON;
             case CONFIRM, HELP, FORMAT -> Target.BUTTON;
-            case OPEN_FILE -> openFocus == OpenFileInputRouter.Focus.LIST ? Target.OTHER_CONTROL : Target.BUTTON;
+            case OPEN_FILE -> openFocus == OpenFileInputRouter.Focus.LOCATION ? Target.TEXT_INPUT
+                : openFocus == OpenFileInputRouter.Focus.LIST ? Target.OTHER_CONTROL : Target.BUTTON;
             case NONE -> Target.OTHER_CONTROL;
         };
     }

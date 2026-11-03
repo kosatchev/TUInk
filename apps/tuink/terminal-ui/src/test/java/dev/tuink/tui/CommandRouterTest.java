@@ -249,7 +249,8 @@ class CommandRouterTest {
             -1,
             "Cyan",
             router,
-            controller.state()
-        ).place(new Rect(0, 0, 80, 20));
+            controller.state(),
+            TestSurfaces.source(new UiSessionState())).place(new Rect(0, 0, 80, 20)
+        );
     }
 }

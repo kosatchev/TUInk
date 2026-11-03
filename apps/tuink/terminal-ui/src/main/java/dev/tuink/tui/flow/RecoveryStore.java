@@ -230,16 +230,21 @@ public final class RecoveryStore implements AutoCloseable {
 
     /** Claims compatible snapshots without reading their document text. */
     public synchronized DiscoveryResult discover() throws IOException {
-        return scan(false);
+        return scan(false, false);
     }
 
     /** Convenience for callers that need materialized snapshots, with the same memory admission checks. */
     public synchronized LoadResult loadAll() throws IOException {
-        DiscoveryResult result = scan(true);
+        DiscoveryResult result = scan(true, false);
         return new LoadResult(result.entries().stream().map(Entry.class::cast).toList(), result.skipped());
     }
 
-    private DiscoveryResult scan(boolean materialize) throws IOException {
+    /** Discovers only unclaimed drafts, excluding this session's live checkpoints. */
+    public synchronized DiscoveryResult discoverAvailable() throws IOException {
+        return scan(false, true);
+    }
+
+    private DiscoveryResult scan(boolean materialize, boolean excludeOwned) throws IOException {
         ensureOpen();
         Path dir = directory();
         if (!Files.exists(dir, LinkOption.NOFOLLOW_LINKS)) {
@@ -271,6 +276,9 @@ public final class RecoveryStore implements AutoCloseable {
                 continue;
             }
             boolean previouslyOwned = entryLocks.containsKey(id);
+            if (excludeOwned && previouslyOwned) {
+                continue;
+            }
             boolean loaded = false;
             try {
                 if (!tryClaim(id)) {

@@ -48,6 +48,63 @@ final class CommandRouter {
         return keymap.resolve(stroke);
     }
 
+    /** Menu hints come from the current bindings, including runtime rebindings. */
+    String shortcutFor(CommandInvocation invocation) {
+        for (var binding : keymap.bindings().entrySet()) {
+            if (binding.getValue().equals(invocation)) {
+                return shortcutLabel(binding.getKey());
+            }
+        }
+        return "";
+    }
+
+    private static String shortcutLabel(KeyStroke stroke) {
+        StringBuilder label = new StringBuilder();
+        for (KeyStroke.Modifier modifier : List.of(KeyStroke.Modifier.CTRL,
+                KeyStroke.Modifier.ALT, KeyStroke.Modifier.SHIFT, KeyStroke.Modifier.SUPER)) {
+            if (stroke.has(modifier)) {
+                label.append(switch (modifier) {
+                    case CTRL -> "Ctrl+";
+                    case ALT -> "Alt+";
+                    case SHIFT -> "Shift+";
+                    case SUPER -> "Super+";
+                });
+            }
+        }
+        label.append(switch (stroke.key()) {
+            case TAB -> "Tab";
+            case ENTER -> "Enter";
+            case ESCAPE -> "Esc";
+            case PAGE_UP -> "PgUp";
+            case PAGE_DOWN -> "PgDn";
+            case ARROW_LEFT -> "Left";
+            case ARROW_RIGHT -> "Right";
+            case ARROW_UP -> "Up";
+            case ARROW_DOWN -> "Down";
+            case HOME -> "Home";
+            case END -> "End";
+            case BACKSPACE -> "Backspace";
+            case DELETE -> "Delete";
+            case INSERT -> "Insert";
+            case SPACE -> "Space";
+            case MINUS -> "-";
+            case EQUALS -> "=";
+            case LEFT_BRACKET -> "[";
+            case RIGHT_BRACKET -> "]";
+            case BACKSLASH -> "\\";
+            case SEMICOLON -> ";";
+            case APOSTROPHE -> "'";
+            case GRAVE -> "`";
+            case COMMA -> ",";
+            case PERIOD -> ".";
+            case SLASH -> "/";
+            case DIGIT_0, DIGIT_1, DIGIT_2, DIGIT_3, DIGIT_4,
+                DIGIT_5, DIGIT_6, DIGIT_7, DIGIT_8, DIGIT_9 -> stroke.key().name().substring(6);
+            default -> stroke.key().name();
+        });
+        return label.toString();
+    }
+
     CommandInvocation tabActivationInvocation(int tabIndex) {
         if (tabIndex < 0) {
             throw new IllegalArgumentException("tabIndex must be non-negative");

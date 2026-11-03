@@ -6,15 +6,12 @@ import dev.tuink.tui.flow.AppSettings;
 import dev.tuink.tui.style.UiStyles;
 
 final class UiSessionState {
-    boolean searchMode;
-    boolean searchEditorFocused;
     boolean showTabBarSetting;
     boolean wrapLinesSetting;
     boolean wrapWordsSetting;
     boolean readingModeSetting;
     boolean confirmOnCloseSetting;
     boolean mouseModeSetting;
-    boolean mouseModeAvailable = true;
     boolean highlightActiveGutterSetting;
     boolean smartHomeEndSetting;
     boolean autoIndentSetting;
@@ -22,72 +19,42 @@ final class UiSessionState {
     boolean autoListSetting;
     boolean visibleWhitespaceSetting;
     boolean syntaxHighlightingSetting;
-    boolean syntaxHighlightingAvailable = true;
     boolean rainbowBracketsSetting;
     boolean autoSelectionHighlightSetting;
     GutterDiffMode gutterDiffModeSetting;
     int tabWidthSetting;
     TabInsertMode tabInsertModeSetting;
-    boolean helpHintsMode;
-    boolean helpLicensesMode;
-    boolean helpAuthorMode;
 
     AppSettings settingsSnapshot(UiStyles.Theme theme) {
         return new AppSettings(showTabBarSetting, wrapLinesSetting, wrapWordsSetting,
             readingModeSetting, confirmOnCloseSetting, mouseModeSetting, highlightActiveGutterSetting,
             smartHomeEndSetting, autoIndentSetting, autoPairsSetting, autoListSetting,
             visibleWhitespaceSetting, syntaxHighlightingSetting, rainbowBracketsSetting,
-            autoSelectionHighlightSetting, gutterDiffModeSetting, tabWidthSetting,
+            autoSelectionHighlightSetting,
+            gutterDiffModeSetting, tabWidthSetting,
             tabInsertModeSetting, theme);
     }
 
-    static UiSessionState from(
-        boolean searchMode,
-        boolean showTabBarSetting,
-        boolean wrapLinesSetting,
-        boolean wrapWordsSetting,
-        boolean readingModeSetting,
-        boolean confirmOnCloseSetting,
-        boolean mouseModeSetting,
-        boolean highlightActiveGutterSetting,
-        boolean smartHomeEndSetting,
-        boolean autoIndentSetting,
-        boolean autoPairsSetting,
-        boolean autoListSetting,
-        boolean visibleWhitespaceSetting,
-        boolean syntaxHighlightingSetting,
-        boolean rainbowBracketsSetting,
-        boolean autoSelectionHighlightSetting,
-        GutterDiffMode gutterDiffModeSetting,
-        int tabWidthSetting,
-        TabInsertMode tabInsertModeSetting,
-        boolean helpHintsMode,
-        boolean helpLicensesMode,
-        boolean helpAuthorMode
-    ) {
+    static UiSessionState from(AppSettings settings) {
         UiSessionState state = new UiSessionState();
-        state.searchMode = searchMode;
-        state.showTabBarSetting = showTabBarSetting;
-        state.wrapLinesSetting = wrapLinesSetting;
-        state.wrapWordsSetting = wrapWordsSetting;
-        state.readingModeSetting = readingModeSetting;
-        state.confirmOnCloseSetting = confirmOnCloseSetting;
-        state.mouseModeSetting = mouseModeSetting;
-        state.highlightActiveGutterSetting = highlightActiveGutterSetting;
-        state.smartHomeEndSetting = smartHomeEndSetting;
-        state.autoIndentSetting = autoIndentSetting;
-        state.autoPairsSetting = autoPairsSetting;
-        state.autoListSetting = autoListSetting;
-        state.visibleWhitespaceSetting = visibleWhitespaceSetting;
-        state.syntaxHighlightingSetting = syntaxHighlightingSetting;
-        state.rainbowBracketsSetting = rainbowBracketsSetting;
-        state.autoSelectionHighlightSetting = autoSelectionHighlightSetting;
-        state.gutterDiffModeSetting = gutterDiffModeSetting == null ? GutterDiffMode.MYERS : gutterDiffModeSetting;
-        state.tabWidthSetting = tabWidthSetting <= 2 ? 2 : 4;
-        state.tabInsertModeSetting = tabInsertModeSetting == null ? TabInsertMode.AUTO : tabInsertModeSetting;
-        state.helpHintsMode = helpHintsMode;
-        state.helpLicensesMode = helpLicensesMode;
-        state.helpAuthorMode = helpAuthorMode;
+        state.showTabBarSetting = settings.showTabBar();
+        state.wrapLinesSetting = settings.wrapLines();
+        state.wrapWordsSetting = settings.wrapWords();
+        state.readingModeSetting = settings.readingMode();
+        state.confirmOnCloseSetting = settings.confirmOnClose();
+        state.mouseModeSetting = settings.mouseMode();
+        state.highlightActiveGutterSetting = settings.highlightActiveGutter();
+        state.smartHomeEndSetting = settings.smartHomeEnd();
+        state.autoIndentSetting = settings.autoIndent();
+        state.autoPairsSetting = settings.autoPairs();
+        state.autoListSetting = settings.autoList();
+        state.visibleWhitespaceSetting = settings.visibleWhitespace();
+        state.syntaxHighlightingSetting = settings.syntaxHighlighting();
+        state.rainbowBracketsSetting = settings.rainbowBrackets();
+        state.autoSelectionHighlightSetting = settings.autoSelectionHighlight();
+        state.gutterDiffModeSetting = settings.gutterDiffMode();
+        state.tabWidthSetting = settings.tabWidth();
+        state.tabInsertModeSetting = settings.tabInsertMode();
         return state;
     }
 }

@@ -26,6 +26,28 @@ import org.junit.jupiter.api.Test;
 
 class TopMenuViewTest {
     @Test
+    void showsTheCurrentBindingAndDisablesEditsInPreview() {
+        var keymap = dev.tuink.tui.keymap.TuinkKeymap.defaults();
+        keymap.unbind(dev.tuiframe.input.KeyStroke.of(dev.tuiframe.input.KeyStroke.Key.S,
+            dev.tuiframe.input.KeyStroke.Modifier.CTRL));
+        keymap.bind(dev.tuiframe.input.KeyStroke.of(dev.tuiframe.input.KeyStroke.Key.F12),
+            CommandInvocation.of(dev.tuink.tui.command.TuinkCommand.DOCUMENT_SAVE.id()));
+        var file = TopMenuView.build(ui(), List.of(), -1, "Blue", new CommandRouter(keymap),
+            MenuBar.State.open(TopMenuController.FILE_INDEX), TestSurfaces.source(ui()));
+        assertTrue(file.menus().get(0).entries().stream().anyMatch(entry ->
+            entry instanceof MenuBar.Item<?> item && item.label().equals("Save") && item.hint().equals("F12")));
+
+        UiSessionState preview = ui();
+        var edit = TopMenuView.build(preview, List.of(), -1, "Blue", new CommandRouter(),
+            MenuBar.State.open(TopMenuController.EDIT_INDEX), TestSurfaces.source(preview).withKind(ActiveSurface.Kind.LIVE_PREVIEW));
+        var cut = edit.menus().get(1).entries().stream().filter(entry ->
+            entry instanceof MenuBar.Item<?> item && item.label().startsWith("Cut"))
+            .map(entry -> (MenuBar.Item<?>) entry).findFirst().orElseThrow();
+        assertFalse(cut.enabled());
+        assertTrue(cut.label().contains("read only"));
+    }
+
+    @Test
     void buildsSixFixedMenusWithSemanticCommandsAndDynamicTabs() {
         CommandRouter router = new CommandRouter();
         TopMenuView tabView = TopMenuView.build(
@@ -37,7 +59,8 @@ class TopMenuViewTest {
             1,
             "Blue",
             router,
-            MenuBar.State.open(TopMenuController.TABS_INDEX)
+            MenuBar.State.open(TopMenuController.TABS_INDEX),
+            TestSurfaces.source(ui())
         );
         TopMenuView editView = view(ui(), MenuBar.State.open(TopMenuController.EDIT_INDEX));
 
@@ -78,7 +101,7 @@ class TopMenuViewTest {
         TopMenuView view = TopMenuView.build(ui(), List.of(
             new TopMenuView.TabItem(Path.of("first.txt"), true, false, true, true),
             new TopMenuView.TabItem(Path.of("中.txt"), false, true, true, false)
-        ), 1, "Cyan", new CommandRouter(), MenuBar.State.open(TopMenuController.TABS_INDEX));
+        ), 1, "Cyan", new CommandRouter(), MenuBar.State.open(TopMenuController.TABS_INDEX), TestSurfaces.source(ui()));
 
         var inactive = item(view, TopMenuController.TABS_INDEX, 5);
         var active = item(view, TopMenuController.TABS_INDEX, 6);
@@ -95,13 +118,10 @@ class TopMenuViewTest {
         ui.wrapLinesSetting = false;
         ui.wrapWordsSetting = true;
         ui.mouseModeSetting = true;
-        ui.mouseModeAvailable = false;
 
         TopMenuView viewMenu = view(ui, MenuBar.State.open(TopMenuController.VIEW_INDEX));
-        TopMenuView settingsMenu = view(
-            ui,
-            MenuBar.State.open(TopMenuController.SETTINGS_INDEX)
-        );
+        TopMenuView settingsMenu = TopMenuView.build(ui, List.of(), -1, "Blue", new CommandRouter(),
+            MenuBar.State.open(TopMenuController.SETTINGS_INDEX), TestSurfaces.source(ui).withRuntime(false, true));
 
         MenuBar.Item<CommandInvocation> wordWrap = item(
             viewMenu,
@@ -136,6 +156,7 @@ class TopMenuViewTest {
                 "tuink.document.format",
                 "tuink.document.reopen-encoding",
                 "tuink.document.open-encoding",
+                "tuink.document.recover-drafts",
                 "tuink.app.quit"
             ),
             commandIds(view(ui, MenuBar.State.open(TopMenuController.FILE_INDEX)), TopMenuController.FILE_INDEX)
@@ -333,7 +354,8 @@ class TopMenuViewTest {
             -1,
             "Cyan",
             new CommandRouter(),
-            MenuBar.State.closed()
+            MenuBar.State.closed(),
+            TestSurfaces.source(ui())
         );
 
         TopMenuView.Placement placement = view.place(new Rect(3, 2, 50, 8));
@@ -352,7 +374,8 @@ class TopMenuViewTest {
             0,
             "Cyan",
             new CommandRouter(),
-            state
+            state,
+            TestSurfaces.source(ui)
         );
     }
 
@@ -364,7 +387,6 @@ class TopMenuViewTest {
         ui.readingModeSetting = false;
         ui.confirmOnCloseSetting = true;
         ui.mouseModeSetting = true;
-        ui.mouseModeAvailable = true;
         ui.highlightActiveGutterSetting = true;
         ui.smartHomeEndSetting = true;
         ui.autoIndentSetting = true;

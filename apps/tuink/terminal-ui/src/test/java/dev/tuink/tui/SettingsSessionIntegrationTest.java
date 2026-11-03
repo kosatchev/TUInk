@@ -71,7 +71,7 @@ class SettingsSessionIntegrationTest {
     @Test
     void anUnavailableMouseActionDoesNotBecomeASavedChoice() throws Exception {
         try (EditorWindowFixture window = overriddenWindow()) {
-            window.ui.mouseModeAvailable = false;
+            window.mouseAvailable = false;
             window.command(TuinkCommand.SETTINGS_TOGGLE_MOUSE);
 
             assertFalse(window.ui.mouseModeSetting);

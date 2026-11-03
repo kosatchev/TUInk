@@ -66,7 +66,7 @@ public final class TuinkKeymap {
         bind(result, key(KeyStroke.Key.O, KeyStroke.Modifier.CTRL), DOCUMENT_OPEN);
         bind(result, key(KeyStroke.Key.S, KeyStroke.Modifier.CTRL), DOCUMENT_SAVE);
         bind(result, key(KeyStroke.Key.K, KeyStroke.Modifier.CTRL), DOCUMENT_SAVE_AS);
-        bind(result, key(KeyStroke.Key.W, KeyStroke.Modifier.CTRL), DOCUMENT_SAVE_AS);
+        bind(result, key(KeyStroke.Key.W, KeyStroke.Modifier.CTRL), TuinkCommand.TAB_CLOSE);
         bind(result, key(KeyStroke.Key.S, KeyStroke.Modifier.CTRL, KeyStroke.Modifier.SHIFT), DOCUMENT_SAVE_AS);
         bind(result, key(KeyStroke.Key.F4, KeyStroke.Modifier.CTRL, KeyStroke.Modifier.SHIFT), DOCUMENT_SAVE_AS);
 
@@ -91,6 +91,7 @@ public final class TuinkKeymap {
         bind(result, key(KeyStroke.Key.TAB, KeyStroke.Modifier.CTRL), TAB_NEXT);
         bind(result, key(KeyStroke.Key.TAB, KeyStroke.Modifier.SUPER), TAB_NEXT);
         bind(result, key(KeyStroke.Key.PAGE_UP, KeyStroke.Modifier.CTRL), TAB_PREVIOUS);
+        bind(result, key(KeyStroke.Key.TAB, KeyStroke.Modifier.CTRL, KeyStroke.Modifier.SHIFT), TAB_PREVIOUS);
 
         bind(result, key(KeyStroke.Key.ARROW_UP), CURSOR_UP);
         bind(result, key(KeyStroke.Key.ARROW_DOWN), CURSOR_DOWN);

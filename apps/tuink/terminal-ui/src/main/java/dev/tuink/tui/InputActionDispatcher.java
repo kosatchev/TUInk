@@ -29,6 +29,14 @@ final class InputActionDispatcher {
     }
 
     static DispatchResult dispatch(TuinkCommand command, UiSessionState ui, DispatchContext ctx) {
+        DispatchResult uiResult = dispatchUi(command, ui, ctx.surface(), ctx.topMenu(), ctx.mouseTrackingController(), () -> {
+            if (ctx.state() != null) {
+                ctx.state().setTopWrapSegment(0);
+                ctx.state().setLeftColumn(0);
+                ctx.state().setLeftVisualColumn(0);
+            }
+        });
+        if (uiResult.handled()) return uiResult;
         DocumentInteraction before = DocumentInteraction.capture(ctx.engine());
         DispatchResult result;
         try {
@@ -41,34 +49,37 @@ final class InputActionDispatcher {
             ? result.withViewportPolicy(CursorPolicy.FOLLOW_CURSOR) : result;
     }
 
-    private static DispatchResult execute(TuinkCommand command, UiSessionState ui, DispatchContext ctx) {
-        if (ui.readingModeSetting && command.editsDocumentText()) {
-            return DispatchResult.handled("Reading mode: editing is disabled");
-        }
-        String statusMessage = null;
+    /** Application preferences and menu intents shared by source and engine-free presentations. */
+    static DispatchResult dispatchUi(TuinkCommand command, UiSessionState ui, ActiveSurface surface, TopMenuController topMenu,
+        Consumer<Boolean> mouseTrackingController, Runnable onWrapEnabled) {
+        Objects.requireNonNull(command, "command");
+        Objects.requireNonNull(ui, "ui");
+        Objects.requireNonNull(mouseTrackingController, "mouseTrackingController");
+        Objects.requireNonNull(onWrapEnabled, "onWrapEnabled");
+        String statusMessage;
         switch (command) {
             case MENU_EDIT -> {
-                ctx.topMenu().openFor(CommandInvocation.of(MENU_EDIT.id()));
+                Objects.requireNonNull(topMenu, "topMenu").openFor(CommandInvocation.of(MENU_EDIT.id()));
                 return DispatchResult.handled(null);
             }
             case MENU_TABS -> {
-                ctx.topMenu().openFor(CommandInvocation.of(MENU_TABS.id()));
+                Objects.requireNonNull(topMenu, "topMenu").openFor(CommandInvocation.of(MENU_TABS.id()));
                 return DispatchResult.handled(null);
             }
             case MENU_VIEW -> {
-                ctx.topMenu().openFor(CommandInvocation.of(MENU_VIEW.id()));
+                Objects.requireNonNull(topMenu, "topMenu").openFor(CommandInvocation.of(MENU_VIEW.id()));
                 return DispatchResult.handled(null);
             }
             case MENU_HELP -> {
-                ctx.topMenu().openFor(CommandInvocation.of(MENU_HELP.id()));
+                Objects.requireNonNull(topMenu, "topMenu").openFor(CommandInvocation.of(MENU_HELP.id()));
                 return DispatchResult.handled(null);
             }
             case MENU_FILE -> {
-                ctx.topMenu().openFor(CommandInvocation.of(MENU_FILE.id()));
+                Objects.requireNonNull(topMenu, "topMenu").openFor(CommandInvocation.of(MENU_FILE.id()));
                 return DispatchResult.handled(null);
             }
             case MENU_SETTINGS -> {
-                ctx.topMenu().openFor(CommandInvocation.of(MENU_SETTINGS.id()));
+                Objects.requireNonNull(topMenu, "topMenu").openFor(CommandInvocation.of(MENU_SETTINGS.id()));
                 return DispatchResult.handled(null);
             }
             case VIEW_TOGGLE_TAB_BAR -> {
@@ -79,9 +90,7 @@ final class InputActionDispatcher {
             case VIEW_TOGGLE_LINE_WRAP -> {
                 ui.wrapLinesSetting = !ui.wrapLinesSetting;
                 if (ui.wrapLinesSetting) {
-                    ctx.state().setTopWrapSegment(0);
-                    ctx.state().setLeftColumn(0);
-                    ctx.state().setLeftVisualColumn(0);
+                    onWrapEnabled.run();
                 }
                 statusMessage = ui.wrapLinesSetting ? "Wrap lines enabled" : "Wrap lines disabled";
                 return DispatchResult.handled(statusMessage);
@@ -104,14 +113,14 @@ final class InputActionDispatcher {
                 return DispatchResult.handled(statusMessage);
             }
             case SETTINGS_TOGGLE_MOUSE -> {
-                if (!ui.mouseModeAvailable) {
+                if (!surface.mouseAvailable()) {
                     return DispatchResult.handled(
                         "Mouse mode is unavailable in this terminal",
                         StatusLevel.WARNING
                     );
                 }
                 ui.mouseModeSetting = !ui.mouseModeSetting;
-                ctx.mouseTrackingController().accept(ui.mouseModeSetting);
+                mouseTrackingController.accept(ui.mouseModeSetting);
                 if (ui.mouseModeSetting) {
                     return DispatchResult.handled("Mouse mode enabled");
                 }
@@ -163,7 +172,7 @@ final class InputActionDispatcher {
                 return DispatchResult.handled(statusMessage);
             }
             case VIEW_TOGGLE_SYNTAX -> {
-                if (!ui.syntaxHighlightingAvailable) {
+                if (!surface.syntaxAvailable()) {
                     return DispatchResult.handled("Syntax highlighting is unavailable in the current theme");
                 }
                 ui.syntaxHighlightingSetting = !ui.syntaxHighlightingSetting;
@@ -204,21 +213,28 @@ final class InputActionDispatcher {
                 return DispatchResult.handled(statusMessage);
             }
             case HELP_KEY_HINTS -> {
-                ui.helpHintsMode = true;
-                return DispatchResult.handled(null);
+                return DispatchResult.requested(Intent.HELP_HINTS);
             }
             case HELP_LICENSES -> {
-                ui.helpLicensesMode = true;
-                return DispatchResult.handled(null);
+                return DispatchResult.requested(Intent.HELP_LICENSES);
             }
             case HELP_AUTHOR -> {
-                ui.helpAuthorMode = true;
-                return DispatchResult.handled(null);
+                return DispatchResult.requested(Intent.HELP_AUTHOR);
             }
+            default -> {
+                return DispatchResult.notHandled();
+            }
+        }
+    }
+
+    private static DispatchResult execute(TuinkCommand command, UiSessionState ui, DispatchContext ctx) {
+        if (ui.readingModeSetting && command.editsDocumentText()) {
+            return DispatchResult.handled("Reading mode: editing is disabled");
+        }
+        String statusMessage = null;
+        switch (command) {
             case SEARCH_OPEN -> {
-                ui.searchMode = true;
-                ui.searchEditorFocused = false;
-                return DispatchResult.handled(null);
+                return DispatchResult.requested(Intent.FIND);
             }
             case EDIT_COPY -> {
                 try {
@@ -421,7 +437,8 @@ final class InputActionDispatcher {
         int contentRows,
         int contentColumns,
         EditorViewNavigation navigation,
-        TuiDocumentSession documentSession
+        TuiDocumentSession documentSession,
+        ActiveSurface surface
     ) {
         DispatchContext {
             if (mouseTrackingController == null) {
@@ -449,14 +466,19 @@ final class InputActionDispatcher {
         ERROR
     }
 
+    enum Intent { NONE, FIND, HELP_HINTS, HELP_LICENSES, HELP_AUTHOR }
+
     /** Result of the selected recipient; viewport policy follows executed effects. */
-    record DispatchResult(boolean handled, String statusMessage, StatusLevel statusLevel, CursorPolicy viewportPolicy) {
+    record DispatchResult(boolean handled, String statusMessage, StatusLevel statusLevel, CursorPolicy viewportPolicy, Intent intent) {
+        static DispatchResult requested(Intent intent) {
+            return new DispatchResult(true, null, StatusLevel.INFO, CursorPolicy.PRESERVE, intent);
+        }
         static DispatchResult handled(String statusMessage) {
             return handled(statusMessage, StatusLevel.INFO);
         }
 
         static DispatchResult handled(String statusMessage, StatusLevel statusLevel) {
-            return new DispatchResult(true, statusMessage, statusLevel, CursorPolicy.PRESERVE);
+            return new DispatchResult(true, statusMessage, statusLevel, CursorPolicy.PRESERVE, Intent.NONE);
         }
 
         static DispatchResult followCursor() {
@@ -464,11 +486,11 @@ final class InputActionDispatcher {
         }
 
         DispatchResult withViewportPolicy(CursorPolicy policy) {
-            return new DispatchResult(handled, statusMessage, statusLevel, Objects.requireNonNull(policy));
+            return new DispatchResult(handled, statusMessage, statusLevel, Objects.requireNonNull(policy), intent);
         }
 
         static DispatchResult notHandled() {
-            return new DispatchResult(false, null, StatusLevel.INFO, CursorPolicy.PRESERVE);
+            return new DispatchResult(false, null, StatusLevel.INFO, CursorPolicy.PRESERVE, Intent.NONE);
         }
     }
 

@@ -8,6 +8,7 @@ import java.util.Optional;
 public enum TuinkCommand {
     APP_QUIT("tuink.app.quit", "Quit"),
 
+    DOCUMENT_RECOVER_DRAFTS("tuink.document.recover-drafts", "Recover drafts"),
     DOCUMENT_OPEN("tuink.document.open", "Open document"),
     DOCUMENT_SAVE("tuink.document.save", "Save document"),
     DOCUMENT_SAVE_AS("tuink.document.save-as", "Save document as"),

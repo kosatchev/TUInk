@@ -18,7 +18,7 @@ class TuinkKeymapTest {
     void mapsPhysicalShortcutsToSemanticCommands() {
         assertEquals(DOCUMENT_SAVE.id(), command(KeyStroke.Key.S, KeyStroke.Modifier.CTRL));
         assertEquals(DOCUMENT_SAVE_AS.id(), command(KeyStroke.Key.K, KeyStroke.Modifier.CTRL));
-        assertEquals(DOCUMENT_SAVE_AS.id(), command(KeyStroke.Key.W, KeyStroke.Modifier.CTRL));
+        assertEquals(TuinkCommand.TAB_CLOSE.id(), command(KeyStroke.Key.W, KeyStroke.Modifier.CTRL));
         assertEquals(
             DOCUMENT_SAVE_AS.id(),
             command(KeyStroke.Key.S, KeyStroke.Modifier.CTRL, KeyStroke.Modifier.SHIFT)
@@ -70,6 +70,8 @@ class TuinkKeymapTest {
         assertEquals(TuinkCommand.TAB_NEXT.id(), command(KeyStroke.Key.PAGE_DOWN, KeyStroke.Modifier.CTRL));
         assertEquals(TuinkCommand.TAB_NEXT.id(), command(KeyStroke.Key.TAB, KeyStroke.Modifier.CTRL));
         assertEquals(TuinkCommand.TAB_NEXT.id(), command(KeyStroke.Key.TAB, KeyStroke.Modifier.SUPER));
+        assertEquals(TuinkCommand.TAB_PREVIOUS.id(), command(KeyStroke.Key.TAB,
+            KeyStroke.Modifier.CTRL, KeyStroke.Modifier.SHIFT));
     }
 
     @Test

@@ -24,7 +24,12 @@ final class SaveWorkflow {
     private SaveWorkflow() {}
 
     record Context(List<TuiDocumentSession> documents, int activeTabIndex, SaveAsSuggestionStore suggestions,
-                   OverwriteApproval overwriteApproval) {
+                   OverwriteApproval overwriteApproval, java.util.Map<ViewId, Integer> displayNumbers) {
+        Context(List<TuiDocumentSession> documents, int activeTabIndex, SaveAsSuggestionStore suggestions,
+                OverwriteApproval overwriteApproval) {
+            this(documents, activeTabIndex, suggestions, overwriteApproval, java.util.Map.of());
+        }
+        Context { displayNumbers = java.util.Map.copyOf(displayNumbers); }
         Context(List<TuiDocumentSession> documents, int activeTabIndex, SaveAsSuggestionStore suggestions) {
             this(documents, activeTabIndex, suggestions, null);
         }
@@ -37,7 +42,8 @@ final class SaveWorkflow {
             }
             return -1;
         }
-        Context at(int index) { return new Context(documents, index, suggestions, overwriteApproval); }
+        Context at(int index) { return new Context(documents, index, suggestions, overwriteApproval, displayNumbers); }
+        int displayNumber(int index) { return displayNumbers.getOrDefault(documents.get(index).viewId(), index + 1); }
         TuiDocumentSession document(TabSession tab) {
             return documents.stream().filter(document -> document.view() == tab).findFirst().orElseThrow();
         }
@@ -241,20 +247,8 @@ final class SaveWorkflow {
         }
         int index = context.indexOf(request.session().viewId());
         if (index < 0) {
-            // The write belongs to the document, even if its initiating view was
-            // detached. A surviving view may present its outcome, but cannot
-            // inherit the removed view's close continuation.
-            for (int candidate = 0; candidate < context.documents().size(); candidate++) {
-                if (context.documents().get(candidate).document() == request.session().document()) {
-                    index = candidate;
-                    TuiDocumentSession surviving = context.documents().get(candidate);
-                    request = new SaveRequest(surviving, request.operation(),
-                        survivingOrigin(request.origin(), surviving.viewId()),
-                        request.purpose() == SavePurpose.CLOSE_TAB ? SavePurpose.CURRENT : request.purpose(),
-                        request.submission());
-                    break;
-                }
-            }
+            SaveRequest handedOff = handoffToSurvivingDocumentView(context, request);
+            if (handedOff != null) { request = handedOff; index = context.indexOf(request.session().viewId()); }
         }
         if (index < 0) {
             io.cancel(request.operation());
@@ -328,6 +322,18 @@ final class SaveWorkflow {
         };
     }
 
+    /** Explicit document-level policy for callers that choose an outcome handoff.
+     * The window controller does not invoke completion for retired UI recipients. */
+    private static SaveRequest handoffToSurvivingDocumentView(Context context, SaveRequest request) {
+        for (TuiDocumentSession surviving : context.documents()) {
+            if (surviving.document() == request.session().document())
+                return new SaveRequest(surviving, request.operation(),
+                    survivingOrigin(request.origin(), surviving.viewId()),
+                    request.purpose() == SavePurpose.CLOSE_TAB ? SavePurpose.CURRENT : request.purpose(), request.submission());
+        }
+        return null;
+    }
+
     private static Result approveTarget(Context context, SaveRequest request,
                                         DocumentIoCoordinator.Confirmation inspection, UiModalState origin) {
         int index = context.indexOf(request.session().viewId());
@@ -390,12 +396,11 @@ final class SaveWorkflow {
     }
 
     private static String workspaceSaveConflict(Context context, Path target) {
-        int owner = WorkspaceDocuments.findOpenFile(context.tabs(), context.activeTabIndex(), target);
-        if (owner < 0 || context.documents().get(owner).document() == context.activeDocument().document()) {
-            return null;
+        java.util.ArrayList<WorkspaceSaveConflictPolicy.OpenDocument> owners = new java.util.ArrayList<>();
+        for (int index = 0; index < context.documents().size(); index++) {
+            owners.add(new WorkspaceSaveConflictPolicy.OpenDocument(context.documents().get(index).document(), context.displayNumber(index)));
         }
-        return "Save failed: target is already open in tab " + (owner + 1)
-            + ". Switch to that tab or choose another name.";
+        return WorkspaceSaveConflictPolicy.conflict(owners, context.activeDocument().document(), target);
     }
 
     private static Result afterSuccessfulSave(Context context, UiModalState modal, Notice notice) {

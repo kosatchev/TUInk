@@ -68,6 +68,7 @@ final class EditorWindowFixture implements AutoCloseable {
     final Map<String, RecoverySnapshot> recoverySnapshots = new HashMap<>();
     final TerminalEditorApp.RecoveryAutosaveManager recoveryManager;
     final DocumentIoController documentIo;
+    boolean mouseAvailable = true;
     int width = 80;
     int height = 24;
 
@@ -107,6 +108,14 @@ final class EditorWindowFixture implements AutoCloseable {
             startupRecoveryEntries, recoveryPersistence);
     }
 
+    EditorWindowFixture(Path directory, boolean reading, List<String> lines,
+                        List<? extends RecoveryStore.PendingSnapshot> startupRecoveryEntries,
+                        TerminalEditorApp.RecoveryPersistence recoveryPersistence, Executor documentExecutor) throws IOException {
+        this(directory, reading, lines,
+            new AppSettingsSession(AppSettings.defaults(), TuiCliOptions.parse(new String[0])),
+            startupRecoveryEntries, recoveryPersistence, documentExecutor, Runnable::run);
+    }
+
     EditorWindowFixture(Path directory, List<String> lines, AppSettingsSession settingsSession) throws IOException {
         this(directory, settingsSession.initialSettings().readingMode(), lines, settingsSession);
     }
@@ -130,14 +139,29 @@ final class EditorWindowFixture implements AutoCloseable {
             Runnable::run, Runnable::run);
     }
 
+    EditorWindowFixture(Path directory, String documentName, List<String> lines,
+                        AppSettingsSession settingsSession) throws IOException {
+        this(directory, settingsSession.initialSettings().readingMode(), lines, settingsSession,
+            List.of(), null, Runnable::run, Runnable::run, documentName);
+    }
+
     private EditorWindowFixture(Path directory, boolean reading, List<String> lines,
                                 AppSettingsSession settingsSession,
                                 List<? extends RecoveryStore.PendingSnapshot> startupRecoveryEntries,
                                 TerminalEditorApp.RecoveryPersistence recoveryPersistence,
                                 Executor documentExecutor, Executor recoveryExecutor) throws IOException {
+        this(directory, reading, lines, settingsSession, startupRecoveryEntries, recoveryPersistence,
+            documentExecutor, recoveryExecutor, "document.txt");
+    }
+
+    private EditorWindowFixture(Path directory, boolean reading, List<String> lines,
+                                AppSettingsSession settingsSession,
+                                List<? extends RecoveryStore.PendingSnapshot> startupRecoveryEntries,
+                                TerminalEditorApp.RecoveryPersistence recoveryPersistence,
+                                Executor documentExecutor, Executor recoveryExecutor, String documentName) throws IOException {
         this.settingsSession = settingsSession;
         Files.createDirectories(directory);
-        document = directory.resolve("document.txt");
+        document = directory.resolve(documentName);
         Files.writeString(document, String.join("\n", lines));
         var initial = host.newEditorTab();
         initial.tabSession().engine().open(JvmDocumentStorage.resource(document));
@@ -147,12 +171,8 @@ final class EditorWindowFixture implements AutoCloseable {
         AppSettings settings = settingsSession.initialSettings();
         host.theme = settings.theme();
         host.styles = UiStyles.forTheme(host.theme);
-        ui = UiSessionState.from(false, settings.showTabBar(), settings.wrapLines(), settings.wrapWords(),
-            reading, settings.confirmOnClose(), settings.mouseMode(), settings.highlightActiveGutter(),
-            settings.smartHomeEnd(), settings.autoIndent(), settings.autoPairs(), settings.autoList(),
-            settings.visibleWhitespace(), settings.syntaxHighlighting(), settings.rainbowBrackets(),
-            settings.autoSelectionHighlight(), settings.gutterDiffMode(), settings.tabWidth(),
-            settings.tabInsertMode(), false, false, false);
+        ui = UiSessionState.from(settings);
+        ui.readingModeSetting = reading;
         renderer = new ObservedRasterizer(host.theme);
         ScreenPresenter presenter = new ScreenPresenter(new PrintWriter(new StringWriter()), TerminalCapabilities.DEFAULT);
         TerminalEditorApp.RecoveryPersistence persistence = recoveryPersistence != null ? recoveryPersistence
@@ -186,7 +206,7 @@ final class EditorWindowFixture implements AutoCloseable {
             notification, tree, recoveryManager, host.new RenderFrameController(renderer, editorView, true, presenter),
             renderer, filename, new SaveAsSuggestionStore(), presenter, query, replacement, context,
             new ArrayList<>(startupRecoveryEntries),
-            new EditorWindowController.TerminalAccess(() -> width, () -> height, enabled -> {}),
+            new EditorWindowController.TerminalAccess(() -> width, () -> height, enabled -> {}, () -> mouseAvailable),
             menu, ui, settingsSession, documentIo));
         try {
             frame();
@@ -197,8 +217,10 @@ final class EditorWindowFixture implements AutoCloseable {
     }
 
     TerminalEditorApp.EditorTab active() {
-        return tabs.get(context.activeTabIndex());
+        return context.active();
     }
+
+    WindowTab selected() { return context.activePresentation(); }
 
     int restore(List<RecoveryStore.Entry> entries) {
         for (RecoveryStore.Entry entry : entries) {
@@ -252,7 +274,7 @@ final class EditorWindowFixture implements AutoCloseable {
     }
 
     private void bindActiveUi() {
-        TabUiState state = active().uiState();
+        TabUiState state = selected().uiState();
         query = state.searchQueryInput;
         replacement = state.searchReplaceInput;
         filename = state.saveAsInput;
@@ -277,7 +299,7 @@ final class EditorWindowFixture implements AutoCloseable {
             return;
         }
         for (int step = 0; step <= SearchFocus.values().length; step++) {
-            if (!active().uiState().searchEditorFocused && host.searchFocusManager().focused().orElse(null) == target) {
+            if (!selected().uiState().searchEditorFocused && host.searchFocusManager().focused().orElse(null) == target) {
                 return;
             }
             event(KeyStroke.of(KeyStroke.Key.TAB));
@@ -287,7 +309,7 @@ final class EditorWindowFixture implements AutoCloseable {
 
     void focusDocument() {
         for (int step = 0; step <= SearchFocus.values().length; step++) {
-            if (active().uiState().searchEditorFocused) {
+            if (selected().uiState().searchEditorFocused) {
                 return;
             }
             event(KeyStroke.of(KeyStroke.Key.TAB));
@@ -296,7 +318,7 @@ final class EditorWindowFixture implements AutoCloseable {
     }
 
     String screenRow(int row) {
-        CellBuffer frame = renderer.frame;
+        CellBuffer frame = screenCells();
         assertNotNull(frame);
         StringBuilder text = new StringBuilder();
         for (int column = 0; column < frame.cols(); column++) {
@@ -305,9 +327,18 @@ final class EditorWindowFixture implements AutoCloseable {
         return text.toString();
     }
 
+    String promptText() {
+        return renderer.plan == null || renderer.plan.interactiveBarText() == null ? "" : renderer.plan.interactiveBarText();
+    }
+
     CellStyle screenStyle(int row, int column) {
-        assertNotNull(renderer.frame);
-        return renderer.frame.get(row, column).style();
+        CellBuffer frame = screenCells();
+        assertNotNull(frame);
+        return frame.get(row, column).style();
+    }
+
+    private CellBuffer screenCells() {
+        return renderer.frame;
     }
 
     int rowStartingWith(String label) {
@@ -321,7 +352,7 @@ final class EditorWindowFixture implements AutoCloseable {
 
     /** Locate a painted scrollbar rather than reproducing its layout math. */
     Point verticalThumb(boolean documentScrollbar) {
-        CellBuffer frame = renderer.frame;
+        CellBuffer frame = screenCells();
         assertNotNull(frame);
         int lastColumn = documentScrollbar ? width - 1 : width - 2;
         int firstColumn = documentScrollbar ? lastColumn : 1;
@@ -354,12 +385,17 @@ final class EditorWindowFixture implements AutoCloseable {
 
     @Override
     public void close() {
-        controller.closeDocumentIo();
-        tree.close();
+        try {
+            controller.closeDocumentIo();
+        } finally {
+            try { renderer.close(); }
+            finally { tree.close(); }
+        }
     }
 
     private static final class ObservedRasterizer extends RenderRasterizer {
         private CellBuffer frame;
+        private RenderPlan plan;
 
         private ObservedRasterizer(UiStyles.Theme theme) {
             super(1, theme);
@@ -367,6 +403,7 @@ final class EditorWindowFixture implements AutoCloseable {
 
         @Override
         public CellBuffer rasterize(RenderPlan plan, int rows, int columns, int contentTopRow) {
+            this.plan = plan;
             frame = super.rasterize(plan, rows, columns, contentTopRow);
             return frame;
         }

@@ -73,7 +73,7 @@ class DocumentFormatIntegrationTest {
             Files.writeString(window.document, "a\r\nb\nc\r");
             window.active().tabSession().engine().open(JvmDocumentStorage.resource(window.document));
             window.ui.mouseModeSetting = true;
-            window.ui.mouseModeAvailable = true;
+            window.mouseAvailable = true;
             window.frame();
             String footer = window.screenRow(window.height - 1);
             assertTrue(footer.contains("EOL:Mixed"), footer);
@@ -187,7 +187,7 @@ class DocumentFormatIntegrationTest {
     void thePaintedCloseCellCancelsAndScrollbarCaptureReleasesOutsideThePanel() throws Exception {
         try (var window = new EditorWindowFixture(directory, false, List.of("original"))) {
             window.ui.mouseModeSetting = true;
-            window.ui.mouseModeAvailable = true;
+            window.mouseAvailable = true;
             window.resize(11, 44);
             window.command(TuinkCommand.DOCUMENT_FORMAT);
             var draft = window.active().uiState().formatDialog;
@@ -239,7 +239,7 @@ class DocumentFormatIntegrationTest {
         try (var window = new EditorWindowFixture(directory, false, List.of("original"), tasks::addLast)) {
             window.ui.showTabBarSetting = true;
             window.ui.mouseModeSetting = true;
-            window.ui.mouseModeAvailable = true;
+            window.mouseAvailable = true;
             var first = window.active().documentSession();
             var second = first.attachView(window.host.clipboard);
             window.context.addAll(List.of(new TerminalEditorApp.EditorTab(second,

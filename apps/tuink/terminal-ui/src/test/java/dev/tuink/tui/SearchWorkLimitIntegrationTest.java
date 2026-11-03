@@ -50,7 +50,7 @@ class SearchWorkLimitIntegrationTest {
             assertEquals("a", window.query.text());
             assertTrue(window.screenRow(window.height - 1).contains("Find 262144"));
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
-            assertFalse(window.ui.searchMode);
+            assertFalse(window.selected().uiState().searchMode);
             assertEquals(original, window.active().tabSession().model().getLine(0));
         }
     }

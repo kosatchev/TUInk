@@ -46,8 +46,8 @@ class FileAccessAdvisoryTest {
             // ordinary absent path here: the injected RO observation must win
             // over the real filesystem's writable/nonexistent observation.
             state.setCurrentResource(JvmDocumentStorage.resource(Path.of("/document.txt")));
-            host.buildQuitConfirmBar(List.of(tab), 120);
-            host.buildCloseTabConfirmBar(List.of(tab), 0, 120);
+            host.buildQuitConfirmBar(List.of(tab), 120, 22);
+            host.buildCloseTabConfirmBar(List.of(tab), 0, 120, 22);
             assertEquals(0, probes.get());
             assertEquals(0, executor.tasks.size(), "painting must not even submit a filesystem check");
 
@@ -56,8 +56,8 @@ class FileAccessAdvisoryTest {
             executor.runNext();
             host.refreshFileAccess(state);
             assertTrue(host.buildBottomBar(state, model, 120, false, 0, 1, "").contains("RO | ENC:"));
-            assertTrue(host.buildQuitConfirmBar(List.of(tab), 120).row().contains("[Save As]"));
-            assertTrue(host.buildCloseTabConfirmBar(List.of(tab), 0, 120).row().contains("[Save As]"));
+            assertTrue(host.buildQuitConfirmBar(List.of(tab), 120, 22).row().contains("[Save As]"));
+            assertTrue(host.buildCloseTabConfirmBar(List.of(tab), 0, 120, 22).row().contains("[Save As]"));
             assertEquals(1, probes.get());
         }
     }

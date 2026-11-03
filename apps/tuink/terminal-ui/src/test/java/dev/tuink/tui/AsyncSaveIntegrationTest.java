@@ -252,12 +252,12 @@ class AsyncSaveIntegrationTest {
             window.command(TuinkCommand.DOCUMENT_SAVE);
             window.command(TuinkCommand.SEARCH_OPEN);
             window.frame();
-            assertTrue(window.ui.searchMode);
+            assertTrue(window.selected().uiState().searchMode);
             assertFalse(window.notification.message.contains("Esc to cancel"));
 
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
             window.frame();
-            assertFalse(window.ui.searchMode);
+            assertFalse(window.selected().uiState().searchMode);
             assertTrue(window.documentIo.busy(), "the first Esc closes search");
             assertTrue(window.notification.message.contains("Esc to cancel"));
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
@@ -694,7 +694,7 @@ class AsyncSaveIntegrationTest {
             window.ui.showTabBarSetting = true;
             window.ui.confirmOnCloseSetting = true;
             window.ui.mouseModeSetting = true;
-            window.ui.mouseModeAvailable = true;
+            window.mouseAvailable = true;
             window.event(new TextInput("draft "));
             var saved = window.active().tabSession();
             window.command(TuinkCommand.DOCUMENT_SAVE);
@@ -792,6 +792,153 @@ class AsyncSaveIntegrationTest {
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
             window.event(new TextInput("after "));
             assertEquals(List.of("draft after original"), window.active().tabSession().model().snapshotLines());
+        }
+    }
+
+    @Test
+    void aRetiredInitiatingViewAcceptsItsReceiptWithoutHandingItsUiToTheSurvivingView() throws Exception {
+        try (Scenario scenario = scenario()) {
+            var window = scenario.window;
+            window.event(new TextInput("draft "));
+            var original = window.active();
+            var document = original.documentSession().document();
+            var attached = original.documentSession().attachView(window.host.clipboard);
+            var surviving = new TerminalEditorApp.EditorTab(attached,
+                attached.newRenderPlanBuilder(window.host.resolveHighlighter(window.document)));
+            window.context.addAll(List.of(surviving));
+            window.command(TuinkCommand.DOCUMENT_SAVE);
+            scenario.executor.runNextOnWorker();
+            String oldStatus = original.uiState().notification.message;
+            window.context.remove(original.documentSession().viewId());
+            original.uiState().close();
+            window.context.activatePresentation(surviving.presentationId());
+            surviving.uiState().saveAsInput.set("independent.md");
+            surviving.uiState().filenameRevision++;
+            surviving.uiState().modalState = dev.tuink.tui.flow.UiModalState.saveAs();
+            surviving.uiState().notification = window.host.new NotificationState();
+            surviving.uiState().notification.warning("Independent alert");
+            window.frame();
+            assertFalse(document.ownsView(original.documentSession().viewId()));
+            assertFalse(document.io().busy());
+            assertFalse(surviving.state().isDirty());
+            assertEquals("draft original", Files.readString(window.document));
+            assertEquals(oldStatus, original.uiState().notification.message);
+            assertEquals("independent.md", surviving.uiState().saveAsInput.text());
+            assertTrue(surviving.uiState().modalState.isSaveAs());
+            assertEquals("Independent alert", surviving.uiState().notification.message);
+            assertEquals(surviving.presentationId(), window.selected().presentationId());
+        }
+    }
+
+    @Test
+    void aNewOwnerAlertSurvivesAnOlderStandaloneSaveReceipt() throws Exception {
+        try (Scenario scenario = scenario()) {
+            var window = scenario.window;
+            window.event(new TextInput("draft "));
+            window.command(TuinkCommand.DOCUMENT_SAVE);
+            window.active().uiState().notification.warning("New independent alert");
+            scenario.executor.runNextOnWorker(); window.frame();
+            assertFalse(window.active().state().isDirty());
+            assertEquals("New independent alert", window.active().uiState().notification.message);
+            assertEquals("draft original", Files.readString(window.document));
+        }
+    }
+
+    @Test
+    void aCancelledAttemptCannotReleaseTheNewSaveSlotWhenItsQueuedWorkerRunsLater() throws Exception {
+        try (Scenario scenario = scenario()) {
+            var window = scenario.window;
+            window.event(new TextInput("draft "));
+            window.command(TuinkCommand.DOCUMENT_SAVE);
+            window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
+            assertFalse(window.documentIo.busy());
+            window.command(TuinkCommand.DOCUMENT_SAVE);
+            assertTrue(window.documentIo.busy());
+            scenario.executor.runNextOnWorker(); // cancelled preparation from the first attempt
+            window.frame();
+            assertTrue(window.documentIo.busy());
+            assertTrue(window.active().state().isDirty());
+            assertEquals("original", Files.readString(window.document));
+            scenario.executor.runNextOnWorker();
+            window.frame();
+            assertFalse(window.documentIo.busy());
+            assertFalse(window.active().state().isDirty());
+            assertEquals("draft original", Files.readString(window.document));
+        }
+    }
+
+    @Test
+    void cancellingTheGlobalFilenamePromptLeavesLaterLocalSavesIndependentOfQuit() throws Exception {
+        try (Scenario scenario = scenario()) {
+            var window = scenario.window;
+            window.ui.confirmOnCloseSetting = true;
+            window.command(TuinkCommand.TAB_NEW);
+            window.event(new TextInput("unnamed draft"));
+            window.command(TuinkCommand.APP_QUIT);
+            window.event(new TextInput("y"));
+            assertTrue(window.selected().uiState().modalState.isSaveAs());
+            assertEquals(dev.tuink.tui.flow.SaveContinuation.QUIT,
+                window.selected().uiState().modalState.saveContinuation());
+            window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
+            assertTrue(window.controller.running());
+            assertTrue(window.selected().uiState().modalState.isNone());
+            Path target = directory.resolve("local-after-cancel.txt");
+            SaveWorkflowIntegrationTest.submitFilename(window, target);
+            scenario.finishOperation();
+            assertEquals("unnamed draft", Files.readString(target));
+            assertTrue(window.controller.running(), "a cancelled close request cannot resume through a local save");
+            assertTrue(window.selected().uiState().modalState.isNone());
+        }
+    }
+
+    @Test
+    void globalSaveAndQuitContinuesAfterItsInitiatingViewRetires() throws Exception {
+        try (Scenario scenario = scenario()) {
+            var window = scenario.window;
+            window.ui.confirmOnCloseSetting = true;
+            window.event(new TextInput("draft "));
+            var original = window.active();
+            var attached = original.documentSession().attachView(window.host.clipboard);
+            var surviving = new TerminalEditorApp.EditorTab(attached,
+                attached.newRenderPlanBuilder(window.host.resolveHighlighter(window.document)));
+            window.context.addAll(List.of(surviving));
+            window.command(TuinkCommand.APP_QUIT);
+            window.event(new TextInput("y"));
+            scenario.executor.runNextOnWorker();
+            window.context.remove(original.documentSession().viewId());
+            original.uiState().close();
+            window.context.activatePresentation(surviving.presentationId());
+            surviving.uiState().notification = window.host.new NotificationState();
+            surviving.uiState().notification.warning("Independent local warning");
+            window.frame();
+            assertFalse(window.controller.running());
+            assertFalse(surviving.state().isDirty());
+            assertEquals(surviving.presentationId(), window.selected().presentationId());
+            assertEquals("Independent local warning", surviving.uiState().notification.message);
+            assertEquals("draft original", Files.readString(window.document));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void aNewAlertSurvivesBothAutomaticSaveAsPhases(boolean error) throws Exception {
+        try (Scenario scenario = scenario()) {
+            var window = scenario.window;
+            window.event(new TextInput("draft "));
+            Path target = directory.resolve("alert-copy.txt");
+            SaveWorkflowIntegrationTest.submitFilename(window, target);
+            var owner = window.selected().uiState();
+            String message = error ? "New independent error" : "New independent warning";
+            if (error) owner.notification.error(message); else owner.notification.warning(message);
+            scenario.executor.runNextOnWorker(); window.frame();
+            assertTrue(window.documentIo.busy(), "inspection must start its separate write");
+            assertEquals(message, owner.notification.message, "automatic write progress must retain the newer alert");
+            scenario.executor.runNextOnWorker(); window.frame();
+            assertFalse(window.documentIo.busy());
+            assertEquals("draft original", Files.readString(target));
+            assertFalse(window.active().state().isDirty());
+            assertTrue(owner.saveAsInput.isEmpty());
+            assertEquals(message, owner.notification.message, "the write receipt keeps the inspection's original notice stamp");
         }
     }
 

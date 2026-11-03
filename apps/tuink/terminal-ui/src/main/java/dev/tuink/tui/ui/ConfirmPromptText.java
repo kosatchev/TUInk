@@ -32,6 +32,14 @@ public final class ConfirmPromptText {
         return prefix + identifier + suffix;
     }
 
+    /** A wrapping prompt may shorten the parent context, but never the filename identity itself. */
+    public static String wrappingFileQuestion(String prefix, Path path, String suffix, int preferredCells) {
+        String full = path == null ? "--no name--" : PathPresentation.full(path);
+        String name = path == null ? full : PathPresentation.name(path);
+        String identity = CellText.width(prefix + full + suffix) <= preferredCells ? full : name;
+        return prefix + identity + suffix;
+    }
+
     private static String tail(String text, int cells) {
         return PathPresentation.clip(text, Math.max(0, CellText.width(text) - cells), cells);
     }

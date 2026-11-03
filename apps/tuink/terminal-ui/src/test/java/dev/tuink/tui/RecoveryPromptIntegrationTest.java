@@ -38,6 +38,26 @@ class RecoveryPromptIntegrationTest {
     @TempDir Path directory;
 
     @Test
+    void postponedDraftCanBeRestoredWithoutRestartingAndLiveDraftsAreExcluded() throws Exception {
+        Path recoveryDirectory = directory.resolve("recovery-reopen");
+        createSnapshot(recoveryDirectory);
+        try (RecoveryStore store = RecoveryStoreFixtures.open(recoveryDirectory);
+             EditorWindowFixture window = new EditorWindowFixture(directory.resolve("reopen-window"), false,
+                 List.of("current document"), store.discover().entries(), persistence(store))) {
+            window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
+            window.event(new TextInput("live edits "));
+            window.command(TuinkCommand.DOCUMENT_RECOVER_DRAFTS);
+            assertTrue(prompt(window).contains("Recovery snapshots: 1."));
+            window.event(new TextInput("y"));
+            assertEquals(2, window.tabs.size());
+            assertEquals(List.of(DRAFT), window.active().tabSession().model().snapshotLines());
+            window.command(TuinkCommand.DOCUMENT_RECOVER_DRAFTS);
+            assertTrue(window.notification.message.contains("No recovery drafts available"));
+            assertEquals(2, window.tabs.size());
+        }
+    }
+
+    @Test
     void startupAndLaterDoNotMaterializeTheOfferedDraft() throws Exception {
         AtomicInteger reads = new AtomicInteger();
         RecoveryStore.PendingSnapshot pending = pending("deferred-draft", reads);
@@ -260,6 +280,9 @@ class RecoveryPromptIntegrationTest {
             }
             @Override public void release(String entryId) throws IOException {
                 store.release(entryId);
+            }
+            @Override public RecoveryStore.DiscoveryResult discoverAvailable() throws IOException {
+                return store.discoverAvailable();
             }
         };
     }

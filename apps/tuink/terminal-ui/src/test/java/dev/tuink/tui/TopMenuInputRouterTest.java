@@ -214,14 +214,14 @@ class TopMenuInputRouterTest {
         controller.adopt(state);
         UiSessionState ui = new UiSessionState();
         ui.wrapLinesSetting = true;
-        ui.mouseModeAvailable = true;
         TopMenuView view = TopMenuView.build(
             ui,
             tabs,
             0,
             "Cyan",
             router,
-            state
+            state,
+            TestSurfaces.source(ui)
         );
         return new Fixture(controller, view.place(bounds), router, tabs);
     }

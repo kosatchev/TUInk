@@ -4,7 +4,6 @@ import dev.tuink.core.EditorState;
 import dev.tuink.editor.search.SearchOptions;
 import dev.tuink.core.TextModel;
 import dev.tuink.render.EditorLayout;
-import dev.tuink.render.RenderPlan;
 import dev.tuink.render.RenderPlanBuilder;
 import dev.tuiframe.geometry.Rect;
 import dev.tuink.tui.ui.ConfirmBarView;
@@ -55,16 +54,14 @@ record FrameComposition(
     }
 
     boolean allowsScrollHints() {
-        return !fullRedraw && !layers.blockedInputHighlight() && layers.helpPage() == null && layers.format() == null
-            && !(layers.contentFocused() && layers.openFile().visible());
+        return !fullRedraw && layers.allowsScrollHints();
     }
 
     record Document(
         RenderPlanBuilder planBuilder,
         TextModel model,
         EditorState state,
-        EditorLayout layout,
-        RenderPlan previousPlan
+        EditorLayout layout
     ) {
         Document {
             Objects.requireNonNull(planBuilder, "planBuilder");
@@ -115,6 +112,13 @@ record FrameComposition(
         boolean contentFocused
     ) {
         HelpPage helpPage() { return help == null ? null : help.page(); }
+
+        /** The picker may supply its own surface; every other blocking layer invalidates content reuse. */
+        boolean allowsScrollHints() {
+            return !blockedInputHighlight && help == null && format == null && confirm == null && !saveAsMode
+                && (topMenu == null || !topMenu.state().isOpen())
+                && !(contentFocused && openFile.visible());
+        }
 
         Layers {
             Objects.requireNonNull(openFile, "openFile");

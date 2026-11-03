@@ -127,10 +127,10 @@ class OpenFileInputRouterTest {
                 OpenFileInputRouter.Focus.LIST,
                 KeyStroke.of(KeyStroke.Key.TAB)
             );
-            assertEquals(OpenFileInputRouter.Focus.OK, tab.focus());
+            assertEquals(OpenFileInputRouter.Focus.LOCATION, tab.focus());
             OpenFileInputRouter.Result reverse = route(
                 placement,
-                OpenFileInputRouter.Focus.OK,
+                OpenFileInputRouter.Focus.LOCATION,
                 KeyStroke.of(KeyStroke.Key.TAB, KeyStroke.Modifier.SHIFT)
             );
             assertEquals(OpenFileInputRouter.Focus.LIST, reverse.focus());
@@ -268,7 +268,7 @@ class OpenFileInputRouterTest {
             var hidden = OpenFileInputRouter.route(dialog, focus,
                 buttonPress(dialog, OpenFileDialogView.Control.HIDDEN), 0L, DOUBLE_CLICK_NANOS);
             assertInstanceOf(OpenFileInputRouter.ToggleHidden.class, hidden.intent());
-            assertEquals(OpenFileInputRouter.Focus.LIST, focus.focus());
+            assertEquals(OpenFileInputRouter.Focus.HIDDEN, focus.focus());
 
             focus.focus(OpenFileInputRouter.Focus.OK);
             var closed = OpenFileInputRouter.route(dialog, focus,
@@ -276,6 +276,7 @@ class OpenFileInputRouterTest {
             assertInstanceOf(OpenFileInputRouter.CloseDialog.class, closed.intent());
             assertEquals(OpenFileInputRouter.Focus.OK, focus.focus());
             assertEquals(java.util.List.of(OpenFileInputRouter.Focus.LIST,
+                OpenFileInputRouter.Focus.LOCATION, OpenFileInputRouter.Focus.HIDDEN,
                 OpenFileInputRouter.Focus.OK, OpenFileInputRouter.Focus.CANCEL), dialog.focusOrder());
             var tab = route(view, closed.state(), focus, KeyStroke.of(KeyStroke.Key.TAB), 1L);
             assertCapturedWithoutIntent(tab);
@@ -461,7 +462,7 @@ class OpenFileInputRouterTest {
     }
 
     @Test
-    void hiddenTinyPlacementCapturesEverythingExceptSafeClose() throws IOException {
+    void hiddenTreeKeepsTheIndependentLocationFieldAndSafeCloseAvailable() throws IOException {
         Files.createFile(root.resolve("note.txt"));
         try (FileTreeModel model = new FileTreeModel(root, false, false)) {
             FileTreeModel.Snapshot snapshot = awaitLoaded(model);
@@ -480,7 +481,7 @@ class OpenFileInputRouterTest {
                 KeyStroke.of(KeyStroke.Key.TAB)
             );
             assertCapturedWithoutIntent(tab);
-            assertEquals(OpenFileInputRouter.Focus.LIST, tab.focus());
+            assertEquals(OpenFileInputRouter.Focus.LOCATION, tab.focus());
             assertCapturedWithoutIntent(route(
                 hidden,
                 OpenFileInputRouter.Focus.LIST,
@@ -602,7 +603,7 @@ class OpenFileInputRouterTest {
             OpenFileInputRouter.Result tab = route(
                 captured, OpenFileInputRouter.Focus.LIST, KeyStroke.of(KeyStroke.Key.TAB)
             );
-            assertEquals(OpenFileInputRouter.Focus.OK, tab.focus());
+            assertEquals(OpenFileInputRouter.Focus.LOCATION, tab.focus());
             assertNull(tab.state().widgetState().drag());
 
             FileTreeView.Placement hidden = view.place(BOUNDS, pressed.state(), CLIP, true, false);
@@ -642,7 +643,7 @@ class OpenFileInputRouterTest {
                         : KeyStroke.of(KeyStroke.Key.TAB);
                     var traversed = route(view, pressed.state(), focus, traversal, 20L);
                     OpenFileInputRouter.Focus expected = backwards ? OpenFileInputRouter.Focus.CANCEL
-                        : OpenFileInputRouter.Focus.OK;
+                        : OpenFileInputRouter.Focus.LOCATION;
                     assertCapturedWithoutIntent(traversed);
                     assertEquals(expected, focus.focus());
                     assertNull(traversed.state().widgetState().drag());
@@ -670,7 +671,9 @@ class OpenFileInputRouterTest {
 
                     FileTreeView.State state = released.state();
                     if (!backwards) {
-                        var cancelTab = route(view, state, focus, KeyStroke.of(KeyStroke.Key.TAB), 40L);
+                        var hiddenTab = route(view, state, focus, KeyStroke.of(KeyStroke.Key.TAB), 35L);
+                        var okTab = route(view, hiddenTab.state(), focus, KeyStroke.of(KeyStroke.Key.TAB), 38L);
+                        var cancelTab = route(view, okTab.state(), focus, KeyStroke.of(KeyStroke.Key.TAB), 40L);
                         assertCapturedWithoutIntent(cancelTab);
                         assertEquals(OpenFileInputRouter.Focus.CANCEL, focus.focus());
                         state = cancelTab.state();
@@ -726,6 +729,10 @@ class OpenFileInputRouterTest {
                 var activated = route(view, state, focus, KeyStroke.of(KeyStroke.Key.ENTER), 20L);
                 if (owner == OpenFileInputRouter.Focus.CANCEL) {
                     assertInstanceOf(OpenFileInputRouter.CloseDialog.class, activated.intent());
+                } else if (owner == OpenFileInputRouter.Focus.HIDDEN) {
+                    assertInstanceOf(OpenFileInputRouter.ToggleHidden.class, activated.intent());
+                } else if (owner == OpenFileInputRouter.Focus.LOCATION) {
+                    assertInstanceOf(OpenFileInputRouter.OpenLocation.class, activated.intent());
                 } else {
                     assertEquals(selected, assertInstanceOf(OpenFileInputRouter.OpenFile.class,
                         activated.intent()).file());
@@ -755,7 +762,7 @@ class OpenFileInputRouterTest {
 
             var tab = route(view, released.state(), focus, KeyStroke.of(KeyStroke.Key.TAB),
                 firstClick + 20_000_000L);
-            assertEquals(OpenFileInputRouter.Focus.OK, focus.focus());
+            assertEquals(OpenFileInputRouter.Focus.LOCATION, focus.focus());
             assertNull(tab.state().lastPressedId());
             assertEquals(0L, tab.state().lastPressedAtNanos());
             var back = route(view, tab.state(), focus, KeyStroke.of(KeyStroke.Key.TAB, KeyStroke.Modifier.SHIFT),

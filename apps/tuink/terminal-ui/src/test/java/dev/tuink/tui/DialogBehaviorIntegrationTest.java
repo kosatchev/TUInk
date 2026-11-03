@@ -182,11 +182,12 @@ class DialogBehaviorIntegrationTest {
     }
 
     @Test
-    void exclusiveOpenFileTraversalMatchesTheRealRouterAndCyclesOnlyThroughListOkAndCancel() {
+    void exclusiveOpenFileTraversalMatchesTheRealRouterAndIncludesLocationAndHidden() {
         var view = FileTreeView.fromSnapshot(new FileTreeModel.Snapshot(Path.of("dialog-fixture"), 0, List.of()),
             false, false);
         var placement = view.place(new Rect(4, 3, 50, 12), FileTreeView.State.initial(), VIEWPORT, true);
         List<OpenFileInputRouter.Focus> order = List.of(OpenFileInputRouter.Focus.LIST,
+            OpenFileInputRouter.Focus.LOCATION, OpenFileInputRouter.Focus.HIDDEN,
             OpenFileInputRouter.Focus.OK, OpenFileInputRouter.Focus.CANCEL);
         boolean contentAvailable = DialogCommandPolicy.mode(ModalInputPolicy.Kind.OPEN_FILE).permitsContentFocus();
         assertFalse(contentAvailable);

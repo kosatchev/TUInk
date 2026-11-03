@@ -108,6 +108,7 @@ public enum TuinkCommand {
     SETTINGS_TOGGLE_AUTO_LIST("tuink.settings.toggle-auto-list", "Toggle auto list"),
     SETTINGS_TOGGLE_MARKDOWN_OPEN_BOTH_TABS("tuink.settings.toggle-markdown-open-both-tabs", "Toggle opening both Markdown tabs"),
     SETTINGS_TOGGLE_MARKDOWN_OPEN_IN_PREVIEW("tuink.settings.toggle-markdown-open-in-preview", "Toggle opening Markdown in Preview"),
+    SETTINGS_TOGGLE_MARKDOWN_CODE_SYNTAX("tuink.settings.toggle-markdown-code-syntax", "Toggle Markdown Source code syntax highlighting"),
     SETTINGS_CYCLE_TAB_INSERT_MODE("tuink.settings.cycle-tab-insert-mode", "Cycle tab insert mode"),
 
     FILE_BROWSER_TOGGLE_HIDDEN("tuink.file-browser.toggle-hidden", "Toggle hidden files"),

@@ -51,6 +51,7 @@ public final class AppSettingsStore {
     private static final String KEY_AUTO_SELECTION_HIGHLIGHT = "ui.autoSelectionHighlight";
     private static final String KEY_MARKDOWN_OPEN_BOTH_TABS = "ui.markdownOpenBothTabs";
     private static final String KEY_MARKDOWN_OPEN_IN_PREVIEW = "ui.markdownOpenInPreview";
+    private static final String KEY_MARKDOWN_CODE_HIGHLIGHTING = "ui.markdownCodeHighlighting";
     private static final String KEY_GUTTER_DIFF_MODE = "ui.gutterDiffMode";
     private static final String KEY_TAB_WIDTH = "ui.tabWidth";
     private static final String KEY_TAB_INSERT_MODE = "ui.tabInsertMode";
@@ -155,6 +156,7 @@ public final class AppSettingsStore {
             parseBoolean(p, KEY_AUTO_SELECTION_HIGHLIGHT, path),
             parseBoolean(p, KEY_MARKDOWN_OPEN_BOTH_TABS, path),
             parseBoolean(p, KEY_MARKDOWN_OPEN_IN_PREVIEW, path),
+            parseOptionalBoolean(p, KEY_MARKDOWN_CODE_HIGHLIGHTING, false, path),
             parseEnum(p, KEY_GUTTER_DIFF_MODE, GutterDiffMode.class, path),
             parseTabWidth(p, path),
             parseEnum(p, KEY_TAB_INSERT_MODE, TabInsertMode.class, path),
@@ -214,6 +216,9 @@ public final class AppSettingsStore {
         p.setProperty(KEY_AUTO_SELECTION_HIGHLIGHT, Boolean.toString(settings.autoSelectionHighlight()));
         p.setProperty(KEY_MARKDOWN_OPEN_BOTH_TABS, Boolean.toString(settings.markdownOpenBothTabs()));
         p.setProperty(KEY_MARKDOWN_OPEN_IN_PREVIEW, Boolean.toString(settings.markdownOpenInPreview()));
+        if (settings.markdownCodeHighlighting()) {
+            p.setProperty(KEY_MARKDOWN_CODE_HIGHLIGHTING, "true");
+        }
         p.setProperty(KEY_GUTTER_DIFF_MODE, canonical(settings.gutterDiffMode()));
         p.setProperty(KEY_TAB_WIDTH, Integer.toString(settings.tabWidth()));
         p.setProperty(KEY_TAB_INSERT_MODE, canonical(settings.tabInsertMode()));
@@ -453,13 +458,19 @@ public final class AppSettingsStore {
         if (!FORMAT.equals(format)) {
             throw invalid(path, "unsupported or missing format marker");
         }
-        if (!p.stringPropertyNames().equals(KEYS)) {
-            Set<String> missing = new java.util.HashSet<>(KEYS);
-            missing.removeAll(p.stringPropertyNames());
-            Set<String> unknown = new java.util.HashSet<>(p.stringPropertyNames());
-            unknown.removeAll(KEYS);
+        Set<String> missing = new java.util.HashSet<>(KEYS);
+        missing.removeAll(p.stringPropertyNames());
+        Set<String> unknown = new java.util.HashSet<>(p.stringPropertyNames());
+        unknown.removeAll(KEYS);
+        unknown.remove(KEY_MARKDOWN_CODE_HIGHLIGHTING);
+        if (!missing.isEmpty() || !unknown.isEmpty()) {
             throw invalid(path, "schema mismatch; missing=" + missing + ", unknown=" + unknown);
         }
+    }
+
+    /** Optional current-schema preferences preserve their documented default when omitted. */
+    private static boolean parseOptionalBoolean(Properties p, String key, boolean defaultValue, Path path) throws IOException {
+        return p.containsKey(key) ? parseBoolean(p, key, path) : defaultValue;
     }
 
     private static boolean parseBoolean(Properties p, String key, Path path) throws IOException {

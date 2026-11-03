@@ -115,6 +115,11 @@ final class InputActionDispatcher {
                 return DispatchResult.handled(ui.markdownOpenInPreviewSetting
                     ? "Markdown opens in Preview" : "Markdown opens in Source");
             }
+            case SETTINGS_TOGGLE_MARKDOWN_CODE_SYNTAX -> {
+                ui.markdownCodeHighlightingSetting = !ui.markdownCodeHighlightingSetting;
+                return DispatchResult.handled(ui.markdownCodeHighlightingSetting
+                    ? "Markdown Source code syntax highlighting enabled" : "Markdown Source code syntax highlighting disabled");
+            }
             case SETTINGS_TOGGLE_CONFIRM_ON_CLOSE -> {
                 ui.confirmOnCloseSetting = !ui.confirmOnCloseSetting;
                 statusMessage = ui.confirmOnCloseSetting

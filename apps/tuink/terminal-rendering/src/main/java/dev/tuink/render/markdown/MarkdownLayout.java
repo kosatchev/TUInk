@@ -1,6 +1,7 @@
 package dev.tuink.render.markdown;
 
 import dev.tuink.editor.document.TextRange;
+import dev.tuink.editor.highlight.TokenSpan;
 import dev.tuink.markdown.MarkdownBlock;
 import dev.tuink.markdown.MarkdownDocument;
 import dev.tuink.markdown.MarkdownInline;
@@ -22,8 +23,21 @@ public final class MarkdownLayout {
         }
         public Run(int start, int end, Role role, TextRange source) { this(start, end, role, source, -1, -1); }
     }
-    public record Line(String text, List<Run> runs, String copyText, TextRange source, String kind) {
-        public Line { runs = List.copyOf(runs); }
+    public record Line(String text, List<Run> runs, String copyText, TextRange source, String kind,
+                       List<TokenSpan> syntax) {
+        public Line {
+            runs = List.copyOf(runs);
+            syntax = List.copyOf(syntax);
+            int previousEnd = 0;
+            for (TokenSpan span : syntax) {
+                if (span.start() < previousEnd || span.end() <= span.start() || span.end() > text.length())
+                    throw new IllegalArgumentException("Invalid line syntax spans");
+                previousEnd = span.end();
+            }
+        }
+        public Line(String text, List<Run> runs, String copyText, TextRange source, String kind) {
+            this(text, runs, copyText, source, kind, List.of());
+        }
     }
     public record Result(MarkdownDocument document, List<Line> lines, int columns, int extent) {
         public Result { lines = List.copyOf(lines); }
@@ -58,21 +72,38 @@ public final class MarkdownLayout {
         default Box math(String source) { return new Box(List.of(source), 0); }
         default List<String> mermaid(String source, int width) { return source.lines().toList(); }
     }
+    /**
+     * Supplies detached token roles for one code block, without selecting a concrete lexer here.
+     * Rows address the supplied text in UTF-16 units and contain sorted, non-overlapping spans.
+     * Missing rows are unstyled. Providers must bound their work and output and honor interruption.
+     */
+    @FunctionalInterface
+    public interface CodeHighlighter {
+        List<List<TokenSpan>> highlight(String language, List<String> lines);
+    }
     private static final Pattern WORDS = Pattern.compile("\\s+|\\S+");
     private static final int MAX_ROWS = 20_000;
     private static final int MAX_LINE_CELLS = 4096;
+    private static final int MAX_LINE_SYNTAX_SPANS = 1024;
+    private static final int MAX_SYNTAX_SPANS = 32_768;
     private final int width;
     private final EmbeddedRenderer embedded;
+    private final CodeHighlighter codeHighlighter;
     private final List<Line> lines = new ArrayList<>();
     private int extent;
+    private int syntaxSpans;
 
     public MarkdownLayout(int width) { this(width, new EmbeddedRenderer() {}); }
     public MarkdownLayout(int width, EmbeddedRenderer embedded) {
+        this(width, embedded, (language, lines) -> List.of());
+    }
+    public MarkdownLayout(int width, EmbeddedRenderer embedded, CodeHighlighter codeHighlighter) {
         this.width = Math.max(1, Math.min(1024, width));
         this.embedded = Objects.requireNonNull(embedded);
+        this.codeHighlighter = Objects.requireNonNull(codeHighlighter);
     }
     public Result layout(MarkdownDocument document) {
-        lines.clear(); extent = 0;
+        lines.clear(); extent = 0; syntaxSpans = 0;
         blocks(document.blocks(), "", 0);
         for (var diagnostic : document.diagnostics()) add("[!] " + diagnostic.message(), Role.DIAGNOSTIC, null, "diagnostic", "");
         return new Result(document, MarkdownProjectionMap.annotate(document, lines), width, extent);
@@ -94,12 +125,12 @@ public final class MarkdownLayout {
                     if (lines.size() > start) {
                         Line first = lines.get(start);
                         String text = prefix + marker + first.text().substring(Math.min(first.text().length(), prefix.length() + CellText.width(marker)));
-                        lines.set(start, new Line(text, first.runs(), first.copyText(), first.source(), first.kind()));
+                        lines.set(start, new Line(text, first.runs(), first.copyText(), first.source(), first.kind(), first.syntax()));
                     }
                 }
             } else if (block instanceof MarkdownBlock.Code n) {
                 if (!n.language().isBlank()) add(prefix + "[" + n.language() + "]", Role.QUOTE, n.source(), "code-label", "");
-                for (String line : n.text().split("\\n", -1)) add(prefix + line, Role.CODE, n.source(), "code", line);
+                code(n, prefix);
             } else if (block instanceof MarkdownBlock.Math n) {
                 for (String line : embedded.math(n.expression()).lines()) add(prefix + line, Role.MATH, n.source(), "math", "");
             } else if (block instanceof MarkdownBlock.Mermaid n) {
@@ -112,6 +143,35 @@ public final class MarkdownLayout {
             }
             if (!lines.isEmpty() && !lines.get(lines.size() - 1).text().isBlank()) add("", Role.TEXT, block.source(), "space", "");
         }
+    }
+    private void code(MarkdownBlock.Code block, String prefix) {
+        List<String> body = List.of(block.text().split("\\n", -1));
+        if (body.size() > MAX_ROWS - lines.size())
+            throw new IllegalArgumentException("Preview exceeds the layout row budget");
+        List<List<TokenSpan>> highlighted = codeHighlighter.highlight(block.language(), body);
+        for (int row = 0; row < body.size(); row++) {
+            check();
+            String value = body.get(row), text = prefix + value;
+            List<TokenSpan> spans = highlighted == null || row >= highlighted.size() ? List.of() : highlighted.get(row);
+            add(new Line(text, List.of(new Run(0, text.length(), Role.CODE, block.source())), value,
+                block.source(), "code", codeSyntax(spans, value.length(), prefix.length())));
+        }
+    }
+    /** Refused or malformed highlighting does not remove any of the code's text or semantic mapping. */
+    private List<TokenSpan> codeSyntax(List<TokenSpan> spans, int length, int prefix) {
+        if (spans == null || spans.isEmpty() || spans.size() > MAX_LINE_SYNTAX_SPANS
+            || spans.size() > MAX_SYNTAX_SPANS - syntaxSpans) return List.of();
+        int previousEnd = 0;
+        var result = new ArrayList<TokenSpan>(spans.size());
+        for (TokenSpan span : spans) {
+            check();
+            if (span == null || span.start() < previousEnd || span.end() <= span.start() || span.end() > length)
+                return List.of();
+            result.add(new TokenSpan(prefix + span.start(), prefix + span.end(), span.styleKey()));
+            previousEnd = span.end();
+        }
+        syntaxSpans += result.size();
+        return List.copyOf(result);
     }
     private record Piece(Box box, Role role, TextRange source, String copy) {
         int width() { return box.lines().stream().mapToInt(CellText::width).max().orElse(0); }

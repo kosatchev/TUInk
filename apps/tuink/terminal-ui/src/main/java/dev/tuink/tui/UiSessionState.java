@@ -23,6 +23,7 @@ final class UiSessionState {
     boolean autoSelectionHighlightSetting;
     boolean markdownOpenBothTabsSetting;
     boolean markdownOpenInPreviewSetting;
+    boolean markdownCodeHighlightingSetting;
     GutterDiffMode gutterDiffModeSetting;
     int tabWidthSetting;
     TabInsertMode tabInsertModeSetting;
@@ -33,6 +34,7 @@ final class UiSessionState {
             smartHomeEndSetting, autoIndentSetting, autoPairsSetting, autoListSetting,
             visibleWhitespaceSetting, syntaxHighlightingSetting, rainbowBracketsSetting,
             autoSelectionHighlightSetting, markdownOpenBothTabsSetting, markdownOpenInPreviewSetting,
+            markdownCodeHighlightingSetting,
             gutterDiffModeSetting, tabWidthSetting,
             tabInsertModeSetting, theme);
     }
@@ -56,6 +58,7 @@ final class UiSessionState {
         state.autoSelectionHighlightSetting = settings.autoSelectionHighlight();
         state.markdownOpenBothTabsSetting = settings.markdownOpenBothTabs();
         state.markdownOpenInPreviewSetting = settings.markdownOpenInPreview();
+        state.markdownCodeHighlightingSetting = settings.markdownCodeHighlighting();
         state.gutterDiffModeSetting = settings.gutterDiffMode();
         state.tabWidthSetting = settings.tabWidth();
         state.tabInsertModeSetting = settings.tabInsertMode();

@@ -7,6 +7,7 @@ import dev.tuink.editor.highlight.SemanticStyleKey;
 import dev.tuink.editor.highlight.TokenSpan;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -50,7 +51,7 @@ public class RegexHighlighter implements SyntaxHighlighter {
             case C -> forC();
             case CPP -> forCpp();
             case PYTHON -> forPython();
-            case MARKDOWN -> new MarkdownFenceHighlighter();
+            case MARKDOWN -> forMarkdownDocument(true);
             case JAVASCRIPT -> forJavaScript();
             case TYPESCRIPT -> forTypeScript();
             case GROOVY -> forGradle();
@@ -81,6 +82,95 @@ public class RegexHighlighter implements SyntaxHighlighter {
             case GIT_COMMIT -> forGitCommit();
             default -> withDefaults();
         };
+    }
+
+    /**
+     * Creates a Markdown document highlighter with optional language token styles
+     * inside code fences. Disabled blocks use the uniform CODE role. Ordinary
+     * Markdown markup remains highlighted in either mode; lexical scanning still
+     * recognizes embedded strings and comments for editing.
+     */
+    public static SyntaxHighlighter forMarkdownDocument(boolean highlightCodeBlocks) {
+        return new MarkdownFenceHighlighter(highlightCodeBlocks);
+    }
+
+    /**
+     * Creates a fresh language-aware highlighter for a Markdown-style language tag.
+     * Accepts the same aliases and info-string forms as Source code fences. Unknown
+     * or absent tags use generic rules. Each caller owns the returned lexical state;
+     * unrelated code blocks must not share it. Markdown tags highlight literal
+     * Markdown syntax without recursively interpreting nested fences.
+     */
+    public static SyntaxHighlighter forLanguageTag(String rawInfo) {
+        SyntaxHighlighter highlighter = forNormalizedLanguageTag(normalizeLanguageTag(rawInfo), null);
+        return highlighter == null ? withDefaults() : highlighter;
+    }
+
+    static SyntaxHighlighter forNormalizedLanguageTag(String languageTag, SyntaxHighlighter fallback) {
+        return switch (languageTag) {
+            case "java" -> forJava();
+            case "c", "h" -> forC();
+            case "cpp", "cxx", "cc", "hpp", "hxx" -> forCpp();
+            case "python", "py", "py3" -> forPython();
+            case "js", "javascript", "node", "nodejs", "jsx" -> forJavaScript();
+            case "ts", "typescript", "tsx" -> forTypeScript();
+            case "gradle", "groovy" -> forGradle();
+            case "sh", "shell", "bash", "zsh" -> forShell();
+            case "sql" -> forSql();
+            case "go", "golang" -> forGo();
+            case "rs", "rust" -> forRust();
+            case "php" -> forPhp();
+            case "ruby", "rb" -> forRuby();
+            case "perl", "pl", "pm" -> forPerl();
+            case "kt", "kts", "kotlin" -> forKotlin();
+            case "proto", "protobuf" -> forProto();
+            case "html", "htm" -> forHtml();
+            case "css", "scss", "sass" -> forCssLike();
+            case "diff", "patch" -> forDiff();
+            case "json" -> forJson();
+            case "yaml", "yml" -> forYaml();
+            case "toml" -> forToml();
+            case "ini", "cfg", "conf" -> forIniLike();
+            case "properties" -> forProperties();
+            case "editorconfig" -> forEditorConfig();
+            case "xml" -> forXml();
+            case "dockerfile", "docker" -> forDockerfile();
+            case "make", "makefile" -> forMakefile();
+            case "markdown", "md" -> forMarkdown();
+            default -> fallback;
+        };
+    }
+
+    static String normalizeLanguageTag(String rawInfo) {
+        if (rawInfo == null || rawInfo.isBlank()) {
+            return "";
+        }
+        String token = rawInfo.trim().split("\\s+", 2)[0].toLowerCase(Locale.ROOT);
+        if (token.startsWith("{") && token.endsWith("}") && token.length() > 2) {
+            token = token.substring(1, token.length() - 1);
+        }
+        if (token.startsWith(".")) {
+            token = token.substring(1);
+        }
+        if (token.startsWith("language-")) {
+            token = token.substring("language-".length());
+        }
+        if (token.startsWith("lang-")) {
+            token = token.substring("lang-".length());
+        }
+        int separator = token.indexOf(':');
+        if (separator >= 0 && separator < token.length() - 1) {
+            token = token.substring(separator + 1);
+        }
+        int end = token.length();
+        while (end > 0) {
+            char tail = token.charAt(end - 1);
+            if (Character.isLetterOrDigit(tail) || tail == '+' || tail == '#') {
+                break;
+            }
+            end--;
+        }
+        return token.substring(0, end);
     }
 
     public static RegexHighlighter forConfigFileName(String fileName) {

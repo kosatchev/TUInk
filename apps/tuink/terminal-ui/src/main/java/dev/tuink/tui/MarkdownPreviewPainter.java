@@ -7,6 +7,8 @@ import dev.tuiframe.style.CellStyle;
 import dev.tuiframe.scroll.ScrollStyle;
 import dev.tuink.tui.style.UiStyles;
 import dev.tuink.render.markdown.MarkdownLayout;
+import dev.tuink.render.SyntaxStyleResolver;
+import dev.tuink.editor.highlight.SemanticStyleKey;
 import dev.tuiframe.text.TerminalText;
 import dev.tuiframe.render.PreparedRowPainter;
 import dev.tuiframe.render.PreparedStyledRow;
@@ -18,9 +20,12 @@ import dev.tuiframe.widget.FocusSpace;
 import dev.tuiframe.widget.WidgetState;
 import dev.tuiframe.widget.WidgetThemeKeys;
 import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 
 /** Paints a prepared, immutable preview placement. */
 final class MarkdownPreviewPainter {
+    private static final SyntaxStyleResolver SYNTAX_STYLES = SyntaxStyleResolver.standard();
     private MarkdownPreviewPainter() {}
     static void paint(Canvas canvas, MarkdownPreviewState.Placement placement, UiStyles.Palette palette, boolean color) {
         var bounds = placement.bounds(); int mark = canvas.save();
@@ -127,12 +132,33 @@ final class MarkdownPreviewPainter {
         private final MarkdownLayout.Line line;
         private final TerminalText.Geometry geometry;
         private final int from, to;
+        private final int syntaxFrom, syntaxTo;
         private final PreviewOverlay styles;
         BaseSpans(MarkdownLayout.Line line, TerminalText.Geometry geometry, int from, int to, PreviewOverlay styles) {
             this.line = line; this.geometry = geometry; this.from = from; this.to = to; this.styles = styles;
+            int low = 0, high = line.syntax().size();
+            while (low < high) {
+                int middle = (low + high) >>> 1;
+                if (line.syntax().get(middle).end() <= from) low = middle + 1;
+                else high = middle;
+            }
+            syntaxFrom = low;
+            high = line.syntax().size();
+            while (low < high) {
+                int middle = (low + high) >>> 1;
+                if (line.syntax().get(middle).start() < to) low = middle + 1;
+                else high = middle;
+            }
+            syntaxTo = low;
         }
-        @Override public int size() { return line.runs().size(); }
+        @Override public int size() { return line.runs().size() + syntaxTo - syntaxFrom; }
         @Override public PreparedStyledRow.Span get(int index) {
+            if (index >= line.runs().size()) {
+                var token = line.syntax().get(syntaxFrom + index - line.runs().size());
+                int start = Math.max(from, Math.min(to, geometry.ceilBoundary(token.start())));
+                int end = Math.max(start, Math.min(to, geometry.ceilBoundary(token.end())));
+                return new PreparedStyledRow.Span(start - from, end - from, styles.syntax(token.styleKey()));
+            }
             // Earlier runs own overlapping starts in the original renderer; later generic spans win.
             var run = line.runs().get(line.runs().size() - 1 - index);
             int start = Math.max(from, Math.min(to, geometry.ceilBoundary(run.start())));
@@ -148,8 +174,9 @@ final class MarkdownPreviewPainter {
         private final CellStyle selected, search, currentSearch;
         private final PreviewSelection.Range selection, currentMatch;
         private final CellStyle[] roles = new CellStyle[MarkdownLayout.Role.values().length];
+        private final Map<SemanticStyleKey, CellStyle> syntaxStyles = new HashMap<>();
         private MarkdownLayout.Line line;
-        private int offset, runIndex, caretStart;
+        private int offset, runIndex, syntaxIndex, caretStart;
         private boolean rebuildBase;
 
         PreviewOverlay(MarkdownPreviewState.Placement placement, UiStyles.Palette palette, boolean color) {
@@ -166,9 +193,20 @@ final class MarkdownPreviewPainter {
             if (style == null) roles[role.ordinal()] = style = MarkdownPreviewPainter.style(role, palette.renderBody(), color);
             return style;
         }
+        CellStyle syntax(SemanticStyleKey key) {
+            var cached = syntaxStyles.get(key);
+            if (cached != null) return cached;
+            var body = palette.renderBody();
+            var mapped = EditorStyleAdapter.toCell(SYNTAX_STYLES.resolve(key));
+            var style = new CellStyle(color && mapped.fg() != CellColor.DEFAULT ? mapped.fg() : body.fg(),
+                body.bg(), mapped.bold(), mapped.underline());
+            if (syntaxStyles.size() < 32) syntaxStyles.put(key, style);
+            return style;
+        }
         void bind(MarkdownLayout.Line line, int row, int offset, TerminalText.Geometry metrics, boolean rebuildBase) {
-            this.line = line; this.offset = offset; this.rebuildBase = rebuildBase; runIndex = 0;
+            this.line = line; this.offset = offset; this.rebuildBase = rebuildBase; runIndex = 0; syntaxIndex = 0;
             while (runIndex < line.runs().size() && line.runs().get(runIndex).end() <= offset) runIndex++;
+            while (syntaxIndex < line.syntax().size() && line.syntax().get(syntaxIndex).end() <= offset) syntaxIndex++;
             caretStart = !placement.searchEditing() && placement.caret() != null && placement.caret().row() == row
                 ? metrics.offsetForVisualColumn(placement.caret().column(), TerminalText.Bias.FLOOR) : -1;
         }
@@ -178,7 +216,12 @@ final class MarkdownPreviewPainter {
                 while (runIndex < line.runs().size() && line.runs().get(runIndex).end() <= absoluteStart) runIndex++;
                 var run = runIndex < line.runs().size() ? line.runs().get(runIndex) : null;
                 if (run != null && run.start() > absoluteStart) run = null;
-                if (rebuildBase) base = run == null ? palette.renderBody() : role(run.role());
+                if (rebuildBase) {
+                    base = run == null ? palette.renderBody() : role(run.role());
+                    while (syntaxIndex < line.syntax().size() && line.syntax().get(syntaxIndex).end() <= absoluteStart) syntaxIndex++;
+                    var token = syntaxIndex < line.syntax().size() ? line.syntax().get(syntaxIndex) : null;
+                    if (token != null && token.start() <= absoluteStart) base = syntax(token.styleKey());
+                }
                 if (run != null && run.projectionStart() >= 0) {
                     int from = run.projectionStart(), to = run.projectionEnd();
                     if (PreviewSelection.linear(run)) {

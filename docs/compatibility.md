@@ -280,6 +280,8 @@ ui.autoPairs=true
 ui.autoList=true
 ui.visibleWhitespace=false
 ui.syntaxHighlighting=true
+# Optional; omission means false.
+ui.markdownCodeHighlighting=false
 ui.rainbowBrackets=true
 ui.autoSelectionHighlight=true
 ui.gutterDiffMode=...
@@ -295,6 +297,14 @@ Format 1 files remain untouched and are rejected, including automatic saves
 from that session. To start a new profile, retain the old file under another
 name and let a following session save a complete format 2 settings file.
 There is no automatic conversion or historical settings reader.
+
+The current format 2 schema also accepts the optional Boolean
+`ui.markdownCodeHighlighting`. Its absence means `false`, so existing format 2
+profiles remain readable without conversion. The writer omits the default and
+stores `true` when language-specific highlighting of Markdown Source code blocks
+is enabled. Existing required
+fields and unknown-key rejection remain strict; malformed optional values also
+reject the profile without rewriting it.
 
 If settings cannot be loaded, an in-editor persistent warning explains that
 preference changes apply only to the current session. Changing a preference in

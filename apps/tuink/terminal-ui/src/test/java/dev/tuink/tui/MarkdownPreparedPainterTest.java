@@ -9,12 +9,58 @@ import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.memory.RenderMemoryBudget;
 import dev.tuink.render.markdown.MarkdownGeometry;
 import dev.tuink.render.markdown.MarkdownLayout;
+import dev.tuink.render.SyntaxStyleResolver;
+import dev.tuink.editor.highlight.TokenSpan;
+import dev.tuink.editor.highlight.SemanticStyleKey;
 import dev.tuink.tui.render.EditorStyleAdapter;
 import dev.tuink.tui.style.UiStyles;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class MarkdownPreparedPainterTest {
+    @Test void narrowSlicesAdmitOnlyVisibleSyntaxSpans() {
+        String text = "if ".repeat(1000);
+        var tokens = java.util.stream.IntStream.range(0, 1000)
+            .mapToObj(index -> new TokenSpan(index * 3, index * 3 + 2, SemanticStyleKey.KEYWORD)).toList();
+        var line = new MarkdownLayout.Line(text, List.of(new MarkdownLayout.Run(0, text.length(),
+            MarkdownLayout.Role.CODE, SOURCE, 0, text.length())), text, SOURCE, "code", tokens);
+        var result = result(text, line);
+        var budget = RenderMemoryBudget.bounded(1_000_000);
+        try (var geometry = new MarkdownGeometry(result, budget)) {
+            try (var admitted = geometry.acquire(0)) { assertNotNull(admitted); }
+            try (var blocker = budget.tryReserve(budget.limitBytes() - budget.usedBytes() - 8192)) {
+                assertNotNull(blocker);
+                paint(placement(result, new Rect(2, 1, 4, 3), 0, PreviewSelection.Snapshot.EMPTY,
+                    List.of(), null, geometry), true);
+                assertEquals(1, geometry.rows().size(), "Invisible tokens must not prevent a small slice from being cached");
+            }
+        }
+        assertEquals(0, budget.usedBytes());
+    }
+
+    @Test void codeTokensUseTheSourceSyntaxPaletteAndRespectMonochrome() {
+        String text = "return 7; // hi";
+        var line = new MarkdownLayout.Line(text,
+            List.of(new MarkdownLayout.Run(0, text.length(), MarkdownLayout.Role.CODE, SOURCE, 0, text.length())),
+            text, SOURCE, "code", List.of(new TokenSpan(0, 6, SemanticStyleKey.KEYWORD),
+                new TokenSpan(7, 8, SemanticStyleKey.NUMBER), new TokenSpan(10, text.length(), SemanticStyleKey.COMMENT)));
+        var result = result(text, line);
+        var bounds = new Rect(2, 1, 20, 1);
+        var placement = placement(result, bounds, 0, PreviewSelection.Snapshot.EMPTY, List.of(), null, null);
+        var colored = paint(placement, true);
+        var palette = SyntaxStyleResolver.standard();
+        for (var token : line.syntax()) {
+            var expected = EditorStyleAdapter.toCell(palette.resolve(token.styleKey()));
+            var actual = colored.get(1, 2 + token.start()).style();
+            assertEquals(expected.fg(), actual.fg());
+            assertEquals(expected.bold(), actual.bold());
+        }
+        var monochrome = paint(placement, false);
+        for (int column = 0; column < text.length(); column++)
+            assertEquals(UiStyles.forTheme(UiStyles.Theme.CYAN).renderBody().fg(),
+                monochrome.get(1, 2 + column).style().fg());
+    }
+
     @Test void preparedAndStreamingPreviewAgreeOnStylesProjectionOverlaysAndUnicodeClipping() {
         var result = fixture();
         var budget = RenderMemoryBudget.bounded(1_000_000);
@@ -94,7 +140,9 @@ class MarkdownPreparedPainterTest {
         var runs = List.of(new MarkdownLayout.Run(0, 1, MarkdownLayout.Role.TEXT, SOURCE, 0, 1),
             new MarkdownLayout.Run(1, 4, MarkdownLayout.Role.STRONG, SOURCE, 1, 4),
             new MarkdownLayout.Run(4, text.length(), MarkdownLayout.Role.CODE, SOURCE, 4, text.length()));
-        return result(text, new MarkdownLayout.Line(text, runs, text, SOURCE, "code"),
+        return result(text, new MarkdownLayout.Line(text, runs, text, SOURCE, "code", List.of(
+            new TokenSpan(1, 4, SemanticStyleKey.COMMENT), new TokenSpan(4, 5, SemanticStyleKey.NUMBER),
+            new TokenSpan(5, text.length(), SemanticStyleKey.KEYWORD))),
             new MarkdownLayout.Line(" │ x² ─ ", List.of(new MarkdownLayout.Run(3, 5,
                 MarkdownLayout.Role.MATH, SOURCE, 4, 7)), "", SOURCE, "math"),
             new MarkdownLayout.Line("[!] note", List.of(new MarkdownLayout.Run(0, 8,

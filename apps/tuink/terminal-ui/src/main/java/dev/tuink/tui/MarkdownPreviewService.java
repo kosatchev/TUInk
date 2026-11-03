@@ -48,6 +48,7 @@ final class MarkdownPreviewService implements AutoCloseable {
     private final Set<Task> consumers = new HashSet<>();
     private final MarkdownPreviewBudget budget;
     private final long embeddedUnitsLimit;
+    private final long codeStyleBytesLimit;
     private volatile boolean closed;
 
     MarkdownPreviewService(Runnable wakeup) { this(new CommonmarkMarkdownParser(), wakeup); }
@@ -58,6 +59,7 @@ final class MarkdownPreviewService implements AutoCloseable {
         this.parser = parser; this.wakeup = wakeup;
         budget = new MarkdownPreviewBudget(limits);
         embeddedUnitsLimit = Math.max(1, limits.layoutBytes() / 4);
+        codeStyleBytesLimit = limits.layoutBytes() / 4;
         worker = new ThreadPoolExecutor(1, 1, 15, TimeUnit.SECONDS, new ArrayBlockingQueue<>(1), operation -> {
             Thread thread = new Thread(operation, "tuink-markdown-preview"); thread.setDaemon(true); return thread;
         }, (operation, executor) -> {
@@ -214,7 +216,8 @@ final class MarkdownPreviewService implements AutoCloseable {
         }
         checkRunning();
         if (!consumer.layoutNeeded) throw new java.util.concurrent.CancellationException("Preview layout consumer retired");
-        var result = new MarkdownLayout(width, embeddedRenderer(embeddedUnitsLimit)).layout(document);
+        var result = new MarkdownLayout(width, embeddedRenderer(embeddedUnitsLimit),
+            new MarkdownCodeHighlighter(codeStyleBytesLimit)).layout(document);
         synchronized (lock) {
             checkRunning();
             MarkdownPreviewBudget.Lease lease;

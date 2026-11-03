@@ -148,6 +148,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         initial.openFileTree = resources.openFileTree();
         setModal(resources.initialModalState());
         host.bindTabUi(this::focusUi);
+        refreshMarkdownHighlighters();
         applyMarkdownOpenPolicy(sessionContext.active(), true);
         if (!settingsSession.canSavePreferences() && notice().message == null
                 && !resources.notification().isError()) {
@@ -512,7 +513,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 host.toTabSessions(tabs), -1, () -> TuiDocumentSession.create(host.clipboard));
             TerminalEditorApp.EditorTab editor = result.openedDocument() == null ? null
                 : new TerminalEditorApp.EditorTab(result.openedDocument(), result.openedDocument().newRenderPlanBuilder(
-                    host.resolveHighlighter(JvmDocumentStorage.pathOf(result.openedDocument().view().state().getCurrentResource()))));
+                    host.resolveHighlighter(JvmDocumentStorage.pathOf(result.openedDocument().view().state().getCurrentResource()),
+                        uiSessionState.markdownCodeHighlightingSetting)));
             if (result.activateViewId() != null) editor = sessionContext.source(result.activateViewId());
             if (editor != null) {
                 boolean activate = sessionContext.activePresentation().presentationId().equals(owner.presentationId());
@@ -2145,6 +2147,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                     startupRecoveryEntries.addAll(restored.failedEntries());
                     int restoredCount = restored.restoredCount();
                     if (restoredCount > 0) {
+                        refreshMarkdownHighlighters();
                         activeTabIndex = sessionContext.activeTabIndex();
                         state = sessionContext.state();
                         openFileTree().setRoot(FilePickerOpenWorkflow.initialRoot(JvmDocumentStorage.pathOf(state.getCurrentResource())));
@@ -2573,7 +2576,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         if (result.openedDocument() != null) {
             TuiDocumentSession document = result.openedDocument();
             RenderPlanBuilder builder = document.newRenderPlanBuilder(
-                host.resolveHighlighter(JvmDocumentStorage.pathOf(document.view().state().getCurrentResource())));
+                host.resolveHighlighter(JvmDocumentStorage.pathOf(document.view().state().getCurrentResource()),
+                    uiSessionState.markdownCodeHighlightingSetting));
             sessionContext.addAll(List.of(new TerminalEditorApp.EditorTab(document, builder)));
             if (!documentPromptActive && publishToOpenedView) {
                 openedView = document.viewId();
@@ -2741,11 +2745,20 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     }
 
     private void refreshSavedHighlighter(DocumentId savedDocumentId) {
+        refreshHighlighters(tab -> tab.documentSession().document().documentId().equals(savedDocumentId));
+    }
+
+    private void refreshMarkdownHighlighters() {
+        refreshHighlighters(tab -> MarkdownOpenPolicy.isMarkdown(JvmDocumentStorage.pathOf(tab.state().getCurrentResource())));
+    }
+
+    private void refreshHighlighters(java.util.function.Predicate<TerminalEditorApp.EditorTab> selected) {
         for (int index = 0; index < tabs.size(); index++) {
             TerminalEditorApp.EditorTab tab = tabs.get(index);
-            if (tab.documentSession().document().documentId().equals(savedDocumentId)) {
+            if (selected.test(tab)) {
                 RenderPlanBuilder builder = tab.documentSession().newRenderPlanBuilder(
-                    host.resolveHighlighter(JvmDocumentStorage.pathOf(tab.state().getCurrentResource())));
+                    host.resolveHighlighter(JvmDocumentStorage.pathOf(tab.state().getCurrentResource()),
+                        uiSessionState.markdownCodeHighlightingSetting));
                 sessionContext.update(tab.withRenderPlanBuilder(builder));
                 if (sessionContext.activePresentation() instanceof TerminalEditorApp.EditorTab
                     && index == sessionContext.activeTabIndex()) renderPlanBuilder = builder;
@@ -3033,6 +3046,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         if (!result.handled()) return false;
         if (readingBefore != uiSessionState.readingModeSetting) settingsSession.readingModeChanged();
         if (mouseBefore != uiSessionState.mouseModeSetting) settingsSession.mouseModeChanged();
+        if (command == TuinkCommand.SETTINGS_TOGGLE_MARKDOWN_CODE_SYNTAX) refreshMarkdownHighlighters();
         applyUiIntent(result.ui().intent());
         if (result.ui().statusMessage() != null) {
             switch (result.ui().statusLevel()) {

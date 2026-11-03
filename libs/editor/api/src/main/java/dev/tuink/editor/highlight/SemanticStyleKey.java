@@ -15,6 +15,7 @@ public record SemanticStyleKey(String value) {
     public static final SemanticStyleKey MARKUP = new SemanticStyleKey("syntax.markup");
     public static final SemanticStyleKey LINK = new SemanticStyleKey("syntax.link");
     public static final SemanticStyleKey QUOTE = new SemanticStyleKey("syntax.quote");
+    public static final SemanticStyleKey CODE = new SemanticStyleKey("syntax.code");
 
     public SemanticStyleKey {
         Objects.requireNonNull(value, "value");

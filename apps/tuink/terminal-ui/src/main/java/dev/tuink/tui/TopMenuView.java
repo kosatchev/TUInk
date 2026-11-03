@@ -23,6 +23,7 @@ import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_CONFIRM_ON_CLOS
 import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_MOUSE;
 import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_MARKDOWN_OPEN_BOTH_TABS;
 import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_MARKDOWN_OPEN_IN_PREVIEW;
+import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_MARKDOWN_CODE_SYNTAX;
 import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_READING_MODE;
 import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_SMART_HOME_END;
 import static dev.tuink.tui.command.TuinkCommand.TAB_CLOSE;
@@ -452,7 +453,8 @@ final class TopMenuView {
             item(SETTINGS_CYCLE_TAB_INSERT_MODE, "[>] Tab insert mode: " + insertMode.label()),
             separator(),
             item(SETTINGS_TOGGLE_MARKDOWN_OPEN_BOTH_TABS, checked(ui.markdownOpenBothTabsSetting) + " Open both Markdown tabs"),
-            item(SETTINGS_TOGGLE_MARKDOWN_OPEN_IN_PREVIEW, checked(ui.markdownOpenInPreviewSetting) + " Open Markdown in Preview")
+            item(SETTINGS_TOGGLE_MARKDOWN_OPEN_IN_PREVIEW, checked(ui.markdownOpenInPreviewSetting) + " Open Markdown in Preview"),
+            item(SETTINGS_TOGGLE_MARKDOWN_CODE_SYNTAX, checked(ui.markdownCodeHighlightingSetting) + " MD code syntax")
         );
     }
 

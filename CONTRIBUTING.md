@@ -90,10 +90,14 @@ fallbacks. See the [Compatibility policy](docs/compatibility.md).
 
 Every persisted schema change must update:
 
-- the format marker and strict reader validation;
-- complete current-schema serialization;
+- the format marker for incompatible changes, and strict reader validation;
+- complete required-field serialization and explicit defaults for optional fields;
 - rejection and data-preservation tests;
 - the compatibility document and release notes when user action is required.
+
+An additive optional preference may keep the current format when its absence
+has a documented default. Required fields and unknown-field rejection remain
+strict; this does not permit reading historical formats or migrating profiles.
 
 Never silently reinterpret incompatible data. Validate paths, reject unsafe ownership assumptions, and preserve user files unless deletion is explicit.
 

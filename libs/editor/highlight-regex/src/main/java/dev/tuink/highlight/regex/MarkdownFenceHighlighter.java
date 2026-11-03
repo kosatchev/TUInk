@@ -9,9 +9,9 @@ import dev.tuink.editor.highlight.LexicalScanner;
 import dev.tuink.editor.highlight.GenericLexicalScanner;
 import dev.tuink.editor.highlight.LexicalConfig;
 import dev.tuink.editor.highlight.TokenSpan;
+import dev.tuink.editor.highlight.SemanticStyleKey;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
@@ -25,8 +25,17 @@ final class MarkdownFenceHighlighter implements ContextualSyntaxHighlighter {
     private final LexicalScanner proseScanner = new GenericLexicalScanner(LexicalConfig.MARKDOWN);
     private final LexicalScanner fallbackScanner = new GenericLexicalScanner(LexicalConfig.GENERIC);
     private final Map<String, SyntaxHighlighter> languageCache = new HashMap<>();
+    private final boolean highlightCodeBlocks;
     private final BoundedLineContext<BlockState> contexts = new BoundedLineContext<>(
         BlockState.EMPTY, MarkdownFenceHighlighter::stateWeight, MarkdownFenceHighlighter::scanContext);
+
+    MarkdownFenceHighlighter() {
+        this(true);
+    }
+
+    MarkdownFenceHighlighter(boolean highlightCodeBlocks) {
+        this.highlightCodeBlocks = highlightCodeBlocks;
+    }
 
     @Override
     public List<TokenSpan> highlight(String line) {
@@ -129,6 +138,9 @@ final class MarkdownFenceHighlighter implements ContextualSyntaxHighlighter {
             HighlightRequest delegated = new HighlightRequest(request.startUtf16(), request.endUtf16(),
                 context.remainingCodeUnits(), request.maxSpans(), work.remaining());
             Fence fence = boundary.codeFence();
+            if (fence != null && !highlightCodeBlocks)
+                return HighlightResult.completed(delegated.clipSpans(
+                    List.of(new TokenSpan(0, line.length(), SemanticStyleKey.CODE))));
             SyntaxHighlighter highlighter = fence == null ? markdown : embeddedHighlighter(fence.languageTag());
             if (highlighter instanceof CStyleHighlighter contextual) {
                 return contextual.highlightResult(document, lineIndex, line, fence.firstLine(), delegated,
@@ -166,79 +178,12 @@ final class MarkdownFenceHighlighter implements ContextualSyntaxHighlighter {
         if (cached != null) {
             return cached;
         }
-        SyntaxHighlighter created = createEmbeddedHighlighter(languageTag);
+        SyntaxHighlighter created = RegexHighlighter.forNormalizedLanguageTag(languageTag, fallback);
         // Unknown tags can change on every edit; retain only the finite supported set.
         if (created != fallback) {
             languageCache.put(languageTag, created);
         }
         return created;
-    }
-
-    private SyntaxHighlighter createEmbeddedHighlighter(String languageTag) {
-        return switch (languageTag) {
-            case "java" -> RegexHighlighter.forJava();
-            case "c", "h" -> RegexHighlighter.forC();
-            case "cpp", "cxx", "cc", "hpp", "hxx" -> RegexHighlighter.forCpp();
-            case "python", "py", "py3" -> RegexHighlighter.forPython();
-            case "js", "javascript", "node", "nodejs", "jsx" -> RegexHighlighter.forJavaScript();
-            case "ts", "typescript", "tsx" -> RegexHighlighter.forTypeScript();
-            case "gradle", "groovy" -> RegexHighlighter.forGradle();
-            case "sh", "shell", "bash", "zsh" -> RegexHighlighter.forShell();
-            case "sql" -> RegexHighlighter.forSql();
-            case "go", "golang" -> RegexHighlighter.forGo();
-            case "rs", "rust" -> RegexHighlighter.forRust();
-            case "php" -> RegexHighlighter.forPhp();
-            case "ruby", "rb" -> RegexHighlighter.forRuby();
-            case "perl", "pl", "pm" -> RegexHighlighter.forPerl();
-            case "kt", "kts", "kotlin" -> RegexHighlighter.forKotlin();
-            case "proto", "protobuf" -> RegexHighlighter.forProto();
-            case "html", "htm" -> RegexHighlighter.forHtml();
-            case "css", "scss", "sass" -> RegexHighlighter.forCssLike();
-            case "diff", "patch" -> RegexHighlighter.forDiff();
-            case "json" -> RegexHighlighter.forJson();
-            case "yaml", "yml" -> RegexHighlighter.forYaml();
-            case "toml" -> RegexHighlighter.forToml();
-            case "ini", "cfg", "conf" -> RegexHighlighter.forIniLike();
-            case "properties" -> RegexHighlighter.forProperties();
-            case "editorconfig" -> RegexHighlighter.forEditorConfig();
-            case "xml" -> RegexHighlighter.forXml();
-            case "dockerfile", "docker" -> RegexHighlighter.forDockerfile();
-            case "make", "makefile" -> RegexHighlighter.forMakefile();
-            case "markdown", "md" -> RegexHighlighter.forMarkdown();
-            default -> fallback;
-        };
-    }
-
-    private static String normalizeLanguageTag(String rawInfo) {
-        if (rawInfo == null || rawInfo.isBlank()) {
-            return "";
-        }
-        String token = rawInfo.trim().split("\\s+", 2)[0].toLowerCase(Locale.ROOT);
-        if (token.startsWith("{") && token.endsWith("}") && token.length() > 2) {
-            token = token.substring(1, token.length() - 1);
-        }
-        if (token.startsWith(".")) {
-            token = token.substring(1);
-        }
-        if (token.startsWith("language-")) {
-            token = token.substring("language-".length());
-        }
-        if (token.startsWith("lang-")) {
-            token = token.substring("lang-".length());
-        }
-        int separator = token.indexOf(':');
-        if (separator >= 0 && separator < token.length() - 1) {
-            token = token.substring(separator + 1);
-        }
-        int end = token.length();
-        while (end > 0) {
-            char tail = token.charAt(end - 1);
-            if (Character.isLetterOrDigit(tail) || tail == '+' || tail == '#') {
-                break;
-            }
-            end--;
-        }
-        return token.substring(0, end);
     }
 
     /** One block transition shared by display delegation and bounded semantic scanning. */
@@ -271,7 +216,7 @@ final class MarkdownFenceHighlighter implements ContextualSyntaxHighlighter {
             }
             FenceMarker marker = fenceMarker(text, start);
             if (completeLine && marker != null && (marker.fenceChar() != '`' || marker.info().indexOf('`') < 0)) {
-                Fence opened = new Fence(marker.fenceChar(), marker.length(), normalizeLanguageTag(marker.info()),
+                Fence opened = new Fence(marker.fenceChar(), marker.length(), RegexHighlighter.normalizeLanguageTag(marker.info()),
                     lineIndex + 1, container);
                 return new Boundary(new BlockState(container, opened), null, true);
             }

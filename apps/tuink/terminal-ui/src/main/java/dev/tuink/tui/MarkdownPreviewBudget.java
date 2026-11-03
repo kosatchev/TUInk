@@ -143,7 +143,7 @@ final class MarkdownPreviewBudget implements AutoCloseable {
         long bytes = 128L;
         var strings = new IdentityHashMap<String, Boolean>();
         for (var line : result.lines()) {
-            bytes += 160L + 80L * line.runs().size();
+            bytes += 184L + 80L * line.runs().size() + 64L * line.syntax().size();
             if (strings.put(line.text(), Boolean.TRUE) == null) bytes += 40L + 2L * line.text().length();
             if (strings.put(line.copyText(), Boolean.TRUE) == null) bytes += 40L + 2L * line.copyText().length();
         }

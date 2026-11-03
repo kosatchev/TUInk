@@ -52,7 +52,7 @@ public final class MarkdownProjectionMap {
                 runs.add(new MarkdownLayout.Run(start, end, run.role(), run.source(),
                     match == null ? -1 : match.start, match == null ? -1 : match.end));
             }
-            result.add(new MarkdownLayout.Line(line.text(), runs, line.copyText(), line.source(), line.kind()));
+            result.add(new MarkdownLayout.Line(line.text(), runs, line.copyText(), line.source(), line.kind(), line.syntax()));
         }
         return List.copyOf(result);
     }

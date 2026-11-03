@@ -244,6 +244,7 @@ class AppSettingsSaveIsolationTest {
         return new AppSettings(d.showTabBar(), d.wrapLines(), d.wrapWords(), d.readingMode(), d.confirmOnClose(),
             d.mouseMode(), d.highlightActiveGutter(), d.smartHomeEnd(), d.autoIndent(), d.autoPairs(), d.autoList(),
             d.visibleWhitespace(), d.syntaxHighlighting(), d.rainbowBrackets(), d.autoSelectionHighlight(), false, false,
+            d.markdownCodeHighlighting(),
             d.gutterDiffMode(), d.tabWidth(), d.tabInsertMode(), theme);
     }
 
@@ -341,6 +342,7 @@ class AppSettingsSaveIsolationTest {
         AppSettings secondSettings = new AppSettings(
             false, true, false, true, false, false, false, false, false,
             false, false, false, false, false, false, false, false,
+            false,
             GutterDiffMode.STABLE, 2, TabInsertMode.ALWAYS_SPACES_2, UiStyles.Theme.LIGHT
         );
         SavingFileSystem fileSystem = new SavingFileSystem(target.getFileSystem(), Mode.PAUSE_FIRST_MOVE);

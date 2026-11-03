@@ -8,10 +8,43 @@ import dev.tuink.editor.storage.FrozenDocumentSource;
 import dev.tuink.editor.document.ImmutableText;
 import dev.tuink.editor.storage.DocumentFileMetadata;
 import dev.tuink.editor.storage.ResourceBinding;
+import dev.tuink.editor.highlight.SemanticStyleKey;
+import dev.tuink.editor.highlight.TokenSpan;
+import dev.tuink.render.markdown.MarkdownLayout;
+import dev.tuink.markdown.MarkdownDocument;
+import dev.tuink.markdown.TextProjection;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class MarkdownPreviewBudgetTest {
+    @Test void syntaxRetentionIsChargedToTheSameLayoutBudgetAndReleased() {
+        var document = new MarkdownDocument(new DocumentId("code"), 0, List.of(), List.of(),
+            new TextProjection("return", List.of()));
+        var plain = new MarkdownLayout.Line("return", List.of(), "return", null, "code");
+        var styled = new MarkdownLayout.Line("return", List.of(), "return", null, "code",
+            List.of(new TokenSpan(0, 6, SemanticStyleKey.KEYWORD)));
+        long plainBytes;
+        try (var budget = new MarkdownPreviewBudget(MarkdownPreviewBudget.Limits.DEFAULT)) {
+            try (var lease = budget.result(new MarkdownLayout.Result(document, List.of(plain), 20, 6))) {
+                plainBytes = budget.usedBytes(MarkdownPreviewBudget.Kind.LAYOUT);
+            }
+            assertEquals(0, budget.usedBytes());
+            try (var lease = budget.result(new MarkdownLayout.Result(document, List.of(styled), 20, 6))) {
+                assertTrue(budget.usedBytes(MarkdownPreviewBudget.Kind.LAYOUT) > plainBytes);
+            }
+            assertEquals(0, budget.usedBytes());
+        }
+        try (var budget = new MarkdownPreviewBudget(new MarkdownPreviewBudget.Limits(
+                1_000_000, 1_000_000, 1_000_000, plainBytes))) {
+            try (var lease = budget.result(new MarkdownLayout.Result(document, List.of(plain), 20, 6))) {
+                assertThrows(MarkdownPreviewBudget.Refused.class, () ->
+                    budget.result(new MarkdownLayout.Result(document, List.of(styled), 20, 6)));
+                assertEquals(plainBytes, budget.usedBytes(MarkdownPreviewBudget.Kind.LAYOUT));
+            }
+            assertEquals(0, budget.usedBytes());
+        }
+    }
+
     @Test void renderAdmissionSharesTheExistingWindowAndLayoutLimits() {
         var budget = new MarkdownPreviewBudget(new MarkdownPreviewBudget.Limits(1200, 1200, 1200, 1200));
         var retained = budget.source(source("a".repeat(20)));

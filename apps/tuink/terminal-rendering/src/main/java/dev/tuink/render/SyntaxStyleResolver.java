@@ -19,7 +19,8 @@ public interface SyntaxStyleResolver {
             SemanticStyleKey.DECORATOR, Style.fg(Color.BRIGHT_YELLOW),
             SemanticStyleKey.MARKUP, new Style(Color.BRIGHT_YELLOW, Color.DEFAULT, true, false),
             SemanticStyleKey.LINK, Style.fg(Color.BRIGHT_YELLOW),
-            SemanticStyleKey.QUOTE, Style.fg(Color.BRIGHT_BLACK));
+            SemanticStyleKey.QUOTE, Style.fg(Color.BRIGHT_BLACK),
+            SemanticStyleKey.CODE, Style.fg(Color.YELLOW));
         return key -> styles.getOrDefault(key, Style.DEFAULT);
     }
 }

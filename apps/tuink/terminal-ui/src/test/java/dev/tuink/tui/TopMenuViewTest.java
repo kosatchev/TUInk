@@ -26,6 +26,23 @@ import org.junit.jupiter.api.Test;
 
 class TopMenuViewTest {
     @Test
+    void markdownSyntaxSettingShowsItsIndependentCheckmark() {
+        var ui = UiSessionState.from(dev.tuink.tui.flow.AppSettings.defaults());
+        for (boolean enabled : new boolean[] {true, false}) {
+            ui.markdownCodeHighlightingSetting = enabled;
+            var menu = TopMenuView.build(ui, List.of(), -1, "Cyan", new CommandRouter(),
+                MenuBar.State.open(TopMenuController.SETTINGS_INDEX), TestSurfaces.source(ui));
+            var setting = menu.menus().get(TopMenuController.SETTINGS_INDEX).entries().stream()
+                .filter(entry -> entry instanceof MenuBar.Item<?> item
+                    && ((CommandInvocation) item.value()).id().equals(
+                        dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_MARKDOWN_CODE_SYNTAX.id()))
+                .map(entry -> (MenuBar.Item<?>) entry).findFirst().orElseThrow();
+            assertEquals((enabled ? "[x]" : "[ ]") + " MD code syntax", setting.label());
+            assertTrue(setting.enabled());
+        }
+    }
+
+    @Test
     void showsTheCurrentBindingAndDisablesEditsInPreview() {
         var keymap = dev.tuink.tui.keymap.TuinkKeymap.defaults();
         keymap.unbind(dev.tuiframe.input.KeyStroke.of(dev.tuiframe.input.KeyStroke.Key.S,
@@ -218,7 +235,8 @@ class TopMenuViewTest {
                 "tuink.settings.toggle-auto-list",
                 "tuink.settings.cycle-tab-insert-mode",
                 "tuink.settings.toggle-markdown-open-both-tabs",
-                "tuink.settings.toggle-markdown-open-in-preview"
+                "tuink.settings.toggle-markdown-open-in-preview",
+                "tuink.settings.toggle-markdown-code-syntax"
             ),
             commandIds(
                 view(ui, MenuBar.State.open(TopMenuController.SETTINGS_INDEX)),

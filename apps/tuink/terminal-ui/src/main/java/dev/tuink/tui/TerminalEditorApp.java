@@ -2202,7 +2202,13 @@ public class TerminalEditorApp {
     }
 
     LineHighlighter resolveHighlighter(Path file) {
-        return new SemanticHighlighterAdapter(file == null ? RegexHighlighter.withDefaults()
+        return resolveHighlighter(file, false);
+    }
+
+    LineHighlighter resolveHighlighter(Path file, boolean markdownCodeHighlighting) {
+        return new SemanticHighlighterAdapter(MarkdownOpenPolicy.isMarkdown(file)
+            ? RegexHighlighter.forMarkdownDocument(markdownCodeHighlighting)
+            : file == null ? RegexHighlighter.withDefaults()
             : RegexHighlighter.forFileName(file.getFileName().toString()));
     }
 

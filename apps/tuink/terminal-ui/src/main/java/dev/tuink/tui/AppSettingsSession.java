@@ -75,6 +75,7 @@ final class AppSettingsSession {
             base.smartHomeEnd(), base.autoIndent(), base.autoPairs(), base.autoList(),
             base.visibleWhitespace(), base.syntaxHighlighting(), base.rainbowBrackets(),
             base.autoSelectionHighlight(), base.markdownOpenBothTabs(), base.markdownOpenInPreview(),
+            base.markdownCodeHighlighting(),
             base.gutterDiffMode(), base.tabWidth(),
             base.tabInsertMode(), theme);
     }

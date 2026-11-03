@@ -32,7 +32,8 @@ class PreviewMenuPointerIntegrationTest {
     @Test void menuCheckboxClicksApplyOnceForSourceLiveAndFrozenPresentations() throws Exception {
         var settings = List.of(
             new Setting(TuinkCommand.MENU_VIEW, "Syntax highlighting", ui -> ui.syntaxHighlightingSetting),
-            new Setting(TuinkCommand.MENU_SETTINGS, "Reading mode", ui -> ui.readingModeSetting));
+            new Setting(TuinkCommand.MENU_SETTINGS, "Reading mode", ui -> ui.readingModeSetting),
+            new Setting(TuinkCommand.MENU_SETTINGS, "MD code syntax", ui -> ui.markdownCodeHighlightingSetting));
         for (var kind : ActiveSurface.Kind.values()) {
             try (var window = window("checkbox-" + kind, kind)) {
                 var presentation = window.selected().presentationId();

@@ -19,6 +19,13 @@ import org.junit.jupiter.api.Test;
 
 class SemanticHighlighterAdapterTest {
     @Test
+    void uniformCodeRoleUsesTheTerminalCodeColor() {
+        SyntaxHighlighter provider = line -> List.of(new TokenSpan(0, line.length(), SemanticStyleKey.CODE));
+        assertEquals(List.of(new StyleSpan(0, 9, Style.fg(Color.YELLOW))),
+            new SemanticHighlighterAdapter(provider).highlight("return 7;"));
+    }
+
+    @Test
     void semanticTokensCanUseDifferentFrontendPalettesAndUnknownKeysRemainPlain() {
         SemanticStyleKey custom = new SemanticStyleKey("plugin.special-token");
         List<TokenSpan> tokens = List.of(new TokenSpan(0, 2, SemanticStyleKey.KEYWORD), new TokenSpan(2, 3, custom));

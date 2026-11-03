@@ -115,6 +115,7 @@ class AppSettingsStoreTest {
             initial.confirmOnClose(), initial.mouseMode(), initial.highlightActiveGutter(), initial.smartHomeEnd(),
             initial.autoIndent(), initial.autoPairs(), initial.autoList(), initial.visibleWhitespace(),
             initial.syntaxHighlighting(), initial.rainbowBrackets(), initial.autoSelectionHighlight(), false, false,
+            initial.markdownCodeHighlighting(),
             initial.gutterDiffMode(), 2, initial.tabInsertMode(), initial.theme()
         );
         int index = 0;

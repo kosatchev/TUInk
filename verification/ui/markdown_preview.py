@@ -373,6 +373,65 @@ def snapshot_save_as(args, output):
     print(f'PASS: frozen Save As, cancel, missing target and disk reopen: {output}', flush=True)
 
 
+def code_highlighting(args, output):
+    """Observe Source/Preview SGR colors and the persisted block-only preference."""
+    def expect_color(payload, color, token, stage):
+        if not re.search(rb'\x1b\[' + str(color).encode() + rb';[0-9;]*m' + re.escape(token), payload):
+            raise AssertionError(f'{stage} did not emit syntax color {color} for {token!r}')
+
+    def toggle_source_code(session):
+        session.send(b'\x1b[15~')  # F5: Settings; Up wraps to the final MD code syntax item.
+        session.expect(lambda: 'MD code syntax' in session.screen.text, 'MD code syntax setting')
+        session.send(b'\x1b[A\r')
+
+    def repaint_source(session, rows):
+        before = len(session.log)
+        session.resize(rows, 86)
+        session.expect(lambda: source_selected(session.screen.text)
+                       and 'preview-string' in session.screen.text, 'repainted Source code block')
+        return bytes(session.log[before:])
+
+    document = output / 'code-highlighting.md'
+    text = ('# Code highlighting\n\n```python\n'
+            'def preview_value():\n'
+            '    text = "preview-string"\n'
+            '    # preview-comment\n'
+            '    return 731\n```\n')
+    document.write_text(text, encoding='utf-8')
+    with Session(output / 'code-highlighting', args.java, args.classpath, document,
+                 native_executable=args.binary) as session:
+        expect_color(repaint_source(session, 25), 33, b'def', 'Default Source code')
+        toggle_source_code(session)
+        expect_color(repaint_source(session, 26), 94, b'def', 'Enabled Source code')
+        session.send(b'\x10')
+        expect_preview(session, 'code block Preview')
+        before = len(session.log)
+        session.resize(25, 86)
+        session.expect(lambda: preview_selected(session.screen.text)
+                       and 'preview-string' in session.screen.text, 'repainted code block')
+        repaint = bytes(session.log[before:])
+        for color, token in ((94, b'def'), (92, b'"preview-string"'),
+                             (90, b'# preview-comment'), (96, b'731')):
+            expect_color(repaint, color, token, 'Preview')
+        session.snapshot('highlighted-code')
+        session.finish()
+        home = session.home
+    profile = home / '.config/tuink/tuink.properties'
+    if 'ui.markdownCodeHighlighting=true' not in profile.read_text(encoding='utf-8'):
+        raise AssertionError('Enabled MD code syntax preference was not saved')
+    with Session(output / 'code-highlighting-restart', args.java, args.classpath, document, home=home,
+                 native_executable=args.binary) as session:
+        expect_color(repaint_source(session, 25), 94, b'def', 'Restarted Source code')
+        toggle_source_code(session)
+        expect_color(repaint_source(session, 26), 33, b'def', 'Disabled Source code')
+        session.finish()
+    if 'ui.markdownCodeHighlighting=' in profile.read_text(encoding='utf-8'):
+        raise AssertionError('Default MD code syntax setting should be omitted from the profile')
+    if document.read_text(encoding='utf-8') != text:
+        raise AssertionError('Code highlighting modified the source')
+    print(f'PASS: Source/Preview code colors and persisted MD code syntax setting: {output}', flush=True)
+
+
 def main():
     root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__)
@@ -452,6 +511,7 @@ def main():
         session.finish()
     if document.read_text(encoding='utf-8') != text:
         raise AssertionError('Preview modified the source document')
+    code_highlighting(args, output)
     sample_sweep(args, output)
     scrollbar_controls(args, output)
     flowchart_scroll(args, output)

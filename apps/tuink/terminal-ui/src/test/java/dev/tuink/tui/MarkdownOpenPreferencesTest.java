@@ -146,7 +146,7 @@ class MarkdownOpenPreferencesTest {
         var s = new AppSettings(d.showTabBar(), d.wrapLines(), d.wrapWords(), d.readingMode(), d.confirmOnClose(),
             d.mouseMode(), d.highlightActiveGutter(), d.smartHomeEnd(), d.autoIndent(), d.autoPairs(), d.autoList(),
             d.visibleWhitespace(), d.syntaxHighlighting(), d.rainbowBrackets(), d.autoSelectionHighlight(),
-            both, preview, d.gutterDiffMode(), d.tabWidth(), d.tabInsertMode(), d.theme());
+            both, preview, d.markdownCodeHighlighting(), d.gutterDiffMode(), d.tabWidth(), d.tabInsertMode(), d.theme());
         return new AppSettingsSession(s, TuiCliOptions.parse(new String[0]));
     }
 }

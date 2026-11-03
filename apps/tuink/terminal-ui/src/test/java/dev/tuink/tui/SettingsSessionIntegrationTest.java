@@ -20,7 +20,7 @@ class SettingsSessionIntegrationTest {
     @Test
     void blockedPreferencesKeepTheirCauseAndWarnAfterSourceOrPreviewChanges() throws Exception {
         String reason = "Unsupported settings file profile: unsupported format marker";
-        for (boolean preview : List.of(false)) {
+        for (boolean preview : List.of(false, true)) {
             AppSettingsSession session = new AppSettingsSession(AppSettings.defaults(),
                 TuiCliOptions.parse(new String[0]), reason);
             try (EditorWindowFixture window = new EditorWindowFixture(directory.resolve("blocked-" + preview),
@@ -28,6 +28,7 @@ class SettingsSessionIntegrationTest {
                 assertFalse(session.canSavePreferences());
                 assertTemporaryWarning(window, reason);
                 window.notification.info("Unrelated operation completed");
+                if (preview) window.event(KeyStroke.of(KeyStroke.Key.P, KeyStroke.Modifier.CTRL));
                 boolean before = window.ui.visibleWhitespaceSetting;
 
                 window.command(TuinkCommand.VIEW_TOGGLE_WHITESPACE);

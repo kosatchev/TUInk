@@ -21,6 +21,8 @@ final class UiSessionState {
     boolean syntaxHighlightingSetting;
     boolean rainbowBracketsSetting;
     boolean autoSelectionHighlightSetting;
+    boolean markdownOpenBothTabsSetting;
+    boolean markdownOpenInPreviewSetting;
     GutterDiffMode gutterDiffModeSetting;
     int tabWidthSetting;
     TabInsertMode tabInsertModeSetting;
@@ -30,7 +32,7 @@ final class UiSessionState {
             readingModeSetting, confirmOnCloseSetting, mouseModeSetting, highlightActiveGutterSetting,
             smartHomeEndSetting, autoIndentSetting, autoPairsSetting, autoListSetting,
             visibleWhitespaceSetting, syntaxHighlightingSetting, rainbowBracketsSetting,
-            autoSelectionHighlightSetting,
+            autoSelectionHighlightSetting, markdownOpenBothTabsSetting, markdownOpenInPreviewSetting,
             gutterDiffModeSetting, tabWidthSetting,
             tabInsertModeSetting, theme);
     }
@@ -52,6 +54,8 @@ final class UiSessionState {
         state.syntaxHighlightingSetting = settings.syntaxHighlighting();
         state.rainbowBracketsSetting = settings.rainbowBrackets();
         state.autoSelectionHighlightSetting = settings.autoSelectionHighlight();
+        state.markdownOpenBothTabsSetting = settings.markdownOpenBothTabs();
+        state.markdownOpenInPreviewSetting = settings.markdownOpenInPreview();
         state.gutterDiffModeSetting = settings.gutterDiffMode();
         state.tabWidthSetting = settings.tabWidth();
         state.tabInsertModeSetting = settings.tabInsertMode();

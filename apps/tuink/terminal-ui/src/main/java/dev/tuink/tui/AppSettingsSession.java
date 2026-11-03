@@ -74,7 +74,7 @@ final class AppSettingsSession {
             readingMode, base.confirmOnClose(), mouseMode, base.highlightActiveGutter(),
             base.smartHomeEnd(), base.autoIndent(), base.autoPairs(), base.autoList(),
             base.visibleWhitespace(), base.syntaxHighlighting(), base.rainbowBrackets(),
-            base.autoSelectionHighlight(),
+            base.autoSelectionHighlight(), base.markdownOpenBothTabs(), base.markdownOpenInPreview(),
             base.gutterDiffMode(), base.tabWidth(),
             base.tabInsertMode(), theme);
     }

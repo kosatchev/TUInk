@@ -31,7 +31,7 @@ class AppSettingsStoreTest {
 
         assertEquals(expected, AppSettingsStore.load(path));
         String stored = Files.readString(path);
-        org.junit.jupiter.api.Assertions.assertTrue(stored.contains("format=1"));
+        org.junit.jupiter.api.Assertions.assertTrue(stored.contains("format=2"));
     }
 
     @Test
@@ -114,7 +114,7 @@ class AppSettingsStoreTest {
             initial.showTabBar(), initial.wrapLines(), initial.wrapWords(), initial.readingMode(),
             initial.confirmOnClose(), initial.mouseMode(), initial.highlightActiveGutter(), initial.smartHomeEnd(),
             initial.autoIndent(), initial.autoPairs(), initial.autoList(), initial.visibleWhitespace(),
-            initial.syntaxHighlighting(), initial.rainbowBrackets(), initial.autoSelectionHighlight(),
+            initial.syntaxHighlighting(), initial.rainbowBrackets(), initial.autoSelectionHighlight(), false, false,
             initial.gutterDiffMode(), 2, initial.tabInsertMode(), initial.theme()
         );
         int index = 0;
@@ -274,7 +274,7 @@ class AppSettingsStoreTest {
         AppSettingsStore.save(path, AppSettings.defaults());
         String current = Files.readString(path);
 
-        Files.writeString(path, current.replace("format=1", "format=2"));
+        Files.writeString(path, current.replace("format=2", "format=3"));
         assertThrows(IOException.class, () -> AppSettingsStore.load(path));
 
         Files.writeString(path, current.replace("ui.tabInsertMode=auto", "ui.tabInsertMode=tab"));

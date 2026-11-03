@@ -160,6 +160,11 @@ public final class CoreDocumentBackend implements DocumentBackend {
             defaultView.state().isDirty(), engine.recoveryRevision());
     }
 
+    @Override public dev.tuink.editor.storage.DocumentOpenMode reopenMode() {
+        requireOwnerThread();
+        return document.model().reopenMode();
+    }
+
     @Override
     public PreparedFormatChange prepareFormatChange(DocumentFormatSpec spec) {
         requireOwnerThread();

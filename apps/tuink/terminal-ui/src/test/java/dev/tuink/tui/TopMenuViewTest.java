@@ -186,7 +186,14 @@ class TopMenuViewTest {
                 "tuink.view.toggle-selection-highlight",
                 "tuink.view.cycle-gutter-diff",
                 "tuink.view.cycle-tab-width",
-                "tuink.view.cycle-theme"
+                "tuink.view.cycle-theme",
+                "tuink.view.toggle-markdown-preview",
+                "tuink.view.preview.copy-source",
+                "tuink.view.preview.copy-table-tsv",
+                "tuink.view.preview.reveal-source",
+                "tuink.view.preview.follow-link",
+                "tuink.view.preview.next-heading",
+                "tuink.view.preview.previous-heading"
             ),
             commandIds(view(ui, MenuBar.State.open(TopMenuController.VIEW_INDEX)), TopMenuController.VIEW_INDEX)
         );
@@ -209,7 +216,9 @@ class TopMenuViewTest {
                 "tuink.settings.toggle-auto-indent",
                 "tuink.settings.toggle-auto-pairs",
                 "tuink.settings.toggle-auto-list",
-                "tuink.settings.cycle-tab-insert-mode"
+                "tuink.settings.cycle-tab-insert-mode",
+                "tuink.settings.toggle-markdown-open-both-tabs",
+                "tuink.settings.toggle-markdown-open-in-preview"
             ),
             commandIds(
                 view(ui, MenuBar.State.open(TopMenuController.SETTINGS_INDEX)),

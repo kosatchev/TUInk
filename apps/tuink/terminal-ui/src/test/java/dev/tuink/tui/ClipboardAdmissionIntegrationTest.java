@@ -32,6 +32,7 @@ class ClipboardAdmissionIntegrationTest {
             "org.jline.terminal.Terminal", "org.junit.jupiter.api.Assertions",
             "org.junit.platform.commons.util.StringUtils", "org.opentest4j.AssertionFailedError"
         )) locations.add(location(Class.forName(name, false, getClass().getClassLoader())));
+        MarkdownProbeClasspath.addTo(locations);
         Process process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx64m", "-cp", String.join(File.pathSeparator, locations), Probe.class.getName(),
             directory.toString()).redirectErrorStream(true).start();

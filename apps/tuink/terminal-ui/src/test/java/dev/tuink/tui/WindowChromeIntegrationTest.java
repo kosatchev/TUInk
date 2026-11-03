@@ -40,6 +40,25 @@ class WindowChromeIntegrationTest {
         }
     }
 
+    @Test void previewTabStripRetainsAnExplicitWheelViewportAcrossOrdinaryFrames() throws Exception {
+        try (var window = new EditorWindowFixture(directory, false, List.of(""))) {
+            window.ui.showTabBarSetting = true;
+            window.resize(16, 42);
+            for (int index = 0; index < 7; index++) window.event(ctrl(KeyStroke.Key.N));
+            window.event(ctrl(KeyStroke.Key.P));
+            window.await(() -> window.preview().ready());
+            var active = window.selected().presentationId();
+            String revealed = window.screenRow(1);
+
+            window.event(new PointerEvent(1, 5, PointerEvent.Kind.SCROLL_UP, PointerEvent.Button.NONE, Set.of()));
+            String browsed = window.screenRow(1);
+            assertNotEquals(revealed, browsed, "the strip can browse away from the active preview");
+            window.frame();
+            assertEquals(browsed, window.screenRow(1), "an unchanged active Preview does not reveal itself again");
+            assertEquals(active, window.selected().presentationId());
+            assertInstanceOf(PreviewTab.class, window.selected());
+        }
+    }
 
     private static KeyStroke ctrl(KeyStroke.Key key) { return KeyStroke.of(key, KeyStroke.Modifier.CTRL); }
 }

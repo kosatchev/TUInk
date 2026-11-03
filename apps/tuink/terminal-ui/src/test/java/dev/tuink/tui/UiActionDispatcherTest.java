@@ -92,7 +92,7 @@ class UiActionDispatcherTest {
         var menu = new TopMenuController();
         for (var command : List.of(TuinkCommand.DOCUMENT_SAVE, TuinkCommand.DOCUMENT_SAVE_AS,
             TuinkCommand.EDIT_COPY, TuinkCommand.EDIT_INSERT_NEWLINE, TuinkCommand.CURSOR_DOWN,
-            TuinkCommand.SEARCH_OPEN, TuinkCommand.VIEW_CYCLE_THEME)) {
+            TuinkCommand.SEARCH_OPEN, TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW, TuinkCommand.VIEW_CYCLE_THEME)) {
             var result = InputActionDispatcher.dispatchUi(command, ui, TestSurfaces.source(ui), menu,
                 ignored -> fail("unhandled command invoked terminal callback"),
                 () -> fail("unhandled command invoked source viewport callback"));

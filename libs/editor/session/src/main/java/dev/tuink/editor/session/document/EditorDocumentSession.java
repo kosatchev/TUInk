@@ -478,7 +478,7 @@ public final class EditorDocumentSession implements DocumentSaveSubject {
         requireOwnerThread();
         DocumentSnapshot text = snapshot();
         DocumentBackend.Status status = backend.status();
-        return new FrozenDocumentSource(text, status.metadata(), status.binding());
+        return new FrozenDocumentSource(text, status.metadata(), status.binding(), backend.reopenMode());
     }
 
     /**

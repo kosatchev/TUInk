@@ -417,6 +417,8 @@ public class TerminalEditorApp {
                 UiModalState initialModalState = modalState;
                 SearchController.SearchUiOptions initialSearchUi = searchUi;
 
+
+
                 runWithRecovery(
                     eventLoop,
                     new EditorWindowController(this, new EditorWindowController.Resources(
@@ -1277,8 +1279,10 @@ public class TerminalEditorApp {
         String position = "Ln " + (p.line() + 1) + "/" + totalLines
             + ", Col " + (p.col() + 1) + "/" + lineCols;
         String compactPosition = "Ln " + (p.line() + 1) + "/" + totalLines + ", Col " + (p.col() + 1);
-        String tabs = totalTabs > 1 ? "Tab " + (activeTabIndex + 1) + "/" + totalTabs : "";
-        var left = new DocumentStatusBarView.Reading(position, compactPosition, tabs, "", searchSummary);
+        boolean markdown = MarkdownOpenPolicy.isMarkdown(JvmDocumentStorage.pathOf(state.getCurrentResource()));
+        String tabs = totalTabs > 1 || markdown ? "Tab " + (activeTabIndex + 1) + "/" + totalTabs : "";
+        var left = new DocumentStatusBarView.Reading(position, compactPosition, tabs,
+            markdown ? "Ctrl+P: Preview" : "", searchSummary);
         String ro = fileAccess.indicator(JvmDocumentStorage.pathOf(state.getCurrentResource()));
         String enc = summary == null ? state.getFileEncoding() == null ? "UTF-8" : state.getFileEncoding().name()
             : summary.charsetName() + (summary.bomKind() == dev.tuink.editor.storage.BomKind.NONE ? "" : "+BOM");
@@ -1356,6 +1360,59 @@ public class TerminalEditorApp {
         }
         return new ScreenCursor(new Point(Math.max(0, Math.min(cols - 1, point.x())),
             Math.max(0, Math.min(rows - 1, point.y()))), visible);
+    }
+
+    private Frame renderPreviewFrame(PreviewFrameComposition composition, RenderFrameController services) {
+        int rows = composition.rows(), cols = composition.cols();
+        var surface = composition.surface();
+        var layers = composition.layers();
+        var geometry = composition.preview().geometry();
+        if (profileEnabled && geometry != null) frameProfiler.beginRasterCache(
+            geometry.visualMetricsBuilds() + geometry.semanticMetricsBuilds(),
+            geometry.preparedRowsMisses(), geometry.preparedRowsHits());
+        long rasterStart = profileEnabled ? System.nanoTime() : 0L;
+        CellBuffer current = new CellBuffer(rows, cols);
+        Canvas canvas = frameCanvas(current, rows, cols);
+        canvas.fill(new Rect(0, 0, cols, rows), styles.renderBody());
+        Rect content = new Rect(0, composition.contentTopRow(), cols, Math.max(0,
+            rows - 1 - composition.contentTopRow() - surface.inlinePrompt().height() - surface.notification().height()));
+        int mark = canvas.save();
+        try {
+            canvas.clip(content);
+            MarkdownPreviewPainter.paint(canvas, composition.preview(), styles, services.colorEnabled);
+        } finally { canvas.restore(mark); }
+        paintSurfaceLine(canvas, 0, cols, surface.topBar().text(), styles.renderTopbar());
+        paintSurfaceLine(canvas, rows - 1, cols, surface.bottomBar(), styles.renderStatus());
+        InlinePromptBar prompt = surface.inlinePrompt();
+        int promptTop = rows - 1 - prompt.height();
+        if (prompt.visible()) {
+            CellStyle style = prompt.style() == null ? styles.renderInteractive()
+                : dev.tuink.tui.render.EditorStyleAdapter.toCell(prompt.style());
+            String[] lines = prompt.text().split("\n", -1);
+            for (int index = 0; index < lines.length; index++) paintSurfaceLine(canvas, promptTop + index, cols, lines[index], style);
+        }
+        NotificationBar notice = surface.notification();
+        if (notice.visible()) paintSurfaceLine(canvas, promptTop - 1, cols,
+            dev.tuink.tui.ui.NotificationPresentation.fit(notice.text(), cols), notice.style() == null
+                ? styles.renderNotification() : dev.tuink.tui.render.EditorStyleAdapter.toCell(notice.style()));
+        paintFrameOverlays(current, canvas, rows, cols, composition.contentTopRow(), surface, layers, null, services.colorEnabled);
+        Point caret = MarkdownPreviewPainter.cursor(composition.preview());
+        ScreenCursor contentCursor = caret == null ? ScreenCursor.hidden()
+            : new ScreenCursor(caret, content.contains(caret.x(), caret.y()));
+        Rect body = composition.preview().contentBounds().intersection(content);
+        ViewportScrollPolicy.Viewport viewport = geometry == null || composition.preview().result() == null
+            || !composition.preview().error().isEmpty() ? null
+            : new ViewportScrollPolicy.Viewport("preview", geometry.identity(), body,
+                composition.preview().top(), composition.preview().left(), !composition.preview().selection().selected());
+        if (profileEnabled) {
+            frameProfiler.buildNanos = 0L;
+            frameProfiler.rasterNanos = System.nanoTime() - rasterStart;
+            if (geometry != null) frameProfiler.endRasterCache(
+                geometry.visualMetricsBuilds() + geometry.semanticMetricsBuilds(),
+                geometry.preparedRowsMisses(), geometry.preparedRowsHits(), geometry.retainedBytes());
+        }
+        return services.present(current, frameCursor(rows, cols, composition.contentTopRow(), surface, layers,
+            null, false, contentCursor), viewport, layers, composition.fullRedraw());
     }
 
     private void paintSurfaceLine(Canvas canvas, int row, int cols, String text, CellStyle style) {
@@ -1500,8 +1557,17 @@ public class TerminalEditorApp {
             this.screenPresenter = screenPresenter;
         }
 
+        /** A preview-only host needs neither a source rasterizer nor an editor view. */
+        RenderFrameController(boolean colorEnabled, ScreenPresenter screenPresenter) {
+            this(null, null, colorEnabled, screenPresenter);
+        }
+
         RenderFrameResult renderFrameIfNeeded(FrameComposition composition) {
             return renderFrame(composition, this);
+        }
+
+        Frame renderPreviewFrameIfNeeded(PreviewFrameComposition composition) {
+            return renderPreviewFrame(composition, this);
         }
 
         /** Both surfaces publish through the same terminal session and diagnostics. */
@@ -1736,7 +1802,21 @@ public class TerminalEditorApp {
     }
 
     List<TabBarView.TabItem> toPresentationTabItems(SessionContext context, boolean[] sourceMatchFlags) {
-        return toTabItems(context.tabs(), sourceMatchFlags);
+        List<TabBarView.TabItem> result = new ArrayList<>();
+        for (WindowTab tab : context.presentations()) {
+            EditorTab source = tab instanceof EditorTab editor ? editor
+                : ((PreviewTab) tab).source() instanceof PreviewTab.LiveSource live ? context.source(live.viewId()) : null;
+            var resource = source == null ? ((PreviewTab.ClosedSnapshot) ((PreviewTab) tab).source()).source().binding().resource()
+                : source.state().getCurrentResource();
+            int index = source == null ? -1 : context.indexOf(source.documentSession().viewId());
+            boolean match = tab instanceof EditorTab && sourceMatchFlags != null && index >= 0
+                && index < sourceMatchFlags.length && sourceMatchFlags[index];
+            String qualifier = tab instanceof PreviewTab ? "Preview"
+                : context.previewFor(source.documentSession().viewId()) == null ? "" : "Source";
+            result.add(new TabBarView.TabItem(JvmDocumentStorage.pathOf(resource), source != null && source.state().isDirty(),
+                match, tab.uiState().hasSearch(), tab.uiState().awaitingAnswer(), qualifier));
+        }
+        return List.copyOf(result);
     }
 
     List<TopMenuView.TabItem> toPresentationMenuTabs(SessionContext context, boolean[] matchFlags) {
@@ -1875,16 +1955,88 @@ public class TerminalEditorApp {
             var entry = workspace.find(viewId);
             return entry == null ? null : (EditorTab) entry.attachment();
         }
-        EditorTab active() { return (EditorTab) activePresentation(); }
+        EditorTab active() {
+            var tab = activePresentation();
+            if (tab instanceof EditorTab editor) return editor;
+            var source = ((PreviewTab) tab).source();
+            return source instanceof PreviewTab.LiveSource live ? source(live.viewId()) : null;
+        }
         ViewId activeViewId() { return active() == null ? null : active().documentSession().viewId(); }
-
+        PreviewTab previewFor(ViewId viewId) {
+            EditorTab source = source(viewId);
+            if (source == null) return null;
+            for (var tab : presentations()) {
+                if (tab instanceof PreviewTab preview && preview.source() instanceof PreviewTab.LiveSource live
+                    && live.documentId().equals(source.documentSession().document().documentId())) return preview;
+            }
+            return null;
+        }
+        private PreviewTab linkedPreview(ViewId viewId) {
+            PreviewTab preview = previewFor(viewId);
+            return preview != null && ((PreviewTab.LiveSource) preview.source()).viewId().equals(viewId) ? preview : null;
+        }
+        void addPreview(PreviewTab preview, ViewId sourceView) {
+            EditorTab editor = Objects.requireNonNull(source(sourceView));
+            if (previewFor(sourceView) != null) throw new IllegalStateException("Preview already exists");
+            workspace.insert(workspace.indexOf(editor.presentationId()) + 1,
+                new EditorWorkspace.Presentation<>(preview.presentationId(), preview.groupId(),
+                    EditorWorkspace.Projection.INSTANCE, preview), false);
+        }
+        void updatePreview(PreviewTab preview) {
+            workspace.updatePresentationAttachment(preview.presentationId(), preview);
+        }
+        void removePreview(PresentationId id) { workspace.removePresentation(id); }
         WindowTab presentation(PresentationId id) {
             var entry = workspace.find(id); return entry == null ? null : entry.attachment();
         }
 
         int indexOf(ViewId viewId) { return workspace.indexOf(viewId); }
 
-        void remove(ViewId viewId) { workspace.remove(viewId); }
+        void remove(ViewId viewId) {
+            EditorTab editor = source(viewId);
+            if (editor == null) return;
+            PreviewTab preview = linkedPreview(viewId);
+            if (preview == null) { workspace.remove(viewId); return; }
+            var captured = preview.uiState().preview.sourceForFreeze();
+            var current = editor.documentSession().document().freezeSource();
+            var frozen = preview.freeze(captured.withBinding(current.binding(), current.reopenMode()));
+            var next = new ArrayList<EditorWorkspace.Presentation<WindowTab>>();
+            for (var item : workspace.presentations()) {
+                if (item.id().equals(editor.presentationId())) continue;
+                next.add(item.id().equals(preview.presentationId())
+                    ? new EditorWorkspace.Presentation<>(frozen.presentationId(), frozen.groupId(),
+                        EditorWorkspace.Projection.INSTANCE, frozen) : item);
+            }
+            var active = workspace.activePresentation().id();
+            workspace.replacePresentations(next, active.equals(editor.presentationId()) ? frozen.presentationId() : active);
+        }
+
+        EditorTab linkPreview(PreviewTab preview, EditorTab editor) { return linkPreview(preview, editor, true); }
+
+        EditorTab linkPreview(PreviewTab preview, EditorTab editor, boolean activate) {
+            PresentationId selected = workspace.activePresentation().id();
+            PreviewTab existing = previewFor(editor.documentSession().viewId());
+            if (existing != null && !existing.presentationId().equals(preview.presentationId())) {
+                EditorTab paired = Objects.requireNonNull(source(((PreviewTab.LiveSource) existing.source()).viewId()));
+                workspace.removePresentation(preview.presentationId());
+                if (activate) workspace.select(paired.presentationId());
+                preview.close();
+                return paired;
+            }
+            EditorTab grouped = editor.withGroup(preview.groupId());
+            PreviewTab linked = preview.relink(grouped);
+            var next = new ArrayList<EditorWorkspace.Presentation<WindowTab>>();
+            for (var item : workspace.presentations()) {
+                if (item.id().equals(editor.presentationId())) continue;
+                if (item.id().equals(preview.presentationId())) {
+                    next.add(sourcePresentation(grouped));
+                    next.add(new EditorWorkspace.Presentation<>(linked.presentationId(), linked.groupId(),
+                        EditorWorkspace.Projection.INSTANCE, linked));
+                } else next.add(item);
+            }
+            workspace.replacePresentations(next, activate ? grouped.presentationId() : selected);
+            return grouped;
+        }
 
         boolean hasOtherViews(ViewId viewId) {
             var entry = workspace.find(viewId);
@@ -1907,11 +2059,19 @@ public class TerminalEditorApp {
 
         void replace(int index, EditorTab replacement) {
             EditorTab old = tabs().get(index);
+            PreviewTab preview = linkedPreview(old.documentSession().viewId());
+            EditorTab grouped = preview == null ? replacement : replacement.withGroup(old.groupId());
             var next = new ArrayList<EditorWorkspace.Presentation<WindowTab>>();
-            for (var item : workspace.presentations())
-                next.add(item.id().equals(old.presentationId()) ? sourcePresentation(replacement) : item);
+            for (var item : workspace.presentations()) {
+                if (item.id().equals(old.presentationId())) next.add(sourcePresentation(grouped));
+                else if (preview != null && item.id().equals(preview.presentationId())) {
+                    PreviewTab linked = preview.relink(grouped);
+                    next.add(new EditorWorkspace.Presentation<>(linked.presentationId(), linked.groupId(),
+                        EditorWorkspace.Projection.INSTANCE, linked));
+                } else next.add(item);
+            }
             var selected = workspace.activePresentation().id();
-            workspace.replacePresentations(next, selected.equals(old.presentationId()) ? replacement.presentationId() : selected);
+            workspace.replacePresentations(next, selected.equals(old.presentationId()) ? grouped.presentationId() : selected);
         }
 
         void replaceActiveRenderPlanBuilder(RenderPlanBuilder nextRenderPlanBuilder) {

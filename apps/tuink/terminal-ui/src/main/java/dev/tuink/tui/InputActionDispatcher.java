@@ -105,6 +105,16 @@ final class InputActionDispatcher {
                 statusMessage = ui.readingModeSetting ? "Reading mode enabled" : "Reading mode disabled";
                 return DispatchResult.handled(statusMessage);
             }
+            case SETTINGS_TOGGLE_MARKDOWN_OPEN_BOTH_TABS -> {
+                ui.markdownOpenBothTabsSetting = !ui.markdownOpenBothTabsSetting;
+                return DispatchResult.handled(ui.markdownOpenBothTabsSetting
+                    ? "Markdown opens both Source and Preview tabs" : "Markdown opens one tab");
+            }
+            case SETTINGS_TOGGLE_MARKDOWN_OPEN_IN_PREVIEW -> {
+                ui.markdownOpenInPreviewSetting = !ui.markdownOpenInPreviewSetting;
+                return DispatchResult.handled(ui.markdownOpenInPreviewSetting
+                    ? "Markdown opens in Preview" : "Markdown opens in Source");
+            }
             case SETTINGS_TOGGLE_CONFIRM_ON_CLOSE -> {
                 ui.confirmOnCloseSetting = !ui.confirmOnCloseSetting;
                 statusMessage = ui.confirmOnCloseSetting

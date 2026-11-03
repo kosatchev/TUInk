@@ -225,7 +225,7 @@ class AppSettingsGuardedSaveTest {
 
     private static AppSettings changed() {
         return new AppSettings(false, true, false, true, false, false, false, false, false,
-            false, false, false, false, false, false,
+            false, false, false, false, false, false, false, false,
             GutterDiffMode.STABLE, 2, TabInsertMode.ALWAYS_SPACES_2, UiStyles.Theme.LIGHT);
     }
 

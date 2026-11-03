@@ -104,7 +104,8 @@ public final class FrozenDocumentSession implements DocumentSaveSubject, AutoClo
                 throw new IllegalStateException("Receipt does not belong to this unchanged frozen source and write");
             }
             ResourceBinding binding = new ResourceBinding(receipt.resource(), SaveDisposition.REPLACE_EXISTING, receipt.baseline());
-            FrozenDocumentSource next = new FrozenDocumentSource(source.text(), receipt.metadata(), binding);
+            FrozenDocumentSource next = new FrozenDocumentSource(source.text(), receipt.metadata(), binding,
+                dev.tuink.editor.storage.DocumentOpenMode.forMetadata(receipt.metadata()));
             write.completed = true;
             source = next;
             generation++;

@@ -49,7 +49,7 @@ class Session:
     def __init__(self, root, java, classpath, document=None, home=None, mono=False, options=None,
                  term="xterm-256color", max_heap_mb=192, config_home=None, timeout=45,
                  terminal_baud=None, jline_provider=None, wait_for_startup=True,
-                 env_overrides=None, jvm_properties=None):
+                 env_overrides=None, jvm_properties=None, native_executable=None):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         home = Path(home) if home else self.root / "home"
@@ -71,6 +71,10 @@ class Session:
         for key, value in (jvm_properties or {}).items():
             args.append(f"-D{key}={value}")
         args.extend(("-cp", classpath, "dev.tuink.app.App"))
+        executable = str(java)
+        if native_executable is not None:
+            executable = str(Path(native_executable).resolve())
+            args = [executable]
         args.extend(("--theme=cyan",) if options is None else options)
         if mono:
             args.append("--no-color")
@@ -93,7 +97,7 @@ class Session:
                 # The editor must install its own terminal signal handlers.
                 for signum in (signal.SIGINT, signal.SIGQUIT, signal.SIGTERM):
                     signal.signal(signum, signal.SIG_DFL)
-                os.execve(str(java), args, env)
+                os.execve(executable, args, env)
             except BaseException:
                 os._exit(127)
         if not wait_for_startup:
@@ -119,16 +123,23 @@ class Session:
         while time.monotonic() < end:
             if not select.select([self.fd], [], [], min(0.025, max(0, end - time.monotonic())))[0]:
                 continue
-            try:
-                data = os.read(self.fd, 65536)
-            except OSError as error:
-                if error.errno == errno.EIO:
-                    break
-                raise
-            if not data:
+            if not self._read_output():
                 break
-            self.log.extend(data)
-            self.screen.feed(data)
+
+    def _read_output(self):
+        try:
+            data = os.read(self.fd, 65536)
+        except BlockingIOError:
+            return True
+        except OSError as error:
+            if error.errno == errno.EIO:
+                return False
+            raise
+        if not data:
+            return False
+        self.log.extend(data)
+        self.screen.feed(data)
+        return True
 
     def expect(self, predicate, description, timeout=3):
         end = min(self.deadline, time.monotonic() + timeout)
@@ -145,8 +156,36 @@ class Session:
     def send(self, data, wait=0.18):
         if self.poll() is not None:
             raise AssertionError(f"editor exited unexpectedly: {self.status}")
-        os.write(self.fd, data)
+        self._write_input(data)
         self.drain(wait)
+
+    def _write_input(self, data):
+        # A large blocking write can fill the input queue while the child is
+        # blocked redrawing into its full output queue. Service both directions
+        # until every input byte is accepted, within the same scenario deadline.
+        remaining = memoryview(data)
+        blocking = os.get_blocking(self.fd)
+        os.set_blocking(self.fd, False)
+        try:
+            while remaining:
+                if self.poll() is not None:
+                    raise AssertionError(f"editor exited unexpectedly: {self.status}")
+                available = self.deadline - time.monotonic()
+                if available <= 0:
+                    raise TimeoutError(f"scenario exceeded {self.timeout:g} seconds")
+                readable, writable, _ = select.select([self.fd], [self.fd], [], min(0.025, available))
+                if readable:
+                    self._read_output()
+                if writable:
+                    try:
+                        written = os.write(self.fd, remaining[:65536])
+                    except (BlockingIOError, InterruptedError):
+                        continue
+                    if written == 0:
+                        raise OSError(errno.EIO, "PTY accepted no input")
+                    remaining = remaining[written:]
+        finally:
+            os.set_blocking(self.fd, blocking)
 
     def save(self, document, expected, description="completed save", timeout=3):
         """Wait for the UI owner to acknowledge a save before sending more edits.

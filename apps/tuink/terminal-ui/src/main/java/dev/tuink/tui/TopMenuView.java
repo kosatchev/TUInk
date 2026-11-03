@@ -21,6 +21,8 @@ import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_AUTO_LIST;
 import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_AUTO_PAIRS;
 import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_CONFIRM_ON_CLOSE;
 import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_MOUSE;
+import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_MARKDOWN_OPEN_BOTH_TABS;
+import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_MARKDOWN_OPEN_IN_PREVIEW;
 import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_READING_MODE;
 import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_SMART_HOME_END;
 import static dev.tuink.tui.command.TuinkCommand.TAB_CLOSE;
@@ -380,7 +382,22 @@ final class TopMenuView {
             item(VIEW_CYCLE_GUTTER_DIFF, "[>] Gutter diff: " + gutterDiff.label()),
             separator(),
             item(VIEW_CYCLE_TAB_WIDTH, checked(ui.tabWidthSetting <= 2) + " Thin tabs"),
-            item(VIEW_CYCLE_THEME, "[>] Theme: " + themeLabel)
+            item(VIEW_CYCLE_THEME, "[>] Theme: " + themeLabel),
+            separator(),
+            item(dev.tuink.tui.command.TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW,
+                surface.preview() ? "Go to source tab" : "Open Markdown preview tab"),
+            item(dev.tuink.tui.command.TuinkCommand.VIEW_PREVIEW_COPY_SOURCE,
+                "Copy block source", surface.preview()),
+            item(dev.tuink.tui.command.TuinkCommand.VIEW_PREVIEW_COPY_TABLE_TSV,
+                "Copy table as TSV", surface.preview()),
+            item(dev.tuink.tui.command.TuinkCommand.VIEW_PREVIEW_REVEAL_SOURCE,
+                "Go to source", surface.preview()),
+            item(dev.tuink.tui.command.TuinkCommand.VIEW_PREVIEW_FOLLOW_LINK,
+                "Follow internal link", surface.preview()),
+            item(dev.tuink.tui.command.TuinkCommand.VIEW_PREVIEW_NEXT_HEADING,
+                "Next heading", surface.preview()),
+            item(dev.tuink.tui.command.TuinkCommand.VIEW_PREVIEW_PREVIOUS_HEADING,
+                "Previous heading", surface.preview())
         );
     }
 
@@ -432,7 +449,10 @@ final class TopMenuView {
             item(SETTINGS_TOGGLE_AUTO_INDENT, checked(ui.autoIndentSetting) + " Auto indent"),
             item(SETTINGS_TOGGLE_AUTO_PAIRS, checked(ui.autoPairsSetting) + " Autopairs"),
             item(SETTINGS_TOGGLE_AUTO_LIST, checked(ui.autoListSetting) + " Auto list"),
-            item(SETTINGS_CYCLE_TAB_INSERT_MODE, "[>] Tab insert mode: " + insertMode.label())
+            item(SETTINGS_CYCLE_TAB_INSERT_MODE, "[>] Tab insert mode: " + insertMode.label()),
+            separator(),
+            item(SETTINGS_TOGGLE_MARKDOWN_OPEN_BOTH_TABS, checked(ui.markdownOpenBothTabsSetting) + " Open both Markdown tabs"),
+            item(SETTINGS_TOGGLE_MARKDOWN_OPEN_IN_PREVIEW, checked(ui.markdownOpenInPreviewSetting) + " Open Markdown in Preview")
         );
     }
 

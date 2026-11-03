@@ -17,6 +17,7 @@ import time
 import traceback
 
 from terminal import Session
+from markdown_preview import preview_selected
 
 
 def status(session):
@@ -553,12 +554,14 @@ class Regressions:
             session.mouse(0, 3, 15)
             session.send(b"\x06")
             session.send(b"needle")
+            expect_field_line(session, "Find: ", "complete query before focus checks", contains="needle")
             caret, field = status(session), field_line(session)
             session.mouse(32, 10, 40)
             assert status(session) == caret, session.screen.text
             assert field_line(session) == field, session.screen.text
             session.mouse(0, 10, 40, True)
             session.send(b"X")
+            session.expect(lambda: "Find: needleX" in session.screen.text, "query input after ignored document drag")
             assert "Find: needleX" in session.screen.text, session.screen.text
             assert status(session) == caret, session.screen.text
             session.mouse(0, 4, 15)
@@ -894,9 +897,11 @@ class Regressions:
             session.expect(lambda: recovery_snapshot_present(recovery, "draft " + original), "autosaved draft")
             session.send(b"\x11")
             session.expect(lambda: "Unsaved (1)" in session.screen.text, "quit confirmation")
-            session.send(b"\x11")
-            session.expect(lambda: "Unsaved (1)" not in session.screen.text, "cancelled repeated Ctrl+Q")
-            assert session.poll() is None, "repeated Ctrl+Q discarded the draft"
+            session.expect(lambda: "Y/Ctrl+S=Save  N/Ctrl+Q=Discard  Esc=Cancel" in session.screen.text,
+                           "the explicit quit shortcut hint")
+            session.send(b"\x1b")
+            session.expect(lambda: "Unsaved (1)" not in session.screen.text, "Esc cancels quitting")
+            assert session.poll() is None, "Esc discarded the draft"
             assert document.read_text(encoding="utf-8") == original
             assert recovery_snapshot_present(recovery, "draft " + original)
             session.send(b"\x11")
@@ -906,6 +911,33 @@ class Regressions:
             assert session.status == 0, session.screen.text
         assert document.read_text(encoding="utf-8") == "draft " + original
         assert not list(recovery.glob("*.meta.properties")), "saved quit left a recovery entry"
+        document.write_text(original, encoding="utf-8")
+        with self.session("quit-discard-shortcut", document) as session:
+            session.send(b"unsaved ")
+            session.send(b"\x11")
+            session.expect(lambda: "Unsaved (1)" in session.screen.text, "first Ctrl+Q only asks")
+            assert session.poll() is None
+            session.send(b"\x11")
+            session.expect(lambda: session.poll() is not None, "second Ctrl+Q discards and quits", timeout=5)
+            assert session.status == 0, session.screen.text
+        assert document.read_text(encoding="utf-8") == original
+
+        for preview in (False, True):
+            mode = "preview" if preview else "source"
+            markdown = self.root / ("quit-discard-no-" + mode + ".md")
+            markdown.write_text(original, encoding="utf-8")
+            with self.session("quit-discard-no-" + mode, markdown) as session:
+                session.send(b"unsaved ")
+                if preview:
+                    session.send(b"\x10")
+                    session.expect(lambda: preview_selected(session.screen.text), "live Preview before quitting")
+                session.send(b"\x11")
+                session.expect(lambda: "Unsaved (1)" in session.screen.text, "quit confirmation before N")
+                assert session.poll() is None
+                session.send(b"n")
+                session.expect(lambda: session.poll() is not None, "N discards and quits from " + mode, timeout=5)
+                assert session.status == 0, session.screen.text
+            assert markdown.read_text(encoding="utf-8") == original
 
     def gutter_idle(self):
         # A large fixture gives the gutter's coalescing window enough room
@@ -970,6 +1002,8 @@ class Regressions:
         with self.session("settings-cli-only", document, home=home, options=overrides) as session:
             assert "READ" in session.screen.text
             session.send(b"X")
+            session.expect(lambda: "Reading mode: editing is disabled" in session.screen.text,
+                           "read-only input acknowledgement before checking temporary preferences")
             assert "Reading mode: editing is disabled" in session.screen.text
             session.finish()
         assert not path.exists(), "temporary CLI options created saved preferences"
@@ -979,7 +1013,10 @@ class Regressions:
                         if line and not line.startswith("#"))
 
         with self.session("settings-unrelated", document, home=home, options=overrides) as session:
-            session.send(b"\x1bOR\r")  # F3, first View item: Show Tab Bar
+            session.send(b"\x1bOR")  # F3, first View item: Show Tab Bar
+            session.expect(lambda: "[x] Show Tab Bar" in session.screen.text, "View menu before settings change")
+            session.send(b"\r")
+            session.expect(lambda: "Tab bar hidden" in session.screen.text, "completed tab bar settings change")
             assert "Tab bar hidden" in session.screen.text, session.screen.text
             session.finish()
         saved = preferences()
@@ -990,7 +1027,12 @@ class Regressions:
 
         with self.session("settings-explicit", document, home=home, options=overrides) as session:
             # Two explicit changes return to the CLI value, which is now a preference.
-            session.send(b"\x1bs\r\x1bs\r")
+            for acknowledgement in ("Reading mode disabled", "Reading mode enabled"):
+                session.send(b"\x1bs")
+                session.expect(lambda: "Reading mode" in session.screen.text and "Confirm on close" in session.screen.text,
+                               "Settings menu before explicit reading mode change")
+                session.send(b"\r")
+                session.expect(lambda: acknowledgement in session.screen.text, "completed explicit reading mode change")
             assert "Reading mode enabled" in session.screen.text, session.screen.text
             session.finish()
         saved = preferences()
@@ -1001,6 +1043,7 @@ class Regressions:
         with self.session("settings-next-launch", document, home=home, options=()) as session:
             assert "READ" in session.screen.text, session.screen.text
             session.mouse(0, 2, 15)
+            session.expect(lambda: "Col 1/" not in status(session), "pointer navigation with persisted mouse preference")
             assert "Col 1/" not in status(session), session.screen.text
             session.finish()
         assert path.read_bytes() == unchanged, "unchanged preferences were rewritten"
@@ -1041,6 +1084,62 @@ class Regressions:
         seeded = path.read_bytes()
         assert b"ui.wrapLines=true\n" in seeded, seeded
         assert b"ui.tabWidth=4\n" in seeded, seeded
+
+        invalid_home = self.root / "settings-incompatible-home"
+        invalid_path = invalid_home / ".config/tuink/tuink.properties"
+        invalid_path.parent.mkdir(parents=True)
+        incompatible = seeded.replace(b"format=2", b"format=1")
+        invalid_path.write_bytes(incompatible)
+        temporary = "Settings changes apply only to this session."
+        with self.session("settings-incompatible", document, home=invalid_home, options=()) as session:
+            session.expect(lambda: temporary in session.screen.text, "visible settings-load failure")
+            session.send(b"\x1bOR\x1b[B\r")
+            session.expect(lambda: temporary in session.screen.text and "Wrap lines enabled" not in session.screen.text,
+                           "a preference change explains its temporary lifetime")
+            session.snapshot("temporary-preferences")
+            session.finish()
+        assert invalid_path.read_bytes() == incompatible, "an incompatible profile was overwritten"
+        not_a_document = self.root / "settings-not-a-document"
+        not_a_document.mkdir()
+        with self.session("settings-incompatible-open-error", not_a_document,
+                          home=invalid_home, options=()) as session:
+            session.expect(lambda: "Open failed:" in session.screen.text,
+                           "the initial file error has priority over the settings warning")
+            session.finish()
+        assert invalid_path.read_bytes() == incompatible
+
+        recovery_home = self.root / "settings-incompatible-recovery-home"
+        recovery_profile = recovery_home / ".config/tuink/tuink.properties"
+        recovery_profile.parent.mkdir(parents=True)
+        recovery_profile.write_bytes(incompatible)
+        meta, payload = format5_snapshot(recovery_home, document, original, "recovered draft\n")
+        metadata_before, text_before = meta.read_bytes(), payload.read_bytes()
+        with self.session("settings-incompatible-recovery", home=recovery_home, options=()) as session:
+            session.expect(lambda: "Recovery snapshots: 1." in session.screen.text
+                           and temporary in session.screen.text,
+                           "the recovery prompt also shows the settings-load warning")
+            session.send(b"\x1b", 0.7)
+            session.expect(lambda: "Restore now?" not in session.screen.text, "recovery postponed")
+            session.finish()
+        assert recovery_profile.read_bytes() == incompatible
+        assert meta.read_bytes() == metadata_before and payload.read_bytes() == text_before
+
+        retained = invalid_path.with_name("tuink.properties.incompatible")
+        invalid_path.rename(retained)  # Explicit user repair, not a production migration.
+        with self.session("settings-repaired-save", document, home=invalid_home, options=()) as session:
+            session.send(b"\x1bOR\x1b[B\r")
+            session.expect(lambda: "Wrap lines enabled" in session.screen.text, "preferences work after profile repair")
+            session.finish()
+        repaired = invalid_path.read_bytes()
+        assert b"format=2\n" in repaired and b"ui.wrapLines=true\n" in repaired
+        with self.session("settings-repaired-restart", document, home=invalid_home, options=()) as session:
+            session.send(b"\x1bOR")
+            session.expect(lambda: "[x] Wrap Lines" in session.screen.text, "saved preferences survive restart")
+            session.send(b"\x1b", 0.7)
+            session.expect(lambda: "Wrap Lines" not in session.screen.text, "the View menu has closed")
+            session.finish()
+        assert invalid_path.read_bytes() == repaired
+        assert retained.read_bytes() == incompatible
 
         for route in ("regular", "symlink"):
             target = path
@@ -1235,10 +1334,12 @@ class Regressions:
                 session.send(b"\x1b", 0.7)
             session.send(b"\x06")
             session.send(b"needle")
+            expect_field_line(session, "Find: ", "complete Linux console query before focus traversal", contains="needle")
             before = field_line(session)
             caret = status(session)
             session.send(b"\x1b\t")  # kcbt from the Linux console's terminfo.
             session.send(b"\x1b[C")
+            session.expect(lambda: status(session) != caret, "document caret after backwards Find traversal")
             assert field_line(session) == before, "Shift+Tab did not move focus out of the query field"
             assert status(session) != caret, "backwards traversal from Find must focus the document"
             session.send(b"\x1b", 0.7)

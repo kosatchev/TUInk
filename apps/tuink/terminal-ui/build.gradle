@@ -5,6 +5,10 @@ plugins {
 sourceSets.test.java.srcDir(rootProject.file('verification/fixtures/java'))
 
 dependencies {
+    implementation project(':markdown-preview')
+    implementation project(':markdown-commonmark')
+    implementation project(':markdown-math')
+    implementation project(':markdown-mermaid')
     implementation project(':tuiframe-core')
     implementation project(':tuiframe-jline')
     implementation project(':tuiframe-widgets')

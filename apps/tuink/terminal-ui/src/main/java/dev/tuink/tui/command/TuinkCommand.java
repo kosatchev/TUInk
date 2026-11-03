@@ -81,6 +81,13 @@ public enum TuinkCommand {
     MENU_HELP("tuink.menu.help", "Open Help menu"),
 
     VIEW_TOGGLE_TAB_BAR("tuink.view.toggle-tab-bar", "Toggle tab bar"),
+    VIEW_TOGGLE_MARKDOWN_PREVIEW("tuink.view.toggle-markdown-preview", "Toggle Markdown preview"),
+    VIEW_PREVIEW_COPY_SOURCE("tuink.view.preview.copy-source", "Copy block source"),
+    VIEW_PREVIEW_COPY_TABLE_TSV("tuink.view.preview.copy-table-tsv", "Copy table as TSV"),
+    VIEW_PREVIEW_REVEAL_SOURCE("tuink.view.preview.reveal-source", "Go to source"),
+    VIEW_PREVIEW_FOLLOW_LINK("tuink.view.preview.follow-link", "Follow internal link"),
+    VIEW_PREVIEW_NEXT_HEADING("tuink.view.preview.next-heading", "Next heading"),
+    VIEW_PREVIEW_PREVIOUS_HEADING("tuink.view.preview.previous-heading", "Previous heading"),
     VIEW_TOGGLE_LINE_WRAP("tuink.view.toggle-line-wrap", "Toggle line wrapping"),
     VIEW_TOGGLE_WORD_WRAP("tuink.view.toggle-word-wrap", "Toggle word wrapping"),
     VIEW_TOGGLE_ACTIVE_GUTTER("tuink.view.toggle-active-gutter", "Toggle active gutter highlight"),
@@ -99,6 +106,8 @@ public enum TuinkCommand {
     SETTINGS_TOGGLE_AUTO_INDENT("tuink.settings.toggle-auto-indent", "Toggle auto indent"),
     SETTINGS_TOGGLE_AUTO_PAIRS("tuink.settings.toggle-auto-pairs", "Toggle auto pairs"),
     SETTINGS_TOGGLE_AUTO_LIST("tuink.settings.toggle-auto-list", "Toggle auto list"),
+    SETTINGS_TOGGLE_MARKDOWN_OPEN_BOTH_TABS("tuink.settings.toggle-markdown-open-both-tabs", "Toggle opening both Markdown tabs"),
+    SETTINGS_TOGGLE_MARKDOWN_OPEN_IN_PREVIEW("tuink.settings.toggle-markdown-open-in-preview", "Toggle opening Markdown in Preview"),
     SETTINGS_CYCLE_TAB_INSERT_MODE("tuink.settings.cycle-tab-insert-mode", "Cycle tab insert mode"),
 
     FILE_BROWSER_TOGGLE_HIDDEN("tuink.file-browser.toggle-hidden", "Toggle hidden files"),

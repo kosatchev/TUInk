@@ -28,7 +28,7 @@ The scenarios protect the following user behavior:
 | `long-copy-name` | Saving a read-only file with a 255-byte name generates a fitting copy name, skips an occupied candidate and preserves both existing files |
 | `navigation` | Ctrl+Home/End and Shift combinations move or select the correct Unicode range, which can be replaced and undone |
 | `fragmented-keys` | Split ESC/CSI/SS3 arrows preserve document bytes and search focus across delayed delivery; standalone Escape still closes search |
-| `quit-confirmation` | Repeated Ctrl+Q cancels quitting and retains the draft; Y saves before exiting |
+| `quit-confirmation` | First Ctrl+Q asks; Esc cancels, Y saves, and N or another Ctrl+Q discards without writing; N works from Source and Preview |
 | `gutter-idle` | Deferred change markers appear after rapid edits and clear after Undo without another input event |
 | `paste` | Terminal paste keeps literal text and Unicode content in a separate Undo step |
 | `settings` | CLI overrides apply to the current session while explicit menu changes preserve saved preferences and dotfile symlinks |

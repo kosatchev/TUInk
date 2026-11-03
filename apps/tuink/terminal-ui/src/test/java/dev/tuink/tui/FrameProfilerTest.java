@@ -82,6 +82,12 @@ class FrameProfilerTest {
             for (int index = 0; index < 30; index++) window.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
             assertTrue(output.toString().contains("surface=source ready=1"), output.toString());
 
+            window.event(KeyStroke.of(KeyStroke.Key.P, KeyStroke.Modifier.CTRL));
+            window.await(() -> window.preview().ready());
+            for (int index = 0; index < 30; index++) window.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
+            assertTrue(output.toString().contains("surface=preview ready=1"), output.toString());
+            assertTrue(output.toString().lines().anyMatch(line -> line.contains("surface=source ready=1 metrics_builds=")), output.toString());
+            assertTrue(output.toString().lines().anyMatch(line -> line.contains("surface=preview ready=1 metrics_builds=")), output.toString());
             for (String line : output.toString().lines().toList()) {
                 assertTrue(line.matches("frame=\\d+ build=[\\d.]+ms raster=[\\d.]+ms diff=[\\d.]+ms"
                     + " search=[\\d.]+ms total=[\\d.]+ms compose=[\\d.]+ms input=[\\d.]+ms"

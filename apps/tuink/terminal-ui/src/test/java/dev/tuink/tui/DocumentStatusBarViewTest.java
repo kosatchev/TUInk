@@ -11,6 +11,18 @@ import org.junit.jupiter.api.Test;
 
 class DocumentStatusBarViewTest {
     @Test
+    void markdownSwitchHintFollowsTheTabCountAndPrecedesSearch() {
+        var host = new TerminalEditorApp();
+        var tab = host.newEditorTab();
+        tab.state().setCurrentResource(JvmDocumentStorage.resource(Path.of("/notes.MD")));
+        for (int count : new int[] {1, 2}) {
+            var bar = host.buildStatusBar(tab.state(), tab.tabSession().model(), 140, false,
+                0, count, "Find 1/3", null, 23);
+            assertTrue(bar.text().contains("Tab 1/" + count + "  Ctrl+P: Preview  Find 1/3"), bar.text());
+        }
+    }
+
+    @Test
     void otherDocumentsDoNotAdvertiseMarkdownSwitching() {
         var host = new TerminalEditorApp();
         var tab = host.newEditorTab();

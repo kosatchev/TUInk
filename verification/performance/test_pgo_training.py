@@ -59,7 +59,7 @@ class PgoTrainingTest(unittest.TestCase):
             settings = training.settings_text(mouse=mouse, wrap=wrap)
             values = dict(line.split("=", 1) for line in settings.splitlines())
             self.assertEqual(expected_keys, set(values))
-            self.assertEqual("1", values["format"])
+            self.assertEqual("2", values["format"])
             self.assertEqual(str(mouse).lower(), values["ui.mouseMode"])
             self.assertEqual(str(wrap).lower(), values["ui.wrapLines"])
             self.assertEqual("true", values["ui.confirmOnClose"])

@@ -64,6 +64,8 @@ public final class TuinkKeymap {
 
         bind(result, key(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL), APP_QUIT);
         bind(result, key(KeyStroke.Key.O, KeyStroke.Modifier.CTRL), DOCUMENT_OPEN);
+        bind(result, key(KeyStroke.Key.P, KeyStroke.Modifier.CTRL), TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW);
+        bind(result, key(KeyStroke.Key.ENTER, KeyStroke.Modifier.CTRL), TuinkCommand.VIEW_PREVIEW_REVEAL_SOURCE);
         bind(result, key(KeyStroke.Key.S, KeyStroke.Modifier.CTRL), DOCUMENT_SAVE);
         bind(result, key(KeyStroke.Key.K, KeyStroke.Modifier.CTRL), DOCUMENT_SAVE_AS);
         bind(result, key(KeyStroke.Key.W, KeyStroke.Modifier.CTRL), TuinkCommand.TAB_CLOSE);

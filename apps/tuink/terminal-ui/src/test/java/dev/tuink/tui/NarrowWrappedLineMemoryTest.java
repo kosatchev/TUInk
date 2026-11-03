@@ -51,6 +51,7 @@ class NarrowWrappedLineMemoryTest {
             "org.opentest4j.AssertionFailedError", "org.junit.platform.commons.util.Preconditions")) {
             locations.add(location(Class.forName(type)));
         }
+        MarkdownProbeClasspath.addTo(locations);
         Process child = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx64m", "-cp", String.join(File.pathSeparator, locations), NarrowProbe.class.getName(),
             file.toString()).redirectErrorStream(true).start();

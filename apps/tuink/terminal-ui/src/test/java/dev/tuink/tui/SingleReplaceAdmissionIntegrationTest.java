@@ -39,6 +39,7 @@ class SingleReplaceAdmissionIntegrationTest {
         )) {
             locations.add(location(Class.forName(name, false, getClass().getClassLoader())));
         }
+        MarkdownProbeClasspath.addTo(locations);
         Process process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx64m", "-cp", String.join(File.pathSeparator, locations), WindowProbe.class.getName(),
             directory.toString()).redirectErrorStream(true).start();

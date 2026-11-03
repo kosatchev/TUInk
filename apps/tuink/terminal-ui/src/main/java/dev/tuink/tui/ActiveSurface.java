@@ -43,6 +43,8 @@ record ActiveSurface(PresentationId presentationId, Kind kind, Focus focus, Moda
             case EDIT_UNDO, EDIT_REDO, EDIT_TOGGLE_LINE_COMMENT -> documentWritable();
             case EDIT_COPY, EDIT_SELECT_ALL -> focus != Focus.CONTROL;
             case DOCUMENT_FORMAT, DOCUMENT_REOPEN_ENCODING -> !preview();
+            case VIEW_PREVIEW_COPY_SOURCE, VIEW_PREVIEW_COPY_TABLE_TSV, VIEW_PREVIEW_REVEAL_SOURCE,
+                 VIEW_PREVIEW_FOLLOW_LINK, VIEW_PREVIEW_NEXT_HEADING, VIEW_PREVIEW_PREVIOUS_HEADING -> preview();
             case VIEW_TOGGLE_WORD_WRAP -> wrapLines;
             case VIEW_TOGGLE_SYNTAX -> syntaxAvailable;
             case DOCUMENT_OPEN, DOCUMENT_OPEN_ENCODING, DOCUMENT_RECOVER_DRAFTS, VIEW_CYCLE_THEME -> modalScope != ModalScope.WINDOW;

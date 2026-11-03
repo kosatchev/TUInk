@@ -19,7 +19,7 @@ class QuitDiscardShortcutIntegrationTest {
     @TempDir Path directory;
 
     @ParameterizedTest
-    @ValueSource(booleans = {false})
+    @ValueSource(booleans = {false, true})
     void firstCtrlQAsksAndTheNextDiscardsFromSourceOrItsLivePreview(boolean preview) throws Exception {
         try (var window = markdownWindow()) {
             window.event(new TextInput("draft "));
@@ -37,7 +37,7 @@ class QuitDiscardShortcutIntegrationTest {
     }
 
     @ParameterizedTest
-    @ValueSource(booleans = {false})
+    @ValueSource(booleans = {false, true})
     void noDiscardsFromSourceOrItsLivePreview(boolean preview) throws Exception {
         try (var window = markdownWindow()) {
             window.event(new TextInput("draft "));

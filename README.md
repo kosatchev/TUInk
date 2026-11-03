@@ -35,6 +35,9 @@ language.
   rainbow brackets, and line-comment toggling.
 - **See what changed.** Gutter markers distinguish edits since the last save
   from edits since the file was opened.
+- **Read Markdown in paired tabs.** `Ctrl+P` opens or selects Preview immediately
+  to the right of Source. Read framed tables, Mermaid flowcharts and sequences,
+  and two-dimensional TeX formulas as terminal text.
 - **Protect unfinished work.** Recovery snapshots and file-aware saves retain
   detected encoding, BOM, line endings, and supported filesystem metadata.
 - **Choose how to run it.** Use Java 25, a native Linux archive, or a Debian
@@ -112,6 +115,53 @@ resets task checkboxes for `-`, `*`, `+`, and numbered lists.
 For heavily changed documents, gutter markers can use a broader changed range
 to keep editing responsive; unchanged lines inside that range may also be marked.
 
+### Markdown preview
+
+Use `Ctrl+P` or **View → Markdown preview** to create or select the linked
+Preview tab immediately to the right of Source. Both participate in normal tab
+navigation; the selected tab fills the document area. `Ctrl+P` from Preview
+selects Source. If Source has been closed, it reopens the linked file from disk
+in a fresh Source tab on the left. `Ctrl+Enter` opens or selects that same Source
+tab and requests the preview position.
+
+Two independent **Settings** options control future Markdown file opens:
+**Open both Markdown tabs** creates the adjacent pair; **Open Markdown in Preview**
+selects Preview. With only the second enabled, Preview opens on its own and
+`Ctrl+P` reads the file into a fresh Source tab on the left. Both options default
+to off and leave existing documents and recovery drafts intact.
+
+Live Preview follows the current source buffer, including unsaved edits, with
+its own position, selection and search. Tables and wide diagrams scroll
+horizontally; math and Mermaid use Unicode cells without terminal image
+protocols. `Ctrl+F` searches preview text, `Ctrl+A` selects all, and `Ctrl+C`
+copies the selection or the whole preview. View also provides **Copy block
+source**, **Copy table as TSV**, and **Go to source**. Esc leaves Find or cancels
+a dialog while keeping Preview selected.
+
+Preview uses the same mouse scrollbars as Source, including both thumb drags
+and track clicks. Its mode, position, search summary and `Ctrl+P` hint
+appear in the bottom status row. Only an active Find input uses a separate row.
+
+`Ctrl+W` closes the selected tab. Closing Source uses the usual Save / Discard /
+Cancel decision; Preview may remain with its accepted immutable raw snapshot.
+The closed editor and its Undo history are released. Closing that Preview has
+no second dirty prompt and creates no extra recovery draft. Snapshot-only tabs
+are session-only and are not restored at startup. During publication the snapshot
+stays open while TUInk waits for the result; an unconfirmed outcome keeps the app
+and snapshot open for verification.
+
+Save and Save As remain available in Preview. With Source open they save the
+latest shared buffer; after Source closes they save the captured raw Markdown
+and its encoding, BOM and line endings through the ordinary version and
+publication checks. Confirmed Save As updates the linked filename and reopen
+target without opening an editor. An unavailable resource reports a save error;
+explicit Save As can export the retained snapshot. Reopening reads disk contents,
+so it does not restore the closed source buffer or its history. Background results
+are applied only to their matching presentation and generation.
+
+See the [Markdown preview guide (Russian)](docs/markdown-preview.md) for controls,
+supported Mermaid/TeX subsets, snapshot behavior and resource limits.
+
 ### File safety
 
 Opening a file is limited to 64 MiB and may have a lower limit when available
@@ -148,8 +198,8 @@ base name before checking availability. Names entered manually remain exact.
 
 If an edit cannot be encoded in the original charset, saving offers **Save as
 UTF-8** with Cancel selected initially. The explicit conversion writes UTF-8
-without a BOM and preserves existing line endings. It becomes a separate undo
-step after a successful save; earlier text edits remain in history.
+without a BOM and preserves existing line endings. In an open Source it becomes
+a separate undo step after a successful save; earlier edits remain in that history.
 
 Use **File → Format…** to choose UTF-8, UTF-8 with BOM, UTF-16LE or UTF-16BE
 with BOM, Windows-1251, CP866 or KOI8-R. Encoding and line endings can be changed
@@ -225,14 +275,17 @@ a long rescan. These cases do not have a constant-time responsiveness guarantee.
 |---|---|
 | `Ctrl+O` | Open the tree-based file picker |
 | `Ctrl+S` | Save the current file |
-| `Ctrl+K` / `Ctrl+W` / `Ctrl+Shift+S` / `Ctrl+Shift+F4` | Save As |
+| `Ctrl+K` / `Ctrl+Shift+S` / `Ctrl+Shift+F4` | Save As |
 | `Ctrl+X` / `Ctrl+C` / `Ctrl+V` | Cut / copy / paste using the application clipboard |
 | `Ctrl+A` | Select all text in the focused document or text field |
 | `Ctrl+Z` / `Ctrl+Y` | Undo / redo |
 | `Ctrl+N` | Open a new tab |
 | `Ctrl+Tab` / `Super+Tab` / `Ctrl+PageDown` | Select the next tab |
-| `Ctrl+PageUp` | Select the previous tab |
+| `Ctrl+Shift+Tab` / `Ctrl+PageUp` | Select the previous tab |
+| `Ctrl+W` | Close the current tab |
 | `Ctrl+F` | Open search and replace |
+| `Ctrl+P` | Create/select paired Preview; from Preview select or reopen Source |
+| `Ctrl+Enter` | Open/select paired Source at the preview position |
 | `Ctrl+/` | Toggle line comments |
 | `Ctrl+Q` | Quit, with confirmation for unsaved work |
 | `F1` / `Alt+I` | Open the File menu |
@@ -288,7 +341,7 @@ final wrap segment has an extra empty row for the cursor after the text.
 Without a selection, `Ctrl+C` copies the current line and `Ctrl+X` cuts it.
 On an empty final line both operations do nothing and preserve the clipboard;
 empty lines with a line ending are still copied or cut.
-Close a tab through Tab > Close Tab.
+Close a tab with `Ctrl+W` or Tab > Close Tab. Menu hints reflect the active key bindings.
 
 With the search panel focused, use `Ctrl+F` for the next match, `Ctrl+G` for the previous
 match and `Ctrl+R` to replace. Activate the `Replace all` button to replace all matches
@@ -336,11 +389,14 @@ use `Tab` / `Shift+Tab` or a click to move focus. Page Up/Page Down and the mous
 wheel scroll the document while preserving its caret, selection, and field focus.
 These field shortcuts leave the document text unchanged.
 `Ctrl+C` / `Ctrl+X` / `Ctrl+V` are ignored when a button or search option is focused.
-In narrow terminals, button groups are hidden first to keep the fields editable.
+In narrow terminals, search controls wrap onto additional rows to keep options and actions accessible.
 Replacement commands are unavailable while either field is hidden or clipped.
 
-Save As and confirmation prompts include the document in their `Tab` /
-`Shift+Tab` focus cycle. While either is open, the document allows navigation,
+Save As includes the document in its `Tab` / `Shift+Tab` focus cycle.
+Confirmations cycle their action buttons; click the document to inspect it.
+`Ctrl+S` saves in save confirmations, `Esc` cancels, and Enter activates the
+focused action (initially Cancel). Narrow confirmations wrap the full question
+and actions rather than hiding file identity. While either prompt is open, the document allows navigation,
 selection, copying, and scrolling. Attempts to edit, cut, paste, undo, or redo
 the document briefly highlight the dialog and focus its first available
 control; the rejected input is discarded. Save As keeps its field editable
@@ -359,13 +415,17 @@ tab's document, including selection, copying, and scrolling. `Tab` / `Shift+Tab`
 only through their controls. Input aimed at the document briefly highlights
 the dialog, focuses its first available control, and is discarded.
 
-In the file picker, `Ctrl+H` toggles hidden files. With the tree focused,
+In the file picker, `Alt+.` or `Ctrl+H` toggles hidden files; the Hidden button
+is also reachable with Tab. `Ctrl+L` focuses a path field with normal text editing
+and clipboard shortcuts. Enter opens the file or navigates to the directory.
+Relative paths are resolved from the displayed directory. With the tree focused,
 `Backspace` moves its root to the parent directory, Left/Right collapse or
 expand folders, and `Shift+Left` / `Shift+Right` scroll long names horizontally.
 `Enter` opens a selected file or makes a selected directory the root. `Tab`
 and `Shift+Tab` move between the tree, OK, and Cancel; `Esc` closes the picker.
-Enter or Space activates OK and Cancel when focused.
-In terminals where Backspace sends `^H`, legacy `Ctrl+H` is interpreted as
+Enter or Space activates the focused button, including Hidden.
+In terminals where Backspace sends `^H`, use `Alt+.` or the Hidden button.
+Legacy `Ctrl+H` is interpreted as
 Backspace because the two keys send the same byte.
 
 The picker bounds the complete expanded tree to 20,000 entries and a memory
@@ -385,12 +445,14 @@ One document read or write runs at a time; keeping dialogs open in several tabs
 does not start concurrent file operations. If you switch tabs during an operation,
 its completion messages and prompts stay with the tab that started it.
 
-In confirmation prompts, `Tab` / `Shift+Tab` cycle through buttons and the
-document. With a button focused, Left/Right move between buttons, and `Enter`
+In confirmation prompts, `Tab` / `Shift+Tab` cycle through the action buttons.
+A click on the document permits inspection; Tab returns to the buttons. With a button focused, Left/Right move between buttons, and `Enter`
 or Space activates the focused button. With the prompt focused, `Y` confirms
 overwriting, saves edits in quit/close-tab confirmation, and restores
-recovery snapshots. `N` cancels overwrite, quit, or close-tab confirmation;
-in recovery it chooses Later and keeps the offered snapshots for the next launch.
+recovery snapshots. `N` chooses Discard in quit and close-tab confirmations,
+without saving the affected documents. It cancels overwrite and encoding
+confirmation; in recovery it chooses Later and keeps the offered snapshots for
+the next launch.
 The recovery prompt starts with Later focused. Only explicitly activating Delete
 removes the offered snapshots.
 
@@ -401,8 +463,17 @@ removes the offered snapshots.
 | Save As | Cancel Save As |
 | Overwrite confirmation | Cancel the save |
 | Close-tab confirmation | Cancel closing the tab |
-| Quit confirmation | Cancel quitting and keep unsaved edits |
+| Quit confirmation | Discard unsaved edits in all documents and quit |
 | Recovery confirmation | Postpone recovery and keep the snapshots for the next launch |
+
+The first `Ctrl+Q` requests exit and shows the quit confirmation when needed.
+Another delivered `Ctrl+Q` or `N` in that visible confirmation chooses **Discard**
+or **Discard All**, without saving the files. Terminal key repeats count as
+delivered keys too. If the complete question and action are unavailable, neither
+shortcut can discard; `Esc` still cancels. The quit hint is
+`Y/Ctrl+S=Save  N/Ctrl+Q=Discard  Esc=Cancel`, with the actual action labels for
+multiple documents or Save As. The initial button remains Cancel; Tab, arrows
+and Enter keep their normal button navigation and activation behavior.
 
 `Esc` cancels Save As and overwrite, close-tab, or quit confirmation. In the
 recovery prompt, `Esc` chooses Later and keeps the offered snapshots, including
@@ -524,6 +595,10 @@ Startup lists snapshots before reading their text. Restore preserves files alrea
 opened in the session; a snapshot that exceeds available memory stays on disk and
 can be postponed or explicitly deleted.
 
+Postponed recovery is available through **File > Recover drafts…** without
+restarting. Discovery skips checkpoints owned by this session and other running
+editors; incompatible snapshots remain untouched.
+
 <details>
 <summary>Supported syntax-highlighting formats</summary>
 
@@ -620,6 +695,11 @@ libs/
     storage-jvm/            # :editor-storage-jvm
     diff-jgit/              # :editor-diff-jgit
     highlight-regex/        # :highlight-regex
+  markdown/
+    preview/                # :markdown-preview — portable models and contracts
+    commonmark/             # :markdown-commonmark — Markdown parser adapter
+    math/                   # :markdown-math — bounded TeX subset
+    mermaid/                # :markdown-mermaid — bounded diagram subset
   tuiframe/
     core/                   # :tuiframe-core
     jline/                  # :tuiframe-jline
@@ -652,6 +732,7 @@ diagnostic material. These local directories are outside the source layout.
 - [Build, test, and native targets](docs/building.md)
 - [Release archives and Debian packaging](docs/packaging.md)
 - [Unreleased changes](docs/releases/unreleased.md)
+- [Markdown preview (русский)](docs/markdown-preview.md)
 - [Architecture roadmap](docs/architecture-roadmap.md)
 - [Architecture decisions](docs/adr/)
 - [Compatibility policy](docs/compatibility.md)

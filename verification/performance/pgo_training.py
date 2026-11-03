@@ -120,9 +120,10 @@ def training_corpus(language: str, chunks: int = 1600) -> Fixture:
 
 def settings_text(*, mouse: bool, wrap: bool) -> str:
     values = {
-        "format": "1", "ui.showTabBar": "true", "ui.wrapLines": str(wrap).lower(),
+        "format": "2", "ui.showTabBar": "true", "ui.wrapLines": str(wrap).lower(),
         "ui.wrapWords": "true", "ui.readingMode": "false", "ui.confirmOnClose": "true",
         "ui.mouseMode": str(mouse).lower(), "ui.highlightActiveLineNumber": "true",
+        "ui.markdownOpenBothTabs": "false", "ui.markdownOpenInPreview": "false",
         "ui.smartHomeEnd": "true", "ui.autoIndent": "true", "ui.autoPairs": "true",
         "ui.autoList": "true", "ui.visibleWhitespace": "true", "ui.syntaxHighlighting": "true",
         "ui.rainbowBrackets": "true", "ui.autoSelectionHighlight": "true",

@@ -5,6 +5,10 @@
 com.googlecode.javaewah:JavaEWAH:1.2.3=runtimeClasspath,testRuntimeClasspath
 commons-codec:commons-codec:1.17.0=runtimeClasspath,testRuntimeClasspath
 org.apiguardian:apiguardian-api:1.1.2=testCompileClasspath
+org.commonmark:commonmark-ext-gfm-strikethrough:0.24.0=runtimeClasspath,testRuntimeClasspath
+org.commonmark:commonmark-ext-gfm-tables:0.24.0=runtimeClasspath,testRuntimeClasspath
+org.commonmark:commonmark-ext-task-list-items:0.24.0=runtimeClasspath,testRuntimeClasspath
+org.commonmark:commonmark:0.24.0=runtimeClasspath,testRuntimeClasspath
 org.jline:jline-native:3.30.17=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
 org.jline:jline-terminal-jni:3.30.17=runtimeClasspath,testRuntimeClasspath
 org.jline:jline-terminal:3.30.17=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath

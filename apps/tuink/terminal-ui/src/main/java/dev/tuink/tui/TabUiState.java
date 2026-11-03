@@ -14,6 +14,7 @@ import java.util.Objects;
 
 /** Retained controls, dialog state, and Help reflow anchor for one terminal view. */
 final class TabUiState implements AutoCloseable {
+    final MarkdownPreviewState preview = new MarkdownPreviewState();
     TextField searchQueryInput;
     TextField searchReplaceInput;
     TextField saveAsInput;
@@ -23,6 +24,7 @@ final class TabUiState implements AutoCloseable {
     SearchFocus pendingSearchFocus;
     UiModalState modalState = UiModalState.none();
     SaveWorkflow.OverwriteApproval overwriteApproval;
+    SnapshotSaveWorkflow.OverwriteApproval snapshotOverwriteApproval;
     long filenameRevision;
     boolean openFileMode;
     DocumentFormatDialogView.State formatDialog;
@@ -69,7 +71,7 @@ final class TabUiState implements AutoCloseable {
         this.saveAsInput = Objects.requireNonNull(saveAsInput, "saveAsInput");
     }
 
-    boolean hasSearch() { return searchMode; }
+    boolean hasSearch() { return searchMode || preview.searchEditing || !preview.searchQuery.isEmpty(); }
 
     boolean awaitingAnswer() { return openFileMode || !modalState.isNone(); }
 
@@ -77,15 +79,19 @@ final class TabUiState implements AutoCloseable {
     @Override public void close() {
         if (closed) return;
         closed = true;
+        preview.close();
         try {
             if (pendingOpen != null) pendingOpen.cancel();
             if (overwriteApproval != null) {
                 overwriteApproval.request().session().document().io().cancel(overwriteApproval.inspection());
             }
-
+            if (snapshotOverwriteApproval != null) {
+                snapshotOverwriteApproval.request().owner().subject().io().cancel(snapshotOverwriteApproval.inspection());
+            }
         } finally {
             pendingOpen = null;
             overwriteApproval = null;
+            snapshotOverwriteApproval = null;
             deferredOpenResult = null;
             if (openFileTree != null) {
                 openFileTree.close();

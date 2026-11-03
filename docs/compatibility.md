@@ -264,13 +264,15 @@ from decoding loss. The diagnostic asks for an unambiguous absolute
 profile. The current marker is:
 
 ```properties
-format=1
+format=2
 ui.showTabBar=true
 ui.wrapLines=false
 ui.wrapWords=false
 ui.readingMode=false
 ui.confirmOnClose=true
 ui.mouseMode=true
+ui.markdownOpenBothTabs=false
+ui.markdownOpenInPreview=false
 ui.highlightActiveLineNumber=true
 ui.smartHomeEnd=true
 ui.autoIndent=true
@@ -287,6 +289,19 @@ ui.theme=...
 ```
 
 The reader accepts only the current schema. Unknown formats, malformed values, missing required fields, and unsupported combinations are incompatible. TUInk must preserve the incompatible file, use documented defaults for the running process, and emit a clear warning. It must not silently rewrite the file as though it had been read successfully.
+
+Settings format 2 adds the two independent Markdown opening preferences.
+Format 1 files remain untouched and are rejected, including automatic saves
+from that session. To start a new profile, retain the old file under another
+name and let a following session save a complete format 2 settings file.
+There is no automatic conversion or historical settings reader.
+
+If settings cannot be loaded, an in-editor persistent warning explains that
+preference changes apply only to the current session. Changing a preference in
+Source or Preview repeats that warning instead of displaying an ordinary success
+message. Opening errors and recovery diagnostics retain priority. Repair or
+retain the incompatible file under another name and restart before expecting
+preferences to be saved; the strict reader does not replace that file.
 
 The complete settings file, including comments, is limited to 64 KiB. Larger
 files are rejected before parsing and left unchanged; the session uses defaults

@@ -1,16 +1,21 @@
 from contextlib import contextmanager
+import errno
+import hashlib
 import os
 from pathlib import Path
 import signal
 import sys
 import tempfile
 import termios
+import time
 import unittest
 from unittest.mock import patch
 
 from run import expect_field_line, recovery_snapshot_present
 from terminal import Session
 from vt import Screen
+from markdown_preview import (EDITING_CLASSES, editing_instance_counts, paired_captions_present,
+                              rendered_preview_present, preview_selected, source_selected)
 
 
 class ScreenTest(unittest.TestCase):
@@ -52,6 +57,72 @@ class ScreenTest(unittest.TestCase):
         screen = Screen()
         screen.feed(b"\x1b[42z\x1b[?9999h")
         self.assertEqual({("42", "", "z"), ("?9999", "", "h")}, screen.unknown)
+
+
+class MarkdownPreviewObservationTest(unittest.TestCase):
+    def test_preview_identity_comes_from_the_status_row_not_document_text(self):
+        footer = ' Preview (live) | Ctrl+P: source | Row 1/10 Col 1'
+        self.assertTrue(preview_selected('File\nbody\n' + footer))
+        self.assertFalse(preview_selected('File\n' + footer + '\n Ln 1/10, Col 1'))
+        self.assertFalse(preview_selected('File\nbody\n' + footer + ' | updating…'))
+        self.assertTrue(source_selected('File\nMarkdown preview\n Ln 1/10, Col 1'))
+
+    def test_compact_status_identifies_the_surface_without_matching_source_hints(self):
+        for mode in ('live', 'snapshot'):
+            footer = f' 1:1  Tab 2/2  Ctrl+P   MD:{mode}'
+            self.assertTrue(preview_selected('File\nbody\n' + footer, mode))
+            self.assertFalse(source_selected('File\nbody\n' + footer))
+            self.assertFalse(preview_selected('File\n' + footer + '\n Ln 1/10, Col 1', mode))
+        for footer in (' Ln 1/10, Col 1  Tab 1/2  Ctrl+P: Preview',
+                       ' 1:1  Tab 1/2  Ctrl+P  RW | INS'):
+            self.assertTrue(source_selected('File\nMD:live\n' + footer))
+            self.assertFalse(preview_selected('File\nMD:live\n' + footer))
+
+    def test_physical_pair_requires_one_source_then_one_preview_in_the_tab_strip(self):
+        self.assertTrue(paired_captions_present('File\n[preview.md · Source] [preview.md · Preview]\nMarkdown preview'))
+        for frame in ('File\n[preview.md · Preview] [preview.md · Source]',
+                      'File\n[preview.md]\nSource · Source and diagram · Preview',
+                      'File\n[a · Source] [a · Preview] [a · Preview]'):
+            with self.subTest(frame=frame):
+                self.assertFalse(paired_captions_present(frame))
+
+    def test_editing_histogram_counts_exact_classes_with_optional_module_annotations(self):
+        histogram = ("12345:\n num     #instances         #bytes  class name (module)\n"
+                     "  1:            2            176  dev.tuink.core.EditorEngine\n"
+                     "  2:            3            144  dev.tuink.tui.TuiDocumentSession (tuink.app@0.17.0)\n"
+                     "  3:            4            288  dev.tuink.editor.session.document.EditorDocumentSession\n"
+                     "  4:            5            320  dev.tuink.core.EditorState (tuink.core)\n"
+                     "  5:            7            560  dev.tuink.core.EditorEngine$PreparedSave\n"
+                     "  6:            8            640  [Ldev.tuink.tui.TuiDocumentSession;\n")
+        self.assertEqual(dict(zip(EDITING_CLASSES, (2, 3, 4, 5))), editing_instance_counts(histogram))
+
+    def test_missing_editing_histogram_classes_have_zero_instances(self):
+        self.assertEqual(dict.fromkeys(EDITING_CLASSES, 0), editing_instance_counts(
+            "  1:        150           6000  [B (java.base@25.0.1)\nTotal       150           6000\n"))
+
+    def test_rendered_nodes_arrow_and_integral_acknowledge_preview(self):
+        frame = ("⌠\n⎮ e⁻ˣ² dx = √π / 2\n⌡\n"
+                 "┌────────┐      ┌─────────┐\n"
+                 "│ Editor │─────→│ Preview │\n"
+                 "└────────┘      └─────────┘\n"
+                 " Preview (live) | Ctrl+P: source | Row 1/10 Col 1")
+        self.assertTrue(rendered_preview_present(frame))
+
+    def test_raw_mermaid_cannot_acknowledge_preview_even_beside_rendered_math(self):
+        fence = chr(96) * 3
+        frame = (" Markdown preview [Ctrl+P: source]\n∫ e⁻ˣ² dx = √π / 2\n"
+                 + fence + "mermaid\nflowchart LR\n A[Editor] --> B[Preview]\n" + fence)
+        self.assertFalse(rendered_preview_present(frame))
+
+    def test_partial_frames_and_source_fallback_do_not_acknowledge_completion(self):
+        for frame in (
+                "Markdown preview",
+                "Markdown preview\n∫ Editor Preview",
+                "Markdown preview\n┌Editor┐ → ┌Preview┐",
+                "Markdown preview\n∫ ┌Editor┐ → ┌Preview┐\n\\frac{x}{y}",
+                "Markdown preview\n∫ ┌Editor┐ → ┌Preview┐\n[Mermaid: unsupported]"):
+            with self.subTest(frame=frame):
+                self.assertFalse(rendered_preview_present(frame))
 
 
 class RecoveryObservationTest(unittest.TestCase):
@@ -174,9 +245,9 @@ class FieldObservationTest(unittest.TestCase):
             return len(data)
 
         session.drain, session.poll = drain, poll
+        session._write_input = lambda data: write(session.fd, data)
         feed(initial)
-        with patch("terminal.time.monotonic", side_effect=lambda: clock[0]), \
-                patch("terminal.os.write", side_effect=write):
+        with patch("terminal.time.monotonic", side_effect=lambda: clock[0]):
             yield session, clock
 
     def test_delayed_find_and_replace_are_observed_after_the_send_drain_has_ended(self):
@@ -242,6 +313,82 @@ class FieldObservationTest(unittest.TestCase):
                 session.expect(broken, "a valid predicate")
             self.assertEqual([], session.drains)
             self.assertEqual(0, clock[0])
+
+
+class BidirectionalInputTest(unittest.TestCase):
+    @staticmethod
+    def peer(root, payload_size, read_input=True):
+        executable = root / "fake-bulk-terminal"
+        executable.write_text(
+            f"#!{sys.executable}\n"
+            "import hashlib, os, signal, sys, time, tty\n"
+            "tty.setraw(0)\n"
+            "os.write(1, b'\\x1b[1;1HFile\\x1b[24;1HLn 1/1, Col 1/1')\n"
+            "signal.alarm(5)\n"
+            + ("while True: time.sleep(1)\n" if not read_input else
+               "assert os.read(0, 1) == b'G'\n"
+               # The peer deliberately fills its output queue before reading
+               # more input, reproducing opposing PTY backpressure.
+               "output = memoryview(b'\\x1b[2;1H' + b'R' * 131072)\n"
+               "while output: output = output[os.write(1, output):]\n"
+               "received = bytearray()\n"
+               f"while len(received) < {payload_size}:\n"
+               f"    received.extend(os.read(0, min(65536, {payload_size} - len(received))))\n"
+               "os.write(1, b'\\x1b[3;1HRECEIVED=' + hashlib.sha256(received).hexdigest().encode())\n"
+               "while os.read(0, 1) != b'\\x11': pass\n"), encoding="utf-8")
+        executable.chmod(0o700)
+        return executable
+
+    def test_bulk_input_drains_output_before_the_peer_can_read_again(self):
+        payload = b"bulk-input-0123456789" * 16384
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = self.peer(root, len(payload))
+            with Session(root / "session", executable, "unused", timeout=5) as session:
+                session.send(b"G" + payload, wait=0)
+                session.expect(lambda: "RECEIVED=" in session.screen.text, "bulk input acknowledgement")
+                self.assertIn("RECEIVED=" + hashlib.sha256(payload).hexdigest(), session.screen.text)
+                self.assertGreaterEqual(session.log.count(b"R"), 131072)
+                self.assertTrue(os.get_blocking(session.fd), "send must restore descriptor mode")
+                session.finish()
+
+    def test_partial_and_temporarily_unavailable_writes_preserve_all_bytes(self):
+        payload = b"partial-write-abcdef" * 8192
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = self.peer(root, len(payload))
+            with Session(root / "session", executable, "unused", timeout=5) as session:
+                write = os.write
+                attempts = []
+
+                def limited_write(fd, data):
+                    attempts.append(len(data))
+                    if len(attempts) == 1:
+                        raise BlockingIOError(errno.EAGAIN, "temporarily full")
+                    if len(attempts) == 2:
+                        raise InterruptedError(errno.EINTR, "interrupted")
+                    return write(fd, data[:997])
+
+                with patch("terminal.os.write", side_effect=limited_write):
+                    session.send(b"G" + payload)
+                session.expect(lambda: "RECEIVED=" in session.screen.text, "partial input acknowledgement")
+                self.assertIn("RECEIVED=" + hashlib.sha256(payload).hexdigest(), session.screen.text)
+                self.assertGreater(len(attempts), len(payload) // 997)
+                self.assertGreater(max(attempts), 997)
+                session.finish()
+
+    def test_a_peer_that_never_reads_cannot_outlive_the_input_deadline(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = self.peer(root, 0, read_input=False)
+            with Session(root / "session", executable, "unused", timeout=5) as session:
+                session.timeout = 0.15
+                session.deadline = time.monotonic() + session.timeout
+                started = time.monotonic()
+                with self.assertRaisesRegex(TimeoutError, "scenario exceeded 0.15 seconds"):
+                    session.send(b"x" * 1_048_576, wait=0)
+                self.assertLess(time.monotonic() - started, 1)
+                self.assertTrue(os.get_blocking(session.fd), "timeout must restore descriptor mode")
 
 
 class LifecycleTest(unittest.TestCase):

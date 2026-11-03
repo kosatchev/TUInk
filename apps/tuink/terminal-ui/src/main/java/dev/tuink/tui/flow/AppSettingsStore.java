@@ -32,7 +32,7 @@ import java.util.Set;
 public final class AppSettingsStore {
     private static final String FILE_NAME = "tuink.properties";
     private static final int MAX_SETTINGS_BYTES = 64 * 1024;
-    private static final String FORMAT = "1";
+    private static final String FORMAT = "2";
     private static final String KEY_FORMAT = "format";
     private static final String KEY_SHOW_TAB_BAR = "ui.showTabBar";
     private static final String KEY_WRAP_LINES = "ui.wrapLines";
@@ -49,6 +49,8 @@ public final class AppSettingsStore {
     private static final String KEY_SYNTAX_HIGHLIGHTING = "ui.syntaxHighlighting";
     private static final String KEY_RAINBOW_BRACKETS = "ui.rainbowBrackets";
     private static final String KEY_AUTO_SELECTION_HIGHLIGHT = "ui.autoSelectionHighlight";
+    private static final String KEY_MARKDOWN_OPEN_BOTH_TABS = "ui.markdownOpenBothTabs";
+    private static final String KEY_MARKDOWN_OPEN_IN_PREVIEW = "ui.markdownOpenInPreview";
     private static final String KEY_GUTTER_DIFF_MODE = "ui.gutterDiffMode";
     private static final String KEY_TAB_WIDTH = "ui.tabWidth";
     private static final String KEY_TAB_INSERT_MODE = "ui.tabInsertMode";
@@ -70,6 +72,8 @@ public final class AppSettingsStore {
         KEY_SYNTAX_HIGHLIGHTING,
         KEY_RAINBOW_BRACKETS,
         KEY_AUTO_SELECTION_HIGHLIGHT,
+        KEY_MARKDOWN_OPEN_BOTH_TABS,
+        KEY_MARKDOWN_OPEN_IN_PREVIEW,
         KEY_GUTTER_DIFF_MODE,
         KEY_TAB_WIDTH,
         KEY_TAB_INSERT_MODE,
@@ -149,6 +153,8 @@ public final class AppSettingsStore {
             parseBoolean(p, KEY_SYNTAX_HIGHLIGHTING, path),
             parseBoolean(p, KEY_RAINBOW_BRACKETS, path),
             parseBoolean(p, KEY_AUTO_SELECTION_HIGHLIGHT, path),
+            parseBoolean(p, KEY_MARKDOWN_OPEN_BOTH_TABS, path),
+            parseBoolean(p, KEY_MARKDOWN_OPEN_IN_PREVIEW, path),
             parseEnum(p, KEY_GUTTER_DIFF_MODE, GutterDiffMode.class, path),
             parseTabWidth(p, path),
             parseEnum(p, KEY_TAB_INSERT_MODE, TabInsertMode.class, path),
@@ -206,6 +212,8 @@ public final class AppSettingsStore {
         p.setProperty(KEY_SYNTAX_HIGHLIGHTING, Boolean.toString(settings.syntaxHighlighting()));
         p.setProperty(KEY_RAINBOW_BRACKETS, Boolean.toString(settings.rainbowBrackets()));
         p.setProperty(KEY_AUTO_SELECTION_HIGHLIGHT, Boolean.toString(settings.autoSelectionHighlight()));
+        p.setProperty(KEY_MARKDOWN_OPEN_BOTH_TABS, Boolean.toString(settings.markdownOpenBothTabs()));
+        p.setProperty(KEY_MARKDOWN_OPEN_IN_PREVIEW, Boolean.toString(settings.markdownOpenInPreview()));
         p.setProperty(KEY_GUTTER_DIFF_MODE, canonical(settings.gutterDiffMode()));
         p.setProperty(KEY_TAB_WIDTH, Integer.toString(settings.tabWidth()));
         p.setProperty(KEY_TAB_INSERT_MODE, canonical(settings.tabInsertMode()));

@@ -34,6 +34,7 @@ public class TextModel {
     private final long cacheIdentity = NEXT_CACHE_ID.incrementAndGet();
     private DocumentFileMetadata fileMetadata;
     private ResourceVersion fileBaseline;
+    private DocumentOpenMode reopenMode = DocumentOpenMode.DETECT;
     private EditorDocument documentOwner;
     private LocalEdit localEdit;
     private GraphemeText cachedGraphemes;
@@ -52,6 +53,7 @@ public class TextModel {
         private final LocalEditBuffer staged = new LocalEditBuffer(source);
         private final DocumentFileMetadata metadataBefore = fileMetadata;
         private final ResourceVersion baselineBefore = fileBaseline;
+        private final DocumentOpenMode reopenModeBefore = reopenMode;
         private final long revisionBefore = revision;
         private final long epochBefore = contentEpoch;
         private final long replacementRevisionBefore = lastContentReplacementRevision;
@@ -75,6 +77,7 @@ public class TextModel {
             buffer = source;
             fileMetadata = metadataBefore;
             fileBaseline = baselineBefore;
+            reopenMode = reopenModeBefore;
             revision = revisionBefore;
             contentEpoch = epochBefore;
             lastContentReplacementRevision = replacementRevisionBefore;
@@ -700,6 +703,7 @@ public class TextModel {
         Objects.requireNonNull(prepared, "prepared");
         replaceLines(prepared.lines(), prepared.metadata());
         fileBaseline = prepared.baseline();
+        reopenMode = DocumentOpenMode.forMetadata(prepared.metadata());
     }
 
     public void save(DocumentResource resource) throws IOException {
@@ -757,8 +761,11 @@ public class TextModel {
     /** Adopt the committed format/version; content and its revision remain unchanged. */
     public void completeSave(SavedDocument saved) {
         Objects.requireNonNull(saved, "saved");
-        fileMetadata = requireCompatibleMetadata(saved.metadata(), lineCount());
+        DocumentFileMetadata metadata = requireCompatibleMetadata(saved.metadata(), lineCount());
+        DocumentOpenMode decoder = DocumentOpenMode.forMetadata(metadata);
+        fileMetadata = metadata;
         fileBaseline = saved.baseline();
+        reopenMode = decoder;
     }
 
     public List<String> snapshotLines() {
@@ -775,8 +782,13 @@ public class TextModel {
         return fileBaseline;
     }
 
+    /** The on-disk decoder is independent of the current editable output format. */
+    public DocumentOpenMode reopenMode() { return reopenMode; }
+
     void restoreFileBaseline(ResourceVersion baseline) {
         fileBaseline = baseline;
+        // Recovery stores the draft format, which need not describe the baseline bytes.
+        reopenMode = DocumentOpenMode.DETECT;
     }
 
     /** Restores file metadata captured together with an undo/redo content state. */

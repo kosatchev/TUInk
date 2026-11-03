@@ -26,6 +26,7 @@ class FrozenDocumentSourceTest {
         var frozen = new FrozenDocumentSource(text, metadata, ResourceBinding.unbound());
         assertSame(text, frozen.text());
         assertSame(metadata, frozen.metadata());
+        assertEquals(DocumentOpenMode.DETECT, frozen.reopenMode());
         assertSame(text.lineText(0), frozen.text().immutableLines().get(0));
         assertSame(text.immutableLines(), frozen.text().immutableLines());
         assertEquals("", frozen.text().line(3));
@@ -37,7 +38,7 @@ class FrozenDocumentSourceTest {
     void confirmedBindingChangeRetainsTheAcceptedTextAndFormatWithoutCallingAProvider() {
         var text = new DocumentSnapshot(new DocumentId("accepted"), 3, List.of("unsaved snapshot"));
         var metadata = DocumentFileMetadata.newDocument(1);
-        var frozen = new FrozenDocumentSource(text, metadata, ResourceBinding.unbound());
+        var frozen = new FrozenDocumentSource(text, metadata, ResourceBinding.unbound(), DocumentOpenMode.CP866);
         DocumentResource resource = new DocumentResource() {
             @Override public ResourceId id() { return (() -> "frozen-test"); }
             @Override public String displayName() { return "saved.md"; }
@@ -49,8 +50,17 @@ class FrozenDocumentSourceTest {
         assertSame(text, updated.text());
         assertSame(metadata, updated.metadata());
         assertSame(binding, updated.binding());
+        assertEquals(DocumentOpenMode.CP866, updated.reopenMode());
         assertSame(updated, updated.withBinding(binding));
         assertNull(frozen.binding().resource());
+        var converted = updated.withBinding(binding, DocumentOpenMode.UTF_8);
+        assertSame(text, converted.text());
+        assertSame(metadata, converted.metadata());
+        assertSame(binding, converted.binding());
+        assertEquals(DocumentOpenMode.UTF_8, converted.reopenMode());
+        assertEquals(DocumentOpenMode.CP866, updated.reopenMode());
+        assertSame(converted, converted.withBinding(binding, DocumentOpenMode.UTF_8));
+        assertThrows(NullPointerException.class, () -> converted.withBinding(binding, null));
     }
 
     @Test

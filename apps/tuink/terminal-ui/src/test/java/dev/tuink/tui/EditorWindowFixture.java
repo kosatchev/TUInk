@@ -81,6 +81,16 @@ final class EditorWindowFixture implements AutoCloseable {
         this(directory, reading, lines, new AppSettingsSession(AppSettings.defaults(), TuiCliOptions.parse(new String[0])));
     }
 
+    EditorWindowFixture(Path directory, String documentName, boolean reading, List<String> lines) throws IOException {
+        this(directory, documentName, reading, lines, Runnable::run);
+    }
+
+    EditorWindowFixture(Path directory, String documentName, boolean reading, List<String> lines,
+                        Executor documentExecutor) throws IOException {
+        this(directory, reading, lines, new AppSettingsSession(AppSettings.defaults(), TuiCliOptions.parse(new String[0])),
+            List.of(), null, documentExecutor, Runnable::run, documentName);
+    }
+
     EditorWindowFixture(Path directory, boolean reading, List<String> lines, Executor documentExecutor) throws IOException {
         this(directory, reading, lines,
             new AppSettingsSession(AppSettings.defaults(), TuiCliOptions.parse(new String[0])),
@@ -222,6 +232,13 @@ final class EditorWindowFixture implements AutoCloseable {
 
     WindowTab selected() { return context.activePresentation(); }
 
+    MarkdownPreviewState preview() {
+        if (selected() instanceof PreviewTab preview) return preview.uiState().preview;
+        var source = (TerminalEditorApp.EditorTab) selected();
+        var preview = context.previewFor(source.documentSession().viewId());
+        return preview == null ? null : preview.uiState().preview;
+    }
+
     int restore(List<RecoveryStore.Entry> entries) {
         for (RecoveryStore.Entry entry : entries) {
             recoverySnapshots.put(entry.id(), entry.snapshot());
@@ -328,6 +345,7 @@ final class EditorWindowFixture implements AutoCloseable {
     }
 
     String promptText() {
+        if (controller.previewFrame() != null) return java.util.Objects.requireNonNullElse(controller.previewPromptText(), "");
         return renderer.plan == null || renderer.plan.interactiveBarText() == null ? "" : renderer.plan.interactiveBarText();
     }
 
@@ -338,7 +356,8 @@ final class EditorWindowFixture implements AutoCloseable {
     }
 
     private CellBuffer screenCells() {
-        return renderer.frame;
+        var preview = controller.previewFrame();
+        return preview == null ? renderer.frame : preview.cells();
     }
 
     int rowStartingWith(String label) {

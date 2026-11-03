@@ -53,6 +53,7 @@ class LexicalStateMemoryIntegrationTest {
             "org.junit.platform.commons.util.Preconditions")) {
             locations.add(location(Class.forName(type)));
         }
+        MarkdownProbeClasspath.addTo(locations);
         for (boolean syntax : new boolean[] {true, false}) {
             Process child = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                 "-Xmx64m", "-cp", String.join(File.pathSeparator, locations), Probe.class.getName(),

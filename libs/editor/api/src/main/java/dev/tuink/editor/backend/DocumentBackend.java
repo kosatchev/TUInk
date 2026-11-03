@@ -41,6 +41,10 @@ public interface DocumentBackend extends DocumentSaveOperations {
     long viewRevision(ViewId viewId);
     DocumentSnapshot snapshot();
     Status status();
+    /** Decoder of the last read/committed bytes, unaffected by unsaved format changes or undo. */
+    default dev.tuink.editor.storage.DocumentOpenMode reopenMode() {
+        return dev.tuink.editor.storage.DocumentOpenMode.DETECT;
+    }
     DocumentCommandResult.Applied execute(DocumentCommandTarget target, DocumentCommand command);
     /** Captures immutable text and format; validation runs detached from the owner. */
     PreparedFormatChange prepareFormatChange(DocumentFormatSpec spec);

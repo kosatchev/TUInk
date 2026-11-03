@@ -3,6 +3,7 @@ plugins {
 }
 
 dependencies {
+    api project(':markdown-preview')
     testImplementation project(':editor-storage-jvm')
     api project(':editor-contract')
     api project(':core')

@@ -27,13 +27,14 @@ class EditorViewBoundaryArchitectureTest {
     }
 
     @Test
-    void terminalLayoutCacheHasOneTuinkModelAdapter() {
+    void terminalLayoutCacheHasExplicitModelAdapters() {
         noClasses()
             .that().resideInAPackage("dev.tuink..")
-            .and().haveNameNotMatching("dev\\.tuink\\.render\\.TerminalEditorTextLayout(?:\\$.*)?")
+            .and().haveNameNotMatching("(?:dev\\.tuink\\.render\\.TerminalEditorTextLayout|dev\\.tuink\\.render\\.markdown\\.MarkdownGeometry)(?:\\$.*)?")
             .should().dependOnClassesThat()
-            .haveNameMatching("dev\\.tuiframe\\.text\\.TerminalTextLayoutCache(?:\\$.*)?")
-            .because("TUInk coordinates and rendering reuse one model layout/cache boundary")
+            // Refcounted metric leases are a consumer contract, not access to the cache.
+            .haveNameMatching("dev\\.tuiframe\\.text\\.TerminalTextLayoutCache(?:\\$(?!MetricsHandle$).*)?")
+            .because("editor and immutable Markdown layouts each have one explicit terminal geometry adapter")
             .check(PRODUCTION);
     }
 

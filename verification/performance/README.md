@@ -135,10 +135,16 @@ reports the binary's build origin as unknown. It never labels an arbitrary
 a receipt, and keep that sidecar when copying a binary for comparison. Builds
 from source archives without Git record unknown commit/source provenance.
 
-`summary.md` reports build, raster, diff and total `mean/p50/p95` in
+`summary.md` reports build, raster, diff and total `mean/p50/p95/p99` in
 milliseconds, aggregated over profiler checkpoints from all repeats.
 `summary.json` also includes search timing, maxima, checkpoint counts and the
-elapsed-time distribution across repeats.
+elapsed-time distribution across repeats. Extended profiles add composition,
+input, output and decoded-event response timing plus emitted UTF-16 characters,
+input association, used heap and surface readiness. Optional phases remain
+absent when an older binary does not measure them; per-metric sample counts
+make partial coverage explicit. Input/response statistics exclude idle frames
+with no associated event. Used heap includes garbage and is not retained memory;
+emitted characters are not PTY bytes. `search` is nested in composition.
 
 These are sampled frame diagnostics, not input-to-paint latency or percentiles
 of all frames. The reported `Queue` time (`input_elapsed_s` in JSON) includes
@@ -152,6 +158,50 @@ avoid overlapping probes or heavy background load. Investigate a repeated
 10–15% regression or increasing queue-drain time; small differences on an
 arbitrary machine are not a hard failure. A lower sampled mean alone does not
 establish an overall speedup.
+
+### Paired Markdown matrix
+
+`markdown_benchmark.py` is a separate opt-in entry point using the same PTY
+lifecycle, settings, parser/statistics and binary receipt validation. It does
+not expand the canonical `perfSmoke`/`perfCheck` scenario set.
+
+```bash
+python3 -B verification/performance/markdown_benchmark.py \
+  --binary apps/tuink/launcher/build/native/nativeCompile/tuink \
+  --label=markdown-before --frames=60 --repeats=1 \
+  --fixtures=paragraphs,code --sizes=24x80 --scenarios=down,shift-down
+```
+
+Use the same command and a new label after the change. To exercise the larger
+matrix, select `--fixtures=paragraphs,code,table,embedded`,
+`--sizes=24x80,50x180` and
+`--scenarios=down,shift-down,wheel,hscroll,mouse-drag`. Defaults are 120 events,
+one repeat, 600 fixture lines, both sizes/surfaces and down/shift-down/wheel.
+`--surfaces=source,preview` can select one surface while diagnosing a case;
+keep both for the paired comparison. Horizontal cases apply only to wide
+code/table fixtures. The deterministic code fixture includes tabs, Cyrillic,
+CJK and supplementary characters; embedded content contains TeX and Mermaid.
+
+The matrix waits for actual Source startup and an accepted Preview layout,
+then injects `--warmup-events=30`. A visible File-menu open/close fence proves
+the preceding input queue was processed, including unchanged frames with no
+output; only then does it wait for quiet output. Horizontal pan uses common
+SGR wheel events with mouse tracking enabled. Startup and
+initial Preview readiness are recorded separately from measured interaction
+profiles. Screen parsing is disabled during the measured loop; only a bounded
+output tail and a cumulative PTY byte count remain. Warmup does not imply that
+every subsequently revealed row was previously indexed; the accepted layout
+and current surface are ready before the measured sequence begins.
+
+Each run under `build/performance/markdown/` contains fixtures, settings,
+per-case logs and `summary.json`/`summary.md`. Metadata retains terminal sizes,
+fixtures/surfaces/scenarios, every delay/timeout, warmup count, hashes of the
+matrix harness/shared harness/screen oracle, and the binary's own provenance.
+Records written before each measured stream are excluded from that case's
+sampled timing statistics. Actual received PTY byte distributions are separate
+from the profiler's UTF-16 character counter. Fixture bytes are preserved and
+must remain identical across paired runs. This is a diagnostic matrix, not a
+hard wall-clock performance gate.
 
 ## Optional PGO training
 

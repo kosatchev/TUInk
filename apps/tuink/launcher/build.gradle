@@ -40,3 +40,28 @@ apply from: "${rootProject.projectDir}/gradle/scripts/debian.gradle"
 apply from: "${rootProject.projectDir}/gradle/scripts/release.gradle"
 apply from: "${rootProject.projectDir}/gradle/scripts/performance.gradle"
 apply from: "${rootProject.projectDir}/gradle/scripts/ui-regression.gradle"
+
+def nativeRuntimeClasspaths = configurations.matching {
+    it.canBeResolved && it.name.startsWith('nativeImage')
+        && (it.name.endsWith('Classpath') || it.name.endsWith('ClasspathInternal'))
+}
+def verifyNativeDependencyLocks = tasks.register('verifyNativeDependencyLocks') {
+    group = 'verification'
+    description = 'Verify dependency locks for every registered Native Image runtime graph without compiling.'
+    notCompatibleWithConfigurationCache('Reads the configured Native Image dependency graphs.')
+    doLast {
+        Set<String> failures = [] as Set
+        nativeRuntimeClasspaths.sort { it.name }.each { configuration ->
+            configuration.incoming.resolutionResult.allDependencies.each { dependency ->
+                if (dependency instanceof org.gradle.api.artifacts.result.UnresolvedDependencyResult) {
+                    failures.add("${configuration.name}: ${dependency.failure.message}")
+                }
+            }
+        }
+        if (!failures.isEmpty()) {
+            throw new GradleException('Native Image dependency locks are incomplete:\n  '
+                + failures.sort().join('\n  '))
+        }
+    }
+}
+tasks.named('check') { dependsOn(verifyNativeDependencyLocks) }

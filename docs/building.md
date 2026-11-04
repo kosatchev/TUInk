@@ -28,6 +28,22 @@ JDK and compiles them with Android D8/R8. `check` compiles separate Java 17 API
 consumers depending only on `core` or `editor-session`. Actual ART,
 Android storage/IME and Windows platform acceptance are separate gates.
 
+The four Markdown modules have the same Java 17 baseline. `check` also compiles
+and runs an external Markdown/Math/Mermaid consumer on an installed Java 17
+toolchain. `./gradlew writeMarkdownRuntimeClasspath` exports their complete
+portable runtime graph for the Android probe's `--markdown` mode. See the
+[probe instructions](../verification/compatibility/android/README.md).
+
+After `./gradlew :app:installDist`, run the real terminal preview smoke with
+`python3 -B verification/ui/markdown_preview.py --java /path/to/jdk-25/bin/java`.
+For a compiled native binary, pass
+`--binary apps/tuink/launcher/build/native/nativeCompile/tuink` instead. The smoke
+checks paired tabs, source closure and disk reread, snapshot saves, resize,
+read-only input, all eight formulas and both Mermaid diagrams. It writes
+terminal snapshots under `build/markdown-preview-pty`. For the JVM run, add
+`--jcmd /path/to/jdk-25/bin/jcmd` to check editing-engine, session and state
+instance counts across close and reopen: one, zero, then one new instance.
+
 Linux access ACL support calls libc directly. Neither the tests nor JVM and
 native distributions require the `acl` package or a separate `libacl` library.
 
@@ -146,6 +162,12 @@ Dependency versions are locked per module, downloaded artifacts are checked
 against `gradle/verification-metadata.xml`, and both the wrapper JAR and Gradle
 distribution have pinned SHA-256 checksums. A normal build must not rewrite any
 of these files.
+
+`check` resolves every registered Native Image runtime dependency graph without
+compiling a native binary. With `-Ppgo`, this also checks all four PGO classpaths,
+so missing lock entries fail in ordinary CI before release compilation.
+Run `./gradlew :app:verifyNativeDependencyLocks -Ppgo` for this check alone;
+it requires neither a native compiler nor trained profiles.
 
 After an intentional dependency change, regenerate the lock state and
 verification metadata together while resolving the complete CI dependency

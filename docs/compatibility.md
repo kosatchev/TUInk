@@ -23,6 +23,23 @@ not promise Android support: the [external engine probe](../verification/compati
 checks JVM execution and D8/R8 processing; ART, Android storage and lifecycle
 remain separate gates.
 
+`markdown-preview`, `markdown-commonmark`, `markdown-math` and
+`markdown-mermaid` also use Java 17 API/bytecode. Their neutral document,
+source-map and provider contracts do not depend on terminal widgets, mutable
+editor state, filesystem adapters or an external parser AST. CommonMark 0.24.0
+and its three pinned extensions remain implementation dependencies of the
+CommonMark adapter. The built-in Math and Mermaid providers have no external
+runtime dependencies. `check` compiles and runs an external Markdown consumer
+on Java 17; the Android probe's `--markdown` mode supplies the entire portable
+runtime graph to D8 and R8. Future Android and desktop frontends can reuse this
+semantic layer and provide their own layout and input handling. The terminal
+layout remains in `render`, outside the portable Markdown modules.
+
+Markdown preview is transient view state. It renders the current document
+snapshot, including unsaved text, and stores no generated glyphs in the source,
+history, settings or recovery files. Its accepted syntax and limits are described
+in [Markdown preview](markdown-preview.md).
+
 The shared engine has no filesystem dependency. Neutral storage contracts live
 in `editor-contract`; public session I/O separates owner capture/approval and
 completion from worker reads, inspection and writes. `editor-storage-jvm` owns

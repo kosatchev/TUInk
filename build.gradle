@@ -300,7 +300,63 @@ def verifyProjectDependencies = tasks.register('verifyProjectDependencies') {
     }
 }
 
+def markdownJava17ApiConsumer = configurations.create('markdownJava17ApiConsumer') {
+    canBeConsumed = false
+    canBeResolved = true
+    attributes {
+        attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage, Usage.JAVA_API))
+        attribute(Category.CATEGORY_ATTRIBUTE, objects.named(Category, Category.LIBRARY))
+        attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, objects.named(LibraryElements, LibraryElements.JAR))
+        attribute(org.gradle.api.attributes.java.TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE, 17)
+    }
+}
+dependencies {
+    add('markdownJava17ApiConsumer', project(':markdown-commonmark'))
+    add('markdownJava17ApiConsumer', project(':markdown-math'))
+    add('markdownJava17ApiConsumer', project(':markdown-mermaid'))
+}
+def markdownProbeClasses = layout.buildDirectory.dir('compatibility/java17-markdown-api')
+def verifyMarkdownJava17Api = tasks.register('verifyMarkdownJava17Api', JavaCompile) {
+    group = 'verification'
+    description = 'Compile a Markdown/math/Mermaid client through the Java 17 public API variants.'
+    source(file('verification/compatibility/jvm/PortableMarkdownApiProbe.java'))
+    classpath = markdownJava17ApiConsumer
+    destinationDirectory = markdownProbeClasses
+    sourceCompatibility = '17'
+    targetCompatibility = '17'
+    options.release = 17
+    javaCompiler = providers.provider {
+        projectsByPath[':markdown-commonmark'].tasks.named('compileJava', JavaCompile).get().javaCompiler.get()
+    }
+}
+def verifyMarkdownJvm = tasks.register('verifyMarkdownJvm', JavaExec) {
+    group = 'verification'
+    description = 'Run the external Markdown/math/Mermaid consumer on Java 17.'
+    dependsOn(verifyMarkdownJava17Api)
+    classpath = files(markdownProbeClasses, java17Consumer)
+    mainClass = 'dev.tuink.compat.PortableMarkdownApiProbe'
+    maxHeapSize = '256m'
+    javaLauncher = projectsByPath[':markdown-commonmark'].javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+tasks.register('writeMarkdownRuntimeClasspath') {
+    group = 'verification'
+    description = 'Export the complete portable runtime JAR set for the external D8/R8 consumer.'
+    dependsOn(java17Consumer)
+    inputs.files(java17Consumer)
+    def output = layout.buildDirectory.file('compatibility/markdown-runtime-classpath.txt')
+    outputs.file(output)
+    notCompatibleWithConfigurationCache('Exports a resolved portable runtime graph for an external tool.')
+    doLast {
+        File target = output.get().asFile
+        target.parentFile.mkdirs()
+        target.setText(java17Consumer.files.collect { it.absolutePath }.sort().join('\n') + '\n', 'UTF-8')
+    }
+}
+
 tasks.named('check') {
+    dependsOn(verifyMarkdownJvm)
     dependsOn(verifyProjectDependencies)
     dependsOn(verifyCoreJava17Api)
     dependsOn(verifySessionJava17Api)

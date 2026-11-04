@@ -7,6 +7,7 @@ import argparse
 import datetime as dt
 import fcntl
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -34,9 +35,11 @@ PROFILE_PATTERN = re.compile(
     r"raster=(?P<raster>\d+(?:\.\d+)?)ms "
     r"diff=(?P<diff>\d+(?:\.\d+)?)ms "
     r"search=(?P<search>\d+(?:\.\d+)?)ms "
-    r"total=(?P<total>\d+(?:\.\d+)?)ms$"
+    r"total=(?P<total>\d+(?:\.\d+)?)ms(?P<extra>(?: [^ ]+)*)$"
 )
 PROFILE_METRICS = ("build", "raster", "diff", "search", "total")
+OPTIONAL_TIMINGS = ("compose", "input", "output", "response", "geometry")
+OPTIONAL_COUNTERS = ("chars", "events", "heap", "ready", "metrics_scans", "metrics_builds", "cache_misses", "rows_reused", "retained_cache_bytes")
 DEFAULT_SCENARIOS = ("down", "shift-down", "mouse-drag")
 SCENARIOS = DEFAULT_SCENARIOS + (
     "save-as-left",
@@ -44,7 +47,7 @@ SCENARIOS = DEFAULT_SCENARIOS + (
     "tabbar-wheel",
     "open-file-tree",
 )
-MOUSE_SCENARIOS = ("mouse-drag", "tabbar-wheel")
+MOUSE_SCENARIOS = ("mouse-drag", "tabbar-wheel", "wheel", "hscroll")
 SAVE_AS_STRESS_TEXT = ("draft-segment-" * 128 + "中😀" * 64).encode("utf-8")
 SEARCH_QUERY = b"__tuink_missing_search__"
 SEARCH_REPLACE_STRESS_TEXT = ("replace-segment-" * 128 + "中😀" * 64).encode("utf-8")
@@ -56,17 +59,42 @@ TERMINATE_TIMEOUT = 1.0
 KILL_TIMEOUT = 1.0
 
 
+class TerminalOutput(bytearray):
+    """Bounded tail storage whose received byte count survives trimming/clear."""
+    def __init__(self, observer=None):
+        super().__init__()
+        self.received_bytes = 0
+        self.observer = observer
+
+    def extend(self, data):
+        self.received_bytes += len(data)
+        if self.observer is not None:
+            self.observer(data)
+        super().extend(data)
+
+
+def terminal_screen(rows: int, cols: int):
+    """Load the existing screen oracle only for opt-in readiness barriers."""
+    path = Path(__file__).resolve().parents[1] / "ui" / "vt.py"
+    spec = importlib.util.spec_from_file_location("tuink_benchmark_screen", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.Screen(rows, cols)
+
+
 def create_settings_fixture(path: Path) -> None:
     path.write_text(
         "\n".join(
             (
-                "format=1",
+                "format=2",
                 "ui.showTabBar=true",
                 "ui.wrapLines=false",
                 "ui.wrapWords=true",
                 "ui.readingMode=false",
                 "ui.confirmOnClose=true",
                 "ui.mouseMode=true",
+                "ui.markdownOpenBothTabs=false",
+                "ui.markdownOpenInPreview=false",
                 "ui.highlightActiveLineNumber=true",
                 "ui.smartHomeEnd=true",
                 "ui.autoIndent=true",
@@ -116,12 +144,13 @@ def distribution(values: list[float]) -> dict[str, float]:
         "mean": statistics.fmean(values),
         "p50": statistics.median(values),
         "p95": percentile(values, 0.95),
+        "p99": percentile(values, 0.99),
         "max": max(values),
     }
 
 
-def parse_profile(path: Path) -> list[dict[str, float | int]]:
-    records: list[dict[str, float | int]] = []
+def parse_profile(path: Path) -> list[dict[str, float | int | str]]:
+    records: list[dict[str, float | int | str]] = []
     with path.open("r", encoding="utf-8") as stream:
         for line_number, raw_line in enumerate(stream, start=1):
             line = raw_line.strip()
@@ -130,9 +159,21 @@ def parse_profile(path: Path) -> list[dict[str, float | int]]:
             match = PROFILE_PATTERN.fullmatch(line)
             if match is None:
                 raise ValueError(f"invalid profile record at {path}:{line_number}: {line}")
-            record: dict[str, float | int] = {"frame": int(match.group("frame"))}
+            record: dict[str, float | int | str] = {"frame": int(match.group("frame"))}
             for metric in PROFILE_METRICS:
                 record[metric] = float(match.group(metric))
+            for token in match.group("extra").split():
+                name, separator, value = token.partition("=")
+                if not separator or name in record:
+                    raise ValueError(f"invalid extra profile field at {path}:{line_number}: {token}")
+                if name == "surface" and value in ("source", "preview"):
+                    record[name] = value
+                elif name in OPTIONAL_TIMINGS and re.fullmatch(r"\d+(?:\.\d+)?ms", value):
+                    record[name] = float(value[:-2])
+                elif name in OPTIONAL_COUNTERS and value.isascii() and value.isdecimal():
+                    record[name] = int(value)
+                else:
+                    raise ValueError(f"unsupported profile field at {path}:{line_number}: {token}")
             records.append(record)
     return records
 
@@ -214,15 +255,20 @@ def drain(selector: selectors.BaseSelector, captured: bytearray) -> bool:
     return read_any
 
 
-def event_sequence(scenario: str, index: int) -> bytes:
+def event_sequence(scenario: str, index: int, rows: int | None = None, cols: int | None = None) -> bytes:
     if scenario == "down":
         return b"\x1b[B"
     if scenario == "shift-down":
         return b"\x1b[1;2B"
     if scenario == "mouse-drag":
-        row = 3 + index % 35
-        col = 10 + index % 100
+        row = 3 + index % (35 if rows is None else max(1, rows - 5))
+        col = 10 + index % (100 if cols is None else max(1, cols - 12))
         return f"\x1b[<32;{col};{row}M".encode("ascii")
+    if scenario == "wheel":
+        return b"\x1b[<65;10;10M"
+    if scenario == "hscroll":
+        button = 67 if index % 2 == 0 else 66
+        return f"\x1b[<{button};10;10M".encode("ascii")
     if scenario == "tabbar-wheel":
         button = 65 if index % 2 == 0 else 64
         return f"\x1b[<{button};10;2M".encode("ascii")
@@ -231,6 +277,23 @@ def event_sequence(scenario: str, index: int) -> bytes:
     if scenario == "open-file-tree":
         return b"\x1b[B"
     raise ValueError(f"unsupported scenario: {scenario}")
+
+
+def paired_event_sequence(scenario: str, index: int, rows: int, cols: int, surface: str) -> bytes:
+    """Paired content coordinates below the shared tab bar on both surfaces."""
+    if surface not in ("source", "preview"):
+        raise ValueError(f"unsupported paired surface: {surface}")
+    if scenario != "mouse-drag":
+        return event_sequence(scenario, index, rows, cols)
+    first_row = 3
+    row = first_row + index % max(1, rows - first_row - 2)
+    col = 10 + index % max(1, cols - 12)
+    return f"\x1b[<32;{col};{row}M".encode("ascii")
+
+
+def drag_button(surface: str | None, pressed: bool) -> bytes:
+    first_row = 3
+    return f"\x1b[<0;10;{first_row}{'M' if pressed else 'm'}".encode("ascii")
 
 
 def require_normal_exit(status: int) -> None:
@@ -256,7 +319,13 @@ def run_profile(
     event_delay: float,
     quiet_period: float,
     completion_timeout: float,
+    *,
+    surface: str | None = None,
+    warmup_events: int = 0,
+    diagnostics: dict[str, object] | None = None,
 ) -> float:
+    if surface not in (None, "source", "preview"):
+        raise ValueError(f"unsupported presentation: {surface}")
     if profile_path.exists():
         profile_path.unlink()
     runtime_home = Path(tempfile.mkdtemp(prefix="tuink-render-home-"))
@@ -284,7 +353,8 @@ def run_profile(
             os._exit(127)
 
     selector = selectors.DefaultSelector()
-    captured = bytearray()
+    screen = terminal_screen(rows, cols) if surface is not None else None
+    captured = TerminalOutput(screen.feed if screen is not None else None)
     status: int | None = None
 
     def poll() -> int | None:
@@ -321,13 +391,81 @@ def run_profile(
                 return
         raise TimeoutError(f"application process {pid} could not be reaped after SIGKILL")
 
+    def await_screen(predicate, description: str) -> None:
+        deadline = time.monotonic() + completion_timeout
+        while not predicate():
+            if poll() is not None:
+                raise RuntimeError(f"application exited during {description} with wait status {status}")
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"timed out waiting for {description}")
+            drain(selector, captured)
+            time.sleep(0.005)
+
+    def await_quiet(description: str) -> None:
+        deadline = time.monotonic() + completion_timeout
+        quiet_since = time.monotonic()
+        while time.monotonic() - quiet_since < quiet_period:
+            if poll() is not None:
+                raise RuntimeError(f"application exited during {description} with wait status {status}")
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"terminal did not become quiet during {description}")
+            if drain(selector, captured):
+                quiet_since = time.monotonic()
+            time.sleep(0.005)
+
     try:
         tty.setraw(master)
         selector.register(master, selectors.EVENT_READ)
-        startup_deadline = time.monotonic() + startup_delay
+        launch_started = time.monotonic()
+        startup_deadline = launch_started + startup_delay
         while time.monotonic() < startup_deadline:
             drain(selector, captured)
             time.sleep(0.01)
+
+        if screen is not None:
+            await_screen(lambda: "File" in screen.lines[0] and "Ln " in screen.text,
+                         "Source readiness")
+            source_ready_elapsed = time.monotonic() - launch_started
+            preview_ready_elapsed = None
+            if surface == "preview":
+                preview_started = time.monotonic()
+                os.write(master, b"\x10")
+                await_screen(lambda: "Preview (live)" in screen.lines[-1] and "Ctrl+P" in screen.lines[-1]
+                             and "Row " in screen.lines[-1] and "updating" not in screen.lines[-1],
+                             "accepted Preview layout")
+                preview_ready_elapsed = time.monotonic() - preview_started
+            if scenario == "hscroll":
+                # Move beyond the initial left edge before timing repeated pan.
+                for _ in range(64):
+                    os.write(master, event_sequence("hscroll", 0))
+                    drain(selector, captured)
+                    time.sleep(event_delay)
+            if scenario == "mouse-drag":
+                os.write(master, drag_button(surface, True))
+            for index in range(warmup_events):
+                os.write(master, paired_event_sequence(scenario, index, rows, cols, surface))
+                drain(selector, captured)
+                time.sleep(event_delay)
+            if scenario == "mouse-drag":
+                os.write(master, drag_button(surface, False))
+            # A quiet output stream alone cannot prove that no-output events
+            # have left the input queue. A visible menu round trip is ordered
+            # after every warmup event and preserves the content viewport.
+            os.write(master, b"\x1bOP")
+            await_screen(lambda: "Save As..." in screen.text and "Quit" in screen.text,
+                         "warmup input fence opening")
+            os.write(master, b"\x1b[27u")
+            await_screen(lambda: "Save As..." not in screen.text,
+                         "warmup input fence closing")
+            await_quiet("warmup")
+            # The oracle establishes readiness only. Keep Python cell parsing
+            # out of the measured producer/consumer loop.
+            captured.observer = None
+            if diagnostics is not None:
+                diagnostics.update(source_ready_s=source_ready_elapsed,
+                                   preview_ready_s=preview_ready_elapsed,
+                                   warmup_events=warmup_events,
+                                   profile_start_checkpoint=profile_line_count(profile_path))
 
         if scenario == "save-as-left":
             # Open Save As through the public Ctrl+K binding, then exercise a
@@ -429,15 +567,18 @@ def run_profile(
                 )
             captured.clear()
 
+        profile_start_checkpoint = profile_line_count(profile_path) if screen is not None else 0
+        measured_output_start = captured.received_bytes
         input_start = time.monotonic()
         if scenario == "mouse-drag":
-            os.write(master, b"\x1b[<0;10;3M")
+            os.write(master, drag_button(surface, True))
         for index in range(frames):
-            os.write(master, event_sequence(scenario, index))
+            os.write(master, paired_event_sequence(scenario, index, rows, cols, surface) if screen is not None
+                     else event_sequence(scenario, index))
             drain(selector, captured)
             time.sleep(event_delay)
         if scenario == "mouse-drag":
-            os.write(master, b"\x1b[<0;10;3m")
+            os.write(master, drag_button(surface, False))
 
         completion_deadline = time.monotonic() + completion_timeout
         quiet_since = time.monotonic()
@@ -450,6 +591,9 @@ def run_profile(
                 quiet_since = time.monotonic()
             time.sleep(0.01)
         input_elapsed = time.monotonic() - input_start
+        if diagnostics is not None:
+            diagnostics["pty_output_bytes"] = captured.received_bytes - measured_output_start
+            diagnostics["profile_start_checkpoint"] = profile_start_checkpoint
 
         if scenario == "open-file-tree":
             late_row = min(OPEN_FILE_TREE_ENTRY_COUNT - 1, max(0, frames - 2))
@@ -472,6 +616,8 @@ def run_profile(
         if exit_status is None:
             raise TimeoutError(f"application did not exit after Ctrl+Q within {EXIT_TIMEOUT:g}s")
         require_normal_exit(exit_status)
+        if surface is not None and scenario == "mouse-drag" and captured.received_bytes == measured_output_start:
+            raise RuntimeError("paired mouse-drag produced no terminal output; content selection was not exercised")
     except Exception:
         terminal_tail = captured[-4000:].decode("utf-8", errors="replace")
         if terminal_tail:
@@ -486,7 +632,7 @@ def run_profile(
             shutil.rmtree(runtime_home, ignore_errors=True)
 
     expected = frames // 30
-    actual = profile_line_count(profile_path)
+    actual = profile_line_count(profile_path) - profile_start_checkpoint
     if actual != expected:
         raise RuntimeError(
             f"unexpected checkpoint count for {scenario}: {actual}, expected {expected}"
@@ -623,16 +769,32 @@ def run_parameters(args: argparse.Namespace, scenarios: list[str]) -> dict[str, 
 
 
 def summarize_scenario(
-    records: list[dict[str, float | int]], input_elapsed: list[float], repeats: int
+    records: list[dict[str, float | int | str]], input_elapsed: list[float], repeats: int
 ) -> dict[str, object]:
     metrics = {
         metric: distribution([float(record[metric]) for record in records])
         for metric in PROFILE_METRICS
     }
+    samples = {metric: len(records) for metric in PROFILE_METRICS}
+    for metric in OPTIONAL_TIMINGS:
+        values = [float(record[metric]) for record in records if metric in record
+                  and (metric not in ("input", "response") or int(record.get("events", 0)) > 0)]
+        if values:
+            metrics[metric] = distribution(values)
+            samples[metric] = len(values)
+    counters, counter_samples = {}, {}
+    for name in OPTIONAL_COUNTERS:
+        values = [float(record[name]) for record in records if name in record]
+        if values:
+            counters[name] = distribution(values)
+            counter_samples[name] = len(values)
     return {
         "repeats": repeats,
         "checkpoints": len(records),
         "metrics_ms": metrics,
+        "metric_samples": samples,
+        "counters": counters,
+        "counter_samples": counter_samples,
         "input_elapsed_s": distribution(input_elapsed),
     }
 
@@ -686,8 +848,8 @@ def summary_markdown(summary: dict[str, object]) -> str:
             "",
             "Values are aggregated over the profiler checkpoints from all repeats.",
             "",
-            "| Scenario | Build mean/p50/p95 | Raster mean/p50/p95 | "
-            "Diff mean/p50/p95 | Total mean/p50/p95 | Queue mean, s |",
+            "| Scenario | Build mean/p50/p95/p99 | Raster mean/p50/p95/p99 | "
+            "Diff mean/p50/p95/p99 | Total mean/p50/p95/p99 | Queue mean, s |",
             "|---|---:|---:|---:|---:|---:|",
         ]
     )
@@ -697,7 +859,7 @@ def summary_markdown(summary: dict[str, object]) -> str:
         def triple(metric: str) -> str:
             values = metrics[metric]
             return "/".join(
-                format_metric(float(values[key])) for key in ("mean", "p50", "p95")
+                format_metric(float(values[key])) for key in ("mean", "p50", "p95", "p99")
             )
 
         queue_mean = float(data["input_elapsed_s"]["mean"])
@@ -712,7 +874,7 @@ def run_self_test() -> None:
     assert percentile([1.0, 2.0, 3.0, 4.0], 0.5) == 2.5
     assert abs(percentile([1.0, 2.0, 3.0, 4.0], 0.95) - 3.85) < 1e-9
     stats = distribution([1.0, 2.0, 3.0])
-    assert stats == {"mean": 2.0, "p50": 2.0, "p95": 2.9, "max": 3.0}
+    assert stats == {"mean": 2.0, "p50": 2.0, "p95": 2.9, "p99": 2.98, "max": 3.0}
     assert event_sequence("save-as-left", 0) == b"\x1b[D"
     assert event_sequence("search-replace-left", 0) == b"\x1b[D"
     assert event_sequence("tabbar-wheel", 0) == b"\x1b[<65;10;2M"

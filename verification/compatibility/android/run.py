@@ -26,6 +26,7 @@ def main():
     parser.add_argument("--compile-api", required=True)
     parser.add_argument("--min-api", type=int, required=True)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--markdown", action="store_true", help="Include portable Markdown, math and Mermaid providers")
     args = parser.parse_args()
     root = next(parent for parent in Path(__file__).resolve().parents
                 if (parent / 'settings.gradle').is_file() and (parent / 'gradlew').is_file())
@@ -40,6 +41,11 @@ def main():
     }
     jars = [root / directory / "build/libs" / f"{module}-{version}.jar"
             for module, directory in modules.items()]
+    if args.markdown:
+        exported = root / 'build/compatibility/markdown-runtime-classpath.txt'
+        if not exported.is_file():
+            parser.error('Run ./gradlew writeMarkdownRuntimeClasspath first')
+        jars = list(dict.fromkeys([*jars, *(Path(line) for line in exported.read_text().splitlines() if line)]))
     android = args.sdk / "platforms" / f"android-{args.compile_api}" / "android.jar"
     dexer = args.sdk / "build-tools" / args.build_tools / "lib/d8.jar"
     java = args.jdk / "bin/java"
@@ -55,11 +61,17 @@ def main():
         work = Path(workdir)
         classes = work / "classes"
         classes.mkdir()
+        probes = [root / "verification/compatibility/android/PortableEngineProbe.java",
+                  root / "verification/fixtures/java/dev/tuink/verification/MemoryDocumentStorage.java"]
+        if args.markdown:
+            probes.append(root / "verification/compatibility/jvm/PortableMarkdownApiProbe.java")
         run([javac, "--release", "17", "-cp", os.pathsep.join(map(str, jars)), "-d", classes,
-             root / "verification/compatibility/android/PortableEngineProbe.java",
-             root / "verification/fixtures/java/dev/tuink/verification/MemoryDocumentStorage.java"])
+             *probes])
         run([runtime_java, "-Xmx256m", "-cp", os.pathsep.join(map(str, [classes, *jars])),
              "dev.tuink.compat.PortableEngineProbe"])
+        if args.markdown:
+            run([runtime_java, '-Xmx256m', '-cp', os.pathsep.join(map(str, [classes, *jars])),
+                 'dev.tuink.compat.PortableMarkdownApiProbe'])
         probe = work / "probe.jar"
         with zipfile.ZipFile(probe, "w", zipfile.ZIP_DEFLATED) as archive:
             for path in sorted(classes.rglob("*.class")):
@@ -70,6 +82,8 @@ def main():
                          "--release", "--min-api", args.min_api, "--lib", android, "--output", target]
             if compiler == "R8":
                 arguments += ["--pg-conf", root / "verification/compatibility/android/keep.pro"]
+                if args.markdown:
+                    arguments += ['--pg-conf', root / 'verification/compatibility/android/markdown-keep.pro']
             run([*arguments, probe, *jars])
             with zipfile.ZipFile(target) as archive:
                 if "classes.dex" not in archive.namelist():

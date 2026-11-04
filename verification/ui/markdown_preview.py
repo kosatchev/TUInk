@@ -432,6 +432,57 @@ def code_highlighting(args, output):
     print(f'PASS: Source/Preview code colors and persisted MD code syntax setting: {output}', flush=True)
 
 
+def preview_menu_pointer(args, output):
+    """Mouse menu commands must not become clicks in the Preview underneath."""
+    def open_item(session, key, label):
+        session.send(key)
+        session.expect(lambda: label in session.screen.text, label + ' menu item')
+        for row, line in enumerate(session.screen.lines):
+            if label in line:
+                return row, line.index(label) + 2, '[x]' in line
+        raise AssertionError('Missing menu item: ' + label)
+
+    for mode in ('live', 'snapshot'):
+        document = output / f'menu-pointer-{mode}.md'
+        text = '# Menu pointer\n\n```text\n' + '\n'.join(f'row-{row:03d} menu pointer probe' for row in range(50)) + '\n```\n'
+        document.write_text(text, encoding='utf-8')
+        with Session(output / f'menu-pointer-{mode}', args.java, args.classpath, document,
+                     native_executable=args.binary, timeout=60) as session:
+            session.send(b'\x10')
+            expect_preview(session, 'menu pointer live Preview')
+            if mode == 'snapshot':
+                session.send(b'\x10\x17')  # Close the clean Source, retaining its Preview.
+                expect_preview(session, 'menu pointer snapshot Preview', mode='snapshot')
+            for key, label in ((b'\x1bOR', 'Syntax highlighting'),
+                               (b'\x1b[15~', 'Reading mode'),
+                               (b'\x1b[15~', 'MD code syntax')):
+                position = preview_position(session)
+                row, column, checked = open_item(session, key, label)
+                session.mouse(0, row, column)
+                session.mouse(0, row, column, True)
+                expect_preview(session, 'Preview after ' + label, mode=mode)
+                if preview_position(session) != position:
+                    raise AssertionError('Menu action moved the Preview caret: ' + label)
+                _, _, after = open_item(session, key, label)
+                if after == checked:
+                    raise AssertionError('Preview mouse menu action did not toggle ' + label)
+                session.send(b'\x1b', 0.7)
+            position = preview_position(session)
+            row, column, _ = open_item(session, b'\x1bOP', 'Open...')
+            session.mouse(0, row, column)
+            session.mouse(0, row, column, True)
+            session.expect(lambda: 'Open File' in session.screen.text, 'mouse menu opens the file picker')
+            session.send(b'\x1b', 0.7)
+            expect_preview(session, 'Preview after dismissing the file picker', mode=mode)
+            if preview_position(session) != position:
+                raise AssertionError('Opening a file picker moved the Preview caret')
+            session.snapshot('menu-actions')
+            session.finish()
+        if document.read_text(encoding='utf-8') != text:
+            raise AssertionError('Preview menu commands modified the source')
+    print(f'PASS: mouse menu commands in live and snapshot Preview: {output}', flush=True)
+
+
 def main():
     root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__)
@@ -512,6 +563,7 @@ def main():
     if document.read_text(encoding='utf-8') != text:
         raise AssertionError('Preview modified the source document')
     code_highlighting(args, output)
+    preview_menu_pointer(args, output)
     sample_sweep(args, output)
     scrollbar_controls(args, output)
     flowchart_scroll(args, output)

@@ -41,10 +41,17 @@ class WindowChromeIntegrationTest {
     }
 
     @Test void previewTabStripRetainsAnExplicitWheelViewportAcrossOrdinaryFrames() throws Exception {
-        try (var window = new EditorWindowFixture(directory, false, List.of(""))) {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, List.of(""))) {
             window.ui.showTabBarSetting = true;
             window.resize(16, 42);
             for (int index = 0; index < 7; index++) window.event(ctrl(KeyStroke.Key.N));
+            window.command(TuinkCommand.DOCUMENT_SAVE_AS);
+            window.command(TuinkCommand.EDIT_SELECT_ALL);
+            Path markdown = directory.resolve("last.md");
+            window.event(new TextInput(markdown.toString()));
+            window.event(KeyStroke.of(KeyStroke.Key.ENTER));
+            window.await(() -> !window.documentIo.busy() && window.selected().uiState().modalState.isNone());
+            assertEquals(markdown, dev.tuink.storage.jvm.JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
             window.event(ctrl(KeyStroke.Key.P));
             window.await(() -> window.preview().ready());
             var active = window.selected().presentationId();

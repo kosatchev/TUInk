@@ -163,7 +163,7 @@ class PairedMarkdownOpenEncodingIntegrationTest {
     void frozenPreviewCanChooseAnExplicitDecoderAndOpenAnotherFileWithoutManufacturingAnEditor() throws Exception {
         Path legacy = directory.resolve("legacy.md");
         Files.write(legacy, "Привет".getBytes(DocumentEncoding.WINDOWS_1251.charset()));
-        try (var window = new EditorWindowFixture(directory, false, List.of("# Original"))) {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("# Original"))) {
             window.event(new TextInput("draft "));
             window.event(ctrl(KeyStroke.Key.P));
             window.await(() -> window.preview().ready());

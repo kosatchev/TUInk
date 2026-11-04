@@ -157,7 +157,7 @@ class MarkdownPreviewScrollbarIntegrationTest {
         lines.add("# Payload"); lines.add(""); lines.add("```text");
         for (int i = 0; i < 100; i++) lines.add("ROW" + i + "_中😀_" + "long_content_".repeat(25));
         lines.add("```");
-        return new EditorWindowFixture(directory, false, lines);
+        return new EditorWindowFixture(directory, "document.md", false, lines);
     }
     private static MarkdownPreviewState preview(EditorWindowFixture window) throws Exception {
         window.event(KeyStroke.of(KeyStroke.Key.P, KeyStroke.Modifier.CTRL));

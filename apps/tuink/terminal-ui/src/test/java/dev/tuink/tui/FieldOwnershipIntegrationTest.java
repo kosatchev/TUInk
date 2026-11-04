@@ -16,7 +16,7 @@ class FieldOwnershipIntegrationTest {
     @TempDir Path directory;
 
     @Test void previewQueryKeepsItsLogicalCopyRecipientWhileTheMenuOwnsPhysicalInput() throws Exception {
-        try (var window = new EditorWindowFixture(directory, false, List.of("# Heading", "alpha body"))) {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("# Heading", "alpha body"))) {
             window.command(TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW); window.await(() -> window.preview().ready());
             window.command(TuinkCommand.SEARCH_OPEN); window.event(new TextInput("alpha"));
             window.command(TuinkCommand.EDIT_SELECT_ALL);
@@ -47,7 +47,7 @@ class FieldOwnershipIntegrationTest {
     }
 
     @Test void previewFindFieldAndBodyShareActualFocusForNavigationCopyTraversalAndCursor() throws Exception {
-        try (var window = new EditorWindowFixture(directory, false, List.of("# Heading", "", "alpha beta alpha gamma"))) {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("# Heading", "", "alpha beta alpha gamma"))) {
             window.command(TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW); window.await(() -> window.preview().ready());
             window.command(TuinkCommand.SEARCH_OPEN); window.event(new TextInput("alpha"));
             var preview = window.preview();
@@ -95,7 +95,7 @@ class FieldOwnershipIntegrationTest {
     }
 
     @Test void previewQueryCaptureNeverMovesContentAndIsCancelledBeforeAModalTakesOwnership() throws Exception {
-        try (var window = new EditorWindowFixture(directory, false, List.of("# Heading", "alpha beta gamma delta epsilon"))) {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("# Heading", "alpha beta gamma delta epsilon"))) {
             window.command(TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW); window.await(() -> window.preview().ready());
             window.command(TuinkCommand.SEARCH_OPEN);
             window.event(new TextInput("alpha beta gamma delta epsilon"));

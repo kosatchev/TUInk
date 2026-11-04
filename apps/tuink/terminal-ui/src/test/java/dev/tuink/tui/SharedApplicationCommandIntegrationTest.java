@@ -16,7 +16,7 @@ class SharedApplicationCommandIntegrationTest {
     @Test void keyboardAndMenuOpenResetPickerForSourceLiveAndFrozenPreview() throws Exception {
         for (var kind : ActiveSurface.Kind.values()) {
             for (boolean menu : new boolean[] {false, true}) {
-                try (var window = new EditorWindowFixture(directory.resolve(kind + "-" + menu), false, List.of("# Original"))) {
+                try (var window = new EditorWindowFixture(directory.resolve(kind + "-" + menu), "document.md", false, List.of("# Original"))) {
                     select(window, kind);
                     var owner = window.selected();
                     owner.uiState().lastPickerDirectoryFailure = new FileTreeModel.DirectoryFailure(directory, "old failure");
@@ -36,7 +36,7 @@ class SharedApplicationCommandIntegrationTest {
 
     @Test void previewFindAndSaveAsRemainEditableWhileDocumentEditsAreUnavailable() throws Exception {
         for (var kind : new ActiveSurface.Kind[] {ActiveSurface.Kind.LIVE_PREVIEW, ActiveSurface.Kind.FROZEN_PREVIEW}) {
-            try (var window = new EditorWindowFixture(directory.resolve(kind.name()), false, List.of("# Original"))) {
+            try (var window = new EditorWindowFixture(directory.resolve(kind.name()), "document.md", false, List.of("# Original"))) {
                 select(window, kind);
                 assertFalse(window.controller.activeSurface().allows(TuinkCommand.EDIT_PASTE));
                 window.command(TuinkCommand.SEARCH_OPEN);

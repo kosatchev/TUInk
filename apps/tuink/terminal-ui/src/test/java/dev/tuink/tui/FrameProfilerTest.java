@@ -75,7 +75,8 @@ class FrameProfilerTest {
     }
 
     @Test void sourceAndReadyPreviewReportTheSameAdditionalPhaseFields() throws Exception {
-        try (var window = new EditorWindowFixture(directory, false)) {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, java.util.stream.IntStream.range(0, 120)
+                .mapToObj(index -> "ROW%04d|".formatted(index) + "abcdefgh ".repeat(30)).toList())) {
             var output = new StringWriter();
             window.host.frameProfiler.setOutput(new PrintWriter(output), false);
             window.host.profileEnabled = true;

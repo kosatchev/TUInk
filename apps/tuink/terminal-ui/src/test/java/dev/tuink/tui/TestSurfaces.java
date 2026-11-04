@@ -1,6 +1,7 @@
 package dev.tuink.tui;
 
 import dev.tuink.editor.document.PresentationId;
+import dev.tuink.editor.language.LanguageId;
 
 /** Explicit capabilities for isolated menu/dispatcher tests without a workspace. */
 final class TestSurfaces {
@@ -8,12 +9,12 @@ final class TestSurfaces {
 
     static ActiveSurface source(boolean reading) {
         return new ActiveSurface(new PresentationId("isolated-source"), ActiveSurface.Kind.SOURCE,
-            ActiveSurface.Focus.CONTENT, ActiveSurface.ModalScope.NONE, reading, false, false, true, true, false);
+            ActiveSurface.Focus.CONTENT, ActiveSurface.ModalScope.NONE, reading, false, false, true, true, false, LanguageId.MARKDOWN);
     }
 
     static ActiveSurface source(UiSessionState preferences) {
         return new ActiveSurface(new PresentationId("isolated-source"), ActiveSurface.Kind.SOURCE,
             ActiveSurface.Focus.CONTENT, ActiveSurface.ModalScope.NONE, preferences.readingModeSetting,
-            false, false, true, true, preferences.wrapLinesSetting);
+            false, false, true, true, preferences.wrapLinesSetting, LanguageId.MARKDOWN);
     }
 }

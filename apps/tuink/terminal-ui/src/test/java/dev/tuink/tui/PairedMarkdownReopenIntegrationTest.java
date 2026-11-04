@@ -25,7 +25,7 @@ class PairedMarkdownReopenIntegrationTest {
     @TempDir Path directory;
 
     @Test void missingReadKeepsTheSnapshotSelectionAndPresentationAccessible() throws Exception {
-        try (var window = new EditorWindowFixture(directory, false, List.of("original needle"))) {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("original needle"))) {
             var preview = freezeClean(window); var captured = closed(preview).source();
             window.event(ctrl(KeyStroke.Key.F)); window.event(new TextInput("needle"));
             window.event(KeyStroke.of(KeyStroke.Key.ENTER)); window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
@@ -46,7 +46,7 @@ class PairedMarkdownReopenIntegrationTest {
     @ValueSource(strings = {"symlink", "hardlink"})
     void anAlreadyOpenDirtyAliasIsActivatedWithoutReloadingOrLosingHistory(String kind) throws Exception {
         assumeTrue(Files.getFileStore(directory).supportsFileAttributeView("posix"));
-        try (var window = new EditorWindowFixture(directory, false, List.of("original"))) {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("original"))) {
             var frozen = freezeClean(window);
             Path alias = directory.resolve("alias.md");
             if (kind.equals("symlink")) Files.createSymbolicLink(alias, window.document.getFileName());
@@ -72,7 +72,7 @@ class PairedMarkdownReopenIntegrationTest {
     }
 
     @Test void reopeningIntoAnExistingPairRetiresTheDuplicatePreviewInsteadOfCreatingAnotherPair() throws Exception {
-        try (var window = new EditorWindowFixture(directory, false, List.of("original"))) {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("original"))) {
             var oldPreview = freezeClean(window);
             window.event(ctrl(KeyStroke.Key.N));
             window.active().tabSession().engine().openExisting(JvmDocumentStorage.resource(window.document)); window.frame();
@@ -91,7 +91,7 @@ class PairedMarkdownReopenIntegrationTest {
 
     @Test void hiddenReopenCompletionMayAttachItsSourceButCannotStealTheNewTabsFocus() throws Exception {
         ArrayDeque<Runnable> queue = new ArrayDeque<>();
-        try (var window = new EditorWindowFixture(directory, false, List.of("original"), queue::add)) {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("original"), queue::add)) {
             var preview = freezeClean(window);
             window.event(ctrl(KeyStroke.Key.P)); assertTrue(window.documentIo.busy()); assertEquals(1, queue.size());
             window.event(ctrl(KeyStroke.Key.N));
@@ -110,7 +110,7 @@ class PairedMarkdownReopenIntegrationTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void anExistingPairUsesItsOwnViewWhenAnotherViewIsTheFirstResourceMatch(boolean reveal) throws Exception {
-        try (var window = new EditorWindowFixture(directory, false,
+        try (var window = new EditorWindowFixture(directory, "document.md", false,
                 List.of("# First", "", "# Second needle", "", "tail"))) {
             var frozen = freezeClean(window);
             window.event(ctrl(KeyStroke.Key.N));
@@ -159,7 +159,7 @@ class PairedMarkdownReopenIntegrationTest {
 
     @Test void cancellingAQueuedReadThenRetryingCannotPublishTheCancelledAttempt() throws Exception {
         ArrayDeque<Runnable> queue = new ArrayDeque<>();
-        try (var window = new EditorWindowFixture(directory, false, List.of("original"), queue::add)) {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("original"), queue::add)) {
             var preview = freezeClean(window); var captured = closed(preview).source();
             window.event(ctrl(KeyStroke.Key.P)); assertEquals(1, queue.size());
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
@@ -179,12 +179,38 @@ class PairedMarkdownReopenIntegrationTest {
 
     @Test void aClosedPreviewCannotBeResurrectedByItsQueuedReadOrDisplaceANewerPreview() throws Exception {
         ArrayDeque<Runnable> queue = new ArrayDeque<>();
-        try (var window = new EditorWindowFixture(directory, false, List.of("original"), queue::add)) {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("original"), queue::add)) {
             var old = freezeClean(window);
             window.event(ctrl(KeyStroke.Key.P)); assertEquals(1, queue.size());
             window.command(TuinkCommand.TAB_CLOSE);
             assertNull(window.context.presentation(old.presentationId()));
             assertTrue(old.uiState().preview.closed); assertFalse(window.documentIo.busy());
+            var replacementSource = window.selected();
+            window.event(new TextInput("# Replacement"));
+            window.event(ctrl(KeyStroke.Key.P));
+            assertSame(replacementSource, window.selected(), "the replacement draft must first acquire a Markdown filename");
+            Path replacementFile = directory.resolve("replacement.md");
+            window.command(TuinkCommand.DOCUMENT_SAVE_AS);
+            window.command(TuinkCommand.EDIT_SELECT_ALL); window.event(new TextInput(replacementFile.toString()));
+            window.event(KeyStroke.of(KeyStroke.Key.ENTER));
+            assertEquals(2, queue.size(), "the cancelled read is still queued before Save As inspection");
+            var cancelledRead = queue.getFirst();
+            var inspection = window.documentIo.pendingOperation();
+            // Save As inspects first, then owner acceptance submits a separate
+            // write. Complete both while keeping the abandoned read queued
+            // until the newer Preview exists, preserving the stale-publication race.
+            runLast(queue); window.frame();
+            assertNull(window.active().state().getCurrentResource(), "inspection is not a saved binding receipt");
+            assertTrue(window.documentIo.busy());
+            assertNotSame(inspection, window.documentIo.pendingOperation());
+            assertEquals(DocumentIoController.Kind.SAVE, window.documentIo.pendingOperation().kind());
+            assertEquals(2, queue.size(), "the owner submitted the approved write after inspection");
+            assertSame(cancelledRead, queue.getFirst());
+            runLast(queue); window.frame();
+            assertEquals(replacementFile, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
+            assertEquals("# Replacement", Files.readString(replacementFile));
+            assertFalse(window.documentIo.busy());
+            assertEquals(1, queue.size()); assertSame(cancelledRead, queue.getFirst());
             var replacement = open(window);
             assertNotEquals(old.presentationId(), replacement.presentationId());
             runNext(queue); window.frame();
@@ -212,6 +238,12 @@ class PairedMarkdownReopenIntegrationTest {
         Thread worker = new Thread(queue.remove(), "paired-preview-test-read");
         worker.start(); worker.join(5_000);
         assertFalse(worker.isAlive(), "Queued immutable resource read did not finish");
+    }
+    private static void runLast(ArrayDeque<Runnable> queue) throws InterruptedException {
+        assertFalse(queue.isEmpty());
+        Thread worker = new Thread(queue.removeLast(), "paired-preview-test-save");
+        worker.start(); worker.join(5_000);
+        assertFalse(worker.isAlive(), "Queued immutable Save As phase did not finish");
     }
     private static void drain(ArrayDeque<Runnable> queue) { while (!queue.isEmpty()) queue.remove().run(); }
 }

@@ -3,6 +3,7 @@ package dev.tuink.tui;
 import static org.junit.jupiter.api.Assertions.*;
 
 import dev.tuink.editor.document.PresentationId;
+import dev.tuink.editor.language.LanguageId;
 import dev.tuink.tui.command.TuinkCommand;
 import org.junit.jupiter.api.Test;
 
@@ -30,7 +31,7 @@ class ActiveSurfaceTest {
     @Test void readonlyDocumentDoesNotMakeItsFindOrSaveAsFieldReadonly() {
         for (var kind : ActiveSurface.Kind.values()) {
             var content = new ActiveSurface(PresentationId.create(), kind, ActiveSurface.Focus.CONTENT,
-                ActiveSurface.ModalScope.NONE, true, false, false, true, true, true);
+                ActiveSurface.ModalScope.NONE, true, false, false, true, true, true, LanguageId.MARKDOWN);
             assertFalse(content.allows(TuinkCommand.EDIT_PASTE));
             assertTrue(content.allows(TuinkCommand.EDIT_COPY));
             var field = content.withFocus(ActiveSurface.Focus.EDITABLE_TEXT);
@@ -50,14 +51,14 @@ class ActiveSurfaceTest {
             assertTrue(surface.allows(TuinkCommand.SEARCH_REPLACE_ALL));
             assertFalse(surface.withKind(ActiveSurface.Kind.LIVE_PREVIEW).allows(TuinkCommand.SEARCH_REPLACE_ALL));
             var locked = new ActiveSurface(surface.presentationId(), surface.kind(), focus, surface.modalScope(),
-                surface.reading(), true, false, true, true, true);
+                surface.reading(), true, false, true, true, true, surface.language());
             assertFalse(locked.allows(TuinkCommand.SEARCH_REPLACE_ALL));
         }
     }
 
     @Test void globalModalAndIoLocksHaveSeparateScopes() {
         var source = new ActiveSurface(PresentationId.create(), ActiveSurface.Kind.SOURCE,
-            ActiveSurface.Focus.CONTENT, ActiveSurface.ModalScope.WINDOW, false, true, true, false, true, false);
+            ActiveSurface.Focus.CONTENT, ActiveSurface.ModalScope.WINDOW, false, true, true, false, true, false, LanguageId.MARKDOWN);
         assertFalse(source.allows(TuinkCommand.DOCUMENT_OPEN));
         assertFalse(source.allows(TuinkCommand.TAB_ACTIVATE));
         assertFalse(source.allows(TuinkCommand.TAB_NEXT));
@@ -66,6 +67,23 @@ class ActiveSurfaceTest {
         assertTrue(source.allows(TuinkCommand.EDIT_COPY));
         assertTrue(source.allows(TuinkCommand.DOCUMENT_SAVE_AS), "the subject workflow owns Save As busy policy");
         assertTrue(source.allows(TuinkCommand.SETTINGS_TOGGLE_MOUSE), "unavailable mouse keeps its warning action");
+    }
+
+    @Test void markdownAdmissionIsSharedButReturningFromAnyExistingPreviewDoesNotDependOnItsFileExtension() {
+        for (var language : LanguageId.values()) {
+            for (var kind : ActiveSurface.Kind.values()) {
+                for (var modal : ActiveSurface.ModalScope.values()) {
+                    var surface = new ActiveSurface(PresentationId.create(), kind, ActiveSurface.Focus.CONTENT,
+                        modal, false, false, false, true, true, true, language);
+                    boolean allowed = modal != ActiveSurface.ModalScope.WINDOW
+                        && (kind != ActiveSurface.Kind.SOURCE || language == LanguageId.MARKDOWN);
+                    assertEquals(allowed, surface.allows(TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW),
+                        language + " / " + kind + " / " + modal);
+                    assertEquals(surface.language(), surface.withRuntime(false, false).language());
+                    assertEquals(surface.language(), surface.withFocus(ActiveSurface.Focus.CONTROL).language());
+                }
+            }
+        }
     }
 
     @Test void applicationIntentsAreSharedAndHelpDoesNotMutatePreferences() {

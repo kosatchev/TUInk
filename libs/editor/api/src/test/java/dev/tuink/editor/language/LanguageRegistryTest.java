@@ -10,7 +10,7 @@ class LanguageRegistryTest {
     @Test
     void canonicalIdentityIncludesAllEditingAndHighlightingAliases() {
         assertAliases(LanguageId.PYTHON, "py", "pyi", "pyw", "pyx");
-        assertAliases(LanguageId.MARKDOWN, "md", "markdown", "mdown", "mkd");
+        assertAliases(LanguageId.MARKDOWN, "md", "markdown", "mdown", "mkd", "mkdn");
         assertAliases(LanguageId.CPP, "cc", "cpp", "cxx", "hh", "hpp", "hxx");
         assertAliases(LanguageId.JAVASCRIPT, "js", "mjs", "cjs", "jsx");
         assertAliases(LanguageId.TYPESCRIPT, "ts", "tsx");

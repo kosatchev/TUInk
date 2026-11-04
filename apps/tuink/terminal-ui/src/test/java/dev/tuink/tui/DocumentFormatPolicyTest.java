@@ -39,6 +39,6 @@ class DocumentFormatPolicyTest {
     private static ActiveSurface surface(ActiveSurface.Kind kind, boolean reading, boolean locked,
         boolean ioBusy, ActiveSurface.ModalScope scope) {
         return new ActiveSurface(PresentationId.create(), kind, ActiveSurface.Focus.CONTROL,
-            scope, reading, locked, ioBusy, true, true, false);
+            scope, reading, locked, ioBusy, true, true, false, dev.tuink.editor.language.LanguageId.MARKDOWN);
     }
 }

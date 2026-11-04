@@ -1,5 +1,8 @@
 package dev.tuink.tui;
 
+import dev.tuink.editor.language.LanguageId;
+import dev.tuink.editor.language.LanguageRegistry;
+import dev.tuink.editor.storage.DocumentResource;
 import dev.tuink.storage.jvm.JvmDocumentStorage;
 import dev.tuink.core.EditorEngine;
 import dev.tuink.editor.command.DocumentCommand;
@@ -439,6 +442,9 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     }
 
     private PreviewTab ensureMarkdownPreview(TerminalEditorApp.EditorTab editor) {
+        // Revalidate the committed binding before either reactivating an old
+        // pair or capturing text and allocating a new preview presentation.
+        if (presentationLanguage(editor) != LanguageId.MARKDOWN) return null;
         PreviewTab preview = sessionContext.previewFor(editor.documentSession().viewId());
         if (preview != null) return preview;
         var initial = editor.documentSession().document().freezeSource();
@@ -832,6 +838,19 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         return frame;
     }
 
+    /** Filename metadata is sufficient: capabilities never capture text or access storage. */
+    private LanguageId presentationLanguage(WindowTab presentation) {
+        DocumentResource resource;
+        if (presentation instanceof TerminalEditorApp.EditorTab editor) resource = editor.state().getCurrentResource();
+        else if (((PreviewTab) presentation).source() instanceof PreviewTab.ClosedSnapshot frozen)
+            resource = frozen.source().binding().resource();
+        else {
+            var source = sessionContext.source(((PreviewTab.LiveSource) ((PreviewTab) presentation).source()).viewId());
+            resource = source == null ? null : source.state().getCurrentResource();
+        }
+        return LanguageRegistry.forFileName(resource == null ? null : resource.nameHint());
+    }
+
     ActiveSurface activeSurface() {
         WindowTab presentation = sessionContext.activePresentation();
         ActiveSurface.Kind kind = presentation instanceof TerminalEditorApp.EditorTab ? ActiveSurface.Kind.SOURCE
@@ -856,7 +875,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             && (source.documentSession().document().io().busy() || formatWorkflow.affects(source.documentSession()));
         return new ActiveSurface(presentation.presentationId(), kind, focus, scope,
             uiSessionState.readingModeSetting || kind != ActiveSurface.Kind.SOURCE, locked, documentIo.busy(),
-            terminal.mouseAvailable(), sourceSyntax().available(), uiSessionState.wrapLinesSetting);
+            terminal.mouseAvailable(), sourceSyntax().available(), uiSessionState.wrapLinesSetting, presentationLanguage(presentation));
     }
 
     private void applyUiIntent(InputActionDispatcher.Intent intent) {

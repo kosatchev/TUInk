@@ -1,7 +1,8 @@
 package dev.tuink.tui;
 
 import java.nio.file.Path;
-import java.util.Locale;
+import dev.tuink.editor.language.LanguageId;
+import dev.tuink.editor.language.LanguageRegistry;
 
 /** Presentation choice for a newly read Markdown file, independent of the current tab. */
 record MarkdownOpenPolicy(boolean createPreview, boolean keepSource, boolean focusPreview) {
@@ -14,8 +15,6 @@ record MarkdownOpenPolicy(boolean createPreview, boolean keepSource, boolean foc
 
     static boolean isMarkdown(Path file) {
         if (file == null || file.getFileName() == null) return false;
-        String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
-        return name.endsWith(".md") || name.endsWith(".markdown") || name.endsWith(".mdown")
-            || name.endsWith(".mkd") || name.endsWith(".mkdn");
+        return LanguageRegistry.forFileName(file.getFileName().toString()) == LanguageId.MARKDOWN;
     }
 }

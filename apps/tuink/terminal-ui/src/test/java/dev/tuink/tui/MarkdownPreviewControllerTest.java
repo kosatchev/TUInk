@@ -16,7 +16,7 @@ class MarkdownPreviewControllerTest {
     @TempDir Path directory;
 
     @Test void headingAndInternalLinkNavigationUseSemanticAnchorsWithoutMovingSource() throws Exception {
-        try (var window = new EditorWindowFixture(directory, false,
+        try (var window = new EditorWindowFixture(directory, "document.md", false,
             List.of("# Start", "", "[jump](#second)", "", "## Second", "", "Text"))) {
             var sourceCursor = window.active().state().getCursor();
             var preview = openPreview(window);
@@ -35,7 +35,7 @@ class MarkdownPreviewControllerTest {
 
     @Test void keyboardSelectionCopiesSemanticContentAndSurvivesReflowWithoutMovingSourceCursor() throws Exception {
         List<String> source = List.of("alpha **beta** gamma");
-        try (EditorWindowFixture window = new EditorWindowFixture(directory, false, source)) {
+        try (EditorWindowFixture window = new EditorWindowFixture(directory, "document.md", false, source)) {
             var caret = window.active().state().getCursor();
             long revision = window.active().tabSession().model().revision();
             MarkdownPreviewState preview = openPreview(window);
@@ -60,7 +60,7 @@ class MarkdownPreviewControllerTest {
 
     @Test void previewSearchEditsOnlyItsQueryAndEscapeKeepsThePreviewTabOpen() throws Exception {
         List<String> source = List.of("# Title", "", "one **needle** two needle");
-        try (EditorWindowFixture window = new EditorWindowFixture(directory, false, source)) {
+        try (EditorWindowFixture window = new EditorWindowFixture(directory, "document.md", false, source)) {
             var caret = window.active().state().getCursor();
             long revision = window.active().tabSession().model().revision();
             MarkdownPreviewState preview = openPreview(window);
@@ -96,7 +96,7 @@ class MarkdownPreviewControllerTest {
 
     @Test void explicitCopyAndRevealCommandsUseCurrentSemanticPosition() throws Exception {
         List<String> source = List.of("Intro $x_i^2$.", "", "| A | B |", "|---|---|", "| left | right |", "", "Last paragraph.");
-        try (EditorWindowFixture window = new EditorWindowFixture(directory, false, source)) {
+        try (EditorWindowFixture window = new EditorWindowFixture(directory, "document.md", false, source)) {
             long revision = window.active().tabSession().model().revision();
             MarkdownPreviewState preview = openPreview(window);
             String semantic = preview.result.document().projection().text();
@@ -124,7 +124,7 @@ class MarkdownPreviewControllerTest {
 
     @Test void dialogContentFocusRoutesPointerNavigationAndCopyToPreview() throws Exception {
         List<String> source = List.of("alpha **beta** gamma", "", "second paragraph");
-        try (EditorWindowFixture window = new EditorWindowFixture(directory, false, source)) {
+        try (EditorWindowFixture window = new EditorWindowFixture(directory, "document.md", false, source)) {
             var caret = window.active().state().getCursor();
             long revision = window.active().tabSession().model().revision();
             MarkdownPreviewState preview = openPreview(window);

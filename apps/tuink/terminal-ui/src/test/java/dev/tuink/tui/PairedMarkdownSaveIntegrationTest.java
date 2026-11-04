@@ -25,7 +25,7 @@ class PairedMarkdownSaveIntegrationTest {
             if (index > 0) raw.append(switch (index % 3) { case 0 -> "\r"; case 1 -> "\r\n"; default -> "\n"; });
             raw.append(lines.get(index));
         }
-        try (var window = new EditorWindowFixture(directory, false, List.of("setup"))) {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("setup"))) {
             Files.write(window.document, utf16le(raw.toString()));
             window.active().tabSession().engine().openExisting(JvmDocumentStorage.resource(window.document));
             window.frame();
@@ -43,7 +43,7 @@ class PairedMarkdownSaveIntegrationTest {
     }
 
     @Test void missingFrozenTargetReportsAnOrdinaryErrorThenExplicitSaveAsEnablesDiskReopen() throws Exception {
-        try (var window = new EditorWindowFixture(directory, false, List.of("original"))) {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("original"))) {
             var oldDocument = window.active().documentSession().document().documentId();
             window.event(new TextInput("draft "));
             var preview = freezeDirtySource(window);
@@ -70,8 +70,8 @@ class PairedMarkdownSaveIntegrationTest {
         }
     }
 
-    @Test void unnamedSnapshotCanSaveAsWithoutRecreatingAnEditingSession() throws Exception {
-        try (var window = new EditorWindowFixture(directory, false, List.of("original"))) {
+    @Test void newMarkdownDocumentMustSaveBeforePreviewAndItsSnapshotCanSaveAsWithoutAnEditor() throws Exception {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("original"))) {
             window.event(ctrl(KeyStroke.Key.N));
             var unnamed = window.active();
             window.event(ctrl(KeyStroke.Key.TAB));
@@ -79,18 +79,25 @@ class PairedMarkdownSaveIntegrationTest {
             assertEquals(unnamed.presentationId(), window.selected().presentationId());
             assertNull(window.active().state().getCurrentResource());
             window.event(new TextInput("unnamed $x_i^2$ trailing  "));
+            window.event(ctrl(KeyStroke.Key.P));
+            assertSame(unnamed, window.selected(), "an unnamed draft cannot create a preview");
+            assertEquals(1, window.context.presentations().size());
+            Path created = directory.resolve("created.md");
+            saveAs(window, created);
+            assertEquals(created, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
+            window.event(KeyStroke.of(KeyStroke.Key.HOME)); window.event(new TextInput("draft "));
             var preview = freezeDirtySource(window);
-            assertNull(closed(preview).source().binding().resource());
-            Path target = directory.resolve("unnamed.md");
+            assertEquals(created, JvmDocumentStorage.pathOf(closed(preview).source().binding().resource()));
+            Path target = directory.resolve("renamed.md");
             saveAs(window, target);
-            assertEquals("unnamed $x_i^2$ trailing  ", Files.readString(target));
+            assertEquals("draft unnamed $x_i^2$ trailing  ", Files.readString(target));
             assertTrue(window.tabs.isEmpty()); assertNull(window.active());
             assertEquals(preview.presentationId(), window.selected().presentationId());
         }
     }
 
     @Test void livePreviewSaveAsRenamesBothTabsWithoutChangingTheSessionHistoryOrSelection() throws Exception {
-        try (var window = new EditorWindowFixture(directory, false, List.of("original"))) {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("original"))) {
             window.event(new TextInput("draft "));
             var source = window.active(); var session = source.documentSession();
             var sourceId = source.presentationId(); var sourceView = session.viewId();
@@ -118,7 +125,7 @@ class PairedMarkdownSaveIntegrationTest {
     }
 
     @Test void cancellingSnapshotSaveAsKeepsItsResourceSourceAndPresentation() throws Exception {
-        try (var window = new EditorWindowFixture(directory, false, List.of("original"))) {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("original"))) {
             window.event(new TextInput("draft "));
             var preview = freezeDirtySource(window); var captured = closed(preview).source();
             Path abandoned = directory.resolve("abandoned.md");
@@ -135,7 +142,7 @@ class PairedMarkdownSaveIntegrationTest {
     }
 
     @Test void closingAnEditedHiddenSourceFreezesTheLastShownVersionRatherThanTheNewerBuffer() throws Exception {
-        try (var window = new EditorWindowFixture(directory, false, List.of("shown version"))) {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("shown version"))) {
             var preview = open(window); var shown = preview.uiState().preview.sourceForFreeze();
             window.event(ctrl(KeyStroke.Key.P));
             window.event(new TextInput("unshown "));

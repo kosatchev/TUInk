@@ -18,7 +18,7 @@ class MarkdownPreviewSearchFieldIntegrationTest {
 
     @Test void querySupportsCaretSelectionClipboardAndSemanticAliasesWithoutEditingTheSource() throws Exception {
         List<String> source = List.of("# Header", "", "needle alpha beta needle");
-        try (var window = new EditorWindowFixture(directory, false, source)) {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, source)) {
             var sourceCaret = window.active().state().getCursor();
             long revision = window.active().tabSession().model().revision();
             var preview = open(window);
@@ -55,7 +55,7 @@ class MarkdownPreviewSearchFieldIntegrationTest {
     }
 
     @Test void queryAdmissionRejectsOversizedInsertionAndKeepsTheSelectedValueAndClipboard() throws Exception {
-        try (var window = new EditorWindowFixture(directory, false, List.of("alpha beta"))) {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("alpha beta"))) {
             var preview = open(window);
             window.event(ctrl(KeyStroke.Key.F)); window.event(new TextInput("alpha"));
             window.event(ctrl(KeyStroke.Key.A));
@@ -79,7 +79,7 @@ class MarkdownPreviewSearchFieldIntegrationTest {
             "B -->|Исходник| C[Редактор]", "B -->|Просмотр| D[Рендер]",
             "C --> E[Сохранить]", "D --> E", "```", ""));
         for (int row = 0; row < 35; row++) { source.add("Paragraph " + row); source.add(""); }
-        try (var window = new EditorWindowFixture(directory, false, source)) {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, source)) {
             var sourceCaret = window.active().state().getCursor();
             var preview = open(window);
             assertTrue(preview.result.extent() > preview.bounds.width());

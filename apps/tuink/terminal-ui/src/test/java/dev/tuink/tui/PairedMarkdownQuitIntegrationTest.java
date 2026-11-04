@@ -36,7 +36,7 @@ class PairedMarkdownQuitIntegrationTest {
     private void quitDuringFrozenPublication(boolean unknownOutcome, boolean timeout) throws Exception {
         var tasks = new ArrayDeque<Runnable>();
         var storage = new BlockingPublicationStorage(unknownOutcome);
-        try (var window = new EditorWindowFixture(directory, false, List.of("original"), tasks::addLast)) {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("original"), tasks::addLast)) {
             window.ui.confirmOnCloseSetting = true;
             // Retain native file identity while injecting only the existing provider publication seam.
             window.active().tabSession().engine().open(storage.resource(window.document));

@@ -102,6 +102,82 @@ def rendered_preview_present(text):
             and '[Mermaid:' not in text)
 
 
+def preview_eligibility(args, output):
+    """Use actual keyboard/menu input and a completed Save As to admit Markdown only."""
+    text = '# Eligibility probe\n\nMarkdown-looking **content** and $x^2$.\n'
+    label = 'Open Markdown preview tab'
+
+    def source_only(session, description):
+        session.expect(lambda: source_selected(session.screen.text)
+                       and not paired_captions_present(session.screen.text)
+                       and not any('· Preview' in line for line in session.screen.lines[:2]), description)
+
+    def click_preview_item(session):
+        session.send(b'\x1bOR')  # F3 opens View, including its unavailable items.
+        session.expect(lambda: label in session.screen.text, 'View contains the Preview command')
+        for row, line in enumerate(session.screen.lines):
+            if label in line:
+                column = line.index(label) + 2
+                session.mouse(0, row, column)
+                session.mouse(0, row, column, True)
+                return
+        raise AssertionError('Missing Preview menu item')
+
+    for suffix in ('txt', 'md'):
+        document = output / ('eligibility.' + suffix)
+        document.write_text(text, encoding='utf-8')
+        with Session(output / ('eligibility-' + suffix), args.java, args.classpath, document,
+                     native_executable=args.binary, timeout=45) as session:
+            source_only(session, 'a single source before attempting Preview')
+            session.send(b'\x10')
+            if suffix == 'txt':
+                session.expect(lambda: 'Preview is available for Markdown files' in session.screen.text,
+                               'Ctrl+P refuses Markdown-looking plain text')
+                source_only(session, 'Ctrl+P leaves the plain-text source alone')
+                if 'Ctrl+P' in session.screen.lines[-1]:
+                    raise AssertionError('Plain text advertises an unavailable Preview shortcut')
+                click_preview_item(session)
+                session.expect(lambda: label in session.screen.text, 'clicking the disabled item keeps View open')
+                source_only(session, 'the disabled menu item creates no Preview')
+                session.snapshot('disabled-preview-menu')
+                session.send(b'\x1b', 0.7)
+                source_only(session, 'plain text remains the only tab after dismissing View')
+            else:
+                expect_preview(session, 'Ctrl+P admits the same content bound to Markdown')
+                session.send(b'\x17')  # Close only Preview before testing its menu entry.
+                source_only(session, 'closing Preview restores the single Markdown source')
+                click_preview_item(session)
+                expect_preview(session, 'the enabled View item creates the Markdown Preview')
+                if not paired_captions_present(session.screen.text):
+                    raise AssertionError('Markdown menu activation did not create the adjacent pair')
+                session.snapshot('enabled-preview-menu')
+            session.finish()
+        if document.read_text(encoding='utf-8') != text:
+            raise AssertionError('Preview eligibility changed the ' + suffix + ' document')
+
+    with Session(output / 'eligibility-unnamed', args.java, args.classpath,
+                 native_executable=args.binary, timeout=45) as session:
+        session.send(b'\x1b[200~' + text.encode('utf-8') + b'\x1b[201~')
+        session.expect(lambda: '*' in session.screen.lines[0] and 'Eligibility probe' in session.screen.text,
+                       'an unnamed Markdown-looking draft')
+        session.send(b'\x10')
+        session.expect(lambda: 'Preview is available for Markdown files' in session.screen.text,
+                       'Ctrl+P refuses an unnamed draft')
+        source_only(session, 'the unnamed draft has no Preview')
+        target = session.root / 'saved-draft.md'
+        fill_snapshot_filename(session, target.name)
+        session.expect_saved(target, text, 'Save As binds the unnamed draft to Markdown', timeout=5)
+        session.expect(lambda: 'Ctrl+P: Preview' in session.screen.lines[-1],
+                       'the completed Markdown save enables the shortcut')
+        session.send(b'\x10')
+        expect_preview(session, 'Ctrl+P admits the saved Markdown draft')
+        if not paired_captions_present(session.screen.text):
+            raise AssertionError('The saved Markdown draft did not acquire its adjacent Preview')
+        session.snapshot('saved-markdown-preview')
+        session.finish()
+    print(f'PASS: Markdown-only keyboard/menu eligibility and unnamed Save As: {output}', flush=True)
+
+
 def scrollbar_controls(args, output):
     """Exercise real SGR track/thumb input, including capture outside the viewport."""
     document = output / 'scrollbar-controls.md'
@@ -611,6 +687,8 @@ def preview_find_workflow(args, output):
 def main():
     root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--scenario', choices=('all', 'eligibility'), default='all',
+                        help='Run the full suite or only Markdown file eligibility')
     parser.add_argument('--java', default='java')
     parser.add_argument('--classpath', default=str(root / 'apps/tuink/launcher/build/install/tuink/lib/*'))
     parser.add_argument('--binary', type=Path)
@@ -624,6 +702,9 @@ def main():
         parser.error('--jcmd is available only for JVM sessions')
     args.output_root.mkdir(parents=True, exist_ok=True)
     output = Path(tempfile.mkdtemp(prefix='native-' if args.binary else 'jvm-', dir=args.output_root))
+    preview_eligibility(args, output)
+    if args.scenario == 'eligibility':
+        return
     document = output / 'preview.md'
     text = ('# Preview smoke\n\n'
             '$$\n\\int_0^{\\infty} e^{-x^2}\\,dx = \\frac{\\sqrt{\\pi}}{2}\n$$\n\n'

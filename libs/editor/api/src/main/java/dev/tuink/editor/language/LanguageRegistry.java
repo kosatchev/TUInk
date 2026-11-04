@@ -42,7 +42,7 @@ public final class LanguageRegistry {
         register(result, LanguageId.C, "c", "h", "ino");
         register(result, LanguageId.CPP, "cc", "cpp", "cxx", "hh", "hpp", "hxx");
         register(result, LanguageId.PYTHON, "py", "pyi", "pyw", "pyx");
-        register(result, LanguageId.MARKDOWN, "md", "markdown", "mdown", "mkd");
+        register(result, LanguageId.MARKDOWN, "md", "markdown", "mdown", "mkd", "mkdn");
         register(result, LanguageId.JAVASCRIPT, "js", "mjs", "cjs", "jsx");
         register(result, LanguageId.TYPESCRIPT, "ts", "tsx");
         register(result, LanguageId.GROOVY, "gradle", "groovy");

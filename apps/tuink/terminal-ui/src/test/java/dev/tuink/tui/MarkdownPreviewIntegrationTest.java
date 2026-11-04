@@ -14,7 +14,7 @@ class MarkdownPreviewIntegrationTest {
     @TempDir Path directory;
 
     @Test void previewsUnsavedBufferAndReturnsWithoutChangingDocumentHistoryOrCursor() throws Exception {
-        try (var window = new EditorWindowFixture(directory, false, List.of("# Heading", "", "Hello **world**."))) {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("# Heading", "", "Hello **world**."))) {
             window.command(TuinkCommand.CURSOR_DOCUMENT_END);
             window.event(new TextInput(" unsaved"));
             var cursor = window.active().state().getCursor();
@@ -41,7 +41,7 @@ class MarkdownPreviewIntegrationTest {
     }
 
     @Test void modeAndPositionBelongToEachTab() throws Exception {
-        try (var window = new EditorWindowFixture(directory, false,
+        try (var window = new EditorWindowFixture(directory, "document.md", false,
             java.util.stream.IntStream.range(0, 80).mapToObj(i -> "# Heading " + i).toList())) {
             window.command(TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW);
             window.await(() -> window.preview().ready());

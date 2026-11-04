@@ -21,7 +21,7 @@ class PairedMarkdownTabsIntegrationTest {
 
     @Test void ctrlPAndOrdinaryTabNavigationReuseOneAdjacentPairAcrossOpenAndNew() throws Exception {
         Path otherFile = Files.writeString(directory.resolve("z-other.md"), "# Another document\n");
-        try (var window = new EditorWindowFixture(directory, false, List.of("# Original", "", "body"))) {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("# Original", "", "body"))) {
             var editor = window.active();
             var preview = openPreview(window);
             PresentationId previewId = preview.presentationId();
@@ -65,7 +65,7 @@ class PairedMarkdownTabsIntegrationTest {
     }
 
     @Test void closingPreviewPreservesTheDirtyEditorAndItsUndoHistory() throws Exception {
-        try (var window = new EditorWindowFixture(directory, false, List.of("original"))) {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("original"))) {
             window.event(new TextInput("draft "));
             var editor = window.active(); var view = editor.documentSession().viewId();
             long revision = editor.tabSession().model().revision();
@@ -85,7 +85,7 @@ class PairedMarkdownTabsIntegrationTest {
     }
 
     @Test void tabsMenuSelectsPresentationsBeyondTheEditingDocumentCount() throws Exception {
-        try (var window = new EditorWindowFixture(directory, false, List.of("# Original"))) {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("# Original"))) {
             var source = window.active();
             var preview = openPreview(window);
             window.event(ctrl(KeyStroke.Key.P));
@@ -101,7 +101,7 @@ class PairedMarkdownTabsIntegrationTest {
     }
 
     @Test void cancellingSourceCloseLeavesTheDirtyPairAndItsIdentitiesUnchanged() throws Exception {
-        try (var window = new EditorWindowFixture(directory, false, List.of("original"))) {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("original"))) {
             window.event(new TextInput("draft "));
             var editor = window.active(); var preview = openPreview(window);
             var documentId = editor.documentSession().document().documentId();
@@ -119,7 +119,7 @@ class PairedMarkdownTabsIntegrationTest {
     }
 
     @Test void reopeningAFrozenPreviewReadsDiskIntoANewSessionBesideTheSamePreview() throws Exception {
-        try (var window = new EditorWindowFixture(directory, false, List.of("original"))) {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("original"))) {
             var original = window.active();
             var oldDocument = original.documentSession().document().documentId();
             var oldView = original.documentSession().viewId();
@@ -150,7 +150,7 @@ class PairedMarkdownTabsIntegrationTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void closingSourceSavesOrDiscardsNormallyAndLeavesOnlyAnEngineFreeSnapshot(boolean save) throws Exception {
-        try (var window = new EditorWindowFixture(directory, false, List.of("original"))) {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("original"))) {
             window.event(new TextInput("draft "));
             var editor = window.active(); var session = editor.documentSession().document();
             var view = editor.documentSession().viewId();

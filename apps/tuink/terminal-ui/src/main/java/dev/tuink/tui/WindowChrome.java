@@ -40,7 +40,7 @@ final class WindowChrome {
     }
 
     record Result(FrameComposition.Surface surface, FrameComposition.Layers layers,
-        SearchBarView.Placement search, Rect blockingBounds) {}
+        SearchBarView.Placement search) {}
 
     record Prepared(Input input, boolean showTabs, int contentTopRow, Rect dialogViewport,
         InlinePromptBar prompt, NotificationBar notification, SaveAsBarView.Placement saveAs,
@@ -151,10 +151,11 @@ final class WindowChrome {
         var page = host.activeHelpPage(input.modal().isHelpHints(), input.modal().isHelpLicenses(), input.modal().isHelpAuthor());
         var help = host.helpOverlayPlacement(input.rows(), input.cols(), page, prepared.dialogViewport().y());
         var format = input.modal().isDocumentFormat() && tab.formatDialog != null
-            ? DocumentFormatDialogView.place(tab.formatDialog, prepared.dialogViewport(), !content.surface().preview() && (!content.surface().reading() || tab.formatDialog.purpose != DocumentFormatDialogView.Purpose.FORMAT)) : null;
-        Rect blocking = help != null ? help.frame().bounds() : picker.visible() ? picker.dialog().frame().bounds()
-            : host.blockingSurface(input.rows(), input.cols(), prepared.contentTopRow(), prepared.prompt().height(),
-                prepared.saveAs() != null || prepared.confirm() != null);
+            ? DocumentFormatDialogView.place(tab.formatDialog, prepared.dialogViewport(),
+                DocumentFormatPolicy.apply(tab.formatDialog.purpose, content.surface()).allowed()) : null;
+        Rect blocking = FrameComposition.Layers.prepareBlockingBounds(input.rows(), input.cols(),
+            prepared.contentTopRow(), prepared.prompt().height(), prepared.saveAs() != null || prepared.confirm() != null,
+            picker, help, format);
         if (focus.blockingContentFocused) {
             boolean available = DialogCommandPolicy.mode(TerminalEditorApp.modalInputKind(input.modal(), tab.openFileMode)).permitsContentFocus()
                 && content.bounds().width() > 0 && content.bounds().height() > 0 && !blocking.contains(content.bounds());
@@ -174,7 +175,7 @@ final class WindowChrome {
         }
         return new Result(new FrameComposition.Surface(topBar, content.status(), prepared.prompt(), prepared.notification()),
             new FrameComposition.Layers(tabs, menuPlacement, prepared.saveAs() != null, prepared.saveAs(), prepared.confirm(),
-                picker, help, format, focus.modalAttention.highlighted(), focus.blockingContentFocused), prepared.search(), blocking);
+                picker, help, format, focus.modalAttention.highlighted(), focus.blockingContentFocused, blocking), prepared.search());
     }
 
     private static ConfirmBarView confirmation(Input input, int rows) {

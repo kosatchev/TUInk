@@ -128,7 +128,8 @@ class FrameCompositionTest {
             new TerminalEditorApp().helpOverlayPlacement(8, 40, HelpPages.KEYMAP),
             null,
             false,
-            false
+            false,
+            new Rect(0, 0, 0, 0)
         );
         assertThrows(
             IllegalArgumentException.class,
@@ -142,6 +143,15 @@ class FrameCompositionTest {
                 false
             )
         );
+    }
+
+    @Test
+    void sourceFramesRejectBlockingGeometryFromAnotherWindowSnapshot() {
+        var base = composition(InlinePromptBar.hidden(), 0);
+        var layers = new FrameComposition.Layers(null, null, false, null, null,
+            FrameComposition.OpenFile.hidden(), null, null, false, false, new Rect(0, 1, 40, 6));
+        assertThrows(IllegalArgumentException.class, () -> new FrameComposition(base.document(), base.surface(),
+            base.search(), layers, false, false, false));
     }
 
     @Test
@@ -270,7 +280,8 @@ class FrameCompositionTest {
                 null,
                 null,
                 false,
-                false
+                false,
+                new Rect(0, 0, 0, 0)
             ),
             false,
             false,

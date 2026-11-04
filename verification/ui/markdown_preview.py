@@ -483,6 +483,77 @@ def preview_menu_pointer(args, output):
     print(f'PASS: mouse menu commands in live and snapshot Preview: {output}', flush=True)
 
 
+def window_dialog_pointer(args, output):
+    """Follow actual dialog controls through to opening a resource, for all presentations."""
+    def item(session, label):
+        for row, line in enumerate(session.screen.lines):
+            if label in line:
+                return row, line.index(label) + 2
+        raise AssertionError('Missing control: ' + label + '\n' + session.screen.text)
+
+    def click(session, label):
+        row, column = item(session, label)
+        session.mouse(0, row, column)
+        session.mouse(0, row, column, True)
+
+    def menu(session, heading, label):
+        column = session.screen.lines[0].index(heading) + 1
+        session.mouse(0, 0, column)
+        session.mouse(0, 0, column, True)
+        session.expect(lambda: label in session.screen.text, heading + ' menu contains ' + label)
+        click(session, label)
+
+    for mode in ('source', 'live', 'snapshot'):
+        case = output / ('window-dialog-' + mode)
+        case.mkdir()
+        document = case / 'document.md'
+        document.write_text('# Dialog ownership\n\n```text\n' + '\n'.join(
+            f'row-{row:03d} document body' for row in range(50)) + '\n```\n', encoding='utf-8')
+        target = case / 'zz-mouse-target.txt'
+        target.write_text('OPENED_BY_MOUSE\n', encoding='utf-8')
+        with Session(case / 'session', args.java, args.classpath, document,
+                     native_executable=args.binary, timeout=60) as session:
+            if mode != 'source':
+                session.send(b'\x10')
+                expect_preview(session, 'dialog live Preview')
+                if mode == 'snapshot':
+                    session.send(b'\x10\x17')
+                    expect_preview(session, 'dialog frozen Preview', mode='snapshot')
+
+            def owner_visible():
+                return source_selected(session.screen.text) if mode == 'source' else preview_selected(session.screen.text, mode)
+
+            menu(session, 'File', 'Open...')
+            session.expect(lambda: 'Open File' in session.screen.text and target.name in session.screen.text,
+                           'file picker has the target')
+            row, column = item(session, target.name)
+            press = f'\x1b[<0;{column + 1};{row + 1}M'.encode('ascii')
+            release = f'\x1b[<0;{column + 1};{row + 1}m'.encode('ascii')
+            session.send((press + release) * 2)
+            session.expect(lambda: 'OPENED_BY_MOUSE' in session.screen.text and 'Open File' not in session.screen.text,
+                           'double-click opens the selected file')
+            session.send(b'\x17')
+            session.expect(owner_visible, 'closing the target restores the originating presentation')
+
+            menu(session, 'File', 'Open...')
+            session.expect(lambda: 'Open File' in session.screen.text, 'picker reopened')
+            click(session, 'Cancel')
+            session.expect(lambda: 'Open File' not in session.screen.text and owner_visible(),
+                           'mouse Cancel closes the picker')
+
+            menu(session, 'File', 'Open with encoding')
+            session.expect(lambda: 'Choose file' in session.screen.text, 'encoding dialog is ready')
+            click(session, 'Choose file')
+            session.expect(lambda: 'Open File' in session.screen.text and 'Choose file' not in session.screen.text,
+                           'mouse Choose file opens the picker')
+            click(session, 'Cancel')
+            session.expect(lambda: 'Open File' not in session.screen.text and owner_visible(),
+                           'encoding picker cancellation restores the origin')
+            session.snapshot('dialogs-complete')
+            session.finish()
+        print(f'PASS: actual file-dialog mouse workflow ({mode}): {case}', flush=True)
+
+
 def main():
     root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__)
@@ -564,6 +635,7 @@ def main():
         raise AssertionError('Preview modified the source document')
     code_highlighting(args, output)
     preview_menu_pointer(args, output)
+    window_dialog_pointer(args, output)
     sample_sweep(args, output)
     scrollbar_controls(args, output)
     flowchart_scroll(args, output)

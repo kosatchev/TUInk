@@ -20,5 +20,6 @@ record PreviewFrameComposition(
         Objects.requireNonNull(surface, "surface");
         Objects.requireNonNull(layers, "layers");
         layers.validatePromptOwner(false);
+        layers.validateGeometry(rows, cols, contentTopRow, surface.inlinePrompt().height());
     }
 }

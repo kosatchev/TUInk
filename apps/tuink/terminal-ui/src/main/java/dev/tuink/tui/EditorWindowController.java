@@ -201,7 +201,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     private SearchBarView.Placement searchBarPlacement;
     private ConfirmBarView.Placement confirmBarPlacement;
     private SaveAsBarView.Placement saveAsBarPlacement;
-    private Rect modalInputBounds = new Rect(0, 0, 0, 0);
+    private FrameComposition.Layers windowLayers;
+    private static final Rect NO_BLOCKING_BOUNDS = new Rect(0, 0, 0, 0);
     private int contentTopRow = 1;
     private int contentRows;
     private int contentCols;
@@ -630,7 +631,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     private boolean routeTabChrome(TuiInputEvent event) {
         if (!(event instanceof PointerEvent pointer) || tabBarPlacement == null
             || !uiSessionState.mouseModeSetting || !terminal.mouseAvailable() || topMenu.isOpen()
-            || !modalState().isNone() && modalInputBounds.contains(pointer.column(), pointer.row())) return false;
+            || !modalState().isNone() && blockingBounds().contains(pointer.column(), pointer.row())) return false;
         var policy = TerminalEditorApp.tabBarInputPolicy(true, true, !windowModal.isNone(), false);
         var result = TabBarInputRouter.route(tabBarPlacement, policy, pointer);
         tabStrip.adopt(result.state());
@@ -820,9 +821,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         contentTopRow = frame.contentTopRow();
         contentRows = frame.preview().bounds().height();
         contentCols = frame.preview().bounds().width();
+        contentLeft = frame.preview().bounds().x();
         editorPointerRows = contentRows;
-        modalInputBounds = host.blockingSurface(frame.rows(), frame.cols(), contentTopRow,
-            frame.surface().inlinePrompt().height(), saveAsMode || confirmMode);
         return frame;
     }
 
@@ -871,7 +871,13 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             startupRecoveryEntries.size(), rows, cols, topMenu, commandRouter, tabStrip);
     }
 
+    private Rect blockingBounds() {
+        // Bootstrap has no prepared owner yet; all subsequent input uses the published layers.
+        return windowLayers == null ? NO_BLOCKING_BOUNDS : windowLayers.blockingBounds();
+    }
+
     private void adoptChrome(FrameComposition.Layers layers) {
+        windowLayers = Objects.requireNonNull(layers, "layers");
         tabBarPlacement = layers.tabBar();
         topMenuPlacement = layers.topMenu();
         saveAsBarPlacement = layers.saveAs();
@@ -982,14 +988,12 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             new Rect(contentLeft, contentTopRow, contentCols, contentRows), statusBarPlacement.text(),
             searchSnapshot.tabMatchFlags()));
         adoptChrome(chrome.layers());
-        modalInputBounds = chrome.blockingBounds();
         FrameComposition composition = new FrameComposition(
             new FrameComposition.Document(renderPlanBuilder, model, state, editorLayout),
             chrome.surface(),
             new FrameComposition.Search(ui().searchMode, searchSnapshot.query(), searchSnapshot.options(),
                 uiSessionState.autoSelectionHighlightSetting, searchBarPlacement, ui().searchEditorFocused),
             chrome.layers(), uiSessionState.wrapLinesSetting, uiSessionState.wrapWordsSetting, fullRedraw);
-        modalInputBounds = host.blockingSurface(composition);
         return composition;
     }
 
@@ -1186,13 +1190,13 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         return new Rect(0, contentTopRow, cols, editorPointerRows)
             .contains(mouse.column(), mouse.row())
             && (TerminalEditorApp.modalInputKind(modalState(), ui().openFileMode) == ModalInputPolicy.Kind.NONE
-                || blockingContentAvailable() && !modalInputBounds.contains(mouse.column(), mouse.row()));
+                || blockingContentAvailable() && !blockingBounds().contains(mouse.column(), mouse.row()));
     }
 
     private boolean blockingContentAvailable() {
         return DialogCommandPolicy.mode(TerminalEditorApp.modalInputKind(modalState(), ui().openFileMode)).permitsContentFocus()
             && contentRows > 0 && contentCols > 0
-            && !modalInputBounds.contains(new Rect(contentLeft, contentTopRow, contentCols, contentRows));
+            && !blockingBounds().contains(new Rect(contentLeft, contentTopRow, contentCols, contentRows));
     }
 
     private void clearBlockingControlFocus() {
@@ -1291,7 +1295,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                     focusDocument();
                 return java.util.Optional.of(WindowInput.physical(mouse, currentRecipient()));
             }
-            if (modalInputBounds.contains(mouse.column(), mouse.row())) {
+            if (blockingBounds().contains(mouse.column(), mouse.row())) {
                 if (mouse.kind() == PointerEvent.Kind.PRESS && mouse.button() == PointerEvent.Button.LEFT
                     && focusUi().blockingContentFocused) {
                     focusFirstBlockingControl();
@@ -2279,6 +2283,13 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         }
         var draft = ui().formatDialog;
         if (draft.busy) return true;
+        var access = DocumentFormatPolicy.apply(draft.purpose, activeSurface());
+        if (!access.allowed()) {
+            draft.error = access.refusal();
+            notice().warning(access.refusal());
+            eventLoop.invalidate();
+            return true;
+        }
         if (draft.purpose == DocumentFormatDialogView.Purpose.OPEN) {
             var mode = draft.openMode();
             closeFormatDialog();
@@ -2289,10 +2300,6 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             openFileTree().setRoot(FilePickerOpenWorkflow.initialRoot(currentPresentationPath()));
             ui().openFileFocusState.focus(OpenFileInputRouter.Focus.LIST);
             eventLoop.invalidate();
-            return true;
-        }
-        if (draft.purpose == DocumentFormatDialogView.Purpose.FORMAT && uiSessionState.readingModeSetting) {
-            draft.error = "Reading mode: format changes are disabled";
             return true;
         }
         if (draft.purpose == DocumentFormatDialogView.Purpose.REOPEN && state.isDirty() && !draft.confirmDiscard) {

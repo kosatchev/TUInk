@@ -79,10 +79,15 @@ class ViewportFrameIntegrationTest {
             preview(controller, first, PREVIEW, 0, 0, false, layers());
             assertEquals(ScrollHint.none(), preview(controller, reflowed, PREVIEW, 1, 0, false, layers()).scrollHint());
             assertEquals(new ScrollHint.Vertical(BODY), preview(controller, reflowed, PREVIEW, 2, 0, false, layers()).scrollHint());
-            var confirm = ConfirmBarView.build("Save?", COLS).place(new Object(), ROWS - 2, new Rect(0, 0, COLS, ROWS));
+            var confirmBar = ConfirmBarView.build("Save?", COLS);
+            var confirm = confirmBar.place(new Object(), ROWS - 2, new Rect(0, 0, COLS, ROWS));
             var modal = new FrameComposition.Layers(null, null, false, null, confirm,
-                FrameComposition.OpenFile.hidden(), null, null, false, false);
-            assertEquals(ScrollHint.none(), preview(controller, reflowed, PREVIEW, 3, 0, false, modal).scrollHint());
+                FrameComposition.OpenFile.hidden(), null, null, false, false, new Rect(0, ROWS - 2, COLS, 1));
+            var promptSurface = new FrameComposition.Surface(surface().topBar(), surface().bottomBar(),
+                InlinePromptBar.of(confirmBar.row(), dev.tuink.render.Style.DEFAULT, 1), NotificationBar.hidden());
+            var modalFrame = new PreviewFrameComposition(ROWS, COLS, 2,
+                placement(reflowed, PREVIEW, 3, 0, PreviewSelection.Snapshot.EMPTY), promptSurface, modal, false);
+            assertEquals(ScrollHint.none(), controller.renderPreviewFrameIfNeeded(modalFrame).scrollHint());
             assertEquals(ScrollHint.none(), preview(controller, reflowed, PREVIEW, 4, 0, false, layers()).scrollHint());
             assertEquals(ScrollHint.none(), preview(controller, reflowed, PREVIEW, 5, 0, true, layers()).scrollHint());
             assertEquals(new ScrollHint.Vertical(BODY), preview(controller, reflowed, PREVIEW, 6, 0, false, layers()).scrollHint());
@@ -222,7 +227,7 @@ class ViewportFrameIntegrationTest {
         var dialog = OpenFileDialogView.place(TerminalEditorApp.OPEN_FILE_SCOPE_ID, layout, tree, false,
             new Rect(0, 0, COLS, ROWS));
         return new FrameComposition.Layers(null, null, false, null, null,
-            new FrameComposition.OpenFile(root, dialog, OpenFileInputRouter.Focus.LIST), null, null, false, false);
+            new FrameComposition.OpenFile(root, dialog, OpenFileInputRouter.Focus.LIST), null, null, false, false, dialog.frame().bounds());
     }
 
     private static FrameComposition source(RenderPlanBuilder builder, TextModel model, EditorState state,
@@ -271,7 +276,7 @@ class ViewportFrameIntegrationTest {
     }
     private static FrameComposition.Layers layers() {
         return new FrameComposition.Layers(null, null, false, null, null,
-            FrameComposition.OpenFile.hidden(), null, null, false, false);
+            FrameComposition.OpenFile.hidden(), null, null, false, false, new Rect(0, 0, 0, 0));
     }
     private static String row(Frame frame, int row) {
         var result = new StringBuilder();

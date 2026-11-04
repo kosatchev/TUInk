@@ -43,6 +43,8 @@ record FrameComposition(
             throw new IllegalArgumentException("Editor layout and prompt height must describe one frame");
         }
         layers.validatePromptOwner(search.placement() != null);
+        layers.validateGeometry(document.layout().rows(), document.layout().cols(),
+            document.layout().contentTopRow(), surface.inlinePrompt().height());
     }
 
     boolean allowsScrollHints() {
@@ -101,7 +103,8 @@ record FrameComposition(
         TerminalEditorApp.HelpOverlayPlacement help,
         DocumentFormatDialogView.Placement format,
         boolean blockedInputHighlight,
-        boolean contentFocused
+        boolean contentFocused,
+        Rect blockingBounds
     ) {
         HelpPage helpPage() { return help == null ? null : help.page(); }
 
@@ -119,8 +122,30 @@ record FrameComposition(
             if (owners > 1) throw new IllegalArgumentException("Only one prompt or modal frame owner is allowed");
         }
 
+        /** Exact immutable geometry prepared from the same modal placements used by paint and cursor. */
+        static Rect prepareBlockingBounds(int rows, int cols, int contentTop, int promptHeight,
+            boolean inline, OpenFile openFile, TerminalEditorApp.HelpOverlayPlacement help,
+            DocumentFormatDialogView.Placement format) {
+            Objects.requireNonNull(openFile, "openFile");
+            if (openFile.visible()) return openFile.dialog().frame().bounds();
+            if (help != null) return help.frame().bounds();
+            if (format != null) return format.bounds();
+            if (!inline) return new Rect(0, 0, 0, 0);
+            return new Rect(0, rows - 1 - promptHeight, cols, promptHeight)
+                .intersection(new Rect(0, contentTop, cols, Math.max(0, rows - 1 - contentTop)));
+        }
+
+        /** Validate at frame preparation, never recompute routing geometry during input or paint. */
+        void validateGeometry(int rows, int cols, int contentTop, int promptHeight) {
+            Rect expected = prepareBlockingBounds(rows, cols, contentTop, promptHeight,
+                saveAsMode || confirm != null, openFile, help, format);
+            if (!blockingBounds.equals(expected))
+                throw new IllegalArgumentException("Modal input, paint and cursor must share the prepared window bounds");
+        }
+
         Layers {
             Objects.requireNonNull(openFile, "openFile");
+            Objects.requireNonNull(blockingBounds, "blockingBounds");
             if (!saveAsMode && saveAs != null) {
                 throw new IllegalArgumentException("Save As placement requires Save As ownership");
             }

@@ -36,7 +36,7 @@ class PreviewFrameCompositionTest {
             new TabBarView.TabItem(Path.of("README.md"), false, false, false, false, "Preview")),
             1, TabBar.State.initial()).place(new Rect(0, 1, cols, 1), new Rect(0, 0, cols, rows));
         var layers = new FrameComposition.Layers(tabs, null, false, null, null,
-            FrameComposition.OpenFile.hidden(), null, null, false, false);
+            FrameComposition.OpenFile.hidden(), null, null, false, false, new Rect(0, 0, 0, 0));
         var surface = surface(InlinePromptBar.hidden(), NotificationBar.of("Snapshot retained", null));
         var preview = preview(new Rect(0, 2, cols, rows - 4));
         StringWriter output = new StringWriter();
@@ -66,7 +66,7 @@ class PreviewFrameCompositionTest {
         placed.activate(host.saveAsFocusManager());
         var prompt = InlinePromptBar.of(bar.row(), EditorStyleAdapter.toEditor(host.styles.promptAlert()), 1);
         var layers = new FrameComposition.Layers(null, null, true, placed, null,
-            FrameComposition.OpenFile.hidden(), null, null, false, false);
+            FrameComposition.OpenFile.hidden(), null, null, false, false, new Rect(0, rows - 2, cols, 1));
         Frame frame = render(host, rows, cols, preview(new Rect(0, 1, cols, rows - 3)), surface(prompt, NotificationBar.hidden()), layers);
 
         assertTrue(row(frame, rows - 2).startsWith("Save As: 界-draft.md"));
@@ -89,7 +89,8 @@ class PreviewFrameCompositionTest {
         var placed = bar.place(new Object(), rows - 1 - prompt.height(), new Rect(0, 1, cols, rows - 1));
         placed.activate(host.confirmFocusManager());
         var layers = new FrameComposition.Layers(null, null, false, null, placed,
-            FrameComposition.OpenFile.hidden(), null, null, true, false);
+            FrameComposition.OpenFile.hidden(), null, null, true, false,
+            new Rect(0, rows - 1 - prompt.height(), cols, prompt.height()));
         Frame frame = render(host, rows, cols, preview(new Rect(0, 1, cols, rows - 2 - prompt.height())),
             surface(prompt, NotificationBar.hidden()), layers);
 
@@ -117,9 +118,28 @@ class PreviewFrameCompositionTest {
 
         var confirm = ConfirmBarView.build("Confirm?", cols).place(new Object(), rows - 2, new Rect(0, 0, cols, rows));
         var invalid = new FrameComposition.Layers(null, null, true, null, confirm,
-            FrameComposition.OpenFile.hidden(), null, null, false, false);
+            FrameComposition.OpenFile.hidden(), null, null, false, false, new Rect(0, 0, 0, 0));
         assertThrows(IllegalArgumentException.class, () -> new PreviewFrameComposition(rows, cols, 1, preview,
             surface(InlinePromptBar.hidden(), NotificationBar.hidden()), invalid, false));
+    }
+
+    @Test void standalonePreviewRejectsStaleModalBoundsInsteadOfSilentlyRoutingElsewhere() {
+        int rows = 10, cols = 60;
+        var field = new TextField();
+        var bar = SaveAsBarView.build(field, cols);
+        var placed = bar.place(new Object(), rows - 2, new Rect(0, 1, cols, rows - 1));
+        var prompt = InlinePromptBar.of(bar.row(), dev.tuink.render.Style.DEFAULT, 1);
+        var stale = new FrameComposition.Layers(null, null, true, placed, null,
+            FrameComposition.OpenFile.hidden(), null, null, false, false, new Rect(0, 0, 0, 0));
+        assertThrows(IllegalArgumentException.class, () -> new PreviewFrameComposition(rows, cols, 1,
+            preview(new Rect(0, 1, cols, rows - 3)), surface(prompt, NotificationBar.hidden()), stale, false));
+    }
+
+    @Test void multilineInlineGeometryClipsToTheActualWindowBodyAtSmallSizes() {
+        assertEquals(new Rect(0, 2, 20, 3), FrameComposition.Layers.prepareBlockingBounds(
+            6, 20, 2, 8, true, FrameComposition.OpenFile.hidden(), null, null));
+        assertEquals(new Rect(0, 0, 0, 0), FrameComposition.Layers.prepareBlockingBounds(
+            6, 20, 2, 8, false, FrameComposition.OpenFile.hidden(), null, null));
     }
 
     private static TerminalEditorApp host() {
@@ -141,7 +161,7 @@ class PreviewFrameCompositionTest {
     }
     private static FrameComposition.Layers emptyLayers() {
         return new FrameComposition.Layers(null, null, false, null, null,
-            FrameComposition.OpenFile.hidden(), null, null, false, false);
+            FrameComposition.OpenFile.hidden(), null, null, false, false, new Rect(0, 0, 0, 0));
     }
     private static MarkdownPreviewState.Placement preview(Rect bounds) {
         return new MarkdownPreviewState.Placement(bounds, result("alpha", line("alpha", 0, 5, 0, 5)),

@@ -55,9 +55,9 @@ class ModalAttentionIntegrationTest {
             int height = composition.surface().inlinePrompt().height();
             Rect expected = new Rect(0, 12 - 1 - height, 60, height);
 
-            assertEquals(expected, app.blockingSurface(composition));
+            assertEquals(expected, composition.layers().blockingBounds());
             assertFalse(composition.allowsScrollHints());
-            app.paintBlockingAttention(buffer, composition, true);
+            app.paintBlockingAttention(buffer, composition.layers(), true);
 
             assertAttention(before, buffer, expected, false, WARNING);
             assertTrue(hasWideGlyph(before, expected), "the real prompt must exercise wide-cell preservation");
@@ -74,9 +74,9 @@ class ModalAttentionIntegrationTest {
             paintDialog(app, buffer, composition, true);
             Rect paintedBounds = changedBounds(document, buffer);
 
-            assertEquals(paintedBounds, app.blockingSurface(composition));
+            assertEquals(paintedBounds, composition.layers().blockingBounds());
             Cell[][] before = snapshot(buffer);
-            app.paintBlockingAttention(buffer, composition, true);
+            app.paintBlockingAttention(buffer, composition.layers(), true);
 
             assertAttention(before, buffer, paintedBounds, true, WARNING);
         }
@@ -89,7 +89,7 @@ class ModalAttentionIntegrationTest {
             dialogFrame(24, 80, true, false), dialogFrame(24, 80, false, false))) {
             CellBuffer buffer = background(composition.document().layout().rows(), composition.document().layout().cols());
             Cell[][] before = snapshot(buffer);
-            app.paintBlockingAttention(buffer, composition, true);
+            app.paintBlockingAttention(buffer, composition.layers(), true);
             assertAttention(before, buffer, new Rect(0, 0, 0, 0), false, WARNING);
             if (composition.layers().helpPage() != null || composition.layers().saveAsMode()) {
                 assertFalse(composition.allowsScrollHints(), "blocking layers invalidate document scroll reuse");
@@ -103,11 +103,11 @@ class ModalAttentionIntegrationTest {
                 CellBuffer buffer = background(size[0], size[1]);
                 Cell[][] document = snapshot(buffer);
                 paintDialog(app, buffer, composition, true);
-                Rect expected = app.blockingSurface(composition);
+                Rect expected = composition.layers().blockingBounds();
                 assertFalse(expected.isEmpty());
                 assertEquals(expected, changedBounds(document, buffer));
                 Cell[][] before = snapshot(buffer);
-                app.paintBlockingAttention(buffer, composition, true);
+                app.paintBlockingAttention(buffer, composition.layers(), true);
                 assertAttention(before, buffer, expected, true, WARNING);
             }
         }
@@ -127,8 +127,8 @@ class ModalAttentionIntegrationTest {
                 buffer = paintPrompt(app, composition);
             }
             Cell[][] before = snapshot(buffer);
-            app.paintBlockingAttention(buffer, composition, false);
-            assertAttention(before, buffer, app.blockingSurface(composition), framed, monochrome);
+            app.paintBlockingAttention(buffer, composition.layers(), false);
+            assertAttention(before, buffer, composition.layers().blockingBounds(), framed, monochrome);
         }
     }
 
@@ -191,8 +191,10 @@ class ModalAttentionIntegrationTest {
             confirm = view.place("confirm-test", top + 1, clip);
             text = "Unsaved document 中🦀\n" + view.row();
         }
-        return composition(rows, cols, InlinePromptBar.of(text, Style.DEFAULT, 1),
-            new FrameComposition.Layers(null, null, saveAs, field, confirm, FrameComposition.OpenFile.hidden(), null, null, attention, false));
+        var prompt = InlinePromptBar.of(text, Style.DEFAULT, 1);
+        return composition(rows, cols, prompt,
+            new FrameComposition.Layers(null, null, saveAs, field, confirm, FrameComposition.OpenFile.hidden(), null, null, attention, false,
+                new Rect(0, rows - 1 - prompt.height(), cols, prompt.height())));
     }
 
     private static FrameComposition dialogFrame(int rows, int cols, boolean help, boolean attention) {
@@ -208,8 +210,10 @@ class ModalAttentionIntegrationTest {
                 OpenFileDialogView.place(TerminalEditorApp.OPEN_FILE_SCOPE_ID, layout, placement, false,
                     new Rect(0, 0, cols, rows)), OpenFileInputRouter.Focus.LIST);
         }
+        var helpPlacement = help ? new TerminalEditorApp().helpOverlayPlacement(rows, cols, HELP) : null;
         return composition(rows, cols, InlinePromptBar.hidden(),
-            new FrameComposition.Layers(null, null, false, null, null, open, help ? new TerminalEditorApp().helpOverlayPlacement(rows, cols, HELP) : null, null, attention, false));
+            new FrameComposition.Layers(null, null, false, null, null, open, helpPlacement, null, attention, false,
+                help ? helpPlacement.frame().bounds() : open.dialog().frame().bounds()));
     }
 
     private static FrameComposition composition(int rows, int cols, InlinePromptBar prompt, FrameComposition.Layers layers) {

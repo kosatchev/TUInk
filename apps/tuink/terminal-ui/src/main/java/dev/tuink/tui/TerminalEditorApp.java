@@ -748,47 +748,14 @@ public class TerminalEditorApp {
         return first < 0L ? second : second < 0L ? first : Math.min(first, second);
     }
 
-    /** Geometry of the visible owner, shared by blocked-pointer feedback and painting. */
-    Rect blockingSurface(FrameComposition composition) {
-        return blockingSurface(composition.document().layout().rows(), composition.document().layout().cols(),
-            composition.document().layout().contentTopRow(), composition.surface(), composition.layers());
-    }
-
-    private Rect blockingSurface(int rows, int cols, int contentTopRow,
-        FrameComposition.Surface surface, FrameComposition.Layers layers) {
-        if (layers.openFile().visible()) {
-            return layers.openFile().dialog().frame().bounds();
-        }
-        if (layers.help() != null) {
-            return layers.help().frame().bounds();
-        }
-        if (layers.format() != null) return layers.format().bounds();
-        return blockingSurface(rows, cols, contentTopRow, surface.inlinePrompt().height(),
-            layers.saveAsMode() || layers.confirm() != null);
-    }
-
-    Rect blockingSurface(int rows, int cols, int contentTop, int promptHeight, boolean inline) {
-        if (inline) {
-            Rect prompt = new Rect(0, rows - 1 - promptHeight, cols, promptHeight);
-            return prompt.intersection(new Rect(0, contentTop, cols, Math.max(0, rows - 1 - contentTop)));
-        }
-        return new Rect(0, 0, 0, 0);
-    }
-
-    void paintBlockingAttention(CellBuffer buffer, FrameComposition composition, boolean colorEnabled) {
-        paintBlockingAttention(buffer, composition.document().layout().rows(), composition.document().layout().cols(),
-            composition.document().layout().contentTopRow(), composition.surface(), composition.layers(), colorEnabled);
-    }
-
-    private void paintBlockingAttention(CellBuffer buffer, int rows, int cols, int contentTopRow,
-        FrameComposition.Surface surface, FrameComposition.Layers layers, boolean colorEnabled) {
+    void paintBlockingAttention(CellBuffer buffer, FrameComposition.Layers layers, boolean colorEnabled) {
         if (!layers.blockedInputHighlight()) {
             return;
         }
         CellStyle accent = blockingAccent(colorEnabled);
         DialogAttentionPainter.paint(
             buffer,
-            blockingSurface(rows, cols, contentTopRow, surface, layers),
+            layers.blockingBounds(),
             layers.helpPage() != null || layers.openFile().visible() || layers.format() != null,
             accent
         );
@@ -1275,7 +1242,7 @@ public class TerminalEditorApp {
         return DocumentStatusBarView.place(left, ro, enc, eol, readingMode, cols, row);
     }
 
-    private void paintFrameOverlays(CellBuffer current, Canvas canvas, int rows, int cols, int contentTopRow,
+    private void paintFrameOverlays(CellBuffer current, Canvas canvas, int rows, int cols,
         FrameComposition.Surface surface, FrameComposition.Layers layers, SearchBarView.Placement search,
         boolean colorEnabled) {
         paintSaveAsField(canvas, layers.saveAs());
@@ -1291,11 +1258,11 @@ public class TerminalEditorApp {
         paintHelpOverlay(canvas, layers.help(), colorEnabled, layers.blockedInputHighlight());
         if (layers.format() != null) layers.format().paint(canvas,
             (colorEnabled ? colorFileTreeWidgetTheme : monoFileTreeWidgetTheme).withSurface(styles.dialog(), styles.dialog()));
-        paintBlockingAttention(current, rows, cols, contentTopRow, surface, layers, colorEnabled);
+        paintBlockingAttention(current, layers, colorEnabled);
     }
 
     /** Shared overlay ownership; the underlying content supplies only a completed cursor intent. */
-    private ScreenCursor frameCursor(int rows, int cols, int contentTopRow, FrameComposition.Surface surface,
+    private ScreenCursor frameCursor(int rows, int cols,
         FrameComposition.Layers layers, SearchBarView.Placement search, boolean searchEditorFocused,
         ScreenCursor contentCursor) {
         Point point = contentCursor.position();
@@ -1312,7 +1279,7 @@ public class TerminalEditorApp {
             && layers.confirm() == null && !menuOpen && !openFile && !help && layers.format() == null;
         if (contentOwnsCursor) visible = contentCursor.visible();
         if (layers.format() != null) visible = false;
-        if (contentFocused && blockingSurface(rows, cols, contentTopRow, surface, layers).contains(point.x(), point.y())) visible = false;
+        if (contentFocused && layers.blockingBounds().contains(point.x(), point.y())) visible = false;
         if (layers.saveAsMode() && !contentFocused) {
             Point field = layers.saveAs() == null ? null : layers.saveAs().cursorPosition(saveAsFocusManager()).orElse(null);
             if (field == null) visible = false;
@@ -1360,7 +1327,7 @@ public class TerminalEditorApp {
             new dev.tuink.tui.render.WindowTextPainter.Text(surface.topBar().text(), surface.bottomBar(),
                 surface.inlinePrompt().text(), surface.inlinePrompt().style(),
                 surface.notification().text(), surface.notification().style()), styles);
-        paintFrameOverlays(current, canvas, rows, cols, composition.contentTopRow(), surface, layers, null, services.colorEnabled);
+        paintFrameOverlays(current, canvas, rows, cols, surface, layers, null, services.colorEnabled);
         Point caret = MarkdownPreviewPainter.cursor(composition.preview());
         ScreenCursor contentCursor = caret == null ? ScreenCursor.hidden()
             : new ScreenCursor(caret, content.contains(caret.x(), caret.y()));
@@ -1376,7 +1343,7 @@ public class TerminalEditorApp {
                 geometry.visualMetricsBuilds() + geometry.semanticMetricsBuilds(),
                 geometry.preparedRowsMisses(), geometry.preparedRowsHits(), geometry.retainedBytes());
         }
-        return services.present(current, frameCursor(rows, cols, composition.contentTopRow(), surface, layers,
+        return services.present(current, frameCursor(rows, cols, layers,
             null, false, contentCursor), viewport, layers, composition.fullRedraw());
     }
 
@@ -1481,11 +1448,11 @@ public class TerminalEditorApp {
             current = renderer.rasterize(plan, rows, cols, contentTopRow);
         }
         Canvas canvas = frameCanvas(current, rows, cols);
-        paintFrameOverlays(current, canvas, rows, cols, contentTopRow, surface, layers, searchBarPlacement, colorEnabled);
+        paintFrameOverlays(current, canvas, rows, cols, surface, layers, searchBarPlacement, colorEnabled);
 
         EditorView.CursorPosition editorCursor = editorView.cursorFromPlan(plan, contentTopRow);
         ScreenCursor contentCursor = new ScreenCursor(new Point(editorCursor.col() - 1, editorCursor.row() - 1), plan.cursorInViewport());
-        ScreenCursor cursor = frameCursor(rows, cols, contentTopRow, surface, layers, searchBarPlacement,
+        ScreenCursor cursor = frameCursor(rows, cols, layers, searchBarPlacement,
             search.editorFocused(), contentCursor);
 
         Rect body = new Rect(plan.gutterWidth(), contentTopRow,

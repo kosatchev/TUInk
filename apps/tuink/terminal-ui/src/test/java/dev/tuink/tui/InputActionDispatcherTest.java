@@ -36,11 +36,10 @@ class InputActionDispatcherTest {
             var before = state.viewMemento();
             var metadata = model.fileMetadata();
             long revision = model.revision();
-            var context = TuiSessionTestSupport.context(engine, state, null,
-                ignored -> {}, 3, 20, dev.tuink.tui.TuiSessionTestSupport.navigation(engine));
+            var context = TuiSessionTestSupport.context(engine, state, 3, 20, dev.tuink.tui.TuiSessionTestSupport.navigation(engine));
             refuseStorage.set(true);
 
-            var result = InputActionDispatcher.dispatch(command, new UiSessionState(), context);
+            var result = InputActionDispatcher.dispatchDocument(command, new UiSessionState(), context);
 
             assertTrue(result.handled(), command.name());
             assertEquals(InputActionDispatcher.StatusLevel.ERROR, result.statusLevel(), command.name());
@@ -80,10 +79,9 @@ class InputActionDispatcherTest {
         tab.state().setCursor(new Position(0, 1));
         var session = TuiDocumentSession.adopt(tab);
         var navigation = new EditorViewNavigation(tab.engine(), session::navigate);
-        var context = new InputActionDispatcher.DispatchContext(tab.engine(), tab.state(), null,
-            ignored -> {}, 3, 20, navigation, session, TestSurfaces.source(false));
+        var context = new InputActionDispatcher.DispatchContext(tab.engine(), 3, 20, navigation, session);
 
-        var result = InputActionDispatcher.dispatch(TuinkCommand.CURSOR_SELECT_DOWN, new UiSessionState(), context);
+        var result = InputActionDispatcher.dispatchDocument(TuinkCommand.CURSOR_SELECT_DOWN, new UiSessionState(), context);
 
         assertTrue(result.handled());
         assertEquals(new Position(0, 0), tab.state().getSelectionAnchor());
@@ -98,16 +96,14 @@ class InputActionDispatcherTest {
         tab.engine().moveCursorTo(new Position(0, 8));
         var navigation = dev.tuink.tui.TuiSessionTestSupport.navigation(tab.engine());
         UiSessionState ui = new UiSessionState();
-        var firstFrame = TuiSessionTestSupport.context(tab.engine(), tab.state(), null,
-            ignored -> {}, 3, 20, navigation);
-        InputActionDispatcher.dispatch(TuinkCommand.CURSOR_DOWN, ui, firstFrame);
+        var firstFrame = TuiSessionTestSupport.context(tab.engine(), tab.state(), 3, 20, navigation);
+        InputActionDispatcher.dispatchDocument(TuinkCommand.CURSOR_DOWN, ui, firstFrame);
         assertEquals(new Position(1, 1), tab.state().getCursor());
         ui.readingModeSetting = true;
-        InputActionDispatcher.dispatch(TuinkCommand.EDIT_CUT, ui, firstFrame);
+        InputActionDispatcher.dispatchDocument(TuinkCommand.EDIT_CUT, ui, firstFrame);
 
-        var nextFrame = TuiSessionTestSupport.context(tab.engine(), tab.state(), null,
-            ignored -> {}, 3, 40, navigation);
-        InputActionDispatcher.dispatch(TuinkCommand.CURSOR_DOWN, ui, nextFrame);
+        var nextFrame = TuiSessionTestSupport.context(tab.engine(), tab.state(), 3, 40, navigation);
+        InputActionDispatcher.dispatchDocument(TuinkCommand.CURSOR_DOWN, ui, nextFrame);
 
         assertEquals(new Position(2, 8), tab.state().getCursor());
         assertEquals(List.of("0123456789", "x", "abcdefghij"), tab.model().snapshotLines());
@@ -120,25 +116,23 @@ class InputActionDispatcherTest {
         tab.engine().moveHome();
         UiSessionState ui = new UiSessionState();
         ui.wrapLinesSetting = true;
-        InputActionDispatcher.DispatchContext context = TuiSessionTestSupport.context(
-            tab.engine(), tab.state(), null, ignored -> {}, 3, 4, dev.tuink.tui.TuiSessionTestSupport.navigation(tab.engine())
-        );
+        InputActionDispatcher.DispatchContext context = TuiSessionTestSupport.context(tab.engine(), tab.state(), 3, 4, dev.tuink.tui.TuiSessionTestSupport.navigation(tab.engine()));
 
-        InputActionDispatcher.dispatch(TuinkCommand.CURSOR_DOWN, ui, context);
+        InputActionDispatcher.dispatchDocument(TuinkCommand.CURSOR_DOWN, ui, context);
         assertEquals(new Position(0, 4), tab.state().getCursor());
-        InputActionDispatcher.dispatch(TuinkCommand.CURSOR_SELECT_DOWN, ui, context);
+        InputActionDispatcher.dispatchDocument(TuinkCommand.CURSOR_SELECT_DOWN, ui, context);
         assertEquals(new Position(0, 8), tab.state().getCursor());
         assertEquals(new Position(0, 4), tab.state().getSelectionAnchor());
-        InputActionDispatcher.dispatch(TuinkCommand.CURSOR_UP, ui, context);
+        InputActionDispatcher.dispatchDocument(TuinkCommand.CURSOR_UP, ui, context);
         assertEquals(new Position(0, 4), tab.state().getCursor());
         assertFalse(tab.engine().hasSelection());
-        InputActionDispatcher.dispatch(TuinkCommand.CURSOR_PAGE_DOWN, ui, context);
+        InputActionDispatcher.dispatchDocument(TuinkCommand.CURSOR_PAGE_DOWN, ui, context);
         assertEquals(new Position(0, 16), tab.state().getCursor());
-        InputActionDispatcher.dispatch(TuinkCommand.CURSOR_PAGE_UP, ui, context);
+        InputActionDispatcher.dispatchDocument(TuinkCommand.CURSOR_PAGE_UP, ui, context);
         assertEquals(new Position(0, 4), tab.state().getCursor());
 
         ui.wrapLinesSetting = false;
-        InputActionDispatcher.dispatch(TuinkCommand.CURSOR_DOWN, ui, context);
+        InputActionDispatcher.dispatchDocument(TuinkCommand.CURSOR_DOWN, ui, context);
         assertEquals(new Position(0, 4), tab.state().getCursor());
     }
 
@@ -161,10 +155,10 @@ class InputActionDispatcherTest {
         );
 
         for (TuinkCommand command : edits) {
-            InputActionDispatcher.DispatchResult result = InputActionDispatcher.dispatch(
+            InputActionDispatcher.DispatchResult result = InputActionDispatcher.dispatchDocument(
                 command,
                 ui,
-                context(ignored -> {})
+                emptyDocumentContext()
             );
 
             assertTrue(result.handled(), command.toString());
@@ -177,34 +171,32 @@ class InputActionDispatcherTest {
     void readingModePreservesTextAndHistoryUntilEditingIsEnabledAgain() {
         TabSession tab = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
         UiSessionState ui = new UiSessionState();
-        InputActionDispatcher.DispatchContext context = TuiSessionTestSupport.context(
-            tab.engine(), tab.state(), null, ignored -> {}, 24, 80, dev.tuink.tui.TuiSessionTestSupport.navigation(tab.engine())
-        );
+        InputActionDispatcher.DispatchContext context = TuiSessionTestSupport.context(tab.engine(), tab.state(), 24, 80, dev.tuink.tui.TuiSessionTestSupport.navigation(tab.engine()));
         tab.engine().insertInput("abc");
         long editedRevision = tab.model().revision();
         ui.readingModeSetting = true;
 
-        InputActionDispatcher.dispatch(TuinkCommand.EDIT_UNDO, ui, context);
+        InputActionDispatcher.dispatchDocument(TuinkCommand.EDIT_UNDO, ui, context);
 
         assertEquals("abc", tab.model().getLine(0));
         assertEquals(editedRevision, tab.model().revision());
         assertTrue(tab.state().isDirty());
 
         ui.readingModeSetting = false;
-        InputActionDispatcher.dispatch(TuinkCommand.EDIT_UNDO, ui, context);
+        InputActionDispatcher.dispatchDocument(TuinkCommand.EDIT_UNDO, ui, context);
         assertEquals("", tab.model().getLine(0));
         assertFalse(tab.state().isDirty());
         long undoneRevision = tab.model().revision();
         ui.readingModeSetting = true;
 
-        InputActionDispatcher.dispatch(TuinkCommand.EDIT_REDO, ui, context);
+        InputActionDispatcher.dispatchDocument(TuinkCommand.EDIT_REDO, ui, context);
 
         assertEquals("", tab.model().getLine(0));
         assertEquals(undoneRevision, tab.model().revision());
         assertFalse(tab.state().isDirty());
 
         ui.readingModeSetting = false;
-        InputActionDispatcher.dispatch(TuinkCommand.EDIT_REDO, ui, context);
+        InputActionDispatcher.dispatchDocument(TuinkCommand.EDIT_REDO, ui, context);
         assertEquals("abc", tab.model().getLine(0));
         assertTrue(tab.state().isDirty());
     }
@@ -213,8 +205,8 @@ class InputActionDispatcherTest {
     void saveCommandsRemainAvailableForTheDocumentWorkflow() {
         UiSessionState ui = new UiSessionState();
 
-        assertFalse(InputActionDispatcher.dispatch(TuinkCommand.DOCUMENT_SAVE, ui, context(ignored -> {})).handled());
-        assertFalse(InputActionDispatcher.dispatch(TuinkCommand.DOCUMENT_SAVE_AS, ui, context(ignored -> {})).handled());
+        assertFalse(InputActionDispatcher.dispatchDocument(TuinkCommand.DOCUMENT_SAVE, ui, emptyDocumentContext()).handled());
+        assertFalse(InputActionDispatcher.dispatchDocument(TuinkCommand.DOCUMENT_SAVE_AS, ui, emptyDocumentContext()).handled());
     }
 
     @Test
@@ -240,11 +232,8 @@ class InputActionDispatcherTest {
         ui.mouseModeSetting = true;
         AtomicBoolean enabled = new AtomicBoolean(true);
 
-        InputActionDispatcher.DispatchResult result = InputActionDispatcher.dispatch(
-            TuinkCommand.SETTINGS_TOGGLE_MOUSE,
-            ui,
-            context(enabled::set)
-        );
+        InputActionDispatcher.DispatchResult result = InputActionDispatcher.dispatchUi(
+            TuinkCommand.SETTINGS_TOGGLE_MOUSE, ui, TestSurfaces.source(ui), null, enabled::set, () -> {});
 
         assertTrue(result.handled());
         assertEquals(InputActionDispatcher.StatusLevel.ERROR, result.statusLevel());
@@ -257,22 +246,21 @@ class InputActionDispatcherTest {
         EditorClipboard clipboard = new EditorClipboard();
         TabSession tab = TabSession.createEmpty(TerminalEditorTextLayout::new, clipboard);
         UiSessionState ui = new UiSessionState();
-        var context = TuiSessionTestSupport.context(tab.engine(), tab.state(), null,
-            ignored -> {}, 3, 8, dev.tuink.tui.TuiSessionTestSupport.navigation(tab.engine()));
+        var context = TuiSessionTestSupport.context(tab.engine(), tab.state(), 3, 8, dev.tuink.tui.TuiSessionTestSupport.navigation(tab.engine()));
         for (TuinkCommand noEffect : List.of(TuinkCommand.EDIT_PASTE, TuinkCommand.EDIT_UNDO,
             TuinkCommand.EDIT_REDO, TuinkCommand.EDIT_DELETE_FORWARD, TuinkCommand.EDIT_BACKSPACE,
             TuinkCommand.EDIT_COPY)) {
             assertEquals(CursorPolicy.PRESERVE,
-                InputActionDispatcher.dispatch(noEffect, ui, context).viewportPolicy(), noEffect.name());
+                InputActionDispatcher.dispatchDocument(noEffect, ui, context).viewportPolicy(), noEffect.name());
         }
         clipboard.setText("inserted");
         assertEquals(CursorPolicy.FOLLOW_CURSOR,
-            InputActionDispatcher.dispatch(TuinkCommand.EDIT_PASTE, ui, context).viewportPolicy());
+            InputActionDispatcher.dispatchDocument(TuinkCommand.EDIT_PASTE, ui, context).viewportPolicy());
         assertEquals("inserted", tab.model().getLine(0));
         assertEquals(CursorPolicy.PRESERVE,
-            InputActionDispatcher.dispatch(TuinkCommand.EDIT_COPY, ui, context).viewportPolicy());
+            InputActionDispatcher.dispatchDocument(TuinkCommand.EDIT_COPY, ui, context).viewportPolicy());
         assertEquals(CursorPolicy.FOLLOW_CURSOR,
-            InputActionDispatcher.dispatch(TuinkCommand.EDIT_UNDO, ui, context).viewportPolicy());
+            InputActionDispatcher.dispatchDocument(TuinkCommand.EDIT_UNDO, ui, context).viewportPolicy());
     }
 
     @Test
@@ -282,29 +270,18 @@ class InputActionDispatcherTest {
         tab.engine().moveHome();
         UiSessionState ui = new UiSessionState();
         ui.wrapLinesSetting = true;
-        var context = TuiSessionTestSupport.context(tab.engine(), tab.state(), null,
-            ignored -> {}, 3, 4, dev.tuink.tui.TuiSessionTestSupport.navigation(tab.engine()));
-        InputActionDispatcher.dispatch(TuinkCommand.CURSOR_SELECT_DOWN, ui, context);
+        var context = TuiSessionTestSupport.context(tab.engine(), tab.state(), 3, 4, dev.tuink.tui.TuiSessionTestSupport.navigation(tab.engine()));
+        InputActionDispatcher.dispatchDocument(TuinkCommand.CURSOR_SELECT_DOWN, ui, context);
         Position cursor = tab.state().getCursor();
 
-        var result = InputActionDispatcher.dispatch(TuinkCommand.CURSOR_PAGE_DOWN, ui, context);
+        var result = InputActionDispatcher.dispatchDocument(TuinkCommand.CURSOR_PAGE_DOWN, ui, context);
 
         assertEquals(CursorPolicy.PAGE_SCROLL, result.viewportPolicy());
         assertEquals(cursor, tab.state().getCursor());
         assertTrue(tab.state().getTopWrapSegment() > 0);
     }
 
-    private static InputActionDispatcher.DispatchContext context(
-        java.util.function.Consumer<Boolean> mouseTrackingController
-    ) {
-        return TuiSessionTestSupport.context(
-            null,
-            null,
-            null,
-            mouseTrackingController,
-            0,
-            0,
-            null
-        );
+    private static InputActionDispatcher.DispatchContext emptyDocumentContext() {
+        return TuiSessionTestSupport.context(null, null, 0, 0, null);
     }
 }

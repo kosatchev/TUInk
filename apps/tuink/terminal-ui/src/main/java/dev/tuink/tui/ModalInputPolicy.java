@@ -53,7 +53,8 @@ final class ModalInputPolicy {
         if (kind == Kind.HELP && isHelpCommand(command)) {
             return false;
         }
-        if (allowedKey(kind, stroke, target)) {
+        KeyStroke semantic = DialogCommandPolicy.eventFor(command).orElse(stroke);
+        if (allowedKey(kind, semantic, target)) {
             return false;
         }
         // An unbound non-text key does not establish an attempted editor action.

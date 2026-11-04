@@ -55,6 +55,14 @@ public final class CommandRegistry<C, R> {
         return commands.size();
     }
 
+    /** Checks current registration and argument schema without executing a handler; invoke revalidates before execution. */
+    public boolean accepts(CommandInvocation invocation) {
+        Objects.requireNonNull(invocation, "invocation");
+        RegisteredCommand<C, R> registered;
+        synchronized (this) { registered = commands.get(invocation.id()); }
+        return registered != null && validateArguments(registered.descriptor(), invocation).isEmpty();
+    }
+
     public InvocationResult<R> invoke(CommandInvocation invocation, C context) {
         Objects.requireNonNull(invocation, "invocation");
         Objects.requireNonNull(context, "context");

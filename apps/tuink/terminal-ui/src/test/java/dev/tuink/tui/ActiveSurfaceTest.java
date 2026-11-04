@@ -42,10 +42,26 @@ class ActiveSurfaceTest {
         }
     }
 
+    @Test void replacementTargetsTheDocumentIndependentlyOfTheFocusedSearchControl() {
+        var source = TestSurfaces.source(new UiSessionState());
+        for (var focus : ActiveSurface.Focus.values()) {
+            var surface = source.withFocus(focus);
+            assertTrue(surface.allows(TuinkCommand.SEARCH_REPLACE));
+            assertTrue(surface.allows(TuinkCommand.SEARCH_REPLACE_ALL));
+            assertFalse(surface.withKind(ActiveSurface.Kind.LIVE_PREVIEW).allows(TuinkCommand.SEARCH_REPLACE_ALL));
+            var locked = new ActiveSurface(surface.presentationId(), surface.kind(), focus, surface.modalScope(),
+                surface.reading(), true, false, true, true, true);
+            assertFalse(locked.allows(TuinkCommand.SEARCH_REPLACE_ALL));
+        }
+    }
+
     @Test void globalModalAndIoLocksHaveSeparateScopes() {
         var source = new ActiveSurface(PresentationId.create(), ActiveSurface.Kind.SOURCE,
             ActiveSurface.Focus.CONTENT, ActiveSurface.ModalScope.WINDOW, false, true, true, false, true, false);
         assertFalse(source.allows(TuinkCommand.DOCUMENT_OPEN));
+        assertFalse(source.allows(TuinkCommand.TAB_ACTIVATE));
+        assertFalse(source.allows(TuinkCommand.TAB_NEXT));
+        assertFalse(source.allows(TuinkCommand.TAB_CLOSE));
         assertFalse(source.allows(TuinkCommand.EDIT_PASTE));
         assertTrue(source.allows(TuinkCommand.EDIT_COPY));
         assertTrue(source.allows(TuinkCommand.DOCUMENT_SAVE_AS), "the subject workflow owns Save As busy policy");

@@ -32,7 +32,6 @@ import dev.tuink.tui.flow.SaveAsSuggestionStore;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.flow.UiModalState;
 import dev.tuink.editor.command.CommandInvocation;
-import dev.tuink.tui.input.EditorInput;
 import dev.tuink.tui.command.TuinkCommand;
 import dev.tuiframe.input.KeyStroke;
 import dev.tuiframe.input.PointerEvent;
@@ -662,33 +661,27 @@ public class TerminalEditorApp {
             && pointer.modifiers().contains(KeyStroke.Modifier.SHIFT);
     }
 
-    static EditorInput resolveEditorInput(
+    static WindowInput resolveEditorInput(
         CommandRouter commandRouter,
         TuiInputEvent event,
         CommandInvocation pendingCommand,
         CommandRouter.RoutedCommand routedMenuResult,
-        boolean searchOwnsInput,
-        SearchFocus searchFocus
+        UiRecipient recipient
     ) {
         Objects.requireNonNull(commandRouter, "commandRouter");
         Objects.requireNonNull(event, "event");
-        if (routedMenuResult instanceof CommandRouter.RoutedAction selected) {
-            return new EditorInput(event, selected.action());
+        Objects.requireNonNull(recipient, "recipient");
+        if (routedMenuResult != null) {
+            return new WindowInput.Command(Objects.requireNonNull(pendingCommand, "pendingCommand"),
+                routedMenuResult, recipient);
         }
         if (pendingCommand != null) {
-            if (searchOwnsInput) {
-                TuinkCommand command = TuinkCommand.fromId(pendingCommand.id()).orElse(null);
-                if (command == null) {
-                    return null;
-                }
-                pendingCommand = commandRouter.invocationForSearch(command, searchFocus, pendingCommand);
-            }
-            TuinkCommand command = commandRouter.invoke(pendingCommand).orElse(null);
-            return command == null ? null : new EditorInput(event, command);
+            var invocation = pendingCommand;
+            return commandRouter.dispatch(invocation)
+                .<WindowInput>map(route -> new WindowInput.Command(invocation, route, recipient))
+                .orElse(WindowInput.Consumed.INSTANCE);
         }
-        return event instanceof TextInput || event instanceof PointerEvent
-            ? new EditorInput(event, null)
-            : null;
+        return WindowInput.physical(event, recipient);
     }
 
     static boolean searchOwnsRawInput(
@@ -721,24 +714,10 @@ public class TerminalEditorApp {
     }
 
     static TabBarInputRouter.Policy tabBarInputPolicy(
-        boolean placementAvailable,
-        boolean mouseEnabled,
-        UiModalState modalState,
-        boolean openFileMode,
-        boolean topMenuOpen,
-        boolean searchMode
+        boolean hasPlacement, boolean pointerAvailable, boolean windowModal, boolean menuOpen
     ) {
-        if (!placementAvailable || !mouseEnabled || modalState == null
-            || openFileMode || topMenuOpen) {
-            return null;
-        }
-        if (modalState.isCloseTabConfirm()) {
-            return TabBarInputRouter.Policy.CLOSE_TAB_CONFIRM;
-        }
-        if (!modalState.isNone()) {
-            return null;
-        }
-        return searchMode ? TabBarInputRouter.Policy.SEARCH : TabBarInputRouter.Policy.NORMAL;
+        if (!hasPlacement || !pointerAvailable || menuOpen) return null;
+        return windowModal ? TabBarInputRouter.Policy.CLOSE_TAB_CONFIRM : TabBarInputRouter.Policy.NORMAL;
     }
 
     static ModalInputPolicy.Kind modalInputKind(UiModalState modal, boolean openFileMode) {

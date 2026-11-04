@@ -43,21 +43,20 @@ final class SaveAsInputRouter {
         Objects.requireNonNull(placement, "placement");
         Objects.requireNonNull(command, "command");
         placement.activate(focusManager);
-        ControlCommandRouter.ClipboardResult copied = ControlCommandRouter.clipboard(command,
-            placement.field(focusManager.focused().orElse(null)).orElse(null), clipboard);
-        if (copied.handled()) {
-            if (copied.inputRejected()) return Result.action(SaveAsBarView.Action.INPUT_REJECTED);
-            return copied.valueChanged() ? Result.action(SaveAsBarView.Action.VALUE_CHANGED) : Result.CAPTURED;
+        var editing = FieldInputDispatcher.command(command,
+            placement.field(focusManager.focused().orElse(null)).orElse(null), clipboard, FieldInputDispatcher.MEMORY_BOUNDED);
+        if (editing instanceof FieldInputDispatcher.Applied applied) {
+            if (applied.inputRejected()) return Result.action(SaveAsBarView.Action.INPUT_REJECTED);
+            return applied.valueChanged() ? Result.action(SaveAsBarView.Action.VALUE_CHANGED) : Result.CAPTURED;
         }
         if (command == TuinkCommand.UI_ESCAPE || command == TuinkCommand.SEARCH_CLOSE) {
             return Result.action(SaveAsBarView.Action.CANCELLED);
         }
-        KeyStroke event = ControlCommandRouter.eventFor(command).orElse(null);
-        if (event != null) {
-            Result routed = route(focusManager, placement, event);
+        if (editing instanceof FieldInputDispatcher.Forward forward) {
+            Result routed = route(focusManager, placement, forward.event());
             return routed.consumed() ? routed : Result.CAPTURED;
         }
-        return ControlCommandRouter.unsupportedLocally(command) ? Result.CAPTURED : Result.IGNORED;
+        return Result.IGNORED;
     }
 
     static Result route(
@@ -100,8 +99,9 @@ final class SaveAsInputRouter {
 
         if (route.target().isPresent()) {
             RoutedTarget<SaveAsBarView.Target, SaveAsBarView.Action> target = route.target().orElseThrow();
-            InteractionResult<SaveAsBarView.Action> interaction = target.placement()
-                .handle(event, route.context().orElseThrow());
+            InteractionResult<SaveAsBarView.Action> interaction = FieldInputDispatcher.event(
+                placement.field(target.id()).orElse(null), event, FieldInputDispatcher.MEMORY_BOUNDED,
+                input -> target.placement().handle(input, route.context().orElseThrow()), SaveAsBarView.Action.INPUT_REJECTED);
             focusManager.apply(scope, target.id(), interaction.focusRequest());
             if (capture != null) {
                 capture.observe(surfaceId, scope, target.id(), interaction);

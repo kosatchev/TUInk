@@ -21,6 +21,7 @@ import java.util.concurrent.FutureTask;
 
 /** View-local mode, request lifetime and viewport. Never shared with an editor cursor. */
 final class MarkdownPreviewState implements AutoCloseable {
+    static final int SEARCH_QUERY_MAX_UTF16 = 4096;
     final PreviewCoordinator coordinator = new PreviewCoordinator();
     final PreviewSelection selection = new PreviewSelection();
     boolean active;
@@ -330,8 +331,9 @@ final class MarkdownPreviewState implements AutoCloseable {
     }
     void setSearchQuery(String query) {
         String next = Objects.requireNonNullElse(query, "");
-        if (next.length() > 4096) {
-            int end = Character.isHighSurrogate(next.charAt(4095)) ? 4095 : 4096;
+        if (next.length() > SEARCH_QUERY_MAX_UTF16) {
+            int end = Character.isHighSurrogate(next.charAt(SEARCH_QUERY_MAX_UTF16 - 1))
+                ? SEARCH_QUERY_MAX_UTF16 - 1 : SEARCH_QUERY_MAX_UTF16;
             next = next.substring(0, end);
         }
         if (searchQuery.equals(next)) return;

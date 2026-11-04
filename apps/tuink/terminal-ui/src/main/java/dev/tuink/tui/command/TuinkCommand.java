@@ -7,6 +7,9 @@ import java.util.Optional;
 /** Built-in semantic editor commands, independent of their keyboard or menu bindings. */
 public enum TuinkCommand {
     APP_QUIT("tuink.app.quit", "Quit"),
+    DIALOG_CONFIRM_SAVE("tuink.dialog.confirm-save", "Save confirmation"),
+    DIALOG_CONFIRM_DISCARD("tuink.dialog.confirm-discard", "Discard confirmation"),
+    DIALOG_CONFIRM_CANCEL("tuink.dialog.confirm-cancel", "Cancel confirmation"),
 
     DOCUMENT_RECOVER_DRAFTS("tuink.document.recover-drafts", "Recover drafts"),
     DOCUMENT_OPEN("tuink.document.open", "Open document"),

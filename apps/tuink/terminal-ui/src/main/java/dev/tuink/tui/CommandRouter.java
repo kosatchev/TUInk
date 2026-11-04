@@ -112,33 +112,8 @@ final class CommandRouter {
         return new CommandInvocation(TAB_ACTIVATE.id(), Map.of("index", Integer.toString(tabIndex)));
     }
 
-    CommandInvocation invocationForSearch(
-        TuinkCommand action,
-        SearchFocus focus,
-        CommandInvocation globalInvocation
-    ) {
-        if (action == null) {
-            return globalInvocation;
-        }
-        TuinkCommand focused = switch (action) {
-            case UI_ESCAPE -> SEARCH_CLOSE;
-            case EDIT_INSERT_TAB -> SEARCH_FOCUS_NEXT;
-            case EDIT_BACKSPACE -> SEARCH_FIELD_BACKSPACE;
-            case EDIT_DELETE_FORWARD -> SEARCH_FIELD_DELETE;
-            case CURSOR_LEFT -> SEARCH_NAVIGATE_LEFT;
-            case CURSOR_RIGHT -> SEARCH_NAVIGATE_RIGHT;
-            case CURSOR_UP -> SEARCH_NAVIGATE_UP;
-            case CURSOR_DOWN -> SEARCH_NAVIGATE_DOWN;
-            case CURSOR_HOME -> SearchController.isSearchFieldFocus(focus) ? SEARCH_FIELD_HOME : null;
-            case CURSOR_END -> SearchController.isSearchFieldFocus(focus) ? SEARCH_FIELD_END : null;
-            case EDIT_INSERT_NEWLINE -> SearchController.actionForSearchFocus(focus);
-            case SEARCH_OPEN -> SEARCH_NEXT;
-            default -> null;
-        };
-        if (focused != null) {
-            return CommandInvocation.of(focused.id());
-        }
-        return globalInvocation == null ? CommandInvocation.of(action.id()) : globalInvocation;
+    boolean accepts(CommandInvocation invocation) {
+        return registry.accepts(invocation);
     }
 
     Optional<TuinkCommand> invoke(CommandInvocation invocation) {
@@ -183,6 +158,10 @@ final class CommandRouter {
                     ),
                     (request, context) -> new ActivateTab(requiredTabIndex(request))
                 );
+            } else if (command == TuinkCommand.TAB_CLOSE) {
+                registry.register(new CommandDescriptor(command.id(), command.title(), "",
+                    List.of(new CommandArgumentDescriptor("index", CommandArgumentType.INTEGER, false, 0, null))),
+                    (request, context) -> new RoutedAction(command));
             } else {
                 registry.register(
                     new CommandDescriptor(command.id(), command.title()),

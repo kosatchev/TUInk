@@ -1,8 +1,6 @@
 package dev.tuink.tui;
 
 import dev.tuiframe.input.KeyStroke;
-import dev.tuiframe.widget.TextField;
-import dev.tuink.core.EditorClipboard;
 import dev.tuink.tui.command.TuinkCommand;
 import java.util.Objects;
 import java.util.Optional;
@@ -56,22 +54,4 @@ final class ControlCommandRouter {
             || command == TuinkCommand.EDIT_TOGGLE_LINE_COMMENT;
     }
 
-    static ClipboardResult clipboard(TuinkCommand command, TextField field, EditorClipboard clipboard) {
-        Objects.requireNonNull(command, "command");
-        Objects.requireNonNull(clipboard, "clipboard");
-        if (command != TuinkCommand.EDIT_COPY && command != TuinkCommand.EDIT_CUT
-            && command != TuinkCommand.EDIT_PASTE) {
-            return new ClipboardResult(false, false, false);
-        }
-        if (field == null) {
-            return new ClipboardResult(true, false, false);
-        }
-        String before = field.text();
-        FieldClipboard.Result result = FieldClipboard.handle(command, field, clipboard);
-        return new ClipboardResult(result.handled(), !before.equals(field.text()),
-            result == FieldClipboard.Result.INPUT_REJECTED);
-    }
-
-    record ClipboardResult(boolean handled, boolean valueChanged, boolean inputRejected) {
-    }
 }

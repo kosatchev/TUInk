@@ -25,10 +25,11 @@ final class PreviewPresentationView {
         var placement = preview.placement();
         var chrome = prepared.finish(new WindowChrome.Content(window.surface(), bounds, status(input, placement), null));
         var layers = chrome.layers();
-        // A retained query is content behind a modal; only its current input owner is painted focused.
-        if ((layers.saveAs() != null || layers.confirm() != null || layers.openFile().visible()
-            || layers.help() != null || layers.format() != null) && !layers.contentFocused()
-            && placement.searchInput() != null) placement = unfocusedQuery(placement);
+        boolean overlay = layers.saveAs() != null || layers.confirm() != null || layers.openFile().visible()
+            || layers.help() != null || layers.format() != null;
+        if (overlay) placement = unfocusedQuery(placement, layers.contentFocused());
+        else if (window.surface().focus() != ActiveSurface.Focus.EDITABLE_TEXT)
+            placement = unfocusedQuery(placement, window.surface().focus() == ActiveSurface.Focus.CONTENT);
         return new PreviewFrameComposition(window.rows(), window.cols(), prepared.contentTopRow(), placement,
             chrome.surface(), layers, input.fullRedraw());
     }
@@ -40,8 +41,8 @@ final class PreviewPresentationView {
             input.window().context().presentations().size(), input.window().cols());
     }
 
-    private static MarkdownPreviewState.Placement unfocusedQuery(MarkdownPreviewState.Placement p) {
+    private static MarkdownPreviewState.Placement unfocusedQuery(MarkdownPreviewState.Placement p, boolean contentFocused) {
         return new MarkdownPreviewState.Placement(p.bounds(), p.result(), p.top(), p.left(), p.loading(), p.error(),
-            p.selection(), p.searchMatches(), p.activeMatch(), p.searchQuery(), p.searchEditing(), p.caret(), null, p.geometry());
+            p.selection(), p.searchMatches(), p.activeMatch(), p.searchQuery(), p.searchEditing(), contentFocused ? p.caret() : null, null, p.geometry());
     }
 }

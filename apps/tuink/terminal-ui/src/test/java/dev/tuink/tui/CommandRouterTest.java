@@ -127,60 +127,13 @@ class CommandRouterTest {
     }
 
     @Test
-    void searchFocusReplacesGlobalEditorSemanticsBeforeRegistryDispatch() {
-        CommandInvocation globalSelectAll = router.invocationFor(
-            KeyStroke.of(KeyStroke.Key.A, KeyStroke.Modifier.CTRL)
-        ).orElseThrow();
-        CommandInvocation fieldSelectAll = router.invocationForSearch(
-            EDIT_SELECT_ALL,
-            SearchFocus.FIND,
-            globalSelectAll
-        );
-        CommandInvocation enter = router.invocationFor(KeyStroke.of(KeyStroke.Key.ENTER)).orElseThrow();
-        CommandInvocation searchEnter = router.invocationForSearch(
-            EDIT_INSERT_NEWLINE,
-            SearchFocus.PREV_BUTTON,
-            enter
-        );
-        CommandInvocation fieldEnter = router.invocationForSearch(
-            EDIT_INSERT_NEWLINE,
-            SearchFocus.FIND,
-            enter
-        );
-
-        assertEquals(EDIT_SELECT_ALL.id(), globalSelectAll.id());
-        assertEquals(EDIT_SELECT_ALL.id(), fieldSelectAll.id());
-        assertEquals(SEARCH_PREVIOUS.id(), searchEnter.id());
-        assertEquals(SEARCH_NEXT.id(), fieldEnter.id());
-        assertEquals(EDIT_SELECT_ALL, router.invoke(fieldSelectAll).orElseThrow());
-        assertEquals(SEARCH_PREVIOUS, router.invoke(searchEnter).orElseThrow());
-    }
-
-    @Test
-    void searchFieldNavigationUsesFocusedCommandsAndPreservesUnrelatedGlobalSemantics() {
-        assertEquals(
-            TuinkCommand.SEARCH_NAVIGATE_LEFT.id(),
-            router.invocationForSearch(TuinkCommand.CURSOR_LEFT, SearchFocus.FIND, null).id()
-        );
-        assertEquals(
-            TuinkCommand.SEARCH_FIELD_BACKSPACE.id(),
-            router.invocationForSearch(TuinkCommand.EDIT_BACKSPACE, SearchFocus.REPLACE, null).id()
-        );
-        assertEquals(
-            TuinkCommand.SEARCH_FIELD_HOME.id(),
-            router.invocationForSearch(CURSOR_HOME, SearchFocus.FIND, null).id()
-        );
-        assertEquals(
-            CURSOR_HOME.id(),
-            router.invocationForSearch(CURSOR_HOME, SearchFocus.CASE, null).id()
-        );
-        assertEquals(
-            SEARCH_NEXT.id(),
-            router.invocationForSearch(TuinkCommand.SEARCH_OPEN, SearchFocus.FIND, null).id()
-        );
-        CommandInvocation quit = CommandInvocation.of(APP_QUIT.id());
-        assertEquals(quit, router.invocationForSearch(APP_QUIT, SearchFocus.FIND, quit));
-        assertNull(router.invocationForSearch(null, SearchFocus.FIND, null));
+    void preflightRejectsMalformedBindingsWithoutExecutingRoutesOrDroppingArguments() {
+        var valid = CommandInvocation.of(EDIT_SELECT_ALL.id());
+        var invalid = new CommandInvocation(EDIT_SELECT_ALL.id(), java.util.Map.of("unexpected", "value"));
+        assertTrue(router.accepts(valid));
+        assertFalse(router.accepts(invalid));
+        assertTrue(router.dispatch(invalid).isEmpty());
+        assertEquals("value", invalid.argument("unexpected").orElseThrow());
     }
 
     @Test
@@ -195,7 +148,7 @@ class CommandRouterTest {
         assertEquals(pluginCommand, resolved);
         assertTrue(customRouter.invoke(resolved).isEmpty());
         assertTrue(customRouter.dispatch(resolved).isEmpty());
-        assertEquals(pluginCommand, customRouter.invocationForSearch(null, SearchFocus.FIND, resolved));
+        assertFalse(customRouter.accepts(resolved));
     }
 
     @Test

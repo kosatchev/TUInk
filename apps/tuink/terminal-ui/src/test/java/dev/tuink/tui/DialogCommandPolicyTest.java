@@ -240,9 +240,8 @@ class DialogCommandPolicyTest {
                 Decision decision = DialogCommandPolicy.decide(mode, Target.TEXT_INPUT,
                     DialogCommandPolicy.action(PHYSICAL_KEY, command));
                 if (!decision.consumed()) {
-                    InputActionDispatcher.dispatch(command, fixture.ui,
-                        TuiSessionTestSupport.context(fixture.tab.engine(), fixture.tab.state(),
-                            fixture.topMenu, ignored -> {}, 3, 12, fixture.navigation));
+                    InputActionDispatcher.dispatchDocument(command, fixture.ui,
+                        TuiSessionTestSupport.context(fixture.tab.engine(), fixture.tab.state(), 3, 12, fixture.navigation));
                 }
                 assertTrue(decision.consumed(), mode + " " + command);
                 assertEquals(modelBefore, fixture.tab.model().snapshotLines());
@@ -301,9 +300,8 @@ class DialogCommandPolicyTest {
         } else if (event instanceof PasteEvent paste) {
             fixture.tab.engine().insertInput(paste.text());
         } else if (command != null) {
-            assertTrue(InputActionDispatcher.dispatch(command, fixture.ui,
-                TuiSessionTestSupport.context(fixture.tab.engine(), fixture.tab.state(),
-                    fixture.topMenu, ignored -> {}, 3, 12, fixture.navigation)).handled(), command.toString());
+            assertTrue(InputActionDispatcher.dispatchDocument(command, fixture.ui,
+                TuiSessionTestSupport.context(fixture.tab.engine(), fixture.tab.state(), 3, 12, fixture.navigation)).handled(), command.toString());
         }
         return decision;
     }

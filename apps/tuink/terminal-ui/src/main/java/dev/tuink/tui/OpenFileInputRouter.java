@@ -104,17 +104,18 @@ final class OpenFileInputRouter {
         TuinkCommand command, EditorClipboard clipboard) {
         dialog.activate(focusState);
         var field = focusState.focus() == Focus.LOCATION ? dialog.location() : null;
-        var copied = ControlCommandRouter.clipboard(command, field, clipboard);
-        if (copied.handled()) {
-            return copied.inputRejected() ? intent(dialog.tree().state(), focusState.focus(),
+        var editing = FieldInputDispatcher.command(command, field, clipboard, FieldInputDispatcher.MEMORY_BOUNDED);
+        if (editing instanceof FieldInputDispatcher.Applied applied) {
+            return applied.inputRejected() ? intent(dialog.tree().state(), focusState.focus(),
                 new SelectionRejected(Rejection.INPUT_TOO_LARGE)) : captured(dialog.tree().state(), focusState.focus());
         }
-        if (focusState.focus() == Focus.LOCATION && ControlCommandRouter.owns(command)) {
-            var event = ControlCommandRouter.eventFor(command).orElse(null);
-            return event == null ? captured(dialog.tree().state(), focusState.focus())
-                : route(dialog, focusState, event, 0, 0);
-        }
-        return ignored(dialog.tree().state(), focusState.focus());
+        var event = command == TuinkCommand.FILE_BROWSER_TOGGLE_HIDDEN
+            ? KeyStroke.of(KeyStroke.Key.H, KeyStroke.Modifier.CTRL)
+            : editing instanceof FieldInputDispatcher.Forward forward ? forward.event() : null;
+        if (event != null) return route(dialog, focusState, event, 0, 0);
+        return ControlCommandRouter.unsupportedLocally(command)
+            ? captured(dialog.tree().state(), focusState.focus())
+            : ignored(dialog.tree().state(), focusState.focus());
     }
 
     static Result route(
@@ -226,8 +227,10 @@ final class OpenFileInputRouter {
         if (routed.target().isPresent()) {
             var target = routed.target().orElseThrow();
             if (target.id() != OpenFileDialogView.Control.LIST) {
-                InteractionResult<OpenFileDialogView.Action> interaction = target.placement().handle(
-                    event, routed.context().orElseThrow());
+                InteractionResult<OpenFileDialogView.Action> interaction = FieldInputDispatcher.event(
+                    target.id() == OpenFileDialogView.Control.LOCATION ? dialog.location() : null,
+                    event, FieldInputDispatcher.MEMORY_BOUNDED,
+                    input -> target.placement().handle(input, routed.context().orElseThrow()), OpenFileDialogView.Action.INPUT_REJECTED);
                 focusState.manager().apply(dialog.focusScope(), target.id(), interaction.focusRequest());
                 if (capture != null) capture.observe(surfaceId, dialog.focusScope(), target.id(), interaction);
                 Focus buttonFocus = focusState.focus();

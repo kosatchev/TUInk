@@ -1,6 +1,8 @@
 package dev.tuink.tui;
 
 import dev.tuiframe.input.PasteEvent;
+import dev.tuiframe.input.KeyStroke;
+import java.util.Optional;
 import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.input.TextInput;
 import dev.tuiframe.input.TuiInputEvent;
@@ -76,6 +78,17 @@ final class DialogCommandPolicy {
             case OPEN_FILE -> openFocus == OpenFileInputRouter.Focus.LOCATION ? Target.TEXT_INPUT
                 : openFocus == OpenFileInputRouter.Focus.LIST ? Target.OTHER_CONTROL : Target.BUTTON;
             case NONE -> Target.OTHER_CONTROL;
+        };
+    }
+
+    /** Translates an approved semantic action for the current dialog owner, never its originating key. */
+    static Optional<KeyStroke> eventFor(TuinkCommand command) {
+        if (command == null) return Optional.empty();
+        return switch (command) {
+            case APP_QUIT -> Optional.of(KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL));
+            case DOCUMENT_SAVE -> Optional.of(KeyStroke.of(KeyStroke.Key.S, KeyStroke.Modifier.CTRL));
+            case FILE_BROWSER_TOGGLE_HIDDEN -> Optional.of(KeyStroke.of(KeyStroke.Key.H, KeyStroke.Modifier.CTRL));
+            default -> ControlCommandRouter.eventFor(command);
         };
     }
 

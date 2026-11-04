@@ -45,11 +45,11 @@ final class SearchInputRouter {
         Objects.requireNonNull(command, "command");
         placement.activate(focusManager);
         SearchFocus focused = focusManager.focused().orElse(null);
-        ControlCommandRouter.ClipboardResult copied = ControlCommandRouter.clipboard(command,
-            placement.field(focused).orElse(null), clipboard);
-        if (copied.handled()) {
-            if (copied.inputRejected()) return Result.action(SearchBarView.Action.INPUT_REJECTED);
-            return copied.valueChanged() ? Result.action(focused == SearchFocus.REPLACE
+        var editing = FieldInputDispatcher.command(command, placement.field(focused).orElse(null),
+            clipboard, FieldInputDispatcher.MEMORY_BOUNDED);
+        if (editing instanceof FieldInputDispatcher.Applied applied) {
+            if (applied.inputRejected()) return Result.action(SearchBarView.Action.INPUT_REJECTED);
+            return applied.valueChanged() ? Result.action(focused == SearchFocus.REPLACE
                 ? SearchBarView.Action.REPLACEMENT_CHANGED : SearchBarView.Action.QUERY_CHANGED) : Result.CAPTURED;
         }
         // Search page keys belong to the document viewport, independently of field focus.
@@ -66,12 +66,11 @@ final class SearchInputRouter {
         if (intent != null) {
             return Result.action(intent);
         }
-        KeyStroke event = ControlCommandRouter.eventFor(command).orElse(null);
-        if (event != null) {
-            Result routed = route(focusManager, placement, event);
+        if (editing instanceof FieldInputDispatcher.Forward forward) {
+            Result routed = route(focusManager, placement, forward.event());
             return routed.consumed() ? routed : Result.CAPTURED;
         }
-        return ControlCommandRouter.unsupportedLocally(command) ? Result.CAPTURED : Result.IGNORED;
+        return Result.IGNORED;
     }
 
     static Result route(
@@ -227,8 +226,9 @@ final class SearchInputRouter {
             return Result.IGNORED;
         }
         RoutedTarget<SearchFocus, SearchBarView.Action> target = route.target().orElseThrow();
-        InteractionResult<SearchBarView.Action> interaction = target.placement()
-            .handle(event, route.context().orElseThrow());
+        InteractionResult<SearchBarView.Action> interaction = FieldInputDispatcher.event(
+            placement.field(target.id()).orElse(null), event, FieldInputDispatcher.MEMORY_BOUNDED,
+            input -> target.placement().handle(input, route.context().orElseThrow()), SearchBarView.Action.INPUT_REJECTED);
         focusManager.apply(scope, target.id(), interaction.focusRequest());
         if (capture != null) {
             capture.observe(surfaceId, scope, target.id(), interaction);
@@ -250,8 +250,9 @@ final class SearchInputRouter {
             return captureIgnored ? Result.CAPTURED : Result.IGNORED;
         }
         RoutedTarget<SearchFocus, SearchBarView.Action> target = route.target().orElseThrow();
-        InteractionResult<SearchBarView.Action> interaction = target.placement()
-            .handle(event, route.context().orElseThrow());
+        InteractionResult<SearchBarView.Action> interaction = FieldInputDispatcher.event(
+            placement.field(target.id()).orElse(null), event, FieldInputDispatcher.MEMORY_BOUNDED,
+            input -> target.placement().handle(input, route.context().orElseThrow()), SearchBarView.Action.INPUT_REJECTED);
         focusManager.apply(scope, target.id(), interaction.focusRequest());
         return fromInteraction(interaction, captureIgnored);
     }

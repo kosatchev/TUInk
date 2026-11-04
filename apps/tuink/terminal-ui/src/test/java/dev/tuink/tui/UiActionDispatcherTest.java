@@ -67,11 +67,12 @@ class UiActionDispatcherTest {
         tab.state().setLeftVisualColumn(7);
         long revision = tab.model().revision();
         var cursor = tab.state().getCursor();
-        var context = TuiSessionTestSupport.context(tab.engine(), tab.state(), null, ignored -> {},
-            8, 20, TuiSessionTestSupport.navigation(tab.engine()));
         var ui = new UiSessionState();
 
-        var result = InputActionDispatcher.dispatch(TuinkCommand.VIEW_TOGGLE_LINE_WRAP, ui, context);
+        var result = InputActionDispatcher.dispatchUi(TuinkCommand.VIEW_TOGGLE_LINE_WRAP, ui,
+            TestSurfaces.source(ui), null, ignored -> {}, () -> {
+                tab.state().setTopWrapSegment(0); tab.state().setLeftColumn(0); tab.state().setLeftVisualColumn(0);
+            });
 
         assertTrue(ui.wrapLinesSetting);
         assertEquals(CursorPolicy.PRESERVE, result.viewportPolicy());

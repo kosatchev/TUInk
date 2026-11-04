@@ -27,7 +27,6 @@ import dev.tuink.tui.ModalInputPolicy.Kind;
 import dev.tuink.tui.command.TuinkCommand;
 import dev.tuink.tui.file.FileTreeModel;
 import dev.tuink.tui.flow.ConfirmChoice;
-import dev.tuink.tui.input.EditorInput;
 import dev.tuink.tui.ui.ConfirmBarView;
 import dev.tuink.tui.ui.FileTreeView;
 import dev.tuink.tui.ui.HelpPage;
@@ -218,7 +217,8 @@ class ModalInputPolicyTest {
             assertTrue(HelpOverlayInputRouter.route(new FocusManager<>(), scope, frame, event).closeRequested());
             assertFalse(blocked(Kind.HELP, event));
         }
-        assertFalse(HelpHintsController.handle(EditorInput.command(TuinkCommand.UI_ESCAPE), true).helpHintsMode());
+        assertFalse(HelpHintsController.handle(WindowInput.command(COMMANDS, TuinkCommand.UI_ESCAPE,
+            UiRecipient.window(new TabUiState(), null)), true).helpHintsMode());
         assertFalse(blocked(Kind.HELP, KeyStroke.of(KeyStroke.Key.ESCAPE)));
         for (TuinkCommand command : List.of(
             TuinkCommand.HELP_KEY_HINTS, TuinkCommand.HELP_LICENSES, TuinkCommand.HELP_AUTHOR

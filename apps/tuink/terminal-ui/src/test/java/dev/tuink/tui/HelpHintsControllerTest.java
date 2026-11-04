@@ -4,12 +4,13 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.tui.command.TuinkCommand;
-import dev.tuink.tui.input.EditorInput;
 import dev.tuiframe.input.KeyStroke;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class HelpHintsControllerTest {
+    private static final CommandRouter ROUTER = new CommandRouter();
+    private static final UiRecipient RECIPIENT = UiRecipient.window(new TabUiState(), null);
     @Test
     void closeCommandsDismissHintsWithoutLeakingIntoTheEditor() {
         for (TuinkCommand command : List.of(
@@ -17,7 +18,7 @@ class HelpHintsControllerTest {
             TuinkCommand.EDIT_INSERT_NEWLINE,
             TuinkCommand.HELP_KEY_HINTS
         )) {
-            HelpHintsController.Result result = HelpHintsController.handle(EditorInput.command(command), true);
+            HelpHintsController.Result result = HelpHintsController.handle(WindowInput.command(ROUTER, command, RECIPIENT), true);
 
             assertTrue(result.consumed());
             assertFalse(result.helpHintsMode());
@@ -26,9 +27,9 @@ class HelpHintsControllerTest {
 
     @Test
     void textAndUnboundPhysicalKeysRemainInsideTheOpenHelpOverlay() {
-        for (EditorInput input : List.of(
-            EditorInput.text("中😀"),
-            new EditorInput(KeyStroke.of(KeyStroke.Key.F1), null)
+        for (WindowInput input : List.of(
+            new WindowInput.Text("中😀", false, false, RECIPIENT),
+            WindowInput.physical(KeyStroke.of(KeyStroke.Key.F1), RECIPIENT)
         )) {
             HelpHintsController.Result result = HelpHintsController.handle(input, true);
 
@@ -40,7 +41,7 @@ class HelpHintsControllerTest {
     @Test
     void closedHelpOverlayLeavesTheCommandToTheEditor() {
         HelpHintsController.Result result = HelpHintsController.handle(
-            EditorInput.command(TuinkCommand.DOCUMENT_SAVE),
+            WindowInput.command(ROUTER, TuinkCommand.DOCUMENT_SAVE, RECIPIENT),
             false
         );
 

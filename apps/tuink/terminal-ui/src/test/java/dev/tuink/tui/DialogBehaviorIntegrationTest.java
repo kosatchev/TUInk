@@ -437,9 +437,8 @@ class DialogBehaviorIntegrationTest {
                 } else if (event instanceof PasteEvent paste) {
                     document.tab.engine().insertInput(paste.text());
                 } else if (command != null) {
-                    assertTrue(InputActionDispatcher.dispatch(command, document.ui,
-                        TuiSessionTestSupport.context(document.tab.engine(), document.tab.state(),
-                            new TopMenuController(), ignored -> {}, 6, 30, document.navigation)).handled());
+                    assertTrue(InputActionDispatcher.dispatchDocument(command, document.ui,
+                        TuiSessionTestSupport.context(document.tab.engine(), document.tab.state(), 6, 30, document.navigation)).handled());
                 }
             }
             return decision;

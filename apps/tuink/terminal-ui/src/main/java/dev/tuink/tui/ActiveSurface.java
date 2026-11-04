@@ -35,13 +35,19 @@ record ActiveSurface(PresentationId presentationId, Kind kind, Focus focus, Moda
 
     boolean preview() { return kind != Kind.SOURCE; }
     boolean editableField() { return focus == Focus.EDITABLE_TEXT; }
-    boolean documentWritable() { return !preview() && !reading && !documentLocked && focus == Focus.CONTENT; }
+    boolean documentEditable() { return !preview() && !reading && !documentLocked && modalScope == ModalScope.NONE; }
+    boolean documentWritable() { return documentEditable() && focus == Focus.CONTENT; }
 
     boolean allows(TuinkCommand command) {
         if (command == null) return true;
         return switch (command) {
             case EDIT_UNDO, EDIT_REDO, EDIT_TOGGLE_LINE_COMMENT -> documentWritable();
+            case SEARCH_REPLACE, SEARCH_REPLACE_ALL -> documentEditable();
             case EDIT_COPY, EDIT_SELECT_ALL -> focus != Focus.CONTROL;
+            case EDIT_INSERT_NEWLINE, EDIT_INSERT_TAB, EDIT_BACKSPACE, EDIT_DELETE_FORWARD ->
+                focus == Focus.CONTROL || editableField() || documentWritable();
+            case TAB_NEW, TAB_CLOSE, TAB_NEXT, TAB_PREVIOUS, TAB_ACTIVATE, VIEW_TOGGLE_MARKDOWN_PREVIEW ->
+                modalScope != ModalScope.WINDOW;
             case DOCUMENT_FORMAT, DOCUMENT_REOPEN_ENCODING -> !preview();
             case VIEW_PREVIEW_COPY_SOURCE, VIEW_PREVIEW_COPY_TABLE_TSV, VIEW_PREVIEW_REVEAL_SOURCE,
                  VIEW_PREVIEW_FOLLOW_LINK, VIEW_PREVIEW_NEXT_HEADING, VIEW_PREVIEW_PREVIOUS_HEADING -> preview();
@@ -58,6 +64,10 @@ record ActiveSurface(PresentationId presentationId, Kind kind, Focus focus, Moda
         if (command == TuinkCommand.VIEW_TOGGLE_WORD_WRAP) return "Enable line wrapping before changing word wrapping";
         if (command == TuinkCommand.VIEW_TOGGLE_SYNTAX) return "Syntax highlighting is unavailable in the current theme";
         if (documentLocked) return "A file operation is already in progress";
+        if (command == TuinkCommand.SEARCH_REPLACE || command == TuinkCommand.SEARCH_REPLACE_ALL) {
+            if (preview()) return "Markdown preview: return to source to replace text";
+            if (reading) return "Reading mode: replace is disabled";
+        }
         if (preview()) return "Markdown preview: return to source to edit";
         if (reading) return "Reading mode: editing is disabled";
         return "This action is unavailable for the focused control";

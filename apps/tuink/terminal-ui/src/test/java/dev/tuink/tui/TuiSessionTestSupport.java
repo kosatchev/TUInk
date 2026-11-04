@@ -14,10 +14,10 @@ public final class TuiSessionTestSupport {
     private TuiSessionTestSupport() {}
 
     static InputActionDispatcher.DispatchContext context(EditorEngine engine, EditorState state,
-        TopMenuController menu, Consumer<Boolean> mouse, int rows, int columns, EditorViewNavigation navigation) {
+        int rows, int columns, EditorViewNavigation navigation) {
         TuiDocumentSession session = engine == null ? null : TuiDocumentSession.adopt(
             new TabSession(engine.model(), state, engine.textLayout(), engine));
-        return new InputActionDispatcher.DispatchContext(engine, state, menu, mouse, rows, columns, navigation, session, TestSurfaces.source(false));
+        return new InputActionDispatcher.DispatchContext(engine, rows, columns, navigation, session);
     }
 
     public static EditorViewNavigation navigation(EditorEngine engine) {

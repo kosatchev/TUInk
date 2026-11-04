@@ -5,7 +5,7 @@ import java.util.function.Consumer;
 
 /** One entry for application intents from either content adapter; I/O workflows retain ownership. */
 final class ApplicationCommandHandler {
-    enum Action { NONE, OPEN, OPEN_ENCODING, RECOVER, THEME, SAVE, SAVE_AS, QUIT }
+    enum Action { NONE, OPEN, OPEN_ENCODING, RECOVER, THEME, SAVE, SAVE_AS, QUIT, COPY, SELECT_ALL, FIND }
     record Result(InputActionDispatcher.DispatchResult ui, Action action) {
         boolean handled() { return ui.handled() || action != Action.NONE; }
     }
@@ -15,7 +15,6 @@ final class ApplicationCommandHandler {
     static Result decide(TuinkCommand command, UiSessionState preferences, ActiveSurface surface,
         TopMenuController menu, Consumer<Boolean> mouseTracking, Runnable wrapEnabled) {
         if (command == null) return new Result(InputActionDispatcher.DispatchResult.notHandled(), Action.NONE);
-        if (!surface.allows(command)) return new Result(InputActionDispatcher.DispatchResult.handled(surface.refusal(command)), Action.NONE);
         var ui = InputActionDispatcher.dispatchUi(command, preferences, surface, menu, mouseTracking, wrapEnabled);
         if (ui.handled()) return new Result(ui, Action.NONE);
         Action action = switch (command) {
@@ -26,6 +25,9 @@ final class ApplicationCommandHandler {
             case DOCUMENT_SAVE -> Action.SAVE;
             case DOCUMENT_SAVE_AS -> Action.SAVE_AS;
             case APP_QUIT -> Action.QUIT;
+            case EDIT_COPY -> Action.COPY;
+            case EDIT_SELECT_ALL -> Action.SELECT_ALL;
+            case SEARCH_OPEN -> Action.FIND;
             default -> Action.NONE;
         };
         return new Result(ui, action);

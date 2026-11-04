@@ -46,6 +46,13 @@ final class WindowPointerCapture {
         return cancellation.isPresent();
     }
 
+    boolean reconcile(Frame frame) {
+        Frame required = Objects.requireNonNull(frame, "frame");
+        var cancellation = manager.reconcile(required.surfaceId, required.scopes);
+        cancellation.ifPresent(WindowPointerCapture::adoptCancellation);
+        return cancellation.isPresent();
+    }
+
     boolean cancel(Frame frame, PointerCaptureCancellation reason) {
         Frame required = Objects.requireNonNull(frame, "frame");
         var cancellation = manager.cancel(required.surfaceId, required.scopes, reason);
@@ -97,15 +104,24 @@ final class WindowPointerCapture {
 
         <K, A> Frame addScope(FocusScope<K, A> scope, FocusManager<K> focusManager, Consumer<A> adopt) {
             Objects.requireNonNull(focusManager, "focusManager");
-            return addBindings(scope, focusManager, adopt);
+            return addBindings(scope, focusManager, adopt, true);
         }
 
         /** Pointer-only bindings, such as document or scrollbar adapters. */
         <K, A> Frame addScope(FocusScope<K, A> scope, Consumer<A> adopt) {
-            return addBindings(scope, null, adopt);
+            return addBindings(scope, null, adopt, true);
         }
 
-        private <K, A> Frame addBindings(FocusScope<K, A> scope, FocusManager<K> focusManager, Consumer<A> adopt) {
+        <K, A> Frame addScope(FocusScope<K, A> scope, FocusManager<K> focusManager, Consumer<A> adopt, boolean available) {
+            Objects.requireNonNull(focusManager, "focusManager");
+            return addBindings(scope, focusManager, adopt, available);
+        }
+
+        <K, A> Frame addScope(FocusScope<K, A> scope, Consumer<A> adopt, boolean available) {
+            return addBindings(scope, null, adopt, available);
+        }
+
+        private <K, A> Frame addBindings(FocusScope<K, A> scope, FocusManager<K> focusManager, Consumer<A> adopt, boolean available) {
             Objects.requireNonNull(scope, "scope");
             Objects.requireNonNull(adopt, "adopt");
             List<RoutedTarget<Object, Runnable>> targets = new ArrayList<>();
@@ -114,7 +130,7 @@ final class WindowPointerCapture {
                     ? new CapturingAdapter<>(scope, target, focusManager, adopt)
                     : new Adapter<>(scope, target, focusManager, adopt);
                 targets.add(new RoutedTarget<>(target.id(), adapter, target.space(),
-                    target.focusable(), target.enabled(), target.visibility()));
+                    target.focusable(), target.enabled() && available, target.visibility()));
             }
             scopes.add(new FocusScope<>(scope.id(), scope.resetPolicy(), targets,
                 scope.tabOrder().stream().map(id -> (Object) id).toList(),

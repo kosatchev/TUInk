@@ -23,7 +23,6 @@ import dev.tuink.tui.flow.SaveContinuation;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.flow.UiModalState;
 import dev.tuink.editor.command.CommandInvocation;
-import dev.tuink.tui.input.EditorInput;
 import dev.tuink.tui.command.TuinkCommand;
 import dev.tuiframe.input.KeyStroke;
 import dev.tuiframe.input.PasteEvent;
@@ -85,6 +84,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     private static final long SYNTAX_RETRY_DELAY_NANOS = 16_000_000L;
     private static final Object DOCUMENT_POINTER_SCOPE = new Object();
     private static final Object PREVIEW_POINTER_SCOPE = new Object();
+    private static final Object PREVIEW_SEARCH_SCOPE = new Object();
     private static final Object HELP_CONTENT_POINTER_SCOPE = new Object();
     private final WindowPointerCapture pointerCapture = new WindowPointerCapture();
     private final TerminalEditorApp host;
@@ -255,6 +255,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
 
     private void setModal(UiModalState modal) {
         Objects.requireNonNull(modal, "modal");
+        if (!modalState().equals(modal) && pointerCapture.active())
+            cancelPointerCapture(PointerCaptureCancellation.SURFACE_CHANGED);
         if (modal.isNone() && !windowModal.isNone()) {
             var message = globalUi.notification;
             if (message != null && message.message != null) {
@@ -337,6 +339,9 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
 
     private void setModal(UiRecipient recipient, UiModalState modal) {
         if (!current(recipient)) return;
+        if ((recipient.flow() == UiRecipient.Flow.WINDOW || !background(recipient))
+            && !modalState().equals(modal) && pointerCapture.active())
+            cancelPointerCapture(PointerCaptureCancellation.SURFACE_CHANGED);
         if (globalModal(modal)) {
             if (recipient.flow() == UiRecipient.Flow.WINDOW || !background(recipient)) windowModal = modal;
         } else {
@@ -597,7 +602,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     }
 
     /** Window navigation remains reachable while a view owns an input dialog. */
-    private boolean routeTabNavigation(TuiInputEvent event, TuinkCommand command) {
+    private boolean executeTabCommand(TuinkCommand command, CommandInvocation invocation) {
         if (!windowModal.isNone()) return false;
         if (command == TuinkCommand.TAB_NEXT || command == TuinkCommand.TAB_PREVIOUS) {
             activatePresentation(Math.floorMod(sessionContext.activePresentationIndex()
@@ -610,18 +615,35 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             return true;
         }
         if (command == TuinkCommand.TAB_CLOSE) {
-            closeView(sessionContext.activePresentationIndex());
+            int index = invocation.argument("index").map(Integer::parseInt).orElse(sessionContext.activePresentationIndex());
+            if (index < sessionContext.presentations().size()) closeView(index);
             return true;
         }
-        if (event instanceof PointerEvent pointer && tabBarPlacement != null
-                && uiSessionState.mouseModeSetting && terminal.mouseAvailable() && !topMenu.isOpen()) {
-            var result = TabBarInputRouter.route(tabBarPlacement, TabBarInputRouter.Policy.NORMAL, pointer);
-            tabStrip.adopt(result.state());
-            if (result.activateIndex() != null && result.activateIndex() < sessionContext.presentations().size()) activatePresentation(result.activateIndex());
-            if (result.closeIndex() != null && result.closeIndex() < sessionContext.presentations().size()) closeView(result.closeIndex());
-            if (result.consumed()) { eventLoop.invalidate(); return true; }
-        }
         return false;
+    }
+
+    private boolean windowTabCommand(TuinkCommand command) {
+        return command == TuinkCommand.TAB_NEXT || command == TuinkCommand.TAB_PREVIOUS
+            || command == TuinkCommand.TAB_NEW || command == TuinkCommand.TAB_CLOSE
+            || command == TuinkCommand.TAB_ACTIVATE;
+    }
+
+    /** Local dialogs keep their presentation while window-scoped dialogs own all chrome. */
+    private boolean routeTabChrome(TuiInputEvent event) {
+        if (!(event instanceof PointerEvent pointer) || tabBarPlacement == null
+            || !uiSessionState.mouseModeSetting || !terminal.mouseAvailable() || topMenu.isOpen()
+            || !modalState().isNone() && modalInputBounds.contains(pointer.column(), pointer.row())) return false;
+        var policy = TerminalEditorApp.tabBarInputPolicy(true, true, !windowModal.isNone(), false);
+        var result = TabBarInputRouter.route(tabBarPlacement, policy, pointer);
+        tabStrip.adopt(result.state());
+        if (result.blocked()) rejectDialogInput();
+        if (result.activateIndex() != null && result.activateIndex() < sessionContext.presentations().size())
+            invokeCommand(commandRouter.tabActivationInvocation(result.activateIndex()), currentRecipient());
+        if (result.closeIndex() != null && result.closeIndex() < sessionContext.presentations().size())
+            invokeCommand(new CommandInvocation(TuinkCommand.TAB_CLOSE.id(),
+                java.util.Map.of("index", Integer.toString(result.closeIndex()))), currentRecipient());
+        if (result.consumed()) eventLoop.invalidate();
+        return result.consumed();
     }
 
     private boolean finishPendingDialogsBeforeQuit() {
@@ -760,7 +782,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             || quitConfirmMode
             || closeTabConfirmMode;
         if (!ui().searchMode) {
-            ui().searchEditorFocused = false;
+            if (!ui().preview.active || !ui().preview.searchEditing) ui().searchEditorFocused = false;
             host.searchFocusManager().deactivate(TerminalEditorApp.SEARCH_SCOPE_ID);
             searchBarPlacement = null;
         }
@@ -816,12 +838,13 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             : modal.isNone() && !ui().openFileMode ? ActiveSurface.ModalScope.NONE : ActiveSurface.ModalScope.PRESENTATION;
         ActiveSurface.Focus focus = ActiveSurface.Focus.CONTENT;
         if (!modal.isNone() && !focusUi().blockingContentFocused)
-            focus = modal.isSaveAs() ? ActiveSurface.Focus.EDITABLE_TEXT : ActiveSurface.Focus.CONTROL;
+            focus = modal.isSaveAs() && host.saveAsFocusManager().focused().orElse(null) == SaveAsBarView.Target.FIELD
+                ? ActiveSurface.Focus.EDITABLE_TEXT : ActiveSurface.Focus.CONTROL;
         else if (ui().openFileMode && !focusUi().blockingContentFocused)
             focus = ui().openFileFocusState.focus() == OpenFileInputRouter.Focus.LOCATION
                 ? ActiveSurface.Focus.EDITABLE_TEXT : ActiveSurface.Focus.CONTROL;
-        else if (modal.isNone() && kind != ActiveSurface.Kind.SOURCE && ui().preview.searchEditing)
-            focus = ActiveSurface.Focus.EDITABLE_TEXT;
+        else if (modal.isNone() && kind != ActiveSurface.Kind.SOURCE && ui().preview.searchEditing && !ui().searchEditorFocused)
+            focus = previewQueryFocused() ? ActiveSurface.Focus.EDITABLE_TEXT : ActiveSurface.Focus.CONTROL;
         else if (modal.isNone() && kind == ActiveSurface.Kind.SOURCE && ui().searchMode && !ui().searchEditorFocused)
             focus = SearchController.isSearchFieldFocus(host.currentSearchFocus())
                 ? ActiveSurface.Focus.EDITABLE_TEXT : ActiveSurface.Focus.CONTROL;
@@ -1030,13 +1053,6 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 FocusSpace.root(new Rect(0, 0, cols, rows)), false, preview.ready()));
     }
 
-    private void routePreviewPointer(PointerEvent event) {
-        var scope = previewPointerScope();
-        var target = scope.target("preview").orElseThrow();
-        var result = target.placement().handle(event, new FocusContext(false, target.interactive(), target.space()));
-        pointerCapture.observe(this, scope, "preview", result);
-    }
-
     private final class PreviewPointerTarget implements PlacedPointerCapture<Void> {
         private final MarkdownPreviewState preview;
         PreviewPointerTarget(MarkdownPreviewState preview) { this.preview = preview; }
@@ -1048,11 +1064,28 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             return InteractionResult.<Void>handled().withPointerCapture(PointerCaptureRequest.RELEASE);
         }
         @Override public InteractionResult<Void> handle(TuiInputEvent event, FocusContext context) {
-            if (!(event instanceof PointerEvent pointer) || !context.enabled() || !preview.pointer(pointer))
+            if (!(event instanceof PointerEvent pointer) || !context.enabled()
+                || !preview.bounds.contains(pointer.column(), pointer.row()) && !preview.pointerCaptureActive())
                 return InteractionResult.ignored();
+            dispatchContentInput(WindowInput.physical(pointer, currentRecipient()));
             return InteractionResult.<Void>handled().withPointerCapture(preview.pointerCaptureActive()
                 ? PointerCaptureRequest.ACQUIRE : PointerCaptureRequest.RELEASE);
         }
+    }
+
+    private boolean previewQueryFocused() {
+        return !ui().searchEditorFocused
+            && ui().searchFocusManager.activeScopeId().filter(PREVIEW_SEARCH_SCOPE::equals).isPresent()
+            && ui().searchFocusManager.focused().orElse(null) == SearchFocus.FIND;
+    }
+
+    private FocusScope<SearchFocus, TextField.Action> previewSearchScope() {
+        MarkdownPreviewState preview = ui().preview;
+        boolean enabled = preview.searchEditing;
+        var scope = FocusScope.single(PREVIEW_SEARCH_SCOPE, FocusResetPolicy.FIRST_FOCUSABLE,
+            new RoutedTarget<>(SearchFocus.FIND, preview.searchPlacement(), FocusSpace.root(preview.bounds), true, enabled));
+        if (enabled && modalState().isNone() && !ui().openFileMode && !topMenu.isOpen() && !ui().searchEditorFocused) ui().searchFocusManager.context(scope, SearchFocus.FIND);
+        return scope;
     }
 
     private WindowPointerCapture.Frame pointerFrame() {
@@ -1061,10 +1094,13 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             frame.addScope(formatPlacement.scope(), formatPlacement.state().focus, Runnable::run);
         }
         if (searchBarPlacement != null) {
-            frame.addScope(searchBarPlacement.focusScope(), host.searchFocusManager(), ignored -> {});
+            frame.addScope(searchBarPlacement.focusScope(), host.searchFocusManager(), ignored -> {},
+                ui().searchMode && modalState().isNone() && !ui().openFileMode && !topMenu.isOpen()
+                    && uiSessionState.mouseModeSetting && terminal.mouseAvailable());
         }
         if (saveAsBarPlacement != null) {
-            frame.addScope(saveAsBarPlacement.focusScope(), host.saveAsFocusManager(), ignored -> {});
+            frame.addScope(saveAsBarPlacement.focusScope(), host.saveAsFocusManager(), ignored -> {},
+                modalState().isSaveAs() && uiSessionState.mouseModeSetting && terminal.mouseAvailable());
         }
         if (topMenuPlacement != null) {
             frame.addScope(topMenuPlacement.captureScope(), action -> {
@@ -1090,6 +1126,11 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             });
         }
         if (sessionContext.activePresentation() instanceof PreviewTab) {
+            // Keep the disabled binding available for cancellation before hiding its query owner.
+            frame.addScope(previewSearchScope(), ui().searchFocusManager, action -> {
+                if (action == TextField.Action.VALUE_CHANGED) ui().preview.setSearchQuery(ui().preview.searchField.text());
+            }, modalState().isNone() && !ui().openFileMode && !topMenu.isOpen()
+                && uiSessionState.mouseModeSetting && terminal.mouseAvailable());
             frame.addScope(previewPointerScope(), ignored -> {});
         } else if (plan != null) {
             frame.addScope(documentPointerScope(), ignored -> {});
@@ -1110,15 +1151,11 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     }
 
     private void routeDocumentPointer(PointerEvent event) {
-        if (ui().preview.active) {
-            handlePreviewInput(event, null);
-            return;
-        }
-        var scope = documentPointerScope();
-        var target = scope.target("document").orElseThrow();
+        var scope = ui().preview.active ? previewPointerScope() : documentPointerScope();
+        var target = scope.target(ui().preview.active ? "preview" : "document").orElseThrow();
         InteractionResult<Void> result = target.placement().handle(event,
             new FocusContext(false, target.interactive(), target.space()));
-        pointerCapture.observe(this, scope, "document", result);
+        pointerCapture.observe(this, scope, target.id(), result);
     }
 
     private final class DocumentPointerTarget implements PlacedPointerCapture<Void> {
@@ -1138,7 +1175,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             if (!(event instanceof PointerEvent pointer) || !context.enabled()) {
                 return InteractionResult.ignored();
             }
-            runDocumentPointerAction(() -> handleDocumentPointer(pointer));
+            dispatchContentInput(WindowInput.physical(pointer, currentRecipient()));
             return InteractionResult.<Void>handled().withPointerCapture(pointerCaptureActive()
                 ? PointerCaptureRequest.ACQUIRE : PointerCaptureRequest.RELEASE);
         }
@@ -1174,11 +1211,10 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         if (TerminalEditorApp.modalInputKind(modalState(), ui().openFileMode) != ModalInputPolicy.Kind.NONE) {
             focusUi().blockingContentFocused = true;
             clearBlockingControlFocus();
-        } else if (ui().searchMode) {
+        } else if (ui().searchMode || ui().preview.active && ui().preview.searchEditing) {
             ui().searchEditorFocused = true;
-            if (searchBarPlacement != null) {
-                host.searchFocusManager().clear(searchBarPlacement.focusScope());
-            }
+            if (ui().preview.active) ui().searchFocusManager.clear(previewSearchScope());
+            else if (searchBarPlacement != null) host.searchFocusManager().clear(searchBarPlacement.focusScope());
         }
     }
 
@@ -1234,14 +1270,15 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         eventLoop.invalidate();
     }
 
-    private boolean routeBlockingInput(TuiInputEvent event, TuinkCommand command, ModalInputPolicy.Kind kind) {
+    private java.util.Optional<WindowInput> routeBlockingInput(TuiInputEvent event, CommandInvocation binding,
+        TuinkCommand command, ModalInputPolicy.Kind kind) {
         if (kind == ModalInputPolicy.Kind.NONE) {
-            return false;
+            return java.util.Optional.empty();
         }
         DialogMode mode = DialogCommandPolicy.mode(kind);
         if (event instanceof PointerEvent mouse) {
             if (!uiSessionState.mouseModeSetting || !terminal.mouseAvailable()) {
-                return true;
+                return java.util.Optional.of(WindowInput.Consumed.INSTANCE);
             }
             boolean drag = mouse.kind() == PointerEvent.Kind.DRAG
                 || mouse.kind() == PointerEvent.Kind.MOVE && mouse.button() == PointerEvent.Button.LEFT;
@@ -1249,19 +1286,16 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 && (documentPointerHit(mouse)
                     || (drag || mouse.kind() == PointerEvent.Kind.RELEASE)
                         && (focusUi().blockingContentFocused || editorScrollDrag != EditorView.ScrollAxis.NONE))) {
-                if (ui().preview.active) {
-                    focusUi().blockingContentFocused = true;
-                    handlePreviewInput(mouse, null);
-                } else routeDocumentPointer(mouse);
-                eventLoop.invalidate();
-                return true;
+                if (mouse.kind() == PointerEvent.Kind.PRESS && mouse.button() == PointerEvent.Button.LEFT)
+                    focusDocument();
+                return java.util.Optional.of(WindowInput.physical(mouse, currentRecipient()));
             }
             if (modalInputBounds.contains(mouse.column(), mouse.row())) {
                 if (mouse.kind() == PointerEvent.Kind.PRESS && mouse.button() == PointerEvent.Button.LEFT
                     && focusUi().blockingContentFocused) {
                     focusFirstBlockingControl();
                 }
-                return false;
+                return java.util.Optional.empty();
             }
             if (!mode.permitsContentFocus()) {
                 if (mouse.kind() == PointerEvent.Kind.PRESS && mouse.button() != PointerEvent.Button.NONE
@@ -1271,35 +1305,28 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                     || mouse.kind() == PointerEvent.Kind.SCROLL_RIGHT) {
                     rejectDialogInput();
                 }
-                return true;
+                return java.util.Optional.of(WindowInput.Consumed.INSTANCE);
             }
-            if (tabBarPlacement != null && tabBarPlacement.enabled()
-                && TerminalEditorApp.belongsToTabChrome(event, tabBarPlacement.bounds())) {
-                if (modalState().isCloseTabConfirm()) {
-                    return false;
-                }
-                if (mouse.kind() == PointerEvent.Kind.PRESS && mouse.button() == PointerEvent.Button.LEFT) {
-                    rejectDialogInput();
-                }
-            }
-            return true;
+            return java.util.Optional.of(WindowInput.Consumed.INSTANCE);
         }
-        TuiInputEvent focusEvent = command == TuinkCommand.EDIT_INSERT_TAB
-            ? KeyStroke.of(KeyStroke.Key.TAB) : event;
+        TuiInputEvent focusEvent = isFocusTraversalCommand(command) ? KeyStroke.of(KeyStroke.Key.TAB) : event;
         if (DialogFocusTraversal.isTraversal(focusEvent)) {
+            if (binding != null && isFocusTraversalCommand(command))
+                return java.util.Optional.of(TerminalEditorApp.resolveEditorInput(commandRouter, event,
+                    binding, null, currentRecipient()));
             advanceBlockingFocus((KeyStroke) focusEvent);
             editorView.cancelMouseSelection();
             eventLoop.invalidate();
-            return true;
+            return java.util.Optional.of(WindowInput.Consumed.INSTANCE);
         }
         if (focusUi().blockingContentFocused && DialogCommandPolicy.cancels(kind, command)) {
             focusFirstBlockingControl();
-            return false;
+            return java.util.Optional.empty();
         }
         if (confirmMode && command == TuinkCommand.DOCUMENT_SAVE && host.confirmPolicy(modalState()).shortcuts().saveShortcut()) {
             // The explicit save accelerator belongs to the confirmation even after source browsing.
             focusFirstBlockingControl();
-            return false;
+            return java.util.Optional.empty();
         }
         DialogInputPolicy.Action action = DialogCommandPolicy.action(event, command);
         DialogInputPolicy.Target target = DialogCommandPolicy.target(kind, ui().openFileFocusState.focus(),
@@ -1307,44 +1334,46 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         DialogInputPolicy.Decision decision = DialogCommandPolicy.decide(mode, target, action);
         if (decision == DialogInputPolicy.Decision.BLOCK) {
             rejectDialogInput();
-            return true;
+            return java.util.Optional.of(WindowInput.Consumed.INSTANCE);
         }
         if (decision.consumed()) {
-            return true;
+            return java.util.Optional.of(WindowInput.Consumed.INSTANCE);
         }
         if (focusUi().blockingContentFocused) {
-            if (ui().preview.active && handlePreviewInput(event, command)) {
-                eventLoop.invalidate();
-                return true;
-            }
-            EditorInput input = TerminalEditorApp.resolveEditorInput(commandRouter, event,
-                event instanceof KeyStroke stroke ? commandRouter.invocationFor(stroke).orElse(null) : null,
-                null, false, SearchFocus.FIND);
-            if (input != null && input.command() != null) {
-                InputActionDispatcher.DispatchResult result = dispatchInputAction(input.command());
-                viewportController.onCommandResult(result.viewportPolicy());
-            }
-            eventLoop.invalidate();
-            return true;
+            return java.util.Optional.of(TerminalEditorApp.resolveEditorInput(commandRouter, event,
+                binding, null, currentRecipient()));
         }
         if (saveAsMode && ControlCommandRouter.owns(command)) {
-            return false;
+            return java.util.Optional.empty();
         }
         if (ModalInputPolicy.blocked(kind, event, command, target)) {
             rejectDialogInput();
-            return true;
+            return java.util.Optional.of(WindowInput.Consumed.INSTANCE);
         }
-        return false;
+        return java.util.Optional.empty();
+    }
+
+    private static boolean isFocusTraversalCommand(TuinkCommand command) {
+        return command == TuinkCommand.EDIT_INSERT_TAB || command == TuinkCommand.SEARCH_FOCUS_NEXT;
+    }
+
+    private boolean searchVisible() {
+        return modalState().isNone() && !ui().openFileMode
+            && (ui().preview.active ? ui().preview.searchEditing : ui().searchMode);
     }
 
     private void advanceSearchFocus(KeyStroke event) {
-        ui().searchEditorFocused = DialogFocusTraversal.advance(host.searchFocusManager(),
-            searchBarPlacement.focusScope(), ui().searchEditorFocused,
-            contentRows > 0 && contentCols > 0, event);
+        cancelPointerCapture(PointerCaptureCancellation.SURFACE_CHANGED);
+        var scope = ui().preview.active ? previewSearchScope() : searchBarPlacement == null ? null : searchBarPlacement.focusScope();
+        if (scope == null) return;
+        ui().searchEditorFocused = DialogFocusTraversal.advance(ui().searchFocusManager,
+            scope, ui().searchEditorFocused, contentRows > 0 && contentCols > 0, event);
+        eventLoop.invalidate();
     }
 
     private boolean consumeSearchControlAction(SearchBarView.Action action) {
         if (action == SearchBarView.Action.CLOSE_REQUESTED) {
+            cancelPointerCapture(PointerCaptureCancellation.SURFACE_CHANGED);
             ui().searchMode = false;
             host.searchFocusManager().deactivate(TerminalEditorApp.SEARCH_SCOPE_ID);
             return true;
@@ -1362,10 +1391,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     }
 
     private void executeSearchDocumentCommand(TuinkCommand command) {
-        if (ui().preview.active && command.editsDocumentText()) {
-            notice().warning("Markdown preview: return to source to replace text");
-            return;
-        }
+        ActiveSurface surface = activeSurface();
+        if (!surface.allows(command)) { notice().warning(surface.refusal(command)); return; }
         TabUiState source = ui();
         if (command.editsDocumentText() && rejectSavingDocumentEdit()) {
             return;
@@ -1624,57 +1651,58 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         if (inputEvent == null) {
             return;
         }
-        TuinkCommand navigationCommand = inputEvent instanceof KeyStroke key
-            ? commandRouter.invocationFor(key).flatMap(invocation -> TuinkCommand.fromId(invocation.id())).orElse(null)
-            : null;
+        dispatchWindowInput(routeWindowInput(inputEvent));
+    }
+
+    private WindowInput routeWindowInput(TuiInputEvent inputEvent) {
+        CommandInvocation binding = inputEvent instanceof KeyStroke stroke
+            ? commandRouter.invocationFor(stroke).orElse(null) : null;
+        if (binding != null && !commandRouter.accepts(binding)) return WindowInput.Consumed.INSTANCE;
+        TuinkCommand navigationCommand = binding == null ? null : TuinkCommand.fromId(binding.id()).orElse(null);
         boolean cancelledCapture = pointerCapture.beforeInput(pointerFrame(), inputEvent);
         if (cancelledCapture && plan != null) {
             prepareComposition(false);
             eventLoop.invalidate();
-        }
-        if (routeTabNavigation(inputEvent, navigationCommand)) return;
-        if (navigationCommand == TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW
-            && modalState().isNone() && !ui().openFileMode) {
-            switchMarkdownPresentation(); return;
         }
         if (inputEvent instanceof ResizeEvent) {
             tabStrip.invalidateLayout();
             host.setHelpScrollState(new ListView.State(-1, host.helpScrollState().firstVisibleIndex()));
             if (ui().openFileTree != null) ui().openFileTree.adopt(ui().openFileTree.state().cancelPointerInteraction());
             topMenu.adopt(topMenu.state().cancelPointerInteraction());
-            return;
+            return WindowInput.Consumed.INSTANCE;
         }
         if (inputEvent instanceof PointerEvent pointer && pointerCapture.active()) {
             if (!uiSessionState.mouseModeSetting || !terminal.mouseAvailable()) {
                 cancelPointerCapture(PointerCaptureCancellation.DISABLED);
-                return;
+                return WindowInput.Consumed.INSTANCE;
             }
             if (pointerCapture.dispatch(pointerFrame(), pointer)) {
                 eventLoop.invalidate();
-                return;
+                return WindowInput.Consumed.INSTANCE;
             }
         }
+        if (inputEvent instanceof PointerEvent && (!uiSessionState.mouseModeSetting || !terminal.mouseAvailable()))
+            return WindowInput.Consumed.INSTANCE;
+        if (windowModal.isNone() && windowTabCommand(navigationCommand))
+            return TerminalEditorApp.resolveEditorInput(commandRouter, inputEvent, binding, null, currentRecipient());
+        if (routeTabChrome(inputEvent)) return WindowInput.Consumed.INSTANCE;
+        if (navigationCommand == TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW
+            && modalState().isNone() && !ui().openFileMode)
+            return TerminalEditorApp.resolveEditorInput(commandRouter, inputEvent, binding, null, currentRecipient());
         if (modalState().isDocumentFormat()) {
-            if (navigationCommand == TuinkCommand.APP_QUIT) {
-                closeFormatDialog();
-            } else if (navigationCommand == TuinkCommand.DOCUMENT_FORMAT_APPLY
-                || navigationCommand == TuinkCommand.DOCUMENT_FORMAT_CANCEL) {
-                invokeFormatCommand(navigationCommand);
-                return;
-            } else {
-                if (!(inputEvent instanceof PointerEvent)
-                    || uiSessionState.mouseModeSetting && terminal.mouseAvailable()) {
-                    if (formatPlacement != null) {
-                        DocumentFormatDialogView.Action action = formatPlacement.handle(inputEvent, pointerCapture, this);
-                        if (action != DocumentFormatDialogView.Action.NONE) {
-                            invokeFormatCommand(action == DocumentFormatDialogView.Action.APPLY
-                                ? TuinkCommand.DOCUMENT_FORMAT_APPLY : TuinkCommand.DOCUMENT_FORMAT_CANCEL);
-                        }
-                    }
+            if (binding != null) return TerminalEditorApp.resolveEditorInput(commandRouter, inputEvent,
+                binding, null, currentRecipient());
+            if (!(inputEvent instanceof PointerEvent)
+                || uiSessionState.mouseModeSetting && terminal.mouseAvailable()) {
+                if (formatPlacement != null) {
+                    DocumentFormatDialogView.Action action = formatPlacement.handle(inputEvent, pointerCapture, this);
+                    if (action != DocumentFormatDialogView.Action.NONE)
+                        return WindowInput.command(commandRouter, action == DocumentFormatDialogView.Action.APPLY
+                            ? TuinkCommand.DOCUMENT_FORMAT_APPLY : TuinkCommand.DOCUMENT_FORMAT_CANCEL, currentRecipient());
                 }
-                eventLoop.invalidate();
-                return;
             }
+            eventLoop.invalidate();
+            return WindowInput.Consumed.INSTANCE;
         }
         if (inputEvent instanceof PointerEvent pointer && pointer.kind() == PointerEvent.Kind.PRESS
             && pointer.button() == PointerEvent.Button.LEFT && statusBarPlacement != null
@@ -1687,24 +1715,20 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 if (ui().formatDialog != null) ui().formatDialog.requestedFocus = encoding
                     ? DocumentFormatDialogView.Target.ENCODING : DocumentFormatDialogView.Target.EOL;
                 eventLoop.invalidate();
-                return;
+                return WindowInput.Consumed.INSTANCE;
             }
         }
         ModalInputPolicy.Kind blocker = TerminalEditorApp.modalInputKind(modalState(), ui().openFileMode);
-        TuinkCommand physicalCommand = inputEvent instanceof KeyStroke stroke
-            ? commandRouter.invocationFor(stroke)
-                .flatMap(invocation -> TuinkCommand.fromId(invocation.id())).orElse(null)
-            : null;
-        if (routeBlockingInput(inputEvent, physicalCommand, blocker)) {
-            return;
-        }
+        TuinkCommand physicalCommand = navigationCommand;
+        var blocked = routeBlockingInput(inputEvent, binding, physicalCommand, blocker);
+        if (blocked.isPresent()) return blocked.orElseThrow();
         if (TerminalEditorApp.searchOwnsRawInput(ui().searchMode, modalState(), ui().openFileMode, topMenu.isOpen())
             && !ui().searchEditorFocused
             && DialogCommandPolicy.decide(DialogMode.NON_BLOCKING,
                 SearchController.isSearchFieldFocus(host.searchFocusManager().focused().orElse(null))
                     ? DialogInputPolicy.Target.TEXT_INPUT : DialogInputPolicy.Target.BUTTON,
                 DialogCommandPolicy.action(inputEvent, physicalCommand)).consumed()) {
-            return;
+            return WindowInput.Consumed.INSTANCE;
         }
         boolean startsAction = !(inputEvent instanceof PointerEvent pointer) || switch (pointer.kind()) {
             case PRESS, SCROLL_UP, SCROLL_DOWN, SCROLL_LEFT, SCROLL_RIGHT -> true;
@@ -1713,6 +1737,11 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         if (!saveAsMode && !confirmMode && startsAction) {
             notice().clearErrorOnUserAction();
         }
+        if (binding == null && searchVisible() && !topMenu.isOpen() && DialogFocusTraversal.isTraversal(inputEvent)) {
+            advanceSearchFocus((KeyStroke) inputEvent); return WindowInput.Consumed.INSTANCE;
+        }
+        if (binding != null && !confirmMode && !topMenu.isOpen())
+            return TerminalEditorApp.resolveEditorInput(commandRouter, inputEvent, binding, null, currentRecipient());
         eventLoop.invalidate();
         if (modalState().isHelpHints() || modalState().isHelpLicenses() || modalState().isHelpAuthor()) {
             boolean pointerAllowed = !(inputEvent instanceof PointerEvent)
@@ -1724,10 +1753,10 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 if (helpInput.closeRequested()) {
                     host.helpFocusManager().deactivate(HelpOverlayInputRouter.Scope.HELP);
                     setModal(UiModalState.none());
-                    return;
+                    return WindowInput.Consumed.INSTANCE;
                 }
                 if (helpInput.consumed()) {
-                    return;
+                    return WindowInput.Consumed.INSTANCE;
                 }
             }
         }
@@ -1735,13 +1764,13 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         if (saveAsMode) {
             if (inputEvent instanceof PointerEvent
                 && (!uiSessionState.mouseModeSetting || !terminal.mouseAvailable())) {
-                return;
+                return WindowInput.Consumed.INSTANCE;
             }
             if (saveAsBarPlacement == null) {
                 // Entering the modal always schedules a frame; keep
                 // a malformed/custom runtime from leaking input.
                 eventLoop.invalidate();
-                return;
+                return WindowInput.Consumed.INSTANCE;
             }
             String filenameBefore = ui().saveAsInput.text();
             SaveAsInputRouter.Result saveAsInputResult = SaveAsInputRouter.route(
@@ -1749,86 +1778,54 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 saveAsBarPlacement,
                 inputEvent, pointerCapture, this
             );
-            if (!saveAsInputResult.consumed() && physicalCommand != null) {
-                saveAsInputResult = SaveAsInputRouter.routeCommand(host.saveAsFocusManager(),
-                    saveAsBarPlacement, physicalCommand, host.clipboard);
-            }
-            SaveAsBarView.Action fieldAction = saveAsInputResult.action();
-            if (fieldAction == SaveAsBarView.Action.SUBMIT_REJECTED) {
-                // Keep a pending save failure visible until its filename is edited.
-                if (notice().message == null) {
-                    notice().warning("Enlarge terminal to show the filename before saving");
-                }
-                return;
-            }
-            if (fieldAction == SaveAsBarView.Action.INPUT_REJECTED) {
-                notice().error("Text is too large; nothing changed");
-                return;
-            }
-            if (fieldAction == SaveAsBarView.Action.VALUE_CHANGED) {
-                if (!filenameBefore.equals(ui().saveAsInput.text())) {
-                    ui().filenameRevision++;
-                    notice().clear();
-                }
-                if (sessionContext.active() != null) saveAsSuggestions.rememberDraft(
-                    sessionContext.active().tabSession(), ui().saveAsInput.text());
-                return;
-            }
-            if (fieldAction == SaveAsBarView.Action.SUBMITTED) {
-                routedSaveAsCommand = TuinkCommand.EDIT_INSERT_NEWLINE;
-            } else if (fieldAction == SaveAsBarView.Action.CANCELLED) {
-                routedSaveAsCommand = TuinkCommand.UI_ESCAPE;
-            }
+            routedSaveAsCommand = applySaveAsFieldAction(saveAsInputResult.action(), filenameBefore);
             if (inputEvent instanceof PointerEvent && saveAsInputResult.consumed()) {
                 editorView.cancelMouseSelection();
             }
             if (routedSaveAsCommand == null && saveAsInputResult.consumed()) {
-                return;
+                return WindowInput.Consumed.INSTANCE;
             }
         }
-        ConfirmChoice routedConfirmDecision = null;
         if (confirmMode) {
             if (inputEvent instanceof PointerEvent
                 && (!uiSessionState.mouseModeSetting || !terminal.mouseAvailable())) {
-                return;
+                return WindowInput.Consumed.INSTANCE;
             }
             if (confirmBarPlacement == null) {
                 // A modal transition always schedules a frame before
                 // input. Capture defensively if a custom runtime
                 // violates that ordering.
                 eventLoop.invalidate();
-                return;
+                return WindowInput.Consumed.INSTANCE;
             }
             ConfirmBarInputRouter.Result confirmInput = ConfirmBarInputRouter.route(
                 host.confirmFocusManager(),
                 confirmBarPlacement,
                 host.confirmPolicy(modalState()),
-                inputEvent
+                binding == null ? inputEvent : DialogCommandPolicy.eventFor(physicalCommand)
+                    .<TuiInputEvent>map(event -> event).orElse(inputEvent)
             );
-            routedConfirmDecision = confirmInput.decision();
-            if (routedConfirmDecision != null) {
+            ConfirmChoice decision = confirmInput.decision();
+            if (decision != null) {
                 notice().clearErrorOnUserAction();
             }
-            if (routedConfirmDecision != null && inputEvent instanceof PointerEvent) {
+            if (decision != null && inputEvent instanceof PointerEvent) {
                 editorView.cancelMouseSelection();
             }
-            if (routedConfirmDecision == null && confirmInput.consumed()) {
-                return;
-            }
+            if (decision != null) return WindowInput.command(commandRouter, confirmationCommand(decision), currentRecipient());
+            if (confirmInput.consumed()) return WindowInput.Consumed.INSTANCE;
         }
         if (ui().openFileMode) {
             if (inputEvent instanceof PointerEvent
                 && (!uiSessionState.mouseModeSetting || !terminal.mouseAvailable())) {
-                return;
+                return WindowInput.Consumed.INSTANCE;
             }
             if (openFileDialogPlacement == null) {
                 eventLoop.invalidate();
-                return;
+                return WindowInput.Consumed.INSTANCE;
             }
             String locationBefore = ui().openFileFocusState.location().text();
-            OpenFileInputRouter.Result openInput = physicalCommand == null ? null : OpenFileInputRouter.routeCommand(
-                openFileDialogPlacement, ui().openFileFocusState, physicalCommand, host.clipboard);
-            if (openInput == null || !openInput.consumed()) openInput = OpenFileInputRouter.route(
+            OpenFileInputRouter.Result openInput = OpenFileInputRouter.route(
                 openFileDialogPlacement,
                 ui().openFileFocusState,
                 inputEvent,
@@ -1844,15 +1841,15 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 applyOpenFileResult(FilePickerOpenWorkflow.apply(openInput.intent(), openFileTree(),
                     host.toTabSessions(tabs), sessionContext.activeTabIndex(),
                     () -> TuiDocumentSession.create(host.clipboard), ui().pickerOpenMode));
-                return;
+                return WindowInput.Consumed.INSTANCE;
             }
             if (openInput.consumed()) {
-                return;
+                return WindowInput.Consumed.INSTANCE;
             }
             // The open-file dialog is modal even when a pointer
             // misses every current-frame control.
             editorView.cancelMouseSelection();
-            return;
+            return WindowInput.Consumed.INSTANCE;
         }
         CommandInvocation routedMenuCommand = null;
         CommandRouter.RoutedCommand routedMenuResult = null;
@@ -1860,13 +1857,13 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             boolean pointerAllowed = !(inputEvent instanceof PointerEvent)
                 || uiSessionState.mouseModeSetting && terminal.mouseAvailable();
             if (!pointerAllowed && topMenu.isOpen()) {
-                return;
+                return WindowInput.Consumed.INSTANCE;
             }
             if (pointerAllowed) {
                 if (topMenuPlacement == null) {
                     if (topMenu.isOpen()) {
                         eventLoop.invalidate();
-                        return;
+                        return WindowInput.Consumed.INSTANCE;
                     }
                 } else {
                     TopMenuInputRouter.Result menuInput = TopMenuInputRouter.route(
@@ -1882,14 +1879,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                     if (routedMenuCommand != null) {
                         routedMenuResult = commandRouter.dispatch(routedMenuCommand)
                             .orElse(null);
-                        if (routedMenuResult instanceof CommandRouter.ActivateTab tab
-                            && tab.tabIndex() >= 0
-                            && tab.tabIndex() < sessionContext.presentations().size()) {
-                            activatePresentation(tab.tabIndex());
-                            return;
-                        }
                     } else if (menuInput.consumed()) {
-                        return;
+                        return WindowInput.Consumed.INSTANCE;
                     }
                 }
             }
@@ -1904,18 +1895,13 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         )) {
             if (inputEvent instanceof PointerEvent
                 && (!uiSessionState.mouseModeSetting || !terminal.mouseAvailable())) {
-                return;
+                return WindowInput.Consumed.INSTANCE;
             }
             if (searchBarPlacement == null) {
                 // Search activation schedules a frame before input;
                 // capture defensively if a custom runtime violates it.
                 eventLoop.invalidate();
-                return;
-            }
-            if (DialogFocusTraversal.isTraversal(inputEvent)) {
-                advanceSearchFocus((KeyStroke) inputEvent);
-                editorView.cancelMouseSelection();
-                return;
+                return WindowInput.Consumed.INSTANCE;
             }
             SearchInputRouter.Result searchInput = !ui().searchEditorFocused
                 || inputEvent instanceof PointerEvent
@@ -1933,69 +1919,11 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             }
             SearchBarView.Action searchAction = searchInput.action();
             if (consumeSearchControlAction(searchAction)) {
-                return;
+                return WindowInput.Consumed.INSTANCE;
             }
             routedSearchAction = searchAction;
             if (routedSearchAction == null && searchInput.consumed()) {
-                return;
-            }
-        }
-        TabBarInputRouter.Policy tabPolicy = routedMenuCommand == null ? TerminalEditorApp.tabBarInputPolicy(
-            tabBarPlacement != null,
-            uiSessionState.mouseModeSetting && terminal.mouseAvailable(),
-            modalState(),
-            ui().openFileMode,
-            topMenu.isOpen(),
-            ui().searchMode
-        ) : null;
-        if (inputEvent instanceof PointerEvent pointer && tabPolicy != null) {
-            TabBarInputRouter.Result tabInput = TabBarInputRouter.route(
-                tabBarPlacement,
-                tabPolicy,
-                pointer
-            );
-            if (modalState().isCloseTabConfirm() && tabInput.blocked()) {
-                rejectDialogInput();
-            }
-            tabStrip.adopt(tabInput.state());
-            Integer activateIndex = tabInput.activateIndex();
-            if (activateIndex != null && activateIndex < tabs.size()) {
-                CommandInvocation activation = commandRouter.tabActivationInvocation(
-                    activateIndex
-                );
-                int resolvedTab = commandRouter.invokeTabActivation(activation).orElse(-1);
-                if (resolvedTab >= 0 && resolvedTab < tabs.size()) {
-                    activateTab(resolvedTab);
-                }
-                topMenu.close();
-                editorView.cancelMouseSelection();
-                return;
-            }
-            Integer closeIndex = tabInput.closeIndex();
-            if (closeIndex != null && closeIndex < tabs.size()) {
-                if (formatWorkflow.affects(tabs.get(closeIndex).documentSession())) {
-                    notice().info("A format operation is in progress; cancel it before closing");
-                    return;
-                }
-                ViewId closeView = tabs.get(closeIndex).documentSession().viewId();
-                if (!sessionContext.canClose(closeView)) {
-                    notice().info("Saving this document; wait before closing its tab");
-                    return;
-                }
-                if (tabs.get(closeIndex).state().isDirty() && !sessionContext.hasOtherViews(closeView)
-                    && uiSessionState.confirmOnCloseSetting) {
-                    setModal(UiModalState.closeTabConfirm(closeIndex)
-                        .bindTo(tabs.get(closeIndex).documentSession().viewId()));
-                } else {
-                    host.closeTab(sessionContext, tabs.get(closeIndex).documentSession().viewId(), saveAsSuggestions);
-                }
-                topMenu.close();
-                editorView.cancelMouseSelection();
-                return;
-            }
-            if (tabInput.consumed()) {
-                editorView.cancelMouseSelection();
-                return;
+                return WindowInput.Consumed.INSTANCE;
             }
         }
         TuinkCommand routedSearchCommand = TerminalEditorApp.searchCommand(routedSearchAction);
@@ -2003,95 +1931,150 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             ? routedMenuCommand
             : routedSearchCommand != null
             ? CommandInvocation.of(routedSearchCommand.id())
-            : routedConfirmDecision == null
-            && routedSaveAsCommand == null
-            && inputEvent instanceof KeyStroke stroke
-            ? commandRouter.invocationFor(stroke).orElse(null)
-            : null;
+            : routedSaveAsCommand == null ? binding : null;
 
-        TuinkCommand previewCommand = pendingCommand == null ? null : TuinkCommand.fromId(pendingCommand.id()).orElse(null);
-        if (modalState().isNone() && !ui().openFileMode && !topMenu.isOpen()
-            && (previewCommand == TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW || !ui().searchMode || ui().searchEditorFocused)
-            && handlePreviewInput(inputEvent, previewCommand)) return;
+        if (routedMenuCommand != null && routedMenuResult == null) return WindowInput.Consumed.INSTANCE;
+        return routedSaveAsCommand != null
+            ? WindowInput.command(commandRouter, routedSaveAsCommand, currentRecipient())
+            : TerminalEditorApp.resolveEditorInput(commandRouter, inputEvent, pendingCommand, routedMenuResult, currentRecipient());
+    }
 
-        if (sessionContext.activePresentation() instanceof PreviewTab selected && !globalModal(modalState())) {
-            TuinkCommand action = routedSaveAsCommand != null ? routedSaveAsCommand : previewCommand;
-            if (routedConfirmDecision != null || saveAsMode) {
-                handlePreviewSaveInput(selected, action, routedConfirmDecision);
-            } else if (action != null) {
-                handlePreviewApplicationCommand(selected, action, inputEvent);
-            }
-            return;
+    private static TuinkCommand confirmationCommand(ConfirmChoice choice) {
+        return switch (choice) {
+            case SAVE -> TuinkCommand.DIALOG_CONFIRM_SAVE;
+            case DISCARD -> TuinkCommand.DIALOG_CONFIRM_DISCARD;
+            case CANCEL -> TuinkCommand.DIALOG_CONFIRM_CANCEL;
+        };
+    }
+
+    private static ConfirmChoice confirmationChoice(TuinkCommand command) {
+        return switch (command) {
+            case DIALOG_CONFIRM_SAVE -> ConfirmChoice.SAVE;
+            case DIALOG_CONFIRM_DISCARD -> ConfirmChoice.DISCARD;
+            case DIALOG_CONFIRM_CANCEL -> ConfirmChoice.CANCEL;
+            default -> null;
+        };
+    }
+
+    private boolean currentInput(WindowInput input) {
+        UiRecipient recipient = switch (input) {
+            case WindowInput.Command command -> command.recipient();
+            case WindowInput.Text text -> text.recipient();
+            case WindowInput.Gesture gesture -> gesture.recipient();
+            case WindowInput.Consumed ignored -> null;
+        };
+        return recipient != null && current(recipient) && (recipient.scope() == UiRecipient.Scope.WINDOW
+            || recipient.presentationId().equals(sessionContext.activePresentation().presentationId()));
+    }
+
+    private void dispatchWindowInput(WindowInput key) {
+        if (!currentInput(key)) return;
+        if (key instanceof WindowInput.Command command) { executeResolvedCommand(command); return; }
+        if (key instanceof WindowInput.Gesture gesture && gesture.motion() instanceof WindowInput.Pointer pointer) {
+            if (modalState().isNone() && ui().preview.active && ui().preview.searchEditing
+                && (ui().preview.searchField.captures(pointer.event())
+                    || pointer.event().row() == ui().preview.bounds.y()
+                        && ui().preview.bounds.contains(pointer.event().column(), pointer.event().row()))
+                && routePreviewSearchOwner(key)) return;
+            routeDocumentPointer(pointer.event()); return;
         }
+        if (ui().preview.active && ui().preview.searchEditing && routePreviewSearchOwner(key)) return;
+        dispatchContentInput(key);
+    }
 
-        if (routedMenuCommand == null && inputEvent instanceof PasteEvent paste) {
-            if (paste.truncated()) {
-                notice().error("Paste is too large and was not inserted");
+    /** Semantic entry shared by chrome controls and programmatic application invocations. */
+    void invokeCommand(CommandInvocation invocation, UiRecipient recipient) {
+        commandRouter.dispatch(invocation).ifPresent(route ->
+            executeResolvedCommand(new WindowInput.Command(invocation, route, recipient)));
+    }
+
+    private void executeResolvedCommand(WindowInput.Command key) {
+        if (!currentInput(key)) return;
+        eventLoop.invalidate();
+        TuinkCommand availability = key.route() instanceof CommandRouter.ActivateTab ? TuinkCommand.TAB_ACTIVATE
+            : ((CommandRouter.RoutedAction) key.route()).action();
+        ActiveSurface surface = activeSurface();
+        if (isFocusTraversalCommand(availability) && !modalState().isDocumentFormat()) {
+            if (TerminalEditorApp.modalInputKind(modalState(), ui().openFileMode) != ModalInputPolicy.Kind.NONE) {
+                advanceBlockingFocus(KeyStroke.of(KeyStroke.Key.TAB)); return;
+            }
+            if (searchVisible()) {
+                if (surface.allows(TuinkCommand.SEARCH_FOCUS_NEXT)) advanceSearchFocus(KeyStroke.of(KeyStroke.Key.TAB));
                 return;
             }
-            if (!modalState().isNone() || ui().openFileMode || topMenu.isOpen()) {
-                // The focused overlay owns input; paste cannot leak through it.
-            } else {
-                if (rejectSavingDocumentEdit()) {
-                    return;
-                } else if (uiSessionState.readingModeSetting) {
-                    notice().warning("Reading mode: editing is disabled");
-                } else {
-                    long revisionBefore = model.revision();
-                    Position cursorBefore = state.getCursor();
-                    try {
-                        activeDocument().execute(new DocumentCommand.Paste(paste.text()));
-                    } catch (DocumentEditLimitException limit) {
-                        notice().error(limit.getMessage());
-                        return;
-                    }
-                    if (revisionBefore != model.revision() || !cursorBefore.equals(state.getCursor())) {
-                        viewportController.onEditorTextInteraction();
-                    }
+        }
+        if (surface.focus() != ActiveSurface.Focus.CONTENT && ControlCommandRouter.unsupportedLocally(availability)) return;
+        if (!surface.allows(availability)) { notice().warning(surface.refusal(availability)); return; }
+        if (key.route() instanceof CommandRouter.ActivateTab tab) {
+            if (tab.tabIndex() >= 0 && tab.tabIndex() < sessionContext.presentations().size())
+                activatePresentation(tab.tabIndex());
+            return;
+        }
+        TuinkCommand resolvedCommand = ((CommandRouter.RoutedAction) key.route()).action();
+        if (executeTabCommand(resolvedCommand, key.invocation())) return;
+        if (modalState().isDocumentFormat()) {
+            if (resolvedCommand == TuinkCommand.APP_QUIT) closeFormatDialog();
+            else if (handleFormatCommand(resolvedCommand)) return;
+            else {
+                KeyStroke control = ControlCommandRouter.eventFor(resolvedCommand).orElse(null);
+                if (control != null && formatPlacement != null) {
+                    var action = formatPlacement.handle(control, pointerCapture, this);
+                    if (action != DocumentFormatDialogView.Action.NONE)
+                        handleFormatCommand(action == DocumentFormatDialogView.Action.APPLY
+                            ? TuinkCommand.DOCUMENT_FORMAT_APPLY : TuinkCommand.DOCUMENT_FORMAT_CANCEL);
                 }
+                eventLoop.invalidate(); return;
+            }
+        }
+        if (ui().openFileMode) {
+            if (openFileDialogPlacement != null) {
+                String before = ui().openFileFocusState.location().text();
+                var input = OpenFileInputRouter.routeCommand(openFileDialogPlacement, ui().openFileFocusState,
+                    resolvedCommand, host.clipboard);
+                if (!before.equals(ui().openFileFocusState.location().text())) ui().pickerNotice = null;
+                openFileTree().adopt(input.state());
+                if (input.intent() != null) applyOpenFileResult(FilePickerOpenWorkflow.apply(input.intent(), openFileTree(),
+                    host.toTabSessions(tabs), sessionContext.activeTabIndex(), () -> TuiDocumentSession.create(host.clipboard), ui().pickerOpenMode));
             }
             return;
         }
-
-        if (routedMenuCommand != null
-            && !(routedMenuResult instanceof CommandRouter.RoutedAction)) {
+        if (modalState().isHelpHints() || modalState().isHelpLicenses() || modalState().isHelpAuthor()) {
+            KeyStroke control = ControlCommandRouter.eventFor(resolvedCommand).orElse(null);
+            if (control != null) {
+                var input = host.routeHelpOverlayInput(currentHelpOverlay(), control, pointerCapture, this);
+                if (input.closeRequested()) { host.helpFocusManager().deactivate(HelpOverlayInputRouter.Scope.HELP); setModal(UiModalState.none()); }
+                if (input.consumed()) return;
+            }
+        }
+        if (modalState().isSaveAs() && !focusUi().blockingContentFocused && ControlCommandRouter.owns(resolvedCommand)) {
+            if (saveAsBarPlacement == null) return;
+            String before = ui().saveAsInput.text();
+            var input = SaveAsInputRouter.routeCommand(host.saveAsFocusManager(), saveAsBarPlacement, resolvedCommand, host.clipboard);
+            TuinkCommand intent = applySaveAsFieldAction(input.action(), before);
+            if (input.consumed() && intent == null) return;
+            if (intent != null) resolvedCommand = intent;
+        }
+        if (resolvedCommand == TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW
+            && modalState().isNone() && !ui().openFileMode) { switchMarkdownPresentation(); return; }
+        if (focusUi().blockingContentFocused
+            && TerminalEditorApp.modalInputKind(modalState(), ui().openFileMode) != ModalInputPolicy.Kind.NONE) {
+            if (!handleApplicationCommand(resolvedCommand)) dispatchContentInput(key);
             return;
         }
-        EditorInput key = routedSaveAsCommand != null
-            ? EditorInput.command(routedSaveAsCommand)
-            : routedConfirmDecision != null
-            ? EditorInput.command(TuinkCommand.EDIT_INSERT_NEWLINE)
-            : TerminalEditorApp.resolveEditorInput(
-                commandRouter,
-                inputEvent,
-                pendingCommand,
-                routedMenuResult,
-                TerminalEditorApp.searchOwnsRawInput(
-                    ui().searchMode,
-                    modalState(),
-                    ui().openFileMode,
-                    topMenu.isOpen(),
-                    routedMenuCommand != null
-                ) && !ui().searchEditorFocused,
-                host.currentSearchFocus()
-            );
-        if (key == null) {
-            return;
+        ConfirmChoice routedConfirmDecision = resolvedCommand == null ? null : confirmationChoice(resolvedCommand);
+        if (sessionContext.activePresentation() instanceof PreviewTab selected && !globalModal(modalState())) {
+            if (routedConfirmDecision != null || saveAsMode) {
+                if (resolvedCommand != null) handlePreviewSaveCommand(selected, resolvedCommand);
+                return;
+            }
         }
         if (TerminalEditorApp.searchOwnsRawInput(ui().searchMode, modalState(), ui().openFileMode, topMenu.isOpen())
             && ui().searchEditorFocused
-            && key.command() == TuinkCommand.UI_ESCAPE) {
+            && resolvedCommand == TuinkCommand.UI_ESCAPE) {
             ui().searchMode = false;
             host.searchFocusManager().deactivate(TerminalEditorApp.SEARCH_SCOPE_ID);
             return;
         }
-        if (key.command() == null && key.event() instanceof PointerEvent mouse) {
-            if (TerminalEditorApp.modalInputKind(modalState(), ui().openFileMode) == ModalInputPolicy.Kind.NONE) {
-                routeDocumentPointer(mouse);
-            }
-            return;
-        }
-
         if (modalState().isHelpHints()) {
             HelpHintsController.Result helpHintsResult = HelpHintsController.handle(
                 key,
@@ -2107,10 +2090,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         }
 
         if (modalState().isHelpLicenses()) {
-            if (key.command() == null && key.event() instanceof TextInput) {
-                return;
-            }
-            TuinkCommand action = key.command();
+            TuinkCommand action = resolvedCommand;
             if (action == TuinkCommand.UI_ESCAPE
                 || action == TuinkCommand.EDIT_INSERT_NEWLINE
                 || action == TuinkCommand.HELP_LICENSES) {
@@ -2121,10 +2101,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         }
 
         if (modalState().isHelpAuthor()) {
-            if (key.command() == null && key.event() instanceof TextInput) {
-                return;
-            }
-            TuinkCommand action = key.command();
+            TuinkCommand action = resolvedCommand;
             if (action == TuinkCommand.UI_ESCAPE
                 || action == TuinkCommand.EDIT_INSERT_NEWLINE
                 || action == TuinkCommand.HELP_AUTHOR) {
@@ -2187,10 +2164,10 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         }
 
         if (modalState().isSaveAs()) {
-            if (key.command() == TuinkCommand.UI_ESCAPE || key.command() == TuinkCommand.APP_QUIT) {
+            if (resolvedCommand == TuinkCommand.UI_ESCAPE || resolvedCommand == TuinkCommand.APP_QUIT) {
                 cancelPendingSave(activeEditingView());
             }
-            applySaveResult(SaveWorkflow.saveAsInput(saveContext(), key.command(), modalState(), ui().saveAsInput.text()));
+            applySaveResult(SaveWorkflow.saveAsInput(saveContext(), resolvedCommand, modalState(), ui().saveAsInput.text()));
             return;
         }
         if (routedConfirmDecision != null) {
@@ -2226,16 +2203,15 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             }
         }
 
-        CommandRecipient recipient = CommandRecipient.resolve(key.command(),
+        if (ui().searchMode && !ui().searchEditorFocused && resolvedCommand == TuinkCommand.SEARCH_OPEN) {
+            executeSearchDocumentCommand(TuinkCommand.SEARCH_NEXT); return;
+        }
+        CommandRecipient recipient = CommandRecipient.resolve(resolvedCommand,
             ui().searchMode, ui().searchEditorFocused);
         if (recipient == CommandRecipient.SEARCH_CONTROL) {
             if (searchBarPlacement != null) {
-                if (key.command() == TuinkCommand.EDIT_INSERT_TAB || key.command() == TuinkCommand.SEARCH_FOCUS_NEXT) {
-                    advanceSearchFocus(KeyStroke.of(KeyStroke.Key.TAB));
-                    return;
-                }
                 SearchInputRouter.Result result = SearchInputRouter.routeCommand(host.searchFocusManager(),
-                    searchBarPlacement, key.command(), host.clipboard);
+                    searchBarPlacement, resolvedCommand, host.clipboard);
                 if (!consumeSearchControlAction(result.action())) {
                     TuinkCommand intent = TerminalEditorApp.searchCommand(result.action());
                     if (intent != null) executeSearchDocumentCommand(intent);
@@ -2244,11 +2220,63 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             return;
         }
         if (recipient == CommandRecipient.SEARCH_DOCUMENT) {
-            executeSearchDocumentCommand(key.command());
+            executeSearchDocumentCommand(resolvedCommand);
             return;
         }
 
-        if (key.command() == null && key.event() instanceof TextInput charInput) {
+        if (ui().preview.active && ui().preview.searchEditing && routePreviewSearchOwner(key)) return;
+        if (handleApplicationCommand(resolvedCommand)) return;
+        if (resolvedCommand == TuinkCommand.UI_ESCAPE) { cancelCurrentOperation(); return; }
+        dispatchContentInput(key);
+    }
+
+    /** The single content target for ordinary, captured and modal-content delivery. */
+    private void dispatchContentInput(WindowInput key) {
+        if (!currentInput(key)) return;
+        if (key instanceof WindowInput.Gesture gesture) {
+            if (gesture.motion() instanceof WindowInput.Pointer pointer) {
+                if (ui().preview.active) {
+                    if (pointer.event().kind() == PointerEvent.Kind.PRESS && pointer.event().button() == PointerEvent.Button.LEFT)
+                        focusDocument();
+                    ui().preview.pointer(pointer.event());
+                }
+                else runDocumentPointerAction(() -> handleDocumentPointer(pointer.event()));
+            } else if (ui().preview.active && gesture.motion() instanceof WindowInput.Pan pan)
+                ui().preview.scroll(pan.rows(), pan.columns());
+            eventLoop.invalidate();
+            return;
+        }
+        TuinkCommand resolvedCommand = key instanceof WindowInput.Command resolved
+            && resolved.route() instanceof CommandRouter.RoutedAction action ? action.action() : null;
+        if (ui().preview.active) {
+            if (resolvedCommand != null) handlePreviewContentCommand(resolvedCommand);
+            return;
+        }
+        if (key instanceof WindowInput.Text text && text.pasted()) {
+            if (text.truncated()) {
+                notice().error("Paste is too large and was not inserted");
+                return;
+            }
+            if (modalState().isNone() && !ui().openFileMode && !topMenu.isOpen()) {
+                if (rejectSavingDocumentEdit()) return;
+                if (uiSessionState.readingModeSetting) {
+                    notice().warning("Reading mode: editing is disabled");
+                } else {
+                    long revisionBefore = model.revision();
+                    Position cursorBefore = state.getCursor();
+                    try {
+                        activeDocument().execute(new DocumentCommand.Paste(text.value()));
+                    } catch (DocumentEditLimitException limit) {
+                        notice().error(limit.getMessage());
+                        return;
+                    }
+                    if (revisionBefore != model.revision() || !cursorBefore.equals(state.getCursor()))
+                        viewportController.onEditorTextInteraction();
+                }
+            }
+            return;
+        }
+        if (key instanceof WindowInput.Text charInput) {
             if (rejectSavingDocumentEdit()) {
                 return;
             } else if (uiSessionState.readingModeSetting) {
@@ -2257,7 +2285,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 long revisionBefore = model.revision();
                 Position cursorBefore = state.getCursor();
                 try {
-                    activeDocument().execute(new DocumentCommand.Input(charInput.text()));
+                    activeDocument().execute(new DocumentCommand.Input(charInput.value()));
                 } catch (DocumentEditLimitException limit) {
                     notice().error(limit.getMessage());
                     return;
@@ -2269,59 +2297,12 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             return;
         }
 
-        TuinkCommand action = key.command();
-        if (routeTabNavigation(KeyStroke.of(KeyStroke.Key.UNKNOWN), action)) return;
-        if ((action == TuinkCommand.DOCUMENT_SAVE || action == TuinkCommand.DOCUMENT_SAVE_AS)
-            && sessionContext.activePresentation() instanceof TerminalEditorApp.EditorTab source
-            && !source.documentSession().document().io().busy()) savePresentationOwners.remove(source.documentSession().viewId());
-        // Preserve the subject's existing save/format lock outcome before
-        // generic application availability handles the remaining commands.
-        if (action != null && action.editsDocumentText() && rejectSavingDocumentEdit()) return;
-        if (handleApplicationCommand(action)) return;
+        TuinkCommand action = resolvedCommand;
+        if (action.editsDocumentText() && rejectSavingDocumentEdit()) return;
         if (handleFormatCommand(action)) return;
-        if (action == TuinkCommand.UI_ESCAPE
-                && cancelPendingSave(activeEditingView()) != DocumentIoCoordinator.CancelResult.IDLE) {
-            return;
-        }
-        if (action == TuinkCommand.UI_ESCAPE && pendingRecoveryDiscovery != null) {
-            cancelRecoveryDiscovery();
-            notice().info("Recovery lookup cancelled; drafts were kept");
-            return;
-        }
-        if (action == TuinkCommand.TAB_CLOSE && formatWorkflow.affects(activeDocument())) {
-            notice().info("A format operation is in progress; cancel it before closing");
-            return;
-        }
-        if (action == TuinkCommand.TAB_CLOSE) cancelPendingSave(sessionContext.activeViewId());
-        if (action == TuinkCommand.TAB_CLOSE && !sessionContext.canClose(sessionContext.activeViewId())) {
-            notice().info("Saving this document; wait before closing its tab");
-            return;
-        }
-        if (activeDocument().document().io().busy()
-                && (action == TuinkCommand.DOCUMENT_SAVE || action == TuinkCommand.DOCUMENT_SAVE_AS)
-            || documentIo.busy() && action == TuinkCommand.DOCUMENT_SAVE && state.getCurrentResource() != null
-            || formatWorkflow.affects(activeDocument()) && (action == TuinkCommand.DOCUMENT_SAVE || action == TuinkCommand.DOCUMENT_SAVE_AS)
-            || action == TuinkCommand.DOCUMENT_OPEN && (ui().pendingOpen != null || ui().deferredOpenResult != null)) {
-            notice().info("A file operation is already in progress");
-            return;
-        }
         InputActionDispatcher.DispatchResult dispatchResult = dispatchInputAction(action);
         if (dispatchResult.handled()) {
             viewportController.onCommandResult(dispatchResult.viewportPolicy());
-            if (dispatchResult.intent() == InputActionDispatcher.Intent.FIND) {
-                ui().searchMode = true;
-                ui().searchEditorFocused = false;
-                String selectedQuery = SearchSelection.prefill(model, state);
-                if (selectedQuery != null && !ui().searchQueryInput.set(selectedQuery)) {
-                    ui().searchMode = false;
-                    ui().searchEditorFocused = false;
-                    host.searchFocusManager().deactivate(TerminalEditorApp.SEARCH_SCOPE_ID);
-                    searchBarPlacement = null;
-                    notice().error("Not enough memory to open Find with the selected text");
-                    return;
-                }
-                host.focusSearch(searchBarPlacement, SearchFocus.FIND);
-            }
             applyUiIntent(dispatchResult.intent());
             if (dispatchResult.statusMessage() != null && !dispatchResult.statusMessage().isBlank()) {
                 if (dispatchResult.statusLevel() == InputActionDispatcher.StatusLevel.ERROR) {
@@ -2334,32 +2315,6 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             }
             reportTemporaryPreferencesChange();
             return;
-        }
-        EditorActionController.Result editorAction = EditorActionController.decide(
-            action,
-            running(),
-            modalState(),
-            uiSessionState.confirmOnCloseSetting,
-            host.hasDirtyTabs(tabs),
-            state.isDirty() && !sessionContext.hasOtherViews(sessionContext.activeViewId()),
-            activeTabIndex,
-            JvmDocumentStorage.pathOf(state.getCurrentResource()),
-            (action == TuinkCommand.DOCUMENT_SAVE || action == TuinkCommand.DOCUMENT_SAVE_AS)
-                && JvmDocumentStorage.pathOf(state.getCurrentResource()) != null
-                && SaveTargetPolicy.isReadOnlyFile(JvmDocumentStorage.pathOf(state.getCurrentResource()))
-        );
-        var themeBefore = host.theme;
-        host.applyEditorActionResult(editorAction, sessionContext, tabs, activeTabIndex,
-            notice(), saveAsSuggestions, renderer);
-        if (host.theme != themeBefore) {
-            settingsSession.themeChanged();
-            reportTemporaryPreferencesChange();
-        }
-        if (!editorAction.running()) closeState = WindowCloseWorkflow.saveResult(closeState, currentRecipient(), false, false, false);
-        setModal(editorAction.modalState().bindTo(sessionContext.activeViewId()));
-        applyFilenameEffect(SaveWorkflow.initialFilename(saveContext(), editorAction.saveAsPreset()));
-        if (editorAction.requestSaveCurrent()) {
-            applySaveResult(SaveWorkflow.saveCurrent(saveContext()));
         }
     }
 
@@ -3007,7 +2962,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         documentIo.close();
     }
 
-    private void handlePreviewSaveInput(PreviewTab preview, TuinkCommand command, ConfirmChoice choice) {
+    private void handlePreviewSaveCommand(PreviewTab preview, TuinkCommand command) {
+        ConfirmChoice choice = confirmationChoice(command);
         if (modalState().isOpenUtf16Confirm()) {
             Path target = modalState().pendingOpenPath(); setModal(UiModalState.none());
             if (choice == ConfirmChoice.SAVE) applyOpenFileResult(FilePickerOpenWorkflow.openAsUtf16(target,
@@ -3064,7 +3020,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 openFileTree().setRoot(FilePickerOpenWorkflow.initialRoot(currentPresentationPath()));
                 ui().openFileFocusState.focus(OpenFileInputRouter.Focus.LIST);
             }
-            case OPEN_ENCODING -> invokeFormatCommand(command);
+            case OPEN_ENCODING -> handleFormatCommand(command);
             case RECOVER -> reopenRecovery();
             case THEME -> {
                 var effect = EditorActionController.decide(command, running(), modalState(), false, false, false,
@@ -3073,14 +3029,11 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 settingsSession.themeChanged();
             }
             case QUIT -> requestWindowClose(currentRecipient());
-            case SAVE, SAVE_AS -> {
-                // Save adapters retain their live and frozen storage policies.
-                if (sessionContext.activePresentation() instanceof PreviewTab preview)
-                    handlePreviewDocumentCommand(preview, command);
-                else return false;
-            }
+            case SAVE, SAVE_AS -> executeSaveCommand(command);
+            case COPY, SELECT_ALL, FIND -> executeCommonContentCommand(command);
         }
         reportTemporaryPreferencesChange();
+        pointerCapture.reconcile(pointerFrame());
         eventLoop.invalidate();
         return true;
     }
@@ -3093,40 +3046,92 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         }
     }
 
-    private void handlePreviewApplicationCommand(PreviewTab preview, TuinkCommand command, TuiInputEvent event) {
-        if (routeTabNavigation(event, command) || handleApplicationCommand(command)) return;
-        handlePreviewDocumentCommand(preview, command);
+    private void cancelCurrentOperation() {
+        if (pendingPreviewReopen != null) { cancelPreviewReopen(); return; }
+        if (pendingRecoveryDiscovery != null) {
+            cancelRecoveryDiscovery(); notice().info("Recovery lookup cancelled; drafts were kept"); return;
+        }
+        if (sessionContext.activePresentation() instanceof PreviewTab preview
+            && preview.source() instanceof PreviewTab.ClosedSnapshot) snapshotSaves.cancel(preview);
+        else cancelPendingSave(activeEditingView());
     }
 
-    private void handlePreviewDocumentCommand(PreviewTab preview, TuinkCommand command) {
-        switch (command) {
-            case DOCUMENT_SAVE, DOCUMENT_SAVE_AS -> {
-                if (documentIo.busy()) { notice().info("A file operation is already in progress"); return; }
-                if (preview.source() instanceof PreviewTab.ClosedSnapshot) {
-                    if (command == TuinkCommand.DOCUMENT_SAVE_AS) snapshotSaves.openSaveAs(preview);
-                    else snapshotSaves.saveCurrent(preview);
-                } else {
-                    ViewId owner = ((PreviewTab.LiveSource) preview.source()).viewId();
-                    savePresentationOwners.put(owner, preview.presentationId());
-                    UiRecipient recipient = UiRecipient.presentation(preview, UiRecipient.Flow.LOCAL);
-                    var action = EditorActionController.decide(command, true, modalState(recipient),
-                        uiSessionState.confirmOnCloseSetting, host.hasDirtyTabs(tabs), false,
-                        viewIndex(recipient), currentPresentationPath(), SaveTargetPolicy.isReadOnlyFile(currentPresentationPath()));
-                    setModal(recipient, action.modalState().bindTo(owner));
-                    if (action.requestSaveCurrent()) applySaveResult(recipient, SaveWorkflow.saveCurrent(saveContext(recipient)), null);
-                    else applyFilenameEffect(recipient, SaveWorkflow.initialFilename(saveContext(recipient), action.saveAsPreset()));
-                }
-            }
-            case APP_QUIT -> requestWindowClose(UiRecipient.presentation(preview, UiRecipient.Flow.LOCAL));
-            case UI_ESCAPE -> {
-                if (pendingPreviewReopen != null && pendingPreviewReopen.owner().equals(preview.presentationId())) cancelPreviewReopen();
-                else if (pendingRecoveryDiscovery != null) cancelRecoveryDiscovery();
-                else if (preview.source() instanceof PreviewTab.ClosedSnapshot) snapshotSaves.cancel(preview);
-                else cancelPendingSave(((PreviewTab.LiveSource) preview.source()).viewId());
-            }
-            default -> { }
+    private void executeSaveCommand(TuinkCommand command) {
+        WindowTab presentation = sessionContext.activePresentation();
+        if (presentation instanceof PreviewTab preview && preview.source() instanceof PreviewTab.ClosedSnapshot) {
+            if (documentIo.busy()) { notice().info("A file operation is already in progress"); return; }
+            if (command == TuinkCommand.DOCUMENT_SAVE_AS) snapshotSaves.openSaveAs(preview);
+            else snapshotSaves.saveCurrent(preview);
+            return;
         }
-        eventLoop.invalidate();
+        ViewId owner = activeEditingView();
+        var source = sessionContext.source(owner);
+        if (source == null) return;
+        boolean preview = presentation instanceof PreviewTab;
+        if (source.documentSession().document().io().busy() || formatWorkflow.affects(source.documentSession())
+            || documentIo.busy() && (preview || command == TuinkCommand.DOCUMENT_SAVE && currentPresentationPath() != null)) {
+            notice().info("A file operation is already in progress"); return;
+        }
+        if (preview) savePresentationOwners.put(owner, presentation.presentationId());
+        else savePresentationOwners.remove(owner);
+        UiRecipient recipient = currentRecipient();
+        Path path = currentPresentationPath();
+        var action = EditorActionController.decide(command, running(), modalState(recipient),
+            uiSessionState.confirmOnCloseSetting, host.hasDirtyTabs(tabs), false, viewIndex(recipient), path,
+            path != null && SaveTargetPolicy.isReadOnlyFile(path));
+        setModal(recipient, action.modalState().bindTo(owner));
+        if (action.notificationError() != null) notice(recipient).error(action.notificationError());
+        applyFilenameEffect(recipient, SaveWorkflow.initialFilename(saveContext(recipient), action.saveAsPreset()));
+        if (action.requestSaveCurrent()) applySaveResult(recipient, SaveWorkflow.saveCurrent(saveContext(recipient)), null);
+    }
+
+    private void executeCommonContentCommand(TuinkCommand command) {
+        if (ui().preview.active) {
+            MarkdownPreviewState preview = ui().preview;
+            switch (command) {
+                case EDIT_COPY -> {
+                    if (preview.ready()) { host.clipboard.setText(preview.selectedText()); notice().info("Copied Markdown preview text"); }
+                }
+                case EDIT_SELECT_ALL -> preview.selectAll();
+                case SEARCH_OPEN -> {
+                    preview.beginSearch(); ui().searchEditorFocused = false;
+                    var scope = previewSearchScope();
+                    ui().searchFocusManager.focus(scope, SearchFocus.FIND);
+                }
+                default -> throw new IllegalArgumentException("Not a common content operation");
+            }
+            return;
+        }
+        var result = dispatchInputAction(command);
+        viewportController.onCommandResult(result.viewportPolicy());
+        if (result.intent() == InputActionDispatcher.Intent.FIND) {
+            ui().searchMode = true; ui().searchEditorFocused = false;
+            String selectedQuery = SearchSelection.prefill(model, state);
+            if (selectedQuery != null && !ui().searchQueryInput.set(selectedQuery)) {
+                ui().searchMode = false; host.searchFocusManager().deactivate(TerminalEditorApp.SEARCH_SCOPE_ID);
+                searchBarPlacement = null; notice().error("Not enough memory to open Find with the selected text"); return;
+            }
+            host.focusSearch(searchBarPlacement, SearchFocus.FIND);
+        }
+        if (result.statusMessage() != null) {
+            switch (result.statusLevel()) {
+                case ERROR -> notice().error(result.statusMessage());
+                case WARNING -> notice().warning(result.statusMessage());
+                default -> notice().info(result.statusMessage());
+            }
+        }
+    }
+
+    private TuinkCommand applySaveAsFieldAction(SaveAsBarView.Action action, String before) {
+        if (action == SaveAsBarView.Action.SUBMIT_REJECTED) {
+            if (notice().message == null) notice().warning("Enlarge terminal to show the filename before saving");
+        } else if (action == SaveAsBarView.Action.INPUT_REJECTED) notice().error("Text is too large; nothing changed");
+        else if (action == SaveAsBarView.Action.VALUE_CHANGED) {
+            if (!before.equals(ui().saveAsInput.text())) { ui().filenameRevision++; notice().clear(); }
+            if (sessionContext.active() != null) saveAsSuggestions.rememberDraft(sessionContext.active().tabSession(), ui().saveAsInput.text());
+        } else if (action == SaveAsBarView.Action.SUBMITTED) return TuinkCommand.EDIT_INSERT_NEWLINE;
+        else if (action == SaveAsBarView.Action.CANCELLED) return TuinkCommand.UI_ESCAPE;
+        return null;
     }
 
     private void requestWindowClose(UiRecipient recipient) {
@@ -3207,47 +3212,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         eventLoop.invalidate();
     }
 
-    private boolean handlePreviewInput(TuiInputEvent event, TuinkCommand command) {
+    private boolean handlePreviewContentCommand(TuinkCommand command) {
         MarkdownPreviewState preview = ui().preview;
-        if (command == TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW) {
-            switchMarkdownPresentation(); return true;
-        }
-        if (!preview.active) return false;
-        // A menu activation carries both its semantic command and the physical
-        // click. Once resolved, that click must not also select Preview content.
-        if (command == null && event instanceof PointerEvent pointer) {
-            if (!uiSessionState.mouseModeSetting || !terminal.mouseAvailable()) return true;
-            if (preview.searchEditing && (preview.searchField.captures(pointer)
-                || pointer.row() == preview.bounds.y() && preview.bounds.contains(pointer.column(), pointer.row()))
-                && handlePreviewSearchInput(preview, event, command)) {
-                eventLoop.invalidate(); return true;
-            }
-            if (!preview.bounds.contains(pointer.column(), pointer.row()) && !preview.pointerCaptureActive()) return false;
-            routePreviewPointer(pointer);
-            eventLoop.invalidate();
-            return true;
-        }
-        if (command == TuinkCommand.SEARCH_OPEN) {
-            preview.beginSearch();
-            eventLoop.invalidate();
-            return true;
-        }
-        if (preview.searchEditing && handlePreviewSearchInput(preview, event, command)) {
-            eventLoop.invalidate(); return true;
-        }
-        if (!preview.searchEditing && event instanceof KeyStroke stroke
-            && stroke.modifiers().equals(java.util.Set.of(KeyStroke.Modifier.ALT))) {
-            boolean panned = true;
-            switch (stroke.key()) {
-                case ARROW_UP -> preview.scroll(-3, 0);
-                case ARROW_DOWN -> preview.scroll(3, 0);
-                case ARROW_LEFT -> preview.scroll(0, -3);
-                case ARROW_RIGHT -> preview.scroll(0, 3);
-                default -> panned = false;
-            }
-            if (panned) { eventLoop.invalidate(); return true; }
-        }
-        if (command == null) return event instanceof TextInput || event instanceof PasteEvent;
         boolean extend = command.name().startsWith("CURSOR_SELECT_");
         switch (command) {
             case CURSOR_UP, CURSOR_SELECT_UP -> preview.moveSelection(PreviewSelection.Move.UP, extend);
@@ -3260,17 +3226,6 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             case CURSOR_END, CURSOR_SELECT_END -> preview.moveSelection(PreviewSelection.Move.END, extend);
             case CURSOR_DOCUMENT_START, CURSOR_SELECT_DOCUMENT_START -> preview.moveSelection(PreviewSelection.Move.START, extend);
             case CURSOR_DOCUMENT_END, CURSOR_SELECT_DOCUMENT_END -> preview.moveSelection(PreviewSelection.Move.DOCUMENT_END, extend);
-            case UI_ESCAPE -> {
-                if (documentIo.busy()) return false;
-                // Escape cancels a field or file operation; presentation switching uses Ctrl+P.
-            }
-            case EDIT_COPY -> {
-                if (preview.ready()) {
-                    host.clipboard.setText(preview.selectedText());
-                    notice().info("Copied Markdown preview text");
-                }
-            }
-            case EDIT_SELECT_ALL -> preview.selectAll();
             case SEARCH_NEXT -> preview.nextMatch(false);
             case SEARCH_PREVIOUS -> preview.nextMatch(true);
             case SEARCH_CLOSE -> preview.searchEditing = false;
@@ -3325,45 +3280,36 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         return true;
     }
 
-    /** Reuse the same field editing/clipboard contract as Find and Save As. */
-    private boolean handlePreviewSearchInput(MarkdownPreviewState preview, TuiInputEvent event, TuinkCommand command) {
-        if (command == TuinkCommand.UI_ESCAPE || command == TuinkCommand.SEARCH_CLOSE) {
-            preview.searchEditing = false; preview.searchField.cancelMouseSelection(); return true;
-        }
-        if (command == TuinkCommand.EDIT_INSERT_NEWLINE || command == TuinkCommand.SEARCH_NEXT) {
-            preview.nextMatch(false); return true;
-        }
-        if (command == TuinkCommand.SEARCH_PREVIOUS) { preview.nextMatch(true); return true; }
-        String insertion = event instanceof TextInput text ? text.text()
-            : event instanceof PasteEvent paste ? paste.text()
-            : event instanceof KeyStroke stroke && stroke.key() == KeyStroke.Key.SPACE
-                && stroke.modifiers().isEmpty() ? " "
-            : command == TuinkCommand.EDIT_PASTE ? host.clipboard.text() : null;
-        if (event instanceof PasteEvent paste && paste.truncated()
-            || insertion != null && (long) preview.searchField.length()
-                - (preview.searchField.selectionEnd() - preview.searchField.selectionStart()) + insertion.length() > 4096) {
-            notice().warning("Preview search query exceeds 4096 UTF-16 units"); return true;
-        }
-        if (command != null) {
-            var clipboard = ControlCommandRouter.clipboard(command, preview.searchField, host.clipboard);
-            if (clipboard.handled()) {
-                if (clipboard.inputRejected()) notice().warning("Preview search input was rejected");
-                preview.setSearchQuery(preview.searchField.text()); return true;
+    private boolean routePreviewSearchOwner(WindowInput input) {
+        MarkdownPreviewState preview = ui().preview;
+        if (!preview.searchEditing || !modalState().isNone() || ui().openFileMode || topMenu.isOpen()) return false;
+        if (input instanceof WindowInput.Command resolved && resolved.route() instanceof CommandRouter.RoutedAction action) {
+            if (action.action() == TuinkCommand.UI_ESCAPE || action.action() == TuinkCommand.SEARCH_CLOSE) {
+                cancelPointerCapture(PointerCaptureCancellation.SURFACE_CHANGED);
+                ui().searchFocusManager.deactivate(PREVIEW_SEARCH_SCOPE);
+                preview.searchEditing = false; preview.searchField.cancelMouseSelection(); return true;
             }
-        }
-        TuiInputEvent input = command == null ? null : ControlCommandRouter.eventFor(command).orElse(null);
-        if (command == null && input == null && (event instanceof KeyStroke || event instanceof TextInput
-            || event instanceof PasteEvent || event instanceof PointerEvent)) input = event;
-        if (input != null) {
-            var interaction = preview.searchPlacement().handle(input, new dev.tuiframe.widget.FocusContext(
-                true, true, dev.tuiframe.widget.FocusSpace.root(preview.bounds)));
-            if (interaction.output().orElse(null) == dev.tuiframe.widget.TextField.Action.INPUT_REJECTED)
-                notice().warning("Preview search input was rejected");
-            if (interaction.consumed()) {
-                preview.setSearchQuery(preview.searchField.text()); return true;
+            if (ui().searchEditorFocused) return false;
+            if (action.action() == TuinkCommand.SEARCH_NEXT
+                || action.action() == TuinkCommand.EDIT_INSERT_NEWLINE && previewQueryFocused()) {
+                preview.nextMatch(false); return true;
             }
+            if (action.action() == TuinkCommand.SEARCH_PREVIOUS) { preview.nextMatch(true); return true; }
         }
-        return command == null || command.editsDocumentText() || ControlCommandRouter.unsupportedLocally(command);
+        if (input instanceof WindowInput.Gesture gesture && gesture.motion() instanceof WindowInput.Pointer pointer) {
+            if (pointer.event().kind() == PointerEvent.Kind.PRESS && pointer.event().button() == PointerEvent.Button.LEFT) {
+                ui().searchEditorFocused = false;
+                ui().searchFocusManager.focus(previewSearchScope(), SearchFocus.FIND);
+            }
+        } else if (ui().searchEditorFocused) return false;
+        var scope = previewSearchScope();
+        var context = ui().searchFocusManager.peekContext(scope, SearchFocus.FIND).orElseThrow();
+        var result = FieldInputDispatcher.input(input, preview.searchField, host.clipboard,
+            scope, SearchFocus.FIND, context, pointerCapture, this, MarkdownPreviewState.SEARCH_QUERY_MAX_UTF16);
+        if (result.output().orElse(null) == TextField.Action.INPUT_REJECTED)
+            notice().warning("Preview search input was rejected");
+        if (result.consumed()) preview.setSearchQuery(preview.searchField.text());
+        return result.consumed() || !(input instanceof WindowInput.Command);
     }
 
     private InputActionDispatcher.DispatchResult dispatchInputAction(TuinkCommand command) {
@@ -3373,9 +3319,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         boolean mouseBefore = uiSessionState.mouseModeSetting;
         TerminalEditorApp.EditorTab target = tabs.get(activeEditingIndex());
         TabSession view = target.tabSession();
-        InputActionDispatcher.DispatchResult result = InputActionDispatcher.dispatch(command, uiSessionState,
-            new InputActionDispatcher.DispatchContext(view.engine(), view.state(), topMenu,
-                terminal::setMouseTracking, contentRows, contentCols, target.navigation(), target.documentSession(), activeSurface()));
+        InputActionDispatcher.DispatchResult result = InputActionDispatcher.dispatchDocument(command, uiSessionState,
+            new InputActionDispatcher.DispatchContext(view.engine(), contentRows, contentCols, target.navigation(), target.documentSession()));
         if (uiSessionState.readingModeSetting != readingBefore) {
             settingsSession.readingModeChanged();
         }

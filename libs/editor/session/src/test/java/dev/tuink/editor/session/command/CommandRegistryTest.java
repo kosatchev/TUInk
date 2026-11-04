@@ -3,6 +3,8 @@ package dev.tuink.editor.session.command;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import dev.tuink.editor.command.CommandDescriptor;
 import dev.tuink.editor.command.CommandArgumentDescriptor;
@@ -12,6 +14,22 @@ import dev.tuink.editor.command.CommandInvocation;
 import org.junit.jupiter.api.Test;
 
 class CommandRegistryTest {
+    @Test
+    void preflightUsesTheRegisteredSchemaWithoutExecutingOrRetainingItsHandler() {
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        CommandRegistry<String, Integer> registry = new CommandRegistry<>();
+        var id = CommandId.of("example.action");
+        registry.register(new CommandDescriptor(id, "Action"), (invocation, context) -> calls.incrementAndGet());
+        assertTrue(registry.accepts(CommandInvocation.of(id)));
+        assertFalse(registry.accepts(new CommandInvocation(id, java.util.Map.of("extra", "value"))));
+        assertFalse(registry.accepts(CommandInvocation.of("example.unknown")));
+        assertEquals(0, calls.get());
+        assertInstanceOf(InvocationResult.Executed.class, registry.invoke(CommandInvocation.of(id), "context"));
+        assertEquals(1, calls.get());
+        registry.unregister(id);
+        assertFalse(registry.accepts(CommandInvocation.of(id)));
+    }
+
     @Test
     void registryOwnsDispatchWithoutOwningEditorOrFrontendState() {
         CommandRegistry<String, String> registry = new CommandRegistry<>();

@@ -11,7 +11,6 @@ import dev.tuink.core.EditorEngine;
 import dev.tuink.core.ClipboardLimitException;
 import dev.tuink.core.DocumentEditLimitException;
 import dev.tuink.editor.storage.DocumentFileMetadata;
-import dev.tuink.core.EditorState;
 import dev.tuink.core.GutterDiffMode;
 import dev.tuink.core.TabInsertMode;
 import dev.tuink.editor.command.CommandInvocation;
@@ -28,15 +27,7 @@ final class InputActionDispatcher {
     private InputActionDispatcher() {
     }
 
-    static DispatchResult dispatch(TuinkCommand command, UiSessionState ui, DispatchContext ctx) {
-        DispatchResult uiResult = dispatchUi(command, ui, ctx.surface(), ctx.topMenu(), ctx.mouseTrackingController(), () -> {
-            if (ctx.state() != null) {
-                ctx.state().setTopWrapSegment(0);
-                ctx.state().setLeftColumn(0);
-                ctx.state().setLeftVisualColumn(0);
-            }
-        });
-        if (uiResult.handled()) return uiResult;
+    static DispatchResult dispatchDocument(TuinkCommand command, UiSessionState ui, DispatchContext ctx) {
         DocumentInteraction before = DocumentInteraction.capture(ctx.engine());
         DispatchResult result;
         try {
@@ -446,21 +437,14 @@ final class InputActionDispatcher {
 
     record DispatchContext(
         EditorEngine engine,
-        EditorState state,
-        TopMenuController topMenu,
-        Consumer<Boolean> mouseTrackingController,
         int contentRows,
         int contentColumns,
         EditorViewNavigation navigation,
-        TuiDocumentSession documentSession,
-        ActiveSurface surface
+        TuiDocumentSession documentSession
     ) {
         DispatchContext {
-            if (mouseTrackingController == null) {
-                throw new IllegalArgumentException("mouseTrackingController must not be null");
-            }
-            if (engine == null ? navigation != null || state != null || documentSession != null
-                : navigation == null || navigation.engine() != engine || engine.state() != state
+            if (engine == null ? navigation != null || documentSession != null
+                : navigation == null || navigation.engine() != engine
                     || documentSession == null || documentSession.view().engine() != engine) {
                 throw new IllegalArgumentException("navigation and commands must belong to the context's editor view");
             }

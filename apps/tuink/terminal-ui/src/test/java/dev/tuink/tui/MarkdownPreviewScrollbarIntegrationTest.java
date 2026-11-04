@@ -135,7 +135,15 @@ class MarkdownPreviewScrollbarIntegrationTest {
             var focused = state.placement();
             var unfocused = new MarkdownPreviewState.Placement(focused.bounds(), focused.result(), focused.top(), focused.left(),
                 focused.loading(), focused.error(), focused.selection(), focused.searchMatches(), focused.activeMatch(),
+                focused.searchQuery(), focused.searchEditing(), null, null, focused.geometry());
+            var contentFocused = new MarkdownPreviewState.Placement(focused.bounds(), focused.result(), focused.top(), focused.left(),
+                focused.loading(), focused.error(), focused.selection(), focused.searchMatches(), focused.activeMatch(),
                 focused.searchQuery(), focused.searchEditing(), focused.caret(), null, focused.geometry());
+            assertEquals(focused.contentBounds(), contentFocused.contentBounds());
+            assertEquals(focused.scrollbars(), contentFocused.scrollbars());
+            var bodyCursor = MarkdownPreviewPainter.cursor(contentFocused);
+            assertNotNull(bodyCursor);
+            assertTrue(contentFocused.contentBounds().contains(bodyCursor.x(), bodyCursor.y()));
             assertEquals(focused.contentBounds(), unfocused.contentBounds());
             assertEquals(focused.scrollbars(), unfocused.scrollbars());
             assertNull(MarkdownPreviewPainter.cursor(unfocused));

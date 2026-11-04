@@ -4,6 +4,7 @@ import dev.tuink.storage.jvm.JvmDocumentStorage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuiframe.input.KeyStroke;
@@ -26,6 +27,28 @@ import org.junit.jupiter.params.provider.ValueSource;
 class EditorCommandRoutingIntegrationTest {
     @TempDir
     Path directory;
+
+    @Test
+    void activeFindInterpretsApprovedFindAndEnterWithoutRewritingTheirInvocations() throws Exception {
+        try (var window = new EditorWindowFixture(directory, false, List.of("needle middle needle"))) {
+            window.command(TuinkCommand.SEARCH_OPEN);
+            window.event(new TextInput("needle"));
+            window.command(TuinkCommand.SEARCH_OPEN);
+            var first = window.active().state().getCursor();
+            window.command(TuinkCommand.SEARCH_OPEN);
+            var second = window.active().state().getCursor();
+            assertNotEquals(first, second);
+            assertEquals("needle", window.query.text());
+            window.focusSearch(SearchFocus.PREV_BUTTON);
+            window.command(TuinkCommand.EDIT_INSERT_NEWLINE);
+            assertEquals(first, window.active().state().getCursor());
+            window.focusSearch(SearchFocus.FIND);
+            window.command(TuinkCommand.CURSOR_HOME);
+            assertEquals(0, window.query.cursor());
+            window.command(TuinkCommand.CURSOR_END);
+            assertEquals(window.query.length(), window.query.cursor());
+        }
+    }
 
     @Test
     void saveAsAliasesEditTheFieldWithUnicodeSelectionAndClipboardWithoutChangingTheDocument() throws Exception {

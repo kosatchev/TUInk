@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import dev.tuink.editor.command.CommandInvocation;
 import dev.tuiframe.input.KeyStroke;
@@ -14,13 +15,20 @@ import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.input.TextInput;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.flow.UiModalState;
-import dev.tuink.tui.input.EditorInput;
 import dev.tuink.tui.command.TuinkCommand;
 import dev.tuink.tui.ui.SearchBarView;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class TerminalEditorInputRoutingTest {
+    private static final UiRecipient RECIPIENT = UiRecipient.window(new TabUiState(), null);
+
+    private static WindowInput resolve(CommandRouter router, dev.tuiframe.input.TuiInputEvent event,
+        CommandInvocation pendingCommand, CommandRouter.RoutedCommand selected,
+        boolean searchOwnsInput, SearchFocus focus) {
+        return TerminalEditorApp.resolveEditorInput(router, event, pendingCommand, selected, RECIPIENT);
+    }
+
     @Test
     void onlyPhysicalShiftLeftPressExtendsEditorSelection() {
         assertTrue(TerminalEditorApp.shouldExtendEditorSelection(new PointerEvent(
@@ -92,24 +100,26 @@ class TerminalEditorInputRoutingTest {
     }
 
     @Test
-    void alreadyRoutedMenuCommandWinsOverUnicodeTextAndPendingKeyboardCommand() {
+    void alreadyRoutedMenuCommandWinsOverUnicodePhysicalTextAndSearchRemapping() {
         CommandRouter router = new CommandRouter();
         CommandRouter.RoutedCommand selected = router.dispatch(
             CommandInvocation.of(EDIT_SELECT_ALL.id())
         ).orElseThrow();
         TextInput decomposedMnemonic = new TextInput("e\u0301");
 
-        EditorInput input = TerminalEditorApp.resolveEditorInput(
+        WindowInput input = resolve(
             router,
             decomposedMnemonic,
-            CommandInvocation.of(DOCUMENT_SAVE.id()),
+            CommandInvocation.of(EDIT_SELECT_ALL.id()),
             selected,
             true,
             SearchFocus.FIND
         );
 
-        assertEquals(EDIT_SELECT_ALL, input.command());
-        assertSame(decomposedMnemonic, input.event());
+        var command = assertInstanceOf(WindowInput.Command.class, input);
+        assertEquals(EDIT_SELECT_ALL, ((CommandRouter.RoutedAction) command.route()).action());
+        assertEquals(CommandInvocation.of(EDIT_SELECT_ALL.id()), command.invocation());
+        assertSame(RECIPIENT, command.recipient());
     }
 
     @Test
@@ -118,12 +128,11 @@ class TerminalEditorInputRoutingTest {
         KeyStroke selectAll = KeyStroke.of(KeyStroke.Key.A, KeyStroke.Modifier.CTRL);
         CommandInvocation invocation = router.invocationFor(selectAll).orElseThrow();
 
-        assertEquals(EDIT_SELECT_ALL, TerminalEditorApp.resolveEditorInput(
-            router, selectAll, invocation, null, true, SearchFocus.FIND
-        ).command());
-        assertEquals(EDIT_SELECT_ALL, TerminalEditorApp.resolveEditorInput(
-            router, selectAll, invocation, null, false, SearchFocus.FIND
-        ).command());
+        for (boolean searchOwnsInput : new boolean[] {true, false}) {
+            var command = assertInstanceOf(WindowInput.Command.class, resolve(
+                router, selectAll, invocation, null, searchOwnsInput, SearchFocus.FIND));
+            assertEquals(new CommandRouter.RoutedAction(EDIT_SELECT_ALL), command.route());
+        }
     }
 
     @Test
@@ -152,16 +161,16 @@ class TerminalEditorInputRoutingTest {
         KeyStroke extraModifier = KeyStroke.of(
             KeyStroke.Key.S, KeyStroke.Modifier.CTRL, KeyStroke.Modifier.ALT
         );
-        assertNull(TerminalEditorApp.resolveEditorInput(
+        assertSame(WindowInput.Consumed.INSTANCE, resolve(
             router, extraModifier, router.invocationFor(extraModifier).orElse(null),
             null, false, SearchFocus.FIND
         ));
-        assertNull(TerminalEditorApp.resolveEditorInput(
+        assertSame(WindowInput.Consumed.INSTANCE, resolve(
             router, KeyStroke.of(KeyStroke.Key.S, KeyStroke.Modifier.CTRL),
             CommandInvocation.of("tuink.missing-command"), null, false, SearchFocus.FIND
         ));
         KeyStroke shiftedEnter = KeyStroke.of(KeyStroke.Key.ENTER, KeyStroke.Modifier.SHIFT);
-        assertNull(TerminalEditorApp.resolveEditorInput(
+        assertSame(WindowInput.Consumed.INSTANCE, resolve(
             router, shiftedEnter, router.invocationFor(shiftedEnter).orElse(null),
             null, true, SearchFocus.FIND
         ));
@@ -172,84 +181,35 @@ class TerminalEditorInputRoutingTest {
         CommandRouter router = new CommandRouter();
         for (String text : new String[] {"😀", "e\u0301", "аб"}) {
             TextInput event = new TextInput(text);
-            EditorInput input = TerminalEditorApp.resolveEditorInput(
+            WindowInput input = resolve(
                 router, event, null, null, false, SearchFocus.FIND
             );
-            assertSame(event, input.event());
-            assertNull(input.command());
+            var routedText = assertInstanceOf(WindowInput.Text.class, input);
+            assertEquals(text, routedText.value());
+            assertFalse(routedText.pasted());
+            assertSame(RECIPIENT, routedText.recipient());
         }
         PointerEvent event = new PointerEvent(
             2, 4, PointerEvent.Kind.DRAG, PointerEvent.Button.LEFT,
             Set.of(KeyStroke.Modifier.SHIFT, KeyStroke.Modifier.CTRL)
         );
-        EditorInput input = TerminalEditorApp.resolveEditorInput(
+        WindowInput input = resolve(
             router, event, null, null, false, SearchFocus.FIND
         );
-        assertSame(event, input.event());
-        assertNull(input.command());
+        var gesture = assertInstanceOf(WindowInput.Gesture.class, input);
+        assertSame(event, ((WindowInput.Pointer) gesture.motion()).event());
+        assertSame(RECIPIENT, gesture.recipient());
     }
 
     @Test
-    void rawTabRoutingYieldsToVisualOwnersAndKeepsCloseConfirmationSafe() {
-        assertEquals(
-            TabBarInputRouter.Policy.NORMAL,
-            TerminalEditorApp.tabBarInputPolicy(true, true, UiModalState.none(), false, false, false)
-        );
-        assertEquals(
-            TabBarInputRouter.Policy.SEARCH,
-            TerminalEditorApp.tabBarInputPolicy(true, true, UiModalState.none(), false, false, true)
-        );
-        assertEquals(
-            TabBarInputRouter.Policy.CLOSE_TAB_CONFIRM,
-            TerminalEditorApp.tabBarInputPolicy(
-                true,
-                true,
-                UiModalState.closeTabConfirm(0),
-                false,
-                false,
-                false
-            )
-        );
-        assertNull(TerminalEditorApp.tabBarInputPolicy(
-            true,
-            true,
-            UiModalState.none(),
-            false,
-            true,
-            false
-        ));
-        assertNull(TerminalEditorApp.tabBarInputPolicy(
-            true,
-            true,
-            UiModalState.none(),
-            true,
-            false,
-            false
-        ));
-        assertNull(TerminalEditorApp.tabBarInputPolicy(
-            true,
-            true,
-            UiModalState.saveAs(),
-            false,
-            false,
-            false
-        ));
-        assertNull(TerminalEditorApp.tabBarInputPolicy(
-            false,
-            true,
-            UiModalState.none(),
-            false,
-            false,
-            false
-        ));
-        assertNull(TerminalEditorApp.tabBarInputPolicy(
-            true,
-            false,
-            UiModalState.none(),
-            false,
-            false,
-            false
-        ));
+    void tabChromePolicyDistinguishesWindowOwnershipFromLocalPresentationControls() {
+        assertEquals(TabBarInputRouter.Policy.NORMAL,
+            TerminalEditorApp.tabBarInputPolicy(true, true, false, false));
+        assertEquals(TabBarInputRouter.Policy.CLOSE_TAB_CONFIRM,
+            TerminalEditorApp.tabBarInputPolicy(true, true, true, false));
+        assertNull(TerminalEditorApp.tabBarInputPolicy(false, true, false, false));
+        assertNull(TerminalEditorApp.tabBarInputPolicy(true, false, false, false));
+        assertNull(TerminalEditorApp.tabBarInputPolicy(true, true, false, true));
     }
 
     @Test

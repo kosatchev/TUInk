@@ -73,7 +73,7 @@ final class MarkdownPreviewPainter {
     static Point cursor(MarkdownPreviewState.Placement placement) {
         if (placement.searchInput() != null) return placement.searchInput().cursorPosition(
             new FocusContext(true, true, FocusSpace.root(placement.bounds()))).orElse(null);
-        if (placement.searchEditing() || placement.result() == null || placement.caret() == null) return null;
+        if (placement.result() == null || placement.caret() == null) return null;
         var content = placement.contentBounds();
         int x = content.x() + placement.caret().column() - placement.left();
         int y = content.y() + placement.caret().row() - placement.top();
@@ -113,7 +113,7 @@ final class MarkdownPreviewPainter {
                 endColumn = metrics.visualWidth();
             }
         }
-        if (!placement.searchEditing() && placement.caret() != null && placement.caret().row() == lineIndex
+        if (placement.searchInput() == null && placement.caret() != null && placement.caret().row() == lineIndex
             && endColumn >= 0 && placement.caret().column() >= endColumn && placement.caret().column() >= left
             && placement.caret().column() < left + columns) {
             CellStyle body = palette.renderBody();
@@ -207,7 +207,7 @@ final class MarkdownPreviewPainter {
             this.line = line; this.offset = offset; this.rebuildBase = rebuildBase; runIndex = 0; syntaxIndex = 0;
             while (runIndex < line.runs().size() && line.runs().get(runIndex).end() <= offset) runIndex++;
             while (syntaxIndex < line.syntax().size() && line.syntax().get(syntaxIndex).end() <= offset) syntaxIndex++;
-            caretStart = !placement.searchEditing() && placement.caret() != null && placement.caret().row() == row
+            caretStart = placement.searchInput() == null && placement.caret() != null && placement.caret().row() == row
                 ? metrics.offsetForVisualColumn(placement.caret().column(), TerminalText.Bias.FLOOR) : -1;
         }
         @Override public CellStyle resolve(int start, int end, CellStyle base) {

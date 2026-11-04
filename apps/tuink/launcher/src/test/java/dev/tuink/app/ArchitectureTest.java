@@ -209,13 +209,14 @@ class ArchitectureTest {
             "dev.tuink.tui.command.."
         );
 
-    static final ArchRule EDITOR_INPUT_COMBINES_ONLY_PHYSICAL_EVENTS_AND_SEMANTIC_COMMANDS = classes()
-        .that().haveFullyQualifiedName("dev.tuink.tui.input.EditorInput")
+    static final ArchRule WINDOW_INPUT_STAYS_IN_THE_TERMINAL_ADAPTER = classes()
+        .that().haveFullyQualifiedName("dev.tuink.tui.WindowInput")
         .should().onlyDependOnClassesThat().resideInAnyPackage(
             "java..",
             "dev.tuiframe.input..",
+            "dev.tuink.editor.command..",
             "dev.tuink.tui.command..",
-            "dev.tuink.tui.input.."
+            "dev.tuink.tui"
         );
 
     static final ArchRule COMMAND_CONTRACT_IS_SELF_CONTAINED = classes()
@@ -506,7 +507,7 @@ class ArchitectureTest {
         PHYSICAL_INPUT_MODEL_IS_SELF_CONTAINED.check(PRODUCTION_CLASSES);
         KEY_DECODER_IS_A_SELF_CONTAINED_JLINE_ADAPTER.check(PRODUCTION_CLASSES);
         SEMANTIC_COMMANDS_DO_NOT_DEPEND_ON_PHYSICAL_INPUT.check(PRODUCTION_CLASSES);
-        EDITOR_INPUT_COMBINES_ONLY_PHYSICAL_EVENTS_AND_SEMANTIC_COMMANDS.check(PRODUCTION_CLASSES);
+        WINDOW_INPUT_STAYS_IN_THE_TERMINAL_ADAPTER.check(PRODUCTION_CLASSES);
         COMMAND_CONTRACT_IS_SELF_CONTAINED.check(PRODUCTION_CLASSES);
         DOCUMENT_CONTRACT_IS_SELF_CONTAINED.check(PRODUCTION_CLASSES);
         LANGUAGE_CONTRACT_IS_SELF_CONTAINED.check(PRODUCTION_CLASSES);

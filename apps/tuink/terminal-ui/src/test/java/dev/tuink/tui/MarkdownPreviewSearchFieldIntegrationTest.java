@@ -44,8 +44,8 @@ class MarkdownPreviewSearchFieldIntegrationTest {
             window.event(new PasteEvent("alpha\nbeta"));
             assertEquals("alpha beta", preview.searchQuery);
             window.event(KeyStroke.of(KeyStroke.Key.HOME));
-            assertNotNull(MarkdownPreviewPainter.cursor(preview.placement()));
-            assertEquals(preview.bounds.y(), MarkdownPreviewPainter.cursor(preview.placement()).y());
+            assertNotNull(MarkdownPreviewPainter.cursor(preview.placement(MarkdownPreviewState.Placement.Focus.QUERY)));
+            assertEquals(preview.bounds.y(), MarkdownPreviewPainter.cursor(preview.placement(MarkdownPreviewState.Placement.Focus.QUERY)).y());
 
             assertEquals(sourceCaret, window.active().state().getCursor());
             assertEquals(revision, window.active().tabSession().model().revision());
@@ -89,9 +89,9 @@ class MarkdownPreviewSearchFieldIntegrationTest {
             assertEquals(6, preview.left);
             window.event(alt(KeyStroke.Key.ARROW_DOWN));
             assertEquals(3, preview.top);
-            var before = preview.placement().caret();
+            var before = preview.placement(MarkdownPreviewState.Placement.Focus.CONTENT).caret();
             window.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
-            assertEquals(before.row() + 1, preview.placement().caret().row());
+            assertEquals(before.row() + 1, preview.placement(MarkdownPreviewState.Placement.Focus.CONTENT).caret().row());
             assertEquals(3, preview.top);
             assertEquals(6, preview.left);
             assertTrue(window.screenRow(window.height - 1).contains("Row "));

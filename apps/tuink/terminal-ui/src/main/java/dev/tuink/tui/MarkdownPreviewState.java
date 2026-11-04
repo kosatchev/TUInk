@@ -1,5 +1,9 @@
 package dev.tuink.tui;
 
+import dev.tuink.core.SearchLimitException;
+import dev.tuink.core.SearchMatcher;
+import dev.tuink.core.SearchOperationContext;
+import dev.tuink.editor.search.SearchOptions;
 import dev.tuink.editor.document.DocumentId;
 import dev.tuink.editor.storage.FrozenDocumentSource;
 import dev.tuink.editor.storage.DocumentOpenMode;
@@ -14,6 +18,7 @@ import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.cell.CellText;
 import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.widget.TextField;
+import java.nio.CharBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -22,6 +27,7 @@ import java.util.concurrent.FutureTask;
 /** View-local mode, request lifetime and viewport. Never shared with an editor cursor. */
 final class MarkdownPreviewState implements AutoCloseable {
     static final int SEARCH_QUERY_MAX_UTF16 = 4096;
+    static final int SEARCH_MATCH_LIMIT = 10_000;
     final PreviewCoordinator coordinator = new PreviewCoordinator();
     final PreviewSelection selection = new PreviewSelection();
     boolean active;
@@ -43,6 +49,9 @@ final class MarkdownPreviewState implements AutoCloseable {
     boolean searchVisible;
     List<PreviewSelection.Range> searchMatches = List.of();
     int activeMatch = -1;
+    SearchFailure searchFailure = SearchFailure.NONE;
+    private SearchOptions searchOptions = SearchController.toSearchOptions(SearchController.SearchUiOptions.DEFAULT);
+    private final long searchWorkLimit;
     private DocumentId selectionDocument;
     private long selectionRevision = -1;
     private int viewportAnchor = -1;
@@ -63,6 +72,12 @@ final class MarkdownPreviewState implements AutoCloseable {
     private long lifecycleGeneration;
     private long pendingLifecycleGeneration;
     private final TextSurfacePointer<Integer> pointer = new TextSurfacePointer<>((first, second) -> first.equals(second));
+
+    MarkdownPreviewState() { this(SearchPresentation.INTERACTIVE_WILDCARD_WORK_LIMIT); }
+    MarkdownPreviewState(long searchWorkLimit) {
+        if (searchWorkLimit < 0) throw new IllegalArgumentException("Search work limit must not be negative");
+        this.searchWorkLimit = searchWorkLimit;
+    }
 
     /** Admission happens before a new preview is inserted into workspace membership. */
     boolean initialize(FrozenDocumentSource input, long generation, MarkdownPreviewService service) {
@@ -319,6 +334,11 @@ final class MarkdownPreviewState implements AutoCloseable {
         if (!searchField.text().equals(next)) searchField.set(next);
         activeMatch = -1; rebuildSearch();
     }
+    void setSearchOptions(SearchOptions options) {
+        SearchOptions next = Objects.requireNonNull(options);
+        if (searchOptions.equals(next)) return;
+        searchOptions = next; activeMatch = -1; rebuildSearch();
+    }
     void nextMatch(boolean backward) {
         if (!ready() || searchMatches.isEmpty()) return;
         if (activeMatch >= 0) activeMatch = Math.floorMod(activeMatch + (backward ? -1 : 1), searchMatches.size());
@@ -337,17 +357,37 @@ final class MarkdownPreviewState implements AutoCloseable {
         revealCaret();
     }
     private void rebuildSearch() {
+        searchFailure = SearchFailure.NONE;
         if (!ready() || searchQuery.isEmpty()) { searchMatches = List.of(); activeMatch = -1; return; }
         String text = result.document().projection().text();
-        List<PreviewSelection.Range> matches = new ArrayList<>();
-        for (int from = 0; matches.size() < 10_000 && from <= text.length() - searchQuery.length();) {
-            int match = text.indexOf(searchQuery, from);
-            if (match < 0) break;
-            matches.add(new PreviewSelection.Range(match, match + searchQuery.length()));
-            from = match + Math.max(1, searchQuery.length());
+        try {
+            var context = SearchOperationContext.bounded(searchWorkLimit);
+            var matcher = SearchMatcher.compile(searchQuery, searchOptions, context);
+            List<PreviewSelection.Range> matches = new ArrayList<>();
+            // The shared matcher searches one logical line, just as it does in
+            // Source. A CharBuffer exposes a bounded view without copying the
+            // projection or letting wildcard stars consume line separators.
+            for (int start = 0; start < text.length() && matches.size() < SEARCH_MATCH_LIMIT;) {
+                int end = text.indexOf('\n', start);
+                if (end < 0) end = text.length();
+                for (var match : matcher.findAll(CharBuffer.wrap(text, start, end),
+                    SEARCH_MATCH_LIMIT - matches.size(), context)) {
+                    matches.add(new PreviewSelection.Range(start + match.startUtf16(), start + match.endUtf16()));
+                }
+                start = end + 1;
+            }
+            searchMatches = List.copyOf(matches);
+            activeMatch = activeMatch >= matches.size() ? -1 : activeMatch;
+        } catch (SearchLimitException limit) {
+            // A failed search never turns into an incomplete match count or a
+            // layout error. Query, accepted document, selection and viewport
+            // remain available; the failure is cached until a search input changes.
+            searchMatches = List.of(); activeMatch = -1;
+            searchFailure = new SearchFailure(limit.summary(), limit.getMessage());
         }
-        searchMatches = List.copyOf(matches);
-        activeMatch = activeMatch >= matches.size() ? -1 : activeMatch;
+    }
+    record SearchFailure(String summary, String message) {
+        static final SearchFailure NONE = new SearchFailure("", "");
     }
     private void revealCaret() {
         var position = selection.visualPosition(result);
@@ -379,35 +419,34 @@ final class MarkdownPreviewState implements AutoCloseable {
         return searchField.layout(new Rect(bounds.x() + prefix, bounds.y(),
             Math.max(0, bounds.width() - prefix), Math.min(1, bounds.height())));
     }
-    Placement placement() {
+    Placement placement(Placement.Focus focus) {
         return new Placement(bounds, ready() ? result : null, top, left, pending != null, error,
             selection.snapshot(), searchMatches, activeMatch, searchQuery, searchVisible,
             ready() ? selection.visualPosition(result) : null, searchVisible ? searchPlacement() : null,
-            ready() ? geometry : null);
+            ready() ? geometry : null, focus, searchFailure);
     }
     record Placement(Rect bounds, MarkdownLayout.Result result, int top, int left, boolean loading, String error,
                      PreviewSelection.Snapshot selection, List<PreviewSelection.Range> searchMatches,
                      int activeMatch, String searchQuery, boolean searchVisible,
-                     PreviewSelection.VisualPosition caret, TextField.Placement searchInput, MarkdownGeometry geometry) {
-        Placement { searchMatches = List.copyOf(searchMatches); }
+                     PreviewSelection.VisualPosition caret, TextField.Placement searchInput, MarkdownGeometry geometry,
+                     Focus focus, SearchFailure searchFailure) {
+        enum Focus { QUERY, CONTENT, NONE }
+        Placement {
+            searchMatches = List.copyOf(searchMatches);
+            Objects.requireNonNull(focus); Objects.requireNonNull(searchFailure);
+            if (searchVisible != (searchInput != null))
+                throw new IllegalArgumentException("A visible Find row requires its real field placement");
+            if (focus == Focus.QUERY && !searchVisible)
+                throw new IllegalArgumentException("A hidden Find field cannot own the cursor");
+        }
+        Placement withFocus(Focus next) {
+            return new Placement(bounds, result, top, left, loading, error, selection, searchMatches, activeMatch,
+                searchQuery, searchVisible, caret, searchInput, geometry, next, searchFailure);
+        }
+        boolean queryFocused() { return focus == Focus.QUERY; }
+        boolean contentFocused() { return focus == Focus.CONTENT; }
         PreviewScrollbars scrollbars() { return PreviewScrollbars.from(bounds, result, searchVisible, top, left); }
         Rect contentBounds() { return scrollbars().layout().contentBounds(); }
-        Placement(Rect bounds, MarkdownLayout.Result result, int top, int left, boolean loading, String error,
-                  PreviewSelection.Snapshot selection, List<PreviewSelection.Range> searchMatches,
-                  int activeMatch, String searchQuery, boolean searchVisible,
-                  PreviewSelection.VisualPosition caret, TextField.Placement searchInput) {
-            this(bounds, result, top, left, loading, error, selection, searchMatches, activeMatch,
-                searchQuery, searchVisible, caret, searchInput, null);
-        }
-        Placement(Rect bounds, MarkdownLayout.Result result, int top, int left, boolean loading, String error,
-                  PreviewSelection.Snapshot selection, List<PreviewSelection.Range> searchMatches,
-                  int activeMatch, String searchQuery, boolean searchVisible) {
-            this(bounds, result, top, left, loading, error, selection, searchMatches, activeMatch,
-                searchQuery, searchVisible, null, null);
-        }
-        Placement(Rect bounds, MarkdownLayout.Result result, int top, int left, boolean loading, String error) {
-            this(bounds, result, top, left, loading, error, PreviewSelection.Snapshot.EMPTY, List.of(), -1, "", false);
-        }
     }
     private void cancel() {
         cancelPointerInteraction();

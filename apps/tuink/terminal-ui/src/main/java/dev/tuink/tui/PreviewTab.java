@@ -29,6 +29,8 @@ final class PreviewTab implements WindowTab {
         this(PresentationId.create(), editor.groupId(),
             new LiveSource(editor.documentSession().document().documentId(), editor.documentSession().viewId()),
             0, new TabUiState());
+        var options = editor.uiState().searchUi;
+        uiState.searchUi = new SearchController.SearchUiOptions(options.caseSensitive(), options.matchMode(), false);
     }
 
     private PreviewTab(PresentationId presentationId, PresentationGroupId groupId, Source source,

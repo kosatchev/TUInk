@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -18,6 +19,37 @@ class SearchMatcherTest {
         true,
         SearchOptions.MatchMode.SUBSTRING
     );
+
+    @Test
+    void cappedResultsStopBeforeReadingTheRestOfTheSourceAndPreserveCanonicalUnicodeRanges() {
+        CharSequence source = new CharSequence() {
+            @Override public int length() { return 1_000_000; }
+            @Override public char charAt(int index) {
+                if (index > 0) throw new AssertionError("Reading beyond the admitted first match");
+                return 'x';
+            }
+            @Override public CharSequence subSequence(int start, int end) { throw new AssertionError("Copying the source"); }
+        };
+        var matcher = SearchMatcher.compile("x", SearchOptions.DEFAULT);
+        assertEquals(List.of(new SearchMatcher.Match(0, 1)),
+            matcher.findAll(source, 1, SearchOperationContext.bounded(0)));
+        assertEquals(List.of(), matcher.findAll(source, 0, SearchOperationContext.bounded(0)));
+        assertThrows(IllegalArgumentException.class, () -> matcher.findAll(source, -1, SearchOperationContext.bounded(0)));
+        assertThrows(NullPointerException.class, () -> matcher.findAll(source, 0, null));
+        var unicode = SearchMatcher.compile("𐐀?", new SearchOptions(true, SearchOptions.MatchMode.WILDCARD));
+        String text = "𐐨x 𐐀X 𐐨z";
+        var capped = unicode.findAll(text, 2, SearchOperationContext.bounded(100));
+        assertEquals(unicode.findAll(text).subList(0, 2), capped);
+        assertThrows(UnsupportedOperationException.class, () -> capped.add(new SearchMatcher.Match(0, 0)));
+    }
+
+    @Test
+    void cappedResultsRespectTheExplicitWorkContext() {
+        var context = SearchOperationContext.bounded(0);
+        var matcher = SearchMatcher.compile("a".repeat(64) + "?a",
+            new SearchOptions(false, SearchOptions.MatchMode.WILDCARD), context);
+        assertThrows(SearchLimitException.class, () -> matcher.findAll("a".repeat(132), 1, context));
+    }
 
     @Test
     void caseInsensitiveLiteralRangesAddressTheOriginalSource() {

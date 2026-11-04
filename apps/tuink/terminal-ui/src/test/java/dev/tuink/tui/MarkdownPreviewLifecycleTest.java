@@ -78,14 +78,14 @@ class MarkdownPreviewLifecycleTest {
             accept(state, input, 1, service);
             var geometry = state.geometry;
             assertNotNull(geometry);
-            assertSame(geometry, state.placement().geometry());
+            assertSame(geometry, state.placement(MarkdownPreviewState.Placement.Focus.CONTENT).geometry());
             long layoutAndGeometry = service.retainedLayoutBytes();
             var borrowed = geometry.acquire(0);
             assertEquals(layoutAndGeometry, service.retainedLayoutBytes(),
                 "Selection already warmed this row; a frame shares its admitted index");
             state.suspend();
             assertNull(state.geometry);
-            assertNull(state.placement().geometry());
+            assertNull(state.placement(MarkdownPreviewState.Placement.Focus.CONTENT).geometry());
             assertThrows(IllegalStateException.class, geometry::result);
             assertTrue(service.retainedLayoutBytes() > 0);
             assertEquals("Title", borrowed.metrics().text());
@@ -99,7 +99,7 @@ class MarkdownPreviewLifecycleTest {
         try (var service = new MarkdownPreviewService(() -> {}); var state = new MarkdownPreviewState()) {
             accept(state, input, 1, service);
             state.moveSelection(PreviewSelection.Move.DOWN, false);
-            var caret = state.placement().caret();
+            var caret = state.placement(MarkdownPreviewState.Placement.Focus.CONTENT).caret();
             assertSame(input, state.acceptedEnvelope());
             assertTrue(service.retainedLayoutBytes() > 0);
             state.suspend();
@@ -109,7 +109,7 @@ class MarkdownPreviewLifecycleTest {
             state.refresh(source(1, List.of("hidden update")), 1, BOUNDS, service);
             assertNull(state.pending, "A hidden consumer must never enqueue or displace visible work");
             accept(state, input, 1, service);
-            assertEquals(caret, state.placement().caret());
+            assertEquals(caret, state.placement(MarkdownPreviewState.Placement.Focus.CONTENT).caret());
             assertEquals("\\frac{a}{b}  ", state.sourceForFreeze().text().line(2));
             assertEquals("", state.sourceForFreeze().text().line(5));
         }

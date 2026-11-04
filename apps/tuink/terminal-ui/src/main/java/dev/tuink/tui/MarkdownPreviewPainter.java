@@ -36,11 +36,8 @@ final class MarkdownPreviewPainter {
                     palette.renderStatus(), bounds.width());
                 if (placement.searchInput() != null) {
                     placement.searchInput().paint(canvas, role -> WidgetThemeKeys.TEXT_FIELD_SELECTION.equals(role)
-                        ? EditorStyleAdapter.toCell(palette.renderSelection()) : palette.renderStatus(), new WidgetState(true, true));
-                } else {
-                    int prefix = CellText.width(MarkdownPreviewState.SEARCH_PREFIX);
-                    CellText.drawClipped(canvas, bounds.x() + prefix, bounds.y(), placement.searchQuery(),
-                        palette.renderStatus(), Math.max(0, bounds.width() - prefix));
+                        ? EditorStyleAdapter.toCell(palette.renderSelection()) : palette.renderStatus(),
+                        new WidgetState(placement.queryFocused(), true));
                 }
             }
             var scrollbars = placement.scrollbars();
@@ -71,9 +68,9 @@ final class MarkdownPreviewPainter {
 
     /** Terminal-global cursor for either the real query field or the readonly visual caret. */
     static Point cursor(MarkdownPreviewState.Placement placement) {
-        if (placement.searchInput() != null) return placement.searchInput().cursorPosition(
+        if (placement.queryFocused() && placement.searchInput() != null) return placement.searchInput().cursorPosition(
             new FocusContext(true, true, FocusSpace.root(placement.bounds()))).orElse(null);
-        if (placement.result() == null || placement.caret() == null) return null;
+        if (!placement.contentFocused() || placement.result() == null || placement.caret() == null) return null;
         var content = placement.contentBounds();
         int x = content.x() + placement.caret().column() - placement.left();
         int y = content.y() + placement.caret().row() - placement.top();
@@ -113,7 +110,7 @@ final class MarkdownPreviewPainter {
                 endColumn = metrics.visualWidth();
             }
         }
-        if (placement.searchInput() == null && placement.caret() != null && placement.caret().row() == lineIndex
+        if (placement.contentFocused() && placement.caret() != null && placement.caret().row() == lineIndex
             && endColumn >= 0 && placement.caret().column() >= endColumn && placement.caret().column() >= left
             && placement.caret().column() < left + columns) {
             CellStyle body = palette.renderBody();
@@ -207,7 +204,7 @@ final class MarkdownPreviewPainter {
             this.line = line; this.offset = offset; this.rebuildBase = rebuildBase; runIndex = 0; syntaxIndex = 0;
             while (runIndex < line.runs().size() && line.runs().get(runIndex).end() <= offset) runIndex++;
             while (syntaxIndex < line.syntax().size() && line.syntax().get(syntaxIndex).end() <= offset) syntaxIndex++;
-            caretStart = placement.searchInput() == null && placement.caret() != null && placement.caret().row() == row
+            caretStart = placement.contentFocused() && placement.caret() != null && placement.caret().row() == row
                 ? metrics.offsetForVisualColumn(placement.caret().column(), TerminalText.Bias.FLOOR) : -1;
         }
         @Override public CellStyle resolve(int start, int end, CellStyle base) {

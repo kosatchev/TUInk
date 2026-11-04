@@ -250,7 +250,8 @@ class ViewportFrameIntegrationTest {
     private static MarkdownPreviewState.Placement placement(MarkdownGeometry geometry, Rect bounds,
             int top, int left, PreviewSelection.Snapshot selection) {
         return new MarkdownPreviewState.Placement(bounds, geometry.result(), top, left, false, "", selection,
-            List.of(), -1, "", false, null, null, geometry);
+            List.of(), -1, "", false, null, null, geometry,
+            MarkdownPreviewState.Placement.Focus.CONTENT, MarkdownPreviewState.SearchFailure.NONE);
     }
     private static MarkdownGeometry geometry() {
         var lines = new ArrayList<MarkdownLayout.Line>();

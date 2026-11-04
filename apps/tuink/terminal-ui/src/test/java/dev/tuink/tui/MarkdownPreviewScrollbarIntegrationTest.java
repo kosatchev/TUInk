@@ -114,7 +114,7 @@ class MarkdownPreviewScrollbarIntegrationTest {
     @Test void paintingUsesTheCommonProportionalThumbAndFirstBodyRowHasNoPermanentHeader() throws Exception {
         try (var window = window()) {
             var state = preview(window);
-            var p = state.placement(); var body = p.contentBounds();
+            var p = state.placement(MarkdownPreviewState.Placement.Focus.CONTENT); var body = p.contentBounds();
             assertEquals(p.bounds().y(), body.y());
             var actual = new CellBuffer(window.height, window.width);
             var expected = new CellBuffer(window.height, window.width);
@@ -132,13 +132,11 @@ class MarkdownPreviewScrollbarIntegrationTest {
     @Test void unfocusedFindKeepsItsExactBodyAndScrollbarsWhileHidingItsCursor() throws Exception {
         try (var window = window()) {
             var state = preview(window); state.setSearchQuery("Payload"); state.beginSearch();
-            var focused = state.placement();
-            var unfocused = new MarkdownPreviewState.Placement(focused.bounds(), focused.result(), focused.top(), focused.left(),
-                focused.loading(), focused.error(), focused.selection(), focused.searchMatches(), focused.activeMatch(),
-                focused.searchQuery(), focused.searchVisible(), null, null, focused.geometry());
-            var contentFocused = new MarkdownPreviewState.Placement(focused.bounds(), focused.result(), focused.top(), focused.left(),
-                focused.loading(), focused.error(), focused.selection(), focused.searchMatches(), focused.activeMatch(),
-                focused.searchQuery(), focused.searchVisible(), focused.caret(), null, focused.geometry());
+            var focused = state.placement(MarkdownPreviewState.Placement.Focus.QUERY);
+            var unfocused = focused.withFocus(MarkdownPreviewState.Placement.Focus.NONE);
+            var contentFocused = focused.withFocus(MarkdownPreviewState.Placement.Focus.CONTENT);
+            assertSame(focused.searchInput(), unfocused.searchInput());
+            assertSame(focused.searchInput(), contentFocused.searchInput());
             assertEquals(focused.contentBounds(), contentFocused.contentBounds());
             assertEquals(focused.scrollbars(), contentFocused.scrollbars());
             var bodyCursor = MarkdownPreviewPainter.cursor(contentFocused);

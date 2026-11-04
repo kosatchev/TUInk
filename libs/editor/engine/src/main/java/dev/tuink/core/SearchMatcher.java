@@ -140,12 +140,23 @@ public final class SearchMatcher {
     }
 
     public List<Match> findAll(CharSequence source, SearchOperationContext context) {
+        return findAll(source, Integer.MAX_VALUE, context);
+    }
+
+    /**
+     * Returns at most {@code maximumMatches} of the canonical non-overlapping
+     * ranges. Scanning stops at that limit rather than retaining or examining
+     * the remaining results. The supplied context covers the complete scan.
+     */
+    public List<Match> findAll(CharSequence source, int maximumMatches, SearchOperationContext context) {
         Objects.requireNonNull(context, "context");
+        if (maximumMatches < 0) throw new IllegalArgumentException("Maximum matches must not be negative");
+        if (maximumMatches == 0) return List.of();
         try {
             List<Match> matches = new ArrayList<>();
             scanMatches(source, (start, end) -> {
                 matches.add(new Match(start, end));
-                return true;
+                return matches.size() < maximumMatches;
             }, context);
             return List.copyOf(matches);
         } catch (OutOfMemoryError exhausted) {

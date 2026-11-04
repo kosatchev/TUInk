@@ -22,14 +22,18 @@ final class PreviewPresentationView {
         var preview = input.tab().uiState().preview;
         if (!preview.active) preview.activate(input.source(), input.tab().generation(), bounds, input.service());
         else preview.refresh(input.source(), input.tab().generation(), bounds, input.service());
-        var placement = preview.placement();
+        preview.setSearchOptions(SearchController.toSearchOptions(window.tab().searchUi));
+        var placement = preview.placement(MarkdownPreviewState.Placement.Focus.NONE);
         var chrome = prepared.finish(new WindowChrome.Content(window.surface(), bounds, status(input, placement), null));
         var layers = chrome.layers();
         boolean overlay = layers.saveAs() != null || layers.confirm() != null || layers.openFile().visible()
             || layers.help() != null || layers.format() != null;
-        if (overlay) placement = unfocusedQuery(placement, layers.contentFocused());
-        else if (window.surface().focus() != ActiveSurface.Focus.EDITABLE_TEXT)
-            placement = unfocusedQuery(placement, window.surface().focus() == ActiveSurface.Focus.CONTENT);
+        var focus = overlay
+            ? layers.contentFocused() ? MarkdownPreviewState.Placement.Focus.CONTENT : MarkdownPreviewState.Placement.Focus.NONE
+            : window.surface().focus() == ActiveSurface.Focus.CONTENT ? MarkdownPreviewState.Placement.Focus.CONTENT
+                : window.surface().focus() == ActiveSurface.Focus.EDITABLE_TEXT && placement.searchVisible()
+                    ? MarkdownPreviewState.Placement.Focus.QUERY : MarkdownPreviewState.Placement.Focus.NONE;
+        placement = placement.withFocus(focus);
         return new PreviewFrameComposition(window.rows(), window.cols(), prepared.contentTopRow(), placement,
             chrome.surface(), layers, input.fullRedraw());
     }
@@ -41,8 +45,4 @@ final class PreviewPresentationView {
             input.window().context().presentations().size(), input.window().cols());
     }
 
-    private static MarkdownPreviewState.Placement unfocusedQuery(MarkdownPreviewState.Placement p, boolean contentFocused) {
-        return new MarkdownPreviewState.Placement(p.bounds(), p.result(), p.top(), p.left(), p.loading(), p.error(),
-            p.selection(), p.searchMatches(), p.activeMatch(), p.searchQuery(), p.searchVisible(), contentFocused ? p.caret() : null, null, p.geometry());
-    }
 }

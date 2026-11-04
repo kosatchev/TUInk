@@ -86,7 +86,8 @@ class PreviewPresentationViewTest {
             var frame = fixture.prepare(UiModalState.recoveryConfirm(), 24, 80);
             assertNotNull(frame.layers().confirm());
             assertEquals(ConfirmChoice.CANCEL, fixture.preview.uiState().confirmFocusManager.focused().orElseThrow());
-            assertNull(frame.preview().searchInput());
+            assertNotNull(frame.preview().searchInput(), "a visible query retains the real field placement behind a modal");
+            assertEquals(MarkdownPreviewState.Placement.Focus.NONE, frame.preview().focus());
             assertTrue(frame.preview().searchVisible(), "the retained Find row keeps the same content geometry");
             assertNull(MarkdownPreviewPainter.cursor(frame.preview()), "the modal hides the query caret");
             assertTrue(fixture.preview.uiState().preview.searchVisible, "retained query resumes when the modal closes");

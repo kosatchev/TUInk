@@ -18,8 +18,8 @@ final class MarkdownPreviewStatus {
                 + " Col " + (preview.caret().column() + 1);
             compactPosition = (preview.caret().row() + 1) + ":" + (preview.caret().column() + 1);
         }
-        String searchCount = preview.searchQuery().isEmpty() ? "" : "Find " + (preview.activeMatch() + 1)
-            + "/" + preview.searchMatches().size();
+        String searchCount = !preview.searchFailure().message().isEmpty() ? preview.searchFailure().summary()
+            : preview.searchQuery().isEmpty() ? "" : "Find " + (preview.activeMatch() + 1) + "/" + preview.searchMatches().size();
         String search = searchCount.isEmpty() ? "" : searchCount + " " + preview.searchQuery();
         return StatusBarLayout.place(List.of(
             Field.required(Key.POSITION, position, compactPosition, 70),

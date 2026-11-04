@@ -97,10 +97,10 @@ class PreviewSelectionGeometryTest {
             state.selection.bindGeometry(state.geometry);
             state.selectAt(0, 1, false);
             state.moveSelection(PreviewSelection.Move.DOWN, false);
-            assertEquals(new PreviewSelection.VisualPosition(1, 2), state.placement().caret());
+            assertEquals(new PreviewSelection.VisualPosition(1, 2), state.placement(MarkdownPreviewState.Placement.Focus.CONTENT).caret());
             state.refresh(input, 1, bounds, service);
             state.moveSelection(PreviewSelection.Move.DOWN, false);
-            assertEquals(new PreviewSelection.VisualPosition(2, 1), state.placement().caret());
+            assertEquals(new PreviewSelection.VisualPosition(2, 1), state.placement(MarkdownPreviewState.Placement.Focus.CONTENT).caret());
         }
     }
 }

@@ -110,7 +110,8 @@ class PreviewFrameCompositionTest {
         var input = query.layout(new Rect(7, 1, 25, 1));
         var base = preview(bounds);
         var preview = new MarkdownPreviewState.Placement(bounds, base.result(), 0, 0, false, "",
-            PreviewSelection.Snapshot.EMPTY, List.of(), -1, "needle", true, null, input);
+            PreviewSelection.Snapshot.EMPTY, List.of(), -1, "needle", true, null, input, null,
+            MarkdownPreviewState.Placement.Focus.QUERY, MarkdownPreviewState.SearchFailure.NONE);
         Frame frame = render(host, rows, cols, preview, surface(InlinePromptBar.hidden(), NotificationBar.hidden()), emptyLayers());
         assertTrue(row(frame, 1).contains("needle"));
         assertEquals(new Point(13, 1), frame.cursor().position());
@@ -166,7 +167,8 @@ class PreviewFrameCompositionTest {
     private static MarkdownPreviewState.Placement preview(Rect bounds) {
         return new MarkdownPreviewState.Placement(bounds, result("alpha", line("alpha", 0, 5, 0, 5)),
             0, 0, false, "", PreviewSelection.Snapshot.EMPTY, List.of(), -1, "", false,
-            new PreviewSelection.VisualPosition(0, 1), null);
+            new PreviewSelection.VisualPosition(0, 1), null, null,
+            MarkdownPreviewState.Placement.Focus.CONTENT, MarkdownPreviewState.SearchFailure.NONE);
     }
     private static String row(Frame frame, int row) {
         StringBuilder text = new StringBuilder();

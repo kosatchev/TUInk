@@ -816,6 +816,12 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     private PreviewFrameComposition preparePreviewComposition(PreviewTab preview, boolean fullRedraw) {
         var frame = PreviewPresentationView.prepare(new PreviewPresentationView.Input(chromeInput(), preview,
             previewSource(preview), markdownPreview, fullRedraw));
+        if (reportSearchError(preview.uiState().preview.searchFailure.message())) {
+            // A newly published persistent notice changes the reserved chrome
+            // rows. Prepare the final placement with those same rows this turn.
+            frame = PreviewPresentationView.prepare(new PreviewPresentationView.Input(chromeInput(), preview,
+                previewSource(preview), markdownPreview, fullRedraw));
+        }
         adoptChrome(frame.layers());
         searchBarPlacement = null; statusBarPlacement = null;
         contentTopRow = frame.contentTopRow();
@@ -888,13 +894,18 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         formatPlacement = layers.format();
     }
 
+    private boolean reportSearchError(String error) {
+        if (error.equals(ui().reportedSearchError)) return false;
+        ui().reportedSearchError = error;
+        if (error.isEmpty()) return false;
+        notice().error(error);
+        return true;
+    }
+
     private FrameComposition prepareComposition(boolean fullRedraw) {
         SearchPresentation.Snapshot searchSnapshot = ui().searchPresentation.resolve(
             ui().searchMode, ui().searchQueryInput.text(), ui().searchUi, host.toTabSessions(tabs), activeTabIndex);
-        if (!searchSnapshot.error().equals(ui().reportedSearchError)) {
-            ui().reportedSearchError = searchSnapshot.error();
-            if (!ui().reportedSearchError.isEmpty()) notice().error(ui().reportedSearchError);
-        }
+        reportSearchError(searchSnapshot.error());
         if (host.profileEnabled) host.frameProfiler.searchNanos = host.frameProfiler.stopwatchNanos();
         SearchBarView searchBar = ui().searchMode ? SearchBarView.build(ui().searchQueryInput,
             ui().searchReplaceInput, cols, ui().searchUi.caseSensitive(), ui().searchUi.matchMode(), ui().searchUi.allTabs()) : null;
@@ -1855,6 +1866,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         eventLoop.invalidate();
         TuinkCommand availability = key.route() instanceof CommandRouter.ActivateTab ? TuinkCommand.TAB_ACTIVATE
             : ((CommandRouter.RoutedAction) key.route()).action();
+        availability = previewSearchIntent(availability);
         ActiveSurface surface = activeSurface();
         if (isFocusTraversalCommand(availability) && !modalState().isDocumentFormat()) {
             if (TerminalEditorApp.modalInputKind(modalState(), ui().openFileMode) != ModalInputPolicy.Kind.NONE) {
@@ -3148,21 +3160,30 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         return true;
     }
 
+    /** Contextual intent after validation of the original command, before its capability gate. */
+    private TuinkCommand previewSearchIntent(TuinkCommand command) {
+        if (ui().preview.active && ui().preview.searchVisible && modalState().isNone()
+            && !ui().openFileMode && !topMenu.isOpen()
+            && (command == TuinkCommand.EDIT_INSERT_NEWLINE || command == TuinkCommand.SEARCH_OPEN
+                && (!ui().preview.searchQuery.isEmpty() || previewQueryFocused())))
+            return TuinkCommand.SEARCH_NEXT;
+        return command;
+    }
+
     private boolean routePreviewSearchOwner(WindowInput input) {
         MarkdownPreviewState preview = ui().preview;
         if (!preview.searchVisible || !modalState().isNone() || ui().openFileMode || topMenu.isOpen()) return false;
         if (input instanceof WindowInput.Command resolved && resolved.route() instanceof CommandRouter.RoutedAction action) {
-            if (action.action() == TuinkCommand.UI_ESCAPE || action.action() == TuinkCommand.SEARCH_CLOSE) {
+            TuinkCommand intent = previewSearchIntent(action.action());
+            if (intent == TuinkCommand.UI_ESCAPE || intent == TuinkCommand.SEARCH_CLOSE) {
                 cancelPointerCapture(PointerCaptureCancellation.SURFACE_CHANGED);
                 ui().searchFocusManager.deactivate(PREVIEW_SEARCH_SCOPE);
                 preview.searchVisible = false; preview.searchField.cancelMouseSelection(); return true;
             }
-            if (ui().searchEditorFocused) return false;
-            if (action.action() == TuinkCommand.SEARCH_NEXT
-                || action.action() == TuinkCommand.EDIT_INSERT_NEWLINE && previewQueryFocused()) {
-                preview.nextMatch(false); return true;
+            if (intent == TuinkCommand.SEARCH_NEXT || intent == TuinkCommand.SEARCH_PREVIOUS) {
+                preview.nextMatch(intent == TuinkCommand.SEARCH_PREVIOUS); return true;
             }
-            if (action.action() == TuinkCommand.SEARCH_PREVIOUS) { preview.nextMatch(true); return true; }
+            if (ui().searchEditorFocused) return false;
         }
         if (input instanceof WindowInput.Gesture gesture && gesture.motion() instanceof WindowInput.Pointer pointer) {
             if (pointer.event().kind() == PointerEvent.Kind.PRESS && pointer.event().button() == PointerEvent.Button.LEFT) {

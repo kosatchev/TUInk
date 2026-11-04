@@ -153,7 +153,8 @@ class MarkdownPreparedPainterTest {
         PreviewSelection.Snapshot selection, List<PreviewSelection.Range> matches,
         PreviewSelection.VisualPosition caret, MarkdownGeometry geometry) {
         return new MarkdownPreviewState.Placement(bounds, result, 0, left, false, "", selection, matches,
-            matches.isEmpty() ? -1 : 0, matches.isEmpty() ? "" : "find", false, caret, null, geometry);
+            matches.isEmpty() ? -1 : 0, matches.isEmpty() ? "" : "find", false, caret, null, geometry,
+            MarkdownPreviewState.Placement.Focus.CONTENT, MarkdownPreviewState.SearchFailure.NONE);
     }
 
     private static CellBuffer paint(MarkdownPreviewState.Placement placement, boolean color) {

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static dev.tuink.tui.PreviewSelectionTest.*;
 
 import dev.tuink.editor.document.DocumentSnapshot;
+import dev.tuink.editor.search.SearchOptions;
 import dev.tuink.editor.storage.FrozenDocumentSource;
 import dev.tuink.editor.storage.DocumentFileMetadata;
 import dev.tuink.editor.storage.ResourceBinding;
@@ -67,7 +68,7 @@ class MarkdownPreviewInteractionTest {
         state.selectAll(); state.requestedRevision = 1;
         assertFalse(state.ready());
         assertEquals("", state.selectedText());
-        assertNull(state.placement().result());
+        assertNull(state.placement(MarkdownPreviewState.Placement.Focus.CONTENT).result());
         admit(state, result(1, 20, "beta", line("beta", 0, 4, 0, 4)));
         assertEquals(state.selectionStart(), state.selectionEnd());
         state.close();
@@ -90,13 +91,71 @@ class MarkdownPreviewInteractionTest {
         state.close();
     }
 
+    @Test void sharedWildcardMatchingRespectsProjectionLinesAndOriginalUtf16Offsets() {
+        String text = "🙂 ALPHA alpha\nalphaX\nİx Ix ıx ix\n";
+        try (var state = ready(result(text, line(text, 0, text.length(), 0, text.length())), new Rect(0, 0, 80, 4))) {
+            state.setSearchQuery("alpha");
+            assertEquals(List.of(new PreviewSelection.Range(3, 8), new PreviewSelection.Range(9, 14),
+                new PreviewSelection.Range(15, 20)), state.searchMatches);
+            state.setSearchOptions(new SearchOptions(true, SearchOptions.MatchMode.WILDCARD));
+            state.setSearchQuery("a*x");
+            assertEquals(List.of(new PreviewSelection.Range(15, 21)), state.searchMatches,
+                "stars never cross logical projection line separators");
+            state.setSearchQuery("i?");
+            assertEquals(List.of(new PreviewSelection.Range(22, 24), new PreviewSelection.Range(25, 27),
+                new PreviewSelection.Range(28, 30), new PreviewSelection.Range(31, 33)), state.searchMatches);
+        }
+    }
+
+    @Test void boundedSearchFailureKeepsTheAcceptedDocumentQuerySelectionAndViewportAndCachesTheFailure() {
+        String text = "a".repeat(132);
+        var result = result(text, line(text, 0, text.length(), 0, text.length()));
+        try (var state = ready(result, new Rect(0, 0, 80, 4), 0)) {
+            state.beginSearch();
+            var options = new SearchOptions(false, SearchOptions.MatchMode.WILDCARD);
+            state.setSearchOptions(options);
+            var selection = state.selection.snapshot(); int top = state.top, left = state.left;
+            String query = "a".repeat(64) + "?a";
+            state.setSearchQuery(query);
+            assertEquals(query, state.searchField.text());
+            assertEquals(query, state.searchQuery);
+            assertEquals("Search is too complex", state.searchFailure.summary());
+            assertTrue(state.searchMatches.isEmpty());
+            assertEquals(-1, state.activeMatch);
+            assertEquals("", state.error, "a rejected search must never hide the accepted Markdown document");
+            assertSame(result, state.placement(MarkdownPreviewState.Placement.Focus.CONTENT).result());
+            assertTrue(state.searchVisible);
+            var failure = state.searchFailure;
+            state.setSearchQuery(query); state.setSearchOptions(options); state.nextMatch(false); state.placement(MarkdownPreviewState.Placement.Focus.CONTENT);
+            assertSame(failure, state.searchFailure, "stable frames and repeated Find must not retry rejected work");
+            assertEquals(selection, state.selection.snapshot());
+            assertEquals(top, state.top); assertEquals(left, state.left);
+            state.setSearchQuery("a?a");
+            assertEquals(44, state.searchMatches.size());
+            assertEquals(MarkdownPreviewState.SearchFailure.NONE, state.searchFailure);
+        }
+    }
+
+    @Test void matchingStopsAtTheRetainedResultCapAcrossLogicalProjectionLines() {
+        String text = String.join("\n", java.util.Collections.nCopies(MarkdownPreviewState.SEARCH_MATCH_LIMIT + 1, "a"));
+        try (var state = ready(result(text, line("a", 0, 1, 0, 1)), new Rect(0, 0, 80, 4))) {
+            state.setSearchQuery("a");
+            assertEquals(MarkdownPreviewState.SEARCH_MATCH_LIMIT, state.searchMatches.size());
+            assertEquals(new PreviewSelection.Range(19_998, 19_999), state.searchMatches.getLast());
+            var matches = state.searchMatches;
+            state.setSearchQuery("a"); state.placement(MarkdownPreviewState.Placement.Focus.CONTENT); state.nextMatch(false);
+            assertSame(matches, state.searchMatches, "cursor-only frames reuse the accepted matches");
+        }
+    }
+
     @Test void painterPreservesTabPhaseAndHighlightsOnlyMappedContent() {
         var palette = UiStyles.forTheme(UiStyles.Theme.CYAN);
         var line = new MarkdownLayout.Line("│ a\t字", List.of(new MarkdownLayout.Run(2, 5,
             MarkdownLayout.Role.CODE, SOURCE, 0, 3)), "a\t字", SOURCE, "code");
         var result = result("a\t字", line);
         var placement = new MarkdownPreviewState.Placement(new Rect(4, 2, 8, 3), result, 0, 0, false, "",
-            new PreviewSelection.Snapshot(1, 2), List.of(new PreviewSelection.Range(2, 3)), 0, "字", false);
+            new PreviewSelection.Snapshot(1, 2), List.of(new PreviewSelection.Range(2, 3)), 0, "字", false, null, null, null,
+            MarkdownPreviewState.Placement.Focus.CONTENT, MarkdownPreviewState.SearchFailure.NONE);
         var buffer = new CellBuffer(8, 20);
         MarkdownPreviewPainter.paint(new Canvas(buffer), placement, palette, true);
         assertEquals(EditorStyleAdapter.toCell(palette.renderSelection()), buffer.get(2, 7).style());
@@ -110,7 +169,8 @@ class MarkdownPreviewInteractionTest {
         var result = result("a\tbcde", line("a\tbcde", 0, 6, 0, 6));
         var buffer = new CellBuffer(5, 15);
         MarkdownPreviewPainter.paint(new Canvas(buffer), new MarkdownPreviewState.Placement(
-            new Rect(5, 1, 5, 3), result, 0, 2, false, ""), palette, true);
+            new Rect(5, 1, 5, 3), result, 0, 2, false, "", PreviewSelection.Snapshot.EMPTY, List.of(), -1, "",
+            false, null, null, null, MarkdownPreviewState.Placement.Focus.CONTENT, MarkdownPreviewState.SearchFailure.NONE), palette, true);
         assertEquals(" ", buffer.get(1, 5).grapheme());
         assertEquals(" ", buffer.get(1, 6).grapheme());
         assertEquals("b", buffer.get(1, 7).grapheme());
@@ -118,7 +178,10 @@ class MarkdownPreviewInteractionTest {
     }
 
     private static MarkdownPreviewState ready(MarkdownLayout.Result result, Rect bounds) {
-        var state = new MarkdownPreviewState();
+        return ready(result, bounds, SearchPresentation.INTERACTIVE_WILDCARD_WORK_LIMIT);
+    }
+    private static MarkdownPreviewState ready(MarkdownLayout.Result result, Rect bounds, long maximumWork) {
+        var state = new MarkdownPreviewState(maximumWork);
         state.active = true; state.result = result; state.bounds = bounds;
         state.requestedId = ID; state.requestedRevision = result.document().revision(); state.requestedWidth = result.columns();
         return state;

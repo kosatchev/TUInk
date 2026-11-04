@@ -554,6 +554,60 @@ def window_dialog_pointer(args, output):
         print(f'PASS: actual file-dialog mouse workflow ({mode}): {case}', flush=True)
 
 
+def preview_find_workflow(args, output):
+    """Exercise query viewport, real focus and Find commands in live/frozen Preview."""
+    for mode in ('live', 'snapshot'):
+        case = output / ('find-workflow-' + mode)
+        case.mkdir()
+        document = case / 'document.md'
+        document.write_text('# Find workflow\n\n```text\n' + '\n'.join(
+            f'row-{row:03d} Alpha searchable text' for row in range(50)) + '\n```\n', encoding='utf-8')
+        with Session(case / 'session', args.java, args.classpath, document,
+                     native_executable=args.binary, timeout=60) as session:
+            # The match-count field is optional at narrow terminal widths.
+            session.resize(24, 120)
+            session.send(b'\x10')
+            expect_preview(session, 'Find live Preview')
+            if mode == 'snapshot':
+                session.send(b'\x10\x17')
+                expect_preview(session, 'Find frozen Preview', mode='snapshot')
+            session.send(b'\x06')
+            query = 'PREFIX_' + 'x' * 160 + '_SUFFIX'
+            session.send(query.encode('ascii'))
+            session.expect(lambda: any(line.startswith('Find:') and '_SUFFIX' in line for line in session.screen.lines),
+                           'complete long query', timeout=8)
+            row = next(index for index, line in enumerate(session.screen.lines) if line.startswith('Find:'))
+            visible = session.screen.lines[row]
+            session.mouse(0, row + 4, 12)
+            session.mouse(0, row + 4, 12, True)
+            session.expect(lambda: preview_position(session)[0] > 1, 'body owns the caret after a click')
+            if session.screen.lines[row] != visible:
+                raise AssertionError('Leaving the query changed its visible horizontal slice')
+            session.send(b'\x1b', 0.8)
+            session.expect(lambda: not any(line.startswith('Find:') for line in session.screen.lines),
+                           'Escape closes Find from the body')
+            session.send(b'\x1b[1;5H')
+            session.send(b'\x06')
+            session.send(b'alpha')
+            session.expect(lambda: 'Find 0/50' in session.screen.lines[-1], 'default case-insensitive semantic matches')
+            session.send(b'\r')
+            session.expect(lambda: 'Find 1/50' in session.screen.lines[-1], 'Enter selects the first match')
+            session.send(b'\x06')
+            session.expect(lambda: 'Find 2/50' in session.screen.lines[-1], 'repeated Find selects the next match')
+            session.send(b'\t')
+            session.send(b'\r')
+            session.expect(lambda: 'Find 3/50' in session.screen.lines[-1], 'Enter advances Find from the body')
+            session.send(b'\x07')
+            session.expect(lambda: 'Find 2/50' in session.screen.lines[-1], 'Ctrl+G selects the preceding match')
+            session.send(b'\x1b', 0.8)
+            session.expect(lambda: not any(line.startswith('Find:') for line in session.screen.lines),
+                           'Find closes without leaving Preview')
+            expect_preview(session, 'Preview remains selected after Find', mode=mode)
+            session.snapshot('find-complete')
+            session.finish()
+        print(f'PASS: actual Preview Find workflow ({mode}): {case}', flush=True)
+
+
 def main():
     root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__)
@@ -636,6 +690,7 @@ def main():
     code_highlighting(args, output)
     preview_menu_pointer(args, output)
     window_dialog_pointer(args, output)
+    preview_find_workflow(args, output)
     sample_sweep(args, output)
     scrollbar_controls(args, output)
     flowchart_scroll(args, output)

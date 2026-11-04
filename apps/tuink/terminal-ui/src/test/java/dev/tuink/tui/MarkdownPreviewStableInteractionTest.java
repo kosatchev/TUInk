@@ -67,7 +67,7 @@ class MarkdownPreviewStableInteractionTest {
                     state.pointer(pointer(content.y() + 1, content.x() + 4, PointerEvent.Kind.RELEASE));
                     // This is the same stable-document refresh performed by the window before drawing.
                     state.refresh(input, 0, bounds, service);
-                    MarkdownPreviewPainter.paint(canvas, state.placement(), palette, true);
+                    MarkdownPreviewPainter.paint(canvas, state.placement(MarkdownPreviewState.Placement.Focus.CONTENT), palette, true);
                     assertNull(state.pending, "Interaction must not submit another parse/layout/highlight task");
                     assertSame(accepted, state.result);
                     assertSame(geometry, state.geometry);

@@ -58,9 +58,11 @@ class MarkdownPreviewStatusTest {
             for (int i = 0; i < lines.length; i++) lines[i] = line(line, 0, 400, i * 401, i * 401 + 400);
             var layout = result(0, 80, String.join("\n", java.util.Collections.nCopies(123, line)), lines);
             var initial = new MarkdownPreviewState.Placement(new Rect(0, 2, 80, 20), layout, 0, 0, false, "",
-                PreviewSelection.Snapshot.EMPTY, List.of(), -1, "", false, new PreviewSelection.VisualPosition(1, 5), null);
+                PreviewSelection.Snapshot.EMPTY, List.of(), -1, "", false, new PreviewSelection.VisualPosition(1, 5), null, null,
+                MarkdownPreviewState.Placement.Focus.CONTENT, MarkdownPreviewState.SearchFailure.NONE);
             var moved = new MarkdownPreviewState.Placement(initial.bounds(), initial.result(), 0, 0, false, "",
-                initial.selection(), List.of(), -1, "", false, new PreviewSelection.VisualPosition(103, 338), null);
+                initial.selection(), List.of(), -1, "", false, new PreviewSelection.VisualPosition(103, 338), null, null,
+                MarkdownPreviewState.Placement.Focus.CONTENT, MarkdownPreviewState.SearchFailure.NONE);
             String before = status(initial, snapshot, BomKind.NONE, 80);
             String after = status(moved, snapshot, BomKind.NONE, 80);
             assertTrue(after.contains("Tab 2/2  Ctrl+P: Source"), after);
@@ -84,7 +86,9 @@ class MarkdownPreviewStatusTest {
     }
 
     @Test void loadingIsVisibleBeforeThereIsAnAcceptedPosition() {
-        var pending = new MarkdownPreviewState.Placement(new Rect(0, 2, 80, 20), null, 0, 0, true, "");
+        var pending = new MarkdownPreviewState.Placement(new Rect(0, 2, 80, 20), null, 0, 0, true, "",
+            PreviewSelection.Snapshot.EMPTY, List.of(), -1, "", false, null, null, null,
+            MarkdownPreviewState.Placement.Focus.NONE, MarkdownPreviewState.SearchFailure.NONE);
         String text = status(pending, false, BomKind.NONE, 80);
         assertTrue(text.contains("updating"));
         assertFalse(text.contains("Row "));
@@ -99,8 +103,13 @@ class MarkdownPreviewStatusTest {
         List<PreviewSelection.Range> matches, int active) {
         var result = result("first\nsecond\nthird", line("first", 0, 5, 0, 5),
             line("second", 0, 6, 6, 12), line("third", 0, 5, 13, 18));
-        return new MarkdownPreviewState.Placement(new Rect(0, 2, 160, 15), result, 0, 0, false, "",
+        var bounds = new Rect(0, 2, 160, 15);
+        var field = new dev.tuiframe.widget.TextField();
+        field.set(query);
+        var input = searching ? field.layout(new Rect(6, 2, 154, 1)) : null;
+        return new MarkdownPreviewState.Placement(bounds, result, 0, 0, false, "",
             PreviewSelection.Snapshot.EMPTY, matches, active, query, searching,
-            new PreviewSelection.VisualPosition(1, 5), null);
+            new PreviewSelection.VisualPosition(1, 5), input, null,
+            MarkdownPreviewState.Placement.Focus.CONTENT, MarkdownPreviewState.SearchFailure.NONE);
     }
 }

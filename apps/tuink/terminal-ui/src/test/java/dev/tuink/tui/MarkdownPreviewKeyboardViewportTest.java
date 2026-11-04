@@ -18,7 +18,7 @@ class MarkdownPreviewKeyboardViewportTest {
         var state = ready(tallDiagram(65), new Rect(0, 0, 21, 8));
         for (int row = 1; row < 65; row++) {
             state.moveSelection(PreviewSelection.Move.DOWN, false);
-            assertEquals(row, state.placement().caret().row());
+            assertEquals(row, state.placement(MarkdownPreviewState.Placement.Focus.CONTENT).caret().row());
             assertTrue(row >= state.top && row < state.top + 7);
             assertEquals(0, state.cursorOffset(), "Every drawn row still targets the Mermaid source");
         }
@@ -26,13 +26,13 @@ class MarkdownPreviewKeyboardViewportTest {
         assertEquals(0, state.top);
         state.moveSelection(PreviewSelection.Move.PAGE_DOWN, false);
         assertEquals(6, state.top);
-        assertEquals(6, state.placement().caret().row());
+        assertEquals(6, state.placement(MarkdownPreviewState.Placement.Focus.CONTENT).caret().row());
         state.moveSelection(PreviewSelection.Move.PAGE_DOWN, false);
         assertEquals(12, state.top);
-        assertEquals(12, state.placement().caret().row());
+        assertEquals(12, state.placement(MarkdownPreviewState.Placement.Focus.CONTENT).caret().row());
         state.moveSelection(PreviewSelection.Move.PAGE_UP, false);
         assertEquals(6, state.top);
-        assertEquals(6, state.placement().caret().row());
+        assertEquals(6, state.placement(MarkdownPreviewState.Placement.Focus.CONTENT).caret().row());
         state.close();
     }
 
@@ -41,13 +41,13 @@ class MarkdownPreviewKeyboardViewportTest {
         state.scroll(3, 3);
         assertEquals(3, state.top);
         assertEquals(3, state.left);
-        assertEquals(new PreviewSelection.VisualPosition(3, 3), state.placement().caret());
+        assertEquals(new PreviewSelection.VisualPosition(3, 3), state.placement(MarkdownPreviewState.Placement.Focus.CONTENT).caret());
         state.moveSelection(PreviewSelection.Move.RIGHT, false);
         assertEquals(3, state.top);
         assertEquals(3, state.left);
-        assertEquals(new PreviewSelection.VisualPosition(3, 4), state.placement().caret());
+        assertEquals(new PreviewSelection.VisualPosition(3, 4), state.placement(MarkdownPreviewState.Placement.Focus.CONTENT).caret());
         state.moveSelection(PreviewSelection.Move.DOWN, false);
-        assertEquals(new PreviewSelection.VisualPosition(4, 4), state.placement().caret());
+        assertEquals(new PreviewSelection.VisualPosition(4, 4), state.placement(MarkdownPreviewState.Placement.Focus.CONTENT).caret());
         assertEquals(3, state.top);
         state.close();
     }
@@ -65,7 +65,7 @@ class MarkdownPreviewKeyboardViewportTest {
         state.scroll(3, 0);
         assertEquals("row0", state.selectedText());
         assertEquals(semantic.indexOf("row3") + 4, state.cursorOffset());
-        assertEquals(3, state.placement().caret().row());
+        assertEquals(3, state.placement(MarkdownPreviewState.Placement.Focus.CONTENT).caret().row());
         state.close();
     }
 
@@ -73,7 +73,7 @@ class MarkdownPreviewKeyboardViewportTest {
         var state = ready(tallDiagram(12), new Rect(4, 2, 30, 6));
         state.selection.selectAtColumn(state.result, 7, 15, false);
         state.scroll(3, 3);
-        var placement = state.placement();
+        var placement = state.placement(MarkdownPreviewState.Placement.Focus.CONTENT);
         Point caret = MarkdownPreviewPainter.cursor(placement);
         assertNotNull(caret);
         assertTrue(placement.bounds().contains(caret));
@@ -87,7 +87,7 @@ class MarkdownPreviewKeyboardViewportTest {
         var state = ready(tallDiagram(12), new Rect(4, 2, 45, 6));
         state.setSearchQuery("needle".repeat(30)); state.beginSearch();
         state.searchField.moveEnd();
-        var placement = state.placement();
+        var placement = state.placement(MarkdownPreviewState.Placement.Focus.QUERY);
         var caret = MarkdownPreviewPainter.cursor(placement);
         assertNotNull(caret);
         assertTrue(placement.searchInput().bounds().contains(caret));

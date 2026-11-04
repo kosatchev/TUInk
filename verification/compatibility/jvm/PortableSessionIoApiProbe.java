@@ -9,6 +9,7 @@ import dev.tuink.editor.command.DocumentCommandResult;
 import dev.tuink.editor.format.DocumentEncoding;
 import dev.tuink.editor.format.DocumentFormatSpec;
 import dev.tuink.editor.format.LineEndingPolicy;
+import dev.tuink.editor.session.application.ApplicationCloseWorkflow;
 import dev.tuink.editor.session.document.EditorDocumentSession;
 import dev.tuink.editor.session.document.EditorWorkspace;
 import dev.tuink.editor.session.document.DocumentIoCoordinator;
@@ -24,6 +25,29 @@ import java.util.List;
 
 /** Compiles with editor-session's API variant, without core on the compile classpath. */
 final class PortableSessionIoApiProbe {
+    /** A different frontend drives the same application-close policy without terminal classes. */
+    static void closeAfterSave(EditorDocumentSession document) throws IOException {
+        var recipient = new PresentationId("external-close");
+        ApplicationCloseWorkflow.State<PresentationId, DocumentIoCoordinator.Work> state =
+            ApplicationCloseWorkflow.State.open();
+        var requested = ApplicationCloseWorkflow.request(state, recipient, null);
+        var ready = ApplicationCloseWorkflow.prepared(requested.state(), null,
+            ApplicationCloseWorkflow.Policy.LIVE_RECOVERY,
+            ApplicationCloseWorkflow.Continuation.RECHECK_DOCUMENTS, 0L, true);
+        var saving = ApplicationCloseWorkflow.choose(ready.state(), ApplicationCloseWorkflow.Choice.SAVE);
+        var work = document.io().beginSave();
+        var waiting = ApplicationCloseWorkflow.publishing(saving.state(), work, 1L).state();
+        var receipt = document.io().accept(work, work.perform());
+        if (receipt instanceof DocumentIoCoordinator.Failed failure) throw failure.failure();
+        if (!(receipt instanceof DocumentIoCoordinator.Saved)) throw new AssertionError("Expected a save receipt");
+        var completed = ApplicationCloseWorkflow.completed(waiting, work, ApplicationCloseWorkflow.Outcome.SAVED, false);
+        var closed = ApplicationCloseWorkflow.saveProgress(completed.state(), recipient,
+            ApplicationCloseWorkflow.SaveProgress.FINISHED);
+        if (closed.running() || closed.recipient() != recipient) {
+            throw new AssertionError("Only the original confirmed close request may finish");
+        }
+    }
+
     static EditorDocumentSession open(DocumentResource source) throws IOException {
         EditorDocumentSession session = EditorDocumentSession.create(new DocumentId("external"), List.of(""));
         var request = new PreparedDocumentOpen(source, DocumentOpenMode.DETECT, false);

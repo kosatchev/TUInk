@@ -13,6 +13,7 @@ import dev.tuink.core.EditorState;
 import dev.tuink.core.LanguageProfiles;
 import dev.tuink.core.Position;
 import dev.tuink.editor.search.SearchOptions;
+import dev.tuink.editor.session.application.ApplicationCloseWorkflow;
 import dev.tuink.editor.session.document.DocumentIoCoordinator;
 import dev.tuink.core.TabSession;
 import dev.tuink.core.TextModel;
@@ -109,7 +110,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     private final java.util.Map<ViewId, PresentationId> savePresentationOwners = new java.util.HashMap<>();
     private Frame lastPreviewFrame;
     private String lastPreviewPrompt;
-    private WindowCloseWorkflow.State closeState = WindowCloseWorkflow.State.open();
+    private ApplicationCloseWorkflow.State<UiRecipient, DocumentIoController.Operation> closeState = ApplicationCloseWorkflow.State.open();
     private SaveWorkflow.SaveRequest pendingSave;
     private FilePickerOpenWorkflow.OpenRequest pendingOpen;
     private boolean disposed;
@@ -646,7 +647,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     private boolean finishPendingDialogsBeforeQuit() {
         for (int index = 0; index < tabs.size(); index++) {
             if (!tabs.get(index).uiState().awaitingAnswer()) continue;
-            closeState = WindowCloseWorkflow.cancel(closeState);
+            closeState = ApplicationCloseWorkflow.cancel(closeState);
             setModal(UiModalState.none());
             activateTab(index);
             notice().info("Finish this document dialog before saving all documents and quitting");
@@ -2050,7 +2051,11 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             }
             if (modalState().isQuitConfirm()) {
                 if (routedConfirmDecision == ConfirmChoice.SAVE && finishPendingDialogsBeforeQuit()) return;
-                applyCloseDecision(WindowCloseWorkflow.choose(closeState, routedConfirmDecision));
+                applyCloseDecision(ApplicationCloseWorkflow.choose(closeState, switch (routedConfirmDecision) {
+                    case SAVE -> ApplicationCloseWorkflow.Choice.SAVE;
+                    case DISCARD -> ApplicationCloseWorkflow.Choice.DISCARD;
+                    case CANCEL -> ApplicationCloseWorkflow.Choice.CANCEL;
+                }));
                 if (routedConfirmDecision != ConfirmChoice.SAVE) applySaveResult(SaveWorkflow.quit(saveContext(), routedConfirmDecision));
                 return;
             }
@@ -2465,7 +2470,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         if (UiEffects.filename(recipient.state(), effect)) return true;
         setModal(recipient, UiModalState.none());
         if (!background(recipient)) saveAsBarPlacement = null;
-        if (recipient.flow() == UiRecipient.Flow.WINDOW) closeState = WindowCloseWorkflow.cancel(closeState);
+        if (recipient.flow() == UiRecipient.Flow.WINDOW) closeState = ApplicationCloseWorkflow.cancel(closeState);
         recipient.state().saveAsFocusManager.deactivate(TerminalEditorApp.SAVE_AS_SCOPE_ID);
         notice(recipient).error("Not enough memory to open Save As; the filename was not changed");
         return false;
@@ -2524,8 +2529,11 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             || result.pendingSave() != null && isGlobalSave(result.pendingSave())) {
             boolean continuesQuit = result.modalState().saveContinuation() == SaveContinuation.QUIT
                 || result.pendingSave() != null && isGlobalSave(result.pendingSave());
-            closeState = WindowCloseWorkflow.saveResult(closeState, recipient, result.running(),
-                result.modalState().isQuitConfirm(), continuesQuit);
+            var progress = !result.running() ? ApplicationCloseWorkflow.SaveProgress.FINISHED
+                : result.modalState().isQuitConfirm() ? ApplicationCloseWorkflow.SaveProgress.CONFIRM
+                : continuesQuit ? ApplicationCloseWorkflow.SaveProgress.CONTINUE
+                : ApplicationCloseWorkflow.SaveProgress.CANCELLED;
+            closeState = ApplicationCloseWorkflow.saveProgress(closeState, recipient, progress);
         }
         if (submittedNoticeRevision < 0 || !UiEffects.preserveModal(modalState(recipient), result.modalState(), preserveFilename))
             setModal(recipient, result.modalState().bindTo(recipient.viewId()));
@@ -2628,8 +2636,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             // Domain receipts are processed even when their UI address retired.
             var transition = request.accept(completion.value(), completion.failure());
             closeOperationCompleted(completion.operation(), transition instanceof DocumentIoCoordinator.Saved
-                ? WindowCloseWorkflow.Outcome.SAVED : transition instanceof DocumentIoCoordinator.Ignored
-                ? WindowCloseWorkflow.Outcome.CANCELLED : WindowCloseWorkflow.Outcome.FAILED);
+                ? ApplicationCloseWorkflow.Outcome.SAVED : transition instanceof DocumentIoCoordinator.Ignored
+                ? ApplicationCloseWorkflow.Outcome.CANCELLED : ApplicationCloseWorkflow.Outcome.FAILED);
             if (transition instanceof DocumentIoCoordinator.Ignored) {
                 if (currentAttempt && !disposed && current(recipient)
                     && completion.value() != null && completion.value().cancelled()) notice(recipient).info("Save cancelled");
@@ -2647,7 +2655,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 if (transition instanceof DocumentIoCoordinator.Approval approval) request.session().document().io().cancel(approval.confirmation());
                 if (transition instanceof DocumentIoCoordinator.Saved) {
                     refreshLivePreviewBinding(request); refreshSavedHighlighter(request.session().document().documentId());
-                    if (currentAttempt && isGlobalSave(request) && closeState.phase() == WindowCloseWorkflow.Phase.SAVING) {
+                    if (currentAttempt && isGlobalSave(request) && closeState.phase() == ApplicationCloseWorkflow.Phase.SAVING) {
                         UiRecipient window = UiRecipient.window(globalUi, null);
                         applySaveResult(window, SaveWorkflow.quit(saveContext(window), ConfirmChoice.SAVE),
                             request.session().document().documentId());
@@ -2737,8 +2745,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             documentIo.cancelSave();
             pendingSave = null;
             if (pendingSaveUi == attempt) pendingSaveUi = null;
-            if (closeState.phase() != WindowCloseWorkflow.Phase.CANCELLING)
-                closeState = WindowCloseWorkflow.cancel(closeState);
+            if (closeState.phase() != ApplicationCloseWorkflow.Phase.CANCELLING)
+                closeState = ApplicationCloseWorkflow.cancel(closeState);
             reportSaveStatus(attempt, () -> "Save cancelled", false);
         } else if (result == DocumentIoCoordinator.CancelResult.DRAINING_WRITE) {
             reportSaveStatus(attempt, () -> "Finishing save…", false);
@@ -2751,7 +2759,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         if (attempt == null || pendingSave != attempt.request() || disposed) return;
         SaveWorkflow.SaveRequest request = attempt.request();
         if (isGlobalSave(request) && request.operation().publishing())
-            applyCloseDecision(WindowCloseWorkflow.publishing(closeState, documentIo.pendingOperation(), System.nanoTime()));
+            applyCloseDecision(ApplicationCloseWorkflow.publishing(closeState, documentIo.pendingOperation(), System.nanoTime()));
         reportSaveStatus(attempt,
             () -> SaveProgressPresentation.message(request.operation().progress(), saveEscapeAvailable(attempt.recipient())), true);
     }
@@ -2989,7 +2997,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
 
     private void requestWindowClose(UiRecipient recipient) {
         if (disposed) return;
-        applyCloseDecision(WindowCloseWorkflow.request(closeState, recipient, documentIo.pendingOperation()));
+        applyCloseDecision(ApplicationCloseWorkflow.request(closeState, recipient, documentIo.pendingOperation()));
     }
 
     private boolean confirmDirtyDocuments() {
@@ -3011,16 +3019,16 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         cancelPendingSave(null);
         var operation = documentIo.pendingOperation();
         var policy = operation != null && operation == snapshotSaves.pendingOperation()
-            ? WindowCloseWorkflow.Policy.SNAPSHOT_RETAIN : WindowCloseWorkflow.Policy.LIVE_RECOVERY;
+            ? ApplicationCloseWorkflow.Policy.SNAPSHOT_RETAIN : ApplicationCloseWorkflow.Policy.LIVE_RECOVERY;
         var continuation = pendingSave != null && isGlobalSave(pendingSave)
-            ? WindowCloseWorkflow.Continuation.SAVE_ALL : WindowCloseWorkflow.Continuation.RECHECK_DOCUMENTS;
-        applyCloseDecision(WindowCloseWorkflow.prepared(closeState, operation, policy, continuation,
+            ? ApplicationCloseWorkflow.Continuation.SAVE_ALL : ApplicationCloseWorkflow.Continuation.RECHECK_DOCUMENTS;
+        applyCloseDecision(ApplicationCloseWorkflow.prepared(closeState, operation, policy, continuation,
             System.nanoTime(), confirmDirtyDocuments()));
     }
 
-    private void applyCloseDecision(WindowCloseWorkflow.Decision decision) {
-        if (disposed || decision.effect() == WindowCloseWorkflow.Effect.NONE && decision.state() == closeState) return;
-        if (decision.effect() == WindowCloseWorkflow.Effect.EXPIRE_LIVE_SAVE) {
+    private void applyCloseDecision(ApplicationCloseWorkflow.Decision<UiRecipient, DocumentIoController.Operation> decision) {
+        if (disposed || decision.effect() == ApplicationCloseWorkflow.Effect.NONE && decision.state() == closeState) return;
+        if (decision.effect() == ApplicationCloseWorkflow.Effect.EXPIRE_LIVE_SAVE) {
             // expireSave may collect a just-ready receipt and run a replacement
             // operation. Keep the old WAITING state until that check resolves.
             try { documentIo.expireSave(decision.state().waiting().operation()); }
@@ -3035,7 +3043,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             case SAVE_ALL -> applySaveResult(SaveWorkflow.quit(saveContext(), ConfirmChoice.SAVE));
             case WAIT -> {
                 if (current(closeState.recipient())) notice(closeState.recipient()).info(
-                    closeState.waiting().policy() == WindowCloseWorkflow.Policy.SNAPSHOT_RETAIN
+                    closeState.waiting().policy() == ApplicationCloseWorkflow.Policy.SNAPSHOT_RETAIN
                         ? "Finishing snapshot save before quitting…" : "Finishing save…");
             }
             case RETAIN_SNAPSHOT -> {
@@ -3048,20 +3056,20 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     }
 
     void checkWindowCloseDeadline(long now) {
-        var decision = WindowCloseWorkflow.tick(closeState, documentIo.pendingOperation(), now);
-        if ((decision.effect() == WindowCloseWorkflow.Effect.RETAIN_SNAPSHOT
-            || decision.effect() == WindowCloseWorkflow.Effect.EXPIRE_LIVE_SAVE)
+        var decision = ApplicationCloseWorkflow.tick(closeState, documentIo.pendingOperation(), now);
+        if ((decision.effect() == ApplicationCloseWorkflow.Effect.RETAIN_SNAPSHOT
+            || decision.effect() == ApplicationCloseWorkflow.Effect.EXPIRE_LIVE_SAVE)
             && documentIo.collect(decision.state().waiting().operation())) return;
         applyCloseDecision(decision);
     }
 
-    private void closeOperationCompleted(DocumentIoController.Operation operation, WindowCloseWorkflow.Outcome outcome) {
-        if (!disposed) applyCloseDecision(WindowCloseWorkflow.completed(closeState, operation, outcome, confirmDirtyDocuments()));
+    private void closeOperationCompleted(DocumentIoController.Operation operation, ApplicationCloseWorkflow.Outcome outcome) {
+        if (!disposed) applyCloseDecision(ApplicationCloseWorkflow.completed(closeState, operation, outcome, confirmDirtyDocuments()));
     }
 
     private void snapshotSaveCompleted(SnapshotSaveController.Completion completion) {
         closeOperationCompleted(completion.operation(), completion.transition() instanceof DocumentIoCoordinator.Saved
-            ? WindowCloseWorkflow.Outcome.SAVED : WindowCloseWorkflow.Outcome.FAILED);
+            ? ApplicationCloseWorkflow.Outcome.SAVED : ApplicationCloseWorkflow.Outcome.FAILED);
         eventLoop.invalidate();
     }
 

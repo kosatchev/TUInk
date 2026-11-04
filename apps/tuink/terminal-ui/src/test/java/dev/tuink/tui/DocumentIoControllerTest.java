@@ -11,6 +11,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import dev.tuink.editor.session.application.ApplicationCloseWorkflow;
 import dev.tuink.editor.storage.StorageOperation;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -297,18 +298,18 @@ class DocumentIoControllerTest {
             assertTrue(started.await(5, TimeUnit.SECONDS));
 
             var recipient = UiRecipient.window(new TabUiState(), null);
-            var requested = WindowCloseWorkflow.request(WindowCloseWorkflow.State.open(), recipient, io.pendingOperation());
-            var waiting = WindowCloseWorkflow.prepared(requested.state(), io.pendingOperation(),
-                WindowCloseWorkflow.Policy.LIVE_RECOVERY, WindowCloseWorkflow.Continuation.RECHECK_DOCUMENTS, 100L, true);
-            var repeated = WindowCloseWorkflow.request(waiting.state(), recipient, io.pendingOperation());
+            var requested = ApplicationCloseWorkflow.request(ApplicationCloseWorkflow.State.<UiRecipient, DocumentIoController.Operation>open(), recipient, io.pendingOperation());
+            var waiting = ApplicationCloseWorkflow.prepared(requested.state(), io.pendingOperation(),
+                ApplicationCloseWorkflow.Policy.LIVE_RECOVERY, ApplicationCloseWorkflow.Continuation.RECHECK_DOCUMENTS, 100L, true);
+            var repeated = ApplicationCloseWorkflow.request(waiting.state(), recipient, io.pendingOperation());
             assertSame(waiting.state(), repeated.state());
-            assertEquals(WindowCloseWorkflow.Effect.NONE,
-                WindowCloseWorkflow.tick(repeated.state(), io.pendingOperation(), 5_000_000_099L).effect());
+            assertEquals(ApplicationCloseWorkflow.Effect.NONE,
+                ApplicationCloseWorkflow.tick(repeated.state(), io.pendingOperation(), 5_000_000_099L).effect());
             assertTrue(io.busy(), "publication keeps its chance to finish before the original deadline");
             assertTrue(operation.publishing());
             assertNull(interrupted.get());
             IllegalStateException failure = assertThrows(IllegalStateException.class,
-                () -> io.expireSave(WindowCloseWorkflow.tick(repeated.state(), io.pendingOperation(),
+                () -> io.expireSave(ApplicationCloseWorkflow.tick(repeated.state(), io.pendingOperation(),
                     5_000_000_100L).state().waiting().operation()));
 
             assertTrue(failure.getMessage().contains("unknown"));

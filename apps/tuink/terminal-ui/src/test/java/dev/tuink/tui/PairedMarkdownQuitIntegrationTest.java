@@ -2,6 +2,7 @@ package dev.tuink.tui;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import dev.tuink.editor.session.application.ApplicationCloseWorkflow;
 import dev.tuiframe.input.TextInput;
 import dev.tuink.storage.jvm.BlockingPublicationStorage;
 import dev.tuink.tui.command.TuinkCommand;
@@ -73,12 +74,12 @@ class PairedMarkdownQuitIntegrationTest {
                     (PreviewTab) window.context.presentation(frozenId)).source());
                 if (timeout) {
                     var operation = window.documentIo.pendingOperation();
-                    window.controller.checkWindowCloseDeadline(System.nanoTime() + WindowCloseWorkflow.WAIT_NANOS);
+                    window.controller.checkWindowCloseDeadline(System.nanoTime() + ApplicationCloseWorkflow.WAIT_NANOS);
                     assertTrue(window.controller.running());
                     assertTrue(otherSource.uiState().notification.message.contains("outcome is still pending"));
                     window.command(TuinkCommand.APP_QUIT);
                     window.command(TuinkCommand.APP_QUIT);
-                    window.controller.checkWindowCloseDeadline(System.nanoTime() + 2 * WindowCloseWorkflow.WAIT_NANOS);
+                    window.controller.checkWindowCloseDeadline(System.nanoTime() + 2 * ApplicationCloseWorkflow.WAIT_NANOS);
                     assertSame(operation, window.documentIo.pendingOperation());
                     assertTrue(window.controller.running());
                     assertTrue(window.selected().uiState().modalState.isNone());

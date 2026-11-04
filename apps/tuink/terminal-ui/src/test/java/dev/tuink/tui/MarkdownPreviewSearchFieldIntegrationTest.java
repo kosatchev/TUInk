@@ -69,7 +69,7 @@ class MarkdownPreviewSearchFieldIntegrationTest {
             window.event(new TextInput("y"));
             assertEquals(4096, preview.searchQuery.length());
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
-            assertFalse(preview.searchEditing); assertTrue(preview.active);
+            assertFalse(preview.searchVisible); assertTrue(preview.active);
         }
     }
 

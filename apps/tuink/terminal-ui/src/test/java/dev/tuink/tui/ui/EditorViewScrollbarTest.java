@@ -52,6 +52,55 @@ class EditorViewScrollbarTest {
     }
 
     @Test
+    void wheelOverTheHorizontalScrollbarStillPansTheDocumentWithoutMovingItsCursor() {
+        Fixture fixture = fixture(20);
+        Position cursor = new Position(2, 1);
+        fixture.state().setCursor(cursor);
+        RenderPlan plan = fixture.plan(false);
+        Rect track = plan.scrollLayout().horizontalScrollbarBounds();
+        var wheel = new dev.tuiframe.input.PointerEvent(track.y(), track.x() + 2,
+            dev.tuiframe.input.PointerEvent.Kind.SCROLL_DOWN, dev.tuiframe.input.PointerEvent.Button.NONE, java.util.Set.of());
+        assertTrue(fixture.view().handleWheel(wheel, fixture.textLayout(), fixture.state(), plan, CONTENT_ROWS, CONTENT_TOP));
+        assertEquals(3, fixture.state().getTopLine());
+        assertEquals(cursor, fixture.state().getCursor());
+        assertFalse(fixture.view().isMouseSelecting());
+    }
+
+    @Test
+    void productionPointerEntryHasOneThumbCaptureOwnerAcrossCancellationAndResize() {
+        Fixture fixture = fixture(20);
+        var engine = new dev.tuink.core.EditorEngine(fixture.model(), fixture.state(), fixture.textLayout());
+        Position cursor = new Position(3, 2);
+        fixture.state().setCursor(cursor);
+        RenderPlan plan = fixture.plan(false);
+        var view = fixture.view();
+        view.handlePointer(pointerEvent(1, COLS - 1, dev.tuiframe.input.PointerEvent.Kind.PRESS), engine, plan,
+            ROWS, COLS, CONTENT_ROWS, CONTENT_TOP, false);
+        assertTrue(view.pointerCaptureActive()); assertFalse(view.isMouseSelecting());
+        view.handlePointer(pointerEvent(6, COLS - 1, dev.tuiframe.input.PointerEvent.Kind.DRAG), engine, plan,
+            ROWS, COLS, CONTENT_ROWS, CONTENT_TOP, false);
+        assertTrue(fixture.state().getTopLine() > 0); assertEquals(cursor, fixture.state().getCursor());
+        view.cancelMouseSelection(); assertFalse(view.pointerCaptureActive());
+        int top = fixture.state().getTopLine();
+        view.handlePointer(pointerEvent(4, COLS - 1, dev.tuiframe.input.PointerEvent.Kind.DRAG), engine, plan,
+            ROWS, COLS, CONTENT_ROWS, CONTENT_TOP, false);
+        assertEquals(top, fixture.state().getTopLine(), "No stale external axis may restore a cancelled drag");
+        view.handlePointer(pointerEvent(1, COLS - 1, dev.tuiframe.input.PointerEvent.Kind.PRESS), engine, plan,
+            ROWS, COLS, CONTENT_ROWS, CONTENT_TOP, false);
+        Rect wide = new Rect(GUTTER, CONTENT_TOP, 37, 25);
+        var resized = new RenderPlan(List.of(), "", "", null, null, null, null, 0, 0, true,
+            false, false, 25, top, 20, 0, 0, 20, 40, GUTTER, 0,
+            new ScrollLayout(wide, wide, null, null, null));
+        view.handlePointer(pointerEvent(2, COLS - 1, dev.tuiframe.input.PointerEvent.Kind.DRAG), engine, resized,
+            27, 40, 25, CONTENT_TOP, false);
+        assertFalse(view.pointerCaptureActive()); assertEquals(cursor, fixture.state().getCursor());
+    }
+
+    private static dev.tuiframe.input.PointerEvent pointerEvent(int row, int column, dev.tuiframe.input.PointerEvent.Kind kind) {
+        return new dev.tuiframe.input.PointerEvent(row, column, kind, dev.tuiframe.input.PointerEvent.Button.LEFT, java.util.Set.of());
+    }
+
+    @Test
     void clickingTheVerticalTrackPagesWithoutStartingADrag() {
         Fixture fixture = fixture(20);
         Position cursor = new Position(2, 1);

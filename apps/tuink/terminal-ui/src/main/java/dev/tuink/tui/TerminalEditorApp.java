@@ -56,7 +56,6 @@ import dev.tuiframe.runtime.TuiEventLoop;
 import dev.tuiframe.screen.Frame;
 import dev.tuiframe.screen.ScreenCursor;
 import dev.tuiframe.scroll.ViewportScrollPolicy;
-import dev.tuiframe.scroll.ScrollInteraction;
 import dev.tuiframe.style.CellStyle;
 import dev.tuiframe.style.CellColor;
 import dev.tuink.tui.style.UiStyles;
@@ -554,11 +553,7 @@ public class TerminalEditorApp {
         EditorViewCoordinates coordinates = new EditorViewCoordinates(
             layout, Math.max(1, contentCols), wrapLines && contentCols > 0, wrapByWords, tabWidth
         );
-        int target = ScrollInteraction.scrollBy(
-            coordinates.rowOffset(EditorViewCoordinates.Top.from(state)), delta,
-            Math.max(1, contentRows), coordinates.totalRows()
-        );
-        coordinates.applyTop(state, coordinates.topAtRow(target));
+        coordinates.scrollBy(state, Math.max(1, contentRows), contentCols, delta, 0, 0);
     }
 
     private void drawTopFileNameBold(
@@ -1358,22 +1353,13 @@ public class TerminalEditorApp {
         int mark = canvas.save();
         try {
             canvas.clip(content);
-            MarkdownPreviewPainter.paint(canvas, composition.preview(), styles, services.colorEnabled);
+            MarkdownPreviewPainter.paint(canvas, composition.preview(), styles,
+                PresentationSyntaxPolicy.preview(services.colorEnabled).color());
         } finally { canvas.restore(mark); }
-        paintSurfaceLine(canvas, 0, cols, surface.topBar().text(), styles.renderTopbar());
-        paintSurfaceLine(canvas, rows - 1, cols, surface.bottomBar(), styles.renderStatus());
-        InlinePromptBar prompt = surface.inlinePrompt();
-        int promptTop = rows - 1 - prompt.height();
-        if (prompt.visible()) {
-            CellStyle style = prompt.style() == null ? styles.renderInteractive()
-                : dev.tuink.tui.render.EditorStyleAdapter.toCell(prompt.style());
-            String[] lines = prompt.text().split("\n", -1);
-            for (int index = 0; index < lines.length; index++) paintSurfaceLine(canvas, promptTop + index, cols, lines[index], style);
-        }
-        NotificationBar notice = surface.notification();
-        if (notice.visible()) paintSurfaceLine(canvas, promptTop - 1, cols,
-            dev.tuink.tui.ui.NotificationPresentation.fit(notice.text(), cols), notice.style() == null
-                ? styles.renderNotification() : dev.tuink.tui.render.EditorStyleAdapter.toCell(notice.style()));
+        dev.tuink.tui.render.WindowTextPainter.paint(canvas, rows, cols,
+            new dev.tuink.tui.render.WindowTextPainter.Text(surface.topBar().text(), surface.bottomBar(),
+                surface.inlinePrompt().text(), surface.inlinePrompt().style(),
+                surface.notification().text(), surface.notification().style()), styles);
         paintFrameOverlays(current, canvas, rows, cols, composition.contentTopRow(), surface, layers, null, services.colorEnabled);
         Point caret = MarkdownPreviewPainter.cursor(composition.preview());
         ScreenCursor contentCursor = caret == null ? ScreenCursor.hidden()
@@ -1392,10 +1378,6 @@ public class TerminalEditorApp {
         }
         return services.present(current, frameCursor(rows, cols, composition.contentTopRow(), surface, layers,
             null, false, contentCursor), viewport, layers, composition.fullRedraw());
-    }
-
-    private void paintSurfaceLine(Canvas canvas, int row, int cols, String text, CellStyle style) {
-        CellText.drawClipped(canvas, 0, row, CellText.fit(Objects.requireNonNullElse(text, ""), cols), style, cols);
     }
 
     private RenderFrameResult renderFrame(
@@ -2181,12 +2163,12 @@ public class TerminalEditorApp {
     }
 
     LineHighlighter resolveHighlighter(Path file) {
-        return resolveHighlighter(file, false);
+        return resolveHighlighter(file, PresentationSyntaxPolicy.source(true, false, theme));
     }
 
-    LineHighlighter resolveHighlighter(Path file, boolean markdownCodeHighlighting) {
+    LineHighlighter resolveHighlighter(Path file, PresentationSyntaxPolicy.Source syntax) {
         return new SemanticHighlighterAdapter(MarkdownOpenPolicy.isMarkdown(file)
-            ? RegexHighlighter.forMarkdownDocument(markdownCodeHighlighting)
+            ? RegexHighlighter.forMarkdownDocument(syntax.codeLanguages())
             : file == null ? RegexHighlighter.withDefaults()
             : RegexHighlighter.forFileName(file.getFileName().toString()));
     }
@@ -2436,14 +2418,6 @@ public class TerminalEditorApp {
                     + " recovery snapshot(s); they were kept for retry or restore: " + String.join("; ", failureDetails);
             }
         }
-    }
-
-    boolean effectiveSyntaxHighlighting(boolean syntaxHighlightingSetting) {
-        return syntaxHighlightingAvailable() && syntaxHighlightingSetting;
-    }
-
-    boolean syntaxHighlightingAvailable() {
-        return theme != UiStyles.Theme.LIGHT;
     }
 
     private void applyTheme(UiStyles.Theme theme) {

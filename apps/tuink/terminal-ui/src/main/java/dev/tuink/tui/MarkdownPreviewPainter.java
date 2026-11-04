@@ -31,7 +31,7 @@ final class MarkdownPreviewPainter {
         var bounds = placement.bounds(); int mark = canvas.save();
         try {
             canvas.clip(bounds); canvas.fill(bounds, palette.renderBody());
-            if (placement.searchEditing()) {
+            if (placement.searchVisible()) {
                 CellText.drawClipped(canvas, bounds.x(), bounds.y(), MarkdownPreviewState.SEARCH_PREFIX,
                     palette.renderStatus(), bounds.width());
                 if (placement.searchInput() != null) {

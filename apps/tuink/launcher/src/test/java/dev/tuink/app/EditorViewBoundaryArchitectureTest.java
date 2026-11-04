@@ -17,11 +17,12 @@ class EditorViewBoundaryArchitectureTest {
         .importPackages("dev.tuink", "dev.tuiframe");
 
     @Test
-    void coordinateAndNavigationKernelUsesOnlyCoreAndCoordinateProjection() {
+    void sourceAdaptersUseOnlyCoreAndSharedInteractionPorts() {
         classes()
             .that().haveNameMatching("dev\\.tuink\\.render\\.EditorView(?:Coordinates|Navigation)(?:\\$.*)?")
             .should().onlyDependOnClassesThat()
             .haveNameMatching("(?:java\\..*|dev\\.tuink\\.core\\..*|"
+                + "dev\\.tuink\\.render\\.surface\\..*|"
                 + "dev\\.tuink\\.render\\.EditorView(?:Coordinates|Navigation)(?:\\$.*)?)")
             .check(PRODUCTION);
     }

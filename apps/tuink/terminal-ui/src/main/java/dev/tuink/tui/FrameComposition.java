@@ -42,15 +42,7 @@ record FrameComposition(
         if (document.layout().overlayRows() != surface.inlinePrompt().height()) {
             throw new IllegalArgumentException("Editor layout and prompt height must describe one frame");
         }
-        int exclusiveOwners = (layers.saveAsMode() ? 1 : 0)
-            + (search.placement() != null ? 1 : 0)
-            + (layers.confirm() != null ? 1 : 0)
-            + (layers.openFile().visible() ? 1 : 0)
-            + (layers.helpPage() != null ? 1 : 0)
-            + (layers.format() != null ? 1 : 0);
-        if (exclusiveOwners > 1) {
-            throw new IllegalArgumentException("Only one prompt or modal frame owner is allowed");
-        }
+        layers.validatePromptOwner(search.placement() != null);
     }
 
     boolean allowsScrollHints() {
@@ -118,6 +110,13 @@ record FrameComposition(
             return !blockedInputHighlight && help == null && format == null && confirm == null && !saveAsMode
                 && (topMenu == null || !topMenu.state().isOpen())
                 && !(contentFocused && openFile.visible());
+        }
+
+        void validatePromptOwner(boolean searchOwnsPrompt) {
+            int owners = (saveAsMode ? 1 : 0) + (searchOwnsPrompt ? 1 : 0)
+                + (confirm != null ? 1 : 0) + (openFile.visible() ? 1 : 0)
+                + (help != null ? 1 : 0) + (format != null ? 1 : 0);
+            if (owners > 1) throw new IllegalArgumentException("Only one prompt or modal frame owner is allowed");
         }
 
         Layers {

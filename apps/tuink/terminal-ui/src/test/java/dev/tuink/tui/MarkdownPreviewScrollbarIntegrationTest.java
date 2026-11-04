@@ -95,7 +95,7 @@ class MarkdownPreviewScrollbarIntegrationTest {
             window.event(pointer(PointerEvent.Kind.PRESS, thumb(state.scrollbars().vertical())));
             window.command(TuinkCommand.SEARCH_OPEN);
             assertFalse(state.pointerCaptureActive());
-            assertTrue(state.searchEditing);
+            assertTrue(state.searchVisible);
             window.command(TuinkCommand.SEARCH_CLOSE);
             window.event(pointer(PointerEvent.Kind.PRESS, thumb(state.scrollbars().vertical())));
             window.event(KeyStroke.of(KeyStroke.Key.P, KeyStroke.Modifier.CTRL));
@@ -135,10 +135,10 @@ class MarkdownPreviewScrollbarIntegrationTest {
             var focused = state.placement();
             var unfocused = new MarkdownPreviewState.Placement(focused.bounds(), focused.result(), focused.top(), focused.left(),
                 focused.loading(), focused.error(), focused.selection(), focused.searchMatches(), focused.activeMatch(),
-                focused.searchQuery(), focused.searchEditing(), null, null, focused.geometry());
+                focused.searchQuery(), focused.searchVisible(), null, null, focused.geometry());
             var contentFocused = new MarkdownPreviewState.Placement(focused.bounds(), focused.result(), focused.top(), focused.left(),
                 focused.loading(), focused.error(), focused.selection(), focused.searchMatches(), focused.activeMatch(),
-                focused.searchQuery(), focused.searchEditing(), focused.caret(), null, focused.geometry());
+                focused.searchQuery(), focused.searchVisible(), focused.caret(), null, focused.geometry());
             assertEquals(focused.contentBounds(), contentFocused.contentBounds());
             assertEquals(focused.scrollbars(), contentFocused.scrollbars());
             var bodyCursor = MarkdownPreviewPainter.cursor(contentFocused);

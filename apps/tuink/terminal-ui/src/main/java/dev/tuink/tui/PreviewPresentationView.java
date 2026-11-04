@@ -43,6 +43,6 @@ final class PreviewPresentationView {
 
     private static MarkdownPreviewState.Placement unfocusedQuery(MarkdownPreviewState.Placement p, boolean contentFocused) {
         return new MarkdownPreviewState.Placement(p.bounds(), p.result(), p.top(), p.left(), p.loading(), p.error(),
-            p.selection(), p.searchMatches(), p.activeMatch(), p.searchQuery(), p.searchEditing(), contentFocused ? p.caret() : null, null, p.geometry());
+            p.selection(), p.searchMatches(), p.activeMatch(), p.searchQuery(), p.searchVisible(), contentFocused ? p.caret() : null, null, p.geometry());
     }
 }

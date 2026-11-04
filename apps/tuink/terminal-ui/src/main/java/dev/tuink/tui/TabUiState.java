@@ -71,7 +71,7 @@ final class TabUiState implements AutoCloseable {
         this.saveAsInput = Objects.requireNonNull(saveAsInput, "saveAsInput");
     }
 
-    boolean hasSearch() { return searchMode || preview.searchEditing || !preview.searchQuery.isEmpty(); }
+    boolean hasSearch() { return searchMode || preview.searchVisible || !preview.searchQuery.isEmpty(); }
 
     boolean awaitingAnswer() { return openFileMode || !modalState.isNone(); }
 

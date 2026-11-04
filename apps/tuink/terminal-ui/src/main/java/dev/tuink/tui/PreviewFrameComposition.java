@@ -19,9 +19,6 @@ record PreviewFrameComposition(
         Objects.requireNonNull(preview, "preview");
         Objects.requireNonNull(surface, "surface");
         Objects.requireNonNull(layers, "layers");
-        int owners = (layers.saveAsMode() ? 1 : 0) + (layers.confirm() != null ? 1 : 0)
-            + (layers.openFile().visible() ? 1 : 0) + (layers.help() != null ? 1 : 0)
-            + (layers.format() != null ? 1 : 0);
-        if (owners > 1) throw new IllegalArgumentException("Only one prompt or modal frame owner is allowed");
+        layers.validatePromptOwner(false);
     }
 }

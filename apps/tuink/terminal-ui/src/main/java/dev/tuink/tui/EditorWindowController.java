@@ -42,7 +42,6 @@ import dev.tuink.tui.render.RenderRasterizer;
 import dev.tuiframe.runtime.TuiApplicationRunner;
 import dev.tuiframe.runtime.TuiEventLoop;
 import dev.tuiframe.screen.Frame;
-import dev.tuiframe.scroll.ScrollInteraction;
 import dev.tuiframe.widget.Button;
 import dev.tuiframe.widget.InteractionResult;
 import dev.tuiframe.widget.PlacedPointerCapture;
@@ -188,8 +187,6 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         void setMouseTracking(boolean enabled) { mouseTracking.accept(enabled); }
         boolean mouseAvailable() { return mouseAvailableSource.getAsBoolean(); }
     }
-    private EditorView.ScrollAxis editorScrollDrag = EditorView.ScrollAxis.NONE;
-    private int editorScrollDragThumbOffset;
 
     private int activeTabIndex;
     private TextModel model;
@@ -519,7 +516,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             TerminalEditorApp.EditorTab editor = result.openedDocument() == null ? null
                 : new TerminalEditorApp.EditorTab(result.openedDocument(), result.openedDocument().newRenderPlanBuilder(
                     host.resolveHighlighter(JvmDocumentStorage.pathOf(result.openedDocument().view().state().getCurrentResource()),
-                        uiSessionState.markdownCodeHighlightingSetting)));
+                        sourceSyntax())));
             if (result.activateViewId() != null) editor = sessionContext.source(result.activateViewId());
             if (editor != null) {
                 boolean activate = sessionContext.activePresentation().presentationId().equals(owner.presentationId());
@@ -782,7 +779,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             || quitConfirmMode
             || closeTabConfirmMode;
         if (!ui().searchMode) {
-            if (!ui().preview.active || !ui().preview.searchEditing) ui().searchEditorFocused = false;
+            if (!ui().preview.active || !ui().preview.searchVisible) ui().searchEditorFocused = false;
             host.searchFocusManager().deactivate(TerminalEditorApp.SEARCH_SCOPE_ID);
             searchBarPlacement = null;
         }
@@ -843,7 +840,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         else if (ui().openFileMode && !focusUi().blockingContentFocused)
             focus = ui().openFileFocusState.focus() == OpenFileInputRouter.Focus.LOCATION
                 ? ActiveSurface.Focus.EDITABLE_TEXT : ActiveSurface.Focus.CONTROL;
-        else if (modal.isNone() && kind != ActiveSurface.Kind.SOURCE && ui().preview.searchEditing && !ui().searchEditorFocused)
+        else if (modal.isNone() && kind != ActiveSurface.Kind.SOURCE && ui().preview.searchVisible && !ui().searchEditorFocused)
             focus = previewQueryFocused() ? ActiveSurface.Focus.EDITABLE_TEXT : ActiveSurface.Focus.CONTROL;
         else if (modal.isNone() && kind == ActiveSurface.Kind.SOURCE && ui().searchMode && !ui().searchEditorFocused)
             focus = SearchController.isSearchFieldFocus(host.currentSearchFocus())
@@ -852,7 +849,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             && (source.documentSession().document().io().busy() || formatWorkflow.affects(source.documentSession()));
         return new ActiveSurface(presentation.presentationId(), kind, focus, scope,
             uiSessionState.readingModeSetting || kind != ActiveSurface.Kind.SOURCE, locked, documentIo.busy(),
-            terminal.mouseAvailable(), host.syntaxHighlightingAvailable(), uiSessionState.wrapLinesSetting);
+            terminal.mouseAvailable(), sourceSyntax().available(), uiSessionState.wrapLinesSetting);
     }
 
     private void applyUiIntent(InputActionDispatcher.Intent intent) {
@@ -862,6 +859,10 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             case HELP_AUTHOR -> setModal(UiModalState.helpAuthor());
             default -> { }
         }
+    }
+
+    private PresentationSyntaxPolicy.Source sourceSyntax() {
+        return PresentationSyntaxPolicy.source(uiSessionState, host.theme);
     }
 
     private WindowChrome.Input chromeInput() {
@@ -951,7 +952,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         renderer.setVisibleWhitespace(uiSessionState.visibleWhitespaceSetting);
         renderer.setTabWidth(uiSessionState.tabWidthSetting);
         renderPlanBuilder.setSyntaxHighlightingEnabled(
-            host.effectiveSyntaxHighlighting(uiSessionState.syntaxHighlightingSetting)
+            sourceSyntax().enabled()
         );
         renderPlanBuilder.setCommentSyntaxProfile(
             LanguageProfiles.resolveCommentSyntax(state.getCurrentResource() == null ? null : state.getCurrentResource().nameHint())
@@ -1025,8 +1026,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
 
     private void cancelDocumentPointerInteraction() {
         editorView.cancelMouseSelection();
-        editorScrollDrag = EditorView.ScrollAxis.NONE;
-        editorScrollDragThumbOffset = 0;
+
     }
 
     private void cancelPointerCapture(PointerCaptureCancellation reason) {
@@ -1081,7 +1081,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
 
     private FocusScope<SearchFocus, TextField.Action> previewSearchScope() {
         MarkdownPreviewState preview = ui().preview;
-        boolean enabled = preview.searchEditing;
+        boolean enabled = preview.searchVisible;
         var scope = FocusScope.single(PREVIEW_SEARCH_SCOPE, FocusResetPolicy.FIRST_FOCUSABLE,
             new RoutedTarget<>(SearchFocus.FIND, preview.searchPlacement(), FocusSpace.root(preview.bounds), true, enabled));
         if (enabled && modalState().isNone() && !ui().openFileMode && !topMenu.isOpen() && !ui().searchEditorFocused) ui().searchFocusManager.context(scope, SearchFocus.FIND);
@@ -1165,7 +1165,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         @Override public Rect bounds() { return bounds; }
         @Override public void paint(Canvas canvas, Theme theme, WidgetState state) {}
         @Override public boolean pointerCaptureActive() {
-            return editorView.isMouseSelecting() || editorScrollDrag != EditorView.ScrollAxis.NONE;
+            return editorView.pointerCaptureActive();
         }
         @Override public InteractionResult<Void> cancelPointerCapture(PointerCaptureCancellation reason) {
             cancelDocumentPointerInteraction();
@@ -1211,7 +1211,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         if (TerminalEditorApp.modalInputKind(modalState(), ui().openFileMode) != ModalInputPolicy.Kind.NONE) {
             focusUi().blockingContentFocused = true;
             clearBlockingControlFocus();
-        } else if (ui().searchMode || ui().preview.active && ui().preview.searchEditing) {
+        } else if (ui().searchMode || ui().preview.active && ui().preview.searchVisible) {
             ui().searchEditorFocused = true;
             if (ui().preview.active) ui().searchFocusManager.clear(previewSearchScope());
             else if (searchBarPlacement != null) host.searchFocusManager().clear(searchBarPlacement.focusScope());
@@ -1266,7 +1266,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         DialogInputPolicy.apply(DialogInputPolicy.Decision.BLOCK, this::focusFirstBlockingControl,
             () -> host.modalAttention().request(TerminalEditorApp.modalInputOwner(modalState(), ui().openFileMode), System.nanoTime()));
         editorView.cancelMouseSelection();
-        editorScrollDrag = EditorView.ScrollAxis.NONE;
+
         eventLoop.invalidate();
     }
 
@@ -1285,7 +1285,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             if (mode.permitsContentFocus()
                 && (documentPointerHit(mouse)
                     || (drag || mouse.kind() == PointerEvent.Kind.RELEASE)
-                        && (focusUi().blockingContentFocused || editorScrollDrag != EditorView.ScrollAxis.NONE))) {
+                        && (focusUi().blockingContentFocused || editorView.pointerCaptureActive()))) {
                 if (mouse.kind() == PointerEvent.Kind.PRESS && mouse.button() == PointerEvent.Button.LEFT)
                     focusDocument();
                 return java.util.Optional.of(WindowInput.physical(mouse, currentRecipient()));
@@ -1359,7 +1359,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
 
     private boolean searchVisible() {
         return modalState().isNone() && !ui().openFileMode
-            && (ui().preview.active ? ui().preview.searchEditing : ui().searchMode);
+            && (ui().preview.active ? ui().preview.searchVisible : ui().searchMode);
     }
 
     private void advanceSearchFocus(KeyStroke event) {
@@ -1468,167 +1468,24 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     }
 
     private void handleDocumentPointer(PointerEvent mouse) {
-        if (mouse.kind() == PointerEvent.Kind.RELEASE) {
-            editorScrollDrag = EditorView.ScrollAxis.NONE;
-            editorScrollDragThumbOffset = 0;
-            editorView.handleMouseRelease(engine);
+        if (mouse.kind() != PointerEvent.Kind.RELEASE && (mouse.button() == PointerEvent.Button.OTHER
+            || !uiSessionState.mouseModeSetting || !terminal.mouseAvailable())) return;
+        if (mouse.kind() == PointerEvent.Kind.PRESS && mouse.button() == PointerEvent.Button.LEFT
+            && !documentPointerHit(mouse)) {
+            editorView.cancelMouseSelection();
             return;
         }
-        if (mouse.button() == PointerEvent.Button.OTHER
-            || !uiSessionState.mouseModeSetting || !terminal.mouseAvailable()) {
-            return;
-        }
-        switch (mouse.kind()) {
-            case SCROLL_UP -> {
-                int topBefore = state.getTopLine();
-                int topWrapBefore = state.getTopWrapSegment();
-                TerminalEditorApp.applyWheelVerticalScroll(
-                    model,
-                    engine.textLayout(),
-                    state,
-                    plan,
-                    -3,
-                    uiSessionState.tabWidthSetting
-                );
-                if (state.getTopLine() != topBefore || state.getTopWrapSegment() != topWrapBefore) {
-                    viewportController.onManualVerticalPan();
-                }
-            }
-            case SCROLL_DOWN -> {
-                int topBefore = state.getTopLine();
-                int topWrapBefore = state.getTopWrapSegment();
-                TerminalEditorApp.applyWheelVerticalScroll(
-                    model,
-                    engine.textLayout(),
-                    state,
-                    plan,
-                    3,
-                    uiSessionState.tabWidthSetting
-                );
-                if (state.getTopLine() != topBefore || state.getTopWrapSegment() != topWrapBefore) {
-                    viewportController.onManualVerticalPan();
-                }
-            }
-            case SCROLL_LEFT, SCROLL_RIGHT -> {
-                if (!plan.wrapLines()) {
-                    int previousLeft = state.getLeftVisualColumn();
-                    int visibleCols = Math.max(0, cols - plan.gutterWidth() - plan.scrollbarWidth());
-                    int nextLeft = ScrollInteraction.scrollBy(
-                        previousLeft, mouse.kind() == PointerEvent.Kind.SCROLL_LEFT ? -3 : 3,
-                        visibleCols, plan.totalColumns()
-                    );
-                    new EditorViewCoordinates(engine.textLayout(), visibleCols, false, false,
-                        uiSessionState.tabWidthSetting).applyHorizontalOffset(state, nextLeft);
-                    viewportController.onScrollbarInteraction(
-                        new EditorView.ScrollPointerResult(true, EditorView.ScrollAxis.NONE, 0),
-                        previousLeft, state.getLeftVisualColumn(), state.getTopLine(), state.getTopLine()
-                    );
-                }
-            }
-            case PRESS -> {
-                if (mouse.button() == PointerEvent.Button.LEFT) {
-                    editorScrollDrag = EditorView.ScrollAxis.NONE;
-                    editorScrollDragThumbOffset = 0;
-                    int leftBeforeScrollPointer = state.getLeftVisualColumn();
-                    int topBeforeScrollPointer = state.getTopLine();
-                    int topWrapBeforeScrollPointer = state.getTopWrapSegment();
-                    EditorView.ScrollPointerResult scrollPointer = editorView.handleScrollbarPointer(
-                        mouse.row(),
-                        mouse.column(),
-                        rows,
-                        cols,
-                        contentTopRow,
-                        plan,
-                        model,
-                        engine.textLayout(),
-                        state
-                    );
-                    if (scrollPointer.consumed()) {
-                        editorScrollDrag = scrollPointer.dragAxis();
-                        editorScrollDragThumbOffset = scrollPointer.dragThumbOffset();
-                        viewportController.onScrollbarInteraction(
-                            scrollPointer,
-                            leftBeforeScrollPointer,
-                            state.getLeftVisualColumn(),
-                            topBeforeScrollPointer,
-                            state.getTopLine()
-                        );
-                        if (state.getTopWrapSegment() != topWrapBeforeScrollPointer) {
-                            viewportController.onManualVerticalPan();
-                        }
-                        editorView.cancelMouseSelection();
-                        return;
-                    }
-                    if (!documentPointerHit(mouse)) {
-                        editorView.cancelMouseSelection();
-                        return;
-                    }
-                    focusDocument();
-                    editorView.handleMousePress(
-                        mouse,
-                        model,
-                        state,
-                        plan,
-                        contentRows,
-                        engine,
-                        contentTopRow,
-                        TerminalEditorApp.shouldExtendEditorSelection(mouse)
-                    );
-                    viewportController.onEditorTextInteraction();
-                }
-            }
-            case MOVE, DRAG -> {
-                if (mouse.button() == PointerEvent.Button.LEFT
-                    && editorScrollDrag != EditorView.ScrollAxis.NONE) {
-                    int leftBeforeDragScroll = state.getLeftVisualColumn();
-                    int topBeforeDragScroll = state.getTopLine();
-                    int topWrapBeforeDragScroll = state.getTopWrapSegment();
-                    EditorView.ScrollPointerResult dragScrollPointer = editorView.handleScrollbarPointer(
-                        mouse.row(),
-                        mouse.column(),
-                        rows,
-                        cols,
-                        contentTopRow,
-                        plan,
-                        model,
-                        engine.textLayout(),
-                        state,
-                        editorScrollDrag,
-                        editorScrollDragThumbOffset
-                    );
-                    if (!dragScrollPointer.consumed()) {
-                        editorScrollDrag = EditorView.ScrollAxis.NONE;
-                        editorScrollDragThumbOffset = 0;
-                    }
-                    viewportController.onScrollbarInteraction(
-                        dragScrollPointer,
-                        leftBeforeDragScroll,
-                        state.getLeftVisualColumn(),
-                        topBeforeDragScroll,
-                        state.getTopLine()
-                    );
-                    if (state.getTopWrapSegment() != topWrapBeforeDragScroll) {
-                        viewportController.onManualVerticalPan();
-                    }
-                    return;
-                }
-                if (!editorView.isMouseSelecting() || mouse.button() != PointerEvent.Button.LEFT) {
-                    return;
-                }
-                editorView.handleMouseDrag(
-                    mouse,
-                    model,
-                    state,
-                    plan,
-                    contentRows,
-                    engine,
-                    contentTopRow
-                );
-                viewportController.onEditorTextInteraction();
-            }
-            default -> {
-                // Unknown pointer events have no editor action.
-            }
+        int leftBefore = state.getLeftVisualColumn();
+        int topBefore = state.getTopLine();
+        int wrapBefore = state.getTopWrapSegment();
+        var result = editorView.handlePointer(mouse, engine, plan, rows, cols, contentRows, contentTopRow,
+            TerminalEditorApp.shouldExtendEditorSelection(mouse));
+        if (result.focusDocument()) focusDocument();
+        if (result.textInteraction()) viewportController.onEditorTextInteraction();
+        if (result.scroll().consumed()) {
+            viewportController.onScrollbarInteraction(result.scroll(), leftBefore, state.getLeftVisualColumn(),
+                topBefore, state.getTopLine());
+            if (wrapBefore != state.getTopWrapSegment()) viewportController.onManualVerticalPan();
         }
     }
 
@@ -1711,7 +1568,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             boolean encoding = statusBarPlacement.encoding().contains(pointer.column(), pointer.row());
             boolean endings = statusBarPlacement.endings().contains(pointer.column(), pointer.row());
             if (encoding || endings) {
-                invokeFormatCommand(TuinkCommand.DOCUMENT_FORMAT);
+                invokeCommand(CommandInvocation.of(TuinkCommand.DOCUMENT_FORMAT.id()), currentRecipient());
                 if (ui().formatDialog != null) ui().formatDialog.requestedFocus = encoding
                     ? DocumentFormatDialogView.Target.ENCODING : DocumentFormatDialogView.Target.EOL;
                 eventLoop.invalidate();
@@ -1971,14 +1828,14 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         if (!currentInput(key)) return;
         if (key instanceof WindowInput.Command command) { executeResolvedCommand(command); return; }
         if (key instanceof WindowInput.Gesture gesture && gesture.motion() instanceof WindowInput.Pointer pointer) {
-            if (modalState().isNone() && ui().preview.active && ui().preview.searchEditing
+            if (modalState().isNone() && ui().preview.active && ui().preview.searchVisible
                 && (ui().preview.searchField.captures(pointer.event())
                     || pointer.event().row() == ui().preview.bounds.y()
                         && ui().preview.bounds.contains(pointer.event().column(), pointer.event().row()))
                 && routePreviewSearchOwner(key)) return;
             routeDocumentPointer(pointer.event()); return;
         }
-        if (ui().preview.active && ui().preview.searchEditing && routePreviewSearchOwner(key)) return;
+        if (ui().preview.active && ui().preview.searchVisible && routePreviewSearchOwner(key)) return;
         dispatchContentInput(key);
     }
 
@@ -2224,7 +2081,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             return;
         }
 
-        if (ui().preview.active && ui().preview.searchEditing && routePreviewSearchOwner(key)) return;
+        if (ui().preview.active && ui().preview.searchVisible && routePreviewSearchOwner(key)) return;
         if (handleApplicationCommand(resolvedCommand)) return;
         if (resolvedCommand == TuinkCommand.UI_ESCAPE) { cancelCurrentOperation(); return; }
         dispatchContentInput(key);
@@ -2316,10 +2173,6 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             reportTemporaryPreferencesChange();
             return;
         }
-    }
-
-    private void invokeFormatCommand(TuinkCommand command) {
-        commandRouter.invoke(CommandInvocation.of(command.id())).ifPresent(this::handleFormatCommand);
     }
 
     private void reopenRecovery() {
@@ -2532,7 +2385,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             TuiDocumentSession document = result.openedDocument();
             RenderPlanBuilder builder = document.newRenderPlanBuilder(
                 host.resolveHighlighter(JvmDocumentStorage.pathOf(document.view().state().getCurrentResource()),
-                    uiSessionState.markdownCodeHighlightingSetting));
+                    sourceSyntax()));
             sessionContext.addAll(List.of(new TerminalEditorApp.EditorTab(document, builder)));
             if (!documentPromptActive && publishToOpenedView) {
                 openedView = document.viewId();
@@ -2713,7 +2566,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             if (selected.test(tab)) {
                 RenderPlanBuilder builder = tab.documentSession().newRenderPlanBuilder(
                     host.resolveHighlighter(JvmDocumentStorage.pathOf(tab.state().getCurrentResource()),
-                        uiSessionState.markdownCodeHighlightingSetting));
+                        sourceSyntax()));
                 sessionContext.update(tab.withRenderPlanBuilder(builder));
                 if (sessionContext.activePresentation() instanceof TerminalEditorApp.EditorTab
                     && index == sessionContext.activeTabIndex()) renderPlanBuilder = builder;
@@ -3228,7 +3081,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             case CURSOR_DOCUMENT_END, CURSOR_SELECT_DOCUMENT_END -> preview.moveSelection(PreviewSelection.Move.DOCUMENT_END, extend);
             case SEARCH_NEXT -> preview.nextMatch(false);
             case SEARCH_PREVIOUS -> preview.nextMatch(true);
-            case SEARCH_CLOSE -> preview.searchEditing = false;
+            case SEARCH_CLOSE -> preview.searchVisible = false;
             case VIEW_PREVIEW_NEXT_HEADING, VIEW_PREVIEW_PREVIOUS_HEADING -> {
                 if (preview.ready()) {
                     var headings = dev.tuink.markdown.MarkdownNavigation.headings(preview.result.document());
@@ -3282,12 +3135,12 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
 
     private boolean routePreviewSearchOwner(WindowInput input) {
         MarkdownPreviewState preview = ui().preview;
-        if (!preview.searchEditing || !modalState().isNone() || ui().openFileMode || topMenu.isOpen()) return false;
+        if (!preview.searchVisible || !modalState().isNone() || ui().openFileMode || topMenu.isOpen()) return false;
         if (input instanceof WindowInput.Command resolved && resolved.route() instanceof CommandRouter.RoutedAction action) {
             if (action.action() == TuinkCommand.UI_ESCAPE || action.action() == TuinkCommand.SEARCH_CLOSE) {
                 cancelPointerCapture(PointerCaptureCancellation.SURFACE_CHANGED);
                 ui().searchFocusManager.deactivate(PREVIEW_SEARCH_SCOPE);
-                preview.searchEditing = false; preview.searchField.cancelMouseSelection(); return true;
+                preview.searchVisible = false; preview.searchField.cancelMouseSelection(); return true;
             }
             if (ui().searchEditorFocused) return false;
             if (action.action() == TuinkCommand.SEARCH_NEXT

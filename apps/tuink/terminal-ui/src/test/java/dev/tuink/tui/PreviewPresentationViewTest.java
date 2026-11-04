@@ -80,16 +80,16 @@ class PreviewPresentationViewTest {
 
     @Test void globalQuestionsKeepTheirDefaultAndRetainedPreviewQueryDoesNotPaintAsFocusedBehindThem() {
         try (var fixture = new Fixture(false, directory.resolve("snapshot.md"))) {
-            fixture.preview.uiState().preview.searchEditing = true;
+            fixture.preview.uiState().preview.searchVisible = true;
             fixture.preview.uiState().preview.searchField.set("needle");
             fixture.preview.uiState().preview.setSearchQuery("needle");
             var frame = fixture.prepare(UiModalState.recoveryConfirm(), 24, 80);
             assertNotNull(frame.layers().confirm());
             assertEquals(ConfirmChoice.CANCEL, fixture.preview.uiState().confirmFocusManager.focused().orElseThrow());
             assertNull(frame.preview().searchInput());
-            assertTrue(frame.preview().searchEditing(), "the retained Find row keeps the same content geometry");
+            assertTrue(frame.preview().searchVisible(), "the retained Find row keeps the same content geometry");
             assertNull(MarkdownPreviewPainter.cursor(frame.preview()), "the modal hides the query caret");
-            assertTrue(fixture.preview.uiState().preview.searchEditing, "retained query resumes when the modal closes");
+            assertTrue(fixture.preview.uiState().preview.searchVisible, "retained query resumes when the modal closes");
             assertEquals("needle", fixture.preview.uiState().preview.searchField.text());
             var help = fixture.prepare(UiModalState.helpHints(), 24, 80);
             assertNotNull(help.layers().help());

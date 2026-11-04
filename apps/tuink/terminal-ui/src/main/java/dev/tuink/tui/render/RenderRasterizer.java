@@ -20,7 +20,6 @@ import dev.tuiframe.style.CellStyle;
 import dev.tuink.tui.style.UiStyles;
 import dev.tuink.tui.style.UiStyles.Palette;
 import dev.tuink.tui.ui.EditorScrollbars;
-import dev.tuink.tui.ui.NotificationPresentation;
 import java.util.Arrays;
 import java.lang.ref.WeakReference;
 import java.util.AbstractList;
@@ -137,34 +136,11 @@ public class RenderRasterizer implements AutoCloseable {
             }
         } finally { endPreparedLineFrame(); }
 
-        int statusRow = Math.max(0, rows - 1);
-
-        drawText(buffer, 0, 0, truncateOrPad(plan.topBarText(), cols), styles.renderTopbar(), cols);
-        drawText(buffer, statusRow, 0, truncateOrPad(plan.bottomBarText(), cols), styles.renderStatus(), cols);
         drawScrollbars(canvas, plan, rows, cols, topRow);
-        int overlayBottomRow = rows - 2;
-        int overlayTopRow = overlayBottomRow;
-        if (plan.interactiveBarText() != null && overlayBottomRow >= 0) {
-            CellStyle style = plan.interactiveBarStyle() == null
-                ? styles.renderInteractive()
-                : cellStyle(plan.interactiveBarStyle());
-            String[] lines = splitLines(plan.interactiveBarText());
-            for (int i = lines.length - 1; i >= 0; i--) {
-                int row = overlayBottomRow - (lines.length - 1 - i);
-                if (row < 0) {
-                    continue;
-                }
-                drawText(buffer, row, 0, truncateOrPad(lines[i], cols), style, cols);
-            }
-            overlayTopRow = overlayBottomRow - lines.length;
-        }
-        if (plan.notificationBarText() != null && overlayTopRow >= 0) {
-            CellStyle style = plan.notificationBarStyle() == null
-                ? styles.renderNotification()
-                : cellStyle(plan.notificationBarStyle());
-            drawText(buffer, overlayTopRow, 0,
-                truncateOrPad(NotificationPresentation.fit(plan.notificationBarText(), cols), cols), style, cols);
-        }
+        WindowTextPainter.paint(canvas, rows, cols,
+            new WindowTextPainter.Text(plan.topBarText(), plan.bottomBarText(),
+                plan.interactiveBarText(), plan.interactiveBarStyle(),
+                plan.notificationBarText(), plan.notificationBarStyle()), styles);
 
         return buffer;
     }
@@ -257,33 +233,6 @@ public class RenderRasterizer implements AutoCloseable {
             buffer.set(row, outCol, safe, style);
             outCol += width;
         }
-    }
-
-    private String truncateOrPad(String text, int width) {
-        if (width <= 0) {
-            return "";
-        }
-        StringBuilder out = new StringBuilder();
-        int used = 0;
-        String value = text == null ? "" : text;
-        TerminalText.Metrics metrics = TerminalText.metrics(value, 1);
-        for (int index = 0; index < metrics.graphemeCount(); index++) {
-            String safe = displayGrapheme(value, metrics.start(index), metrics.end(index));
-            int cellWidth = Math.max(1, metrics.width(index));
-            if (used + cellWidth > width) {
-                break;
-            }
-            out.append(safe);
-            used += cellWidth;
-        }
-        return out.append(" ".repeat(Math.max(0, width - used))).toString();
-    }
-
-    private String[] splitLines(String text) {
-        if (text == null) {
-            return new String[0];
-        }
-        return text.split("\\n", -1);
     }
 
     private int resolveActiveGutterRow(RenderPlan plan) {

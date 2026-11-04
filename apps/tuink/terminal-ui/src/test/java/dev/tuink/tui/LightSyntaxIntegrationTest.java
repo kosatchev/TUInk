@@ -39,12 +39,12 @@ class LightSyntaxIntegrationTest {
             window.command(TuinkCommand.VIEW_TOGGLE_SYNTAX);
             assertTrue(window.ui.syntaxHighlightingSetting);
             assertTrue(window.screenRow(window.height - 2).contains("unavailable in the current theme"));
-            assertFalse(window.host.effectiveSyntaxHighlighting(window.ui.syntaxHighlightingSetting));
+            assertFalse(PresentationSyntaxPolicy.source(window.ui, window.host.theme).enabled());
 
             window.command(TuinkCommand.VIEW_CYCLE_THEME);
             assertEquals(UiStyles.Theme.CYAN, window.host.theme);
             assertTrue(window.controller.activeSurface().syntaxAvailable());
-            assertTrue(window.host.effectiveSyntaxHighlighting(window.ui.syntaxHighlightingSetting));
+            assertTrue(PresentationSyntaxPolicy.source(window.ui, window.host.theme).enabled());
             assertEquals("keep", window.active().tabSession().model().getLine(0));
             assertFalse(window.active().state().isDirty());
         }
@@ -62,7 +62,7 @@ class LightSyntaxIntegrationTest {
 
             assertEquals(UiStyles.Theme.CYAN, window.host.theme);
             assertFalse(window.ui.syntaxHighlightingSetting);
-            assertFalse(window.host.effectiveSyntaxHighlighting(window.ui.syntaxHighlightingSetting));
+            assertFalse(PresentationSyntaxPolicy.source(window.ui, window.host.theme).enabled());
         }
     }
 

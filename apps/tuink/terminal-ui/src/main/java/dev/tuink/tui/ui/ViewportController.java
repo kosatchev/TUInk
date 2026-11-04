@@ -9,7 +9,7 @@ import dev.tuink.render.EditorViewCoordinates;
 import dev.tuink.render.EditorViewCoordinates.Geometry;
 import dev.tuink.render.EditorViewCoordinates.Top;
 import dev.tuink.render.EditorViewNavigation;
-import dev.tuiframe.scroll.ScrollInteraction;
+import dev.tuink.render.surface.TextSurfaceInteraction;
 
 /**
  * Tracks viewport interaction mode and applies cursor visibility policy.
@@ -111,7 +111,7 @@ public final class ViewportController {
                 ? previousViewport.anchor()
                 : new EditorViewCoordinates(layout, previousViewport.geometry()).anchor(Top.from(state));
             if (!geometry.equals(previousViewport.geometry())) {
-                coordinates.applyTop(state, coordinates.topForAnchor(anchor));
+                coordinates.applyTop(state, coordinates.topAtRow(TextSurfaceInteraction.anchorRow(coordinates, anchor, 0)));
             }
         }
         if (!manualVerticalPan) {
@@ -126,7 +126,8 @@ public final class ViewportController {
             Top top = coordinates.normalizeTop(Top.from(state));
             int offset = coordinates.rowOffset(top);
             int total = coordinates.totalRows();
-            int bounded = ScrollInteraction.clampOffset(offset, contentRows, total);
+            int bounded = TextSurfaceInteraction.clamp(new TextSurfaceInteraction.Viewport(offset, 0, contentRows, contentCols),
+                total, contentCols).top();
             coordinates.applyTop(state, bounded == offset ? top : coordinates.topAtRow(bounded));
             state.setLeftColumn(0);
             state.setLeftVisualColumn(0);
@@ -134,17 +135,15 @@ public final class ViewportController {
             return;
         }
 
-        state.setTopLine(ScrollInteraction.clampOffset(state.getTopLine(), contentRows, model.lineCount()));
-        state.setTopWrapSegment(0);
         Position cursor = model.clamp(state.getCursor());
         int requiredColumns = Math.max(
             layout.maxVisualLineWidth(safeTabWidth),
             layout.visualColumnAt(cursor.line(), cursor.col(), safeTabWidth) + 1
         );
-        int left = ScrollInteraction.clampOffset(state.getLeftVisualColumn(), contentCols, requiredColumns);
-        if (left != state.getLeftVisualColumn()) {
-            coordinates.applyHorizontalOffset(state, left);
-        }
+        var clamped = TextSurfaceInteraction.clamp(coordinates.viewport(state, contentRows, contentCols),
+            coordinates.totalRows(), requiredColumns);
+        coordinates.applyTop(state, coordinates.topAtRow(clamped.top()));
+        if (clamped.left() != state.getLeftVisualColumn()) coordinates.applyHorizontalOffset(state, clamped.left());
         rememberViewport(model, coordinates, state, geometry, anchor);
     }
 

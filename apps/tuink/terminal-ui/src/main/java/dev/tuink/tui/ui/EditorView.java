@@ -10,11 +10,14 @@ import dev.tuink.core.Position;
 import dev.tuink.core.TextModel;
 import dev.tuink.render.EditorViewCoordinates;
 import dev.tuink.render.EditorViewNavigation;
+import dev.tuink.render.surface.TextSurfaceInteraction;
+import dev.tuink.render.surface.TextSurfacePointer;
+import dev.tuiframe.geometry.Rect;
+import dev.tuiframe.scroll.ScrollLayout;
 import dev.tuink.render.RenderPlan;
 import dev.tuiframe.geometry.Point;
 import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.scroll.Scrollbar;
-import dev.tuiframe.scroll.ScrollInteraction;
 import java.util.Objects;
 import java.util.function.LongSupplier;
 import java.util.function.Function;
@@ -23,9 +26,6 @@ import java.util.function.Function;
  * UI helper for the main editor text area.
  */
 public final class EditorView {
-    private static final int EDGE_AUTO_SCROLL_MAX_STEP = 6;
-    private static final long EDGE_AUTO_SCROLL_INTERVAL_NANOS = 50_000_000L;
-    private static final long DOUBLE_CLICK_WINDOW_NANOS = 450_000_000L;
     private final LongSupplier nanoClock;
     private Function<DocumentCommand, DocumentCommandResult.Applied> commands;
 
@@ -35,12 +35,9 @@ public final class EditorView {
         HORIZONTAL
     }
 
-    private boolean mouseSelecting;
-    private Position lastClickPosition;
-    private long lastClickAtNanos;
+    private final TextSurfacePointer<Position> pointer = new TextSurfacePointer<>((first, second) ->
+        first.line() == second.line() && Math.abs((long) first.col() - second.col()) <= 1);
     private int tabWidth = 4;
-    private PointerEvent selectionScrollPointer;
-    private long selectionScrollAtNanos;
 
     public EditorView() {
         this(System::nanoTime);
@@ -67,10 +64,7 @@ public final class EditorView {
     }
 
     public void cancelMouseSelection() {
-        mouseSelecting = false;
-        selectionScrollPointer = null;
-        lastClickPosition = null;
-        lastClickAtNanos = 0L;
+        pointer.cancel();
     }
 
     public void setTabWidth(int tabWidth) {
@@ -87,139 +81,133 @@ public final class EditorView {
         int contentTopRow,
         boolean extendSelection
     ) {
-        selectionScrollPointer = null;
-        boolean selectedWordByDoubleClick = false;
-        Position hit = mouseToTextPosition(
-            mouse,
-            model,
-            engine.textLayout(),
-            state,
-            plan,
-            contentRows,
-            contentTopRow
-        );
-        if (hit != null) {
-            mouseSelecting = true;
-            if (extendSelection) {
-                resetClickSequence();
-                select(DocumentCommand.SelectionAction.EXTEND, hit);
-            } else if (isDoubleClick(hit) && select(DocumentCommand.SelectionAction.WORD, hit)) {
-                selectedWordByDoubleClick = true;
-            } else {
-                select(DocumentCommand.SelectionAction.BEGIN, hit);
-            }
-        } else {
-            mouseSelecting = false;
-            lastClickPosition = null;
-            lastClickAtNanos = 0L;
-        }
-        ensureCursorVisible(engine, plan, contentRows);
-        return selectedWordByDoubleClick;
-    }
-
-    private void resetClickSequence() {
-        lastClickPosition = null;
-        lastClickAtNanos = 0L;
+        var placement = pointerPlacement(engine.textLayout(), state, plan, contentRows, contentTopRow);
+        var result = pointer.handle(placement, mouse, extendSelection, nanoClock.getAsLong());
+        boolean word = applyPointer(result, state, engine, plan, contentRows);
+        if (result.target() == null) ensureCursorVisible(engine, plan, contentRows);
+        return word;
     }
 
     public void handleMouseDrag(
-        PointerEvent mouse,
-        TextModel model,
-        EditorState state,
-        RenderPlan plan,
-        int contentRows,
-        EditorEngine engine,
-        int contentTopRow
-    ) {
-        if (!mouseSelecting || mouse.button() != PointerEvent.Button.LEFT) {
-            return;
-        }
-        boolean changed = dragSelection(mouse, model, state, plan, contentRows, engine, contentTopRow);
-        scheduleSelectionScroll(mouse, plan, contentRows, contentTopRow, changed, nanoClock.getAsLong());
-    }
-
-    /** Next selection scroll runs on the UI thread, using the last drag coordinates. */
-    public long nanosUntilSelectionScroll(long nowNanos) {
-        return selectionScrollPointer == null ? -1L : Math.max(0L, selectionScrollAtNanos - nowNanos);
-    }
-
-    public boolean scrollSelectionIfDue(
-        TextModel model,
-        EditorState state,
-        RenderPlan plan,
-        int contentRows,
-        EditorEngine engine,
-        int contentTopRow,
-        long nowNanos
-    ) {
-        if (selectionScrollPointer == null || nowNanos - selectionScrollAtNanos < 0L) {
-            return false;
-        }
-        PointerEvent mouse = selectionScrollPointer;
-        boolean changed = dragSelection(mouse, model, state, plan, contentRows, engine, contentTopRow);
-        scheduleSelectionScroll(mouse, plan, contentRows, contentTopRow, changed, nowNanos);
-        return changed;
-    }
-
-    private void scheduleSelectionScroll(
-        PointerEvent mouse, RenderPlan plan, int contentRows, int contentTopRow, boolean changed, long nowNanos
-    ) {
-        int top = Math.max(1, contentTopRow);
-        int bottom = top + contentRows - 1;
-        boolean verticalEdge = mouse.row() <= top || mouse.row() >= bottom;
-        boolean horizontalEdge = !plan.wrapLines()
-            && (mouse.column() <= plan.gutterWidth() || mouse.column() >= plan.cols() - plan.scrollbarWidth() - 1);
-        selectionScrollPointer = changed && contentRows > 0 && (verticalEdge || horizontalEdge) ? mouse : null;
-        selectionScrollAtNanos = nowNanos + EDGE_AUTO_SCROLL_INTERVAL_NANOS;
-    }
-
-    private boolean dragSelection(
         PointerEvent mouse, TextModel model, EditorState state, RenderPlan plan, int contentRows,
         EditorEngine engine, int contentTopRow
     ) {
-        Position oldCursor = state.getCursor();
-        int oldTop = state.getTopLine();
-        int oldSegment = state.getTopWrapSegment();
-        int oldLeft = state.getLeftVisualColumn();
+        if (!pointer.selecting() || mouse.button() != PointerEvent.Button.LEFT) return;
+        dragSelection(mouse, state, plan, contentRows, engine, contentTopRow, nanoClock.getAsLong());
+    }
+
+    public long nanosUntilSelectionScroll(long nowNanos) { return pointer.nanosUntilRepeat(nowNanos); }
+
+    public boolean scrollSelectionIfDue(
+        TextModel model, EditorState state, RenderPlan plan, int contentRows,
+        EditorEngine engine, int contentTopRow, long nowNanos
+    ) {
+        PointerEvent repeat = pointer.repeatIfDue(nowNanos);
+        return repeat != null && dragSelection(repeat, state, plan, contentRows, engine, contentTopRow, nowNanos);
+    }
+
+    private boolean dragSelection(PointerEvent mouse, EditorState state, RenderPlan plan, int contentRows,
+                                  EditorEngine engine, int contentTopRow, long now) {
+        Position before = state.getCursor();
+        int top = state.getTopLine(), segment = state.getTopWrapSegment(), left = state.getLeftVisualColumn();
+        var placement = pointerPlacement(engine.textLayout(), state, plan, contentRows, contentTopRow);
+        var result = pointer.handle(placement, mouse, false, now);
+        applyPointer(result, state, engine, plan, contentRows);
+        boolean changed = !before.equals(state.getCursor()) || top != state.getTopLine()
+            || segment != state.getTopWrapSegment() || left != state.getLeftVisualColumn();
+        pointer.afterDrag(placement, mouse, changed, now);
+        return changed;
+    }
+
+    private TextSurfacePointer.Placement<Position> pointerPlacement(
+        EditorTextLayout layout, EditorState state, RenderPlan plan, int contentRows, int contentTopRow
+    ) {
+        int columns = Math.max(0, plan.cols() - plan.gutterWidth() - plan.scrollbarWidth());
         int top = Math.max(1, contentTopRow);
-        int bottom = top + Math.max(0, contentRows) - 1;
-        PointerEvent effectiveMouse = mouse;
-        autoScrollVerticalOnDrag(
-            mouse,
-            engine.textLayout(),
-            state,
-            plan,
-            contentRows,
-            contentTopRow
-        );
-        if (mouse.row() < top || mouse.row() > bottom) {
-            int clampedRow = Math.max(
-                top,
-                Math.min(mouse.row(), bottom)
-            );
-            effectiveMouse = new PointerEvent(
-                clampedRow,
-                mouse.column(),
-                mouse.kind(),
-                mouse.button(),
-                mouse.modifiers()
-            );
+        var content = new Rect(plan.gutterWidth(), top, columns, Math.max(0, contentRows));
+        var placement = new ScrollLayout(content, content, null, null, null);
+        var geometry = coordinates(layout, plan, columns);
+        int pointerRows = Math.max(0, contentRows);
+        Rect horizontalTrack = plan.scrollLayout().horizontalScrollbarBounds();
+        if (horizontalTrack != null) pointerRows = Math.max(pointerRows, Math.max(0, horizontalTrack.bottomExclusive() - top));
+        return new TextSurfacePointer.Placement<>(new Rect(0, top, Math.max(0, plan.cols()), pointerRows),
+            placement, null, null, geometry, geometry.viewport(state, contentRows, columns),
+            geometry.totalRows(), plan.totalColumns(), TextSurfacePointer.Policy.source(plan.wrapLines()));
+    }
+
+    /** One production entry: the shared pointer controller owns both content and scrollbar capture. */
+    public PointerResult handlePointer(PointerEvent mouse, EditorEngine engine, RenderPlan plan,
+                                       int rows, int columns, int contentRows, int contentTopRow, boolean extendSelection) {
+        EditorState state = engine.state();
+        var bars = EditorScrollbars.from(plan, rows, columns, contentTopRow);
+        var geometry = coordinates(engine.textLayout(), plan, bars.layout().contentBounds().width());
+        int top = Math.max(1, contentTopRow);
+        int pointerRows = Math.max(0, contentRows);
+        Rect horizontal = bars.layout().horizontalScrollbarBounds();
+        if (horizontal != null) pointerRows = Math.max(pointerRows, Math.max(0, horizontal.bottomExclusive() - top));
+        var placement = new TextSurfacePointer.Placement<Position>(new Rect(0, top, Math.max(0, columns), pointerRows),
+            bars.layout(), bars.vertical(), bars.horizontal(), geometry,
+            geometry.viewport(state, bars.layout().contentBounds().height(), bars.layout().contentBounds().width()),
+            plan.totalLines(), plan.totalColumns(), TextSurfacePointer.Policy.source(plan.wrapLines()));
+        Position cursorBefore = state.getCursor();
+        int topBefore = state.getTopLine(), segmentBefore = state.getTopWrapSegment(), leftBefore = state.getLeftVisualColumn();
+        long now = nanoClock.getAsLong();
+        var gesture = pointer.handle(placement, mouse, extendSelection, now);
+        boolean word = applyPointer(gesture, state, engine, plan, contentRows);
+        boolean textInteraction = gesture.action() == TextSurfacePointer.Action.BEGIN
+            || gesture.action() == TextSurfacePointer.Action.EXTEND || gesture.action() == TextSurfacePointer.Action.WORD;
+        if (textInteraction && (mouse.kind() == PointerEvent.Kind.DRAG || mouse.kind() == PointerEvent.Kind.MOVE)) {
+            boolean changed = !cursorBefore.equals(state.getCursor()) || topBefore != state.getTopLine()
+                || segmentBefore != state.getTopWrapSegment() || leftBefore != state.getLeftVisualColumn();
+            pointer.afterDrag(placement, mouse, changed, now);
         }
-        Position hit = mouseToTextPosition(
-            effectiveMouse,
-            model,
-            engine.textLayout(),
-            state,
-            plan,
-            contentRows,
-            contentTopRow
-        );
-        if (hit != null) {
-            select(DocumentCommand.SelectionAction.EXTEND, hit);
-            ensureCursorVisible(engine, plan, contentRows);
+        boolean scroll = gesture.action() == TextSurfacePointer.Action.SCROLL;
+        boolean wheel = mouse.kind() == PointerEvent.Kind.SCROLL_UP || mouse.kind() == PointerEvent.Kind.SCROLL_DOWN
+            || mouse.kind() == PointerEvent.Kind.SCROLL_LEFT || mouse.kind() == PointerEvent.Kind.SCROLL_RIGHT;
+        ScrollAxis axis = !scroll || wheel || gesture.drag() == null ? ScrollAxis.NONE
+            : gesture.drag().axis() == Scrollbar.Axis.VERTICAL ? ScrollAxis.VERTICAL : ScrollAxis.HORIZONTAL;
+        var scrollResult = new ScrollPointerResult(scroll, axis, gesture.drag() == null ? 0 : gesture.drag().grabOffset());
+        return new PointerResult(gesture.consumed(), textInteraction,
+            textInteraction && mouse.kind() == PointerEvent.Kind.PRESS, word, scrollResult);
+    }
+
+    public boolean pointerCaptureActive() { return pointer.capturing(); }
+
+    public record PointerResult(boolean consumed, boolean textInteraction, boolean focusDocument,
+                                boolean selectedWord, ScrollPointerResult scroll) {}
+
+    /** The window keeps focus/manual-pan policy; wheel classification and offset computation are shared. */
+    public boolean handleWheel(PointerEvent mouse, EditorTextLayout layout, EditorState state,
+                               RenderPlan plan, int contentRows, int contentTopRow) {
+        var placement = pointerPlacement(layout, state, plan, contentRows, contentTopRow);
+        var gesture = pointer.handle(placement, mouse, false, nanoClock.getAsLong());
+        if (gesture.action() != TextSurfacePointer.Action.SCROLL) return false;
+        var geometry = coordinates(layout, plan, placement.viewport().columns());
+        if (placement.viewport().top() != gesture.viewport().top()) geometry.applyTop(state, geometry.topAtRow(gesture.viewport().top()));
+        if (!plan.wrapLines() && placement.viewport().left() != gesture.viewport().left())
+            geometry.applyHorizontalOffset(state, gesture.viewport().left());
+        return gesture.consumed();
+    }
+
+    private boolean applyPointer(TextSurfacePointer.Result<Position> result, EditorState state,
+                                 EditorEngine engine, RenderPlan plan, int contentRows) {
+        var coordinates = coordinates(engine.textLayout(), plan, result.viewport().columns());
+        var previous = coordinates.viewport(state, contentRows, result.viewport().columns());
+        if (previous.top() != result.viewport().top()) coordinates.applyTop(state, coordinates.topAtRow(result.viewport().top()));
+        if (previous.left() != result.viewport().left()) coordinates.applyHorizontalOffset(state, result.viewport().left());
+        boolean selectedWord = false;
+        switch (result.action()) {
+            case BEGIN -> select(DocumentCommand.SelectionAction.BEGIN, result.target());
+            case EXTEND -> select(DocumentCommand.SelectionAction.EXTEND, result.target());
+            case WORD -> {
+                selectedWord = select(DocumentCommand.SelectionAction.WORD, result.target());
+                if (!selectedWord) select(DocumentCommand.SelectionAction.BEGIN, result.target());
+            }
+            case FINISH -> select(DocumentCommand.SelectionAction.FINISH, null);
+            default -> { }
         }
-        return !oldCursor.equals(state.getCursor()) || oldTop != state.getTopLine()
-            || oldSegment != state.getTopWrapSegment() || oldLeft != state.getLeftVisualColumn();
+        if (result.target() != null) ensureCursorVisible(engine, plan, contentRows);
+        return selectedWord;
     }
 
     private void ensureCursorVisible(EditorEngine engine, RenderPlan plan, int contentRows) {
@@ -227,69 +215,11 @@ public final class EditorView {
         EditorViewNavigation.ensureCursorVisible(engine, contentRows, contentColumns, plan.wrapLines(), plan.wrapByWords());
     }
 
-    private void autoScrollVerticalOnDrag(
-        PointerEvent mouse,
-        EditorTextLayout textLayout,
-        EditorState state,
-        RenderPlan plan,
-        int contentRows,
-        int contentTopRow
-    ) {
-        if (contentRows <= 0) {
-            return;
-        }
-        int top = Math.max(1, contentTopRow);
-        int bottom = top + contentRows - 1;
-        int delta = autoScrollDeltaForMouseRow(mouse.row(), top, bottom);
-        if (delta == 0) {
-            return;
-        }
-        int visibleCols = Math.max(0, plan.cols() - plan.gutterWidth() - plan.scrollbarWidth());
-        EditorViewCoordinates coordinates = coordinates(textLayout, plan, visibleCols);
-        int currentTop = coordinates.rowOffset(EditorViewCoordinates.Top.from(state));
-        int targetTop = ScrollInteraction.scrollBy(currentTop, delta, contentRows, coordinates.totalRows());
-        coordinates.applyTop(state, coordinates.topAtRow(targetTop));
-    }
-
-    private int autoScrollDeltaForMouseRow(int mouseRow, int top, int bottom) {
-        if (mouseRow < top) {
-            return -Math.min(EDGE_AUTO_SCROLL_MAX_STEP, Math.max(1, top - mouseRow));
-        }
-        if (mouseRow > bottom) {
-            return Math.min(EDGE_AUTO_SCROLL_MAX_STEP, Math.max(1, mouseRow - bottom));
-        }
-        if (mouseRow == top) {
-            return -1;
-        }
-        if (mouseRow == bottom) {
-            return 1;
-        }
-        return 0;
-    }
-
-    private boolean isDoubleClick(Position hit) {
-        long now = nanoClock.getAsLong();
-        boolean doubleClick = lastClickPosition != null
-            && hit.line() == lastClickPosition.line()
-            && Math.abs(hit.col() - lastClickPosition.col()) <= 1
-            && now - lastClickAtNanos <= DOUBLE_CLICK_WINDOW_NANOS;
-        lastClickPosition = hit;
-        lastClickAtNanos = now;
-        return doubleClick;
-    }
-
     public void handleMouseRelease(EditorEngine engine) {
-        selectionScrollPointer = null;
-        if (!mouseSelecting) {
-            return;
-        }
-        mouseSelecting = false;
-        select(DocumentCommand.SelectionAction.FINISH, null);
+        if (pointer.finishSelection()) select(DocumentCommand.SelectionAction.FINISH, null);
     }
 
-    public boolean isMouseSelecting() {
-        return mouseSelecting;
-    }
+    public boolean isMouseSelecting() { return pointer.selecting(); }
 
     public Position mouseToTextPosition(
         PointerEvent mouse,
@@ -378,53 +308,23 @@ public final class EditorView {
         ScrollAxis axis,
         int dragThumbOffset
     ) {
-        if (textLayout.model() != model) {
-            throw new IllegalArgumentException("textLayout must be bound to model");
+        if (textLayout.model() != model) throw new IllegalArgumentException("textLayout must be bound to model");
+        EditorScrollbars bars = EditorScrollbars.from(plan, rows, cols, contentTopRow);
+        int columns = bars.layout().contentBounds().width();
+        var geometry = coordinates(textLayout, plan, columns);
+        var placement = new TextSurfacePointer.Placement<Position>(bars.layout().contentBounds(), bars.layout(),
+            bars.vertical(), bars.horizontal(), geometry, geometry.viewport(state, bars.layout().contentBounds().height(), columns),
+            plan.totalLines(), plan.totalColumns(), TextSurfacePointer.Policy.source(plan.wrapLines()));
+        Scrollbar.Drag drag = axis == ScrollAxis.NONE ? null : new Scrollbar.Drag(
+            axis == ScrollAxis.VERTICAL ? Scrollbar.Axis.VERTICAL : Scrollbar.Axis.HORIZONTAL, dragThumbOffset);
+        var result = pointer.scrollbar(placement, new Point(mouseCol, mouseRow), drag);
+        if (result.consumed()) {
+            if (placement.viewport().top() != result.viewport().top()) geometry.applyTop(state, geometry.topAtRow(result.viewport().top()));
+            if (placement.viewport().left() != result.viewport().left()) geometry.applyHorizontalOffset(state, result.viewport().left());
         }
-        EditorScrollbars scrollbars = EditorScrollbars.from(plan, rows, cols, contentTopRow);
-        Point point = new Point(mouseCol, mouseRow);
-        if (axis != ScrollAxis.HORIZONTAL && scrollbars.vertical() != null) {
-            Scrollbar.Press press = scrollbarPointer(
-                scrollbars.vertical(), point, axis == ScrollAxis.VERTICAL, dragThumbOffset
-            );
-            if (press != null) {
-                int targetTop = press.offset();
-                int visibleCols = Math.max(0, cols - plan.gutterWidth() - plan.scrollbarWidth());
-                EditorViewCoordinates coordinates = coordinates(textLayout, plan, visibleCols);
-                coordinates.applyTop(state, coordinates.topAtRow(targetTop));
-                return new ScrollPointerResult(
-                    true,
-                    press.drag() != null ? ScrollAxis.VERTICAL : ScrollAxis.NONE,
-                    press.drag() != null ? press.drag().grabOffset() : 0
-                );
-            }
-        }
-
-        if (axis != ScrollAxis.VERTICAL && scrollbars.horizontal() != null) {
-            Scrollbar.Press press = scrollbarPointer(
-                scrollbars.horizontal(), point, axis == ScrollAxis.HORIZONTAL, dragThumbOffset
-            );
-            if (press != null) {
-                coordinates(textLayout, plan, cols).applyHorizontalOffset(state, press.offset());
-                return new ScrollPointerResult(
-                    true,
-                    press.drag() != null ? ScrollAxis.HORIZONTAL : ScrollAxis.NONE,
-                    press.drag() != null ? press.drag().grabOffset() : 0
-                );
-            }
-        }
-
-        return new ScrollPointerResult(false, ScrollAxis.NONE, 0);
-    }
-
-    private static Scrollbar.Press scrollbarPointer(
-        Scrollbar scrollbar, Point point, boolean dragging, int dragThumbOffset
-    ) {
-        if (dragging) {
-            Scrollbar.Drag drag = new Scrollbar.Drag(scrollbar.axis(), dragThumbOffset);
-            return new Scrollbar.Press(scrollbar.drag(point, drag), drag);
-        }
-        return scrollbar.press(point).orElse(null);
+        ScrollAxis nextAxis = result.drag() == null ? ScrollAxis.NONE
+            : result.drag().axis() == Scrollbar.Axis.VERTICAL ? ScrollAxis.VERTICAL : ScrollAxis.HORIZONTAL;
+        return new ScrollPointerResult(result.consumed(), nextAxis, result.drag() == null ? 0 : result.drag().grabOffset());
     }
 
     public record CursorPosition(int row, int col) {

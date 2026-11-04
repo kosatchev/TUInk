@@ -76,14 +76,14 @@ class PreviewMenuPointerIntegrationTest {
             try (var window = window("search-" + kind, kind)) {
                 window.command(TuinkCommand.SEARCH_OPEN);
                 window.event(new TextInput("row-00"));
-                assertTrue(window.preview().searchEditing);
+                assertTrue(window.preview().searchVisible);
                 assertEquals("row-00", window.preview().searchQuery);
                 var navigation = Navigation.capture(window.preview());
                 boolean before = window.ui.readingModeSetting;
                 window.command(TuinkCommand.MENU_SETTINGS);
                 clickMenu(window, "Reading mode");
                 assertEquals(!before, window.ui.readingModeSetting);
-                assertTrue(window.preview().searchEditing);
+                assertTrue(window.preview().searchVisible);
                 assertEquals("row-00", window.preview().searchQuery);
                 assertEquals(navigation, Navigation.capture(window.preview()));
                 assertFalse(window.menu.isOpen());

@@ -102,7 +102,7 @@ class JavaScriptContinuationIntegrationTest {
                 if (window.tree.state().selectedId() != null && window.tree.state().selectedId().path().equals(file)) {
                     window.event(KeyStroke.of(KeyStroke.Key.ENTER));
                     assertEquals(file, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
-                    assertTrue(window.host.effectiveSyntaxHighlighting(window.ui.syntaxHighlightingSetting));
+                    assertTrue(PresentationSyntaxPolicy.source(window.ui, window.host.theme).enabled());
                     return window;
                 }
                 window.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));

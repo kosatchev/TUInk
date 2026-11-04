@@ -7,12 +7,12 @@ import dev.tuink.editor.storage.ResourceBinding;
 import dev.tuink.markdown.preview.PreviewCoordinator;
 import dev.tuink.render.markdown.MarkdownLayout;
 import dev.tuink.render.markdown.MarkdownGeometry;
+import dev.tuink.render.markdown.MarkdownTextSurface;
+import dev.tuink.render.surface.TextSurfaceInteraction;
+import dev.tuink.render.surface.TextSurfacePointer;
 import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.cell.CellText;
-import dev.tuiframe.geometry.Point;
 import dev.tuiframe.input.PointerEvent;
-import dev.tuiframe.scroll.Scrollbar;
-import dev.tuiframe.scroll.ScrollInteraction;
 import dev.tuiframe.widget.TextField;
 import java.util.ArrayList;
 import java.util.List;
@@ -40,7 +40,7 @@ final class MarkdownPreviewState implements AutoCloseable {
     Rect bounds = new Rect(0, 0, 0, 0);
     String searchQuery = "";
     final TextField searchField = new TextField();
-    boolean searchEditing;
+    boolean searchVisible;
     List<PreviewSelection.Range> searchMatches = List.of();
     int activeMatch = -1;
     private DocumentId selectionDocument;
@@ -62,8 +62,7 @@ final class MarkdownPreviewState implements AutoCloseable {
     private long pendingLinkGeneration;
     private long lifecycleGeneration;
     private long pendingLifecycleGeneration;
-    private boolean pointerSelecting;
-    private Scrollbar.Drag scrollDrag;
+    private final TextSurfacePointer<Integer> pointer = new TextSurfacePointer<>((first, second) -> first.equals(second));
 
     /** Admission happens before a new preview is inserted into workspace membership. */
     boolean initialize(FrozenDocumentSource input, long generation, MarkdownPreviewService service) {
@@ -184,13 +183,13 @@ final class MarkdownPreviewState implements AutoCloseable {
                 result = finished;
                 geometry = new MarkdownGeometry(result, service == null ? bytes -> null : service.renderMemoryBudget());
                 top = preserve && viewportAnchor >= 0
-                    ? PreviewSelection.position(result, viewportAnchor).row() + viewportAnchorDelta
+                    ? TextSurfaceInteraction.anchorRow(textSurface(), viewportAnchor, viewportAnchorDelta)
                     : result.rowForSource(anchorSourceLine);
                 if (preserve) {
                     selection.bindGeometry(geometry);
                     selection.reconcile(result.document().projection().text());
                     if (caretAnchor >= 0) selection.restoreVisual(result,
-                        PreviewSelection.position(result, caretAnchor).row() + caretAnchorDelta, caretColumn);
+                        TextSurfaceInteraction.anchorRow(textSurface(), caretAnchor, caretAnchorDelta), caretColumn);
                 }
                 else {
                     selection.clear(); selection.bindGeometry(geometry); selection.selectAt(result, Math.max(0, top), 0, false);
@@ -215,80 +214,57 @@ final class MarkdownPreviewState implements AutoCloseable {
     /** Viewport-only panning carries the visual caret, keeping the next key in the visible area. */
     void scroll(int rows, int columns) {
         if (!ready()) return;
-        var content = contentBounds();
-        scrollTo(ScrollInteraction.scrollBy(top, rows, content.height(), result.lines().size()),
-            ScrollInteraction.scrollBy(left, columns, content.width(), result.extent()));
+        var next = TextSurfaceInteraction.scrollBy(viewport(), result.lines().size(), result.extent(), rows, columns);
+        scrollTo(next.top(), next.left());
     }
     void clamp() {
         if (result == null) { top = 0; left = 0; return; }
-        var content = contentBounds();
-        top = ScrollInteraction.clampOffset(top, content.height(), result.lines().size());
-        left = ScrollInteraction.clampOffset(left, content.width(), result.extent());
+        applyViewport(TextSurfaceInteraction.clamp(viewport(), result.lines().size(), result.extent()));
     }
-    PreviewScrollbars scrollbars() { return PreviewScrollbars.from(bounds, result, searchEditing, top, left); }
+    private TextSurfaceInteraction.Viewport viewport() {
+        var content = contentBounds();
+        return new TextSurfaceInteraction.Viewport(top, left, content.height(), content.width());
+    }
+    private void applyViewport(TextSurfaceInteraction.Viewport viewport) { top = viewport.top(); left = viewport.left(); }
+    private MarkdownTextSurface textSurface() { return new MarkdownTextSurface(result, geometry); }
+
+    PreviewScrollbars scrollbars() { return PreviewScrollbars.from(bounds, result, searchVisible, top, left); }
     Rect contentBounds() { return scrollbars().layout().contentBounds(); }
-    boolean pointerCaptureActive() { return pointerSelecting || scrollDrag != null; }
-    void cancelPointerInteraction() { pointerSelecting = false; scrollDrag = null; }
+    boolean pointerCaptureActive() { return pointer.capturing(); }
+    void cancelPointerInteraction() { pointer.cancel(); }
 
     private void scrollTo(int nextTop, int nextLeft) {
-        int oldTop = top, oldLeft = left;
-        top = nextTop; left = nextLeft; clamp();
-        selection.pan(result, top - oldTop, left - oldLeft);
-        keepCaretInViewport(); activeMatch = -1;
+        var caret = selection.visualPosition(result);
+        var pan = TextSurfaceInteraction.pan(textSurface(), viewport(), new TextSurfaceInteraction.Visual(caret.row(), caret.column()),
+            nextTop, nextLeft, TextSurfaceInteraction.PanCaret.TRANSLATE_VISUAL);
+        int rows = pan.viewport().top() - top, columns = pan.viewport().left() - left;
+        applyViewport(pan.viewport());
+        selection.pan(result, pan, rows > 0 || rows == 0 && columns >= 0); activeMatch = -1;
     }
 
     /** Scrollbar hit testing and painting consume the same immutable placement. */
     boolean pointer(PointerEvent event) {
-        boolean capturing = pointerCaptureActive();
-        if (event.kind() == PointerEvent.Kind.RELEASE) {
-            cancelPointerInteraction();
-            return capturing || bounds.contains(event.column(), event.row());
+        if (!ready()) {
+            boolean captured = pointer.capturing();
+            if (event.kind() == PointerEvent.Kind.RELEASE) pointer.finishSelection();
+            return captured || bounds.contains(event.column(), event.row());
         }
-        if (!ready()) return bounds.contains(event.column(), event.row());
-        boolean drag = event.button() == PointerEvent.Button.LEFT
-            && (event.kind() == PointerEvent.Kind.DRAG || event.kind() == PointerEvent.Kind.MOVE);
-        if (!bounds.contains(event.column(), event.row()) && !(drag && capturing)) {
-            if (event.kind() == PointerEvent.Kind.PRESS) cancelPointerInteraction();
-            return false;
-        }
-        switch (event.kind()) {
-            case SCROLL_UP -> scroll(-3, 0);
-            case SCROLL_DOWN -> scroll(3, 0);
-            case SCROLL_LEFT -> scroll(0, -3);
-            case SCROLL_RIGHT -> scroll(0, 3);
-            case PRESS -> {
-                cancelPointerInteraction();
-                if (event.button() != PointerEvent.Button.LEFT) return true;
-                var placement = scrollbars();
-                Point point = new Point(event.column(), event.row());
-                for (Scrollbar bar : new Scrollbar[] { placement.vertical(), placement.horizontal() }) {
-                    if (bar == null) continue;
-                    var press = bar.press(point);
-                    if (press.isPresent()) {
-                        if (bar.axis() == Scrollbar.Axis.VERTICAL) scrollTo(press.get().offset(), left);
-                        else scrollTo(top, press.get().offset());
-                        scrollDrag = press.get().drag();
-                        return true;
-                    }
-                }
-                if (placement.layout().contentBounds().contains(point)) {
-                    pointerSelecting = true;
-                    pointerAt(event.row(), event.column(), event.modifiers().contains(dev.tuiframe.input.KeyStroke.Modifier.SHIFT));
-                }
-            }
-            case DRAG, MOVE -> {
-                if (drag && scrollDrag != null) {
-                    var placement = scrollbars();
-                    var bar = scrollDrag.axis() == Scrollbar.Axis.VERTICAL ? placement.vertical() : placement.horizontal();
-                    if (bar == null) cancelPointerInteraction();
-                    else if (scrollDrag.axis() == Scrollbar.Axis.VERTICAL)
-                        scrollTo(bar.drag(new Point(event.column(), event.row()), scrollDrag), left);
-                    else scrollTo(top, bar.drag(new Point(event.column(), event.row()), scrollDrag));
-                } else if (drag && pointerSelecting) pointerAt(event.row(), event.column(), true);
+        var bars = scrollbars();
+        var placement = new TextSurfacePointer.Placement<Integer>(bounds, bars.layout(), bars.vertical(), bars.horizontal(),
+            textSurface(), viewport(), result.lines().size(), result.extent(), TextSurfacePointer.Policy.preview());
+        var gesture = pointer.handle(placement, event,
+            event.modifiers().contains(dev.tuiframe.input.KeyStroke.Modifier.SHIFT), System.nanoTime());
+        switch (gesture.action()) {
+            case SCROLL -> scrollTo(gesture.viewport().top(), gesture.viewport().left());
+            case BEGIN, EXTEND, WORD -> {
+                if (gesture.viewport().top() != top || gesture.viewport().left() != left) applyViewport(gesture.viewport());
+                selection.selectAtColumn(result, gesture.visual().row(), gesture.visual().column(),
+                    gesture.action() == TextSurfacePointer.Action.EXTEND);
+                activeMatch = -1; revealCaret();
             }
             default -> { }
         }
-        return true;
+        return gesture.consumed();
     }
 
     boolean ready() {
@@ -311,22 +287,24 @@ final class MarkdownPreviewState implements AutoCloseable {
         if (!ready() || result.lines().isEmpty()) return;
         var content = contentBounds();
         if (content.isEmpty()) return;
-        int row = Math.max(0, Math.min(result.lines().size() - 1, top + windowRow - content.y()));
-        int visual = Math.max(0, windowColumn - content.x() + left);
-        selection.selectAtColumn(result, row, visual, extend); activeMatch = -1; revealCaret();
+        // Captured drags may continue outside the content; clamp their row before the common hit conversion.
+        int localRow = Math.clamp(windowRow - content.y(), 0, content.height() - 1);
+        var hit = TextSurfaceInteraction.hit(viewport(), localRow, windowColumn - content.x());
+        selection.selectAtColumn(result, hit.row(), hit.column(), extend); activeMatch = -1; revealCaret();
     }
     void moveSelection(PreviewSelection.Move move, boolean extend) {
         if (!ready() || result.lines().isEmpty()) return;
         int page = Math.max(1, contentBounds().height() - 1);
         selection.move(result, move, extend, page);
         if (move == PreviewSelection.Move.PAGE_UP || move == PreviewSelection.Move.PAGE_DOWN) {
-            top = Math.max(0, top + (move == PreviewSelection.Move.PAGE_UP ? -page : page));
+            top = TextSurfaceInteraction.pageTop(top, move == PreviewSelection.Move.PAGE_UP ? -page : page,
+                result.lines().size(), contentBounds().height(), true);
             clamp(); keepCaretInViewport();
         } else revealCaret();
         activeMatch = -1;
     }
     void beginSearch() {
-        cancelPointerInteraction(); searchEditing = true; searchField.selectAll();
+        cancelPointerInteraction(); searchVisible = true; searchField.selectAll();
         if (ready()) { clamp(); keepCaretInViewport(); }
     }
     void setSearchQuery(String query) {
@@ -373,22 +351,15 @@ final class MarkdownPreviewState implements AutoCloseable {
     }
     private void revealCaret() {
         var position = selection.visualPosition(result);
-        var content = contentBounds();
-        int rows = Math.max(1, content.height()), columns = Math.max(1, content.width());
-        if (position.row() < top) top = position.row();
-        else if (position.row() >= top + rows) top = position.row() - rows + 1;
-        int column = position.column();
-        if (column < left) left = column;
-        else if (column >= left + columns) left = column - columns + 1;
-        clamp();
+        applyViewport(TextSurfaceInteraction.reveal(viewport(), new TextSurfaceInteraction.Visual(position.row(), position.column()),
+            result.lines().size(), result.extent(), 0, true, true));
     }
     private void keepCaretInViewport() {
         if (result.lines().isEmpty()) return;
         var caret = selection.visualPosition(result);
-        var content = contentBounds();
-        int row = Math.max(top, Math.min(caret.row(), top + Math.max(1, content.height()) - 1));
-        int column = Math.max(left, Math.min(caret.column(), left + Math.max(1, content.width()) - 1));
-        if (row != caret.row() || column != caret.column()) selection.restoreVisual(result, row, column);
+        var visible = TextSurfaceInteraction.keepVisible(new TextSurfaceInteraction.Visual(caret.row(), caret.column()), viewport());
+        if (visible.row() != caret.row() || visible.column() != caret.column())
+            selection.restoreVisual(result, visible.row(), visible.column());
     }
     private void captureAnchor() {
         if (result == null || result.lines().isEmpty()) return;
@@ -410,29 +381,29 @@ final class MarkdownPreviewState implements AutoCloseable {
     }
     Placement placement() {
         return new Placement(bounds, ready() ? result : null, top, left, pending != null, error,
-            selection.snapshot(), searchMatches, activeMatch, searchQuery, searchEditing,
-            ready() ? selection.visualPosition(result) : null, searchEditing ? searchPlacement() : null,
+            selection.snapshot(), searchMatches, activeMatch, searchQuery, searchVisible,
+            ready() ? selection.visualPosition(result) : null, searchVisible ? searchPlacement() : null,
             ready() ? geometry : null);
     }
     record Placement(Rect bounds, MarkdownLayout.Result result, int top, int left, boolean loading, String error,
                      PreviewSelection.Snapshot selection, List<PreviewSelection.Range> searchMatches,
-                     int activeMatch, String searchQuery, boolean searchEditing,
+                     int activeMatch, String searchQuery, boolean searchVisible,
                      PreviewSelection.VisualPosition caret, TextField.Placement searchInput, MarkdownGeometry geometry) {
         Placement { searchMatches = List.copyOf(searchMatches); }
-        PreviewScrollbars scrollbars() { return PreviewScrollbars.from(bounds, result, searchEditing, top, left); }
+        PreviewScrollbars scrollbars() { return PreviewScrollbars.from(bounds, result, searchVisible, top, left); }
         Rect contentBounds() { return scrollbars().layout().contentBounds(); }
         Placement(Rect bounds, MarkdownLayout.Result result, int top, int left, boolean loading, String error,
                   PreviewSelection.Snapshot selection, List<PreviewSelection.Range> searchMatches,
-                  int activeMatch, String searchQuery, boolean searchEditing,
+                  int activeMatch, String searchQuery, boolean searchVisible,
                   PreviewSelection.VisualPosition caret, TextField.Placement searchInput) {
             this(bounds, result, top, left, loading, error, selection, searchMatches, activeMatch,
-                searchQuery, searchEditing, caret, searchInput, null);
+                searchQuery, searchVisible, caret, searchInput, null);
         }
         Placement(Rect bounds, MarkdownLayout.Result result, int top, int left, boolean loading, String error,
                   PreviewSelection.Snapshot selection, List<PreviewSelection.Range> searchMatches,
-                  int activeMatch, String searchQuery, boolean searchEditing) {
+                  int activeMatch, String searchQuery, boolean searchVisible) {
             this(bounds, result, top, left, loading, error, selection, searchMatches, activeMatch,
-                searchQuery, searchEditing, null, null);
+                searchQuery, searchVisible, null, null);
         }
         Placement(Rect bounds, MarkdownLayout.Result result, int top, int left, boolean loading, String error) {
             this(bounds, result, top, left, loading, error, PreviewSelection.Snapshot.EMPTY, List.of(), -1, "", false);

@@ -4,6 +4,8 @@ import dev.tuink.core.EditorState;
 import dev.tuink.core.EditorTextLayout;
 import dev.tuink.core.Position;
 import dev.tuink.core.TextModel;
+import dev.tuink.render.surface.TextSurfaceGeometry;
+import dev.tuink.render.surface.TextSurfaceInteraction;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
@@ -12,7 +14,7 @@ import java.util.Objects;
  * Document coordinates for one editor geometry, shared by rendering, pointer hits and resize anchors.
  * The bound layout owns all metrics and wrap caches; this object holds no derived text cache.
  */
-public final class EditorViewCoordinates {
+public final class EditorViewCoordinates implements TextSurfaceGeometry<Position> {
     private final EditorTextLayout layout;
     private final TextModel model;
     private final Geometry geometry;
@@ -122,19 +124,66 @@ public final class EditorViewCoordinates {
     /** Returns null for a row outside the editor content; columns are relative to its text area. */
     public Position positionInViewport(EditorState state, int visibleRows, int row, int column) {
         Objects.requireNonNull(state, "state");
-        if (row < 0 || row >= visibleRows) {
-            return null;
-        }
-        int documentRow = saturatedSum(rowOffset(Top.from(state)), row);
-        int documentColumn = geometry.wrapLines() ? Math.max(0, column)
-            : saturatedSum(state.getLeftVisualColumn(), Math.max(0, column));
-        return positionAt(documentRow, documentColumn);
+        var hit = TextSurfaceInteraction.hit(new TextSurfaceInteraction.Viewport(rowOffset(Top.from(state)),
+            geometry.wrapLines() ? 0 : state.getLeftVisualColumn(), visibleRows, geometry.columns()), row, column);
+        return hit == null ? null : positionAt(hit);
+    }
+
+    @Override public int totalColumns() { return layout.maxVisualLineWidth(geometry.tabWidth()); }
+
+    @Override public int rowWidth(int row) {
+        Top top = topAtRow(row);
+        if (!geometry.wrapLines()) return visualColumn(top.line(), model.lineLength(top.line()));
+        List<Integer> starts = starts(top.line());
+        int start = starts.get(top.segment());
+        int end = top.segment() + 1 < starts.size() ? starts.get(top.segment() + 1) : model.lineLength(top.line());
+        return visualColumn(top.line(), end) - visualColumn(top.line(), start);
+    }
+
+    @Override public TextSurfaceInteraction.Visual visualPosition(Position position) {
+        VisualPosition at = toVisual(position);
+        return new TextSurfaceInteraction.Visual(at.row(), at.column());
+    }
+
+    @Override public Position positionAt(TextSurfaceInteraction.Visual visual) {
+        return positionAt(visual.row(), visual.column());
+    }
+
+    @Override public TextSurfaceInteraction.Visual normalize(TextSurfaceInteraction.Visual visual) {
+        return visualPosition(positionAt(visual));
+    }
+
+    @Override public int previousColumn(int row, int column) { return adjacentColumn(row, column, -1); }
+    @Override public int nextColumn(int row, int column) { return adjacentColumn(row, column, 1); }
+
+    private int adjacentColumn(int row, int column, int direction) {
+        Top top = topAtRow(row);
+        int start = geometry.wrapLines() ? starts(top.line()).get(top.segment()) : 0;
+        int base = visualColumn(top.line(), start);
+        int offset = layout.textOffsetAtVisualColumn(top.line(), saturatedSum(base, Math.max(0, column + direction)),
+            geometry.tabWidth(), direction < 0 ? EditorTextLayout.Bias.FLOOR : EditorTextLayout.Bias.CEIL);
+        return Math.clamp(visualColumn(top.line(), offset) - base, 0, rowWidth(row));
     }
 
     public VisualPosition inViewport(Position position, EditorState state) {
         VisualPosition absolute = toVisual(position);
         return new VisualPosition(absolute.row() - rowOffset(Top.from(state)),
             absolute.column() - (geometry.wrapLines() ? 0 : state.getLeftVisualColumn()));
+    }
+
+    public TextSurfaceInteraction.Viewport viewport(EditorState state, int rows, int columns) {
+        return new TextSurfaceInteraction.Viewport(rowOffset(Top.from(state)),
+            geometry.wrapLines() ? 0 : state.getLeftVisualColumn(), rows, columns);
+    }
+
+    /** Source viewport adapter: scrolling never creates or changes an editing caret. */
+    public void scrollBy(EditorState state, int rows, int columns, int deltaRows, int deltaColumns, int totalColumns) {
+        var current = viewport(state, rows, columns);
+        var requested = TextSurfaceInteraction.scrollBy(current, totalRows(), totalColumns, deltaRows, deltaColumns);
+        var next = TextSurfaceInteraction.pan(this, current, visualPosition(state.getCursor()), requested.top(), requested.left(),
+            TextSurfaceInteraction.PanCaret.PRESERVE, totalRows(), totalColumns).viewport();
+        applyTop(state, topAtRow(next.top()));
+        if (deltaColumns != 0) applyHorizontalOffset(state, next.left());
     }
 
     public void applyTop(EditorState state, Top top) {

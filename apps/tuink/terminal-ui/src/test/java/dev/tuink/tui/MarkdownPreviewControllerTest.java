@@ -65,7 +65,7 @@ class MarkdownPreviewControllerTest {
             long revision = window.active().tabSession().model().revision();
             MarkdownPreviewState preview = openPreview(window);
             window.event(ctrl(KeyStroke.Key.F));
-            assertTrue(preview.searchEditing);
+            assertTrue(preview.searchVisible);
             window.event(new TextInput("needle"));
             assertEquals("needle", preview.searchQuery);
             assertEquals(2, preview.searchMatches.size());
@@ -79,7 +79,7 @@ class MarkdownPreviewControllerTest {
             assertEquals(first, preview.selectionStart());
 
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
-            assertFalse(preview.searchEditing);
+            assertFalse(preview.searchVisible);
             assertTrue(preview.active);
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
             assertTrue(preview.active);

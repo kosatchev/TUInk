@@ -19,7 +19,7 @@ public final class HelpPages {
             "Ctrl+Q                  Request quit",
             "Ctrl+Z / Ctrl+Y         Undo / redo",
             "Ctrl+X / Ctrl+C         Cut / copy selection or current line",
-            "Ctrl+V                  Paste application clipboard",
+            "Ctrl+V                  Paste system clipboard (local fallback)",
             "Ctrl+A                  Select all document text",
             "Ctrl+/                  Toggle line comment",
             "Ctrl+F                  Open search and replace",

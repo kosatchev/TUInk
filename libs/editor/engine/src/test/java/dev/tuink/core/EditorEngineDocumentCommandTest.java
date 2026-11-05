@@ -71,6 +71,7 @@ class EditorEngineDocumentCommandTest {
             EditorViewMemento otherBefore = other.state().viewMemento();
             engine.restoreSelection(new Position(0, 1), new Position(0, 0));
             fixture.clipboard.setText("keep clipboard");
+            long clipboardRevision = fixture.clipboard.revision();
             List<String> before = engine.model().snapshotLines();
             var metadata = engine.model().fileMetadata();
             EditorViewMemento view = engine.state().viewMemento();
@@ -97,6 +98,7 @@ class EditorEngineDocumentCommandTest {
             assertEquals(view, engine.state().viewMemento(), command.toString());
             assertEquals(otherBefore, other.state().viewMemento(), command.toString());
             assertEquals("keep clipboard", fixture.clipboard.text(), command.toString());
+            assertEquals(clipboardRevision, fixture.clipboard.revision(), "Failed command must not publish: " + command);
             assertSame(undoStack, history.undoStack, command.toString());
             assertSame(redoStack, history.redoStack, command.toString());
             assertEquals(coalescing, history.lastEditKind, command.toString());
@@ -121,6 +123,40 @@ class EditorEngineDocumentCommandTest {
         assertTrue(execute(fixture.engine, edit(DocumentCommand.EditAction.UNDO)).performed());
         assertEquals("original", fixture.engine.model().getLine(0));
         assertFalse(execute(fixture.engine, edit(DocumentCommand.EditAction.UNDO)).performed());
+    }
+
+    @Test
+    void successfulCopyAndCutPublishOnceButPasteAndHistoryDoNotRepublishTheClipboard() {
+        Fixture fixture = fixture();
+        long initial = fixture.clipboard.revision();
+        assertTrue(execute(fixture.engine, edit(DocumentCommand.EditAction.COPY)).performed());
+        String copied = fixture.clipboard.text();
+        assertEquals(initial + 1, fixture.clipboard.revision());
+        assertTrue(execute(fixture.engine, edit(DocumentCommand.EditAction.COPY)).performed());
+        assertEquals(copied, fixture.clipboard.text());
+        assertEquals(initial + 2, fixture.clipboard.revision(), "Same-text copy remains a publication");
+        assertTrue(execute(fixture.engine, edit(DocumentCommand.EditAction.CUT)).performed());
+        assertEquals(copied, fixture.clipboard.text());
+        long cutRevision = fixture.clipboard.revision();
+        assertEquals(initial + 3, cutRevision);
+        assertTrue(execute(fixture.engine, edit(DocumentCommand.EditAction.UNDO)).performed());
+        assertTrue(execute(fixture.engine, edit(DocumentCommand.EditAction.REDO)).performed());
+        assertTrue(execute(fixture.engine, edit(DocumentCommand.EditAction.PASTE)).performed());
+        assertTrue(execute(fixture.engine, new DocumentCommand.Paste("external")).performed());
+        assertEquals(copied, fixture.clipboard.text());
+        assertEquals(cutRevision, fixture.clipboard.revision(), "Pasting and replaying history never export a new copy");
+    }
+
+    @Test
+    void copyingAndCuttingAnEmptyLastLineAreNotPublications() {
+        Fixture fixture = fixture();
+        fixture.engine.model().replaceLines(List.of(""));
+        fixture.clipboard.setText("keep");
+        long revision = fixture.clipboard.revision();
+        assertFalse(execute(fixture.engine, edit(DocumentCommand.EditAction.COPY)).performed());
+        assertFalse(execute(fixture.engine, edit(DocumentCommand.EditAction.CUT)).performed());
+        assertEquals("keep", fixture.clipboard.text());
+        assertEquals(revision, fixture.clipboard.revision());
     }
 
     @Test

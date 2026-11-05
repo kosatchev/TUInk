@@ -169,6 +169,27 @@ final class EditorWindowFixture implements AutoCloseable {
                                 List<? extends RecoveryStore.PendingSnapshot> startupRecoveryEntries,
                                 TerminalEditorApp.RecoveryPersistence recoveryPersistence,
                                 Executor documentExecutor, Executor recoveryExecutor, String documentName) throws IOException {
+        this(directory, reading, lines, settingsSession, startupRecoveryEntries, recoveryPersistence,
+            documentExecutor, recoveryExecutor, documentName, null);
+    }
+
+    EditorWindowFixture(Path directory, String documentName, List<String> lines,
+                        dev.tuink.editor.clipboard.ClipboardPort clipboard) throws IOException {
+        this(directory, documentName, lines, clipboard, Runnable::run);
+    }
+
+    EditorWindowFixture(Path directory, String documentName, List<String> lines,
+                        dev.tuink.editor.clipboard.ClipboardPort clipboard, Executor documentExecutor) throws IOException {
+        this(directory, false, lines, new AppSettingsSession(AppSettings.defaults(), TuiCliOptions.parse(new String[0])),
+            List.of(), null, documentExecutor, Runnable::run, documentName, clipboard);
+    }
+
+    private EditorWindowFixture(Path directory, boolean reading, List<String> lines,
+                                AppSettingsSession settingsSession,
+                                List<? extends RecoveryStore.PendingSnapshot> startupRecoveryEntries,
+                                TerminalEditorApp.RecoveryPersistence recoveryPersistence,
+                                Executor documentExecutor, Executor recoveryExecutor, String documentName,
+                                dev.tuink.editor.clipboard.ClipboardPort clipboard) throws IOException {
         this.settingsSession = settingsSession;
         Files.createDirectories(directory);
         document = directory.resolve(documentName);
@@ -217,7 +238,7 @@ final class EditorWindowFixture implements AutoCloseable {
             renderer, filename, new SaveAsSuggestionStore(), presenter, query, replacement, context,
             new ArrayList<>(startupRecoveryEntries),
             new EditorWindowController.TerminalAccess(() -> width, () -> height, enabled -> {}, () -> mouseAvailable),
-            menu, ui, settingsSession, documentIo));
+            menu, ui, settingsSession, documentIo), clipboard);
         try {
             frame();
         } catch (RuntimeException | Error failure) {

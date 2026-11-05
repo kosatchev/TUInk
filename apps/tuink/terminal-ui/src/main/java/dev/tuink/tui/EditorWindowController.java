@@ -1,6 +1,7 @@
 package dev.tuink.tui;
 
 import dev.tuink.editor.language.LanguageId;
+import dev.tuink.editor.clipboard.ClipboardPort;
 import dev.tuink.editor.language.LanguageRegistry;
 import dev.tuink.editor.storage.DocumentResource;
 import dev.tuink.storage.jvm.JvmDocumentStorage;
@@ -78,6 +79,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
+import java.util.function.BooleanSupplier;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
@@ -107,6 +109,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     private final UiSessionState uiSessionState;
     private final AppSettingsSession settingsSession;
     private final DocumentIoController documentIo;
+    private final SystemClipboardController systemClipboard;
     private final DocumentFormatWorkflow formatWorkflow;
     private final MarkdownPreviewService markdownPreview;
     private final SnapshotSaveController snapshotSaves;
@@ -120,10 +123,19 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     private Object pendingRecoveryDiscovery;
 
     EditorWindowController(TerminalEditorApp host, Resources resources) {
+        this(host, resources, null);
+    }
+
+    EditorWindowController(TerminalEditorApp host, Resources resources,
+        ClipboardPort clipboardPort) {
         this.host = Objects.requireNonNull(host, "host");
         this.commandRouter = resources.commandRouter();
         this.editorView = resources.editorView();
         this.eventLoop = resources.eventLoop();
+        this.systemClipboard = new SystemClipboardController(host.clipboard, clipboardPort,
+            eventLoop::invalidate, message -> {
+                if (!notice().isError()) notice().warning(message);
+            });
         this.markdownPreview = new MarkdownPreviewService(eventLoop::invalidate);
         this.recoveryAutosave = resources.recoveryAutosave();
         this.renderFrameController = resources.renderFrameController();
@@ -670,6 +682,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
 
     @Override
     public void prepareTurn() {
+        systemClipboard.collect();
         synchronizeUiLifetime();
         synchronizeModalTarget();
         while (documentIo.collect()) {
@@ -1029,6 +1042,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
 
     @Override
     public void frameEnded(boolean rendered) {
+        systemClipboard.frameEnded();
         if (host.profileEnabled) {
             host.frameProfiler.endFrame(rendered);
         }
@@ -1036,6 +1050,11 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
 
     @Override
     public long nanosUntilWakeup(long nowNanos) {
+        return TerminalEditorApp.earlierDeadline(contentWakeup(nowNanos),
+            systemClipboard.busy() ? SYNTAX_RETRY_DELAY_NANOS : -1L);
+    }
+
+    private long contentWakeup(long nowNanos) {
         if (sessionContext.activePresentation() instanceof PreviewTab) {
             long next = TerminalEditorApp.earlierDeadline(notice().nanosUntilExpire(nowNanos),
                 host.modalAttention().nanosUntilChange(nowNanos));
@@ -1543,7 +1562,19 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         if (inputEvent == null) {
             return;
         }
-        dispatchWindowInput(routeWindowInput(inputEvent));
+        acceptWindowEvent(inputEvent);
+    }
+
+    private void acceptWindowEvent(TuiInputEvent inputEvent) {
+        if (systemClipboard.deferInput(() -> {
+            prepareTurn();
+            acceptWindowEvent(inputEvent);
+        })) return;
+        try {
+            dispatchWindowInput(routeWindowInput(inputEvent));
+        } finally {
+            systemClipboard.synchronize();
+        }
     }
 
     private WindowInput routeWindowInput(TuiInputEvent inputEvent) {
@@ -1876,11 +1907,61 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
 
     /** Semantic entry shared by chrome controls and programmatic application invocations. */
     void invokeCommand(CommandInvocation invocation, UiRecipient recipient) {
-        commandRouter.dispatch(invocation).ifPresent(route ->
-            executeResolvedCommand(new WindowInput.Command(invocation, route, recipient)));
+        if (systemClipboard.deferInput(() -> {
+            prepareTurn();
+            invokeCommand(invocation, recipient);
+        })) return;
+        try {
+            commandRouter.dispatch(invocation).ifPresent(route ->
+                executeResolvedCommand(new WindowInput.Command(invocation, route, recipient)));
+        } finally {
+            systemClipboard.synchronize();
+        }
     }
 
     private void executeResolvedCommand(WindowInput.Command key) {
+        executeResolvedCommand(key, true);
+    }
+
+    /** A late clipboard receipt may never paste into a replacement document or field. */
+    private BooleanSupplier clipboardTarget(WindowInput.Command key, ActiveSurface surface) {
+        WindowTab presentation = sessionContext.activePresentation();
+        UiModalState modal = modalState();
+        TextField field = clipboardField(surface);
+        String text = field == null ? null : field.text();
+        int cursor = field == null ? 0 : field.cursor();
+        int start = field == null ? 0 : field.selectionStart();
+        int end = field == null ? 0 : field.selectionEnd();
+        TextModel document = field == null && presentation instanceof TerminalEditorApp.EditorTab source
+            ? source.tabSession().model() : null;
+        long revision = document == null ? 0 : document.revision();
+        EditorState view = document == null ? null : ((TerminalEditorApp.EditorTab) presentation).tabSession().state();
+        Position caret = view == null ? null : view.getCursor();
+        Position anchor = view == null ? null : view.getSelectionAnchor();
+        return () -> {
+            if (disposed || !currentInput(key) || sessionContext.activePresentation() != presentation) return false;
+            ActiveSurface current = activeSurface();
+            // Other tabs may finish I/O while this read waits. Only the target and its
+            // current editing permission can revoke the paste, not window-wide runtime state.
+            return surface.kind() == current.kind() && surface.focus() == current.focus()
+                && surface.modalScope() == current.modalScope() && current.allows(TuinkCommand.EDIT_PASTE)
+                && modal.equals(modalState()) && clipboardField(current) == field
+                && (field == null || text.equals(field.text()) && cursor == field.cursor()
+                    && start == field.selectionStart() && end == field.selectionEnd())
+                && (document == null || revision == document.revision() && caret.equals(view.getCursor())
+                    && Objects.equals(anchor, view.getSelectionAnchor()));
+        };
+    }
+
+    private TextField clipboardField(ActiveSurface surface) {
+        if (!surface.editableField()) return null;
+        if (modalState().isSaveAs()) return ui().saveAsInput;
+        if (ui().openFileMode) return ui().openFileFocusState.location();
+        if (surface.preview()) return ui().preview.searchField;
+        return host.currentSearchFocus() == SearchFocus.REPLACE ? ui().searchReplaceInput : ui().searchQueryInput;
+    }
+
+    private void executeResolvedCommand(WindowInput.Command key, boolean readSystemClipboard) {
         if (!currentInput(key)) return;
         eventLoop.invalidate();
         TuinkCommand availability = key.route() instanceof CommandRouter.ActivateTab ? TuinkCommand.TAB_ACTIVATE
@@ -1898,6 +1979,12 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         }
         if (surface.focus() != ActiveSurface.Focus.CONTENT && ControlCommandRouter.unsupportedLocally(availability)) return;
         if (!surface.allows(availability)) { notice().warning(surface.refusal(availability)); return; }
+        if (readSystemClipboard && availability == TuinkCommand.EDIT_PASTE
+            && surface.focus() != ActiveSurface.Focus.CONTROL) {
+            var target = clipboardTarget(key, surface);
+            systemClipboard.paste(target, () -> executeResolvedCommand(key, false));
+            return;
+        }
         if (key.route() instanceof CommandRouter.ActivateTab tab) {
             if (tab.tabIndex() >= 0 && tab.tabIndex() < sessionContext.presentations().size())
                 activatePresentation(tab.tabIndex());
@@ -2836,6 +2923,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     void closeDocumentIo() {
         if (disposed) return;
         disposed = true;
+        systemClipboard.close();
         cancelPreviewReopen();
         markdownPreview.close();
         host.closeFileAccess();

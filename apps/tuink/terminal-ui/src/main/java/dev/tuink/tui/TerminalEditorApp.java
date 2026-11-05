@@ -33,6 +33,7 @@ import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.flow.UiModalState;
 import dev.tuink.editor.command.CommandInvocation;
 import dev.tuink.tui.command.TuinkCommand;
+import dev.tuink.tui.clipboard.ProcessClipboard;
 import dev.tuiframe.input.KeyStroke;
 import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.input.TextInput;
@@ -442,7 +443,7 @@ public class TerminalEditorApp {
                         uiSessionState,
                         settingsSession,
                         new DocumentIoController()
-                    )),
+                    ), ProcessClipboard.detect().orElse(null)),
                     recoveryAutosave,
                     () -> toDocumentSessions(tabs),
                     warning -> TerminalDiagnostics.error("Warning: " + warning)

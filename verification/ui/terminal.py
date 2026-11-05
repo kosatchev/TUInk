@@ -90,6 +90,7 @@ class Session:
                 fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
                 os.chdir(self.root)
                 env = dict(os.environ, TERM=term, HOME=str(home),
+                           DISPLAY="", WAYLAND_DISPLAY="", SSH_TTY="tuink-isolated-test",
                            XDG_CONFIG_HOME=str(self.config_home), XDG_DATA_HOME=str(home / ".local/share"),
                            XDG_CACHE_HOME=str(home / ".cache"))
                 env.update(env_overrides or {})

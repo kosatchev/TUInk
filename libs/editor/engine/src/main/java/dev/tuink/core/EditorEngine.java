@@ -448,6 +448,7 @@ public class EditorEngine {
         private final long revisionBefore = model.revision();
         private final long navigationBefore = state.navigationRevision();
         private final String clipboardBefore = clipboard.text();
+        private final long clipboardRevisionBefore = clipboard.revision();
         private final EditKind coalescingKind = history.lastEditKind;
         private final long coalescingAt = history.lastEditAtNanos;
         private final Position coalescingCursor = history.lastEditCursorAfter;
@@ -477,7 +478,7 @@ public class EditorEngine {
 
         private void restore() {
             state.restoreEditState(before, navigationBefore);
-            clipboard.setText(clipboardBefore);
+            clipboard.restore(clipboardBefore, clipboardRevisionBefore);
             history.lastEditKind = coalescingKind;
             history.lastEditAtNanos = coalescingAt;
             history.lastEditCursorAfter = coalescingCursor;

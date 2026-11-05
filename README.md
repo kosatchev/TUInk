@@ -79,7 +79,7 @@ Run `./gradlew buildHelp` for the complete local build command reference.
 ### Familiar editing
 
 - multiple tabs with mouse and keyboard navigation;
-- a shared application clipboard for copying, cutting, and pasting between tabs;
+- system clipboard integration, with a shared application clipboard as fallback;
 - selection by keyboard, mouse drag, or Shift+Click;
 - undo and redo;
 - search across all tabs, with replacement in the active tab;
@@ -276,7 +276,7 @@ a long rescan. These cases do not have a constant-time responsiveness guarantee.
 | `Ctrl+O` | Open the tree-based file picker |
 | `Ctrl+S` | Save the current file |
 | `Ctrl+K` / `Ctrl+Shift+S` / `Ctrl+Shift+F4` | Save As |
-| `Ctrl+X` / `Ctrl+C` / `Ctrl+V` | Cut / copy / paste using the application clipboard |
+| `Ctrl+X` / `Ctrl+C` / `Ctrl+V` | Cut / copy / paste using the system clipboard when available |
 | `Ctrl+A` | Select all text in the focused document or text field |
 | `Ctrl+Z` / `Ctrl+Y` | Undo / redo |
 | `Ctrl+N` | Open a new tab |
@@ -341,6 +341,26 @@ final wrap segment has an extra empty row for the cursor after the text.
 Without a selection, `Ctrl+C` copies the current line and `Ctrl+X` cuts it.
 On an empty final line both operations do nothing and preserve the clipboard;
 empty lines with a line ending are still copied or cut.
+
+Copy and cut publish successful operations to the system clipboard; paste reads
+its current text. The same integration serves the editor, Markdown Preview,
+search fields, Save As, and the file picker's location field. Preview content
+remains read only. A failed copy or an operation without anything to copy
+preserves the previous clipboard. Terminal bracketed paste inserts the received
+text directly.
+
+On a local Linux desktop, install either `wl-clipboard` for Wayland or `xclip`
+or `xsel` for X11. TUInk detects available helpers automatically; on macOS it
+uses `pbcopy` and `pbpaste`. Helpers run outside the UI thread, with bounded
+execution time and a 16 MiB UTF-8 transfer limit. Input typed after Ctrl+V keeps
+its order while the clipboard is being read. Clipboard text is sent through
+standard input, never shell commands or command-line arguments.
+
+Without a supported helper or desktop session, TUInk retains its shared internal
+clipboard. A failed system transfer reports a status warning and uses that
+internal clipboard. SSH sessions use the internal clipboard; use the terminal's
+own copy and paste shortcuts to exchange text with the local desktop.
+
 Close a tab with `Ctrl+W` or Tab > Close Tab. Menu hints reflect the active key bindings.
 
 With the search panel focused, use `Ctrl+F` for the next match, `Ctrl+G` for the previous

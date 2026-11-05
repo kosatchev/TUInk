@@ -14,7 +14,7 @@ import java.util.regex.Pattern;
 
 /** Detached terminal layout; contains no mutable editor or UI state. */
 public final class MarkdownLayout {
-    public enum Role { TEXT, HEADING, STRONG, EMPHASIS, CODE, LINK, QUOTE, TABLE, MATH, DIAGRAM, DIAGNOSTIC }
+    public enum Role { TEXT, HEADING, STRONG, EMPHASIS, CODE, CODE_BLOCK, LINK, QUOTE, QUOTE_MARKER, TABLE, MATH, DIAGRAM, DIAGNOSTIC }
     public record Run(int start, int end, Role role, TextRange source, int projectionStart, int projectionEnd) {
         public Run {
             if (start < 0 || end < start) throw new IllegalArgumentException("Invalid visual run");
@@ -90,6 +90,11 @@ public final class MarkdownLayout {
     private final EmbeddedRenderer embedded;
     private final CodeHighlighter codeHighlighter;
     private final List<Line> lines = new ArrayList<>();
+    /** Shared immutable context for drawing prefixes, never inferred from literal text. */
+    private record QuotePrefix(int end) {}
+    private static final QuotePrefix NO_QUOTE = new QuotePrefix(0);
+    private final List<QuotePrefix> quotePrefixes = new ArrayList<>();
+    private QuotePrefix quotePrefix = NO_QUOTE;
     private int extent;
     private int syntaxSpans;
 
@@ -103,18 +108,19 @@ public final class MarkdownLayout {
         this.codeHighlighter = Objects.requireNonNull(codeHighlighter);
     }
     public Result layout(MarkdownDocument document) {
-        lines.clear(); extent = 0; syntaxSpans = 0;
+        lines.clear(); quotePrefixes.clear(); quotePrefix = NO_QUOTE; extent = 0; syntaxSpans = 0;
         blocks(document.blocks(), "", 0);
         for (var diagnostic : document.diagnostics()) add("[!] " + diagnostic.message(), Role.DIAGNOSTIC, null, "diagnostic", "");
-        return new Result(document, MarkdownProjectionMap.annotate(document, lines), width, extent);
+        return new Result(document, decorateQuotes(MarkdownProjectionMap.annotate(document, lines)), width, extent);
     }
     private void blocks(List<MarkdownBlock> blocks, String prefix, int depth) {
         if (depth > 96) throw new IllegalArgumentException("Markdown layout nesting limit");
         for (MarkdownBlock block : blocks) {
             check();
+            int firstLine = lines.size();
             if (block instanceof MarkdownBlock.Heading n) paragraph(n.content(), prefix, Role.HEADING, n.source(), "heading");
             else if (block instanceof MarkdownBlock.Paragraph n) paragraph(n.content(), prefix, Role.TEXT, n.source(), "paragraph");
-            else if (block instanceof MarkdownBlock.Quote n) blocks(n.blocks(), prefix + "│ ", depth + 1);
+            else if (block instanceof MarkdownBlock.Quote n) quote(n, prefix, depth);
             else if (block instanceof MarkdownBlock.ListBlock n) {
                 int number = n.start();
                 for (var item : n.items()) {
@@ -141,8 +147,48 @@ public final class MarkdownLayout {
             else if (block instanceof MarkdownBlock.Raw n) {
                 for (String line : n.text().split("\\n", -1)) add(prefix + line, Role.TEXT, n.source(), "raw", line);
             }
-            if (!lines.isEmpty() && !lines.get(lines.size() - 1).text().isBlank()) add("", Role.TEXT, block.source(), "space", "");
+            if (lines.size() > firstLine && !lines.get(lines.size() - 1).text().isBlank())
+                add(quotePrefix.end() == 0 ? "" : prefix.stripTrailing(), Role.TEXT, block.source(), "space", "");
         }
+    }
+    private void quote(MarkdownBlock.Quote block, String prefix, int depth) {
+        String nested = prefix + "│ ";
+        QuotePrefix previous = quotePrefix;
+        quotePrefix = new QuotePrefix(nested.length());
+        int firstLine = lines.size();
+        try {
+            blocks(block.blocks(), nested, depth + 1);
+            if (lines.size() == firstLine) add(nested.stripTrailing(), Role.TEXT, block.source(), "quote", "");
+            else if (lines.get(lines.size() - 1).kind().equals("space")) {
+                // Continue the bar between quoted blocks, then end it with the quote.
+                lines.remove(lines.size() - 1);
+                quotePrefixes.remove(quotePrefixes.size() - 1);
+            }
+        } finally { quotePrefix = previous; }
+    }
+
+    /** Drawing prefixes do not participate in copy/search, including atomic math and diagram rows. */
+    private List<Line> decorateQuotes(List<Line> annotated) {
+        List<Line> result = new ArrayList<>(annotated.size());
+        for (int row = 0; row < annotated.size(); row++) {
+            check();
+            Line line = annotated.get(row);
+            int prefixEnd = Math.min(line.text().length(), quotePrefixes.get(row).end());
+            if (prefixEnd == 0) { result.add(line); continue; }
+            List<Run> runs = new ArrayList<>(line.runs().size() + 1);
+            runs.add(new Run(0, prefixEnd, Role.QUOTE_MARKER, null));
+            for (Run run : line.runs()) {
+                if (run.end() <= prefixEnd) continue;
+                int start = Math.max(prefixEnd, run.start());
+                int projectionStart = run.projectionStart();
+                if (projectionStart >= 0 && run.role() != Role.MATH && run.role() != Role.DIAGRAM
+                    && run.projectionEnd() - projectionStart == run.end() - run.start())
+                    projectionStart += start - run.start();
+                runs.add(new Run(start, run.end(), run.role(), run.source(), projectionStart, run.projectionEnd()));
+            }
+            result.add(new Line(line.text(), runs, line.copyText(), line.source(), line.kind(), line.syntax()));
+        }
+        return List.copyOf(result);
     }
     private void code(MarkdownBlock.Code block, String prefix) {
         List<String> body = List.of(block.text().split("\\n", -1));
@@ -153,7 +199,7 @@ public final class MarkdownLayout {
             check();
             String value = body.get(row), text = prefix + value;
             List<TokenSpan> spans = highlighted == null || row >= highlighted.size() ? List.of() : highlighted.get(row);
-            add(new Line(text, List.of(new Run(0, text.length(), Role.CODE, block.source())), value,
+            add(new Line(text, List.of(new Run(0, text.length(), Role.CODE_BLOCK, block.source())), value,
                 block.source(), "code", codeSyntax(spans, value.length(), prefix.length())));
         }
     }
@@ -244,7 +290,7 @@ public final class MarkdownLayout {
         if (lines.size() >= MAX_ROWS) throw new IllegalArgumentException("Preview exceeds the layout row budget");
         if (CellText.width(line.text()) > MAX_LINE_CELLS)
             throw new IllegalArgumentException("Preview exceeds the layout line width budget");
-        lines.add(line); extent = Math.max(extent, CellText.width(line.text()));
+        lines.add(line); quotePrefixes.add(quotePrefix); extent = Math.max(extent, CellText.width(line.text()));
     }
     private static void check() {
         if (Thread.currentThread().isInterrupted()) throw new java.util.concurrent.CancellationException("Preview cancelled");

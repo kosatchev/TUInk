@@ -59,9 +59,10 @@ class MarkdownCodeHighlightLayoutTest {
         assertEquals("│ • go\t😀", line.text());
         assertEquals("go\t😀", line.copyText());
         assertEquals(List.of(token(4, 6)), line.syntax());
-        assertEquals(4, line.runs().get(0).start());
-        assertEquals(0, line.runs().get(0).projectionStart());
-        assertEquals(line.copyText().length(), line.runs().get(0).projectionEnd());
+        var codeRun = line.runs().stream().filter(run -> run.role() == MarkdownLayout.Role.CODE_BLOCK).findFirst().orElseThrow();
+        assertEquals(4, codeRun.start());
+        assertEquals(0, codeRun.projectionStart());
+        assertEquals(line.copyText().length(), codeRun.projectionEnd());
     }
 
     @Test void eachBlockIsPresentedOnceAndInlineCodeAndRawTextAreNotTokenized() {

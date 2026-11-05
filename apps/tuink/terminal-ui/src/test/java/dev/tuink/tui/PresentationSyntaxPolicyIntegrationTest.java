@@ -18,7 +18,7 @@ class PresentationSyntaxPolicyIntegrationTest {
 
     @Test
     void togglesFromPreviewKeepItsColorsWhileSourceTraversesAllFourPreferenceCombinations() throws Exception {
-        var lines = List.of("# Heading", "", "```python", "return 7", "```");
+        var lines = List.of("# Heading", "", "```python", "return 7", "value = other", "```");
         var settings = new AppSettingsSession(AppSettings.defaults(), TuiCliOptions.parse(new String[0]));
         try (var window = new EditorWindowFixture(directory, "policy.md", lines, settings)) {
             var source = window.active();
@@ -54,13 +54,17 @@ class PresentationSyntaxPolicyIntegrationTest {
     private static void assertPairColors(EditorWindowFixture window, CellColor sourceCode, CellColor sourceHeading) throws Exception {
         assertInstanceOf(PreviewTab.class, window.selected());
         assertEquals(CellColor.BRIGHT_BLUE, styleAt(window, "return 7").fg(), "Preview preserves independent code colors");
+        assertEquals(CellColor.WHITE, styleAt(window, "value = other").fg(), "Preview keeps a readable foreground on the dark code background");
         window.command(TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW);
         assertInstanceOf(TerminalEditorApp.EditorTab.class, window.selected());
         assertEquals(sourceCode, styleAt(window, "return 7").fg());
+        assertEquals(sourceCode == CellColor.YELLOW ? CellColor.YELLOW : CellColor.DEFAULT,
+            styleAt(window, "value = other").fg(), "Source keeps its own Markdown syntax preference");
         assertEquals(sourceHeading, styleAt(window, "# Heading").fg());
         window.command(TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW);
         window.await(() -> window.preview().ready());
         assertEquals(CellColor.BRIGHT_BLUE, styleAt(window, "return 7").fg());
+        assertEquals(CellColor.WHITE, styleAt(window, "value = other").fg());
     }
 
     private static CellStyle styleAt(EditorWindowFixture window, String text) {

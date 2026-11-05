@@ -8,6 +8,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuink.editor.command.CommandInvocation;
+import dev.tuiframe.cell.Canvas;
+import dev.tuiframe.cell.CellBuffer;
+import dev.tuiframe.geometry.Point;
 import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.input.KeyStroke;
 import dev.tuiframe.input.PasteEvent;
@@ -16,6 +19,8 @@ import dev.tuiframe.input.ResizeEvent;
 import dev.tuiframe.widget.MenuBar;
 import dev.tuiframe.widget.InteractionResult;
 import dev.tuiframe.widget.PointerCaptureRequest;
+import dev.tuiframe.style.CellStyle;
+import dev.tuiframe.widget.Theme;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Set;
@@ -166,9 +171,14 @@ class TopMenuInputRouterTest {
         assertEquals(3, fixture.controller.state().firstVisibleEntryIndex());
         Fixture rebuilt = fixture(fixture.controller.state(), bounds);
         assertEquals(3, rebuilt.placement.state().firstVisibleEntryIndex());
-        int trackX = rebuilt.placement.popupBounds().orElseThrow().rightExclusive() - 2;
+        var cells = new CellBuffer(bounds.height(), bounds.width());
+        rebuilt.placement.paint(new Canvas(cells), Theme.fixed(CellStyle.DEFAULT));
+        var thumb = java.util.stream.IntStream.range(0, bounds.height() * bounds.width())
+            .mapToObj(index -> new Point(index % bounds.width(), index / bounds.width()))
+            .filter(point -> "█".equals(cells.get(point.y(), point.x()).grapheme()))
+            .findFirst().orElseThrow();
         TopMenuInputRouter.Result grab = rebuilt.route(pointer(
-            popup.y() + 2, trackX, PointerEvent.Kind.PRESS, PointerEvent.Button.LEFT
+            thumb.y(), thumb.x(), PointerEvent.Kind.PRESS, PointerEvent.Button.LEFT
         ));
         assertTrue(grab.consumed());
         assertNull(grab.command());

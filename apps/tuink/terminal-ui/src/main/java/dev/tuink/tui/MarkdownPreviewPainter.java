@@ -56,7 +56,7 @@ final class MarkdownPreviewPainter {
                     int index = placement.top() + y;
                     if (index >= result.lines().size()) break;
                     var line = result.lines().get(index);
-                    paintLine(canvas, line, placement, content, index, content.y() + y, palette, color, overlay);
+                    paintLine(canvas, line, placement, content, index, content.y() + y, color, overlay);
                 }
             } finally { canvas.restore(contentMark); }
             ScrollStyle scrollStyle = ScrollStyle.fromParent(palette.renderBody(), palette.renderBorder());
@@ -81,16 +81,18 @@ final class MarkdownPreviewPainter {
 
     /** Stable rows share admitted geometry; selection/search/caret remain transient adapter effects. */
     private static void paintLine(Canvas canvas, MarkdownLayout.Line line, MarkdownPreviewState.Placement placement,
-        dev.tuiframe.geometry.Rect content, int lineIndex, int row, UiStyles.Palette palette, boolean color, PreviewOverlay overlay) {
+        dev.tuiframe.geometry.Rect content, int lineIndex, int row, boolean color, PreviewOverlay overlay) {
         int columns = content.width();
         if (columns == 0) return;
+        CellStyle body = overlay.prepareLine(line);
+        if (color && overlay.blockLine) canvas.fill(content.x(), row, columns, 1, body);
         int left = placement.left();
         int endColumn;
         var geometry = placement.geometry();
         try (var admitted = geometry == null ? null : geometry.acquire(lineIndex)) {
             if (admitted == null) {
                 overlay.bind(line, lineIndex, 0, TerminalText.streamingGeometry(line.text(), 4), true);
-                endColumn = PreparedRowPainter.paintStreaming(canvas, line.text(), 4, 0, palette.renderBody(),
+                endColumn = PreparedRowPainter.paintStreaming(canvas, line.text(), 4, 0, body,
                     row, content.x(), columns, left, overlay, false, false, null);
             } else {
                 var metrics = admitted.metrics();
@@ -98,13 +100,13 @@ final class MarkdownPreviewPainter {
                 int to = metrics.offsetForVisualColumn(left + columns, TerminalText.Bias.CEIL);
                 int visualStart = metrics.visualColumnAt(from);
                 var key = new PreparedStyledRow.Key(geometry.identity(), geometry.identity(), geometry.revision(),
-                    styleRevision(palette.renderBody(), color), lineIndex, from, to - from, 4, visualStart % 4);
-                try (var prepared = geometry.rows().acquire(key, admitted, from, to, palette.renderBody(),
+                    styleRevision(body, color), lineIndex, from, to - from, 4, visualStart % 4);
+                try (var prepared = geometry.rows().acquire(key, admitted, from, to, body,
                     new BaseSpans(line, metrics, from, to, overlay))) {
                     overlay.bind(line, lineIndex, from, metrics, prepared == null);
                     if (prepared != null) PreparedRowPainter.paint(canvas, prepared.row(), row,
                         content.x(), columns, left - visualStart, overlay, false, false, null);
-                    else PreparedRowPainter.paintGeometry(canvas, metrics.view(from, to), palette.renderBody(), row,
+                    else PreparedRowPainter.paintGeometry(canvas, metrics.view(from, to), body, row,
                         content.x(), columns, left - visualStart, overlay);
                 }
                 endColumn = metrics.visualWidth();
@@ -113,7 +115,6 @@ final class MarkdownPreviewPainter {
         if (placement.contentFocused() && placement.caret() != null && placement.caret().row() == lineIndex
             && endColumn >= 0 && placement.caret().column() >= endColumn && placement.caret().column() >= left
             && placement.caret().column() < left + columns) {
-            CellStyle body = palette.renderBody();
             canvas.put(content.x() + placement.caret().column() - left, row, " ",
                 new CellStyle(body.fg(), body.bg(), true, true));
         }
@@ -166,18 +167,27 @@ final class MarkdownPreviewPainter {
 
     private static final class PreviewOverlay implements PreparedRowPainter.Overlay {
         private final MarkdownPreviewState.Placement placement;
-        private final UiStyles.Palette palette;
         private final boolean color;
         private final CellStyle selected, search, currentSearch;
         private final PreviewSelection.Range selection, currentMatch;
-        private final CellStyle[] roles = new CellStyle[MarkdownLayout.Role.values().length];
+        private static final int ROLE_COUNT = MarkdownLayout.Role.values().length;
+        private final CellStyle[] roles = new CellStyle[ROLE_COUNT * 2];
         private final Map<SemanticStyleKey, CellStyle> syntaxStyles = new HashMap<>();
+        private final Map<SemanticStyleKey, CellStyle> blockSyntaxStyles = new HashMap<>();
+        private final CellStyle body, blockBody;
+        private CellStyle lineBody;
+        private boolean blockLine;
         private MarkdownLayout.Line line;
         private int offset, runIndex, syntaxIndex, caretStart;
         private boolean rebuildBase;
 
         PreviewOverlay(MarkdownPreviewState.Placement placement, UiStyles.Palette palette, boolean color) {
-            this.placement = placement; this.palette = palette; this.color = color;
+            this.placement = placement; this.color = color;
+            body = palette.renderBody();
+            // Explicit dark backgrounds need a readable physical foreground even
+            // when the terminal uses a dark default foreground on a light theme.
+            blockBody = color ? new CellStyle(CellColor.WHITE, CellColor.DARK_GRAY, false, false) : body;
+            lineBody = body;
             selected = EditorStyleAdapter.toCell(palette.renderSelection());
             search = EditorStyleAdapter.toCell(palette.renderSearchMatch());
             currentSearch = EditorStyleAdapter.toCell(palette.renderCurrentSearchMatch());
@@ -185,19 +195,25 @@ final class MarkdownPreviewPainter {
             currentMatch = placement.activeMatch() >= 0 && placement.activeMatch() < placement.searchMatches().size()
                 ? placement.searchMatches().get(placement.activeMatch()) : null;
         }
+        CellStyle prepareLine(MarkdownLayout.Line line) {
+            blockLine = line.kind().equals("code") || line.kind().equals("code-label");
+            return lineBody = blockLine ? blockBody : body;
+        }
         CellStyle role(MarkdownLayout.Role role) {
-            var style = roles[role.ordinal()];
-            if (style == null) roles[role.ordinal()] = style = MarkdownPreviewPainter.style(role, palette.renderBody(), color);
+            int index = role.ordinal() + (blockLine ? ROLE_COUNT : 0);
+            var style = roles[index];
+            if (style == null) roles[index] = style = MarkdownPreviewPainter.style(role, lineBody, color);
             return style;
         }
         CellStyle syntax(SemanticStyleKey key) {
-            var cached = syntaxStyles.get(key);
+            var styles = blockLine ? blockSyntaxStyles : syntaxStyles;
+            var cached = styles.get(key);
             if (cached != null) return cached;
-            var body = palette.renderBody();
+            var body = lineBody;
             var mapped = EditorStyleAdapter.toCell(SYNTAX_STYLES.resolve(key));
             var style = new CellStyle(color && mapped.fg() != CellColor.DEFAULT ? mapped.fg() : body.fg(),
                 body.bg(), mapped.bold(), mapped.underline());
-            if (syntaxStyles.size() < 32) syntaxStyles.put(key, style);
+            if (styles.size() < 32) styles.put(key, style);
             return style;
         }
         void bind(MarkdownLayout.Line line, int row, int offset, TerminalText.Geometry metrics, boolean rebuildBase) {
@@ -214,7 +230,7 @@ final class MarkdownPreviewPainter {
                 var run = runIndex < line.runs().size() ? line.runs().get(runIndex) : null;
                 if (run != null && run.start() > absoluteStart) run = null;
                 if (rebuildBase) {
-                    base = run == null ? palette.renderBody() : role(run.role());
+                    base = run == null ? lineBody : role(run.role());
                     while (syntaxIndex < line.syntax().size() && line.syntax().get(syntaxIndex).end() <= absoluteStart) syntaxIndex++;
                     var token = syntaxIndex < line.syntax().size() ? line.syntax().get(syntaxIndex) : null;
                     if (token != null && token.start() <= absoluteStart) base = syntax(token.styleKey());
@@ -248,8 +264,9 @@ final class MarkdownPreviewPainter {
         boolean bold = role == MarkdownLayout.Role.HEADING || role == MarkdownLayout.Role.STRONG;
         boolean underline = role == MarkdownLayout.Role.LINK || role == MarkdownLayout.Role.EMPHASIS;
         CellColor fg = !color ? base.fg() : switch (role) {
-            case HEADING, LINK -> CellColor.CYAN;
+            case HEADING, LINK, QUOTE_MARKER -> CellColor.CYAN;
             case CODE -> CellColor.YELLOW;
+            case CODE_BLOCK -> base.fg();
             case MATH -> CellColor.GREEN;
             case DIAGNOSTIC -> CellColor.RED;
             case QUOTE -> CellColor.BRIGHT_BLACK;

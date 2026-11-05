@@ -151,7 +151,7 @@ class MarkdownPreviewInteractionTest {
     @Test void painterPreservesTabPhaseAndHighlightsOnlyMappedContent() {
         var palette = UiStyles.forTheme(UiStyles.Theme.CYAN);
         var line = new MarkdownLayout.Line("│ a\t字", List.of(new MarkdownLayout.Run(2, 5,
-            MarkdownLayout.Role.CODE, SOURCE, 0, 3)), "a\t字", SOURCE, "code");
+            MarkdownLayout.Role.CODE_BLOCK, SOURCE, 0, 3)), "a\t字", SOURCE, "code");
         var result = result("a\t字", line);
         var placement = new MarkdownPreviewState.Placement(new Rect(4, 2, 8, 3), result, 0, 0, false, "",
             new PreviewSelection.Snapshot(1, 2), List.of(new PreviewSelection.Range(2, 3)), 0, "字", false, null, null, null,

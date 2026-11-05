@@ -3,9 +3,9 @@ package dev.tuiframe.capability;
 /**
  * Color depth available to one terminal presentation session.
  *
- * <p>The current physical cell palette is ANSI-16. Deeper modes are exposed
- * here so a frontend can negotiate presentation without coupling widgets to a
- * terminal backend; indexed and RGB theme mapping can be added independently.</p>
+ * <p>The physical cell palette uses ANSI-16 colors and a dark neutral shade
+ * mapped to an indexed color on deeper terminals. Frontends negotiate
+ * presentation without coupling widgets to a terminal backend.</p>
  */
 public enum ColorDepth {
     MONOCHROME,

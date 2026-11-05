@@ -229,3 +229,16 @@ ORDER BY snippets DESC, language;
   "selection": null
 }
 ```
+
+## Block quotes
+
+> A regular quote with **emphasis** and `inline code`.
+>
+> The next paragraph is still part of the same quote.
+>
+> > A nested quote with its own vertical rule.
+
+> ```python
+> def quoted_example():
+>     return 42  # Code inside a quote
+> ```

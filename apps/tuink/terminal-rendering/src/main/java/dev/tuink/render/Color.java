@@ -20,5 +20,7 @@ public enum Color {
     BRIGHT_BLUE,
     BRIGHT_MAGENTA,
     BRIGHT_CYAN,
-    BRIGHT_WHITE
+    BRIGHT_WHITE,
+    /** Dark neutral shade; indexed 236 where supported, black on ANSI-16. */
+    DARK_GRAY
 }

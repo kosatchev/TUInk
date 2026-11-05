@@ -7,6 +7,11 @@ import dev.tuiframe.cell.Canvas;
 import dev.tuiframe.cell.CellBuffer;
 import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.memory.RenderMemoryBudget;
+import dev.tuiframe.style.CellColor;
+import dev.tuink.editor.document.DocumentId;
+import dev.tuink.markdown.MarkdownBlock;
+import dev.tuink.markdown.MarkdownDocument;
+import dev.tuink.markdown.MarkdownInline;
 import dev.tuink.render.markdown.MarkdownGeometry;
 import dev.tuink.render.markdown.MarkdownLayout;
 import dev.tuink.render.SyntaxStyleResolver;
@@ -18,12 +23,63 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class MarkdownPreparedPainterTest {
+    @Test void codeBlocksUseReadableBaseBetweenTokensAndOnEntireUntokenizedRows() {
+        var document = new MarkdownDocument(new DocumentId("code-base-colors"), 1, List.of(
+            new MarkdownBlock.Code("int value = 7;\nvalue = other;", "java", SOURCE),
+            new MarkdownBlock.Code("other = value;", "", SOURCE),
+            new MarkdownBlock.Paragraph(List.of(new MarkdownInline.Code("inline", SOURCE)), SOURCE)), List.of());
+        for (long styleBytes : new long[] {0, 1_000_000}) {
+            var result = new MarkdownLayout(80, new MarkdownLayout.EmbeddedRenderer() {},
+                new MarkdownCodeHighlighter(styleBytes)).layout(document);
+            for (var theme : UiStyles.Theme.values()) for (boolean color : new boolean[] {false, true}) {
+                for (int path = 0; path < 3; path++) {
+                    var budget = RenderMemoryBudget.bounded(1_000_000);
+                    try (var geometry = path == 0 ? null : new MarkdownGeometry(result, budget)) {
+                        if (path == 2) for (int row = 0; row < result.lines().size(); row++)
+                            try (var admitted = geometry.acquire(row)) { assertNotNull(admitted); }
+                        try (var blocker = path == 2
+                            ? budget.tryReserve(budget.limitBytes() - budget.usedBytes()) : null) {
+                            var palette = UiStyles.forTheme(theme);
+                            var view = placement(result, new Rect(2, 1, 20, result.lines().size()), 0,
+                                PreviewSelection.Snapshot.EMPTY, List.of(), null, geometry);
+                            var cells = new CellBuffer(result.lines().size() + 2, 24);
+                            // The second paint also checks admitted rows on a cache hit.
+                            for (int repaint = 0; repaint < 2; repaint++) {
+                                MarkdownPreviewPainter.paint(new Canvas(cells), view, palette, color);
+                                for (int row = 0; row < result.lines().size(); row++) {
+                                    var line = result.lines().get(row);
+                                    if (line.kind().equals("code")) for (int column = 0; column < line.text().length(); column++) {
+                                        var expected = color ? CellColor.WHITE : palette.renderBody().fg();
+                                        if (color) for (var token : line.syntax())
+                                            if (token.start() <= column && column < token.end()) {
+                                                var mapped = EditorStyleAdapter.toCell(SyntaxStyleResolver.standard().resolve(token.styleKey())).fg();
+                                                if (mapped != CellColor.DEFAULT) expected = mapped;
+                                            }
+                                        assertEquals(expected, cells.get(1 + row, 2 + column).style().fg(),
+                                            "theme=" + theme + ", color=" + color + ", path=" + path
+                                                + ", row=" + row + ", column=" + column);
+                                    }
+                                    if (line.copyText().equals("inline"))
+                                        assertEquals(color ? CellColor.YELLOW : palette.renderBody().fg(),
+                                            cells.get(1 + row, 2).style().fg(), "inline code keeps its Markdown color");
+                                }
+                            }
+                            if (path == 1) assertTrue(geometry.rows().hits() > 0);
+                            if (path == 2) assertEquals(0, geometry.rows().size());
+                        }
+                    }
+                    assertEquals(0, budget.usedBytes());
+                }
+            }
+        }
+    }
+
     @Test void narrowSlicesAdmitOnlyVisibleSyntaxSpans() {
         String text = "if ".repeat(1000);
         var tokens = java.util.stream.IntStream.range(0, 1000)
             .mapToObj(index -> new TokenSpan(index * 3, index * 3 + 2, SemanticStyleKey.KEYWORD)).toList();
         var line = new MarkdownLayout.Line(text, List.of(new MarkdownLayout.Run(0, text.length(),
-            MarkdownLayout.Role.CODE, SOURCE, 0, text.length())), text, SOURCE, "code", tokens);
+            MarkdownLayout.Role.CODE_BLOCK, SOURCE, 0, text.length())), text, SOURCE, "code", tokens);
         var result = result(text, line);
         var budget = RenderMemoryBudget.bounded(1_000_000);
         try (var geometry = new MarkdownGeometry(result, budget)) {
@@ -41,7 +97,7 @@ class MarkdownPreparedPainterTest {
     @Test void codeTokensUseTheSourceSyntaxPaletteAndRespectMonochrome() {
         String text = "return 7; // hi";
         var line = new MarkdownLayout.Line(text,
-            List.of(new MarkdownLayout.Run(0, text.length(), MarkdownLayout.Role.CODE, SOURCE, 0, text.length())),
+            List.of(new MarkdownLayout.Run(0, text.length(), MarkdownLayout.Role.CODE_BLOCK, SOURCE, 0, text.length())),
             text, SOURCE, "code", List.of(new TokenSpan(0, 6, SemanticStyleKey.KEYWORD),
                 new TokenSpan(7, 8, SemanticStyleKey.NUMBER), new TokenSpan(10, text.length(), SemanticStyleKey.COMMENT)));
         var result = result(text, line);

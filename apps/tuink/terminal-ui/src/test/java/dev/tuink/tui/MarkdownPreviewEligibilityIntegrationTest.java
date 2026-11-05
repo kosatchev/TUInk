@@ -181,7 +181,7 @@ class MarkdownPreviewEligibilityIntegrationTest {
             }
             case MOUSE_MENU -> {
                 window.command(TuinkCommand.MENU_VIEW);
-                Point at = menuItem(window, "Open Markdown preview tab");
+                Point at = menuItem(window, "MD Preview");
                 window.pointer(PointerEvent.Kind.PRESS, at.y(), at.x());
                 window.pointer(PointerEvent.Kind.RELEASE, at.y(), at.x());
             }

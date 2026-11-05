@@ -141,7 +141,8 @@ final class ReferenceTerminal {
 
     private void selectGraphicRendition(String parameters) {
         String[] values = parameters.isEmpty() ? new String[] {"0"} : parameters.split(";", -1);
-        for (String value : values) {
+        for (int index = 0; index < values.length; index++) {
+            String value = values[index];
             int code = value.isEmpty() ? 0 : nonNegative(value);
             switch (code) {
                 case 0 -> resetStyle();
@@ -151,6 +152,14 @@ final class ReferenceTerminal {
                 case 24 -> underline = false;
                 case 30, 31, 32, 33, 34, 35, 36, 37,
                      39, 90, 91, 92, 93, 94, 95, 96, 97 -> foreground = foreground(code);
+                case 38, 48 -> {
+                    if (index + 2 >= values.length || !values[index + 1].equals("5")
+                        || !values[index + 2].equals("236"))
+                        throw new IllegalArgumentException("unsupported indexed SGR: " + parameters);
+                    if (code == 38) foreground = CellColor.DARK_GRAY;
+                    else background = CellColor.DARK_GRAY;
+                    index += 2;
+                }
                 case 40, 41, 42, 43, 44, 45, 46, 47,
                      49, 100, 101, 102, 103, 104, 105, 106, 107 -> background = background(code);
                 default -> throw new IllegalArgumentException("unsupported SGR code: " + code);

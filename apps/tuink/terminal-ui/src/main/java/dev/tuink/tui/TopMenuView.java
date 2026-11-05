@@ -364,6 +364,9 @@ final class TopMenuView {
             ? GutterDiffMode.MYERS
             : ui.gutterDiffModeSetting;
         return List.of(
+            item(dev.tuink.tui.command.TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW,
+                surface.preview() ? "MD Source" : "MD Preview"),
+            separator(),
             item(VIEW_TOGGLE_TAB_BAR, checked(ui.showTabBarSetting) + " Show Tab Bar"),
             item(VIEW_TOGGLE_LINE_WRAP, checked(wrapLines) + " Wrap Lines"),
             item(VIEW_TOGGLE_WORD_WRAP, wrapWords, wrapLines),
@@ -385,8 +388,6 @@ final class TopMenuView {
             item(VIEW_CYCLE_TAB_WIDTH, checked(ui.tabWidthSetting <= 2) + " Thin tabs"),
             item(VIEW_CYCLE_THEME, "[>] Theme: " + themeLabel),
             separator(),
-            item(dev.tuink.tui.command.TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW,
-                surface.preview() ? "Go to source tab" : "Open Markdown preview tab"),
             item(dev.tuink.tui.command.TuinkCommand.VIEW_PREVIEW_COPY_SOURCE,
                 "Copy block source", surface.preview()),
             item(dev.tuink.tui.command.TuinkCommand.VIEW_PREVIEW_COPY_TABLE_TSV,

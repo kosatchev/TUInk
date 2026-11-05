@@ -119,6 +119,36 @@ class AnsiDiffCellStyleTest {
         }
     }
 
+    @Test
+    void darkGrayUsesItsOwnIndexAndFallsBackByNegotiatedDepthWithoutCacheLeakage() {
+        var diff = new AnsiDiff();
+        var style = new CellStyle(CellColor.DARK_GRAY, CellColor.DARK_GRAY, false, false);
+        for (var depth : new ColorDepth[] {ColorDepth.ANSI_256, ColorDepth.ANSI_16,
+            ColorDepth.TRUECOLOR, ColorDepth.MONOCHROME, ColorDepth.ANSI_256}) {
+            String expected = switch (depth) {
+                case ANSI_256, TRUECOLOR -> "\u001B[38;5;236;48;5;236;22;24m";
+                case ANSI_16 -> "\u001B[30;40;22;24m";
+                case MONOCHROME -> "\u001B[39;49;22;24;7m";
+            };
+            assertEquals(FULL_REDRAW_PREFIX + expected + "x" + RESET,
+                diff.diff(null, oneCell("x", style), new TerminalCapabilities(depth, false, false, false),
+                    ScrollHint.none()), depth.toString());
+        }
+    }
+
+    @Test
+    void indexedBackgroundAndGrayCommentForegroundReplayAcrossFullAndStyleOnlyFrames() {
+        var capabilities = new TerminalCapabilities(ColorDepth.ANSI_256, false, false, false);
+        var previous = oneCell("x", new CellStyle(CellColor.BRIGHT_BLACK, CellColor.DARK_GRAY, false, false));
+        var current = oneCell("x", new CellStyle(CellColor.WHITE, CellColor.DARK_GRAY, false, false));
+        var diff = new AnsiDiff();
+        var terminal = new ReferenceTerminal(1, 1);
+        terminal.apply(diff.diff(null, previous, capabilities, ScrollHint.none()));
+        assertEquals(previous.get(0, 0), terminal.cell(0, 0));
+        terminal.apply(diff.diff(previous, current, capabilities, ScrollHint.none()));
+        assertEquals(current.get(0, 0), terminal.cell(0, 0));
+    }
+
     private static String fullRedraw(AnsiDiff diff, CellStyle style, boolean colorEnabled) {
         return diff.diff(
             null,
@@ -168,6 +198,7 @@ class AnsiDiffCellStyleTest {
             case BRIGHT_MAGENTA -> 95;
             case BRIGHT_CYAN -> 96;
             case BRIGHT_WHITE -> 97;
+            case DARK_GRAY -> 30;
         };
     }
 
@@ -190,6 +221,7 @@ class AnsiDiffCellStyleTest {
             case BRIGHT_MAGENTA -> 105;
             case BRIGHT_CYAN -> 106;
             case BRIGHT_WHITE -> 107;
+            case DARK_GRAY -> 40;
         };
     }
 }

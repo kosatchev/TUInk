@@ -26,6 +26,21 @@ import org.junit.jupiter.api.Test;
 
 class TopMenuViewTest {
     @Test
+    void markdownToggleIsTheFirstViewItemAndUsesTheCtrlPBinding() {
+        var preferences = ui();
+        for (var kind : ActiveSurface.Kind.values()) {
+            var menu = TopMenuView.build(preferences, List.of(), -1, "Cyan",
+                new CommandRouter(dev.tuink.tui.keymap.TuinkKeymap.defaults()),
+                MenuBar.State.open(TopMenuController.VIEW_INDEX), TestSurfaces.source(preferences).withKind(kind));
+            var toggle = item(menu, TopMenuController.VIEW_INDEX, 0);
+            assertEquals(dev.tuink.tui.command.TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW.id(), toggle.value().id());
+            assertEquals(kind == ActiveSurface.Kind.SOURCE ? "MD Preview" : "MD Source", toggle.label());
+            assertEquals("Ctrl+P", toggle.hint());
+            assertTrue(toggle.enabled());
+        }
+    }
+
+    @Test
     void markdownSyntaxSettingShowsItsIndependentCheckmark() {
         var ui = UiSessionState.from(dev.tuink.tui.flow.AppSettings.defaults());
         for (boolean enabled : new boolean[] {true, false}) {
@@ -143,7 +158,7 @@ class TopMenuViewTest {
         MenuBar.Item<CommandInvocation> wordWrap = item(
             viewMenu,
             TopMenuController.VIEW_INDEX,
-            2
+            4
         );
         assertEquals(VIEW_TOGGLE_WORD_WRAP.id(), wordWrap.value().id());
         assertEquals("[x] Wrap by words (disabled)", wordWrap.label());
@@ -193,6 +208,7 @@ class TopMenuViewTest {
         );
         assertEquals(
             List.of(
+                "tuink.view.toggle-markdown-preview",
                 "tuink.view.toggle-tab-bar",
                 "tuink.view.toggle-line-wrap",
                 "tuink.view.toggle-word-wrap",
@@ -204,7 +220,6 @@ class TopMenuViewTest {
                 "tuink.view.cycle-gutter-diff",
                 "tuink.view.cycle-tab-width",
                 "tuink.view.cycle-theme",
-                "tuink.view.toggle-markdown-preview",
                 "tuink.view.preview.copy-source",
                 "tuink.view.preview.copy-table-tsv",
                 "tuink.view.preview.reveal-source",

@@ -22,7 +22,7 @@ public final class MarkdownTableLayout {
                                                   MarkdownLayout.EmbeddedRenderer embedded) {
         int columns = table.rows().stream().mapToInt(row -> row.cells().size()).max().orElse(0);
         if (columns == 0) return List.of();
-        if (columns > MAX_COLUMNS) return failure("Table exceeds the column budget", table.source());
+        if (columns > MAX_COLUMNS) return failure("Table exceeds the column budget", table.source(), prefix);
         int[] natural = new int[columns], minimum = new int[columns];
         for (MarkdownBlock.Row row : table.rows()) {
             check();
@@ -43,7 +43,7 @@ public final class MarkdownTableLayout {
             sizes[column] = minimum[column]; totalMinimum += sizes[column]; totalNatural += natural[column];
         }
         if ((long)totalMinimum + 3L * columns + 1 + CellText.width(prefix) > MAX_EXTENT)
-            return failure("Table exceeds the layout width budget", table.source());
+            return failure("Table exceeds the layout width budget", table.source(), prefix);
         int target = Math.min(totalNatural, Math.max(available, totalMinimum));
         for (int used = totalMinimum; used < target;) {
             for (int column = 0; column < columns && used < target; column++) {
@@ -63,7 +63,7 @@ public final class MarkdownTableLayout {
                     : List.of(empty(row.source()));
                 cells.add(cell); height = Math.max(height, cell.size());
             }
-            if ((long)output.size() + height + 2 > MAX_ROWS) return failure("Table exceeds the layout row budget", table.source());
+            if ((long)output.size() + height + 2 > MAX_ROWS) return failure("Table exceeds the layout row budget", table.source(), prefix);
             for (int y = 0; y < height; y++) {
                 StringBuilder text = new StringBuilder(prefix).append('│');
                 StringBuilder copy = new StringBuilder();
@@ -157,8 +157,8 @@ public final class MarkdownTableLayout {
         rows.add(new MarkdownLayout.Line(text.toString(), List.of(new MarkdownLayout.Run(0, text.length(), MarkdownLayout.Role.TABLE, null)), "", source, "table-border"));
     }
     private static MarkdownLayout.Line empty(TextRange source) { return new MarkdownLayout.Line("", List.of(), "", source, "table"); }
-    private static List<MarkdownLayout.Line> failure(String message, TextRange source) {
-        String text = "[!] " + message + "; use the source view for this table";
+    private static List<MarkdownLayout.Line> failure(String message, TextRange source, String prefix) {
+        String text = prefix + "[!] " + message + "; use the source view for this table";
         return List.of(new MarkdownLayout.Line(text, List.of(new MarkdownLayout.Run(0, text.length(), MarkdownLayout.Role.DIAGNOSTIC, source)), "", source, "diagnostic"));
     }
     private static void check() {

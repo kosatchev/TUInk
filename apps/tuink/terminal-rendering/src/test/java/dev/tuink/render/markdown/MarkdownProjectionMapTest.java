@@ -69,9 +69,13 @@ class MarkdownProjectionMapTest {
         MarkdownLayout.Result result = new MarkdownLayout(80).layout(doc);
         MarkdownLayout.Line line = result.lines().stream().filter(value -> value.kind().equals("code") && value.copyText().equals("one")).findFirst().orElseThrow();
         assertEquals("│ one", line.text());
-        assertEquals(2, line.runs().get(0).start());
-        assertEquals(0, line.runs().get(0).projectionStart());
-        assertEquals(3, line.runs().get(0).projectionEnd());
+        var code = line.runs().stream().filter(value -> value.role() == MarkdownLayout.Role.CODE_BLOCK).findFirst().orElseThrow();
+        assertEquals(2, code.start());
+        assertEquals(0, code.projectionStart());
+        assertEquals(3, code.projectionEnd());
+        var marker = line.runs().get(0);
+        assertEquals(MarkdownLayout.Role.QUOTE_MARKER, marker.role());
+        assertEquals(-1, marker.projectionStart());
         assertTrue(result.lines().stream().filter(value -> value.kind().equals("code-label")).flatMap(value -> value.runs().stream()).allMatch(run -> run.projectionStart() == -1));
     }
 

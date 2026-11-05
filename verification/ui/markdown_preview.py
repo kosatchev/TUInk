@@ -105,7 +105,7 @@ def rendered_preview_present(text):
 def preview_eligibility(args, output):
     """Use actual keyboard/menu input and a completed Save As to admit Markdown only."""
     text = '# Eligibility probe\n\nMarkdown-looking **content** and $x^2$.\n'
-    label = 'Open Markdown preview tab'
+    label = 'MD Preview'
 
     def source_only(session, description):
         session.expect(lambda: source_selected(session.screen.text)

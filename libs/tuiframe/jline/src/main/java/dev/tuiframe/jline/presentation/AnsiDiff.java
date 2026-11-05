@@ -1,6 +1,7 @@
 package dev.tuiframe.jline.presentation;
 
 import dev.tuiframe.capability.TerminalCapabilities;
+import dev.tuiframe.capability.ColorDepth;
 import dev.tuiframe.cell.Cell;
 import dev.tuiframe.cell.CellBuffer;
 import dev.tuiframe.geometry.Rect;
@@ -16,6 +17,7 @@ import java.util.Objects;
  */
 final class AnsiDiff {
     private final Map<CellStyle, String> colorStyleCache = new HashMap<>();
+    private final Map<CellStyle, String> indexedStyleCache = new HashMap<>();
     private final Map<CellStyle, String> monoStyleCache = new HashMap<>();
 
     AnsiDiff() {
@@ -28,7 +30,7 @@ final class AnsiDiff {
         ScrollHint scrollHint
     ) {
         Objects.requireNonNull(capabilities, "capabilities");
-        boolean colorEnabled = capabilities.colorEnabled();
+        ColorDepth colorDepth = capabilities.colorDepth();
         ScrollHint hint = scrollHint == null ? ScrollHint.none() : scrollHint;
         Rect scrollRegion = hint instanceof ScrollHint.Vertical vertical
             ? vertical.region()
@@ -61,7 +63,7 @@ final class AnsiDiff {
                     if (cell.continuation()) {
                         continue;
                     }
-                    String styleAnsi = ansiFor(cell.style(), colorEnabled);
+                    String styleAnsi = ansiFor(cell.style(), colorDepth);
                     if (!styleAnsi.equals(activeStyleAnsi)) {
                         out.append(styleAnsi);
                         activeStyleAnsi = styleAnsi;
@@ -100,7 +102,7 @@ final class AnsiDiff {
             activeStyleAnsi = applyHorizontalScroll(
                 out,
                 current,
-                colorEnabled,
+                colorDepth,
                 activeStyleAnsi,
                 regionTop,
                 regionBottom,
@@ -124,7 +126,7 @@ final class AnsiDiff {
             );
             if (scroll != null) {
                 applyVerticalScroll(out, scroll);
-                activeStyleAnsi = drawEnteringRows(out, current, colorEnabled, activeStyleAnsi, scroll);
+                activeStyleAnsi = drawEnteringRows(out, current, colorDepth, activeStyleAnsi, scroll);
                 wroteAnyCell = scroll.enteringCount() > 0;
             }
         }
@@ -133,7 +135,7 @@ final class AnsiDiff {
             if (horizontalApplied && r >= regionTop && r <= regionBottom) {
                 activeStyleAnsi = drawRowRange(
                     current,
-                    colorEnabled,
+                    colorDepth,
                     r,
                     0,
                     safeTextStart - 1,
@@ -142,7 +144,7 @@ final class AnsiDiff {
                 );
                 activeStyleAnsi = drawRowRange(
                     current,
-                    colorEnabled,
+                    colorDepth,
                     r,
                     safeTextEnd + 1,
                     current.cols() - 1,
@@ -160,7 +162,7 @@ final class AnsiDiff {
                 RowWrite left = diffRowRange(
                     previous,
                     current,
-                    colorEnabled,
+                    colorDepth,
                     shiftedPrevRow,
                     r,
                     0,
@@ -173,7 +175,7 @@ final class AnsiDiff {
                 RowWrite right = diffRowRange(
                     previous,
                     current,
-                    colorEnabled,
+                    colorDepth,
                     shiftedPrevRow,
                     r,
                     safeTextEnd + 1,
@@ -192,7 +194,7 @@ final class AnsiDiff {
                 RowWrite rowWrite = diffRowRange(
                     previous,
                     current,
-                    colorEnabled,
+                    colorDepth,
                     shiftedPrevRow,
                     r,
                     0,
@@ -213,7 +215,7 @@ final class AnsiDiff {
             if (previous.rowHasWideCells(r) || current.rowHasWideCells(r)) {
                 activeStyleAnsi = drawRowRange(
                     current,
-                    colorEnabled,
+                    colorDepth,
                     r,
                     0,
                     current.cols() - 1,
@@ -243,7 +245,7 @@ final class AnsiDiff {
                     if (next.equals(prev)) {
                         break;
                     }
-                    String styleAnsi = ansiFor(next.style(), colorEnabled);
+                    String styleAnsi = ansiFor(next.style(), colorDepth);
                     if (!styleAnsi.equals(activeStyleAnsi)) {
                         out.append(styleAnsi);
                         activeStyleAnsi = styleAnsi;
@@ -266,7 +268,7 @@ final class AnsiDiff {
     private String applyHorizontalScroll(
         StringBuilder out,
         CellBuffer current,
-        boolean colorEnabled,
+        ColorDepth colorDepth,
         String activeStyleAnsi,
         int topRow,
         int bottomRow,
@@ -290,7 +292,7 @@ final class AnsiDiff {
                     if (cell.continuation()) {
                         continue;
                     }
-                    String styleAnsi = ansiFor(cell.style(), colorEnabled);
+                    String styleAnsi = ansiFor(cell.style(), colorDepth);
                     if (!styleAnsi.equals(activeStyleAnsi)) {
                         out.append(styleAnsi);
                         activeStyleAnsi = styleAnsi;
@@ -308,7 +310,7 @@ final class AnsiDiff {
                     if (cell.continuation()) {
                         continue;
                     }
-                    String styleAnsi = ansiFor(cell.style(), colorEnabled);
+                    String styleAnsi = ansiFor(cell.style(), colorDepth);
                     if (!styleAnsi.equals(activeStyleAnsi)) {
                         out.append(styleAnsi);
                         activeStyleAnsi = styleAnsi;
@@ -324,7 +326,7 @@ final class AnsiDiff {
                     if (cell.continuation()) {
                         continue;
                     }
-                    String styleAnsi = ansiFor(cell.style(), colorEnabled);
+                    String styleAnsi = ansiFor(cell.style(), colorDepth);
                     if (!styleAnsi.equals(activeStyleAnsi)) {
                         out.append(styleAnsi);
                         activeStyleAnsi = styleAnsi;
@@ -490,7 +492,7 @@ final class AnsiDiff {
     private String drawEnteringRows(
         StringBuilder out,
         CellBuffer current,
-        boolean colorEnabled,
+        ColorDepth colorDepth,
         String activeStyleAnsi,
         VerticalScroll scroll
     ) {
@@ -504,7 +506,7 @@ final class AnsiDiff {
                 if (cell.continuation()) {
                     continue;
                 }
-                String styleAnsi = ansiFor(cell.style(), colorEnabled);
+                String styleAnsi = ansiFor(cell.style(), colorDepth);
                 if (!styleAnsi.equals(activeStyleAnsi)) {
                     out.append(styleAnsi);
                     activeStyleAnsi = styleAnsi;
@@ -515,13 +517,18 @@ final class AnsiDiff {
         return activeStyleAnsi;
     }
 
-    private String ansiFor(CellStyle style, boolean colorEnabled) {
-        Map<CellStyle, String> cache = colorEnabled ? colorStyleCache : monoStyleCache;
+    private String ansiFor(CellStyle style, ColorDepth colorDepth) {
+        Map<CellStyle, String> cache = switch (colorDepth) {
+            case MONOCHROME -> monoStyleCache;
+            case ANSI_16 -> colorStyleCache;
+            case ANSI_256, TRUECOLOR -> indexedStyleCache;
+        };
         String cached = cache.get(style);
         if (cached != null) {
             return cached;
         }
-        String ansi = colorEnabled ? toAnsi(style) : toMonochromeAnsi(style);
+        String ansi = colorDepth.colorEnabled()
+            ? toAnsi(style, colorDepth != ColorDepth.ANSI_16) : toMonochromeAnsi(style);
         cache.put(style, ansi);
         return ansi;
     }
@@ -613,7 +620,7 @@ final class AnsiDiff {
     private RowWrite diffRowRange(
         CellBuffer previous,
         CellBuffer current,
-        boolean colorEnabled,
+        ColorDepth colorDepth,
         int previousRow,
         int currentRow,
         int fromCol,
@@ -629,7 +636,7 @@ final class AnsiDiff {
         if (previous.rowHasWideCells(previousRow) || current.rowHasWideCells(currentRow)) {
             String resultingStyle = drawRowRange(
                 current,
-                colorEnabled,
+                colorDepth,
                 currentRow,
                 0,
                 current.cols() - 1,
@@ -655,7 +662,7 @@ final class AnsiDiff {
                 if (next.equals(prev)) {
                     break;
                 }
-                String styleAnsi = ansiFor(next.style(), colorEnabled);
+                String styleAnsi = ansiFor(next.style(), colorDepth);
                 if (!styleAnsi.equals(activeStyleAnsi)) {
                     out.append(styleAnsi);
                     activeStyleAnsi = styleAnsi;
@@ -672,7 +679,7 @@ final class AnsiDiff {
 
     private String drawRowRange(
         CellBuffer current,
-        boolean colorEnabled,
+        ColorDepth colorDepth,
         int row,
         int fromCol,
         int toCol,
@@ -688,7 +695,7 @@ final class AnsiDiff {
             if (cell.continuation()) {
                 continue;
             }
-            String styleAnsi = ansiFor(cell.style(), colorEnabled);
+            String styleAnsi = ansiFor(cell.style(), colorDepth);
             if (!styleAnsi.equals(activeStyleAnsi)) {
                 out.append(styleAnsi);
                 activeStyleAnsi = styleAnsi;
@@ -705,10 +712,10 @@ final class AnsiDiff {
         out.append("\u001B[").append(row + 1).append(';').append(col + 1).append('H');
     }
 
-    private static String toAnsi(CellStyle style) {
+    private static String toAnsi(CellStyle style, boolean indexedColors) {
         return "\u001B["
-            + fgCode(style.fg()) + ';'
-            + bgCode(style.bg()) + ';'
+            + (indexedColors && style.fg() == CellColor.DARK_GRAY ? "38;5;236" : fgCode(style.fg())) + ';'
+            + (indexedColors && style.bg() == CellColor.DARK_GRAY ? "48;5;236" : bgCode(style.bg())) + ';'
             + (style.bold() ? "1" : "22") + ';'
             + (style.underline() ? "4" : "24") + 'm';
     }
@@ -740,6 +747,7 @@ final class AnsiDiff {
             case BRIGHT_MAGENTA -> 95;
             case BRIGHT_CYAN -> 96;
             case BRIGHT_WHITE -> 97;
+            case DARK_GRAY -> 30;
         };
     }
 
@@ -762,6 +770,7 @@ final class AnsiDiff {
             case BRIGHT_MAGENTA -> 105;
             case BRIGHT_CYAN -> 106;
             case BRIGHT_WHITE -> 107;
+            case DARK_GRAY -> 40;
         };
     }
 }

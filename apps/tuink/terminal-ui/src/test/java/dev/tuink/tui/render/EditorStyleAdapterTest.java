@@ -80,6 +80,7 @@ class EditorStyleAdapterTest {
             case BRIGHT_MAGENTA -> CellColor.BRIGHT_MAGENTA;
             case BRIGHT_CYAN -> CellColor.BRIGHT_CYAN;
             case BRIGHT_WHITE -> CellColor.BRIGHT_WHITE;
+            case DARK_GRAY -> CellColor.DARK_GRAY;
         };
     }
 }

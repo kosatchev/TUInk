@@ -29,7 +29,7 @@ class LightSyntaxIntegrationTest {
             window.command(TuinkCommand.MENU_VIEW);
             int row = syntaxRow(window);
             String line = window.screenRow(row);
-            assertTrue(line.contains("[x] Syntax highlighting (unavailable in Light)"), line);
+            assertTrue(line.contains("[x] Syntax highlighting"), line);
             int column = line.indexOf("Syntax highlighting");
             window.pointer(PointerEvent.Kind.PRESS, row, column);
             window.pointer(PointerEvent.Kind.RELEASE, row, column);
@@ -38,7 +38,7 @@ class LightSyntaxIntegrationTest {
 
             window.command(TuinkCommand.VIEW_TOGGLE_SYNTAX);
             assertTrue(window.ui.syntaxHighlightingSetting);
-            assertTrue(window.screenRow(window.height - 2).contains("unavailable in the current theme"));
+            assertTrue(window.screenRow(window.height - 2).contains("Syntax highlighting is unavailable in the current theme"));
             assertFalse(PresentationSyntaxPolicy.source(window.ui, window.host.theme).enabled());
 
             window.command(TuinkCommand.VIEW_CYCLE_THEME);

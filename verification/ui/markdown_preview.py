@@ -456,9 +456,12 @@ def code_highlighting(args, output):
             raise AssertionError(f'{stage} did not emit syntax color {color} for {token!r}')
 
     def toggle_source_code(session):
-        session.send(b'\x1b[15~')  # F5: Settings; Up wraps to the final MD code syntax item.
+        session.send(b'\x1b[15~')  # F5: Settings; activate the actual painted command.
         session.expect(lambda: 'MD code syntax' in session.screen.text, 'MD code syntax setting')
-        session.send(b'\x1b[A\r')
+        row, line = next((row, line) for row, line in enumerate(session.screen.lines) if 'MD code syntax' in line)
+        column = line.index('MD code syntax') + 1
+        session.mouse(0, row, column)
+        session.mouse(0, row, column, True)
 
     def repaint_source(session, rows):
         before = len(session.log)
@@ -530,7 +533,7 @@ def preview_menu_pointer(args, output):
                 session.send(b'\x10\x17')  # Close the clean Source, retaining its Preview.
                 expect_preview(session, 'menu pointer snapshot Preview', mode='snapshot')
             for key, label in ((b'\x1bOR', 'Syntax highlighting'),
-                               (b'\x1b[15~', 'Reading mode'),
+                               (b'\x1bOR', 'Reading mode'),
                                (b'\x1b[15~', 'MD code syntax')):
                 position = preview_position(session)
                 row, column, checked = open_item(session, key, label)

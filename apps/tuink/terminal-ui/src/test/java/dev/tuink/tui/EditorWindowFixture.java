@@ -327,6 +327,29 @@ final class EditorWindowFixture implements AutoCloseable {
         event(alias);
     }
 
+    /** Select through real keyboard routing, resolving the descriptor by stable command identity. */
+    void selectMenuCommand(TuinkCommand command) {
+        int target = menuCommandIndex(command);
+        event(KeyStroke.of(KeyStroke.Key.HOME));
+        for (int attempt = 0; attempt < TuinkCommand.values().length
+                && menu.state().selectedEntryIndex() != target; attempt++) {
+            event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
+        }
+        assertTrue(menu.state().selectedEntryIndex() == target, "Menu command must be keyboard-selectable: " + command);
+    }
+
+    int menuCommandIndex(TuinkCommand command) {
+        assertTrue(menu.isOpen(), "A menu must be open before selecting its command");
+        var view = TopMenuView.build(ui, List.of(), -1, host.theme.label(), new CommandRouter(keymap),
+            menu.state(), controller.activeSurface());
+        var entries = view.menus().get(menu.state().openMenuIndex()).entries();
+        for (int index = 0; index < entries.size(); index++) {
+            if (entries.get(index) instanceof dev.tuiframe.widget.MenuBar.Item<?> item
+                && ((CommandInvocation) item.value()).id().equals(command.id())) return index;
+        }
+        throw new AssertionError("Command is absent from the open menu: " + command);
+    }
+
     void focusSearch(SearchFocus target) {
         if (target == null) {
             // Explicitly cleared focus is a public FocusManager state. Only the

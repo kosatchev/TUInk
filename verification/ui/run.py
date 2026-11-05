@@ -20,6 +20,13 @@ from terminal import Session
 from markdown_preview import preview_selected
 
 
+def activate_menu_item(session, menu_key, label, mnemonic):
+    """Use a visible command and its mnemonic instead of depending on popup row order."""
+    session.send(menu_key)
+    session.expect(lambda: label in session.screen.text, label + " menu item")
+    session.send(mnemonic)
+
+
 def status(session):
     match = re.search(r"Ln \d+/\d+, Col \d+/\d+", session.screen.text)
     if not match:
@@ -524,8 +531,7 @@ class Regressions:
         original = "\n".join(f"ROW{i:04d}|" + " ".join(f"C{j:03d}|" for j in range(50)) for i in range(120))
         document = self.fixture("reading", original)
         with self.session("reading", document) as session:
-            session.send(b"\x1bs")
-            session.send(b"\r")
+            activate_menu_item(session, b"\x1bv", "Reading mode", b"r")
             session.expect(lambda: "READ" in session.screen.text, "reading mode")
             session.mouse(65, 10, 15)
             session.mouse(65, 10, 15)
@@ -603,9 +609,7 @@ class Regressions:
         original = " ".join(f"T{i:04d}" for i in range(1200)) + "\n" + "\n".join("last line " + str(i) for i in range(40))
         document = self.fixture("resize", original)
         with self.session("resize", document) as session:
-            session.send(b"\x1bOR")  # F3: View menu
-            session.send(b"\x1b[B")
-            session.send(b"\r")
+            activate_menu_item(session, b"\x1bOR", "Wrap Lines", b"w")
             assert "Wrap lines enabled" in session.screen.text, session.screen.text
             for _ in range(4):
                 session.mouse(65, 10, 20)
@@ -1013,9 +1017,7 @@ class Regressions:
                         if line and not line.startswith("#"))
 
         with self.session("settings-unrelated", document, home=home, options=overrides) as session:
-            session.send(b"\x1bOR")  # F3, first View item: Show Tab Bar
-            session.expect(lambda: "[x] Show Tab Bar" in session.screen.text, "View menu before settings change")
-            session.send(b"\r")
+            activate_menu_item(session, b"\x1bOR", "Show Tab Bar", b"s")
             session.expect(lambda: "Tab bar hidden" in session.screen.text, "completed tab bar settings change")
             assert "Tab bar hidden" in session.screen.text, session.screen.text
             session.finish()
@@ -1028,10 +1030,7 @@ class Regressions:
         with self.session("settings-explicit", document, home=home, options=overrides) as session:
             # Two explicit changes return to the CLI value, which is now a preference.
             for acknowledgement in ("Reading mode disabled", "Reading mode enabled"):
-                session.send(b"\x1bs")
-                session.expect(lambda: "Reading mode" in session.screen.text and "Confirm on close" in session.screen.text,
-                               "Settings menu before explicit reading mode change")
-                session.send(b"\r")
+                activate_menu_item(session, b"\x1bv", "Reading mode", b"r")
                 session.expect(lambda: acknowledgement in session.screen.text, "completed explicit reading mode change")
             assert "Reading mode enabled" in session.screen.text, session.screen.text
             session.finish()
@@ -1059,7 +1058,7 @@ class Regressions:
         dotfile.write_bytes(path.read_bytes())
         linked_path.symlink_to(os.path.relpath(dotfile, linked_path.parent))
         with self.session("settings-linked", document, home=linked_home, options=()) as session:
-            session.send(b"\x1bOR\r")
+            activate_menu_item(session, b"\x1bOR", "Show Tab Bar", b"s")
             session.expect(lambda: "Tab bar shown" in session.screen.text, "changed linked settings")
             session.finish()
         assert linked_path.is_symlink(), "saving preferences replaced the dotfile symlink"
@@ -1127,7 +1126,7 @@ class Regressions:
         retained = invalid_path.with_name("tuink.properties.incompatible")
         invalid_path.rename(retained)  # Explicit user repair, not a production migration.
         with self.session("settings-repaired-save", document, home=invalid_home, options=()) as session:
-            session.send(b"\x1bOR\x1b[B\r")
+            activate_menu_item(session, b"\x1bOR", "Wrap Lines", b"w")
             session.expect(lambda: "Wrap lines enabled" in session.screen.text, "preferences work after profile repair")
             session.finish()
         repaired = invalid_path.read_bytes()
@@ -1420,8 +1419,7 @@ class Regressions:
         settings = home / ".config/tuink/tuink.properties"
 
         def toggle_reading(session):
-            session.send(b"\x1bs")
-            session.send(b"\r")
+            activate_menu_item(session, b"\x1bv", "Reading mode", b"r")
 
         with self.session("settings-memory-seed", document, home=home) as session:
             toggle_reading(session)
@@ -1459,9 +1457,7 @@ class Regressions:
                 session.expect(lambda: f"Col {document.stat().st_size + 1}/" in status(session),
                                "end of a densely highlighted CSV line")
                 session.resize(24, 120)
-                session.send(b"\x1bOR")
-                session.send(b"\x1b[B")
-                session.send(b"\r")
+                activate_menu_item(session, b"\x1bOR", "Wrap Lines", b"w")
                 session.expect(lambda: "Wrap lines enabled" in session.screen.text,
                                "wrapping a densely highlighted CSV line")
                 session.send(b"\x1b[H")

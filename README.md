@@ -134,8 +134,8 @@ Live Preview follows the current source buffer, including unsaved edits, with
 its own position, selection and search. Tables and wide diagrams scroll
 horizontally; math and Mermaid use Unicode cells without terminal image
 protocols. `Ctrl+F` searches preview text, `Ctrl+A` selects all, and `Ctrl+C`
-copies the selection or the whole preview. View also provides **Copy block
-source**, **Copy table as TSV**, and **Go to source**. Esc leaves Find or cancels
+copies the selection or the whole preview. Edit also provides **Copy block
+source** and **Copy table as TSV**; View provides **Go to source**. Esc leaves Find or cancels
 a dialog while keeping Preview selected.
 
 **Settings > MD copy as displayed** makes ordinary Preview copy use rendered
@@ -322,6 +322,10 @@ Modified shortcuts work when the terminal sends distinct key sequences and the
 desktop passes them through. For example, some terminals cannot distinguish
 `Ctrl+Shift+S` from `Ctrl+S`, or `Ctrl+Tab` from `Tab`. Use another listed
 shortcut when a combination is unavailable.
+
+**View** groups document modes (including Reading mode), wrapping, appearance
+and Markdown navigation. **Settings** groups close confirmation, mouse behavior,
+editing preferences and Markdown preferences; **Tab width** sits beside Tab insert mode.
 
 A standalone `Esc` can take up to half a second to act while TUInk waits for a
 possible terminal key sequence. Unambiguous key sequences, including Alt

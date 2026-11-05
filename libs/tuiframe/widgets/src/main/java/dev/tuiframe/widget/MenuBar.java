@@ -499,7 +499,7 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
     }
 
     /** Semantic menu action independent of an application command model. */
-    public sealed interface Action<C> permits StateChanged, Invoked {
+    public sealed interface Action<C> permits StateChanged, Invoked, Unavailable {
     }
 
     /** Opening, dismissal, menu switching, or navigation produced a new state. */
@@ -517,6 +517,15 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
             if (state.isOpen()) {
                 throw new IllegalArgumentException("invocation state must be closed");
             }
+        }
+    }
+
+    /** A readable disabled item's activation was attempted; the menu remains open and unchanged. */
+    public record Unavailable<C>(C value, State state) implements Action<C> {
+        public Unavailable {
+            Objects.requireNonNull(value, "value");
+            Objects.requireNonNull(state, "state");
+            if (!state.isOpen()) throw new IllegalArgumentException("unavailable state must remain open");
         }
     }
 
@@ -815,10 +824,7 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
             if (row != null && row.entry() instanceof Item<?> raw) {
                 @SuppressWarnings("unchecked")
                 Item<C> item = (Item<C>) raw;
-                if (row.activatable()) {
-                    return invoke(item.value());
-                }
-                return InteractionResult.handled();
+                return activate(row, item);
             }
             if (popup != null && popup.bounds().contains(point)) {
                 return InteractionResult.handled();
@@ -870,7 +876,7 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
             }
             @SuppressWarnings("unchecked")
             Item<C> item = (Item<C>) raw;
-            return row.activatable() ? invoke(item.value()) : InteractionResult.handled();
+            return activate(row, item);
         }
 
         private InteractionResult<Action<C>> handleMnemonic(String text) {
@@ -893,8 +899,8 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
                 }
                 @SuppressWarnings("unchecked")
                 Item<C> item = (Item<C>) raw;
-                if (row.activatable() && mnemonicEquals(row.label().mnemonicText(), grapheme)) {
-                    return invoke(item.value());
+                if (row.readable() && mnemonicEquals(row.label().mnemonicText(), grapheme)) {
+                    return activate(row, item);
                 }
             }
             return null;
@@ -917,7 +923,7 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
             if (visible != null && visible.entry() instanceof Item<?> raw) {
                 @SuppressWarnings("unchecked")
                 Item<C> item = (Item<C>) raw;
-                return visible.activatable() ? invoke(item.value()) : InteractionResult.handled();
+                return activate(visible, item);
             }
             if (rowCapacity <= 0) {
                 return InteractionResult.handled();
@@ -930,6 +936,12 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
             return next.equals(state)
                 ? InteractionResult.handled()
                 : InteractionResult.output(new StateChanged<>(next));
+        }
+
+        private InteractionResult<Action<C>> activate(PreparedRow<C> row, Item<C> item) {
+            if (!row.readable()) return InteractionResult.handled();
+            return item.enabled() ? invoke(item.value())
+                : InteractionResult.output(new Unavailable<>(item.value(), state));
         }
 
         private InteractionResult<Action<C>> invoke(C value) {
@@ -997,8 +1009,10 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
 
     private record PreparedRow<C>(int entryIndex, int y, Entry<C> entry, PreparedLabel label, PreparedLabel hint) {
         private boolean activatable() {
-            return entry instanceof Item<?> item && item.enabled() && label != null
-                && label.text().equals(item.label());
+            return entry instanceof Item<?> item && item.enabled() && readable();
+        }
+        private boolean readable() {
+            return entry instanceof Item<?> item && label != null && label.text().equals(item.label());
         }
     }
 

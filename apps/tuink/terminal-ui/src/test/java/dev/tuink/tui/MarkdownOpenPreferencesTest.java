@@ -88,12 +88,12 @@ class MarkdownOpenPreferencesTest {
     @Test void settingsMenuCheckboxesAreIndependentAndPersistFromKeyboard() throws Exception {
         try (var window = new EditorWindowFixture(directory, List.of("keep"), settings(false, false))) {
             window.command(TuinkCommand.MENU_SETTINGS);
-            for (int index = 0; index < 8; index++) window.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
+            window.selectMenuCommand(TuinkCommand.SETTINGS_TOGGLE_MARKDOWN_OPEN_BOTH_TABS);
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             assertTrue(window.ui.markdownOpenBothTabsSetting);
             assertFalse(window.ui.markdownOpenInPreviewSetting);
             window.command(TuinkCommand.MENU_SETTINGS);
-            for (int index = 0; index < 9; index++) window.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
+            window.selectMenuCommand(TuinkCommand.SETTINGS_TOGGLE_MARKDOWN_OPEN_IN_PREVIEW);
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             assertTrue(window.ui.markdownOpenBothTabsSetting);
             assertTrue(window.ui.markdownOpenInPreviewSetting);

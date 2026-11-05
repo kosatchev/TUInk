@@ -107,6 +107,8 @@ final class InputActionDispatcher {
                     ? "Markdown opens in Preview" : "Markdown opens in Source");
             }
             case SETTINGS_TOGGLE_MARKDOWN_CODE_SYNTAX -> {
+                var availability = surface.availability(command);
+                if (!availability.enabled()) return DispatchResult.handled(availability.reason(), StatusLevel.WARNING);
                 ui.markdownCodeHighlightingSetting = !ui.markdownCodeHighlightingSetting;
                 return DispatchResult.handled(ui.markdownCodeHighlightingSetting
                     ? "Markdown Source code syntax highlighting enabled" : "Markdown Source code syntax highlighting disabled");
@@ -188,9 +190,8 @@ final class InputActionDispatcher {
                 return DispatchResult.handled(statusMessage);
             }
             case VIEW_TOGGLE_SYNTAX -> {
-                if (!surface.syntaxAvailable()) {
-                    return DispatchResult.handled("Syntax highlighting is unavailable in the current theme");
-                }
+                var availability = surface.availability(command);
+                if (!availability.enabled()) return DispatchResult.handled(availability.reason(), StatusLevel.WARNING);
                 ui.syntaxHighlightingSetting = !ui.syntaxHighlightingSetting;
                 statusMessage = ui.syntaxHighlightingSetting
                     ? "Syntax highlighting enabled"
@@ -198,6 +199,8 @@ final class InputActionDispatcher {
                 return DispatchResult.handled(statusMessage);
             }
             case VIEW_TOGGLE_RAINBOW_BRACKETS -> {
+                var availability = surface.availability(command);
+                if (!availability.enabled()) return DispatchResult.handled(availability.reason(), StatusLevel.WARNING);
                 ui.rainbowBracketsSetting = !ui.rainbowBracketsSetting;
                 statusMessage = ui.rainbowBracketsSetting
                     ? "Rainbow brackets enabled"

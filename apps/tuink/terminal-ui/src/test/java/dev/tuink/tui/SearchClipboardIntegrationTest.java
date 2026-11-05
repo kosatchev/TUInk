@@ -384,15 +384,9 @@ class SearchClipboardIntegrationTest {
                 window.focusSearch(target);
             }
             window.frame();
-            List<TuinkCommand> editEntries = List.of(
-                TuinkCommand.EDIT_UNDO, TuinkCommand.EDIT_REDO, TuinkCommand.EDIT_CUT,
-                TuinkCommand.EDIT_COPY, TuinkCommand.EDIT_PASTE, TuinkCommand.EDIT_TOGGLE_LINE_COMMENT,
-                TuinkCommand.EDIT_SELECT_ALL, TuinkCommand.SEARCH_OPEN
-            );
-            int index = editEntries.indexOf(command);
-            assertTrue(index >= 0, "command must appear in Edit menu");
             window.event(KeyStroke.of(KeyStroke.Key.F2));
             assertTrue(window.menu.isOpen());
+            int index = window.menuCommandIndex(command);
             var descriptors = TopMenuView.build(ui, List.of(), -1, "Cyan", new CommandRouter(),
                 window.menu.state(), window.controller.activeSurface());
             var item = (dev.tuiframe.widget.MenuBar.Item<?>) descriptors.menus()
@@ -401,9 +395,7 @@ class SearchClipboardIntegrationTest {
                 // An unavailable command has no keyboard activation; close without invoking another row.
                 window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
             } else {
-                for (int step = 0; window.menu.state().selectedEntryIndex() != index && step < editEntries.size(); step++) {
-                    window.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
-                }
+                window.selectMenuCommand(command);
                 assertEquals(index, window.menu.state().selectedEntryIndex());
                 window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             }

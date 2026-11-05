@@ -111,7 +111,7 @@ class TopMenuViewTest {
             entry instanceof MenuBar.Item<?> item && item.label().startsWith("Cut"))
             .map(entry -> (MenuBar.Item<?>) entry).findFirst().orElseThrow();
         assertFalse(cut.enabled());
-        assertTrue(cut.label().contains("read only"));
+        assertEquals("Cut", cut.label());
     }
 
     @Test
@@ -139,11 +139,8 @@ class TopMenuViewTest {
             .map(MenuBar.Menu::mnemonicGraphemeIndex)
             .toList());
 
-        MenuBar.Item<CommandInvocation> selectAll = item(
-            editView,
-            TopMenuController.EDIT_INDEX,
-            6
-        );
+        MenuBar.Item<CommandInvocation> selectAll = commandItem(editView, TopMenuController.EDIT_INDEX,
+            dev.tuink.tui.command.TuinkCommand.EDIT_SELECT_ALL);
         assertEquals(EDIT_SELECT_ALL.id(), selectAll.value().id());
         assertEquals("Select All", selectAll.label());
 
@@ -190,21 +187,15 @@ class TopMenuViewTest {
         TopMenuView settingsMenu = TopMenuView.build(ui, List.of(), -1, "Blue", new CommandRouter(),
             MenuBar.State.open(TopMenuController.SETTINGS_INDEX), TestSurfaces.source(ui).withRuntime(false, true));
 
-        MenuBar.Item<CommandInvocation> wordWrap = item(
-            viewMenu,
-            TopMenuController.VIEW_INDEX,
-            4
-        );
+        MenuBar.Item<CommandInvocation> wordWrap = commandItem(viewMenu, TopMenuController.VIEW_INDEX,
+            dev.tuink.tui.command.TuinkCommand.VIEW_TOGGLE_WORD_WRAP);
         assertEquals(VIEW_TOGGLE_WORD_WRAP.id(), wordWrap.value().id());
-        assertEquals("[x] Wrap by words (disabled)", wordWrap.label());
+        assertEquals("[x] Wrap by words", wordWrap.label());
         assertFalse(wordWrap.enabled());
         assertEquals(-1, wordWrap.mnemonicGraphemeIndex());
 
-        MenuBar.Item<CommandInvocation> mouse = item(
-            settingsMenu,
-            TopMenuController.SETTINGS_INDEX,
-            1
-        );
+        MenuBar.Item<CommandInvocation> mouse = commandItem(settingsMenu, TopMenuController.SETTINGS_INDEX,
+            dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_MOUSE);
         assertEquals(SETTINGS_TOGGLE_MOUSE.id(), mouse.value().id());
         assertEquals("[ ] Mouse mode", mouse.label());
         assertTrue(mouse.enabled());
@@ -218,11 +209,11 @@ class TopMenuViewTest {
             List.of(
                 "tuink.tab.new",
                 "tuink.document.open",
+                "tuink.document.open-encoding",
                 "tuink.document.save",
                 "tuink.document.save-as",
                 "tuink.document.format",
                 "tuink.document.reopen-encoding",
-                "tuink.document.open-encoding",
                 "tuink.document.recover-drafts",
                 "tuink.app.quit"
             ),
@@ -235,8 +226,10 @@ class TopMenuViewTest {
                 "tuink.edit.cut",
                 "tuink.edit.copy",
                 "tuink.edit.paste",
-                "tuink.edit.toggle-line-comment",
+                "tuink.view.preview.copy-source",
+                "tuink.view.preview.copy-table-tsv",
                 "tuink.edit.select-all",
+                "tuink.edit.toggle-line-comment",
                 "tuink.search.open"
             ),
             commandIds(view(ui, MenuBar.State.open(TopMenuController.EDIT_INDEX)), TopMenuController.EDIT_INDEX)
@@ -244,19 +237,17 @@ class TopMenuViewTest {
         assertEquals(
             List.of(
                 "tuink.view.toggle-markdown-preview",
-                "tuink.view.toggle-tab-bar",
+                "tuink.settings.toggle-reading-mode",
                 "tuink.view.toggle-line-wrap",
                 "tuink.view.toggle-word-wrap",
+                "tuink.view.toggle-tab-bar",
                 "tuink.view.toggle-active-gutter",
                 "tuink.view.toggle-whitespace",
                 "tuink.view.toggle-syntax",
                 "tuink.view.toggle-rainbow-brackets",
                 "tuink.view.toggle-selection-highlight",
                 "tuink.view.cycle-gutter-diff",
-                "tuink.view.cycle-tab-width",
                 "tuink.view.cycle-theme",
-                "tuink.view.preview.copy-source",
-                "tuink.view.preview.copy-table-tsv",
                 "tuink.view.preview.reveal-source",
                 "tuink.view.preview.follow-link",
                 "tuink.view.preview.next-heading",
@@ -276,18 +267,18 @@ class TopMenuViewTest {
         );
         assertEquals(
             List.of(
-                "tuink.settings.toggle-reading-mode",
-                "tuink.settings.toggle-mouse",
                 "tuink.settings.toggle-confirm-on-close",
+                "tuink.settings.toggle-mouse",
+                "tuink.settings.toggle-right-click-clipboard",
                 "tuink.settings.toggle-smart-home-end",
                 "tuink.settings.toggle-auto-indent",
                 "tuink.settings.toggle-auto-pairs",
                 "tuink.settings.toggle-auto-list",
+                "tuink.view.cycle-tab-width",
                 "tuink.settings.cycle-tab-insert-mode",
                 "tuink.settings.toggle-markdown-open-both-tabs",
                 "tuink.settings.toggle-markdown-open-in-preview",
                 "tuink.settings.toggle-markdown-code-syntax",
-                "tuink.settings.toggle-right-click-clipboard",
                 "tuink.settings.toggle-markdown-visual-copy"
             ),
             commandIds(
@@ -394,7 +385,8 @@ class TopMenuViewTest {
         assertEquals(" Edit ", cells(buffer, 0, 7, 6));
         assertEquals("demo.txt", cells(buffer, 0, topBar.menuPrefixWidth(), 8));
         assertEquals("Undo", cells(buffer, popup.y() + 1, popup.x() + 2, 4));
-        assertEquals("Select All", cells(buffer, popup.y() + 7, popup.x() + 2, 10));
+        assertTrue(java.util.stream.IntStream.range(popup.y() + 1, popup.y() + popup.height() - 1)
+            .anyMatch(row -> cells(buffer, row, popup.x() + 2, 5).equals("Paste")));
     }
 
     @Test
@@ -489,6 +481,16 @@ class TopMenuViewTest {
     ) {
         MenuBar.Entry<CommandInvocation> entry = view.menus().get(menuIndex).entries().get(entryIndex);
         return (MenuBar.Item<CommandInvocation>) assertInstanceOf(MenuBar.Item.class, entry);
+    }
+
+    private static MenuBar.Item<CommandInvocation> commandItem(TopMenuView view, int menuIndex,
+        dev.tuink.tui.command.TuinkCommand command) {
+        var entries = view.menus().get(menuIndex).entries();
+        for (int index = 0; index < entries.size(); index++) {
+            if (entries.get(index) instanceof MenuBar.Item<?> candidate
+                && ((CommandInvocation) candidate.value()).id().equals(command.id())) return item(view, menuIndex, index);
+        }
+        throw new AssertionError("Missing menu command: " + command);
     }
 
     private static List<String> commandIds(TopMenuView view, int menuIndex) {

@@ -50,14 +50,15 @@ class CommandRouterTest {
     void actualMenuSelectionJoinsTheSameCommandPath() {
         TopMenuController controller = new TopMenuController();
         controller.adopt(MenuBar.State.open(TopMenuController.EDIT_INDEX));
-        for (int i = 0; i < 5; i++) {
-            TopMenuInputRouter.route(
-                controller,
-                menuPlacement(controller),
-                router,
-                KeyStroke.of(KeyStroke.Key.ARROW_DOWN)
-            );
+        var entries = menuView(controller).menus().get(TopMenuController.EDIT_INDEX).entries();
+        int target = java.util.stream.IntStream.range(0, entries.size())
+            .filter(index -> entries.get(index) instanceof MenuBar.Item<?> item
+                && ((CommandInvocation) item.value()).id().equals(EDIT_TOGGLE_LINE_COMMENT.id()))
+            .findFirst().orElseThrow();
+        for (int attempt = 0; controller.state().selectedEntryIndex() != target && attempt < entries.size(); attempt++) {
+            TopMenuInputRouter.route(controller, menuPlacement(controller), router, KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
         }
+        assertEquals(target, controller.state().selectedEntryIndex());
 
         TopMenuInputRouter.Result selected = TopMenuInputRouter.route(
             controller,
@@ -196,6 +197,10 @@ class CommandRouterTest {
     }
 
     private TopMenuView.Placement menuPlacement(TopMenuController controller) {
+        return menuView(controller).place(new Rect(0, 0, 80, 20));
+    }
+
+    private TopMenuView menuView(TopMenuController controller) {
         return TopMenuView.build(
             new UiSessionState(),
             List.of(),
@@ -203,7 +208,7 @@ class CommandRouterTest {
             "Cyan",
             router,
             controller.state(),
-            TestSurfaces.source(new UiSessionState())).place(new Rect(0, 0, 80, 20)
+            TestSurfaces.source(new UiSessionState())
         );
     }
 }

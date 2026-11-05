@@ -30,16 +30,17 @@ class TinyMenuIntegrationTest {
             long revision = window.active().tabSession().model().revision();
             window.resize(6, 6);
             window.command(TuinkCommand.MENU_SETTINGS);
-            window.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
-            window.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
-            assertEquals(2, window.menu.state().selectedEntryIndex());
+            window.selectMenuCommand(TuinkCommand.SETTINGS_TOGGLE_CONFIRM_ON_CLOSE);
+            assertEquals(window.menuCommandIndex(TuinkCommand.SETTINGS_TOGGLE_CONFIRM_ON_CLOSE),
+                window.menu.state().selectedEntryIndex());
             assertFalse(screenContains(window, "Confirm on close"));
 
             activate(window, route, true);
 
             assertEquals(initialConfirm, window.ui.confirmOnCloseSetting);
             assertTrue(window.menu.isOpen());
-            assertEquals(2, window.menu.state().selectedEntryIndex());
+            assertEquals(window.menuCommandIndex(TuinkCommand.SETTINGS_TOGGLE_CONFIRM_ON_CLOSE),
+                window.menu.state().selectedEntryIndex());
             assertEquals(revision, window.active().tabSession().model().revision());
             assertEquals(List.of("unchanged"), window.active().tabSession().model().snapshotLines());
             assertFalse(window.active().state().isDirty());
@@ -61,10 +62,12 @@ class TinyMenuIntegrationTest {
             boolean initialConfirm = window.ui.confirmOnCloseSetting;
             window.resize(6, 6);
             window.command(TuinkCommand.MENU_SETTINGS);
-            for (int step = 0; step < 3; step++) {
-                window.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
-            }
-            assertEquals(4, window.menu.state().selectedEntryIndex(), "Navigation still skips separators");
+            window.selectMenuCommand(TuinkCommand.SETTINGS_TOGGLE_RIGHT_CLICK_CLIPBOARD);
+            int previous = window.menu.state().selectedEntryIndex();
+            window.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
+            assertEquals(window.menuCommandIndex(TuinkCommand.SETTINGS_TOGGLE_SMART_HOME_END),
+                window.menu.state().selectedEntryIndex());
+            assertTrue(window.menu.state().selectedEntryIndex() > previous + 1, "Navigation skips the group separator");
 
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
 
@@ -88,9 +91,9 @@ class TinyMenuIntegrationTest {
             assertTrue(window.ui.confirmOnCloseSetting);
 
             window.command(TuinkCommand.MENU_SETTINGS);
-            window.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
-            window.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
-            assertEquals(2, window.menu.state().selectedEntryIndex());
+            window.selectMenuCommand(TuinkCommand.SETTINGS_TOGGLE_CONFIRM_ON_CLOSE);
+            assertEquals(window.menuCommandIndex(TuinkCommand.SETTINGS_TOGGLE_CONFIRM_ON_CLOSE),
+                window.menu.state().selectedEntryIndex());
             assertTrue(screenContains(window, "Confirm on close"));
             window.resize(6, 6);
 
@@ -98,7 +101,8 @@ class TinyMenuIntegrationTest {
 
             assertTrue(window.ui.confirmOnCloseSetting);
             assertTrue(window.menu.isOpen());
-            assertEquals(2, window.menu.state().selectedEntryIndex());
+            assertEquals(window.menuCommandIndex(TuinkCommand.SETTINGS_TOGGLE_CONFIRM_ON_CLOSE),
+                window.menu.state().selectedEntryIndex());
             window.resize(24, 80);
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
             assertFalse(window.menu.isOpen());
@@ -118,11 +122,12 @@ class TinyMenuIntegrationTest {
     private static void activate(EditorWindowFixture window, String route, boolean tiny) {
         switch (route) {
             case "enter" -> window.event(KeyStroke.of(KeyStroke.Key.ENTER));
-            case "ordinal" -> window.event(new TextInput("3"));
+            case "ordinal" -> window.event(new TextInput(Integer.toString(
+                window.menuCommandIndex(TuinkCommand.SETTINGS_TOGGLE_CONFIRM_ON_CLOSE) + 1)));
             case "mnemonic" -> window.event(new TextInput("c"));
             case "click" -> {
                 if (tiny) {
-                    window.pointer(PointerEvent.Kind.PRESS, 4, 2);
+                    window.pointer(PointerEvent.Kind.PRESS, 2, 2);
                 } else {
                     for (int row = 0; row < window.height; row++) {
                         int column = window.screenRow(row).indexOf("Confirm on close");

@@ -326,12 +326,15 @@ final class TopMenuView {
         return List.of(
             item(TAB_NEW, "New"),
             item(DOCUMENT_OPEN, "Open..."),
+            item(TuinkCommand.DOCUMENT_OPEN_ENCODING, "Open with encoding..."),
+            separator(),
             item(DOCUMENT_SAVE, "Save"),
             item(DOCUMENT_SAVE_AS, "Save As..."),
-            item(TuinkCommand.DOCUMENT_FORMAT, surface.preview() ? "Format (source tab)" : "Format...", !surface.preview()),
-            item(TuinkCommand.DOCUMENT_REOPEN_ENCODING, surface.preview() ? "Reopen with encoding (source tab)" : "Reopen with encoding...", !surface.preview()),
-            item(TuinkCommand.DOCUMENT_OPEN_ENCODING, "Open with encoding..."),
+            item(TuinkCommand.DOCUMENT_FORMAT, "Format...", !surface.preview()),
+            item(TuinkCommand.DOCUMENT_REOPEN_ENCODING, "Reopen with encoding...", !surface.preview()),
+            separator(),
             item(TuinkCommand.DOCUMENT_RECOVER_DRAFTS, "Recover drafts..."),
+            separator(),
             item(APP_QUIT, "Quit")
         );
     }
@@ -339,69 +342,48 @@ final class TopMenuView {
     private static List<EntrySpec> editEntries(ActiveSurface surface) {
         boolean writable = surface.editableField() || surface.documentWritable();
         boolean documentWritable = surface.documentWritable();
-        String reason = writable ? "" : " (read only)";
         return List.of(
-            item(EDIT_UNDO, documentWritable ? "Undo" : "Undo (unavailable)", documentWritable),
-            item(EDIT_REDO, documentWritable ? "Redo" : "Redo (unavailable)", documentWritable),
-            item(EDIT_CUT, "Cut" + reason, writable),
+            item(EDIT_UNDO, "Undo", documentWritable),
+            item(EDIT_REDO, "Redo", documentWritable),
+            separator(),
+            item(EDIT_CUT, "Cut", writable),
             item(EDIT_COPY, "Copy"),
-            item(EDIT_PASTE, "Paste" + reason, writable),
-            item(EDIT_TOGGLE_LINE_COMMENT, documentWritable ? "Toggle Line Comment" : "Toggle Line Comment (unavailable)", documentWritable),
+            item(EDIT_PASTE, "Paste", writable),
+            separator(),
+            item(TuinkCommand.VIEW_PREVIEW_COPY_SOURCE, "Copy block source", surface.preview()),
+            item(TuinkCommand.VIEW_PREVIEW_COPY_TABLE_TSV, "Copy table as TSV", surface.preview()),
+            separator(),
             item(EDIT_SELECT_ALL, "Select All"),
+            item(EDIT_TOGGLE_LINE_COMMENT, "Toggle Line Comment", documentWritable),
+            separator(),
             item(SEARCH_OPEN, "Find")
         );
     }
 
     private static List<EntrySpec> viewEntries(UiSessionState ui, ActiveSurface surface, String themeLabel) {
         boolean wrapLines = ui.wrapLinesSetting;
-        String wrapWords = checked(ui.wrapWordsSetting) + " Wrap by words";
-        if (!wrapLines) {
-            wrapWords += " (disabled)";
-        }
-        String syntaxLabel = checked(ui.syntaxHighlightingSetting) + " Syntax highlighting";
-        if (!surface.syntaxAvailable()) {
-            syntaxLabel += " (unavailable in " + themeLabel + ")";
-        }
         GutterDiffMode gutterDiff = ui.gutterDiffModeSetting == null
-            ? GutterDiffMode.MYERS
-            : ui.gutterDiffModeSetting;
+            ? GutterDiffMode.MYERS : ui.gutterDiffModeSetting;
         return List.of(
-            item(dev.tuink.tui.command.TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW,
-                surface.preview() ? "MD Source" : "MD Preview"),
+            item(TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW, surface.preview() ? "MD Source" : "MD Preview"),
+            item(SETTINGS_TOGGLE_READING_MODE, checked(ui.readingModeSetting) + " Reading mode"),
+            separator(),
+            item(VIEW_TOGGLE_LINE_WRAP, checked(wrapLines) + " Wrap Lines"),
+            item(VIEW_TOGGLE_WORD_WRAP, checked(ui.wrapWordsSetting) + " Wrap by words", wrapLines),
             separator(),
             item(VIEW_TOGGLE_TAB_BAR, checked(ui.showTabBarSetting) + " Show Tab Bar"),
-            item(VIEW_TOGGLE_LINE_WRAP, checked(wrapLines) + " Wrap Lines"),
-            item(VIEW_TOGGLE_WORD_WRAP, wrapWords, wrapLines),
-            separator(),
-            item(
-                VIEW_TOGGLE_ACTIVE_GUTTER,
-                checked(ui.highlightActiveGutterSetting) + " Highlight current line number"
-            ),
+            item(VIEW_TOGGLE_ACTIVE_GUTTER, checked(ui.highlightActiveGutterSetting) + " Highlight current line number"),
             item(VIEW_TOGGLE_WHITESPACE, checked(ui.visibleWhitespaceSetting) + " Visible tabs/spaces"),
-            separator(),
-            item(VIEW_TOGGLE_SYNTAX, syntaxLabel, surface.syntaxAvailable()),
+            item(VIEW_TOGGLE_SYNTAX, checked(ui.syntaxHighlightingSetting) + " Syntax highlighting"),
             item(VIEW_TOGGLE_RAINBOW_BRACKETS, checked(ui.rainbowBracketsSetting) + " Rainbow brackets"),
-            item(
-                VIEW_TOGGLE_SELECTION_HIGHLIGHT,
-                checked(ui.autoSelectionHighlightSetting) + " Auto highlight selection"
-            ),
+            item(VIEW_TOGGLE_SELECTION_HIGHLIGHT, checked(ui.autoSelectionHighlightSetting) + " Auto highlight selection"),
             item(VIEW_CYCLE_GUTTER_DIFF, "[>] Gutter diff: " + gutterDiff.label()),
-            separator(),
-            item(VIEW_CYCLE_TAB_WIDTH, checked(ui.tabWidthSetting <= 2) + " Thin tabs"),
             item(VIEW_CYCLE_THEME, "[>] Theme: " + themeLabel),
             separator(),
-            item(dev.tuink.tui.command.TuinkCommand.VIEW_PREVIEW_COPY_SOURCE,
-                "Copy block source", surface.preview()),
-            item(dev.tuink.tui.command.TuinkCommand.VIEW_PREVIEW_COPY_TABLE_TSV,
-                "Copy table as TSV", surface.preview()),
-            item(dev.tuink.tui.command.TuinkCommand.VIEW_PREVIEW_REVEAL_SOURCE,
-                "Go to source", surface.preview()),
-            item(dev.tuink.tui.command.TuinkCommand.VIEW_PREVIEW_FOLLOW_LINK,
-                "Follow internal link", surface.preview()),
-            item(dev.tuink.tui.command.TuinkCommand.VIEW_PREVIEW_NEXT_HEADING,
-                "Next heading", surface.preview()),
-            item(dev.tuink.tui.command.TuinkCommand.VIEW_PREVIEW_PREVIOUS_HEADING,
-                "Previous heading", surface.preview())
+            item(TuinkCommand.VIEW_PREVIEW_REVEAL_SOURCE, "Go to source", surface.preview()),
+            item(TuinkCommand.VIEW_PREVIEW_FOLLOW_LINK, "Follow internal link", surface.preview()),
+            item(TuinkCommand.VIEW_PREVIEW_NEXT_HEADING, "Next heading", surface.preview()),
+            item(TuinkCommand.VIEW_PREVIEW_PREVIOUS_HEADING, "Previous heading", surface.preview())
         );
     }
 
@@ -432,36 +414,24 @@ final class TopMenuView {
     }
 
     private static List<EntrySpec> settingsEntries(UiSessionState ui, ActiveSurface surface) {
-        TabInsertMode insertMode = ui.tabInsertModeSetting == null
-            ? TabInsertMode.AUTO
-            : ui.tabInsertModeSetting;
+        TabInsertMode insertMode = ui.tabInsertModeSetting == null ? TabInsertMode.AUTO : ui.tabInsertModeSetting;
         return List.of(
-            item(SETTINGS_TOGGLE_READING_MODE, checked(ui.readingModeSetting) + " Reading mode"),
-            item(
-                SETTINGS_TOGGLE_MOUSE,
-                checked(ui.mouseModeSetting && surface.mouseAvailable()) + " Mouse mode"
-            ),
-            item(
-                SETTINGS_TOGGLE_CONFIRM_ON_CLOSE,
-                checked(ui.confirmOnCloseSetting) + " Confirm on close"
-            ),
+            item(SETTINGS_TOGGLE_CONFIRM_ON_CLOSE, checked(ui.confirmOnCloseSetting) + " Confirm on close"),
             separator(),
-            item(
-                SETTINGS_TOGGLE_SMART_HOME_END,
-                checked(ui.smartHomeEndSetting) + " Smart Home/End"
-            ),
+            item(SETTINGS_TOGGLE_MOUSE, checked(ui.mouseModeSetting && surface.mouseAvailable()) + " Mouse mode"),
+            item(SETTINGS_TOGGLE_RIGHT_CLICK_CLIPBOARD, checked(ui.rightClickClipboardSetting) + " Right-click: copy/paste"),
+            separator(),
+            item(SETTINGS_TOGGLE_SMART_HOME_END, checked(ui.smartHomeEndSetting) + " Smart Home/End"),
             item(SETTINGS_TOGGLE_AUTO_INDENT, checked(ui.autoIndentSetting) + " Auto indent"),
             item(SETTINGS_TOGGLE_AUTO_PAIRS, checked(ui.autoPairsSetting) + " Autopairs"),
             item(SETTINGS_TOGGLE_AUTO_LIST, checked(ui.autoListSetting) + " Auto list"),
+            item(VIEW_CYCLE_TAB_WIDTH, "[>] Tab width: " + ui.tabWidthSetting),
             item(SETTINGS_CYCLE_TAB_INSERT_MODE, "[>] Tab insert mode: " + insertMode.label()),
             separator(),
             item(SETTINGS_TOGGLE_MARKDOWN_OPEN_BOTH_TABS, checked(ui.markdownOpenBothTabsSetting) + " Open both Markdown tabs"),
             item(SETTINGS_TOGGLE_MARKDOWN_OPEN_IN_PREVIEW, checked(ui.markdownOpenInPreviewSetting) + " Open Markdown in Preview"),
             item(SETTINGS_TOGGLE_MARKDOWN_CODE_SYNTAX, checked(ui.markdownCodeHighlightingSetting) + " MD code syntax"),
-            item(SETTINGS_TOGGLE_RIGHT_CLICK_CLIPBOARD,
-                checked(ui.rightClickClipboardSetting) + " Right-click: copy/paste"),
-            item(SETTINGS_TOGGLE_MARKDOWN_VISUAL_COPY,
-                checked(ui.markdownVisualCopySetting) + " MD copy as displayed")
+            item(SETTINGS_TOGGLE_MARKDOWN_VISUAL_COPY, checked(ui.markdownVisualCopySetting) + " MD copy as displayed")
         );
     }
 

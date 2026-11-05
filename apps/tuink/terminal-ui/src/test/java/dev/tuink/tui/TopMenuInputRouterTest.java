@@ -54,7 +54,7 @@ class TopMenuInputRouterTest {
     @Test
     void editSelectAllReturnsItsExactSemanticCommandEvenWithSearchBehindMenu() {
         Fixture fixture = fixture(MenuBar.State.open(TopMenuController.EDIT_INDEX), new Rect(0, 0, 80, 20));
-        PointerEvent selectAll = pointer(8, 9, PointerEvent.Kind.PRESS, PointerEvent.Button.LEFT);
+        PointerEvent selectAll = fixture.itemPointer("Select All");
 
         TopMenuInputRouter.Result result = fixture.route(selectAll);
 
@@ -140,7 +140,8 @@ class TopMenuInputRouterTest {
 
     @Test
     void shortcutRevealsAnOffscreenMenuOnTheNextNarrowFrame() {
-        Rect bounds = new Rect(0, 0, 20, 10);
+        int readableWidth = dev.tuiframe.cell.CellText.width("[ ] Confirm on close") + 5;
+        Rect bounds = new Rect(0, 0, readableWidth - 1, 10);
         Fixture fixture = fixture(MenuBar.State.closed(), bounds);
         TopMenuInputRouter.Result shortcut = fixture.route(KeyStroke.of(KeyStroke.Key.S, KeyStroke.Modifier.ALT));
         assertTrue(shortcut.consumed());
@@ -153,9 +154,9 @@ class TopMenuInputRouterTest {
         assertNull(activated.command(), "The scrollbar leaves one character of the item label hidden");
         assertTrue(rebuilt.controller.isOpen());
 
-        Fixture expanded = fixture(rebuilt.controller.state(), new Rect(0, 0, 21, 10));
+        Fixture expanded = fixture(rebuilt.controller.state(), new Rect(0, 0, readableWidth, 10));
         TopMenuInputRouter.Result readable = expanded.route(KeyStroke.of(KeyStroke.Key.ENTER));
-        assertEquals("tuink.settings.toggle-reading-mode", readable.command().id().value());
+        assertEquals("tuink.settings.toggle-confirm-on-close", readable.command().id().value());
     }
 
     @Test
@@ -257,6 +258,20 @@ class TopMenuInputRouterTest {
             this(controller, placement, router, tabs, new WindowPointerCapture());
         }
 
+        PointerEvent itemPointer(String label) {
+            Rect popup = placement.popupBounds().orElseThrow();
+            var cells = new CellBuffer(popup.y() + popup.height(), popup.x() + popup.width());
+            placement.paint(new Canvas(cells), Theme.fixed(CellStyle.DEFAULT));
+            for (int row = popup.y(); row < popup.y() + popup.height(); row++) {
+                var text = new StringBuilder();
+                for (int column = popup.x(); column < popup.x() + popup.width(); column++)
+                    text.append(cells.get(row, column).grapheme());
+                int column = text.indexOf(label);
+                if (column >= 0) return pointer(row, popup.x() + column + 1, PointerEvent.Kind.PRESS, PointerEvent.Button.LEFT);
+            }
+            throw new AssertionError("Missing painted menu item: " + label);
+        }
+
         TopMenuInputRouter.Result route(dev.tuiframe.input.TuiInputEvent event) {
             if (placement.pointerCaptureActive() && !capture.active()) {
                 capture.observe(this, placement.captureScope(), "menu",
@@ -273,7 +288,7 @@ class TopMenuInputRouterTest {
                 });
             boolean cancelled = capture.beforeInput(frame, event);
             if (event instanceof PointerEvent pointer && capture.dispatch(frame, pointer)) {
-                return new TopMenuInputRouter.Result(null, true);
+                return new TopMenuInputRouter.Result(null, true, null);
             }
             TopMenuView.Placement current = cancelled
                 ? fixture(controller.state(), placement.bounds(), tabs).placement : placement;

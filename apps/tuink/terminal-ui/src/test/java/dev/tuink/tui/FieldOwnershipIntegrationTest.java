@@ -34,8 +34,7 @@ class FieldOwnershipIntegrationTest {
                     window.pointer(PointerEvent.Kind.PRESS, row, column);
                     window.pointer(PointerEvent.Kind.RELEASE, row, column);
                 } else {
-                    window.event(KeyStroke.of(KeyStroke.Key.HOME));
-                    window.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
+                    window.selectMenuCommand(TuinkCommand.EDIT_COPY);
                     window.event(KeyStroke.of(KeyStroke.Key.ENTER));
                 }
                 assertFalse(window.menu.isOpen());

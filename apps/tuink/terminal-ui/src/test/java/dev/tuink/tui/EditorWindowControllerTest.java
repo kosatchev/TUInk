@@ -103,10 +103,9 @@ class EditorWindowControllerTest {
 
             fixture.event(KeyStroke.of(KeyStroke.Key.E, KeyStroke.Modifier.ALT));
             assertTrue(fixture.menu.isOpen());
-            for (int step = 0; fixture.menu.state().selectedEntryIndex() != 2 && step < 8; step++) {
-                fixture.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
-            }
-            assertEquals(2, fixture.menu.state().selectedEntryIndex(), "Cut must be reachable from field focus");
+            fixture.selectMenuCommand(dev.tuink.tui.command.TuinkCommand.EDIT_CUT);
+            assertEquals(fixture.menuCommandIndex(dev.tuink.tui.command.TuinkCommand.EDIT_CUT),
+                fixture.menu.state().selectedEntryIndex(), "Cut must be reachable from field focus");
             fixture.event(KeyStroke.of(KeyStroke.Key.ENTER));
 
             assertFalse(fixture.menu.isOpen());

@@ -1802,6 +1802,13 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                     if (inputEvent instanceof PointerEvent && menuInput.consumed()) {
                         editorView.cancelMouseSelection();
                     }
+                    if (menuInput.unavailable() != null) {
+                        var command = TuinkCommand.fromId(menuInput.unavailable().id()).orElse(null);
+                        var availability = activeSurface().availability(command);
+                        notice().warning(availability.enabled() ? "Command is not available here" : availability.reason());
+                        eventLoop.invalidate();
+                        return WindowInput.Consumed.INSTANCE;
+                    }
                     routedMenuCommand = menuInput.command();
                     if (routedMenuCommand != null) {
                         routedMenuResult = commandRouter.dispatch(routedMenuCommand)
@@ -2046,7 +2053,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             }
         }
         if (surface.focus() != ActiveSurface.Focus.CONTENT && ControlCommandRouter.unsupportedLocally(availability)) return;
-        if (!surface.allows(availability)) { notice().warning(surface.refusal(availability)); return; }
+        var access = surface.availability(availability);
+        if (!access.enabled()) { notice().warning(access.reason()); return; }
         if (readSystemClipboard && availability == TuinkCommand.EDIT_PASTE
             && surface.focus() != ActiveSurface.Focus.CONTROL) {
             var target = clipboardTarget(key, surface);

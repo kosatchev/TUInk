@@ -10,11 +10,12 @@ import java.util.Objects;
 
 /** Raw input adapter from the generic menu widget to TUInk commands. */
 final class TopMenuInputRouter {
-    record Result(CommandInvocation command, boolean consumed) {
+    record Result(CommandInvocation command, boolean consumed, CommandInvocation unavailable) {
         Result {
-            if (command != null && !consumed) {
-                throw new IllegalArgumentException("an ignored event cannot invoke a command");
-            }
+            if ((command != null || unavailable != null) && !consumed)
+                throw new IllegalArgumentException("an ignored event cannot activate a command");
+            if (command != null && unavailable != null)
+                throw new IllegalArgumentException("an unavailable attempt cannot invoke a command");
         }
     }
 
@@ -66,6 +67,10 @@ final class TopMenuInputRouter {
                 controller.adopt(invoked.state());
                 return invoked(invoked.value());
             }
+            if (action instanceof MenuBar.Unavailable<CommandInvocation> unavailable) {
+                controller.adopt(unavailable.state());
+                return new Result(null, true, unavailable.value());
+            }
             throw new IllegalStateException("Unsupported menu action: " + action);
         }
         if (interaction.consumed()) {
@@ -85,14 +90,14 @@ final class TopMenuInputRouter {
     }
 
     private static Result ignored() {
-        return new Result(null, false);
+        return new Result(null, false, null);
     }
 
     private static Result captured() {
-        return new Result(null, true);
+        return new Result(null, true, null);
     }
 
     private static Result invoked(CommandInvocation command) {
-        return new Result(Objects.requireNonNull(command, "command"), true);
+        return new Result(Objects.requireNonNull(command, "command"), true, null);
     }
 }

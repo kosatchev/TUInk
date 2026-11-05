@@ -352,8 +352,8 @@ class MenuBarTest {
         expanded.paint(new Canvas(restored), THEME, WidgetState.FOCUSED);
         assertEquals(underlined(SELECTED), restored.get(2, 2).style());
         assertEquals(underlined(DISABLED_ITEM), restored.get(4, 2).style());
-        assertCaptured(expanded.handle(new TextInput("o"), FOCUSED));
-        assertCaptured(expanded.handle(press(4, 2), FOCUSED));
+        assertTrue(output(expanded.handle(new TextInput("o"), FOCUSED)) instanceof MenuBar.Unavailable<?>);
+        assertTrue(output(expanded.handle(press(4, 2), FOCUSED)) instanceof MenuBar.Unavailable<?>);
     }
 
     @Test
@@ -444,7 +444,7 @@ class MenuBarTest {
             stateChange(open.handle(press(1, 7), UNFOCUSED))
         );
         assertEquals("enabled", invokedValue(open.handle(press(3, 3), UNFOCUSED)));
-        assertCaptured(open.handle(press(4, 3), UNFOCUSED));
+        assertTrue(output(open.handle(press(4, 3), UNFOCUSED)) instanceof MenuBar.Unavailable<?>);
         assertCaptured(open.handle(press(5, 3), UNFOCUSED));
         assertCaptured(open.handle(press(2, 2), UNFOCUSED));
         assertCaptured(open.handle(press(7, 13), UNFOCUSED));

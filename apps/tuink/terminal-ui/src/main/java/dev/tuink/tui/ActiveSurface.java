@@ -19,9 +19,9 @@ record ActiveSurface(PresentationId presentationId, Kind kind, Focus focus, Moda
         reading = reading || kind != Kind.SOURCE;
     }
 
-    ActiveSurface withRuntime(boolean mouse, boolean syntax) {
+    ActiveSurface withRuntime(boolean mouse, boolean syntaxDecorations) {
         return new ActiveSurface(presentationId, kind, focus, modalScope, reading, documentLocked,
-            windowIoBusy, mouse, syntax, wrapLines, language);
+            windowIoBusy, mouse, syntaxDecorations, wrapLines, language);
     }
 
     ActiveSurface withKind(Kind next) {
@@ -39,9 +39,17 @@ record ActiveSurface(PresentationId presentationId, Kind kind, Focus focus, Moda
     boolean documentEditable() { return !preview() && !reading && !documentLocked && modalScope == ModalScope.NONE; }
     boolean documentWritable() { return documentEditable() && focus == Focus.CONTENT; }
 
-    boolean allows(TuinkCommand command) {
-        if (command == null) return true;
-        return switch (command) {
+    record Availability(boolean enabled, String reason) {
+        private static final Availability AVAILABLE = new Availability(true, "");
+    }
+
+    Availability availability(TuinkCommand command) {
+        if (command == null) return Availability.AVAILABLE;
+        if (!syntaxAvailable && switch (command) {
+            case VIEW_TOGGLE_SYNTAX -> true;
+            default -> false;
+        }) return new Availability(false, "Syntax highlighting is unavailable in the current theme");
+        boolean enabled = switch (command) {
             case EDIT_UNDO, EDIT_REDO, EDIT_TOGGLE_LINE_COMMENT -> documentWritable();
             case SEARCH_REPLACE, SEARCH_REPLACE_ALL -> documentEditable();
             case EDIT_COPY, EDIT_SELECT_ALL -> focus != Focus.CONTROL;
@@ -54,19 +62,21 @@ record ActiveSurface(PresentationId presentationId, Kind kind, Focus focus, Moda
             case VIEW_PREVIEW_COPY_SOURCE, VIEW_PREVIEW_COPY_TABLE_TSV, VIEW_PREVIEW_REVEAL_SOURCE,
                  VIEW_PREVIEW_FOLLOW_LINK, VIEW_PREVIEW_NEXT_HEADING, VIEW_PREVIEW_PREVIOUS_HEADING -> preview();
             case VIEW_TOGGLE_WORD_WRAP -> wrapLines;
-            case VIEW_TOGGLE_SYNTAX -> syntaxAvailable;
             case DOCUMENT_OPEN, DOCUMENT_OPEN_ENCODING, DOCUMENT_RECOVER_DRAFTS, VIEW_CYCLE_THEME -> modalScope != ModalScope.WINDOW;
             // Opening Save As and starting a save have different live/frozen busy
             // policies; the existing subject workflow revalidates those actions.
             default -> !command.editsDocumentText() || editableField() || documentWritable();
         };
+        return enabled ? Availability.AVAILABLE : new Availability(false, refusalReason(command));
     }
 
-    String refusal(TuinkCommand command) {
+    boolean allows(TuinkCommand command) { return availability(command).enabled(); }
+    String refusal(TuinkCommand command) { return availability(command).reason(); }
+
+    private String refusalReason(TuinkCommand command) {
         if (command == TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW && !preview() && language != LanguageId.MARKDOWN)
             return "Preview is available for Markdown files";
         if (command == TuinkCommand.VIEW_TOGGLE_WORD_WRAP) return "Enable line wrapping before changing word wrapping";
-        if (command == TuinkCommand.VIEW_TOGGLE_SYNTAX) return "Syntax highlighting is unavailable in the current theme";
         if (documentLocked) return "A file operation is already in progress";
         if (command == TuinkCommand.SEARCH_REPLACE || command == TuinkCommand.SEARCH_REPLACE_ALL) {
             if (preview()) return "Markdown preview: return to source to replace text";

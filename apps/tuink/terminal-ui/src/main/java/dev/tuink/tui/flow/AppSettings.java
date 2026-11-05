@@ -27,7 +27,8 @@ public record AppSettings(
     int tabWidth,
     TabInsertMode tabInsertMode,
     UiStyles.Theme theme,
-    boolean rightClickClipboard
+    boolean rightClickClipboard,
+    boolean markdownVisualCopy
 ) {
     public static AppSettings defaults() {
         return new AppSettings(
@@ -53,6 +54,7 @@ public record AppSettings(
             4,
             TabInsertMode.AUTO,
             UiStyles.Theme.CYAN,
+            false,
             false
         );
     }

@@ -8,6 +8,7 @@ import dev.tuink.markdown.MarkdownInline;
 import dev.tuiframe.cell.CellText;
 import dev.tuiframe.text.TerminalText;
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.regex.Pattern;
@@ -39,8 +40,21 @@ public final class MarkdownLayout {
             this(text, runs, copyText, source, kind, List.of());
         }
     }
-    public record Result(MarkdownDocument document, List<Line> lines, int columns, int extent) {
-        public Result { lines = List.copyOf(lines); }
+    /** Copy boundaries are recorded while laying out; they never depend on painted screen cells. */
+    public enum CopyMode { FLOW, ROWS, ATOMIC, TABLE, DECORATION }
+    public record CopyPiece(Box box, int projectionStart, int projectionEnd, boolean atomic,
+                            boolean normalizeWhitespace, boolean hardBreak, int tabColumn) {}
+    public record CopySection(CopyMode mode, int firstRow, int endRow, String firstPrefix,
+                              String continuationPrefix, List<CopyPiece> pieces,
+                              int projectionStart, int projectionEnd) {
+        public CopySection { pieces = List.copyOf(pieces); }
+    }
+    public record Result(MarkdownDocument document, List<Line> lines, int columns, int extent,
+                         List<CopySection> copySections) {
+        public Result { lines = List.copyOf(lines); copySections = List.copyOf(copySections); }
+        public Result(MarkdownDocument document, List<Line> lines, int columns, int extent) {
+            this(document, lines, columns, extent, List.of());
+        }
         public int rowForSource(int sourceLine) {
             int nearest = 0;
             for (int i = 0; i < lines.size(); i++) {
@@ -90,6 +104,9 @@ public final class MarkdownLayout {
     private final EmbeddedRenderer embedded;
     private final CodeHighlighter codeHighlighter;
     private final List<Line> lines = new ArrayList<>();
+    private final List<CopySection> copySections = new ArrayList<>();
+    private MarkdownCopyMapping copyMapping;
+    private final IdentityHashMap<Box, Integer> copyTabColumns = new IdentityHashMap<>();
     /** Shared immutable context for drawing prefixes, never inferred from literal text. */
     private record QuotePrefix(int end) {}
     private static final QuotePrefix NO_QUOTE = new QuotePrefix(0);
@@ -108,10 +125,31 @@ public final class MarkdownLayout {
         this.codeHighlighter = Objects.requireNonNull(codeHighlighter);
     }
     public Result layout(MarkdownDocument document) {
-        lines.clear(); quotePrefixes.clear(); quotePrefix = NO_QUOTE; extent = 0; syntaxSpans = 0;
+        lines.clear(); copySections.clear(); copyTabColumns.clear(); quotePrefixes.clear(); quotePrefix = NO_QUOTE; extent = 0; syntaxSpans = 0;
+        copyMapping = new MarkdownCopyMapping(document.projection());
         blocks(document.blocks(), "", 0);
-        for (var diagnostic : document.diagnostics()) add("[!] " + diagnostic.message(), Role.DIAGNOSTIC, null, "diagnostic", "");
-        return new Result(document, decorateQuotes(MarkdownProjectionMap.annotate(document, lines)), width, extent);
+        for (var diagnostic : document.diagnostics()) {
+            int first = lines.size();
+            add("[!] " + diagnostic.message(), Role.DIAGNOSTIC, null, "diagnostic", "");
+            copySections.add(new CopySection(CopyMode.DECORATION, first, lines.size(), "", "", List.of(), -1, -1));
+        }
+        copyMapping = null; copyTabColumns.clear();
+        List<Line> ready = decorateQuotes(MarkdownProjectionMap.annotate(document, lines));
+        List<CopySection> readyCopy = new ArrayList<>(copySections.size());
+        for (CopySection section : copySections) {
+            if (section.mode() != CopyMode.TABLE) { readyCopy.add(section); continue; }
+            int start = Integer.MAX_VALUE, end = -1;
+            for (int row = section.firstRow(); row < section.endRow(); row++) {
+                check();
+                for (Run run : ready.get(row).runs()) if (run.projectionStart() >= 0) {
+                    start = Math.min(start, run.projectionStart()); end = Math.max(end, run.projectionEnd());
+                }
+            }
+            readyCopy.add(new CopySection(section.mode(), section.firstRow(), section.endRow(), "", "", List.of(),
+                end < 0 ? -1 : start, end));
+        }
+        copyMapping = null;
+        return new Result(document, ready, width, extent, readyCopy);
     }
     private void blocks(List<MarkdownBlock> blocks, String prefix, int depth) {
         if (depth > 96) throw new IllegalArgumentException("Markdown layout nesting limit");
@@ -132,20 +170,38 @@ public final class MarkdownLayout {
                         Line first = lines.get(start);
                         String text = prefix + marker + first.text().substring(Math.min(first.text().length(), prefix.length() + CellText.width(marker)));
                         lines.set(start, new Line(text, first.runs(), first.copyText(), first.source(), first.kind(), first.syntax()));
+                        for (int index = copySections.size() - 1; index >= 0; index--) {
+                            CopySection section = copySections.get(index);
+                            if (section.firstRow() < start) break;
+                            if (section.firstRow() == start && section.mode() == CopyMode.FLOW) {
+                                copySections.set(index, new CopySection(section.mode(), section.firstRow(), section.endRow(),
+                                    text.substring(0, Math.min(text.length(), section.firstPrefix().length())),
+                                    section.continuationPrefix(), section.pieces(), section.projectionStart(), section.projectionEnd()));
+                                break;
+                            }
+                        }
                     }
                 }
             } else if (block instanceof MarkdownBlock.Code n) {
                 if (!n.language().isBlank()) add(prefix + "[" + n.language() + "]", Role.QUOTE, n.source(), "code-label", "");
                 code(n, prefix);
+                copyRows(firstLine, firstLine + (n.language().isBlank() ? 0 : 1), n.source(), n.text(), prefix);
             } else if (block instanceof MarkdownBlock.Math n) {
                 for (String line : embedded.math(n.expression()).lines()) add(prefix + line, Role.MATH, n.source(), "math", "");
+                copyAtomic(firstLine, n.source(), n.expression());
             } else if (block instanceof MarkdownBlock.Mermaid n) {
                 for (String line : embedded.mermaid(n.code(), width)) add(prefix + line, Role.DIAGRAM, n.source(), "mermaid", "");
+                copyAtomic(firstLine, n.source(), n.code());
             } else if (block instanceof MarkdownBlock.Table n) {
                 for (Line line : MarkdownTableLayout.layout(n, width, prefix, embedded)) add(line);
-            } else if (block instanceof MarkdownBlock.ThematicBreak n) add(prefix + "─".repeat(Math.max(1, width - CellText.width(prefix))), Role.QUOTE, n.source(), "rule", "");
+                copySections.add(new CopySection(CopyMode.TABLE, firstLine, lines.size(), "", "", List.of(), -1, -1));
+            } else if (block instanceof MarkdownBlock.ThematicBreak n) {
+                add(prefix + "─".repeat(Math.max(1, width - CellText.width(prefix))), Role.QUOTE, n.source(), "rule", "");
+                copySections.add(new CopySection(CopyMode.DECORATION, firstLine, lines.size(), "", "", List.of(), -1, -1));
+            }
             else if (block instanceof MarkdownBlock.Raw n) {
                 for (String line : n.text().split("\\n", -1)) add(prefix + line, Role.TEXT, n.source(), "raw", line);
+                copyRows(firstLine, firstLine, n.source(), n.text(), prefix);
             }
             if (lines.size() > firstLine && !lines.get(lines.size() - 1).text().isBlank())
                 add(quotePrefix.end() == 0 ? "" : prefix.stripTrailing(), Role.TEXT, block.source(), "space", "");
@@ -158,7 +214,10 @@ public final class MarkdownLayout {
         int firstLine = lines.size();
         try {
             blocks(block.blocks(), nested, depth + 1);
-            if (lines.size() == firstLine) add(nested.stripTrailing(), Role.TEXT, block.source(), "quote", "");
+            if (lines.size() == firstLine) {
+                add(nested.stripTrailing(), Role.TEXT, block.source(), "quote", "");
+                copySections.add(new CopySection(CopyMode.DECORATION, firstLine, lines.size(), "", "", List.of(), -1, -1));
+            }
             else if (lines.get(lines.size() - 1).kind().equals("space")) {
                 // Continue the bar between quoted blocks, then end it with the quote.
                 lines.remove(lines.size() - 1);
@@ -219,33 +278,95 @@ public final class MarkdownLayout {
         syntaxSpans += result.size();
         return List.copyOf(result);
     }
+    private void copyAtomic(int firstRow, TextRange source, String value) {
+        MarkdownCopyMapping.Range range = copyMapping.match(source, value, true);
+        copySections.add(new CopySection(CopyMode.ATOMIC, firstRow, lines.size(), "", "", List.of(), range.start(), range.end()));
+    }
+    private void copyRows(int firstRow, int firstBody, TextRange source, String value, String prefix) {
+        MarkdownCopyMapping.Range range = copyMapping.match(source, value, false);
+        List<CopyPiece> pieces = new ArrayList<>();
+        int offset = range.start();
+        for (int index = firstBody; index < lines.size(); index++) {
+            String row = lines.get(index).copyText();
+            pieces.add(new CopyPiece(new Box(List.of(row), 0), offset, offset < 0 ? -1 : offset + row.length(), false, false, false, -1));
+            if (offset >= 0) offset += row.length() + 1;
+        }
+        copySections.add(new CopySection(CopyMode.ROWS, firstRow, lines.size(), prefix, prefix, pieces, range.start(), range.end()));
+    }
     private record Piece(Box box, Role role, TextRange source, String copy) {
         int width() { return box.lines().stream().mapToInt(CellText::width).max().orElse(0); }
     }
     private void paragraph(List<MarkdownInline> content, String prefix, Role role, TextRange source, String kind) {
-        List<Piece> pieces = new ArrayList<>(); inlines(content, role, pieces);
+        List<Piece> pieces = new ArrayList<>();
+        List<CopyPiece> atoms = new ArrayList<>();
+        inlines(content, role, pieces, atoms);
         List<Piece> row = new ArrayList<>(); int used = CellText.width(prefix);
+        int firstRow = lines.size(), atomStart = 0;
         for (Piece piece : pieces) {
             check();
-            if (piece.copy().equals("\n")) { flush(row, prefix, source, kind); row.clear(); used = CellText.width(prefix); continue; }
+            if (piece.copy().equals("\n")) {
+                flush(row, prefix, source, kind);
+                int atomEnd = atomStart;
+                while (atomEnd < atoms.size() && !atoms.get(atomEnd).hardBreak()) atomEnd++;
+                copyFlow(firstRow, prefix, atoms.subList(atomStart, Math.min(atoms.size(), atomEnd + 1)));
+                atomStart = Math.min(atoms.size(), atomEnd + 1);
+                row.clear(); used = CellText.width(prefix); firstRow = lines.size(); continue;
+            }
             if (used + piece.width() > width && !row.isEmpty()) { flush(row, prefix, source, kind); row.clear(); used = CellText.width(prefix); }
             if (row.isEmpty() && piece.copy().isBlank()) continue;
             row.add(piece); used += piece.width();
         }
         if (!row.isEmpty()) flush(row, prefix, source, kind);
+        if (atomStart < atoms.size()) copyFlow(firstRow, prefix, atoms.subList(atomStart, atoms.size()));
     }
-    private void inlines(List<MarkdownInline> content, Role inherited, List<Piece> pieces) {
+    private void copyFlow(int firstRow, String prefix, List<CopyPiece> pieces) {
+        int start = Integer.MAX_VALUE, end = -1;
+        List<CopyPiece> ready = new ArrayList<>(pieces.size());
+        for (CopyPiece piece : pieces) {
+            if (piece.projectionStart() >= 0) {
+                start = Math.min(start, piece.projectionStart()); end = Math.max(end, piece.projectionEnd());
+            }
+            Integer column = copyTabColumns.get(piece.box());
+            ready.add(column == null ? piece : new CopyPiece(piece.box(), piece.projectionStart(), piece.projectionEnd(),
+                piece.atomic(), piece.normalizeWhitespace(), piece.hardBreak(), column));
+        }
+        copySections.add(new CopySection(CopyMode.FLOW, firstRow, lines.size(), prefix, prefix, ready, end < 0 ? -1 : start, end));
+    }
+    private CopyPiece copyPiece(Box box, TextRange source, String value, boolean atomic,
+                                boolean normalizeWhitespace, boolean hardBreak) {
+        MarkdownCopyMapping.Range range = copyMapping.match(source, value, atomic);
+        return new CopyPiece(box, range.start(), range.end(), atomic, normalizeWhitespace, hardBreak, -1);
+    }
+    private void inlines(List<MarkdownInline> content, Role inherited, List<Piece> pieces, List<CopyPiece> atoms) {
         for (MarkdownInline inline : content) {
             check();
-            if (inline instanceof MarkdownInline.Text n) words(n.text(), inherited, n.source(), pieces);
-            else if (inline instanceof MarkdownInline.Code n) pieces.add(new Piece(new Box(List.of(n.text()), 0), Role.CODE, n.source(), n.text()));
-            else if (inline instanceof MarkdownInline.Math n) pieces.add(new Piece(embedded.math(n.expression()), Role.MATH, n.source(), n.expression()));
-            else if (inline instanceof MarkdownInline.Break n) pieces.add(new Piece(new Box(List.of(n.hard() ? "" : " "), 0), inherited, n.source(), n.hard() ? "\n" : " "));
-            else if (inline instanceof MarkdownInline.Styled n) inlines(n.content(), n.style() == MarkdownInline.Style.STRONG ? Role.STRONG : Role.EMPHASIS, pieces);
+            if (inline instanceof MarkdownInline.Text n) {
+                atoms.add(copyPiece(new Box(List.of(n.text()), 0), n.source(), n.text(), false, true, false));
+                words(n.text(), inherited, n.source(), pieces);
+            } else if (inline instanceof MarkdownInline.Code n) {
+                Box box = new Box(List.of(n.text()), 0);
+                atoms.add(copyPiece(box, n.source(), n.text(), false, false, false));
+                pieces.add(new Piece(box, Role.CODE, n.source(), n.text()));
+            } else if (inline instanceof MarkdownInline.Math n) {
+                Box box = embedded.math(n.expression());
+                atoms.add(copyPiece(box, n.source(), n.expression(), true, false, false));
+                pieces.add(new Piece(box, Role.MATH, n.source(), n.expression()));
+            } else if (inline instanceof MarkdownInline.Break n) {
+                Box box = new Box(List.of(n.hard() ? "" : " "), 0);
+                atoms.add(copyPiece(box, n.source(), n.hard() ? "\n" : " ", false, false, n.hard()));
+                pieces.add(new Piece(box, inherited, n.source(), n.hard() ? "\n" : " "));
+            } else if (inline instanceof MarkdownInline.Styled n) inlines(n.content(), n.style() == MarkdownInline.Style.STRONG ? Role.STRONG : Role.EMPHASIS, pieces, atoms);
             else if (inline instanceof MarkdownInline.Link n) {
-                if (n.image()) words("[image: ", Role.QUOTE, n.source(), pieces);
-                inlines(n.content(), Role.LINK, pieces);
-                if (n.image()) words("] " + n.destination(), Role.QUOTE, n.source(), pieces);
+                if (n.image()) {
+                    atoms.add(new CopyPiece(new Box(List.of("[image: "), 0), -1, -1, false, false, false, -1));
+                    words("[image: ", Role.QUOTE, n.source(), pieces);
+                }
+                inlines(n.content(), Role.LINK, pieces, atoms);
+                if (n.image()) {
+                    String suffix = "] " + n.destination();
+                    atoms.add(new CopyPiece(new Box(List.of(suffix), 0), -1, -1, false, false, false, -1));
+                    words(suffix, Role.QUOTE, n.source(), pieces);
+                }
             }
         }
     }
@@ -271,10 +392,20 @@ public final class MarkdownLayout {
         int below = pieces.stream().mapToInt(p -> p.box().lines().size() - p.box().baseline() - 1).max().orElse(0);
         for (int y = 0; y <= baseline + below; y++) {
             StringBuilder text = new StringBuilder(prefix), copy = new StringBuilder(); List<Run> runs = new ArrayList<>();
+            int visualColumn = CellText.width(prefix);
             for (Piece piece : pieces) {
                 int line = y - baseline + piece.box().baseline();
                 String value = line < 0 || line >= piece.box().lines().size() ? "" : piece.box().lines().get(line);
-                int start = text.length(); text.append(value).append(" ".repeat(Math.max(0, piece.width() - CellText.width(value))));
+                int valueWidth = CellText.width(value), padding = Math.max(0, piece.width() - valueWidth);
+                if (piece.role() == Role.CODE && y == baseline && value.indexOf('\t') >= 0)
+                    copyTabColumns.putIfAbsent(piece.box(), visualColumn % 4);
+                int start = text.length(); text.append(value).append(" ".repeat(padding));
+                if (value.indexOf('\t') < 0) visualColumn += valueWidth + padding;
+                else {
+                    var cursor = TerminalText.graphemeCursor(value);
+                    while (cursor.advance()) visualColumn += cursor.isTab() ? 4 - visualColumn % 4 : Math.max(1, cursor.width());
+                    visualColumn += padding;
+                }
                 runs.add(new Run(start, text.length(), piece.role(), piece.source()));
                 if (y == baseline) copy.append(piece.copy());
             }

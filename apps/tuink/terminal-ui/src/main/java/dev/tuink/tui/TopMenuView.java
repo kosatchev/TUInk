@@ -25,6 +25,7 @@ import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_RIGHT_CLICK_CLI
 import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_MARKDOWN_OPEN_BOTH_TABS;
 import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_MARKDOWN_OPEN_IN_PREVIEW;
 import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_MARKDOWN_CODE_SYNTAX;
+import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_MARKDOWN_VISUAL_COPY;
 import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_READING_MODE;
 import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_SMART_HOME_END;
 import static dev.tuink.tui.command.TuinkCommand.TAB_CLOSE;
@@ -458,7 +459,9 @@ final class TopMenuView {
             item(SETTINGS_TOGGLE_MARKDOWN_OPEN_IN_PREVIEW, checked(ui.markdownOpenInPreviewSetting) + " Open Markdown in Preview"),
             item(SETTINGS_TOGGLE_MARKDOWN_CODE_SYNTAX, checked(ui.markdownCodeHighlightingSetting) + " MD code syntax"),
             item(SETTINGS_TOGGLE_RIGHT_CLICK_CLIPBOARD,
-                checked(ui.rightClickClipboardSetting) + " Right-click: copy/paste")
+                checked(ui.rightClickClipboardSetting) + " Right-click: copy/paste"),
+            item(SETTINGS_TOGGLE_MARKDOWN_VISUAL_COPY,
+                checked(ui.markdownVisualCopySetting) + " MD copy as displayed")
         );
     }
 

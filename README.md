@@ -138,6 +138,20 @@ copies the selection or the whole preview. View also provides **Copy block
 source**, **Copy table as TSV**, and **Go to source**. Esc leaves Find or cancels
 a dialog while keeping Preview selected.
 
+**Settings > MD copy as displayed** makes ordinary Preview copy use rendered
+characters: formula layouts, diagram lines and arrows, table frames and quote
+markers. It is off by default and remembered between launches. `Ctrl+C` and
+optional right-click copy share this policy; explicit **Copy block source** and
+**Copy table as TSV** keep their formats. Source tabs and text fields keep
+their normal copy behavior.
+
+Displayed copy includes selected content outside the visible viewport. It
+preserves hard line breaks, code rows and the spaces needed to align multiline
+formulas and diagrams. Automatic wrapping of ordinary paragraphs is joined
+back into logical lines so pasted text can wrap to its destination's width.
+Copy uses the accepted Markdown layout and contains plain text without terminal
+escape sequences or interface chrome.
+
 Preview uses the same mouse scrollbars as Source, including both thumb drags
 and track clicks. Its mode, position, search summary and `Ctrl+P` hint
 appear in the bottom status row. Only an active Find input uses a separate row.

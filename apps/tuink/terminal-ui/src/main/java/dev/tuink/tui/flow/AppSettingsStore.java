@@ -53,6 +53,7 @@ public final class AppSettingsStore {
     private static final String KEY_MARKDOWN_OPEN_BOTH_TABS = "ui.markdownOpenBothTabs";
     private static final String KEY_MARKDOWN_OPEN_IN_PREVIEW = "ui.markdownOpenInPreview";
     private static final String KEY_MARKDOWN_CODE_HIGHLIGHTING = "ui.markdownCodeHighlighting";
+    private static final String KEY_MARKDOWN_VISUAL_COPY = "ui.markdownVisualCopy";
     private static final String KEY_GUTTER_DIFF_MODE = "ui.gutterDiffMode";
     private static final String KEY_TAB_WIDTH = "ui.tabWidth";
     private static final String KEY_TAB_INSERT_MODE = "ui.tabInsertMode";
@@ -162,7 +163,8 @@ public final class AppSettingsStore {
             parseTabWidth(p, path),
             parseEnum(p, KEY_TAB_INSERT_MODE, TabInsertMode.class, path),
             parseEnum(p, KEY_THEME, UiStyles.Theme.class, path),
-            parseOptionalBoolean(p, KEY_RIGHT_CLICK_CLIPBOARD, false, path)
+            parseOptionalBoolean(p, KEY_RIGHT_CLICK_CLIPBOARD, false, path),
+            parseOptionalBoolean(p, KEY_MARKDOWN_VISUAL_COPY, false, path)
         );
     }
 
@@ -222,6 +224,7 @@ public final class AppSettingsStore {
         if (settings.markdownCodeHighlighting()) {
             p.setProperty(KEY_MARKDOWN_CODE_HIGHLIGHTING, "true");
         }
+        if (settings.markdownVisualCopy()) p.setProperty(KEY_MARKDOWN_VISUAL_COPY, "true");
         p.setProperty(KEY_GUTTER_DIFF_MODE, canonical(settings.gutterDiffMode()));
         p.setProperty(KEY_TAB_WIDTH, Integer.toString(settings.tabWidth()));
         p.setProperty(KEY_TAB_INSERT_MODE, canonical(settings.tabInsertMode()));
@@ -467,6 +470,7 @@ public final class AppSettingsStore {
         unknown.removeAll(KEYS);
         unknown.remove(KEY_MARKDOWN_CODE_HIGHLIGHTING);
         unknown.remove(KEY_RIGHT_CLICK_CLIPBOARD);
+        unknown.remove(KEY_MARKDOWN_VISUAL_COPY);
         if (!missing.isEmpty() || !unknown.isEmpty()) {
             throw invalid(path, "schema mismatch; missing=" + missing + ", unknown=" + unknown);
         }

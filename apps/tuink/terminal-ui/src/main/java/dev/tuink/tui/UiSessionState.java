@@ -25,6 +25,7 @@ final class UiSessionState {
     boolean markdownOpenBothTabsSetting;
     boolean markdownOpenInPreviewSetting;
     boolean markdownCodeHighlightingSetting;
+    boolean markdownVisualCopySetting;
     GutterDiffMode gutterDiffModeSetting;
     int tabWidthSetting;
     TabInsertMode tabInsertModeSetting;
@@ -37,7 +38,7 @@ final class UiSessionState {
             autoSelectionHighlightSetting, markdownOpenBothTabsSetting, markdownOpenInPreviewSetting,
             markdownCodeHighlightingSetting,
             gutterDiffModeSetting, tabWidthSetting,
-            tabInsertModeSetting, theme, rightClickClipboardSetting);
+            tabInsertModeSetting, theme, rightClickClipboardSetting, markdownVisualCopySetting);
     }
 
     static UiSessionState from(AppSettings settings) {
@@ -61,6 +62,7 @@ final class UiSessionState {
         state.markdownOpenBothTabsSetting = settings.markdownOpenBothTabs();
         state.markdownOpenInPreviewSetting = settings.markdownOpenInPreview();
         state.markdownCodeHighlightingSetting = settings.markdownCodeHighlighting();
+        state.markdownVisualCopySetting = settings.markdownVisualCopy();
         state.gutterDiffModeSetting = settings.gutterDiffMode();
         state.tabWidthSetting = settings.tabWidth();
         state.tabInsertModeSetting = settings.tabInsertMode();

@@ -10,6 +10,7 @@ import dev.tuink.editor.storage.DocumentOpenMode;
 import dev.tuink.editor.storage.ResourceBinding;
 import dev.tuink.markdown.preview.PreviewCoordinator;
 import dev.tuink.render.markdown.MarkdownLayout;
+import dev.tuink.render.markdown.MarkdownVisualCopy;
 import dev.tuink.render.markdown.MarkdownGeometry;
 import dev.tuink.render.markdown.MarkdownTextSurface;
 import dev.tuink.render.surface.TextSurfaceInteraction;
@@ -290,6 +291,18 @@ final class MarkdownPreviewState implements AutoCloseable {
     int selectionStart() { return selection.start(); }
     int selectionEnd() { return selection.end(); }
     String selectedText() { return ready() ? selection.selectedText(result.document().projection().text()) : ""; }
+    String copyText(boolean asDisplayed) {
+        if (!ready()) return "";
+        if (!asDisplayed) return selectedText();
+        int start = selection.start(), end = selection.end();
+        Runtime runtime = Runtime.getRuntime();
+        long available = Math.max(0, runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory()));
+        long reserve = Math.max(1024 * 1024, Math.min(8 * 1024 * 1024, runtime.maxMemory() / 16));
+        // Allow for UTF-16 builders, their growth/copy and the finished immutable String.
+        int budget = (int) Math.min(Integer.MAX_VALUE, Math.max(0, available - reserve - 16 * 1024) / 6);
+        return start == end ? MarkdownVisualCopy.copyAll(result, budget)
+            : MarkdownVisualCopy.copy(result, start, end, budget);
+    }
     void selectAll() {
         if (!ready()) return;
         selection.selectAll(result.document().projection().text()); activeMatch = -1;

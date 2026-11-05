@@ -76,6 +76,23 @@ class TopMenuViewTest {
     }
 
     @Test
+    void markdownVisualCopyShowsItsIndependentCheckmarkAtTheEndOfSettings() {
+        var ui = UiSessionState.from(dev.tuink.tui.flow.AppSettings.defaults());
+        ui.rightClickClipboardSetting = true;
+        for (boolean enabled : new boolean[] {false, true}) {
+            ui.markdownVisualCopySetting = enabled;
+            var menu = TopMenuView.build(ui, List.of(), -1, "Cyan", new CommandRouter(),
+                MenuBar.State.open(TopMenuController.SETTINGS_INDEX), TestSurfaces.source(ui));
+            var entries = menu.menus().get(TopMenuController.SETTINGS_INDEX).entries();
+            var setting = item(menu, TopMenuController.SETTINGS_INDEX, entries.size() - 1);
+            assertEquals(dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_MARKDOWN_VISUAL_COPY.id(),
+                setting.value().id());
+            assertEquals((enabled ? "[x]" : "[ ]") + " MD copy as displayed", setting.label());
+            assertTrue(setting.enabled());
+        }
+    }
+
+    @Test
     void showsTheCurrentBindingAndDisablesEditsInPreview() {
         var keymap = dev.tuink.tui.keymap.TuinkKeymap.defaults();
         keymap.unbind(dev.tuiframe.input.KeyStroke.of(dev.tuiframe.input.KeyStroke.Key.S,
@@ -270,7 +287,8 @@ class TopMenuViewTest {
                 "tuink.settings.toggle-markdown-open-both-tabs",
                 "tuink.settings.toggle-markdown-open-in-preview",
                 "tuink.settings.toggle-markdown-code-syntax",
-                "tuink.settings.toggle-right-click-clipboard"
+                "tuink.settings.toggle-right-click-clipboard",
+                "tuink.settings.toggle-markdown-visual-copy"
             ),
             commandIds(
                 view(ui, MenuBar.State.open(TopMenuController.SETTINGS_INDEX)),

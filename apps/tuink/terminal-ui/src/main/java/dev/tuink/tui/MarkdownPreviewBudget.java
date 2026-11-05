@@ -147,6 +147,10 @@ final class MarkdownPreviewBudget implements AutoCloseable {
             if (strings.put(line.text(), Boolean.TRUE) == null) bytes += 40L + 2L * line.text().length();
             if (strings.put(line.copyText(), Boolean.TRUE) == null) bytes += 40L + 2L * line.copyText().length();
         }
+        long copyBytes = dev.tuink.render.markdown.MarkdownVisualCopy.retainedBytes(result);
+        if (copyBytes > limits.layoutBytes() - bytes)
+            throw new Refused("Preview layout memory budget exceeded");
+        bytes += copyBytes;
         return retain(List.of(new Item(Kind.MODEL, result.document(), modelBytes(result.document())),
             new Item(Kind.LAYOUT, result, bytes)));
     }

@@ -301,6 +301,8 @@ ui.visibleWhitespace=false
 ui.syntaxHighlighting=true
 # Optional; omission means false.
 ui.markdownCodeHighlighting=false
+# Optional; omission means false.
+ui.markdownVisualCopy=false
 ui.rainbowBrackets=true
 ui.autoSelectionHighlight=true
 ui.gutterDiffMode=...
@@ -318,10 +320,12 @@ name and let a following session save a complete format 2 settings file.
 There is no automatic conversion or historical settings reader.
 
 The current format 2 schema also accepts the optional Booleans
-`ui.markdownCodeHighlighting` and `ui.rightClickClipboard`. Their absence means
-`false`, so existing format 2 profiles remain readable without conversion.
-The writer omits each default and stores `true` when Markdown Source code syntax
-or right-click copy/paste is enabled. These are independent preferences;
+`ui.markdownCodeHighlighting`, `ui.rightClickClipboard` and
+`ui.markdownVisualCopy`. Their absence means `false`, so existing format 2
+profiles remain readable without conversion. The writer omits each default and
+stores `true` when the corresponding preference is enabled. Markdown visual copy
+controls ordinary copying from Preview; explicit block-source and TSV commands
+keep their own representations. These are independent preferences;
 right-click copy/paste does not enable mouse tracking or change the ordinary
 clipboard commands. Existing required fields and unknown-key rejection remain
 strict; malformed optional values also reject the profile without rewriting it.

@@ -11,6 +11,7 @@ from markdown_preview import preview_selected, source_selected
 
 
 RMB_LABEL = 'Right-click: copy/paste'
+VISUAL_COPY_LABEL = 'MD copy as displayed'
 
 
 def locate(session, text):
@@ -35,14 +36,18 @@ def select_token(session, line, token):
     return row, start + len(token)
 
 
-def toggle_right_click(session, expected):
+def toggle_setting(session, label, expected):
     session.send(b'\x1b[15~')  # F5: Settings; activate the item with the mouse.
-    row, column = locate(session, RMB_LABEL)
+    row, column = locate(session, label)
     if ('[x]' in session.screen.lines[row][:column]) != expected:
-        raise AssertionError('Unexpected right-click preference: ' + session.screen.lines[row])
+        raise AssertionError('Unexpected preference: ' + session.screen.lines[row])
     session.mouse(0, row, column + 2)
     session.mouse(0, row, column + 2, release=True)
-    session.expect(lambda: RMB_LABEL not in session.screen.text, 'the mouse setting command closes Settings')
+    session.expect(lambda: label not in session.screen.text, 'the mouse setting command closes Settings')
+
+
+def toggle_right_click(session, expected):
+    toggle_setting(session, RMB_LABEL, expected)
 
 
 def field_right_click(session, clipboard, prefix, value):
@@ -145,6 +150,75 @@ def right_click_clipboard(args, output, env, clipboard):
         raise AssertionError('Field or readonly right-click changed a document unexpectedly')
 
 
+def visual_copy_clipboard(args, output, env, clipboard):
+    home = output / 'visual-copy-home'
+    document = output / 'visual-copy.md'
+    paragraph = ('soft alpha beta gamma delta ' * 8) + 'soft-tail'
+    source = ('# Visual clipboard\n\n' + paragraph + '\n\nhard first  \nhard second\n\n'
+              '> quote_marker\n\n$$\n\\frac{a}{b}\n$$\n\n'
+              '```mermaid\nflowchart LR\nA[LEFT] --> B[RIGHT]\n```\n\nvisual_tail\n')
+    document.write_text(source, encoding='utf-8')
+
+    def displayed(value):
+        return ('┌' in value and '→' in value and '─' in value and '│ quote_marker' in value
+                and '\\frac' not in value and 'flowchart LR' not in value
+                and any(line.strip() == 'a' for line in value.splitlines())
+                and any(line.strip() == 'b' for line in value.splitlines())
+                and paragraph in value and 'hard first\nhard second' in value and 'visual_tail' in value)
+
+    with Session(output / 'visual-copy-enable', args.java, args.classpath, document, home=home,
+                 native_executable=args.binary, env_overrides=env, timeout=60) as session:
+        session.resize(24, 44)
+        session.send(b'\x10')
+        session.expect(lambda: preview_selected(session.screen.text), 'Preview before visual-copy preference')
+        session.send(b'\x01\x03')
+        session.expect(lambda: '\\frac{a}{b}' in clipboard.read_text(encoding='utf-8')
+                       and 'flowchart LR' in clipboard.read_text(encoding='utf-8'),
+                       'default copy retains semantic TeX and Mermaid')
+        toggle_setting(session, VISUAL_COPY_LABEL, expected=False)
+        session.send(b'\x03')
+        session.expect(lambda: displayed(clipboard.read_text(encoding='utf-8')),
+                       'displayed copy preserves symbols and hard breaks while unwrapping soft lines', timeout=5)
+        visual = clipboard.read_text(encoding='utf-8')
+        (output / 'visual-copy-text.txt').write_text(visual, encoding='utf-8')
+        session.snapshot('visual-copy-enabled')
+        session.send(b'\x0e')
+        session.expect(lambda: source_selected(session.screen.text), 'new editable Source for visual text')
+        session.send(b'\x16')
+        session.expect(lambda: '*' in session.screen.lines[0], 'displayed text pasted into a scratch Source')
+        target = session.root / 'copied-visual.txt'
+        session.send(b'\x0b')
+        session.expect(lambda: 'Save As: ' in session.screen.text, 'scratch Source Save As')
+        session.send(b'\x01\x1b[200~' + str(target).encode('utf-8') + b'\x1b[201~\r')
+        session.expect_saved(target, visual, 'Source saves the exact displayed clipboard text', timeout=5)
+        session.finish()
+    settings = home / '.config/tuink/tuink.properties'
+    if 'ui.markdownVisualCopy=true' not in settings.read_text(encoding='iso-8859-1'):
+        raise AssertionError('The displayed-copy preference was not saved')
+    with Session(output / 'visual-copy-restart', args.java, args.classpath, document, home=home,
+                 native_executable=args.binary, env_overrides=env, timeout=60) as session:
+        session.send(b'\x1b[15~')
+        row, column = locate(session, VISUAL_COPY_LABEL)
+        if '[x]' not in session.screen.lines[row][:column]:
+            raise AssertionError('The displayed-copy preference did not survive restart')
+        session.send(b'\x1b', 0.7)
+        session.send(b'\x10')
+        session.expect(lambda: preview_selected(session.screen.text), 'Preview with persisted displayed copy')
+        clipboard.write_text('restart sentinel', encoding='utf-8')
+        session.send(b'\x01\x03')
+        session.expect(lambda: clipboard.read_text(encoding='utf-8') == visual,
+                       'displayed copy survives restart and another viewport width', timeout=5)
+        session.send(b'\x10')
+        session.expect(lambda: source_selected(session.screen.text), 'Source with displayed-copy preference enabled')
+        session.send(b'\x01\x03')
+        session.expect(lambda: clipboard.read_text(encoding='utf-8') == source,
+                       'the preference does not convert Source Markdown')
+        session.snapshot('visual-copy-restarted')
+        session.finish()
+    if document.read_text(encoding='utf-8') != source:
+        raise AssertionError('Visual copy changed the Markdown document')
+
+
 def main():
     root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__)
@@ -209,7 +283,8 @@ else:
             raise AssertionError('Empty system clipboard pasted stale local text')
         session.finish()
     right_click_clipboard(args, output, env, clipboard)
-    print(f'PASS system clipboard: Source/Preview/fields, input order, empty text, optional right-click and restart: {output}', flush=True)
+    visual_copy_clipboard(args, output, env, clipboard)
+    print(f'PASS system clipboard: Source/Preview/fields, ordering, empty text, right-click, displayed copy and restart: {output}', flush=True)
 
 
 if __name__ == '__main__':

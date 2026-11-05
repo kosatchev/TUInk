@@ -3145,7 +3145,17 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             MarkdownPreviewState preview = ui().preview;
             switch (command) {
                 case EDIT_COPY -> {
-                    if (preview.ready()) { host.clipboard.setText(preview.selectedText()); notice().info("Copied Markdown preview text"); }
+                    if (preview.ready()) {
+                        String copied;
+                        try {
+                            copied = preview.copyText(uiSessionState.markdownVisualCopySetting);
+                        } catch (dev.tuink.render.markdown.MarkdownVisualCopy.LimitException | OutOfMemoryError refused) {
+                            notice().error("The selected Markdown is too large to copy; clipboard unchanged");
+                            return;
+                        }
+                        host.clipboard.setText(copied);
+                        notice().info("Copied Markdown preview text");
+                    }
                 }
                 case EDIT_SELECT_ALL -> preview.selectAll();
                 case SEARCH_OPEN -> {

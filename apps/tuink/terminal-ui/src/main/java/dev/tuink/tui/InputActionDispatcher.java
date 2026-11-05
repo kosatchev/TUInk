@@ -118,6 +118,11 @@ final class InputActionDispatcher {
                     : "Confirm on close disabled";
                 return DispatchResult.handled(statusMessage);
             }
+            case SETTINGS_TOGGLE_MARKDOWN_VISUAL_COPY -> {
+                ui.markdownVisualCopySetting = !ui.markdownVisualCopySetting;
+                return DispatchResult.handled(ui.markdownVisualCopySetting
+                    ? "Markdown visual copy enabled" : "Markdown visual copy disabled");
+            }
             case SETTINGS_TOGGLE_RIGHT_CLICK_CLIPBOARD -> {
                 ui.rightClickClipboardSetting = !ui.rightClickClipboardSetting;
                 return DispatchResult.handled(ui.rightClickClipboardSetting

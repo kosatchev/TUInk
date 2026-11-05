@@ -7,6 +7,7 @@ import dev.tuiframe.input.TuiInputEvent;
 import dev.tuiframe.widget.TextField;
 import dev.tuiframe.widget.DialogInputPolicy.Target;
 import dev.tuink.tui.command.TuinkCommand;
+import dev.tuink.tui.flow.ConfirmationShortcuts;
 import java.util.Objects;
 import java.util.Set;
 
@@ -27,10 +28,12 @@ final class ModalInputPolicy {
     private ModalInputPolicy() {
     }
 
-    static boolean blocked(Kind kind, TuiInputEvent event, TuinkCommand command, Target target) {
+    static boolean blocked(Kind kind, TuiInputEvent event, TuinkCommand command, Target target,
+        ConfirmationShortcuts shortcuts) {
         Objects.requireNonNull(kind, "kind");
         Objects.requireNonNull(event, "event");
         Objects.requireNonNull(target, "target");
+        Objects.requireNonNull(shortcuts, "shortcuts");
         if (kind == Kind.NONE) {
             return false;
         }
@@ -38,7 +41,7 @@ final class ModalInputPolicy {
             if (target == Target.TEXT_INPUT) return false;
             return switch (kind) {
                 case SAVE_AS, NONE -> false;
-                case CONFIRM -> !isConfirmationText(text.text());
+                case CONFIRM -> !" ".equals(text.text()) && shortcuts.textDecision(text.text()) == null;
                 case HELP -> !" ".equals(text.text()) && !isHelpCommand(command);
                 case OPEN_FILE, FORMAT -> !" ".equals(text.text());
             };
@@ -54,6 +57,7 @@ final class ModalInputPolicy {
             return false;
         }
         KeyStroke semantic = DialogCommandPolicy.eventFor(command).orElse(stroke);
+        if (kind == Kind.CONFIRM && ConfirmationInput.decision(shortcuts, semantic) != null) return false;
         if (allowedKey(kind, semantic, target)) {
             return false;
         }
@@ -90,17 +94,6 @@ final class ModalInputPolicy {
             case ARROW_UP, ARROW_DOWN, PAGE_UP, PAGE_DOWN -> kind == Kind.HELP || kind == Kind.OPEN_FILE || kind == Kind.FORMAT;
             default -> false;
         };
-    }
-
-    private static boolean isConfirmationText(String text) {
-        if (" ".equals(text)) {
-            return true;
-        }
-        if (text.codePointCount(0, text.length()) != 1) {
-            return false;
-        }
-        int codePoint = Character.toLowerCase(text.codePointAt(0));
-        return codePoint == 'y' || codePoint == 'n';
     }
 
     private static boolean isHelpCommand(TuinkCommand command) {

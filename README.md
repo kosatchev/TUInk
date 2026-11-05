@@ -516,7 +516,13 @@ without saving the affected documents. It cancels overwrite and encoding
 confirmation; in recovery it chooses Later and keeps the offered snapshots for
 the next launch.
 The recovery prompt starts with Later focused. Only explicitly activating Delete
-removes the offered snapshots.
+removes the offered snapshots; `D` activates it directly. Its hint is
+`Y=Restore  D=Delete  N/Esc=Later  Ctrl+Q=Quit`. Restore opens the drafts in tabs;
+Delete removes their recovery copies and leaves the original files unchanged.
+Ctrl+Q keeps the offered recovery copies and starts normal application exit.
+If current documents have unsaved edits, the usual Save/Discard/Cancel
+confirmation appears; cancelling that exit preserves the edits and the offered
+recovery copies.
 
 `Ctrl+Q` has the following context-specific actions:
 
@@ -526,7 +532,7 @@ removes the offered snapshots.
 | Overwrite confirmation | Cancel the save |
 | Close-tab confirmation | Cancel closing the tab |
 | Quit confirmation | Discard unsaved edits in all documents and quit |
-| Recovery confirmation | Postpone recovery and keep the snapshots for the next launch |
+| Recovery confirmation | Keep the offered snapshots and request normal application exit |
 
 The first `Ctrl+Q` requests exit and shows the quit confirmation when needed.
 Another delivered `Ctrl+Q` or `N` in that visible confirmation chooses **Discard**

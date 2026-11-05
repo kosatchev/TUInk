@@ -97,12 +97,22 @@ to Cancel. Discard requires explicitly activating its button. These choices
 use the existing save continuations, including Save As and multi-tab saves.
 
 Recovery offers Restore, Delete, and Later, with Later initially focused.
-`N`, Escape, and Ctrl+Q choose Later, even when the terminal is too small to
+`Y` chooses Restore and `D` chooses Delete, case-insensitively. The recovery
+shortcut policy supplies both input bindings and the single visible hint:
+`Y=Restore  D=Delete  N/Esc=Later  Ctrl+Q=Quit`; the question contains only the draft
+count. Recovery and encoding confirmations have separate shortcut policies.
+`N` and Escape choose Later, even when the terminal is too small to
 show the question. Postponing recovery keeps the startup snapshots on disk
 through a later normal quit; the recovery store releases their claims immediately,
 so another instance can offer them without waiting for this editor to close.
-Only explicitly activating Delete
-removes the offered snapshots. Restore and Delete remain unavailable while
+Only explicitly activating Delete, including `D`, removes the offered snapshots;
+it does not change the original files. Ctrl+Q releases the offered snapshots
+without deleting them and starts the ordinary application-close workflow,
+including Save/Discard/Cancel for current unsaved documents. Cancelling that
+exit keeps the current edits and the offered snapshots. A release failure leaves
+the failed entries pending in the recovery prompt and prevents exit. This safe
+Quit action is available even when the question is clipped; it is a keyboard
+action and does not add a fourth button. Restore and Delete remain unavailable while
 their question or controls are clipped.
 
 Search reserves room for its fields before showing option and action groups.

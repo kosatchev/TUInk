@@ -1,6 +1,6 @@
 package dev.tuink.tui.flow;
 
-public enum ConfirmChoice {
+public enum ConfirmChoice implements ConfirmationAction {
     SAVE,
     DISCARD,
     CANCEL;

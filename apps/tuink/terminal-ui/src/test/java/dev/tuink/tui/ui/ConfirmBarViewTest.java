@@ -16,6 +16,9 @@ import dev.tuiframe.widget.RoutedTarget;
 import dev.tuiframe.widget.Theme;
 import dev.tuiframe.widget.WidgetThemeKeys;
 import dev.tuink.tui.flow.ConfirmChoice;
+import dev.tuink.tui.flow.ConfirmationAction;
+import dev.tuink.tui.flow.ConfirmationShortcuts;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class ConfirmBarViewTest {
@@ -168,6 +171,90 @@ class ConfirmBarViewTest {
 
         int saveColumn = target(placement, ConfirmChoice.SAVE).placement().bounds().x();
         assertTrue(saveColumn > CellText.width(cluster));
+    }
+
+    @Test
+    void responsiveHintsUseTheRegistryForEveryConfirmationPolicy() {
+        var cases = List.of(
+            new HintCase(ConfirmationShortcuts.STANDARD, "Open", "Cancel", false, "Cancel",
+                "Y=Open  N/Esc/Ctrl+Q=Cancel"),
+            new HintCase(ConfirmationShortcuts.SAVE, "Save", "Discard", true, "Cancel",
+                "Y/Ctrl+S=Save  N/Esc/Ctrl+Q=Cancel"),
+            new HintCase(ConfirmationShortcuts.SAVE_CHANGES, "Save", "Discard", true, "Cancel",
+                "Y/Ctrl+S=Save  N=Discard  Esc/Ctrl+Q=Cancel"),
+            new HintCase(ConfirmationShortcuts.QUIT, "Save", "Discard", true, "Cancel",
+                "Y/Ctrl+S=Save  N/Ctrl+Q=Discard  Esc=Cancel"),
+            new HintCase(ConfirmationShortcuts.RECOVERY, "Restore", "Delete", true, "Later",
+                "Y=Restore  D=Delete  N/Esc=Later  Ctrl+Q=Quit"));
+        for (var example : cases) {
+            var view = ConfirmBarView.responsive("Question?", 120, 2, example.primary(), example.secondary(),
+                example.includeCancel(), example.cancel(), example.shortcuts());
+            assertEquals(example.hint(), view.row().lines().findFirst().orElseThrow().stripTrailing(),
+                example.shortcuts().name());
+            assertTrue(view.row().contains(example.shortcuts().keysFor(ConfirmChoice.SAVE) + "=" + example.primary()));
+            if (example.includeCancel() && !example.shortcuts().keysFor(ConfirmChoice.DISCARD).isEmpty())
+                assertTrue(view.row().contains(example.shortcuts().keysFor(ConfirmChoice.DISCARD) + "=" + example.secondary()));
+            assertTrue(view.row().contains(example.shortcuts().keysFor(ConfirmChoice.CANCEL) + "=" + example.cancel()));
+            if (example.shortcuts() == ConfirmationShortcuts.RECOVERY)
+                assertTrue(view.row().contains(example.shortcuts().keysFor(ConfirmationAction.Command.QUIT)
+                    + "=" + ConfirmationAction.Command.QUIT.label()));
+            else {
+                assertFalse(view.row().contains("D="));
+                assertFalse(view.row().contains("Ctrl+Q=Quit"));
+            }
+            assertFalse(view.row().contains("[Quit]"), "Shortcut commands do not add focusable buttons");
+        }
+    }
+
+    @Test
+    void recoveryAtSeventyColumnsHasTwoCompleteRowsAndAllThreePaintedTargets() {
+        var view = ConfirmBarView.responsive("Unsaved drafts: 3.", 70, 2,
+            "Restore", "Delete", true, "Later", ConfirmationShortcuts.RECOVERY);
+        var rows = view.row().lines().toList();
+        assertEquals(2, rows.size());
+        assertEquals("Y=Restore  D=Delete  N/Esc=Later  Ctrl+Q=Quit", rows.get(0).stripTrailing());
+        assertTrue(rows.get(1).contains("Unsaved drafts: 3."));
+        assertTrue(rows.get(1).contains("[Restore] [Delete] [Later]"));
+        for (var row : rows) assertTrue(CellText.width(row) <= 70);
+        assertFalse(view.row().contains("Enlarge"));
+        assertFalse(view.row().contains("[Quit]"));
+
+        var placement = view.place(new Object(), 0, viewport(2, 70));
+        assertTrue(placement.decisionsAvailable());
+        assertEquals(List.of(ConfirmChoice.SAVE, ConfirmChoice.DISCARD, ConfirmChoice.CANCEL),
+            placement.focusScope().tabOrder());
+        for (var choice : placement.focusScope().tabOrder()) assertTrue(target(placement, choice).focusEligible());
+        var focus = new FocusManager<ConfirmChoice>();
+        placement.activate(focus);
+        assertEquals(ConfirmChoice.CANCEL, focus.focused().orElseThrow());
+        var cells = new CellBuffer(2, 70);
+        var canvas = new Canvas(cells);
+        for (int row = 0; row < rows.size(); row++) CellText.draw(canvas, 0, row, rows.get(row), NORMAL);
+        placement.paint(canvas, THEME, focus);
+        assertEquals(rows.get(0).stripTrailing(), rowText(cells, 0).stripTrailing());
+        assertButtonStyle(cells, placement, ConfirmChoice.SAVE, NORMAL);
+        assertButtonStyle(cells, placement, ConfirmChoice.DISCARD, NORMAL);
+        assertButtonStyle(cells, placement, ConfirmChoice.CANCEL, FOCUSED);
+    }
+
+    @Test
+    void recoveryDoesNotOfferDeleteWhenOnlyOneOfItsRequiredRowsIsAvailable() {
+        var view = ConfirmBarView.responsive("Unsaved drafts: 3.", 70, 1,
+            "Restore", "Delete", true, "Later", ConfirmationShortcuts.RECOVERY);
+        var placement = view.place(new Object(), 0, viewport(1, 70));
+        assertTrue(view.row().contains("Enlarge"));
+        assertFalse(view.row().contains("D=Delete"));
+        assertFalse(placement.decisionsAvailable());
+        for (var choice : placement.focusScope().tabOrder()) assertFalse(target(placement, choice).enabled());
+    }
+
+    private record HintCase(ConfirmationShortcuts shortcuts, String primary, String secondary,
+        boolean includeCancel, String cancel, String hint) {}
+
+    private static String rowText(CellBuffer cells, int row) {
+        var text = new StringBuilder();
+        for (int column = 0; column < cells.cols(); column++) text.append(cells.get(row, column).grapheme());
+        return text.toString();
     }
 
     private static void assertButtonStyle(

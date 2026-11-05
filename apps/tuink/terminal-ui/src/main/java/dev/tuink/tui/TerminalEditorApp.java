@@ -1585,7 +1585,7 @@ public class TerminalEditorApp {
     }
 
     String buildRecoveryPrompt(int count) {
-        return "Recovery snapshots: " + count + ". Restore now? (y/N)";
+        return "Unsaved drafts: " + count + ".";
     }
 
     record RecoveryRestoreResult(int restoredCount, List<RecoveryStore.PendingSnapshot> failedEntries,

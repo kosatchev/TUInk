@@ -36,12 +36,40 @@ class RecoveryDiscoveryIntegrationTest {
             worker.join(5000);
             assertFalse(worker.isAlive());
             assertNotSame(owner, persistence.reader.get());
-            assertFalse(window.promptText().contains("Restore now?"), "only the UI owner may publish the prompt");
+            assertFalse(window.promptText().contains("Unsaved drafts:"), "only the UI owner may publish the prompt");
             window.frame();
-            assertTrue(window.promptText().contains("Restore now?"));
+            assertTrue(window.promptText().contains("Unsaved drafts:"));
+            assertTrue(window.promptText().contains("[Restore]"));
+            assertTrue(window.promptText().contains("D=Delete"));
             assertEquals(0, persistence.materializations.get());
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
             assertEquals(1, persistence.releases.get());
+        }
+    }
+
+    @Test
+    void quittingPublishedRecoveryReleasesOfferedClaimsAndAsksAboutCurrentUnsavedEdits() throws Exception {
+        ArrayDeque<Runnable> tasks = new ArrayDeque<>();
+        var persistence = new DiscoveryPersistence();
+        try (var window = window(tasks, persistence)) {
+            window.event(new TextInput("live edits "));
+            window.command(TuinkCommand.DOCUMENT_RECOVER_DRAFTS);
+            tasks.removeFirst().run();
+            window.frame();
+            assertTrue(window.promptText().contains("Unsaved drafts: 1."));
+
+            window.event(KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL));
+
+            assertTrue(window.controller.running());
+            assertEquals(1, persistence.releases.get());
+            assertEquals(0, persistence.materializations.get());
+            assertTrue(window.promptText().contains("Unsaved (1)"));
+            assertFalse(window.promptText().contains("Unsaved drafts:"));
+            window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
+            assertTrue(window.controller.running());
+            assertEquals(List.of("live edits original"), window.active().tabSession().model().snapshotLines());
+            assertTrue(window.active().state().isDirty());
+            assertEquals("original", Files.readString(window.document));
         }
     }
 
@@ -56,7 +84,7 @@ class RecoveryDiscoveryIntegrationTest {
             window.frame();
             assertEquals(0, persistence.discoveries.get());
             assertEquals(0, persistence.releases.get());
-            assertFalse(window.promptText().contains("Restore now?"));
+            assertFalse(window.promptText().contains("Unsaved drafts:"));
             assertTrue(window.notification.message.contains("cancelled"));
         }
     }
@@ -71,7 +99,7 @@ class RecoveryDiscoveryIntegrationTest {
             tasks.removeFirst().run();
             window.frame();
             assertTrue(window.active().uiState().modalState.isHelpHints());
-            assertFalse(window.promptText().contains("Restore now?"));
+            assertFalse(window.promptText().contains("Unsaved drafts:"));
             assertEquals(0, persistence.releases.get());
             tasks.removeFirst().run();
             assertEquals(1, persistence.releases.get());
@@ -116,12 +144,12 @@ class RecoveryDiscoveryIntegrationTest {
             tasks.removeFirst().run();
             window.frame();
             assertTrue(window.notification.message.contains("unavailable recovery directory"));
-            assertFalse(window.promptText().contains("Restore now?"));
+            assertFalse(window.promptText().contains("Unsaved drafts:"));
             persistence.failure = null;
             window.command(TuinkCommand.DOCUMENT_RECOVER_DRAFTS);
             tasks.removeFirst().run();
             window.frame();
-            assertTrue(window.promptText().contains("Restore now?"));
+            assertTrue(window.promptText().contains("Unsaved drafts:"));
             assertEquals(2, persistence.discoveries.get());
         }
     }

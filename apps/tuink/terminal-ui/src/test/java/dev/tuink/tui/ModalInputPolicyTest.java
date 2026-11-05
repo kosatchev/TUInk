@@ -27,6 +27,8 @@ import dev.tuink.tui.ModalInputPolicy.Kind;
 import dev.tuink.tui.command.TuinkCommand;
 import dev.tuink.tui.file.FileTreeModel;
 import dev.tuink.tui.flow.ConfirmChoice;
+import dev.tuink.tui.flow.ConfirmationAction;
+import dev.tuink.tui.flow.ConfirmationShortcuts;
 import dev.tuink.tui.ui.ConfirmBarView;
 import dev.tuink.tui.ui.FileTreeView;
 import dev.tuink.tui.ui.HelpPage;
@@ -46,14 +48,14 @@ class ModalInputPolicyTest {
                 ctrl(KeyStroke.Key.A), ctrl(KeyStroke.Key.C), ctrl(KeyStroke.Key.X), ctrl(KeyStroke.Key.V),
                 KeyStroke.of(KeyStroke.Key.ARROW_LEFT, KeyStroke.Modifier.SHIFT),
                 KeyStroke.of(KeyStroke.Key.HOME), KeyStroke.of(KeyStroke.Key.DELETE))) {
-            assertFalse(ModalInputPolicy.blocked(Kind.OPEN_FILE, event, command(event), Target.TEXT_INPUT),
+            assertFalse(ModalInputPolicy.blocked(Kind.OPEN_FILE, event, command(event), Target.TEXT_INPUT, ConfirmationShortcuts.STANDARD),
                 event.toString());
         }
         for (KeyStroke event : List.of(ctrl(KeyStroke.Key.S), ctrl(KeyStroke.Key.N), ctrl(KeyStroke.Key.W))) {
-            assertTrue(ModalInputPolicy.blocked(Kind.OPEN_FILE, event, command(event), Target.TEXT_INPUT),
+            assertTrue(ModalInputPolicy.blocked(Kind.OPEN_FILE, event, command(event), Target.TEXT_INPUT, ConfirmationShortcuts.STANDARD),
                 "A location field must not open document commands: " + event);
         }
-        assertTrue(ModalInputPolicy.blocked(Kind.OPEN_FILE, new TextInput("file.md"), null, Target.BUTTON));
+        assertTrue(ModalInputPolicy.blocked(Kind.OPEN_FILE, new TextInput("file.md"), null, Target.BUTTON, ConfirmationShortcuts.STANDARD));
     }
 
     @Test
@@ -100,6 +102,58 @@ class ModalInputPolicyTest {
     }
 
     @Test
+    void confirmationTextGateUsesTheActualPolicyBindingsWithoutChangingFieldEditing() {
+        for (var shortcuts : ConfirmationShortcuts.values()) {
+            for (String text : List.of("y", "Y", "n", "N", "d", "D")) {
+                var event = new TextInput(text);
+                assertEquals(shortcuts.textDecision(text) == null,
+                    ModalInputPolicy.blocked(Kind.CONFIRM, event, null, Target.BUTTON, shortcuts),
+                    shortcuts + " " + text);
+                assertFalse(ModalInputPolicy.blocked(Kind.CONFIRM, event, null, Target.TEXT_INPUT, shortcuts),
+                    "A focused field still owns its text: " + shortcuts + " " + text);
+                for (var kind : List.of(Kind.HELP, Kind.OPEN_FILE, Kind.FORMAT))
+                    assertTrue(ModalInputPolicy.blocked(kind, event, null, Target.BUTTON, shortcuts),
+                        "Confirmation bindings do not authorize other modal surfaces: " + kind + " " + text);
+            }
+            for (String text : List.of("unknown", "yes", "dd", "D ", "q", "Q", "😀", "Y\u0301")) {
+                var event = new TextInput(text);
+                assertTrue(ModalInputPolicy.blocked(Kind.CONFIRM, event, null, Target.BUTTON, shortcuts),
+                    shortcuts + " " + text);
+                assertFalse(ModalInputPolicy.blocked(Kind.OPEN_FILE, event, null, Target.TEXT_INPUT, shortcuts));
+            }
+            assertFalse(ModalInputPolicy.blocked(Kind.CONFIRM, new TextInput(" "), null, Target.BUTTON, shortcuts),
+                "Space continues to activate the focused button");
+        }
+    }
+
+    @Test
+    void confirmationSaveQuitAndEscapePassTheGateOnlyForTheirActualBindings() {
+        for (var shortcuts : ConfirmationShortcuts.values()) {
+            boolean saveBound = shortcuts == ConfirmationShortcuts.SAVE
+                || shortcuts == ConfirmationShortcuts.SAVE_CHANGES || shortcuts == ConfirmationShortcuts.QUIT;
+            // The semantic command also covers a custom binding whose physical key differs.
+            for (var physical : List.of(ctrl(KeyStroke.Key.S), KeyStroke.of(KeyStroke.Key.F12)))
+                assertEquals(!saveBound, ModalInputPolicy.blocked(Kind.CONFIRM, physical,
+                    TuinkCommand.DOCUMENT_SAVE, Target.BUTTON, shortcuts), shortcuts + " Save " + physical);
+            for (var physical : List.of(ctrl(KeyStroke.Key.Q), KeyStroke.of(KeyStroke.Key.F12)))
+                assertFalse(ModalInputPolicy.blocked(Kind.CONFIRM, physical,
+                    TuinkCommand.APP_QUIT, Target.BUTTON, shortcuts), shortcuts + " Quit " + physical);
+            for (var physical : List.of(KeyStroke.of(KeyStroke.Key.ESCAPE), KeyStroke.of(KeyStroke.Key.F12)))
+                assertFalse(ModalInputPolicy.blocked(Kind.CONFIRM, physical,
+                    TuinkCommand.UI_ESCAPE, Target.BUTTON, shortcuts), shortcuts + " Escape " + physical);
+
+            ConfirmationAction expectedQuit = shortcuts == ConfirmationShortcuts.RECOVERY ? ConfirmationAction.Command.QUIT
+                : shortcuts == ConfirmationShortcuts.QUIT ? ConfirmChoice.DISCARD : ConfirmChoice.CANCEL;
+            assertEquals(expectedQuit, ConfirmationInput.decision(shortcuts, ctrl(KeyStroke.Key.Q)), shortcuts.name());
+            assertNull(ConfirmationInput.decision(shortcuts, ctrl(KeyStroke.Key.D)),
+                "Ctrl+D is not the printable recovery Delete mnemonic: " + shortcuts);
+            assertTrue(ModalInputPolicy.blocked(Kind.CONFIRM, ctrl(KeyStroke.Key.D),
+                TuinkCommand.EDIT_DELETE_FORWARD, Target.BUTTON, shortcuts),
+                "An editing Delete command cannot become a confirmation decision: " + shortcuts);
+        }
+    }
+
+    @Test
     void pointerResizeUnknownAndUnboundKeysNeverRequestKeyboardFeedback() {
         for (Kind kind : Kind.values()) {
             for (TuiInputEvent event : List.of(
@@ -108,7 +162,7 @@ class ModalInputPolicyTest {
                 new PointerEvent(0, 0, PointerEvent.Kind.SCROLL_DOWN, PointerEvent.Button.NONE, Set.of()),
                 KeyStroke.of(KeyStroke.Key.UNKNOWN)
             )) {
-                assertFalse(ModalInputPolicy.blocked(kind, event, TuinkCommand.EDIT_PASTE, Target.BUTTON));
+                assertFalse(ModalInputPolicy.blocked(kind, event, TuinkCommand.EDIT_PASTE, Target.BUTTON, ConfirmationShortcuts.STANDARD));
             }
             KeyStroke unbound = KeyStroke.of(KeyStroke.Key.S, KeyStroke.Modifier.CTRL, KeyStroke.Modifier.ALT);
             assertNull(command(unbound));
@@ -223,7 +277,7 @@ class ModalInputPolicyTest {
         for (TuinkCommand command : List.of(
             TuinkCommand.HELP_KEY_HINTS, TuinkCommand.HELP_LICENSES, TuinkCommand.HELP_AUTHOR
         )) {
-            assertFalse(ModalInputPolicy.blocked(Kind.HELP, KeyStroke.of(KeyStroke.Key.F6), command, Target.BUTTON));
+            assertFalse(ModalInputPolicy.blocked(Kind.HELP, KeyStroke.of(KeyStroke.Key.F6), command, Target.BUTTON, ConfirmationShortcuts.STANDARD));
         }
         assertTrue(blocked(Kind.HELP, KeyStroke.of(KeyStroke.Key.ARROW_LEFT)));
     }
@@ -284,7 +338,7 @@ class ModalInputPolicyTest {
 
     private static boolean blocked(Kind kind, TuiInputEvent event) {
         return ModalInputPolicy.blocked(kind, event, command(event),
-            kind == Kind.SAVE_AS ? Target.TEXT_INPUT : Target.BUTTON);
+            kind == Kind.SAVE_AS ? Target.TEXT_INPUT : Target.BUTTON, ConfirmationShortcuts.STANDARD);
     }
 
     private static TuinkCommand command(TuiInputEvent event) {

@@ -16,6 +16,8 @@ import dev.tuiframe.widget.FocusManager;
 import dev.tuiframe.widget.FocusScope;
 import dev.tuiframe.widget.RoutedTarget;
 import dev.tuink.tui.flow.ConfirmChoice;
+import dev.tuink.tui.flow.ConfirmationAction;
+import dev.tuink.tui.flow.ConfirmationShortcuts;
 import dev.tuink.tui.ui.ConfirmBarView;
 import java.util.List;
 import java.util.Set;
@@ -83,8 +85,15 @@ class ConfirmBarInputRouterTest {
         );
         placement.activate(fixture.focus);
 
-        assertEquals(3, placement.focusScope().tabOrder().size());
+        assertEquals(List.of(ConfirmChoice.SAVE, ConfirmChoice.DISCARD, ConfirmChoice.CANCEL),
+            placement.focusScope().tabOrder());
         assertEquals(ConfirmChoice.CANCEL, fixture.focus.focused().orElseThrow());
+        assertEquals(ConfirmChoice.CANCEL, fixture.route(KeyStroke.of(KeyStroke.Key.ENTER)).decision(),
+            "Recovery starts at Later rather than restoring or deleting drafts");
+        assertEquals(ConfirmationAction.Command.QUIT,
+            fixture.route(KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL)).decision());
+        assertEquals(ConfirmChoice.CANCEL, fixture.focus.focused().orElseThrow(),
+            "The shortcut-only Quit command does not become another focus target");
         fixture.route(KeyStroke.of(KeyStroke.Key.TAB));
         assertEquals(ConfirmChoice.SAVE, fixture.focus.focused().orElseThrow());
         fixture.route(KeyStroke.of(KeyStroke.Key.TAB));
@@ -164,11 +173,47 @@ class ConfirmBarInputRouterTest {
     }
 
     @Test
+    void recoveryAcceptsExactDeleteLettersAndKeepsNoAndEscapeForLater() {
+        for (String letter : List.of("d", "D")) {
+            Fixture recovery = fixture(ConfirmBarView.buildRecovery("Unsaved drafts: 3.", 80),
+                ConfirmBarInputRouter.Policy.recovery(), 80, new Object());
+            assertEquals(ConfirmChoice.DISCARD, recovery.route(new TextInput(letter)).decision());
+            assertEquals(ConfirmChoice.DISCARD, recovery.focus.focused().orElseThrow());
+        }
+        for (TuiInputEvent event : List.of(new TextInput("n"), new TextInput("N"),
+            KeyStroke.of(KeyStroke.Key.ESCAPE))) {
+            Fixture recovery = fixture(ConfirmBarView.buildRecovery("Unsaved drafts: 3.", 80),
+                ConfirmBarInputRouter.Policy.recovery(), 80, new Object());
+            assertEquals(ConfirmChoice.CANCEL, recovery.route(event).decision(), event.toString());
+        }
+        Fixture recovery = fixture(ConfirmBarView.buildRecovery("Unsaved drafts: 3.", 80),
+            ConfirmBarInputRouter.Policy.recovery(), 80, new Object());
+        for (String text : List.of("delete", "dd", "D ", "Ｄ", "q", "Q", "unrelated"))
+            assertCapturedWithoutDecision(recovery.route(new TextInput(text)));
+        assertEquals(ConfirmChoice.CANCEL, recovery.focus.focused().orElseThrow());
+    }
+
+    @Test
+    void deleteIsUnboundOutsideRecoveryIncludingTheIndependentOpenPolicy() {
+        assertFalse(ConfirmBarInputRouter.Policy.open() == ConfirmBarInputRouter.Policy.recovery());
+        assertEquals(ConfirmationShortcuts.STANDARD, ConfirmBarInputRouter.Policy.open().shortcuts());
+        assertEquals(ConfirmationShortcuts.RECOVERY, ConfirmBarInputRouter.Policy.recovery().shortcuts());
+        for (var policy : List.of(ConfirmBarInputRouter.Policy.open(), ConfirmBarInputRouter.Policy.overwrite(),
+            ConfirmBarInputRouter.Policy.quit(), ConfirmBarInputRouter.Policy.closeTab())) {
+            Fixture fixture = standard(policy, 80);
+            for (String letter : List.of("d", "D")) {
+                assertCapturedWithoutDecision(fixture.route(new TextInput(letter)));
+                assertEquals(ConfirmChoice.CANCEL, fixture.focus.focused().orElseThrow());
+            }
+        }
+    }
+
+    @Test
     void exactCtrlQKeepsTheIntendedDecisionInAllConfirmationModes() {
         List<Fixture> fixtures = allConfirmationModes();
-        List<ConfirmChoice> expected = List.of(
-            ConfirmChoice.CANCEL, ConfirmChoice.CANCEL,
-            ConfirmChoice.DISCARD, ConfirmChoice.CANCEL
+        List<ConfirmationAction> expected = List.of(
+            ConfirmationAction.Command.QUIT, ConfirmChoice.CANCEL,
+            ConfirmChoice.DISCARD, ConfirmChoice.CANCEL, ConfirmChoice.CANCEL
         );
 
         for (int index = 0; index < fixtures.size(); index++) {
@@ -328,13 +373,15 @@ class ConfirmBarInputRouterTest {
     }
 
     @Test
-    void compactConfirmationsAllowOnlySafeCancellationAcrossEveryPolicy() {
+    void compactConfirmationsAllowOnlySafeCancellationOrRecoveryQuitAcrossEveryPolicy() {
         List<ConfirmBarInputRouter.Policy> policies = List.of(
             ConfirmBarInputRouter.Policy.recovery(), ConfirmBarInputRouter.Policy.overwrite(),
-            ConfirmBarInputRouter.Policy.quit(), ConfirmBarInputRouter.Policy.closeTab()
+            ConfirmBarInputRouter.Policy.quit(), ConfirmBarInputRouter.Policy.closeTab(),
+            ConfirmBarInputRouter.Policy.open()
         );
         List<TuiInputEvent> events = List.of(
             new TextInput("y"), new TextInput("Y"), new TextInput("n"), new TextInput("N"),
+            new TextInput("d"), new TextInput("D"),
             KeyStroke.of(KeyStroke.Key.ESCAPE), KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL),
             KeyStroke.of(KeyStroke.Key.ENTER), new TextInput(" "), KeyStroke.of(KeyStroke.Key.TAB),
             KeyStroke.of(KeyStroke.Key.HOME), KeyStroke.of(KeyStroke.Key.END),
@@ -348,12 +395,15 @@ class ConfirmBarInputRouterTest {
             for (TuiInputEvent event : events) {
                 ConfirmBarInputRouter.Result result = fixture.route(event);
                 boolean safeCancel = event instanceof TextInput text && text.text().equalsIgnoreCase("n")
-                        && policy.shortcuts().noDecision() == ConfirmChoice.CANCEL
+                        && policy.shortcuts().decision(ConfirmationShortcuts.Key.NO) == ConfirmChoice.CANCEL
                     || event.equals(KeyStroke.of(KeyStroke.Key.ESCAPE))
                     || event.equals(KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL))
-                        && policy != ConfirmBarInputRouter.Policy.quit();
+                        && policy != ConfirmBarInputRouter.Policy.quit() && policy != ConfirmBarInputRouter.Policy.recovery();
+                boolean recoveryQuit = policy == ConfirmBarInputRouter.Policy.recovery()
+                    && event.equals(KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL));
                 assertTrue(result.consumed(), event.toString());
-                assertEquals(safeCancel ? ConfirmChoice.CANCEL : null, result.decision(), event.toString());
+                assertEquals(recoveryQuit ? ConfirmationAction.Command.QUIT : safeCancel ? ConfirmChoice.CANCEL : null,
+                    result.decision(), event.toString());
                 assertTrue(fixture.focus.focused().isEmpty());
             }
         }
@@ -395,6 +445,43 @@ class ConfirmBarInputRouterTest {
         assertEquals(ConfirmChoice.CANCEL, fixture.route(KeyStroke.of(KeyStroke.Key.ESCAPE)).decision());
     }
 
+    @Test
+    void deleteCannotActivateAClippedRecoveryButtonWhileTheQuestionRemainsVisible() {
+        var view = ConfirmBarView.buildRecovery("Unsaved drafts: 3.", 80);
+        var full = view.place(new Object(), 4, viewport(6, 80));
+        int clippedWidth = full.focusScope().target(ConfirmChoice.DISCARD).orElseThrow()
+            .placement().bounds().rightExclusive() - 1;
+        var placement = view.place(new Object(), 4, viewport(6, clippedWidth));
+        Fixture recovery = new Fixture(new FocusManager<>(), placement, ConfirmBarInputRouter.Policy.recovery());
+
+        assertTrue(placement.decisionsAvailable());
+        assertTrue(recovery.target(ConfirmChoice.DISCARD).enabled());
+        assertFalse(recovery.target(ConfirmChoice.DISCARD).interactive());
+        assertCapturedWithoutDecision(recovery.route(new TextInput("d")));
+        assertCapturedWithoutDecision(recovery.route(new TextInput("D")));
+        assertEquals(ConfirmChoice.CANCEL, recovery.route(new TextInput("n")).decision());
+        assertEquals(ConfirmationAction.Command.QUIT,
+            recovery.route(KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL)).decision());
+    }
+
+    @Test
+    void aClippedRecoveryShortcutLineDisablesDeleteEvenWhenAllButtonsFit() {
+        var view = ConfirmBarView.responsive("Unsaved drafts: 3.", 70, 2,
+            "Restore", "Delete", true, "Later", ConfirmationShortcuts.RECOVERY);
+        var placement = view.place(new Object(), 0, new Rect(0, 1, 70, 1));
+        Fixture recovery = new Fixture(new FocusManager<>(), placement, ConfirmBarInputRouter.Policy.recovery());
+
+        assertFalse(placement.decisionsAvailable(), "The keys explaining Delete must be visible as well");
+        assertFalse(recovery.target(ConfirmChoice.DISCARD).enabled());
+        assertCapturedWithoutDecision(recovery.route(new TextInput("d")));
+        assertCapturedWithoutDecision(recovery.route(new TextInput("D")));
+        assertCapturedWithoutDecision(recovery.route(KeyStroke.of(KeyStroke.Key.ENTER)));
+        assertEquals(ConfirmChoice.CANCEL, recovery.route(KeyStroke.of(KeyStroke.Key.ESCAPE)).decision());
+        assertEquals(ConfirmationAction.Command.QUIT,
+            recovery.route(KeyStroke.of(KeyStroke.Key.Q, KeyStroke.Modifier.CTRL)).decision(),
+            "Safe application exit remains available when the shortcut hint and dangerous choices are clipped");
+    }
+
     private static Fixture standard(ConfirmBarInputRouter.Policy policy, int cols) {
         return fixture(ConfirmBarView.build("Confirm?", cols), policy, cols, new Object());
     }
@@ -409,7 +496,8 @@ class ConfirmBarInputRouterTest {
             ),
             standard(ConfirmBarInputRouter.Policy.overwrite(), 80),
             standard(ConfirmBarInputRouter.Policy.quit(), 80),
-            standard(ConfirmBarInputRouter.Policy.closeTab(), 80)
+            standard(ConfirmBarInputRouter.Policy.closeTab(), 80),
+            standard(ConfirmBarInputRouter.Policy.open(), 80)
         );
     }
 

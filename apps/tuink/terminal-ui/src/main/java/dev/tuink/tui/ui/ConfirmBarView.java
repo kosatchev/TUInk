@@ -14,6 +14,7 @@ import dev.tuiframe.widget.WidgetState;
 import dev.tuiframe.cell.CellText;
 import dev.tuiframe.text.TerminalText;
 import dev.tuink.tui.flow.ConfirmChoice;
+import dev.tuink.tui.flow.ConfirmationAction;
 import dev.tuink.tui.flow.ConfirmationShortcuts;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -59,14 +60,15 @@ public final class ConfirmBarView {
         if (cols < 6 || availableRows < 1 || question.isBlank()) return build("", cols);
         String primary = compactLabel(primaryLabel, cols), secondary = compactLabel(secondaryLabel, cols);
         String cancel = compactLabel(cancelLabel, cols);
-        String hint = "Y" + (shortcuts.saveShortcut() ? "/Ctrl+S" : "") + "=" + primaryLabel;
-        String discardKeys = shortcuts.noDecision() == ConfirmChoice.DISCARD ? "N" : "";
-        if (shortcuts.ctrlQDecision() == ConfirmChoice.DISCARD)
-            discardKeys += (discardKeys.isEmpty() ? "" : "/") + "Ctrl+Q";
+        String hint = shortcuts.keysFor(ConfirmChoice.SAVE) + "=" + primaryLabel;
+        String discardKeys = shortcuts.keysFor(ConfirmChoice.DISCARD);
         if (includeCancel && !discardKeys.isEmpty()) hint += "  " + discardKeys + "=" + secondaryLabel;
-        String cancelKeys = shortcuts.noDecision() == ConfirmChoice.CANCEL ? "N/Esc" : "Esc";
-        if (shortcuts.ctrlQDecision() == ConfirmChoice.CANCEL) cancelKeys += "/Ctrl+Q";
+        String cancelKeys = shortcuts.keysFor(ConfirmChoice.CANCEL);
         hint += "  " + cancelKeys + "=" + cancelLabel;
+        for (var command : ConfirmationAction.Command.values()) {
+            String keys = shortcuts.keysFor(command);
+            if (!keys.isEmpty()) hint += "  " + keys + "=" + command.label();
+        }
         if (!secondary.equals(secondaryLabel)) hint += "  " + secondary + "=" + secondaryLabel;
         List<String> lines = new ArrayList<>(wrap(hint, cols));
         List<Rect> context = new ArrayList<>();

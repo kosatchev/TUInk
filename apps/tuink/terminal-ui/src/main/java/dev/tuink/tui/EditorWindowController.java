@@ -22,6 +22,8 @@ import dev.tuink.editor.session.document.DocumentIoCoordinator;
 import dev.tuink.core.TabSession;
 import dev.tuink.core.TextModel;
 import dev.tuink.tui.flow.ConfirmChoice;
+import dev.tuink.tui.flow.ConfirmationAction;
+import dev.tuink.tui.flow.ConfirmationShortcuts;
 import dev.tuink.tui.flow.RecoveryStore;
 import dev.tuink.tui.flow.SaveAsSuggestionStore;
 import dev.tuink.tui.flow.SaveContinuation;
@@ -1382,7 +1384,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             focusFirstBlockingControl();
             return java.util.Optional.empty();
         }
-        if (confirmMode && command == TuinkCommand.DOCUMENT_SAVE && host.confirmPolicy(modalState()).shortcuts().saveShortcut()) {
+        if (confirmMode && command == TuinkCommand.DOCUMENT_SAVE
+            && host.confirmPolicy(modalState()).shortcuts().decision(ConfirmationShortcuts.Key.SAVE) == ConfirmChoice.SAVE) {
             // The explicit save accelerator belongs to the confirmation even after source browsing.
             focusFirstBlockingControl();
             return java.util.Optional.empty();
@@ -1405,7 +1408,9 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         if (saveAsMode && ControlCommandRouter.owns(command)) {
             return java.util.Optional.empty();
         }
-        if (ModalInputPolicy.blocked(kind, event, command, target)) {
+        if (ModalInputPolicy.blocked(kind, event, command, target,
+            kind == ModalInputPolicy.Kind.CONFIRM ? host.confirmPolicy(modalState()).shortcuts()
+                : ConfirmationShortcuts.STANDARD)) {
             rejectDialogInput();
             return java.util.Optional.of(WindowInput.Consumed.INSTANCE);
         }
@@ -1734,7 +1739,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 binding == null ? inputEvent : DialogCommandPolicy.eventFor(physicalCommand)
                     .<TuiInputEvent>map(event -> event).orElse(inputEvent)
             );
-            ConfirmChoice decision = confirmInput.decision();
+            ConfirmationAction decision = confirmInput.decision();
             if (decision != null) {
                 notice().clearErrorOnUserAction();
             }
@@ -1875,11 +1880,16 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             : TerminalEditorApp.resolveEditorInput(commandRouter, inputEvent, pendingCommand, routedMenuResult, currentRecipient());
     }
 
-    private static TuinkCommand confirmationCommand(ConfirmChoice choice) {
-        return switch (choice) {
-            case SAVE -> TuinkCommand.DIALOG_CONFIRM_SAVE;
-            case DISCARD -> TuinkCommand.DIALOG_CONFIRM_DISCARD;
-            case CANCEL -> TuinkCommand.DIALOG_CONFIRM_CANCEL;
+    private static TuinkCommand confirmationCommand(ConfirmationAction action) {
+        return switch (action) {
+            case ConfirmChoice choice -> switch (choice) {
+                case SAVE -> TuinkCommand.DIALOG_CONFIRM_SAVE;
+                case DISCARD -> TuinkCommand.DIALOG_CONFIRM_DISCARD;
+                case CANCEL -> TuinkCommand.DIALOG_CONFIRM_CANCEL;
+            };
+            case ConfirmationAction.Command command -> switch (command) {
+                case QUIT -> TuinkCommand.APP_QUIT;
+            };
         };
     }
 
@@ -2114,6 +2124,14 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         }
         if (resolvedCommand == TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW
             && modalState().isNone() && !ui().openFileMode) { switchMarkdownPresentation(); return; }
+        if (modalState().isRecoveryConfirm() && resolvedCommand == TuinkCommand.APP_QUIT) {
+            // Release the offered drafts before the ordinary close workflow,
+            // including when the content was focused or a custom binding invoked Quit.
+            if (!postponeRecovery()) return;
+            setModal(UiModalState.none());
+            requestWindowClose(currentRecipient());
+            return;
+        }
         if (focusUi().blockingContentFocused
             && TerminalEditorApp.modalInputKind(modalState(), ui().openFileMode) != ModalInputPolicy.Kind.NONE) {
             if (!handleApplicationCommand(resolvedCommand)) dispatchContentInput(key);
@@ -2206,16 +2224,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                         return;
                     }
                     notice().info("Recovery snapshots discarded");
-                } else {
-                    var release = recoveryAutosave.releaseEntries(startupRecoveryEntries);
-                    startupRecoveryEntries.clear();
-                    startupRecoveryEntries.addAll(release.failedEntries());
-                    if (!release.successful()) {
-                        notice().error(release.failureMessage());
-                        return;
-                    }
-                    notice().info("Recovery postponed; snapshots kept for next launch or File > Recover drafts");
-                }
+                } else if (!postponeRecovery()) return;
                 setModal(UiModalState.none());
                 return;
             }
@@ -2378,6 +2387,19 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             reportTemporaryPreferencesChange();
             return;
         }
+    }
+
+    /** Both Later and application exit retain the offered copies and release only their claims. */
+    private boolean postponeRecovery() {
+        var release = recoveryAutosave.releaseEntries(startupRecoveryEntries);
+        startupRecoveryEntries.clear();
+        startupRecoveryEntries.addAll(release.failedEntries());
+        if (!release.successful()) {
+            notice().error(release.failureMessage());
+            return false;
+        }
+        notice().info("Recovery postponed; snapshots kept for next launch or File > Recover drafts");
+        return true;
     }
 
     private void reopenRecovery() {

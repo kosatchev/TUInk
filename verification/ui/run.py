@@ -79,6 +79,12 @@ def recovery_snapshot_present(directory, expected):
     return False
 
 
+def recovery_prompt(session, count=None):
+    text = session.screen.text
+    marker = "Unsaved drafts:" if count is None else f"Unsaved drafts: {count}."
+    return marker in text and all(label in text for label in ("[Restore]", "[Delete]", "[Later]"))
+
+
 def format5_snapshot(home, document, original, text):
     """The actual v0.13.0 schema: display paths, CSV separators, no platform/byte size."""
     directory = home / ".config/tuink/recovery"
@@ -1114,11 +1120,11 @@ class Regressions:
         meta, payload = format5_snapshot(recovery_home, document, original, "recovered draft\n")
         metadata_before, text_before = meta.read_bytes(), payload.read_bytes()
         with self.session("settings-incompatible-recovery", home=recovery_home, options=()) as session:
-            session.expect(lambda: "Recovery snapshots: 1." in session.screen.text
+            session.expect(lambda: recovery_prompt(session, 1)
                            and temporary in session.screen.text,
                            "the recovery prompt also shows the settings-load warning")
             session.send(b"\x1b", 0.7)
-            session.expect(lambda: "Restore now?" not in session.screen.text, "recovery postponed")
+            session.expect(lambda: "Unsaved drafts:" not in session.screen.text, "recovery postponed")
             session.finish()
         assert recovery_profile.read_bytes() == incompatible
         assert meta.read_bytes() == metadata_before and payload.read_bytes() == text_before
@@ -1196,22 +1202,49 @@ class Regressions:
                            "autosaved draft before crash", timeout=5)
             session.crash()
         assert document.read_text(encoding="utf-8") == original
-        for name, key in (("escape", b"\x1b"), ("quit", b"\x11"), ("no", b"n"), ("default", b"\r")):
+        for name, key in (("escape", b"\x1b"), ("no", b"n"), ("default", b"\r")):
             with self.session("recovery-later-" + name, document, home=home) as session:
-                session.expect(lambda: "Restore now?" in session.screen.text, "recovery confirmation")
+                session.expect(lambda: recovery_prompt(session), "recovery confirmation")
                 session.send(key, 0.7)
-                session.expect(lambda: "Restore now?" not in session.screen.text, "postponed recovery")
+                session.expect(lambda: "Unsaved drafts:" not in session.screen.text, "postponed recovery")
                 assert session.poll() is None, "postponing recovery exited the editor"
                 assert recovery_snapshot_present(directory, text + original), "postponing recovery lost the draft"
                 assert document.read_text(encoding="utf-8") == original
                 session.finish()
             assert recovery_snapshot_present(directory, text + original), "normal exit deleted a postponed draft"
+
+        with self.session("recovery-quit-startup", document, home=home) as session:
+            session.expect(lambda: recovery_prompt(session, 1)
+                           and "N/Esc=Later  Ctrl+Q=Quit" in session.screen.text, "recovery Quit shortcut")
+            session.send(b"\x11")
+            session.expect(lambda: session.poll() is not None, "Ctrl+Q quits from startup recovery", timeout=5)
+            assert session.status == 0, "recovery quit exited with an error"
+        assert recovery_snapshot_present(directory, text + original), "quitting startup recovery deleted the draft"
+        assert document.read_text(encoding="utf-8") == original, "quitting recovery changed the original file"
+
+        with self.session("recovery-quit-file", document, home=home) as session:
+            session.expect(lambda: recovery_prompt(session, 1), "draft survives recovery Quit and the next launch")
+            session.send(b"n", 0.7)
+            session.expect(lambda: "Unsaved drafts:" not in session.screen.text, "postponed recovery before reopening File")
+            session.send(b"\x1bOP")
+            session.expect(lambda: "Recover drafts" in session.screen.text, "File recovery action")
+            row, column = next((row, line.index("Recover drafts"))
+                               for row, line in enumerate(session.screen.lines) if "Recover drafts" in line)
+            session.mouse(0, row, column + 2)
+            session.mouse(0, row, column + 2, release=True)
+            session.expect(lambda: recovery_prompt(session, 1), "postponed draft reopened from File")
+            session.send(b"\x11")
+            session.expect(lambda: session.poll() is not None, "Ctrl+Q quits from reopened recovery", timeout=5)
+            assert session.status == 0, "reopened recovery quit exited with an error"
+        assert recovery_snapshot_present(directory, text + original), "quitting reopened recovery deleted the draft"
+        assert document.read_text(encoding="utf-8") == original, "quitting reopened recovery changed the original file"
+
         with self.session("recovery-later-owner", document, home=home) as owner:
-            owner.expect(lambda: "Restore now?" in owner.screen.text, "recovery confirmation")
+            owner.expect(lambda: recovery_prompt(owner), "recovery confirmation")
             owner.send(b"\x1b", 0.7)
-            owner.expect(lambda: "Restore now?" not in owner.screen.text, "postponed recovery")
+            owner.expect(lambda: "Unsaved drafts:" not in owner.screen.text, "postponed recovery")
             with self.session("recovery-restore", document, home=home) as session:
-                session.expect(lambda: "Restore now?" in session.screen.text, "recovery in a concurrent instance")
+                session.expect(lambda: recovery_prompt(session), "recovery in a concurrent instance")
                 session.send(b"y")
                 session.send(b"\x13")
                 session.expect(lambda: document.read_text(encoding="utf-8") == text + original,
@@ -1219,6 +1252,29 @@ class Regressions:
                 session.finish()
             owner.finish()
         assert not list((home / ".config/tuink/recovery").glob("*.meta.properties")), "normal saved exit left recovery entries"
+
+        for suffix, key in (("lower", b"d"), ("upper", b"D")):
+            deleted_document = self.fixture("recovery-delete-" + suffix, original)
+            deleted_home = self.root / ("recovery-delete-" + suffix + "-home")
+            deleted_directory = deleted_home / ".config/tuink/recovery"
+            with self.session("recovery-delete-seed-" + suffix, deleted_document, home=deleted_home) as session:
+                session.send(text.encode("utf-8"))
+                session.expect(lambda: recovery_snapshot_present(deleted_directory, text + original),
+                               "draft committed before testing Delete", timeout=5)
+                session.crash()
+            with self.session("recovery-delete-" + suffix, deleted_document, home=deleted_home) as session:
+                session.expect(lambda: recovery_prompt(session, 1)
+                               and "D=Delete" in session.screen.text, "visible Delete shortcut")
+                session.send(key, 0.7)
+                session.expect(lambda: "Unsaved drafts:" not in session.screen.text
+                               and not list(deleted_directory.glob("*.meta.properties")), "Delete removes the offered recovery copy")
+                assert session.poll() is None, "Delete exited the editor"
+                assert deleted_document.read_text(encoding="utf-8") == original, "Delete changed the original file"
+                session.send(b"\x13")
+                assert deleted_document.read_text(encoding="utf-8") == original, "the shortcut leaked into the document"
+                session.finish()
+            assert not list(deleted_directory.glob("*.meta.properties"))
+            assert deleted_document.read_text(encoding="utf-8") == original, "Delete or the following save changed the original file"
 
     def recovery_format5(self):
         original = b"\xef\xbb\xbforiginal\r\nlast"
@@ -1229,13 +1285,13 @@ class Regressions:
         meta, payload = format5_snapshot(home, document, original, recovered)
         metadata_before, text_before = meta.read_bytes(), payload.read_bytes()
         with self.session("format5-later", home=home) as session:
-            session.expect(lambda: "Recovery snapshots: 1." in session.screen.text, "release draft offered")
+            session.expect(lambda: recovery_prompt(session, 1), "release draft offered")
             session.send(b"\x1b", 0.7)
-            session.expect(lambda: "Restore now?" not in session.screen.text, "release draft postponed")
+            session.expect(lambda: "Unsaved drafts:" not in session.screen.text, "release draft postponed")
             session.finish()
         assert meta.read_bytes() == metadata_before and payload.read_bytes() == text_before
         with self.session("format5-restore", home=home) as session:
-            session.expect(lambda: "Recovery snapshots: 1." in session.screen.text, "release draft offered again")
+            session.expect(lambda: recovery_prompt(session, 1), "release draft offered again")
             session.send(b"y")
             session.expect(lambda: "draft 中" in session.screen.text, "release draft restored")
             assert meta.read_bytes() == metadata_before and payload.read_bytes() == text_before
@@ -1259,7 +1315,7 @@ class Regressions:
         format5_snapshot(detached_home, ambiguous, original, recovered)
         copy = self.root / "format5-recovered-copy.txt"
         with self.session("format5-ambiguous", home=detached_home) as session:
-            session.expect(lambda: "Recovery snapshots: 1." in session.screen.text, "ambiguous release draft offered")
+            session.expect(lambda: recovery_prompt(session, 1), "ambiguous release draft offered")
             session.send(b"y\x13")
             session.expect(lambda: "Save As:" in session.screen.text, "ambiguous draft requires a new filename")
             assert ambiguous.read_bytes() == original and raw.read_bytes() == original
@@ -1309,13 +1365,13 @@ class Regressions:
         for restore in (False, True):
             with self.session("recovery-memory-restore" if restore else "recovery-memory-later",
                               document, home=home, max_heap_mb=64) as session:
-                session.expect(lambda: "Recovery snapshots: 4." in session.screen.text, "all large drafts offered")
+                session.expect(lambda: recovery_prompt(session, 4), "all large drafts offered")
                 if restore:
                     session.send(b"y")
                     session.expect(lambda: "Could not restore 4" in session.screen.text, "bounded restore error")
-                    assert "Restore now?" in session.screen.text, session.screen.text
+                    assert recovery_prompt(session), session.screen.text
                 session.send(b"\x1b", 0.7)
-                session.expect(lambda: "Restore now?" not in session.screen.text, "postponed large drafts")
+                session.expect(lambda: "Unsaved drafts:" not in session.screen.text, "postponed large drafts")
                 assert "explicitly opened document" in session.screen.text, session.screen.text
                 session.finish()
             assert fingerprints() == before, "failed or postponed recovery changed persisted drafts"
@@ -1493,7 +1549,7 @@ class Regressions:
                            "recovery snapshot with raw Unix filename", timeout=5)
             session.crash()
         with self.session("unix-path-restore", home=home) as session:
-            session.expect(lambda: "Restore now?" in session.screen.text, "raw-path recovery offered")
+            session.expect(lambda: recovery_prompt(session), "raw-path recovery offered")
             session.send(b"y")
             session.expect(lambda: "first second original" in session.screen.text, "raw-path draft restored")
             session.send(b"\x13")

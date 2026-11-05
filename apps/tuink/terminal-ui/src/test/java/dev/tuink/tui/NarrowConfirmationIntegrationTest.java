@@ -17,6 +17,8 @@ import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /** Confirms visible context and destructive input through the production window pipeline. */
 class NarrowConfirmationIntegrationTest {
@@ -167,11 +169,13 @@ class NarrowConfirmationIntegrationTest {
         source.engine().insertInput("RECOVERED DRAFT");
         RecoveryStore.Entry entry = new RecoveryStore.Entry("recovery-entry", source.engine().captureRecoverySnapshot());
         try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("alpha"), List.of(entry))) {
-            assertTrue(prompt(window).contains("Restore now?"));
+            assertTrue(prompt(window).contains("Unsaved drafts:"));
             window.resize(24, 5);
 
             assertEquals("Enlar", prompt(window));
             window.event(new TextInput("y"));
+            window.event(new TextInput("d"));
+            window.event(new TextInput("D"));
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             window.pointer(PointerEvent.Kind.PRESS, window.height - 2, 0);
 
@@ -180,10 +184,58 @@ class NarrowConfirmationIntegrationTest {
             assertEquals("Enlar", prompt(window));
 
             window.resize(24, 80);
-            assertTrue(prompt(window).contains("Restore now?"));
+            assertTrue(prompt(window).contains("Unsaved drafts:"));
             window.event(new TextInput("y"));
             assertEquals("RECOVERED DRAFT", window.active().tabSession().model().getLine(0));
-            assertFalse(prompt(window).contains("Restore now?"));
+            assertFalse(prompt(window).contains("Unsaved drafts:"));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"y", "d"})
+    void recoveryChoicesFitSeventyColumnsAndTwoPromptRows(String key) throws Exception {
+        TabSession source = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
+        source.engine().insertInput("RECOVERED DRAFT");
+        RecoveryStore.Entry entry = new RecoveryStore.Entry("compact-recovery", source.engine().captureRecoverySnapshot());
+        try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("alpha"), List.of(entry))) {
+            window.resize(4, 70);
+            String visible = window.promptText();
+            assertEquals(2, visible.lines().count());
+            assertTrue(visible.contains("Unsaved drafts: 1."));
+            assertTrue(visible.contains("Y=Restore  D=Delete  N/Esc=Later  Ctrl+Q=Quit"));
+            assertTrue(visible.contains("[Restore]"));
+            assertTrue(visible.contains("[Delete]"));
+            assertTrue(visible.contains("[Later]"));
+
+            window.event(new TextInput(key));
+
+            assertFalse(window.promptText().contains("Unsaved drafts:"));
+            assertEquals(ActiveSurface.ModalScope.NONE, window.controller.activeSurface().modalScope());
+            assertTrue(window.controller.running());
+            if (key.equals("y")) assertEquals("RECOVERED DRAFT", window.active().tabSession().model().getLine(0));
+            else {
+                assertEquals("alpha", window.active().tabSession().model().getLine(0));
+                assertFalse(window.recoverySnapshots.containsKey(entry.id()));
+            }
+        }
+    }
+
+    @Test
+    void quittingClippedRecoveryPreservesItsOfferedCopyAndOriginalDocument() throws Exception {
+        TabSession source = TabSession.createEmpty(TerminalEditorTextLayout::new, new EditorClipboard());
+        source.engine().insertInput("RECOVERED DRAFT");
+        RecoveryStore.Entry entry = new RecoveryStore.Entry("clipped-quit", source.engine().captureRecoverySnapshot());
+        try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of("alpha"), List.of(entry))) {
+            window.resize(24, 5);
+            assertEquals("Enlar", prompt(window));
+
+            window.event(ctrlQ());
+
+            assertFalse(window.controller.running());
+            assertEquals(1, window.tabs.size());
+            assertTrue(window.recoverySnapshots.containsKey(entry.id()));
+            assertEquals(List.of("RECOVERED DRAFT"), window.recoverySnapshots.get(entry.id()).lines());
+            assertEquals("alpha", Files.readString(window.document));
         }
     }
 

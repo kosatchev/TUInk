@@ -3,6 +3,7 @@ package dev.tuiframe.widget;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 import dev.tuiframe.cell.Cell;
 import dev.tuiframe.cell.CellBuffer;
@@ -107,6 +108,32 @@ class TextFieldMouseSelectionTest {
         assertEquals(new Point(6, 1), field.layout(bounds).cursorPosition(FOCUSED).orElseThrow());
         assertEquals(before, paintedCells(field, bounds));
         assertFalse(field.layout(bounds).handle(drag(1, 2), FOCUSED).consumed());
+    }
+
+    @Test
+    void explicitSelectionCollapseKeepsTheActiveCaretAndDraggedViewportAndEndsCapture() {
+        Rect bounds = new Rect(2, 1, 5, 1);
+        TextField field = dragIntoScrolledWindow(bounds);
+        assertTrue(field.mouseSelecting());
+        assertTrue(field.hasSelection());
+        String value = field.text();
+        int caret = field.cursor();
+        Point cursor = field.layout(bounds).cursorPosition(FOCUSED).orElseThrow();
+        var before = paintedCells(field, bounds).stream().map(Cell::grapheme).toList();
+
+        for (int repeat = 0; repeat < 2; repeat++) {
+            field.collapseSelection();
+            assertSame(value, field.text());
+            assertEquals(caret, field.cursor());
+            assertFalse(field.hasSelection());
+            assertFalse(field.mouseSelecting());
+            assertEquals(cursor, field.layout(bounds).cursorPosition(FOCUSED).orElseThrow());
+            assertEquals(before, paintedCells(field, bounds).stream().map(Cell::grapheme).toList());
+            assertFalse(field.captures(release(1, 8)));
+        }
+        field.insert("Z");
+        assertEquals(value.substring(0, caret) + "Z" + value.substring(caret), field.text(),
+            "The next edit inserts at the retained active caret instead of replacing the old selection");
     }
 
     @Test

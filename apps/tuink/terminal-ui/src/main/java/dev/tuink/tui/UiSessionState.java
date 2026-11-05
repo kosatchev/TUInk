@@ -12,6 +12,7 @@ final class UiSessionState {
     boolean readingModeSetting;
     boolean confirmOnCloseSetting;
     boolean mouseModeSetting;
+    boolean rightClickClipboardSetting;
     boolean highlightActiveGutterSetting;
     boolean smartHomeEndSetting;
     boolean autoIndentSetting;
@@ -36,7 +37,7 @@ final class UiSessionState {
             autoSelectionHighlightSetting, markdownOpenBothTabsSetting, markdownOpenInPreviewSetting,
             markdownCodeHighlightingSetting,
             gutterDiffModeSetting, tabWidthSetting,
-            tabInsertModeSetting, theme);
+            tabInsertModeSetting, theme, rightClickClipboardSetting);
     }
 
     static UiSessionState from(AppSettings settings) {
@@ -47,6 +48,7 @@ final class UiSessionState {
         state.readingModeSetting = settings.readingMode();
         state.confirmOnCloseSetting = settings.confirmOnClose();
         state.mouseModeSetting = settings.mouseMode();
+        state.rightClickClipboardSetting = settings.rightClickClipboard();
         state.highlightActiveGutterSetting = settings.highlightActiveGutter();
         state.smartHomeEndSetting = settings.smartHomeEnd();
         state.autoIndentSetting = settings.autoIndent();

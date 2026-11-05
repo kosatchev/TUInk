@@ -185,6 +185,12 @@ public final class TextField implements InteractiveWidget<TextField.Action> {
         updateCursor(value.length(), 0);
     }
 
+    /** Removes the selection at the active caret without moving its retained text viewport. */
+    public void collapseSelection() {
+        cancelMouseSelection();
+        selectionAnchor = -1;
+    }
+
     public boolean mouseSelecting() {
         return mouseSelecting;
     }

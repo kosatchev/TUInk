@@ -79,3 +79,14 @@ placements. Frame fence сохраняется также при перепол�
 `SystemClipboardIntegrationTest`. Сквозной сценарий
 `verification/ui/clipboard.py` использует настоящий PTY и собственный helper,
 не затрагивая системный буфер пользователя.
+
+Опциональный `Right-click: copy/paste` разрешает получателя по текущим
+`RoutedTarget`, clipped placements и общей геометрии текстовых viewport.
+Сначала учитываются capture, mouse capability, modal policy и реальные
+текстовые поля. Фокус меняется на найденного владельца без синтетического
+левого клика, поэтому caret и выделение не перемещаются к указателю.
+Затем выполняется обычный `EDIT_COPY` или `EDIT_PASTE`. Выделение снимается
+только после подтверждённой clipboard publication; Source использует session
+`Select(RESTORE, caret, null)`, поля и Preview — операции collapse, сохраняющие
+caret, viewport и визуальную позицию. Отказ подготовки Copy или collapse
+оставляет окно рабочим; история документа при Copy не меняется.

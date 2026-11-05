@@ -33,6 +33,8 @@ final class PreviewSelection {
     int caret() { return caret; }
     int start() { return Math.min(anchor, caret); }
     int end() { return Math.max(anchor, caret); }
+    /** Drops copy selection while retaining the caret's two-dimensional visual affinity and index. */
+    void collapseSelection() { anchor = caret; }
     void clear() { anchor = 0; caret = 0; preferredColumn = -1; visual = null; releaseIndex(); }
     void releaseIndex() { geometry = null; visualResult = null; }
     void bindGeometry(MarkdownGeometry geometry) { this.geometry = geometry; }

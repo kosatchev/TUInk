@@ -227,7 +227,7 @@ class AppSettingsGuardedSaveTest {
         return new AppSettings(false, true, false, true, false, false, false, false, false,
             false, false, false, false, false, false, false, false,
             false,
-            GutterDiffMode.STABLE, 2, TabInsertMode.ALWAYS_SPACES_2, UiStyles.Theme.LIGHT);
+            GutterDiffMode.STABLE, 2, TabInsertMode.ALWAYS_SPACES_2, UiStyles.Theme.LIGHT, false);
     }
 
     private static void assertOnlyFiles(Path directory, Path... expected) throws IOException {

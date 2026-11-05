@@ -21,6 +21,7 @@ import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_AUTO_LIST;
 import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_AUTO_PAIRS;
 import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_CONFIRM_ON_CLOSE;
 import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_MOUSE;
+import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_RIGHT_CLICK_CLIPBOARD;
 import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_MARKDOWN_OPEN_BOTH_TABS;
 import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_MARKDOWN_OPEN_IN_PREVIEW;
 import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_MARKDOWN_CODE_SYNTAX;
@@ -455,7 +456,9 @@ final class TopMenuView {
             separator(),
             item(SETTINGS_TOGGLE_MARKDOWN_OPEN_BOTH_TABS, checked(ui.markdownOpenBothTabsSetting) + " Open both Markdown tabs"),
             item(SETTINGS_TOGGLE_MARKDOWN_OPEN_IN_PREVIEW, checked(ui.markdownOpenInPreviewSetting) + " Open Markdown in Preview"),
-            item(SETTINGS_TOGGLE_MARKDOWN_CODE_SYNTAX, checked(ui.markdownCodeHighlightingSetting) + " MD code syntax")
+            item(SETTINGS_TOGGLE_MARKDOWN_CODE_SYNTAX, checked(ui.markdownCodeHighlightingSetting) + " MD code syntax"),
+            item(SETTINGS_TOGGLE_RIGHT_CLICK_CLIPBOARD,
+                checked(ui.rightClickClipboardSetting) + " Right-click: copy/paste")
         );
     }
 

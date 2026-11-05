@@ -127,6 +127,41 @@ class PreviewSelectionTest {
         assertEquals(new PreviewSelection.Snapshot(4, 4), selection.snapshot());
     }
 
+    @Test void explicitCollapseKeepsTheActiveEndOfABackwardSelection() {
+        var result = result("alpha", line("alpha", 0, 5, 0, 5));
+        var selection = new PreviewSelection();
+        selection.selectAtColumn(result, 0, 4, false);
+        selection.selectAtColumn(result, 0, 1, true);
+        assertTrue(selection.snapshot().selected());
+        var visual = selection.visualPosition(result);
+
+        selection.collapseSelection();
+
+        assertEquals(new PreviewSelection.Snapshot(1, 1), selection.snapshot());
+        assertSame(visual, selection.visualPosition(result));
+        selection.move(result, PreviewSelection.Move.RIGHT, false, 1);
+        assertEquals(new PreviewSelection.Snapshot(2, 2), selection.snapshot());
+    }
+
+    @Test void explicitCollapsePreservesAtomicFormulaVisualAffinityInsteadOfRemappingItsOffset() {
+        String source = "x^2";
+        var runs = List.of(new MarkdownLayout.Run(0, 3, MarkdownLayout.Role.MATH, SOURCE, 0, source.length()));
+        var result = result(source, new MarkdownLayout.Line(" x ", runs, "", SOURCE, "math"),
+            new MarkdownLayout.Line("───", runs, "", SOURCE, "math"),
+            new MarkdownLayout.Line(" y ", runs, "", SOURCE, "math"));
+        var selection = new PreviewSelection();
+        selection.selectRange(source, 0, source.length());
+        selection.restoreVisual(result, 1, 2);
+        var visual = selection.visualPosition(result);
+
+        for (int repeat = 0; repeat < 2; repeat++) {
+            selection.collapseSelection();
+            assertEquals(new PreviewSelection.Snapshot(source.length(), source.length()), selection.snapshot());
+            assertSame(visual, selection.visualPosition(result));
+            assertEquals(new PreviewSelection.VisualPosition(1, 2), selection.visualPosition(result));
+        }
+    }
+
     static MarkdownLayout.Line line(String display, int start, int end, int projectionStart, int projectionEnd) {
         return new MarkdownLayout.Line(display, List.of(new MarkdownLayout.Run(start, end,
             MarkdownLayout.Role.TEXT, SOURCE, projectionStart, projectionEnd)), display, SOURCE, "paragraph");

@@ -26,7 +26,8 @@ public record AppSettings(
     GutterDiffMode gutterDiffMode,
     int tabWidth,
     TabInsertMode tabInsertMode,
-    UiStyles.Theme theme
+    UiStyles.Theme theme,
+    boolean rightClickClipboard
 ) {
     public static AppSettings defaults() {
         return new AppSettings(
@@ -51,7 +52,8 @@ public record AppSettings(
             GutterDiffMode.MYERS,
             4,
             TabInsertMode.AUTO,
-            UiStyles.Theme.CYAN
+            UiStyles.Theme.CYAN,
+            false
         );
     }
 }

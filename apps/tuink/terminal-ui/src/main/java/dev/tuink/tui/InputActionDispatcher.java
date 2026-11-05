@@ -118,6 +118,11 @@ final class InputActionDispatcher {
                     : "Confirm on close disabled";
                 return DispatchResult.handled(statusMessage);
             }
+            case SETTINGS_TOGGLE_RIGHT_CLICK_CLIPBOARD -> {
+                ui.rightClickClipboardSetting = !ui.rightClickClipboardSetting;
+                return DispatchResult.handled(ui.rightClickClipboardSetting
+                    ? "Right-click copy/paste enabled" : "Right-click copy/paste disabled");
+            }
             case SETTINGS_TOGGLE_MOUSE -> {
                 if (!surface.mouseAvailable()) {
                     return DispatchResult.handled(

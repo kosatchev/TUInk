@@ -288,6 +288,8 @@ ui.wrapWords=false
 ui.readingMode=false
 ui.confirmOnClose=true
 ui.mouseMode=true
+# Optional; omission means false.
+ui.rightClickClipboard=false
 ui.markdownOpenBothTabs=false
 ui.markdownOpenInPreview=false
 ui.highlightActiveLineNumber=true
@@ -315,13 +317,14 @@ from that session. To start a new profile, retain the old file under another
 name and let a following session save a complete format 2 settings file.
 There is no automatic conversion or historical settings reader.
 
-The current format 2 schema also accepts the optional Boolean
-`ui.markdownCodeHighlighting`. Its absence means `false`, so existing format 2
-profiles remain readable without conversion. The writer omits the default and
-stores `true` when language-specific highlighting of Markdown Source code blocks
-is enabled. Existing required
-fields and unknown-key rejection remain strict; malformed optional values also
-reject the profile without rewriting it.
+The current format 2 schema also accepts the optional Booleans
+`ui.markdownCodeHighlighting` and `ui.rightClickClipboard`. Their absence means
+`false`, so existing format 2 profiles remain readable without conversion.
+The writer omits each default and stores `true` when Markdown Source code syntax
+or right-click copy/paste is enabled. These are independent preferences;
+right-click copy/paste does not enable mouse tracking or change the ordinary
+clipboard commands. Existing required fields and unknown-key rejection remain
+strict; malformed optional values also reject the profile without rewriting it.
 
 If settings cannot be loaded, an in-editor persistent warning explains that
 preference changes apply only to the current session. Changing a preference in

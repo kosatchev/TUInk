@@ -116,7 +116,7 @@ class AppSettingsStoreTest {
             initial.autoIndent(), initial.autoPairs(), initial.autoList(), initial.visibleWhitespace(),
             initial.syntaxHighlighting(), initial.rainbowBrackets(), initial.autoSelectionHighlight(), false, false,
             initial.markdownCodeHighlighting(),
-            initial.gutterDiffMode(), 2, initial.tabInsertMode(), initial.theme()
+            initial.gutterDiffMode(), 2, initial.tabInsertMode(), initial.theme(), initial.rightClickClipboard()
         );
         int index = 0;
         for (String name : List.of("x".repeat(250), "я".repeat(125))) {

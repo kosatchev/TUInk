@@ -58,6 +58,7 @@ import dev.tuiframe.widget.DialogFocusTraversal;
 import dev.tuiframe.widget.DialogInputPolicy;
 import dev.tuiframe.widget.DialogMode;
 import dev.tuiframe.widget.FocusContext;
+import dev.tuiframe.widget.FocusManager;
 import dev.tuiframe.widget.ListView;
 import dev.tuiframe.widget.FocusResetPolicy;
 import dev.tuiframe.widget.FocusScope;
@@ -80,6 +81,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.function.BooleanSupplier;
+import java.util.function.Function;
+import java.util.Optional;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
@@ -1606,6 +1609,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         }
         if (inputEvent instanceof PointerEvent && (!uiSessionState.mouseModeSetting || !terminal.mouseAvailable()))
             return WindowInput.Consumed.INSTANCE;
+        if (routeClipboardPointer(inputEvent)) return WindowInput.Consumed.INSTANCE;
         if (windowModal.isNone() && windowTabCommand(navigationCommand))
             return TerminalEditorApp.resolveEditorInput(commandRouter, inputEvent, binding, null, currentRecipient());
         if (routeTabChrome(inputEvent)) return WindowInput.Consumed.INSTANCE;
@@ -1921,6 +1925,70 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
 
     private void executeResolvedCommand(WindowInput.Command key) {
         executeResolvedCommand(key, true);
+    }
+
+    /** Mouse clipboard gestures resolve a real text owner before entering the common command path. */
+    private boolean routeClipboardPointer(TuiInputEvent event) {
+        if (!uiSessionState.rightClickClipboardSetting || !(event instanceof PointerEvent pointer)
+            || pointer.kind() != PointerEvent.Kind.PRESS || pointer.button() != PointerEvent.Button.RIGHT
+            || !pointer.modifiers().isEmpty() || topMenu.isOpen()) return false;
+
+        if (modalState().isSaveAs() && saveAsBarPlacement != null
+            && clipboardFieldPointer(pointer, saveAsBarPlacement.focusScope(), host.saveAsFocusManager(),
+                saveAsBarPlacement::field, () -> focusUi().blockingContentFocused = false)) return true;
+        if (modalState().isNone() && ui().openFileMode && openFileDialogPlacement != null
+            && clipboardFieldPointer(pointer, openFileDialogPlacement.focusScope(), ui().openFileFocusState.manager(),
+                id -> id == OpenFileDialogView.Control.LOCATION
+                    ? java.util.Optional.of(openFileDialogPlacement.location()) : java.util.Optional.empty(),
+                () -> { focusUi().blockingContentFocused = false;
+                    ui().openFileFocusState.focus(OpenFileInputRouter.Focus.LOCATION); })) return true;
+        if (modalState().isNone() && !ui().openFileMode) {
+            if (ui().preview.active && ui().preview.searchVisible
+                && clipboardFieldPointer(pointer, previewSearchScope(), ui().searchFocusManager,
+                    id -> java.util.Optional.of(ui().preview.searchField), () -> ui().searchEditorFocused = false)) return true;
+            if (!ui().preview.active && ui().searchMode && searchBarPlacement != null
+                && clipboardFieldPointer(pointer, searchBarPlacement.focusScope(), host.searchFocusManager(),
+                    searchBarPlacement::field, () -> ui().searchEditorFocused = false)) return true;
+        }
+
+        if (!documentPointerHit(pointer)) return false;
+        if (ui().preview.active) {
+            var preview = ui().preview;
+            if (!preview.ready() || !PreviewScrollbars.from(preview.bounds, preview.result, preview.searchVisible,
+                preview.top, preview.left).layout().contentBounds().contains(pointer.column(), pointer.row())) return false;
+            focusDocument();
+            return pointerClipboardAction(preview.selection.snapshot().selected(), preview.selection::collapseSelection);
+        }
+        if (plan == null || !dev.tuink.tui.ui.EditorScrollbars.from(plan, rows, cols, contentTopRow).layout().contentBounds()
+            .contains(pointer.column(), pointer.row())) return false;
+        focusDocument();
+        return pointerClipboardAction(state.hasSelection(), () -> {
+            Position caret = state.getCursor();
+            activeDocument().execute(new DocumentCommand.Select(DocumentCommand.SelectionAction.RESTORE,
+                new TextPosition(caret.line(), caret.col()), null));
+        });
+    }
+
+    private <K, A> boolean clipboardFieldPointer(PointerEvent pointer, FocusScope<K, A> scope,
+        FocusManager<K> focus,
+        Function<K, Optional<TextField>> fields, Runnable focusOwner) {
+        var target = ClipboardPointerRouter.fieldAt(scope, pointer, fields).orElse(null);
+        if (target == null) return false;
+        focus.focus(scope, target.id());
+        focusOwner.run();
+        return pointerClipboardAction(target.field().hasSelection(), target.field()::collapseSelection);
+    }
+
+    private boolean pointerClipboardAction(boolean selected, Runnable collapseSelection) {
+        if (selected) {
+            long before = host.clipboard.revision();
+            invokeCommand(CommandInvocation.of(TuinkCommand.EDIT_COPY.id()), currentRecipient());
+            if (host.clipboard.revision() != before) runDocumentPointerAction(collapseSelection);
+        } else if (activeSurface().allows(TuinkCommand.EDIT_PASTE)) {
+            invokeCommand(CommandInvocation.of(TuinkCommand.EDIT_PASTE.id()), currentRecipient());
+        }
+        eventLoop.invalidate();
+        return true;
     }
 
     /** A late clipboard receipt may never paste into a replacement document or field. */

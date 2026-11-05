@@ -40,6 +40,7 @@ public final class AppSettingsStore {
     private static final String KEY_READING_MODE = "ui.readingMode";
     private static final String KEY_CONFIRM_ON_CLOSE = "ui.confirmOnClose";
     private static final String KEY_MOUSE_MODE = "ui.mouseMode";
+    private static final String KEY_RIGHT_CLICK_CLIPBOARD = "ui.rightClickClipboard";
     private static final String KEY_HIGHLIGHT_ACTIVE_GUTTER = "ui.highlightActiveLineNumber";
     private static final String KEY_SMART_HOME_END = "ui.smartHomeEnd";
     private static final String KEY_AUTO_INDENT = "ui.autoIndent";
@@ -160,7 +161,8 @@ public final class AppSettingsStore {
             parseEnum(p, KEY_GUTTER_DIFF_MODE, GutterDiffMode.class, path),
             parseTabWidth(p, path),
             parseEnum(p, KEY_TAB_INSERT_MODE, TabInsertMode.class, path),
-            parseEnum(p, KEY_THEME, UiStyles.Theme.class, path)
+            parseEnum(p, KEY_THEME, UiStyles.Theme.class, path),
+            parseOptionalBoolean(p, KEY_RIGHT_CLICK_CLIPBOARD, false, path)
         );
     }
 
@@ -205,6 +207,7 @@ public final class AppSettingsStore {
         p.setProperty(KEY_READING_MODE, Boolean.toString(settings.readingMode()));
         p.setProperty(KEY_CONFIRM_ON_CLOSE, Boolean.toString(settings.confirmOnClose()));
         p.setProperty(KEY_MOUSE_MODE, Boolean.toString(settings.mouseMode()));
+        if (settings.rightClickClipboard()) p.setProperty(KEY_RIGHT_CLICK_CLIPBOARD, "true");
         p.setProperty(KEY_HIGHLIGHT_ACTIVE_GUTTER, Boolean.toString(settings.highlightActiveGutter()));
         p.setProperty(KEY_SMART_HOME_END, Boolean.toString(settings.smartHomeEnd()));
         p.setProperty(KEY_AUTO_INDENT, Boolean.toString(settings.autoIndent()));
@@ -463,6 +466,7 @@ public final class AppSettingsStore {
         Set<String> unknown = new java.util.HashSet<>(p.stringPropertyNames());
         unknown.removeAll(KEYS);
         unknown.remove(KEY_MARKDOWN_CODE_HIGHLIGHTING);
+        unknown.remove(KEY_RIGHT_CLICK_CLIPBOARD);
         if (!missing.isEmpty() || !unknown.isEmpty()) {
             throw invalid(path, "schema mismatch; missing=" + missing + ", unknown=" + unknown);
         }

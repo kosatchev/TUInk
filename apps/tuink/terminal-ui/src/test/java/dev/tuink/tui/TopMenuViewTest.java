@@ -58,6 +58,24 @@ class TopMenuViewTest {
     }
 
     @Test
+    void rightClickClipboardHasItsOwnCheckmarkEvenWhenMouseTrackingIsUnavailable() {
+        var ui = UiSessionState.from(dev.tuink.tui.flow.AppSettings.defaults());
+        ui.mouseModeSetting = false;
+        for (boolean enabled : new boolean[] {false, true}) {
+            ui.rightClickClipboardSetting = enabled;
+            var menu = TopMenuView.build(ui, List.of(), -1, "Cyan", new CommandRouter(),
+                MenuBar.State.open(TopMenuController.SETTINGS_INDEX), TestSurfaces.source(ui).withRuntime(false, true));
+            var setting = menu.menus().get(TopMenuController.SETTINGS_INDEX).entries().stream()
+                .filter(entry -> entry instanceof MenuBar.Item<?> item
+                    && ((CommandInvocation) item.value()).id().equals(
+                        dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_RIGHT_CLICK_CLIPBOARD.id()))
+                .map(entry -> (MenuBar.Item<?>) entry).findFirst().orElseThrow();
+            assertEquals((enabled ? "[x]" : "[ ]") + " Right-click: copy/paste", setting.label());
+            assertTrue(setting.enabled());
+        }
+    }
+
+    @Test
     void showsTheCurrentBindingAndDisablesEditsInPreview() {
         var keymap = dev.tuink.tui.keymap.TuinkKeymap.defaults();
         keymap.unbind(dev.tuiframe.input.KeyStroke.of(dev.tuiframe.input.KeyStroke.Key.S,
@@ -251,7 +269,8 @@ class TopMenuViewTest {
                 "tuink.settings.cycle-tab-insert-mode",
                 "tuink.settings.toggle-markdown-open-both-tabs",
                 "tuink.settings.toggle-markdown-open-in-preview",
-                "tuink.settings.toggle-markdown-code-syntax"
+                "tuink.settings.toggle-markdown-code-syntax",
+                "tuink.settings.toggle-right-click-clipboard"
             ),
             commandIds(
                 view(ui, MenuBar.State.open(TopMenuController.SETTINGS_INDEX)),

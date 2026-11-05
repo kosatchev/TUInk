@@ -361,6 +361,15 @@ clipboard. A failed system transfer reports a status warning and uses that
 internal clipboard. SSH sessions use the internal clipboard; use the terminal's
 own copy and paste shortcuts to exchange text with the local desktop.
 
+**Settings > Right-click: copy/paste** enables an optional mouse shortcut;
+it is off by default and remembered between launches. In a text area or field,
+an unmodified right press copies the selection and collapses it at its current
+caret. Without a selection it pastes at that caret, without moving it to the
+pointer. Markdown Preview content allows only copying; its Find field remains
+editable. The gesture uses the same clipboard and commands as `Ctrl+C/V`.
+Buttons, menus, gutters and scrollbars retain their normal input behavior.
+Mouse mode must be enabled and supported by the terminal.
+
 Close a tab with `Ctrl+W` or Tab > Close Tab. Menu hints reflect the active key bindings.
 
 With the search panel focused, use `Ctrl+F` for the next match, `Ctrl+G` for the previous

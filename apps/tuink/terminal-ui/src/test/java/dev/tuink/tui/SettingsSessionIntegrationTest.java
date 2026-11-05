@@ -47,11 +47,11 @@ class SettingsSessionIntegrationTest {
     void blockedSessionTracksExplicitChoicesRelativeToItsCliOverrides() throws Exception {
         String reason = "Settings file cannot be loaded";
         AppSettingsSession session = new AppSettingsSession(AppSettings.defaults(),
-            TuiCliOptions.parse(new String[]{"--read", "--no-mouse", "--theme=light"}), reason);
+            TuiCliOptions.parse(new String[]{"--read", "--no-mouse", "--theme=monochrome"}), reason);
         try (EditorWindowFixture window = new EditorWindowFixture(directory, List.of("keep"), session)) {
             assertTrue(window.ui.readingModeSetting);
             assertFalse(window.ui.mouseModeSetting);
-            assertEquals(UiStyles.Theme.LIGHT, window.host.theme);
+            assertEquals(UiStyles.Theme.MONOCHROME, window.host.theme);
             window.command(TuinkCommand.SETTINGS_TOGGLE_READING_MODE);
             assertFalse(window.ui.readingModeSetting);
             assertTemporaryWarning(window, reason);
@@ -59,7 +59,7 @@ class SettingsSessionIntegrationTest {
             assertTrue(window.ui.mouseModeSetting);
             assertTemporaryWarning(window, reason);
             window.command(TuinkCommand.VIEW_CYCLE_THEME);
-            assertFalse(window.host.theme == UiStyles.Theme.LIGHT);
+            assertFalse(window.host.theme == UiStyles.Theme.MONOCHROME);
             assertTemporaryWarning(window, reason);
         }
     }
@@ -67,7 +67,7 @@ class SettingsSessionIntegrationTest {
     private static void assertTemporaryWarning(EditorWindowFixture window, String reason) {
         assertTrue(window.notification.message.startsWith("Settings changes apply only to this session."));
         assertTrue(window.notification.message.contains(reason));
-        assertEquals(window.host.styles.notifyWarning(), window.notification.style());
+        assertEquals(window.host.styles.windows().notifyWarning(), window.notification.style());
         assertEquals(-1L, window.notification.nanosUntilExpire(System.nanoTime()));
     }
 
@@ -76,7 +76,7 @@ class SettingsSessionIntegrationTest {
         try (EditorWindowFixture window = overriddenWindow()) {
             assertTrue(window.ui.readingModeSetting);
             assertFalse(window.ui.mouseModeSetting);
-            assertEquals(UiStyles.Theme.LIGHT, window.host.theme);
+            assertEquals(UiStyles.Theme.MONOCHROME, window.host.theme);
             assertEquals(AppSettings.defaults(), preferences(window));
         }
     }
@@ -93,7 +93,7 @@ class SettingsSessionIntegrationTest {
             assertEquals(UiStyles.Theme.CYAN, saved.theme());
             assertTrue(window.ui.readingModeSetting);
             assertFalse(window.ui.mouseModeSetting);
-            assertEquals(UiStyles.Theme.LIGHT, window.host.theme);
+            assertEquals(UiStyles.Theme.MONOCHROME, window.host.theme);
         }
     }
 
@@ -143,7 +143,7 @@ class SettingsSessionIntegrationTest {
             }
 
             AppSettings saved = preferences(window);
-            assertEquals(UiStyles.Theme.LIGHT, saved.theme());
+            assertEquals(UiStyles.Theme.MONOCHROME, saved.theme());
             assertFalse(saved.readingMode());
             assertTrue(saved.mouseMode());
         }
@@ -165,7 +165,7 @@ class SettingsSessionIntegrationTest {
 
     private EditorWindowFixture overriddenWindow() throws Exception {
         AppSettingsSession session = new AppSettingsSession(AppSettings.defaults(),
-            TuiCliOptions.parse(new String[]{"--read", "--no-mouse", "--theme=light"}));
+            TuiCliOptions.parse(new String[]{"--read", "--no-mouse", "--theme=monochrome"}));
         return new EditorWindowFixture(directory, List.of("keep"), session);
     }
 

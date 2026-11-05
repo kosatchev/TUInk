@@ -39,7 +39,7 @@ class ActiveSearchMarkerBudgetIntegrationTest {
             assertTrue(window.screenRow(1).contains("#document.txt"));
             int documentRow = window.rowStartingWith(" 1 ");
             int firstCharacter = window.screenRow(documentRow).indexOf('a');
-            var highlighted = EditorStyleAdapter.toCell(window.host.styles.renderSearchMatch());
+            var highlighted = EditorStyleAdapter.toCell(window.host.styles.windows().renderSearchMatch());
             assertEquals(highlighted, window.screenStyle(documentRow, firstCharacter));
             window.frame();
             assertEquals(highlighted, window.screenStyle(documentRow, firstCharacter));

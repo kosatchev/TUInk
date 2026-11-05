@@ -574,7 +574,7 @@ public class TerminalEditorApp {
                 col++;
                 continue;
             }
-            canvas.put(col, 0, cell.grapheme(), styles.topbarFilenameHighlight());
+            canvas.put(col, 0, cell.grapheme(), styles.windows().topbarFilenameHighlight());
             col += Math.max(1, cell.width());
         }
     }
@@ -763,13 +763,13 @@ public class TerminalEditorApp {
     }
 
     private CellStyle blockingAccent(boolean colorEnabled) {
-        return colorEnabled ? styles.notifyWarning()
+        return colorEnabled ? styles.windows().notifyWarning()
             : new CellStyle(CellColor.DEFAULT, CellColor.DEFAULT, true, true);
     }
 
     private CellStyle focusedButtonStyle(CellStyle parentStyle) {
         if (parentStyle == null) {
-            return styles.menuSelected();
+            return styles.windows().menuSelected();
         }
         return new CellStyle(parentStyle.bg(), parentStyle.fg(), true, parentStyle.underline());
     }
@@ -809,7 +809,7 @@ public class TerminalEditorApp {
         OpenDialogLayout layout = openFile.layout();
         OpenFileDialogView.Placement dialog = openFile.dialog();
         Theme childTheme = (colorEnabled ? colorFileTreeWidgetTheme : monoFileTreeWidgetTheme)
-            .withSurface(styles.dialog(), highlighted ? blockingAccent(colorEnabled) : styles.dialogBorder());
+            .withSurface(styles.windows().dialog(), highlighted ? blockingAccent(colorEnabled) : styles.windows().dialogBorder());
         if (dialog.compactDialog() != null) {
             dialog.paintCompact(canvas, childTheme, WidgetState.FOCUSED);
             return;
@@ -822,7 +822,7 @@ public class TerminalEditorApp {
             layout.left() + 1,
             padRight(dev.tuink.tui.ui.PathPresentation.clip(pathLine, 0, Math.max(0, layout.width() - 2)),
                 Math.max(0, layout.width() - 2)),
-            styles.dialog()
+            styles.windows().dialog()
         );
         FileTreeView.Placement treePlacement = openFile.placement();
         if (treePlacement != null) {
@@ -1011,7 +1011,7 @@ public class TerminalEditorApp {
         HelpDialogLayout layout = overlay.layout();
         Theme widgetTheme = colorEnabled ? colorOverlayWidgetTheme : monoOverlayWidgetTheme;
         if (highlighted) {
-            widgetTheme = widgetTheme.withSurface(styles.dialog(), blockingAccent(colorEnabled));
+            widgetTheme = widgetTheme.withSurface(styles.windows().dialog(), blockingAccent(colorEnabled));
         }
         if (CompactDialogView.required(overlay.viewport().height(), overlay.viewport().width())) {
             var target = overlay.focusScope().target(HelpOverlayInputRouter.Target.CLOSE).orElseThrow();
@@ -1028,7 +1028,7 @@ public class TerminalEditorApp {
             layout.top() + layout.height() - 2,
             textCol,
             clipText(overlay.footer(), textWidth),
-            styles.dialog()
+            styles.windows().dialog()
         );
         RoutedTarget<HelpOverlayInputRouter.Target, Button.Action> closeTarget = overlay.focusScope()
             .target(HelpOverlayInputRouter.Target.CLOSE)
@@ -1046,111 +1046,111 @@ public class TerminalEditorApp {
         if (WidgetThemeKeys.MODAL_BODY.equals(key)
             || WidgetThemeKeys.BUTTON.equals(key)
             || WidgetThemeKeys.LIST_ITEM.equals(key)) {
-            return styles.dialog();
+            return styles.windows().dialog();
         }
         if (WidgetThemeKeys.MODAL_BORDER.equals(key)) {
-            return styles.dialogBorder();
+            return styles.windows().dialogBorder();
         }
         if (WidgetThemeKeys.MODAL_TITLE.equals(key)) {
-            return styles.dialogTitle();
+            return styles.windows().dialogTitle();
         }
         if (WidgetThemeKeys.BUTTON_FOCUSED.equals(key)) {
-            return colorEnabled ? styles.menuSelected() : styles.dialogSelectedMono();
+            return colorEnabled ? styles.windows().menuSelected() : styles.windows().dialogSelectedMono();
         }
         if (WidgetThemeKeys.BUTTON_DISABLED.equals(key)) {
-            return styles.dialog();
+            return styles.windows().dialog();
         }
         return null;
     }
 
     CellStyle resolveConfirmWidgetStyle(WidgetStyleRole key) {
         if (WidgetThemeKeys.BUTTON_FOCUSED.equals(key)) {
-            return focusedButtonStyle(styles.promptAlert());
+            return focusedButtonStyle(styles.windows().promptAlert());
         }
         if (WidgetThemeKeys.BUTTON.equals(key) || WidgetThemeKeys.BUTTON_DISABLED.equals(key)) {
-            return styles.promptAlert();
+            return styles.windows().promptAlert();
         }
         return null;
     }
 
     CellStyle resolveSaveAsWidgetStyle(WidgetStyleRole key) {
         if (WidgetThemeKeys.BUTTON_FOCUSED.equals(key) || WidgetThemeKeys.TEXT_FIELD_SELECTION.equals(key)) {
-            return focusedButtonStyle(styles.promptAlert());
+            return focusedButtonStyle(styles.windows().promptAlert());
         }
         if (WidgetThemeKeys.TEXT_FIELD.equals(key)
             || WidgetThemeKeys.TEXT_FIELD_FOCUSED.equals(key)
             || WidgetThemeKeys.TEXT_FIELD_DISABLED.equals(key)
             || WidgetThemeKeys.BUTTON.equals(key)
             || WidgetThemeKeys.BUTTON_DISABLED.equals(key)) {
-            return styles.promptAlert();
+            return styles.windows().promptAlert();
         }
         return null;
     }
 
     CellStyle resolveSearchWidgetStyle(WidgetStyleRole key) {
         if (WidgetThemeKeys.BUTTON_FOCUSED.equals(key) || WidgetThemeKeys.TEXT_FIELD_SELECTION.equals(key)) {
-            return focusedButtonStyle(styles.searchBar());
+            return focusedButtonStyle(styles.windows().searchBar());
         }
         if (WidgetThemeKeys.BUTTON.equals(key)
             || WidgetThemeKeys.BUTTON_DISABLED.equals(key)
             || WidgetThemeKeys.TEXT_FIELD.equals(key)
             || WidgetThemeKeys.TEXT_FIELD_FOCUSED.equals(key)
             || WidgetThemeKeys.TEXT_FIELD_DISABLED.equals(key)) {
-            return styles.searchBar();
+            return styles.windows().searchBar();
         }
         return null;
     }
 
     CellStyle resolveTabBarWidgetStyle(WidgetStyleRole key, boolean colorEnabled) {
         if (WidgetThemeKeys.TAB_ITEM_ACTIVE.equals(key)) {
-            return colorEnabled ? styles.tabbarActive() : styles.tabbarActiveMono();
+            return colorEnabled ? styles.windows().tabbarActive() : styles.windows().tabbarActiveMono();
         }
         if (WidgetThemeKeys.TAB_BAR.equals(key)
             || WidgetThemeKeys.TAB_ITEM.equals(key)
             || WidgetThemeKeys.TAB_ITEM_DISABLED.equals(key)) {
-            return colorEnabled ? styles.tabbar() : styles.tabbarMono();
+            return colorEnabled ? styles.windows().tabbar() : styles.windows().tabbarMono();
         }
         return null;
     }
 
     CellStyle resolveTopMenuWidgetStyle(WidgetStyleRole key, boolean colorEnabled) {
         if (WidgetThemeKeys.MENU_BAR_ACTIVE.equals(key)) {
-            return colorEnabled ? styles.menuTopSelected() : styles.menuSelectedMono();
+            return colorEnabled ? styles.windows().menuTopSelected() : styles.windows().menuSelectedMono();
         }
         if (WidgetThemeKeys.MENU_BAR.equals(key)
             || WidgetThemeKeys.MENU_BAR_DISABLED.equals(key)) {
-            return styles.renderTopbar();
+            return styles.windows().renderTopbar();
         }
         if (WidgetThemeKeys.MENU_ITEM_SELECTED.equals(key)) {
-            return colorEnabled ? styles.menuSelected() : styles.menuSelectedMono();
+            return colorEnabled ? styles.windows().menuSelected() : styles.windows().menuSelectedMono();
         }
         if (WidgetThemeKeys.MENU_ITEM_DISABLED.equals(key)) {
-            return colorEnabled ? styles.contextMenuDisabledItem() : styles.menuPopup();
+            return colorEnabled ? styles.windows().contextMenuDisabledItem() : styles.windows().menuPopup();
         }
         if (WidgetThemeKeys.MENU_POPUP.equals(key)
             || WidgetThemeKeys.MENU_ITEM.equals(key)) {
-            return styles.menuPopup();
+            return styles.windows().menuPopup();
         }
         return null;
     }
 
     CellStyle resolveFileTreeWidgetStyle(WidgetStyleRole key, boolean colorEnabled) {
         if (WidgetThemeKeys.MODAL_TITLE.equals(key)) {
-            return styles.dialogTitle();
+            return styles.windows().dialogTitle();
         }
         if (WidgetThemeKeys.LIST_ITEM_SELECTED.equals(key)
             || WidgetThemeKeys.LIST_ITEM_SELECTED_FOCUSED.equals(key)) {
-            return colorEnabled ? styles.menuSelected() : styles.dialogSelectedMono();
+            return colorEnabled ? styles.windows().menuSelected() : styles.windows().dialogSelectedMono();
         }
         if (WidgetThemeKeys.LIST_ITEM.equals(key)
             || WidgetThemeKeys.LIST_ITEM_DISABLED.equals(key)) {
-            return styles.dialog();
+            return styles.windows().dialog();
         }
         if (WidgetThemeKeys.BUTTON.equals(key) || WidgetThemeKeys.BUTTON_DISABLED.equals(key)) {
-            return styles.dialog();
+            return styles.windows().dialog();
         }
         if (WidgetThemeKeys.BUTTON_FOCUSED.equals(key)) {
-            return colorEnabled ? styles.menuSelected() : styles.dialogSelectedMono();
+            return colorEnabled ? styles.windows().menuSelected() : styles.windows().dialogSelectedMono();
         }
         return null;
     }
@@ -1258,7 +1258,7 @@ public class TerminalEditorApp {
             layers.blockedInputHighlight(), layers.contentFocused());
         paintHelpOverlay(canvas, layers.help(), colorEnabled, layers.blockedInputHighlight());
         if (layers.format() != null) layers.format().paint(canvas,
-            (colorEnabled ? colorFileTreeWidgetTheme : monoFileTreeWidgetTheme).withSurface(styles.dialog(), styles.dialog()));
+            (colorEnabled ? colorFileTreeWidgetTheme : monoFileTreeWidgetTheme).withSurface(styles.windows().dialog(), styles.windows().dialog()));
         paintBlockingAttention(current, layers, colorEnabled);
     }
 
@@ -1315,14 +1315,15 @@ public class TerminalEditorApp {
         long rasterStart = profileEnabled ? System.nanoTime() : 0L;
         CellBuffer current = new CellBuffer(rows, cols);
         Canvas canvas = frameCanvas(current, rows, cols);
-        canvas.fill(new Rect(0, 0, cols, rows), styles.renderBody());
+        canvas.fill(new Rect(0, 0, cols, rows), services.colorEnabled
+            ? styles.windows().renderBody() : CellStyle.DEFAULT);
         Rect content = new Rect(0, composition.contentTopRow(), cols, Math.max(0,
             rows - 1 - composition.contentTopRow() - surface.inlinePrompt().height() - surface.notification().height()));
         int mark = canvas.save();
         try {
             canvas.clip(content);
             MarkdownPreviewPainter.paint(canvas, composition.preview(), styles,
-                PresentationSyntaxPolicy.preview(services.colorEnabled).color());
+                PresentationSyntaxPolicy.preview(services.colorEnabled, theme).color());
         } finally { canvas.restore(mark); }
         dev.tuink.tui.render.WindowTextPainter.paint(canvas, rows, cols,
             new dev.tuink.tui.render.WindowTextPainter.Text(surface.topBar().text(), surface.bottomBar(),
@@ -1385,6 +1386,7 @@ public class TerminalEditorApp {
         boolean colorEnabled = services.colorEnabled;
         ScreenPresenter screenPresenter = services.screenPresenter;
         RenderRasterizer renderer = services.renderer;
+        renderer.setColorEnabled(colorEnabled);
         EditorView editorView = services.editorView;
         RenderPlan plan;
         SearchOptions renderSearchOptions = searchMode
@@ -2107,10 +2109,10 @@ public class TerminalEditorApp {
                 return null;
             }
             return switch (kind) {
-                case SUCCESS -> styles.notifySuccess();
-                case INFO -> styles.notifyInfo();
-                case WARNING -> styles.notifyWarning();
-                case ERROR -> styles.notifyError();
+                case SUCCESS -> styles.windows().notifySuccess();
+                case INFO -> styles.windows().notifyInfo();
+                case WARNING -> styles.windows().notifyWarning();
+                case ERROR -> styles.windows().notifyError();
             };
         }
 
@@ -2131,7 +2133,7 @@ public class TerminalEditorApp {
     }
 
     LineHighlighter resolveHighlighter(Path file) {
-        return resolveHighlighter(file, PresentationSyntaxPolicy.source(true, false, theme));
+        return resolveHighlighter(file, PresentationSyntaxPolicy.source(true, false, true, theme));
     }
 
     LineHighlighter resolveHighlighter(Path file, PresentationSyntaxPolicy.Source syntax) {
@@ -2400,7 +2402,7 @@ public class TerminalEditorApp {
         TerminalDiagnostics.line(output, "  --no-mouse       Disable mouse tracking and mouse interactions");
         TerminalDiagnostics.line(output, "  --no-alt-screen  Do not use alternate screen buffer");
         TerminalDiagnostics.line(output, "  --no-color       Render in monochrome (no ANSI colors, keep text attributes)");
-        TerminalDiagnostics.line(output, "  --theme=<name>   UI palette: blue, cyan (default), light");
+        TerminalDiagnostics.line(output, "  --theme=<name>   UI palette: blue, cyan (default), monochrome");
         TerminalDiagnostics.line(output, "  --read           Start in reading mode (editing disabled)");
         TerminalDiagnostics.line(output, "  --open-as-utf16le Interpret the selected BOM-marked file as UTF-16LE");
         TerminalDiagnostics.line(output, "  --open-as=<name> Open an existing file as auto, utf-8, utf-16le, utf-16be,");

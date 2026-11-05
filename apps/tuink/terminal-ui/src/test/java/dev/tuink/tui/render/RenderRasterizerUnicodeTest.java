@@ -159,10 +159,10 @@ class RenderRasterizerUnicodeTest {
             CellBuffer buffer = new RenderRasterizer(1, theme).rasterize(scrollbarPlan(), 6, 10);
             for (int[] position : new int[][] {{1, 9}, {2, 9}, {4, 2}, {4, 5}, {4, 9}}) {
                 CellStyle style = buffer.get(position[0], position[1]).style();
-                assertEquals(palette.renderBody().bg(), style.bg(), theme.label());
-                assertEquals(palette.renderBorder().fg(), style.fg(), theme.label());
-                assertEquals(palette.renderBorder().bold(), style.bold(), theme.label());
-                assertEquals(palette.renderBorder().underline(), style.underline(), theme.label());
+                assertEquals(palette.windows().renderBody().bg(), style.bg(), theme.label());
+                assertEquals(palette.windows().renderBorder().fg(), style.fg(), theme.label());
+                assertEquals(palette.windows().renderBorder().bold(), style.bold(), theme.label());
+                assertEquals(palette.windows().renderBorder().underline(), style.underline(), theme.label());
             }
         }
     }
@@ -375,15 +375,18 @@ class RenderRasterizerUnicodeTest {
         assertTrue(cyanMarker.underline());
 
         long hits = rasterizer.preparedLineCacheHits();
-        rasterizer.setTheme(UiStyles.Theme.LIGHT);
-        CellBuffer light = rasterizer.rasterize(plan, 4, 14);
+        long misses = rasterizer.preparedLineCacheMisses();
+        rasterizer.setTheme(UiStyles.Theme.MONOCHROME);
+        CellBuffer monochrome = rasterizer.rasterize(plan, 4, 14);
 
+        assertTrue(rasterizer.preparedLineCacheMisses() > misses, "A changed body invalidates physical styles");
+        rasterizer.rasterize(plan, 4, 14);
         assertTrue(rasterizer.preparedLineCacheHits() > hits);
         assertEquals(
-            UiStyles.forTheme(UiStyles.Theme.LIGHT).renderLeadingWhitespace().fg(),
-            light.get(1, 0).style().fg()
+            UiStyles.forTheme(UiStyles.Theme.MONOCHROME).windows().renderLeadingWhitespace().fg(),
+            monochrome.get(1, 0).style().fg()
         );
-        assertEquals(EditorStyleAdapter.toCell(overlay).bg(), light.get(1, 0).style().bg());
+        assertEquals(EditorStyleAdapter.toCell(overlay).bg(), monochrome.get(1, 0).style().bg());
 
         rasterizer.setVisibleWhitespace(false);
         CellBuffer hidden = rasterizer.rasterize(plan, 4, 14);

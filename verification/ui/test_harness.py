@@ -9,6 +9,7 @@ import tempfile
 import termios
 import time
 import unittest
+import test_monochrome_theme
 from unittest.mock import patch
 
 from run import expect_field_line, recovery_snapshot_present
@@ -496,6 +497,11 @@ class LifecycleTest(unittest.TestCase):
                 os.fstat(slave)
             with self.assertRaises(ChildProcessError):
                 os.waitpid(session.pid, os.WNOHANG)
+
+
+def load_tests(loader, tests, pattern):
+    tests.addTests(loader.loadTestsFromModule(test_monochrome_theme))
+    return tests
 
 
 if __name__ == "__main__":

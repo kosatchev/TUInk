@@ -93,11 +93,11 @@ final class WindowChrome {
         if (modal.isSaveAs()) {
             saveAs = SaveAsBarView.build(modal.saveFormat() == DocumentSaveFormat.UTF8
                 ? "Save UTF-8: " : SaveAsBarView.DEFAULT_LABEL, tab.saveAsInput, input.cols());
-            prompt = InlinePromptBar.of(saveAs.row(), EditorStyleAdapter.toEditor(host.styles.promptAlert()), 1);
+            prompt = InlinePromptBar.of(saveAs.row(), EditorStyleAdapter.toEditor(host.styles.windows().promptAlert()), 1);
         } else {
             confirm = confirmation(input, availableRows);
-            if (confirm != null) prompt = InlinePromptBar.of(confirm.row(), EditorStyleAdapter.toEditor(host.styles.promptAlert()), 1);
-            else if (activeSearch != null) prompt = InlinePromptBar.of(activeSearch.text(), EditorStyleAdapter.toEditor(host.styles.searchBar()), 1);
+            if (confirm != null) prompt = InlinePromptBar.of(confirm.row(), EditorStyleAdapter.toEditor(host.styles.windows().promptAlert()), 1);
+            else if (activeSearch != null) prompt = InlinePromptBar.of(activeSearch.text(), EditorStyleAdapter.toEditor(host.styles.windows().searchBar()), 1);
         }
         Rect clip = new Rect(0, top, input.cols(), Math.max(0, input.rows() - top));
         int promptTop = input.rows() - 1 - prompt.height();

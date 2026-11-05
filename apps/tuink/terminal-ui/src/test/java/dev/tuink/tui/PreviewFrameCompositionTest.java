@@ -64,7 +64,7 @@ class PreviewFrameCompositionTest {
         var bar = SaveAsBarView.build(field, cols);
         var placed = bar.place(new Object(), rows - 2, new Rect(0, 1, cols, rows - 1));
         placed.activate(host.saveAsFocusManager());
-        var prompt = InlinePromptBar.of(bar.row(), EditorStyleAdapter.toEditor(host.styles.promptAlert()), 1);
+        var prompt = InlinePromptBar.of(bar.row(), EditorStyleAdapter.toEditor(host.styles.windows().promptAlert()), 1);
         var layers = new FrameComposition.Layers(null, null, true, placed, null,
             FrameComposition.OpenFile.hidden(), null, null, false, false, new Rect(0, rows - 2, cols, 1));
         Frame frame = render(host, rows, cols, preview(new Rect(0, 1, cols, rows - 3)), surface(prompt, NotificationBar.hidden()), layers);
@@ -85,7 +85,7 @@ class PreviewFrameCompositionTest {
         int rows = 14, cols = 60;
         var bar = ConfirmBarView.responsive("Save snapshot?", cols, rows - 2,
             "Save", "Discard", true, "Cancel", ConfirmationShortcuts.SAVE);
-        var prompt = InlinePromptBar.of(bar.row(), EditorStyleAdapter.toEditor(host.styles.promptAlert()), 1);
+        var prompt = InlinePromptBar.of(bar.row(), EditorStyleAdapter.toEditor(host.styles.windows().promptAlert()), 1);
         var placed = bar.place(new Object(), rows - 1 - prompt.height(), new Rect(0, 1, cols, rows - 1));
         placed.activate(host.confirmFocusManager());
         var layers = new FrameComposition.Layers(null, null, false, null, placed,
@@ -98,7 +98,7 @@ class PreviewFrameCompositionTest {
         assertTrue(row(frame, rows - 2).contains("[Cancel]"));
         assertFalse(frame.cursor().visible());
         assertTrue(row(frame, 1).startsWith("alpha"));
-        assertNotEquals(host.styles.renderBody(), frame.cells().get(rows - 2, 0).style());
+        assertNotEquals(host.styles.windows().renderBody(), frame.cells().get(rows - 2, 0).style());
     }
 
     @Test void queryFieldOwnsTheStandalonePreviewCursorAndConflictingModalsAreRejected() {

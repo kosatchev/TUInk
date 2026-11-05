@@ -14,7 +14,6 @@ import dev.tuink.markdown.MarkdownDocument;
 import dev.tuink.markdown.MarkdownInline;
 import dev.tuink.render.markdown.MarkdownGeometry;
 import dev.tuink.render.markdown.MarkdownLayout;
-import dev.tuink.render.SyntaxStyleResolver;
 import dev.tuink.editor.highlight.TokenSpan;
 import dev.tuink.editor.highlight.SemanticStyleKey;
 import dev.tuink.tui.render.EditorStyleAdapter;
@@ -49,10 +48,10 @@ class MarkdownPreparedPainterTest {
                                 for (int row = 0; row < result.lines().size(); row++) {
                                     var line = result.lines().get(row);
                                     if (line.kind().equals("code")) for (int column = 0; column < line.text().length(); column++) {
-                                        var expected = color ? CellColor.WHITE : palette.renderBody().fg();
+                                        var expected = color ? EditorStyleAdapter.toCell(palette.preview().codeBody()).fg() : CellColor.DEFAULT;
                                         if (color) for (var token : line.syntax())
                                             if (token.start() <= column && column < token.end()) {
-                                                var mapped = EditorStyleAdapter.toCell(SyntaxStyleResolver.standard().resolve(token.styleKey())).fg();
+                                                var mapped = EditorStyleAdapter.toCell(palette.syntax().resolve(token.styleKey())).fg();
                                                 if (mapped != CellColor.DEFAULT) expected = mapped;
                                             }
                                         assertEquals(expected, cells.get(1 + row, 2 + column).style().fg(),
@@ -60,7 +59,7 @@ class MarkdownPreparedPainterTest {
                                                 + ", row=" + row + ", column=" + column);
                                     }
                                     if (line.copyText().equals("inline"))
-                                        assertEquals(color ? CellColor.YELLOW : palette.renderBody().fg(),
+                                        assertEquals(color ? EditorStyleAdapter.toCell(palette.preview().role(MarkdownLayout.Role.CODE)).fg() : CellColor.DEFAULT,
                                             cells.get(1 + row, 2).style().fg(), "inline code keeps its Markdown color");
                                 }
                             }
@@ -104,7 +103,7 @@ class MarkdownPreparedPainterTest {
         var bounds = new Rect(2, 1, 20, 1);
         var placement = placement(result, bounds, 0, PreviewSelection.Snapshot.EMPTY, List.of(), null, null);
         var colored = paint(placement, true);
-        var palette = SyntaxStyleResolver.standard();
+        var palette = UiStyles.forTheme(UiStyles.Theme.CYAN).syntax();
         for (var token : line.syntax()) {
             var expected = EditorStyleAdapter.toCell(palette.resolve(token.styleKey()));
             var actual = colored.get(1, 2 + token.start()).style();
@@ -113,7 +112,7 @@ class MarkdownPreparedPainterTest {
         }
         var monochrome = paint(placement, false);
         for (int column = 0; column < text.length(); column++)
-            assertEquals(UiStyles.forTheme(UiStyles.Theme.CYAN).renderBody().fg(),
+            assertEquals(CellColor.DEFAULT,
                 monochrome.get(1, 2 + column).style().fg());
     }
 
@@ -139,7 +138,7 @@ class MarkdownPreparedPainterTest {
         assertEquals(0, budget.usedBytes());
     }
 
-    @Test void selectionSearchCaretAndOverlayPaletteReuseRowsWhileColorInvalidatesBaseStyles() {
+    @Test void selectionSearchAndCaretReuseRowsWhileCapabilityAndPaletteIdentityInvalidateBaseStyles() {
         var result = fixture();
         var budget = RenderMemoryBudget.bounded(1_000_000);
         try (var geometry = new MarkdownGeometry(result, budget)) {
@@ -151,16 +150,19 @@ class MarkdownPreparedPainterTest {
             var painted = paint(next, true);
             assertEquals(misses, geometry.rows().misses());
             assertEquals(hits + result.lines().size(), geometry.rows().hits());
-            assertEquals(EditorStyleAdapter.toCell(UiStyles.forTheme(UiStyles.Theme.CYAN).renderSelection()),
+            assertEquals(EditorStyleAdapter.toCell(UiStyles.forTheme(UiStyles.Theme.CYAN).windows().renderSelection()),
                 painted.get(2, 5).style());
             paint(next, false);
             assertEquals(misses + result.lines().size(), geometry.rows().misses());
             var otherPalette = new CellBuffer(7, 24);
-            MarkdownPreviewPainter.paint(new Canvas(otherPalette), next, UiStyles.forTheme(UiStyles.Theme.LIGHT), false);
-            assertEquals(misses + result.lines().size(), geometry.rows().misses(),
-                "Themes currently share the same body style; transient overlay palettes do not invalidate base rows");
-            assertEquals(EditorStyleAdapter.toCell(UiStyles.forTheme(UiStyles.Theme.LIGHT).renderSelection()),
+            MarkdownPreviewPainter.paint(new Canvas(otherPalette), next, UiStyles.forTheme(UiStyles.Theme.MONOCHROME), false);
+            assertEquals(misses + result.lines().size() * 2, geometry.rows().misses(),
+                "Distinct immutable palette snapshots have distinct prepared styles even when their body colors agree");
+            assertEquals(EditorStyleAdapter.toCell(UiStyles.forTheme(UiStyles.Theme.MONOCHROME).windows().renderSelection()),
                 otherPalette.get(2, 5).style());
+            paint(next, true);
+            assertEquals(misses + result.lines().size() * 2, geometry.rows().misses(),
+                "Returning to the original palette reuses its admitted rows");
             assertEquals(result.lines().size(), geometry.misses());
         }
         assertEquals(0, budget.usedBytes());

@@ -37,8 +37,8 @@ class WindowTextPainterTest {
         assertEquals("😀", buffer.get(4, 0).grapheme());
         assertTrue(buffer.get(4, 1).continuation());
         assertEquals("Z", buffer.get(4, 2).grapheme());
-        assertRowStyle(buffer, 0, PALETTE.renderTopbar());
-        assertRowStyle(buffer, 4, PALETTE.renderStatus());
+        assertRowStyle(buffer, 0, PALETTE.windows().renderTopbar());
+        assertRowStyle(buffer, 4, PALETTE.windows().renderStatus());
         for (int row = 1; row < 4; row++) assertEquals("########", row(buffer, row));
         assertWideCellsComplete(buffer);
     }
@@ -62,10 +62,10 @@ class WindowTextPainterTest {
         var buffer = filled(6, 12);
         var defaults = new WindowTextPainter.Text("top", "status", "prompt", null, "notice", null);
         WindowTextPainter.paint(new Canvas(buffer), 6, 12, defaults, palette);
-        assertRowStyle(buffer, 0, palette.renderTopbar());
-        assertRowStyle(buffer, 3, palette.renderNotification());
-        assertRowStyle(buffer, 4, palette.renderInteractive());
-        assertRowStyle(buffer, 5, palette.renderStatus());
+        assertRowStyle(buffer, 0, palette.windows().renderTopbar());
+        assertRowStyle(buffer, 3, palette.windows().renderNotification());
+        assertRowStyle(buffer, 4, palette.windows().renderInteractive());
+        assertRowStyle(buffer, 5, palette.windows().renderStatus());
         assertEquals("############", row(buffer, 1));
         assertEquals("############", row(buffer, 2));
 
@@ -75,8 +75,8 @@ class WindowTextPainterTest {
             new WindowTextPainter.Text("top", "status", "prompt", promptStyle, "notice", noticeStyle), palette);
         assertRowStyle(buffer, 3, EditorStyleAdapter.toCell(noticeStyle));
         assertRowStyle(buffer, 4, EditorStyleAdapter.toCell(promptStyle));
-        assertRowStyle(buffer, 0, palette.renderTopbar());
-        assertRowStyle(buffer, 5, palette.renderStatus());
+        assertRowStyle(buffer, 0, palette.windows().renderTopbar());
+        assertRowStyle(buffer, 5, palette.windows().renderStatus());
     }
 
     @Test
@@ -93,8 +93,8 @@ class WindowTextPainterTest {
         assertEquals(padded("Replace:", 40), row(buffer, 5));
         assertEquals(" ".repeat(40), row(buffer, 6));
         assertEquals(padded("status", 40), row(buffer, 7));
-        assertRowStyle(buffer, 3, PALETTE.renderNotification());
-        for (int row = 4; row <= 6; row++) assertRowStyle(buffer, row, PALETTE.renderInteractive());
+        assertRowStyle(buffer, 3, PALETTE.windows().renderNotification());
+        for (int row = 4; row <= 6; row++) assertRowStyle(buffer, row, PALETTE.windows().renderInteractive());
     }
 
     @Test
@@ -108,9 +108,9 @@ class WindowTextPainterTest {
         assertEquals("########", row(buffer, 2));
         assertEquals("message…", row(buffer, 3));
         assertEquals("        ", row(buffer, 4));
-        assertRowStyle(buffer, 0, PALETTE.renderTopbar());
-        assertRowStyle(buffer, 3, PALETTE.renderNotification());
-        assertRowStyle(buffer, 4, PALETTE.renderStatus());
+        assertRowStyle(buffer, 0, PALETTE.windows().renderTopbar());
+        assertRowStyle(buffer, 3, PALETTE.windows().renderNotification());
+        assertRowStyle(buffer, 4, PALETTE.windows().renderStatus());
     }
 
     @Test
@@ -129,7 +129,7 @@ class WindowTextPainterTest {
             for (int row = 0; row < rows; row++) {
                 assertEquals(padded(expected.get(rows - 1).get(row), 8), row(buffer, row), "height=" + rows + ", row=" + row);
             }
-            assertRowStyle(buffer, rows - 1, PALETTE.renderStatus());
+            assertRowStyle(buffer, rows - 1, PALETTE.windows().renderStatus());
         }
     }
 

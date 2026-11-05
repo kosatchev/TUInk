@@ -10,6 +10,7 @@ import dev.tuiframe.cell.CellBuffer;
 import dev.tuiframe.screen.ScrollHint;
 import dev.tuiframe.style.CellColor;
 import dev.tuiframe.style.CellStyle;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class AnsiDiffCellStyleTest {
@@ -126,7 +127,8 @@ class AnsiDiffCellStyleTest {
         for (var depth : new ColorDepth[] {ColorDepth.ANSI_256, ColorDepth.ANSI_16,
             ColorDepth.TRUECOLOR, ColorDepth.MONOCHROME, ColorDepth.ANSI_256}) {
             String expected = switch (depth) {
-                case ANSI_256, TRUECOLOR -> "\u001B[38;5;236;48;5;236;22;24m";
+                case ANSI_256 -> "\u001B[38;5;236;48;5;236;22;24m";
+                case TRUECOLOR -> "\u001B[38;2;48;48;48;48;2;48;48;48;22;24m";
                 case ANSI_16 -> "\u001B[30;40;22;24m";
                 case MONOCHROME -> "\u001B[39;49;22;24;7m";
             };
@@ -147,6 +149,57 @@ class AnsiDiffCellStyleTest {
         assertEquals(previous.get(0, 0), terminal.cell(0, 0));
         terminal.apply(diff.diff(previous, current, capabilities, ScrollHint.none()));
         assertEquals(current.get(0, 0), terminal.cell(0, 0));
+    }
+
+    @Test
+    void neutralShadesUseExactDepthCodesAndKeepDecorationsAcrossDepthChanges() {
+        record Shade(CellColor color, int level, int index, int foreground, int background) {}
+        var shades = List.of(
+            new Shade(CellColor.GRAY_028, 28, 234, 30, 40),
+            new Shade(CellColor.DARK_GRAY, 48, 236, 30, 40),
+            new Shade(CellColor.GRAY_128, 128, 244, 90, 100),
+            new Shade(CellColor.GRAY_158, 158, 247, 37, 47),
+            new Shade(CellColor.GRAY_188, 188, 250, 37, 47),
+            new Shade(CellColor.GRAY_218, 218, 253, 97, 107),
+            new Shade(CellColor.GRAY_238, 238, 255, 97, 107));
+        var diff = new AnsiDiff();
+        for (var shade : shades) for (boolean bold : new boolean[] {false, true})
+            for (boolean underline : new boolean[] {false, true}) {
+                var style = new CellStyle(shade.color(), shade.color(), bold, underline);
+                // One encoder must not return the indexed cache entry for a later RGB frame, or vice versa.
+                for (var depth : List.of(ColorDepth.TRUECOLOR, ColorDepth.ANSI_256, ColorDepth.ANSI_16,
+                    ColorDepth.MONOCHROME, ColorDepth.TRUECOLOR, ColorDepth.ANSI_256)) {
+                    String attributes = (bold ? "1" : "22") + ";" + (underline ? "4" : "24") + "m";
+                    String expected = switch (depth) {
+                        case ANSI_16 -> "\u001B[" + shade.foreground() + ";" + shade.background() + ";" + attributes;
+                        case ANSI_256 -> "\u001B[38;5;" + shade.index() + ";48;5;" + shade.index() + ";" + attributes;
+                        case TRUECOLOR -> "\u001B[38;2;" + shade.level() + ";" + shade.level() + ";" + shade.level()
+                            + ";48;2;" + shade.level() + ";" + shade.level() + ";" + shade.level() + ";" + attributes;
+                        case MONOCHROME -> monochromeAnsi(style);
+                    };
+                    assertEquals(FULL_REDRAW_PREFIX + expected + "x" + RESET,
+                        diff.diff(null, oneCell("x", style), new TerminalCapabilities(depth, false, false, false),
+                            ScrollHint.none()), shade.color() + "/" + depth + "/" + bold + "/" + underline);
+                }
+            }
+    }
+
+    @Test
+    void grayStyleOnlyPatchesReplayDistinctForegroundBackgroundAndBoldAtDeepColorDepths() {
+        var before = oneCell("x", new CellStyle(CellColor.GRAY_128, CellColor.GRAY_238, false, false));
+        var after = oneCell("x", new CellStyle(CellColor.GRAY_218, CellColor.GRAY_158, true, true));
+        for (var depth : List.of(ColorDepth.ANSI_256, ColorDepth.TRUECOLOR)) {
+            var capabilities = new TerminalCapabilities(depth, false, false, false);
+            var diff = new AnsiDiff();
+            var terminal = new ReferenceTerminal(1, 1);
+            terminal.apply(diff.diff(null, before, capabilities, ScrollHint.none()));
+            assertEquals(before.get(0, 0), terminal.cell(0, 0));
+            String patch = diff.diff(before, after, capabilities, ScrollHint.none());
+            terminal.apply(patch);
+            assertEquals(after.get(0, 0), terminal.cell(0, 0));
+            assertTrue(patch.contains(depth == ColorDepth.TRUECOLOR
+                ? "38;2;218;218;218;48;2;158;158;158;1;4m" : "38;5;253;48;5;247;1;4m"));
+        }
     }
 
     private static String fullRedraw(AnsiDiff diff, CellStyle style, boolean colorEnabled) {
@@ -198,7 +251,10 @@ class AnsiDiffCellStyleTest {
             case BRIGHT_MAGENTA -> 95;
             case BRIGHT_CYAN -> 96;
             case BRIGHT_WHITE -> 97;
-            case DARK_GRAY -> 30;
+            case DARK_GRAY, GRAY_028 -> 30;
+            case GRAY_128 -> 90;
+            case GRAY_158, GRAY_188 -> 37;
+            case GRAY_218, GRAY_238 -> 97;
         };
     }
 
@@ -221,7 +277,10 @@ class AnsiDiffCellStyleTest {
             case BRIGHT_MAGENTA -> 105;
             case BRIGHT_CYAN -> 106;
             case BRIGHT_WHITE -> 107;
-            case DARK_GRAY -> 40;
+            case DARK_GRAY, GRAY_028 -> 40;
+            case GRAY_128 -> 100;
+            case GRAY_158, GRAY_188 -> 47;
+            case GRAY_218, GRAY_238 -> 107;
         };
     }
 }

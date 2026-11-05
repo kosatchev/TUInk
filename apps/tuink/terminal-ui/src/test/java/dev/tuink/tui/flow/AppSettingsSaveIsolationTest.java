@@ -160,10 +160,10 @@ class AppSettingsSaveIsolationTest {
 
             Path sidecar = saveLock(target);
             Object identity = Files.readAttributes(sidecar, BasicFileAttributes.class).fileKey();
-            AppSettingsStore.saveIfUnchanged(AppSettingsStore.loadSnapshot(alias), settings(UiStyles.Theme.LIGHT));
+            AppSettingsStore.saveIfUnchanged(AppSettingsStore.loadSnapshot(alias), settings(UiStyles.Theme.MONOCHROME));
             assertEquals(identity, Files.readAttributes(sidecar, BasicFileAttributes.class).fileKey(),
                 "Releasing a guard must retain its inode across settings replacement");
-            assertEquals(settings(UiStyles.Theme.LIGHT), AppSettingsStore.load(target));
+            assertEquals(settings(UiStyles.Theme.MONOCHROME), AppSettingsStore.load(target));
             assertOnlyFiles("tuink.properties", link.getFileName().toString());
         } finally {
             first.destroyForcibly();
@@ -185,12 +185,12 @@ class AppSettingsSaveIsolationTest {
                 });
                 assertTrue(fileSystem.provider.firstMoveReady.await(TIMEOUT_SECONDS, SECONDS));
                 assertThrows(AppSettingsStore.SettingsConflictException.class,
-                    () -> AppSettingsStore.saveIfUnchanged(secondBaseline, settings(UiStyles.Theme.LIGHT)));
+                    () -> AppSettingsStore.saveIfUnchanged(secondBaseline, settings(UiStyles.Theme.MONOCHROME)));
 
                 Path independent = directory.resolve("independent.properties");
                 AppSettingsStore.saveIfUnchanged(AppSettingsStore.loadSnapshot(independent),
-                    settings(UiStyles.Theme.LIGHT));
-                assertEquals(settings(UiStyles.Theme.LIGHT), AppSettingsStore.load(independent));
+                    settings(UiStyles.Theme.MONOCHROME));
+                assertEquals(settings(UiStyles.Theme.MONOCHROME), AppSettingsStore.load(independent));
 
                 // A failed local acquisition must not close a second descriptor
                 // for the locked inode and accidentally release this process's POSIX lock.
@@ -207,7 +207,7 @@ class AppSettingsSaveIsolationTest {
                 first.get(TIMEOUT_SECONDS, SECONDS);
                 assertEquals(settings(UiStyles.Theme.BLUE), AppSettingsStore.load(target));
                 assertThrows(AppSettingsStore.SettingsConflictException.class,
-                    () -> AppSettingsStore.saveIfUnchanged(secondBaseline, settings(UiStyles.Theme.LIGHT)));
+                    () -> AppSettingsStore.saveIfUnchanged(secondBaseline, settings(UiStyles.Theme.MONOCHROME)));
             } finally {
                 fileSystem.provider.releaseFirstMove.countDown();
                 executor.shutdownNow();
@@ -231,7 +231,7 @@ class AppSettingsSaveIsolationTest {
 
             var loaded = AppSettingsStore.loadSnapshot(target);
             assertThrows(AppSettingsStore.SettingsConflictException.class,
-                () -> AppSettingsStore.saveIfUnchanged(loaded, settings(UiStyles.Theme.LIGHT)));
+                () -> AppSettingsStore.saveIfUnchanged(loaded, settings(UiStyles.Theme.MONOCHROME)));
 
             assertArrayEquals(original, Files.readAllBytes(target));
             assertEquals("preserve this file", Files.readString(unrelated));
@@ -304,7 +304,7 @@ class AppSettingsSaveIsolationTest {
                             if (editor.state().isDirty()) throw new AssertionError("Successful document save stayed dirty");
                         } else {
                             AppSettingsStore.saveIfUnchanged(baseline,
-                                settings(hold ? UiStyles.Theme.BLUE : UiStyles.Theme.LIGHT));
+                                settings(hold ? UiStyles.Theme.BLUE : UiStyles.Theme.MONOCHROME));
                         }
                         return "SAVED";
                     } catch (IOException expected) {
@@ -343,7 +343,7 @@ class AppSettingsSaveIsolationTest {
             false, true, false, true, false, false, false, false, false,
             false, false, false, false, false, false, false, false,
             false,
-            GutterDiffMode.STABLE, 2, TabInsertMode.ALWAYS_SPACES_2, UiStyles.Theme.LIGHT, false, false
+            GutterDiffMode.STABLE, 2, TabInsertMode.ALWAYS_SPACES_2, UiStyles.Theme.MONOCHROME, false, false
         );
         SavingFileSystem fileSystem = new SavingFileSystem(target.getFileSystem(), Mode.PAUSE_FIRST_MOVE);
         Path wrappedTarget = fileSystem.wrap(target);

@@ -34,18 +34,18 @@ class RightClickClipboardSettingsSessionTest {
         ui.rightClickClipboardSetting = true;
         var saved = ui.settingsSnapshot(UiStyles.Theme.CYAN);
         var session = new AppSettingsSession(saved,
-            TuiCliOptions.parse(new String[] {"--read", "--no-mouse", "--theme=light"}));
+            TuiCliOptions.parse(new String[] {"--read", "--no-mouse", "--theme=monochrome"}));
         assertTrue(session.initialSettings().rightClickClipboard());
         var runtime = UiSessionState.from(session.initialSettings());
         assertTrue(runtime.rightClickClipboardSetting);
-        assertEquals(saved, session.preferences(runtime.settingsSnapshot(UiStyles.Theme.LIGHT)));
+        assertEquals(saved, session.preferences(runtime.settingsSnapshot(UiStyles.Theme.MONOCHROME)));
         runtime.rightClickClipboardSetting = false;
-        var changed = session.preferences(runtime.settingsSnapshot(UiStyles.Theme.LIGHT));
+        var changed = session.preferences(runtime.settingsSnapshot(UiStyles.Theme.MONOCHROME));
         assertFalse(changed.rightClickClipboard());
         assertEquals(saved.mouseMode(), changed.mouseMode());
         assertEquals(saved.readingMode(), changed.readingMode());
         assertEquals(saved.theme(), changed.theme());
         runtime.rightClickClipboardSetting = true;
-        assertEquals(saved, session.preferences(runtime.settingsSnapshot(UiStyles.Theme.LIGHT)));
+        assertEquals(saved, session.preferences(runtime.settingsSnapshot(UiStyles.Theme.MONOCHROME)));
     }
 }

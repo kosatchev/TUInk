@@ -71,7 +71,7 @@ class ClipboardAdmissionIntegrationTest {
                     window.command(command);
                     require(window.notification.message.equals("Not enough memory to copy this text; clipboard unchanged"),
                         "Missing refusal for " + command + ": " + window.notification.message);
-                    require(window.notification.style().equals(window.host.styles.notifyError()), "Wrong error style");
+                    require(window.notification.style().equals(window.host.styles.windows().notifyError()), "Wrong error style");
                     require(window.host.clipboard.text().equals("previous clipboard"), "Clipboard changed");
                     require(tab.model().snapshotLines().equals(original), "Document changed");
                     require(tab.model().fileMetadata().equals(metadata), "Metadata changed");

@@ -127,7 +127,7 @@ class NarrowSaveAsIntegrationTest {
             window.resize(24, 10);
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             assertEquals(failure, window.notification.message);
-            assertEquals(window.host.styles.notifyError(), window.notification.style());
+            assertEquals(window.host.styles.windows().notifyError(), window.notification.style());
             assertEquals("external change", Files.readString(window.document));
 
             Path copy = directory.resolve("retry.txt");

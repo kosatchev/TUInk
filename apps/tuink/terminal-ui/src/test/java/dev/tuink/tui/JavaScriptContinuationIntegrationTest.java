@@ -119,7 +119,7 @@ class JavaScriptContinuationIntegrationTest {
         assertStyle(window, line, line.indexOf("denominator"), CellStyle.DEFAULT);
         window.active().tabSession().engine().moveCursorTo(new Position(sourceLine, line.indexOf('[')));
         window.frame();
-        CellStyle pair = EditorStyleAdapter.toCell(window.host.styles.renderBracketMatch());
+        CellStyle pair = EditorStyleAdapter.toCell(window.host.styles.syntax().bracketMatch());
         assertStyle(window, line, line.indexOf('['), pair);
         assertStyle(window, line, line.indexOf(']'), pair);
     }

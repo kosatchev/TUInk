@@ -36,19 +36,19 @@ class MarkdownVisualCopySettingsSessionTest {
         ui.markdownVisualCopySetting = true;
         var saved = ui.settingsSnapshot(UiStyles.Theme.CYAN);
         var session = new AppSettingsSession(saved,
-            TuiCliOptions.parse(new String[] {"--read", "--no-mouse", "--theme=light"}));
+            TuiCliOptions.parse(new String[] {"--read", "--no-mouse", "--theme=monochrome"}));
         assertTrue(session.initialSettings().markdownVisualCopy());
         var runtime = UiSessionState.from(session.initialSettings());
         assertTrue(runtime.markdownVisualCopySetting);
-        assertEquals(saved, session.preferences(runtime.settingsSnapshot(UiStyles.Theme.LIGHT)));
+        assertEquals(saved, session.preferences(runtime.settingsSnapshot(UiStyles.Theme.MONOCHROME)));
         runtime.markdownVisualCopySetting = false;
-        var changed = session.preferences(runtime.settingsSnapshot(UiStyles.Theme.LIGHT));
+        var changed = session.preferences(runtime.settingsSnapshot(UiStyles.Theme.MONOCHROME));
         assertFalse(changed.markdownVisualCopy());
         assertEquals(saved.mouseMode(), changed.mouseMode());
         assertEquals(saved.rightClickClipboard(), changed.rightClickClipboard());
         assertEquals(saved.readingMode(), changed.readingMode());
         assertEquals(saved.theme(), changed.theme());
         runtime.markdownVisualCopySetting = true;
-        assertEquals(saved, session.preferences(runtime.settingsSnapshot(UiStyles.Theme.LIGHT)));
+        assertEquals(saved, session.preferences(runtime.settingsSnapshot(UiStyles.Theme.MONOCHROME)));
     }
 }

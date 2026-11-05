@@ -34,11 +34,11 @@ class MarkdownSyntaxSettingsSessionTest {
         ui.markdownCodeHighlightingSetting = true;
         var saved = ui.settingsSnapshot(UiStyles.Theme.CYAN);
         var session = new AppSettingsSession(saved,
-            TuiCliOptions.parse(new String[] {"--read", "--no-mouse", "--theme=light"}));
+            TuiCliOptions.parse(new String[] {"--read", "--no-mouse", "--theme=monochrome"}));
         assertTrue(session.initialSettings().markdownCodeHighlighting());
         var runtime = UiSessionState.from(session.initialSettings());
         assertTrue(runtime.markdownCodeHighlightingSetting);
-        var preferences = session.preferences(runtime.settingsSnapshot(UiStyles.Theme.LIGHT));
+        var preferences = session.preferences(runtime.settingsSnapshot(UiStyles.Theme.MONOCHROME));
         assertEquals(saved, preferences, "Launch overrides must not reset the Markdown preference");
     }
 }

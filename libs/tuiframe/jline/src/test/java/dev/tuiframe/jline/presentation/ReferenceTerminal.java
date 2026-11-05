@@ -153,12 +153,37 @@ final class ReferenceTerminal {
                 case 30, 31, 32, 33, 34, 35, 36, 37,
                      39, 90, 91, 92, 93, 94, 95, 96, 97 -> foreground = foreground(code);
                 case 38, 48 -> {
-                    if (index + 2 >= values.length || !values[index + 1].equals("5")
-                        || !values[index + 2].equals("236"))
-                        throw new IllegalArgumentException("unsupported indexed SGR: " + parameters);
-                    if (code == 38) foreground = CellColor.DARK_GRAY;
-                    else background = CellColor.DARK_GRAY;
-                    index += 2;
+                    CellColor selected;
+                    if (index + 2 < values.length && values[index + 1].equals("5")) {
+                        selected = switch (nonNegative(values[index + 2])) {
+                            case 234 -> CellColor.GRAY_028;
+                            case 236 -> CellColor.DARK_GRAY;
+                            case 244 -> CellColor.GRAY_128;
+                            case 247 -> CellColor.GRAY_158;
+                            case 250 -> CellColor.GRAY_188;
+                            case 253 -> CellColor.GRAY_218;
+                            case 255 -> CellColor.GRAY_238;
+                            default -> throw new IllegalArgumentException("unsupported indexed SGR: " + parameters);
+                        };
+                        index += 2;
+                    } else if (index + 4 < values.length && values[index + 1].equals("2")) {
+                        int red = nonNegative(values[index + 2]);
+                        if (red != nonNegative(values[index + 3]) || red != nonNegative(values[index + 4]))
+                            throw new IllegalArgumentException("unsupported nonneutral RGB SGR: " + parameters);
+                        selected = switch (red) {
+                            case 28 -> CellColor.GRAY_028;
+                            case 48 -> CellColor.DARK_GRAY;
+                            case 128 -> CellColor.GRAY_128;
+                            case 158 -> CellColor.GRAY_158;
+                            case 188 -> CellColor.GRAY_188;
+                            case 218 -> CellColor.GRAY_218;
+                            case 238 -> CellColor.GRAY_238;
+                            default -> throw new IllegalArgumentException("unsupported RGB SGR: " + parameters);
+                        };
+                        index += 4;
+                    } else throw new IllegalArgumentException("unsupported extended SGR: " + parameters);
+                    if (code == 38) foreground = selected;
+                    else background = selected;
                 }
                 case 40, 41, 42, 43, 44, 45, 46, 47,
                      49, 100, 101, 102, 103, 104, 105, 106, 107 -> background = background(code);

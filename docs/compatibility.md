@@ -313,6 +313,12 @@ ui.theme=...
 
 The reader accepts only the current schema. Unknown formats, malformed values, missing required fields, and unsupported combinations are incompatible. TUInk must preserve the incompatible file, use documented defaults for the running process, and emit a clear warning. It must not silently rewrite the file as though it had been read successfully.
 
+`ui.theme` accepts only `cyan`, `blue`, or `monochrome`. The Monochrome theme
+uses `ui.theme=monochrome` in settings and `--theme=monochrome` on the CLI.
+There are no legacy-name aliases or automatic conversions. An unsupported
+theme value follows the incompatible-file rules above; update that value
+manually before expecting the profile to load.
+
 Settings format 2 adds the two independent Markdown opening preferences.
 Format 1 files remain untouched and are rejected, including automatic saves
 from that session. To start a new profile, retain the old file under another

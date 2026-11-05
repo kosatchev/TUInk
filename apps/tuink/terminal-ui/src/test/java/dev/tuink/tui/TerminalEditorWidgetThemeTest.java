@@ -15,16 +15,16 @@ class TerminalEditorWidgetThemeTest {
         TerminalEditorApp app = new TerminalEditorApp();
         UiStyles.Palette palette = UiStyles.forTheme(UiStyles.Theme.CYAN);
 
-        assertEquals(palette.dialog(), app.resolveOverlayWidgetStyle(WidgetThemeKeys.MODAL_BODY, true));
-        assertEquals(palette.dialogBorder(), app.resolveOverlayWidgetStyle(WidgetThemeKeys.MODAL_BORDER, true));
-        assertEquals(palette.dialogTitle(), app.resolveOverlayWidgetStyle(WidgetThemeKeys.MODAL_TITLE, true));
-        assertEquals(palette.dialog(), app.resolveOverlayWidgetStyle(WidgetThemeKeys.BUTTON, true));
-        assertEquals(palette.menuSelected(), app.resolveOverlayWidgetStyle(WidgetThemeKeys.BUTTON_FOCUSED, true));
+        assertEquals(palette.windows().dialog(), app.resolveOverlayWidgetStyle(WidgetThemeKeys.MODAL_BODY, true));
+        assertEquals(palette.windows().dialogBorder(), app.resolveOverlayWidgetStyle(WidgetThemeKeys.MODAL_BORDER, true));
+        assertEquals(palette.windows().dialogTitle(), app.resolveOverlayWidgetStyle(WidgetThemeKeys.MODAL_TITLE, true));
+        assertEquals(palette.windows().dialog(), app.resolveOverlayWidgetStyle(WidgetThemeKeys.BUTTON, true));
+        assertEquals(palette.windows().menuSelected(), app.resolveOverlayWidgetStyle(WidgetThemeKeys.BUTTON_FOCUSED, true));
         assertEquals(
-            palette.dialogSelectedMono(),
+            palette.windows().dialogSelectedMono(),
             app.resolveOverlayWidgetStyle(WidgetThemeKeys.BUTTON_FOCUSED, false)
         );
-        assertEquals(palette.dialog(), app.resolveOverlayWidgetStyle(WidgetThemeKeys.BUTTON_DISABLED, true));
+        assertEquals(palette.windows().dialog(), app.resolveOverlayWidgetStyle(WidgetThemeKeys.BUTTON_DISABLED, true));
         assertNull(app.resolveOverlayWidgetStyle(new WidgetStyleRole("test.unknown"), true));
     }
 
@@ -32,7 +32,7 @@ class TerminalEditorWidgetThemeTest {
     void confirmAdapterUsesPromptStyleAndOneFocusedVariant() {
         TerminalEditorApp app = new TerminalEditorApp();
         UiStyles.Palette palette = UiStyles.forTheme(UiStyles.Theme.CYAN);
-        CellStyle prompt = palette.promptAlert();
+        CellStyle prompt = palette.windows().promptAlert();
 
         assertEquals(prompt, app.resolveConfirmWidgetStyle(WidgetThemeKeys.BUTTON));
         assertEquals(prompt, app.resolveConfirmWidgetStyle(WidgetThemeKeys.BUTTON_DISABLED));
@@ -46,7 +46,7 @@ class TerminalEditorWidgetThemeTest {
     @Test
     void saveAsAdapterUsesThePromptStyleAndHighlightsFocusedButtons() {
         TerminalEditorApp app = new TerminalEditorApp();
-        CellStyle prompt = UiStyles.forTheme(UiStyles.Theme.CYAN).promptAlert();
+        CellStyle prompt = UiStyles.forTheme(UiStyles.Theme.CYAN).windows().promptAlert();
 
         assertEquals(prompt, app.resolveSaveAsWidgetStyle(WidgetThemeKeys.TEXT_FIELD));
         assertEquals(prompt, app.resolveSaveAsWidgetStyle(WidgetThemeKeys.TEXT_FIELD_FOCUSED));
@@ -63,7 +63,7 @@ class TerminalEditorWidgetThemeTest {
     @Test
     void searchAdapterUsesOneBarStyleAndFocusedButtonVariant() {
         TerminalEditorApp app = new TerminalEditorApp();
-        CellStyle search = UiStyles.forTheme(UiStyles.Theme.CYAN).searchBar();
+        CellStyle search = UiStyles.forTheme(UiStyles.Theme.CYAN).windows().searchBar();
 
         assertEquals(search, app.resolveSearchWidgetStyle(WidgetThemeKeys.BUTTON));
         assertEquals(search, app.resolveSearchWidgetStyle(WidgetThemeKeys.BUTTON_DISABLED));
@@ -82,18 +82,18 @@ class TerminalEditorWidgetThemeTest {
         TerminalEditorApp app = new TerminalEditorApp();
         UiStyles.Palette palette = UiStyles.forTheme(UiStyles.Theme.CYAN);
 
-        assertEquals(palette.tabbar(), app.resolveTabBarWidgetStyle(WidgetThemeKeys.TAB_BAR, true));
-        assertEquals(palette.tabbar(), app.resolveTabBarWidgetStyle(WidgetThemeKeys.TAB_ITEM, true));
+        assertEquals(palette.windows().tabbar(), app.resolveTabBarWidgetStyle(WidgetThemeKeys.TAB_BAR, true));
+        assertEquals(palette.windows().tabbar(), app.resolveTabBarWidgetStyle(WidgetThemeKeys.TAB_ITEM, true));
         assertEquals(
-            palette.tabbarActive(),
+            palette.windows().tabbarActive(),
             app.resolveTabBarWidgetStyle(WidgetThemeKeys.TAB_ITEM_ACTIVE, true)
         );
         assertEquals(
-            palette.tabbarMono(),
+            palette.windows().tabbarMono(),
             app.resolveTabBarWidgetStyle(WidgetThemeKeys.TAB_ITEM_DISABLED, false)
         );
         assertEquals(
-            palette.tabbarActiveMono(),
+            palette.windows().tabbarActiveMono(),
             app.resolveTabBarWidgetStyle(WidgetThemeKeys.TAB_ITEM_ACTIVE, false)
         );
         assertNull(app.resolveTabBarWidgetStyle(new WidgetStyleRole("test.unknown"), true));
@@ -105,31 +105,31 @@ class TerminalEditorWidgetThemeTest {
         UiStyles.Palette palette = UiStyles.forTheme(UiStyles.Theme.CYAN);
 
         assertEquals(
-            palette.renderTopbar(),
+            palette.windows().renderTopbar(),
             app.resolveTopMenuWidgetStyle(WidgetThemeKeys.MENU_BAR, true)
         );
         assertEquals(
-            palette.menuTopSelected(),
+            palette.windows().menuTopSelected(),
             app.resolveTopMenuWidgetStyle(WidgetThemeKeys.MENU_BAR_ACTIVE, true)
         );
         assertEquals(
-            palette.menuPopup(),
+            palette.windows().menuPopup(),
             app.resolveTopMenuWidgetStyle(WidgetThemeKeys.MENU_POPUP, true)
         );
         assertEquals(
-            palette.menuSelected(),
+            palette.windows().menuSelected(),
             app.resolveTopMenuWidgetStyle(WidgetThemeKeys.MENU_ITEM_SELECTED, true)
         );
         assertEquals(
-            palette.contextMenuDisabledItem(),
+            palette.windows().contextMenuDisabledItem(),
             app.resolveTopMenuWidgetStyle(WidgetThemeKeys.MENU_ITEM_DISABLED, true)
         );
         assertEquals(
-            palette.menuSelectedMono(),
+            palette.windows().menuSelectedMono(),
             app.resolveTopMenuWidgetStyle(WidgetThemeKeys.MENU_ITEM_SELECTED, false)
         );
         assertEquals(
-            palette.menuPopup(),
+            palette.windows().menuPopup(),
             app.resolveTopMenuWidgetStyle(WidgetThemeKeys.MENU_ITEM_DISABLED, false)
         );
         assertNull(app.resolveTopMenuWidgetStyle(new WidgetStyleRole("test.unknown"), true));
@@ -140,20 +140,20 @@ class TerminalEditorWidgetThemeTest {
         TerminalEditorApp app = new TerminalEditorApp();
         UiStyles.Palette palette = UiStyles.forTheme(UiStyles.Theme.CYAN);
 
-        assertEquals(palette.dialog(), app.resolveFileTreeWidgetStyle(WidgetThemeKeys.LIST_ITEM, true));
+        assertEquals(palette.windows().dialog(), app.resolveFileTreeWidgetStyle(WidgetThemeKeys.LIST_ITEM, true));
         assertEquals(
-            palette.dialog(),
+            palette.windows().dialog(),
             app.resolveFileTreeWidgetStyle(WidgetThemeKeys.LIST_ITEM_DISABLED, false)
         );
         assertEquals(
-            palette.menuSelected(),
+            palette.windows().menuSelected(),
             app.resolveFileTreeWidgetStyle(WidgetThemeKeys.LIST_ITEM_SELECTED_FOCUSED, true)
         );
         assertEquals(
-            palette.dialogSelectedMono(),
+            palette.windows().dialogSelectedMono(),
             app.resolveFileTreeWidgetStyle(WidgetThemeKeys.LIST_ITEM_SELECTED, false)
         );
-        assertEquals(palette.dialog(), app.resolveOverlayWidgetStyle(WidgetThemeKeys.LIST_ITEM, true));
+        assertEquals(palette.windows().dialog(), app.resolveOverlayWidgetStyle(WidgetThemeKeys.LIST_ITEM, true));
         assertNull(app.resolveFileTreeWidgetStyle(new WidgetStyleRole("test.unknown"), true));
     }
 }

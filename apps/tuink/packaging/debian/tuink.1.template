@@ -22,7 +22,7 @@ Do not use the alternate screen buffer.
 Render without ANSI colors.
 .TP
 .BR \-\-theme= name
-Select the UI palette: blue, cyan, or light.
+Select the UI palette: blue, cyan, or monochrome.
 .TP
 .BR \-\-read
 Start in reading mode with editing disabled.

@@ -74,6 +74,6 @@ class MarkdownVisualCopySettingsStoreTest {
     private static AppSettings settings(boolean markdownVisualCopy) {
         return new AppSettings(false, true, false, true, false, false, true, false,
             true, false, true, false, true, false, true, true, false, true,
-            GutterDiffMode.STABLE, 2, TabInsertMode.ALWAYS_SPACES_2, UiStyles.Theme.LIGHT, true, markdownVisualCopy);
+            GutterDiffMode.STABLE, 2, TabInsertMode.ALWAYS_SPACES_2, UiStyles.Theme.MONOCHROME, true, markdownVisualCopy);
     }
 }

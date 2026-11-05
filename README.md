@@ -84,7 +84,22 @@ Run `./gradlew buildHelp` for the complete local build command reference.
 - undo and redo;
 - search across all tabs, with replacement in the active tab;
 - menus, buttons, dialogs, text fields, trees, and scrollbars;
-- configurable Cyan, Blue, and Light themes.
+- configurable Cyan, Blue, and **Monochrome** themes.
+
+**Monochrome** is a grayscale theme for both the editor and Markdown Preview. It keeps
+syntax styles, bold text and underlining, with explicit neutral foregrounds
+and a dark neutral document surface. Preview code blocks retain a full-width
+dark-gray background. Bracket depths use gray tones; unmatched brackets use
+an inverted neutral foreground/background. Syntax and Markdown Source code
+highlighting remain configurable in this theme. Indexed/RGB terminals provide gray
+gradations; ANSI-16 terminals use neutral fallbacks.
+The theme uses `ui.theme=monochrome` in settings and `--theme=monochrome` on the CLI.
+
+Window controls, Markdown Preview roles and syntax tokens have independent
+immutable palettes. Source and code inside Preview use the same syntax palette.
+Changing themes updates visual styles while retaining document text, lexical
+analysis and Markdown layout. Menus, selections, search matches, notifications
+and change markers also use neutral styles in the monochrome theme.
 
 ### Terminal-native behavior
 
@@ -579,7 +594,7 @@ Usage: tuink [options] [file]
   --no-mouse       Disable mouse tracking and mouse interactions
   --no-alt-screen  Do not use the alternate screen buffer
   --no-color       Render without ANSI colors
-  --theme=<name>   Select blue, cyan (default), or light
+  --theme=<name>   Select blue, cyan (default), or monochrome
   --read           Start in reading mode
   --open-as=<encoding>
                    Choose auto, UTF-8, UTF-16LE/BE, Windows-1251, CP866 or KOI8-R

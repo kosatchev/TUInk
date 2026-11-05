@@ -1002,7 +1002,7 @@ class Regressions:
         original = document.read_bytes()
         home = self.root / "settings-home"
         path = home / ".config/tuink/tuink.properties"
-        overrides = ("--read", "--no-mouse", "--theme=light")
+        overrides = ("--read", "--no-mouse", "--theme=monochrome")
         with self.session("settings-cli-only", document, home=home, options=overrides) as session:
             assert "READ" in session.screen.text
             session.send(b"X")

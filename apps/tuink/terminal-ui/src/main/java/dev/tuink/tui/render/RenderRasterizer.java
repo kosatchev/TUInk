@@ -17,6 +17,8 @@ import dev.tuiframe.cell.CellBuffer;
 import dev.tuiframe.cell.Canvas;
 import dev.tuiframe.scroll.ScrollStyle;
 import dev.tuiframe.style.CellStyle;
+import dev.tuiframe.style.CellColor;
+import dev.tuiframe.geometry.Rect;
 import dev.tuink.tui.style.UiStyles;
 import dev.tuink.tui.style.UiStyles.Palette;
 import dev.tuink.tui.ui.EditorScrollbars;
@@ -39,6 +41,7 @@ public class RenderRasterizer implements AutoCloseable {
     private static final AtomicLong FALLBACK_PRODUCERS = new AtomicLong(Long.MIN_VALUE);
 
     private Palette styles;
+    private boolean colorEnabled = true;
     private final int contentTopRow;
     private boolean highlightActiveGutter = true;
     private boolean visibleWhitespace = true;
@@ -78,7 +81,30 @@ public class RenderRasterizer implements AutoCloseable {
     }
 
     public void setTheme(UiStyles.Theme theme) {
-        this.styles = UiStyles.forTheme(theme);
+        setPalette(UiStyles.forTheme(theme));
+    }
+
+    public void setPalette(Palette palette) {
+        Objects.requireNonNull(palette, "palette");
+        if (styles == palette) return;
+        var before = bodyStyle();
+        this.styles = palette;
+        if (!before.equals(bodyStyle())) invalidatePhysicalStyles();
+    }
+
+    public void setColorEnabled(boolean enabled) {
+        if (colorEnabled == enabled) return;
+        colorEnabled = enabled;
+        invalidatePhysicalStyles();
+    }
+
+    private CellStyle bodyStyle() {
+        return colorEnabled ? styles.windows().renderBody() : CellStyle.DEFAULT;
+    }
+
+    private void invalidatePhysicalStyles() {
+        Arrays.fill(cellStyleCache, null);
+        clearPreparedLineCache();
     }
 
     public void setHighlightActiveGutter(boolean enabled) {
@@ -106,6 +132,7 @@ public class RenderRasterizer implements AutoCloseable {
         if (closed) throw new IllegalStateException("Rasterizer is closed");
         CellBuffer buffer = new CellBuffer(rows, cols);
         Canvas canvas = new Canvas(buffer);
+        canvas.fill(new Rect(0, 0, cols, rows), bodyStyle());
         int contentCols = Math.max(1, cols - plan.scrollbarWidth());
         int topRow = Math.max(1, contentTopRow);
         int activeGutterRow = resolveActiveGutterRow(plan);
@@ -120,8 +147,8 @@ public class RenderRasterizer implements AutoCloseable {
                     break;
                 }
                 CellStyle gutterStyle = highlightActiveGutter && row == activeGutterRow
-                    ? styles.renderGutterActive()
-                    : styles.renderGutter();
+                    ? styles.windows().renderGutterActive()
+                    : styles.windows().renderGutter();
                 drawGutter(buffer, screenRow, line, gutterStyle, contentCols);
                 boolean markLeadingWhitespace = shouldMarkLeadingWhitespace(plan, line);
                 drawHighlightedText(
@@ -147,7 +174,7 @@ public class RenderRasterizer implements AutoCloseable {
 
     private void drawScrollbars(Canvas canvas, RenderPlan plan, int rows, int cols, int contentTopRow) {
         EditorScrollbars scrollbars = EditorScrollbars.from(plan, rows, cols, contentTopRow);
-        ScrollStyle scrollStyle = ScrollStyle.fromParent(styles.renderBody(), styles.renderBorder());
+        ScrollStyle scrollStyle = ScrollStyle.fromParent(bodyStyle(), styles.windows().renderBorder());
         if (scrollbars.vertical() != null) {
             scrollbars.vertical().draw(canvas, scrollStyle);
         }
@@ -168,11 +195,11 @@ public class RenderRasterizer implements AutoCloseable {
             PreparedRowPainter.Overlay dynamic = overlay.empty() ? null : overlay;
             int endColumn = handle == null
                 ? PreparedRowPainter.paintStreaming(canvas, text, tabWidth, Math.floorMod(line.sourceVisualColumn(), tabWidth),
-                    CellStyle.DEFAULT, row, startCol, Math.max(0, cols - startCol), line.leadingClippedCells(), dynamic,
-                    visibleWhitespace && markLeadingWhitespace, visibleWhitespace, styles.renderLeadingWhitespace())
+                    bodyStyle(), row, startCol, Math.max(0, cols - startCol), line.leadingClippedCells(), dynamic,
+                    visibleWhitespace && markLeadingWhitespace, visibleWhitespace, styles.windows().renderLeadingWhitespace())
                 : PreparedRowPainter.paint(canvas, handle.row(), row, startCol, Math.max(0, cols - startCol),
                     line.leadingClippedCells(), dynamic, visibleWhitespace && markLeadingWhitespace,
-                    visibleWhitespace, styles.renderLeadingWhitespace());
+                    visibleWhitespace, styles.windows().renderLeadingWhitespace());
             if (endColumn >= 0 && line.lineBreakSelectionStyle() != null) {
                 int column = startCol + endColumn - line.leadingClippedCells();
                 if (column >= startCol && column < cols) canvas.put(column, row, " ", cellStyle(line.lineBreakSelectionStyle()));
@@ -206,16 +233,16 @@ public class RenderRasterizer implements AutoCloseable {
         GutterDiffFlag diff = marker.flag();
         if (marker.historical()) {
             return switch (diff) {
-                case ADDED -> styles.renderGutterAddedHistorical();
-                case MODIFIED -> styles.renderGutterModifiedHistorical();
-                case DELETED -> styles.renderGutterDeletedHistorical();
+                case ADDED -> styles.windows().renderGutterAddedHistorical();
+                case MODIFIED -> styles.windows().renderGutterModifiedHistorical();
+                case DELETED -> styles.windows().renderGutterDeletedHistorical();
                 default -> null;
             };
         }
         return switch (diff) {
-            case ADDED -> styles.renderGutterAdded();
-            case MODIFIED -> styles.renderGutterModified();
-            case DELETED -> styles.renderGutterDeleted();
+            case ADDED -> styles.windows().renderGutterAdded();
+            case MODIFIED -> styles.windows().renderGutterModified();
+            case DELETED -> styles.windows().renderGutterDeleted();
             default -> null;
         };
     }
@@ -281,7 +308,7 @@ public class RenderRasterizer implements AutoCloseable {
             handle = frameCached;
         } else {
             long hits = preparedRows.hits();
-            handle = preparedRows.acquire(key, text, CellStyle.DEFAULT, new SourceBaseSpans(text, spans, baseCount));
+            handle = preparedRows.acquire(key, text, bodyStyle(), new SourceBaseSpans(text, spans, baseCount));
             if (preparedRows.hits() != hits) preparedLineCacheHits++;
             else preparedLineCacheMisses++;
         }
@@ -451,7 +478,7 @@ public class RenderRasterizer implements AutoCloseable {
 
     private CellStyle cellStyle(Style style) {
         if (style.equals(Style.DEFAULT)) {
-            return CellStyle.DEFAULT;
+            return bodyStyle();
         }
         int attributes = (style.bold() ? 2 : 0) | (style.underline() ? 1 : 0);
         int index = ((style.fg().ordinal() * EDITOR_COLOR_COUNT + style.bg().ordinal()) << 2)
@@ -460,7 +487,10 @@ public class RenderRasterizer implements AutoCloseable {
         if (cached != null) {
             return cached;
         }
-        CellStyle mapped = EditorStyleAdapter.toCell(style);
+        CellStyle raw = EditorStyleAdapter.toCell(style);
+        CellStyle body = bodyStyle();
+        CellStyle mapped = new CellStyle(raw.fg() == CellColor.DEFAULT ? body.fg() : raw.fg(),
+            raw.bg() == CellColor.DEFAULT ? body.bg() : raw.bg(), raw.bold(), raw.underline());
         cellStyleCache[index] = mapped;
         return mapped;
     }

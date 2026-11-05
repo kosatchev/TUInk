@@ -69,6 +69,12 @@ public final class EditorStyleAdapter {
             case BRIGHT_CYAN -> CellColor.BRIGHT_CYAN;
             case BRIGHT_WHITE -> CellColor.BRIGHT_WHITE;
             case DARK_GRAY -> CellColor.DARK_GRAY;
+            case GRAY_128 -> CellColor.GRAY_128;
+            case GRAY_158 -> CellColor.GRAY_158;
+            case GRAY_188 -> CellColor.GRAY_188;
+            case GRAY_218 -> CellColor.GRAY_218;
+            case GRAY_238 -> CellColor.GRAY_238;
+            case GRAY_028 -> CellColor.GRAY_028;
         };
     }
 
@@ -92,6 +98,12 @@ public final class EditorStyleAdapter {
             case BRIGHT_CYAN -> Color.BRIGHT_CYAN;
             case BRIGHT_WHITE -> Color.BRIGHT_WHITE;
             case DARK_GRAY -> Color.DARK_GRAY;
+            case GRAY_128 -> Color.GRAY_128;
+            case GRAY_158 -> Color.GRAY_158;
+            case GRAY_188 -> Color.GRAY_188;
+            case GRAY_218 -> Color.GRAY_218;
+            case GRAY_238 -> Color.GRAY_238;
+            case GRAY_028 -> Color.GRAY_028;
         };
     }
 }

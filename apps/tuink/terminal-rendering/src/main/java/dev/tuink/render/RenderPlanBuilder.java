@@ -13,6 +13,7 @@ import dev.tuink.editor.search.SearchOptions;
 import dev.tuink.core.TextModel;
 import dev.tuink.editor.document.DocumentId;
 import dev.tuink.editor.document.DocumentView;
+import dev.tuink.editor.highlight.TokenSpan;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
@@ -43,6 +44,8 @@ public class RenderPlanBuilder {
     static final int MAX_BRACKET_DEPTH = 32_768;
     static final int MAX_BRACKET_FACTS = 131_072;
     private final LineHighlighter highlighter;
+    private final SemanticLineHighlighter semanticHighlighter;
+    private SyntaxStyleResolver syntaxStyleResolver;
     private final LineLexicalScanner lexicalScanner;
     private final EditorTextLayout textLayout;
     private final DocumentView documentView;
@@ -136,6 +139,9 @@ public class RenderPlanBuilder {
 
     public RenderPlanBuilder(LineHighlighter highlighter, EditorTextLayout textLayout, DocumentId documentId) {
         this.highlighter = highlighter;
+        this.semanticHighlighter = highlighter instanceof SemanticLineHighlighter semantic ? semantic : null;
+        this.syntaxStyleResolver = semanticHighlighter == null
+            ? SyntaxStyleResolver.standard() : semanticHighlighter.syntaxStyleResolver();
         this.lexicalScanner = highlighter instanceof ContextualLineHighlighter contextual
             ? contextual.lexicalScanner() : null;
         this.textLayout = Objects.requireNonNull(textLayout, "textLayout");
@@ -184,6 +190,17 @@ public class RenderPlanBuilder {
             return;
         }
         this.syntaxHighlightingEnabled = enabled;
+        baseStyleGeneration++;
+    }
+
+    /** Immutable palettes change physical styles without discarding syntax or lexical progress. */
+    public void setSyntaxStyleResolver(SyntaxStyleResolver resolver) {
+        Objects.requireNonNull(resolver, "resolver");
+        if (syntaxStyleResolver == resolver) return;
+        syntaxStyleResolver = resolver;
+        for (SyntaxSpans cached : syntaxSpanCache.values()) {
+            syntaxCacheWeight -= cached.clearResolvedStyles();
+        }
         baseStyleGeneration++;
     }
 
@@ -886,7 +903,11 @@ public class RenderPlanBuilder {
         SyntaxKey key = new SyntaxKey(lineIndex, startUtf16, endUtf16);
         SyntaxSpans cached = syntaxSpanCache.get(key);
         if (cached != null && cached.lineText().equals(line)) {
-            return cached.spans();
+            int previousWeight = cached.weight();
+            List<StyleSpan> spans = cached.resolve(syntaxStyleResolver);
+            syntaxCacheWeight += cached.weight() - previousWeight;
+            trimSyntaxCache();
+            return spans;
         }
         if (cached != null) {
             syntaxSpanCache.remove(key);
@@ -897,24 +918,39 @@ public class RenderPlanBuilder {
         // Keep one real lookahead unit: a bounded prefix must not look like EOL
         // to a highlighter which declines incomplete input.
         String syntaxText = line.subSequence(0, Math.min(line.length(), MAX_SYNTAX_SCAN_CODE_UNITS + 1)).toString();
-        HighlightResult result = highlighter instanceof ContextualLineHighlighter contextual
-            ? contextual.highlightResult(documentView, lineIndex, syntaxText, request)
-            : HighlightResult.completed(highlighter.highlight(syntaxText, request));
-        List<StyleSpan> spans = request.clipSpans(result.spans());
-        if (result.retryPending()) {
+        SyntaxSpans computed;
+        boolean retryPending;
+        if (semanticHighlighter != null) {
+            var budget = new dev.tuink.editor.highlight.HighlightRequest(startUtf16, endUtf16,
+                MAX_SYNTAX_SCAN_CODE_UNITS, MAX_SYNTAX_SPANS, MAX_SYNTAX_WORK);
+            var result = semanticHighlighter.highlightTokens(documentView, lineIndex, syntaxText, budget);
+            computed = SyntaxSpans.semantic(line, budget.clipSpans(result.spans()));
+            retryPending = result.retryPending();
+        } else {
+            HighlightResult result = highlighter instanceof ContextualLineHighlighter contextual
+                ? contextual.highlightResult(documentView, lineIndex, syntaxText, request)
+                : HighlightResult.completed(highlighter.highlight(syntaxText, request));
+            computed = SyntaxSpans.styled(line, request.clipSpans(result.spans()));
+            retryPending = result.retryPending();
+        }
+        List<StyleSpan> spans = computed.resolve(syntaxStyleResolver);
+        if (retryPending) {
             pendingSyntaxWork = true;
             return spans;
         }
-        SyntaxSpans computed = new SyntaxSpans(line, spans);
         syntaxSpanCache.put(key, computed);
         syntaxCacheWeight += computed.weight();
+        trimSyntaxCache();
+        return spans;
+    }
+
+    private void trimSyntaxCache() {
         var iterator = syntaxSpanCache.entrySet().iterator();
         while (syntaxSpanCache.size() > MAX_SYNTAX_CACHE_ENTRIES || syntaxCacheWeight > MAX_SYNTAX_CACHE_WEIGHT) {
             SyntaxSpans removed = iterator.next().getValue();
             syntaxCacheWeight -= removed.weight();
             iterator.remove();
         }
-        return spans;
     }
 
     int syntaxCacheWeight() {
@@ -1472,9 +1508,40 @@ public class RenderPlanBuilder {
     private record SyntaxKey(int lineIndex, int startUtf16, int endUtf16) {
     }
 
-    private record SyntaxSpans(CharSequence lineText, List<StyleSpan> spans) {
+    /** One bounded source entry retains at most one palette's resolved display spans. */
+    private static final class SyntaxSpans {
+        private final CharSequence lineText;
+        private final List<TokenSpan> tokens;
+        private List<StyleSpan> spans;
+
+        private SyntaxSpans(CharSequence lineText, List<TokenSpan> tokens, List<StyleSpan> spans) {
+            this.lineText = lineText; this.tokens = tokens; this.spans = spans;
+        }
+
+        static SyntaxSpans semantic(CharSequence lineText, List<TokenSpan> tokens) {
+            return new SyntaxSpans(lineText, tokens, null);
+        }
+
+        static SyntaxSpans styled(CharSequence lineText, List<StyleSpan> spans) {
+            return new SyntaxSpans(lineText, null, spans);
+        }
+
+        CharSequence lineText() { return lineText; }
+
+        List<StyleSpan> resolve(SyntaxStyleResolver resolver) {
+            if (spans == null) spans = SemanticHighlighterAdapter.styled(tokens, resolver);
+            return spans;
+        }
+
+        int clearResolvedStyles() {
+            if (tokens == null || spans == null) return 0;
+            int released = spans.size();
+            spans = null;
+            return released;
+        }
+
         int weight() {
-            return 1 + spans.size();
+            return 1 + (tokens == null ? 0 : tokens.size()) + (spans == null ? 0 : spans.size());
         }
     }
 

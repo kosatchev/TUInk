@@ -18,13 +18,13 @@ public final class WindowTextPainter {
     public static void paint(Canvas canvas, int rows, int columns, Text text, UiStyles.Palette palette) {
         Objects.requireNonNull(canvas); Objects.requireNonNull(text); Objects.requireNonNull(palette);
         if (rows < 1 || columns < 1) return;
-        line(canvas, 0, columns, text.top(), palette.renderTopbar());
-        line(canvas, rows - 1, columns, text.status(), palette.renderStatus());
+        line(canvas, 0, columns, text.top(), palette.windows().renderTopbar());
+        line(canvas, rows - 1, columns, text.status(), palette.windows().renderStatus());
         int promptTop = rows - 1;
         if (text.prompt() != null) {
             String[] lines = text.prompt().split("\n", -1);
             promptTop -= lines.length;
-            CellStyle style = text.promptStyle() == null ? palette.renderInteractive()
+            CellStyle style = text.promptStyle() == null ? palette.windows().renderInteractive()
                 : EditorStyleAdapter.toCell(text.promptStyle());
             for (int index = 0; index < lines.length; index++) {
                 int row = promptTop + index;
@@ -32,7 +32,7 @@ public final class WindowTextPainter {
             }
         }
         if (text.notification() != null && promptTop > 0) {
-            CellStyle style = text.notificationStyle() == null ? palette.renderNotification()
+            CellStyle style = text.notificationStyle() == null ? palette.windows().renderNotification()
                 : EditorStyleAdapter.toCell(text.notificationStyle());
             line(canvas, promptTop - 1, columns, NotificationPresentation.fit(text.notification(), columns), style);
         }

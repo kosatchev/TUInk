@@ -18,6 +18,7 @@ import java.util.Objects;
 final class AnsiDiff {
     private final Map<CellStyle, String> colorStyleCache = new HashMap<>();
     private final Map<CellStyle, String> indexedStyleCache = new HashMap<>();
+    private final Map<CellStyle, String> trueColorStyleCache = new HashMap<>();
     private final Map<CellStyle, String> monoStyleCache = new HashMap<>();
 
     AnsiDiff() {
@@ -521,14 +522,15 @@ final class AnsiDiff {
         Map<CellStyle, String> cache = switch (colorDepth) {
             case MONOCHROME -> monoStyleCache;
             case ANSI_16 -> colorStyleCache;
-            case ANSI_256, TRUECOLOR -> indexedStyleCache;
+            case ANSI_256 -> indexedStyleCache;
+            case TRUECOLOR -> trueColorStyleCache;
         };
         String cached = cache.get(style);
         if (cached != null) {
             return cached;
         }
         String ansi = colorDepth.colorEnabled()
-            ? toAnsi(style, colorDepth != ColorDepth.ANSI_16) : toMonochromeAnsi(style);
+            ? toAnsi(style, colorDepth) : toMonochromeAnsi(style);
         cache.put(style, ansi);
         return ansi;
     }
@@ -712,12 +714,41 @@ final class AnsiDiff {
         out.append("\u001B[").append(row + 1).append(';').append(col + 1).append('H');
     }
 
-    private static String toAnsi(CellStyle style, boolean indexedColors) {
+    private static String toAnsi(CellStyle style, ColorDepth colorDepth) {
         return "\u001B["
-            + (indexedColors && style.fg() == CellColor.DARK_GRAY ? "38;5;236" : fgCode(style.fg())) + ';'
-            + (indexedColors && style.bg() == CellColor.DARK_GRAY ? "48;5;236" : bgCode(style.bg())) + ';'
+            + colorCode(style.fg(), colorDepth, false) + ';'
+            + colorCode(style.bg(), colorDepth, true) + ';'
             + (style.bold() ? "1" : "22") + ';'
             + (style.underline() ? "4" : "24") + 'm';
+    }
+
+    private static String colorCode(CellColor color, ColorDepth colorDepth, boolean background) {
+        int level = switch (color) {
+            case DARK_GRAY -> 48;
+            case GRAY_028 -> 28;
+            case GRAY_128 -> 128;
+            case GRAY_158 -> 158;
+            case GRAY_188 -> 188;
+            case GRAY_218 -> 218;
+            case GRAY_238 -> 238;
+            default -> -1;
+        };
+        if (level >= 0 && colorDepth == ColorDepth.TRUECOLOR)
+            return (background ? "48;2;" : "38;2;") + level + ';' + level + ';' + level;
+        if (level >= 0 && colorDepth == ColorDepth.ANSI_256) {
+            int index = switch (color) {
+                case DARK_GRAY -> 236;
+                case GRAY_028 -> 234;
+                case GRAY_128 -> 244;
+                case GRAY_158 -> 247;
+                case GRAY_188 -> 250;
+                case GRAY_218 -> 253;
+                case GRAY_238 -> 255;
+                default -> throw new IllegalStateException("Not a neutral shade: " + color);
+            };
+            return (background ? "48;5;" : "38;5;") + index;
+        }
+        return Integer.toString(background ? bgCode(color) : fgCode(color));
     }
 
     private static String toMonochromeAnsi(CellStyle style) {
@@ -747,7 +778,10 @@ final class AnsiDiff {
             case BRIGHT_MAGENTA -> 95;
             case BRIGHT_CYAN -> 96;
             case BRIGHT_WHITE -> 97;
-            case DARK_GRAY -> 30;
+            case DARK_GRAY, GRAY_028 -> 30;
+            case GRAY_128 -> 90;
+            case GRAY_158, GRAY_188 -> 37;
+            case GRAY_218, GRAY_238 -> 97;
         };
     }
 
@@ -770,7 +804,10 @@ final class AnsiDiff {
             case BRIGHT_MAGENTA -> 105;
             case BRIGHT_CYAN -> 106;
             case BRIGHT_WHITE -> 107;
-            case DARK_GRAY -> 40;
+            case DARK_GRAY, GRAY_028 -> 40;
+            case GRAY_128 -> 100;
+            case GRAY_158, GRAY_188 -> 47;
+            case GRAY_218, GRAY_238 -> 107;
         };
     }
 }

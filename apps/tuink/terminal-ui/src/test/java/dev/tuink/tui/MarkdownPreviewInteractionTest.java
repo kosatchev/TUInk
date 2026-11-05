@@ -158,10 +158,10 @@ class MarkdownPreviewInteractionTest {
             MarkdownPreviewState.Placement.Focus.CONTENT, MarkdownPreviewState.SearchFailure.NONE);
         var buffer = new CellBuffer(8, 20);
         MarkdownPreviewPainter.paint(new Canvas(buffer), placement, palette, true);
-        assertEquals(EditorStyleAdapter.toCell(palette.renderSelection()), buffer.get(2, 7).style());
-        assertEquals(EditorStyleAdapter.toCell(palette.renderCurrentSearchMatch()), buffer.get(2, 8).style());
-        assertEquals(EditorStyleAdapter.toCell(palette.renderCurrentSearchMatch()), buffer.get(2, 9).style());
-        assertNotEquals(EditorStyleAdapter.toCell(palette.renderSelection()), buffer.get(2, 4).style());
+        assertEquals(EditorStyleAdapter.toCell(palette.windows().renderSelection()), buffer.get(2, 7).style());
+        assertEquals(EditorStyleAdapter.toCell(palette.windows().renderCurrentSearchMatch()), buffer.get(2, 8).style());
+        assertEquals(EditorStyleAdapter.toCell(palette.windows().renderCurrentSearchMatch()), buffer.get(2, 9).style());
+        assertNotEquals(EditorStyleAdapter.toCell(palette.windows().renderSelection()), buffer.get(2, 4).style());
     }
 
     @Test void painterClipsAStyledRunAndItsTabsAtANonzeroViewportOrigin() {

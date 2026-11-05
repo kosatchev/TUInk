@@ -81,6 +81,12 @@ class EditorStyleAdapterTest {
             case BRIGHT_CYAN -> CellColor.BRIGHT_CYAN;
             case BRIGHT_WHITE -> CellColor.BRIGHT_WHITE;
             case DARK_GRAY -> CellColor.DARK_GRAY;
+            case GRAY_128 -> CellColor.GRAY_128;
+            case GRAY_158 -> CellColor.GRAY_158;
+            case GRAY_188 -> CellColor.GRAY_188;
+            case GRAY_218 -> CellColor.GRAY_218;
+            case GRAY_238 -> CellColor.GRAY_238;
+            case GRAY_028 -> CellColor.GRAY_028;
         };
     }
 }

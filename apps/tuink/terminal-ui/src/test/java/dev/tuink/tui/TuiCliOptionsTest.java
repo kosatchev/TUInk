@@ -94,7 +94,7 @@ class TuiCliOptionsTest {
             "--no-alt-screen",
             "--no-color",
             "--read",
-            "--theme=light",
+            "--theme=monochrome",
             "notes.txt"
         });
 
@@ -103,7 +103,8 @@ class TuiCliOptionsTest {
         assertFalse(options.altScreenEnabled());
         assertFalse(options.colorEnabled());
         assertEquals(Boolean.TRUE, options.readModeOverride());
-        assertEquals(UiStyles.Theme.LIGHT, options.themeOverride());
+        assertEquals(UiStyles.Theme.MONOCHROME, options.themeOverride());
+        assertEquals("Monochrome", UiStyles.Theme.MONOCHROME.label());
     }
 
     @Test
@@ -190,11 +191,11 @@ class TuiCliOptionsTest {
 
     @Test
     void separatorPreservesEarlierOptionsAndCanHaveNoFileAfterIt() {
-        TuiCliOptions options = TuiCliOptions.parse(new String[] {"--read", "--theme=light", "--"});
+        TuiCliOptions options = TuiCliOptions.parse(new String[] {"--read", "--theme=monochrome", "--"});
 
         assertNull(options.file());
         assertEquals(Boolean.TRUE, options.readModeOverride());
-        assertEquals(UiStyles.Theme.LIGHT, options.themeOverride());
+        assertEquals(UiStyles.Theme.MONOCHROME, options.themeOverride());
         assertEquals(Path.of("notes.txt"), TuiCliOptions.parse(new String[] {"notes.txt", "--"}).file());
     }
 

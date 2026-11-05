@@ -1001,25 +1001,27 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             ui().searchEditorFocused = false;
             host.searchFocusManager().next(searchBarPlacement.focusScope());
         }
+        renderer.setPalette(host.styles);
         renderer.setHighlightActiveGutter(uiSessionState.highlightActiveGutterSetting);
         renderer.setVisibleWhitespace(uiSessionState.visibleWhitespaceSetting);
         renderer.setTabWidth(uiSessionState.tabWidthSetting);
-        renderPlanBuilder.setSyntaxHighlightingEnabled(
-            sourceSyntax().enabled()
-        );
+        var decorations = sourceSyntax();
+        renderPlanBuilder.setSyntaxStyleResolver(host.styles.syntax());
+        renderPlanBuilder.setSyntaxHighlightingEnabled(decorations.enabled());
         renderPlanBuilder.setCommentSyntaxProfile(
             LanguageProfiles.resolveCommentSyntax(state.getCurrentResource() == null ? null : state.getCurrentResource().nameHint())
         );
-        renderPlanBuilder.setRainbowBracketsEnabled(uiSessionState.rainbowBracketsSetting);
+        renderPlanBuilder.setBracketMatchingEnabled(decorations.bracketMatching());
+        renderPlanBuilder.setRainbowBracketsEnabled(decorations.rainbowBrackets());
         renderPlanBuilder.setTabWidth(uiSessionState.tabWidthSetting);
         renderPlanBuilder.setDecorationStyles(
-            host.styles.renderSelection(),
-            host.styles.renderSearchMatch(),
-            host.styles.renderCurrentSearchMatch(),
-            host.styles.renderBracketMatch(),
-            host.styles.renderQuoteMatch(),
-            host.styles.renderUnmatchedBracket(),
-            host.styles.renderRainbowBrackets()
+            host.styles.windows().renderSelection(),
+            host.styles.windows().renderSearchMatch(),
+            host.styles.windows().renderCurrentSearchMatch(),
+            host.styles.syntax().bracketMatch(),
+            host.styles.syntax().quoteMatch(),
+            host.styles.syntax().unmatchedBracket(),
+            host.styles.syntax().bracketDepths()
         );
         renderPlanBuilder.setGutterDiffResolver(engine.gutterDiffMarkers());
         editorView.setTabWidth(uiSessionState.tabWidthSetting);

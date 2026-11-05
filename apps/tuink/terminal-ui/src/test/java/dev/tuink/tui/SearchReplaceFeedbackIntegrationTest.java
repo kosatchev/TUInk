@@ -38,7 +38,7 @@ class SearchReplaceFeedbackIntegrationTest {
                 int column = window.screenRow(row).indexOf("[Replace all]") + 2;
                 assertTrue(column >= 2);
                 window.pointer(PointerEvent.Kind.PRESS, row, column);
-                assertEquals(window.host.styles.notifyError(), window.notification.style());
+                assertEquals(window.host.styles.windows().notifyError(), window.notification.style());
                 window.pointer(PointerEvent.Kind.RELEASE, row, column);
                 window.pointer(PointerEvent.Kind.MOVE, row, column);
             } else {
@@ -46,10 +46,10 @@ class SearchReplaceFeedbackIntegrationTest {
             }
 
             assertTrue(window.notification.message.startsWith("Replacement result is too large"));
-            assertEquals(window.host.styles.notifyError(), window.notification.style());
+            assertEquals(window.host.styles.windows().notifyError(), window.notification.style());
             assertEquals(-1L, window.notification.nanosUntilExpire(System.nanoTime()));
             window.frame();
-            assertEquals(window.host.styles.notifyError(), window.notification.style());
+            assertEquals(window.host.styles.windows().notifyError(), window.notification.style());
             assertEquals(original, window.active().tabSession().model().getLine(0));
             assertEquals(revision, window.active().tabSession().model().revision());
             assertFalse(window.active().state().isDirty());
@@ -88,7 +88,7 @@ class SearchReplaceFeedbackIntegrationTest {
             assertEquals(segment, window.active().state().getTopWrapSegment());
             assertEquals(left, window.active().state().getLeftVisualColumn());
             assertEquals("Found 120 occurrence(s); text unchanged", window.notification.message);
-            assertEquals(window.host.styles.notifyInfo(), window.notification.style());
+            assertEquals(window.host.styles.windows().notifyInfo(), window.notification.style());
             assertFalse(window.active().state().isDirty());
             assertFalse(window.active().tabSession().engine().undo());
             assertEquals(lines, window.active().tabSession().model().snapshotLines());
@@ -190,7 +190,7 @@ class SearchReplaceFeedbackIntegrationTest {
             replace(window, SearchFocus.ALL_BUTTON);
 
             assertEquals("Nothing to replace", window.notification.message);
-            assertEquals(window.host.styles.notifyInfo(), window.notification.style());
+            assertEquals(window.host.styles.windows().notifyInfo(), window.notification.style());
             assertEquals(revision, window.active().tabSession().model().revision());
             assertFalse(window.active().state().isDirty());
         }

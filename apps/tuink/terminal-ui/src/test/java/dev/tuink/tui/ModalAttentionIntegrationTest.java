@@ -42,7 +42,7 @@ import org.junit.jupiter.api.Test;
 
 class ModalAttentionIntegrationTest {
     private static final CellStyle BACKGROUND = new CellStyle(CellColor.WHITE, CellColor.BLACK, false, false);
-    private static final CellStyle WARNING = UiStyles.forTheme(UiStyles.Theme.CYAN).notifyWarning();
+    private static final CellStyle WARNING = UiStyles.forTheme(UiStyles.Theme.CYAN).windows().notifyWarning();
     private static final HelpPage HELP = new HelpPage("Help 中🦀", List.of("Document shortcuts", "Wide text 中🦀", "Close with Escape"));
 
     @Test

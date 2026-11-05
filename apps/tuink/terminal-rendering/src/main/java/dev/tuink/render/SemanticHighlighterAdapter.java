@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Objects;
 
 /** Applies a frontend palette while preserving portable highlighting budgets and continuation. */
-public final class SemanticHighlighterAdapter implements ContextualLineHighlighter {
+public final class SemanticHighlighterAdapter implements SemanticLineHighlighter {
     private final SyntaxHighlighter delegate;
     private final SyntaxStyleResolver styles;
     private final LineLexicalScanner scanner;
@@ -47,11 +47,20 @@ public final class SemanticHighlighterAdapter implements ContextualLineHighlight
 
     @Override public HighlightResult highlightResult(DocumentView document, int lineIndex, String line,
                                                      HighlightRequest request) {
-        var budget = portable(request);
+        var result = highlightTokens(document, lineIndex, line, portable(request));
+        return new HighlightResult(styled(result.spans()), result.retryPending());
+    }
+
+    @Override public dev.tuink.editor.highlight.HighlightResult highlightTokens(DocumentView document,
+        int lineIndex, String line, dev.tuink.editor.highlight.HighlightRequest budget) {
         var result = delegate instanceof ContextualSyntaxHighlighter contextual
             ? contextual.highlightResult(document, lineIndex, line, budget)
             : dev.tuink.editor.highlight.HighlightResult.completed(delegate.highlight(line, budget));
-        return new HighlightResult(styled(budget.clipSpans(result.spans())), result.retryPending());
+        return new dev.tuink.editor.highlight.HighlightResult(budget.clipSpans(result.spans()), result.retryPending());
+    }
+
+    @Override public SyntaxStyleResolver syntaxStyleResolver() {
+        return styles;
     }
 
     @Override public LineLexicalScanner lexicalScanner() {
@@ -64,6 +73,11 @@ public final class SemanticHighlighterAdapter implements ContextualLineHighlight
     }
 
     private List<StyleSpan> styled(List<TokenSpan> tokens) {
+        return styled(tokens, styles);
+    }
+
+    /** The same mapping serves direct adapter callers and palette-independent render caches. */
+    static List<StyleSpan> styled(List<TokenSpan> tokens, SyntaxStyleResolver styles) {
         List<StyleSpan> result = new ArrayList<>(tokens.size());
         for (TokenSpan token : tokens) {
             Style style = Objects.requireNonNullElse(styles.resolve(token.styleKey()), Style.DEFAULT);

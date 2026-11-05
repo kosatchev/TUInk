@@ -38,9 +38,9 @@ class PresentationSyntaxPolicyIntegrationTest {
 
             window.command(TuinkCommand.VIEW_CYCLE_THEME);
             window.command(TuinkCommand.VIEW_CYCLE_THEME);
-            assertEquals(UiStyles.Theme.LIGHT, window.host.theme);
+            assertEquals(UiStyles.Theme.MONOCHROME, window.host.theme);
             assertTrue(window.ui.syntaxHighlightingSetting);
-            assertPairColors(window, CellColor.DEFAULT, CellColor.DEFAULT);
+            assertPairColors(window, CellColor.GRAY_218, CellColor.GRAY_218);
             window.command(TuinkCommand.VIEW_CYCLE_THEME);
             assertEquals(UiStyles.Theme.CYAN, window.host.theme);
             assertPairColors(window, CellColor.YELLOW, CellColor.BRIGHT_YELLOW);
@@ -53,18 +53,22 @@ class PresentationSyntaxPolicyIntegrationTest {
 
     private static void assertPairColors(EditorWindowFixture window, CellColor sourceCode, CellColor sourceHeading) throws Exception {
         assertInstanceOf(PreviewTab.class, window.selected());
-        assertEquals(CellColor.BRIGHT_BLUE, styleAt(window, "return 7").fg(), "Preview preserves independent code colors");
-        assertEquals(CellColor.WHITE, styleAt(window, "value = other").fg(), "Preview keeps a readable foreground on the dark code background");
+        boolean simplified = window.host.theme == UiStyles.Theme.MONOCHROME;
+        var previewKeyword = simplified ? CellColor.GRAY_218 : CellColor.BRIGHT_BLUE;
+        assertEquals(previewKeyword, styleAt(window, "return 7").fg(), "Preview honors the current theme independently of Source preferences");
+        assertEquals(CellColor.DARK_GRAY, styleAt(window, "return 7").bg());
+        assertEquals(simplified ? CellColor.GRAY_218 : CellColor.WHITE, styleAt(window, "value = other").fg());
         window.command(TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW);
         assertInstanceOf(TerminalEditorApp.EditorTab.class, window.selected());
         assertEquals(sourceCode, styleAt(window, "return 7").fg());
-        assertEquals(sourceCode == CellColor.YELLOW ? CellColor.YELLOW : CellColor.DEFAULT,
+        assertEquals(window.ui.syntaxHighlightingSetting && !window.ui.markdownCodeHighlightingSetting
+            ? (simplified ? CellColor.GRAY_218 : CellColor.YELLOW) : CellColor.DEFAULT,
             styleAt(window, "value = other").fg(), "Source keeps its own Markdown syntax preference");
         assertEquals(sourceHeading, styleAt(window, "# Heading").fg());
         window.command(TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW);
         window.await(() -> window.preview().ready());
-        assertEquals(CellColor.BRIGHT_BLUE, styleAt(window, "return 7").fg());
-        assertEquals(CellColor.WHITE, styleAt(window, "value = other").fg());
+        assertEquals(previewKeyword, styleAt(window, "return 7").fg());
+        assertEquals(simplified ? CellColor.GRAY_218 : CellColor.WHITE, styleAt(window, "value = other").fg());
     }
 
     private static CellStyle styleAt(EditorWindowFixture window, String text) {

@@ -28,11 +28,11 @@ class SearchWorkLimitIntegrationTest {
 
             assertEquals(costly, window.query.text());
             assertTrue(window.notification.message.startsWith("Search is too complex"));
-            assertEquals(window.host.styles.notifyError(), window.notification.style());
+            assertEquals(window.host.styles.windows().notifyError(), window.notification.style());
             assertEquals(-1L, window.notification.nanosUntilExpire(System.nanoTime()));
             assertTrue(window.screenRow(window.height - 1).contains("Search is too complex"));
             window.frame();
-            assertEquals(window.host.styles.notifyError(), window.notification.style());
+            assertEquals(window.host.styles.windows().notifyError(), window.notification.style());
 
             long revision = window.active().tabSession().model().revision();
             window.replacement.set("b");

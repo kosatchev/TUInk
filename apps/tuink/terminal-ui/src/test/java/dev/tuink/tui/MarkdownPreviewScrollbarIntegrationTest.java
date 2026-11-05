@@ -121,7 +121,7 @@ class MarkdownPreviewScrollbarIntegrationTest {
             var palette = UiStyles.forTheme(UiStyles.Theme.CYAN);
             MarkdownPreviewPainter.paint(new Canvas(actual), p, palette, true);
             var track = p.scrollbars().vertical();
-            track.draw(new Canvas(expected), ScrollStyle.fromParent(palette.renderBody(), palette.renderBorder()));
+            track.draw(new Canvas(expected), ScrollStyle.fromParent(palette.windows().renderBody(), palette.windows().renderBorder()));
             for (int y = track.track().y(); y < track.track().bottomExclusive(); y++)
                 assertEquals(expected.get(y, track.track().x()), actual.get(y, track.track().x()));
             assertEquals("P", actual.get(body.y(), body.x()).grapheme(), "the document starts on the first content row");

@@ -79,6 +79,19 @@ class MarkdownPreviewStableInteractionTest {
                 else assertEquals(firstPassBuilds, geometry.visualMetricsBuilds(),
                     "Repeating the same traversal must reuse bounded per-row geometry");
             }
+            long acceptedMetrics = geometry.visualMetricsBuilds();
+            for (var theme : List.of(UiStyles.Theme.CYAN, UiStyles.Theme.MONOCHROME, UiStyles.Theme.BLUE, UiStyles.Theme.CYAN)) {
+                state.refresh(input, 0, bounds, service);
+                MarkdownPreviewPainter.paint(canvas, state.placement(MarkdownPreviewState.Placement.Focus.CONTENT),
+                    UiStyles.forTheme(theme), true);
+                assertNull(state.pending, "Palette changes must not submit parse/layout/highlight work");
+                assertSame(accepted, state.result);
+                assertSame(geometry, state.geometry);
+                assertSame(codeStyles, styledCode.syntax());
+                assertEquals(1, parses.get());
+                assertEquals(initialWakeups, wakeups.get());
+            }
+            assertEquals(acceptedMetrics, geometry.visualMetricsBuilds(), "Theme round trips reuse accepted row geometry");
             assertFalse(state.pointerCaptureActive());
         }
         assertEquals(0, service.retainedBytes(), "Closing the presentation and worker releases their shared ledger");

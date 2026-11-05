@@ -34,7 +34,7 @@ class MarkdownSourceSyntaxIntegrationTest {
             window.command(TuinkCommand.SETTINGS_TOGGLE_MARKDOWN_CODE_SYNTAX);
             assertEquals(CellColor.BRIGHT_BLUE, styleAt(window, "return 7;").fg());
             window.command(TuinkCommand.VIEW_TOGGLE_SYNTAX);
-            assertEquals(window.host.styles.renderBody().fg(), styleAt(window, "return 7;").fg());
+            assertEquals(window.host.styles.windows().renderBody().fg(), styleAt(window, "return 7;").fg());
         }
     }
 

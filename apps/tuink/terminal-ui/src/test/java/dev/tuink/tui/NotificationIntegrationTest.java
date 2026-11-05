@@ -25,7 +25,7 @@ class NotificationIntegrationTest {
         warning.persistentWarning("Settings changes apply only to this session");
         warning.clearErrorOnUserAction();
         assertEquals("Settings changes apply only to this session", warning.message);
-        assertEquals(host.styles.notifyWarning(), warning.style());
+        assertEquals(host.styles.windows().notifyWarning(), warning.style());
         assertTrue(warning.requiresAttention());
         assertFalse(warning.isError());
         assertEquals(-1L, warning.nanosUntilExpire(Long.MAX_VALUE));

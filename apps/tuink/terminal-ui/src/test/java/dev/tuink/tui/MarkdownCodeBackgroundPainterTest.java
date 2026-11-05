@@ -8,6 +8,7 @@ import dev.tuiframe.cell.CellBuffer;
 import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.memory.RenderMemoryBudget;
 import dev.tuiframe.style.CellColor;
+import dev.tuiframe.style.CellStyle;
 import dev.tuink.editor.highlight.SemanticStyleKey;
 import dev.tuink.editor.highlight.TokenSpan;
 import dev.tuink.render.markdown.MarkdownGeometry;
@@ -32,7 +33,9 @@ class MarkdownCodeBackgroundPainterTest {
                         ? budget.tryReserve(budget.limitBytes() - budget.usedBytes()) : null) {
                         if (path == 2) assertNotNull(blocker);
                         var palette = UiStyles.forTheme(theme);
-                        var expectedBackground = color ? CellColor.DARK_GRAY : palette.renderBody().bg();
+                        var body = color ? EditorStyleAdapter.toCell(palette.preview().body()) : CellStyle.DEFAULT;
+                        var codeBody = color ? EditorStyleAdapter.toCell(palette.preview().codeBody()) : body;
+                        var expectedBackground = codeBody.bg();
                         for (int left : new int[] {0, 4, 80}) {
                             var placement = placement(result, geometry, width, left, PreviewSelection.Snapshot.EMPTY,
                                 List.of(), -1, new PreviewSelection.VisualPosition(1, left + 2));
@@ -44,21 +47,21 @@ class MarkdownCodeBackgroundPainterTest {
                                         "theme=" + theme + ", color=" + color + ", path=" + path
                                             + ", left=" + left + ", row=" + row + ", column=" + column);
                                 for (int row = 3; row < 5; row++) for (int column = 0; column < content.width(); column++)
-                                    assertEquals(palette.renderBody().bg(), cells.get(content.y() + row, content.x() + column).style().bg(),
+                                    assertEquals(body.bg(), cells.get(content.y() + row, content.x() + column).style().bg(),
                                         "Inline code and ordinary paragraphs keep the body background");
-                                assertEquals(palette.renderBody().bg(), cells.get(content.y(), content.x() - 1).style().bg(),
+                                assertEquals(CellColor.DEFAULT, cells.get(content.y(), content.x() - 1).style().bg(),
                                     "The background is clipped to content, outside the window");
                                 if (left == 0) {
                                     assertEquals("r", cells.get(content.y(), content.x()).grapheme(), "Code gains no padding");
-                                    assertEquals(color ? CellColor.BRIGHT_BLUE : palette.renderBody().fg(),
+                                    assertEquals(color ? EditorStyleAdapter.toCell(palette.syntax().resolve(SemanticStyleKey.KEYWORD)).fg() : CellColor.DEFAULT,
                                         cells.get(content.y(), content.x()).style().fg());
                                     if (content.width() > 8) {
-                                        assertEquals(color ? CellColor.WHITE : palette.renderBody().fg(),
+                                        assertEquals(codeBody.fg(),
                                             cells.get(content.y(), content.x() + 8).style().fg(), "Punctuation keeps a readable base");
-                                        assertEquals(color ? CellColor.BRIGHT_BLACK : palette.renderBody().fg(),
+                                        assertEquals(color ? EditorStyleAdapter.toCell(palette.syntax().resolve(SemanticStyleKey.COMMENT)).fg() : CellColor.DEFAULT,
                                             cells.get(content.y(), content.x() + 10).style().fg(), "Gray comments retain their syntax color");
                                     }
-                                    assertEquals(color ? CellColor.YELLOW : palette.renderBody().fg(),
+                                    assertEquals(color ? EditorStyleAdapter.toCell(palette.preview().role(MarkdownLayout.Role.CODE)).fg() : CellColor.DEFAULT,
                                         cells.get(content.y() + 3, content.x()).style().fg(), "Inline code keeps its foreground");
                                 }
                             }
@@ -89,8 +92,8 @@ class MarkdownCodeBackgroundPainterTest {
                         List.of(new PreviewSelection.Range(0, 6), new PreviewSelection.Range(7, 8)), 1, null);
                     var cells = paint(placement, palette, true);
                     var content = placement.contentBounds();
-                    assertEquals(EditorStyleAdapter.toCell(palette.renderSelection()), cells.get(content.y(), content.x()).style());
-                    assertEquals(EditorStyleAdapter.toCell(palette.renderCurrentSearchMatch()), cells.get(content.y(), content.x() + 7).style());
+                    assertEquals(EditorStyleAdapter.toCell(palette.windows().renderSelection()), cells.get(content.y(), content.x()).style());
+                    assertEquals(EditorStyleAdapter.toCell(palette.windows().renderCurrentSearchMatch()), cells.get(content.y(), content.x() + 7).style());
                     assertEquals(CellColor.DARK_GRAY, cells.get(content.y(), content.x() + 8).style().bg());
                     assertEquals(CellColor.DARK_GRAY, cells.get(content.y(), content.rightExclusive() - 1).style().bg());
                     if (path == 1) assertEquals(misses, geometry.rows().misses(), "Overlays do not invalidate base rows");

@@ -82,7 +82,7 @@ class SingleReplaceAdmissionIntegrationTest {
 
                 require(window.notification.message.startsWith("Replacement result is too large"),
                     "Missing single-replacement admission error");
-                require(window.notification.style().equals(window.host.styles.notifyError()), "Wrong error style");
+                require(window.notification.style().equals(window.host.styles.windows().notifyError()), "Wrong error style");
                 require(window.notification.nanosUntilExpire(System.nanoTime()) == -1, "Error must persist");
                 require(tab.model().snapshotLines().equals(original), "Rejected Replace changed the document");
                 require(tab.model().fileMetadata().equals(metadata), "Rejected Replace changed file metadata");

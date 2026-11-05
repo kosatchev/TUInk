@@ -21,6 +21,7 @@ class MarkdownSyntaxSettingsStoreTest {
         AppSettingsStore.save(file, expected);
         String original = Files.readString(file);
         assertTrue(original.contains("format=2"));
+        assertTrue(original.lines().anyMatch("ui.theme=monochrome"::equals));
         assertFalse(original.contains(KEY));
 
         var loaded = AppSettingsStore.loadSnapshot(file);
@@ -30,6 +31,7 @@ class MarkdownSyntaxSettingsStoreTest {
 
         assertEquals(expected, AppSettingsStore.load(file));
         assertFalse(Files.readString(file).contains(KEY));
+        assertTrue(Files.readString(file).lines().anyMatch("ui.theme=monochrome"::equals));
     }
 
     @Test void enablingPersistsAndDisablingAgainOmitsTheDefaultWithoutChangingOtherPreferences() throws Exception {
@@ -75,6 +77,6 @@ class MarkdownSyntaxSettingsStoreTest {
     private static AppSettings settings(boolean mdSyntax) {
         return new AppSettings(false, true, false, true, false, false, false, false,
             false, false, false, false, false, false, false, true, true, mdSyntax,
-            GutterDiffMode.STABLE, 2, TabInsertMode.ALWAYS_SPACES_2, UiStyles.Theme.LIGHT, false, false);
+            GutterDiffMode.STABLE, 2, TabInsertMode.ALWAYS_SPACES_2, UiStyles.Theme.MONOCHROME, false, false);
     }
 }

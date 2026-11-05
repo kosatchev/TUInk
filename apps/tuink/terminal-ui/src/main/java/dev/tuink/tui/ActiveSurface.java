@@ -8,7 +8,7 @@ import java.util.Objects;
 /** Immutable command capabilities; construction reads cached UI/session state only. */
 record ActiveSurface(PresentationId presentationId, Kind kind, Focus focus, ModalScope modalScope,
     boolean reading, boolean documentLocked, boolean windowIoBusy, boolean mouseAvailable,
-    boolean syntaxAvailable, boolean wrapLines, LanguageId language) {
+    boolean syntaxDecorationsAvailable, boolean wrapLines, LanguageId language) {
     enum Kind { SOURCE, LIVE_PREVIEW, FROZEN_PREVIEW }
     enum Focus { CONTENT, EDITABLE_TEXT, CONTROL }
     enum ModalScope { NONE, PRESENTATION, WINDOW }
@@ -26,12 +26,12 @@ record ActiveSurface(PresentationId presentationId, Kind kind, Focus focus, Moda
 
     ActiveSurface withKind(Kind next) {
         return new ActiveSurface(presentationId, next, focus, modalScope, reading, documentLocked,
-            windowIoBusy, mouseAvailable, syntaxAvailable, wrapLines, language);
+            windowIoBusy, mouseAvailable, syntaxDecorationsAvailable, wrapLines, language);
     }
 
     ActiveSurface withFocus(Focus next) {
         return new ActiveSurface(presentationId, kind, next, modalScope, reading, documentLocked,
-            windowIoBusy, mouseAvailable, syntaxAvailable, wrapLines, language);
+            windowIoBusy, mouseAvailable, syntaxDecorationsAvailable, wrapLines, language);
     }
 
     boolean preview() { return kind != Kind.SOURCE; }
@@ -45,10 +45,10 @@ record ActiveSurface(PresentationId presentationId, Kind kind, Focus focus, Moda
 
     Availability availability(TuinkCommand command) {
         if (command == null) return Availability.AVAILABLE;
-        if (!syntaxAvailable && switch (command) {
-            case VIEW_TOGGLE_SYNTAX -> true;
+        if (!syntaxDecorationsAvailable && switch (command) {
+            case VIEW_TOGGLE_SYNTAX, VIEW_TOGGLE_RAINBOW_BRACKETS, SETTINGS_TOGGLE_MARKDOWN_CODE_SYNTAX -> true;
             default -> false;
-        }) return new Availability(false, "Syntax highlighting is unavailable in the current theme");
+        }) return new Availability(false, "Syntax styles are unavailable");
         boolean enabled = switch (command) {
             case EDIT_UNDO, EDIT_REDO, EDIT_TOGGLE_LINE_COMMENT -> documentWritable();
             case SEARCH_REPLACE, SEARCH_REPLACE_ALL -> documentEditable();

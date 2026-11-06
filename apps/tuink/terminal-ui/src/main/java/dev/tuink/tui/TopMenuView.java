@@ -380,7 +380,6 @@ final class TopMenuView {
             item(VIEW_CYCLE_GUTTER_DIFF, "[>] Gutter diff: " + gutterDiff.label()),
             item(VIEW_CYCLE_THEME, "[>] Theme: " + themeLabel),
             separator(),
-            item(TuinkCommand.VIEW_PREVIEW_REVEAL_SOURCE, "Go to source", surface.preview()),
             item(TuinkCommand.VIEW_PREVIEW_FOLLOW_LINK, "Follow internal link", surface.preview()),
             item(TuinkCommand.VIEW_PREVIEW_NEXT_HEADING, "Next heading", surface.preview()),
             item(TuinkCommand.VIEW_PREVIEW_PREVIOUS_HEADING, "Previous heading", surface.preview())

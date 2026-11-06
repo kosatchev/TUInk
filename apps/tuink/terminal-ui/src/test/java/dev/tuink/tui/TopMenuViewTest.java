@@ -248,7 +248,6 @@ class TopMenuViewTest {
                 "tuink.view.toggle-selection-highlight",
                 "tuink.view.cycle-gutter-diff",
                 "tuink.view.cycle-theme",
-                "tuink.view.preview.reveal-source",
                 "tuink.view.preview.follow-link",
                 "tuink.view.preview.next-heading",
                 "tuink.view.preview.previous-heading"

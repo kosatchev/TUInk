@@ -87,7 +87,6 @@ public enum TuinkCommand {
     VIEW_TOGGLE_MARKDOWN_PREVIEW("tuink.view.toggle-markdown-preview", "Toggle Markdown preview"),
     VIEW_PREVIEW_COPY_SOURCE("tuink.view.preview.copy-source", "Copy block source"),
     VIEW_PREVIEW_COPY_TABLE_TSV("tuink.view.preview.copy-table-tsv", "Copy table as TSV"),
-    VIEW_PREVIEW_REVEAL_SOURCE("tuink.view.preview.reveal-source", "Go to source"),
     VIEW_PREVIEW_FOLLOW_LINK("tuink.view.preview.follow-link", "Follow internal link"),
     VIEW_PREVIEW_NEXT_HEADING("tuink.view.preview.next-heading", "Next heading"),
     VIEW_PREVIEW_PREVIOUS_HEADING("tuink.view.preview.previous-heading", "Previous heading"),

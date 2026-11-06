@@ -1,6 +1,7 @@
 package dev.tuink.tui;
 
 import dev.tuink.editor.document.DocumentSnapshot;
+import dev.tuink.editor.document.TextPosition;
 import dev.tuink.editor.document.TextRange;
 import dev.tuink.markdown.MarkdownBlock;
 import dev.tuink.markdown.MarkdownDocument;
@@ -38,6 +39,20 @@ final class MarkdownPreviewActions {
         var range = sourceRange(document, offset);
         var block = range == null ? null : find(document.blocks(), range);
         return block instanceof MarkdownBlock.Table table ? MarkdownCopy.tableTsv(table) : null;
+    }
+    /** Maps an insertion position, retaining the end boundary of exact text mappings. */
+    static TextPosition sourcePosition(MarkdownDocument document, int offset) {
+        int at = Math.max(0, Math.min(document.projection().text().length(), offset));
+        dev.tuink.markdown.TextProjection.Mapping preceding = null;
+        for (var mapping : document.projection().mappings()) {
+            if (at >= mapping.start() && at < mapping.end()) {
+                var start = mapping.source().start();
+                return mapping.exact() ? new TextPosition(start.line(), start.utf16Offset() + at - mapping.start()) : start;
+            }
+            if (mapping.end() <= at && (preceding == null || mapping.end() > preceding.end())) preceding = mapping;
+        }
+        if (preceding == null) return null;
+        return preceding.exact() ? preceding.source().end() : preceding.source().start();
     }
     static TextRange sourceRange(MarkdownDocument document, int offset) {
         if (document.projection().text().isEmpty()) return null;

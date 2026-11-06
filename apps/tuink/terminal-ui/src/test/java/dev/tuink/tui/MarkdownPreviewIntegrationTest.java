@@ -1,6 +1,8 @@
 package dev.tuink.tui;
 
 import dev.tuink.tui.command.TuinkCommand;
+import dev.tuink.core.Position;
+import dev.tuink.editor.command.CommandInvocation;
 import dev.tuiframe.input.KeyStroke;
 import dev.tuiframe.input.TextInput;
 import dev.tuiframe.input.PasteEvent;
@@ -13,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class MarkdownPreviewIntegrationTest {
     @TempDir Path directory;
 
-    @Test void previewsUnsavedBufferAndReturnsWithoutChangingDocumentHistoryOrCursor() throws Exception {
+    @Test void previewsUnsavedBufferAndReturnsAtPreviewPositionWithoutChangingDocumentHistory() throws Exception {
         try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("# Heading", "", "Hello **world**."))) {
             window.command(TuinkCommand.CURSOR_DOCUMENT_END);
             window.event(new TextInput(" unsaved"));
@@ -30,13 +32,43 @@ class MarkdownPreviewIntegrationTest {
             assertEquals(source, window.active().tabSession().model().snapshotLines());
             assertEquals(revision, window.active().tabSession().model().revision());
             assertTrue(window.active().state().isDirty());
-            window.command(TuinkCommand.CURSOR_UP);
+            window.command(TuinkCommand.CURSOR_DOCUMENT_START);
+            window.command(TuinkCommand.CURSOR_RIGHT);
             assertEquals(cursor, window.active().state().getCursor());
             window.command(TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW);
             assertFalse(window.preview().active);
-            assertEquals(cursor, window.active().state().getCursor());
+            assertEquals(new Position(0, 3), window.active().state().getCursor());
             window.command(TuinkCommand.EDIT_UNDO);
             assertEquals(List.of("# Heading", "", "Hello **world**."), window.active().tabSession().model().snapshotLines());
+        }
+    }
+
+    @Test void emptyPreviewStillReturnsToSource() throws Exception {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, List.of(""))) {
+            var editor = window.active();
+            window.event(KeyStroke.of(KeyStroke.Key.P, KeyStroke.Modifier.CTRL));
+            window.await(() -> window.preview().ready());
+            assertTrue(window.preview().result.document().projection().text().isEmpty());
+            window.event(KeyStroke.of(KeyStroke.Key.P, KeyStroke.Modifier.CTRL));
+            assertSame(editor, window.selected());
+            assertEquals(new Position(0, 0), editor.state().getCursor());
+        }
+    }
+
+    @Test void returningBeforeTheFirstPreviewLayoutPreservesTheSourceCursor() throws Exception {
+        try (var window = new EditorWindowFixture(directory, "document.md", false,
+                List.of("# Heading", "", "Last paragraph"))) {
+            window.command(TuinkCommand.CURSOR_DOCUMENT_END);
+            var editor = window.active();
+            var cursor = editor.state().getCursor();
+            var toggle = CommandInvocation.of(TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW.id());
+            window.controller.invokeCommand(toggle, UiRecipient.presentation(editor, UiRecipient.Flow.LOCAL));
+            var preview = assertInstanceOf(PreviewTab.class, window.selected());
+            assertFalse(preview.uiState().preview.ready());
+            window.controller.invokeCommand(toggle, UiRecipient.presentation(preview, UiRecipient.Flow.LOCAL));
+            window.frame();
+            assertSame(editor, window.selected());
+            assertEquals(cursor, editor.state().getCursor());
         }
     }
 

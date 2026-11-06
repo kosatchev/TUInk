@@ -455,7 +455,13 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
 
     private void switchMarkdownPresentation() {
         WindowTab current = sessionContext.activePresentation();
-        if (current instanceof PreviewTab preview) { openPreviewSource(preview, null); return; }
+        if (current instanceof PreviewTab preview) {
+            var state = preview.uiState().preview;
+            var source = state.ready()
+                ? MarkdownPreviewActions.sourcePosition(state.result.document(), state.cursorOffset()) : null;
+            openPreviewSource(preview, source);
+            return;
+        }
         var editor = (TerminalEditorApp.EditorTab) current;
         PreviewTab preview = ensureMarkdownPreview(editor);
         if (preview != null) activatePresentation(sessionContext.presentations().indexOf(preview));
@@ -3405,14 +3411,6 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                     String tsv = MarkdownPreviewActions.table(preview.result.document(), preview.cursorOffset());
                     if (tsv != null) { host.clipboard.setText(tsv); notice().info("Copied table as TSV"); }
                     else notice().info("Select a table first");
-                }
-            }
-            case VIEW_PREVIEW_REVEAL_SOURCE -> {
-                if (preview.ready()) {
-                    var source = MarkdownPreviewActions.sourceRange(preview.result.document(), preview.cursorOffset());
-                    if (source != null) {
-                        openPreviewSource((PreviewTab) sessionContext.activePresentation(), source.start());
-                    }
                 }
             }
             case DOCUMENT_FORMAT, DOCUMENT_FORMAT_APPLY -> notice().warning("Return to source to change document format");

@@ -59,7 +59,7 @@ record ActiveSurface(PresentationId presentationId, Kind kind, Focus focus, Moda
             case VIEW_TOGGLE_MARKDOWN_PREVIEW -> modalScope != ModalScope.WINDOW
                 && (preview() || language == LanguageId.MARKDOWN);
             case DOCUMENT_FORMAT, DOCUMENT_REOPEN_ENCODING -> !preview();
-            case VIEW_PREVIEW_COPY_SOURCE, VIEW_PREVIEW_COPY_TABLE_TSV, VIEW_PREVIEW_REVEAL_SOURCE,
+            case VIEW_PREVIEW_COPY_SOURCE, VIEW_PREVIEW_COPY_TABLE_TSV,
                  VIEW_PREVIEW_FOLLOW_LINK, VIEW_PREVIEW_NEXT_HEADING, VIEW_PREVIEW_PREVIOUS_HEADING -> preview();
             case VIEW_TOGGLE_WORD_WRAP -> wrapLines;
             case DOCUMENT_OPEN, DOCUMENT_OPEN_ENCODING, DOCUMENT_RECOVER_DRAFTS, VIEW_CYCLE_THEME -> modalScope != ModalScope.WINDOW;

@@ -132,12 +132,13 @@ to keep editing responsive; unchanged lines inside that range may also be marked
 
 ### Markdown preview
 
-Use `Ctrl+P` or **View → Markdown preview** to create or select the linked
+Use `Ctrl+P` or **View → MD Preview** to create or select the linked
 Preview tab immediately to the right of Source. Both participate in normal tab
 navigation; the selected tab fills the document area. `Ctrl+P` from Preview
-selects Source. If Source has been closed, it reopens the linked file from disk
-in a fresh Source tab on the left. `Ctrl+Enter` opens or selects that same Source
-tab and requests the preview position.
+or **View → MD Source** selects Source at the current Preview position. If
+Source has been closed, it reopens the linked file from disk in a fresh Source
+tab on the left. Empty or unfinished previews open Source without moving its
+cursor.
 
 Two independent **Settings** options control future Markdown file opens:
 **Open both Markdown tabs** creates the adjacent pair; **Open Markdown in Preview**
@@ -150,8 +151,8 @@ its own position, selection and search. Tables and wide diagrams scroll
 horizontally; math and Mermaid use Unicode cells without terminal image
 protocols. `Ctrl+F` searches preview text, `Ctrl+A` selects all, and `Ctrl+C`
 copies the selection or the whole preview. Edit also provides **Copy block
-source** and **Copy table as TSV**; View provides **Go to source**. Esc leaves Find or cancels
-a dialog while keeping Preview selected.
+source** and **Copy table as TSV**. Esc leaves Find or cancels a dialog while
+keeping Preview selected.
 
 **Settings > MD copy as displayed** makes ordinary Preview copy use rendered
 characters: formula layouts, diagram lines and arrows, table frames and quote
@@ -313,8 +314,7 @@ a long rescan. These cases do not have a constant-time responsiveness guarantee.
 | `Ctrl+Shift+Tab` / `Ctrl+PageUp` | Select the previous tab |
 | `Ctrl+W` | Close the current tab |
 | `Ctrl+F` | Open search and replace |
-| `Ctrl+P` | Create/select paired Preview; from Preview select or reopen Source |
-| `Ctrl+Enter` | Open/select paired Source at the preview position |
+| `Ctrl+P` | Create/select paired Preview; from Preview select or reopen Source at the preview position |
 | `Ctrl+/` | Toggle line comments |
 | `Ctrl+Q` | Quit, with confirmation for unsaved work |
 | `F1` / `Alt+I` | Open the File menu |

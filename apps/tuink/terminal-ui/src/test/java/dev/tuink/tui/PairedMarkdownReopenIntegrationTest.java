@@ -42,6 +42,21 @@ class PairedMarkdownReopenIntegrationTest {
         }
     }
 
+    @Test void reopeningFromDiskNavigatesToThePreviewPosition() throws Exception {
+        try (var window = new EditorWindowFixture(directory, "document.md", false,
+                List.of("# First", "", "Second needle paragraph"))) {
+            freezeClean(window);
+            window.event(ctrl(KeyStroke.Key.F)); window.event(new TextInput("needle"));
+            window.event(KeyStroke.of(KeyStroke.Key.ENTER)); window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
+            window.event(KeyStroke.of(KeyStroke.Key.ARROW_LEFT));
+            window.event(ctrl(KeyStroke.Key.P));
+            window.await(() -> window.selected() instanceof TerminalEditorApp.EditorTab && !window.documentIo.busy());
+            assertEquals(new Position(2, 7), window.active().state().getCursor());
+            assertEquals(1, window.tabs.size()); assertEquals(2, window.context.presentations().size());
+            assertFalse(window.active().state().isDirty());
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"symlink", "hardlink"})
     void anAlreadyOpenDirtyAliasIsActivatedWithoutReloadingOrLosingHistory(String kind) throws Exception {
@@ -54,9 +69,10 @@ class PairedMarkdownReopenIntegrationTest {
             window.event(ctrl(KeyStroke.Key.N));
             window.active().tabSession().engine().openExisting(JvmDocumentStorage.resource(alias)); window.frame();
             window.event(new TextInput("dirty "));
-            var editor = window.active(); var session = editor.documentSession(); var cursor = editor.state().getCursor();
+            var editor = window.active(); var session = editor.documentSession();
             long revision = editor.tabSession().model().revision();
-            select(window, frozen.presentationId()); window.event(ctrl(KeyStroke.Key.P));
+            select(window, frozen.presentationId()); window.await(() -> window.preview().ready());
+            window.event(ctrl(KeyStroke.Key.P));
             assertEquals(editor.presentationId(), window.selected().presentationId());
             assertSame(session, window.active().documentSession());
             assertEquals(1, window.tabs.size()); assertEquals(2, window.context.presentations().size());
@@ -64,7 +80,7 @@ class PairedMarkdownReopenIntegrationTest {
             assertInstanceOf(PreviewTab.LiveSource.class, ((PreviewTab) window.context.presentation(frozen.presentationId())).source());
             assertEquals(List.of("dirty original"), window.active().tabSession().model().snapshotLines());
             assertEquals(revision, window.active().tabSession().model().revision());
-            assertEquals(cursor, window.active().state().getCursor()); assertTrue(window.active().state().isDirty());
+            assertEquals(new Position(0, 0), window.active().state().getCursor()); assertTrue(window.active().state().isDirty());
             assertEquals("original", Files.readString(window.document));
             window.event(ctrl(KeyStroke.Key.Z));
             assertEquals(List.of("original"), window.active().tabSession().model().snapshotLines());
@@ -109,7 +125,7 @@ class PairedMarkdownReopenIntegrationTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void anExistingPairUsesItsOwnViewWhenAnotherViewIsTheFirstResourceMatch(boolean reveal) throws Exception {
+    void anExistingPairUsesItsOwnViewWhenAnotherViewIsTheFirstResourceMatch(boolean viaMenu) throws Exception {
         try (var window = new EditorWindowFixture(directory, "document.md", false,
                 List.of("# First", "", "# Second needle", "", "tail"))) {
             var frozen = freezeClean(window);
@@ -126,7 +142,6 @@ class PairedMarkdownReopenIntegrationTest {
             first.documentSession().navigate(new Position(0, 1), false);
             secondSession.navigate(new Position(4, 2), false);
             var firstCursor = first.state().getCursor();
-            var pairedCursor = paired.state().getCursor();
             long revision = first.tabSession().model().revision();
             assertSame(first.documentSession().document(), secondSession.document());
             assertEquals(0, WorkspaceDocuments.findOpenFile(window.host.toTabSessions(window.tabs), -1, window.document));
@@ -135,9 +150,11 @@ class PairedMarkdownReopenIntegrationTest {
             select(window, frozen.presentationId());
             window.event(ctrl(KeyStroke.Key.F)); window.event(new TextInput("needle"));
             window.event(KeyStroke.of(KeyStroke.Key.ENTER)); window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
-            var target = MarkdownPreviewActions.sourceRange(window.preview().result.document(), window.preview().cursorOffset()).start();
-            assertEquals(2, target.line());
-            if (reveal) window.command(TuinkCommand.VIEW_PREVIEW_REVEAL_SOURCE);
+            window.event(KeyStroke.of(KeyStroke.Key.ARROW_LEFT));
+            if (viaMenu) {
+                window.event(KeyStroke.of(KeyStroke.Key.F3));
+                window.event(KeyStroke.of(KeyStroke.Key.ENTER));
+            }
             else window.event(ctrl(KeyStroke.Key.P));
 
             assertEquals(paired.presentationId(), window.selected().presentationId());
@@ -146,8 +163,7 @@ class PairedMarkdownReopenIntegrationTest {
             assertEquals(List.of(first.presentationId(), paired.presentationId(), existing.presentationId()),
                 window.context.presentations().stream().map(WindowTab::presentationId).toList());
             assertEquals(firstCursor, first.state().getCursor(), "The first alias match is not the existing pair's source");
-            assertEquals(reveal ? new Position(target.line(), target.utf16Offset()) : pairedCursor,
-                paired.state().getCursor());
+            assertEquals(new Position(2, 9), paired.state().getCursor());
             assertEquals(revision, first.tabSession().model().revision());
             assertTrue(paired.state().isDirty());
             window.event(ctrl(KeyStroke.Key.P));

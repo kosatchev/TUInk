@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import dev.tuiframe.input.KeyStroke;
 import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.input.TextInput;
+import dev.tuink.core.Position;
 import dev.tuink.tui.command.TuinkCommand;
 import java.nio.file.Path;
 import java.util.List;
@@ -61,7 +62,6 @@ class MarkdownPreviewControllerTest {
     @Test void previewSearchEditsOnlyItsQueryAndEscapeKeepsThePreviewTabOpen() throws Exception {
         List<String> source = List.of("# Title", "", "one **needle** two needle");
         try (EditorWindowFixture window = new EditorWindowFixture(directory, "document.md", false, source)) {
-            var caret = window.active().state().getCursor();
             long revision = window.active().tabSession().model().revision();
             MarkdownPreviewState preview = openPreview(window);
             window.event(ctrl(KeyStroke.Key.F));
@@ -84,17 +84,18 @@ class MarkdownPreviewControllerTest {
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
             assertTrue(preview.active);
             assertInstanceOf(PreviewTab.class, window.selected());
+            window.event(KeyStroke.of(KeyStroke.Key.ARROW_LEFT));
             window.event(ctrl(KeyStroke.Key.P));
             assertFalse(preview.active);
             assertInstanceOf(TerminalEditorApp.EditorTab.class, window.selected());
-            assertEquals(caret, window.active().state().getCursor());
+            assertEquals(new Position(2, 6), window.active().state().getCursor());
             assertEquals(source, window.active().tabSession().model().snapshotLines());
             assertEquals(revision, window.active().tabSession().model().revision());
             assertFalse(window.active().state().isDirty());
         }
     }
 
-    @Test void explicitCopyAndRevealCommandsUseCurrentSemanticPosition() throws Exception {
+    @Test void copyCommandsAndMdSourceMenuUseCurrentSemanticPosition() throws Exception {
         List<String> source = List.of("Intro $x_i^2$.", "", "| A | B |", "|---|---|", "| left | right |", "", "Last paragraph.");
         try (EditorWindowFixture window = new EditorWindowFixture(directory, "document.md", false, source)) {
             long revision = window.active().tabSession().model().revision();
@@ -112,10 +113,11 @@ class MarkdownPreviewControllerTest {
             assertEquals("A\tB\nleft\tright", window.host.clipboard.text());
 
             int paragraph = semantic.indexOf("Last paragraph.");
-            preview.selection.selectRange(semantic, paragraph, paragraph);
-            window.command(TuinkCommand.VIEW_PREVIEW_REVEAL_SOURCE);
+            preview.selection.selectRange(semantic, paragraph + 3, paragraph + 3);
+            window.event(KeyStroke.of(KeyStroke.Key.F3));
+            window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             assertFalse(preview.active);
-            assertEquals(6, window.active().state().getCursor().line());
+            assertEquals(new Position(6, 3), window.active().state().getCursor());
             assertEquals(source, window.active().tabSession().model().snapshotLines());
             assertEquals(revision, window.active().tabSession().model().revision());
             assertFalse(window.active().state().isDirty());

@@ -210,10 +210,11 @@ class SystemClipboardIntegrationTest {
             window.event(ctrl(KeyStroke.Key.C));
             await(window, () -> !port.writes.isEmpty());
             assertTrue(port.text.contains("Heading"));
+            window.command(TuinkCommand.CURSOR_DOCUMENT_START);
             window.event(ctrl(KeyStroke.Key.P));
             window.event(new PasteEvent("literal", false));
             assertEquals(0, port.reads);
-            assertTrue(window.active().tabSession().model().getLine(0).contains("literal"));
+            assertEquals(List.of("# literalHeading", "hello"), window.active().tabSession().model().snapshotLines());
         }
     }
 
@@ -232,8 +233,8 @@ class SystemClipboardIntegrationTest {
             window.event(new TextInput("source!"));
             port.holdRead.countDown();
             await(window, () -> window.selected() instanceof TerminalEditorApp.EditorTab
-                && window.active().tabSession().model().getLine(0).startsWith("source!"));
-            assertEquals(List.of("source!# Heading", "hello"), window.active().tabSession().model().snapshotLines());
+                && window.active().tabSession().model().getLine(0).equals("# source!Heading"));
+            assertEquals(List.of("# source!Heading", "hello"), window.active().tabSession().model().snapshotLines());
         } finally {
             port.holdRead.countDown();
         }

@@ -322,18 +322,15 @@ public class TerminalEditorApp {
             frameProfiler.setOutput(profileWriter, true);
         }
 
-        AppSettings loadedSettings = AppSettings.defaults();
-        AppSettingsStore.LoadedSettings settingsSnapshot = null;
-        String settingsLoadFailure = null;
+        AppSettingsSession settingsSession;
         try {
-            settingsSnapshot = AppSettingsStore.loadSnapshot();
-            loadedSettings = settingsSnapshot.settings();
+            settingsSession = AppSettingsSession.load(cli);
         } catch (IOException e) {
-            settingsLoadFailure = Objects.toString(e.getMessage(), e.getClass().getSimpleName());
+            String settingsLoadFailure = Objects.toString(e.getMessage(), e.getClass().getSimpleName());
+            settingsSession = new AppSettingsSession(AppSettings.defaults(), cli, settingsLoadFailure);
             TerminalDiagnostics.error("Warning: failed to load settings: " + e.getMessage());
         }
 
-        AppSettingsSession settingsSession = new AppSettingsSession(loadedSettings, cli, settingsLoadFailure);
         AppSettings initialSettings = settingsSession.initialSettings();
         applyTheme(initialSettings.theme());
         SessionContext sessionContext = new SessionContext(List.of(newEditorTab()), 0);
@@ -345,7 +342,8 @@ public class TerminalEditorApp {
         if (!settingsSession.canSavePreferences()) {
             notification.persistentWarning(settingsSession.saveUnavailableWarning());
         }
-        UiModalState modalState = UiModalState.none();
+        UiModalState modalState = settingsSession.hasUnsupportedSettings()
+            ? UiModalState.settingsConfirm() : UiModalState.none();
         RecoveryAutosaveManager recoveryAutosave = new RecoveryAutosaveManager(recoveryStore);
         List<RecoveryStore.PendingSnapshot> startupRecoveryEntries = new ArrayList<>();
         TextField saveAsInput = new TextField(TextField.PastePolicy.PRESERVE_TABS);
@@ -373,7 +371,7 @@ public class TerminalEditorApp {
                         + recoveryStore.directory() + ": " + recoveryLoad.skipped()
                 );
             }
-            if (!startupRecoveryEntries.isEmpty()) {
+            if (!startupRecoveryEntries.isEmpty() && modalState.isNone()) {
                 modalState = UiModalState.recoveryConfirm();
             }
         } catch (IOException e) {
@@ -453,15 +451,12 @@ public class TerminalEditorApp {
             }
         }
 
-        AppSettings preferences = settingsSession.preferences(uiSessionState.settingsSnapshot(theme));
-        if (settingsSnapshot != null && !preferences.equals(loadedSettings)) {
-            try {
-                AppSettingsStore.saveIfUnchanged(settingsSnapshot, preferences);
-            } catch (AppSettingsStore.SettingsConflictException conflict) {
-                TerminalDiagnostics.error("Warning: " + conflict.getMessage());
-            } catch (IOException e) {
-                TerminalDiagnostics.error("Warning: failed to save settings: " + e.getMessage());
-            }
+        try {
+            settingsSession.savePreferences(uiSessionState.settingsSnapshot(theme));
+        } catch (AppSettingsStore.SettingsConflictException conflict) {
+            TerminalDiagnostics.error("Warning: " + conflict.getMessage());
+        } catch (IOException e) {
+            TerminalDiagnostics.error("Warning: failed to save settings: " + e.getMessage());
         }
     }
 
@@ -1160,7 +1155,7 @@ public class TerminalEditorApp {
         if (modalState.isSaveUtf8Confirm()) {
             return ConfirmBarInputRouter.Policy.overwrite();
         }
-        if (modalState.isRecoveryConfirm()) {
+        if (modalState.isRecoveryConfirm() || modalState.isSettingsConfirm()) {
             return ConfirmBarInputRouter.Policy.recovery();
         }
         if (modalState.isSaveOverwriteConfirm()) {
@@ -2390,7 +2385,7 @@ public class TerminalEditorApp {
         }
     }
 
-    private void applyTheme(UiStyles.Theme theme) {
+    void applyTheme(UiStyles.Theme theme) {
         this.theme = theme == null ? UiStyles.Theme.CYAN : theme;
         this.styles = UiStyles.forTheme(this.theme);
     }

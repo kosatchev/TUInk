@@ -22,6 +22,7 @@ import dev.tuink.editor.session.document.DocumentIoCoordinator;
 import dev.tuink.core.TabSession;
 import dev.tuink.core.TextModel;
 import dev.tuink.tui.flow.ConfirmChoice;
+import dev.tuink.tui.flow.AppSettings;
 import dev.tuink.tui.flow.ConfirmationAction;
 import dev.tuink.tui.flow.ConfirmationShortcuts;
 import dev.tuink.tui.flow.RecoveryStore;
@@ -166,7 +167,10 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         initial.searchUi = resources.initialSearchUi();
         initial.notification = resources.notification();
         initial.openFileTree = resources.openFileTree();
-        setModal(resources.initialModalState());
+        UiModalState initialModal = settingsSession.hasUnsupportedSettings()
+            ? UiModalState.settingsConfirm() : resources.initialModalState();
+        if (globalModal(initialModal)) globalUi.notification = resources.notification();
+        setModal(initialModal);
         host.bindTabUi(this::focusUi);
         refreshMarkdownHighlighters();
         applyMarkdownOpenPolicy(sessionContext.active(), true);
@@ -269,7 +273,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
     }
 
     private static boolean globalModal(UiModalState modal) {
-        return modal.isQuitConfirm() || modal.isRecoveryConfirm();
+        return modal.isQuitConfirm() || modal.isRecoveryConfirm() || modal.isSettingsConfirm();
     }
 
     private void setModal(UiModalState modal) {
@@ -760,7 +764,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         }
         List<TuiDocumentSession> recoveryTabSessions = host.toDocumentSessions(tabs);
         recoveryAutosave.syncTabs(recoveryTabSessions);
-        String recoveryWarning = modalState().isRecoveryConfirm() ? null
+        String recoveryWarning = modalState().isRecoveryConfirm() || modalState().isSettingsConfirm() ? null
             : recoveryAutosave.autosaveDirtyTabs(recoveryTabSessions, System.nanoTime());
         if (recoveryWarning != null) {
             notice().warning(recoveryWarning);
@@ -798,7 +802,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         }
         pendingOverwritePath = modalState().pendingOverwritePath();
         pendingCloseTabIndex = modalState().pendingCloseTabIndex();
-        confirmMode = recoveryConfirmMode
+        confirmMode = recoveryConfirmMode || modalState().isSettingsConfirm()
             || modalState().isSaveUtf8Confirm()
             || modalState().isOpenUtf16Confirm()
             || saveOverwriteConfirmMode
@@ -2124,6 +2128,13 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         }
         if (resolvedCommand == TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW
             && modalState().isNone() && !ui().openFileMode) { switchMarkdownPresentation(); return; }
+        if (modalState().isSettingsConfirm() && resolvedCommand == TuinkCommand.APP_QUIT) {
+            if (!startupRecoveryEntries.isEmpty() && !postponeRecovery()) return;
+            settingsSession.postponeUnsupportedSettings();
+            setModal(UiModalState.none());
+            requestWindowClose(currentRecipient());
+            return;
+        }
         if (modalState().isRecoveryConfirm() && resolvedCommand == TuinkCommand.APP_QUIT) {
             // Release the offered drafts before the ordinary close workflow,
             // including when the content was focused or a custom binding invoked Quit.
@@ -2184,6 +2195,11 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 host.helpFocusManager().deactivate(HelpOverlayInputRouter.Scope.HELP);
                 setModal(UiModalState.none());
             }
+            return;
+        }
+
+        if (modalState().isSettingsConfirm()) {
+            if (routedConfirmDecision != null) resolveUnsupportedSettings(routedConfirmDecision);
             return;
         }
 
@@ -2387,6 +2403,38 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             reportTemporaryPreferencesChange();
             return;
         }
+    }
+
+    private void resolveUnsupportedSettings(ConfirmChoice choice) {
+        try {
+            switch (choice) {
+                case SAVE -> {
+                    applySessionSettings(settingsSession.repairUnsupportedSettings());
+                    notice().success("Settings fixed");
+                }
+                case DISCARD -> {
+                    applySessionSettings(settingsSession.deleteUnsupportedSettings());
+                    notice().info("Settings file deleted; using defaults");
+                }
+                case CANCEL -> {
+                    settingsSession.postponeUnsupportedSettings();
+                    notice().persistentWarning(settingsSession.saveUnavailableWarning());
+                }
+            }
+            setModal(startupRecoveryEntries.isEmpty() ? UiModalState.none() : UiModalState.recoveryConfirm());
+        } catch (IOException failure) {
+            notice().error(failure.getMessage());
+        }
+    }
+
+    private void applySessionSettings(AppSettings settings) {
+        uiSessionState.apply(settings);
+        host.applyTheme(settings.theme());
+        renderer.setTheme(settings.theme());
+        terminal.setMouseTracking(settings.mouseMode());
+        refreshMarkdownHighlighters();
+        applyMarkdownOpenPolicy(sessionContext.active(), true);
+        eventLoop.invalidate();
     }
 
     /** Both Later and application exit retain the offered copies and release only their claims. */

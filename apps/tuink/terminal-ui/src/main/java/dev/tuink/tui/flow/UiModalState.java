@@ -100,6 +100,10 @@ public record UiModalState(
         return state(UiModalMode.RECOVERY_CONFIRM, null, -1, SaveContinuation.NONE);
     }
 
+    public static UiModalState settingsConfirm() {
+        return state(UiModalMode.SETTINGS_CONFIRM, null, -1, SaveContinuation.NONE);
+    }
+
     public static UiModalState quitConfirm() {
         return state(UiModalMode.QUIT_CONFIRM, null, -1, SaveContinuation.NONE);
     }
@@ -169,6 +173,10 @@ public record UiModalState(
 
     public boolean isRecoveryConfirm() {
         return mode == UiModalMode.RECOVERY_CONFIRM;
+    }
+
+    public boolean isSettingsConfirm() {
+        return mode == UiModalMode.SETTINGS_CONFIRM;
     }
 
     public boolean isQuitConfirm() {

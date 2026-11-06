@@ -130,6 +130,19 @@ final class EditorWindowFixture implements AutoCloseable {
         this(directory, settingsSession.initialSettings().readingMode(), lines, settingsSession);
     }
 
+    EditorWindowFixture(Path directory, List<String> lines, AppSettingsSession settingsSession,
+                        List<? extends RecoveryStore.PendingSnapshot> startupRecoveryEntries,
+                        TerminalEditorApp.RecoveryPersistence recoveryPersistence) throws IOException {
+        this(directory, "document.txt", lines, settingsSession, startupRecoveryEntries, recoveryPersistence);
+    }
+
+    EditorWindowFixture(Path directory, String documentName, List<String> lines, AppSettingsSession settingsSession,
+                        List<? extends RecoveryStore.PendingSnapshot> startupRecoveryEntries,
+                        TerminalEditorApp.RecoveryPersistence recoveryPersistence) throws IOException {
+        this(directory, settingsSession.initialSettings().readingMode(), lines, settingsSession,
+            startupRecoveryEntries, recoveryPersistence, Runnable::run, Runnable::run, documentName);
+    }
+
     private EditorWindowFixture(Path directory, boolean reading, List<String> lines,
                                 AppSettingsSession settingsSession) throws IOException {
         this(directory, reading, lines, settingsSession, List.of());

@@ -1097,6 +1097,8 @@ class Regressions:
         invalid_path.write_bytes(incompatible)
         temporary = "Settings changes apply only to this session."
         with self.session("settings-incompatible", document, home=invalid_home, options=()) as session:
+            session.expect(lambda: "Unsupported settings." in session.screen.text, "unsupported settings confirmation")
+            session.send(b"n", 0.7)
             session.expect(lambda: temporary in session.screen.text, "visible settings-load failure")
             session.send(b"\x1bOR\x1b[B\r")
             session.expect(lambda: temporary in session.screen.text and "Wrap lines enabled" not in session.screen.text,
@@ -1120,6 +1122,9 @@ class Regressions:
         meta, payload = format5_snapshot(recovery_home, document, original, "recovered draft\n")
         metadata_before, text_before = meta.read_bytes(), payload.read_bytes()
         with self.session("settings-incompatible-recovery", home=recovery_home, options=()) as session:
+            session.expect(lambda: "Unsupported settings." in session.screen.text
+                           and not recovery_prompt(session), "settings confirmation precedes recovery")
+            session.send(b"n", 0.7)
             session.expect(lambda: recovery_prompt(session, 1)
                            and temporary in session.screen.text,
                            "the recovery prompt also shows the settings-load warning")

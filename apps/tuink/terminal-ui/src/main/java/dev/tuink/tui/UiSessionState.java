@@ -43,29 +43,33 @@ final class UiSessionState {
 
     static UiSessionState from(AppSettings settings) {
         UiSessionState state = new UiSessionState();
-        state.showTabBarSetting = settings.showTabBar();
-        state.wrapLinesSetting = settings.wrapLines();
-        state.wrapWordsSetting = settings.wrapWords();
-        state.readingModeSetting = settings.readingMode();
-        state.confirmOnCloseSetting = settings.confirmOnClose();
-        state.mouseModeSetting = settings.mouseMode();
-        state.rightClickClipboardSetting = settings.rightClickClipboard();
-        state.highlightActiveGutterSetting = settings.highlightActiveGutter();
-        state.smartHomeEndSetting = settings.smartHomeEnd();
-        state.autoIndentSetting = settings.autoIndent();
-        state.autoPairsSetting = settings.autoPairs();
-        state.autoListSetting = settings.autoList();
-        state.visibleWhitespaceSetting = settings.visibleWhitespace();
-        state.syntaxHighlightingSetting = settings.syntaxHighlighting();
-        state.rainbowBracketsSetting = settings.rainbowBrackets();
-        state.autoSelectionHighlightSetting = settings.autoSelectionHighlight();
-        state.markdownOpenBothTabsSetting = settings.markdownOpenBothTabs();
-        state.markdownOpenInPreviewSetting = settings.markdownOpenInPreview();
-        state.markdownCodeHighlightingSetting = settings.markdownCodeHighlighting();
-        state.markdownVisualCopySetting = settings.markdownVisualCopy();
-        state.gutterDiffModeSetting = settings.gutterDiffMode();
-        state.tabWidthSetting = settings.tabWidth();
-        state.tabInsertModeSetting = settings.tabInsertMode();
+        state.apply(settings);
         return state;
+    }
+
+    void apply(AppSettings settings) {
+        showTabBarSetting = settings.showTabBar();
+        wrapLinesSetting = settings.wrapLines();
+        wrapWordsSetting = settings.wrapWords();
+        readingModeSetting = settings.readingMode();
+        confirmOnCloseSetting = settings.confirmOnClose();
+        mouseModeSetting = settings.mouseMode();
+        rightClickClipboardSetting = settings.rightClickClipboard();
+        highlightActiveGutterSetting = settings.highlightActiveGutter();
+        smartHomeEndSetting = settings.smartHomeEnd();
+        autoIndentSetting = settings.autoIndent();
+        autoPairsSetting = settings.autoPairs();
+        autoListSetting = settings.autoList();
+        visibleWhitespaceSetting = settings.visibleWhitespace();
+        syntaxHighlightingSetting = settings.syntaxHighlighting();
+        rainbowBracketsSetting = settings.rainbowBrackets();
+        autoSelectionHighlightSetting = settings.autoSelectionHighlight();
+        markdownOpenBothTabsSetting = settings.markdownOpenBothTabs();
+        markdownOpenInPreviewSetting = settings.markdownOpenInPreview();
+        markdownCodeHighlightingSetting = settings.markdownCodeHighlighting();
+        markdownVisualCopySetting = settings.markdownVisualCopy();
+        gutterDiffModeSetting = settings.gutterDiffMode();
+        tabWidthSetting = settings.tabWidth();
+        tabInsertModeSetting = settings.tabInsertMode();
     }
 }

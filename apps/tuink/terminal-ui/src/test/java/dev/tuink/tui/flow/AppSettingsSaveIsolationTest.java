@@ -450,6 +450,64 @@ class AppSettingsSaveIsolationTest {
     }
 
     @Test
+    void unsupportedSnapshotRetainsTheFingerprintOfTheSameSingleReadForBothExplicitActions() throws IOException {
+        for (boolean repair : List.of(false, true)) {
+            Path target = directory.resolve("unsupported-" + repair + ".properties");
+            Files.writeString(target, "format=99\n");
+            byte[] external = "format=98\n# another writer\n".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+            SavingFileSystem fileSystem = new SavingFileSystem(target.getFileSystem(), Mode.NORMAL);
+            fileSystem.provider.afterFirstRead = () -> Files.write(target, external);
+
+            var unsupported = assertThrows(AppSettingsStore.UnsupportedSettingsException.class,
+                () -> AppSettingsStore.loadSnapshot(fileSystem.wrap(target)));
+
+            assertEquals(1, fileSystem.provider.readCount.get());
+            assertEquals(AppSettings.defaults(), unsupported.repairedSettings());
+            assertThrows(AppSettingsStore.SettingsConflictException.class, () -> {
+                if (repair) AppSettingsStore.repairIfUnchanged(unsupported);
+                else AppSettingsStore.deleteIfUnchanged(unsupported);
+            });
+            assertArrayEquals(external, Files.readAllBytes(target));
+        }
+    }
+
+    @Test
+    void explicitDeleteRechecksChangedBytesAfterItsFirstFingerprintWhileHoldingTheGuard() throws IOException {
+        Path target = directory.resolve("tuink.properties");
+        Files.writeString(target, "format=99\n");
+        SavingFileSystem fileSystem = new SavingFileSystem(target.getFileSystem(), Mode.NORMAL);
+        var unsupported = assertThrows(AppSettingsStore.UnsupportedSettingsException.class,
+            () -> AppSettingsStore.loadSnapshot(fileSystem.wrap(target)));
+        byte[] external = "format=98\n# edit during delete admission\n".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+        fileSystem.provider.readCount.set(0);
+        fileSystem.provider.afterFirstRead = () -> Files.write(target, external);
+
+        assertThrows(AppSettingsStore.SettingsConflictException.class,
+            () -> AppSettingsStore.deleteIfUnchanged(unsupported));
+
+        assertTrue(fileSystem.provider.readCount.get() >= 2, "Deletion must revalidate after acquiring the writer guard");
+        assertArrayEquals(external, Files.readAllBytes(target));
+        assertOnlyFiles("tuink.properties");
+    }
+
+    @Test
+    void explicitRepairRechecksAfterStagingAndPreservesAnotherWritersBytes() throws IOException {
+        Path target = directory.resolve("tuink.properties");
+        Files.writeString(target, "format=99\n");
+        SavingFileSystem fileSystem = new SavingFileSystem(target.getFileSystem(), Mode.NORMAL);
+        var unsupported = assertThrows(AppSettingsStore.UnsupportedSettingsException.class,
+            () -> AppSettingsStore.loadSnapshot(fileSystem.wrap(target)));
+        byte[] external = "format=98\n# edit during repair staging\n".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+        fileSystem.provider.afterWrite = () -> Files.write(target, external);
+
+        assertThrows(AppSettingsStore.SettingsConflictException.class,
+            () -> AppSettingsStore.repairIfUnchanged(unsupported));
+
+        assertArrayEquals(external, Files.readAllBytes(target));
+        assertOnlyFiles("tuink.properties");
+    }
+
+    @Test
     void startupReadRemainsBoundedWhenTheFileGrowsAfterTheSizeCheck() throws IOException {
         Path target = directory.resolve("tuink.properties");
         AppSettingsStore.save(target, AppSettings.defaults());

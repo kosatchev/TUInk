@@ -182,6 +182,9 @@ final class WindowChrome {
         var modal = input.modal(); var host = input.host(); int cols = input.cols();
         if (modal.isSaveOverwriteConfirm()) return host.buildOverwriteConfirmBar(modal.pendingOverwritePath(), cols, rows);
         if (modal.isQuitConfirm()) return host.buildQuitConfirmBar(input.context().tabs(), cols, rows);
+        if (modal.isSettingsConfirm()) return ConfirmBarView.responsive(
+            "Unsupported settings. Replace invalid values with defaults?", cols, rows,
+            "Fix", "Delete", true, "Later", host.confirmPolicy(modal).shortcuts());
         if (modal.isRecoveryConfirm()) return ConfirmBarView.responsive(host.buildRecoveryPrompt(input.recoveryEntryCount()), cols, rows,
             "Restore", "Delete", true, "Later", host.confirmPolicy(modal).shortcuts());
         if (modal.isCloseTabConfirm()) return host.buildCloseTabConfirmBar(input.context().tabs(), modal.pendingCloseTabIndex(), cols, rows);

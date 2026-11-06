@@ -6,6 +6,7 @@ import dev.tuink.storage.jvm.JvmFilePaths;
 import dev.tuink.core.TabInsertMode;
 import dev.tuink.tui.style.UiStyles;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.channels.Channels;
@@ -113,7 +114,17 @@ public final class AppSettingsStore {
         }
         Path target = requireRegularTarget(requested, attributes).toRealPath();
         byte[] bytes = readSettingsBytes(target);
-        return new LoadedSettings(parseSettings(bytes, requested), requested, target, fingerprint(bytes));
+        byte[] originalFingerprint = fingerprint(bytes);
+        Properties properties = null;
+        try {
+            properties = parseProperties(bytes, requested);
+            return new LoadedSettings(parseSettings(properties, requested, false), requested, target, originalFingerprint);
+        } catch (IOException unsupported) {
+            AppSettings repaired = properties != null && FORMAT.equals(properties.getProperty(KEY_FORMAT))
+                ? parseSettings(properties, requested, true) : AppSettings.defaults();
+            throw new UnsupportedSettingsException(unsupported,
+                new LoadedSettings(repaired, requested, target, originalFingerprint));
+        }
     }
 
     private static byte[] readSettingsBytes(Path path) throws IOException {
@@ -132,40 +143,60 @@ public final class AppSettingsStore {
         }
     }
 
-    private static AppSettings parseSettings(byte[] bytes, Path path) throws IOException {
+    private static Properties parseProperties(byte[] bytes, Path path) throws IOException {
         Properties p = new Properties();
         try (var input = new ByteArrayInputStream(bytes)) {
             p.load(input);
         } catch (IllegalArgumentException malformed) {
             throw new IOException("Malformed settings file " + path + ": " + malformed.getMessage(), malformed);
         }
-        requireExactSchema(p, path);
+        return p;
+    }
+
+    /** Strict loads and explicit repair share the same field readers and validation rules. */
+    private static AppSettings parseSettings(Properties p, Path path, boolean repair) throws IOException {
+        if (!repair) requireExactSchema(p, path);
+        AppSettings defaults = AppSettings.defaults();
         return new AppSettings(
-            parseBoolean(p, KEY_SHOW_TAB_BAR, path),
-            parseBoolean(p, KEY_WRAP_LINES, path),
-            parseBoolean(p, KEY_WRAP_WORDS, path),
-            parseBoolean(p, KEY_READING_MODE, path),
-            parseBoolean(p, KEY_CONFIRM_ON_CLOSE, path),
-            parseBoolean(p, KEY_MOUSE_MODE, path),
-            parseBoolean(p, KEY_HIGHLIGHT_ACTIVE_GUTTER, path),
-            parseBoolean(p, KEY_SMART_HOME_END, path),
-            parseBoolean(p, KEY_AUTO_INDENT, path),
-            parseBoolean(p, KEY_AUTO_PAIRS, path),
-            parseBoolean(p, KEY_AUTO_LIST, path),
-            parseBoolean(p, KEY_VISIBLE_WHITESPACE, path),
-            parseBoolean(p, KEY_SYNTAX_HIGHLIGHTING, path),
-            parseBoolean(p, KEY_RAINBOW_BRACKETS, path),
-            parseBoolean(p, KEY_AUTO_SELECTION_HIGHLIGHT, path),
-            parseBoolean(p, KEY_MARKDOWN_OPEN_BOTH_TABS, path),
-            parseBoolean(p, KEY_MARKDOWN_OPEN_IN_PREVIEW, path),
-            parseOptionalBoolean(p, KEY_MARKDOWN_CODE_HIGHLIGHTING, false, path),
-            parseEnum(p, KEY_GUTTER_DIFF_MODE, GutterDiffMode.class, path),
-            parseTabWidth(p, path),
-            parseEnum(p, KEY_TAB_INSERT_MODE, TabInsertMode.class, path),
-            parseEnum(p, KEY_THEME, UiStyles.Theme.class, path),
-            parseOptionalBoolean(p, KEY_RIGHT_CLICK_CLIPBOARD, false, path),
-            parseOptionalBoolean(p, KEY_MARKDOWN_VISUAL_COPY, false, path)
+            setting(repair, defaults.showTabBar(), () -> parseBoolean(p, KEY_SHOW_TAB_BAR, path)),
+            setting(repair, defaults.wrapLines(), () -> parseBoolean(p, KEY_WRAP_LINES, path)),
+            setting(repair, defaults.wrapWords(), () -> parseBoolean(p, KEY_WRAP_WORDS, path)),
+            setting(repair, defaults.readingMode(), () -> parseBoolean(p, KEY_READING_MODE, path)),
+            setting(repair, defaults.confirmOnClose(), () -> parseBoolean(p, KEY_CONFIRM_ON_CLOSE, path)),
+            setting(repair, defaults.mouseMode(), () -> parseBoolean(p, KEY_MOUSE_MODE, path)),
+            setting(repair, defaults.highlightActiveGutter(), () -> parseBoolean(p, KEY_HIGHLIGHT_ACTIVE_GUTTER, path)),
+            setting(repair, defaults.smartHomeEnd(), () -> parseBoolean(p, KEY_SMART_HOME_END, path)),
+            setting(repair, defaults.autoIndent(), () -> parseBoolean(p, KEY_AUTO_INDENT, path)),
+            setting(repair, defaults.autoPairs(), () -> parseBoolean(p, KEY_AUTO_PAIRS, path)),
+            setting(repair, defaults.autoList(), () -> parseBoolean(p, KEY_AUTO_LIST, path)),
+            setting(repair, defaults.visibleWhitespace(), () -> parseBoolean(p, KEY_VISIBLE_WHITESPACE, path)),
+            setting(repair, defaults.syntaxHighlighting(), () -> parseBoolean(p, KEY_SYNTAX_HIGHLIGHTING, path)),
+            setting(repair, defaults.rainbowBrackets(), () -> parseBoolean(p, KEY_RAINBOW_BRACKETS, path)),
+            setting(repair, defaults.autoSelectionHighlight(), () -> parseBoolean(p, KEY_AUTO_SELECTION_HIGHLIGHT, path)),
+            setting(repair, defaults.markdownOpenBothTabs(), () -> parseBoolean(p, KEY_MARKDOWN_OPEN_BOTH_TABS, path)),
+            setting(repair, defaults.markdownOpenInPreview(), () -> parseBoolean(p, KEY_MARKDOWN_OPEN_IN_PREVIEW, path)),
+            setting(repair, defaults.markdownCodeHighlighting(), () -> parseOptionalBoolean(p, KEY_MARKDOWN_CODE_HIGHLIGHTING, false, path)),
+            setting(repair, defaults.gutterDiffMode(), () -> parseEnum(p, KEY_GUTTER_DIFF_MODE, GutterDiffMode.class, path)),
+            setting(repair, defaults.tabWidth(), () -> parseTabWidth(p, path)),
+            setting(repair, defaults.tabInsertMode(), () -> parseEnum(p, KEY_TAB_INSERT_MODE, TabInsertMode.class, path)),
+            setting(repair, defaults.theme(), () -> parseEnum(p, KEY_THEME, UiStyles.Theme.class, path)),
+            setting(repair, defaults.rightClickClipboard(), () -> parseOptionalBoolean(p, KEY_RIGHT_CLICK_CLIPBOARD, false, path)),
+            setting(repair, defaults.markdownVisualCopy(), () -> parseOptionalBoolean(p, KEY_MARKDOWN_VISUAL_COPY, false, path))
         );
+    }
+
+    @FunctionalInterface
+    private interface SettingReader<T> {
+        T read() throws IOException;
+    }
+
+    private static <T> T setting(boolean repair, T fallback, SettingReader<T> reader) throws IOException {
+        try {
+            return reader.read();
+        } catch (IOException invalid) {
+            if (!repair) throw invalid;
+            return fallback;
+        }
     }
 
     public static void save(AppSettings settings) throws IOException {
@@ -182,7 +213,37 @@ public final class AppSettingsStore {
         save(loaded.requested, settings, loaded);
     }
 
-    private static void save(Path path, AppSettings settings, LoadedSettings loaded) throws IOException {
+    /** Repairs only the exact unsupported bytes and target previously offered to the user. */
+    public static LoadedSettings repairIfUnchanged(UnsupportedSettingsException unsupported) throws IOException {
+        LoadedSettings original = Objects.requireNonNull(unsupported, "unsupported").original;
+        return save(original.requested, original.settings(), original);
+    }
+
+    /** Deletes the requested leaf; a final symbolic link is removed without deleting its target. */
+    public static LoadedSettings deleteIfUnchanged(UnsupportedSettingsException unsupported) throws IOException {
+        LoadedSettings original = Objects.requireNonNull(unsupported, "unsupported").original;
+        Path target = requireUnchanged(original);
+        FileSaveGuard guard;
+        try {
+            guard = FileSaveGuard.acquire(target);
+        } catch (IOException unavailable) {
+            throw new SettingsConflictException(original.requested, unavailable);
+        }
+        Throwable failure = null;
+        try {
+            Path entry = JvmFilePaths.resolveEntry(original.requested);
+            requireSameTarget(original.requested, target, original);
+            Files.delete(entry);
+            return new LoadedSettings(AppSettings.defaults(), original.requested, entry, null);
+        } catch (IOException | RuntimeException | Error error) {
+            failure = error;
+            throw error;
+        } finally {
+            releaseGuard(guard, failure);
+        }
+    }
+
+    private static LoadedSettings save(Path path, AppSettings settings, LoadedSettings loaded) throws IOException {
         Objects.requireNonNull(settings, "settings");
         Path target = loaded == null ? path.toAbsolutePath() : requireUnchanged(loaded);
         if (target.getFileName() == null || target.getFileName().toString().equals(".")
@@ -230,12 +291,17 @@ public final class AppSettingsStore {
         p.setProperty(KEY_TAB_INSERT_MODE, canonical(settings.tabInsertMode()));
         p.setProperty(KEY_THEME, canonical(settings.theme()));
 
+        byte[] encoded;
+        try (var output = new ByteArrayOutputStream()) {
+            p.store(output, "TUInk user settings");
+            encoded = output.toByteArray();
+        }
         Path tmp = Files.createTempFile(dir, ".tuink-settings.", ".tmp");
         FileSaveGuard guard = null;
         Throwable failure = null;
         try {
             try (OutputStream out = Files.newOutputStream(tmp)) {
-                p.store(out, "TUInk user settings");
+                out.write(encoded);
             }
             try {
                 guard = FileSaveGuard.acquire(target);
@@ -244,19 +310,12 @@ public final class AppSettingsStore {
                 throw unavailable;
             }
             publishSettings(tmp, path.toAbsolutePath(), target, loaded);
+            return new LoadedSettings(settings, path.toAbsolutePath(), target, fingerprint(encoded));
         } catch (IOException | RuntimeException | Error error) {
             failure = error;
             throw error;
         } finally {
-            if (guard != null) {
-                try {
-                    guard.close();
-                } catch (IOException cleanupFailure) {
-                    if (failure != null) failure.addSuppressed(cleanupFailure);
-                    // Publication already completed when there is no primary
-                    // failure. Releasing the guard must not turn it into a failed save.
-                }
-            }
+            releaseGuard(guard, failure);
             try {
                 Files.deleteIfExists(tmp);
             } catch (IOException cleanupFailure) {
@@ -265,6 +324,16 @@ public final class AppSettingsStore {
                 }
                 // A committed settings file must not be reported as a failed save.
             }
+        }
+    }
+
+    private static void releaseGuard(FileSaveGuard guard, Throwable failure) {
+        if (guard == null) return;
+        try {
+            guard.close();
+        } catch (IOException cleanupFailure) {
+            if (failure != null) failure.addSuppressed(cleanupFailure);
+            // A committed write or deletion must not become a failure while releasing its guard.
         }
     }
 
@@ -434,6 +503,19 @@ public final class AppSettingsStore {
         }
     }
 
+    /** A readable bounded file whose current schema or values require an explicit user decision. */
+    public static final class UnsupportedSettingsException extends IOException {
+        private static final long serialVersionUID = 1L;
+        private final LoadedSettings original;
+
+        private UnsupportedSettingsException(IOException cause, LoadedSettings original) {
+            super(cause.getMessage(), cause.getCause());
+            this.original = original;
+        }
+
+        public AppSettings repairedSettings() { return original.settings(); }
+    }
+
     public static final class SettingsConflictException extends IOException {
         private static final long serialVersionUID = 1L;
 
@@ -482,11 +564,10 @@ public final class AppSettingsStore {
     }
 
     private static boolean parseBoolean(Properties p, String key, Path path) throws IOException {
-        return switch (p.getProperty(key)) {
-            case "true" -> true;
-            case "false" -> false;
-            default -> throw invalid(path, key + " must be true or false");
-        };
+        String value = p.getProperty(key);
+        if ("true".equals(value)) return true;
+        if ("false".equals(value)) return false;
+        throw invalid(path, key + " must be true or false");
     }
 
     private static int parseTabWidth(Properties p, Path path) throws IOException {

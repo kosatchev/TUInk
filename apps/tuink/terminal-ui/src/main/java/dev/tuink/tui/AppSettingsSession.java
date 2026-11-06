@@ -1,14 +1,19 @@
 package dev.tuink.tui;
 
 import dev.tuink.tui.flow.AppSettings;
+import dev.tuink.tui.flow.AppSettingsStore;
 import dev.tuink.tui.style.UiStyles;
+import java.io.IOException;
 import java.util.Objects;
 
 /** Keeps temporary launch overrides separate from explicitly changed preferences. */
 final class AppSettingsSession {
-    private final AppSettings saved;
-    private final AppSettings initial;
-    private final String saveUnavailableReason;
+    private AppSettings saved;
+    private AppSettings initial;
+    private String saveUnavailableReason;
+    private final TuiCliOptions cli;
+    private AppSettingsStore.LoadedSettings snapshot;
+    private AppSettingsStore.UnsupportedSettingsException unsupported;
     private AppSettings observedTemporarySettings;
     private boolean readingModeChanged;
     private boolean mouseModeChanged;
@@ -21,12 +26,63 @@ final class AppSettingsSession {
     AppSettingsSession(AppSettings saved, TuiCliOptions cli, String saveUnavailableReason) {
         this.saved = Objects.requireNonNull(saved, "saved");
         this.saveUnavailableReason = saveUnavailableReason;
-        Objects.requireNonNull(cli, "cli");
+        this.cli = Objects.requireNonNull(cli, "cli");
         initial = withOverrides(saved,
             cli.readModeOverride() == null ? saved.readingMode() : cli.readModeOverride(),
             cli.mouseEnabledOverride() == null ? saved.mouseMode() : cli.mouseEnabledOverride(),
             cli.themeOverride() == null ? saved.theme() : cli.themeOverride());
         observedTemporarySettings = canSavePreferences() ? null : initial;
+    }
+
+    static AppSettingsSession load(TuiCliOptions cli) throws IOException {
+        try {
+            var loaded = AppSettingsStore.loadSnapshot();
+            var session = new AppSettingsSession(loaded.settings(), cli);
+            session.snapshot = loaded;
+            return session;
+        } catch (AppSettingsStore.UnsupportedSettingsException unsupported) {
+            return forUnsupportedSettings(unsupported, cli);
+        }
+    }
+
+    static AppSettingsSession forUnsupportedSettings(AppSettingsStore.UnsupportedSettingsException failure,
+                                                    TuiCliOptions cli) {
+        var session = new AppSettingsSession(AppSettings.defaults(), cli, failure.getMessage());
+        session.unsupported = Objects.requireNonNull(failure);
+        return session;
+    }
+
+    boolean hasUnsupportedSettings() { return unsupported != null; }
+
+    AppSettings repairUnsupportedSettings() throws IOException {
+        return accept(AppSettingsStore.repairIfUnchanged(Objects.requireNonNull(unsupported)));
+    }
+
+    AppSettings deleteUnsupportedSettings() throws IOException {
+        return accept(AppSettingsStore.deleteIfUnchanged(Objects.requireNonNull(unsupported)));
+    }
+
+    void postponeUnsupportedSettings() { unsupported = null; }
+
+    private AppSettings accept(AppSettingsStore.LoadedSettings loaded) {
+        snapshot = loaded;
+        saved = loaded.settings();
+        initial = withOverrides(saved,
+            cli.readModeOverride() == null ? saved.readingMode() : cli.readModeOverride(),
+            cli.mouseEnabledOverride() == null ? saved.mouseMode() : cli.mouseEnabledOverride(),
+            cli.themeOverride() == null ? saved.theme() : cli.themeOverride());
+        saveUnavailableReason = null;
+        unsupported = null;
+        observedTemporarySettings = null;
+        readingModeChanged = mouseModeChanged = themeChanged = false;
+        return initial;
+    }
+
+    void savePreferences(AppSettings runtime) throws IOException {
+        AppSettings preferences = preferences(runtime);
+        if (canSavePreferences() && snapshot != null && !preferences.equals(saved)) {
+            AppSettingsStore.saveIfUnchanged(snapshot, preferences);
+        }
     }
 
     AppSettings initialSettings() {
@@ -37,8 +93,7 @@ final class AppSettingsSession {
 
     String saveUnavailableWarning() {
         if (canSavePreferences()) return null;
-        return "Settings changes apply only to this session. " + saveUnavailableReason
-            + ". Repair the settings file and restart.";
+        return "Settings changes apply only to this session. " + saveUnavailableReason;
     }
 
     /** Only blocked sessions observe runtime changes; launch overrides are already in the baseline. */

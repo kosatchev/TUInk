@@ -637,6 +637,17 @@ the original Unix filename bytes. This also conservatively rejects a literal
 directory to start; no other profile is selected automatically. The `--read`,
 `--no-mouse`, and `--theme` options apply only to the current session. Explicit
 changes through the menus or their key bindings are saved as preferences.
+Readable unsupported settings open a **Fix / Delete / Later** confirmation,
+initially focused on **Later**. **Fix** keeps valid fields of the current
+format and replaces invalid or missing values with defaults; an unsupported
+whole format or malformed properties file is replaced with defaults. **Delete**
+removes the selected profile entry and uses defaults. Neither action converts
+old formats or accepts old names. **N/Esc** or the default button leaves the
+file unchanged and makes preference changes temporary for this session.
+**Ctrl+Q** requests normal application exit while keeping the file and any
+offered recovery copies. Recovery is offered after the settings response.
+If the settings file changed externally, Fix and Delete preserve the changed
+file and keep the confirmation open with an error.
 If the settings file changes during the session, including edits saved from
 TUInk itself, the changed file is kept and the application warns on exit that
 this session's menu preferences were not saved.

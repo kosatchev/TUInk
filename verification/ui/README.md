@@ -70,6 +70,19 @@ For an already built install layout, select scenarios directly:
 python3 -B verification/ui/run.py --java "$JAVA_HOME/bin/java" focus resize
 ```
 
+Unsupported settings also have a focused JVM/native gate:
+
+```sh
+python3 -B verification/ui/unsupported_settings.py --java "$JAVA_HOME/bin/java"
+python3 -B verification/ui/unsupported_settings.py --binary /absolute/path/to/tuink
+```
+
+It uses private homes to exercise Fix, Delete, default Later, temporary Preview
+preferences, CLI overrides, external-change conflicts, whole-file defaults and
+settings-before-recovery ordering. It verifies settings and document bytes and
+keeps queued recovery copies through Ctrl+Q. `--output-root` selects its logs;
+neither invocation uses the user's settings or desktop clipboard.
+
 `--classpath` accepts installed JVM JARs, defaulting to
 `apps/tuink/launcher/build/install/tuink/lib/*`; `--output-root` selects the log directory.
 There is no hard-coded SDK or temporary path. Each run creates isolated homes,

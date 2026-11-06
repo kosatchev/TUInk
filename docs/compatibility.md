@@ -316,14 +316,14 @@ The reader accepts only the current schema. Unknown formats, malformed values, m
 `ui.theme` accepts only `cyan`, `blue`, or `monochrome`. The Monochrome theme
 uses `ui.theme=monochrome` in settings and `--theme=monochrome` on the CLI.
 There are no legacy-name aliases or automatic conversions. An unsupported
-theme value follows the incompatible-file rules above; update that value
-manually before expecting the profile to load.
+theme value follows the incompatible-file rules below, including explicit Fix
+with the default value.
 
 Settings format 2 adds the two independent Markdown opening preferences.
-Format 1 files remain untouched and are rejected, including automatic saves
-from that session. To start a new profile, retain the old file under another
-name and let a following session save a complete format 2 settings file.
-There is no automatic conversion or historical settings reader.
+Format 1 files are rejected, including automatic saves from that session.
+Explicit Fix may replace an unsupported whole format with current defaults;
+it does not interpret historical fields. There is no automatic conversion or
+historical settings reader.
 
 The current format 2 schema also accepts the optional Booleans
 `ui.markdownCodeHighlighting`, `ui.rightClickClipboard` and
@@ -336,12 +336,32 @@ right-click copy/paste does not enable mouse tracking or change the ordinary
 clipboard commands. Existing required fields and unknown-key rejection remain
 strict; malformed optional values also reject the profile without rewriting it.
 
-If settings cannot be loaded, an in-editor persistent warning explains that
-preference changes apply only to the current session. Changing a preference in
-Source or Preview repeats that warning instead of displaying an ordinary success
-message. Opening errors and recovery diagnostics retain priority. Repair or
-retain the incompatible file under another name and restart before expecting
-preferences to be saved; the strict reader does not replace that file.
+Readable, bounded settings with unsupported schema, values, or properties
+syntax open **Fix / Delete / Later**, initially focused on Later. The question
+is **Unsupported settings. Replace invalid values with defaults?**. The hint
+is **Y=Fix  D=Delete  N/Esc=Later  Ctrl+Q=Quit**. Fix retains valid known fields
+of the current format, replacing invalid or missing fields with defaults and
+removing unknown fields. An unsupported whole format or malformed properties
+syntax resets the complete profile to defaults. No aliases, historical readers
+or migrations are introduced.
+
+Fix and Delete require the requested path and captured file contents to remain
+unchanged, and use the existing settings-write guards. Failure preserves the
+file, keeps the prompt open and reports the error. Delete unlinks only the
+selected profile entry; when that final entry is a symbolic link, its target is
+kept. Successful Fix or Delete applies the resulting settings to the current
+session, reapplies temporary CLI overrides and refreshes the guarded snapshot
+for later preference saves.
+
+Later leaves the file unchanged, uses defaults and disables preference saves
+for this session. A persistent warning explains that changes are temporary;
+Source or Preview preference changes repeat that warning. Ordinary I/O failures
+and files exceeding the size limit retain the warning path without a repair
+prompt. Recovery is offered only after the settings response. Ctrl+Q requests
+ordinary application exit without changing the settings file, and releases any
+queued recovery claims while retaining their copies. Current dirty documents
+still require the usual Save/Discard/Cancel choice. Fix and Delete cannot run
+when their question or controls are clipped; Later and safe Quit remain usable.
 
 The complete settings file, including comments, is limited to 64 KiB. Larger
 files are rejected before parsing and left unchanged; the session uses defaults

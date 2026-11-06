@@ -1,6 +1,6 @@
 # Unreleased
 
-Changes on the development branch after [v0.17.0](0.17.0.md).
+Changes on the development branch after [v0.18.0](0.18.0.md).
 
 - **View → MD Source** (`Ctrl+P`) opens or selects Source at the current
   Preview position. Empty or unfinished previews still allow returning to

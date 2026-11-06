@@ -10,13 +10,13 @@ language.
 
 ## TUInk in action
 
-### Files and menus
+### Markdown Source, Preview, and tabs
 
-![TUInk file picker and menu tour](docs/assets/tuink-menus.gif)
+![TUInk cycling through Markdown Source, Preview, and README tabs](docs/assets/tuink-tabs.gif)
 
-### Tabs and syntax highlighting
+### Menus
 
-![TUInk tab tour](docs/assets/tuink-tabs.gif)
+![TUInk menus on an empty document](docs/assets/tuink-menus.gif)
 
 ## Why TUInk?
 
@@ -140,6 +140,10 @@ Source has been closed, it reopens the linked file from disk in a fresh Source
 tab on the left. Empty or unfinished previews open Source without moving its
 cursor.
 
+Preview is available for Markdown filenames (`.md`, `.markdown`, `.mdown`,
+`.mkd` and `.mkdn`, case-insensitively). Save an unnamed draft with a Markdown
+filename before opening Preview.
+
 Two independent **Settings** options control future Markdown file opens:
 **Open both Markdown tabs** creates the adjacent pair; **Open Markdown in Preview**
 selects Preview. With only the second enabled, Preview opens on its own and
@@ -167,6 +171,8 @@ formulas and diagrams. Automatic wrapping of ordinary paragraphs is joined
 back into logical lines so pasted text can wrap to its destination's width.
 Copy uses the accepted Markdown layout and contains plain text without terminal
 escape sequences or interface chrome.
+Control characters and unsupported grapheme clusters use the same visible
+replacements as the screen.
 
 Preview uses the same mouse scrollbars as Source, including both thumb drags
 and track clicks. Its mode, position, search summary and `Ctrl+P` hint
@@ -186,8 +192,24 @@ and its encoding, BOM and line endings through the ordinary version and
 publication checks. Confirmed Save As updates the linked filename and reopen
 target without opening an editor. An unavailable resource reports a save error;
 explicit Save As can export the retained snapshot. Reopening reads disk contents,
-so it does not restore the closed source buffer or its history. Background results
-are applied only to their matching presentation and generation.
+using the decoder of the last read or confirmed save. Unsaved output-format
+changes do not change that decoder. Reopening does not restore the closed source
+buffer or its history. Background results are applied only to their matching
+presentation and generation.
+
+Two English demonstration documents are included in `apps/tuink/samples/`:
+
+- `demo_markdown_preview.md` covers formulas, diagrams, code highlighting and quotes.
+- `demo_mermaid_complex.md` covers 18 supported diagrams and two expected diagnostics.
+
+Open either document and press `Ctrl+P`. For example, from the repository root:
+
+```bash
+./gradlew --console=plain :app:run --args="apps/tuink/samples/demo_markdown_preview.md"
+```
+
+JVM and native archives include the same documents under `samples/`; Debian
+packages install them under `/usr/share/doc/tuink/examples/`.
 
 See the [Markdown preview guide (Russian)](docs/markdown-preview.md) for controls,
 supported Mermaid/TeX subsets, snapshot behavior and resource limits.
@@ -810,6 +832,7 @@ diagnostic material. These local directories are outside the source layout.
 - [Перенос на другой компьютер, сборка и запуск (русский)](docs/setup-ru.md)
 - [Build, test, and native targets](docs/building.md)
 - [Release archives and Debian packaging](docs/packaging.md)
+- [TUInk 0.18.0 release notes](docs/releases/0.18.0.md)
 - [Unreleased changes](docs/releases/unreleased.md)
 - [Markdown preview (русский)](docs/markdown-preview.md)
 - [Architecture roadmap](docs/architecture-roadmap.md)

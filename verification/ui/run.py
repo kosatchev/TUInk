@@ -136,6 +136,52 @@ class Regressions:
         path.write_text(text, encoding="utf-8")
         return path
 
+    def folder_explorer(self):
+        directory = self.root / "explorer-project"
+        source = directory / "src"
+        source.mkdir(parents=True)
+        document = source / "note.txt"
+        original = "EXPLORER_DOCUMENT_TEXT"
+        document.write_text(original, encoding="utf-8")
+        with self.session("folder-explorer", directory, max_heap_mb=128) as session:
+            def sidebar_visible():
+                # The root caption is in the left panel, independently of a
+                # document's full path in the top menu or its tab title.
+                return session.screen.lines[1].startswith(" " + directory.name)
+
+            session.expect(lambda: sidebar_visible() and any("src" in line[:30]
+                           for line in session.screen.lines[2:]), "CLI directory explorer with its first folder")
+            session.send(b"\x05\x1b[C")  # Ctrl+E, Right: focus and expand src.
+            session.expect(lambda: any("note.txt" in line[:30] for line in session.screen.lines[2:]),
+                           "the asynchronously loaded child file")
+            session.send(b"\x1b[C\r")  # Right enters the expanded folder's first child; Enter opens it.
+            session.expect(lambda: original in session.screen.text and sidebar_visible()
+                           and session.screen.col >= 31, "the selected file beside the explorer with document focus")
+            assert document.read_text(encoding="utf-8") == original
+            session.snapshot("opened-from-tree")
+
+            session.send(b"\x02")
+            session.expect(lambda: not sidebar_visible() and original in session.screen.text,
+                           "Ctrl+B hiding the explorer while retaining the document")
+            session.send(b"\x02")
+            session.expect(lambda: sidebar_visible() and any("note.txt" in line[:30]
+                           for line in session.screen.lines[2:]), "Ctrl+B restoring the expanded explorer")
+            session.resize(24, 40)
+            session.expect(lambda: not sidebar_visible() and original in session.screen.text,
+                           "a narrow terminal temporarily hiding the explorer")
+            session.resize(24, 80)
+            session.expect(lambda: sidebar_visible() and original in session.screen.text,
+                           "the explorer returning after widening the terminal")
+
+            session.send(b"\x05")
+            session.expect(lambda: session.screen.col < 30, "Ctrl+E moving the caret into the tree")
+            session.send(b"\x1b", 0.7)  # Allow the standalone Escape/key-sequence distinction.
+            session.expect(lambda: session.screen.col >= 31, "Escape returning the caret to the document")
+            session.send(b"edited ")
+            session.save(document, "edited " + original, "editing and saving only the selected file after Escape")
+            session.finish()
+        assert document.read_text(encoding="utf-8") == "edited " + original
+
     def cli_path_identity(self):
         directory = self.root / "cli-path-files"
         directory.mkdir()
@@ -654,9 +700,13 @@ class Regressions:
                 session.mouse(65, 10, 15)
             before = document_rows(session)
             session.save(document, original)
-            assert document_rows(session) == before, session.screen.text
+            # Notifications reserve their own row. Once it expires, the full
+            # manually scrolled viewport must return with the same text/offset.
+            session.expect(lambda: document_rows(session) == before,
+                           "Save preserving the complete viewport after its notification", timeout=5)
             session.send(b"\x03")  # Copy
-            assert document_rows(session) == before, session.screen.text
+            session.expect(lambda: document_rows(session) == before,
+                           "Copy preserving the complete viewport after its notification", timeout=5)
             session.send(b"\x0e")  # New tab
             assert "Tab 2/2" in session.screen.text, session.screen.text
             session.send(b"\x1b[27;5;9~")  # Ctrl+Tab (xterm modifyOtherKeys)
@@ -1775,7 +1825,7 @@ class Regressions:
         assert document.read_text(encoding="utf-8") == original
 
 
-SCENARIOS = ("reading", "focus", "field", "resize", "large-wrap", "tabs", "tab-scoped-ui", "history", "grapheme-edit-caret", "selection-autoscroll", "long-copy-name", "navigation", "fragmented-keys", "quit-confirmation", "gutter-idle", "paste", "settings", "settings-conflict", "recovery", "recovery-format5", "recovery-memory", "linux-keys", "enhanced-text", "long-unicode-edit", "save-as-workspace", "settings-memory", "syntax-memory", "unix-path-recovery", "literal-indentation", "field-memory", "document-caption", "save-name-suggestion", "replacement-memory", "paste-memory", "recovery-lock-cleanup", "xdg-profile", "cli-path-identity", "save-as-retarget", "legacy-encoding", "document-format", "format-errors", "format-reopen", "field-edit-caret", "field-memory-growth", "identical-replace-budget", "clipboard-memory", "cpp-raw-indentation", "terminal-diagnostics", "terminal-attributes", "startup-dependencies")
+SCENARIOS = ("reading", "focus", "field", "resize", "large-wrap", "tabs", "folder-explorer", "tab-scoped-ui", "history", "grapheme-edit-caret", "selection-autoscroll", "long-copy-name", "navigation", "fragmented-keys", "quit-confirmation", "gutter-idle", "paste", "settings", "settings-conflict", "recovery", "recovery-format5", "recovery-memory", "linux-keys", "enhanced-text", "long-unicode-edit", "save-as-workspace", "settings-memory", "syntax-memory", "unix-path-recovery", "literal-indentation", "field-memory", "document-caption", "save-name-suggestion", "replacement-memory", "paste-memory", "recovery-lock-cleanup", "xdg-profile", "cli-path-identity", "save-as-retarget", "legacy-encoding", "document-format", "format-errors", "format-reopen", "field-edit-caret", "field-memory-growth", "identical-replace-budget", "clipboard-memory", "cpp-raw-indentation", "terminal-diagnostics", "terminal-attributes", "startup-dependencies")
 
 
 def classpath_manifest(classpath):

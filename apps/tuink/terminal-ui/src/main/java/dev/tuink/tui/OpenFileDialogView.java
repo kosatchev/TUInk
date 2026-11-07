@@ -66,6 +66,12 @@ final class OpenFileDialogView {
 
     static Placement place(Object scopeId, OpenDialogLayout layout, FileTreeView.Placement tree,
         boolean showHiddenFiles, Rect interactionClip, FilePickerOpenWorkflow.Notice notice, TextField location) {
+        return place(scopeId, layout, tree, showHiddenFiles, interactionClip, notice, location, null);
+    }
+
+    static Placement place(Object scopeId, OpenDialogLayout layout, FileTreeView.Placement tree,
+        boolean showHiddenFiles, Rect interactionClip, FilePickerOpenWorkflow.Notice notice, TextField location,
+        Path folderRoot) {
         Objects.requireNonNull(layout, "layout");
         Objects.requireNonNull(tree, "tree");
         Objects.requireNonNull(location, "location");
@@ -74,9 +80,18 @@ final class OpenFileDialogView {
             ? CompactDialogView.place(interactionClip,
                 notice != null && interactionClip.height() < 3
                     ? NotificationPresentation.fitReasonWithPath(notice.summary(), notice.path(), interactionClip.width())
-                    : "Open file")
+                    : folderRoot == null ? "Open file" : "Open folder")
             : null;
         var buttons = OpenFileDialogController.buttonsForLayout(layout);
+        if (folderRoot != null && layout.width() >= 27) {
+            String label = "Open folder";
+            String cancel = " Cancel ";
+            int total = label.length() + 2 + 2 + cancel.length() + 2;
+            int start = layout.left() + Math.max(1, (layout.width() - 2 - total) / 2);
+            Button ok = new Button(buttons.ok().row(), start, label);
+            buttons = new OpenFileDialogController.OpenDialogButtons(ok,
+                new Button(buttons.cancel().row(), start + ok.width() + 2, cancel));
+        }
         String hiddenLabel = showHiddenFiles ? "Hidden [x]" : "Hidden [ ]";
         Button hidden = Button.plain(layout.top() + 1,
             Math.max(layout.left() + 1, layout.right() - hiddenLabel.length()), hiddenLabel);
@@ -98,15 +113,16 @@ final class OpenFileDialogView {
             buttonTarget(Control.CLOSE, close, space,
                 compact != null || tree.enabled(), compact != null)
         );
+        String title = folderRoot == null ? "Open File" : "Open Folder";
         PlacedModal frame = compact != null ? compact.frame() : new Modal(layout.width(), layout.height(),
-            tree.loading() ? " Open File (Loading...) " : " Open File ")
+            " " + title + (tree.loading() ? " (Loading...) " : " "))
             .layout(new Rect(layout.left(), layout.top(), layout.width(), layout.height()));
         return new Placement(layout, frame, tree, new FocusScope<>(
             scopeId, FocusResetPolicy.FIRST_FOCUSABLE, targets,
             compact == null ? List.of(Control.LIST, Control.LOCATION, Control.HIDDEN, Control.OK, Control.CANCEL)
                 : List.of(Control.CLOSE),
             List.of(Control.CLOSE, Control.HIDDEN, Control.CANCEL, Control.OK, Control.LOCATION, Control.LIST)
-        ), showHiddenFiles, compact, notice, location);
+        ), showHiddenFiles, compact, notice, location, folderRoot);
     }
 
     private static RoutedTarget<Control, Action> buttonTarget(
@@ -181,7 +197,8 @@ final class OpenFileDialogView {
         boolean showHiddenFiles,
         CompactDialogView.Placement compactDialog,
         FilePickerOpenWorkflow.Notice notice,
-        TextField location
+        TextField location,
+        Path folderRoot
     ) {
         Placement {
             Objects.requireNonNull(layout, "layout");

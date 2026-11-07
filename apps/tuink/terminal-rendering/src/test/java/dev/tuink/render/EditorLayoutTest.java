@@ -10,9 +10,55 @@ import dev.tuink.core.EditorState;
 import dev.tuink.core.Position;
 import dev.tuink.core.SimpleLineBuffer;
 import dev.tuink.core.TextModel;
+import dev.tuiframe.geometry.Rect;
 import org.junit.jupiter.api.Test;
 
 class EditorLayoutTest {
+    @Test
+    void paneGeometryRetainsTerminalDimensionsAndPlacesBothScrollbarsInsideThePane() {
+        TextModel model = model("0123456789".repeat(10), "second", "third", "fourth", "fifth", "sixth");
+        EditorLayout layout = EditorLayout.resolve(model, new TerminalEditorTextLayout(model), new EditorState(),
+            10, 80, 2, 1, false, false, 4, new Rect(25, 2, 40, 6));
+
+        assertAll(
+            () -> assertEquals(80, layout.cols()),
+            () -> assertEquals(10, layout.rows()),
+            () -> assertEquals(new Rect(25, 2, 40, 6), layout.editorBounds()),
+            () -> assertEquals(new Rect(28, 2, 36, 5), layout.scrollLayout().contentBounds()),
+            () -> assertEquals(new Rect(64, 2, 1, 5), layout.scrollLayout().verticalScrollbarBounds()),
+            () -> assertEquals(new Rect(28, 7, 36, 1), layout.scrollLayout().horizontalScrollbarBounds())
+        );
+    }
+
+    @Test
+    void paneWrappingUsesItsOwnWidthAndGlobalChromeStillClipsItsHeight() {
+        TextModel model = model("12345678901234567890");
+        EditorLayout layout = EditorLayout.resolve(model, new TerminalEditorTextLayout(model), new EditorState(),
+            12, 80, 2, 2, true, false, 4, new Rect(30, 0, 10, 12));
+
+        assertAll(
+            () -> assertEquals(new Rect(30, 2, 10, 7), layout.editorBounds()),
+            () -> assertEquals(7, layout.contentColumns()),
+            () -> assertEquals(7, layout.contentRows()),
+            () -> assertNull(layout.scrollLayout().horizontalScrollbarBounds()),
+            () -> assertNull(layout.scrollLayout().verticalScrollbarBounds())
+        );
+    }
+
+    @Test
+    void paneTooNarrowForTheGutterHasNoTextOrScrollbarOutsideItsBounds() {
+        TextModel model = model("long text", "second", "third");
+        for (int width = 0; width <= 3; width++) {
+            EditorLayout layout = EditorLayout.resolve(model, new TerminalEditorTextLayout(model), new EditorState(),
+                8, 80, 1, 0, false, false, 4, new Rect(30, 1, width, 6));
+            assertEquals(0, layout.contentColumns());
+            assertEquals(30 + width, layout.scrollLayout().contentBounds().x());
+            assertTrue(layout.editorBounds().contains(layout.scrollLayout().contentBounds()));
+            assertNull(layout.scrollLayout().horizontalScrollbarBounds());
+            assertNull(layout.scrollLayout().verticalScrollbarBounds());
+        }
+    }
+
     @Test
     void horizontalScrollbarReducesAvailableContentRows() {
         EditorLayout layout = resolve(model("1234567890"), 5, 12, 1, 0, false);

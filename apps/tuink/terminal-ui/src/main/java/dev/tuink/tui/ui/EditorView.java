@@ -59,7 +59,7 @@ public final class EditorView {
     }
 
     public CursorPosition cursorFromPlan(RenderPlan plan, int contentTopRow) {
-        int top = Math.max(1, contentTopRow);
+        int top = plan.scrollLayout().contentBounds().y();
         return new CursorPosition(plan.cursorRow() + top + 1, plan.cursorCol() + 1);
     }
 
@@ -122,15 +122,15 @@ public final class EditorView {
     private TextSurfacePointer.Placement<Position> pointerPlacement(
         EditorTextLayout layout, EditorState state, RenderPlan plan, int contentRows, int contentTopRow
     ) {
-        int columns = Math.max(0, plan.cols() - plan.gutterWidth() - plan.scrollbarWidth());
-        int top = Math.max(1, contentTopRow);
-        var content = new Rect(plan.gutterWidth(), top, columns, Math.max(0, contentRows));
+        int columns = plan.scrollLayout().contentBounds().width();
+        int top = plan.scrollLayout().contentBounds().y();
+        var content = new Rect(plan.scrollLayout().contentBounds().x(), top, columns, Math.max(0, contentRows));
         var placement = new ScrollLayout(content, content, null, null, null);
         var geometry = coordinates(layout, plan, columns);
         int pointerRows = Math.max(0, contentRows);
         Rect horizontalTrack = plan.scrollLayout().horizontalScrollbarBounds();
         if (horizontalTrack != null) pointerRows = Math.max(pointerRows, Math.max(0, horizontalTrack.bottomExclusive() - top));
-        return new TextSurfacePointer.Placement<>(new Rect(0, top, Math.max(0, plan.cols()), pointerRows),
+        return new TextSurfacePointer.Placement<>(new Rect(plan.editorBounds().x(), top, plan.editorBounds().width(), pointerRows),
             placement, null, null, geometry, geometry.viewport(state, contentRows, columns),
             geometry.totalRows(), plan.totalColumns(), TextSurfacePointer.Policy.source(plan.wrapLines()));
     }
@@ -141,11 +141,12 @@ public final class EditorView {
         EditorState state = engine.state();
         var bars = EditorScrollbars.from(plan, rows, columns, contentTopRow);
         var geometry = coordinates(engine.textLayout(), plan, bars.layout().contentBounds().width());
-        int top = Math.max(1, contentTopRow);
+        int top = bars.layout().contentBounds().y();
         int pointerRows = Math.max(0, contentRows);
         Rect horizontal = bars.layout().horizontalScrollbarBounds();
         if (horizontal != null) pointerRows = Math.max(pointerRows, Math.max(0, horizontal.bottomExclusive() - top));
-        var placement = new TextSurfacePointer.Placement<Position>(new Rect(0, top, Math.max(0, columns), pointerRows),
+        var surface = plan.editorBounds().intersection(new Rect(0, top, Math.max(0, columns), pointerRows));
+        var placement = new TextSurfacePointer.Placement<Position>(surface,
             bars.layout(), bars.vertical(), bars.horizontal(), geometry,
             geometry.viewport(state, bars.layout().contentBounds().height(), bars.layout().contentBounds().width()),
             plan.totalLines(), plan.totalColumns(), TextSurfacePointer.Policy.source(plan.wrapLines()));
@@ -211,7 +212,7 @@ public final class EditorView {
     }
 
     private void ensureCursorVisible(EditorEngine engine, RenderPlan plan, int contentRows) {
-        int contentColumns = Math.max(0, plan.cols() - plan.gutterWidth() - plan.scrollbarWidth());
+        int contentColumns = plan.scrollLayout().contentBounds().width();
         EditorViewNavigation.ensureCursorVisible(engine, contentRows, contentColumns, plan.wrapLines(), plan.wrapByWords());
     }
 
@@ -233,9 +234,10 @@ public final class EditorView {
         if (textLayout.model() != model) {
             throw new IllegalArgumentException("textLayout must be bound to model");
         }
-        int columns = Math.max(0, plan.cols() - plan.gutterWidth() - plan.scrollbarWidth());
+        int columns = plan.scrollLayout().contentBounds().width();
         return coordinates(textLayout, plan, columns).positionInViewport(state, contentRows,
-            mouse.row() - Math.max(1, contentTopRow), mouse.column() - plan.gutterWidth());
+            mouse.row() - plan.scrollLayout().contentBounds().y(),
+            mouse.column() - plan.scrollLayout().contentBounds().x());
     }
 
     private EditorViewCoordinates coordinates(EditorTextLayout layout, RenderPlan plan, int columns) {

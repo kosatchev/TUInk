@@ -131,7 +131,8 @@ class FrameCompositionTest {
             null,
             false,
             false,
-            new Rect(0, 0, 0, 0)
+            new Rect(0, 0, 0, 0),
+            null
         );
         assertThrows(
             IllegalArgumentException.class,
@@ -151,7 +152,7 @@ class FrameCompositionTest {
     void sourceFramesRejectBlockingGeometryFromAnotherWindowSnapshot() {
         var base = composition(InlinePromptBar.hidden(), 0);
         var layers = new FrameComposition.Layers(null, null, false, null, null,
-            FrameComposition.OpenFile.hidden(), null, null, false, false, new Rect(0, 1, 40, 6));
+            FrameComposition.OpenFile.hidden(), null, null, false, false, new Rect(0, 1, 40, 6), null);
         assertThrows(IllegalArgumentException.class, () -> new FrameComposition(base.document(), base.surface(),
             base.search(), layers, false, false, false));
     }
@@ -283,7 +284,8 @@ class FrameCompositionTest {
                 null,
                 false,
                 false,
-                new Rect(0, 0, 0, 0)
+                new Rect(0, 0, 0, 0),
+                null
             ),
             false,
             false,

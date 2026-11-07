@@ -133,8 +133,10 @@ public class RenderRasterizer implements AutoCloseable {
         CellBuffer buffer = new CellBuffer(rows, cols);
         Canvas canvas = new Canvas(buffer);
         canvas.fill(new Rect(0, 0, cols, rows), bodyStyle());
-        int contentCols = Math.max(1, cols - plan.scrollbarWidth());
-        int topRow = Math.max(1, contentTopRow);
+        Rect editor = plan.editorBounds().intersection(new Rect(0, 0, cols, rows));
+        int contentRight = Math.min(editor.rightExclusive(), plan.scrollLayout().contentBounds().rightExclusive());
+        int textLeft = plan.scrollLayout().contentBounds().x();
+        int topRow = plan.editorBounds().y();
         int activeGutterRow = resolveActiveGutterRow(plan);
         int visibleLineCount = Math.min(plan.lines().size(), plan.contentRows());
         beginPreparedLineFrame(visibleLineCount);
@@ -143,20 +145,20 @@ public class RenderRasterizer implements AutoCloseable {
             for (int row = 0; row < visibleLineCount; row++) {
                 LineVisual line = plan.lines().get(row);
                 int screenRow = row + topRow;
-                if (screenRow >= rows) {
+                if (screenRow >= editor.bottomExclusive()) {
                     break;
                 }
                 CellStyle gutterStyle = highlightActiveGutter && row == activeGutterRow
                     ? styles.windows().renderGutterActive()
                     : styles.windows().renderGutter();
-                drawGutter(buffer, screenRow, line, gutterStyle, contentCols);
+                drawGutter(buffer, screenRow, editor.x(), line, gutterStyle, Math.min(contentRight, textLeft));
                 boolean markLeadingWhitespace = shouldMarkLeadingWhitespace(plan, line);
                 drawHighlightedText(
                     canvas,
                     screenRow,
-                    plan.gutterWidth(),
+                    textLeft,
                     line,
-                    contentCols,
+                    contentRight,
                     markLeadingWhitespace,
                     row
                 );
@@ -210,20 +212,20 @@ public class RenderRasterizer implements AutoCloseable {
         }
     }
 
-    private void drawGutter(CellBuffer buffer, int row, LineVisual line, CellStyle baseStyle, int cols) {
+    private void drawGutter(CellBuffer buffer, int row, int left, LineVisual line, CellStyle baseStyle, int cols) {
         String gutter = line.gutter();
         if (gutter == null || gutter.isEmpty()) {
             return;
         }
-        drawText(buffer, row, 0, gutter, baseStyle, cols);
-        if (cols <= 0) {
+        drawText(buffer, row, left, gutter, baseStyle, cols);
+        if (cols <= left) {
             return;
         }
         CellStyle markerStyle = gutterMarkerStyle(line.gutterDiff());
         if (markerStyle == null) {
             return;
         }
-        buffer.set(row, 0, String.valueOf(gutter.charAt(0)), markerStyle);
+        buffer.set(row, left, String.valueOf(gutter.charAt(0)), markerStyle);
     }
 
     private CellStyle gutterMarkerStyle(GutterDiffMarker marker) {

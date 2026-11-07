@@ -46,8 +46,8 @@ final class WindowChrome {
         InlinePromptBar prompt, NotificationBar notification, SaveAsBarView.Placement saveAs,
         ConfirmBarView.Placement confirm, SearchBarView.Placement search) {
         Rect contentBounds(boolean reserveNotification) {
-            return new Rect(0, contentTopRow, input.cols(), Math.max(0,
-                input.rows() - 1 - contentTopRow - prompt.height() - (reserveNotification ? notification.height() : 0)));
+            return input.preferences().explorer.documentBounds(new Rect(0, contentTopRow, input.cols(), Math.max(0,
+                input.rows() - 1 - contentTopRow - prompt.height() - (reserveNotification ? notification.height() : 0))));
         }
         Result finish(Content content) { return complete(this, content); }
     }
@@ -57,23 +57,24 @@ final class WindowChrome {
         private TabBar.State state;
         private PresentationId active;
         private int activeIndex = -1;
-        private int columns = -1;
+        private Rect placedBounds;
         private TabBarView.Placement previous;
 
         TabStrip() { this(TabBar.State.initial()); }
         TabStrip(TabBar.State state) { this.state = Objects.requireNonNull(state); }
         void adopt(TabBar.State next) { state = Objects.requireNonNull(next); }
-        void invalidateLayout() { columns = -1; }
+        void invalidateLayout() { placedBounds = null; }
 
         private TabBarView.Placement place(Input input, List<TabBarView.TabItem> items, boolean show) {
             if (!show) { previous = null; active = null; return null; }
             int nextIndex = input.context().activePresentationIndex();
             PresentationId nextActive = input.context().activePresentation().presentationId();
             var view = TabBarView.build(items, nextIndex, state);
-            Rect bounds = new Rect(0, 1, input.cols(), 1), clip = new Rect(0, 0, input.cols(), input.rows());
-            var placement = !Objects.equals(active, nextActive) || activeIndex != nextIndex || columns != input.cols()
+            Rect pane = input.preferences().explorer.documentBounds(new Rect(0, 1, input.cols(), Math.max(0, input.rows() - 2)));
+            Rect bounds = new Rect(pane.x(), 1, pane.width(), 1), clip = new Rect(0, 0, input.cols(), input.rows());
+            var placement = !Objects.equals(active, nextActive) || activeIndex != nextIndex || !bounds.equals(placedBounds)
                 ? view.placeRevealingActive(bounds, clip) : view.placeKeepingActiveVisible(bounds, clip, previous);
-            active = nextActive; activeIndex = nextIndex; columns = input.cols();
+            active = nextActive; activeIndex = nextIndex; placedBounds = bounds;
             state = placement.state(); previous = placement;
             return placement;
         }
@@ -148,6 +149,9 @@ final class WindowChrome {
         input.menu().adopt(menuPlacement.state());
         var topBar = menu.topBar(selected.file(), selected.dirty(), input.cols(), content.surface().reading());
         var picker = picker(prepared);
+        var explorer = input.preferences().explorer.place(new Rect(0, 1, input.cols(),
+            Math.max(0, input.rows() - 2 - prepared.prompt().height() - prepared.notification().height())),
+            prepared.dialogViewport(), input.modal().isNone() && !tab.openFileMode && !input.menu().state().isOpen());
         var page = host.activeHelpPage(input.modal().isHelpHints(), input.modal().isHelpLicenses(), input.modal().isHelpAuthor());
         var help = host.helpOverlayPlacement(input.rows(), input.cols(), page, prepared.dialogViewport().y());
         var format = input.modal().isDocumentFormat() && tab.formatDialog != null
@@ -175,7 +179,7 @@ final class WindowChrome {
         }
         return new Result(new FrameComposition.Surface(topBar, content.status(), prepared.prompt(), prepared.notification()),
             new FrameComposition.Layers(tabs, menuPlacement, prepared.saveAs() != null, prepared.saveAs(), prepared.confirm(),
-                picker, help, format, focus.modalAttention.highlighted(), focus.blockingContentFocused, blocking), prepared.search());
+                picker, help, format, focus.modalAttention.highlighted(), focus.blockingContentFocused, blocking, explorer), prepared.search());
     }
 
     private static ConfirmBarView confirmation(Input input, int rows) {
@@ -209,7 +213,8 @@ final class WindowChrome {
             !CompactDialogView.required(viewport.height(), viewport.width()));
         tab.openFileFocusState.synchronizeRoot(tree.root());
         var dialog = OpenFileDialogView.place(TerminalEditorApp.OPEN_FILE_SCOPE_ID, layout, placedTree,
-            tree.showHiddenFiles(), viewport, tab.pickerNotice, tab.openFileFocusState.location());
+            tree.showHiddenFiles(), viewport, tab.pickerNotice, tab.openFileFocusState.location(),
+            tab.choosingFolder ? tree.root() : null);
         dialog.activate(tab.openFileFocusState);
         return new FrameComposition.OpenFile(PathPresentation.full(tree.root()), dialog, tab.openFileFocusState.focus());
     }

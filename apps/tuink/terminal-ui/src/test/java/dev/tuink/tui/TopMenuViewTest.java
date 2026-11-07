@@ -210,6 +210,8 @@ class TopMenuViewTest {
                 "tuink.tab.new",
                 "tuink.document.open",
                 "tuink.document.open-encoding",
+                "tuink.folder.open",
+                "tuink.folder.close",
                 "tuink.document.save",
                 "tuink.document.save-as",
                 "tuink.document.format",
@@ -237,6 +239,9 @@ class TopMenuViewTest {
         assertEquals(
             List.of(
                 "tuink.view.toggle-markdown-preview",
+                "tuink.explorer.toggle",
+                "tuink.explorer.focus",
+                "tuink.explorer.refresh",
                 "tuink.settings.toggle-reading-mode",
                 "tuink.view.toggle-line-wrap",
                 "tuink.view.toggle-word-wrap",

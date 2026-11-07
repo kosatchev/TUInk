@@ -19,7 +19,8 @@ public record EditorLayout(
     int contentColumns,
     int scrollbarWidth,
     int horizontalScrollbarHeight,
-    ScrollLayout scrollLayout
+    ScrollLayout scrollLayout,
+    Rect editorBounds
 ) {
     public EditorLayout {
         rows = Math.max(1, rows);
@@ -32,6 +33,17 @@ public record EditorLayout(
         scrollbarWidth = Math.max(0, scrollbarWidth);
         horizontalScrollbarHeight = Math.max(0, horizontalScrollbarHeight);
         Objects.requireNonNull(scrollLayout, "scrollLayout");
+        Objects.requireNonNull(editorBounds, "editorBounds");
+    }
+
+    /** Compatibility constructor for a full-width editor surface. */
+    public EditorLayout(int rows, int cols, int contentTopRow, int overlayRows, int gutterWidth,
+        int contentRows, int contentColumns, int scrollbarWidth, int horizontalScrollbarHeight,
+        ScrollLayout scrollLayout) {
+        this(rows, cols, contentTopRow, overlayRows, gutterWidth, contentRows, contentColumns,
+            scrollbarWidth, horizontalScrollbarHeight, scrollLayout,
+            new Rect(0, Math.max(1, contentTopRow), Math.max(1, cols),
+                Math.max(0, contentRows) + Math.max(0, horizontalScrollbarHeight)));
     }
 
     public static EditorLayout resolve(
@@ -46,6 +58,24 @@ public record EditorLayout(
         boolean wrapByWords,
         int tabWidth
     ) {
+        return resolve(model, textLayout, state, rows, cols, contentTopRow, overlayRows,
+            wrapLines, wrapByWords, tabWidth, new Rect(0, 0, Math.max(1, cols), Math.max(1, rows)));
+    }
+
+    /** Resolves an editor pane while keeping rows and columns in terminal coordinates. */
+    public static EditorLayout resolve(
+        TextModel model,
+        EditorTextLayout textLayout,
+        EditorState state,
+        int rows,
+        int cols,
+        int contentTopRow,
+        int overlayRows,
+        boolean wrapLines,
+        boolean wrapByWords,
+        int tabWidth,
+        Rect editorSurface
+    ) {
         if (textLayout == null || textLayout.model() != model) {
             throw new IllegalArgumentException("textLayout must be bound to model");
         }
@@ -54,8 +84,12 @@ public record EditorLayout(
         int top = Math.max(1, contentTopRow);
         int overlays = Math.max(0, overlayRows);
         int availableRows = Math.max(0, safeRows - top - 1 - overlays);
+        Rect editor = Objects.requireNonNull(editorSurface, "editorSurface")
+            .intersection(new Rect(0, top, safeCols, availableRows));
         int gutter = gutterWidth(model.lineCount());
-        Rect viewport = new Rect(Math.min(gutter, safeCols), top, Math.max(0, safeCols - gutter), availableRows);
+        int visibleGutter = Math.min(gutter, editor.width());
+        Rect viewport = new Rect(editor.x() + visibleGutter, editor.y(),
+            Math.max(0, editor.width() - gutter), editor.height());
         Position cursor = model.clamp(state.getCursor());
         int maxWidth = wrapLines ? 0 : textLayout.maxVisualLineWidth(tabWidth);
         int cursorExtent = wrapLines
@@ -82,14 +116,15 @@ public record EditorLayout(
         return new EditorLayout(
             safeRows,
             safeCols,
-            top,
+            editor.y(),
             overlays,
             gutter,
             scrollLayout.contentBounds().height(),
             scrollLayout.contentBounds().width(),
             verticalWidth,
             horizontalHeight,
-            scrollLayout
+            scrollLayout,
+            editor
         );
     }
 

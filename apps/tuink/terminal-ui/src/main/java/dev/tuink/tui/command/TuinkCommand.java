@@ -115,6 +115,11 @@ public enum TuinkCommand {
     SETTINGS_TOGGLE_MARKDOWN_VISUAL_COPY("tuink.settings.toggle-markdown-visual-copy", "Toggle copying Markdown Preview as displayed"),
     SETTINGS_CYCLE_TAB_INSERT_MODE("tuink.settings.cycle-tab-insert-mode", "Cycle tab insert mode"),
 
+    FOLDER_OPEN("tuink.folder.open", "Open folder"),
+    FOLDER_CLOSE("tuink.folder.close", "Close folder"),
+    EXPLORER_TOGGLE("tuink.explorer.toggle", "Toggle explorer"),
+    EXPLORER_FOCUS("tuink.explorer.focus", "Focus explorer"),
+    EXPLORER_REFRESH("tuink.explorer.refresh", "Refresh explorer"),
     FILE_BROWSER_TOGGLE_HIDDEN("tuink.file-browser.toggle-hidden", "Toggle hidden files"),
 
     HELP_KEY_HINTS("tuink.help.key-hints", "Show key hints"),

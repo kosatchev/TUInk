@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuiframe.explorer.Explorer;
+
 import static dev.tuink.tui.command.TuinkCommand.APP_QUIT;
 import static dev.tuink.tui.command.TuinkCommand.DOCUMENT_OPEN;
 import static dev.tuink.tui.command.TuinkCommand.DOCUMENT_SAVE;
@@ -327,6 +329,8 @@ final class TopMenuView {
             item(TAB_NEW, "New"),
             item(DOCUMENT_OPEN, "Open..."),
             item(TuinkCommand.DOCUMENT_OPEN_ENCODING, "Open with encoding..."),
+            item(TuinkCommand.FOLDER_OPEN, "Open folder..."),
+            item(TuinkCommand.FOLDER_CLOSE, "Close folder"),
             separator(),
             item(DOCUMENT_SAVE, "Save"),
             item(DOCUMENT_SAVE_AS, "Save As..."),
@@ -366,6 +370,9 @@ final class TopMenuView {
             ? GutterDiffMode.MYERS : ui.gutterDiffModeSetting;
         return List.of(
             item(TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW, surface.preview() ? "MD Source" : "MD Preview"),
+            item(TuinkCommand.EXPLORER_TOGGLE, checked(ui.explorer.visible) + " Explorer"),
+            item(TuinkCommand.EXPLORER_FOCUS, "Focus explorer"),
+            item(TuinkCommand.EXPLORER_REFRESH, "Refresh explorer"),
             item(SETTINGS_TOGGLE_READING_MODE, checked(ui.readingModeSetting) + " Reading mode"),
             separator(),
             item(VIEW_TOGGLE_LINE_WRAP, checked(wrapLines) + " Wrap Lines"),

@@ -19,6 +19,7 @@ TUInk объединяет переносимый движок редактир�
 | `markdown-preview` | Immutable Markdown, Math и Mermaid models и provider ports |
 | `markdown-commonmark`, `markdown-math`, `markdown-mermaid` | Парсеры и поддержанные поднаборы синтаксиса |
 | `tuiframe-core`, `tuiframe-jline`, `tuiframe-widgets` | Terminal runtime, cells, geometry, input, presenter и widgets |
+| `tuiframe-explorer` | Файловое дерево, drag, файловые операции, история и системная корзина |
 | `render` | Терминальная геометрия редактора и Markdown, подготовленные строки и render plans |
 | `tui` | Окна, focus, команды, настройки и платформенные адаптеры приложения |
 | `app` | CLI entry point, launchers и упаковка |
@@ -73,6 +74,32 @@ Terminal cells, ANSI, Unicode cell widths и window geometry остаются в
 терминальных модулях. Portable models используют semantic styles и позиции
 в zero-based UTF-16 offsets. Подробные решения находятся в [ADR](adr/).
 
+## Дерево рабочей папки
+
+Проводник принадлежит окну TUInk: один корень, раскрытые каталоги, выбранная
+строка, прокрутка, видимость и желаемая ширина сохраняются при смене вкладки.
+Смена или закрытие корня не закрывает документы. В первой версии это состояние
+живёт до завершения приложения; автоматического filesystem watcher нет.
+
+TUIframe предоставляет универсальные `TreeView`, `SplitPane` и `Splitter`.
+`SplitPane` вычисляет непересекающиеся области и разделитель, а `Splitter`
+возвращает типизированные изменения размера и gesture state через существующий
+контракт pointer capture. Если минимальные размеры не помещаются, основная
+область получает всё место; приложение сохраняет желаемую ширину панели.
+Дерево знает плоские descriptors и операции навигации, но не `Path` или дисковые I/O.
+
+`tuiframe-explorer` владеет общей файловой моделью и UI для picker и explorer:
+сканирование идёт в фоне, snapshots ограничены бюджетом и проверяются по
+generation. Политика корня и активации отличается: picker может переходить
+между каталогами, explorer закреплён на выбранной папке. CLI различает
+существующую папку и документ при запуске, до входа в event loop.
+
+Source и Preview получают выделенный прямоугольник основной области; rendering,
+gutter, wrapping, курсор и mouse hit-testing используют эту же геометрию.
+Фокус дерева отделён от фокуса документа: необработанный ввод дерева не должен
+редактировать текст. Команды меню и клавиатуры используют общую маршрутизацию;
+политики диалогов и захвата указателя остаются обязательными для обеих областей.
+
 ## Проверки и границы поддержки
 
 `./gradlew check` запускает module tests, dependency/architecture gates,
@@ -84,6 +111,6 @@ Terminal cells, ANSI, Unicode cell widths и window geometry остаются в
 [проверках переносимости](../verification/compatibility/android/README.md).
 
 D8/R8 conversion и JVM consumers проверяют переносимые границы. Android ART,
-UI, lifecycle и storage adapters требуют собственных проверок. Постоянное
-дерево рабочей папки, инструменты Git и внешний plugin host пока не реализованы.
+UI, lifecycle и storage adapters требуют собственных проверок. Инструменты Git,
+многокорневые workspaces и внешний plugin host пока не реализованы.
 Полнота Mermaid/TeX ограничена [документированным поднабором](markdown-preview.md).

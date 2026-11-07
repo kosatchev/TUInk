@@ -104,7 +104,8 @@ record FrameComposition(
         DocumentFormatDialogView.Placement format,
         boolean blockedInputHighlight,
         boolean contentFocused,
-        Rect blockingBounds
+        Rect blockingBounds,
+        ExplorerState.Placement explorer
     ) {
         HelpPage helpPage() { return help == null ? null : help.page(); }
 

@@ -10,7 +10,9 @@ import java.util.Locale;
  *
  * <p>This is application configuration rather than part of the reusable
  * terminal runtime. Keeping the parser separate makes the frontend entrypoint
- * deterministic and testable without opening a terminal.</p>
+ * deterministic and testable without opening a terminal. The historical
+ * {@code file} accessor holds a startup file or directory; path classification
+ * happens during application bootstrap, outside this parser.</p>
  */
 record TuiCliOptions(
     Path file,

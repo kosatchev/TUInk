@@ -35,6 +35,58 @@ class OpenFileInputRouterTest {
     Path root;
 
     @Test
+    void folderPickerConfirmsCurrentDirectoryEvenWhenItIsEmpty() {
+        try (FileTreeModel model = new FileTreeModel(root, false, false, false)) {
+            FileTreeModel.Snapshot snapshot = awaitLoaded(model);
+            FileTreeView.Placement tree = FileTreeView.fromSnapshot(snapshot, false, false)
+                .place(BOUNDS, FileTreeView.State.initial(), CLIP, true);
+            assertTrue(tree.selectedEntry().isEmpty());
+            OpenFileDialogView.FocusState focus = new OpenFileDialogView.FocusState();
+            focus.synchronizeRoot(root);
+            focus.focus(OpenFileInputRouter.Focus.OK);
+            OpenFileDialogView.Placement dialog = folderDialog(tree, focus);
+            OpenFileInputRouter.Result result = OpenFileInputRouter.route(dialog, focus,
+                KeyStroke.of(KeyStroke.Key.ENTER), 1L, DOUBLE_CLICK_NANOS);
+            assertEquals(root, assertInstanceOf(OpenFileInputRouter.ChooseDirectory.class, result.intent()).directory());
+            assertEquals(root, dialog.folderRoot());
+        }
+    }
+
+    @Test
+    void folderPickerNavigatesDirectoriesButConsumesFileActivation() throws IOException {
+        Path folder = Files.createDirectory(root.resolve("folder"));
+        Path file = Files.createFile(root.resolve("note.txt"));
+        try (FileTreeModel model = new FileTreeModel(root, false, false)) {
+            FileTreeModel.Snapshot snapshot = awaitLoaded(model);
+            FileTreeView view = FileTreeView.fromSnapshot(snapshot, false, false);
+            FileTreeView.Placement tree = placement(view, snapshot, entry(snapshot, folder), true);
+            OpenFileDialogView.FocusState focus = new OpenFileDialogView.FocusState();
+            focus.synchronizeRoot(root);
+            OpenFileDialogView.Placement dialog = folderDialog(tree, focus);
+            OpenFileInputRouter.Result enter = OpenFileInputRouter.route(dialog, focus,
+                KeyStroke.of(KeyStroke.Key.ENTER), 1L, DOUBLE_CLICK_NANOS);
+            assertEquals(folder, assertInstanceOf(OpenFileInputRouter.ChangeRoot.class, enter.intent()).root());
+
+            focus.focus(OpenFileInputRouter.Focus.OK);
+            OpenFileInputRouter.Result confirm = OpenFileInputRouter.route(dialog, focus,
+                KeyStroke.of(KeyStroke.Key.ENTER), 2L, DOUBLE_CLICK_NANOS);
+            assertEquals(root, assertInstanceOf(OpenFileInputRouter.ChooseDirectory.class, confirm.intent()).directory());
+
+            tree = placement(view, snapshot, entry(snapshot, file), true);
+            focus.focus(OpenFileInputRouter.Focus.LIST);
+            dialog = folderDialog(tree, focus);
+            assertCapturedWithoutIntent(OpenFileInputRouter.route(dialog, focus,
+                KeyStroke.of(KeyStroke.Key.ENTER), 3L, DOUBLE_CLICK_NANOS));
+        }
+    }
+
+    private OpenFileDialogView.Placement folderDialog(FileTreeView.Placement tree, OpenFileDialogView.FocusState focus) {
+        OpenFileDialogView.Placement base = OpenFileDialogTestSupport.placement(tree);
+        return OpenFileDialogView.place("test-folder-picker", base.layout(), tree, false,
+            new Rect(0, 0, 40, 12), null, focus.location(), root);
+    }
+
+    @Test
     void exactTreeKeysProduceFileNavigationIntents() throws IOException {
         Path folder = Files.createDirectory(root.resolve("folder"));
         Path file = Files.createFile(root.resolve("note.txt"));

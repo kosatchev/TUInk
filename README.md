@@ -5,8 +5,8 @@
 TUInk is a non-modal editor for people who want to stay in the terminal
 without giving up familiar controls. Open a file and start typing: use ordinary
 keyboard shortcuts, the mouse, menus, tabs, search and replace, syntax
-highlighting, and a tree-based file picker without learning an editor command
-language.
+highlighting, a tree-based file picker, and a folder explorer beside the document
+without learning an editor command language.
 
 ## TUInk in action
 
@@ -27,7 +27,7 @@ language.
 - **Work with real-world Unicode.** Cursor movement and selection respect
   extended grapheme clusters, including emoji, combining characters, and wide
   CJK text.
-- **Find and navigate quickly.** Work in multiple tabs, browse files in a tree,
+- **Find and navigate quickly.** Work in multiple tabs, browse a folder beside the document,
   search across every tab, and replace matches in the active tab. Case,
   whole-word, and wildcard options help narrow the result.
 - **Edit code comfortably.** TUInk provides syntax highlighting, line and word
@@ -65,6 +65,17 @@ Open a file directly:
 ```bash
 ./gradlew --console=plain :app:run --args="README.md"
 ```
+
+Open the current folder in the left explorer panel:
+
+```bash
+./gradlew --console=plain :app:run --args="."
+# Installed application:
+tuink .
+```
+
+An existing directory opens the explorer. A file opens in a document tab;
+a nonexistent path keeps the usual new-file behavior.
 
 For a filename containing spaces, quote it inside Gradle's argument string:
 `./gradlew --console=plain :app:run --args='"my notes.txt"'`.
@@ -326,6 +337,8 @@ a long rescan. These cases do not have a constant-time responsiveness guarantee.
 | Input | Action |
 |---|---|
 | `Ctrl+O` | Open the tree-based file picker |
+| `Ctrl+B` | Show / hide the folder explorer |
+| `Ctrl+E` | Show and focus the folder explorer |
 | `Ctrl+S` | Save the current file |
 | `Ctrl+K` / `Ctrl+Shift+S` / `Ctrl+Shift+F4` | Save As |
 | `Ctrl+X` / `Ctrl+C` / `Ctrl+V` | Cut / copy / paste using the system clipboard when available |
@@ -516,6 +529,32 @@ The picker bounds the complete expanded tree to 20,000 entries and a memory
 budget. A directory that exceeds the remaining budget is omitted with a visible
 error; its contents are not presented as a complete listing. Directory item
 counts may end in `+` when their counting budget is reached.
+
+**File → Open folder...** opens a directory chooser. Navigate into the desired
+directory and activate **Open folder** to use the displayed directory as the
+explorer root. Enter on a directory navigates inside the chooser. You can also
+start with `tuink .` or `tuink path/to/folder`.
+
+The explorer stays on the left while Source or Markdown Preview occupies the
+right. It belongs to the window and keeps its selected entry, expanded folders
+and scroll position while you switch tabs. Opening another root or choosing
+**File → Close folder** leaves open documents and unsaved edits intact.
+**Ctrl+B** toggles panel visibility; **Ctrl+E** shows it and moves focus into it.
+An empty panel offers an **Open folder...** action. With the tree focused:
+
+- Up/Down, Page Up/Page Down and Home/End move the selection.
+- Right expands a folder or enters its first child; Left collapses it or selects its parent.
+- Enter toggles a folder or opens a file and returns focus to the document.
+- A single click selects an entry; double-click opens a file or toggles a folder.
+- **Esc** returns focus to the document. Tab in the document keeps inserting indentation.
+- **Alt+.** or a distinct **Ctrl+H** toggles hidden files; **Shift+Left/Right** scrolls long names.
+
+Drag the divider to resize the panel. When the terminal is too narrow for both
+regions, the explorer temporarily disappears; enlarging the terminal restores
+it with the preferred width. **View → Refresh explorer** reloads folder contents
+after external changes. The first version has one root, no automatic filesystem
+watcher, and keeps explorer state only for the current run. Its loading uses the
+same background scanning and bounded tree model as the file picker.
 
 Document reads and writes run in the background. During a save, the document
 being written allows navigation and copying; text edits and closing that tab

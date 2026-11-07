@@ -383,7 +383,8 @@ public class TerminalEditorApp {
             );
         }
 
-        openInitialDocument(cli, sessionContext, notification);
+        Path initialFolder = openInitialDocument(cli, sessionContext, notification);
+        if (initialFolder != null) initialOpenFileRoot = initialFolder;
 
         try (
             renderer;
@@ -416,11 +417,7 @@ public class TerminalEditorApp {
                 );
                 UiModalState initialModalState = modalState;
                 SearchController.SearchUiOptions initialSearchUi = searchUi;
-
-
-
-                runWithRecovery(
-                    eventLoop,
+                EditorWindowController windowController =
                     new EditorWindowController(this, new EditorWindowController.Resources(
                         commandRouter,
                         editorView,
@@ -444,7 +441,11 @@ public class TerminalEditorApp {
                         uiSessionState,
                         settingsSession,
                         new DocumentIoController()
-                    ), ProcessClipboard.detect().orElse(null)),
+                    ), ProcessClipboard.detect().orElse(null));
+                if (initialFolder != null) windowController.openFolder(initialFolder);
+                runWithRecovery(
+                    eventLoop,
+                    windowController,
                     recoveryAutosave,
                     () -> toDocumentSessions(tabs),
                     warning -> TerminalDiagnostics.error("Warning: " + warning)
@@ -463,10 +464,15 @@ public class TerminalEditorApp {
         }
     }
 
-    /** Keep bootstrap document references out of the long-lived window-loop stack frame. */
-    private void openInitialDocument(TuiCliOptions cli, SessionContext sessionContext, NotificationState notification) {
-        if (cli.file() == null) return;
+    /**
+     * Classifies the startup path before the event loop; returns a folder for the
+     * window explorer or loads a document. Missing paths retain new-file semantics.
+     * Bootstrap document references stay out of the long-lived window-loop frame.
+     */
+    Path openInitialDocument(TuiCliOptions cli, SessionContext sessionContext, NotificationState notification) {
+        if (cli.file() == null) return null;
         Path file = cli.file();
+        if (Files.isDirectory(file)) return file.toAbsolutePath().normalize();
         try {
             var resource = JvmDocumentStorage.resource(file);
             var mode = cli.openMode();
@@ -483,6 +489,7 @@ public class TerminalEditorApp {
             }
             notification.error("Open failed: " + reason);
         }
+        return null;
     }
 
     void applyEditorActionResult(
@@ -533,7 +540,7 @@ public class TerminalEditorApp {
     ) {
         scrollDocumentViewport(
             model, textLayout, state, plan == null ? 1 : plan.contentRows(),
-            plan == null ? 0 : Math.max(0, plan.cols() - plan.gutterWidth() - plan.scrollbarWidth()),
+            plan == null ? 0 : plan.scrollLayout().contentBounds().width(),
             plan != null && plan.wrapLines(), plan != null && plan.wrapByWords(), deltaRows, tabWidth
         );
     }
@@ -1244,6 +1251,8 @@ public class TerminalEditorApp {
     private void paintFrameOverlays(CellBuffer current, Canvas canvas, int rows, int cols,
         FrameComposition.Surface surface, FrameComposition.Layers layers, SearchBarView.Placement search,
         boolean colorEnabled) {
+        if (layers.explorer() != null) layers.explorer().paint(canvas,
+            colorEnabled ? colorFileTreeWidgetTheme : monoFileTreeWidgetTheme);
         paintSaveAsField(canvas, layers.saveAs());
         paintConfirmButtons(canvas, layers.confirm());
         paintSearchBar(canvas, search);
@@ -1271,6 +1280,12 @@ public class TerminalEditorApp {
         boolean menuOpen = layers.topMenu() != null && layers.topMenu().state().isOpen();
         boolean openFile = layers.openFile().visible();
         boolean help = layers.help() != null;
+        if (layers.explorer() != null && layers.explorer().focused() && !menuOpen && !openFile
+            && !help && layers.format() == null && !layers.saveAsMode() && layers.confirm() == null) {
+            var tree = layers.explorer().tree();
+            return tree == null ? ScreenCursor.hidden() : tree.cursorPosition()
+                .map(position -> new ScreenCursor(position, true)).orElseGet(ScreenCursor::hidden);
+        }
         boolean visible = CursorPolicy.shouldShowCursor(layers.saveAsMode() && !contentFocused,
             searchOwnsCursor, searchCursor != null, layers.confirm() != null && !contentFocused,
             menuOpen, openFile && !contentFocused, help && !contentFocused);
@@ -1315,8 +1330,7 @@ public class TerminalEditorApp {
         Canvas canvas = frameCanvas(current, rows, cols);
         canvas.fill(new Rect(0, 0, cols, rows), services.colorEnabled
             ? styles.windows().renderBody() : CellStyle.DEFAULT);
-        Rect content = new Rect(0, composition.contentTopRow(), cols, Math.max(0,
-            rows - 1 - composition.contentTopRow() - surface.inlinePrompt().height() - surface.notification().height()));
+        Rect content = composition.preview().bounds();
         int mark = canvas.save();
         try {
             canvas.clip(content);
@@ -1456,9 +1470,7 @@ public class TerminalEditorApp {
         ScreenCursor cursor = frameCursor(rows, cols, layers, searchBarPlacement,
             search.editorFocused(), contentCursor);
 
-        Rect body = new Rect(plan.gutterWidth(), contentTopRow,
-            Math.max(0, cols - plan.gutterWidth() - plan.scrollbarWidth()), plan.contentRows())
-            .intersection(new Rect(0, 0, cols, rows));
+        Rect body = plan.scrollLayout().contentBounds();
         long generation = (plan.wrapLines() ? 1L : 0L) | (plan.wrapByWords() ? 2L : 0L);
         var viewport = new ViewportScrollPolicy.Viewport("source:" + renderPlanBuilder.renderIdentity(), generation,
             body, plan.topLine(), plan.leftVisualColumn(), !plan.wrapLines() && !state.hasSelection());
@@ -2396,6 +2408,7 @@ public class TerminalEditorApp {
     private void printUsage(PrintStream output) {
         TerminalDiagnostics.line(output, "Usage: tuink [options] [--] [file]");
         TerminalDiagnostics.line(output, "Development: ./gradlew --console=plain :app:run -PappArgs=\"[options] [--] [file]\"");
+        TerminalDiagnostics.line(output, "An existing directory opens the folder explorer; use tuink . for the current folder.");
         TerminalDiagnostics.line(output, "Options:");
         TerminalDiagnostics.line(output, "  --no-mouse       Disable mouse tracking and mouse interactions");
         TerminalDiagnostics.line(output, "  --no-alt-screen  Do not use alternate screen buffer");

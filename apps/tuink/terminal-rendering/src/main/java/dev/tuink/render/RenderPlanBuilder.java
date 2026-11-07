@@ -691,15 +691,16 @@ public class RenderPlanBuilder {
         int cursorLineLeftColumn = columnForVisualColumn(cursor.line(), leftVisualColumn);
         EditorViewCoordinates.VisualPosition cursorVisual = coordinates.inViewport(cursor, state);
         int cursorRow = cursorVisual.row();
-        int cursorCol = gutterWidth + cursorVisual.column();
-        int maxCursorCol = Math.max(0, safeCols - 1 - scrollbarWidth);
+        int textLeft = resolvedLayout.scrollLayout().contentBounds().x();
+        int cursorCol = textLeft + cursorVisual.column();
+        int maxCursorCol = Math.max(0, resolvedLayout.scrollLayout().contentBounds().rightExclusive() - 1);
         boolean cursorInViewport = contentRows > 0
             && textWidth > 0
             && cursorRow >= 0
             && cursorRow < contentRows
-            && cursorCol >= gutterWidth
+            && cursorCol >= textLeft
             && cursorCol <= maxCursorCol;
-        int minCursorCol = Math.min(gutterWidth, maxCursorCol);
+        int minCursorCol = Math.min(textLeft, maxCursorCol);
         cursorRow = Math.max(0, Math.min(cursorRow, Math.max(contentRows - 1, 0)));
         cursorCol = Math.max(minCursorCol, Math.min(cursorCol, maxCursorCol));
 
@@ -725,7 +726,8 @@ public class RenderPlanBuilder {
             safeCols,
             gutterWidth,
             scrollbarWidth,
-            resolvedLayout.scrollLayout()
+            resolvedLayout.scrollLayout(),
+            resolvedLayout.editorBounds()
         );
     }
 

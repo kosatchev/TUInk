@@ -25,7 +25,13 @@ final class OpenFileInputRouter {
 
     sealed interface Intent
         permits ToggleDirectory, ChangeRoot, OpenFile, MoveToParentRoot,
-        CloseDialog, ToggleHidden, SelectionRejected, OpenLocation {
+        CloseDialog, ToggleHidden, SelectionRejected, OpenLocation, ChooseDirectory {
+    }
+
+    record ChooseDirectory(Path directory) implements Intent {
+        ChooseDirectory {
+            directory = Objects.requireNonNull(directory, "directory").toAbsolutePath().normalize();
+        }
     }
 
     record OpenLocation(String value) implements Intent {
@@ -138,6 +144,9 @@ final class OpenFileInputRouter {
         Object surfaceId
     ) {
         Result result = routeInput(dialog, focusState, event, nowNanos, doubleClickWindowNanos, capture, surfaceId);
+        if (dialog.folderRoot() != null && result.intent() instanceof OpenFile) {
+            result = captured(result.state(), result.focus()).withPointerCapture(result.pointerCaptureRequest());
+        }
         if (capture != null) {
             capture.observe(surfaceId, dialog.captureScope(), OpenFileDialogView.Control.LIST,
                 InteractionResult.<FileTreeView.Action>handled().withPointerCapture(result.pointerCaptureRequest()));
@@ -247,7 +256,9 @@ final class OpenFileInputRouter {
                     return switch (target.id()) {
                         case OK -> focusState.locationEdited()
                             ? intent(current.resetClickTracking(), buttonFocus, new OpenLocation(dialog.location().text()))
-                            : confirmSelection(placement, buttonFocus);
+                            : dialog.folderRoot() != null
+                                ? intent(current.resetClickTracking(), buttonFocus, new ChooseDirectory(dialog.folderRoot()))
+                                : confirmSelection(placement, buttonFocus);
                         case CANCEL, CLOSE -> intent(current.resetClickTracking(), buttonFocus, new CloseDialog());
                         case HIDDEN -> {
                             yield intent(current.resetClickTracking(), focusState.focus(), new ToggleHidden());

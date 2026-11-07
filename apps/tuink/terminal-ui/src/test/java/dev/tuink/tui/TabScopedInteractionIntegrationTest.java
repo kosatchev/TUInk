@@ -430,11 +430,14 @@ class TabScopedInteractionIntegrationTest {
             window.command(TuinkCommand.TAB_NEW);
             window.command(TuinkCommand.TAB_PREVIOUS);
             window.command(TuinkCommand.HELP_KEY_HINTS);
-            for (int row = 0; row < 12; row++) {
-                window.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
-            }
+            String anchor = "Ctrl+X / Ctrl+C";
             var before = window.host.helpOverlayPlacement(window.height, window.width, HelpPages.KEYMAP, 2);
-            assertTrue(window.screenRow(before.content().contentBounds().y()).contains("Ctrl+X / Ctrl+C"));
+            for (int row = 0; row < HelpPages.KEYMAP.rows().size()
+                && !window.screenRow(before.content().contentBounds().y()).contains(anchor); row++) {
+                window.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
+                before = window.host.helpOverlayPlacement(window.height, window.width, HelpPages.KEYMAP, 2);
+            }
+            assertTrue(window.screenRow(before.content().contentBounds().y()).contains(anchor));
 
             window.command(TuinkCommand.TAB_NEXT);
             if (otherHelp) window.command(TuinkCommand.HELP_AUTHOR);
@@ -444,7 +447,7 @@ class TabScopedInteractionIntegrationTest {
             assertSame(first.uiState(), window.active().uiState());
             assertTrue(first.uiState().modalState.isHelpHints());
             var after = window.host.helpOverlayPlacement(window.height, window.width, HelpPages.KEYMAP, 2);
-            assertTrue(window.screenRow(after.content().contentBounds().y()).contains("Ctrl+X / Ctrl+C"));
+            assertTrue(window.screenRow(after.content().contentBounds().y()).contains(anchor));
             assertTrue(after.content().state().firstVisibleIndex() > before.content().state().firstVisibleIndex());
         }
     }

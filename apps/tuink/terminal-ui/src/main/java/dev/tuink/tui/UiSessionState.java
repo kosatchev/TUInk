@@ -6,6 +6,7 @@ import dev.tuink.tui.flow.AppSettings;
 import dev.tuink.tui.style.UiStyles;
 
 final class UiSessionState {
+    final ExplorerState explorer = new ExplorerState();
     boolean showTabBarSetting;
     boolean wrapLinesSetting;
     boolean wrapWordsSetting;

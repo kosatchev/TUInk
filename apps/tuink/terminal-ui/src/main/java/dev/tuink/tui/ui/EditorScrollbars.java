@@ -9,7 +9,8 @@ import dev.tuink.render.RenderPlan;
 public record EditorScrollbars(ScrollLayout layout, Scrollbar vertical, Scrollbar horizontal) {
     public static EditorScrollbars from(RenderPlan plan, int rows, int cols, int contentTopRow) {
         int top = Math.max(1, contentTopRow);
-        Rect surface = new Rect(0, top, Math.max(0, cols), Math.max(0, rows - top - 1));
+        Rect surface = plan.editorBounds().intersection(
+            new Rect(0, top, Math.max(0, cols), Math.max(0, rows - top - 1)));
         ScrollLayout planned = plan.scrollLayout();
         Rect content = planned.contentBounds().intersection(surface);
         // Placements belong to one frame. A resized surface may hide a whole

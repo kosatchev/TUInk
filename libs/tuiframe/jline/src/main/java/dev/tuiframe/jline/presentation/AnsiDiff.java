@@ -20,8 +20,14 @@ final class AnsiDiff {
     private final Map<CellStyle, String> indexedStyleCache = new HashMap<>();
     private final Map<CellStyle, String> trueColorStyleCache = new HashMap<>();
     private final Map<CellStyle, String> monoStyleCache = new HashMap<>();
+    private final TerminalPalette palette;
+    private long paletteRevision;
 
-    AnsiDiff() {
+    AnsiDiff() { this(new TerminalPalette()); }
+
+    AnsiDiff(TerminalPalette palette) {
+        this.palette = Objects.requireNonNull(palette, "palette");
+        this.paletteRevision = palette.revision();
     }
 
     String diff(
@@ -31,6 +37,11 @@ final class AnsiDiff {
         ScrollHint scrollHint
     ) {
         Objects.requireNonNull(capabilities, "capabilities");
+        if (paletteRevision != palette.revision()) {
+            paletteRevision = palette.revision();
+            colorStyleCache.clear(); indexedStyleCache.clear(); trueColorStyleCache.clear(); monoStyleCache.clear();
+            previous = null;
+        }
         ColorDepth colorDepth = capabilities.colorDepth();
         ScrollHint hint = scrollHint == null ? ScrollHint.none() : scrollHint;
         Rect scrollRegion = hint instanceof ScrollHint.Vertical vertical
@@ -714,9 +725,10 @@ final class AnsiDiff {
         out.append("\u001B[").append(row + 1).append(';').append(col + 1).append('H');
     }
 
-    private static String toAnsi(CellStyle style, ColorDepth colorDepth) {
+    private String toAnsi(CellStyle style, ColorDepth colorDepth) {
+        String foreground = palette.foregroundCode(style.fg(), colorDepth);
         return "\u001B["
-            + colorCode(style.fg(), colorDepth, false) + ';'
+            + (foreground == null ? colorCode(style.fg(), colorDepth, false) : foreground) + ';'
             + colorCode(style.bg(), colorDepth, true) + ';'
             + (style.bold() ? "1" : "22") + ';'
             + (style.underline() ? "4" : "24") + 'm';

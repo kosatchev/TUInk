@@ -20,15 +20,24 @@ public final class ScreenPresenter {
 
     private final PrintWriter writer;
     private final TerminalCapabilities capabilities;
-    private final AnsiDiff ansiDiff = new AnsiDiff();
+    private final AnsiDiff ansiDiff;
+    private final TerminalPalette palette;
+    private long paletteRevision;
     private Frame previousFrame;
     private Point cursorPosition;
     private boolean cursorVisible;
     private boolean cursorKnown;
 
     public ScreenPresenter(PrintWriter writer, TerminalCapabilities capabilities) {
+        this(writer, capabilities, new TerminalPalette());
+    }
+
+    public ScreenPresenter(PrintWriter writer, TerminalCapabilities capabilities, TerminalPalette palette) {
         this.writer = Objects.requireNonNull(writer, "writer");
         this.capabilities = Objects.requireNonNull(capabilities, "capabilities");
+        this.palette = Objects.requireNonNull(palette, "palette");
+        this.paletteRevision = palette.revision();
+        this.ansiDiff = new AnsiDiff(palette);
     }
 
     public synchronized PresentResult present(Frame frame) {
@@ -41,6 +50,10 @@ public final class ScreenPresenter {
      */
     public synchronized PresentResult present(Frame frame, boolean measurePatchTime) {
         Objects.requireNonNull(frame, "frame");
+        if (paletteRevision != palette.revision()) {
+            paletteRevision = palette.revision();
+            invalidate();
+        }
         CellBuffer current = frame.cells();
         CellBuffer previous = previousFrame == null ? null : previousFrame.cells();
         boolean fullRedraw = previous == null

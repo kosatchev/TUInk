@@ -1,9 +1,11 @@
 package dev.tuiframe.jline;
 
+import dev.tuiframe.capability.ColorDepth;
 import dev.tuiframe.capability.TerminalCapabilities;
 import dev.tuiframe.input.ResizeEvent;
 import dev.tuiframe.input.TuiInputEvent;
 import dev.tuiframe.jline.presentation.ScreenPresenter;
+import dev.tuiframe.jline.presentation.TerminalPalette;
 import dev.tuiframe.runtime.TuiEventLoop;
 import java.io.IOException;
 import java.util.Objects;
@@ -21,11 +23,16 @@ public final class TerminalRuntime implements AutoCloseable {
     private final TerminalCapabilities capabilities;
     private final TuiEventLoop<TuiInputEvent> eventLoop;
     private final ScreenPresenter screenPresenter;
+    private final TerminalPalette palette = new TerminalPalette();
 
     private TerminalRuntime(TerminalSession session, boolean colorEnabled) {
         this.session = Objects.requireNonNull(session, "session");
         this.capabilities = session.capabilities().withColorEnabled(colorEnabled);
-        KeyDecoder decoder = new KeyDecoder(session.reader(), session.backspaceSendsCtrlH(), session.keyMap());
+        boolean queryColors = capabilities.colorDepth() == ColorDepth.ANSI_256
+            || capabilities.colorDepth() == ColorDepth.TRUECOLOR;
+        KeyDecoder decoder = queryColors
+            ? new KeyDecoder(session.reader(), session.backspaceSendsCtrlH(), session.keyMap(), this::acceptColorResponse)
+            : new KeyDecoder(session.reader(), session.backspaceSendsCtrlH(), session.keyMap());
         this.eventLoop = new TuiEventLoop<>(timeoutMillis -> {
             KeyDecoder.ReadResult result = decoder.read(timeoutMillis);
             return switch (result.status()) {
@@ -34,11 +41,20 @@ public final class TerminalRuntime implements AutoCloseable {
                 case END -> TuiEventLoop.Read.end();
             };
         });
-        this.screenPresenter = new ScreenPresenter(session.writer(), capabilities);
+        this.screenPresenter = new ScreenPresenter(session.writer(), capabilities, palette);
         session.onResize(() -> eventLoop.requestResize(
             new ResizeEvent(height(), width())
         ));
         session.onInterrupt(eventLoop::requestStop);
+        if (queryColors) {
+            session.writer().print(TerminalPalette.query());
+            session.writer().flush();
+            if (session.writer().checkError()) throw new IllegalStateException("Terminal palette query write failed");
+        }
+    }
+
+    private void acceptColorResponse(String payload) {
+        if (palette.acceptOsc(payload)) eventLoop.invalidate();
     }
 
     public static TerminalRuntime open(TerminalSession.Options options, boolean colorEnabled) throws IOException {

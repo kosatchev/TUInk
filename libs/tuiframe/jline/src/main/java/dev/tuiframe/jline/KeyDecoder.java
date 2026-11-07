@@ -10,6 +10,7 @@ import java.util.ArrayDeque;
 import java.util.EnumSet;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 import org.jline.utils.NonBlockingReader;
 
@@ -25,11 +26,13 @@ public final class KeyDecoder {
     private static final int REPLACEMENT_CHARACTER = 0xFFFD;
     private static final long SEQUENCE_TIMEOUT_MS = 5L;
     // ESC is also the prefix of Alt chords and terminal keys. Only this
-    // ambiguous first byte expires; a recognized sequence survives idle polls.
+    // ambiguous first byte (or unclaimed OSC prefix) expires; a recognized
+    // sequence survives idle polls.
     private static final long ESCAPE_AMBIGUITY_NANOS = 500_000_000L;
     private static final int MAX_SEQUENCE_READ_CODE_UNITS = 128;
     private static final int MAX_PASTE_READS_PER_POLL = 4096;
     private static final int MAX_CSI_LENGTH = 64;
+    private static final int MAX_OSC_LENGTH = 1024;
     private static final String BRACKETED_PASTE_END = "\u001B[201~";
     static final int DEFAULT_MAX_PASTE_CODE_UNITS = 1_048_576;
 
@@ -38,6 +41,10 @@ public final class KeyDecoder {
     private final boolean backspaceSendsCtrlH;
     private final TerminalKeyMap terminalKeys;
     private final LongSupplier nanoClock;
+    private final Consumer<String> colorResponse;
+    private final StringBuilder oscSequence = new StringBuilder();
+    private boolean oscEscape;
+    private boolean discardOsc;
     private final StringBuilder terminalSequence = new StringBuilder();
     private final ArrayDeque<Integer> replayCodeUnits = new ArrayDeque<>();
     private boolean matchingTerminalKey;
@@ -75,6 +82,16 @@ public final class KeyDecoder {
         this(reader, DEFAULT_MAX_PASTE_CODE_UNITS, backspaceSendsCtrlH, terminalKeys);
     }
 
+    KeyDecoder(NonBlockingReader reader, boolean backspaceSendsCtrlH, TerminalKeyMap terminalKeys,
+        Consumer<String> colorResponse) {
+        this(reader, DEFAULT_MAX_PASTE_CODE_UNITS, backspaceSendsCtrlH, terminalKeys, System::nanoTime, colorResponse);
+    }
+
+    KeyDecoder(NonBlockingReader reader, boolean backspaceSendsCtrlH, TerminalKeyMap terminalKeys,
+        LongSupplier nanoClock, Consumer<String> colorResponse) {
+        this(reader, DEFAULT_MAX_PASTE_CODE_UNITS, backspaceSendsCtrlH, terminalKeys, nanoClock, colorResponse);
+    }
+
     private KeyDecoder(
         NonBlockingReader reader, int maxPasteCodeUnits, boolean backspaceSendsCtrlH,
         TerminalKeyMap terminalKeys
@@ -91,6 +108,13 @@ public final class KeyDecoder {
         NonBlockingReader reader, int maxPasteCodeUnits, boolean backspaceSendsCtrlH,
         TerminalKeyMap terminalKeys, LongSupplier nanoClock
     ) {
+        this(reader, maxPasteCodeUnits, backspaceSendsCtrlH, terminalKeys, nanoClock, null);
+    }
+
+    private KeyDecoder(
+        NonBlockingReader reader, int maxPasteCodeUnits, boolean backspaceSendsCtrlH,
+        TerminalKeyMap terminalKeys, LongSupplier nanoClock, Consumer<String> colorResponse
+    ) {
         if (reader == null) {
             throw new IllegalArgumentException("reader must not be null");
         }
@@ -102,6 +126,7 @@ public final class KeyDecoder {
         this.backspaceSendsCtrlH = backspaceSendsCtrlH;
         this.terminalKeys = Objects.requireNonNull(terminalKeys, "terminalKeys");
         this.nanoClock = Objects.requireNonNull(nanoClock, "nanoClock");
+        this.colorResponse = colorResponse;
     }
 
     public ReadResult read(long timeoutMs) throws IOException {
@@ -255,9 +280,12 @@ public final class KeyDecoder {
 
     private TuiInputEvent continueEscapeSequence(long timeoutMs) throws IOException {
         long nextTimeout = timeoutMs;
+        long startedAtNanos = nanoClock.getAsLong();
         for (int reads = 0; reads < MAX_SEQUENCE_READ_CODE_UNITS; reads++) {
             TuiInputEvent expired = expireEscapeSequence();
             if (expired != null) return expired;
+            if (isOsc() && nanoClock.getAsLong() - startedAtNanos >= SEQUENCE_TIMEOUT_MS * 1_000_000L)
+                return null;
             int next = readCodeUnit(nextTimeout);
             nextTimeout = SEQUENCE_TIMEOUT_MS;
             if (next == NonBlockingReader.READ_EXPIRED) {
@@ -274,6 +302,12 @@ public final class KeyDecoder {
                 return endEscapeSequence();
             }
             lastEscapeByteAtNanos = nanoClock.getAsLong();
+
+            if (isOsc()) {
+                TuiInputEvent event = consumeOsc(next);
+                if (event != null || escapeState == EscapeState.NONE) return event;
+                continue;
+            }
 
             if (next != 27 && (next <= 0x1F || next == 0x7F)
                 && (escapeState != EscapeState.AFTER_ESCAPE
@@ -331,6 +365,11 @@ public final class KeyDecoder {
                 continue;
             }
             if (escapeState == EscapeState.AFTER_ESCAPE) {
+                if (next == ']' && colorResponse != null) {
+                    escapeState = EscapeState.OSC_PREFIX;
+                    oscSequence.setLength(0);
+                    continue;
+                }
                 if (next == 'O') {
                     escapeState = EscapeState.SS3;
                     continue;
@@ -390,15 +429,26 @@ public final class KeyDecoder {
             // prefixes retain their bytes until a match, mismatch, cancellation or EOF.
             return matchedTerminalKey == null ? null : finishTerminalMatch();
         }
-        if (escapeState == EscapeState.AFTER_ESCAPE) {
+        if (escapeState == EscapeState.AFTER_ESCAPE || escapeState == EscapeState.OSC && oscEscape) {
+            // An ESC inside OSC may begin ST or be the user's recovery key.
+            // Once the normal ambiguity window expires, preserve that key.
             clearEscapeSequence();
             return KeyStroke.of(KeyStroke.Key.ESCAPE);
         }
+        if (escapeState == EscapeState.OSC_PREFIX) return replayAltRightBracket();
         return null;
     }
 
     private TuiInputEvent endEscapeSequence() {
+        if (escapeState == EscapeState.OSC_PREFIX) {
+            replayCodeUnits.addFirst(-1);
+            return replayAltRightBracket();
+        }
         endPending = true;
+        if (escapeState == EscapeState.OSC) {
+            clearEscapeSequence();
+            return null;
+        }
         if (escapeState == EscapeState.AFTER_ESCAPE) {
             clearEscapeSequence();
             return KeyStroke.of(KeyStroke.Key.ESCAPE);
@@ -423,6 +473,61 @@ public final class KeyDecoder {
         terminalSequence.setLength(0);
         matchedTerminalKey = null;
         matchedTerminalLength = 0;
+        oscSequence.setLength(0);
+        oscEscape = false;
+        discardOsc = false;
+    }
+
+    private boolean isOsc() {
+        return escapeState == EscapeState.OSC_PREFIX || escapeState == EscapeState.OSC;
+    }
+
+    /** Only our color-query prefixes claim OSC input; ordinary Alt+] remains a physical key. */
+    private TuiInputEvent consumeOsc(int next) throws IOException {
+        if (escapeState == EscapeState.OSC_PREFIX) {
+            if (next > Character.MAX_VALUE) {
+                replayCodeUnits.addFirst(next);
+                return replayAltRightBracket();
+            }
+            oscSequence.append((char) next);
+            String prefix = oscSequence.toString();
+            if ("10;".equals(prefix) || "4;".equals(prefix)) escapeState = EscapeState.OSC;
+            else if (!"10;".startsWith(prefix) && !"4;".startsWith(prefix)) return replayAltRightBracket();
+            return null;
+        }
+        if (next == '\007' || next == '\\' && oscEscape) {
+            String response = discardOsc ? null : oscSequence.toString();
+            clearEscapeSequence();
+            if (response != null) colorResponse.accept(response);
+            return null;
+        }
+        if (next != 27 && (next <= 0x1F || next == 0x7F)) {
+            // A damaged response must never trap Ctrl+Q, Enter or editing controls.
+            clearEscapeSequence();
+            return decodeCodeUnit(next);
+        }
+        if (oscEscape) {
+            // A fresh terminal key cancels an unterminated response without exposing its payload.
+            clearEscapeSequence();
+            beginEscapeSequence();
+            replayCodeUnits.addFirst(next);
+            return null;
+        }
+        if (next == 27) { oscEscape = true; return null; }
+        if (!discardOsc) {
+            if (next > Character.MAX_VALUE || oscSequence.length() >= MAX_OSC_LENGTH) {
+                discardOsc = true;
+                oscSequence.setLength(0);
+            } else oscSequence.append((char) next);
+        }
+        return null;
+    }
+
+    private TuiInputEvent replayAltRightBracket() {
+        for (int index = oscSequence.length() - 1; index >= 0; index--)
+            replayCodeUnits.addFirst((int) oscSequence.charAt(index));
+        clearEscapeSequence();
+        return KeyStroke.of(KeyStroke.Key.RIGHT_BRACKET, KeyStroke.Modifier.ALT);
     }
 
     private static TuiInputEvent decodeSs3Code(int code) {
@@ -889,7 +994,9 @@ public final class KeyDecoder {
         AFTER_ESCAPE,
         SS3,
         CSI,
-        DISCARD_CSI
+        DISCARD_CSI,
+        OSC_PREFIX,
+        OSC
     }
 
     private record PhysicalKey(KeyStroke.Key key, boolean shifted) {

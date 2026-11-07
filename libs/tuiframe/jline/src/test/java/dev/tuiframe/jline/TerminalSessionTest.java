@@ -14,6 +14,7 @@ import dev.tuiframe.input.KeyStroke;
 import dev.tuiframe.input.ResizeEvent;
 import dev.tuiframe.input.TextInput;
 import dev.tuiframe.input.TuiInputEvent;
+import dev.tuiframe.jline.presentation.TerminalPalette;
 import dev.tuiframe.runtime.TuiApplicationRunner;
 import dev.tuiframe.runtime.TuiEventLoop;
 import dev.tuiframe.screen.Frame;
@@ -187,6 +188,89 @@ class TerminalSessionTest {
         assertFalse(runtime.eventLoop().running());
         runtime.close();
         assertEquals(1, backend.closeCount);
+    }
+
+    @Test
+    void colorDiscoveryQueriesOnceWithoutReadingInputAndInvalidatesOnlyOnChanges() throws Exception {
+        for (ColorDepth depth : List.of(ColorDepth.ANSI_256, ColorDepth.TRUECOLOR)) {
+            FakeBackend backend = new FakeBackend("custom-terminal");
+            backend.capabilities = new TerminalCapabilities(depth, true, true, true);
+            backend.enqueueInput("x");
+            try (TerminalRuntime runtime = TerminalRuntime.start(
+                new TerminalSession.Options(false, false, false), backend, new FakeShutdownHooks(), true)) {
+                assertEquals(0, backend.readCount, "startup must not steal user input while querying colors");
+                assertTrue(backend.output().endsWith(TerminalPalette.query()));
+                assertEquals(backend.output().indexOf(TerminalPalette.query()),
+                    backend.output().lastIndexOf(TerminalPalette.query()));
+                assertEquals(new TextInput("x"), runtime.eventLoop().poll(now -> -1L).event());
+                TuiEventLoop.FrameTicket initialFrame = runtime.eventLoop().beginFrame();
+                runtime.eventLoop().endFrame(initialFrame, true);
+                assertEquals(null, runtime.eventLoop().beginFrame());
+
+                backend.enqueueInput("\u001B]10;rgb:aaaa/bbbb/cccc\u0007");
+                consumeColorResponse(runtime, backend);
+                TuiEventLoop.FrameTicket changedFrame = runtime.eventLoop().beginFrame();
+                assertTrue(changedFrame != null, "a discovered color must schedule repaint without a key event");
+                runtime.eventLoop().endFrame(changedFrame, true);
+
+                backend.enqueueInput("\u001B]10;rgb:aaaa/bbbb/cccc\u0007");
+                consumeColorResponse(runtime, backend);
+                assertEquals(null, runtime.eventLoop().beginFrame(), "unchanged responses must not repaint");
+                backend.enqueueInput("\u001B]4;7;malformed\u001B\\");
+                consumeColorResponse(runtime, backend);
+                assertEquals(null, runtime.eventLoop().beginFrame(), "malformed responses must not repaint");
+                assertEquals(backend.output().indexOf(TerminalPalette.query()),
+                    backend.output().lastIndexOf(TerminalPalette.query()));
+            }
+        }
+    }
+
+    private static void consumeColorResponse(TerminalRuntime runtime, FakeBackend backend) throws IOException {
+        int polls = 0;
+        while (!backend.input.isEmpty()) {
+            assertEquals(null, runtime.eventLoop().poll(now -> -1L).event());
+            assertTrue(++polls < 20, "a short color response must eventually be consumed");
+        }
+    }
+
+    @Test
+    void monochromeAndAnsi16RuntimeDoNotQueryColorsOrClaimAltRightBracket() throws Exception {
+        for (ColorDepth depth : List.of(ColorDepth.MONOCHROME, ColorDepth.ANSI_16, ColorDepth.TRUECOLOR)) {
+            FakeBackend backend = new FakeBackend("custom-terminal");
+            backend.capabilities = new TerminalCapabilities(depth, true, true, true);
+            backend.enqueueInput("\u001B]x");
+            try (TerminalRuntime runtime = TerminalRuntime.start(
+                new TerminalSession.Options(false, false, false), backend, new FakeShutdownHooks(),
+                depth != ColorDepth.TRUECOLOR)) {
+                assertFalse(backend.output().contains(TerminalPalette.query()));
+                assertEquals(KeyStroke.of(KeyStroke.Key.RIGHT_BRACKET, KeyStroke.Modifier.ALT),
+                    runtime.eventLoop().poll(now -> -1L).event());
+                assertEquals(new TextInput("x"), runtime.eventLoop().poll(now -> -1L).event());
+            }
+        }
+    }
+
+    @Test
+    void paletteQueryWriteFailureClosesAndRestoresTheSession() {
+        FakeBackend backend = new FakeBackend("custom-terminal");
+        backend.capabilities = new TerminalCapabilities(ColorDepth.TRUECOLOR, true, true, true);
+        backend.writer = new PrintWriter(backend.output, true) {
+            @Override
+            public void print(String value) {
+                if (TerminalPalette.query().equals(value)) setError();
+                else super.print(value);
+            }
+        };
+        FakeShutdownHooks hooks = new FakeShutdownHooks();
+
+        IllegalStateException failure = assertThrows(IllegalStateException.class,
+            () -> TerminalRuntime.start(new TerminalSession.Options(false, false, false), backend, hooks, true));
+
+        assertEquals("Terminal palette query write failed", failure.getMessage());
+        assertTrue(backend.currentAttributes.getLocalFlag(LocalFlag.ISIG));
+        assertEquals(1, backend.attributesRestoreCount);
+        assertEquals(1, backend.closeCount);
+        assertEquals(1, hooks.removeCount);
     }
 
     @Test
@@ -822,11 +906,13 @@ class TerminalSessionTest {
         private Runnable resizeHandler;
         private Runnable interruptHandler;
         private Runnable beforeNextRead;
+        private int readCount;
         private int height = 24;
         private int width = 80;
         private final NonBlockingReader reader = new NonBlockingReader() {
             @Override
             protected int read(long timeout, boolean isPeek) {
+                readCount++;
                 Runnable beforeRead = beforeNextRead;
                 beforeNextRead = null;
                 if (beforeRead != null) {

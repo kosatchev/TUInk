@@ -69,7 +69,7 @@ import dev.tuiframe.widget.Theme;
 import dev.tuiframe.widget.WidgetState;
 import dev.tuink.tui.ui.TabBarView;
 import dev.tuink.tui.ui.DocumentCaption;
-import dev.tuink.tui.ui.PathPresentation;
+import dev.tuiframe.explorer.ui.PathPresentation;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;

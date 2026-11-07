@@ -62,8 +62,10 @@ Use the [repository layout](README.md#repository-layout) to place new code:
 - `libs/editor/` owns the shared editor API, engine, session, and concrete
   adapters. Keep terminal and filesystem dependencies out of the portable
   API, engine, and session modules.
-- `libs/tuiframe/` owns reusable terminal runtime and widgets without editor
-  or application policy. `libs/unicode-text/` owns the independent text primitive.
+- `libs/tuiframe/` owns reusable terminal runtime, widgets and the filesystem
+  explorer without editor or application policy. `tuiframe-explorer` owns file
+  operations and history; TUInk adapts receipts to document bindings.
+  `libs/unicode-text/` owns the independent text primitive.
 - Unit tests belong in their module's `src/test`. Shared fixtures, complete
   application scenarios, performance tools, and external compatibility probes
   belong under `verification/` in the corresponding named directory.

@@ -12,7 +12,7 @@ import dev.tuink.tui.flow.ConfirmChoice;
 import dev.tuink.tui.flow.DocumentSaveFormat;
 import dev.tuink.tui.flow.UiModalState;
 import dev.tuink.tui.ui.NotificationPresentation;
-import dev.tuink.tui.ui.PathPresentation;
+import dev.tuiframe.explorer.file.PathLabels;
 import dev.tuiframe.text.TerminalPlainText;
 import java.io.IOException;
 import java.nio.file.AccessDeniedException;
@@ -213,7 +213,7 @@ final class SnapshotSaveWorkflow {
         DocumentResource resource = owner.subject().binding().resource();
         if (resource == null) return "untitled.md";
         Path target = filePath(resource);
-        if (target != null) return PathPresentation.full(target);
+        if (target != null) return PathLabels.full(target);
         String hint = resource.nameHint();
         return hint == null || hint.isBlank() ? "untitled.md" : TerminalPlainText.singleLine(hint);
     }

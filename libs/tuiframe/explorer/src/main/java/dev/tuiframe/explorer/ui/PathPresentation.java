@@ -1,13 +1,12 @@
-package dev.tuink.tui.ui;
+package dev.tuiframe.explorer.ui;
 
 import dev.tuiframe.cell.CellText;
+import dev.tuiframe.explorer.file.PathLabels;
 import dev.tuiframe.text.TerminalText;
 import dev.tuiframe.widget.LabelPolicy;
-import dev.tuink.tui.flow.SavePathInput;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 
 /** Lossless path labels. A basename beginning {@code file:} is an encoded display label, not an input path. */
 public final class PathPresentation {
@@ -71,28 +70,16 @@ public final class PathPresentation {
 
     /** Full, reversible input spelling, using a URI when terminal sanitization would change its identity. */
     public static String full(Path path) {
-        Objects.requireNonNull(path, "path");
-        String formatted = SavePathInput.format(path);
-        return displayPreserves(formatted) && (!formatted.startsWith(URI_MARKER) || formatted.startsWith("file:/"))
-            ? formatted : path.toAbsolutePath().toUri().toASCIIString();
+        return PathLabels.full(path);
     }
 
     /** Uses the original path's URI component, so a raw basename never acquires a fictitious working directory. */
     public static String name(Path path) {
-        Objects.requireNonNull(path, "path");
-        Path leaf = path.getFileName();
-        if (leaf == null) return full(path);
-        String literal = leaf.toString();
-        if (!literal.startsWith(URI_MARKER) && displayPreserves(literal)
-            && Path.of(literal).equals(leaf)) return literal;
-        String uri = path.toAbsolutePath().toUri().toASCIIString();
-        if (uri.endsWith("/")) uri = uri.substring(0, uri.length() - 1);
-        String component = uri.substring(uri.lastIndexOf('/') + 1);
-        return URI_MARKER + component.replace(":", "%3A");
+        return PathLabels.name(path);
     }
 
     public static boolean encodedName(Path path) {
-        return path != null && name(path).startsWith(URI_MARKER);
+        return PathLabels.encodedName(path);
     }
 
     public static String fit(String text, int cells, int preferredTailCells) {
@@ -101,10 +88,6 @@ public final class PathPresentation {
 
     public static String clip(String text, int leftCells, int cells) {
         return LABEL_POLICY.clip(text, leftCells, cells);
-    }
-
-    private static boolean displayPreserves(String text) {
-        return text.equals(CellText.clip(text, 0, CellText.width(text)));
     }
 
     private static boolean hasTokens(String text) {

@@ -1,6 +1,6 @@
-package dev.tuink.tui.ui;
+package dev.tuiframe.explorer.ui;
 
-import static dev.tuink.tui.file.FileTreeTestSupport.awaitLoaded;
+import static dev.tuiframe.explorer.file.FileTreeTestSupport.awaitLoaded;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -18,7 +18,7 @@ import dev.tuiframe.scroll.Scrollbar;
 import dev.tuiframe.style.CellStyle;
 import dev.tuiframe.widget.InteractionResult;
 import dev.tuiframe.widget.Theme;
-import dev.tuink.tui.file.FileTreeModel;
+import dev.tuiframe.explorer.file.FileTreeModel;
 import java.io.IOException;
 import java.io.File;
 import java.net.URI;
@@ -33,6 +33,38 @@ class FileTreeViewTest {
 
     @TempDir
     Path root;
+
+    @Test
+    void explorerEnterTogglesDirectoriesAndKeepsFileActivation() throws IOException {
+        Path folder = Files.createDirectory(root.resolve("folder"));
+        Path file = Files.createFile(folder.resolve("child.txt"));
+        Rect bounds = new Rect(1, 1, 25, 6);
+        Rect clip = new Rect(0, 0, 40, 10);
+        try (FileTreeModel model = new FileTreeModel(root, false, false, false)) {
+            FileTreeModel.Snapshot snapshot = awaitLoaded(model);
+            FileTreeModel.Entry directory = entry(snapshot, folder);
+            FileTreeView view = FileTreeView.fromSnapshot(snapshot, false, false,
+                FileTreeView.DirectoryActivation.TOGGLE_EXPANSION);
+            FileTreeView.Placement placed = view.place(bounds, state(snapshot, directory, 0, 0), clip, true);
+            FileTreeView.ToggleRequested expand = assertInstanceOf(FileTreeView.ToggleRequested.class,
+                output(placed.handle(KeyStroke.of(KeyStroke.Key.ENTER), 1L, DOUBLE_CLICK_NANOS)));
+            assertEquals(directory.id(), expand.id());
+            assertTrue(expand.expand());
+            model.setDirectoryExpanded(expand.id(), expand.expand());
+
+            snapshot = awaitLoaded(model);
+            view = FileTreeView.fromSnapshot(snapshot, false, false, FileTreeView.DirectoryActivation.TOGGLE_EXPANSION);
+            placed = view.place(bounds, expand.state(), clip, true);
+            FileTreeView.ToggleRequested collapse = assertInstanceOf(FileTreeView.ToggleRequested.class,
+                output(placed.handle(KeyStroke.of(KeyStroke.Key.ENTER), 2L, DOUBLE_CLICK_NANOS)));
+            assertFalse(collapse.expand());
+
+            placed = view.place(bounds, state(snapshot, entry(snapshot, file), 0, 0), clip, true);
+            FileTreeView.FileRequested open = assertInstanceOf(FileTreeView.FileRequested.class,
+                output(placed.handle(KeyStroke.of(KeyStroke.Key.ENTER), 3L, DOUBLE_CLICK_NANOS)));
+            assertEquals(file, open.file());
+        }
+    }
 
     @Test
     void horizontalScrollingMasksPartialNativeByteEscapesAndActivationRetainsTheExactPath() throws IOException {

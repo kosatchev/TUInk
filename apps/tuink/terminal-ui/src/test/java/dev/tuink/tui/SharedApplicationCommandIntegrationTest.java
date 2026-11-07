@@ -4,7 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import dev.tuiframe.input.KeyStroke;
 import dev.tuink.tui.command.TuinkCommand;
-import dev.tuink.tui.file.FileTreeModel;
+import dev.tuiframe.explorer.file.FileTreeModel;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;

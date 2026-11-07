@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuiframe.explorer.Explorer;
+
 import dev.tuink.editor.storage.DocumentEncodingException;
 
 import dev.tuink.storage.jvm.JvmDocumentStorage;
@@ -38,7 +40,7 @@ class FilePickerOpenWorkflowTest {
 
     @Test
     void invalidLocationDoesNotStartIoOrAllocateADocument() {
-        try (OpenFileTreeController tree = new OpenFileTreeController(directory, false, false)) {
+        try (Explorer tree = new Explorer(directory, false, false)) {
             for (String value : List.of("", "invalid\u0000path")) {
                 var result = applyWithoutDocument(new OpenFileInputRouter.OpenLocation(value), tree);
                 assertTrue(result.openFileMode());
@@ -53,7 +55,7 @@ class FilePickerOpenWorkflowTest {
     @Test
     void relativeLocationRetainsTheSelectedEncodingAndDirectoryCompletionIsOnlyANavigationIntent() throws Exception {
         Path target = Files.createDirectory(directory.resolve("folder with spaces"));
-        try (OpenFileTreeController tree = new OpenFileTreeController(directory, false, false)) {
+        try (Explorer tree = new Explorer(directory, false, false)) {
             var result = FilePickerOpenWorkflow.apply(new OpenFileInputRouter.OpenLocation("folder with spaces"), tree,
                 List.of(), -1, () -> fail("location submission must not create a document"), DocumentOpenMode.WINDOWS_1251);
             var request = result.pendingOpen();
@@ -72,7 +74,7 @@ class FilePickerOpenWorkflowTest {
 
     @Test
     void cancelledLocationCannotPublishDirectoryNavigation() throws Exception {
-        try (OpenFileTreeController tree = new OpenFileTreeController(directory, false, false)) {
+        try (Explorer tree = new Explorer(directory, false, false)) {
             var result = applyWithoutDocument(new OpenFileInputRouter.OpenLocation(directory.toString()), tree);
             var target = result.pendingOpen().inspect();
             result.pendingOpen().cancel();
@@ -86,7 +88,7 @@ class FilePickerOpenWorkflowTest {
     @Test
     void treeAndCancelIntentsDoNotCreateDocuments() throws Exception {
         Path child = Files.createDirectory(directory.resolve("child"));
-        try (OpenFileTreeController tree = new OpenFileTreeController(directory, true, false)) {
+        try (Explorer tree = new Explorer(directory, true, false)) {
             var changed = applyWithoutDocument(new OpenFileInputRouter.ChangeRoot(child), tree);
             assertTrue(changed.openFileMode());
             assertEquals(child, tree.root());
@@ -104,7 +106,7 @@ class FilePickerOpenWorkflowTest {
 
     @Test
     void invalidSelectionsRetainThePickerWithoutPublishingAnEmptyDocument() {
-        try (OpenFileTreeController tree = new OpenFileTreeController(directory, true, false)) {
+        try (Explorer tree = new Explorer(directory, true, false)) {
             var rejected = applyWithoutDocument(
                 new OpenFileInputRouter.SelectionRejected(OpenFileInputRouter.Rejection.ERROR), tree);
             assertTrue(rejected.openFileMode());
@@ -132,7 +134,7 @@ class FilePickerOpenWorkflowTest {
         Files.writeString(file, "selected\r\ncontents");
         EditorClipboard clipboard = new EditorClipboard();
         clipboard.setText("clipboard");
-        try (OpenFileTreeController tree = new OpenFileTreeController(directory, true, false)) {
+        try (Explorer tree = new Explorer(directory, true, false)) {
             var requested = FilePickerOpenWorkflow.apply(new OpenFileInputRouter.OpenFile(file), tree,
                 List.of(), -1,
                 () -> fail("requesting a read must not allocate a document"));
@@ -159,7 +161,7 @@ class FilePickerOpenWorkflowTest {
         existing.engine().insertInput("draft ");
         existing.engine().moveCursorTo(new Position(0, 2));
         long revision = existing.model().revision();
-        try (OpenFileTreeController tree = new OpenFileTreeController(directory, true, false)) {
+        try (Explorer tree = new Explorer(directory, true, false)) {
             var result = FilePickerOpenWorkflow.apply(new OpenFileInputRouter.OpenFile(file), tree,
                 List.of(existing), 0, () -> fail("an already open file must not allocate another document"));
 
@@ -308,7 +310,7 @@ class FilePickerOpenWorkflowTest {
     }
 
     private static FilePickerOpenWorkflow.Result applyWithoutDocument(OpenFileInputRouter.Intent intent,
-                                                                      OpenFileTreeController tree) {
+                                                                      Explorer tree) {
         return FilePickerOpenWorkflow.apply(intent, tree, List.of(), -1,
             () -> fail("navigation must not allocate a document"));
     }

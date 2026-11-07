@@ -19,6 +19,7 @@ def projectDirectories = [
     ':tuiframe-core': 'libs/tuiframe/core',
     ':tuiframe-jline': 'libs/tuiframe/jline',
     ':tuiframe-widgets': 'libs/tuiframe/widgets',
+    ':tuiframe-explorer': 'libs/tuiframe/explorer',
     ':unicode-text': 'libs/unicode-text',
     ':markdown-preview': 'libs/markdown/preview',
     ':markdown-commonmark': 'libs/markdown/commonmark',

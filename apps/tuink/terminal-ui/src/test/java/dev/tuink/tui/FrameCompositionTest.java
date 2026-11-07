@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuiframe.explorer.Explorer;
+
 import static dev.tuink.tui.file.FileTreeTestSupport.awaitLoaded;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -16,8 +18,8 @@ import dev.tuink.render.RenderPlanBuilder;
 import dev.tuink.render.Style;
 import dev.tuink.render.TerminalEditorTextLayout;
 import dev.tuiframe.geometry.Rect;
-import dev.tuink.tui.file.FileTreeModel;
-import dev.tuink.tui.ui.FileTreeView;
+import dev.tuiframe.explorer.file.FileTreeModel;
+import dev.tuiframe.explorer.ui.FileTreeView;
 import dev.tuink.tui.ui.HelpPages;
 import dev.tuink.tui.ui.InlinePromptBar;
 import dev.tuink.tui.ui.NotificationBar;
@@ -107,7 +109,7 @@ class FrameCompositionTest {
             for (RecordComponent component : type.getRecordComponents()) {
                 Class<?> componentType = component.getType();
                 assertFalse(Collection.class.isAssignableFrom(componentType));
-                assertFalse(componentType.equals(OpenFileTreeController.class));
+                assertFalse(componentType.equals(Explorer.class));
                 assertFalse(componentType.equals(UiSessionState.class));
             }
         }

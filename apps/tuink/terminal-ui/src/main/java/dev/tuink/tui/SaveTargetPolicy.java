@@ -4,10 +4,10 @@ import dev.tuink.storage.jvm.JvmDocumentStorage;
 import dev.tuink.storage.jvm.JvmFileAdvisory;
 import dev.tuink.editor.storage.DocumentEncodingException;
 import dev.tuink.core.EditorState;
-import dev.tuink.tui.file.FileFailureReason;
+import dev.tuiframe.explorer.file.FileFailureReason;
 import dev.tuink.tui.flow.SaveTargetSuggester;
 import dev.tuink.tui.flow.SavePathInput;
-import dev.tuink.tui.ui.PathPresentation;
+import dev.tuiframe.explorer.file.PathLabels;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Locale;
@@ -71,7 +71,7 @@ final class SaveTargetPolicy {
 
     static String suggestWritableName(Path path, Predicate<Path> occupied) {
         Path preferred = path.getFileName() == null ? Path.of(DEFAULT_FILE_NAME) : path;
-        return PathPresentation.full(SaveTargetSuggester.firstAvailable(preferred, "-copy", occupied));
+        return PathLabels.full(SaveTargetSuggester.firstAvailable(preferred, "-copy", occupied));
     }
 
 }

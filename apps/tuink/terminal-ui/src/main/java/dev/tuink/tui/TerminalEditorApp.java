@@ -1,5 +1,8 @@
 package dev.tuink.tui;
 
+import dev.tuiframe.explorer.ui.PathPresentation;
+import dev.tuiframe.explorer.Explorer;
+
 import dev.tuink.storage.jvm.JvmDocumentStorage;
 import dev.tuink.editor.session.recovery.RecoveryCoordinator;
 import dev.tuink.editor.session.recovery.RecoveryParticipant;
@@ -93,7 +96,7 @@ import dev.tuink.tui.ui.CursorPolicy;
 import dev.tuink.tui.ui.SaveAsBarView;
 import dev.tuink.tui.ui.SearchBarView;
 import dev.tuink.tui.ui.TabBarView;
-import dev.tuink.tui.ui.FileTreeView;
+import dev.tuiframe.explorer.ui.FileTreeView;
 import dev.tuink.tui.ui.ViewportController;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -384,7 +387,7 @@ public class TerminalEditorApp {
 
         try (
             renderer;
-            OpenFileTreeController openFileTree = new OpenFileTreeController(
+            Explorer openFileTree = new Explorer(
                 initialOpenFileRoot,
                 true,
                 true
@@ -815,7 +818,7 @@ public class TerminalEditorApp {
             canvas,
             layout.top() + 1,
             layout.left() + 1,
-            padRight(dev.tuink.tui.ui.PathPresentation.clip(pathLine, 0, Math.max(0, layout.width() - 2)),
+            padRight(dev.tuiframe.explorer.ui.PathPresentation.clip(pathLine, 0, Math.max(0, layout.width() - 2)),
                 Math.max(0, layout.width() - 2)),
             styles.windows().dialog()
         );

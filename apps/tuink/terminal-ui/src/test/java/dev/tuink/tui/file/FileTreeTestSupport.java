@@ -1,5 +1,7 @@
 package dev.tuink.tui.file;
 
+import dev.tuiframe.explorer.file.FileTreeModel;
+
 import java.time.Duration;
 import java.util.concurrent.locks.LockSupport;
 

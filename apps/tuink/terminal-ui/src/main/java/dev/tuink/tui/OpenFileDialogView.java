@@ -23,7 +23,7 @@ import dev.tuiframe.widget.Theme;
 import dev.tuiframe.widget.TextField;
 import dev.tuiframe.widget.WidgetState;
 import dev.tuiframe.widget.WidgetThemeKeys;
-import dev.tuink.tui.ui.FileTreeView;
+import dev.tuiframe.explorer.ui.FileTreeView;
 import dev.tuink.tui.ui.OpenFileDialogController;
 import dev.tuink.tui.ui.OpenFileDialogController.OpenDialogLayout;
 import dev.tuink.tui.ui.NotificationPresentation;

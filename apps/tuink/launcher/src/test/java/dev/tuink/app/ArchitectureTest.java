@@ -140,10 +140,10 @@ class ArchitectureTest {
         .should().dependOnClassesThat().resideInAPackage("dev.tuink.app..");
 
     static final ArchRule FILE_TREE_MODEL_STAYS_TERMINAL_INDEPENDENT = classes()
-        .that().resideInAPackage("dev.tuink.tui.file..")
+        .that().haveNameMatching("dev\\.tuiframe\\.explorer\\.file\\.(?:FileTreeModel|FileTreeLoadBudget|FileFailureReason)(?:\\$.*)?")
         .should().onlyDependOnClassesThat().resideInAnyPackage(
             "java..",
-            "dev.tuink.tui.file.."
+            "dev.tuiframe.explorer.file.."
         );
 
     static final ArchRule APP_USES_ONLY_THE_TUI_FACADE = noClasses()

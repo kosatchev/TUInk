@@ -125,6 +125,7 @@ Run only a specific module's tests when iterating:
 ./gradlew :tuiframe-core:test
 ./gradlew :tuiframe-jline:test
 ./gradlew :tuiframe-widgets:test
+./gradlew :tuiframe-explorer:test
 ./gradlew :editor-contract:test
 ./gradlew :core:test
 ./gradlew :editor-session:test
@@ -178,7 +179,8 @@ graph:
   check :app:distZip :app:perfHarnessTest \
   dependencies :editor-contract:dependencies :editor-session:dependencies \
   :unicode-text:dependencies :tuiframe-core:dependencies \
-  :tuiframe-jline:dependencies :tuiframe-widgets:dependencies :core:dependencies \
+  :tuiframe-jline:dependencies :tuiframe-widgets:dependencies \
+  :tuiframe-explorer:dependencies :core:dependencies \
   :editor-diff-jgit:dependencies :editor-storage-jvm:dependencies \
   :render:dependencies :highlight-regex:dependencies \
   :tui:dependencies :app:dependencies

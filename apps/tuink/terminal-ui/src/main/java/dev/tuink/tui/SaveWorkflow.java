@@ -14,7 +14,7 @@ import dev.tuink.tui.flow.SaveAsSuggestionStore;
 import dev.tuink.tui.flow.SaveContinuation;
 import dev.tuink.tui.flow.SaveTargetSuggester;
 import dev.tuink.tui.flow.UiModalState;
-import dev.tuink.tui.ui.PathPresentation;
+import dev.tuiframe.explorer.file.PathLabels;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
@@ -483,10 +483,10 @@ final class SaveWorkflow {
                 return suggestWritableName(context, index, file);
             }
             if (file != null) {
-                return PathPresentation.full(file.toAbsolutePath());
+                return PathLabels.full(file.toAbsolutePath());
             }
             Path preferred = Path.of("").toAbsolutePath().resolve(SaveTargetPolicy.DEFAULT_FILE_NAME);
-            return PathPresentation.full(SaveTargetSuggester.firstAvailable(preferred,
+            return PathLabels.full(SaveTargetSuggester.firstAvailable(preferred,
                 target -> occupied(context, index, target)));
         }, draft -> !writableCopy || SaveTargetPolicy.isSuitableDraft(draft));
     }
@@ -539,7 +539,7 @@ final class SaveWorkflow {
     }
 
     private static void rememberSavedPath(Context context, TabSession tab, Path file) {
-        context.suggestions().rememberDraft(tab, PathPresentation.full(file.toAbsolutePath()));
+        context.suggestions().rememberDraft(tab, PathLabels.full(file.toAbsolutePath()));
     }
 
     private static Result result(UiModalState modal, Notice notice) {

@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuiframe.explorer.Explorer;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -10,8 +12,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.input.KeyStroke;
 import dev.tuiframe.input.PointerEvent;
-import dev.tuink.tui.file.FileTreeModel;
-import dev.tuink.tui.ui.FileTreeView;
+import dev.tuiframe.explorer.file.FileTreeModel;
+import dev.tuiframe.explorer.ui.FileTreeView;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -20,7 +22,7 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-class OpenFileTreeControllerTest {
+class ExplorerControllerIntegrationTest {
     private static final Rect BOUNDS = new Rect(2, 1, 24, 5);
     private static final Rect NARROW_BOUNDS = new Rect(2, 1, 14, 4);
     private static final Rect CLIP = new Rect(0, 0, 40, 10);
@@ -28,6 +30,55 @@ class OpenFileTreeControllerTest {
 
     @TempDir
     Path root;
+
+    @Test
+    void explorerKeepsItsRootAndRefreshPreservesSelectionAndScroll() throws IOException {
+        Path folder = Files.createDirectory(root.resolve("folder"));
+        for (int index = 0; index < 12; index++) {
+            Files.createFile(folder.resolve("long-child-file-%02d-0123456789.txt".formatted(index)));
+        }
+        try (Explorer controller = Explorer.sidebar(root)) {
+            awaitLoaded(controller);
+            FileTreeView.Placement placement = controller.place(NARROW_BOUNDS, CLIP, true, true);
+            assertEquals(root, placement.selectedEntry().orElseThrow().path());
+            assertTrue(controller.select(folder));
+            placement = controller.place(NARROW_BOUNDS, CLIP, true, true);
+            assertEquals(folder, placement.selectedEntry().orElseThrow().path());
+            assertEquals(0, placement.sizeColumnWidth());
+            assertEquals(0, placement.dateColumnWidth());
+            OpenFileInputRouter.Result enter = route(placement, KeyStroke.of(KeyStroke.Key.ENTER));
+            OpenFileInputRouter.ToggleDirectory expand = assertInstanceOf(OpenFileInputRouter.ToggleDirectory.class, enter.intent());
+            controller.adopt(enter.state());
+            controller.requestExpansion(expand.id(), expand.expand());
+            awaitLoaded(controller);
+            controller.moveToParentRoot();
+            assertEquals(root, controller.root());
+
+            placement = controller.place(NARROW_BOUNDS, CLIP, true, true);
+            controller.adopt(route(placement, KeyStroke.of(KeyStroke.Key.END)).state());
+            placement = controller.place(NARROW_BOUNDS, CLIP, true, true);
+            controller.adopt(route(placement, KeyStroke.of(KeyStroke.Key.ARROW_RIGHT, KeyStroke.Modifier.SHIFT)).state());
+            FileTreeView.State before = controller.place(NARROW_BOUNDS, CLIP, true, true).state();
+            assertTrue(before.widgetState().firstVisibleIndex() > 0);
+            assertTrue(before.widgetState().horizontalOffset() > 0);
+
+            Files.createFile(folder.resolve("z-new.txt"));
+            controller.adopt(withClick(before, before.selectedId()));
+            controller.refresh();
+            awaitLoaded(controller);
+            FileTreeView.State after = controller.place(NARROW_BOUNDS, CLIP, true, true).state();
+            assertEquals(before.selectedId(), after.selectedId());
+            assertEquals(before.widgetState().firstVisibleIndex(), after.widgetState().firstVisibleIndex());
+            assertEquals(before.widgetState().horizontalOffset(), after.widgetState().horizontalOffset());
+            assertNull(after.lastPressedId());
+            assertTrue(after.snapshotRevision() > before.snapshotRevision());
+
+            placement = controller.place(NARROW_BOUNDS, CLIP, true, true);
+            controller.adopt(route(placement, KeyStroke.of(KeyStroke.Key.END)).state());
+            assertEquals(folder.resolve("z-new.txt"),
+                controller.place(NARROW_BOUNDS, CLIP, true, true).selectedEntry().orElseThrow().path());
+        }
+    }
 
     @Test
     void metadataRevisionKeepsStableSelectionAndBothViewports() throws IOException {
@@ -38,7 +89,7 @@ class OpenFileTreeControllerTest {
             Files.createFile(directory.resolve("child.txt"));
         }
 
-        try (OpenFileTreeController controller = new OpenFileTreeController(root, true, true)) {
+        try (Explorer controller = new Explorer(root, true, true)) {
             awaitLoaded(controller);
             FileTreeView.Placement placement = controller.place(NARROW_BOUNDS, CLIP, true, true);
             OpenFileInputRouter.Result end = route(
@@ -80,7 +131,7 @@ class OpenFileTreeControllerTest {
         Files.createFile(folder.resolve("child.txt"));
         Files.createFile(root.resolve("note.txt"));
 
-        try (OpenFileTreeController controller = new OpenFileTreeController(root, false, false)) {
+        try (Explorer controller = new Explorer(root, false, false)) {
             awaitLoaded(controller);
             FileTreeView.Placement placement = controller.place(BOUNDS, CLIP, true, true);
             OpenFileInputRouter.Result selectFolder = route(
@@ -155,7 +206,7 @@ class OpenFileTreeControllerTest {
         for (int index = 0; index < 12; index++) {
             Files.createFile(root.resolve("long-file-name-" + index + "-0123456789.txt"));
         }
-        OpenFileTreeController controller = new OpenFileTreeController(root, false, false);
+        Explorer controller = new Explorer(root, false, false);
         awaitLoaded(controller);
         FileTreeView.Placement placement = controller.place(NARROW_BOUNDS, CLIP, true, true);
         OpenFileInputRouter.Result end = route(placement, KeyStroke.of(KeyStroke.Key.END));
@@ -179,7 +230,7 @@ class OpenFileTreeControllerTest {
         controller.close();
     }
 
-    private static void awaitLoaded(OpenFileTreeController controller) {
+    private static void awaitLoaded(Explorer controller) {
         long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
         while (controller.loading()) {
             if (System.nanoTime() >= deadline) {
@@ -190,7 +241,7 @@ class OpenFileTreeControllerTest {
     }
 
     private static FileTreeView.Placement awaitMetadataRevision(
-        OpenFileTreeController controller,
+        Explorer controller,
         long baselineRevision
     ) {
         long startedAt = System.nanoTime();

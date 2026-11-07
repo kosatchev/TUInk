@@ -1,4 +1,4 @@
-package dev.tuink.tui.file;
+package dev.tuiframe.explorer.file;
 
 import java.nio.file.Path;
 

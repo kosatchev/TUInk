@@ -11,7 +11,7 @@ import dev.tuiframe.input.KeyStroke;
 import dev.tuiframe.input.TextInput;
 import dev.tuink.tui.command.TuinkCommand;
 import dev.tuink.tui.flow.SavePathInput;
-import dev.tuink.tui.ui.PathPresentation;
+import dev.tuiframe.explorer.ui.PathPresentation;
 import java.io.File;
 import java.net.URI;
 import java.nio.file.Files;

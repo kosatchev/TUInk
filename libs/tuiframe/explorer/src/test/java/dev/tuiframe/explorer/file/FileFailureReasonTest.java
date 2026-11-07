@@ -1,4 +1,4 @@
-package dev.tuink.tui.file;
+package dev.tuiframe.explorer.file;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;

@@ -5,7 +5,7 @@ import dev.tuiframe.input.TuiInputEvent;
 import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.widget.InteractionResult;
 import dev.tuiframe.widget.PointerCaptureRequest;
-import dev.tuink.tui.ui.FileTreeView;
+import dev.tuiframe.explorer.ui.FileTreeView;
 import dev.tuink.tui.ui.OpenFileDialogController.OpenDialogLayout;
 import java.util.concurrent.atomic.AtomicReference;
 

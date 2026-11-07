@@ -77,6 +77,7 @@ def allowedProjectDependencies = [
     ':tuiframe-core'   : [] as Set,
     ':tuiframe-jline'  : [':tuiframe-core'] as Set,
     ':tuiframe-widgets': [':tuiframe-core'] as Set,
+    ':tuiframe-explorer': [':tuiframe-core', ':tuiframe-widgets'] as Set,
     ':editor-contract' : [] as Set,
     ':core'            : [':unicode-text', ':editor-contract'] as Set,
     ':editor-session'  : [':editor-contract', ':core'] as Set,
@@ -84,7 +85,7 @@ def allowedProjectDependencies = [
     ':editor-storage-jvm': [':core', ':editor-contract'] as Set,
     ':render'          : [':tuiframe-core', ':editor-contract', ':core', ':markdown-preview'] as Set,
     ':highlight-regex' : [':editor-contract', ':render'] as Set,
-    ':tui'             : [':tuiframe-core', ':tuiframe-jline', ':tuiframe-widgets', ':editor-contract', ':core',
+    ':tui'             : [':tuiframe-core', ':tuiframe-jline', ':tuiframe-widgets', ':tuiframe-explorer', ':editor-contract', ':core',
                          ':editor-session', ':render', ':highlight-regex', ':editor-diff-jgit',
                          ':editor-storage-jvm', ':markdown-preview', ':markdown-commonmark',
                          ':markdown-math', ':markdown-mermaid'] as Set,
@@ -100,7 +101,8 @@ def allowedTestProjectDependencies = [
 def expectedProjectGroups = [
     ':tuiframe-core'   : 'dev.tuiframe',
     ':tuiframe-jline'  : 'dev.tuiframe',
-    ':tuiframe-widgets': 'dev.tuiframe'
+    ':tuiframe-widgets': 'dev.tuiframe',
+    ':tuiframe-explorer': 'dev.tuiframe'
 ]
 def externallyDependencyFreeProductionConfigurations = [
     'annotationProcessor',
@@ -243,7 +245,7 @@ def verifyProjectDependencies = tasks.register('verifyProjectDependencies') {
                                     + "${dependency.group}:${dependency.name}"
                             )
                         }
-                        if ([':unicode-text', ':tuiframe-core', ':tuiframe-widgets', ':editor-contract',
+                        if ([':unicode-text', ':tuiframe-core', ':tuiframe-widgets', ':tuiframe-explorer', ':editor-contract',
                              ':editor-session'].contains(sourceProject.path)
                             && externallyDependencyFreeProductionConfigurations.contains(configuration.name)) {
                             violations.add(

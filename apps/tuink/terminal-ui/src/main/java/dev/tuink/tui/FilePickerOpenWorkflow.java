@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuiframe.explorer.file.ExplorerNavigation;
+
 import dev.tuink.editor.storage.DocumentEncodingException;
 
 import dev.tuink.core.TabSession;
@@ -10,7 +12,7 @@ import dev.tuink.editor.storage.DocumentLoad;
 import dev.tuink.editor.session.document.PreparedDocumentOpen;
 import dev.tuink.storage.jvm.FileBaseline;
 import dev.tuink.storage.jvm.JvmDocumentStorage;
-import dev.tuink.tui.file.FileFailureReason;
+import dev.tuiframe.explorer.file.FileFailureReason;
 import dev.tuink.tui.ui.NotificationPresentation;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -104,13 +106,13 @@ final class FilePickerOpenWorkflow {
         return Path.of(".").toAbsolutePath().normalize();
     }
 
-    static Result apply(OpenFileInputRouter.Intent intent, OpenFileTreeController tree,
+    static Result apply(OpenFileInputRouter.Intent intent, ExplorerNavigation tree,
                         List<TabSession> tabs, int activeTabIndex,
                         Supplier<TuiDocumentSession> newDocument) {
         return apply(intent, tree, tabs, activeTabIndex, newDocument, DocumentOpenMode.DETECT);
     }
 
-    static Result apply(OpenFileInputRouter.Intent intent, OpenFileTreeController tree,
+    static Result apply(OpenFileInputRouter.Intent intent, ExplorerNavigation tree,
                         List<TabSession> tabs, int activeTabIndex,
                         Supplier<TuiDocumentSession> newDocument, DocumentOpenMode mode) {
         if (intent == null) {

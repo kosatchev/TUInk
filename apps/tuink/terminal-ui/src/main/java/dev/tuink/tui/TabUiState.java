@@ -1,6 +1,8 @@
 package dev.tuink.tui;
 
-import dev.tuink.tui.file.FileTreeModel;
+import dev.tuiframe.explorer.Explorer;
+
+import dev.tuiframe.explorer.file.FileTreeModel;
 import dev.tuink.tui.flow.ConfirmChoice;
 import dev.tuink.tui.flow.SearchFocus;
 import dev.tuink.tui.flow.UiModalState;
@@ -32,7 +34,7 @@ final class TabUiState implements AutoCloseable {
     FilePickerOpenWorkflow.Notice pickerNotice;
     FileTreeModel.DirectoryFailure lastPickerDirectoryFailure;
     final OpenFileDialogView.FocusState openFileFocusState = new OpenFileDialogView.FocusState();
-    OpenFileTreeController openFileTree;
+    Explorer openFileTree;
     FilePickerOpenWorkflow.OpenRequest pendingOpen;
     FilePickerOpenWorkflow.Result deferredOpenResult;
     final SearchPresentation searchPresentation = new SearchPresentation();

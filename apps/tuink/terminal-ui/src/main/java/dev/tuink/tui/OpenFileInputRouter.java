@@ -8,8 +8,8 @@ import dev.tuiframe.widget.InteractionResult;
 import dev.tuiframe.widget.PointerCaptureRequest;
 import dev.tuink.core.EditorClipboard;
 import dev.tuink.tui.command.TuinkCommand;
-import dev.tuink.tui.file.FileTreeModel;
-import dev.tuink.tui.ui.FileTreeView;
+import dev.tuiframe.explorer.file.FileTreeModel;
+import dev.tuiframe.explorer.ui.FileTreeView;
 import java.nio.file.Path;
 import java.util.Objects;
 

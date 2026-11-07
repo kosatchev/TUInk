@@ -1,5 +1,7 @@
 package dev.tuink.tui.ui;
 
+import dev.tuiframe.explorer.ui.PathPresentation;
+
 import dev.tuiframe.cell.Canvas;
 import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.input.PointerEvent;

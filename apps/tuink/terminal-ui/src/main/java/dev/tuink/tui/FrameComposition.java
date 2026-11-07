@@ -7,7 +7,7 @@ import dev.tuink.render.EditorLayout;
 import dev.tuink.render.RenderPlanBuilder;
 import dev.tuiframe.geometry.Rect;
 import dev.tuink.tui.ui.ConfirmBarView;
-import dev.tuink.tui.ui.FileTreeView;
+import dev.tuiframe.explorer.ui.FileTreeView;
 import dev.tuink.tui.ui.HelpPage;
 import dev.tuink.tui.ui.InlinePromptBar;
 import dev.tuink.tui.ui.NotificationBar;

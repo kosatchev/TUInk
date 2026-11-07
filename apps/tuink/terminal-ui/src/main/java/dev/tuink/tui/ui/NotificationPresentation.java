@@ -1,5 +1,7 @@
 package dev.tuink.tui.ui;
 
+import dev.tuiframe.explorer.ui.PathPresentation;
+
 import dev.tuiframe.cell.CellText;
 import dev.tuiframe.text.TerminalPlainText;
 import java.nio.file.Path;

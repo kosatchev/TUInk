@@ -1,0 +1,9 @@
+plugins {
+    id 'java-library'
+}
+
+group = 'dev.tuiframe'
+
+dependencies {
+    api project(':tuiframe-widgets')
+}

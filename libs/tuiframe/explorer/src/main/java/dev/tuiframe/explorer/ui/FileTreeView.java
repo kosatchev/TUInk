@@ -1,4 +1,4 @@
-package dev.tuink.tui.ui;
+package dev.tuiframe.explorer.ui;
 
 import dev.tuiframe.cell.Canvas;
 import dev.tuiframe.cell.CellText;
@@ -15,7 +15,8 @@ import dev.tuiframe.widget.PlacedPointerCapture;
 import dev.tuiframe.widget.PointerCaptureCancellation;
 import dev.tuiframe.widget.Theme;
 import dev.tuiframe.widget.WidgetState;
-import dev.tuink.tui.file.FileTreeModel;
+import dev.tuiframe.explorer.file.FileTreeModel;
+import dev.tuiframe.explorer.file.ExplorerFileService;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -26,7 +27,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * TUInk-owned presentation and policy adapter over the reusable flat tree widget.
+ * Reusable presentation and policy adapter over the reusable flat tree widget.
  *
  * <p>One instance projects one immutable {@link FileTreeModel.Snapshot}. The
  * projection contains no filesystem traversal and no retained hierarchy. Its
@@ -35,6 +36,9 @@ import java.util.Optional;
  * policy.</p>
  */
 public final class FileTreeView {
+    /** File-picker navigation and fixed-root explorer activation share the same tree widget. */
+    public enum DirectoryActivation { NAVIGATE, TOGGLE_EXPANSION }
+
     private static final int MIN_LABEL_WIDTH_WITH_METADATA = 12;
     private static final int DEFAULT_SIZE_COLUMN_WIDTH = 11;
     private static final int MIN_SIZE_COLUMN_WIDTH = 7;
@@ -47,6 +51,7 @@ public final class FileTreeView {
     private final Map<FileTreeModel.EntryId, Integer> indexById;
     private final boolean showSizeColumn;
     private final boolean showDateColumn;
+    private final DirectoryActivation directoryActivation;
     private final int leadingExtent;
     private final boolean hasMetadataRows;
 
@@ -64,9 +69,11 @@ public final class FileTreeView {
     private FileTreeView(
         FileTreeModel.Snapshot snapshot,
         boolean showSizeColumn,
-        boolean showDateColumn
+        boolean showDateColumn,
+        DirectoryActivation directoryActivation
     ) {
         this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
+        this.directoryActivation = Objects.requireNonNull(directoryActivation, "directoryActivation");
         this.entries = snapshot.entries();
         HashMap<FileTreeModel.EntryId, Integer> indexes = new HashMap<>(entries.size());
         int widestLeading = 0;
@@ -99,7 +106,16 @@ public final class FileTreeView {
         boolean showSizeColumn,
         boolean showDateColumn
     ) {
-        return new FileTreeView(snapshot, showSizeColumn, showDateColumn);
+        return fromSnapshot(snapshot, showSizeColumn, showDateColumn, DirectoryActivation.NAVIGATE);
+    }
+
+    public static FileTreeView fromSnapshot(
+        FileTreeModel.Snapshot snapshot,
+        boolean showSizeColumn,
+        boolean showDateColumn,
+        DirectoryActivation directoryActivation
+    ) {
+        return new FileTreeView(snapshot, showSizeColumn, showDateColumn, directoryActivation);
     }
 
     public FileTreeModel.Snapshot snapshot() {
@@ -286,7 +302,7 @@ public final class FileTreeView {
     private static String displayLabel(FileTreeModel.Entry entry) {
         return switch (entry.kind()) {
             case FILE -> PathPresentation.name(entry.path());
-            case DIRECTORY -> PathPresentation.name(entry.path()) + "/";
+            case DIRECTORY -> PathPresentation.name(entry.path()) + (entry.path().getFileName() == null ? "" : "/");
             case PARENT, ERROR -> entry.name();
         };
     }
@@ -392,9 +408,9 @@ public final class FileTreeView {
         }
     }
 
-    /** TUInk semantic outputs; generic presentation never sees paths or file policy. */
+    /** Explorer semantic outputs; generic presentation never sees paths or file policy. */
     public sealed interface Action
-        permits StateChanged, ToggleRequested, RootRequested, FileRequested {
+        permits StateChanged, ToggleRequested, RootRequested, FileRequested, MoveRequested {
         State state();
     }
 
@@ -429,12 +445,30 @@ public final class FileTreeView {
         }
     }
 
-    /** Exact current-frame generic placement plus TUInk snapshot policy. */
+    /** A drop intent carries the identity observed by the scanner before the gesture. */
+    public record MoveRequested(Path source, Path destination, ExplorerFileService.Target expected,
+        State state) implements Action {
+        public MoveRequested {
+            Objects.requireNonNull(source); Objects.requireNonNull(destination);
+            Objects.requireNonNull(expected); Objects.requireNonNull(state);
+        }
+    }
+
+    /** Optional composite interaction owned by a containing Explorer. */
+    public interface Interaction {
+        InteractionResult<Action> handle(TuiInputEvent event, long nowNanos, long doubleClickWindowNanos);
+        PlacedPointerCapture<Action> captureTarget();
+        void paint(Canvas canvas, Theme theme);
+    }
+
+    /** Exact current-frame generic placement plus filesystem snapshot policy. */
     public final class Placement {
         private final dev.tuiframe.widget.TreeView.Placement<FileTreeModel.EntryId> placed;
         private final FocusContext context;
         private final State state;
         private final MetadataColumns columns;
+        private final Interaction interaction;
+        private final Rect allocation;
 
         private Placement(
             dev.tuiframe.widget.TreeView.Placement<FileTreeModel.EntryId> placed,
@@ -442,14 +476,26 @@ public final class FileTreeView {
             State state,
             MetadataColumns columns
         ) {
+            this(placed, context, state, columns, null, null);
+        }
+
+        private Placement(dev.tuiframe.widget.TreeView.Placement<FileTreeModel.EntryId> placed,
+            FocusContext context, State state, MetadataColumns columns, Interaction interaction, Rect allocation) {
             this.placed = Objects.requireNonNull(placed, "placed");
             this.context = Objects.requireNonNull(context, "context");
             this.state = Objects.requireNonNull(state, "state");
             this.columns = Objects.requireNonNull(columns, "columns");
+            this.interaction = interaction;
+            this.allocation = allocation;
+        }
+
+        public Placement withInteraction(Rect allocation, Interaction interaction) {
+            return new Placement(placed, context, state, columns,
+                Objects.requireNonNull(interaction), Objects.requireNonNull(allocation));
         }
 
         public Rect bounds() {
-            return placed.bounds();
+            return allocation == null ? placed.bounds() : allocation;
         }
 
         /**
@@ -458,6 +504,7 @@ public final class FileTreeView {
          * drag/release and cancellation cannot activate entries or double-click.
          */
         public PlacedPointerCapture<Action> captureTarget() {
+            if (interaction != null) return interaction.captureTarget();
             return new PlacedPointerCapture<>() {
                 @Override
                 public Rect bounds() {
@@ -566,6 +613,7 @@ public final class FileTreeView {
                 Objects.requireNonNull(theme, "theme"),
                 context.widgetState()
             );
+            if (interaction != null) interaction.paint(canvas, theme);
         }
 
         /** Returns the exact selected-row cursor in terminal coordinates. */
@@ -578,13 +626,14 @@ public final class FileTreeView {
             return context.localPoint(event).filter(placed.bounds()::contains).isPresent();
         }
 
-        /** Routes an event and applies TUInk activation/double-click policy. */
+        /** Routes an event and applies Explorer activation/double-click policy. */
         public InteractionResult<Action> handle(
             TuiInputEvent event,
             long nowNanos,
             long doubleClickWindowNanos
         ) {
             Objects.requireNonNull(event, "event");
+            if (interaction != null) return interaction.handle(event, nowNanos, doubleClickWindowNanos);
             if (doubleClickWindowNanos < 0L) {
                 throw new IllegalArgumentException("doubleClickWindowNanos must not be negative");
             }
@@ -643,6 +692,10 @@ public final class FileTreeView {
             }
             if (entry.kind() == FileTreeModel.Kind.FILE) {
                 return new FileRequested(entry.path(), next);
+            }
+            if (entry.kind() == FileTreeModel.Kind.DIRECTORY
+                && directoryActivation == DirectoryActivation.TOGGLE_EXPANSION) {
+                return new ToggleRequested(entry.id(), !entry.expanded(), next);
             }
             return new RootRequested(entry.path(), next);
         }

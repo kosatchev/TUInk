@@ -1,4 +1,4 @@
-package dev.tuink.tui.file;
+package dev.tuiframe.explorer.file;
 
 import java.io.IOException;
 import java.nio.file.AccessDeniedException;

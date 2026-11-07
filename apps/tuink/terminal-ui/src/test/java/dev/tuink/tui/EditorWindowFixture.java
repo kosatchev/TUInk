@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuiframe.explorer.Explorer;
+
 import dev.tuink.storage.jvm.JvmDocumentStorage;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -59,7 +61,7 @@ final class EditorWindowFixture implements AutoCloseable {
     final TopMenuController menu = new TopMenuController();
     final Keymap<KeyStroke> keymap = TuinkKeymap.defaults();
     final TuiEventLoop<TuiInputEvent> loop = new TuiEventLoop<>(timeout -> TuiEventLoop.Read.idle());
-    OpenFileTreeController tree;
+    Explorer tree;
     final UiSessionState ui;
     final AppSettingsSession settingsSession;
     final EditorWindowController controller;
@@ -211,7 +213,7 @@ final class EditorWindowFixture implements AutoCloseable {
         initial.tabSession().engine().open(JvmDocumentStorage.resource(document));
         context = new TerminalEditorApp.SessionContext(List.of(initial), 0);
         tabs = context.tabs();
-        tree = new OpenFileTreeController(directory, true, false);
+        tree = new Explorer(directory, true, false);
         AppSettings settings = settingsSession.initialSettings();
         host.theme = settings.theme();
         host.styles = UiStyles.forTheme(host.theme);

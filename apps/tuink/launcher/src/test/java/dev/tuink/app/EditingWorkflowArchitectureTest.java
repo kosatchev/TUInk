@@ -30,7 +30,8 @@ class EditingWorkflowArchitectureTest {
             .that().haveNameMatching("dev\\.tuink\\.tui\\.(?:SearchCommandHandler|SearchSelection|SearchPresentation|"
                 + "SaveWorkflow|SaveTargetPolicy|FilePickerOpenWorkflow)(?:\\$.*)?")
             .should().dependOnClassesThat()
-            .haveNameMatching("(?:dev\\.tuink\\.tui\\.TerminalEditorApp(?:\\$.*)?|dev\\.tuiframe\\..*)")
+            .haveNameMatching("(?:dev\\.tuink\\.tui\\.TerminalEditorApp(?:\\$.*)?|"
+                + "dev\\.tuiframe\\.(?!explorer\\.file\\.).*)")
             .because("the window applies workflow results to focus, widgets and rendering")
             .check(PRODUCTION);
     }

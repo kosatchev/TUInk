@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuiframe.explorer.Explorer;
+
 import dev.tuink.editor.language.LanguageId;
 import dev.tuink.editor.clipboard.ClipboardPort;
 import dev.tuink.editor.language.LanguageRegistry;
@@ -72,11 +74,11 @@ import dev.tuiframe.widget.Theme;
 import dev.tuink.tui.ui.ConfirmBarView;
 import dev.tuink.tui.ui.EditorView;
 import dev.tuink.tui.ui.HelpPage;
-import dev.tuink.tui.file.FileTreeModel;
+import dev.tuiframe.explorer.file.FileTreeModel;
 import dev.tuink.tui.ui.SaveAsBarView;
 import dev.tuink.tui.ui.SearchBarView;
 import dev.tuink.tui.ui.TabBarView;
-import dev.tuink.tui.ui.FileTreeView;
+import dev.tuiframe.explorer.ui.FileTreeView;
 import dev.tuink.tui.ui.ViewportController;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -187,7 +189,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         UiModalState initialModalState,
         SearchController.SearchUiOptions initialSearchUi,
         TerminalEditorApp.NotificationState notification,
-        OpenFileTreeController openFileTree,
+        Explorer openFileTree,
         TerminalEditorApp.RecoveryAutosaveManager recoveryAutosave,
         TerminalEditorApp.RenderFrameController renderFrameController,
         RenderRasterizer renderer,
@@ -316,10 +318,10 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
 
     TerminalEditorApp.NotificationState notificationState() { return notice(); }
 
-    private OpenFileTreeController openFileTree() {
+    private Explorer openFileTree() {
         if (ui().openFileTree == null) {
             Path file = currentPresentationPath();
-            ui().openFileTree = new OpenFileTreeController(FilePickerOpenWorkflow.initialRoot(file), true, true);
+            ui().openFileTree = new Explorer(FilePickerOpenWorkflow.initialRoot(file), true, true);
         }
         return ui().openFileTree;
     }
@@ -389,13 +391,13 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         return recipient.viewId() == null ? -1 : sessionContext.indexOf(recipient.viewId());
     }
 
-    private OpenFileTreeController openFileTree(UiRecipient recipient) {
+    private Explorer openFileTree(UiRecipient recipient) {
         TabUiState owner = recipient.state();
         if (owner.openFileTree == null) {
             WindowTab tab = sessionContext.presentation(recipient.presentationId());
             Path path = tab instanceof TerminalEditorApp.EditorTab source ? JvmDocumentStorage.pathOf(source.state().getCurrentResource())
                 : tab instanceof PreviewTab preview ? JvmDocumentStorage.pathOf(previewSource(preview).binding().resource()) : null;
-            owner.openFileTree = new OpenFileTreeController(FilePickerOpenWorkflow.initialRoot(path), true, true);
+            owner.openFileTree = new Explorer(FilePickerOpenWorkflow.initialRoot(path), true, true);
         }
         return owner.openFileTree;
     }

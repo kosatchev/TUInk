@@ -12,7 +12,7 @@ import dev.tuink.tui.ui.ConfirmPromptText;
 import dev.tuink.tui.ui.InlinePromptBar;
 import dev.tuink.tui.ui.NotificationBar;
 import dev.tuink.tui.ui.OpenFileDialogController;
-import dev.tuink.tui.ui.PathPresentation;
+import dev.tuiframe.explorer.ui.PathPresentation;
 import dev.tuink.tui.ui.SaveAsBarView;
 import dev.tuink.tui.ui.SearchBarView;
 import dev.tuink.tui.ui.TabBarView;

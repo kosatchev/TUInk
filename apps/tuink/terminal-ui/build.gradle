@@ -12,6 +12,7 @@ dependencies {
     implementation project(':tuiframe-core')
     implementation project(':tuiframe-jline')
     implementation project(':tuiframe-widgets')
+    implementation project(':tuiframe-explorer')
     implementation project(':editor-contract')
     implementation project(':core')
     implementation project(':editor-session')

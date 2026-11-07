@@ -1,6 +1,6 @@
-package dev.tuink.tui.file;
+package dev.tuiframe.explorer.file;
 
-import static dev.tuink.tui.file.FileTreeTestSupport.awaitLoaded;
+import static dev.tuiframe.explorer.file.FileTreeTestSupport.awaitLoaded;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
@@ -28,6 +28,51 @@ import org.junit.jupiter.api.io.TempDir;
 class FileTreeModelTest {
     @TempDir
     Path root;
+
+    @Test
+    void fixedRootRefreshKeepsExpandedDirectoriesAndLoadsFilesystemChanges() throws IOException {
+        Path folder = Files.createDirectory(root.resolve("folder"));
+        Path oldFile = Files.createFile(folder.resolve("old.txt"));
+        try (FileTreeModel model = new FileTreeModel(root, false, false, false)) {
+            FileTreeModel.Snapshot initial = awaitLoaded(model);
+            assertEquals(List.of(folder), initial.entries().stream().map(FileTreeModel.Entry::path).toList());
+            assertTrue(model.setDirectoryExpanded(entry(initial, folder, FileTreeModel.Kind.DIRECTORY).id(), true));
+            assertTrue(containsPath(awaitLoaded(model), oldFile));
+
+            Files.delete(oldFile);
+            Path newFile = Files.createFile(folder.resolve("new.txt"));
+            model.refresh();
+            FileTreeModel.Snapshot refreshed = awaitLoaded(model);
+            assertEquals(root, refreshed.root());
+            assertTrue(entry(refreshed, folder, FileTreeModel.Kind.DIRECTORY).expanded());
+            assertTrue(containsPath(refreshed, newFile));
+            assertFalse(containsPath(refreshed, oldFile));
+            assertTrue(refreshed.entries().stream().noneMatch(item -> item.kind() == FileTreeModel.Kind.PARENT));
+            assertTrue(refreshed.entries().stream().allMatch(item -> item.sizeValue().isEmpty() && item.dateValue().isEmpty()));
+        }
+    }
+
+    @Test
+    void fixedRootOmitsParentFromLoadingAndFailureSnapshots() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        try (FileTreeModel model = new FileTreeModel(root, false, false, (directory, hidden, consumer) -> {
+            entered.countDown();
+            awaitIgnoringInterrupts(release);
+            throw new java.nio.file.AccessDeniedException(directory.toString());
+        }, FileTreeLoadBudget.DEFAULT_LIMITS, Thread::new, false)) {
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            assertTrue(model.snapshot().loading());
+            assertTrue(model.snapshot().entries().isEmpty());
+            release.countDown();
+            FileTreeModel.Snapshot failed = awaitLoaded(model);
+            assertEquals(FileTreeModel.LoadStatus.FAILED, failed.status());
+            assertEquals(1, failed.entries().size());
+            assertEquals(FileTreeModel.Kind.ERROR, failed.entries().getFirst().kind());
+        } finally {
+            release.countDown();
+        }
+    }
 
     @Test
     void failingToCreateTheWorkerPublishesAMemoryFailureAndTheNextRequestCanLoad() throws IOException {

@@ -835,7 +835,7 @@ diagnostic material. These local directories are outside the source layout.
 - [TUInk 0.18.0 release notes](docs/releases/0.18.0.md)
 - [Unreleased changes](docs/releases/unreleased.md)
 - [Markdown preview (русский)](docs/markdown-preview.md)
-- [Architecture roadmap](docs/architecture-roadmap.md)
+- [Architecture](docs/architecture-roadmap.md)
 - [Architecture decisions](docs/adr/)
 - [Compatibility policy](docs/compatibility.md)
 - [Render-loop profiling](docs/profiling.md)

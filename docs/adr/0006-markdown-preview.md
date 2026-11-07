@@ -29,5 +29,6 @@ new external runtime components are the four explicitly pinned CommonMark
 artifacts in its adapter. External Java 17, D8/R8 and native smoke checks cover
 the resulting integration. Device lifecycle and ART remain platform gates.
 
-See the [architecture](../architecture-roadmap.md) and
-[required examples](../../apps/tuink/samples/demo_markdown_preview.md).
+See the [preview guide](../markdown-preview.md),
+[paired presentation ownership](0007-paired-markdown-presentations.md) and
+[examples](../../apps/tuink/samples/demo_markdown_preview.md).

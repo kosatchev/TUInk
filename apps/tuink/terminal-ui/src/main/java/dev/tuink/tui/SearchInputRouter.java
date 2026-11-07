@@ -46,7 +46,7 @@ final class SearchInputRouter {
         placement.activate(focusManager);
         SearchFocus focused = focusManager.focused().orElse(null);
         var editing = FieldInputDispatcher.command(command, placement.field(focused).orElse(null),
-            clipboard, FieldInputDispatcher.MEMORY_BOUNDED);
+            clipboard, queryLimit(placement));
         if (editing instanceof FieldInputDispatcher.Applied applied) {
             if (applied.inputRejected()) return Result.action(SearchBarView.Action.INPUT_REJECTED);
             return applied.valueChanged() ? Result.action(focused == SearchFocus.REPLACE
@@ -59,10 +59,12 @@ final class SearchInputRouter {
         SearchBarView.Action intent = switch (command) {
             case SEARCH_NEXT -> SearchBarView.Action.FIND_NEXT;
             case SEARCH_PREVIOUS -> SearchBarView.Action.FIND_PREVIOUS;
-            case SEARCH_REPLACE -> SearchBarView.Action.REPLACE;
-            case SEARCH_REPLACE_ALL -> SearchBarView.Action.REPLACE_ALL;
+            case SEARCH_REPLACE -> placement.readOnly() ? null : SearchBarView.Action.REPLACE;
+            case SEARCH_REPLACE_ALL -> placement.readOnly() ? null : SearchBarView.Action.REPLACE_ALL;
             default -> null;
         };
+        if (placement.readOnly() && (command == TuinkCommand.SEARCH_REPLACE || command == TuinkCommand.SEARCH_REPLACE_ALL))
+            return Result.CAPTURED;
         if (intent != null) {
             return Result.action(intent);
         }
@@ -227,7 +229,7 @@ final class SearchInputRouter {
         }
         RoutedTarget<SearchFocus, SearchBarView.Action> target = route.target().orElseThrow();
         InteractionResult<SearchBarView.Action> interaction = FieldInputDispatcher.event(
-            placement.field(target.id()).orElse(null), event, FieldInputDispatcher.MEMORY_BOUNDED,
+            placement.field(target.id()).orElse(null), event, queryLimit(placement),
             input -> target.placement().handle(input, route.context().orElseThrow()), SearchBarView.Action.INPUT_REJECTED);
         focusManager.apply(scope, target.id(), interaction.focusRequest());
         if (capture != null) {
@@ -251,7 +253,7 @@ final class SearchInputRouter {
         }
         RoutedTarget<SearchFocus, SearchBarView.Action> target = route.target().orElseThrow();
         InteractionResult<SearchBarView.Action> interaction = FieldInputDispatcher.event(
-            placement.field(target.id()).orElse(null), event, FieldInputDispatcher.MEMORY_BOUNDED,
+            placement.field(target.id()).orElse(null), event, queryLimit(placement),
             input -> target.placement().handle(input, route.context().orElseThrow()), SearchBarView.Action.INPUT_REJECTED);
         focusManager.apply(scope, target.id(), interaction.focusRequest());
         return fromInteraction(interaction, captureIgnored);
@@ -277,5 +279,9 @@ final class SearchInputRouter {
 
     private static boolean isField(SearchFocus focus) {
         return focus == SearchFocus.FIND || focus == SearchFocus.REPLACE;
+    }
+
+    private static int queryLimit(SearchBarView.Placement placement) {
+        return placement.readOnly() ? MarkdownPreviewState.SEARCH_QUERY_MAX_UTF16 : FieldInputDispatcher.MEMORY_BOUNDED;
     }
 }

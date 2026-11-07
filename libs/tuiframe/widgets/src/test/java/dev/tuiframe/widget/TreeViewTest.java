@@ -221,6 +221,25 @@ class TreeViewTest {
     }
 
     @Test
+    void rightOnExpandedBranchSelectsAndRevealsItsFirstChildWithoutEnteringASibling() {
+        List<TreeView.Item<String>> items = List.of(
+            item("previous", "previous", 0, TreeView.Kind.LEAF),
+            item("parent", "parent", 0, TreeView.Kind.EXPANDED),
+            item("child", "child", 1, TreeView.Kind.LEAF),
+            item("empty", "empty", 0, TreeView.Kind.EXPANDED),
+            item("sibling", "sibling", 0, TreeView.Kind.LEAF)
+        );
+        assertState(new TreeView.State(2, 1, 0),
+            placement(items, new TreeView.State(1, 0, 0), new Rect(0, 0, 20, 2))
+                .handle(KeyStroke.of(KeyStroke.Key.ARROW_RIGHT), FOCUSED));
+        InteractionResult<TreeView.Action<String>> empty =
+            placement(items, new TreeView.State(3, 2, 0), new Rect(0, 0, 20, 2))
+                .handle(KeyStroke.of(KeyStroke.Key.ARROW_RIGHT), FOCUSED);
+        assertTrue(empty.consumed());
+        assertTrue(empty.output().isEmpty());
+    }
+
+    @Test
     void translatedPointerPressesDistinguishDisclosureAndRowBody() {
         List<TreeView.Item<String>> items = rows(10);
         TreeView.Placement<String> placement = placement(

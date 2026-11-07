@@ -365,9 +365,10 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
             if (bounds.isEmpty()) {
                 return;
             }
-            CellStyle normalStyle = theme.resolveStyle(
-                widgetState.enabled() ? WidgetThemeKeys.LIST_ITEM : WidgetThemeKeys.LIST_ITEM_DISABLED
-            );
+            CellStyle inheritedStyle = theme.resolveStyle(WidgetThemeKeys.LIST_ITEM,
+                theme.resolveStyle(WidgetThemeKeys.MODAL_BODY));
+            CellStyle normalStyle = widgetState.enabled() ? inheritedStyle
+                : theme.resolveStyle(WidgetThemeKeys.LIST_ITEM_DISABLED, inheritedStyle);
             CellStyle selectedStyle = normalStyle;
             if (widgetState.enabled()) {
                 CellStyle selected = theme.resolveStyle(WidgetThemeKeys.LIST_ITEM_SELECTED, normalStyle);
@@ -381,14 +382,14 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
                     return;
                 }
                 canvas.fill(bounds, normalStyle);
-                paintRows(canvas, normalStyle, selectedStyle);
+                paintRows(canvas, normalStyle, selectedStyle, theme.resolveStyle(WidgetThemeKeys.TREE_BRANCH));
                 paintScrollbars(canvas, theme, normalStyle);
             } finally {
                 canvas.restore(mark);
             }
         }
 
-        private void paintRows(Canvas canvas, CellStyle normalStyle, CellStyle selectedStyle) {
+        private void paintRows(Canvas canvas, CellStyle normalStyle, CellStyle selectedStyle, CellStyle branchStyle) {
             if (contentBounds.isEmpty()) {
                 return;
             }
@@ -401,7 +402,10 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
                 if (!rowStyle.equals(normalStyle)) {
                     canvas.fill(contentBounds.x(), row, contentBounds.width(), 1, rowStyle);
                 }
-                paintLeading(canvas, visible.item(), row, rowStyle);
+                CellStyle labelStyle = hasDisclosure(visible.item().item().kind())
+                    ? new CellStyle(rowStyle.fg(), rowStyle.bg(), rowStyle.bold() || branchStyle.bold(),
+                        rowStyle.underline() || branchStyle.underline()) : rowStyle;
+                paintLeading(canvas, visible.item(), row, labelStyle);
                 paintTrailing(canvas, visible.item(), row, rowStyle);
             }
         }
@@ -545,9 +549,15 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
             if (selected == null) {
                 return InteractionResult.handled();
             }
-            return selected.item().kind() == Kind.COLLAPSED
-                ? InteractionResult.output(expansion(selected, state.selectedIndex(), true, state))
-                : InteractionResult.handled();
+            if (selected.item().kind() == Kind.COLLAPSED) {
+                return InteractionResult.output(expansion(selected, state.selectedIndex(), true, state));
+            }
+            int childIndex = state.selectedIndex() + 1;
+            if (selected.item().kind() == Kind.EXPANDED && childIndex < items.size()
+                && items.get(childIndex).item().depth() > selected.item().depth()) {
+                return stateChange(select(childIndex));
+            }
+            return InteractionResult.handled();
         }
 
         private InteractionResult<Action<V>> activateSelected() {

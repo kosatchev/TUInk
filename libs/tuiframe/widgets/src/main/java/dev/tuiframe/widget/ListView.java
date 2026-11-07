@@ -366,9 +366,10 @@ public final class ListView implements InteractiveWidget<ListView.Action> {
             if (bounds.isEmpty()) {
                 return;
             }
-            CellStyle normalStyle = theme.resolveStyle(
-                widgetState.enabled() ? WidgetThemeKeys.LIST_ITEM : WidgetThemeKeys.LIST_ITEM_DISABLED
-            );
+            CellStyle inheritedStyle = theme.resolveStyle(WidgetThemeKeys.LIST_ITEM,
+                theme.resolveStyle(WidgetThemeKeys.MODAL_BODY));
+            CellStyle normalStyle = widgetState.enabled() ? inheritedStyle
+                : theme.resolveStyle(WidgetThemeKeys.LIST_ITEM_DISABLED, inheritedStyle);
             CellStyle selectedStyle = normalStyle;
             if (widgetState.enabled()) {
                 CellStyle unfocusedSelected = theme.resolveStyle(

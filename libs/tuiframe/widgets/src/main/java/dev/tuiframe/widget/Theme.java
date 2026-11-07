@@ -30,7 +30,10 @@ public interface Theme {
         return ScrollStyle.fromParent(body, border);
     }
 
-    /** Supplies the parent surface to children while retaining their widget roles. */
+    /**
+     * Supplies the parent surface to children while retaining explicit widget roles.
+     * Lists and trees inherit this body when their ordinary item role is absent.
+     */
     default Theme withSurface(CellStyle body, CellStyle border) {
         Objects.requireNonNull(body, "body");
         Objects.requireNonNull(border, "border");

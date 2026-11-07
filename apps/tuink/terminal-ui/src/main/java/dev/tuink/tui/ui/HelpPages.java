@@ -1,5 +1,7 @@
 package dev.tuink.tui.ui;
 
+import dev.tuiframe.explorer.Explorer;
+
 import dev.tuink.tui.AppVersion;
 
 public final class HelpPages {
@@ -53,6 +55,7 @@ public final class HelpPages {
             "F4 or Alt+T             Open Tab menu",
             "F5 or Alt+S             Open Settings menu",
             "F6 or Alt+H             Open Help menu",
+            "F7                      Open Explorer menu",
             "Arrows                  Move selection",
             "Enter                   Activate item",
             "Letters / 1-9           Mnemonic selection",

@@ -24,7 +24,7 @@ final class DocumentIoController implements AutoCloseable {
     private boolean closed;
     private long nextOperation;
 
-    enum Kind { READ, SAVE }
+    enum Kind { READ, SAVE, MUTATION }
 
     /** Stable host-operation identity; equal counters from different hosts are not interchangeable. */
     static final class Operation {
@@ -71,6 +71,11 @@ final class DocumentIoController implements AutoCloseable {
     /** Save work can be abandoned only after its session revokes publication rights. */
     <T> void submitSave(Callable<T> operation, Consumer<Completion<T>> completion) {
         submit(operation, completion, Kind.SAVE, null);
+    }
+
+    /** Filesystem mutations always publish their real outcome, including during shutdown. */
+    <T> void submitMutation(Callable<T> operation, Consumer<Completion<T>> completion) {
+        submit(operation, completion, Kind.MUTATION, null);
     }
 
     private <T> void submit(Callable<T> operation, Consumer<Completion<T>> completion, Kind kind,

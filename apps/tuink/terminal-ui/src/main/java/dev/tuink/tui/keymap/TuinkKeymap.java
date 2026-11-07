@@ -37,6 +37,7 @@ import static dev.tuink.tui.command.TuinkCommand.EDIT_TOGGLE_LINE_COMMENT;
 import static dev.tuink.tui.command.TuinkCommand.EDIT_UNDO;
 import static dev.tuink.tui.command.TuinkCommand.FILE_BROWSER_TOGGLE_HIDDEN;
 import static dev.tuink.tui.command.TuinkCommand.MENU_EDIT;
+import static dev.tuink.tui.command.TuinkCommand.MENU_EXPLORER;
 import static dev.tuink.tui.command.TuinkCommand.MENU_FILE;
 import static dev.tuink.tui.command.TuinkCommand.MENU_HELP;
 import static dev.tuink.tui.command.TuinkCommand.MENU_SETTINGS;
@@ -126,6 +127,7 @@ public final class TuinkKeymap {
         bind(result, key(KeyStroke.Key.F4), MENU_TABS);
         bind(result, key(KeyStroke.Key.F5), MENU_SETTINGS);
         bind(result, key(KeyStroke.Key.F6), MENU_HELP);
+        bind(result, key(KeyStroke.Key.F7), MENU_EXPLORER);
         bind(result, key(KeyStroke.Key.I, KeyStroke.Modifier.ALT), MENU_FILE);
         bind(result, key(KeyStroke.Key.E, KeyStroke.Modifier.ALT), MENU_EDIT);
         bind(result, key(KeyStroke.Key.V, KeyStroke.Modifier.ALT), MENU_VIEW);

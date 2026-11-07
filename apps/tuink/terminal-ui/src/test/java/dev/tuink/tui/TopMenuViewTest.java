@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuiframe.explorer.Explorer;
+
 import static dev.tuink.tui.command.TuinkCommand.EDIT_SELECT_ALL;
 import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_MOUSE;
 import static dev.tuink.tui.command.TuinkCommand.VIEW_TOGGLE_WORD_WRAP;
@@ -107,7 +109,7 @@ class TopMenuViewTest {
         UiSessionState preview = ui();
         var edit = TopMenuView.build(preview, List.of(), -1, "Blue", new CommandRouter(),
             MenuBar.State.open(TopMenuController.EDIT_INDEX), TestSurfaces.source(preview).withKind(ActiveSurface.Kind.LIVE_PREVIEW));
-        var cut = edit.menus().get(1).entries().stream().filter(entry ->
+        var cut = edit.menus().get(TopMenuController.EDIT_INDEX).entries().stream().filter(entry ->
             entry instanceof MenuBar.Item<?> item && item.label().startsWith("Cut"))
             .map(entry -> (MenuBar.Item<?>) entry).findFirst().orElseThrow();
         assertFalse(cut.enabled());
@@ -115,7 +117,7 @@ class TopMenuViewTest {
     }
 
     @Test
-    void buildsSixFixedMenusWithSemanticCommandsAndDynamicTabs() {
+    void buildsSevenFixedMenusWithSemanticCommandsAndDynamicTabs() {
         CommandRouter router = new CommandRouter();
         TopMenuView tabView = TopMenuView.build(
             ui(),
@@ -132,10 +134,10 @@ class TopMenuViewTest {
         TopMenuView editView = view(ui(), MenuBar.State.open(TopMenuController.EDIT_INDEX));
 
         assertEquals(
-            List.of(" File ", " Edit ", " View ", " Tab ", " Settings ", " Help "),
+            List.of(" File ", " Explorer ", " Edit ", " View ", " Tab ", " Settings ", " Help "),
             tabView.menus().stream().map(MenuBar.Menu::label).toList()
         );
-        assertEquals(List.of(2, 1, 1, 1, 1, 1), tabView.menus().stream()
+        assertEquals(List.of(2, 2, 1, 1, 1, 1, 1), tabView.menus().stream()
             .map(MenuBar.Menu::mnemonicGraphemeIndex)
             .toList());
 
@@ -210,8 +212,6 @@ class TopMenuViewTest {
                 "tuink.tab.new",
                 "tuink.document.open",
                 "tuink.document.open-encoding",
-                "tuink.folder.open",
-                "tuink.folder.close",
                 "tuink.document.save",
                 "tuink.document.save-as",
                 "tuink.document.format",
@@ -239,9 +239,6 @@ class TopMenuViewTest {
         assertEquals(
             List.of(
                 "tuink.view.toggle-markdown-preview",
-                "tuink.explorer.toggle",
-                "tuink.explorer.focus",
-                "tuink.explorer.refresh",
                 "tuink.settings.toggle-reading-mode",
                 "tuink.view.toggle-line-wrap",
                 "tuink.view.toggle-word-wrap",
@@ -299,25 +296,25 @@ class TopMenuViewTest {
     @Test
     void topBarSnapshotPreservesPrefixDirtyAndReadAlignment() {
         TopMenuView closed = view(ui(), MenuBar.State.closed());
-        TopMenuView.TopBar normal = closed.topBar(Path.of("demo.txt"), true, 64, false);
-        String closedBase = " ".repeat(44) + " | demo.txt *";
+        TopMenuView.TopBar normal = closed.topBar(Path.of("demo.txt"), true, 80, false);
+        String closedBase = " ".repeat(55) + " | demo.txt *";
 
-        assertEquals(CellText.fit(closedBase, 64), normal.text());
-        assertEquals(47, normal.menuPrefixWidth());
-        assertEquals(47, closed.menuPrefixWidth());
+        assertEquals(CellText.fit(closedBase, 80), normal.text());
+        assertEquals(58, normal.menuPrefixWidth());
+        assertEquals(58, closed.menuPrefixWidth());
 
         TopMenuView open = view(ui(), MenuBar.State.open(TopMenuController.FILE_INDEX));
-        TopMenuView.TopBar reading = open.topBar(Path.of("demo.txt"), false, 64, true);
-        String openBase = " ".repeat(44) + " | demo.txt";
-        assertEquals(CellText.fit(openBase, 58) + " READ ", reading.text());
-        assertEquals(47, reading.menuPrefixWidth());
+        TopMenuView.TopBar reading = open.topBar(Path.of("demo.txt"), false, 80, true);
+        String openBase = " ".repeat(55) + " | demo.txt";
+        assertEquals(CellText.fit(openBase, 74) + " READ ", reading.text());
+        assertEquals(58, reading.menuPrefixWidth());
     }
 
     @Test
     void longPathsKeepTheBasenameExtensionDirtyAndExactFilenameStyleRange() {
         TopMenuView view = view(ui(), MenuBar.State.closed());
         Path file = Path.of("very-long-parent-directory".repeat(3), "e\u0301👩‍💻界-long-file-name.java");
-        for (int width : List.of(60, 64, 80, 120)) {
+        for (int width : List.of(80, 84, 100, 140)) {
             TopMenuView.TopBar topBar = view.topBar(file, true, width, false);
             assertTrue(topBar.text().contains(".java *"), topBar.text());
             assertEquals(width, CellText.width(topBar.text()));
@@ -386,7 +383,8 @@ class TopMenuViewTest {
 
         Rect popup = placement.popupBounds().orElseThrow();
         assertEquals(" File ", cells(buffer, 0, 0, 6));
-        assertEquals(" Edit ", cells(buffer, 0, 7, 6));
+        assertEquals(" Explorer ", cells(buffer, 0, 7, 10));
+        assertEquals(" Edit ", cells(buffer, 0, 18, 6));
         assertEquals("demo.txt", cells(buffer, 0, topBar.menuPrefixWidth(), 8));
         assertEquals("Undo", cells(buffer, popup.y() + 1, popup.x() + 2, 4));
         assertTrue(java.util.stream.IntStream.range(popup.y() + 1, popup.y() + popup.height() - 1)

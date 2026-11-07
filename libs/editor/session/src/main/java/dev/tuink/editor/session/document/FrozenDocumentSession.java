@@ -46,6 +46,21 @@ public final class FrozenDocumentSession implements DocumentSaveSubject, AutoClo
     @Override public DocumentFileMetadata metadata() { requireOwner(); return source.metadata(); }
     @Override public DocumentIoCoordinator io() { return io; }
 
+    @Override public boolean relocateResource(ResourceBinding expected, ResourceBinding replacement) {
+        requireOwner();
+        Objects.requireNonNull(expected, "expected");
+        Objects.requireNonNull(replacement, "replacement");
+        if (io.busy()) throw new IllegalStateException("Frozen source is busy saving");
+        if (!source.binding().equals(expected)) return false;
+        if (expected.equals(replacement)) return true;
+        if (generation == Long.MAX_VALUE) throw new IllegalStateException("Frozen source generation exhausted");
+        FrozenDocumentSource next = new FrozenDocumentSource(source.text(), source.metadata(), replacement,
+            source.reopenMode());
+        source = next;
+        generation++;
+        return true;
+    }
+
     /** Stops new work; a write past its publication fence still returns its real receipt to this owner. */
     @Override public void close() { io.stop(); }
 

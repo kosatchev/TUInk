@@ -49,6 +49,10 @@ final class InputActionDispatcher {
         Objects.requireNonNull(onWrapEnabled, "onWrapEnabled");
         String statusMessage;
         switch (command) {
+            case MENU_EXPLORER -> {
+                Objects.requireNonNull(topMenu, "topMenu").openFor(CommandInvocation.of(TuinkCommand.MENU_EXPLORER.id()));
+                return DispatchResult.handled(null);
+            }
             case MENU_EDIT -> {
                 Objects.requireNonNull(topMenu, "topMenu").openFor(CommandInvocation.of(MENU_EDIT.id()));
                 return DispatchResult.handled(null);

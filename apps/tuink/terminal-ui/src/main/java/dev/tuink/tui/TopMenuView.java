@@ -1,5 +1,6 @@
 package dev.tuink.tui;
 
+import dev.tuiframe.explorer.file.FileTreeModel;
 import dev.tuiframe.explorer.Explorer;
 
 import static dev.tuink.tui.command.TuinkCommand.APP_QUIT;
@@ -120,6 +121,8 @@ final class TopMenuView {
         int openMenuIndex = requiredState.isOpen() ? requiredState.openMenuIndex() : -1;
         this.menus = List.of(
             menu(" File ", 2, openMenuIndex == TopMenuController.FILE_INDEX ? fileEntries(surface) : List.of()),
+            menu(" Explorer ", 2, openMenuIndex == TopMenuController.EXPLORER_INDEX
+                ? explorerEntries(ui, surface) : List.of()),
             menu(" Edit ", 1, openMenuIndex == TopMenuController.EDIT_INDEX ? editEntries(surface) : List.of()),
             menu(
                 " View ",
@@ -329,8 +332,6 @@ final class TopMenuView {
             item(TAB_NEW, "New"),
             item(DOCUMENT_OPEN, "Open..."),
             item(TuinkCommand.DOCUMENT_OPEN_ENCODING, "Open with encoding..."),
-            item(TuinkCommand.FOLDER_OPEN, "Open folder..."),
-            item(TuinkCommand.FOLDER_CLOSE, "Close folder"),
             separator(),
             item(DOCUMENT_SAVE, "Save"),
             item(DOCUMENT_SAVE_AS, "Save As..."),
@@ -370,9 +371,6 @@ final class TopMenuView {
             ? GutterDiffMode.MYERS : ui.gutterDiffModeSetting;
         return List.of(
             item(TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW, surface.preview() ? "MD Source" : "MD Preview"),
-            item(TuinkCommand.EXPLORER_TOGGLE, checked(ui.explorer.visible) + " Explorer"),
-            item(TuinkCommand.EXPLORER_FOCUS, "Focus explorer"),
-            item(TuinkCommand.EXPLORER_REFRESH, "Refresh explorer"),
             item(SETTINGS_TOGGLE_READING_MODE, checked(ui.readingModeSetting) + " Reading mode"),
             separator(),
             item(VIEW_TOGGLE_LINE_WRAP, checked(wrapLines) + " Wrap Lines"),
@@ -390,6 +388,38 @@ final class TopMenuView {
             item(TuinkCommand.VIEW_PREVIEW_FOLLOW_LINK, "Follow internal link", surface.preview()),
             item(TuinkCommand.VIEW_PREVIEW_NEXT_HEADING, "Next heading", surface.preview()),
             item(TuinkCommand.VIEW_PREVIEW_PREVIOUS_HEADING, "Previous heading", surface.preview())
+        );
+    }
+
+    private static List<EntrySpec> explorerEntries(UiSessionState ui, ActiveSurface surface) {
+        var explorer = ui.explorer;
+        boolean open = explorer.root() != null;
+        boolean idle = !explorer.mutating && !surface.windowIoBusy();
+        var selection = explorer.selectedEntry();
+        boolean actionable = selection != null && (selection.kind() == dev.tuiframe.explorer.file.FileTreeModel.Kind.FILE
+            || selection.kind() == dev.tuiframe.explorer.file.FileTreeModel.Kind.DIRECTORY);
+        boolean create = open && actionable && idle;
+        boolean selectedChild = create && !explorer.selectedRoot();
+        String width = switch (explorer.preferredWidth) {
+            case 24 -> "Narrow (24)";
+            case 30 -> "Normal (30)";
+            case 40 -> "Wide (40)";
+            default -> "Custom (" + explorer.preferredWidth + ")";
+        };
+        return List.of(
+            item(TuinkCommand.FOLDER_OPEN, "Open folder...", !explorer.mutating),
+            item(TuinkCommand.FOLDER_CLOSE, "Close folder", open && !explorer.mutating),
+            separator(),
+            item(TuinkCommand.EXPLORER_NEW_FILE, "Create file...", create),
+            item(TuinkCommand.EXPLORER_NEW_DIRECTORY, "Create folder...", create),
+            item(TuinkCommand.EXPLORER_RENAME, "Rename...", selectedChild),
+            item(TuinkCommand.EXPLORER_MOVE, "Move...", selectedChild),
+            item(TuinkCommand.EXPLORER_DELETE, "Delete...", selectedChild),
+            separator(),
+            item(TuinkCommand.EXPLORER_REFRESH, "Refresh explorer", open && idle),
+            item(TuinkCommand.EXPLORER_TOGGLE, checked(explorer.visible) + " Show explorer"),
+            item(TuinkCommand.EXPLORER_FOCUS, "Focus explorer"),
+            item(TuinkCommand.EXPLORER_CYCLE_WIDTH, "[>] Width: " + width)
         );
     }
 

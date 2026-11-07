@@ -358,6 +358,7 @@ a long rescan. These cases do not have a constant-time responsiveness guarantee.
 | `F4` / `Alt+T` | Open the Tab menu |
 | `F5` / `Alt+S` | Open the Settings menu |
 | `F6` / `Alt+H` | Open the Help menu |
+| `F7` | Open the Explorer menu |
 | Arrows / Page Up / Page Down / Home / End | Navigate the document |
 | `Shift` + Arrow keys | Extend the selection |
 | `Shift+Home` / `Shift+End` | Select to the line start / end, respecting Smart Home/End |
@@ -530,7 +531,7 @@ budget. A directory that exceeds the remaining budget is omitted with a visible
 error; its contents are not presented as a complete listing. Directory item
 counts may end in `+` when their counting budget is reached.
 
-**File → Open folder...** opens a directory chooser. Navigate into the desired
+**Explorer → Open folder...** opens a directory chooser. Navigate into the desired
 directory and activate **Open folder** to use the displayed directory as the
 explorer root. Enter on a directory navigates inside the chooser. You can also
 start with `tuink .` or `tuink path/to/folder`.
@@ -538,7 +539,7 @@ start with `tuink .` or `tuink path/to/folder`.
 The explorer stays on the left while Source or Markdown Preview occupies the
 right. It belongs to the window and keeps its selected entry, expanded folders
 and scroll position while you switch tabs. Opening another root or choosing
-**File → Close folder** leaves open documents and unsaved edits intact.
+**Explorer → Close folder** leaves open documents and unsaved edits intact.
 **Ctrl+B** toggles panel visibility; **Ctrl+E** shows it and moves focus into it.
 An empty panel offers an **Open folder...** action. With the tree focused:
 
@@ -549,12 +550,44 @@ An empty panel offers an **Open folder...** action. With the tree focused:
 - **Esc** returns focus to the document. Tab in the document keeps inserting indentation.
 - **Alt+.** or a distinct **Ctrl+H** toggles hidden files; **Shift+Left/Right** scrolls long names.
 
+File trees inherit their containing surface. The sidebar uses the editor's
+background; directory names are bold, including the selectable root row. Floating
+file-action windows share the light Help/Open popup surface and button styles.
+Their input fields use a dark background with light text, with distinct focus,
+selection and disabled states. The divider uses the active theme's border color
+without adding bold when the explorer has focus. Selection, disclosure marks
+and scrollbars inherit their container.
+
+On 256-color and true-color terminals, TUIframe requests the default foreground
+and ANSI palette through read-only terminal color queries. Reported foregrounds
+are rendered explicitly so bold retains the same text color; 256-color output
+uses the nearest extended-palette shade. Responses are decoded separately from
+keyboard input and pasted text, without delaying startup or changing the terminal
+palette. Terminals without color-query support retain their native color and bold
+behavior, as do ANSI-16 and `--no-color` output.
+
+The Explorer menu creates files and folders inside the selected folder, or
+beside a selected file. **Rename...** selects the current name for replacement
+without overwriting another entry. **Move...** opens a separate destination folder tree;
+Ctrl+L edits its path, Enter navigates, and **Move here** confirms the destination.
+Existing names are never overwritten. **Delete...** permanently removes the
+selected entry and any directory contents after confirmation. The open root
+cannot be renamed, moved or deleted. Open document text, unsaved edits and undo
+history survive renames and moves; deleted documents become unnamed drafts requiring Save As.
+
+Explorer follows File in the top menu; F1–F7 retain their existing command
+assignments. Search, Save As, document confirmations, notifications and status
+are laid out inside the document pane. Opening these controls does not shorten
+the neighbouring tree. Quit confirmation spans the full window.
+
 Drag the divider to resize the panel. When the terminal is too narrow for both
 regions, the explorer temporarily disappears; enlarging the terminal restores
-it with the preferred width. **View → Refresh explorer** reloads folder contents
+it with the preferred width. **Explorer → Width** cycles 24, 30 and 40 columns.
+**Explorer → Refresh explorer** reloads folder contents
 after external changes. The first version has one root, no automatic filesystem
 watcher, and keeps explorer state only for the current run. Its loading uses the
-same background scanning and bounded tree model as the file picker.
+same background scanning and bounded tree model as the file picker. File actions
+refresh the affected directories; saving existing content does not rescan the tree.
 
 Document reads and writes run in the background. During a save, the document
 being written allows navigation and copying; text edits and closing that tab
@@ -656,7 +689,7 @@ cd tuink-<version>
 ## Options and configuration
 
 ```text
-Usage: tuink [options] [file]
+Usage: tuink [options] [--] [file|directory]
 
   --no-mouse       Disable mouse tracking and mouse interactions
   --no-alt-screen  Do not use the alternate screen buffer

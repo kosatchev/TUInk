@@ -15,6 +15,7 @@ import dev.tuink.tui.ui.OpenFileDialogController.OpenDialogLayout;
 import dev.tuink.tui.ui.SaveAsBarView;
 import dev.tuink.tui.ui.SearchBarView;
 import dev.tuink.tui.ui.TabBarView;
+import dev.tuink.tui.render.WindowTextPainter;
 import java.util.Objects;
 
 /**
@@ -44,7 +45,7 @@ record FrameComposition(
         }
         layers.validatePromptOwner(search.placement() != null);
         layers.validateGeometry(document.layout().rows(), document.layout().cols(),
-            document.layout().contentTopRow(), surface.inlinePrompt().height());
+            document.layout().contentTopRow(), surface.inlinePrompt().height(), surface.textLayout());
     }
 
     boolean allowsScrollHints() {
@@ -69,13 +70,15 @@ record FrameComposition(
         TopMenuView.TopBar topBar,
         String bottomBar,
         InlinePromptBar inlinePrompt,
-        NotificationBar notification
+        NotificationBar notification,
+        WindowTextPainter.Layout textLayout
     ) {
         Surface {
             Objects.requireNonNull(topBar, "topBar");
             Objects.requireNonNull(bottomBar, "bottomBar");
             Objects.requireNonNull(inlinePrompt, "inlinePrompt");
             Objects.requireNonNull(notification, "notification");
+            Objects.requireNonNull(textLayout, "textLayout");
         }
     }
 
@@ -105,13 +108,14 @@ record FrameComposition(
         boolean blockedInputHighlight,
         boolean contentFocused,
         Rect blockingBounds,
-        ExplorerState.Placement explorer
+        ExplorerState.Placement explorer,
+        ExplorerFileDialogView.Placement explorerDialog
     ) {
         HelpPage helpPage() { return help == null ? null : help.page(); }
 
         /** The picker may supply its own surface; every other blocking layer invalidates content reuse. */
         boolean allowsScrollHints() {
-            return !blockedInputHighlight && help == null && format == null && confirm == null && !saveAsMode
+            return !blockedInputHighlight && help == null && format == null && explorerDialog == null && confirm == null && !saveAsMode
                 && (topMenu == null || !topMenu.state().isOpen())
                 && !(contentFocused && openFile.visible());
         }
@@ -119,27 +123,28 @@ record FrameComposition(
         void validatePromptOwner(boolean searchOwnsPrompt) {
             int owners = (saveAsMode ? 1 : 0) + (searchOwnsPrompt ? 1 : 0)
                 + (confirm != null ? 1 : 0) + (openFile.visible() ? 1 : 0)
-                + (help != null ? 1 : 0) + (format != null ? 1 : 0);
+                + (help != null ? 1 : 0) + (format != null ? 1 : 0) + (explorerDialog != null ? 1 : 0);
             if (owners > 1) throw new IllegalArgumentException("Only one prompt or modal frame owner is allowed");
         }
 
         /** Exact immutable geometry prepared from the same modal placements used by paint and cursor. */
         static Rect prepareBlockingBounds(int rows, int cols, int contentTop, int promptHeight,
             boolean inline, OpenFile openFile, TerminalEditorApp.HelpOverlayPlacement help,
-            DocumentFormatDialogView.Placement format) {
+            DocumentFormatDialogView.Placement format, ExplorerFileDialogView.Placement explorerDialog, Rect inlineBounds) {
             Objects.requireNonNull(openFile, "openFile");
+            if (explorerDialog != null) return explorerDialog.bounds();
             if (openFile.visible()) return openFile.dialog().frame().bounds();
             if (help != null) return help.frame().bounds();
             if (format != null) return format.bounds();
             if (!inline) return new Rect(0, 0, 0, 0);
-            return new Rect(0, rows - 1 - promptHeight, cols, promptHeight)
+            return Objects.requireNonNull(inlineBounds, "inlineBounds")
                 .intersection(new Rect(0, contentTop, cols, Math.max(0, rows - 1 - contentTop)));
         }
 
         /** Validate at frame preparation, never recompute routing geometry during input or paint. */
-        void validateGeometry(int rows, int cols, int contentTop, int promptHeight) {
+        void validateGeometry(int rows, int cols, int contentTop, int promptHeight, WindowTextPainter.Layout textLayout) {
             Rect expected = prepareBlockingBounds(rows, cols, contentTop, promptHeight,
-                saveAsMode || confirm != null, openFile, help, format);
+                saveAsMode || confirm != null, openFile, help, format, explorerDialog, textLayout.prompt().clip());
             if (!blockingBounds.equals(expected))
                 throw new IllegalArgumentException("Modal input, paint and cursor must share the prepared window bounds");
         }

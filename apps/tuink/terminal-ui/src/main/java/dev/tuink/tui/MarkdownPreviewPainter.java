@@ -30,15 +30,6 @@ final class MarkdownPreviewPainter {
         var bounds = placement.bounds(); int mark = canvas.save();
         try {
             canvas.clip(bounds); canvas.fill(bounds, cellStyle(palette.preview().body(), color));
-            if (placement.searchVisible()) {
-                CellText.drawClipped(canvas, bounds.x(), bounds.y(), MarkdownPreviewState.SEARCH_PREFIX,
-                    palette.windows().renderStatus(), bounds.width());
-                if (placement.searchInput() != null) {
-                    placement.searchInput().paint(canvas, role -> WidgetThemeKeys.TEXT_FIELD_SELECTION.equals(role)
-                        ? EditorStyleAdapter.toCell(palette.windows().renderSelection()) : palette.windows().renderStatus(),
-                        new WidgetState(placement.queryFocused(), true));
-                }
-            }
             var scrollbars = placement.scrollbars();
             var content = scrollbars.layout().contentBounds();
             if (!placement.error().isEmpty()) {
@@ -67,8 +58,10 @@ final class MarkdownPreviewPainter {
 
     /** Terminal-global cursor for either the real query field or the readonly visual caret. */
     static Point cursor(MarkdownPreviewState.Placement placement) {
-        if (placement.queryFocused() && placement.searchInput() != null) return placement.searchInput().cursorPosition(
-            new FocusContext(true, true, FocusSpace.root(placement.bounds()))).orElse(null);
+        if (placement.queryFocused() && placement.searchInput() != null) {
+            var field = placement.searchInput();
+            return field.cursorPosition(new FocusContext(true, true, FocusSpace.root(field.bounds()))).orElse(null);
+        }
         if (!placement.contentFocused() || placement.result() == null || placement.caret() == null) return null;
         var content = placement.contentBounds();
         int x = content.x() + placement.caret().column() - placement.left();

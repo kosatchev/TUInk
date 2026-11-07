@@ -91,7 +91,7 @@ class ExplorerGeometryIntegrationTest {
     }
 
     @Test
-    void asynchronousNotificationCanHideCapturedDividerAndNextInputCancelsItsRetainedBinding() throws Exception {
+    void asynchronousTabNotificationKeepsTheCapturedDividerAndItsGesture() throws Exception {
         try (var window = new EditorWindowFixture(directory, false, List.of("source text"))) {
             window.resize(3, 80);
             window.notification.clear();
@@ -100,8 +100,8 @@ class ExplorerGeometryIntegrationTest {
             explorer.focused = true;
             window.frame();
             assertNotNull(explorer.placement);
-            assertEquals(1, explorer.placement.bounds().height());
-            assertFalse(explorer.focused, "a header without tree rows cannot retain keyboard focus");
+            assertEquals(2, explorer.placement.bounds().height());
+            assertTrue(explorer.focused);
             var divider = explorer.placement.divider().bounds();
             int preferred = explorer.preferredWidth;
             window.pointer(PointerEvent.Kind.PRESS, divider.y(), divider.x());
@@ -110,17 +110,20 @@ class ExplorerGeometryIntegrationTest {
             // Model an owner-thread completion publishing a notice without a key or resize event.
             window.notification.info("Background operation completed");
             window.frame();
-            assertNull(explorer.placement);
-            assertFalse(explorer.focused);
+            assertNotNull(explorer.placement);
+            assertEquals(divider, explorer.placement.divider().bounds());
+            assertTrue(explorer.splitterState.dragging(), "A sibling footer cannot revoke a divider capture");
+            window.pointer(PointerEvent.Kind.DRAG, divider.y(), divider.x() + 5);
+            assertEquals(preferred + 5, explorer.preferredWidth);
             assertDoesNotThrow(() -> window.pointer(PointerEvent.Kind.RELEASE, divider.y(), divider.x()));
             assertFalse(explorer.splitterState.dragging());
 
             window.notification.clear();
             window.frame();
             assertNotNull(explorer.placement);
-            assertFalse(explorer.focused);
+            assertTrue(explorer.focused);
             window.pointer(PointerEvent.Kind.DRAG, divider.y(), divider.x() + 5);
-            assertEquals(preferred, explorer.preferredWidth, "the hidden divider's old capture must stay cancelled");
+            assertEquals(preferred + 5, explorer.preferredWidth, "The released gesture cannot resume resizing");
         }
     }
 

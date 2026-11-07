@@ -35,11 +35,11 @@ class PreviewFindWorkflowIntegrationTest {
             assertEquals(displayed, window.screenRow(queryRow), "Losing focus must not replace the field's viewport");
             window.command(TuinkCommand.DOCUMENT_SAVE_AS);
             assertTrue(window.selected().uiState().modalState.isSaveAs());
-            assertEquals(displayed, window.screenRow(queryRow), "A modal must paint the same retained query placement");
+            assertFalse(window.screenRow(queryRow).contains("SUFFIX"), "The modal owns the footer while retaining the query");
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
             assertTrue(preview.searchVisible);
             assertEquals(displayed, window.screenRow(queryRow));
-            window.event(KeyStroke.of(KeyStroke.Key.TAB, KeyStroke.Modifier.SHIFT));
+            clickQuery(window);
             assertFalse(window.selected().uiState().searchEditorFocused);
             assertEquals(displayed, window.screenRow(queryRow));
             assertEquals(cursor, preview.searchField.cursor());
@@ -61,7 +61,7 @@ class PreviewFindWorkflowIntegrationTest {
             assertEquals(1, preview.activeMatch);
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             assertEquals(2, preview.activeMatch);
-            window.event(KeyStroke.of(KeyStroke.Key.TAB));
+            clickBody(window);
             assertTrue(window.selected().uiState().searchEditorFocused);
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             assertEquals(0, preview.activeMatch, "Readonly body Enter is Find Next while Find is visible");
@@ -81,7 +81,7 @@ class PreviewFindWorkflowIntegrationTest {
     void findWithAnEmptyQueryReturnsFromTheBodyToTheRealQueryField(ActiveSurface.Kind kind) throws Exception {
         try (var window = window(kind, List.of("# Test", "", "needle one needle two"))) {
             window.event(ctrl(KeyStroke.Key.F));
-            window.event(KeyStroke.of(KeyStroke.Key.TAB));
+            clickBody(window);
             assertTrue(window.selected().uiState().searchEditorFocused);
             assertEquals("", window.preview().searchQuery);
             window.event(ctrl(KeyStroke.Key.F));
@@ -139,12 +139,12 @@ class PreviewFindWorkflowIntegrationTest {
             window.event(new TextInput("needle"));
             window.event(ctrl(KeyStroke.Key.A)); window.event(ctrl(KeyStroke.Key.C));
             assertEquals("needle", window.host.clipboard.text());
-            window.event(KeyStroke.of(KeyStroke.Key.TAB));
+            clickBody(window);
             assertTrue(window.selected().uiState().searchEditorFocused);
             window.event(ctrl(KeyStroke.Key.A)); window.event(ctrl(KeyStroke.Key.C));
             assertEquals(window.preview().result.document().projection().text(), window.host.clipboard.text());
             assertEquals("needle", window.preview().searchQuery);
-            window.event(KeyStroke.of(KeyStroke.Key.TAB, KeyStroke.Modifier.SHIFT));
+            clickQuery(window);
             window.event(ctrl(KeyStroke.Key.A));
             window.host.clipboard.setText("needle\none");
             window.event(ctrl(KeyStroke.Key.V));
@@ -157,6 +157,14 @@ class PreviewFindWorkflowIntegrationTest {
         var body = window.preview().contentBounds();
         window.pointer(PointerEvent.Kind.PRESS, body.y(), body.x() + 1);
         window.pointer(PointerEvent.Kind.RELEASE, body.y(), body.x() + 1);
+    }
+
+    private static void clickQuery(EditorWindowFixture window) {
+        var query = window.preview().searchPlacement();
+        var caret = query.cursorPosition(new dev.tuiframe.widget.FocusContext(true, true,
+            dev.tuiframe.widget.FocusSpace.root(query.bounds()))).orElseThrow();
+        window.pointer(PointerEvent.Kind.PRESS, caret.y(), caret.x());
+        window.pointer(PointerEvent.Kind.RELEASE, caret.y(), caret.x());
     }
 
     private EditorWindowFixture window(ActiveSurface.Kind kind, List<String> source) throws Exception {

@@ -1,6 +1,7 @@
 package dev.tuink.tui;
 
 import static dev.tuink.tui.command.TuinkCommand.MENU_EDIT;
+import static dev.tuink.tui.command.TuinkCommand.MENU_EXPLORER;
 import static dev.tuink.tui.command.TuinkCommand.MENU_FILE;
 import static dev.tuink.tui.command.TuinkCommand.MENU_HELP;
 import static dev.tuink.tui.command.TuinkCommand.MENU_SETTINGS;
@@ -15,11 +16,12 @@ import java.util.Objects;
 /** Application-owned lifecycle for the reusable top-menu state. */
 final class TopMenuController {
     static final int FILE_INDEX = 0;
-    static final int EDIT_INDEX = 1;
-    static final int VIEW_INDEX = 2;
-    static final int TABS_INDEX = 3;
-    static final int SETTINGS_INDEX = 4;
-    static final int HELP_INDEX = 5;
+    static final int EXPLORER_INDEX = 1;
+    static final int EDIT_INDEX = 2;
+    static final int VIEW_INDEX = 3;
+    static final int TABS_INDEX = 4;
+    static final int SETTINGS_INDEX = 5;
+    static final int HELP_INDEX = 6;
 
     private MenuBar.State state = MenuBar.State.closed();
 
@@ -41,7 +43,7 @@ final class TopMenuController {
 
     /**
      * Opens the menu addressed by a semantic keymap command. The command is
-     * consumed only when it denotes one of the six top-level menus.
+     * consumed only when it denotes one of the top-level menus.
      */
     boolean openFor(CommandInvocation invocation) {
         if (invocation == null) {
@@ -73,6 +75,9 @@ final class TopMenuController {
         }
         if (MENU_HELP.id().equals(id)) {
             return HELP_INDEX;
+        }
+        if (MENU_EXPLORER.id().equals(id)) {
+            return EXPLORER_INDEX;
         }
         return -1;
     }

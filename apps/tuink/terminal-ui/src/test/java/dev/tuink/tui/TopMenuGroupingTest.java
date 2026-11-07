@@ -15,7 +15,7 @@ class TopMenuGroupingTest {
     @Test void fileAndEditSeparateExistingCommandsIntoTheirUserTasks() {
         var ui = UiSessionState.from(AppSettings.defaults());
         assertEquals(List.of(
-            List.of(TAB_NEW, DOCUMENT_OPEN, DOCUMENT_OPEN_ENCODING, FOLDER_OPEN, FOLDER_CLOSE),
+            List.of(TAB_NEW, DOCUMENT_OPEN, DOCUMENT_OPEN_ENCODING),
             List.of(DOCUMENT_SAVE, DOCUMENT_SAVE_AS, DOCUMENT_FORMAT, DOCUMENT_REOPEN_ENCODING),
             List.of(DOCUMENT_RECOVER_DRAFTS), List.of(APP_QUIT)), groups(ui, TopMenuController.FILE_INDEX));
         assertEquals(List.of(
@@ -28,8 +28,7 @@ class TopMenuGroupingTest {
     @Test void viewContainsDocumentModesAppearanceAndMarkdownNavigationWhileSettingsContainsPreferences() {
         var ui = UiSessionState.from(AppSettings.defaults());
         assertEquals(List.of(
-            List.of(VIEW_TOGGLE_MARKDOWN_PREVIEW, EXPLORER_TOGGLE, EXPLORER_FOCUS, EXPLORER_REFRESH,
-                SETTINGS_TOGGLE_READING_MODE),
+            List.of(VIEW_TOGGLE_MARKDOWN_PREVIEW, SETTINGS_TOGGLE_READING_MODE),
             List.of(VIEW_TOGGLE_LINE_WRAP, VIEW_TOGGLE_WORD_WRAP),
             List.of(VIEW_TOGGLE_TAB_BAR, VIEW_TOGGLE_ACTIVE_GUTTER, VIEW_TOGGLE_WHITESPACE,
                 VIEW_TOGGLE_SYNTAX, VIEW_TOGGLE_RAINBOW_BRACKETS, VIEW_TOGGLE_SELECTION_HIGHLIGHT,

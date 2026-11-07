@@ -100,6 +100,20 @@ contents after atomic replacement.
 
 ## Consequences
 
+Confirmed filesystem relocation has a separate owner-thread contract:
+`DocumentSaveSubject.relocateResource(expected, replacement)`. It changes only
+the resource binding and recovery generation, preserving text, dirty state,
+savepoint, history and attached views. Live and frozen subjects reject stale
+bindings and relocation during document I/O. The JVM adapter maps physical
+baselines to the new path while retaining the original fingerprint, so a move
+cannot silently accept external edits. Removing a live document's resource
+retains its text as an unnamed dirty draft requiring Save As.
+
+Explorer mutations belong to the application file service. Their worker
+receipts are always accepted by the window owner, including at shutdown;
+read cancellation cannot abandon a move or deletion after publication.
+Terminal widgets and the portable editor contracts contain no filesystem paths.
+
 - No-edit open/save preserves BOM, final EOL, and mixed separators.
 - Editing a newline uses the document default while untouched separators remain
   exact.

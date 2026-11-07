@@ -635,12 +635,36 @@ def window_dialog_pointer(args, output):
 
 def preview_find_workflow(args, output):
     """Exercise query viewport, real focus and Find commands in live/frozen Preview."""
+    def find_row(session):
+        return next(index for index, line in enumerate(session.screen.lines) if line.startswith('Find:'))
+
+    def click_body(session):
+        rows = [(index, line.index('row-')) for index, line in enumerate(session.screen.lines)
+                if re.search(r'row-\d{3} Alpha', line)]
+        if not rows:
+            raise AssertionError('A rendered Markdown body row is missing:\n' + session.screen.text)
+        row, column = rows[min(3, len(rows) - 1)]
+        session.mouse(0, row, column + 12)
+        session.mouse(0, row, column + 12, True)
+
+    def click_control(session, label):
+        first = find_row(session)
+        for row in range(first, len(session.screen.lines) - 1):
+            line = session.screen.lines[row]
+            if label in line:
+                column = line.index(label) + 1
+                session.mouse(0, row, column)
+                session.mouse(0, row, column, True)
+                return
+        raise AssertionError('Missing search control ' + label + '\n' + session.screen.text)
+
     for mode in ('live', 'snapshot'):
         case = output / ('find-workflow-' + mode)
         case.mkdir()
         document = case / 'document.md'
-        document.write_text('# Find workflow\n\n```text\n' + '\n'.join(
-            f'row-{row:03d} Alpha searchable text' for row in range(50)) + '\n```\n', encoding='utf-8')
+        original = '# Find workflow\n\n```text\n' + '\n'.join(
+            f'row-{row:03d} Alpha searchable text' for row in range(50)) + '\n```\n'
+        document.write_text(original, encoding='utf-8')
         with Session(case / 'session', args.java, args.classpath, document,
                      native_executable=args.binary, timeout=60) as session:
             # The match-count field is optional at narrow terminal widths.
@@ -655,10 +679,11 @@ def preview_find_workflow(args, output):
             session.send(query.encode('ascii'))
             session.expect(lambda: any(line.startswith('Find:') and '_SUFFIX' in line for line in session.screen.lines),
                            'complete long query', timeout=8)
-            row = next(index for index, line in enumerate(session.screen.lines) if line.startswith('Find:'))
+            row = find_row(session)
+            if row < session.screen.rows - 3:
+                raise AssertionError('Preview Find must occupy the document footer')
             visible = session.screen.lines[row]
-            session.mouse(0, row + 4, 12)
-            session.mouse(0, row + 4, 12, True)
+            click_body(session)
             session.expect(lambda: preview_position(session)[0] > 1, 'body owns the caret after a click')
             if session.screen.lines[row] != visible:
                 raise AssertionError('Leaving the query changed its visible horizontal slice')
@@ -673,17 +698,36 @@ def preview_find_workflow(args, output):
             session.expect(lambda: 'Find 1/50' in session.screen.lines[-1], 'Enter selects the first match')
             session.send(b'\x06')
             session.expect(lambda: 'Find 2/50' in session.screen.lines[-1], 'repeated Find selects the next match')
-            session.send(b'\t')
+            session.send(b'\t' * 6)  # Find, Case, word, wildcard, Next, Prev, then body.
+            session.expect(lambda: session.screen.row < find_row(session), 'the full toolbar traversal reaches the body caret')
             session.send(b'\r')
             session.expect(lambda: 'Find 3/50' in session.screen.lines[-1], 'Enter advances Find from the body')
             session.send(b'\x07')
             session.expect(lambda: 'Find 2/50' in session.screen.lines[-1], 'Ctrl+G selects the preceding match')
+            session.resize(24, 24)
+            session.expect(lambda: any(re.search(r'row-\d{3} Alpha', line) for line in session.screen.lines)
+                           and any(line.startswith('Find:') for line in session.screen.lines)
+                           and all(label in session.screen.text for label in ('word:', 'Next', 'Prev')),
+                           'narrow Find retains its field and every supported action')
+            if 'Replace' in session.screen.text or 'All tabs' in session.screen.text:
+                raise AssertionError('Readonly Preview exposed document-changing search controls')
+            click_control(session, 'Prev')
+            session.resize(24, 120)
+            session.expect(lambda: 'Find 1/50' in session.screen.lines[-1], 'narrow Prev button searches backward')
+            # Clicking Prev retains its focus through resize; Enter must remain
+            # Previous rather than being rewritten to Find Next.
+            session.send(b'\r')
+            session.expect(lambda: 'Find 50/50' in session.screen.lines[-1], 'Enter activates the focused Prev button')
+            session.send(b'\x1b[Z\r')
+            session.expect(lambda: 'Find 1/50' in session.screen.lines[-1], 'Enter activates the focused Next button')
             session.send(b'\x1b', 0.8)
             session.expect(lambda: not any(line.startswith('Find:') for line in session.screen.lines),
                            'Find closes without leaving Preview')
             expect_preview(session, 'Preview remains selected after Find', mode=mode)
             session.snapshot('find-complete')
             session.finish()
+        if document.read_text(encoding='utf-8') != original:
+            raise AssertionError('Readonly Find changed the source document')
         print(f'PASS: actual Preview Find workflow ({mode}): {case}', flush=True)
 
 

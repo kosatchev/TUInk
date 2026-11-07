@@ -209,6 +209,13 @@ public final class EditorDocumentSession implements DocumentSaveSubject {
     @Override public ResourceBinding binding() { return status().binding(); }
     @Override public DocumentFileMetadata metadata() { return status().metadata(); }
 
+    @Override public boolean relocateResource(ResourceBinding expected, ResourceBinding replacement) {
+        requireOwnerThread();
+        requireIoIdle();
+        return backend.relocateResource(Objects.requireNonNull(expected, "expected"),
+            Objects.requireNonNull(replacement, "replacement"));
+    }
+
     /** Cached by immutable metadata identity; no text or separator scan occurs on repeated frames. */
     public DocumentFormatSummary formatSummary() {
         requireOwnerThread();

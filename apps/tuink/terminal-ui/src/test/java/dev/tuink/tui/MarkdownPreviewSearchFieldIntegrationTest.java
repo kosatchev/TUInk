@@ -45,7 +45,8 @@ class MarkdownPreviewSearchFieldIntegrationTest {
             assertEquals("alpha beta", preview.searchQuery);
             window.event(KeyStroke.of(KeyStroke.Key.HOME));
             assertNotNull(MarkdownPreviewPainter.cursor(preview.placement(MarkdownPreviewState.Placement.Focus.QUERY)));
-            assertEquals(preview.bounds.y(), MarkdownPreviewPainter.cursor(preview.placement(MarkdownPreviewState.Placement.Focus.QUERY)).y());
+            assertEquals(preview.searchPlacement().bounds().y(),
+                MarkdownPreviewPainter.cursor(preview.placement(MarkdownPreviewState.Placement.Focus.QUERY)).y());
 
             assertEquals(sourceCaret, window.active().state().getCursor());
             assertEquals(revision, window.active().tabSession().model().revision());

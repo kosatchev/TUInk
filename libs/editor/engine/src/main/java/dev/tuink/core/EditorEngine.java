@@ -980,6 +980,29 @@ public class EditorEngine {
         return new ResourceBinding(resource, disposition, version);
     }
 
+    /**
+     * Publishes a confirmed external location change independently of saving.
+     * A removal retains the buffer as an unnamed draft; a move preserves its
+     * savepoint, format history, shared views and pending undo/redo entries.
+     */
+    public boolean relocateResource(ResourceBinding expected, ResourceBinding replacement) {
+        document.requireOwnerThread();
+        Objects.requireNonNull(expected, "expected");
+        Objects.requireNonNull(replacement, "replacement");
+        if (!resourceBinding().equals(expected)) return false;
+        if (expected.equals(replacement)) return true;
+        model.relocateFileBaseline(replacement.version());
+        state.setCurrentResource(replacement.resource());
+        state.setSaveDisposition(replacement.disposition());
+        if (replacement.resource() == null) {
+            history.savedDocumentStateId = -1L;
+            state.setDirty(true);
+        }
+        breakCoalescing();
+        document.recoveryGeneration++;
+        return true;
+    }
+
     public static final class SavePreparation {
         private final EditorEngine owner;
         private final Thread ownerThread;

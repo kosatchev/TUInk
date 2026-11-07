@@ -1,5 +1,7 @@
 package dev.tuink.tui;
 
+import dev.tuiframe.explorer.Explorer;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -141,7 +143,7 @@ class FrameCompositionGoldenTest {
 
         assertEquals(
             List.of(
-                "·File···Edit···View···Tab···Settings···Help·",
+                "·File···Explorer···Edit···View···Tab·" + "·".repeat(6) + "*",
                 "[α.txt·x]·[#中»e\u0301*·x]·························",
                 "··editor:·A中»B·e\u0301····························",
                 "·······┌─·T中»e\u0301·───────────────────X─┐·······",

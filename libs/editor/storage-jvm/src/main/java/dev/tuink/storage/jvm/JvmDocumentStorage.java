@@ -81,6 +81,46 @@ public final class JvmDocumentStorage implements DocumentStorage {
         throw new IllegalArgumentException("Not a JVM file version");
     }
 
+    /**
+     * Captured physical location for host filesystem operations. This performs
+     * no lookup: even a now-missing alias retains the location of its baseline.
+     * A named document without a byte baseline retains its lexical resource path.
+     */
+    public static Path boundPhysicalPath(ResourceBinding binding) {
+        Objects.requireNonNull(binding, "binding");
+        Path requested = pathOf(binding.resource());
+        FileBaseline baseline = baselineOf(binding.version());
+        return baseline == null ? requested : baseline.target();
+    }
+
+    /**
+     * Maps a captured binding after the host has confirmed a filesystem move.
+     * The original byte fingerprint is retained, including an existing external
+     * conflict; observing the moved bytes must not silently authorize replacing
+     * changes made outside the editor. This never writes or returns the old path.
+     */
+    public static ResourceBinding relocatedBinding(ResourceBinding original, Path destination) {
+        Objects.requireNonNull(original, "original");
+        Objects.requireNonNull(destination, "destination");
+        if (!(original.resource() instanceof FileResource file)) {
+            throw new IllegalArgumentException("Not a JVM file resource");
+        }
+        Path requested = destination.toAbsolutePath().normalize();
+        FileBaseline baseline = baselineOf(original.version());
+        ResourceVersion relocated = null;
+        if (baseline != null) {
+            Path target;
+            try { target = requested.toRealPath(); }
+            catch (IOException | SecurityException inaccessible) {
+                // Publication has already happened. Retain the destination and
+                // old fingerprint so later Save fails closed if access was lost.
+                target = requested;
+            }
+            relocated = new FileBaseline(target, baseline.sha256(), baseline.byteSize());
+        }
+        return new ResourceBinding(file.storage.fileResource(requested), original.disposition(), relocated);
+    }
+
     DocumentResource fileResource(Path path) {
         return new FileResource(this, Objects.requireNonNull(path, "path").toAbsolutePath());
     }

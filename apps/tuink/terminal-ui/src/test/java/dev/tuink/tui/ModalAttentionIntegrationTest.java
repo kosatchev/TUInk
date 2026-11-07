@@ -17,6 +17,7 @@ import dev.tuink.render.TerminalEditorTextLayout;
 import dev.tuiframe.explorer.file.FileTreeModel;
 import dev.tuink.tui.flow.UiModalState;
 import dev.tuink.tui.render.RenderRasterizer;
+import dev.tuink.tui.render.WindowTextPainter;
 import dev.tuink.tui.style.UiStyles;
 import dev.tuink.tui.ui.ConfirmBarView;
 import dev.tuiframe.explorer.ui.FileTreeView;
@@ -194,7 +195,7 @@ class ModalAttentionIntegrationTest {
         var prompt = InlinePromptBar.of(text, Style.DEFAULT, 1);
         return composition(rows, cols, prompt,
             new FrameComposition.Layers(null, null, saveAs, field, confirm, FrameComposition.OpenFile.hidden(), null, null, attention, false,
-                new Rect(0, rows - 1 - prompt.height(), cols, prompt.height()), null));
+                new Rect(0, rows - 1 - prompt.height(), cols, prompt.height()), null, null));
     }
 
     private static FrameComposition dialogFrame(int rows, int cols, boolean help, boolean attention) {
@@ -213,7 +214,7 @@ class ModalAttentionIntegrationTest {
         var helpPlacement = help ? new TerminalEditorApp().helpOverlayPlacement(rows, cols, HELP) : null;
         return composition(rows, cols, InlinePromptBar.hidden(),
             new FrameComposition.Layers(null, null, false, null, null, open, helpPlacement, null, attention, false,
-                help ? helpPlacement.frame().bounds() : open.dialog().frame().bounds(), null));
+                help ? helpPlacement.frame().bounds() : open.dialog().frame().bounds(), null, null));
     }
 
     private static FrameComposition composition(int rows, int cols, InlinePromptBar prompt, FrameComposition.Layers layers) {
@@ -225,7 +226,8 @@ class ModalAttentionIntegrationTest {
         RenderPlanBuilder builder = RenderPlanBuilder.standalone(text -> List.of(), textLayout);
         EditorLayout layout = EditorLayout.resolve(model, textLayout, state, rows, cols, 1, prompt.height(), false, false, 4);
         return new FrameComposition(new FrameComposition.Document(builder, model, state, layout),
-            new FrameComposition.Surface(new TopMenuView.TopBar(" File ", 6), "status", prompt, NotificationBar.hidden()),
+            new FrameComposition.Surface(new TopMenuView.TopBar(" File ", 6), "status", prompt, NotificationBar.hidden(),
+                WindowTextPainter.Layout.fullWindow(rows, cols, prompt.height(), 0)),
             new FrameComposition.Search(false, "", SearchOptions.DEFAULT, false, null, false), layers, false, false, false);
     }
 

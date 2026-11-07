@@ -135,7 +135,7 @@ class AppCliTest {
         for (String filename : new String[] {"--ui=gui", "--ui", "--help", "-h", "--", "--open-as=cp866", "--version"}) {
             Result help = run(new String[] {"--help", "--", filename});
             assertEquals(0, help.exitCode());
-            assertTrue(help.output().contains("[--] [file]"));
+        assertTrue(help.output().contains("[--] [file|directory]"));
             assertEquals("", help.error());
 
             Result tooManyFiles = run(new String[] {"--", filename, "another-file"});

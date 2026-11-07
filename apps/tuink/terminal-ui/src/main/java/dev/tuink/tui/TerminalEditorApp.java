@@ -594,25 +594,25 @@ public class TerminalEditorApp {
         return canvas;
     }
 
-    private void paintConfirmButtons(Canvas canvas, ConfirmBarView.Placement placement) {
+    private void paintConfirmButtons(Canvas canvas, ConfirmBarView.Placement placement, Theme theme) {
         if (placement == null) {
             return;
         }
-        placement.paint(canvas, confirmWidgetTheme, confirmFocusManager());
+        placement.paint(canvas, theme, confirmFocusManager());
     }
 
-    private void paintSaveAsField(Canvas canvas, SaveAsBarView.Placement placement) {
+    private void paintSaveAsField(Canvas canvas, SaveAsBarView.Placement placement, Theme theme) {
         if (placement == null) {
             return;
         }
-        placement.paint(canvas, saveAsWidgetTheme, saveAsFocusManager());
+        placement.paint(canvas, theme, saveAsFocusManager());
     }
 
-    private void paintSearchBar(Canvas canvas, SearchBarView.Placement placement) {
+    private void paintSearchBar(Canvas canvas, SearchBarView.Placement placement, Theme theme) {
         if (placement == null) {
             return;
         }
-        placement.paint(canvas, searchWidgetTheme, searchFocusManager());
+        placement.paint(canvas, theme, searchFocusManager());
     }
 
     SearchFocus currentSearchFocus() {
@@ -728,7 +728,7 @@ public class TerminalEditorApp {
         if (modal.isSaveAs()) {
             return ModalInputPolicy.Kind.SAVE_AS;
         }
-        if (modal.isDocumentFormat()) return ModalInputPolicy.Kind.FORMAT;
+        if (modal.isDocumentFormat() || modal.isExplorerFiles()) return ModalInputPolicy.Kind.FORMAT;
         if (modal.isHelpHints() || modal.isHelpLicenses() || modal.isHelpAuthor()) {
             return ModalInputPolicy.Kind.HELP;
         }
@@ -762,7 +762,8 @@ public class TerminalEditorApp {
         DialogAttentionPainter.paint(
             buffer,
             layers.blockingBounds(),
-            layers.helpPage() != null || layers.openFile().visible() || layers.format() != null,
+            layers.helpPage() != null || layers.openFile().visible() || layers.format() != null
+                || layers.explorerDialog() != null,
             accent
         );
     }
@@ -1048,10 +1049,30 @@ public class TerminalEditorApp {
     }
 
     CellStyle resolveOverlayWidgetStyle(WidgetStyleRole key, boolean colorEnabled) {
-        if (WidgetThemeKeys.MODAL_BODY.equals(key)
-            || WidgetThemeKeys.BUTTON.equals(key)
-            || WidgetThemeKeys.LIST_ITEM.equals(key)) {
+        return resolvePopupWidgetStyle(key, colorEnabled);
+    }
+
+    /** The containing popup supplies its body and the shared contrasting input palette. */
+    Theme popupWidgetTheme(boolean colorEnabled) {
+        return ((Theme) key -> resolvePopupWidgetStyle(key, colorEnabled))
+            .withSurface(styles.windows().dialog(), styles.windows().dialogBorder());
+    }
+
+    CellStyle resolvePopupWidgetStyle(WidgetStyleRole key, boolean colorEnabled) {
+        if (WidgetThemeKeys.MODAL_BODY.equals(key) || WidgetThemeKeys.BUTTON.equals(key)) {
             return styles.windows().dialog();
+        }
+        if (WidgetThemeKeys.TEXT_FIELD.equals(key)) {
+            return styles.windows().dialogField();
+        }
+        if (WidgetThemeKeys.TEXT_FIELD_FOCUSED.equals(key)) {
+            return styles.windows().dialogFieldFocused();
+        }
+        if (WidgetThemeKeys.TEXT_FIELD_DISABLED.equals(key)) {
+            return styles.windows().dialogFieldDisabled();
+        }
+        if (WidgetThemeKeys.TEXT_FIELD_SELECTION.equals(key)) {
+            return styles.windows().dialogFieldSelection();
         }
         if (WidgetThemeKeys.MODAL_BORDER.equals(key)) {
             return styles.windows().dialogBorder();
@@ -1059,11 +1080,19 @@ public class TerminalEditorApp {
         if (WidgetThemeKeys.MODAL_TITLE.equals(key)) {
             return styles.windows().dialogTitle();
         }
-        if (WidgetThemeKeys.BUTTON_FOCUSED.equals(key)) {
+        if (WidgetThemeKeys.MODAL_ERROR.equals(key)) {
+            return styles.windows().notifyError();
+        }
+        if (WidgetThemeKeys.BUTTON_FOCUSED.equals(key) || WidgetThemeKeys.LIST_ITEM_SELECTED.equals(key)
+            || WidgetThemeKeys.LIST_ITEM_SELECTED_FOCUSED.equals(key)) {
             return colorEnabled ? styles.windows().menuSelected() : styles.windows().dialogSelectedMono();
         }
         if (WidgetThemeKeys.BUTTON_DISABLED.equals(key)) {
-            return styles.windows().dialog();
+            return styles.windows().contextMenuDisabledItem();
+        }
+        if (WidgetThemeKeys.TREE_BRANCH.equals(key)) {
+            return new CellStyle(dev.tuiframe.style.CellColor.DEFAULT,
+                dev.tuiframe.style.CellColor.DEFAULT, true, false);
         }
         return null;
     }
@@ -1140,24 +1169,43 @@ public class TerminalEditorApp {
     }
 
     CellStyle resolveFileTreeWidgetStyle(WidgetStyleRole key, boolean colorEnabled) {
-        if (WidgetThemeKeys.MODAL_TITLE.equals(key)) {
-            return styles.windows().dialogTitle();
-        }
-        if (WidgetThemeKeys.LIST_ITEM_SELECTED.equals(key)
-            || WidgetThemeKeys.LIST_ITEM_SELECTED_FOCUSED.equals(key)) {
-            return colorEnabled ? styles.windows().menuSelected() : styles.windows().dialogSelectedMono();
-        }
-        if (WidgetThemeKeys.LIST_ITEM.equals(key)
-            || WidgetThemeKeys.LIST_ITEM_DISABLED.equals(key)) {
-            return styles.windows().dialog();
-        }
-        if (WidgetThemeKeys.BUTTON.equals(key) || WidgetThemeKeys.BUTTON_DISABLED.equals(key)) {
-            return styles.windows().dialog();
-        }
-        if (WidgetThemeKeys.BUTTON_FOCUSED.equals(key)) {
-            return colorEnabled ? styles.windows().menuSelected() : styles.windows().dialogSelectedMono();
-        }
-        return null;
+        return resolvePopupWidgetStyle(key, colorEnabled);
+    }
+
+    /** A container supplies its surface; ordinary tree rows inherit it. */
+    Theme explorerWidgetTheme(boolean colorEnabled) {
+        var windows = styles.windows();
+        var body = windows.renderBody();
+        var borderRole = windows.sidebarBorder();
+        var border = new CellStyle(borderRole.fg(), body.bg(), borderRole.bold(), borderRole.underline());
+        Theme roles = key -> {
+            if (WidgetThemeKeys.MODAL_TITLE.equals(key)) {
+                return new CellStyle(border.fg(), border.bg(), true, border.underline());
+            }
+            if (WidgetThemeKeys.BUTTON.equals(key) || WidgetThemeKeys.BUTTON_DISABLED.equals(key)
+                || WidgetThemeKeys.TEXT_FIELD.equals(key) || WidgetThemeKeys.TEXT_FIELD_FOCUSED.equals(key)
+                || WidgetThemeKeys.TEXT_FIELD_DISABLED.equals(key)) return body;
+            if (WidgetThemeKeys.BUTTON_FOCUSED.equals(key) || WidgetThemeKeys.TEXT_FIELD_SELECTION.equals(key)) {
+                if (colorEnabled) return windows.sidebarSelectedFocused();
+                var selected = windows.sidebarSelected();
+                return new CellStyle(selected.fg(), selected.bg(), true, true);
+            }
+            if (WidgetThemeKeys.TREE_BRANCH.equals(key)) {
+                return new CellStyle(dev.tuiframe.style.CellColor.DEFAULT,
+                    dev.tuiframe.style.CellColor.DEFAULT, true, false);
+            }
+            if (WidgetThemeKeys.LIST_ITEM_SELECTED.equals(key)) return windows.sidebarSelected();
+            if (WidgetThemeKeys.LIST_ITEM_SELECTED_FOCUSED.equals(key)) {
+                if (colorEnabled) return windows.sidebarSelectedFocused();
+                var selected = windows.sidebarSelected();
+                return new CellStyle(selected.fg(), selected.bg(), true, true);
+            }
+            if (WidgetThemeKeys.SPLITTER_FOCUSED.equals(key)) {
+                return border;
+            }
+            return null;
+        };
+        return roles.withSurface(body, border);
     }
 
     ConfirmBarInputRouter.Policy confirmPolicy(UiModalState modalState) {
@@ -1252,10 +1300,15 @@ public class TerminalEditorApp {
         FrameComposition.Surface surface, FrameComposition.Layers layers, SearchBarView.Placement search,
         boolean colorEnabled) {
         if (layers.explorer() != null) layers.explorer().paint(canvas,
-            colorEnabled ? colorFileTreeWidgetTheme : monoFileTreeWidgetTheme);
-        paintSaveAsField(canvas, layers.saveAs());
-        paintConfirmButtons(canvas, layers.confirm());
-        paintSearchBar(canvas, search);
+            explorerWidgetTheme(colorEnabled));
+        var controlsTheme = surface.textLayout().prompt().theme();
+        int controlsMark = canvas.save();
+        try {
+            canvas.clip(surface.textLayout().prompt().clip());
+            paintSaveAsField(canvas, layers.saveAs(), controlsTheme);
+            paintConfirmButtons(canvas, layers.confirm(), controlsTheme);
+            paintSearchBar(canvas, search, controlsTheme);
+        } finally { canvas.restore(controlsMark); }
         if (layers.tabBar() != null) layers.tabBar().paint(canvas,
             colorEnabled ? colorTabBarWidgetTheme : monoTabBarWidgetTheme);
         if (layers.topMenu() != null) layers.topMenu().paint(canvas,
@@ -1265,7 +1318,9 @@ public class TerminalEditorApp {
             layers.blockedInputHighlight(), layers.contentFocused());
         paintHelpOverlay(canvas, layers.help(), colorEnabled, layers.blockedInputHighlight());
         if (layers.format() != null) layers.format().paint(canvas,
-            (colorEnabled ? colorFileTreeWidgetTheme : monoFileTreeWidgetTheme).withSurface(styles.windows().dialog(), styles.windows().dialog()));
+            popupWidgetTheme(colorEnabled));
+        if (layers.explorerDialog() != null) layers.explorerDialog().paint(canvas,
+            popupWidgetTheme(colorEnabled), popupWidgetTheme(colorEnabled).resolveStyle(WidgetThemeKeys.MODAL_ERROR));
         paintBlockingAttention(current, layers, colorEnabled);
     }
 
@@ -1273,6 +1328,8 @@ public class TerminalEditorApp {
     private ScreenCursor frameCursor(int rows, int cols,
         FrameComposition.Layers layers, SearchBarView.Placement search, boolean searchEditorFocused,
         ScreenCursor contentCursor) {
+        if (layers.explorerDialog() != null) return layers.explorerDialog().cursor()
+            .map(point -> new ScreenCursor(point, true)).orElseGet(ScreenCursor::hidden);
         Point point = contentCursor.position();
         Point searchCursor = search == null ? null : search.cursorPosition(searchFocusManager()).orElse(null);
         boolean searchOwnsCursor = search != null && !searchEditorFocused;
@@ -1340,8 +1397,8 @@ public class TerminalEditorApp {
         dev.tuink.tui.render.WindowTextPainter.paint(canvas, rows, cols,
             new dev.tuink.tui.render.WindowTextPainter.Text(surface.topBar().text(), surface.bottomBar(),
                 surface.inlinePrompt().text(), surface.inlinePrompt().style(),
-                surface.notification().text(), surface.notification().style()), styles);
-        paintFrameOverlays(current, canvas, rows, cols, surface, layers, null, services.colorEnabled);
+                surface.notification().text(), surface.notification().style()), styles, surface.textLayout());
+        paintFrameOverlays(current, canvas, rows, cols, surface, layers, composition.search(), services.colorEnabled);
         Point caret = MarkdownPreviewPainter.cursor(composition.preview());
         ScreenCursor contentCursor = caret == null ? ScreenCursor.hidden()
             : new ScreenCursor(caret, content.contains(caret.x(), caret.y()));
@@ -1358,7 +1415,8 @@ public class TerminalEditorApp {
                 geometry.preparedRowsMisses(), geometry.preparedRowsHits(), geometry.retainedBytes());
         }
         return services.present(current, frameCursor(rows, cols, layers,
-            null, false, contentCursor), viewport, layers, composition.fullRedraw());
+            composition.search(), composition.preview().focus() == MarkdownPreviewState.Placement.Focus.CONTENT,
+            contentCursor), viewport, layers, composition.fullRedraw());
     }
 
     private RenderFrameResult renderFrame(
@@ -1455,12 +1513,12 @@ public class TerminalEditorApp {
         if (profileEnabled) {
             frameProfiler.beginRasterCache(renderer.metricsBuilds(), renderer.preparedRowsMisses(), renderer.preparedRowsReused());
             long rasterStart = System.nanoTime();
-            current = renderer.rasterize(plan, rows, cols, contentTopRow);
+            current = renderer.rasterize(plan, rows, cols, contentTopRow, surface.textLayout());
             frameProfiler.rasterNanos = System.nanoTime() - rasterStart;
             frameProfiler.endRasterCache(renderer.metricsBuilds(), renderer.preparedRowsMisses(),
                 renderer.preparedRowsReused(), renderer.retainedRenderBytes());
         } else {
-            current = renderer.rasterize(plan, rows, cols, contentTopRow);
+            current = renderer.rasterize(plan, rows, cols, contentTopRow, surface.textLayout());
         }
         Canvas canvas = frameCanvas(current, rows, cols);
         paintFrameOverlays(current, canvas, rows, cols, surface, layers, searchBarPlacement, colorEnabled);
@@ -2406,8 +2464,8 @@ public class TerminalEditorApp {
     }
 
     private void printUsage(PrintStream output) {
-        TerminalDiagnostics.line(output, "Usage: tuink [options] [--] [file]");
-        TerminalDiagnostics.line(output, "Development: ./gradlew --console=plain :app:run -PappArgs=\"[options] [--] [file]\"");
+        TerminalDiagnostics.line(output, "Usage: tuink [options] [--] [file|directory]");
+        TerminalDiagnostics.line(output, "Development: ./gradlew --console=plain :app:run -PappArgs=\"[options] [--] [file|directory]\"");
         TerminalDiagnostics.line(output, "An existing directory opens the folder explorer; use tuink . for the current folder.");
         TerminalDiagnostics.line(output, "Options:");
         TerminalDiagnostics.line(output, "  --no-mouse       Disable mouse tracking and mouse interactions");

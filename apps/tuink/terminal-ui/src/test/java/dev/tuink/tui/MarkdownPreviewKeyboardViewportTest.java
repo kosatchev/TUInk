@@ -91,7 +91,7 @@ class MarkdownPreviewKeyboardViewportTest {
         var caret = MarkdownPreviewPainter.cursor(placement);
         assertNotNull(caret);
         assertTrue(placement.searchInput().bounds().contains(caret));
-        assertEquals(state.bounds.y(), caret.y());
+        assertEquals(state.bounds.bottomExclusive(), caret.y());
         state.close();
     }
 

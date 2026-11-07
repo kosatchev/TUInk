@@ -39,6 +39,18 @@ class TopMenuInputRouterTest {
     }
 
     @Test
+    void explorerIsTheNextVisualMenuAfterFileWhileF2StillOpensEdit() {
+        Fixture fixture = fixture(MenuBar.State.open(TopMenuController.FILE_INDEX), new Rect(0, 0, 80, 20));
+
+        assertTrue(fixture.route(KeyStroke.of(KeyStroke.Key.ARROW_RIGHT)).consumed());
+        assertEquals(TopMenuController.EXPLORER_INDEX, fixture.controller.state().openMenuIndex());
+
+        fixture = fixture(fixture.controller.state(), new Rect(0, 0, 80, 20));
+        assertTrue(fixture.route(KeyStroke.of(KeyStroke.Key.F2)).consumed());
+        assertEquals(TopMenuController.EDIT_INDEX, fixture.controller.state().openMenuIndex());
+    }
+
+    @Test
     void shortcutSwitchesAnOpenMenuWithoutTogglingItClosed() {
         Fixture fixture = fixture(MenuBar.State.open(TopMenuController.FILE_INDEX), new Rect(0, 0, 80, 20));
 

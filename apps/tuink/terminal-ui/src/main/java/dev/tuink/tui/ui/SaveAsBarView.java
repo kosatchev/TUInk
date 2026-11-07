@@ -73,19 +73,24 @@ public final class SaveAsBarView {
      * controls cannot receive focus or input.
      */
     public Placement place(Object scopeId, int topRow, Rect interactionClip) {
+        return place(scopeId, new Rect(0, topRow, CellText.width(row), 1), interactionClip);
+    }
+
+    public Placement place(Object scopeId, Rect bounds, Rect interactionClip) {
+        int left = bounds.x(), topRow = bounds.y();
         Objects.requireNonNull(scopeId, "scopeId");
         Rect safeInteractionClip = Objects.requireNonNull(interactionClip, "interactionClip");
         List<RoutedTarget<Target, Action>> targets = new ArrayList<>(ORDER.size());
-        Rect fieldBounds = new Rect(fieldStart, topRow, fieldWidth, 1);
+        Rect fieldBounds = new Rect(left + fieldStart, topRow, fieldWidth, 1);
         boolean filenameVisible = fieldWidth >= MIN_FIELD_WIDTH
             && InteractionVisibility.FULL_BOUNDS.allows(fieldBounds, safeInteractionClip);
         addTarget(targets, Target.FIELD,
             field.layout(fieldBounds).mapOutput(SaveAsBarView::fieldAction), safeInteractionClip);
         addTarget(targets, Target.SAVE,
-            save.layout(new Rect(saveStart, topRow, buttonsVisible ? save.width() : 0, 1))
+            save.layout(new Rect(left + saveStart, topRow, buttonsVisible ? save.width() : 0, 1))
                 .mapOutput(ignored -> Action.SUBMITTED), safeInteractionClip, filenameVisible);
         addTarget(targets, Target.CANCEL,
-            cancel.layout(new Rect(cancelStart, topRow, buttonsVisible ? cancel.width() : 0, 1))
+            cancel.layout(new Rect(left + cancelStart, topRow, buttonsVisible ? cancel.width() : 0, 1))
                 .mapOutput(ignored -> Action.CANCELLED), safeInteractionClip);
         FocusScope<Target, Action> focusScope = new FocusScope<>(
             scopeId,

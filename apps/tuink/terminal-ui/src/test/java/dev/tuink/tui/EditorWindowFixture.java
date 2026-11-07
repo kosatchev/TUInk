@@ -485,5 +485,13 @@ final class EditorWindowFixture implements AutoCloseable {
             frame = super.rasterize(plan, rows, columns, contentTopRow);
             return frame;
         }
+
+        @Override
+        public CellBuffer rasterize(RenderPlan plan, int rows, int columns, int contentTopRow,
+            dev.tuink.tui.render.WindowTextPainter.Layout textLayout) {
+            this.plan = plan;
+            frame = super.rasterize(plan, rows, columns, contentTopRow, textLayout);
+            return frame;
+        }
     }
 }

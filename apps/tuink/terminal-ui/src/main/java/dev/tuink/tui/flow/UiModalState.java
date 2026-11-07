@@ -134,6 +134,9 @@ public record UiModalState(
 
     public boolean isDocumentFormat() { return mode == UiModalMode.DOCUMENT_FORMAT; }
 
+    public static UiModalState explorerFiles() { return state(UiModalMode.EXPLORER_FILES, null, -1, SaveContinuation.NONE); }
+    public boolean isExplorerFiles() { return mode == UiModalMode.EXPLORER_FILES; }
+
     public boolean isSaveAs() {
         return mode == UiModalMode.SAVE_AS;
     }

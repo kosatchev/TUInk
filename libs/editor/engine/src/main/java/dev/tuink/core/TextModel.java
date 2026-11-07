@@ -782,6 +782,11 @@ public class TextModel {
         return fileBaseline;
     }
 
+    /** Changes only the location of the baseline; its decoder and editable metadata stay intact. */
+    void relocateFileBaseline(ResourceVersion baseline) {
+        fileBaseline = baseline;
+    }
+
     /** The on-disk decoder is independent of the current editable output format. */
     public DocumentOpenMode reopenMode() { return reopenMode; }
 

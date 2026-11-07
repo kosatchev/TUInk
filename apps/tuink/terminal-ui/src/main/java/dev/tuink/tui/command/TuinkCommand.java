@@ -1,5 +1,7 @@
 package dev.tuink.tui.command;
 
+import dev.tuiframe.explorer.Explorer;
+
 import dev.tuink.editor.command.CommandId;
 import java.util.Objects;
 import java.util.Optional;
@@ -82,6 +84,7 @@ public enum TuinkCommand {
     MENU_TABS("tuink.menu.tabs", "Open Tab menu"),
     MENU_SETTINGS("tuink.menu.settings", "Open Settings menu"),
     MENU_HELP("tuink.menu.help", "Open Help menu"),
+    MENU_EXPLORER("tuink.menu.explorer", "Open Explorer menu"),
 
     VIEW_TOGGLE_TAB_BAR("tuink.view.toggle-tab-bar", "Toggle tab bar"),
     VIEW_TOGGLE_MARKDOWN_PREVIEW("tuink.view.toggle-markdown-preview", "Toggle Markdown preview"),
@@ -120,6 +123,12 @@ public enum TuinkCommand {
     EXPLORER_TOGGLE("tuink.explorer.toggle", "Toggle explorer"),
     EXPLORER_FOCUS("tuink.explorer.focus", "Focus explorer"),
     EXPLORER_REFRESH("tuink.explorer.refresh", "Refresh explorer"),
+    EXPLORER_NEW_FILE("tuink.explorer.new-file", "Create file"),
+    EXPLORER_NEW_DIRECTORY("tuink.explorer.new-directory", "Create directory"),
+    EXPLORER_RENAME("tuink.explorer.rename", "Rename selected file or directory"),
+    EXPLORER_MOVE("tuink.explorer.move", "Move selected file or directory"),
+    EXPLORER_DELETE("tuink.explorer.delete", "Delete selected file or directory"),
+    EXPLORER_CYCLE_WIDTH("tuink.explorer.cycle-width", "Cycle explorer width"),
     FILE_BROWSER_TOGGLE_HIDDEN("tuink.file-browser.toggle-hidden", "Toggle hidden files"),
 
     HELP_KEY_HINTS("tuink.help.key-hints", "Show key hints"),

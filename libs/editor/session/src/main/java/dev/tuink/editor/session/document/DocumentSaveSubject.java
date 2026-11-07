@@ -11,4 +11,12 @@ public interface DocumentSaveSubject {
     ResourceBinding binding();
     DocumentFileMetadata metadata();
     DocumentIoCoordinator io();
+
+    /**
+     * Accepts a host-confirmed move or removal against the captured file binding.
+     * Performs no storage operation. A changed binding rejects the late result;
+     * an active save must finish before a host starts the filesystem change.
+     * An unbound replacement retains the text and requires an explicit Save As.
+     */
+    boolean relocateResource(ResourceBinding expected, ResourceBinding replacement);
 }

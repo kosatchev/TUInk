@@ -35,6 +35,7 @@ class TuinkKeymapTest {
 
     @Test
     void functionAndMnemonicKeysShareMenuCommands() {
+        assertEquals(TuinkCommand.MENU_EXPLORER.id(), command(KeyStroke.Key.F7));
         List<KeyStroke.Key> functionKeys = List.of(
             KeyStroke.Key.F1, KeyStroke.Key.F2, KeyStroke.Key.F3,
             KeyStroke.Key.F4, KeyStroke.Key.F5, KeyStroke.Key.F6

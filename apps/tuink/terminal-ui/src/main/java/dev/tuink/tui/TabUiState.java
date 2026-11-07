@@ -31,6 +31,7 @@ final class TabUiState implements AutoCloseable {
     boolean openFileMode;
     boolean choosingFolder;
     DocumentFormatDialogView.State formatDialog;
+    ExplorerFileDialogView.State explorerDialog;
     dev.tuink.editor.storage.DocumentOpenMode pickerOpenMode = dev.tuink.editor.storage.DocumentOpenMode.DETECT;
     FilePickerOpenWorkflow.Notice pickerNotice;
     FileTreeModel.DirectoryFailure lastPickerDirectoryFailure;
@@ -38,6 +39,8 @@ final class TabUiState implements AutoCloseable {
     Explorer openFileTree;
     FilePickerOpenWorkflow.OpenRequest pendingOpen;
     FilePickerOpenWorkflow.Result deferredOpenResult;
+    FileOpenContext deferredOpenContext;
+    FileOpenContext encodingOpenContext;
     final SearchPresentation searchPresentation = new SearchPresentation();
     String reportedSearchError = "";
     Object blockingFocusOwner;
@@ -96,6 +99,8 @@ final class TabUiState implements AutoCloseable {
             overwriteApproval = null;
             snapshotOverwriteApproval = null;
             deferredOpenResult = null;
+            deferredOpenContext = null;
+            encodingOpenContext = null;
             if (openFileTree != null) {
                 openFileTree.close();
                 openFileTree = null;

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import dev.tuink.editor.command.CommandInvocation;
 import dev.tuink.tui.command.TuinkCommand;
+import dev.tuink.tui.flow.SearchFocus;
 import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.input.KeyStroke;
 import dev.tuiframe.input.TextInput;
@@ -82,10 +83,20 @@ class FieldOwnershipIntegrationTest {
             assertEquals("alpha", window.host.clipboard.text());
             assertEquals(bodySelection, preview.selection.snapshot());
             window.command(TuinkCommand.EDIT_INSERT_TAB);
+            assertFalse(window.selected().uiState().searchEditorFocused);
+            assertEquals(SearchFocus.CASE, window.selected().uiState().searchFocusManager.focused().orElseThrow());
+            assertEquals(ActiveSurface.Focus.CONTROL, window.controller.activeSurface().focus());
+            assertFalse(window.controller.previewFrame().cursor().visible(), "Toolbar buttons show focus without an editing caret");
+            for (int index = 0; index < 5; index++) window.command(TuinkCommand.EDIT_INSERT_TAB);
             assertTrue(window.selected().uiState().searchEditorFocused);
             assertEquals(row, window.controller.previewFrame().cursor().position().y());
             window.event(KeyStroke.of(KeyStroke.Key.TAB, KeyStroke.Modifier.SHIFT));
             assertFalse(window.selected().uiState().searchEditorFocused);
+            assertEquals(SearchFocus.PREV_BUTTON, window.selected().uiState().searchFocusManager.focused().orElseThrow());
+            assertEquals(ActiveSurface.Focus.CONTROL, window.controller.activeSurface().focus());
+            for (int index = 0; index < 5; index++) window.event(KeyStroke.of(KeyStroke.Key.TAB, KeyStroke.Modifier.SHIFT));
+            assertEquals(SearchFocus.FIND, window.selected().uiState().searchFocusManager.focused().orElseThrow());
+            assertEquals(ActiveSurface.Focus.EDITABLE_TEXT, window.controller.activeSurface().focus());
             assertEquals(field.y(), window.controller.previewFrame().cursor().position().y());
             assertEquals("alpha", preview.searchQuery);
             assertEquals(matches, preview.searchMatches);

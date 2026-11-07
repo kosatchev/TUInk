@@ -1,7 +1,5 @@
 package dev.tuink.tui;
 
-import dev.tuiframe.explorer.file.FileTreeModel;
-
 import dev.tuiframe.explorer.Explorer;
 
 import dev.tuiframe.cell.Canvas;
@@ -17,7 +15,7 @@ import dev.tuiframe.widget.Theme;
 import dev.tuiframe.widget.WidgetState;
 import dev.tuiframe.widget.WidgetThemeKeys;
 import dev.tuiframe.explorer.ui.FileTreeView;
-import dev.tuiframe.explorer.ui.PathPresentation;
+import dev.tuiframe.explorer.file.FileTreeModel;
 import java.nio.file.Path;
 
 /** Window-owned folder navigation, independent of document and picker lifetimes. */
@@ -27,14 +25,25 @@ final class ExplorerState implements AutoCloseable {
     Explorer tree;
     boolean visible;
     boolean focused;
+    boolean mutating;
     int preferredWidth = 30;
     Splitter.State splitterState = Splitter.State.initial();
     Placement placement;
     Placement capturePlacement;
 
+    Path root() { return tree == null ? null : tree.root(); }
+
     FileTreeModel.Entry selectedEntry() { return tree == null ? null : tree.selectedEntry(); }
 
-    Path root() { return tree == null ? null : tree.root(); }
+    boolean selectedRoot() {
+        var selected = selectedEntry();
+        return selected != null && selected.path().equals(root());
+    }
+
+    boolean selectedDirectory() {
+        var selected = selectedEntry();
+        return selected != null && selected.kind() == FileTreeModel.Kind.DIRECTORY;
+    }
 
     void open(Path root) {
         if (tree != null) tree.close();
@@ -46,17 +55,17 @@ final class ExplorerState implements AutoCloseable {
         capturePlacement = null;
     }
 
-    Rect documentBounds(Rect body) {
-        return visible ? SplitPane.sideBySide(body, preferredWidth, 16, 24).secondBounds() : body;
+    SplitPane prepareLayout(Rect body) {
+        if (!visible) { focused = false; return null; }
+        var split = SplitPane.sideBySide(body, preferredWidth, 16, 24);
+        if (!split.divided() || split.firstBounds().height() <= (tree == null ? 1 : 0)) focused = false;
+        return split;
     }
 
-    Placement place(Rect body, Rect clip, boolean interactive) {
-        if (!visible) { placement = null; return null; }
-        var split = SplitPane.sideBySide(body, preferredWidth, 16, 24);
-        if (!split.divided()) { focused = false; placement = null; return null; }
+    Placement place(SplitPane split, Rect clip, boolean interactive) {
+        if (split == null || !split.divided()) { placement = null; return null; }
         Rect left = split.firstBounds();
-        Rect list = new Rect(left.x(), left.y() + Math.min(1, left.height()), left.width(), Math.max(0, left.height() - 1));
-        if (list.isEmpty()) focused = false;
+        Rect list = left;
         var placedTree = tree == null ? null : tree.place(list, clip, focused && interactive, true);
         placement = new Placement(left, split.secondBounds(), placedTree,
             new Splitter(split, splitterState).layout(), root(), focused && interactive);
@@ -93,12 +102,12 @@ final class ExplorerState implements AutoCloseable {
             var body = theme.resolveStyle(WidgetThemeKeys.MODAL_BODY);
             canvas.fill(bounds, body);
             var header = theme.resolveStyle(WidgetThemeKeys.MODAL_BORDER, body);
-            String caption = root == null ? " Explorer" : " " + PathPresentation.name(root);
-            if (tree != null && tree.loading()) caption += " (Loading...)";
-            CellText.drawClipped(canvas, bounds.x(), bounds.y(), caption, header, bounds.width());
             if (tree != null) tree.paint(canvas, theme);
-            else if (bounds.height() > 1) CellText.drawClipped(canvas, bounds.x(), bounds.y() + 1,
-                " Open folder...", body, bounds.width());
+            else {
+                CellText.drawClipped(canvas, bounds.x(), bounds.y(), " Explorer", header, bounds.width());
+                if (bounds.height() > 1) CellText.drawClipped(canvas, bounds.x(), bounds.y() + 1,
+                    " Open folder...", body, bounds.width());
+            }
             divider.paint(canvas, theme, new WidgetState(focused, true));
         }
     }

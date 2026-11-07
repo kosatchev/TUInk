@@ -41,6 +41,8 @@ public interface DocumentBackend extends DocumentSaveOperations {
     long viewRevision(ViewId viewId);
     DocumentSnapshot snapshot();
     Status status();
+    /** Publishes a host-confirmed location change without changing text, format or the savepoint. */
+    boolean relocateResource(ResourceBinding expected, ResourceBinding replacement);
     /** Decoder of the last read/committed bytes, unaffected by unsaved format changes or undo. */
     default dev.tuink.editor.storage.DocumentOpenMode reopenMode() {
         return dev.tuink.editor.storage.DocumentOpenMode.DETECT;

@@ -19,6 +19,7 @@ import dev.tuink.render.Style;
 import dev.tuink.render.TerminalEditorTextLayout;
 import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.explorer.file.FileTreeModel;
+import dev.tuink.tui.render.WindowTextPainter;
 import dev.tuiframe.explorer.ui.FileTreeView;
 import dev.tuink.tui.ui.HelpPages;
 import dev.tuink.tui.ui.InlinePromptBar;
@@ -132,6 +133,7 @@ class FrameCompositionTest {
             false,
             false,
             new Rect(0, 0, 0, 0),
+            null,
             null
         );
         assertThrows(
@@ -152,7 +154,7 @@ class FrameCompositionTest {
     void sourceFramesRejectBlockingGeometryFromAnotherWindowSnapshot() {
         var base = composition(InlinePromptBar.hidden(), 0);
         var layers = new FrameComposition.Layers(null, null, false, null, null,
-            FrameComposition.OpenFile.hidden(), null, null, false, false, new Rect(0, 1, 40, 6), null);
+            FrameComposition.OpenFile.hidden(), null, null, false, false, new Rect(0, 1, 40, 6), null, null);
         assertThrows(IllegalArgumentException.class, () -> new FrameComposition(base.document(), base.surface(),
             base.search(), layers, false, false, false));
     }
@@ -270,7 +272,8 @@ class FrameCompositionTest {
                 new TopMenuView.TopBar(" File ", 6),
                 "status",
                 prompt,
-                NotificationBar.hidden()
+                NotificationBar.hidden(),
+                WindowTextPainter.Layout.fullWindow(8, 40, prompt.height(), 0)
             ),
             new FrameComposition.Search(false, "", SearchOptions.DEFAULT, false, null, false),
             new FrameComposition.Layers(
@@ -285,6 +288,7 @@ class FrameCompositionTest {
                 false,
                 false,
                 new Rect(0, 0, 0, 0),
+                null,
                 null
             ),
             false,

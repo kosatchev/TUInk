@@ -14,6 +14,7 @@ import dev.tuink.editor.document.ViewId;
 import dev.tuink.editor.document.ViewSnapshot;
 import dev.tuink.editor.document.WorkspaceEdit;
 import dev.tuink.editor.storage.DocumentLoad;
+import dev.tuink.editor.storage.ResourceBinding;
 import dev.tuink.editor.storage.DocumentResource;
 import dev.tuink.editor.storage.SavedDocument;
 import dev.tuink.editor.storage.SaveDisposition;
@@ -158,6 +159,12 @@ public final class CoreDocumentBackend implements DocumentBackend {
         EditorEngine engine = defaultView.engine();
         return new Status(engine.resourceBinding(), document.model().fileMetadata(),
             defaultView.state().isDirty(), engine.recoveryRevision());
+    }
+
+    @Override
+    public boolean relocateResource(ResourceBinding expected, ResourceBinding replacement) {
+        requireOwnerThread();
+        return defaultView.engine().relocateResource(expected, replacement);
     }
 
     @Override public dev.tuink.editor.storage.DocumentOpenMode reopenMode() {

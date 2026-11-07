@@ -88,7 +88,9 @@ control scopes, document geometry, clipboard adapter, and rendering. File and
 menu commands aimed at a document behind its blocking or exclusive dialog remain
 unavailable. Tab navigation is routed before view-local blocking input so another
 tab remains usable and the originating dialog retains its controls and focus.
-Only quit confirmation and startup recovery keep application-wide ownership.
+Quit confirmation, startup recovery/settings, and Explorer file-action dialogs
+keep application-wide ownership. Explorer operations address the window-owned
+tree selection rather than the selected document presentation.
 Escape and the existing per-dialog Ctrl+Q actions continue through the dialog's
 cancellation policy.
 
@@ -175,6 +177,39 @@ inside the dialog, and document input is rejected. A document caret covered
 by a dialog is hidden; a document completely covered by the dialog is skipped
 during focus traversal even when its mode permits content focus.
 
+### Popup surfaces and file-action behavior
+
+Help, License, About, Open, document-format and Explorer file-action windows use
+one application popup theme. Its base surface, border and title resolve through
+`dialog`, `dialogBorder` and `dialogTitle` in `UiStyles`. Ordinary buttons and
+tree/list rows receive that light surface with dark text from their containing
+popup. Text fields override it with the shared dark `dialogField` surface and
+light text; focused, disabled and selected text use `dialogFieldFocused`,
+`dialogFieldDisabled` and `dialogFieldSelection`. The whole input allocation,
+including empty padding, receives its field surface. Focus, text selection,
+disabled controls, branch emphasis and validation errors use shared semantic
+widget roles. In particular,
+`MODAL_ERROR` is supplied by the application palette; widgets do not choose
+application colors. Both the Help and Open theme adapters delegate to the same
+popup resolver as file-action windows. The editor surface remains the parent
+surface for the sidebar, independently of popup styling.
+
+Each popup owns one retained control scope and one exact-frame placement. Name
+dialogs initially focus the text field; a rename selects its current basename.
+Destination selection initially focuses its tree. Destructive confirmations
+initially focus Cancel. Tab and Shift+Tab traverse only eligible controls.
+Enter retains the receiving control's meaning: it submits a readable name,
+navigates an entered path, or activates a focused button. Name submission and
+the primary button execute the same validated operation.
+
+Escape, the frame close control and the file-action dialog's Ctrl+Q cancel
+unpublished work through the same owner path. During a committed mutation,
+controls show the busy state and the owner accepts its actual result before
+closing; cancel does not claim to roll back an already published filesystem
+change. An error remains inside the popup while preserving its draft. Resizing
+retains input and control identity; clipped controls cannot activate, and safe
+cancellation remains available in the compact layout.
+
 File identities use one application presentation policy across the picker,
 tabs, menus and confirmation questions. If native bytes or terminal sanitization
 make a literal ambiguous, the display uses a marked, percent-encoded label.
@@ -183,6 +218,27 @@ available only when its complete basename is visible; otherwise the existing
 resize prompt applies. Presentation labels never determine the persistence path.
 
 ## Consequences
+
+### Container geometry and inherited surfaces
+
+`SurfaceContext` carries immutable bounds, the ancestor clip and inherited
+widget roles. Children are placed in parent-local coordinates; explicit child
+roles override inherited roles without changing siblings. The application
+composes workspace, explorer, document and footer containers from these contexts.
+Search and inline Save As retain their own surface overrides; popup controls
+inherit the popup theme, including its contrasting text-field roles.
+
+`WindowChrome` prepares footer surfaces once for both Source and Preview.
+Search, Save As, view confirmations, notifications and status are children of
+the document container. They reserve document height independently of the
+explorer. Quit confirmation has a window-wide surface and keeps its global
+close workflow. Fields, buttons, painting, cursor and modal hit bounds consume
+the same prepared geometry; renderers do not infer a second footer allocation.
+
+Preview uses the shared search composition in read-only mode, with a bounded
+query, matching options and next/previous actions. Replacement and document
+editing controls are absent from its scope. Focus and input admission use the
+same search router as Source.
 
 Common focus, rejection, capture, local buffer, timing, and painting contracts
 are tested without a TUInk dependency. Application tests cover its clipboard

@@ -2,6 +2,7 @@ package dev.tuink.tui;
 
 import static dev.tuink.tui.command.TuinkCommand.DOCUMENT_SAVE;
 import static dev.tuink.tui.command.TuinkCommand.MENU_EDIT;
+import static dev.tuink.tui.command.TuinkCommand.MENU_EXPLORER;
 import static dev.tuink.tui.command.TuinkCommand.MENU_FILE;
 import static dev.tuink.tui.command.TuinkCommand.MENU_HELP;
 import static dev.tuink.tui.command.TuinkCommand.MENU_SETTINGS;
@@ -19,10 +20,11 @@ import org.junit.jupiter.api.Test;
 
 class TopMenuControllerTest {
     @Test
-    void semanticMenuCommandsOpenAllSixStableMenuIndices() {
+    void semanticMenuCommandsOpenAllSevenVisualMenuIndices() {
         TopMenuController controller = new TopMenuController();
         List<TuinkCommand> commands = List.of(
             MENU_FILE,
+            MENU_EXPLORER,
             MENU_EDIT,
             MENU_VIEW,
             MENU_TABS,

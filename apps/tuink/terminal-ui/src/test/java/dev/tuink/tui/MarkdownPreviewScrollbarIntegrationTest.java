@@ -147,8 +147,9 @@ class MarkdownPreviewScrollbarIntegrationTest {
             assertNull(MarkdownPreviewPainter.cursor(unfocused));
             var buffer = new CellBuffer(window.height, window.width);
             MarkdownPreviewPainter.paint(new Canvas(buffer), unfocused, UiStyles.forTheme(UiStyles.Theme.CYAN), true);
-            assertTrue(row(buffer, state.bounds.y()).contains("Find: Payload"));
-            assertEquals(state.bounds.y() + 1, focused.contentBounds().y());
+            assertFalse(row(buffer, state.bounds.y()).contains("Find:"), "The shared footer paints Find outside the Markdown viewport");
+            assertEquals(state.bounds.y(), focused.contentBounds().y());
+            assertEquals(state.bounds.bottomExclusive(), focused.searchInput().bounds().y());
         }
     }
 

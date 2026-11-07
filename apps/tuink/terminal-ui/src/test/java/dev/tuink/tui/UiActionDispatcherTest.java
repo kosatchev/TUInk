@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test;
 
 class UiActionDispatcherTest {
     @Test void everyTopLevelMenuOpensWithoutADocumentContext() {
-        var commands = List.of(TuinkCommand.MENU_FILE, TuinkCommand.MENU_EDIT, TuinkCommand.MENU_VIEW,
+        var commands = List.of(TuinkCommand.MENU_FILE, TuinkCommand.MENU_EXPLORER, TuinkCommand.MENU_EDIT, TuinkCommand.MENU_VIEW,
             TuinkCommand.MENU_TABS, TuinkCommand.MENU_SETTINGS, TuinkCommand.MENU_HELP);
         var ui = new UiSessionState();
         ui.readingModeSetting = true;

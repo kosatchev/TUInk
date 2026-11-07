@@ -129,6 +129,12 @@ public class RenderRasterizer implements AutoCloseable {
     }
 
     public CellBuffer rasterize(RenderPlan plan, int rows, int cols, int contentTopRow) {
+        int promptHeight = plan.interactiveBarText() == null ? 0 : plan.interactiveBarText().split("\n", -1).length;
+        return rasterize(plan, rows, cols, contentTopRow, WindowTextPainter.Layout.fullWindow(rows, cols,
+            promptHeight, plan.notificationBarText() == null ? 0 : 1));
+    }
+
+    public CellBuffer rasterize(RenderPlan plan, int rows, int cols, int contentTopRow, WindowTextPainter.Layout textLayout) {
         if (closed) throw new IllegalStateException("Rasterizer is closed");
         CellBuffer buffer = new CellBuffer(rows, cols);
         Canvas canvas = new Canvas(buffer);
@@ -169,7 +175,7 @@ public class RenderRasterizer implements AutoCloseable {
         WindowTextPainter.paint(canvas, rows, cols,
             new WindowTextPainter.Text(plan.topBarText(), plan.bottomBarText(),
                 plan.interactiveBarText(), plan.interactiveBarStyle(),
-                plan.notificationBarText(), plan.notificationBarStyle()), styles);
+                plan.notificationBarText(), plan.notificationBarStyle()), styles, textLayout);
 
         return buffer;
     }

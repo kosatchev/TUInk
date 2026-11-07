@@ -215,16 +215,21 @@ public final class ConfirmBarView {
      * Only controls fully contained in {@code interactionClip} can receive focus or input.
      */
     public Placement place(Object scopeId, int topRow, Rect interactionClip) {
+        return place(scopeId, new Rect(0, topRow, CellText.width(row), Math.max(1, row.split("\n", -1).length)), interactionClip);
+    }
+
+    public Placement place(Object scopeId, Rect placementBounds, Rect interactionClip) {
+        int left = placementBounds.x(), topRow = placementBounds.y();
         Objects.requireNonNull(scopeId, "scopeId");
         Rect safeInteractionClip = Objects.requireNonNull(interactionClip, "interactionClip");
         FocusSpace space = FocusSpace.root(safeInteractionClip);
         boolean questionVisible = decisionsAvailable && contextBounds.stream().allMatch(bounds ->
-            InteractionVisibility.FULL_BOUNDS.allows(new Rect(bounds.x(), topRow + bounds.y(), bounds.width(), bounds.height()), safeInteractionClip));
+            InteractionVisibility.FULL_BOUNDS.allows(new Rect(left + bounds.x(), topRow + bounds.y(), bounds.width(), bounds.height()), safeInteractionClip));
         List<RoutedTarget<ConfirmChoice, Button.Action>> targets = new ArrayList<>(choices.size());
         List<ConfirmChoice> tabOrder = new ArrayList<>(choices.size());
         for (ChoiceButton choice : choices) {
             Button button = choice.button();
-            Rect bounds = new Rect(button.col(), topRow + button.row(), button.width(), 1);
+            Rect bounds = new Rect(left + button.col(), topRow + button.row(), button.width(), 1);
             targets.add(new RoutedTarget<>(
                 choice.choice(),
                 button.layout(bounds),

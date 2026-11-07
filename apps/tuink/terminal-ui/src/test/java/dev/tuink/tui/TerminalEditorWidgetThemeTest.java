@@ -2,6 +2,7 @@ package dev.tuink.tui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuiframe.widget.WidgetStyleRole;
 import dev.tuiframe.widget.WidgetThemeKeys;
@@ -24,7 +25,7 @@ class TerminalEditorWidgetThemeTest {
             palette.windows().dialogSelectedMono(),
             app.resolveOverlayWidgetStyle(WidgetThemeKeys.BUTTON_FOCUSED, false)
         );
-        assertEquals(palette.windows().dialog(), app.resolveOverlayWidgetStyle(WidgetThemeKeys.BUTTON_DISABLED, true));
+        assertEquals(palette.windows().contextMenuDisabledItem(), app.resolveOverlayWidgetStyle(WidgetThemeKeys.BUTTON_DISABLED, true));
         assertNull(app.resolveOverlayWidgetStyle(new WidgetStyleRole("test.unknown"), true));
     }
 
@@ -140,11 +141,10 @@ class TerminalEditorWidgetThemeTest {
         TerminalEditorApp app = new TerminalEditorApp();
         UiStyles.Palette palette = UiStyles.forTheme(UiStyles.Theme.CYAN);
 
-        assertEquals(palette.windows().dialog(), app.resolveFileTreeWidgetStyle(WidgetThemeKeys.LIST_ITEM, true));
-        assertEquals(
-            palette.windows().dialog(),
-            app.resolveFileTreeWidgetStyle(WidgetThemeKeys.LIST_ITEM_DISABLED, false)
-        );
+        assertNull(app.resolveFileTreeWidgetStyle(WidgetThemeKeys.LIST_ITEM, true),
+            "Ordinary file rows inherit the containing surface");
+        assertNull(app.resolveFileTreeWidgetStyle(WidgetThemeKeys.LIST_ITEM_DISABLED, false),
+            "Disabled file rows inherit the containing surface too");
         assertEquals(
             palette.windows().menuSelected(),
             app.resolveFileTreeWidgetStyle(WidgetThemeKeys.LIST_ITEM_SELECTED_FOCUSED, true)
@@ -153,7 +153,10 @@ class TerminalEditorWidgetThemeTest {
             palette.windows().dialogSelectedMono(),
             app.resolveFileTreeWidgetStyle(WidgetThemeKeys.LIST_ITEM_SELECTED, false)
         );
-        assertEquals(palette.windows().dialog(), app.resolveOverlayWidgetStyle(WidgetThemeKeys.LIST_ITEM, true));
+        assertNull(app.resolveOverlayWidgetStyle(WidgetThemeKeys.LIST_ITEM, true),
+            "Overlay lists inherit their light containing surface");
         assertNull(app.resolveFileTreeWidgetStyle(new WidgetStyleRole("test.unknown"), true));
+        assertTrue(app.resolveFileTreeWidgetStyle(WidgetThemeKeys.TREE_BRANCH, true).bold());
+        assertTrue(app.explorerWidgetTheme(true).resolveStyle(WidgetThemeKeys.TREE_BRANCH).bold());
     }
 }

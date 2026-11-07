@@ -145,13 +145,13 @@ class Regressions:
         document.write_text(original, encoding="utf-8")
         with self.session("folder-explorer", directory, max_heap_mb=128) as session:
             def sidebar_visible():
-                # The root caption is in the left panel, independently of a
-                # document's full path in the top menu or its tab title.
-                return session.screen.lines[1].startswith(" " + directory.name)
+                # The selectable expanded root is beside the tabs, independently
+                # of a document's full path in the top menu or its tab title.
+                return session.screen.lines[1].startswith("▼ " + directory.name + "/")
 
             session.expect(lambda: sidebar_visible() and any("src" in line[:30]
                            for line in session.screen.lines[2:]), "CLI directory explorer with its first folder")
-            session.send(b"\x05\x1b[C")  # Ctrl+E, Right: focus and expand src.
+            session.send(b"\x05\x1b[C\x1b[C")  # Ctrl+E, Right enters src, Right expands it.
             session.expect(lambda: any("note.txt" in line[:30] for line in session.screen.lines[2:]),
                            "the asynchronously loaded child file")
             session.send(b"\x1b[C\r")  # Right enters the expanded folder's first child; Enter opens it.

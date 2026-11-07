@@ -82,11 +82,12 @@ class ViewportFrameIntegrationTest {
             var confirmBar = ConfirmBarView.build("Save?", COLS);
             var confirm = confirmBar.place(new Object(), ROWS - 2, new Rect(0, 0, COLS, ROWS));
             var modal = new FrameComposition.Layers(null, null, false, null, confirm,
-                FrameComposition.OpenFile.hidden(), null, null, false, false, new Rect(0, ROWS - 2, COLS, 1), null);
+                FrameComposition.OpenFile.hidden(), null, null, false, false, new Rect(0, ROWS - 2, COLS, 1), null, null);
             var promptSurface = new FrameComposition.Surface(surface().topBar(), surface().bottomBar(),
-                InlinePromptBar.of(confirmBar.row(), dev.tuink.render.Style.DEFAULT, 1), NotificationBar.hidden());
+                InlinePromptBar.of(confirmBar.row(), dev.tuink.render.Style.DEFAULT, 1), NotificationBar.hidden(),
+                dev.tuink.tui.render.WindowTextPainter.Layout.fullWindow(ROWS, COLS, 1, 0));
             var modalFrame = new PreviewFrameComposition(ROWS, COLS, 2,
-                placement(reflowed, PREVIEW, 3, 0, PreviewSelection.Snapshot.EMPTY), promptSurface, modal, false);
+                placement(reflowed, PREVIEW, 3, 0, PreviewSelection.Snapshot.EMPTY), promptSurface, modal, null, false);
             assertEquals(ScrollHint.none(), controller.renderPreviewFrameIfNeeded(modalFrame).scrollHint());
             assertEquals(ScrollHint.none(), preview(controller, reflowed, PREVIEW, 4, 0, false, layers()).scrollHint());
             assertEquals(ScrollHint.none(), preview(controller, reflowed, PREVIEW, 5, 0, true, layers()).scrollHint());
@@ -227,7 +228,7 @@ class ViewportFrameIntegrationTest {
         var dialog = OpenFileDialogView.place(TerminalEditorApp.OPEN_FILE_SCOPE_ID, layout, tree, false,
             new Rect(0, 0, COLS, ROWS));
         return new FrameComposition.Layers(null, null, false, null, null,
-            new FrameComposition.OpenFile(root, dialog, OpenFileInputRouter.Focus.LIST), null, null, false, false, dialog.frame().bounds(), null);
+            new FrameComposition.OpenFile(root, dialog, OpenFileInputRouter.Focus.LIST), null, null, false, false, dialog.frame().bounds(), null, null);
     }
 
     private static FrameComposition source(RenderPlanBuilder builder, TextModel model, EditorState state,
@@ -245,7 +246,7 @@ class ViewportFrameIntegrationTest {
     }
     private static PreviewFrameComposition composition(MarkdownPreviewState.Placement placement,
             boolean fullRedraw, FrameComposition.Layers layers) {
-        return new PreviewFrameComposition(ROWS, COLS, 2, placement, surface(), layers, fullRedraw);
+        return new PreviewFrameComposition(ROWS, COLS, 2, placement, surface(), layers, null, fullRedraw);
     }
     private static MarkdownPreviewState.Placement placement(MarkdownGeometry geometry, Rect bounds,
             int top, int left, PreviewSelection.Snapshot selection) {
@@ -273,11 +274,12 @@ class ViewportFrameIntegrationTest {
     }
     private static FrameComposition.Surface surface() {
         return new FrameComposition.Surface(new TopMenuView.TopBar(" File | document ", 0), " status",
-            InlinePromptBar.hidden(), NotificationBar.hidden());
+            InlinePromptBar.hidden(), NotificationBar.hidden(),
+            dev.tuink.tui.render.WindowTextPainter.Layout.fullWindow(ROWS, COLS, 0, 0));
     }
     private static FrameComposition.Layers layers() {
         return new FrameComposition.Layers(null, null, false, null, null,
-            FrameComposition.OpenFile.hidden(), null, null, false, false, new Rect(0, 0, 0, 0), null);
+            FrameComposition.OpenFile.hidden(), null, null, false, false, new Rect(0, 0, 0, 0), null, null);
     }
     private static String row(Frame frame, int row) {
         var result = new StringBuilder();

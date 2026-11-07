@@ -19,6 +19,8 @@ import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.cell.CellText;
 import dev.tuiframe.input.PointerEvent;
 import dev.tuiframe.widget.TextField;
+import dev.tuink.tui.ui.SearchBarView;
+import dev.tuink.tui.flow.SearchFocus;
 import java.nio.CharBuffer;
 import java.util.ArrayList;
 import java.util.List;
@@ -48,6 +50,7 @@ final class MarkdownPreviewState implements AutoCloseable {
     String searchQuery = "";
     final TextField searchField = new TextField();
     boolean searchVisible;
+    private SearchBarView.Placement preparedSearch;
     List<PreviewSelection.Range> searchMatches = List.of();
     int activeMatch = -1;
     SearchFailure searchFailure = SearchFailure.NONE;
@@ -244,7 +247,7 @@ final class MarkdownPreviewState implements AutoCloseable {
     private void applyViewport(TextSurfaceInteraction.Viewport viewport) { top = viewport.top(); left = viewport.left(); }
     private MarkdownTextSurface textSurface() { return new MarkdownTextSurface(result, geometry); }
 
-    PreviewScrollbars scrollbars() { return PreviewScrollbars.from(bounds, result, searchVisible, top, left); }
+    PreviewScrollbars scrollbars() { return PreviewScrollbars.from(bounds, result, top, left); }
     Rect contentBounds() { return scrollbars().layout().contentBounds(); }
     boolean pointerCaptureActive() { return pointer.capturing(); }
     void cancelPointerInteraction() { pointer.cancel(); }
@@ -427,10 +430,15 @@ final class MarkdownPreviewState implements AutoCloseable {
         caretColumn = caret.column();
     }
     static final String SEARCH_PREFIX = "Find: ";
+    void prepareSearch(SearchBarView.Placement placement) { preparedSearch = placement; }
+    SearchBarView.Placement searchBar() { return preparedSearch; }
     TextField.Placement searchPlacement() {
-        int prefix = Math.min(CellText.width(SEARCH_PREFIX), Math.max(0, bounds.width() - 1));
-        return searchField.layout(new Rect(bounds.x() + prefix, bounds.y(),
-            Math.max(0, bounds.width() - prefix), Math.min(1, bounds.height())));
+        if (preparedSearch != null) return preparedSearch.fieldPlacement(SearchFocus.FIND).orElseThrow();
+        // Standalone state fixtures use the same footer composition as the window.
+        var bar = SearchBarView.buildReadOnly(searchField, bounds.width(), !searchOptions.caseInsensitive(), searchOptions.matchMode());
+        int rows = bar.text().split("\n", -1).length;
+        Rect footer = new Rect(bounds.x(), bounds.bottomExclusive(), bounds.width(), rows);
+        return bar.place(this, footer, footer).fieldPlacement(SearchFocus.FIND).orElseThrow();
     }
     Placement placement(Placement.Focus focus) {
         return new Placement(bounds, ready() ? result : null, top, left, pending != null, error,
@@ -458,7 +466,7 @@ final class MarkdownPreviewState implements AutoCloseable {
         }
         boolean queryFocused() { return focus == Focus.QUERY; }
         boolean contentFocused() { return focus == Focus.CONTENT; }
-        PreviewScrollbars scrollbars() { return PreviewScrollbars.from(bounds, result, searchVisible, top, left); }
+        PreviewScrollbars scrollbars() { return PreviewScrollbars.from(bounds, result, top, left); }
         Rect contentBounds() { return scrollbars().layout().contentBounds(); }
     }
     private void cancel() {

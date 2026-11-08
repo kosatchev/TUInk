@@ -1179,6 +1179,10 @@ public class TerminalEditorApp {
         var borderRole = windows.sidebarBorder();
         var border = new CellStyle(borderRole.fg(), body.bg(), borderRole.bold(), borderRole.underline());
         Theme roles = key -> {
+            if (dev.tuiframe.explorer.ExplorerStyleKeys.WARNING.equals(key)) return windows.notifyWarning();
+            if (dev.tuiframe.explorer.ExplorerStyleKeys.ERROR.equals(key)) return windows.notifyError();
+            if (dev.tuiframe.explorer.ExplorerStyleKeys.DROP_TARGET.equals(key)) return windows.sidebarSelectedFocused();
+            if (dev.tuiframe.explorer.ExplorerStyleKeys.DRAG_LABEL.equals(key)) return windows.dialogTitle();
             if (WidgetThemeKeys.MODAL_TITLE.equals(key)) {
                 return new CellStyle(border.fg(), border.bg(), true, border.underline());
             }

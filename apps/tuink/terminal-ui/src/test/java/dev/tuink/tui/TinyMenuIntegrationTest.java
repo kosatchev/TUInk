@@ -62,7 +62,7 @@ class TinyMenuIntegrationTest {
             boolean initialConfirm = window.ui.confirmOnCloseSetting;
             window.resize(6, 6);
             window.command(TuinkCommand.MENU_SETTINGS);
-            window.selectMenuCommand(TuinkCommand.SETTINGS_TOGGLE_RIGHT_CLICK_CLIPBOARD);
+            window.selectMenuCommand(TuinkCommand.SETTINGS_TOGGLE_FILE_HISTORY_NOTIFICATIONS);
             int previous = window.menu.state().selectedEntryIndex();
             window.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
             assertEquals(window.menuCommandIndex(TuinkCommand.SETTINGS_TOGGLE_SMART_HOME_END),

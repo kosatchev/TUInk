@@ -245,7 +245,7 @@ class AppSettingsSaveIsolationTest {
             d.mouseMode(), d.highlightActiveGutter(), d.smartHomeEnd(), d.autoIndent(), d.autoPairs(), d.autoList(),
             d.visibleWhitespace(), d.syntaxHighlighting(), d.rainbowBrackets(), d.autoSelectionHighlight(), false, false,
             d.markdownCodeHighlighting(),
-            d.gutterDiffMode(), d.tabWidth(), d.tabInsertMode(), theme, d.rightClickClipboard(), d.markdownVisualCopy());
+            d.gutterDiffMode(), d.tabWidth(), d.tabInsertMode(), theme, d.rightClickClipboard(), d.markdownVisualCopy(), true);
     }
 
     private static Path saveLock(Path target) throws IOException {
@@ -344,7 +344,7 @@ class AppSettingsSaveIsolationTest {
             false, false, false, false, false, false, false, false,
             false,
             GutterDiffMode.STABLE, 2, TabInsertMode.ALWAYS_SPACES_2, UiStyles.Theme.MONOCHROME, false, false
-        );
+        , true);
         SavingFileSystem fileSystem = new SavingFileSystem(target.getFileSystem(), Mode.PAUSE_FIRST_MOVE);
         Path wrappedTarget = fileSystem.wrap(target);
 

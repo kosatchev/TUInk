@@ -23,7 +23,8 @@ class ExplorerMenuTest {
         var router = new CommandRouter();
         var menu = menu(ui);
         assertEquals(List.of(FOLDER_OPEN, FOLDER_CLOSE, EXPLORER_NEW_FILE, EXPLORER_NEW_DIRECTORY,
-            EXPLORER_RENAME, EXPLORER_MOVE, EXPLORER_DELETE, EXPLORER_REFRESH, EXPLORER_TOGGLE, EXPLORER_FOCUS,
+            EXPLORER_RENAME, EXPLORER_COPY, EXPLORER_MOVE, EXPLORER_TRASH, EXPLORER_DELETE, EXPLORER_UNDO,
+            EXPLORER_REDO, EXPLORER_REFRESH, EXPLORER_TOGGLE, EXPLORER_FOCUS,
             EXPLORER_CYCLE_WIDTH), commands(menu, TopMenuController.EXPLORER_INDEX));
         assertEquals(MENU_EXPLORER.id(), router.invocationFor(KeyStroke.of(KeyStroke.Key.F7)).orElseThrow().id());
         assertEquals(MENU_HELP.id(), router.invocationFor(KeyStroke.of(KeyStroke.Key.F6)).orElseThrow().id());
@@ -36,7 +37,7 @@ class ExplorerMenuTest {
     }
 
     @Test
-    void rootAllowsCreationWhileOnlyChildrenCanBeRenamedMovedOrDeleted() throws Exception {
+    void rootAllowsCreationAndCopyWhileOnlyChildrenCanBeRenamedMovedOrDeleted() throws Exception {
         Path file = Files.writeString(directory.resolve("file.txt"), "text");
         var ui = UiSessionState.from(AppSettings.defaults());
         try (var explorer = ui.explorer) {
@@ -46,21 +47,26 @@ class ExplorerMenuTest {
             var root = menu(ui);
             assertTrue(item(root, EXPLORER_NEW_FILE).enabled());
             assertTrue(item(root, EXPLORER_NEW_DIRECTORY).enabled());
+            assertTrue(item(root, EXPLORER_COPY).enabled());
             assertFalse(item(root, EXPLORER_RENAME).enabled());
             assertFalse(item(root, EXPLORER_MOVE).enabled());
+            assertFalse(item(root, EXPLORER_TRASH).enabled());
             assertFalse(item(root, EXPLORER_DELETE).enabled());
 
             assertTrue(explorer.tree.select(file));
             var child = menu(ui);
             assertTrue(item(child, EXPLORER_NEW_FILE).enabled());
             assertTrue(item(child, EXPLORER_RENAME).enabled());
+            assertTrue(item(child, EXPLORER_COPY).enabled());
             assertTrue(item(child, EXPLORER_MOVE).enabled());
+            assertTrue(item(child, EXPLORER_TRASH).enabled());
             assertTrue(item(child, EXPLORER_DELETE).enabled());
 
             explorer.mutating = true;
             var busy = menu(ui);
             for (var command : List.of(FOLDER_OPEN, FOLDER_CLOSE, EXPLORER_NEW_FILE,
-                EXPLORER_NEW_DIRECTORY, EXPLORER_RENAME, EXPLORER_MOVE, EXPLORER_DELETE, EXPLORER_REFRESH)) {
+                EXPLORER_NEW_DIRECTORY, EXPLORER_RENAME, EXPLORER_COPY, EXPLORER_MOVE, EXPLORER_TRASH,
+                EXPLORER_DELETE, EXPLORER_UNDO, EXPLORER_REDO, EXPLORER_REFRESH)) {
                 assertFalse(item(busy, command).enabled(), command.title());
             }
         }
@@ -72,7 +78,8 @@ class ExplorerMenuTest {
         var empty = menu(ui);
         assertTrue(item(empty, FOLDER_OPEN).enabled());
         for (var command : List.of(FOLDER_CLOSE, EXPLORER_NEW_FILE, EXPLORER_NEW_DIRECTORY,
-            EXPLORER_RENAME, EXPLORER_MOVE, EXPLORER_DELETE, EXPLORER_REFRESH)) {
+            EXPLORER_RENAME, EXPLORER_COPY, EXPLORER_MOVE, EXPLORER_TRASH, EXPLORER_DELETE,
+            EXPLORER_UNDO, EXPLORER_REDO, EXPLORER_REFRESH)) {
             assertFalse(item(empty, command).enabled(), command.title());
         }
         for (var expected : List.of("Narrow (24)", "Normal (30)", "Wide (40)", "Custom (37)")) {

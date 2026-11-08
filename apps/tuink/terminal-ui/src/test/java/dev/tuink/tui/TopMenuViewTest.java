@@ -271,6 +271,7 @@ class TopMenuViewTest {
                 "tuink.settings.toggle-confirm-on-close",
                 "tuink.settings.toggle-mouse",
                 "tuink.settings.toggle-right-click-clipboard",
+                "tuink.settings.toggle-file-history-notifications",
                 "tuink.settings.toggle-smart-home-end",
                 "tuink.settings.toggle-auto-indent",
                 "tuink.settings.toggle-auto-pairs",

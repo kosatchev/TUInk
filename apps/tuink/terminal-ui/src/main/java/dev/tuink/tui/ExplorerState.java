@@ -32,6 +32,10 @@ final class ExplorerState implements AutoCloseable {
     Placement capturePlacement;
 
     Path root() { return tree == null ? null : tree.root(); }
+    boolean canUndo() { return tree != null && !mutating && tree.operations().canUndo(); }
+    boolean canRedo() { return tree != null && !mutating && tree.operations().canRedo(); }
+    String undoLabel() { return tree == null ? "Undo" : tree.operations().undoLabel(); }
+    String redoLabel() { return tree == null ? "Redo" : tree.operations().redoLabel(); }
 
     FileTreeModel.Entry selectedEntry() { return tree == null ? null : tree.selectedEntry(); }
 

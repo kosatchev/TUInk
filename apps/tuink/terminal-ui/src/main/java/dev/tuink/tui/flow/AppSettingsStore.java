@@ -55,6 +55,7 @@ public final class AppSettingsStore {
     private static final String KEY_MARKDOWN_OPEN_IN_PREVIEW = "ui.markdownOpenInPreview";
     private static final String KEY_MARKDOWN_CODE_HIGHLIGHTING = "ui.markdownCodeHighlighting";
     private static final String KEY_MARKDOWN_VISUAL_COPY = "ui.markdownVisualCopy";
+    private static final String KEY_FILE_HISTORY_NOTIFICATIONS = "ui.fileHistoryNotifications";
     private static final String KEY_GUTTER_DIFF_MODE = "ui.gutterDiffMode";
     private static final String KEY_TAB_WIDTH = "ui.tabWidth";
     private static final String KEY_TAB_INSERT_MODE = "ui.tabInsertMode";
@@ -181,7 +182,8 @@ public final class AppSettingsStore {
             setting(repair, defaults.tabInsertMode(), () -> parseEnum(p, KEY_TAB_INSERT_MODE, TabInsertMode.class, path)),
             setting(repair, defaults.theme(), () -> parseEnum(p, KEY_THEME, UiStyles.Theme.class, path)),
             setting(repair, defaults.rightClickClipboard(), () -> parseOptionalBoolean(p, KEY_RIGHT_CLICK_CLIPBOARD, false, path)),
-            setting(repair, defaults.markdownVisualCopy(), () -> parseOptionalBoolean(p, KEY_MARKDOWN_VISUAL_COPY, false, path))
+            setting(repair, defaults.markdownVisualCopy(), () -> parseOptionalBoolean(p, KEY_MARKDOWN_VISUAL_COPY, false, path)),
+            setting(repair, defaults.showFileHistoryNotifications(), () -> parseOptionalBoolean(p, KEY_FILE_HISTORY_NOTIFICATIONS, true, path))
         );
     }
 
@@ -286,6 +288,7 @@ public final class AppSettingsStore {
             p.setProperty(KEY_MARKDOWN_CODE_HIGHLIGHTING, "true");
         }
         if (settings.markdownVisualCopy()) p.setProperty(KEY_MARKDOWN_VISUAL_COPY, "true");
+        p.setProperty(KEY_FILE_HISTORY_NOTIFICATIONS, Boolean.toString(settings.showFileHistoryNotifications()));
         p.setProperty(KEY_GUTTER_DIFF_MODE, canonical(settings.gutterDiffMode()));
         p.setProperty(KEY_TAB_WIDTH, Integer.toString(settings.tabWidth()));
         p.setProperty(KEY_TAB_INSERT_MODE, canonical(settings.tabInsertMode()));
@@ -553,6 +556,7 @@ public final class AppSettingsStore {
         unknown.remove(KEY_MARKDOWN_CODE_HIGHLIGHTING);
         unknown.remove(KEY_RIGHT_CLICK_CLIPBOARD);
         unknown.remove(KEY_MARKDOWN_VISUAL_COPY);
+        unknown.remove(KEY_FILE_HISTORY_NOTIFICATIONS);
         if (!missing.isEmpty() || !unknown.isEmpty()) {
             throw invalid(path, "schema mismatch; missing=" + missing + ", unknown=" + unknown);
         }

@@ -19,7 +19,7 @@ class MarkdownOpenSettingsStoreTest {
                 d.confirmOnClose(), d.mouseMode(), d.highlightActiveGutter(), d.smartHomeEnd(), d.autoIndent(),
                 d.autoPairs(), d.autoList(), d.visibleWhitespace(), d.syntaxHighlighting(), d.rainbowBrackets(),
                 d.autoSelectionHighlight(), both, preview, d.markdownCodeHighlighting(), d.gutterDiffMode(), d.tabWidth(), d.tabInsertMode(), d.theme(),
-                d.rightClickClipboard(), d.markdownVisualCopy());
+                d.rightClickClipboard(), d.markdownVisualCopy(), true);
             AppSettingsStore.save(file, settings);
             assertEquals(settings, AppSettingsStore.load(file));
             String saved = Files.readString(file);

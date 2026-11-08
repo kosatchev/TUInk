@@ -73,6 +73,6 @@ class RightClickClipboardSettingsStoreTest {
     private static AppSettings settings(boolean rightClickClipboard) {
         return new AppSettings(false, true, false, true, false, false, true, false,
             true, false, true, false, true, false, true, true, false, true,
-            GutterDiffMode.STABLE, 2, TabInsertMode.ALWAYS_SPACES_2, UiStyles.Theme.MONOCHROME, rightClickClipboard, false);
+            GutterDiffMode.STABLE, 2, TabInsertMode.ALWAYS_SPACES_2, UiStyles.Theme.MONOCHROME, rightClickClipboard, false, true);
     }
 }

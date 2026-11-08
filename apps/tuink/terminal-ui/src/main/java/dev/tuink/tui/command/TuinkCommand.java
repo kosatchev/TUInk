@@ -1,7 +1,5 @@
 package dev.tuink.tui.command;
 
-import dev.tuiframe.explorer.Explorer;
-
 import dev.tuink.editor.command.CommandId;
 import java.util.Objects;
 import java.util.Optional;
@@ -116,6 +114,7 @@ public enum TuinkCommand {
     SETTINGS_TOGGLE_MARKDOWN_OPEN_IN_PREVIEW("tuink.settings.toggle-markdown-open-in-preview", "Toggle opening Markdown in Preview"),
     SETTINGS_TOGGLE_MARKDOWN_CODE_SYNTAX("tuink.settings.toggle-markdown-code-syntax", "Toggle Markdown Source code syntax highlighting"),
     SETTINGS_TOGGLE_MARKDOWN_VISUAL_COPY("tuink.settings.toggle-markdown-visual-copy", "Toggle copying Markdown Preview as displayed"),
+    SETTINGS_TOGGLE_FILE_HISTORY_NOTIFICATIONS("tuink.settings.toggle-file-history-notifications", "Toggle file Undo/Redo notifications"),
     SETTINGS_CYCLE_TAB_INSERT_MODE("tuink.settings.cycle-tab-insert-mode", "Cycle tab insert mode"),
 
     FOLDER_OPEN("tuink.folder.open", "Open folder"),
@@ -126,8 +125,12 @@ public enum TuinkCommand {
     EXPLORER_NEW_FILE("tuink.explorer.new-file", "Create file"),
     EXPLORER_NEW_DIRECTORY("tuink.explorer.new-directory", "Create directory"),
     EXPLORER_RENAME("tuink.explorer.rename", "Rename selected file or directory"),
+    EXPLORER_COPY("tuink.explorer.copy", "Copy selected file or directory"),
     EXPLORER_MOVE("tuink.explorer.move", "Move selected file or directory"),
     EXPLORER_DELETE("tuink.explorer.delete", "Delete selected file or directory"),
+    EXPLORER_TRASH("tuink.explorer.trash", "Move selected file or directory to Trash"),
+    EXPLORER_UNDO("tuink.explorer.undo", "Undo file operation"),
+    EXPLORER_REDO("tuink.explorer.redo", "Redo file operation"),
     EXPLORER_CYCLE_WIDTH("tuink.explorer.cycle-width", "Cycle explorer width"),
     FILE_BROWSER_TOGGLE_HIDDEN("tuink.file-browser.toggle-hidden", "Toggle hidden files"),
 

@@ -118,7 +118,7 @@ class AppSettingsStoreTest {
             initial.markdownCodeHighlighting(),
             initial.gutterDiffMode(), 2, initial.tabInsertMode(), initial.theme(), initial.rightClickClipboard(),
             initial.markdownVisualCopy()
-        );
+        , true);
         int index = 0;
         for (String name : List.of("x".repeat(250), "я".repeat(125))) {
             assertEquals(250, name.getBytes(StandardCharsets.UTF_8).length);

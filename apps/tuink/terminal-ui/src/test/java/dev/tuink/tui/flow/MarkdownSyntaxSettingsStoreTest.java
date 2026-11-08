@@ -77,6 +77,6 @@ class MarkdownSyntaxSettingsStoreTest {
     private static AppSettings settings(boolean mdSyntax) {
         return new AppSettings(false, true, false, true, false, false, false, false,
             false, false, false, false, false, false, false, true, true, mdSyntax,
-            GutterDiffMode.STABLE, 2, TabInsertMode.ALWAYS_SPACES_2, UiStyles.Theme.MONOCHROME, false, false);
+            GutterDiffMode.STABLE, 2, TabInsertMode.ALWAYS_SPACES_2, UiStyles.Theme.MONOCHROME, false, false, true);
     }
 }

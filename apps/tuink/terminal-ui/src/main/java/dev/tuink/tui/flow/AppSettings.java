@@ -28,7 +28,8 @@ public record AppSettings(
     TabInsertMode tabInsertMode,
     UiStyles.Theme theme,
     boolean rightClickClipboard,
-    boolean markdownVisualCopy
+    boolean markdownVisualCopy,
+    boolean showFileHistoryNotifications
 ) {
     public static AppSettings defaults() {
         return new AppSettings(
@@ -55,7 +56,8 @@ public record AppSettings(
             TabInsertMode.AUTO,
             UiStyles.Theme.CYAN,
             false,
-            false
+            false,
+            true
         );
     }
 }

@@ -129,6 +129,12 @@ final class InputActionDispatcher {
                 return DispatchResult.handled(ui.markdownVisualCopySetting
                     ? "Markdown visual copy enabled" : "Markdown visual copy disabled");
             }
+            case SETTINGS_TOGGLE_FILE_HISTORY_NOTIFICATIONS -> {
+                ui.showFileHistoryNotificationsSetting = !ui.showFileHistoryNotificationsSetting;
+                if (!ui.showFileHistoryNotificationsSetting && ui.explorer.tree != null) ui.explorer.tree.clearHistoryNotice();
+                return DispatchResult.handled(ui.showFileHistoryNotificationsSetting
+                    ? "File Undo/Redo notifications enabled" : "File Undo/Redo notifications disabled");
+            }
             case SETTINGS_TOGGLE_RIGHT_CLICK_CLIPBOARD -> {
                 ui.rightClickClipboardSetting = !ui.rightClickClipboardSetting;
                 return DispatchResult.handled(ui.rightClickClipboardSetting

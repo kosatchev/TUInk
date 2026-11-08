@@ -126,6 +126,7 @@ def settings_text(*, mouse: bool, wrap: bool) -> str:
         "ui.highlightActiveLineNumber": "true",
         "ui.markdownOpenBothTabs": "false", "ui.markdownOpenInPreview": "false",
         "ui.markdownCodeHighlighting": "false", "ui.markdownVisualCopy": "false",
+        "ui.fileHistoryNotifications": "false",
         "ui.smartHomeEnd": "true", "ui.autoIndent": "true", "ui.autoPairs": "true",
         "ui.autoList": "true", "ui.visibleWhitespace": "true", "ui.syntaxHighlighting": "true",
         "ui.rainbowBrackets": "true", "ui.autoSelectionHighlight": "true",

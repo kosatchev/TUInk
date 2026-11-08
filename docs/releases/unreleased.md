@@ -12,9 +12,33 @@ Changes on the development branch after [v0.18.0](0.18.0.md).
   using the existing pointer-capture contract. Right on an expanded tree branch
   selects its first child.
 - **Explorer controls:** F7 opens the Explorer menu with file/folder creation,
-  Rename, destination-tree Move, permanent Delete with confirmation, and 24/30/40-column
-  width presets. The root is selectable for creation and cannot be renamed, moved or
-  deleted. Directories are bold and the sidebar uses the editor background.
+  Rename, destination-tree Move, Move to Trash, permanent Delete with confirmation,
+  and 24/30/40-column width presets. The root is selectable for creation and cannot
+  be renamed, moved or deleted. Directories are bold and the sidebar uses the
+  editor background.
+- **Shared explorer:** `tuiframe-explorer` owns the file model, UI, mouse gestures,
+  mutations and file history. TUInk enables file management in its sidebar;
+  Open, folder selection and move-destination popup trees remain read-only.
+- **Drag to move:** Hold an entry for 1 second and drag to a highlighted folder.
+  A label follows the pointer, hovering expands nested folders, and edge dragging
+  scrolls the tree. One move starts on release over a valid target; Escape cancels.
+- **File Undo/Redo:** Explorer menu commands reverse moves, renames and creation;
+  Ctrl+Z/Ctrl+Y use this history only while the sidebar has focus. Undoing creation
+  requires the same empty entry and refuses to remove saved content or populated
+  folders. Destination and identity checks preserve conflicting entries.
+  Mixed creation, copy, rename and move chains retain their identities across
+  repeated Undo/Redo, including transfers between filesystems. Published transfer
+  identities keep external replacements protected; copied links retain timestamps.
+  Successful Undo/Redo shows a temporary yellow sidebar notice, controlled by
+  Settings → File Undo/Redo notifications (enabled by default); errors stay visible.
+- **Copy files and folders:** Explorer → Copy opens a read-only destination picker
+  and copies the disk contents without rebinding open documents or overwriting an
+  existing entry. Undo refuses a changed copy; Redo refuses a changed source.
+  Copies exceeding the bounded history limit complete with a warning and no Undo.
+- **System Trash:** Move to Trash uses the Linux system Trash when available
+  and never falls back to permanent deletion. Trash and permanent deletion are
+  not undoable in TUInk and clear earlier file history; system tools can restore
+  trashed entries.
 - **File operation lifetime:** Moves retain open documents, dirty state and
   undo history while updating resource bindings, including Preview. Deleting
   an open file retains its text as an unnamed draft. Structural changes refresh
@@ -38,4 +62,4 @@ Changes on the development branch after [v0.18.0](0.18.0.md).
   content share the same available width even in very short terminals.
 
 The explorer supports one root at a time. Root restoration across launches
-and automatic filesystem watching are not included.
+and an OS filesystem watcher are not included.

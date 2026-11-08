@@ -35,7 +35,7 @@ class AppSettingsRepairTest {
         var expected = new AppSettings(false, defaults.wrapLines(), false, true, false, false, false, false,
             defaults.autoIndent(), false, false, false, false, false, false, true, true,
             defaults.markdownCodeHighlighting(), defaults.gutterDiffMode(), defaults.tabWidth(),
-            TabInsertMode.ALWAYS_SPACES_2, UiStyles.Theme.MONOCHROME, true, true);
+            TabInsertMode.ALWAYS_SPACES_2, UiStyles.Theme.MONOCHROME, true, true, true);
 
         var unsupported = unsupported(file);
         assertEquals(expected, unsupported.repairedSettings());
@@ -249,6 +249,6 @@ class AppSettingsRepairTest {
     private static AppSettings customized() {
         return new AppSettings(false, true, false, true, false, false, false, false, false, false, false, false,
             false, false, false, true, true, true, GutterDiffMode.STABLE, 2,
-            TabInsertMode.ALWAYS_SPACES_2, UiStyles.Theme.MONOCHROME, true, true);
+            TabInsertMode.ALWAYS_SPACES_2, UiStyles.Theme.MONOCHROME, true, true, true);
     }
 }

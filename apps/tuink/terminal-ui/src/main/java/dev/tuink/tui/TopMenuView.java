@@ -1,7 +1,6 @@
 package dev.tuink.tui;
 
 import dev.tuiframe.explorer.file.FileTreeModel;
-import dev.tuiframe.explorer.Explorer;
 
 import static dev.tuink.tui.command.TuinkCommand.APP_QUIT;
 import static dev.tuink.tui.command.TuinkCommand.DOCUMENT_OPEN;
@@ -348,8 +347,8 @@ final class TopMenuView {
         boolean writable = surface.editableField() || surface.documentWritable();
         boolean documentWritable = surface.documentWritable();
         return List.of(
-            item(EDIT_UNDO, "Undo", documentWritable),
-            item(EDIT_REDO, "Redo", documentWritable),
+            item(EDIT_UNDO, "Undo", surface.allows(EDIT_UNDO)),
+            item(EDIT_REDO, "Redo", surface.allows(EDIT_REDO)),
             separator(),
             item(EDIT_CUT, "Cut", writable),
             item(EDIT_COPY, "Copy"),
@@ -413,8 +412,13 @@ final class TopMenuView {
             item(TuinkCommand.EXPLORER_NEW_FILE, "Create file...", create),
             item(TuinkCommand.EXPLORER_NEW_DIRECTORY, "Create folder...", create),
             item(TuinkCommand.EXPLORER_RENAME, "Rename...", selectedChild),
+            item(TuinkCommand.EXPLORER_COPY, "Copy...", create && selection.path().getFileName() != null),
             item(TuinkCommand.EXPLORER_MOVE, "Move...", selectedChild),
-            item(TuinkCommand.EXPLORER_DELETE, "Delete...", selectedChild),
+            item(TuinkCommand.EXPLORER_TRASH, "Move to Trash...", selectedChild),
+            item(TuinkCommand.EXPLORER_DELETE, "Delete permanently...", selectedChild),
+            separator(),
+            item(TuinkCommand.EXPLORER_UNDO, explorer.undoLabel(), idle && explorer.canUndo()),
+            item(TuinkCommand.EXPLORER_REDO, explorer.redoLabel(), idle && explorer.canRedo()),
             separator(),
             item(TuinkCommand.EXPLORER_REFRESH, "Refresh explorer", open && idle),
             item(TuinkCommand.EXPLORER_TOGGLE, checked(explorer.visible) + " Show explorer"),
@@ -456,6 +460,8 @@ final class TopMenuView {
             separator(),
             item(SETTINGS_TOGGLE_MOUSE, checked(ui.mouseModeSetting && surface.mouseAvailable()) + " Mouse mode"),
             item(SETTINGS_TOGGLE_RIGHT_CLICK_CLIPBOARD, checked(ui.rightClickClipboardSetting) + " Right-click: copy/paste"),
+            item(TuinkCommand.SETTINGS_TOGGLE_FILE_HISTORY_NOTIFICATIONS,
+                checked(ui.showFileHistoryNotificationsSetting) + " File Undo/Redo notifications"),
             separator(),
             item(SETTINGS_TOGGLE_SMART_HOME_END, checked(ui.smartHomeEndSetting) + " Smart Home/End"),
             item(SETTINGS_TOGGLE_AUTO_INDENT, checked(ui.autoIndentSetting) + " Auto indent"),

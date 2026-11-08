@@ -8,6 +8,11 @@ dependencies {
     testImplementation 'com.tngtech.archunit:archunit:1.4.2'
 }
 
+tasks.named('test', Test) {
+    // Architecture classes retain separate imported graphs until their JVM exits.
+    forkEvery = 1
+}
+
 application {
     applicationName = 'tuink'
     mainClass = 'dev.tuink.app.App'

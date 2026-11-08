@@ -1,0 +1,22 @@
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.util.Comparator
+
+// PTY and native ACL fixtures intentionally contain raw Unix filename bytes.
+// Keep the NIO paths intact instead of passing them through Gradle's File
+// deletion. The default walk does not follow symlinks outside build outputs.
+allprojects { owner ->
+    def outputDirectory = owner.layout.buildDirectory
+    owner.tasks.withType(Delete).configureEach {
+        if (name == 'clean') {
+            doFirst {
+                def directory = outputDirectory.get().asFile.toPath()
+                if (Files.exists(directory, LinkOption.NOFOLLOW_LINKS)) {
+                    Files.walk(directory).withCloseable { paths ->
+                        paths.sorted(Comparator.reverseOrder()).forEach { path -> Files.delete(path) }
+                    }
+                }
+            }
+        }
+    }
+}

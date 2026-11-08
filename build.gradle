@@ -20,6 +20,7 @@ allprojects {
     }
 }
 
+apply from: rootProject.file('gradle/scripts/jgit-runtime.gradle')
 apply from: rootProject.file('gradle/scripts/clean.gradle')
 
 // The build JDK is independent of a library's runtime API baseline. Only the

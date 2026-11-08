@@ -2,33 +2,9 @@ plugins {
     id 'java-library'
 }
 
-configurations {
-    jgitBinary {
-        transitive = false
-    }
-}
-
-def jgitVersion = '6.10.1.202505221210-r'
-def jgitUnsignedDir = layout.buildDirectory.dir('generated/jgit-unsigned')
-
-tasks.register('prepareUnsignedJgit', Copy) {
-    from({ zipTree(configurations.jgitBinary.singleFile) })
-    into(jgitUnsignedDir)
-    exclude('META-INF/*.SF', 'META-INF/*.RSA', 'META-INF/*.DSA')
-}
-
-tasks.register('unsignedJgitJar', Jar) {
-    dependsOn(tasks.named('prepareUnsignedJgit'))
-    archiveBaseName = 'org.eclipse.jgit-unsigned'
-    archiveVersion = jgitVersion
-    destinationDirectory = layout.buildDirectory.dir('libs')
-    from(jgitUnsignedDir)
-}
-
 dependencies {
     api project(':editor-contract')
-    jgitBinary "org.eclipse.jgit:org.eclipse.jgit:${jgitVersion}"
-    implementation(files(tasks.named('unsignedJgitJar')))
+    implementation rootProject.ext.jgitRuntimeFiles
     implementation 'com.googlecode.javaewah:JavaEWAH:1.2.3'
     implementation 'org.slf4j:slf4j-api:1.7.36'
     implementation 'commons-codec:commons-codec:1.17.0'

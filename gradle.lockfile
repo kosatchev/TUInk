@@ -6,4 +6,5 @@ org.commonmark:commonmark-ext-gfm-strikethrough:0.24.0=portableJava17Consumer
 org.commonmark:commonmark-ext-gfm-tables:0.24.0=portableJava17Consumer
 org.commonmark:commonmark-ext-task-list-items:0.24.0=portableJava17Consumer
 org.commonmark:commonmark:0.24.0=portableJava17Consumer
+org.eclipse.jgit:org.eclipse.jgit:6.10.1.202505221210-r=jgitBinary
 empty=coreJava17ApiConsumer,markdownJava17ApiConsumer,sessionJava17ApiConsumer

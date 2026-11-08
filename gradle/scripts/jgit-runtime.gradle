@@ -1,0 +1,23 @@
+// One unsigned JGit runtime artifact shared by independent platform adapters.
+configurations {
+    jgitBinary {
+        transitive = false
+        canBeConsumed = false
+    }
+}
+def jgitVersion = '6.10.1.202505221210-r'
+def unsignedDir = layout.buildDirectory.dir('generated/jgit-unsigned')
+tasks.register('prepareUnsignedJgit', Copy) {
+    from({ zipTree(configurations.jgitBinary.singleFile) })
+    into(unsignedDir)
+    exclude('META-INF/*.SF', 'META-INF/*.RSA', 'META-INF/*.DSA')
+}
+tasks.register('unsignedJgitJar', Jar) {
+    dependsOn(tasks.named('prepareUnsignedJgit'))
+    archiveBaseName = 'org.eclipse.jgit-unsigned'
+    archiveVersion = jgitVersion
+    destinationDirectory = layout.buildDirectory.dir('libs')
+    from(unsignedDir)
+}
+dependencies { jgitBinary "org.eclipse.jgit:org.eclipse.jgit:${jgitVersion}" }
+ext.jgitRuntimeFiles = files(tasks.named('unsignedJgitJar'))

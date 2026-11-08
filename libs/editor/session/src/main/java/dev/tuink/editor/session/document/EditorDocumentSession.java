@@ -208,6 +208,16 @@ public final class EditorDocumentSession implements DocumentSaveSubject {
 
     @Override public ResourceBinding binding() { return status().binding(); }
     @Override public DocumentFileMetadata metadata() { return status().metadata(); }
+    @Override public DocumentOpenMode reopenMode() { requireOwnerThread(); return backend.reopenMode(); }
+    @Override public boolean unsavedExternalChanges() { return status().dirty(); }
+
+    @Override public boolean acceptExternal(ResourceBinding expected, DocumentLoad loaded, boolean update) {
+        requireOwnerThread();
+        Objects.requireNonNull(expected, "expected");
+        Objects.requireNonNull(loaded, "loaded");
+        if (io.busy() || io.state() == DocumentIoCoordinator.State.STOPPED) return false;
+        return backend.acceptExternal(expected, loaded, update);
+    }
 
     @Override public boolean relocateResource(ResourceBinding expected, ResourceBinding replacement) {
         requireOwnerThread();

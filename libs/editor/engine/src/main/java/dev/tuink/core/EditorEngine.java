@@ -1003,6 +1003,70 @@ public class EditorEngine {
         return true;
     }
 
+    /**
+     * Adopts exactly one detached disk version. Only text and editable format enter
+     * Update history; undo never revokes the already accepted disk version/decoder.
+     */
+    public boolean acceptExternal(ResourceBinding expected, DocumentLoad loaded, boolean update) {
+        document.requireOwnerThread();
+        Objects.requireNonNull(expected, "expected");
+        Objects.requireNonNull(loaded, "loaded");
+        if (!resourceBinding().equals(expected) || expected.resource() == null
+            || expected.disposition() != SaveDisposition.REPLACE_EXISTING
+            || loaded.disposition() != SaveDisposition.REPLACE_EXISTING || loaded.baseline() == null
+            || loaded.resource().storage() != expected.resource().storage()
+            || !loaded.resource().id().equals(expected.resource().id())) return false;
+        TextModel.LocalEdit edit = null;
+        boolean published = false;
+        try {
+            List<LineText> beforeLines = model.snapshotTextLines();
+            DocumentEditBudget budget = DocumentEditBudget.currentHeap(beforeLines.size());
+            var imported = new ArrayList<LineText>(loaded.lines().size());
+            for (int index = 0; index < loaded.lines().size(); index++) {
+                String line = loaded.lines().get(index);
+                boolean shared = index < beforeLines.size() && beforeLines.get(index).contentEquals(line);
+                budget.finishLine(line.length(), !shared);
+                imported.add(shared ? beforeLines.get(index) : LineText.of(line));
+            }
+            List<LineText> diskLines = List.copyOf(imported);
+            boolean same = model.fileMetadata().equals(loaded.metadata()) && beforeLines.equals(diskLines);
+            boolean replace = update && !same;
+            long afterId = replace ? history.nextDocumentStateId + 1 : history.currentDocumentStateId;
+            ExternalSnapshot before = replace
+                ? new ExternalSnapshot(beforeLines, model.fileMetadata(), state.viewMemento()) : null;
+            Deque<HistoryEntry> undo = replace ? copyHistory(history.undoStack) : history.undoStack;
+            Deque<HistoryEntry> redo = update ? new ArrayDeque<>() : history.redoStack;
+            edit = model.beginLocalEdit();
+            if (replace) model.replaceTextLines(diskLines, loaded.metadata());
+            model.acceptExternalVersion(loaded);
+            edit.preparePublication();
+            EditorDocument.PreparedChange views = document.prepareChange();
+            if (replace) pushWithLimit(undo, new ExternalHistoryEntry(before,
+                new ExternalSnapshot(diskLines, loaded.metadata(), views.projectedView(state)),
+                history.currentDocumentStateId, afterId));
+            prepareGutterDiffCapacity(model.lineCount());
+            edit.publish();
+            published = true;
+            history.undoStack = undo;
+            history.redoStack = redo;
+            history.currentDocumentStateId = afterId;
+            if (replace) history.nextDocumentStateId = afterId;
+            history.savedDocumentStateId = update || same ? afterId : -1L;
+            state.setDirty(!update && !same);
+            document.baselines.savedLines = diskLines;
+            document.baselines.generation++;
+            invalidateGutterDiff();
+            breakCoalescing();
+            document.publishChange(views);
+            return true;
+        } catch (OutOfMemoryError exhausted) {
+            if (published) throw exhausted;
+            throw new DocumentEditLimitException();
+        } finally {
+            if (!published && edit != null) edit.abort();
+        }
+    }
+
     public static final class SavePreparation {
         private final EditorEngine owner;
         private final Thread ownerThread;
@@ -2863,6 +2927,25 @@ public class EditorEngine {
     }
 
     private record Snapshot(List<String> lines, DocumentFileMetadata fileMetadata, EditorViewMemento view) {}
+
+    private record ExternalSnapshot(List<LineText> lines, DocumentFileMetadata metadata, EditorViewMemento view) {}
+
+    private void restoreExternalSnapshot(ExternalSnapshot snapshot) {
+        model.replaceTextLines(snapshot.lines(), snapshot.metadata());
+        restoreViewState(new ViewState(DocumentPreferences.from(snapshot.metadata()), snapshot.view()));
+    }
+
+    private record ExternalHistoryEntry(ExternalSnapshot before, ExternalSnapshot after,
+        long beforeStateId, long afterStateId) implements HistoryEntry {
+        @Override public long undo(EditorEngine engine) {
+            engine.restoreExternalSnapshot(before);
+            return beforeStateId;
+        }
+        @Override public long redo(EditorEngine engine) {
+            engine.restoreExternalSnapshot(after);
+            return afterStateId;
+        }
+    }
 
     private record DocumentPreferences(Charset charset, BomKind bomKind, String defaultLineSeparator) {
         static DocumentPreferences from(DocumentFileMetadata metadata) {

@@ -167,6 +167,11 @@ public final class CoreDocumentBackend implements DocumentBackend {
         return defaultView.engine().relocateResource(expected, replacement);
     }
 
+    @Override public boolean acceptExternal(ResourceBinding expected, DocumentLoad loaded, boolean update) {
+        requireOwnerThread();
+        return defaultView.engine().acceptExternal(expected, loaded, update);
+    }
+
     @Override public dev.tuink.editor.storage.DocumentOpenMode reopenMode() {
         requireOwnerThread();
         return document.model().reopenMode();

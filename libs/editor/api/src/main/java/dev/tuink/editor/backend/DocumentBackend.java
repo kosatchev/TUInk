@@ -43,6 +43,8 @@ public interface DocumentBackend extends DocumentSaveOperations {
     Status status();
     /** Publishes a host-confirmed location change without changing text, format or the savepoint. */
     boolean relocateResource(ResourceBinding expected, ResourceBinding replacement);
+    /** Accepts a detached external version while keeping document history and original-open baseline. */
+    default boolean acceptExternal(ResourceBinding expected, DocumentLoad loaded, boolean update) { return false; }
     /** Decoder of the last read/committed bytes, unaffected by unsaved format changes or undo. */
     default dev.tuink.editor.storage.DocumentOpenMode reopenMode() {
         return dev.tuink.editor.storage.DocumentOpenMode.DETECT;

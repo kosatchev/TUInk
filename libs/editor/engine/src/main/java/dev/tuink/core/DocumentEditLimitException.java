@@ -4,7 +4,7 @@ package dev.tuink.core;
 public final class DocumentEditLimitException extends RuntimeException {
     private static final long serialVersionUID = 1L;
 
-    DocumentEditLimitException() {
+    public DocumentEditLimitException() {
         super("Replacement result is too large for available memory. Use less text, fewer matches or a shorter replacement.");
     }
 }

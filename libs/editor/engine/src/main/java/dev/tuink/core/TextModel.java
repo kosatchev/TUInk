@@ -706,6 +706,12 @@ public class TextModel {
         reopenMode = DocumentOpenMode.forMetadata(prepared.metadata());
     }
 
+    /** Adopts accepted disk bytes without changing the buffer's editable format. */
+    void acceptExternalVersion(DocumentLoad loaded) {
+        fileBaseline = loaded.baseline();
+        reopenMode = DocumentOpenMode.forMetadata(loaded.metadata());
+    }
+
     public void save(DocumentResource resource) throws IOException {
         save(resource, fileMetadata);
     }
@@ -915,6 +921,30 @@ public class TextModel {
         int slot = (int) (revision % CHANGE_HISTORY_CAPACITY);
         firstChangedLines[slot] = 0;
         lineChanges[slot] = change;
+        lastContentReplacementRevision = revision;
+    }
+
+    /** Publishes retained immutable history lines without materializing the previous document as strings. */
+    void replaceTextLines(List<LineText> lines, DocumentFileMetadata metadata) {
+        if (lines.isEmpty()) throw new IllegalArgumentException("A document must have one logical line");
+        DocumentEditBudget.requireTemporaryReferences(lines.size());
+        DocumentFileMetadata checked = requireCompatibleMetadata(metadata, lines.size());
+        TextBuffer next = Objects.requireNonNull(buffer.createEmptySibling(), "buffer.createEmptySibling()");
+        if (next == buffer || next.lineCount() != 1 || !next.getLine(0).isEmpty())
+            throw new IllegalArgumentException("createEmptySibling() must return an independent empty buffer");
+        for (LineText line : lines) {
+            if (!line.immutableText().isWellFormedUtf16() || line.immutableText().containsLineSeparator())
+                throw new IllegalArgumentException("History must contain well-formed logical lines");
+        }
+        next.setLineText(0, lines.get(0));
+        next.insertLineTexts(1, lines.subList(1, lines.size()));
+        buffer = next;
+        fileMetadata = checked;
+        contentEpoch++;
+        revision++;
+        int slot = (int) (revision % CHANGE_HISTORY_CAPACITY);
+        firstChangedLines[slot] = 0;
+        lineChanges[slot] = new LineChange(0, 1, 1);
         lastContentReplacementRevision = revision;
     }
 

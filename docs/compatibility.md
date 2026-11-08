@@ -283,6 +283,7 @@ profile. The current marker is:
 ```properties
 format=2
 ui.showTabBar=true
+ui.showDocumentPath=true
 ui.wrapLines=false
 ui.wrapWords=false
 ui.readingMode=false
@@ -343,6 +344,11 @@ The writer records its current value explicitly. It controls only temporary
 success notices for filesystem Undo/Redo in the sidebar, independently of errors
 and persistent deleted-file or external-change banners. Existing format 2 profiles remain
 readable without conversion; malformed values follow the same rejection rules.
+
+The optional Boolean `ui.showDocumentPath` defaults to `true` when absent. The
+writer records its value explicitly. It controls the passive path row in Source
+and Preview; temporarily hiding the row in a short terminal does not change the
+preference. Existing format 2 profiles remain readable without conversion.
 
 Readable, bounded settings with unsupported schema, values, or properties
 syntax open **Fix / Delete / Later**, initially focused on Later. The question

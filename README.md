@@ -10,13 +10,13 @@ without learning an editor command language.
 
 ## TUInk in action
 
-### Markdown Source, Preview, and tabs
+### Tabs and Markdown preview
 
-![TUInk cycling through Markdown Source, Preview, and README tabs](docs/assets/tuink-tabs.gif)
+![README, Markdown Source, and Preview tabs with diagrams and formulas](docs/assets/tuink-tabs.gif)
 
-### Menus
+### Folder explorer and menus
 
-![TUInk menus on an empty document](docs/assets/tuink-menus.gif)
+![TUInk with the project folder open, followed by each editor menu](docs/assets/tuink-menus.gif)
 
 ## Why TUInk?
 
@@ -541,8 +541,10 @@ error; its contents are not presented as a complete listing. Directory item
 counts may end in `+` when their counting budget is reached.
 
 **Explorer → Open folder...** opens a directory chooser. Navigate into the desired
-directory and activate **Open folder** to use the displayed directory as the
-explorer root. Enter on a directory navigates inside the chooser. You can also
+directory or select it in the tree, then activate **Open folder**. Selection
+updates the Path field; a manually entered path can also be confirmed directly.
+The chosen directory becomes the explorer root. Enter on a directory navigates
+inside the chooser. You can also
 start with `tuink .` or `tuink path/to/folder`.
 
 The explorer stays on the left while Source or Markdown Preview occupies the
@@ -579,7 +581,11 @@ The Explorer menu creates files and folders inside the selected folder, or
 beside a selected file. **Rename...** selects the current name for replacement
 without overwriting another entry. **Move...** and **Copy...** open a separate
 destination folder tree; Ctrl+L edits its path, Enter navigates, and **Move here**
-or **Copy here** confirms the destination. Copy retains the source and copies
+or **Copy here** confirms the destination. The tree initially uses the open folder
+as its root and displays relative paths, like the sidebar. **Use full path** is
+off by default; enable it to browse outside the open folder. Entering an outside
+path enables it automatically. Switching the view preserves the chosen destination.
+Copy retains the source and copies
 the on-disk file or directory; unsaved editor changes remain in their open document.
 Existing names are never overwritten. **Move to Trash...** uses the Linux system
 Trash when available; failure never falls back to permanent deletion.
@@ -588,6 +594,17 @@ contents after confirmation. The open root cannot be renamed, moved or deleted;
 it can be copied to a folder outside its own tree.
 Open document text, unsaved edits and
 text undo history survive renames and moves.
+
+**View → Document Path** shows a path below the document tabs (or below the menu
+when the tabs are hidden). It is enabled by default and saved in preferences.
+Files opened from the explorer show paths relative to the open folder; files
+opened from the command line or the file picker show full paths. Hiding the
+sidebar keeps relative paths; closing the folder, changing to an unrelated root,
+or saving outside it shows the full path. Source and Preview share this policy.
+Long paths collapse middle directories to `…` before shortening the filename,
+preserving its extension where space permits. Deleted drafts retain their original
+path with a **(Draft)** suffix; unnamed documents show **Untitled**. Very short
+windows temporarily hide the path row to leave room for document content.
 
 To move with the mouse, hold an entry for 1 second and drag it onto a folder.
 A label follows the pointer and the destination is highlighted. Hover over a
@@ -977,6 +994,7 @@ diagnostic material. These local directories are outside the source layout.
 - [Перенос на другой компьютер, сборка и запуск (русский)](docs/setup-ru.md)
 - [Build, test, and native targets](docs/building.md)
 - [Release archives and Debian packaging](docs/packaging.md)
+- [TUInk 0.19.0 release notes](docs/releases/0.19.0.md)
 - [TUInk 0.18.0 release notes](docs/releases/0.18.0.md)
 - [Unreleased changes](docs/releases/unreleased.md)
 - [Markdown preview (русский)](docs/markdown-preview.md)

@@ -996,7 +996,6 @@ diagnostic material. These local directories are outside the source layout.
 - [Release archives and Debian packaging](docs/packaging.md)
 - [TUInk 0.19.0 release notes](docs/releases/0.19.0.md)
 - [TUInk 0.18.0 release notes](docs/releases/0.18.0.md)
-- [Unreleased changes](docs/releases/unreleased.md)
 - [Markdown preview (русский)](docs/markdown-preview.md)
 - [Architecture](docs/architecture-roadmap.md)
 - [Architecture decisions](docs/adr/)

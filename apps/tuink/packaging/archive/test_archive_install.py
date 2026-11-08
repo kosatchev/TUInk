@@ -166,25 +166,26 @@ class ArchiveInstallTest(unittest.TestCase):
     def test_release_document_link_does_not_depend_on_main(self):
         # Model a release-only document which does not exist on the default branch.
         remote = self.root / "remote"
-        released = remote / self.documentation_ref / "docs/releases/unreleased.md"
+        release_document = f"docs/releases/{self.release_version}.md"
+        released = remote / self.documentation_ref / release_document
         released.parent.mkdir(parents=True)
-        released.write_text("# Unreleased\n", encoding="utf-8")
+        released.write_text(f"# TUInk {self.release_version}\n", encoding="utf-8")
         (remote / "main").mkdir()
         # A development build can also be newer than its own version tag.
         (remote / f"v{self.release_version}").mkdir()
         (self.archive / "README.md").write_text(
-            "[Unreleased changes](docs/releases/unreleased.md#changes)\n",
+            f"[Release notes]({release_document}#changes)\n",
             encoding="utf-8",
         )
         self.run_script("install.sh")
         expected = (
-            "[Unreleased changes](https://github.com/kosatchev/tuink/blob/"
-            f"{self.documentation_ref}/docs/releases/unreleased.md#changes)\n"
+            "[Release notes](https://github.com/kosatchev/tuink/blob/"
+            f"{self.documentation_ref}/{release_document}#changes)\n"
         )
         self.assertEqual(expected, (self.install_dir / "README.md").read_text())
         self.assertTrue(released.is_file())
-        self.assertFalse((remote / "main" / "docs/releases/unreleased.md").exists())
-        self.assertFalse((remote / f"v{self.release_version}" / "docs/releases/unreleased.md").exists())
+        self.assertFalse((remote / "main" / release_document).exists())
+        self.assertFalse((remote / f"v{self.release_version}" / release_document).exists())
 
     def test_invalid_or_unexpanded_documentation_version_refuses_before_install(self):
         script = self.archive / "install.sh"

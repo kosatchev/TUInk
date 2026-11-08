@@ -25,6 +25,7 @@ import dev.tuiframe.widget.Theme;
 import dev.tuiframe.widget.WidgetState;
 import dev.tuiframe.widget.WidgetThemeKeys;
 import dev.tuiframe.explorer.file.ExplorerFileService;
+import dev.tuiframe.explorer.file.PathLabels;
 import dev.tuiframe.explorer.ui.FileTreeView;
 import dev.tuiframe.explorer.ui.PathPresentation;
 import dev.tuink.tui.flow.SavePathInput;
@@ -35,7 +36,7 @@ import java.util.Optional;
 
 /** Application-owned file action dialog; shares the ordinary tree and focus contracts. */
 final class ExplorerFileDialogView {
-    enum Target { TREE, FIELD, APPLY, CANCEL }
+    enum Target { TREE, FIELD, FULL_PATH, APPLY, CANCEL }
     enum Action { NONE, APPLY, CANCEL }
 
     static final class State implements AutoCloseable {
@@ -44,7 +45,11 @@ final class ExplorerFileDialogView {
         final Path parent;
         final TextField field = new TextField();
         final FocusManager<Target> focus = new FocusManager<>();
-        final Explorer tree;
+        Explorer tree;
+        final Path relativeRoot;
+        private Path destination;
+        private String synchronizedPath;
+        boolean fullPath;
         ExplorerFileService.Target inspected;
         Target requestedFocus;
         boolean busy;
@@ -53,12 +58,22 @@ final class ExplorerFileDialogView {
         String error;
 
         State(ExplorerFileService.Action action, Path source, Path parent) {
+            this(action, source, parent, parent);
+        }
+
+        State(ExplorerFileService.Action action, Path source, Path parent, Path root) {
             this.action = action; this.source = source; this.parent = parent;
+            relativeRoot = (root == null ? parent == null ? Path.of(".") : parent : root).toAbsolutePath().normalize();
             tree = action == ExplorerFileService.Action.MOVE || action == ExplorerFileService.Action.COPY
-                ? new Explorer(parent, false, false) : null;
+                ? Explorer.directoryPicker(relativeRoot) : null;
             requestedFocus = action.removes() ? Target.CANCEL
                 : tree == null ? Target.FIELD : Target.TREE;
-            if (tree != null) field.set(PathPresentation.full(tree.root()));
+            if (tree != null) {
+                destination = parent.toAbsolutePath().normalize().startsWith(relativeRoot)
+                    ? parent.toAbsolutePath().normalize() : relativeRoot;
+                synchronizeDestination();
+                tree.reveal(destination);
+            }
             else if (action == ExplorerFileService.Action.RENAME) {
                 field.set(source.getFileName().toString());
                 field.selectAll();
@@ -68,26 +83,74 @@ final class ExplorerFileDialogView {
         boolean creating() { return action == ExplorerFileService.Action.CREATE_FILE || action == ExplorerFileService.Action.CREATE_DIRECTORY; }
         boolean naming() { return creating() || action == ExplorerFileService.Action.RENAME; }
         Path destinationFolder() {
-            var selected = tree == null ? null : tree.selectedEntry();
-            return destinationSelected && selected != null && selected.directory() ? selected.path()
-                : tree == null ? parent : tree.root();
+            return tree == null ? parent : destination;
         }
         boolean destinationAllowed() {
             var selected = tree == null ? null : tree.selectedEntry();
-            return tree == null || field.text().equals(PathPresentation.full(tree.root()))
-                && (!destinationSelected || selected != null && selected.directory());
+            return tree == null || field.text().equals(synchronizedPath)
+                && (!destinationSelected || selected != null && (selected.directory()
+                    || selected.kind() == dev.tuiframe.explorer.file.FileTreeModel.Kind.PARENT));
+        }
+        String display(Path path) {
+            return tree == null || fullPath || !path.toAbsolutePath().normalize().startsWith(relativeRoot)
+                ? PathLabels.full(path) : PathLabels.relative(relativeRoot, path);
+        }
+        private void synchronizeDestination() {
+            synchronizedPath = display(destination);
+            field.set(synchronizedPath);
+        }
+        void setFullPath(boolean enabled) {
+            if (enabled == fullPath) return;
+            if (!field.text().equals(synchronizedPath)) {
+                error = "Press Enter to use the entered path before changing the view";
+                return;
+            }
+            if (!enabled && !destination.startsWith(relativeRoot)) {
+                error = "Destination is outside the open folder; use full path";
+                return;
+            }
+            fullPath = enabled;
+            replaceTree();
+        }
+        private void replaceTree() {
+            boolean hidden = tree.showHiddenFiles();
+            tree.close();
+            tree = fullPath ? new Explorer(destination, false, false) : Explorer.directoryPicker(relativeRoot);
+            if (hidden) tree.toggleHiddenFiles();
+            if (!fullPath) tree.reveal(destination);
+            destinationSelected = false;
+            synchronizeDestination();
+            error = null;
+        }
+        void navigate(String input) {
+            Path base = fullPath ? tree.root() : relativeRoot;
+            destination = base.resolve(SavePathInput.parse(input)).toAbsolutePath().normalize();
+            if (!destination.startsWith(relativeRoot)) fullPath = true;
+            replaceTree();
+            requestedFocus = Target.TREE;
         }
         void treeAction(FileTreeView.Action action) {
-            var previous = tree.state().selectedId();
+            var previous = tree.state();
+            boolean selected = !java.util.Objects.equals(previous.selectedId(), action.state().selectedId())
+                || action instanceof FileTreeView.ToggleRequested
+                || action.state().lastPressedId() != null
+                    && (!java.util.Objects.equals(previous.lastPressedId(), action.state().lastPressedId())
+                        || previous.lastPressedAtNanos() != action.state().lastPressedAtNanos());
             tree.adopt(action.state());
-            if (!java.util.Objects.equals(previous, action.state().selectedId())
-                || action.state().lastPressedId() != null || action instanceof FileTreeView.ToggleRequested)
-                destinationSelected = true;
+            if (selected) destinationSelected = true;
             if (action instanceof FileTreeView.ToggleRequested toggle) tree.requestExpansion(toggle.id(), toggle.expand());
             if (action instanceof FileTreeView.RootRequested root) {
-                tree.setRoot(root.root()); field.set(PathPresentation.full(tree.root())); destinationSelected = false;
+                tree.setRoot(root.root()); destination = tree.root(); destinationSelected = false;
+                synchronizeDestination();
+            } else if (selected) {
+                var entry = tree.selectedEntry();
+                if (entry != null && (entry.directory()
+                    || entry.kind() == dev.tuiframe.explorer.file.FileTreeModel.Kind.PARENT)) {
+                    destination = entry.path();
+                    synchronizeDestination();
+                }
             }
-            error = null;
+            if (selected || action instanceof FileTreeView.RootRequested) error = null;
         }
         @Override public void close() { if (tree != null) tree.close(); }
     }
@@ -109,12 +172,16 @@ final class ExplorerFileDialogView {
         FileTreeView.Placement tree = null;
         if (!compact) {
             if (state.tree != null) {
-                Rect treeBounds = new Rect(bounds.x() + 2, bounds.y() + 3, Math.max(0, width - 4), Math.max(0, height - 7));
+                Rect treeBounds = new Rect(bounds.x() + 2, bounds.y() + 4, Math.max(0, width - 4), Math.max(0, height - 8));
                 boolean focused = state.requestedFocus == Target.TREE
                     || state.requestedFocus == null && state.focus.focused().orElse(null) == Target.TREE;
                 tree = state.tree.place(treeBounds, viewport, focused, true);
                 targets.add(new RoutedTarget<>(Target.TREE, tree.captureTarget().mapOutput(action ->
                     (Runnable) () -> state.treeAction(action)), space, true, !state.busy && tree.enabled()));
+                var fullPath = Button.plain(0, 0, (state.fullPath ? "[x] " : "[ ] ") + "Use full path");
+                targets.add(new RoutedTarget<>(Target.FULL_PATH, fullPath.layout(new Rect(bounds.x() + 2,
+                    bounds.y() + 3, Math.min(width - 4, fullPath.width()), 1))
+                    .mapOutput(ignored -> (Runnable) () -> state.setFullPath(!state.fullPath)), space, true, !state.busy));
             }
             if (!state.action.removes()) {
                 int row = state.tree == null ? bounds.y() + 3 : bounds.y() + 2;
@@ -123,9 +190,7 @@ final class ExplorerFileDialogView {
                     state.error = null;
                     if (action == TextField.Action.SUBMITTED && state.tree != null) {
                         try {
-                            Path path = state.tree.root().resolve(SavePathInput.parse(state.field.text())).toAbsolutePath().normalize();
-                            state.tree.setRoot(path); state.field.set(PathPresentation.full(state.tree.root())); state.destinationSelected = false;
-                            state.requestedFocus = Target.TREE;
+                            state.navigate(state.field.text());
                         } catch (IllegalArgumentException failure) { state.error = "Invalid destination path"; }
                     }
                 }), space, true, !state.busy));
@@ -146,7 +211,7 @@ final class ExplorerFileDialogView {
             Math.max(bounds.x(), bounds.rightExclusive() - cancel.width() - 2),
             Math.max(bounds.y(), bounds.bottomExclusive() - 2), Math.min(cancel.width(), width), Math.min(1, height)))
             .mapOutput(ignored -> (Runnable) () -> {}), space, true, !state.busy));
-        var order = targets.stream().map(RoutedTarget::id).toList();
+        var order = targets.stream().map(RoutedTarget::id).sorted().toList();
         var scope = new FocusScope<>(state, FocusResetPolicy.FIRST_FOCUSABLE, targets, order, order);
         state.focus.context(scope, Target.CANCEL);
         if (state.requestedFocus != null && !compact && !state.busy) {
@@ -209,7 +274,7 @@ final class ExplorerFileDialogView {
                 CellText.drawClipped(canvas, x, bounds().y() + 1, "Enlarge terminal", body, width);
             } else {
                 Path context = state.source == null ? state.parent : state.source;
-                CellText.drawClipped(canvas, x, bounds().y() + 1, PathPresentation.full(context), body, width);
+                CellText.drawClipped(canvas, x, bounds().y() + 1, state.display(context), body, width);
                 if (state.action.removes()) {
                     CellText.drawClipped(canvas, x, bounds().y() + 3,
                         state.action == ExplorerFileService.Action.TRASH ? "Move this entry and its contents to the system Trash?"
@@ -219,7 +284,7 @@ final class ExplorerFileDialogView {
                 } else CellText.drawClipped(canvas, x, bounds().y() + (state.tree == null ? 3 : 2),
                     state.tree == null ? "Name:" : "Path:", body, 6);
                 String message = state.busy ? "Working; wait for the operation to finish" : state.error;
-                if (message == null && state.tree != null) message = "To: " + PathPresentation.full(state.destinationFolder());
+                if (message == null && state.tree != null) message = "To: " + state.display(state.destinationFolder());
                 if (message != null) CellText.drawClipped(canvas, x, bounds().bottomExclusive() - 3,
                     TerminalPlainText.singleLine(message), state.error == null ? body : errorStyle, width);
             }

@@ -255,6 +255,93 @@ class Regressions:
         assert document.read_text(encoding="utf-8") == original
         assert sibling.read_text(encoding="utf-8") == "PICKER_SIBLING\n"
 
+    def path_dialogs(self):
+        workspace = self.root / "path-project"
+        folder = workspace / "docs"
+        destination = folder / "copies"
+        destination.mkdir(parents=True)
+        document = folder / "note.md"
+        document.write_text("# PATH_DOCUMENT\n", encoding="utf-8")
+        outside = self.root / "outside-path-project"
+        outside.mkdir()
+        with self.session("path-dialogs", workspace, timeout=100) as session:
+            session.resize(32, 120)
+
+            def click(label, rightmost=False):
+                session.expect(lambda: label in session.screen.text, "visible " + label)
+                positions = [(row, line.rfind(label) if rightmost else line.find(label))
+                             for row, line in enumerate(session.screen.lines) if label in line]
+                row, column = max(positions, key=lambda point: point[1]) if rightmost else positions[0]
+                session.mouse(0, row, column + 1)
+                session.mouse(0, row, column + 1, release=True)
+
+            def explorer_menu(label):
+                session.send(b"\x1b[18~")
+                click(label)
+
+            explorer_menu("Open folder...")
+            session.expect(lambda: "[Open folder]" in session.screen.text, "folder chooser")
+            click("docs", rightmost=True)
+            session.expect(lambda: any("Path:" in line and "docs" in line for line in session.screen.lines),
+                           "mouse selection updating the folder Path field")
+            click("[Open folder]")
+            session.expect(lambda: session.screen.lines[1].startswith("▼ docs/"), "selected folder as workspace root")
+            session.send(b"\x05\x1b[F\r")  # Last entry is note.md; open it from Explorer.
+            session.expect(lambda: "PATH_DOCUMENT" in session.screen.text
+                           and session.screen.lines[2][31:].strip() == "note.md", "relative document path")
+            session.send(b"\x02")
+            session.expect(lambda: session.screen.lines[2].strip() == "note.md", "relative path with hidden sidebar")
+            session.send(b"\x02\x10")
+            session.expect(lambda: preview_selected(session.screen.text) and "note.md" in session.screen.lines[2],
+                           "Live Preview retaining the relative path")
+            session.send(b"\x10\x17")
+            session.expect(lambda: preview_selected(session.screen.text, "snapshot")
+                           and "note.md" in session.screen.lines[2], "Frozen Preview retaining the path")
+
+            session.send(b"\x05\x1b[F")
+            explorer_menu("Copy...")
+            session.expect(lambda: "[Copy here]" in session.screen.text and "[ ] Use full path" in session.screen.text,
+                           "relative Copy tree by default")
+            click("copies", rightmost=True)
+            session.expect(lambda: any("Path:" in line and "copies" in line for line in session.screen.lines),
+                           "relative destination selection")
+            click("[ ] Use full path")
+            session.expect(lambda: "[x] Use full path" in session.screen.text
+                           and any("Path:" in line and "copies" in line and "/" in line for line in session.screen.lines),
+                           "full destination view preserving the selected folder")
+            click("[x] Use full path")
+            session.expect(lambda: "[ ] Use full path" in session.screen.text
+                           and any("Path:" in line and "copies" in line and str(folder) not in line
+                                   for line in session.screen.lines), "return to the relative destination")
+            click("[Copy here]")
+            copied = destination / document.name
+            session.expect(lambda: copied.exists() and "[Copy here]" not in session.screen.text, "copied document")
+            assert copied.read_bytes() == document.read_bytes()
+
+            session.send(b"\x05\x1b[F")
+            explorer_menu("Move...")
+            session.expect(lambda: "[Move here]" in session.screen.text and "[ ] Use full path" in session.screen.text,
+                           "fresh Move dialog starting in relative mode")
+            session.send(b"\x0c\x01\x1b[200~" + str(outside).encode() + b"\x1b[201~\r")
+            session.expect(lambda: "[x] Use full path" in session.screen.text
+                           and any("Path:" in line and outside.name in line for line in session.screen.lines),
+                           "outside path automatically enabling full navigation")
+            click("[Move here]")
+            moved = outside / document.name
+            session.expect(lambda: moved.exists() and not document.exists() and "[Move here]" not in session.screen.text,
+                           "moved document")
+            session.send(b"\x02")
+            session.expect(lambda: session.screen.lines[2].strip() == str(moved), "Frozen Preview path after outside Move")
+            session.send(b"\x1bOR")
+            click("Document Path")
+            session.expect(lambda: str(moved) not in session.screen.lines[2], "View hiding the path row")
+            session.snapshot("paths-and-dialogs")
+            session.finish()
+            saved = dict(line.split("=", 1) for line in (session.home / ".config/tuink/tuink.properties").read_text().splitlines()
+                         if "=" in line and not line.startswith("#"))
+            assert saved["ui.showDocumentPath"] == "false", saved
+        assert moved.read_bytes() == copied.read_bytes()
+
     def cli_path_identity(self):
         directory = self.root / "cli-path-files"
         directory.mkdir()
@@ -1230,12 +1317,16 @@ class Regressions:
             session.finish()
         assert invalid_path.read_bytes() == incompatible, "an incompatible profile was overwritten"
         not_a_document = self.root / "settings-not-a-document"
-        not_a_document.mkdir()
-        with self.session("settings-incompatible-open-error", not_a_document,
-                          home=invalid_home, options=()) as session:
-            session.expect(lambda: "Open failed:" in session.screen.text,
-                           "the initial file error has priority over the settings warning")
-            session.finish()
+        # Directories intentionally open Explorer; a FIFO is an unsupported document type.
+        os.mkfifo(not_a_document)
+        try:
+            with self.session("settings-incompatible-open-error", not_a_document,
+                              home=invalid_home, options=()) as session:
+                session.expect(lambda: "Open failed:" in session.screen.text,
+                               "the initial file error has priority over the settings warning")
+                session.finish()
+        finally:
+            not_a_document.unlink()
         assert invalid_path.read_bytes() == incompatible
 
         recovery_home = self.root / "settings-incompatible-recovery-home"
@@ -1744,7 +1835,10 @@ class Regressions:
             session.send(b"draft ")
             for columns in (80, 60, 120):
                 session.resize(24, columns)
-                assert ".txt" in session.screen.lines[0], session.screen.text
+                assert ".txt" in session.screen.lines[1], session.screen.text
+                assert session.screen.lines[1].startswith("/"), session.screen.text
+                if columns >= 80:
+                    assert ".txt" in session.screen.lines[0], session.screen.text
                 assert "*" in session.screen.lines[0], session.screen.text
             session.send(b"\x0e")
             session.send(b"\x1b[5;5~")
@@ -1753,6 +1847,7 @@ class Regressions:
                 session.resize(24, columns)
                 assert ".txt" in session.screen.lines[1], session.screen.text
                 assert "*" in session.screen.lines[1], session.screen.text
+                assert ".txt" in session.screen.lines[2], session.screen.text
             session.send(b"\x13")
             session.expect(lambda: "*" not in session.screen.lines[0] + session.screen.lines[1],
                            "saving clears both document status markers")
@@ -1898,7 +1993,7 @@ class Regressions:
         assert document.read_text(encoding="utf-8") == original
 
 
-SCENARIOS = ("reading", "focus", "field", "resize", "large-wrap", "tabs", "folder-explorer", "picker-navigation", "tab-scoped-ui", "history", "grapheme-edit-caret", "selection-autoscroll", "long-copy-name", "navigation", "fragmented-keys", "quit-confirmation", "gutter-idle", "paste", "settings", "settings-conflict", "recovery", "recovery-format5", "recovery-memory", "linux-keys", "enhanced-text", "long-unicode-edit", "save-as-workspace", "settings-memory", "syntax-memory", "unix-path-recovery", "literal-indentation", "field-memory", "document-caption", "save-name-suggestion", "replacement-memory", "paste-memory", "recovery-lock-cleanup", "xdg-profile", "cli-path-identity", "save-as-retarget", "legacy-encoding", "document-format", "format-errors", "format-reopen", "field-edit-caret", "field-memory-growth", "identical-replace-budget", "clipboard-memory", "cpp-raw-indentation", "terminal-diagnostics", "terminal-attributes", "startup-dependencies")
+SCENARIOS = ("reading", "focus", "field", "resize", "large-wrap", "tabs", "folder-explorer", "picker-navigation", "path-dialogs", "tab-scoped-ui", "history", "grapheme-edit-caret", "selection-autoscroll", "long-copy-name", "navigation", "fragmented-keys", "quit-confirmation", "gutter-idle", "paste", "settings", "settings-conflict", "recovery", "recovery-format5", "recovery-memory", "linux-keys", "enhanced-text", "long-unicode-edit", "save-as-workspace", "settings-memory", "syntax-memory", "unix-path-recovery", "literal-indentation", "field-memory", "document-caption", "save-name-suggestion", "replacement-memory", "paste-memory", "recovery-lock-cleanup", "xdg-profile", "cli-path-identity", "save-as-retarget", "legacy-encoding", "document-format", "format-errors", "format-reopen", "field-edit-caret", "field-memory-growth", "identical-replace-budget", "clipboard-memory", "cpp-raw-indentation", "terminal-diagnostics", "terminal-attributes", "startup-dependencies")
 
 
 def classpath_manifest(classpath):

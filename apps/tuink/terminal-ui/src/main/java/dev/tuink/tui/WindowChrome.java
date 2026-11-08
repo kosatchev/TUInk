@@ -6,6 +6,7 @@ import dev.tuiframe.widget.SplitPane;
 import dev.tuiframe.widget.TabBar;
 import dev.tuiframe.widget.SurfaceContext;
 import dev.tuiframe.widget.NoticeBanner;
+import dev.tuiframe.widget.PathBar;
 import dev.tuink.editor.document.PresentationId;
 import dev.tuink.tui.flow.DocumentSaveFormat;
 import dev.tuink.tui.flow.UiModalState;
@@ -62,7 +63,7 @@ final class WindowChrome {
         SplitPane explorerSplit, Rect documentPane,
         InlinePromptBar prompt, NotificationBar notification, SaveAsBarView.Placement saveAs,
         ConfirmBarView.Placement confirm, SearchBarView.Placement search, WindowTextPainter.Layout textLayout,
-        NoticeBanner.Placement deletedNotice, NoticeBanner.Placement externalNotice) {
+        NoticeBanner.Placement deletedNotice, NoticeBanner.Placement externalNotice, PathBar.Placement pathBar) {
         Rect contentBounds(boolean reserveNotification) {
             return new Rect(documentPane.x(), contentTopRow, documentPane.width(), Math.max(0,
                 input.rows() - 1 - contentTopRow - prompt.height() - (reserveNotification ? notification.height() : 0)
@@ -136,6 +137,19 @@ final class WindowChrome {
         var explorerSplit = input.preferences().explorer.prepareLayout(body);
         Rect allocated = explorerSplit == null ? body : explorerSplit.secondBounds();
         Rect documentPane = new Rect(allocated.x(), 1, allocated.width(), Math.max(0, input.rows() - 1));
+        PathBar.Placement pathBar = null;
+        var pathDocument = TerminalEditorApp.documentId(input.context().activePresentation());
+        var pathDeleted = host.deletedNotices.banner(pathDocument);
+        var pathExternal = host.externalNoticeBanner(pathDocument);
+        int pathNoticeRows = windowPrompt ? 0
+            : (pathDeleted == null ? 0 : pathDeleted.preferredHeight(documentPane.width()))
+                + (pathExternal == null ? 0 : pathExternal.preferredHeight(documentPane.width()));
+        if (input.preferences().showDocumentPathSetting && documentPane.width() > 0
+            && input.rows() - 1 - top - prompt.height() - notification.height() - pathNoticeRows >= 2) {
+            pathBar = host.documentPaths.component(host, input.context(), input.preferences().explorer.root())
+                .layout(new Rect(documentPane.x(), top, documentPane.width(), 1));
+            top++;
+        }
         var document = workspace.child(new Rect(documentPane.x(), top - 1, documentPane.width(), Math.max(0, input.rows() - top)));
         var footerParent = windowPrompt
             ? window.child(new Rect(0, top, input.cols(), Math.max(0, input.rows() - top))) : document;
@@ -204,9 +218,9 @@ final class WindowChrome {
             }
             if (tab.searchEditorFocused) tab.searchFocusManager.clear(placedSearch.focusScope());
         } else if (!tab.searchMode && !tab.preview.searchVisible) tab.searchFocusManager.deactivate(TerminalEditorApp.SEARCH_SCOPE_ID);
-        int inset = showTabs ? top : 0;
+        int inset = showTabs ? 2 : 0;
         return new Prepared(input, showTabs, top, new Rect(0, inset, input.cols(), Math.max(0, input.rows() - inset)),
-            explorerSplit, documentPane, prompt, notification, placedSave, placedConfirm, placedSearch, textLayout, deletedNotice, externalNotice);
+            explorerSplit, documentPane, prompt, notification, placedSave, placedConfirm, placedSearch, textLayout, deletedNotice, externalNotice, pathBar);
     }
 
     private static Result complete(Prepared prepared, Content content) {
@@ -251,7 +265,7 @@ final class WindowChrome {
                 } else if (help != null) DialogFocusTraversal.focusFirst(focus.helpFocusManager, help.focusScope());
             }
         }
-        return new Result(new FrameComposition.Surface(topBar, content.status(), prepared.prompt(), prepared.notification(), prepared.textLayout(), prepared.deletedNotice(), prepared.externalNotice()),
+        return new Result(new FrameComposition.Surface(topBar, content.status(), prepared.prompt(), prepared.notification(), prepared.textLayout(), prepared.deletedNotice(), prepared.externalNotice(), prepared.pathBar()),
             new FrameComposition.Layers(tabs, menuPlacement, prepared.saveAs() != null, prepared.saveAs(), prepared.confirm(),
                 picker, help, format, focus.modalAttention.highlighted(), focus.blockingContentFocused, blocking, explorer, fileDialog), prepared.search());
     }
@@ -306,7 +320,7 @@ final class WindowChrome {
         tab.openFileFocusState.synchronizeRoot(tree.root());
         var dialog = OpenFileDialogView.place(TerminalEditorApp.OPEN_FILE_SCOPE_ID, layout, placedTree,
             tree.showHiddenFiles(), viewport, tab.pickerNotice, tab.openFileFocusState.location(),
-            tab.choosingFolder ? tree.root() : null);
+            tab.choosingFolder ? tab.openFileFocusState.selectedDirectory() : null);
         dialog.activate(tab.openFileFocusState);
         return new FrameComposition.OpenFile(PathPresentation.full(tree.root()), dialog, tab.openFileFocusState.focus());
     }

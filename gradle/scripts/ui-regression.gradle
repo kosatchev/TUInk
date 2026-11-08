@@ -19,7 +19,7 @@ tasks.register('uiRegressionTest', Exec) {
     inputs.files(uiScripts)
     inputs.files(configurations.runtimeClasspath)
     outputs.dir(uiOutputRoot)
-    outputs.upToDateWhen { false }
+    doNotTrackState('PTY fixtures contain arbitrary filesystem entries; every regression run must execute.')
     doFirst {
         commandLine('python3', '-B', uiRegressionScript,
             '--java', uiJavaLauncher.get().executablePath.asFile.absolutePath,

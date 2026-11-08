@@ -82,6 +82,10 @@ final class InputActionDispatcher {
                 statusMessage = ui.showTabBarSetting ? "Tab bar shown" : "Tab bar hidden";
                 return DispatchResult.handled(statusMessage);
             }
+            case VIEW_TOGGLE_DOCUMENT_PATH -> {
+                ui.showDocumentPathSetting = !ui.showDocumentPathSetting;
+                return DispatchResult.handled(ui.showDocumentPathSetting ? "Document path shown" : "Document path hidden");
+            }
             case VIEW_TOGGLE_LINE_WRAP -> {
                 ui.wrapLinesSetting = !ui.wrapLinesSetting;
                 if (ui.wrapLinesSetting) {

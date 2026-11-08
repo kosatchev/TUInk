@@ -746,6 +746,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                         sourceSyntax())));
             if (result.activateViewId() != null) editor = sessionContext.source(result.activateViewId());
             if (editor != null) {
+                if (result.openedDocument() != null) host.documentPaths.inherit(TerminalEditorApp.documentId(owner),
+                    editor.documentSession().document().documentId());
                 boolean activate = sessionContext.activePresentation().presentationId().equals(owner.presentationId());
                 if (activate) cancelPointerCapture(PointerCaptureCancellation.SURFACE_CHANGED);
                 if (retainFrozenSource(owner)) {
@@ -937,6 +939,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         host.deletedNotices.retain(sessionContext.presentations().stream().map(TerminalEditorApp::documentId)
             .collect(java.util.stream.Collectors.toSet()));
         host.externalNotices.retain(sessionContext.presentations().stream().map(TerminalEditorApp::documentId)
+            .collect(java.util.stream.Collectors.toSet()));
+        host.documentPaths.retain(sessionContext.presentations().stream().map(TerminalEditorApp::documentId)
             .collect(java.util.stream.Collectors.toSet()));
         if (ui().deferredOpenResult != null && modalState().isNone() && !ui().openFileMode
             && !topMenu.isOpen() && activeSurface().focus() == ActiveSurface.Focus.CONTENT
@@ -1457,6 +1461,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             frame.addScope(openFileDialogPlacement.captureScope(), action -> {
                 if (action instanceof FileTreeView.StateChanged changed) {
                     openFileTree().adopt(changed.state());
+                    if (ui().choosingFolder) ui().openFileFocusState.selectDirectory(changed.state().selectedId());
                 }
             });
         }
@@ -2427,7 +2432,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 topMenu.close();
                 cancelPointerCapture(PointerCaptureCancellation.SURFACE_CHANGED);
                 cancelDocumentPointerInteraction();
-                explorerFiles.open(action, selected.path(), parent);
+                explorerFiles.open(action, selected.path(), parent, explorer.root());
                 globalUi.explorerDialog = explorerFiles.dialog();
                 setModal(UiModalState.explorerFiles());
             }
@@ -2457,6 +2462,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 ui().lastPickerDirectoryFailure = null;
                 openFileTree().setRoot(explorer.root() == null
                     ? FilePickerOpenWorkflow.initialRoot(currentPresentationPath()) : explorer.root());
+                ui().openFileFocusState.resetLocation(openFileTree().root());
                 ui().openFileFocusState.focus(OpenFileInputRouter.Focus.LIST);
             }
             case FOLDER_CLOSE -> {
@@ -2657,8 +2663,9 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
                 inspectFolder(choose.directory(), true); return;
             }
             if (intent instanceof OpenFileInputRouter.OpenLocation location) {
-                try { inspectFolder(openFileTree().root().resolve(Path.of(location.value())).toAbsolutePath().normalize(), false); }
-                catch (java.nio.file.InvalidPathException failure) {
+                try { inspectFolder(openFileTree().root().resolve(dev.tuink.tui.flow.SavePathInput.parse(location.value()))
+                    .toAbsolutePath().normalize(), location.chooseDirectory()); }
+                catch (IllegalArgumentException failure) {
                     ui().pickerNotice = new FilePickerOpenWorkflow.Notice("Invalid folder path", null);
                 }
                 return;
@@ -2678,6 +2685,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         if (documentIo.busy()) { notice().info("A file operation is already in progress"); return; }
         UiRecipient recipient = currentRecipient();
         var owner = recipient.state();
+        String submittedLocation = owner.openFileFocusState.location().text();
+        Path submittedDirectory = owner.openFileFocusState.selectedDirectory();
         var attempt = new FolderInspection(recipient);
         pendingFolderInspection = attempt;
         documentIo.submit(() -> {
@@ -2688,7 +2697,9 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         }, completion -> {
             boolean currentAttempt = pendingFolderInspection == attempt;
             if (currentAttempt) pendingFolderInspection = null;
-            if (!disposed && currentAttempt && current(recipient) && owner.openFileMode && owner.choosingFolder) {
+            if (!disposed && currentAttempt && current(recipient) && owner.openFileMode && owner.choosingFolder
+                && submittedLocation.equals(owner.openFileFocusState.location().text())
+                && Objects.equals(submittedDirectory, owner.openFileFocusState.selectedDirectory())) {
                 if (completion.failure() != null)
                     owner.pickerNotice = new FilePickerOpenWorkflow.Notice("Cannot open folder", target);
                 else if (choose) {
@@ -3401,6 +3412,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         ViewId openedView = null;
         if (result.openedDocument() != null) {
             TuiDocumentSession document = result.openedDocument();
+            host.documentPaths.opened(document.document().documentId(), context.origin() == FileOpenContext.Origin.EXPLORER);
             RenderPlanBuilder builder = document.newRenderPlanBuilder(
                 host.resolveHighlighter(JvmDocumentStorage.pathOf(document.view().state().getCurrentResource()),
                     sourceSyntax()));

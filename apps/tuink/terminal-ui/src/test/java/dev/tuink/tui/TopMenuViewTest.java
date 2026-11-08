@@ -235,6 +235,7 @@ class TopMenuViewTest {
                 "tuink.view.toggle-line-wrap",
                 "tuink.view.toggle-word-wrap",
                 "tuink.view.toggle-tab-bar",
+                "tuink.view.toggle-document-path",
                 "tuink.view.toggle-active-gutter",
                 "tuink.view.toggle-whitespace",
                 "tuink.view.toggle-syntax",

@@ -41,9 +41,13 @@ final class ExplorerFileController implements AutoCloseable {
     boolean mutating() { return mutating; }
 
     void open(ExplorerFileService.Action action, Path source, Path parent) {
+        open(action, source, parent, parent);
+    }
+
+    void open(ExplorerFileService.Action action, Path source, Path parent, Path root) {
         if (io.busy()) throw new IllegalStateException("A file operation is already in progress");
         close();
-        var next = new ExplorerFileDialogView.State(action, source, parent);
+        var next = new ExplorerFileDialogView.State(action, source, parent, root);
         dialog = next;
         if (!next.creating()) {
             var operations = operationsSource.get();

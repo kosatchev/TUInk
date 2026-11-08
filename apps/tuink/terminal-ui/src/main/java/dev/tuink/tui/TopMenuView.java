@@ -43,6 +43,7 @@ import static dev.tuink.tui.command.TuinkCommand.VIEW_TOGGLE_RAINBOW_BRACKETS;
 import static dev.tuink.tui.command.TuinkCommand.VIEW_TOGGLE_SELECTION_HIGHLIGHT;
 import static dev.tuink.tui.command.TuinkCommand.VIEW_TOGGLE_SYNTAX;
 import static dev.tuink.tui.command.TuinkCommand.VIEW_TOGGLE_TAB_BAR;
+import static dev.tuink.tui.command.TuinkCommand.VIEW_TOGGLE_DOCUMENT_PATH;
 import static dev.tuink.tui.command.TuinkCommand.VIEW_TOGGLE_WHITESPACE;
 import static dev.tuink.tui.command.TuinkCommand.VIEW_TOGGLE_WORD_WRAP;
 
@@ -378,6 +379,7 @@ final class TopMenuView {
             item(VIEW_TOGGLE_WORD_WRAP, checked(ui.wrapWordsSetting) + " Wrap by words", wrapLines),
             separator(),
             item(VIEW_TOGGLE_TAB_BAR, checked(ui.showTabBarSetting) + " Show Tab Bar"),
+            item(VIEW_TOGGLE_DOCUMENT_PATH, checked(ui.showDocumentPathSetting) + " Document Path"),
             item(VIEW_TOGGLE_ACTIVE_GUTTER, checked(ui.highlightActiveGutterSetting) + " Highlight current line number"),
             item(VIEW_TOGGLE_WHITESPACE, checked(ui.visibleWhitespaceSetting) + " Visible tabs/spaces"),
             item(VIEW_TOGGLE_SYNTAX, checked(ui.syntaxHighlightingSetting) + " Syntax highlighting"),

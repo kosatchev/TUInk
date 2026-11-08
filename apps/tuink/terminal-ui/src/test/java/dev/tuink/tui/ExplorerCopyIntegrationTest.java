@@ -106,8 +106,8 @@ class ExplorerCopyIntegrationTest {
             assertTrue(window.ui.explorer.selectedRoot());
             window.command(TuinkCommand.EXPLORER_COPY);
             inspected(window);
-            assertEquals(directory, window.controller.explorerFileDialog().tree.root(),
-                "Root Copy starts at its parent, so the current root is not its own destination");
+            assertEquals(root, window.controller.explorerFileDialog().tree.root());
+            assertFalse(window.controller.explorerFileDialog().fullPath);
             chooseDestination(window, destination);
             chooseApply(window);
             completed(window);
@@ -140,13 +140,16 @@ class ExplorerCopyIntegrationTest {
             window.event(new PasteEvent(destination.toString()));
             assertFalse(dialog.destinationAllowed(), "Typing a path is not an accepted destination until Enter navigates there");
             window.event(KeyStroke.of(KeyStroke.Key.TAB));
+            assertEquals(ExplorerFileDialogView.Target.FULL_PATH, dialog.focus.focused().orElseThrow());
+            window.event(KeyStroke.of(KeyStroke.Key.TAB));
             assertEquals(ExplorerFileDialogView.Target.CANCEL, dialog.focus.focused().orElseThrow(),
                 "The disabled Copy action is excluded from focus traversal");
             assertFalse(Files.exists(destination.resolve("document.txt")));
             window.event(ctrl(KeyStroke.Key.L));
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             window.await(() -> !dialog.tree.loading());
-            assertEquals(destination, dialog.tree.root());
+            assertEquals(directory, dialog.tree.root());
+            assertEquals(destination, dialog.destinationFolder());
             assertTrue(dialog.destinationAllowed());
             assertEquals(directory, window.ui.explorer.root());
             chooseApply(window);
@@ -175,7 +178,7 @@ class ExplorerCopyIntegrationTest {
             chooseApply(window);
             window.await(() -> !window.documentIo.busy() && dialog.error != null);
             assertSame(dialog, window.controller.explorerFileDialog());
-            assertEquals(occupied.toString(), dialog.field.text());
+            assertEquals("occupied", dialog.field.text());
             assertEquals("original", Files.readString(window.document));
             assertEquals("other content", Files.readString(existing));
             assertEquals(binding, subject.binding());
@@ -239,10 +242,13 @@ class ExplorerCopyIntegrationTest {
             window.command(command);
             inspected(window);
             var dialog = window.controller.explorerFileDialog();
-            assertEquals(PathPresentation.full(sourceParent), dialog.field.text());
-            assertEquals(sourceParent, SavePathInput.parse(dialog.field.text()));
+            assertEquals(".", dialog.field.text());
+            assertEquals(sourceParent, dialog.destinationFolder());
             assertTrue(dialog.destinationAllowed());
 
+            dialog.setFullPath(true);
+            assertEquals(PathPresentation.full(sourceParent), dialog.field.text());
+            assertEquals(sourceParent, SavePathInput.parse(dialog.field.text()));
             window.event(KeyStroke.of(KeyStroke.Key.HOME));
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             window.await(() -> !dialog.tree.loading());

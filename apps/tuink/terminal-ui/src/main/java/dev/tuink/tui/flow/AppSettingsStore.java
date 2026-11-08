@@ -36,6 +36,7 @@ public final class AppSettingsStore {
     private static final String FORMAT = "2";
     private static final String KEY_FORMAT = "format";
     private static final String KEY_SHOW_TAB_BAR = "ui.showTabBar";
+    private static final String KEY_DOCUMENT_PATH = "ui.showDocumentPath";
     private static final String KEY_WRAP_LINES = "ui.wrapLines";
     private static final String KEY_WRAP_WORDS = "ui.wrapWords";
     private static final String KEY_READING_MODE = "ui.readingMode";
@@ -183,7 +184,8 @@ public final class AppSettingsStore {
             setting(repair, defaults.theme(), () -> parseEnum(p, KEY_THEME, UiStyles.Theme.class, path)),
             setting(repair, defaults.rightClickClipboard(), () -> parseOptionalBoolean(p, KEY_RIGHT_CLICK_CLIPBOARD, false, path)),
             setting(repair, defaults.markdownVisualCopy(), () -> parseOptionalBoolean(p, KEY_MARKDOWN_VISUAL_COPY, false, path)),
-            setting(repair, defaults.showFileHistoryNotifications(), () -> parseOptionalBoolean(p, KEY_FILE_HISTORY_NOTIFICATIONS, true, path))
+            setting(repair, defaults.showFileHistoryNotifications(), () -> parseOptionalBoolean(p, KEY_FILE_HISTORY_NOTIFICATIONS, true, path)),
+            setting(repair, defaults.showDocumentPath(), () -> parseOptionalBoolean(p, KEY_DOCUMENT_PATH, true, path))
         );
     }
 
@@ -267,6 +269,7 @@ public final class AppSettingsStore {
         Properties p = new Properties();
         p.setProperty(KEY_FORMAT, FORMAT);
         p.setProperty(KEY_SHOW_TAB_BAR, Boolean.toString(settings.showTabBar()));
+        p.setProperty(KEY_DOCUMENT_PATH, Boolean.toString(settings.showDocumentPath()));
         p.setProperty(KEY_WRAP_LINES, Boolean.toString(settings.wrapLines()));
         p.setProperty(KEY_WRAP_WORDS, Boolean.toString(settings.wrapWords()));
         p.setProperty(KEY_READING_MODE, Boolean.toString(settings.readingMode()));
@@ -557,6 +560,7 @@ public final class AppSettingsStore {
         unknown.remove(KEY_RIGHT_CLICK_CLIPBOARD);
         unknown.remove(KEY_MARKDOWN_VISUAL_COPY);
         unknown.remove(KEY_FILE_HISTORY_NOTIFICATIONS);
+        unknown.remove(KEY_DOCUMENT_PATH);
         if (!missing.isEmpty() || !unknown.isEmpty()) {
             throw invalid(path, "schema mismatch; missing=" + missing + ", unknown=" + unknown);
         }

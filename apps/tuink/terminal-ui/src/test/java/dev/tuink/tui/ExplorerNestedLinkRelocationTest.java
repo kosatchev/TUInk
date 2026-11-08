@@ -45,8 +45,7 @@ class ExplorerNestedLinkRelocationTest {
                 controller.open(ExplorerFileService.Action.MOVE, source, directory);
                 pending.remove().run();
                 assertTrue(io.collect());
-                controller.dialog().tree.setRoot(destination);
-                controller.dialog().field.set(destination.toString());
+                controller.dialog().navigate(destination.toString());
                 controller.confirm();
                 pending.remove().run();
                 assertTrue(io.collect());

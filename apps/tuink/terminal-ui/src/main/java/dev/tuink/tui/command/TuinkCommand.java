@@ -88,6 +88,7 @@ public enum TuinkCommand {
     MENU_EXPLORER("tuink.menu.explorer", "Open Explorer menu"),
 
     VIEW_TOGGLE_TAB_BAR("tuink.view.toggle-tab-bar", "Toggle tab bar"),
+    VIEW_TOGGLE_DOCUMENT_PATH("tuink.view.toggle-document-path", "Toggle document path"),
     VIEW_TOGGLE_MARKDOWN_PREVIEW("tuink.view.toggle-markdown-preview", "Toggle Markdown preview"),
     VIEW_PREVIEW_COPY_SOURCE("tuink.view.preview.copy-source", "Copy block source"),
     VIEW_PREVIEW_COPY_TABLE_TSV("tuink.view.preview.copy-table-tsv", "Copy table as TSV"),

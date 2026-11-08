@@ -28,7 +28,9 @@ class PreviewPresentationViewTest {
             assertTrue(fixture.context.tabs().isEmpty());
             assertNull(fixture.context.active());
             var frame = fixture.prepare(UiModalState.none(), 24, 80);
-            assertEquals(1, frame.contentTopRow());
+            assertEquals(2, frame.contentTopRow());
+            assertNotNull(frame.surface().pathBar());
+            assertEquals(1, frame.surface().pathBar().bounds().y());
             assertNull(frame.layers().tabBar());
             assertTrue(frame.surface().topBar().text().contains("READ"));
             assertTrue(frame.surface().bottomBar().contains("snapshot"));
@@ -47,7 +49,8 @@ class PreviewPresentationViewTest {
     @Test void livePairUsesPresentationOrderForTheTabBarAndRetainsSourceOwnership() {
         try (var fixture = new Fixture(true, directory.resolve("README.md"))) {
             var frame = fixture.prepare(UiModalState.none(), 24, 80);
-            assertEquals(2, frame.contentTopRow());
+            assertEquals(3, frame.contentTopRow());
+            assertEquals(2, frame.surface().pathBar().bounds().y());
             assertNotNull(frame.layers().tabBar());
             assertEquals(2, fixture.host.toPresentationTabItems(fixture.context, null).size());
             assertEquals("Source", fixture.host.toPresentationTabItems(fixture.context, null).getFirst().qualifier());

@@ -7,6 +7,7 @@ import dev.tuink.render.EditorLayout;
 import dev.tuink.render.RenderPlanBuilder;
 import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.widget.NoticeBanner;
+import dev.tuiframe.widget.PathBar;
 import dev.tuink.tui.ui.ConfirmBarView;
 import dev.tuiframe.explorer.ui.FileTreeView;
 import dev.tuink.tui.ui.HelpPage;
@@ -74,8 +75,14 @@ record FrameComposition(
         NotificationBar notification,
         WindowTextPainter.Layout textLayout,
         NoticeBanner.Placement deletedNotice,
-        NoticeBanner.Placement externalNotice
+        NoticeBanner.Placement externalNotice,
+        PathBar.Placement pathBar
     ) {
+        Surface(TopMenuView.TopBar topBar, String bottomBar, InlinePromptBar inlinePrompt,
+            NotificationBar notification, WindowTextPainter.Layout textLayout,
+            NoticeBanner.Placement deletedNotice, NoticeBanner.Placement externalNotice) {
+            this(topBar, bottomBar, inlinePrompt, notification, textLayout, deletedNotice, externalNotice, null);
+        }
         Surface {
             Objects.requireNonNull(topBar, "topBar");
             Objects.requireNonNull(bottomBar, "bottomBar");

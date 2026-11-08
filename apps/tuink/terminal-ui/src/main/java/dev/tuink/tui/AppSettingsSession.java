@@ -132,6 +132,7 @@ final class AppSettingsSession {
             base.autoSelectionHighlight(), base.markdownOpenBothTabs(), base.markdownOpenInPreview(),
             base.markdownCodeHighlighting(),
             base.gutterDiffMode(), base.tabWidth(),
-            base.tabInsertMode(), theme, base.rightClickClipboard(), base.markdownVisualCopy(), base.showFileHistoryNotifications());
+            base.tabInsertMode(), theme, base.rightClickClipboard(), base.markdownVisualCopy(),
+            base.showFileHistoryNotifications(), base.showDocumentPath());
     }
 }

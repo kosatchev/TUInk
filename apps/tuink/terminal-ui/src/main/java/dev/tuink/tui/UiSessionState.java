@@ -8,6 +8,7 @@ import dev.tuink.tui.style.UiStyles;
 final class UiSessionState {
     final ExplorerState explorer = new ExplorerState();
     boolean showTabBarSetting;
+    boolean showDocumentPathSetting = true;
     boolean wrapLinesSetting;
     boolean wrapWordsSetting;
     boolean readingModeSetting;
@@ -40,7 +41,8 @@ final class UiSessionState {
             autoSelectionHighlightSetting, markdownOpenBothTabsSetting, markdownOpenInPreviewSetting,
             markdownCodeHighlightingSetting,
             gutterDiffModeSetting, tabWidthSetting,
-            tabInsertModeSetting, theme, rightClickClipboardSetting, markdownVisualCopySetting, showFileHistoryNotificationsSetting);
+            tabInsertModeSetting, theme, rightClickClipboardSetting, markdownVisualCopySetting,
+            showFileHistoryNotificationsSetting, showDocumentPathSetting);
     }
 
     static UiSessionState from(AppSettings settings) {
@@ -51,6 +53,7 @@ final class UiSessionState {
 
     void apply(AppSettings settings) {
         showTabBarSetting = settings.showTabBar();
+        showDocumentPathSetting = settings.showDocumentPath();
         wrapLinesSetting = settings.wrapLines();
         wrapWordsSetting = settings.wrapWords();
         readingModeSetting = settings.readingMode();

@@ -126,7 +126,9 @@ class ExplorerFileActionsIntegrationTest {
             assertEquals(destination, dialog.tree.state().selectedId().path());
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             window.await(() -> !dialog.tree.loading());
-            assertEquals(destination, dialog.tree.root());
+            assertEquals(directory, dialog.tree.root());
+            assertEquals(destination, dialog.destinationFolder());
+            assertEquals("destination", dialog.field.text());
             assertEquals(directory, window.ui.explorer.root());
             chooseApply(window);
             window.await(() -> window.controller.explorerFileDialog() == null && !window.documentIo.busy());

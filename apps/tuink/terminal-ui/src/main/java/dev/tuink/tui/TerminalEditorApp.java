@@ -132,6 +132,7 @@ public class TerminalEditorApp {
     UiStyles.Theme theme = UiStyles.Theme.CYAN;
     UiStyles.Palette styles = UiStyles.forTheme(theme);
     final DeletedDocumentNotices deletedNotices = new DeletedDocumentNotices();
+    final DocumentPaths documentPaths = new DocumentPaths();
     final ExternalDocumentNotices externalNotices = new ExternalDocumentNotices();
     static final NoticeBanner.Action EXTERNAL_KEEP_ACTION = new NoticeBanner.Action("keep", "Keep");
     static final NoticeBanner.Action EXTERNAL_UPDATE_ACTION = new NoticeBanner.Action("update", "Update");
@@ -1221,6 +1222,7 @@ public class TerminalEditorApp {
             if (WidgetThemeKeys.MODAL_TITLE.equals(key)) {
                 return new CellStyle(border.fg(), border.bg(), true, border.underline());
             }
+            if (WidgetThemeKeys.PATH_BAR.equals(key)) return windows.renderGutter();
             if (WidgetThemeKeys.BUTTON.equals(key) || WidgetThemeKeys.BUTTON_DISABLED.equals(key)
                 || WidgetThemeKeys.TEXT_FIELD.equals(key) || WidgetThemeKeys.TEXT_FIELD_FOCUSED.equals(key)
                 || WidgetThemeKeys.TEXT_FIELD_DISABLED.equals(key)) return body;
@@ -1340,6 +1342,7 @@ public class TerminalEditorApp {
         boolean colorEnabled) {
         if (layers.explorer() != null) layers.explorer().paint(canvas,
             explorerWidgetTheme(colorEnabled));
+        if (surface.pathBar() != null) surface.pathBar().paint(canvas, explorerWidgetTheme(colorEnabled));
         if (surface.deletedNotice() != null)
             surface.deletedNotice().paint(canvas, noticeWidgetTheme(), WidgetState.NORMAL);
         if (surface.externalNotice() != null)

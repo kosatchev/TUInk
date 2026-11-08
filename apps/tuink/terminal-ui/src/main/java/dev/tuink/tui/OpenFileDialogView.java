@@ -24,6 +24,7 @@ import dev.tuiframe.widget.TextField;
 import dev.tuiframe.widget.WidgetState;
 import dev.tuiframe.widget.WidgetThemeKeys;
 import dev.tuiframe.explorer.ui.FileTreeView;
+import dev.tuiframe.explorer.ui.PathPresentation;
 import dev.tuink.tui.ui.OpenFileDialogController;
 import dev.tuink.tui.ui.OpenFileDialogController.OpenDialogLayout;
 import dev.tuink.tui.ui.NotificationPresentation;
@@ -138,6 +139,8 @@ final class OpenFileDialogView {
         private FocusScope<Control, Action> scope;
         private final TextField location = new TextField(TextField.PastePolicy.PRESERVE_TABS);
         private Path locationRoot;
+        private Path selectedDirectory;
+        private String locationBaseline;
         private OpenFileInputRouter.Focus pendingFocus = OpenFileInputRouter.Focus.LIST;
         private boolean compact;
         private Control focusBeforeCompact;
@@ -145,11 +148,30 @@ final class OpenFileDialogView {
         TextField location() { return location; }
 
         boolean locationEdited() {
-            return locationRoot != null && !location.text().equals(locationRoot.toString());
+            return locationBaseline != null && !location.text().equals(locationBaseline);
         }
 
         void synchronizeRoot(Path root) {
-            if (!Objects.equals(root, locationRoot) && location.set(root.toString())) locationRoot = root;
+            if (!Objects.equals(root, locationRoot)) resetLocation(root);
+        }
+
+        void resetLocation(Path root) {
+            if (location.set(PathPresentation.full(root))) {
+                locationRoot = root;
+                selectedDirectory = root;
+                locationBaseline = location.text();
+            }
+        }
+
+        Path selectedDirectory() { return selectedDirectory; }
+
+        void selectDirectory(dev.tuiframe.explorer.file.FileTreeModel.EntryId selected) {
+            if (selected == null || selected.kind() != dev.tuiframe.explorer.file.FileTreeModel.Kind.DIRECTORY
+                && selected.kind() != dev.tuiframe.explorer.file.FileTreeModel.Kind.PARENT) return;
+            if (location.set(PathPresentation.full(selected.path()))) {
+                selectedDirectory = selected.path();
+                locationBaseline = location.text();
+            }
         }
 
         OpenFileInputRouter.Focus focus() {

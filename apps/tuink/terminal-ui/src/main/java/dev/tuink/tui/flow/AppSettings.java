@@ -29,8 +29,23 @@ public record AppSettings(
     UiStyles.Theme theme,
     boolean rightClickClipboard,
     boolean markdownVisualCopy,
-    boolean showFileHistoryNotifications
+    boolean showFileHistoryNotifications,
+    boolean showDocumentPath
 ) {
+    public AppSettings(boolean showTabBar, boolean wrapLines, boolean wrapWords, boolean readingMode,
+        boolean confirmOnClose, boolean mouseMode, boolean highlightActiveGutter, boolean smartHomeEnd,
+        boolean autoIndent, boolean autoPairs, boolean autoList, boolean visibleWhitespace,
+        boolean syntaxHighlighting, boolean rainbowBrackets, boolean autoSelectionHighlight,
+        boolean markdownOpenBothTabs, boolean markdownOpenInPreview, boolean markdownCodeHighlighting,
+        GutterDiffMode gutterDiffMode, int tabWidth, TabInsertMode tabInsertMode, UiStyles.Theme theme,
+        boolean rightClickClipboard, boolean markdownVisualCopy, boolean showFileHistoryNotifications) {
+        this(showTabBar, wrapLines, wrapWords, readingMode, confirmOnClose, mouseMode,
+            highlightActiveGutter, smartHomeEnd, autoIndent, autoPairs, autoList, visibleWhitespace,
+            syntaxHighlighting, rainbowBrackets, autoSelectionHighlight, markdownOpenBothTabs,
+            markdownOpenInPreview, markdownCodeHighlighting, gutterDiffMode, tabWidth, tabInsertMode,
+            theme, rightClickClipboard, markdownVisualCopy, showFileHistoryNotifications, true);
+    }
+
     public static AppSettings defaults() {
         return new AppSettings(
             true,

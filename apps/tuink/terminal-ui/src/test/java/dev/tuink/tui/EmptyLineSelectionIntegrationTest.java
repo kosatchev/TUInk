@@ -125,7 +125,7 @@ class EmptyLineSelectionIntegrationTest {
 
     private static void assertOnlyTwoLineBreakCellsAreSelected(EditorWindowFixture window) {
         // Undo may leave a historical diff marker in the gutter's first cell.
-        int firstRow = 1;
+        int firstRow = 2; // The enabled document path occupies the row below the menu.
         assertEquals("1 abc", window.screenRow(firstRow).substring(1, 6));
         int textColumn = window.screenRow(firstRow).indexOf("abc");
         assertSelectedBlank(window, firstRow, textColumn + "abc".length());

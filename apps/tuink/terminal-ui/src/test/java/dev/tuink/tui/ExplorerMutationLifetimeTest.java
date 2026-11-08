@@ -108,8 +108,7 @@ class ExplorerMutationLifetimeTest {
                     () -> List.of(new ExplorerFileController.Binding(subject, original)), accepted::add, () -> {});
                 controller.open(ExplorerFileService.Action.MOVE, folder, directory);
                 pending.remove().run(); io.collect();
-                controller.dialog().tree.setRoot(destination);
-                controller.dialog().field.set(destination.toString());
+                controller.dialog().navigate(destination.toString());
                 controller.confirm();
                 assertTrue(controller.mutating());
                 controller.close();
@@ -145,8 +144,7 @@ class ExplorerMutationLifetimeTest {
                     () -> List.of(new ExplorerFileController.Binding(subject, expected)), accepted::add, () -> {});
                 controller.open(ExplorerFileService.Action.MOVE, alias, directory);
                 pending.remove().run(); io.collect();
-                controller.dialog().tree.setRoot(destination);
-                controller.dialog().field.set(destination.toString());
+                controller.dialog().navigate(destination.toString());
                 controller.confirm(); pending.remove().run(); io.collect();
                 var outcome = accepted.getFirst();
                 assertTrue(outcome.result().succeeded());

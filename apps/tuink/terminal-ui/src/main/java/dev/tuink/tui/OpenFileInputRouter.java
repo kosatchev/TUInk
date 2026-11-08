@@ -34,7 +34,8 @@ final class OpenFileInputRouter {
         }
     }
 
-    record OpenLocation(String value) implements Intent {
+    record OpenLocation(String value, boolean chooseDirectory) implements Intent {
+        OpenLocation(String value) { this(value, false); }
         OpenLocation { Objects.requireNonNull(value, "value"); }
     }
 
@@ -144,6 +145,8 @@ final class OpenFileInputRouter {
         Object surfaceId
     ) {
         Result result = routeInput(dialog, focusState, event, nowNanos, doubleClickWindowNanos, capture, surfaceId);
+        if (dialog.folderRoot() != null && !Objects.equals(dialog.tree().state().selectedId(), result.state().selectedId()))
+            focusState.selectDirectory(result.state().selectedId());
         if (dialog.folderRoot() != null && result.intent() instanceof OpenFile) {
             result = captured(result.state(), result.focus()).withPointerCapture(result.pointerCaptureRequest());
         }
@@ -255,9 +258,11 @@ final class OpenFileInputRouter {
                     }
                     return switch (target.id()) {
                         case OK -> focusState.locationEdited()
-                            ? intent(current.resetClickTracking(), buttonFocus, new OpenLocation(dialog.location().text()))
+                            ? intent(current.resetClickTracking(), buttonFocus,
+                                new OpenLocation(dialog.location().text(), dialog.folderRoot() != null))
                             : dialog.folderRoot() != null
-                                ? intent(current.resetClickTracking(), buttonFocus, new ChooseDirectory(dialog.folderRoot()))
+                                ? intent(current.resetClickTracking(), buttonFocus, new ChooseDirectory(
+                                    focusState.selectedDirectory() == null ? dialog.folderRoot() : focusState.selectedDirectory()))
                                 : confirmSelection(placement, buttonFocus);
                         case CANCEL, CLOSE -> intent(current.resetClickTracking(), buttonFocus, new CloseDialog());
                         case HIDDEN -> {

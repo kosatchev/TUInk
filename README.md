@@ -148,7 +148,10 @@ Preview tab immediately to the right of Source. Both participate in normal tab
 navigation; the selected tab fills the document area. `Ctrl+P` from Preview
 or **View → MD Source** selects Source at the current Preview position. If
 Source has been closed, it reopens the linked file from disk in a fresh Source
-tab on the left. Empty or unfinished previews open Source without moving its
+tab. An unsaved frozen Preview or one with external Undo/Redo history stays in
+its own tab; Source opens independently so that retained text and history remain
+available. An ordinary unchanged snapshot rejoins the Source/Preview pair.
+Empty or unfinished previews open Source without moving its
 cursor.
 
 Preview is available for Markdown filenames (`.md`, `.markdown`, `.mdown`,
@@ -191,9 +194,10 @@ appear in the bottom status row. Only an active Find input uses a separate row.
 
 `Ctrl+W` closes the selected tab. Closing Source uses the usual Save / Discard /
 Cancel decision; Preview may remain with its accepted immutable raw snapshot.
-The closed editor and its Undo history are released. Closing that Preview has
-no second dirty prompt and creates no extra recovery draft. Snapshot-only tabs
-are session-only and are not restored at startup. During publication the snapshot
+The closed editor and its earlier Undo history are released. Closing an unchanged
+snapshot has no second dirty prompt. A later external Keep or Undo can leave
+unsaved frozen text; that draft participates in close/quit confirmation and recovery.
+Preview layout and its session history are not restored at startup. During publication the snapshot
 stays open while TUInk waits for the result; an unconfirmed outcome keeps the app
 and snapshot open for verification.
 
@@ -244,10 +248,12 @@ an error without changing open documents. Reads remain bounded if the file grows
 If an edit leaves an empty line between bare CR and LF endings, that empty
 line's ending becomes CRLF so saving and reopening retain both line breaks.
 
-Normal saves compare the destination with the bytes last opened or saved.
+Normal saves compare the destination with the bytes last opened, saved, or
+explicitly acknowledged with Keep/Update.
 A change detected during these checks retains your edits and reports a
-conflict. Use Save As with a different name to keep both versions, or reopen
-the file. This check also applies to recovered documents. Locks coordinate
+conflict. Use the external-change warning's Keep/Update actions, or Save As with
+a different name to keep both versions. This check also applies to recovered
+documents. Locks coordinate
 TUInk instances of the same user across configuration profiles. Other editors
 do not use these locks: a change after the final check can still be overwritten.
 Save As checks existing destinations with streaming reads. Longer checks and
@@ -343,7 +349,7 @@ a long rescan. These cases do not have a constant-time responsiveness guarantee.
 | `Ctrl+K` / `Ctrl+Shift+S` / `Ctrl+Shift+F4` | Save As |
 | `Ctrl+X` / `Ctrl+C` / `Ctrl+V` | Cut / copy / paste using the system clipboard when available |
 | `Ctrl+A` | Select all text in the focused document or text field |
-| `Ctrl+Z` / `Ctrl+Y` | Undo / redo |
+| `Ctrl+Z` / `Ctrl+Y` | Undo / redo in the focused document, field, or sidebar explorer |
 | `Ctrl+N` | Open a new tab |
 | `Ctrl+Tab` / `Super+Tab` / `Ctrl+PageDown` | Select the next tab |
 | `Ctrl+Shift+Tab` / `Ctrl+PageUp` | Select the previous tab |
@@ -526,6 +532,7 @@ In terminals where Backspace sends `^H`, use `Alt+.` or the Hidden button.
 Legacy `Ctrl+H` is interpreted as
 Backspace because the two keys send the same byte.
 
+The picker is read-only: browsing never creates, renames, moves or deletes entries.
 The picker bounds the complete expanded tree to 20,000 entries and a memory
 budget. A directory that exceeds the remaining budget is omitted with a visible
 error; its contents are not presented as a complete listing. Directory item
@@ -568,12 +575,69 @@ behavior, as do ANSI-16 and `--no-color` output.
 
 The Explorer menu creates files and folders inside the selected folder, or
 beside a selected file. **Rename...** selects the current name for replacement
-without overwriting another entry. **Move...** opens a separate destination folder tree;
-Ctrl+L edits its path, Enter navigates, and **Move here** confirms the destination.
-Existing names are never overwritten. **Delete...** permanently removes the
-selected entry and any directory contents after confirmation. The open root
-cannot be renamed, moved or deleted. Open document text, unsaved edits and undo
-history survive renames and moves; deleted documents become unnamed drafts requiring Save As.
+without overwriting another entry. **Move...** and **Copy...** open a separate
+destination folder tree; Ctrl+L edits its path, Enter navigates, and **Move here**
+or **Copy here** confirms the destination. Copy retains the source and copies
+the on-disk file or directory; unsaved editor changes remain in their open document.
+Existing names are never overwritten. **Move to Trash...** uses the Linux system
+Trash when available; failure never falls back to permanent deletion.
+**Delete permanently...** separately removes the selected entry and any directory
+contents after confirmation. The open root cannot be renamed, moved or deleted;
+it can be copied to a folder outside its own tree.
+Open document text, unsaved edits and
+text undo history survive renames and moves.
+
+To move with the mouse, hold an entry for 1 second and drag it onto a folder.
+A label follows the pointer and the destination is highlighted. Hover over a
+collapsed folder to expand it; the tree scrolls near its upper and lower edges.
+Only releasing over a valid destination starts one move. Escape cancels the
+gesture. The file pickers in popups allow browsing without file operations or
+file dragging.
+
+**Explorer → Undo / Redo** reverses moves, renames, copies and creation in the current
+explorer session. **Ctrl+Z / Ctrl+Y** targets file history only while the sidebar
+has focus; document and input-field history remain separate. Undoing creation
+requires the same empty file or empty directory: it refuses to remove saved
+content, a populated directory or a replaced entry. Undoing a copy requires its
+complete tree to remain unchanged; Redo refuses a source changed since copying.
+Copies larger than 10,000 entries still complete, but show an Undo-unavailable
+warning and clear earlier file history to keep memory use bounded.
+File history checks identities
+and never overwrites an occupied destination. Permanent deletion and Trash cannot
+be undone in TUInk and clear its earlier file history. Restore trashed entries
+through the system Trash. Successful file Undo/Redo briefly shows a yellow notice
+at the bottom of the sidebar; **Settings → File Undo/Redo notifications** disables
+these success notices while retaining errors.
+
+Deleting an open file keeps its text as an unnamed dirty draft requiring Save As.
+A yellow banner beneath its document or Preview reports the removal and remains
+until a successful file save or **Dismiss**. Editing, changing tabs, a failed or
+cancelled save, and recovery checkpoints do not dismiss it.
+
+TUInk checks the active document's file in the background, including while idle.
+It checks metadata about once a second and rechecks content roughly every five
+seconds when metadata stays unchanged, using bounded reads. Tab activation and
+**Explorer → Refresh explorer** request a fresh check. These are periodic reads,
+without an OS filesystem watcher; inactive documents are checked when activated.
+
+Changed bytes show a persistent yellow banner below Source or Preview with
+**Keep** and **Update**. Keep retains the current text and format and acknowledges
+that exact disk version. The retained text stays dirty when it differs, and the
+next explicit Save can replace the acknowledged version after the usual guarded
+checks. Update accepts the disk text and format as one Undo step and marks that
+version clean. Earlier local Undo history and the historical gutter markers from
+the original open remain available. Undo restores text and format; it keeps the
+newly acknowledged disk baseline, so restoring older text makes the document dirty.
+**File → Keep current text** and **File → Update from disk** provide keyboard access;
+Update from disk remains available after Keep.
+
+Live Preview follows the shared Source decision. A frozen Preview supports the
+same Keep/Update choices and session Undo/Redo for those changes, with Save/Discard/
+Cancel guarding unsaved text on close or quit. Its dirty text also participates in
+recovery. Successful saves from TUInk update the baseline without showing a false
+external warning. A newer disk version, intervening edits, read or decoding errors,
+and oversized files retain the current buffer and unresolved warning. No external
+change reloads text automatically.
 
 Explorer follows File in the top menu; F1–F7 retain their existing command
 assignments. Search, Save As, document confirmations, notifications and status
@@ -584,7 +648,7 @@ Drag the divider to resize the panel. When the terminal is too narrow for both
 regions, the explorer temporarily disappears; enlarging the terminal restores
 it with the preferred width. **Explorer → Width** cycles 24, 30 and 40 columns.
 **Explorer → Refresh explorer** reloads folder contents
-after external changes. The first version has one root, no automatic filesystem
+after external changes. The first version has one root, no OS filesystem
 watcher, and keeps explorer state only for the current run. Its loading uses the
 same background scanning and bounded tree model as the file picker. File actions
 refresh the affected directories; saving existing content does not rescan the tree.
@@ -761,6 +825,10 @@ Recovery data is stored in the selected profile's `tuink/recovery` directory
 Active recovery snapshots are isolated between editor instances. If input ends
 or the editor is interrupted, its snapshots remain available for recovery on
 the next start.
+Recovery retains current text, file format and the accepted disk baseline,
+including unsaved frozen Preview text after external changes. Undo/Redo history
+and the original text used for historical gutter markers belong to the current
+session and are not stored in recovery.
 Autosave writes run serially in the background with at most one snapshot in
 flight. The UI captures immutable text blocks; the worker assembles and writes
 the snapshot. Shutdown waits for that write before final recovery saves or cleanup.
@@ -843,9 +911,11 @@ training, checksums and advanced settings.
 | **TUInk** | Non-modal terminal text editor | Functional application |
 | **TUIframe** | Reusable terminal UI runtime and widgets | Internal, incubating API |
 
-TUIframe is split into `tuiframe-core`, `tuiframe-jline`, and
-`tuiframe-widgets`. TUInk deliberately keeps editor-specific state and policy
-outside those reusable modules.
+TUIframe is split into `tuiframe-core`, `tuiframe-jline`, `tuiframe-widgets` and
+`tuiframe-explorer`. The explorer module owns filesystem browsing, drag gestures,
+file operations, guarded session history and the Trash provider. Each instance
+has read-only or file-management access; TUInk enables management only in its
+sidebar. TUInk retains document bindings, editor commands and application policy.
 
 ## Repository layout
 
@@ -877,6 +947,7 @@ libs/
     core/                   # :tuiframe-core
     jline/                  # :tuiframe-jline
     widgets/                # :tuiframe-widgets
+    explorer/               # :tuiframe-explorer — filesystem UI and operations
   unicode-text/             # :unicode-text
 verification/
   ui/                       # whole-application terminal scenarios

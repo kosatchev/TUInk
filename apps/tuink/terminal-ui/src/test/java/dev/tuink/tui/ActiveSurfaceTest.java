@@ -102,4 +102,30 @@ class ActiveSurfaceTest {
             assertEquals(InputActionDispatcher.Intent.HELP_AUTHOR, help.ui().intent());
         }
     }
+
+    @Test void externalActionsRemainAvailableAfterKeepWhileFrozenHistoryStaysInItsContentScope() {
+        var source = TestSurfaces.source(new UiSessionState());
+        assertFalse(source.allows(TuinkCommand.DOCUMENT_KEEP_EXTERNAL));
+        assertFalse(source.allows(TuinkCommand.DOCUMENT_UPDATE_EXTERNAL));
+        var changed = source.withExternal(true, true, false, false);
+        assertTrue(changed.allows(TuinkCommand.DOCUMENT_KEEP_EXTERNAL));
+        assertTrue(changed.allows(TuinkCommand.DOCUMENT_UPDATE_EXTERNAL));
+        var kept = changed.withExternal(true, false, false, false);
+        assertFalse(kept.allows(TuinkCommand.DOCUMENT_KEEP_EXTERNAL));
+        assertTrue(kept.allows(TuinkCommand.DOCUMENT_UPDATE_EXTERNAL));
+        assertTrue(kept.withRuntime(false, false).withFocus(ActiveSurface.Focus.CONTROL)
+            .allows(TuinkCommand.DOCUMENT_UPDATE_EXTERNAL));
+        var frozen = changed.withKind(ActiveSurface.Kind.FROZEN_PREVIEW).withExternal(true, true, true, false);
+        assertTrue(frozen.allows(TuinkCommand.EDIT_UNDO));
+        assertFalse(frozen.allows(TuinkCommand.EDIT_REDO));
+        assertFalse(frozen.withFocus(ActiveSurface.Focus.EDITABLE_TEXT).allows(TuinkCommand.EDIT_UNDO));
+        assertFalse(frozen.withFocus(ActiveSurface.Focus.CONTROL).allows(TuinkCommand.EDIT_UNDO));
+        assertFalse(frozen.withKind(ActiveSurface.Kind.LIVE_PREVIEW).allows(TuinkCommand.EDIT_UNDO));
+        var locked = new ActiveSurface(frozen.presentationId(), frozen.kind(), frozen.focus(),
+            ActiveSurface.ModalScope.WINDOW, true, true, true, true, true, false, frozen.language())
+            .withExternal(true, true, true, true);
+        assertFalse(locked.allows(TuinkCommand.DOCUMENT_KEEP_EXTERNAL));
+        assertFalse(locked.allows(TuinkCommand.DOCUMENT_UPDATE_EXTERNAL));
+        assertFalse(locked.allows(TuinkCommand.EDIT_UNDO));
+    }
 }

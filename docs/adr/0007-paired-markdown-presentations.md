@@ -55,15 +55,21 @@ Binding feature имеет два состояния:
   сессией редактора;
 - `ClosedSnapshot`: полный immutable исходник и отдельный получатель
   сохранения; ссылок на `EditorDocumentSession`, `TuiDocumentSession`, engine
-  и history нет.
+  и прежнюю editing history нет; история последующих внешних изменений
+  принадлежит frozen subject.
 
-ID preview и группы сохраняются при повторном открытии. Новая сессия
+ID preview и группы сохраняются при обычном повторном открытии. Новая сессия
 редактора получает новые ID. Поколение связи растёт при freeze, повторном
 открытии и замене ресурса. Worker receipts проверяются по presentation ID,
 поколению, исходнику и operation token.
 
 Ctrl+P из source создаёт/активирует preview, из live preview активирует
 существующий source. Из closed preview команда запускает чтение файла с диска.
+Если frozen subject несохранён или имеет внешнюю Undo/Redo history, повторное
+открытие не relink/retire этот subject: Source добавляется независимо с новым
+document/group ID, а прежние Preview, текст, история и recovery остаются.
+При уже открытом владельце ресурса выбирается тот Source без замены frozen
+вкладки. Пользователь получает явное сообщение об отдельных вкладках.
 Обычные команды вкладок работают с тем же registry. Закрытие preview не
 закрывает source. Закрытие source проходит Save / Discard / Cancel и завершает
 редакторскую сессию даже при оставшемся preview.
@@ -91,8 +97,13 @@ freeze. Явно завершённый Save As обновляет resource/base
 
 Подготовка снимка и admission бюджета завершаются до retirement source.
 При отказе редактор, preview и прежняя membership остаются на месте. После
-Discard frozen snapshot не входит в dirty/recovery registry, а закрытие
-оставшегося preview не вызывает второй вопрос о dirty документе.
+Discard неизменённый frozen snapshot не входит в dirty/recovery registry, а
+закрытие оставшегося preview не повторяет вопрос об уже закрытом source.
+Последующий Keep внешней версии или Undo может оставить несохранённый frozen
+текст: он уже участвует в dirty-индикации, close/quit guards и recovery. Для
+внешних изменений frozen subject хранит собственную историю текущего сеанса;
+прежняя история закрытого editor не удерживается. Recovery использует текущую
+схему текста/формата/дискового baseline, без истории Undo и Preview layout.
 
 ### Открытие и сохранение
 
@@ -104,7 +115,8 @@ aliases и admission. Уже открытый dirty владелец ресур�
 
 `DocumentIoCoordinator` получает общий save-subject port. Live adapter
 сохраняет существующее backend поведение. Frozen subject владеет только
-immutable исходником, binding, поколением и собственным временем жизни I/O.
+immutable исходником, binding, поколением, историей принятых внешних изменений
+и собственным временем жизни I/O.
 Он не создаёт `EditorDocumentSession` или engine. Inspection, authorization,
 receipt validation, cancellation и неизвестный результат публикации остаются
 одним storage protocol; отдельного `Files.write` пути нет.

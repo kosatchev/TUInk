@@ -15,6 +15,8 @@ public enum TuinkCommand {
     DOCUMENT_OPEN("tuink.document.open", "Open document"),
     DOCUMENT_SAVE("tuink.document.save", "Save document"),
     DOCUMENT_SAVE_AS("tuink.document.save-as", "Save document as"),
+    DOCUMENT_KEEP_EXTERNAL("tuink.document.keep-external", "Keep current text after external change"),
+    DOCUMENT_UPDATE_EXTERNAL("tuink.document.update-external", "Update from disk"),
     DOCUMENT_FORMAT("tuink.document.format", "Change document format"),
     DOCUMENT_FORMAT_APPLY("tuink.document.format.apply", "Apply document format"),
     DOCUMENT_FORMAT_CANCEL("tuink.document.format.cancel", "Cancel document format"),

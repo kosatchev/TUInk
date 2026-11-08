@@ -153,6 +153,7 @@ final class WindowChrome {
         var textLayout = new WindowTextPainter.Layout(statusSurface, promptSurface, noticeSurface);
         var documentId = TerminalEditorApp.documentId(input.context().activePresentation());
         var deletedBanner = host.deletedNotices.banner(documentId);
+        var externalBanner = host.externalNoticeBanner(documentId);
         NoticeBanner.Placement deletedNotice = null;
         NoticeBanner.Placement externalNotice = null;
         int bannerRows = Math.max(0, input.rows() - 1 - top - prompt.height() - notification.height());
@@ -167,7 +168,14 @@ final class WindowChrome {
             bannerRows -= height;
             bannerBottom -= height;
         }
-
+        if (externalBanner != null && !windowPrompt) {
+            int height = Math.min(externalBanner.preferredHeight(documentPane.width()), bannerRows);
+            var bannerSurface = document.child(new Rect(0,
+                bannerBottom - height - document.bounds().y(), documentPane.width(), height));
+            externalNotice = externalBanner.place(host.externalNotices.scopeId(documentId), bannerSurface.bounds(),
+                bannerSurface.clip(), bannerEnabled && !host.externalNotices.busy(documentId)
+                    && !input.surface().documentLocked() && !input.surface().windowIoBusy());
+        }
         SaveAsBarView.Placement placedSave = null;
         ConfirmBarView.Placement placedConfirm = null;
         SearchBarView.Placement placedSearch = null;

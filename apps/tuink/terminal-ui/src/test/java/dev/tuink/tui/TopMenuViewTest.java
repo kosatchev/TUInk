@@ -204,6 +204,8 @@ class TopMenuViewTest {
                 "tuink.document.open-encoding",
                 "tuink.document.save",
                 "tuink.document.save-as",
+                "tuink.document.keep-external",
+                "tuink.document.update-external",
                 "tuink.document.format",
                 "tuink.document.reopen-encoding",
                 "tuink.document.recover-drafts",

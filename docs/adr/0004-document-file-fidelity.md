@@ -25,11 +25,37 @@ The document also retains `CREATE_NEW` versus `REPLACE_EXISTING` filesystem
 intent: opening a missing path cannot overwrite a file that appears before the
 first save, and recovery preserves the same constraint across restart.
 Undo snapshots and recovery snapshots carry the same file metadata.
-The document retains a SHA-256 baseline of the exact bytes last loaded or saved,
-along with the resolved target path. Normal save and Save As to the current file
+The document retains a SHA-256 baseline of the exact bytes last loaded, saved,
+or explicitly accepted through Keep/Update, along with the resolved target path.
+Normal save and Save As to the current file
 reject changed, removed, retargeted, or unverifiable files before committing.
 Recovery retains this disk baseline separately from the edited document text.
 Save As to a different path remains the way to preserve both versions.
+
+External changes are observed separately from saving. The application inspects
+the active subject's file on a worker: metadata about once a second, with a
+bounded content/fingerprint check roughly every five seconds even when metadata is
+unchanged. Activation and Refresh force a fresh check. There is no OS watcher.
+Observations carry the subject, expected resource binding, generation and exact
+byte version; the window never treats access denial or unknown I/O as removal.
+
+`DocumentSaveSubject.acceptExternal(expected, loaded, update)` applies an explicit
+owner decision after a fresh worker read. Keep acknowledges the observed disk
+baseline while retaining current text and format. Update accepts that version's
+text and format in one Undo entry while retaining earlier local history and the
+original-open historical gutter baseline. The accepted disk baseline is separate
+from Undo: undoing Update restores the previous text/format and can make it dirty,
+but does not authorize saving against an older disk version. A changed binding,
+generation, painted version or unsuccessful read retains the buffer and decision
+notice. A save performed by TUInk advances the baseline without a false external
+change notification.
+
+Live Source and Preview share this document decision. A frozen Preview retains
+its own session history for accepted external changes through `FrozenDocumentSession`;
+unsaved retained text participates in close/quit guards and recovery. Recovery
+uses the existing text/format/disk-baseline fields, not a new schema. Neither Undo
+history nor the original text used for historical gutter markers is serialized.
+
 Save As captures immutable document/history preparation on the owner, then
 inspects the address on a worker. The inspection pins the physical target,
 canonical parent identity, existing-file identity/attributes and a streaming
@@ -109,10 +135,42 @@ baselines to the new path while retaining the original fingerprint, so a move
 cannot silently accept external edits. Removing a live document's resource
 retains its text as an unnamed dirty draft requiring Save As.
 
-Explorer mutations belong to the application file service. Their worker
-receipts are always accepted by the window owner, including at shutdown;
-read cancellation cannot abandon a move or deletion after publication.
-Terminal widgets and the portable editor contracts contain no filesystem paths.
+Filesystem mutations and their guarded session history belong to
+`tuiframe-explorer` (`ExplorerFileService` and `ExplorerOperations`). Each
+`Explorer` has an immutable read-only or file-management profile; read-only
+instances reject mutations even if called outside the UI. TUInk's adapter owns
+worker scheduling and reconciles operation receipts with open document bindings.
+Receipts are always accepted by the window owner, including at shutdown; read
+cancellation cannot abandon a move or deletion after publication. The low-level
+`tuiframe-widgets` module and portable editor contracts contain no filesystem
+paths.
+
+Filesystem Undo/Redo remains separate from document text history. It reverses
+copy, move, rename and creation only while expected identities and destinations remain
+valid. Copy publishes a verified staging tree without deleting its source; popup
+destination trees remain read-only. It copies disk data without saving or rebinding
+the source document. Undo Copy checks the complete copy's identity, byte digests,
+links and attributes before removing it. Redo checks the original source and the
+staged contents before publication. Trusted inverse operations can refresh only
+the identities and directory times they changed, preserving checks on unrelated
+entries. Copy history stores bounded metadata and SHA-256 digests, not contents;
+a copy exceeding 10,000 entries completes with a visible warning and ends earlier
+history rather than admitting an unsafe inverse.
+
+Undo Create removes only the same empty file or directory, preserving
+saved content and populated folders. A successful application save refreshes
+the relocation history's expected identity after atomic file replacement; it
+never authorizes Undo Copy to remove saved changes. Permanent deletion
+and Linux system Trash clear earlier file history and have no in-application
+inverse. An unavailable or failed Trash operation never authorizes permanent
+deletion.
+
+Confirmed removal also records an application-owned warning for the document.
+Its text remains an unnamed dirty draft; the warning appears beneath Source or
+its paired Preview until a successful file save or explicit Dismiss. A failed or
+cancelled save, text edit or recovery checkpoint does not clear it. The background
+observer, activation/refresh and save checks distinguish missing files from access
+denial and unknown I/O failures; there is no filesystem watcher.
 
 - No-edit open/save preserves BOM, final EOL, and mixed separators.
 - Editing a newline uses the document default while untouched separators remain

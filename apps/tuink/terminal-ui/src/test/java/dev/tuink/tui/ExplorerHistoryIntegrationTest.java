@@ -82,7 +82,94 @@ class ExplorerHistoryIntegrationTest {
         }
     }
 
-
+    @ParameterizedTest
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void mixedFileHistoryPreservesLiveAndFrozenPreviewDraftsAndChecksCopyRedoAfterSave(boolean frozen, boolean save) throws Exception {
+        try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("# Original"))) {
+            if (!frozen) window.event(new TextInput("draft "));
+            window.command(TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW);
+            window.await(() -> window.preview().ready());
+            DocumentSaveSubject subject;
+            String diskBefore;
+            String draft;
+            if (frozen) {
+                window.command(TuinkCommand.TAB_PREVIOUS);
+                window.command(TuinkCommand.TAB_CLOSE);
+                window.await(() -> window.selected() instanceof PreviewTab preview
+                    && preview.source() instanceof PreviewTab.ClosedSnapshot && window.preview().ready());
+                subject = ((PreviewTab.ClosedSnapshot) ((PreviewTab) window.selected()).source()).subject();
+                diskBefore = "# External";
+                draft = "# Original";
+                Files.writeString(window.document, diskBefore);
+                window.await(() -> window.host.externalNotices.visible(subject.documentId()));
+                window.command(TuinkCommand.DOCUMENT_KEEP_EXTERNAL);
+                window.await(() -> !window.documentIo.busy() && !window.host.externalNotices.visible(subject.documentId()));
+            } else {
+                subject = window.active().documentSession().document();
+                diskBefore = "# Original";
+                draft = "draft # Original";
+            }
+            var presentation = window.selected().presentationId();
+            open(window);
+            select(window, directory);
+            window.command(TuinkCommand.EXPLORER_NEW_DIRECTORY);
+            window.event(new TextInput("created"));
+            window.event(KeyStroke.of(KeyStroke.Key.ENTER));
+            completed(window);
+            Path created = directory.resolve("created");
+            transfer(window, TuinkCommand.EXPLORER_COPY, window.document, created);
+            assertEquals(window.document, JvmDocumentStorage.pathOf(subject.binding().resource()));
+            assertEquals(diskBefore, Files.readString(created.resolve("document.md")));
+            select(window, window.document);
+            window.command(TuinkCommand.EXPLORER_RENAME);
+            inspected(window);
+            window.event(new TextInput("renamed.md"));
+            window.event(KeyStroke.of(KeyStroke.Key.ENTER));
+            completed(window);
+            transfer(window, TuinkCommand.EXPLORER_MOVE, directory.resolve("renamed.md"), created);
+            assertEquals(created.resolve("renamed.md"), JvmDocumentStorage.pathOf(subject.binding().resource()));
+            if (save) {
+                window.command(TuinkCommand.DOCUMENT_SAVE);
+                window.await(() -> !window.documentIo.busy() && !(subject instanceof FrozenDocumentSession retained
+                    ? retained.unsavedExternalChanges() : window.active().state().isDirty()));
+                assertEquals(draft, Files.readString(created.resolve("renamed.md")));
+            }
+            for (int index = 0; index < 4; index++) {
+                window.command(TuinkCommand.EXPLORER_UNDO);
+                completed(window);
+                assertFalse(window.ui.explorer.tree.noticeIsError());
+            }
+            assertFalse(Files.exists(created));
+            assertEquals(window.document, JvmDocumentStorage.pathOf(subject.binding().resource()));
+            assertEquals(save ? draft : diskBefore, Files.readString(window.document));
+            assertEquals(presentation, window.selected().presentationId());
+            if (frozen) assertEquals(List.of(draft), ((FrozenDocumentSession) subject).source().text().lines());
+            else assertEquals(List.of(draft), window.active().tabSession().model().snapshotLines());
+            window.command(TuinkCommand.EXPLORER_REDO);
+            completed(window);
+            window.command(TuinkCommand.EXPLORER_REDO);
+            completed(window);
+            if (save) {
+                assertTrue(window.ui.explorer.tree.noticeIsError(), "Changed disk contents must refuse the old copy's Redo");
+                assertTrue(window.ui.explorer.canRedo());
+                assertFalse(Files.exists(created.resolve("document.md")));
+                assertEquals(draft, Files.readString(window.document));
+            } else {
+                assertFalse(window.ui.explorer.tree.noticeIsError());
+                assertEquals(diskBefore, Files.readString(created.resolve("document.md")));
+                for (int index = 0; index < 2; index++) {
+                    window.command(TuinkCommand.EXPLORER_REDO);
+                    completed(window);
+                    assertFalse(window.ui.explorer.tree.noticeIsError());
+                }
+                assertEquals(created.resolve("renamed.md"), JvmDocumentStorage.pathOf(subject.binding().resource()));
+                assertEquals(diskBefore, Files.readString(created.resolve("renamed.md")));
+            }
+            assertEquals(presentation, window.selected().presentationId());
+            if (frozen) assertEquals(!save, ((FrozenDocumentSession) subject).unsavedExternalChanges());
+            else assertEquals(!save, window.active().state().isDirty());
+        }
+    }
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})

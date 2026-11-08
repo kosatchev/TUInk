@@ -41,8 +41,26 @@ Changes on the development branch after [v0.18.0](0.18.0.md).
   trashed entries.
 - **File operation lifetime:** Moves retain open documents, dirty state and
   undo history while updating resource bindings, including Preview. Deleting
-  an open file retains its text as an unnamed draft. Structural changes refresh
+  an open file retains its text as an unnamed dirty draft, with a persistent yellow
+  banner below the document or Preview. Only a successful file save or Dismiss
+  clears the banner. External missing-file checks run in the background and on
+  activation, refresh and save, without a watcher. Structural changes refresh
   affected folders without rescanning unrelated expanded directories.
+- **External file changes:** Active files are checked in the background, with
+  metadata checks about every second and bounded content checks roughly every
+  five seconds even when metadata is unchanged. Activation and Refresh request a
+  fresh check; no OS watcher is required. Changed bytes show a persistent yellow
+  Keep/Update banner in the document pane. Keep acknowledges the exact disk
+  version while retaining local text; a later Save still uses guarded checks.
+  Update accepts text and format in one Undo step, preserving earlier history
+  and historical gutter markers. Undo retains the accepted disk baseline.
+  File → Update from disk remains available after Keep. Own saves do not cause
+  false warnings; stale results and read/decoding failures preserve the buffer.
+- **Frozen external drafts:** Source and Live Preview share external decisions;
+  frozen Preview has session Undo/Redo for them. Unsaved frozen text appears dirty,
+  participates in close/quit Save/Discard/Cancel and recovery, and can save to its
+  bound file. Recovery uses the existing schema and retains current text/format/
+  baseline, without Undo history or the original text for historical gutters.
 - **Containers and popups:** Explorer follows File. File-action dialogs use the
   common light Help/Open popup theme. Child surface contexts share geometry,
   clipping and inherited widget roles. Document footers use the document pane;

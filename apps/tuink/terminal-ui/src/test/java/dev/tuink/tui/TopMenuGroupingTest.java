@@ -16,7 +16,8 @@ class TopMenuGroupingTest {
         var ui = UiSessionState.from(AppSettings.defaults());
         assertEquals(List.of(
             List.of(TAB_NEW, DOCUMENT_OPEN, DOCUMENT_OPEN_ENCODING),
-            List.of(DOCUMENT_SAVE, DOCUMENT_SAVE_AS, DOCUMENT_FORMAT, DOCUMENT_REOPEN_ENCODING),
+            List.of(DOCUMENT_SAVE, DOCUMENT_SAVE_AS, DOCUMENT_KEEP_EXTERNAL, DOCUMENT_UPDATE_EXTERNAL,
+                DOCUMENT_FORMAT, DOCUMENT_REOPEN_ENCODING),
             List.of(DOCUMENT_RECOVER_DRAFTS), List.of(APP_QUIT)), groups(ui, TopMenuController.FILE_INDEX));
         assertEquals(List.of(
             List.of(EDIT_UNDO, EDIT_REDO), List.of(EDIT_CUT, EDIT_COPY, EDIT_PASTE),
@@ -81,6 +82,23 @@ class TopMenuGroupingTest {
                 null, ignored -> fail(), () -> fail());
             assertTrue(result.handled());
         }
+    }
+
+    @Test void externalActionsAndFrozenHistoryUseTheProjectedDocumentCapabilities() {
+        var ui = UiSessionState.from(AppSettings.defaults());
+        var frozen = TestSurfaces.source(ui).withKind(ActiveSurface.Kind.FROZEN_PREVIEW)
+            .withExternal(true, true, true, false);
+        var file = menu(ui, TopMenuController.FILE_INDEX, frozen);
+        assertEquals("Keep current text", item(file, DOCUMENT_KEEP_EXTERNAL).label());
+        assertEquals("Update from disk", item(file, DOCUMENT_UPDATE_EXTERNAL).label());
+        assertTrue(item(file, DOCUMENT_KEEP_EXTERNAL).enabled());
+        assertTrue(item(file, DOCUMENT_UPDATE_EXTERNAL).enabled());
+        var edit = menu(ui, TopMenuController.EDIT_INDEX, frozen);
+        assertTrue(item(edit, EDIT_UNDO).enabled());
+        assertFalse(item(edit, EDIT_REDO).enabled());
+        var kept = menu(ui, TopMenuController.FILE_INDEX, frozen.withExternal(true, false, false, true));
+        assertFalse(item(kept, DOCUMENT_KEEP_EXTERNAL).enabled());
+        assertTrue(item(kept, DOCUMENT_UPDATE_EXTERNAL).enabled(), "Update remains available after Keep");
     }
 
     private static List<List<TuinkCommand>> groups(UiSessionState ui, int menuIndex) {

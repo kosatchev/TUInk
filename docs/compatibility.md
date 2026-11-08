@@ -290,6 +290,8 @@ ui.confirmOnClose=true
 ui.mouseMode=true
 # Optional; omission means false.
 ui.rightClickClipboard=false
+# Optional; omission means true.
+ui.fileHistoryNotifications=true
 ui.markdownOpenBothTabs=false
 ui.markdownOpenInPreview=false
 ui.highlightActiveLineNumber=true
@@ -335,6 +337,12 @@ keep their own representations. These are independent preferences;
 right-click copy/paste does not enable mouse tracking or change the ordinary
 clipboard commands. Existing required fields and unknown-key rejection remain
 strict; malformed optional values also reject the profile without rewriting it.
+
+The optional Boolean `ui.fileHistoryNotifications` defaults to `true` when absent.
+The writer records its current value explicitly. It controls only temporary
+success notices for filesystem Undo/Redo in the sidebar, independently of errors
+and persistent deleted-file or external-change banners. Existing format 2 profiles remain
+readable without conversion; malformed values follow the same rejection rules.
 
 Readable, bounded settings with unsupported schema, values, or properties
 syntax open **Fix / Delete / Later**, initially focused on Later. The question
@@ -462,16 +470,25 @@ not depend on an external process replacing the target with a directory.
 For example, `file:///home/user/legacy-%FF.txt` retains the byte `FF`; it must
 not become a filename containing the Unicode replacement character.
 
-`fileBaseline` records the last successfully loaded or saved file's physical,
-absolute normalized target path, original byte count and SHA-256 digest. It is
+`fileBaseline` records the last successfully loaded, saved or explicitly accepted
+Keep/Update version's physical, absolute normalized target path, original byte
+count and SHA-256 digest. It is
 preserved across recovery so saving a restored document can detect changes made
-by another process since that load or save. The digest is exactly 64 lowercase
+by another process since that accepted version. The digest is exactly 64 lowercase
 hexadecimal characters. `fileBaseline.byteSize` is a nonnegative integer, or `-1`
 when the original size is unknown. When `fileBaseline.present=false`, target,
 digest and byte size must all be empty. A baseline requires `currentFile.present=true` and
 `saveDisposition=REPLACE_EXISTING`. An existing-path snapshot without a known
 baseline can be restored, but ordinary save refuses to overwrite its file; use
 Save As with a different name or reopen the original file.
+
+Keep/Update does not change the recovery schema. Keep retains the current text
+and format with the acknowledged disk baseline; Update changes text/format as
+one session Undo step. Undo does not roll the accepted disk baseline back.
+Unsaved frozen Preview text after Keep or Undo is checkpointed with the same
+format 8 fields as live drafts. Recovery retains that current text, format and
+baseline, while Undo/Redo entries, external notice scopes and the original-open
+text used for historical gutter markers remain current-session state.
 
 `textGeneration` selects `<entry>.<generation>.txt`; the stable
 `<entry>.meta.properties` file is the commit point. Text is written to a new
@@ -559,7 +576,8 @@ stores continue using their original directory.
 Only an application exit authorized by the editor's quit flow clears its
 remaining runtime snapshots. End of input, an external interrupt, or an
 application failure preserves recovery and attempts a final save of dirty
-tabs without the usual autosave delay. Abrupt process termination can retain
+documents, including unsaved frozen Preview text, without the usual autosave
+delay. Abrupt process termination can retain
 only the last successfully committed snapshot.
 
 Automatic snapshot writes are spaced by at least two seconds after each

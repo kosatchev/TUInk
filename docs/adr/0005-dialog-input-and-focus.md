@@ -152,14 +152,46 @@ and resizing recalculates whether an item can be activated.
 Cancellation runs while the owner binding still exists and adopts its ordinary
 widget output. An immutable placement is rebuilt after cancellation before
 normal routing continues. Focus and capture are independent, so dragging a
-scrollbar does not require keyboard focus. The file-tree capture adapter handles
-only drag/release/cancellation; normal entry presses keep the current event's
-double-click clock and TUInk activation policy.
+scrollbar does not require keyboard focus. The shared `Explorer` owns file-row
+gesture state, activation and the event's double-click clock; its capture adapter
+routes continuation and cancellation through the current placement.
 
 Semantic local commands use `ControlCommandRouter` and the same Search/Save As
 raw-control routes as keyboard input. Unsupported local commands stay consumed
 by TUInk's control adapter. `KeyStroke.SPACE` and `TextInput(" ")` have identical
 local meaning in text fields, without application-specific event conversion.
+
+`tuiframe-explorer` applies an immutable access profile per instance. TUInk's
+sidebar uses `MANAGE_FILES`; Open, folder-selection and move/copy-destination popup
+trees use `READ_ONLY`. Read-only trees permit navigation, selection and scrollbar
+capture, but cannot start file dragging or mutate files through their operations
+object. A writable tree distinguishes a completed click from a 1 second hold with
+movement. It paints a drag label and destination highlight, expands hovered
+folders after 700 ms and scrolls at the viewport edges. Only release over a valid
+destination emits one move intent. Escape, root/surface changes and geometry
+changes cancel the gesture; its own hover expansion and scrolling preserve it.
+
+Undo/Redo routing respects the same receiver boundary: Ctrl+Z/Ctrl+Y use file
+history only with sidebar focus. Fields retain their own local history and never
+fall through into filesystem operations; explicit Explorer menu commands can
+operate while Source or Preview has focus. The explorer owns its warning/error
+footer. Successful history notices are temporary and configurable; errors remain
+visible. The shared `NoticeBanner` accepts owner-defined action IDs and labels,
+with Dismiss as its default action. It has no file or editor semantics; each
+action has its own routed button, clipping, enabled state and optional focus.
+TUInk uses Dismiss for persistent deleted-file notices and Keep/Update for
+external changes. Both warnings occupy the document pane, independently of the
+sidebar and temporary history-notice preference. Layout reserves their actual
+heights, wraps action groups when needed and excludes clipped buttons from input.
+
+Showing a notice never takes document focus or changes the caret, and Tab in
+Source keeps its editing behavior. Mouse buttons and File-menu Keep current text /
+Update from disk commands use the same asynchronous decision path. Update remains
+available for a bound document after Keep. Each changed disk version receives a
+new notice scope; a click can accept only the version whose scope was painted.
+Pending decisions disable buttons. Changed versions, stale edits and failed reads
+retain the buffer and unresolved warning. Accepted Keep/Update clears that warning;
+the deleted-file warning keeps its separate Dismiss/successful-save lifetime.
 
 Search is non-blocking and includes the editable document in its focus cycle.
 Save As and confirmation prompts are blocking: their focus cycles include the

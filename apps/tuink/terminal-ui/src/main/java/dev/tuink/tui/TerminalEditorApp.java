@@ -132,6 +132,10 @@ public class TerminalEditorApp {
     UiStyles.Theme theme = UiStyles.Theme.CYAN;
     UiStyles.Palette styles = UiStyles.forTheme(theme);
     final DeletedDocumentNotices deletedNotices = new DeletedDocumentNotices();
+    final ExternalDocumentNotices externalNotices = new ExternalDocumentNotices();
+    static final NoticeBanner.Action EXTERNAL_KEEP_ACTION = new NoticeBanner.Action("keep", "Keep");
+    static final NoticeBanner.Action EXTERNAL_UPDATE_ACTION = new NoticeBanner.Action("update", "Update");
+    final FocusManager<NoticeBanner.Action> externalNoticeFocusManager = new FocusManager<>();
     private final Theme colorOverlayWidgetTheme = key -> resolveOverlayWidgetStyle(key, true);
     private final Theme monoOverlayWidgetTheme = key -> resolveOverlayWidgetStyle(key, false);
     final FocusManager<HelpOverlayInputRouter.Target> helpFocusManager = new FocusManager<>();
@@ -177,7 +181,12 @@ public class TerminalEditorApp {
         return deletedNotices.originalPath(documentId(presentation));
     }
 
-
+    NoticeBanner externalNoticeBanner(dev.tuink.editor.document.DocumentId document) {
+        var notice = externalNotices.notice(document);
+        return notice == null ? null : new NoticeBanner("File changed on disk: "
+            + PathPresentation.full(notice.path()) + ". Keep current text or update from disk.",
+            NoticeBanner.Severity.WARNING, List.of(EXTERNAL_KEEP_ACTION, EXTERNAL_UPDATE_ACTION));
+    }
 
     Theme noticeWidgetTheme() {
         return role -> {
@@ -1333,6 +1342,8 @@ public class TerminalEditorApp {
             explorerWidgetTheme(colorEnabled));
         if (surface.deletedNotice() != null)
             surface.deletedNotice().paint(canvas, noticeWidgetTheme(), WidgetState.NORMAL);
+        if (surface.externalNotice() != null)
+            surface.externalNotice().paint(canvas, noticeWidgetTheme(), externalNoticeFocusManager);
         var controlsTheme = surface.textLayout().prompt().theme();
         int controlsMark = canvas.save();
         try {

@@ -334,6 +334,8 @@ final class TopMenuView {
             separator(),
             item(DOCUMENT_SAVE, "Save"),
             item(DOCUMENT_SAVE_AS, "Save As..."),
+            item(TuinkCommand.DOCUMENT_KEEP_EXTERNAL, "Keep current text", surface.allows(TuinkCommand.DOCUMENT_KEEP_EXTERNAL)),
+            item(TuinkCommand.DOCUMENT_UPDATE_EXTERNAL, "Update from disk", surface.allows(TuinkCommand.DOCUMENT_UPDATE_EXTERNAL)),
             item(TuinkCommand.DOCUMENT_FORMAT, "Format...", !surface.preview()),
             item(TuinkCommand.DOCUMENT_REOPEN_ENCODING, "Reopen with encoding...", !surface.preview()),
             separator(),

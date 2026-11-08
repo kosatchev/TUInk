@@ -85,7 +85,7 @@ class ViewportFrameIntegrationTest {
                 FrameComposition.OpenFile.hidden(), null, null, false, false, new Rect(0, ROWS - 2, COLS, 1), null, null);
             var promptSurface = new FrameComposition.Surface(surface().topBar(), surface().bottomBar(),
                 InlinePromptBar.of(confirmBar.row(), dev.tuink.render.Style.DEFAULT, 1), NotificationBar.hidden(),
-                dev.tuink.tui.render.WindowTextPainter.Layout.fullWindow(ROWS, COLS, 1, 0));
+                dev.tuink.tui.render.WindowTextPainter.Layout.fullWindow(ROWS, COLS, 1, 0), null, null);
             var modalFrame = new PreviewFrameComposition(ROWS, COLS, 2,
                 placement(reflowed, PREVIEW, 3, 0, PreviewSelection.Snapshot.EMPTY), promptSurface, modal, null, false);
             assertEquals(ScrollHint.none(), controller.renderPreviewFrameIfNeeded(modalFrame).scrollHint());
@@ -275,7 +275,7 @@ class ViewportFrameIntegrationTest {
     private static FrameComposition.Surface surface() {
         return new FrameComposition.Surface(new TopMenuView.TopBar(" File | document ", 0), " status",
             InlinePromptBar.hidden(), NotificationBar.hidden(),
-            dev.tuink.tui.render.WindowTextPainter.Layout.fullWindow(ROWS, COLS, 0, 0));
+            dev.tuink.tui.render.WindowTextPainter.Layout.fullWindow(ROWS, COLS, 0, 0), null, null);
     }
     private static FrameComposition.Layers layers() {
         return new FrameComposition.Layers(null, null, false, null, null,

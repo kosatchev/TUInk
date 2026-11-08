@@ -168,7 +168,7 @@ class PreviewFrameCompositionTest {
     }
     private static FrameComposition.Surface surface(int rows, int cols, InlinePromptBar prompt, NotificationBar notice) {
         return new FrameComposition.Surface(new TopMenuView.TopBar(" File | README.md · Preview READ ", 0),
-            " Preview · read-only", prompt, notice, WindowTextPainter.Layout.fullWindow(rows, cols, prompt.height(), notice.height()));
+            " Preview · read-only", prompt, notice, WindowTextPainter.Layout.fullWindow(rows, cols, prompt.height(), notice.height()), null, null);
     }
     private static FrameComposition.Layers emptyLayers() {
         return new FrameComposition.Layers(null, null, false, null, null,

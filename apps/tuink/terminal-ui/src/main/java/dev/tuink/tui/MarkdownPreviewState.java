@@ -160,6 +160,30 @@ final class MarkdownPreviewState implements AutoCloseable {
         if (acceptedEnvelope != null) acceptedEnvelope = acceptedEnvelope.withBinding(binding, reopenMode);
         if (creationEnvelope != null) creationEnvelope = creationEnvelope.withBinding(binding, reopenMode);
     }
+
+    /** Publishes an authoritative frozen-subject change before any replacement layout can finish. */
+    boolean adoptExternalSource(FrozenDocumentSource source, long generation) {
+        Objects.requireNonNull(source);
+        if (closed || generation < linkGeneration) return false;
+        if (service == null) throw new IllegalStateException("External adoption requires an initialized preview");
+        if (!sourceForFreeze().text().documentId().equals(source.text().documentId()))
+            throw new IllegalArgumentException("External source belongs to another document");
+        captureAnchor(); cancel(); releaseResult();
+        MarkdownPreviewBudget.Lease previous = acceptedRetention != null ? acceptedRetention : creationRetention;
+        MarkdownPreviewBudget.Lease retained;
+        try { retained = service.replaceSource(previous, source); }
+        catch (MarkdownPreviewBudget.Refused refused) { error = refused.getMessage(); return false; }
+        if (acceptedRetention != null && acceptedRetention != previous) acceptedRetention.close();
+        if (creationRetention != null && creationRetention != previous) creationRetention.close();
+        acceptedRetention = null; acceptedEnvelope = null;
+        creationRetention = retained; creationEnvelope = source;
+        linkGeneration = generation;
+        requestedId = null; requestedRevision = -1; requestedWidth = 0;
+        searchMatches = List.of(); activeMatch = -1;
+        error = "";
+        return true;
+    }
+
     /** Frozen-save receipts may change format while retaining exactly the captured text. */
     boolean updateSavedSource(FrozenDocumentSource saved, long generation) {
         Objects.requireNonNull(saved);

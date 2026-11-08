@@ -273,7 +273,7 @@ class FrameCompositionTest {
                 "status",
                 prompt,
                 NotificationBar.hidden(),
-                WindowTextPainter.Layout.fullWindow(8, 40, prompt.height(), 0)
+                WindowTextPainter.Layout.fullWindow(8, 40, prompt.height(), 0), null, null
             ),
             new FrameComposition.Search(false, "", SearchOptions.DEFAULT, false, null, false),
             new FrameComposition.Layers(

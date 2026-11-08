@@ -1,7 +1,5 @@
 package dev.tuink.tui.ui;
 
-import dev.tuiframe.explorer.Explorer;
-
 import dev.tuink.tui.AppVersion;
 
 public final class HelpPages {

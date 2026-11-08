@@ -205,6 +205,64 @@ class MarkdownPreviewLifecycleTest {
         }
     }
 
+    @Test void externalAdoptionRetiresLateLayoutAndAcceptsASaveBeforeReplacementLayout() throws Exception {
+        var initial = source(0, List.of("# Initial", "", "original text"));
+        var obsolete = source(1, List.of("# Obsolete layout"));
+        var authoritative = source(2, List.of("# External", "", "accepted raw  ", ""));
+        var started = new CountDownLatch(1); var release = new CountDownLatch(1);
+        var parser = new CommonmarkMarkdownParser();
+        try (var service = new MarkdownPreviewService((snapshot, limits, control) -> {
+            if (snapshot.revision() == 1) {
+                started.countDown();
+                boolean done = false;
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+                while (!done && System.nanoTime() < deadline) {
+                    try { done = release.await(Math.max(1, deadline - System.nanoTime()), TimeUnit.NANOSECONDS); }
+                    catch (InterruptedException ignored) { /* Deliberately simulate a provider finishing late. */ }
+                }
+                assertTrue(done);
+            }
+            return parser.parse(snapshot, limits, control);
+        }, () -> {}); var state = new MarkdownPreviewState()) {
+            accept(state, initial, 1, service);
+            state.moveSelection(PreviewSelection.Move.DOWN, true);
+            state.refresh(obsolete, 1, BOUNDS, service);
+            assertTrue(started.await(3, TimeUnit.SECONDS));
+            assertTrue(state.adoptExternalSource(authoritative, 2));
+            assertSame(authoritative, state.sourceForFreeze());
+            assertNull(state.pending); assertNull(state.result); assertNull(state.geometry);
+            var target = new ResourceBinding(JvmDocumentStorage.resource(directory.resolve("external.md")),
+                SaveDisposition.CREATE_NEW, null);
+            var saved = authoritative.withBinding(target, DocumentOpenMode.UTF_8);
+            assertTrue(state.updateSavedSource(saved, 3), "A save receipt need not wait for Markdown layout admission");
+            assertSame(saved, state.sourceForFreeze());
+            assertThrows(IllegalArgumentException.class, () -> state.updateSavedSource(initial.withBinding(target), 4),
+                "Ordinary saved-receipt validation remains strict about the captured text identity");
+            release.countDown();
+            assertFalse(state.collect(obsolete.text().documentId(), obsolete.text().revision()));
+            accept(state, saved, 3, service);
+            assertEquals(2, state.result.document().revision());
+            assertSame(saved, state.sourceForFreeze());
+            assertEquals("accepted raw  ", state.sourceForFreeze().text().line(2));
+        } finally { release.countDown(); }
+    }
+
+    @Test void refusedExternalSourceAdmissionKeepsThePreviouslyAdmittedEnvelope() throws Exception {
+        var initial = source(0, List.of("# Initial"));
+        var oversized = source(1, List.of("new external text ".repeat(1000)));
+        var limits = new MarkdownPreviewBudget.Limits(100_000, 2_000, 50_000, 50_000);
+        try (var service = new MarkdownPreviewService(new CommonmarkMarkdownParser(), () -> {}, limits);
+             var state = new MarkdownPreviewState()) {
+            accept(state, initial, 1, service);
+            assertFalse(state.adoptExternalSource(oversized, 2));
+            assertSame(initial, state.sourceForFreeze());
+            assertTrue(state.error.contains("memory budget"));
+            assertNull(state.pending); assertNull(state.result); assertNull(state.geometry);
+            assertTrue(service.retainedSourceBytes() > 0);
+            assertTrue(service.retainedSourceBytes() <= limits.sourceBytes());
+        }
+    }
+
     @Test void layoutBudgetFailureKeepsTheCreationSnapshotAndDoesNotResubmitEveryFrame() throws Exception {
         var input = source(0, List.of("still available"));
         var limits = new MarkdownPreviewBudget.Limits(100_000, 50_000, 50_000, 100);

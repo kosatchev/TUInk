@@ -68,6 +68,7 @@ class ExplorerCopyIntegrationTest {
             assertEquals(1, window.tabs.size(), "Copy must not open another document");
             assertTrue(window.active().state().isDirty());
             assertEquals(List.of("draft original"), window.active().tabSession().model().snapshotLines());
+            assertFalse(window.host.deletedNotices.visible(document));
 
             window.command(TuinkCommand.EXPLORER_UNDO);
             completed(window);
@@ -218,6 +219,7 @@ class ExplorerCopyIntegrationTest {
             assertEquals(binding, retainedFrozen.source().binding());
             assertEquals("# original", Files.readString(window.document));
             assertEquals("# original", Files.readString(destination.resolve("document.md")));
+            assertFalse(window.host.deletedNotices.visible(TerminalEditorApp.documentId(retained)));
         }
     }
 

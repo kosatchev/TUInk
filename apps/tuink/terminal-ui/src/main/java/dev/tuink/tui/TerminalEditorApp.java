@@ -1,6 +1,5 @@
 package dev.tuink.tui;
 
-import dev.tuiframe.explorer.ui.PathPresentation;
 import dev.tuiframe.explorer.Explorer;
 
 import dev.tuink.storage.jvm.JvmDocumentStorage;
@@ -69,6 +68,8 @@ import dev.tuiframe.widget.Button;
 import dev.tuiframe.widget.DialogAttention;
 import dev.tuiframe.widget.DialogAttentionPainter;
 import dev.tuiframe.widget.FocusManager;
+import dev.tuiframe.widget.NoticeBanner;
+import dev.tuiframe.explorer.ui.PathPresentation;
 import dev.tuiframe.widget.FocusContext;
 import dev.tuiframe.widget.ListView;
 import dev.tuiframe.widget.FocusResetPolicy;
@@ -130,6 +131,7 @@ public class TerminalEditorApp {
     final DialogAttention modalAttention = new DialogAttention();
     UiStyles.Theme theme = UiStyles.Theme.CYAN;
     UiStyles.Palette styles = UiStyles.forTheme(theme);
+    final DeletedDocumentNotices deletedNotices = new DeletedDocumentNotices();
     private final Theme colorOverlayWidgetTheme = key -> resolveOverlayWidgetStyle(key, true);
     private final Theme monoOverlayWidgetTheme = key -> resolveOverlayWidgetStyle(key, false);
     final FocusManager<HelpOverlayInputRouter.Target> helpFocusManager = new FocusManager<>();
@@ -161,6 +163,30 @@ public class TerminalEditorApp {
 
     TerminalEditorApp(FileAccessAdvisory fileAccess) {
         this.fileAccess = Objects.requireNonNull(fileAccess, "fileAccess");
+    }
+
+    static DocumentId documentId(WindowTab presentation) {
+        if (presentation instanceof EditorTab source) return source.documentSession().document().documentId();
+        var preview = (PreviewTab) presentation;
+        return preview.source() instanceof PreviewTab.LiveSource live ? live.documentId()
+            : ((PreviewTab.ClosedSnapshot) preview.source()).subject().documentId();
+    }
+
+    /** Presentation-only hint; a deleted original must never become an implicit save target. */
+    Path deletedDraftCaption(WindowTab presentation) {
+        return deletedNotices.originalPath(documentId(presentation));
+    }
+
+
+
+    Theme noticeWidgetTheme() {
+        return role -> {
+            if (WidgetThemeKeys.NOTICE_SUCCESS.equals(role)) return styles.windows().notifySuccess();
+            if (WidgetThemeKeys.NOTICE_INFO.equals(role)) return styles.windows().notifyInfo();
+            if (WidgetThemeKeys.NOTICE_WARNING.equals(role)) return styles.windows().notifyWarning();
+            if (WidgetThemeKeys.NOTICE_ERROR.equals(role)) return styles.windows().notifyError();
+            return null;
+        };
     }
 
     boolean refreshFileAccess(EditorState state) {
@@ -1305,6 +1331,8 @@ public class TerminalEditorApp {
         boolean colorEnabled) {
         if (layers.explorer() != null) layers.explorer().paint(canvas,
             explorerWidgetTheme(colorEnabled));
+        if (surface.deletedNotice() != null)
+            surface.deletedNotice().paint(canvas, noticeWidgetTheme(), WidgetState.NORMAL);
         var controlsTheme = surface.textLayout().prompt().theme();
         int controlsMark = canvas.save();
         try {
@@ -1816,7 +1844,15 @@ public class TerminalEditorApp {
                 && index < sourceMatchFlags.length && sourceMatchFlags[index];
             String qualifier = tab instanceof PreviewTab ? "Preview"
                 : context.previewFor(source.documentSession().viewId()) == null ? "" : "Source";
-            result.add(new TabBarView.TabItem(JvmDocumentStorage.pathOf(resource), source != null && source.state().isDirty(),
+            Path file = JvmDocumentStorage.pathOf(resource);
+            boolean deletedDraft = file == null && deletedDraftCaption(tab) != null;
+            if (deletedDraft) {
+                file = deletedDraftCaption(tab);
+                qualifier = qualifier.isEmpty() ? "Draft" : qualifier + ", Draft";
+            }
+            boolean externalDraft = source == null && ((PreviewTab.ClosedSnapshot) ((PreviewTab) tab).source())
+                .subject().unsavedExternalChanges();
+            result.add(new TabBarView.TabItem(file, deletedDraft || externalDraft || source != null && source.state().isDirty(),
                 match, tab.uiState().hasSearch(), tab.uiState().awaitingAnswer(), qualifier));
         }
         return List.copyOf(result);
@@ -2281,8 +2317,8 @@ public class TerminalEditorApp {
         private final RecoveryPersistence persistence;
         private final java.util.concurrent.atomic.AtomicReference<String> discoveryCleanupWarning =
             new java.util.concurrent.atomic.AtomicReference<>();
-        private final Map<EditorDocumentSession, TuiRecoveryParticipant> participants =
-            new IdentityHashMap<>();
+        private final Map<DocumentId, SwitchableRecoveryParticipant> participants = new java.util.HashMap<>();
+        private List<dev.tuink.editor.session.document.FrozenDocumentSession> frozenDocuments = List.of();
         private final ExecutorService ownedWorker;
 
         private RecoveryAutosaveManager(RecoveryStore store) {
@@ -2338,10 +2374,68 @@ public class TerminalEditorApp {
         }
 
         private RecoveryParticipant<RecoverySnapshot> participant(TuiDocumentSession document) {
-            TuiRecoveryParticipant participant = participants.computeIfAbsent(document.document(),
-                ignored -> new TuiRecoveryParticipant(document));
-            participant.source = document;
+            SwitchableRecoveryParticipant participant = participants.computeIfAbsent(document.document().documentId(),
+                SwitchableRecoveryParticipant::new);
+            if (participant.delegate instanceof TuiRecoveryParticipant live && live.source.document() == document.document())
+                live.source = document;
+            else participant.use(document.document(), new TuiRecoveryParticipant(document));
             return participant;
+        }
+
+        private RecoveryParticipant<RecoverySnapshot> participant(dev.tuink.editor.session.document.FrozenDocumentSession document) {
+            SwitchableRecoveryParticipant participant = participants.computeIfAbsent(document.documentId(),
+                SwitchableRecoveryParticipant::new);
+            if (participant.ownerIdentity != document) participant.use(document, new FrozenRecoveryParticipant(document));
+            return participant;
+        }
+
+        /** The coordinator keeps one participant and entry identity across Source -> Frozen handoff. */
+        private static final class SwitchableRecoveryParticipant implements RecoveryParticipant<RecoverySnapshot> {
+            private final DocumentId documentId;
+            private Object ownerIdentity;
+            private RecoveryParticipant<RecoverySnapshot> delegate;
+            private long revision;
+            private long observedRevision;
+            private boolean observedDirty;
+            private boolean observed;
+
+            private SwitchableRecoveryParticipant(DocumentId documentId) { this.documentId = documentId; }
+
+            private void use(Object ownerIdentity, RecoveryParticipant<RecoverySnapshot> delegate) {
+                this.ownerIdentity = ownerIdentity;
+                this.delegate = delegate;
+                observed = false;
+                revision++;
+            }
+
+            @Override public DocumentId documentId() { return documentId; }
+            @Override public Status status() {
+                Status next = delegate.status();
+                if (!observed || next.revision() != observedRevision || next.dirty() != observedDirty) {
+                    if (observed) revision++;
+                    observed = true;
+                    observedRevision = next.revision();
+                    observedDirty = next.dirty();
+                }
+                return new Status(next.dirty(), revision);
+            }
+            @Override public PreparedCheckpoint<RecoverySnapshot> prepareCheckpoint() { return delegate.prepareCheckpoint(); }
+        }
+
+        /** Frozen text needs no editing engine. Only its immutable source envelope crosses to the writer. */
+        private static final class FrozenRecoveryParticipant implements RecoveryParticipant<RecoverySnapshot> {
+            private final dev.tuink.editor.session.document.FrozenDocumentSession source;
+            private FrozenRecoveryParticipant(dev.tuink.editor.session.document.FrozenDocumentSession source) { this.source = source; }
+            @Override public DocumentId documentId() { return source.documentId(); }
+            @Override public Status status() { return new Status(source.unsavedExternalChanges(), source.generation()); }
+            @Override public PreparedCheckpoint<RecoverySnapshot> prepareCheckpoint() {
+                var captured = source.source();
+                boolean dirty = source.unsavedExternalChanges();
+                var createdAt = java.time.Instant.now();
+                return () -> new RecoverySnapshot(captured.text().lines(), new Position(0, 0),
+                    new ViewportState(0, 0, 0, 0), null, dirty, captured.binding().resource(),
+                    captured.binding().disposition(), captured.metadata(), captured.binding().version(), createdAt);
+            }
         }
 
         /** Retained document identity survives detaching or replacing its terminal projection. */
@@ -2373,13 +2467,27 @@ public class TerminalEditorApp {
         }
 
         private List<RecoveryParticipant<RecoverySnapshot>> participantList(List<TuiDocumentSession> documents) {
-            var seen = java.util.Collections.newSetFromMap(
-                new IdentityHashMap<EditorDocumentSession, Boolean>());
-            return documents.stream().filter(view -> seen.add(view.document())).map(this::participant).toList();
+            var current = new java.util.LinkedHashMap<DocumentId, RecoveryParticipant<RecoverySnapshot>>();
+            for (TuiDocumentSession document : documents) {
+                DocumentId id = document.document().documentId();
+                if (!current.containsKey(id)) current.put(id, participant(document));
+            }
+            for (var document : frozenDocuments) {
+                if (!current.containsKey(document.documentId())) current.put(document.documentId(), participant(document));
+            }
+            return List.copyOf(current.values());
         }
 
         private void retainParticipants(List<TuiDocumentSession> documents) {
-            participants.keySet().retainAll(documents.stream().map(TuiDocumentSession::document).toList());
+            var ids = new java.util.HashSet<DocumentId>();
+            documents.forEach(document -> ids.add(document.document().documentId()));
+            frozenDocuments.forEach(document -> ids.add(document.documentId()));
+            participants.keySet().retainAll(ids);
+        }
+
+        /** Membership is captured before live-view synchronization and again before terminal shutdown. */
+        void syncFrozen(List<dev.tuink.editor.session.document.FrozenDocumentSession> documents) {
+            frozenDocuments = List.copyOf(documents);
         }
 
         void syncTabs(List<TuiDocumentSession> documents) {

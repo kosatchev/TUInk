@@ -75,6 +75,7 @@ public enum TuinkCommand {
     TAB_NEXT("tuink.tab.next", "Next tab"),
     TAB_PREVIOUS("tuink.tab.previous", "Previous tab"),
     TAB_ACTIVATE("tuink.tab.activate", "Activate tab"),
+    DOCUMENT_DISMISS_DELETED_NOTICE("tuink.document.dismiss-deleted-notice", "Dismiss deleted file warning"),
 
     MENU_FILE("tuink.menu.file", "Open File menu"),
     MENU_EDIT("tuink.menu.edit", "Open Edit menu"),

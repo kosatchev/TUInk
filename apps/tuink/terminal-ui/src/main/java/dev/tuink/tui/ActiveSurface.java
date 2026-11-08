@@ -8,7 +8,8 @@ import java.util.Objects;
 /** Immutable command capabilities; construction reads cached UI/session state only. */
 record ActiveSurface(PresentationId presentationId, Kind kind, Focus focus, ModalScope modalScope,
     boolean reading, boolean documentLocked, boolean windowIoBusy, boolean mouseAvailable,
-    boolean syntaxDecorationsAvailable, boolean wrapLines, LanguageId language) {
+    boolean syntaxDecorationsAvailable, boolean wrapLines, LanguageId language,
+    boolean externalBound, boolean externalNotice, boolean frozenCanUndo, boolean frozenCanRedo) {
     enum Kind { SOURCE, LIVE_PREVIEW, FROZEN_PREVIEW }
     enum Focus { CONTENT, EDITABLE_TEXT, CONTROL }
     enum ModalScope { NONE, PRESENTATION, WINDOW }
@@ -19,19 +20,31 @@ record ActiveSurface(PresentationId presentationId, Kind kind, Focus focus, Moda
         reading = reading || kind != Kind.SOURCE;
     }
 
+    ActiveSurface(PresentationId presentationId, Kind kind, Focus focus, ModalScope modalScope,
+        boolean reading, boolean documentLocked, boolean windowIoBusy, boolean mouseAvailable,
+        boolean syntaxDecorationsAvailable, boolean wrapLines, LanguageId language) {
+        this(presentationId, kind, focus, modalScope, reading, documentLocked, windowIoBusy,
+            mouseAvailable, syntaxDecorationsAvailable, wrapLines, language, false, false, false, false);
+    }
+
+    ActiveSurface withExternal(boolean bound, boolean notice, boolean undo, boolean redo) {
+        return new ActiveSurface(presentationId, kind, focus, modalScope, reading, documentLocked,
+            windowIoBusy, mouseAvailable, syntaxDecorationsAvailable, wrapLines, language, bound, notice, undo, redo);
+    }
+
     ActiveSurface withRuntime(boolean mouse, boolean syntaxDecorations) {
         return new ActiveSurface(presentationId, kind, focus, modalScope, reading, documentLocked,
-            windowIoBusy, mouse, syntaxDecorations, wrapLines, language);
+            windowIoBusy, mouse, syntaxDecorations, wrapLines, language, externalBound, externalNotice, frozenCanUndo, frozenCanRedo);
     }
 
     ActiveSurface withKind(Kind next) {
         return new ActiveSurface(presentationId, next, focus, modalScope, reading, documentLocked,
-            windowIoBusy, mouseAvailable, syntaxDecorationsAvailable, wrapLines, language);
+            windowIoBusy, mouseAvailable, syntaxDecorationsAvailable, wrapLines, language, externalBound, externalNotice, frozenCanUndo, frozenCanRedo);
     }
 
     ActiveSurface withFocus(Focus next) {
         return new ActiveSurface(presentationId, kind, next, modalScope, reading, documentLocked,
-            windowIoBusy, mouseAvailable, syntaxDecorationsAvailable, wrapLines, language);
+            windowIoBusy, mouseAvailable, syntaxDecorationsAvailable, wrapLines, language, externalBound, externalNotice, frozenCanUndo, frozenCanRedo);
     }
 
     boolean preview() { return kind != Kind.SOURCE; }
@@ -50,7 +63,9 @@ record ActiveSurface(PresentationId presentationId, Kind kind, Focus focus, Moda
             default -> false;
         }) return new Availability(false, "Syntax styles are unavailable");
         boolean enabled = switch (command) {
-            case EDIT_UNDO, EDIT_REDO, EDIT_TOGGLE_LINE_COMMENT -> documentWritable();
+            case EDIT_UNDO -> documentWritable() || frozenHistoryReady() && frozenCanUndo;
+            case EDIT_REDO -> documentWritable() || frozenHistoryReady() && frozenCanRedo;
+            case EDIT_TOGGLE_LINE_COMMENT -> documentWritable();
             case SEARCH_REPLACE, SEARCH_REPLACE_ALL -> documentEditable();
             case EDIT_COPY, EDIT_SELECT_ALL -> focus != Focus.CONTROL;
             case EDIT_INSERT_NEWLINE, EDIT_INSERT_TAB, EDIT_BACKSPACE, EDIT_DELETE_FORWARD ->
@@ -72,6 +87,9 @@ record ActiveSurface(PresentationId presentationId, Kind kind, Focus focus, Moda
 
     boolean allows(TuinkCommand command) { return availability(command).enabled(); }
     String refusal(TuinkCommand command) { return availability(command).reason(); }
+
+    private boolean externalReady() { return modalScope == ModalScope.NONE && !documentLocked && !windowIoBusy; }
+    private boolean frozenHistoryReady() { return kind == Kind.FROZEN_PREVIEW && focus == Focus.CONTENT && externalReady(); }
 
     private String refusalReason(TuinkCommand command) {
         if (command == TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW && !preview() && language != LanguageId.MARKDOWN)

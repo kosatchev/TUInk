@@ -196,7 +196,10 @@ final class SnapshotSaveController implements AutoCloseable {
         if (result.saved() && transition instanceof DocumentIoCoordinator.Saved accepted) {
             preview = preview.saved();
             context.updatePreview(preview);
-            preview.uiState().preview.updateSavedSource(request.owner().subject().source(), preview.generation());
+            var state = preview.uiState().preview;
+            var saved = request.owner().subject().source();
+            if (state.sourceForFreeze().text() == saved.text()) state.updateSavedSource(saved, preview.generation());
+            else state.adoptExternalSource(saved, preview.generation());
             // Only this accepted operation can advance its captured UI address.
             recipient = recipient.afterAcceptedSaveRebind(preview, request.operation(), accepted);
         }

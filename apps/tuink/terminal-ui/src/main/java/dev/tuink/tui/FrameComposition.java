@@ -6,6 +6,7 @@ import dev.tuink.core.TextModel;
 import dev.tuink.render.EditorLayout;
 import dev.tuink.render.RenderPlanBuilder;
 import dev.tuiframe.geometry.Rect;
+import dev.tuiframe.widget.NoticeBanner;
 import dev.tuink.tui.ui.ConfirmBarView;
 import dev.tuiframe.explorer.ui.FileTreeView;
 import dev.tuink.tui.ui.HelpPage;
@@ -71,7 +72,9 @@ record FrameComposition(
         String bottomBar,
         InlinePromptBar inlinePrompt,
         NotificationBar notification,
-        WindowTextPainter.Layout textLayout
+        WindowTextPainter.Layout textLayout,
+        NoticeBanner.Placement deletedNotice,
+        NoticeBanner.Placement externalNotice
     ) {
         Surface {
             Objects.requireNonNull(topBar, "topBar");

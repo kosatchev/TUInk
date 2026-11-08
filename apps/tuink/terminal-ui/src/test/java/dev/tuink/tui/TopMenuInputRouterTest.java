@@ -85,12 +85,11 @@ class TopMenuInputRouterTest {
                 new TopMenuView.TabItem(Path.of("second.txt"), false, false)
             )
         );
-        for (int i = 0; i < 5; i++) {
-            TopMenuInputRouter.Result moved = fixture.route(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
-            assertTrue(moved.consumed());
-            assertNull(moved.command());
-            fixture = fixture(fixture.controller.state(), new Rect(0, 0, 80, 20), fixture.tabs);
-        }
+        // Menu navigation wraps from the first static entry to the last dynamic tab.
+        TopMenuInputRouter.Result moved = fixture.route(KeyStroke.of(KeyStroke.Key.ARROW_UP));
+        assertTrue(moved.consumed());
+        assertNull(moved.command());
+        fixture = fixture(fixture.controller.state(), new Rect(0, 0, 80, 20), fixture.tabs);
 
         TopMenuInputRouter.Result selected = fixture.route(KeyStroke.of(KeyStroke.Key.ENTER));
 

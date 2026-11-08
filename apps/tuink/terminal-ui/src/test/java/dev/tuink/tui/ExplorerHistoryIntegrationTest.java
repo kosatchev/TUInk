@@ -239,6 +239,7 @@ class ExplorerHistoryIntegrationTest {
             assertTrue(window.active().state().isDirty());
             assertEquals(List.of("draft original"), window.active().tabSession().model().snapshotLines());
             var document = window.active().documentSession().document().documentId();
+            assertTrue(window.host.deletedNotices.visible(document));
             assertFalse(window.ui.explorer.canUndo());
             window.event(ctrl(KeyStroke.Key.Z));
             assertFalse(Files.exists(window.document));

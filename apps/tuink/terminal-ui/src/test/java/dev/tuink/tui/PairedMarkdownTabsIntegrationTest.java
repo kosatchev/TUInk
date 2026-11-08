@@ -90,11 +90,12 @@ class PairedMarkdownTabsIntegrationTest {
             var preview = openPreview(window);
             window.event(ctrl(KeyStroke.Key.P));
             window.command(TuinkCommand.MENU_TABS);
-            for (int step = 0; step < 5; step++) window.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
+            window.event(KeyStroke.of(KeyStroke.Key.ARROW_UP));
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             assertEquals(preview.presentationId(), window.selected().presentationId());
             window.command(TuinkCommand.MENU_TABS);
-            for (int step = 0; step < 4; step++) window.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
+            window.event(KeyStroke.of(KeyStroke.Key.ARROW_UP));
+            window.event(KeyStroke.of(KeyStroke.Key.ARROW_UP));
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             assertEquals(source.presentationId(), window.selected().presentationId());
         }

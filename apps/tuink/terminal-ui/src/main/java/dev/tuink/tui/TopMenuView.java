@@ -437,6 +437,7 @@ final class TopMenuView {
         entries.add(item(TAB_CLOSE, "Close Tab"));
         entries.add(item(TAB_NEXT, "Next Tab"));
         entries.add(item(TAB_PREVIOUS, "Previous Tab"));
+        entries.add(item(TuinkCommand.DOCUMENT_DISMISS_DELETED_NOTICE, "Dismiss file warning"));
         entries.add(separator());
         for (int index = 0; index < tabs.size(); index++) {
             TabItem tab = Objects.requireNonNull(tabs.get(index), "tab");

@@ -5,6 +5,7 @@ import dev.tuiframe.widget.DialogFocusTraversal;
 import dev.tuiframe.widget.SplitPane;
 import dev.tuiframe.widget.TabBar;
 import dev.tuiframe.widget.SurfaceContext;
+import dev.tuiframe.widget.NoticeBanner;
 import dev.tuink.editor.document.PresentationId;
 import dev.tuink.tui.flow.DocumentSaveFormat;
 import dev.tuink.tui.flow.UiModalState;
@@ -60,10 +61,13 @@ final class WindowChrome {
     record Prepared(Input input, boolean showTabs, int contentTopRow, Rect dialogViewport,
         SplitPane explorerSplit, Rect documentPane,
         InlinePromptBar prompt, NotificationBar notification, SaveAsBarView.Placement saveAs,
-        ConfirmBarView.Placement confirm, SearchBarView.Placement search, WindowTextPainter.Layout textLayout) {
+        ConfirmBarView.Placement confirm, SearchBarView.Placement search, WindowTextPainter.Layout textLayout,
+        NoticeBanner.Placement deletedNotice, NoticeBanner.Placement externalNotice) {
         Rect contentBounds(boolean reserveNotification) {
             return new Rect(documentPane.x(), contentTopRow, documentPane.width(), Math.max(0,
-                input.rows() - 1 - contentTopRow - prompt.height() - (reserveNotification ? notification.height() : 0)));
+                input.rows() - 1 - contentTopRow - prompt.height() - (reserveNotification ? notification.height() : 0)
+                    - (deletedNotice == null ? 0 : deletedNotice.bounds().height())
+                    - (externalNotice == null ? 0 : externalNotice.bounds().height())));
         }
         Result finish(Content content) { return complete(this, content); }
     }
@@ -147,6 +151,23 @@ final class WindowChrome {
             footerParent.bounds().width(), notification.height()));
         var statusSurface = document.child(new Rect(0, input.rows() - 1 - document.bounds().y(), document.bounds().width(), 1));
         var textLayout = new WindowTextPainter.Layout(statusSurface, promptSurface, noticeSurface);
+        var documentId = TerminalEditorApp.documentId(input.context().activePresentation());
+        var deletedBanner = host.deletedNotices.banner(documentId);
+        NoticeBanner.Placement deletedNotice = null;
+        NoticeBanner.Placement externalNotice = null;
+        int bannerRows = Math.max(0, input.rows() - 1 - top - prompt.height() - notification.height());
+        int bannerBottom = promptTop - notification.height();
+        boolean bannerEnabled = modal.isNone() && !tab.openFileMode && !input.menu().state().isOpen();
+        if (deletedBanner != null && !windowPrompt) {
+            int height = Math.min(deletedBanner.preferredHeight(documentPane.width()), bannerRows);
+            var bannerSurface = document.child(new Rect(0,
+                bannerBottom - height - document.bounds().y(), documentPane.width(), height));
+            deletedNotice = deletedBanner.place(host.deletedNotices.scopeId(documentId), bannerSurface.bounds(),
+                bannerSurface.clip(), bannerEnabled);
+            bannerRows -= height;
+            bannerBottom -= height;
+        }
+
         SaveAsBarView.Placement placedSave = null;
         ConfirmBarView.Placement placedConfirm = null;
         SearchBarView.Placement placedSearch = null;
@@ -177,7 +198,7 @@ final class WindowChrome {
         } else if (!tab.searchMode && !tab.preview.searchVisible) tab.searchFocusManager.deactivate(TerminalEditorApp.SEARCH_SCOPE_ID);
         int inset = showTabs ? top : 0;
         return new Prepared(input, showTabs, top, new Rect(0, inset, input.cols(), Math.max(0, input.rows() - inset)),
-            explorerSplit, documentPane, prompt, notification, placedSave, placedConfirm, placedSearch, textLayout);
+            explorerSplit, documentPane, prompt, notification, placedSave, placedConfirm, placedSearch, textLayout, deletedNotice, externalNotice);
     }
 
     private static Result complete(Prepared prepared, Content content) {
@@ -222,7 +243,7 @@ final class WindowChrome {
                 } else if (help != null) DialogFocusTraversal.focusFirst(focus.helpFocusManager, help.focusScope());
             }
         }
-        return new Result(new FrameComposition.Surface(topBar, content.status(), prepared.prompt(), prepared.notification(), prepared.textLayout()),
+        return new Result(new FrameComposition.Surface(topBar, content.status(), prepared.prompt(), prepared.notification(), prepared.textLayout(), prepared.deletedNotice(), prepared.externalNotice()),
             new FrameComposition.Layers(tabs, menuPlacement, prepared.saveAs() != null, prepared.saveAs(), prepared.confirm(),
                 picker, help, format, focus.modalAttention.highlighted(), focus.blockingContentFocused, blocking, explorer, fileDialog), prepared.search());
     }
@@ -230,13 +251,31 @@ final class WindowChrome {
     private static ConfirmBarView confirmation(Input input, int rows, int cols) {
         var modal = input.modal(); var host = input.host();
         if (modal.isSaveOverwriteConfirm()) return host.buildOverwriteConfirmBar(modal.pendingOverwritePath(), cols, rows);
-        if (modal.isQuitConfirm()) return host.buildQuitConfirmBar(input.context().tabs(), cols, rows);
+        if (modal.isQuitConfirm()) {
+            long snapshots = input.context().presentations().stream().filter(tab -> tab instanceof PreviewTab preview
+                && preview.source() instanceof PreviewTab.ClosedSnapshot frozen
+                && (host.deletedNotices.hasUnsavedRemoval(TerminalEditorApp.documentId(tab))
+                    || frozen.subject().unsavedExternalChanges())).count();
+            if (snapshots > 0) return ConfirmBarView.responsive("Save unsaved documents, including " + snapshots + " preview draft(s)?",
+                cols, rows, "Save All", "Discard All", true, "Cancel", host.confirmPolicy(modal).shortcuts());
+            return host.buildQuitConfirmBar(input.context().tabs(), cols, rows);
+        }
         if (modal.isSettingsConfirm()) return ConfirmBarView.responsive(
             "Unsupported settings. Replace invalid values with defaults?", cols, rows,
             "Fix", "Delete", true, "Later", host.confirmPolicy(modal).shortcuts());
         if (modal.isRecoveryConfirm()) return ConfirmBarView.responsive(host.buildRecoveryPrompt(input.recoveryEntryCount()), cols, rows,
             "Restore", "Delete", true, "Later", host.confirmPolicy(modal).shortcuts());
-        if (modal.isCloseTabConfirm()) return host.buildCloseTabConfirmBar(input.context().tabs(), modal.pendingCloseTabIndex(), cols, rows);
+        if (modal.isCloseTabConfirm()) {
+            if (input.context().activePresentation() instanceof PreviewTab preview && preview.source() instanceof PreviewTab.ClosedSnapshot frozen) {
+                var file = dev.tuink.storage.jvm.JvmDocumentStorage.pathOf(frozen.subject().binding().resource());
+                var caption = host.deletedDraftCaption(preview);
+                if (caption == null) caption = file;
+                return ConfirmBarView.responsive(ConfirmPromptText.wrappingFileQuestion("Close draft: ", caption,
+                    " ?", cols * Math.max(1, Math.min(8, rows - 4))), cols, rows, file == null ? "Save As" : "Save", "Discard", true, "Cancel",
+                    host.confirmPolicy(modal).shortcuts());
+            }
+            return host.buildCloseTabConfirmBar(input.context().tabs(), modal.pendingCloseTabIndex(), cols, rows);
+        }
         if (modal.isSaveUtf8Confirm() || modal.isOpenUtf16Confirm()) {
             boolean opening = modal.isOpenUtf16Confirm();
             String question = opening ? ConfirmPromptText.wrappingFileQuestion("Ambiguous: ", modal.pendingOpenPath(), " as UTF-16LE?",

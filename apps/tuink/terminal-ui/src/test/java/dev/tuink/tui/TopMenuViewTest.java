@@ -1,7 +1,5 @@
 package dev.tuink.tui;
 
-import dev.tuiframe.explorer.Explorer;
-
 import static dev.tuink.tui.command.TuinkCommand.EDIT_SELECT_ALL;
 import static dev.tuink.tui.command.TuinkCommand.SETTINGS_TOGGLE_MOUSE;
 import static dev.tuink.tui.command.TuinkCommand.VIEW_TOGGLE_WORD_WRAP;
@@ -146,16 +144,8 @@ class TopMenuViewTest {
         assertEquals(EDIT_SELECT_ALL.id(), selectAll.value().id());
         assertEquals("Select All", selectAll.label());
 
-        MenuBar.Item<CommandInvocation> firstTab = item(
-            tabView,
-            TopMenuController.TABS_INDEX,
-            5
-        );
-        MenuBar.Item<CommandInvocation> activeTab = item(
-            tabView,
-            TopMenuController.TABS_INDEX,
-            6
-        );
+        MenuBar.Item<CommandInvocation> firstTab = tabItem(tabView, 0);
+        MenuBar.Item<CommandInvocation> activeTab = tabItem(tabView, 1);
         assertEquals("   first.txt", firstTab.label());
         assertEquals("> #中.txt*", activeTab.label());
         assertEquals("0", firstTab.value().argument("index").orElseThrow());
@@ -169,8 +159,8 @@ class TopMenuViewTest {
             new TopMenuView.TabItem(Path.of("中.txt"), false, true, true, false)
         ), 1, "Cyan", new CommandRouter(), MenuBar.State.open(TopMenuController.TABS_INDEX), TestSurfaces.source(ui()));
 
-        var inactive = item(view, TopMenuController.TABS_INDEX, 5);
-        var active = item(view, TopMenuController.TABS_INDEX, 6);
+        var inactive = tabItem(view, 0);
+        var active = tabItem(view, 1);
 
         assertEquals("   ?/first.txt*", inactive.label());
         assertEquals("> /#中.txt", active.label());
@@ -262,6 +252,7 @@ class TopMenuViewTest {
                 "tuink.tab.close",
                 "tuink.tab.next",
                 "tuink.tab.previous",
+                "tuink.document.dismiss-deleted-notice",
                 "tuink.tab.activate"
             ),
             commandIds(view(ui, MenuBar.State.open(TopMenuController.TABS_INDEX)), TopMenuController.TABS_INDEX)
@@ -494,6 +485,20 @@ class TopMenuViewTest {
                 && ((CommandInvocation) candidate.value()).id().equals(command.id())) return item(view, menuIndex, index);
         }
         throw new AssertionError("Missing menu command: " + command);
+    }
+
+    private static MenuBar.Item<CommandInvocation> tabItem(TopMenuView view, int tabIndex) {
+        var entries = view.menus().get(TopMenuController.TABS_INDEX).entries();
+        for (int index = 0; index < entries.size(); index++) {
+            if (entries.get(index) instanceof MenuBar.Item<?> candidate
+                && ((CommandInvocation) candidate.value()).id().equals(
+                    dev.tuink.tui.command.TuinkCommand.TAB_ACTIVATE.id())
+                && ((CommandInvocation) candidate.value()).argument("index")
+                    .orElseThrow().equals(Integer.toString(tabIndex))) {
+                return item(view, TopMenuController.TABS_INDEX, index);
+            }
+        }
+        throw new AssertionError("Missing tab menu item: " + tabIndex);
     }
 
     private static List<String> commandIds(TopMenuView view, int menuIndex) {

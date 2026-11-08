@@ -227,7 +227,7 @@ class ModalAttentionIntegrationTest {
         EditorLayout layout = EditorLayout.resolve(model, textLayout, state, rows, cols, 1, prompt.height(), false, false, 4);
         return new FrameComposition(new FrameComposition.Document(builder, model, state, layout),
             new FrameComposition.Surface(new TopMenuView.TopBar(" File ", 6), "status", prompt, NotificationBar.hidden(),
-                WindowTextPainter.Layout.fullWindow(rows, cols, prompt.height(), 0)),
+                WindowTextPainter.Layout.fullWindow(rows, cols, prompt.height(), 0), null, null),
             new FrameComposition.Search(false, "", SearchOptions.DEFAULT, false, null, false), layers, false, false, false);
     }
 

@@ -525,7 +525,9 @@ and clipboard shortcuts. Enter opens the file or navigates to the directory.
 Relative paths are resolved from the displayed directory. With the tree focused,
 `Backspace` moves its root to the parent directory, Left/Right collapse or
 expand folders, and `Shift+Left` / `Shift+Right` scroll long names horizontally.
-`Enter` opens a selected file or makes a selected directory the root. `Tab`
+`Enter` or a double-click on an entry's name opens a file or makes a directory
+the root. A single click selects an entry; clicking a directory's arrow only
+expands or collapses it. `Tab`
 and `Shift+Tab` move between the tree, OK, and Cancel; `Esc` closes the picker.
 Enter or Space activates the focused button, including Hidden.
 In terminals where Backspace sends `^H`, use `Alt+.` or the Hidden button.

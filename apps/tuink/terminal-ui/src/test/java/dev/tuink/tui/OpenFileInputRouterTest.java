@@ -349,7 +349,7 @@ class OpenFileInputRouterTest {
     }
 
     @Test
-    void directoryDoubleClickRoutesToToggleByStableId() throws IOException {
+    void directoryDoubleClickRoutesToRootNavigationByStableId() throws IOException {
         Path folder = Files.createDirectory(root.resolve("folder"));
         Path file = Files.createFile(root.resolve("note.txt"));
         try (FileTreeModel model = new FileTreeModel(root, false, false)) {
@@ -405,12 +405,11 @@ class OpenFileInputRouterTest {
                 -8L,
                 DOUBLE_CLICK_NANOS
             );
-            OpenFileInputRouter.ToggleDirectory toggle = assertInstanceOf(
-                OpenFileInputRouter.ToggleDirectory.class,
+            OpenFileInputRouter.ChangeRoot navigate = assertInstanceOf(
+                OpenFileInputRouter.ChangeRoot.class,
                 second.intent()
             );
-            assertEquals(entry.id(), toggle.id());
-            assertTrue(toggle.expand());
+            assertEquals(folder, navigate.root());
             assertNull(second.state().lastPressedId());
 
             FileTreeModel.Entry fileEntry = entry(snapshot, file);

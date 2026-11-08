@@ -36,7 +36,7 @@ import java.util.Optional;
  * policy.</p>
  */
 public final class FileTreeView {
-    /** File-picker navigation and fixed-root explorer activation share the same tree widget. */
+    /** Directory activation by Enter or label double-click; disclosure controls only expand/collapse. */
     public enum DirectoryActivation { NAVIGATE, TOGGLE_EXPANSION }
 
     private static final int MIN_LABEL_WIDTH_WITH_METADATA = 12;
@@ -660,7 +660,7 @@ public final class FileTreeView {
             }
             if (action instanceof dev.tuiframe.widget.TreeView.Activated<?> activated) {
                 State next = state.resetClickTracking();
-                return keyboardActivation(entryAt(activated.itemIndex()), next);
+                return activateEntry(entryAt(activated.itemIndex()), next);
             }
             if (action instanceof dev.tuiframe.widget.TreeView.ItemPressed<?> pressed) {
                 FileTreeModel.Entry entry = entryAt(pressed.itemIndex());
@@ -680,13 +680,13 @@ public final class FileTreeView {
                     nowNanos
                 );
                 return doubleClick
-                    ? doubleClickActivation(entry, clicked.resetClickTracking())
+                    ? activateEntry(entry, clicked.resetClickTracking())
                     : new StateChanged(clicked);
             }
             throw new IllegalStateException("Unsupported tree action: " + action);
         }
 
-        private Action keyboardActivation(FileTreeModel.Entry entry, State next) {
+        private Action activateEntry(FileTreeModel.Entry entry, State next) {
             if (entry == null || entry.kind() == FileTreeModel.Kind.ERROR) {
                 return new StateChanged(next);
             }
@@ -700,18 +700,6 @@ public final class FileTreeView {
             return new RootRequested(entry.path(), next);
         }
 
-        private Action doubleClickActivation(FileTreeModel.Entry entry, State next) {
-            if (entry.kind() == FileTreeModel.Kind.ERROR) {
-                return new StateChanged(next);
-            }
-            if (entry.kind() == FileTreeModel.Kind.DIRECTORY) {
-                return new ToggleRequested(entry.id(), !entry.expanded(), next);
-            }
-            if (entry.kind() == FileTreeModel.Kind.FILE) {
-                return new FileRequested(entry.path(), next);
-            }
-            return new RootRequested(entry.path(), next);
-        }
     }
 
     private record MetadataColumns(int sizeWidth, int dateWidth) {

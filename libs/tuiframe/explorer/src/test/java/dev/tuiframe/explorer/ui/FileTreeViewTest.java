@@ -59,6 +59,16 @@ class FileTreeViewTest {
                 output(placed.handle(KeyStroke.of(KeyStroke.Key.ENTER), 2L, DOUBLE_CLICK_NANOS)));
             assertFalse(collapse.expand());
 
+            PointerEvent press = pointer(selectedRow(placed), placed.leadingBounds().x() + 3, PointerEvent.Kind.PRESS);
+            var first = assertInstanceOf(FileTreeView.StateChanged.class,
+                output(placed.handle(press, 3L, DOUBLE_CLICK_NANOS))).state();
+            var second = view.place(bounds, first, clip, true);
+            var doubleClick = assertInstanceOf(FileTreeView.ToggleRequested.class,
+                output(second.handle(press, 4L, DOUBLE_CLICK_NANOS)));
+            assertEquals(directory.id(), doubleClick.id());
+            assertFalse(doubleClick.expand(), "Fixed-root trees keep their double-click expansion policy");
+            assertEquals(root, model.root());
+
             placed = view.place(bounds, state(snapshot, entry(snapshot, file), 0, 0), clip, true);
             FileTreeView.FileRequested open = assertInstanceOf(FileTreeView.FileRequested.class,
                 output(placed.handle(KeyStroke.of(KeyStroke.Key.ENTER), 3L, DOUBLE_CLICK_NANOS)));
@@ -294,7 +304,7 @@ class FileTreeViewTest {
     }
 
     @Test
-    void doubleClickUsesStableIdAndKeepsDirectoryAndKeyboardPoliciesDistinct() throws IOException {
+    void doubleClickAndEnterNavigateToTheSameDirectoryByStableId() throws IOException {
         Path folder = Files.createDirectory(root.resolve("folder"));
         Path file = Files.createFile(root.resolve("note.txt"));
 
@@ -327,12 +337,11 @@ class FileTreeViewTest {
                 clip,
                 true
             );
-            FileTreeView.ToggleRequested doubleClick = assertInstanceOf(
-                FileTreeView.ToggleRequested.class,
+            FileTreeView.RootRequested doubleClick = assertInstanceOf(
+                FileTreeView.RootRequested.class,
                 output(secondPlacement.handle(press, 2_000L, DOUBLE_CLICK_NANOS))
             );
-            assertEquals(directory.id(), doubleClick.id());
-            assertTrue(doubleClick.expand());
+            assertEquals(folder.toAbsolutePath().normalize(), doubleClick.root());
             assertEquals(null, doubleClick.state().lastPressedId());
 
             FileTreeView.RootRequested enterDirectory = assertInstanceOf(
@@ -371,6 +380,54 @@ class FileTreeViewTest {
                 FileTreeView.FileRequested.class,
                 output(filePlacement.handle(KeyStroke.of(KeyStroke.Key.ENTER), 4_000L, DOUBLE_CLICK_NANOS))
             );
+        }
+    }
+
+    @Test
+    void disclosureAndRightExpandWithoutNavigatingOrCompletingADirectoryDoubleClick() throws IOException {
+        Path folder = Files.createDirectory(root.resolve("folder"));
+        Path child = Files.createFile(folder.resolve("child.txt"));
+        Rect bounds = new Rect(2, 1, 24, 5);
+        Rect clip = new Rect(0, 0, 32, 8);
+        try (FileTreeModel model = new FileTreeModel(root, false, false)) {
+            FileTreeModel.Snapshot snapshot = awaitLoaded(model);
+            FileTreeView view = FileTreeView.fromSnapshot(snapshot, false, false);
+            var placed = view.place(bounds, state(snapshot, entry(snapshot, folder), 0, 0), clip, true);
+            PointerEvent label = pointer(selectedRow(placed), placed.leadingBounds().x() + 3, PointerEvent.Kind.PRESS);
+            var first = assertInstanceOf(FileTreeView.StateChanged.class,
+                output(placed.handle(label, 1L, DOUBLE_CLICK_NANOS))).state();
+            placed = view.place(bounds, first, clip, true);
+            var expand = assertInstanceOf(FileTreeView.ToggleRequested.class, output(placed.handle(
+                pointer(selectedRow(placed), placed.leadingBounds().x(), PointerEvent.Kind.PRESS),
+                2L, DOUBLE_CLICK_NANOS)));
+            assertTrue(expand.expand());
+            assertEquals(null, expand.state().lastPressedId());
+            model.setDirectoryExpanded(expand.id(), expand.expand());
+            snapshot = awaitLoaded(model);
+            assertEquals(root, snapshot.root());
+            view = FileTreeView.fromSnapshot(snapshot, false, false);
+            placed = view.place(bounds, expand.state(), clip, true);
+            first = assertInstanceOf(FileTreeView.StateChanged.class,
+                output(placed.handle(label, 3L, DOUBLE_CLICK_NANOS))).state();
+            placed = view.place(bounds, first, clip, true);
+            var intoChild = assertInstanceOf(FileTreeView.StateChanged.class,
+                output(placed.handle(KeyStroke.of(KeyStroke.Key.ARROW_RIGHT), 4L, DOUBLE_CLICK_NANOS)));
+            assertEquals(child, intoChild.state().selectedId().path());
+            assertEquals(null, intoChild.state().lastPressedId());
+
+            placed = view.place(bounds, state(snapshot, entry(snapshot, folder), 0, 0), clip, true);
+            var navigate = assertInstanceOf(FileTreeView.RootRequested.class,
+                output(placed.handle(KeyStroke.of(KeyStroke.Key.ENTER), 5L, DOUBLE_CLICK_NANOS)));
+            assertEquals(folder, navigate.root(), "An expanded directory still supports navigation");
+
+            model.setDirectoryExpanded(entry(snapshot, folder).id(), false);
+            snapshot = awaitLoaded(model);
+            view = FileTreeView.fromSnapshot(snapshot, false, false);
+            placed = view.place(bounds, state(snapshot, entry(snapshot, folder), 0, 0), clip, true);
+            expand = assertInstanceOf(FileTreeView.ToggleRequested.class,
+                output(placed.handle(KeyStroke.of(KeyStroke.Key.ARROW_RIGHT), 6L, DOUBLE_CLICK_NANOS)));
+            assertTrue(expand.expand());
+            assertEquals(root, model.root());
         }
     }
 

@@ -23,6 +23,7 @@ The scenarios protect the following user behavior:
 | `large-wrap` | A 2 MB document with 400,000 short lines survives wrapping and repeated resizes on a 192 MiB JVM heap |
 | `tabs` | Save, Copy, and returning to a tab preserve its independent viewport |
 | `folder-explorer` | A CLI directory opens the left tree; Ctrl+E and Right/Enter open its child file, Ctrl+B and narrow resize preserve the expanded tree, and Escape returns to editing before Save writes the exact expected bytes |
+| `picker-navigation` | After moving to the parent with `..`, single clicks select, disclosure clicks and Left/Right expand or collapse, and a label double-click or Enter makes the directory the root without editing any files |
 | `history` | Undo/Redo through the real keymap preserve Unicode text and grouping |
 | `grapheme-edit-caret` | Typing after replacing part of a combining cluster or joining lines continues after the complete grapheme |
 | `selection-autoscroll` | A stationary drag at either viewport edge keeps scrolling; release and opening Find stop the timer |

@@ -21,6 +21,15 @@ public final class PathLabels {
             ? formatted : path.toAbsolutePath().toUri().toASCIIString();
     }
 
+    /** A reversible relative spelling; unsafe native names retain the actual absolute URI. */
+    public static String relative(Path base, Path path) {
+        Path relative = base.toAbsolutePath().normalize().relativize(path.toAbsolutePath().normalize());
+        String literal = relative.toString();
+        if (literal.isEmpty()) return ".";
+        return !literal.startsWith(URI_MARKER) && displayPreserves(literal)
+            && Path.of(literal).equals(relative) ? literal : full(path.toAbsolutePath().normalize());
+    }
+
     /** Uses the original path's URI component, so a raw basename never acquires a fictitious working directory. */
     public static String name(Path path) {
         Objects.requireNonNull(path, "path");

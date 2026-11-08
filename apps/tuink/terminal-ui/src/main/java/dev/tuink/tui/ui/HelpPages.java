@@ -136,6 +136,8 @@ public final class HelpPages {
             "Up / Down               Select previous / next entry",
             "PgUp / PgDn             Move selection by a page",
             "Enter                   Open selection / activate button",
+            "Double-click name       Open file / enter directory",
+            "Click directory arrow   Expand / collapse in the tree",
             "Space (button focused)  Activate OK / Cancel",
             "Tab / Shift+Tab         Cycle controls inside the dialog",
             "Esc                     Close file dialog",

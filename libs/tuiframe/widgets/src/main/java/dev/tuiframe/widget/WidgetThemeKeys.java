@@ -14,6 +14,7 @@ public final class WidgetThemeKeys {
     public static final WidgetStyleRole TEXT_FIELD_DISABLED = new WidgetStyleRole("widget.text-field.disabled");
     public static final WidgetStyleRole TEXT_FIELD_SELECTION = new WidgetStyleRole("widget.text-field.selection");
     public static final WidgetStyleRole MODAL_BODY = new WidgetStyleRole("widget.modal.body");
+    public static final WidgetStyleRole PATH_BAR = new WidgetStyleRole("widget.path-bar");
     public static final WidgetStyleRole MODAL_BORDER = new WidgetStyleRole("widget.modal.border");
     public static final WidgetStyleRole MODAL_TITLE = new WidgetStyleRole("widget.modal.title");
     public static final WidgetStyleRole MODAL_ERROR = new WidgetStyleRole("widget.modal.error");

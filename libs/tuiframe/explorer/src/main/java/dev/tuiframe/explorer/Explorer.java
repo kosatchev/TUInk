@@ -31,6 +31,7 @@ import java.util.Objects;
 /** Reusable filesystem explorer with instance permissions and retained gesture ownership. */
 public final class Explorer implements ExplorerNavigation, AutoCloseable {
     public enum Access { READ_ONLY, MANAGE_FILES }
+    public enum Navigation { BROWSE, ROOTED }
 
     private static final long HOLD_NANOS = 1_000_000_000L;
     private static final long EXPAND_NANOS = 700_000_000L;
@@ -38,6 +39,7 @@ public final class Explorer implements ExplorerNavigation, AutoCloseable {
     private static final long NOTICE_NANOS = 3_000_000_000L;
     private final FileTreeModel model;
     private final Access access;
+    private final Navigation navigation;
     private final ExplorerOperations operations;
     private FileTreeView.State state = FileTreeView.State.initial();
     private FileTreeView presentation;
@@ -66,15 +68,26 @@ public final class Explorer implements ExplorerNavigation, AutoCloseable {
 
     public Explorer(Path root, boolean showSizeColumn, boolean showDateColumn, Access access,
         ExplorerFileService files) {
+        this(root, showSizeColumn, showDateColumn, access,
+            access == Access.MANAGE_FILES ? Navigation.ROOTED : Navigation.BROWSE, files);
+    }
+
+    public Explorer(Path root, boolean showSizeColumn, boolean showDateColumn, Access access,
+        Navigation navigation, ExplorerFileService files) {
         this.access = Objects.requireNonNull(access);
+        this.navigation = Objects.requireNonNull(navigation);
         model = new FileTreeModel(root, showSizeColumn, showDateColumn,
-            access == Access.READ_ONLY, access == Access.MANAGE_FILES);
+            navigation == Navigation.BROWSE, navigation == Navigation.ROOTED);
         operations = new ExplorerOperations(access, Objects.requireNonNull(files));
         operations.setProtectedRoot(model.root());
     }
 
     public static Explorer sidebar(Path root) { return new Explorer(root, false, false, Access.MANAGE_FILES); }
+    public static Explorer directoryPicker(Path root) {
+        return new Explorer(root, false, false, Access.READ_ONLY, Navigation.ROOTED, new ExplorerFileService());
+    }
     public Access access() { return access; }
+    public Navigation navigation() { return navigation; }
     public ExplorerOperations operations() { return operations; }
     public Path root() { return model.root(); }
     public boolean showHiddenFiles() { return model.showHiddenFiles(); }
@@ -94,7 +107,7 @@ public final class Explorer implements ExplorerNavigation, AutoCloseable {
     }
 
     public void moveToParentRoot() {
-        Path parent = access == Access.MANAGE_FILES ? null : model.root().getParent();
+        Path parent = navigation == Navigation.ROOTED ? null : model.root().getParent();
         if (parent != null) setRoot(parent);
         else cancelPointerInteraction(PointerCaptureCancellation.SURFACE_CHANGED);
     }
@@ -166,7 +179,7 @@ public final class Explorer implements ExplorerNavigation, AutoCloseable {
         if (pendingSelection != null && !snapshot.loading()) pendingSelection = null;
         if (presentation == null || presentedSnapshot != snapshot) {
             presentation = FileTreeView.fromSnapshot(snapshot, model.showSizeColumn(), model.showDateColumn(),
-                access == Access.MANAGE_FILES ? FileTreeView.DirectoryActivation.TOGGLE_EXPANSION
+                navigation == Navigation.ROOTED ? FileTreeView.DirectoryActivation.TOGGLE_EXPANSION
                     : FileTreeView.DirectoryActivation.NAVIGATE);
             presentedSnapshot = snapshot;
         }

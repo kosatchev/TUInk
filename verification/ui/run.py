@@ -182,6 +182,79 @@ class Regressions:
             session.finish()
         assert document.read_text(encoding="utf-8") == "edited " + original
 
+    def picker_navigation(self):
+        project = self.root / "picker-navigation" / "project"
+        inner = project / "inner"
+        inner.mkdir(parents=True)
+        document = inner / "note.txt"
+        original = "PICKER_ORIGINAL\n"
+        document.write_text(original, encoding="utf-8")
+        sibling = project / "sibling.txt"
+        sibling.write_text("PICKER_SIBLING\n", encoding="utf-8")
+        with self.session("picker-navigation-session", document) as session:
+            session.resize(32, 160)
+            session.send(b"\x0f")
+            session.expect(lambda: "Open File" in session.screen.text and "note.txt" in session.screen.text,
+                           "file picker starting in the document directory")
+
+            def at_root(suffix):
+                return any("Path:" in line and suffix in line for line in session.screen.lines)
+
+            def tree_has_file(name):
+                return any(re.search(r"│\s+" + re.escape(name) + r"\s", line)
+                           for line in session.screen.lines)
+
+            def folder_position():
+                session.expect(lambda: any(re.search(r"[▶▼] inner/", line) for line in session.screen.lines),
+                               "visible inner directory in the parent tree")
+                return next((row, re.search(r"[▶▼] inner/", line).start())
+                            for row, line in enumerate(session.screen.lines)
+                            if re.search(r"[▶▼] inner/", line))
+
+            def click(row, column, count=1):
+                press = f"\x1b[<0;{column + 1};{row + 1}M".encode()
+                release = f"\x1b[<0;{column + 1};{row + 1}m".encode()
+                session.send((press + release) * count)
+
+            session.send(b"\x1b[H\r")  # Activate the leading '..' entry.
+            session.expect(lambda: at_root("project") and "sibling.txt" in session.screen.text,
+                           "moving the picker root to the parent")
+            row, arrow = folder_position()
+            click(row, arrow + 2)
+            session.expect(lambda: tree_has_file("sibling.txt") and not tree_has_file("note.txt"),
+                           "one label click selecting without navigation or expansion")
+            click(row, arrow)
+            session.expect(lambda: tree_has_file("note.txt") and tree_has_file("sibling.txt"),
+                           "the disclosure arrow expanding in the parent tree")
+            session.send(b"\x1b[D")
+            session.expect(lambda: not tree_has_file("note.txt") and tree_has_file("sibling.txt"),
+                           "Left collapsing the directory without changing the root")
+            session.send(b"\x1b[C")
+            session.expect(lambda: tree_has_file("note.txt") and tree_has_file("sibling.txt"),
+                           "Right expanding the directory without changing the root")
+            session.snapshot("parent-expanded")
+            row, arrow = folder_position()
+            click(row, arrow + 2, count=2)
+            session.expect(lambda: at_root("project/inner") and "note.txt" in session.screen.text
+                           and "sibling.txt" not in session.screen.text,
+                           "a label double-click entering the expanded directory")
+            session.snapshot("entered-by-double-click")
+            session.send(b"\x1b[H\r")
+            session.expect(lambda: "sibling.txt" in session.screen.text,
+                           "returning to the parent after the double-click")
+            row, arrow = folder_position()
+            click(row, arrow + 2)
+            session.send(b"\r")
+            session.expect(lambda: at_root("project/inner") and "sibling.txt" not in session.screen.text,
+                           "Enter entering the selected directory")
+            session.snapshot("entered-by-enter")
+            session.send(b"\x1b", 0.7)
+            session.expect(lambda: "Open File" not in session.screen.text and "PICKER_ORIGINAL" in session.screen.text,
+                           "closing the picker without editing its document")
+            session.finish()
+        assert document.read_text(encoding="utf-8") == original
+        assert sibling.read_text(encoding="utf-8") == "PICKER_SIBLING\n"
+
     def cli_path_identity(self):
         directory = self.root / "cli-path-files"
         directory.mkdir()
@@ -1825,7 +1898,7 @@ class Regressions:
         assert document.read_text(encoding="utf-8") == original
 
 
-SCENARIOS = ("reading", "focus", "field", "resize", "large-wrap", "tabs", "folder-explorer", "tab-scoped-ui", "history", "grapheme-edit-caret", "selection-autoscroll", "long-copy-name", "navigation", "fragmented-keys", "quit-confirmation", "gutter-idle", "paste", "settings", "settings-conflict", "recovery", "recovery-format5", "recovery-memory", "linux-keys", "enhanced-text", "long-unicode-edit", "save-as-workspace", "settings-memory", "syntax-memory", "unix-path-recovery", "literal-indentation", "field-memory", "document-caption", "save-name-suggestion", "replacement-memory", "paste-memory", "recovery-lock-cleanup", "xdg-profile", "cli-path-identity", "save-as-retarget", "legacy-encoding", "document-format", "format-errors", "format-reopen", "field-edit-caret", "field-memory-growth", "identical-replace-budget", "clipboard-memory", "cpp-raw-indentation", "terminal-diagnostics", "terminal-attributes", "startup-dependencies")
+SCENARIOS = ("reading", "focus", "field", "resize", "large-wrap", "tabs", "folder-explorer", "picker-navigation", "tab-scoped-ui", "history", "grapheme-edit-caret", "selection-autoscroll", "long-copy-name", "navigation", "fragmented-keys", "quit-confirmation", "gutter-idle", "paste", "settings", "settings-conflict", "recovery", "recovery-format5", "recovery-memory", "linux-keys", "enhanced-text", "long-unicode-edit", "save-as-workspace", "settings-memory", "syntax-memory", "unix-path-recovery", "literal-indentation", "field-memory", "document-caption", "save-name-suggestion", "replacement-memory", "paste-memory", "recovery-lock-cleanup", "xdg-profile", "cli-path-identity", "save-as-retarget", "legacy-encoding", "document-format", "format-errors", "format-reopen", "field-edit-caret", "field-memory-growth", "identical-replace-budget", "clipboard-memory", "cpp-raw-indentation", "terminal-diagnostics", "terminal-attributes", "startup-dependencies")
 
 
 def classpath_manifest(classpath):

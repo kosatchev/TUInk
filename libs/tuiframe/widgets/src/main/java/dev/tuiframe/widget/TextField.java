@@ -55,6 +55,12 @@ public final class TextField implements InteractiveWidget<TextField.Action> {
         InteractionResult.focus(FocusRequest.SELF);
 
     private String value = "";
+    private String placeholder = "";
+    /** Presentation-only hint; it never participates in editing, selection or submission. */
+    public TextField placeholder(String text) {
+        placeholder = dev.tuiframe.text.TerminalPlainText.singleLine(Objects.requireNonNull(text));
+        return this;
+    }
     private final PastePolicy pastePolicy;
     private final LongSupplier allocationBudget;
     private final boolean heapBudget;
@@ -595,6 +601,7 @@ public final class TextField implements InteractiveWidget<TextField.Action> {
         private final TextField owner;
         private final Rect bounds;
         private final String visibleText;
+        private final String placeholder;
         private final int viewportLeft;
         private final int cursorColumn;
         private final int selectionLeft;
@@ -610,6 +617,7 @@ public final class TextField implements InteractiveWidget<TextField.Action> {
         ) {
             this.owner = Objects.requireNonNull(owner, "owner");
             this.bounds = Objects.requireNonNull(bounds, "bounds");
+            this.placeholder = owner.value.isEmpty() ? owner.placeholder : "";
             Objects.requireNonNull(metrics, "metrics");
             if (bounds.isEmpty()) {
                 visibleText = "";
@@ -662,12 +670,7 @@ public final class TextField implements InteractiveWidget<TextField.Action> {
             if (bounds.isEmpty()) {
                 return;
             }
-            WidgetStyleRole role = !state.enabled()
-                ? WidgetThemeKeys.TEXT_FIELD_DISABLED
-                : state.focused()
-                    ? WidgetThemeKeys.TEXT_FIELD_FOCUSED
-                    : WidgetThemeKeys.TEXT_FIELD;
-            CellStyle style = theme.resolveStyle(role);
+            CellStyle style = ControlStyles.input(theme, state);
             int mark = canvas.save();
             try {
                 if (!canvas.clip(bounds)) {
@@ -675,8 +678,10 @@ public final class TextField implements InteractiveWidget<TextField.Action> {
                 }
                 canvas.fill(bounds, style);
                 CellText.draw(canvas, bounds.x(), bounds.y(), visibleText, style);
+                if (!placeholder.isEmpty())
+                    CellText.drawClipped(canvas, bounds.x(), bounds.y(), placeholder, ControlStyles.placeholder(theme, state), bounds.width());
                 if (state.enabled() && selectionRight > selectionLeft) {
-                    CellStyle fallback = new CellStyle(style.bg(), style.fg(), style.bold(), true);
+                    CellStyle fallback = style.inverted().emphasis(style.bold(), true);
                     CellStyle selected = theme.resolveStyle(WidgetThemeKeys.TEXT_FIELD_SELECTION, fallback);
                     if (canvas.clip(new Rect(bounds.x() + selectionLeft, bounds.y(),
                         selectionRight - selectionLeft, 1))) {

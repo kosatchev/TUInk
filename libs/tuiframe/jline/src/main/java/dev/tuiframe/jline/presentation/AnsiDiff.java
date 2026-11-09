@@ -731,7 +731,8 @@ final class AnsiDiff {
             + (foreground == null ? colorCode(style.fg(), colorDepth, false) : foreground) + ';'
             + colorCode(style.bg(), colorDepth, true) + ';'
             + (style.bold() ? "1" : "22") + ';'
-            + (style.underline() ? "4" : "24") + 'm';
+            + (style.underline() ? "4" : "24") + ';'
+            + (style.inverse() ? "7" : "27") + 'm';
     }
 
     private static String colorCode(CellColor color, ColorDepth colorDepth, boolean background) {
@@ -768,7 +769,7 @@ final class AnsiDiff {
             + "39;49;"
             + (style.bold() ? "1" : "22") + ';'
             + (style.underline() ? "4" : "24") + ';'
-            + (style.bg() != CellColor.DEFAULT ? "7" : "27") + 'm';
+            + ((style.bg() != CellColor.DEFAULT && style.bg() != CellColor.BLACK) ^ style.inverse() ? "7" : "27") + 'm';
     }
 
     private static int fgCode(CellColor color) {

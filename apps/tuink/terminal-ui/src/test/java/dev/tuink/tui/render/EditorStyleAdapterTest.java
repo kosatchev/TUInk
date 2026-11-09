@@ -51,6 +51,15 @@ class EditorStyleAdapterTest {
     }
 
     @Test
+    void explicitInverseSurvivesBothDirectionsAndStyleCaching() {
+        var style = new Style(Color.DEFAULT, Color.DEFAULT, true, false, true);
+        var cell = EditorStyleAdapter.toCell(style);
+        assertEquals(true, cell.inverse());
+        assertEquals(style, EditorStyleAdapter.toEditor(cell));
+        assertEquals(CellStyle.DEFAULT, EditorStyleAdapter.toCell(new Style(Color.DEFAULT, Color.DEFAULT, false, false)));
+    }
+
+    @Test
     void reusesEditorStylesAcrossEqualCellStyles() {
         Style first = new Style(Color.CYAN, Color.BLACK, true, false);
         CellStyle mapped = EditorStyleAdapter.toCell(first);

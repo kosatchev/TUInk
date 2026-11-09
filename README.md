@@ -562,7 +562,8 @@ An empty panel offers an **Open folder...** action. With the tree focused:
 - **Alt+.** or a distinct **Ctrl+H** toggles hidden files; **Shift+Left/Right** scrolls long names.
 
 File trees inherit their containing surface. The sidebar uses the editor's
-background; directory names are bold, including the selectable root row. Floating
+background; unselected directory names are bold, including the selectable root
+row. Floating
 file-action windows share the light Help/Open popup surface and button styles.
 Their input fields use a dark background with light text, with distinct focus,
 selection and disabled states. The divider uses the active theme's border color

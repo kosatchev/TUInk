@@ -25,6 +25,7 @@ final class ReferenceTerminal {
     private CellColor background = CellColor.DEFAULT;
     private boolean bold;
     private boolean underline;
+    private boolean inverse;
 
     ReferenceTerminal(int rows, int cols) {
         if (rows <= 0 || cols <= 0) {
@@ -150,6 +151,8 @@ final class ReferenceTerminal {
                 case 22 -> bold = false;
                 case 4 -> underline = true;
                 case 24 -> underline = false;
+                case 7 -> inverse = true;
+                case 27 -> inverse = false;
                 case 30, 31, 32, 33, 34, 35, 36, 37,
                      39, 90, 91, 92, 93, 94, 95, 96, 97 -> foreground = foreground(code);
                 case 38, 48 -> {
@@ -273,7 +276,7 @@ final class ReferenceTerminal {
     }
 
     private CellStyle activeStyle() {
-        return new CellStyle(foreground, background, bold, underline);
+        return new CellStyle(foreground, background, bold, underline, inverse);
     }
 
     private void resetStyle() {
@@ -281,6 +284,7 @@ final class ReferenceTerminal {
         background = CellColor.DEFAULT;
         bold = false;
         underline = false;
+        inverse = false;
     }
 
     private static int count(String parameters) {

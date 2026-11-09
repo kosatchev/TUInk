@@ -147,10 +147,7 @@ public final class Button implements InteractiveWidget<Button.Action> {
         public void paint(Canvas canvas, Theme theme, WidgetState state) {
             Objects.requireNonNull(theme, "theme");
             Objects.requireNonNull(state, "state");
-            WidgetStyleRole role = !state.enabled()
-                ? WidgetThemeKeys.BUTTON_DISABLED
-                : state.focused() ? WidgetThemeKeys.BUTTON_FOCUSED : WidgetThemeKeys.BUTTON;
-            paintText(canvas, bounds, button.renderedText, theme.resolveStyle(role));
+            paintText(canvas, bounds, button.renderedText, ControlStyles.button(theme, state));
         }
 
         @Override

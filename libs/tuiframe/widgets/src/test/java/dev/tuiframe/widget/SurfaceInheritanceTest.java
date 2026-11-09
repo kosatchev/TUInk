@@ -25,14 +25,16 @@ class SurfaceInheritanceTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void ordinaryDisabledAndUnstyledSelectionInheritEitherContainingSurface(boolean tree) {
+    void ordinaryAndDisabledRowsInheritTheSurfaceWhileSelectionUsesInverseOrAccent(boolean tree) {
         var placement = placement(tree);
         Theme empty = role -> null;
         for (CellStyle body : List.of(LIGHT, DARK)) {
             Theme theme = empty.withSurface(body, BORDER);
             for (WidgetState state : List.of(WidgetState.NORMAL, WidgetState.FOCUSED, WidgetState.DISABLED)) {
                 var buffer = paint(placement, theme, state);
-                assertEquals(body, buffer.get(0, 0).style(), "The selected row inherits the containing surface");
+                var selected = !state.enabled() ? body : state.focused()
+                    ? new CellStyle(CellColor.BLACK, CellColor.CYAN, true, false) : body.inverted();
+                assertEquals(selected, buffer.get(0, 0).style(), "Only focused selection uses the accent");
                 assertEquals(body, buffer.get(1, 0).style(), "Ordinary row text inherits the same surface");
                 assertEquals(body, buffer.get(1, 8).style(), "Unused row cells retain the parent background");
                 assertEquals(new CellStyle(BORDER.fg(), body.bg(), BORDER.bold(), BORDER.underline()),

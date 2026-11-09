@@ -106,6 +106,24 @@ class RenderRasterizerPaletteTest {
         assertTrue(contrast(158, 48) >= 4.5, "the dimmest code comments must remain readable");
     }
 
+    @Test
+    void inverseAttributeSurvivesPreparedAndStreamingRasterizationWithoutCacheCollisions() {
+        var model = new TextModel(new SimpleLineBuffer()); model.replaceLines(List.of("ab"));
+        var builder = RenderPlanBuilder.standalone(line -> List.of(
+            new StyleSpan(0, 1, new Style(Color.DEFAULT, Color.DEFAULT, true, false)),
+            new StyleSpan(1, 2, new Style(Color.DEFAULT, Color.DEFAULT, true, false, true))), new TerminalEditorTextLayout(model));
+        builder.setBracketMatchingEnabled(false); builder.setRainbowBracketsEnabled(false);
+        var state = new EditorState();
+        var plan = builder.build(model, state, ROWS, COLS, "", "");
+        for (int bytes : new int[] {1, 1 << 20}) try (var rasterizer = new RenderRasterizer(1, UiStyles.Theme.CYAN,
+                RenderMemoryBudget.bounded(bytes))) {
+            rasterizer.setVisibleWhitespace(false);
+            var cells = rasterizer.rasterize(plan, ROWS, COLS);
+            assertFalse(cells.get(1, plan.gutterWidth()).style().inverse());
+            assertTrue(cells.get(1, plan.gutterWidth() + 1).style().inverse());
+        }
+    }
+
     private static void assertDocumentStyles(CellBuffer frame, RenderPlan plan, CellStyle body) {
         int text = plan.gutterWidth();
         assertEquals(body, frame.get(1, text).style(), "an unstyled glyph inherits the body");

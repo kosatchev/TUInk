@@ -369,13 +369,7 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
                 theme.resolveStyle(WidgetThemeKeys.MODAL_BODY));
             CellStyle normalStyle = widgetState.enabled() ? inheritedStyle
                 : theme.resolveStyle(WidgetThemeKeys.LIST_ITEM_DISABLED, inheritedStyle);
-            CellStyle selectedStyle = normalStyle;
-            if (widgetState.enabled()) {
-                CellStyle selected = theme.resolveStyle(WidgetThemeKeys.LIST_ITEM_SELECTED, normalStyle);
-                selectedStyle = widgetState.focused()
-                    ? theme.resolveStyle(WidgetThemeKeys.LIST_ITEM_SELECTED_FOCUSED, selected)
-                    : selected;
-            }
+            CellStyle selectedStyle = ControlStyles.listSelection(theme, widgetState);
             int mark = canvas.save();
             try {
                 if (!canvas.clip(bounds)) {
@@ -395,16 +389,15 @@ public final class TreeView<V> implements InteractiveWidget<TreeView.Action<V>> 
             }
             for (int rowOffset = 0; rowOffset < visibleItems.size(); rowOffset++) {
                 VisibleItem<V> visible = visibleItems.get(rowOffset);
-                CellStyle rowStyle = visible.itemIndex() == state.selectedIndex()
-                    ? selectedStyle
-                    : normalStyle;
+                boolean selected = visible.itemIndex() == state.selectedIndex();
+                CellStyle rowStyle = selected ? selectedStyle : normalStyle;
                 int row = Math.addExact(contentBounds.y(), rowOffset);
                 if (!rowStyle.equals(normalStyle)) {
                     canvas.fill(contentBounds.x(), row, contentBounds.width(), 1, rowStyle);
                 }
-                CellStyle labelStyle = hasDisclosure(visible.item().item().kind())
+                CellStyle labelStyle = !selected && hasDisclosure(visible.item().item().kind())
                     ? new CellStyle(rowStyle.fg(), rowStyle.bg(), rowStyle.bold() || branchStyle.bold(),
-                        rowStyle.underline() || branchStyle.underline()) : rowStyle;
+                        rowStyle.underline() || branchStyle.underline(), rowStyle.inverse()) : rowStyle;
                 paintLeading(canvas, visible.item(), row, labelStyle);
                 paintTrailing(canvas, visible.item(), row, rowStyle);
             }

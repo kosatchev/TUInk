@@ -370,19 +370,7 @@ public final class ListView implements InteractiveWidget<ListView.Action> {
                 theme.resolveStyle(WidgetThemeKeys.MODAL_BODY));
             CellStyle normalStyle = widgetState.enabled() ? inheritedStyle
                 : theme.resolveStyle(WidgetThemeKeys.LIST_ITEM_DISABLED, inheritedStyle);
-            CellStyle selectedStyle = normalStyle;
-            if (widgetState.enabled()) {
-                CellStyle unfocusedSelected = theme.resolveStyle(
-                    WidgetThemeKeys.LIST_ITEM_SELECTED,
-                    normalStyle
-                );
-                selectedStyle = widgetState.focused()
-                    ? theme.resolveStyle(
-                        WidgetThemeKeys.LIST_ITEM_SELECTED_FOCUSED,
-                        unfocusedSelected
-                    )
-                    : unfocusedSelected;
-            }
+            CellStyle selectedStyle = ControlStyles.listSelection(theme, widgetState);
             int mark = canvas.save();
             try {
                 if (!canvas.clip(bounds)) {

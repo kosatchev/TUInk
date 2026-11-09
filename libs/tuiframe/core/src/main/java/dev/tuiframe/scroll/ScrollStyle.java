@@ -13,7 +13,7 @@ public record ScrollStyle(CellStyle track, CellStyle thumb) {
     public static ScrollStyle fromParent(CellStyle body, CellStyle border) {
         Objects.requireNonNull(body, "body");
         Objects.requireNonNull(border, "border");
-        CellStyle inherited = new CellStyle(border.fg(), body.bg(), border.bold(), border.underline());
+        CellStyle inherited = new CellStyle(border.fg(), body.bg(), border.bold(), border.underline(), body.inverse());
         return new ScrollStyle(inherited, inherited);
     }
 }

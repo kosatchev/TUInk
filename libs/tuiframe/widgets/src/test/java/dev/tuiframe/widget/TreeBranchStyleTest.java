@@ -2,7 +2,6 @@ package dev.tuiframe.widget;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuiframe.cell.Canvas;
 import dev.tuiframe.cell.CellBuffer;
@@ -16,7 +15,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 class TreeBranchStyleTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void branchEmphasisComposesWithSelectionWithoutReplacingTheSurface(boolean focused) {
+    void selectionOwnsItsEmphasisWhileUnselectedBranchesKeepTheirs(boolean focused) {
         CellStyle body = new CellStyle(CellColor.GRAY_218, CellColor.GRAY_028, false, false);
         CellStyle selected = new CellStyle(CellColor.BLACK, CellColor.CYAN, false, false);
         CellStyle selectedFocused = new CellStyle(CellColor.BRIGHT_WHITE, CellColor.BLUE, false, false);
@@ -38,8 +37,9 @@ class TreeBranchStyleTest {
         CellStyle branch = buffer.get(0, 2).style();
         assertEquals(active.fg(), branch.fg());
         assertEquals(active.bg(), branch.bg());
-        assertTrue(branch.bold());
-        assertTrue(branch.underline());
+        assertEquals(active, branch);
+        assertFalse(branch.bold());
+        assertFalse(branch.underline());
         assertFalse(buffer.get(1, 4).style().bold());
         assertEquals(body, buffer.get(1, 4).style());
         assertEquals(new CellStyle(body.fg(), body.bg(), true, true), buffer.get(2, 2).style());

@@ -134,9 +134,9 @@ public final class NoticeBanner {
             CellStyle body = theme.resolveStyle(role, theme.resolveStyle(WidgetThemeKeys.MODAL_BODY));
             Theme buttonTheme = key -> {
                 if (WidgetThemeKeys.BUTTON_FOCUSED.equals(key))
-                    return new CellStyle(body.bg(), body.fg(), true, true);
+                    return new CellStyle(body.bg(), body.fg(), true, true, body.inverse());
                 if (WidgetThemeKeys.BUTTON.equals(key) || WidgetThemeKeys.BUTTON_DISABLED.equals(key))
-                    return new CellStyle(body.fg(), body.bg(), body.bold(), true);
+                    return body.emphasis(body.bold(), true);
                 return theme.style(key);
             };
             int mark = canvas.save();

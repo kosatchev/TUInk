@@ -27,7 +27,7 @@ public final class EditorStyleAdapter {
             toCellColor(style.fg()),
             toCellColor(style.bg()),
             style.bold(),
-            style.underline()
+            style.underline(), style.inverse()
         );
     }
 
@@ -44,7 +44,7 @@ public final class EditorStyleAdapter {
                 toEditorColor(value.fg()),
                 toEditorColor(value.bg()),
                 value.bold(),
-                value.underline()
+                value.underline(), value.inverse()
             )
         );
     }

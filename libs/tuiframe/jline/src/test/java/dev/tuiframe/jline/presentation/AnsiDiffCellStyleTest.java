@@ -39,7 +39,7 @@ class AnsiDiffCellStyleTest {
     }
 
     @Test
-    void monochromeFullRedrawIgnoresForegroundAndReversesOnlyNonDefaultBackgrounds() {
+    void monochromeFullRedrawKeepsBlackBackgroundOrdinaryAndReversesLighterSurfaces() {
         AnsiDiff diff = new AnsiDiff();
 
         for (CellColor foreground : CellColor.values()) {
@@ -127,9 +127,9 @@ class AnsiDiffCellStyleTest {
         for (var depth : new ColorDepth[] {ColorDepth.ANSI_256, ColorDepth.ANSI_16,
             ColorDepth.TRUECOLOR, ColorDepth.MONOCHROME, ColorDepth.ANSI_256}) {
             String expected = switch (depth) {
-                case ANSI_256 -> "\u001B[38;5;236;48;5;236;22;24m";
-                case TRUECOLOR -> "\u001B[38;2;48;48;48;48;2;48;48;48;22;24m";
-                case ANSI_16 -> "\u001B[30;40;22;24m";
+                case ANSI_256 -> "\u001B[38;5;236;48;5;236;22;24;27m";
+                case TRUECOLOR -> "\u001B[38;2;48;48;48;48;2;48;48;48;22;24;27m";
+                case ANSI_16 -> "\u001B[30;40;22;24;27m";
                 case MONOCHROME -> "\u001B[39;49;22;24;7m";
             };
             assertEquals(FULL_REDRAW_PREFIX + expected + "x" + RESET,
@@ -169,7 +169,7 @@ class AnsiDiffCellStyleTest {
                 // One encoder must not return the indexed cache entry for a later RGB frame, or vice versa.
                 for (var depth : List.of(ColorDepth.TRUECOLOR, ColorDepth.ANSI_256, ColorDepth.ANSI_16,
                     ColorDepth.MONOCHROME, ColorDepth.TRUECOLOR, ColorDepth.ANSI_256)) {
-                    String attributes = (bold ? "1" : "22") + ";" + (underline ? "4" : "24") + "m";
+                    String attributes = (bold ? "1" : "22") + ";" + (underline ? "4" : "24") + ";27m";
                     String expected = switch (depth) {
                         case ANSI_16 -> "\u001B[" + shade.foreground() + ";" + shade.background() + ";" + attributes;
                         case ANSI_256 -> "\u001B[38;5;" + shade.index() + ";48;5;" + shade.index() + ";" + attributes;
@@ -198,8 +198,39 @@ class AnsiDiffCellStyleTest {
             terminal.apply(patch);
             assertEquals(after.get(0, 0), terminal.cell(0, 0));
             assertTrue(patch.contains(depth == ColorDepth.TRUECOLOR
-                ? "38;2;218;218;218;48;2;158;158;158;1;4m" : "38;5;253;48;5;247;1;4m"));
+                ? "38;2;218;218;218;48;2;158;158;158;1;4;27m" : "38;5;253;48;5;247;1;4;27m"));
         }
+    }
+
+    @Test
+    void explicitInverseAndItsResetReplayWithoutLeakingIntoAdjacentCells() {
+        for (var depth : List.of(ColorDepth.ANSI_16, ColorDepth.ANSI_256, ColorDepth.TRUECOLOR)) {
+            var cells = new CellBuffer(1, 3);
+            cells.set(0, 0, "i", CellStyle.DEFAULT.inverted());
+            cells.set(0, 1, "n", CellStyle.DEFAULT);
+            cells.set(0, 2, "b", CellStyle.fg(CellColor.BLUE).inverted());
+            var capabilities = new TerminalCapabilities(depth, false, false, false);
+            var diff = new AnsiDiff(); var terminal = new ReferenceTerminal(1, 3);
+            terminal.apply(diff.diff(null, cells, capabilities, ScrollHint.none()));
+            for (int col = 0; col < 3; col++) assertEquals(cells.get(0, col), terminal.cell(0, col));
+            var normal = new CellBuffer(1, 3); normal.set(0, 0, "i", CellStyle.DEFAULT);
+            terminal.apply(diff.diff(cells, normal, capabilities, ScrollHint.none()));
+            for (int col = 0; col < 3; col++) assertEquals(normal.get(0, col), terminal.cell(0, col));
+        }
+        for (var background : List.of(CellColor.DEFAULT, CellColor.BLUE)) {
+            var base = new CellStyle(CellColor.WHITE, background, false, false);
+            assertEquals(FULL_REDRAW_PREFIX + monochromeAnsi(base.inverted()) + "x" + RESET,
+                fullRedraw(new AnsiDiff(), base.inverted(), false));
+        }
+    }
+
+    @Test
+    void blackPaletteBodyAndLightInputRetainOppositeSurfacesWithoutColor() {
+        var body = new CellStyle(CellColor.GRAY_188, CellColor.BLACK, false, false);
+        var field = new CellStyle(CellColor.GRAY_028, CellColor.GRAY_188, false, false);
+        assertTrue(fullRedraw(new AnsiDiff(), body, false).contains(";27m"));
+        assertTrue(fullRedraw(new AnsiDiff(), field, false).contains(";7m"));
+        assertTrue(fullRedraw(new AnsiDiff(), body.inverted(), false).contains(";7m"));
     }
 
     private static String fullRedraw(AnsiDiff diff, CellStyle style, boolean colorEnabled) {
@@ -222,14 +253,14 @@ class AnsiDiffCellStyleTest {
             + foregroundCode(style.fg()) + ';'
             + backgroundCode(style.bg()) + ';'
             + (style.bold() ? "1" : "22") + ';'
-            + (style.underline() ? "4" : "24") + 'm';
+            + (style.underline() ? "4" : "24") + ';' + (style.inverse() ? "7" : "27") + 'm';
     }
 
     private static String monochromeAnsi(CellStyle style) {
         return "\u001B[39;49;"
             + (style.bold() ? "1" : "22") + ';'
             + (style.underline() ? "4" : "24") + ';'
-            + (style.bg() == CellColor.DEFAULT ? "27" : "7") + 'm';
+            + ((style.bg() != CellColor.DEFAULT && style.bg() != CellColor.BLACK) ^ style.inverse() ? "7" : "27") + 'm';
     }
 
     private static int foregroundCode(CellColor color) {

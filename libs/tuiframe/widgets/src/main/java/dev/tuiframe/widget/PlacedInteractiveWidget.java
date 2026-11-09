@@ -21,7 +21,7 @@ public interface PlacedInteractiveWidget<A> extends PlacedWidget {
     /**
      * Maps typed output while preserving this placement's geometry, readiness,
      * paint and independent interaction effects. The result exposes capture and
-     * cursor capabilities exactly when this placement exposes them.
+     * cursor and popup capabilities exactly when this placement exposes them.
      */
     default <B> PlacedInteractiveWidget<B> mapOutput(Function<? super A, ? extends B> mapper) {
         return OutputMappedPlacement.create(this, mapper);

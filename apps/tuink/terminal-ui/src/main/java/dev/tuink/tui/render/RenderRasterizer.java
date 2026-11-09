@@ -37,7 +37,7 @@ public class RenderRasterizer implements AutoCloseable {
     private static final int MAX_PREPARED_LINES = 1024;
     private static final int MAX_PREPARED_CACHE_WEIGHT = 16 * 1024 * 1024;
     private static final int EDITOR_COLOR_COUNT = Color.values().length;
-    private static final int CELL_STYLE_VARIANTS = EDITOR_COLOR_COUNT * EDITOR_COLOR_COUNT * 4;
+    private static final int CELL_STYLE_VARIANTS = EDITOR_COLOR_COUNT * EDITOR_COLOR_COUNT * 8;
     private static final AtomicLong FALLBACK_PRODUCERS = new AtomicLong(Long.MIN_VALUE);
 
     private Palette styles;
@@ -488,8 +488,8 @@ public class RenderRasterizer implements AutoCloseable {
         if (style.equals(Style.DEFAULT)) {
             return bodyStyle();
         }
-        int attributes = (style.bold() ? 2 : 0) | (style.underline() ? 1 : 0);
-        int index = ((style.fg().ordinal() * EDITOR_COLOR_COUNT + style.bg().ordinal()) << 2)
+        int attributes = (style.inverse() ? 4 : 0) | (style.bold() ? 2 : 0) | (style.underline() ? 1 : 0);
+        int index = ((style.fg().ordinal() * EDITOR_COLOR_COUNT + style.bg().ordinal()) << 3)
             | attributes;
         CellStyle cached = cellStyleCache[index];
         if (cached != null) {
@@ -498,7 +498,7 @@ public class RenderRasterizer implements AutoCloseable {
         CellStyle raw = EditorStyleAdapter.toCell(style);
         CellStyle body = bodyStyle();
         CellStyle mapped = new CellStyle(raw.fg() == CellColor.DEFAULT ? body.fg() : raw.fg(),
-            raw.bg() == CellColor.DEFAULT ? body.bg() : raw.bg(), raw.bold(), raw.underline());
+            raw.bg() == CellColor.DEFAULT ? body.bg() : raw.bg(), raw.bold(), raw.underline(), raw.inverse());
         cellStyleCache[index] = mapped;
         return mapped;
     }

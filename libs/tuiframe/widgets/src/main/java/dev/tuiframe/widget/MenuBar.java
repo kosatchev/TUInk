@@ -987,7 +987,7 @@ public final class MenuBar<C> implements InteractiveWidget<MenuBar.Action<C>> {
     private static CellStyle underlined(CellStyle style) {
         return style.underline()
             ? style
-            : new CellStyle(style.fg(), style.bg(), style.bold(), true);
+            : style.emphasis(style.bold(), true);
     }
 
     private static boolean mnemonicEquals(String expected, String input) {

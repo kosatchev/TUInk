@@ -2,6 +2,8 @@ package dev.tuiframe.style;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
@@ -30,6 +32,14 @@ class CellStyleTest {
         assertEquals(CellColor.DEFAULT, CellStyle.DEFAULT.bg());
         assertFalse(CellStyle.DEFAULT.bold());
         assertFalse(CellStyle.DEFAULT.underline());
+    }
+
+    @Test
+    void inversionIsAValueAttributeIncludingWhenBothColorsAreDefaults() {
+        var normal = CellStyle.DEFAULT; var inverse = normal.inverted();
+        assertTrue(inverse.inverse()); assertNotEquals(normal, inverse);
+        assertEquals(normal, inverse.inverted()); assertTrue(inverse.emphasis(true, true).inverse());
+        assertEquals(inverse, new CellStyle(normal.fg(), normal.bg(), false, false, true));
     }
 
     @Test

@@ -7,7 +7,7 @@ import dev.tuink.core.GutterDiffFlag;
 import dev.tuink.core.GutterDiffMarker;
 import dev.tuink.core.LineText;
 import dev.tuink.core.Position;
-import dev.tuink.core.SearchLimitException;
+import dev.tuink.core.SearchException;
 import dev.tuink.core.SearchMatcher;
 import dev.tuink.editor.search.SearchOptions;
 import dev.tuink.core.TextModel;
@@ -106,7 +106,7 @@ public class RenderPlanBuilder {
                 }
                 matcher = highlightMatcher;
                 failedSearch = null;
-            } catch (SearchLimitException limit) {
+            } catch (SearchException limit) {
                 failedSearch = key;
             }
         }
@@ -115,7 +115,7 @@ public class RenderPlanBuilder {
             if (matcher == null) return List.of();
             try {
                 return matcher.findIntersecting(source, start, end);
-            } catch (SearchLimitException limit) {
+            } catch (SearchException limit) {
                 refuse();
                 return List.of();
             }
@@ -125,7 +125,7 @@ public class RenderPlanBuilder {
             if (matcher == null) return false;
             try {
                 return matcher.matchesRange(source, start, end);
-            } catch (SearchLimitException limit) {
+            } catch (SearchException limit) {
                 refuse();
                 return false;
             }

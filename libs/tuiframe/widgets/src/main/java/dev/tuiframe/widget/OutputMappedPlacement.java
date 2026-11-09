@@ -19,6 +19,17 @@ final class OutputMappedPlacement {
     ) {
         Objects.requireNonNull(delegate, "delegate");
         Objects.requireNonNull(mapper, "mapper");
+        if (delegate instanceof PlacedPopup<?> popup) {
+            var typed = (PlacedPopup<A>) popup;
+            if (delegate instanceof PlacedPointerCapture<?> capture) {
+                var typedCapture = (PlacedPointerCapture<A>) capture;
+                return delegate instanceof PlacedCursorSource cursor
+                    ? new PopupCaptureCursorMapping<>(typed, typedCapture, cursor, mapper)
+                    : new PopupCaptureMapping<>(typed, typedCapture, mapper);
+            }
+            return delegate instanceof PlacedCursorSource cursor
+                ? new PopupCursorMapping<>(typed, cursor, mapper) : new PopupMapping<>(typed, mapper);
+        }
         if (delegate instanceof PlacedPointerCapture<?> capture) {
             PlacedPointerCapture<A> typedCapture = (PlacedPointerCapture<A>) capture;
             return delegate instanceof PlacedCursorSource cursor
@@ -72,6 +83,38 @@ final class OutputMappedPlacement {
         final InteractionResult<B> mapped(InteractionResult<A> result) {
             return result.mapOutput(mapper);
         }
+    }
+
+    private static class PopupMapping<A, B> extends Mapping<A, B> implements PlacedPopup<B> {
+        private final PlacedPopup<A> popup;
+        PopupMapping(PlacedPopup<A> popup, Function<? super A, ? extends B> mapper) { super(popup, mapper); this.popup = popup; }
+        @Override public boolean popupOpen() { return popup.popupOpen(); }
+        @Override public Rect popupBounds() { return popup.popupBounds(); }
+        @Override public void dismissPopup() { popup.dismissPopup(); }
+        @Override public void paintPopup(Canvas canvas, Theme theme, WidgetState state) { popup.paintPopup(canvas, theme, state); }
+    }
+    private static final class PopupCursorMapping<A, B> extends PopupMapping<A, B> implements PlacedCursorSource {
+        private final PlacedCursorSource cursor;
+        PopupCursorMapping(PlacedPopup<A> popup, PlacedCursorSource cursor, Function<? super A, ? extends B> mapper) {
+            super(popup, mapper); this.cursor = cursor;
+        }
+        @Override public Optional<Point> cursorPosition(FocusContext context) { return cursor.cursorPosition(context); }
+    }
+    private static class PopupCaptureMapping<A, B> extends PopupMapping<A, B> implements PlacedPointerCapture<B> {
+        private final PlacedPointerCapture<A> capture;
+        PopupCaptureMapping(PlacedPopup<A> popup, PlacedPointerCapture<A> capture, Function<? super A, ? extends B> mapper) {
+            super(popup, mapper); this.capture = capture;
+        }
+        @Override public boolean pointerCaptureActive() { return capture.pointerCaptureActive(); }
+        @Override public InteractionResult<B> cancelPointerCapture(PointerCaptureCancellation reason) {
+            return mapped(capture.cancelPointerCapture(reason));
+        }
+    }
+    private static final class PopupCaptureCursorMapping<A, B> extends PopupCaptureMapping<A, B> implements PlacedCursorSource {
+        private final PlacedCursorSource cursor;
+        PopupCaptureCursorMapping(PlacedPopup<A> popup, PlacedPointerCapture<A> capture, PlacedCursorSource cursor,
+            Function<? super A, ? extends B> mapper) { super(popup, capture, mapper); this.cursor = cursor; }
+        @Override public Optional<Point> cursorPosition(FocusContext context) { return cursor.cursorPosition(context); }
     }
 
     private static class CaptureMapping<A, B> extends Mapping<A, B> implements PlacedPointerCapture<B> {

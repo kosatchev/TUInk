@@ -3,7 +3,11 @@ package dev.tuiframe.style;
 /**
  * Concrete styling of a terminal cell.
  */
-public record CellStyle(CellColor fg, CellColor bg, boolean bold, boolean underline) {
+public record CellStyle(CellColor fg, CellColor bg, boolean bold, boolean underline, boolean inverse) {
+    public CellStyle(CellColor fg, CellColor bg, boolean bold, boolean underline) { this(fg, bg, bold, underline, false); }
+    /** Semantic inversion also works when both colors are terminal defaults. */
+    public CellStyle inverted() { return new CellStyle(fg, bg, bold, underline, !inverse); }
+    public CellStyle emphasis(boolean bold, boolean underline) { return new CellStyle(fg, bg, bold, underline, inverse); }
     public static final CellStyle DEFAULT = new CellStyle(
         CellColor.DEFAULT,
         CellColor.DEFAULT,
@@ -30,7 +34,8 @@ public record CellStyle(CellColor fg, CellColor bg, boolean bold, boolean underl
             && fg == style.fg
             && bg == style.bg
             && bold == style.bold
-            && underline == style.underline;
+            && underline == style.underline
+            && inverse == style.inverse;
     }
 
     @Override
@@ -38,6 +43,7 @@ public record CellStyle(CellColor fg, CellColor bg, boolean bold, boolean underl
         int result = fg.ordinal();
         result = 31 * result + bg.ordinal();
         result = 31 * result + Boolean.hashCode(bold);
-        return 31 * result + Boolean.hashCode(underline);
+        result = 31 * result + Boolean.hashCode(underline);
+        return 31 * result + Boolean.hashCode(inverse);
     }
 }

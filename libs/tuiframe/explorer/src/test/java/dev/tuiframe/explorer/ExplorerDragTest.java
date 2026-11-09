@@ -38,19 +38,18 @@ class ExplorerDragTest {
             var press = explorer.handle(pointer(sourceRow, PointerEvent.Kind.PRESS), 0L, DOUBLE_CLICK);
             assertEquals(PointerCaptureRequest.ACQUIRE, press.pointerCaptureRequest());
             place(explorer);
-            explorer.handle(pointer(destinationRow, PointerEvent.Kind.DRAG), 100_000_000L, DOUBLE_CLICK);
             assertFalse(explorer.dragging());
-            assertEquals(900_000_000L, explorer.nanosUntilWakeup(100_000_000L));
-            assertFalse(explorer.tick(500_000_000L));
-            assertFalse(explorer.dragging(), "The former half-second delay must no longer arm a move");
-            assertFalse(explorer.tick(999_999_999L));
+            assertEquals(400_000_000L, explorer.nanosUntilWakeup(100_000_000L));
+            assertFalse(explorer.tick(499_999_999L));
             assertFalse(explorer.dragging());
-            assertTrue(explorer.tick(1_000_000_000L));
+            assertTrue(explorer.tick(500_000_000L));
+            assertFalse(explorer.dragging(), "Holding only prepares the gesture; motion starts the move");
+            explorer.handle(pointer(destinationRow, PointerEvent.Kind.DRAG), 500_000_000L, DOUBLE_CLICK);
             assertTrue(explorer.dragging());
             assertTrue(Files.exists(file));
             assertFalse(Files.exists(destination.resolve(file.getFileName())));
 
-            var released = explorer.handle(pointer(destinationRow, PointerEvent.Kind.RELEASE), 1_010_000_000L, DOUBLE_CLICK);
+            var released = explorer.handle(pointer(destinationRow, PointerEvent.Kind.RELEASE), 510_000_000L, DOUBLE_CLICK);
             var drop = assertInstanceOf(FileTreeView.MoveRequested.class, released.output().orElseThrow());
             assertEquals(file, drop.source());
             assertEquals(destination, drop.destination());
@@ -59,6 +58,34 @@ class ExplorerDragTest {
             assertEquals(PointerCaptureRequest.RELEASE, released.pointerCaptureRequest());
             assertFalse(explorer.pointerCaptureActive());
             assertTrue(Files.exists(file), "A gesture requests one move; the operation queue owns publication");
+        }
+    }
+
+    @Test void earlyMotionPermanentlyCancelsFileAndFolderMovesAndAFreshStationaryPressCanRetry() throws Exception {
+        Path destination = Files.createDirectory(root.resolve("destination"));
+        Path file = Files.writeString(root.resolve("source.txt"), "contents");
+        Path folder = Files.createDirectory(root.resolve("source-folder"));
+        for (Path source : new Path[] {file, folder}) try (var explorer = Explorer.sidebar(root)) {
+            loaded(explorer); place(explorer);
+            int sourceRow = row(explorer, source), targetRow = row(explorer, destination);
+            explorer.handle(pointer(sourceRow, PointerEvent.Kind.PRESS), 0L, DOUBLE_CLICK);
+            place(explorer);
+            explorer.handle(new PointerEvent(sourceRow, 9, PointerEvent.Kind.DRAG, PointerEvent.Button.LEFT, Set.of()), 499_999_999L, DOUBLE_CLICK);
+            assertEquals(-1L, explorer.nanosUntilWakeup(1_000_000_000L));
+            assertFalse(explorer.tick(1_000_000_000L));
+            explorer.handle(pointer(sourceRow, PointerEvent.Kind.DRAG), 1_100_000_000L, DOUBLE_CLICK);
+            explorer.handle(pointer(targetRow, PointerEvent.Kind.DRAG), 1_200_000_000L, DOUBLE_CLICK);
+            assertFalse(explorer.dragging());
+            var cancelled = explorer.handle(pointer(targetRow, PointerEvent.Kind.RELEASE), 1_300_000_000L, DOUBLE_CLICK);
+            assertFalse(cancelled.output().orElse(null) instanceof FileTreeView.MoveRequested);
+            assertFalse(explorer.pointerCaptureActive());
+            place(explorer);
+            explorer.handle(pointer(sourceRow, PointerEvent.Kind.PRESS), 2_000_000_000L, DOUBLE_CLICK);
+            explorer.handle(pointer(targetRow, PointerEvent.Kind.DRAG), 2_500_000_000L, DOUBLE_CLICK);
+            assertTrue(explorer.dragging());
+            assertInstanceOf(FileTreeView.MoveRequested.class, explorer.handle(pointer(targetRow, PointerEvent.Kind.RELEASE),
+                2_510_000_000L, DOUBLE_CLICK).output().orElseThrow());
+            assertTrue(Files.exists(source)); assertFalse(Files.exists(destination.resolve(source.getFileName())));
         }
     }
 

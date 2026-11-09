@@ -11,6 +11,7 @@ import dev.tuiframe.explorer.ui.PathPresentation;
 import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.input.KeyStroke;
 import dev.tuiframe.input.PointerEvent;
+import dev.tuiframe.input.PointerDragPolicy;
 import dev.tuiframe.input.ResizeEvent;
 import dev.tuiframe.input.TuiInputEvent;
 import dev.tuiframe.style.CellStyle;
@@ -33,7 +34,6 @@ public final class Explorer implements ExplorerNavigation, AutoCloseable {
     public enum Access { READ_ONLY, MANAGE_FILES }
     public enum Navigation { BROWSE, ROOTED }
 
-    private static final long HOLD_NANOS = 1_000_000_000L;
     private static final long EXPAND_NANOS = 700_000_000L;
     private static final long SCROLL_NANOS = 80_000_000L;
     private static final long NOTICE_NANOS = 3_000_000_000L;
@@ -229,7 +229,7 @@ public final class Explorer implements ExplorerNavigation, AutoCloseable {
             if (pointer.kind() == PointerEvent.Kind.DRAG || pointer.kind() == PointerEvent.Kind.MOVE) {
                 if (pointer.button() != PointerEvent.Button.LEFT) return InteractionResult.handled();
                 gesture.row = pointer.row(); gesture.column = pointer.column();
-                arm(nowNanos);
+                advanceGesture(nowNanos);
                 updateHover(nowNanos);
                 return InteractionResult.<FileTreeView.Action>handled().withPointerCapture(PointerCaptureRequest.ACQUIRE);
             }
@@ -256,7 +256,7 @@ public final class Explorer implements ExplorerNavigation, AutoCloseable {
     private InteractionResult<FileTreeView.Action> release(PointerEvent pointer, long now) {
         var completed = gesture;
         completed.row = pointer.row(); completed.column = pointer.column();
-        arm(now);
+        advanceGesture(now);
         updateHover(now);
         var destination = completed.dragging ? validDropTarget() : null;
         var clicked = entryAt(pointer.row(), pointer.column());
@@ -269,7 +269,7 @@ public final class Explorer implements ExplorerNavigation, AutoCloseable {
                 .withPointerCapture(PointerCaptureRequest.RELEASE);
             return changed(PointerCaptureRequest.RELEASE);
         }
-        if (clicked != null && clicked.id().equals(completed.source.id()) && now - completed.pressedAt < HOLD_NANOS) {
+        if (clicked != null && clicked.id().equals(completed.source.id()) && !completed.hold.cancelled() && !completed.hold.armed()) {
             boolean twice = clicked.id().equals(lastClick) && now - lastClickAt >= 0L && now - lastClickAt <= doubleClickNanos;
             lastClick = twice ? null : clicked.id(); lastClickAt = now;
             FileTreeView.Action action = new FileTreeView.StateChanged(state);
@@ -284,15 +284,16 @@ public final class Explorer implements ExplorerNavigation, AutoCloseable {
         return changed(PointerCaptureRequest.RELEASE);
     }
 
-    private boolean arm(long now) {
-        if (gesture == null || gesture.armed || now - gesture.pressedAt < HOLD_NANOS) return false;
-        gesture.armed = true;
-        return true;
+    private boolean advanceGesture(long now) {
+        if (gesture == null) return false;
+        var before = gesture.hold;
+        gesture.hold = before.move(gesture.row, gesture.column, now);
+        return gesture.hold != before;
     }
 
     private void updateHover(long now) {
         if (gesture == null || rawPlacement == null) return;
-        if (gesture.armed && gesture.source.target() != null && !gesture.source.path().equals(root())
+        if (gesture.hold.dragging() && gesture.source.target() != null && !gesture.source.path().equals(root())
             && (gesture.row != gesture.startRow || gesture.column != gesture.startColumn)) gesture.dragging = true;
         var destination = gesture.dragging ? validDropTarget() : null;
         Path next = destination == null ? null : destination.path();
@@ -305,7 +306,7 @@ public final class Explorer implements ExplorerNavigation, AutoCloseable {
         currentNanos = now;
         boolean changed = false;
         if (notice != null && notice.expiresAt != 0L && now - notice.expiresAt >= 0L) { notice = null; changed = true; }
-        changed |= arm(now);
+        changed |= advanceGesture(now);
         updateHover(now);
         if (gesture != null && gesture.dragging) {
             var destination = validDropTarget();
@@ -325,7 +326,7 @@ public final class Explorer implements ExplorerNavigation, AutoCloseable {
     public long nanosUntilWakeup(long now) {
         long next = notice == null || notice.expiresAt == 0L ? -1L : Math.max(0L, notice.expiresAt - now);
         if (gesture == null) return next;
-        if (!gesture.armed) next = earlier(next, Math.max(0L, gesture.pressedAt + HOLD_NANOS - now));
+        next = earlier(next, gesture.hold.nanosUntilWakeup(now));
         if (gesture.dragging) {
             var destination = validDropTarget();
             if (destination != null && !destination.expanded() && !loading())
@@ -436,11 +437,12 @@ public final class Explorer implements ExplorerNavigation, AutoCloseable {
     private static final class Gesture {
         final FileTreeModel.Entry source;
         final int startRow, startColumn;
-        final long pressedAt;
+        PointerDragPolicy.Gesture hold;
         int row, column;
-        boolean armed, dragging;
+        boolean dragging;
         Gesture(FileTreeModel.Entry source, int row, int column, long now) {
-            this.source = source; startRow = this.row = row; startColumn = this.column = column; pressedAt = now;
+            this.source = source; startRow = this.row = row; startColumn = this.column = column;
+            hold = PointerDragPolicy.Gesture.begin(row, column, now);
         }
     }
 

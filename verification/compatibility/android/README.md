@@ -1,6 +1,6 @@
 # Shared engine compatibility probe
 
-This external consumer checks `editor-contract`, `unicode-text`, `core`,
+This external consumer checks `editor-contract`, `unicode-text`, `editor-search-text`, `core`,
 `editor-session` and `highlight-regex` JARs without terminal, JGit or FFM
 adapters. It compiles against their public APIs with Java 17, exercises editing,
 undo/redo, stale-result rejection, search, text ownership, UTF-16 boundaries,
@@ -42,7 +42,7 @@ D8/R8 inputs. They need no terminal or filesystem frontend.
 Build the inputs with the repository's Java 25 toolchain:
 
 ```sh
-./gradlew :editor-contract:jar :unicode-text:jar :core:jar :editor-session:jar :highlight-regex:jar
+./gradlew :editor-contract:jar :unicode-text:jar :editor-search-text:jar :core:jar :editor-session:jar :highlight-regex:jar
 python3 verification/compatibility/android/run.py \
   --jdk /path/to/jdk-25 \
   --runtime-jdk /path/to/jdk-17 \

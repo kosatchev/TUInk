@@ -126,7 +126,7 @@ class LinuxFileAclTest {
     private void saveProbe(Path target, String nativeAccessOption, Class<?> probe) throws Exception {
         Path emptyPath = Files.createDirectory(tempDir.resolve("empty-path"));
         String classpath = String.join(File.pathSeparator,
-            location(LinuxFileAclTest.class), location(TextModel.class), location(GraphemeText.class),
+            location(LinuxFileAclTest.class), location(TextModel.class), location(dev.tuink.core.SearchMatcher.class), location(GraphemeText.class),
             location(ImmutableText.class), LinuxXattrTestRuntime.classpath());
         ProcessBuilder builder = new ProcessBuilder(
             Path.of(System.getProperty("java.home"), "bin", "java").toString(),

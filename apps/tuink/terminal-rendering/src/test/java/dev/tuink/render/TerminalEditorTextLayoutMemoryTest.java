@@ -31,7 +31,7 @@ class TerminalEditorTextLayoutMemoryTest {
             for (int index = 0; index < 384; index++) output.write(block);
         }
         String classpath = String.join(File.pathSeparator, location(getClass()), location(RenderPlanBuilder.class),
-            location(TextModel.class), location(TerminalText.class), location(DocumentView.class), location(dev.tuink.storage.jvm.JvmDocumentStorage.class));
+            location(TextModel.class), location(dev.tuink.core.SearchMatcher.class), location(TerminalText.class), location(DocumentView.class), location(dev.tuink.storage.jvm.JvmDocumentStorage.class));
         Process child = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx64m", "-cp", classpath, NarrowWrapProbe.class.getName(), file.toString())
             .redirectErrorStream(true).start();
@@ -55,7 +55,7 @@ class TerminalEditorTextLayoutMemoryTest {
                 }
             }
             String classpath = String.join(File.pathSeparator, location(getClass()), location(RenderPlanBuilder.class),
-                location(TextModel.class), location(TerminalText.class), location(DocumentView.class), location(dev.tuink.storage.jvm.JvmDocumentStorage.class));
+                location(TextModel.class), location(dev.tuink.core.SearchMatcher.class), location(TerminalText.class), location(DocumentView.class), location(dev.tuink.storage.jvm.JvmDocumentStorage.class));
             Process child = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                 "-Xmx" + example[1] + "m", "-cp", classpath, BoundedRenderProbe.class.getName(), file.toString())
                 .redirectErrorStream(true).start();
@@ -82,7 +82,7 @@ class TerminalEditorTextLayoutMemoryTest {
                 output.write("Ā".getBytes(StandardCharsets.UTF_8));
             }
             String classpath = String.join(File.pathSeparator, location(TerminalEditorTextLayoutMemoryTest.class),
-                location(TerminalEditorTextLayout.class), location(TextModel.class), location(TerminalText.class),
+                location(TerminalEditorTextLayout.class), location(TextModel.class), location(dev.tuink.core.SearchMatcher.class), location(TerminalText.class),
                 location(DocumentView.class), location(dev.tuink.storage.jvm.JvmDocumentStorage.class));
             Process process = new ProcessBuilder(
                 Path.of(System.getProperty("java.home"), "bin", "java").toString(),

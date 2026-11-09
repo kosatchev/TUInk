@@ -32,7 +32,7 @@ class RenderPlanBuilderBracketMemoryTest {
                 for (int index = 0; index < 128; index++) output.write(block);
             }
             String classpath = String.join(File.pathSeparator, location(getClass()), location(RenderPlanBuilder.class),
-                location(TextModel.class), location(TerminalText.class), location(DocumentView.class), location(dev.tuink.storage.jvm.JvmDocumentStorage.class));
+                location(TextModel.class), location(dev.tuink.core.SearchMatcher.class), location(TerminalText.class), location(DocumentView.class), location(dev.tuink.storage.jvm.JvmDocumentStorage.class));
             Process child = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                 "-Xmx64m", "-cp", classpath, DenseBracketProbe.class.getName(), file.toString())
                 .redirectErrorStream(true).start();

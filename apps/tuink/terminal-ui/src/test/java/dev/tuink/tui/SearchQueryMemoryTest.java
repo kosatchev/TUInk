@@ -37,7 +37,7 @@ class SearchQueryMemoryTest {
     private void runProbe(String heap, String mode) throws Exception {
         var locations = new LinkedHashSet<String>();
         for (String name : List.of(
-            getClass().getName(), "dev.tuink.tui.SearchPresentation", "dev.tuink.core.EditorEngine",
+            getClass().getName(), "dev.tuink.tui.SearchPresentation", "dev.tuink.core.EditorEngine", "dev.tuink.core.SearchMatcher",
             "dev.tuink.editor.language.LanguageRegistry", "dev.tuink.unicode.GraphemeText", "dev.tuiframe.widget.TextField",
             "dev.tuiframe.cell.CellBuffer"
         )) locations.add(Path.of(Class.forName(name, false, getClass().getClassLoader())

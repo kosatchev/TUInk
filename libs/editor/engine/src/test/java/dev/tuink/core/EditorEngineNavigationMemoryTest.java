@@ -29,7 +29,7 @@ class EditorEngineNavigationMemoryTest {
                 }
                 output.write("Ā".getBytes(StandardCharsets.UTF_8));
             }
-            String classpath = String.join(File.pathSeparator, location(getClass()), location(EditorEngine.class),
+            String classpath = String.join(File.pathSeparator, location(getClass()), location(EditorEngine.class), location(dev.tuink.core.SearchMatcher.class),
                 location(GraphemeText.class), location(LanguageRegistry.class), LinuxXattrTestRuntime.classpath());
             Process child = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                 "-Xmx" + example[1] + "m", "-cp", classpath, NavigationProbe.class.getName(), file.toString())

@@ -35,6 +35,7 @@ def main():
     modules = {
         'editor-contract': 'libs/editor/api',
         'unicode-text': 'libs/unicode-text',
+        'editor-search-text': 'libs/editor/search-text',
         'core': 'libs/editor/engine',
         'editor-session': 'libs/editor/session',
         'highlight-regex': 'libs/editor/highlight-regex',
@@ -53,7 +54,7 @@ def main():
     runtime_java = (args.runtime_jdk or args.jdk) / "bin/java"
     for path in [*jars, android, dexer, java, javac, runtime_java]:
         if not path.is_file():
-            parser.error(f"Missing input/tool: {path}; build the five shared engine JARs first")
+            parser.error(f"Missing input/tool: {path}; build the six shared engine JARs first")
 
     output = (args.output or root / "build/compatibility/android").resolve()
     output.mkdir(parents=True, exist_ok=True)

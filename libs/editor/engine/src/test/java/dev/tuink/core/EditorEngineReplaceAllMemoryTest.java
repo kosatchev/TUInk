@@ -26,7 +26,7 @@ class EditorEngineReplaceAllMemoryTest {
 
     private static void runProbe(Class<?> probe) throws Exception {
         String classpath = String.join(File.pathSeparator,
-            location(EditorEngineReplaceAllMemoryTest.class), location(EditorEngine.class), location(TextModel.class),
+            location(EditorEngineReplaceAllMemoryTest.class), location(EditorEngine.class), location(dev.tuink.core.SearchMatcher.class), location(TextModel.class),
             location(GraphemeText.class), location(LanguageRegistry.class));
         Process process = new ProcessBuilder(
             Path.of(System.getProperty("java.home"), "bin", "java").toString(),

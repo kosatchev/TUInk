@@ -12,6 +12,7 @@ def projectDirectories = [
     ':render': 'apps/tuink/terminal-rendering',
     ':editor-contract': 'libs/editor/api',
     ':core': 'libs/editor/engine',
+    ':editor-search-text': 'libs/editor/search-text',
     ':editor-session': 'libs/editor/session',
     ':editor-storage-jvm': 'libs/editor/storage-jvm',
     ':editor-diff-jgit': 'libs/editor/diff-jgit',

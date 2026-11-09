@@ -17,7 +17,7 @@ class EditorEngineKeyboardMemoryTest {
     @Test
     void repeatedEndOfFileEntersAndUndoShareA400000LineDocumentOn128MiB() throws Exception {
         String classpath = String.join(File.pathSeparator, location(EditorEngineKeyboardMemoryTest.class),
-            location(EditorEngine.class), location(GraphemeText.class),
+            location(EditorEngine.class), location(dev.tuink.core.SearchMatcher.class), location(GraphemeText.class),
             location(LanguageRegistry.class));
         Process process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx128m", "-cp", classpath, MemoryProbe.class.getName()).redirectErrorStream(true).start();

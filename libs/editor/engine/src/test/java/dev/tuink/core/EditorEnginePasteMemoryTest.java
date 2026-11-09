@@ -24,7 +24,7 @@ class EditorEnginePasteMemoryTest {
 
     private static void probe(String mode, int heapMiB) throws Exception {
         String classpath = String.join(File.pathSeparator, location(EditorEnginePasteMemoryTest.class),
-            location(EditorEngine.class), location(GraphemeText.class), location(LanguageRegistry.class), LinuxXattrTestRuntime.classpath());
+            location(EditorEngine.class), location(dev.tuink.core.SearchMatcher.class), location(GraphemeText.class), location(LanguageRegistry.class), LinuxXattrTestRuntime.classpath());
         Process process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx" + heapMiB + "m", "-cp", classpath, MemoryProbe.class.getName(), mode)
             .redirectErrorStream(true).start();

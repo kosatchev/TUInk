@@ -27,7 +27,7 @@ class SingleReplaceAdmissionIntegrationTest {
         // The child uses the real window with in-memory terminal/recovery ports.
         // Include each runtime module and the assertions used by its fixture.
         for (String name : List.of(
-            "dev.tuink.tui.TerminalEditorApp", "dev.tuink.storage.jvm.JvmDocumentStorage", "dev.tuink.core.EditorEngine",
+            "dev.tuink.tui.TerminalEditorApp", "dev.tuink.storage.jvm.JvmDocumentStorage", "dev.tuink.core.EditorEngine", "dev.tuink.core.SearchMatcher",
             "dev.tuink.editor.language.LanguageRegistry", "dev.tuink.unicode.GraphemeText",
             "dev.tuink.editor.session.document.EditorDocumentSession", "dev.tuink.render.RenderPlanBuilder",
             "dev.tuink.highlight.regex.RegexHighlighter", "dev.tuiframe.cell.CellBuffer",
@@ -40,6 +40,7 @@ class SingleReplaceAdmissionIntegrationTest {
             locations.add(location(Class.forName(name, false, getClass().getClassLoader())));
         }
         MarkdownProbeClasspath.addTo(locations);
+        ProjectSearchProbeClasspath.addTo(locations);
         Process process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx64m", "-cp", String.join(File.pathSeparator, locations), WindowProbe.class.getName(),
             directory.toString()).redirectErrorStream(true).start();

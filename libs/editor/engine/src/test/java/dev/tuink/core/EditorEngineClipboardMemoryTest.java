@@ -32,7 +32,7 @@ class EditorEngineClipboardMemoryTest {
 
     private static void probe(String mode, boolean disableCompactStrings) throws Exception {
         String classpath = String.join(File.pathSeparator, location(EditorEngineClipboardMemoryTest.class),
-            location(EditorEngine.class), location(EditorDocument.class), location(GraphemeText.class),
+            location(EditorEngine.class), location(dev.tuink.core.SearchMatcher.class), location(EditorDocument.class), location(GraphemeText.class),
             location(LanguageRegistry.class));
         List<String> command = new ArrayList<>(List.of(
             Path.of(System.getProperty("java.home"), "bin", "java").toString(), "-Xmx64m"));

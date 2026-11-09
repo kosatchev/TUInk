@@ -43,7 +43,7 @@ class RecoveryFormatRoundTripMemoryTest {
     void acceptedManyLineAndLegacyEncodedDocumentsRoundTripTheirOwnRecoveryStorage(@TempDir Path directory)
         throws Exception {
         String classpath = String.join(File.pathSeparator, location(getClass()), location(RecoveryStore.class),
-            location(RecoverySnapshot.class), location(ImmutableText.class), location(GraphemeText.class),
+            location(RecoverySnapshot.class), location(dev.tuink.core.SearchMatcher.class), location(ImmutableText.class), location(GraphemeText.class),
             location(dev.tuink.storage.jvm.JvmDocumentStorage.class));
         Process child = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx1g", "-cp", classpath, RoundTripProbe.class.getName(), directory.toString())

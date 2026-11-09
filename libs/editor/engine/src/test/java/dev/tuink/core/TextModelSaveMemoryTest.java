@@ -28,7 +28,7 @@ class TextModelSaveMemoryTest {
     void acceptedMultilineUnicodePastesCanBeSavedAndSavedAgainOnBoundedHeap(int heapMiB, int blocks)
         throws Exception {
         String classpath = String.join(File.pathSeparator, location(TextModelSaveMemoryTest.class),
-            location(EditorEngine.class), location(GraphemeText.class),
+            location(EditorEngine.class), location(dev.tuink.core.SearchMatcher.class), location(GraphemeText.class),
             location(LanguageRegistry.class), LinuxXattrTestRuntime.classpath());
         Process process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "--enable-native-access=ALL-UNNAMED", "-Xmx" + heapMiB + "m", "-cp", classpath, MemoryProbe.class.getName(),

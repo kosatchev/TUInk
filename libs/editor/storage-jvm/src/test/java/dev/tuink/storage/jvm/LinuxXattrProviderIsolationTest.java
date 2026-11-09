@@ -43,7 +43,7 @@ public class LinuxXattrProviderIsolationTest {
             Files.writeString(descriptor, configuration == Configuration.BROKEN ? "missing.Provider\n"
                 : FirstProvider.class.getName() + "\n" + SecondProvider.class.getName() + "\n");
         }
-        String classpath = String.join(File.pathSeparator, location(getClass()), location(TextModel.class),
+        String classpath = String.join(File.pathSeparator, location(getClass()), location(TextModel.class), location(SearchMatcher.class),
             location(GraphemeText.class), location(LanguageRegistry.class),
             location(JvmDocumentStorage.class), servicesRoot.toString());
         Process process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),

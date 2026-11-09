@@ -26,7 +26,7 @@ apply from: rootProject.file('gradle/scripts/clean.gradle')
 // The build JDK is independent of a library's runtime API baseline. Only the
 // modules already checked against Java 17 belong here; this is not an Android
 // compatibility claim for the remaining editor runtime.
-def java17Libraries = [':unicode-text', ':editor-contract', ':core', ':editor-session',
+def java17Libraries = [':editor-search-text', ':unicode-text', ':editor-contract', ':core', ':editor-session',
                        ':highlight-regex', ':editor-diff-jgit', ':markdown-preview',
                        ':markdown-commonmark', ':markdown-math', ':markdown-mermaid'] as Set
 
@@ -82,7 +82,8 @@ def allowedProjectDependencies = [
     ':tuiframe-widgets': [':tuiframe-core'] as Set,
     ':tuiframe-explorer': [':tuiframe-core', ':tuiframe-widgets'] as Set,
     ':editor-contract' : [] as Set,
-    ':core'            : [':unicode-text', ':editor-contract'] as Set,
+    ':editor-search-text': [':editor-contract'] as Set,
+    ':core'            : [':unicode-text', ':editor-contract', ':editor-search-text'] as Set,
     ':editor-session'  : [':editor-contract', ':core'] as Set,
     ':editor-diff-jgit': [':editor-contract'] as Set,
     ':editor-storage-jvm': [':core', ':editor-contract'] as Set,
@@ -123,8 +124,9 @@ def portableRuntimeProjects = [
     ':markdown-commonmark': [':markdown-commonmark', ':markdown-preview', ':editor-contract'] as Set,
     ':unicode-text': [':unicode-text'] as Set,
     ':editor-contract': [':editor-contract'] as Set,
-    ':core': [':core', ':unicode-text', ':editor-contract'] as Set,
-    ':editor-session': [':editor-session', ':core', ':unicode-text', ':editor-contract'] as Set,
+    ':editor-search-text': [':editor-search-text', ':editor-contract'] as Set,
+    ':core': [':core', ':editor-search-text', ':unicode-text', ':editor-contract'] as Set,
+    ':editor-session': [':editor-session', ':core', ':editor-search-text', ':unicode-text', ':editor-contract'] as Set,
     ':highlight-regex': [':highlight-regex', ':editor-contract'] as Set
 ]
 def rootVersionForHelp = rootProject.version.toString()
@@ -249,7 +251,7 @@ def verifyProjectDependencies = tasks.register('verifyProjectDependencies') {
                             )
                         }
                         if ([':unicode-text', ':tuiframe-core', ':tuiframe-widgets', ':tuiframe-explorer', ':editor-contract',
-                             ':editor-session'].contains(sourceProject.path)
+                             ':editor-session', ':editor-search-text'].contains(sourceProject.path)
                             && externallyDependencyFreeProductionConfigurations.contains(configuration.name)) {
                             violations.add(
                                 "${sourceProject.path}:${configuration.name} -> "

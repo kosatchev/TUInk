@@ -30,7 +30,7 @@ class DocumentCommandSessionMemoryTest {
     @Test
     void fourHundredThousandLinesAndRepeatedEnterUndoStayBoundedThroughThePublicSession() throws Exception {
         String classpath = String.join(File.pathSeparator, location(getClass()), location(EditorDocumentSession.class),
-            location(CoreDocumentBackend.class), location(DocumentCommand.class), location(GraphemeText.class));
+            location(CoreDocumentBackend.class), location(dev.tuink.core.SearchMatcher.class), location(DocumentCommand.class), location(GraphemeText.class));
         Process process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx128m", "-cp", classpath, MemoryProbe.class.getName()).redirectErrorStream(true).start();
         try {

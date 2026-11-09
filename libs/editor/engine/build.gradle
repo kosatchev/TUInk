@@ -6,6 +6,7 @@ plugins {
 dependencies {
     implementation project(':unicode-text')
     api project(':editor-contract')
+    api project(':editor-search-text')
     testImplementation project(':editor-diff-jgit')
     testImplementation project(':editor-storage-jvm')
 }

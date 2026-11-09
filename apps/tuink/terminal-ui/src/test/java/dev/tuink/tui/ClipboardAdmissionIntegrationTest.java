@@ -22,7 +22,7 @@ class ClipboardAdmissionIntegrationTest {
         var locations = new LinkedHashSet<String>();
         for (Class<?> type : List.of(getClass(), EditorWindowFixture.class)) locations.add(location(type));
         for (String name : List.of(
-            "dev.tuink.tui.TerminalEditorApp", "dev.tuink.storage.jvm.JvmDocumentStorage", "dev.tuink.core.EditorEngine",
+            "dev.tuink.tui.TerminalEditorApp", "dev.tuink.storage.jvm.JvmDocumentStorage", "dev.tuink.core.EditorEngine", "dev.tuink.core.SearchMatcher",
             "dev.tuink.editor.language.LanguageRegistry", "dev.tuink.unicode.GraphemeText",
             "dev.tuink.editor.session.document.EditorDocumentSession", "dev.tuink.render.RenderPlanBuilder",
             "dev.tuink.highlight.regex.RegexHighlighter", "dev.tuiframe.cell.CellBuffer",
@@ -33,6 +33,7 @@ class ClipboardAdmissionIntegrationTest {
             "org.junit.platform.commons.util.StringUtils", "org.opentest4j.AssertionFailedError"
         )) locations.add(location(Class.forName(name, false, getClass().getClassLoader())));
         MarkdownProbeClasspath.addTo(locations);
+        ProjectSearchProbeClasspath.addTo(locations);
         Process process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx64m", "-cp", String.join(File.pathSeparator, locations), Probe.class.getName(),
             directory.toString()).redirectErrorStream(true).start();

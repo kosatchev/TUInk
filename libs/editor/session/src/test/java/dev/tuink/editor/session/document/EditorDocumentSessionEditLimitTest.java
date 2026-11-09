@@ -23,7 +23,7 @@ class EditorDocumentSessionEditLimitTest {
     @Test
     void oversizedWorkspaceEditReturnsATypedRejectionAndPreservesSnapshotAndRedo() throws Exception {
         String classpath = String.join(File.pathSeparator, location(EditorDocumentSessionEditLimitTest.class),
-            location(EditorDocumentSession.class), location(EditorEngine.class), location(TextModel.class),
+            location(EditorDocumentSession.class), location(EditorEngine.class), location(dev.tuink.core.SearchMatcher.class), location(TextModel.class),
             location(WorkspaceEditValidator.class),
             location(DocumentId.class), location(Class.forName("dev.tuink.unicode.GraphemeText")));
         Process process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),

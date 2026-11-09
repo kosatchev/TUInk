@@ -30,7 +30,7 @@ class RecoveryStreamingSaveTest {
     @Test
     void updatingALargeSnapshotDoesNotMaterializeThePreviousDocumentInASmallHeap() throws Exception {
         String classpath = String.join(File.pathSeparator, location(getClass()), location(RecoveryStore.class),
-            location(RecoverySnapshot.class), location(dev.tuink.storage.jvm.JvmDocumentStorage.class), location(dev.tuink.editor.document.DocumentId.class));
+            location(RecoverySnapshot.class), location(dev.tuink.core.SearchMatcher.class), location(dev.tuink.storage.jvm.JvmDocumentStorage.class), location(dev.tuink.editor.document.DocumentId.class));
         Process child = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx64m", "-cp", classpath, UpdateProbe.class.getName(), directory.toString())
             .redirectErrorStream(true).start();

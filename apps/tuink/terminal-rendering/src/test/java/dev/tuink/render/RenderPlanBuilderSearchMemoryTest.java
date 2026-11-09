@@ -48,7 +48,7 @@ class RenderPlanBuilderSearchMemoryTest {
     void rendererHandlesMemoryRefusalAfterEarlierCompilationRounds() throws Exception {
         var locations = new LinkedHashSet<String>();
         for (String name : List.of(
-            getClass().getName(), "dev.tuink.render.RenderPlanBuilder", "dev.tuink.core.SearchMatcher",
+            getClass().getName(), "dev.tuink.render.RenderPlanBuilder", "dev.tuink.core.SearchMatcher", "dev.tuink.core.TextModel",
             "dev.tuink.editor.document.DocumentView", "dev.tuink.unicode.GraphemeText",
             "dev.tuiframe.cell.CellBuffer", "org.junit.jupiter.api.Assertions",
             "org.junit.platform.commons.util.StringUtils", "org.opentest4j.AssertionFailedError"

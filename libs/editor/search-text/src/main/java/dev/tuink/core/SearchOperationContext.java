@@ -1,5 +1,9 @@
 package dev.tuink.core;
 
+import java.util.Objects;
+import java.util.concurrent.CancellationException;
+import java.util.function.BooleanSupplier;
+
 /**
  * Shared search limits for one synchronous operation, possibly spanning several
  * scans or documents. Confine a context and its children to one thread. Compiled
@@ -10,6 +14,7 @@ public final class SearchOperationContext {
         new SearchOperationContext(Long.MAX_VALUE, Long.MAX_VALUE, null);
 
     private final SearchOperationContext parent;
+    private BooleanSupplier cancelled;
     private long remainingWork;
     private long remainingCompilationBytes;
 
@@ -40,10 +45,24 @@ public final class SearchOperationContext {
         return new SearchOperationContext(maximumWork, SearchMemoryBudget.additionalPeakLimit(), this);
     }
 
+    /** A detached search may cooperatively stop without changing matching semantics. */
+    public static SearchOperationContext cancellable(long maximumWork, BooleanSupplier cancelled) {
+        SearchOperationContext result = bounded(maximumWork);
+        result.cancelled = Objects.requireNonNull(cancelled, "cancelled");
+        return result;
+    }
+
+    public void checkpoint() {
+        if (parent != null) parent.checkpoint();
+        if (cancelled != null && (Thread.currentThread().isInterrupted() || cancelled.getAsBoolean()))
+            throw new CancellationException("Search cancelled");
+    }
+
     /** No aggregate operation limits; individual allocation admission still applies. */
     public static SearchOperationContext unlimited() { return UNLIMITED; }
 
     void consume(long work) {
+        checkpoint();
         if (work < 0) throw new IllegalArgumentException("Search work must not be negative");
         if (this == UNLIMITED) return;
         if (work > remainingWork) throw new SearchLimitException();

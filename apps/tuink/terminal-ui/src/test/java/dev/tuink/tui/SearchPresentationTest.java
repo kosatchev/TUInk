@@ -33,7 +33,7 @@ class SearchPresentationTest {
         assertEquals("", rejected.query());
         assertTrue(rejected.error().startsWith("Search is too complex"));
         assertEquals("Search is too complex", rejected.summary());
-        assertTrue(rejected.error().contains("use literal search"));
+        assertTrue(rejected.error().contains("use strict search"));
         assertSame(rejected, presentation.resolve(true, query, options, List.of(tab), 0));
         var simpler = presentation.resolve(true, "a?a", options, List.of(tab), 0);
         assertEquals(44, simpler.matchCount());

@@ -1,0 +1,9 @@
+plugins { id 'java-library' }
+
+dependencies {
+    api project(':project-search')
+    implementation project(':core')
+    implementation project(':editor-storage-jvm')
+    implementation rootProject.ext.jgitRuntimeFiles
+    implementation 'org.slf4j:slf4j-api:1.7.36'
+}

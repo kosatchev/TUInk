@@ -40,6 +40,7 @@ public final class SearchMatcher {
 
     public static SearchMatcher compile(String query, SearchOptions options, SearchOperationContext context) {
         Objects.requireNonNull(context, "context");
+        context.checkpoint();
         try {
             String safeQuery = query == null ? "" : query;
             SearchOptions safeOptions = options == null ? SearchOptions.DEFAULT : options;
@@ -150,6 +151,7 @@ public final class SearchMatcher {
      */
     public List<Match> findAll(CharSequence source, int maximumMatches, SearchOperationContext context) {
         Objects.requireNonNull(context, "context");
+        context.checkpoint();
         if (maximumMatches < 0) throw new IllegalArgumentException("Maximum matches must not be negative");
         if (maximumMatches == 0) return List.of();
         try {
@@ -176,6 +178,7 @@ public final class SearchMatcher {
 
     public List<Match> findIntersecting(CharSequence source, int startUtf16, int endUtf16, SearchOperationContext context) {
         Objects.requireNonNull(context, "context");
+        context.checkpoint();
         if (endUtf16 <= startUtf16) {
             return List.of();
         }
@@ -207,6 +210,7 @@ public final class SearchMatcher {
 
     public Match findFirstAtOrAfter(CharSequence source, int fromUtf16, SearchOperationContext context) {
         Objects.requireNonNull(context, "context");
+        context.checkpoint();
         try {
             int[] found = {-1, -1};
             scanMatches(source, (start, end) -> {
@@ -230,6 +234,7 @@ public final class SearchMatcher {
 
     public Match findLastBefore(CharSequence source, int beforeUtf16, SearchOperationContext context) {
         Objects.requireNonNull(context, "context");
+        context.checkpoint();
         try {
             int[] found = {-1, -1};
             scanMatches(source, (start, end) -> {
@@ -253,6 +258,7 @@ public final class SearchMatcher {
 
     public int countMatches(CharSequence source, SearchOperationContext context) {
         Objects.requireNonNull(context, "context");
+        context.checkpoint();
         try {
             int[] count = {0};
             scanMatches(source, (start, end) -> {
@@ -276,6 +282,7 @@ public final class SearchMatcher {
 
     public boolean matchesRange(CharSequence source, int startUtf16, int endUtf16, SearchOperationContext context) {
         Objects.requireNonNull(context, "context");
+        context.checkpoint();
         if (source == null
             || startUtf16 < 0
             || endUtf16 < startUtf16
@@ -288,12 +295,13 @@ public final class SearchMatcher {
     }
 
     /** Visits the same ranges as findAll without retaining a Match object for each result. */
-    void scanMatches(CharSequence source, MatchVisitor visitor) {
+    public void scanMatches(CharSequence source, MatchVisitor visitor) {
         scanMatches(source, visitor, SearchWorkBudget.current());
     }
 
-    void scanMatches(CharSequence source, MatchVisitor visitor, SearchOperationContext context) {
+    public void scanMatches(CharSequence source, MatchVisitor visitor, SearchOperationContext context) {
         Objects.requireNonNull(context, "context");
+        context.checkpoint();
         if (source == null || source.length() == 0 || (literal == null && wildcard == null)) {
             return;
         }
@@ -309,7 +317,7 @@ public final class SearchMatcher {
     }
 
     @FunctionalInterface
-    interface MatchVisitor {
+    public interface MatchVisitor {
         /** Returns false when no more results are needed. */
         boolean visit(int startUtf16, int endUtf16);
     }
@@ -328,7 +336,7 @@ public final class SearchMatcher {
                 return literal.cursor(source, acceptedEnd, matchMode == SearchOptions.MatchMode.WHOLE_WORD);
             }
             if (!wildcard.hasStar) {
-                return wildcard.segments.get(0).cursor(source, acceptedEnd, true, wildcard.caseInsensitive);
+                return wildcard.segments.get(0).cursor(source, acceptedEnd, true, wildcard.caseInsensitive, SearchWorkBudget.current());
             }
             // A starred pattern has at most one result on a line. Its greedy
             // suffix needs the complete line, so retain the existing scan.
@@ -436,7 +444,7 @@ public final class SearchMatcher {
                         offsets[codePointIndex % tokens.length] = offset;
                         int codePoint = Character.codePointAt(source, offset);
                         offset += Character.charCount(codePoint);
-                        scannedCodePoints++;
+                        if ((scannedCodePoints++ & 4095L) == 0) context.checkpoint();
                         int token = fold(codePoint);
                         while (matched > 0 && token != tokens[matched]) matched = prefix[matched - 1];
                         if (token == tokens[matched]) matched++;
@@ -633,13 +641,15 @@ public final class SearchMatcher {
                 CharSequence source, int from, boolean nonOverlapping, boolean caseInsensitive, MatchVisitor visitor,
                 SearchOperationContext context
             ) {
-                Cursor cursor = cursor(source, from, nonOverlapping, caseInsensitive);
+                Cursor cursor = cursor(source, from, nonOverlapping, caseInsensitive, context);
                 while (cursor.moveNext(context)) {
                     if (!visitor.visit(cursor.startUtf16, cursor.endUtf16)) return;
                 }
             }
 
-            private Cursor cursor(CharSequence source, int from, boolean nonOverlapping, boolean caseInsensitive) {
+            private Cursor cursor(CharSequence source, int from, boolean nonOverlapping, boolean caseInsensitive,
+                                  SearchOperationContext constructionContext) {
+                constructionContext.checkpoint();
                 if (literals.length == 0) {
                     // Used for a pattern consisting only of '?'. Each source code
                     // point is visited once, even when the query itself is long.
@@ -647,6 +657,7 @@ public final class SearchMatcher {
                         private int start = from;
 
                         @Override boolean advance(SearchOperationContext context) {
+                            context.checkpoint();
                             if (start >= source.length()) return false;
                             int end = WildcardSegment.advance(source, start, length);
                             if (end < 0) {
@@ -671,7 +682,7 @@ public final class SearchMatcher {
                 // literal with one linear pass before starting that automaton.
                 if (prefix == null && questionMasks.length > 4
                     && (long) (source.length() - from) * questionMasks.length > 1_000_000L
-                    && !containsRequiredLiterals(source, from, caseInsensitive)) {
+                    && !containsRequiredLiterals(source, from, caseInsensitive, constructionContext)) {
                     return new Cursor() { @Override boolean advance(SearchOperationContext context) { return false; } };
                 }
 
@@ -688,7 +699,7 @@ public final class SearchMatcher {
                         while (suffixEnd >= 0 && suffixEnd < source.length()) {
                             int codePoint = Character.codePointAt(source, offset);
                             int next = offset + Character.charCount(codePoint);
-                            scannedCodePoints++;
+                            if ((scannedCodePoints++ & 4095L) == 0) context.checkpoint();
                             suffixEnd += Character.charCount(Character.codePointAt(source, suffixEnd));
                             // Keep the full-window start and trailing lookahead
                             // in original UTF-16 coordinates without a line index.
@@ -742,9 +753,12 @@ public final class SearchMatcher {
                 };
             }
 
-            private boolean containsRequiredLiterals(CharSequence source, int from, boolean caseInsensitive) {
+            private boolean containsRequiredLiterals(CharSequence source, int from, boolean caseInsensitive,
+                                                     SearchOperationContext context) {
                 var missing = new HashSet<>(literalMasks.keySet());
+                int checked = 0;
                 for (int offset = from; offset < source.length();) {
+                    if ((checked++ & 4095) == 0) context.checkpoint();
                     int codePoint = Character.codePointAt(source, offset);
                     offset += Character.charCount(codePoint);
                     missing.remove(caseInsensitive ? foldCase(codePoint) : codePoint);

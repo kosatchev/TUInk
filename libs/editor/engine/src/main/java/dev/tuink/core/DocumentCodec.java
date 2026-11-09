@@ -239,50 +239,34 @@ public final class DocumentCodec {
             }
             case DETECT -> { }
         }
-        if (hasUtf32Bom(data, true) && isValidUtf32(data, true)) {
-            // A valid UTF-32LE stream may also be valid UTF-16LE beginning with
-            // NUL. Bytes alone cannot decide which interpretation was intended.
-            try {
-                decodeStrict(data, 2, StandardCharsets.UTF_16LE);
-            } catch (CharacterCodingException invalidUtf16) {
-                throw unsupportedUtf32("UTF-32LE");
+        DocumentOpenMode detected = detectOpenMode(data, new EncodingProbe() {
+            public boolean validUtf8() { return isValidUtf8(data); }
+            public boolean validUtf32(boolean littleEndian) { return isValidUtf32(data, littleEndian); }
+            public boolean validUtf16Le() {
+                try { decodeStrict(data, 2, StandardCharsets.UTF_16LE); return true; }
+                catch (CharacterCodingException invalid) { return false; }
             }
+        });
+        return decodeWithDetectedCharset(data, detected);
+    }
+
+    /** Shared automatic-decoding policy for full document loads and bounded streaming readers. */
+    public interface EncodingProbe {
+        boolean validUtf8();
+        boolean validUtf32(boolean littleEndian);
+        boolean validUtf16Le();
+    }
+
+    public static DocumentOpenMode detectOpenMode(byte[] prefix, EncodingProbe probe) throws IOException {
+        if (hasUtf32Bom(prefix, true) && probe.validUtf32(true)) {
+            if (!probe.validUtf16Le()) throw unsupportedUtf32("UTF-32LE");
             throw new AmbiguousDocumentEncodingException();
         }
-        if (hasUtf32Bom(data, false) && isValidUtf32(data, false)) {
-            throw unsupportedUtf32("UTF-32BE");
-        }
-        if (hasUtf8Bom(data)) {
-            return new DetectedContent(
-                StandardCharsets.UTF_8,
-                BomKind.UTF_8,
-                decodeStrict(data, 3, StandardCharsets.UTF_8)
-            );
-        }
-        if (hasUtf16LeBom(data)) {
-            return new DetectedContent(
-                StandardCharsets.UTF_16LE,
-                BomKind.UTF_16_LE,
-                decodeStrict(data, 2, StandardCharsets.UTF_16LE)
-            );
-        }
-        if (hasUtf16BeBom(data)) {
-            return new DetectedContent(
-                StandardCharsets.UTF_16BE,
-                BomKind.UTF_16_BE,
-                decodeStrict(data, 2, StandardCharsets.UTF_16BE)
-            );
-        }
-        if (isValidUtf8(data)) {
-            return new DetectedContent(StandardCharsets.UTF_8, BomKind.NONE, new String(data, StandardCharsets.UTF_8));
-        }
-        Charset fallback;
-        try {
-            fallback = Charset.forName("windows-1251");
-        } catch (UnsupportedCharsetException unavailable) {
-            throw new IOException("Fallback document encoding is unavailable: windows-1251", unavailable);
-        }
-        return new DetectedContent(fallback, BomKind.NONE, decodeStrict(data, 0, fallback));
+        if (hasUtf32Bom(prefix, false) && probe.validUtf32(false)) throw unsupportedUtf32("UTF-32BE");
+        if (hasUtf8Bom(prefix)) return DocumentOpenMode.UTF_8;
+        if (hasUtf16LeBom(prefix)) return DocumentOpenMode.UTF_16LE;
+        if (hasUtf16BeBom(prefix)) return DocumentOpenMode.UTF_16BE;
+        return probe.validUtf8() ? DocumentOpenMode.UTF_8 : DocumentOpenMode.WINDOWS_1251;
     }
 
     private static String decodeExplicitCharset(byte[] data, int offset, Charset charset) throws IOException {

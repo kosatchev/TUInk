@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
+/** Operation-wide budgets are independent of the document host. */
 class SearchWorkBudgetTest {
     private static final SearchOptions WILDCARD = new SearchOptions(false, SearchOptions.MatchMode.WILDCARD);
 
@@ -18,7 +19,7 @@ class SearchWorkBudgetTest {
         var work = new SearchLimitException();
         var memory = SearchLimitException.memory();
         assertEquals("Search is too complex", work.summary());
-        assertTrue(work.getMessage().contains("use literal search"));
+        assertTrue(work.getMessage().contains("use strict search"));
         assertEquals("Not enough memory to search", memory.summary());
         assertTrue(memory.getMessage().contains("shorten the query"));
         assertSame(memory, SearchLimitException.memory(), "Memory failure reporting must reuse its exception");

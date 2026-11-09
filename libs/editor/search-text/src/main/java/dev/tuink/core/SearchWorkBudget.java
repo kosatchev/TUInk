@@ -5,9 +5,9 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
- * Bounds the nonlinear work of wildcard matching across a complete interactive
- * action, including repeated scans and searches across documents. Linear literal
- * and wildcard-segment scans do not consume this budget.
+ * Bounds nonlinear wildcard work and regex input access across a complete
+ * interactive action, including repeated scans and searches across documents.
+ * Linear literal and wildcard-segment scans do not consume this budget.
  */
 public final class SearchWorkBudget {
     // Compatibility boundary for existing Supplier callbacks. Search algorithms

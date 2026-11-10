@@ -5,7 +5,7 @@ public enum SearchFocus {
     REPLACE,
     CASE,
     WORD,
-    WILDCARD,
+    MODE,
     ALL,
     NEXT_BUTTON,
     PREV_BUTTON,

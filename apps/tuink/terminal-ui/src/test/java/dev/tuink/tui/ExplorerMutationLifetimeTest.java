@@ -26,14 +26,14 @@ class ExplorerMutationLifetimeTest {
         try (var window = new EditorWindowFixture(directory, false, List.of("original"), pending::add)) {
             var original = window.active().documentSession();
             window.controller.openFolder(directory);
-            window.await(() -> !window.ui.explorer.tree.loading());
+            window.await(() -> !window.ui.sidebar.tree.loading());
             window.command(TuinkCommand.EXPLORER_NEW_FILE);
             window.event(new TextInput("new.txt"));
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             pending.remove().run(); window.frame();
             assertTrue(Files.exists(directory.resolve("new.txt")));
             assertTrue(window.documentIo.busy(), "The new file still has a detached read pending");
-            assertFalse(window.ui.explorer.focused, "The tree must not swallow typing while the read finishes");
+            assertFalse(window.ui.sidebar.focused, "The tree must not swallow typing while the read finishes");
             window.event(new TextInput("draft "));
             pending.remove().run(); window.frame();
             assertEquals(2, window.tabs.size());

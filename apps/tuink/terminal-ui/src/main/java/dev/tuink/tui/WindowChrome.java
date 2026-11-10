@@ -105,8 +105,8 @@ final class WindowChrome {
     /** The document container width is independent of its local footer height. */
     static Rect documentPane(Input input) {
         Rect workspace = new Rect(0, 1, input.cols(), Math.max(0, input.rows() - 1));
-        if (!input.preferences().explorer.visible) return workspace;
-        return SplitPane.sideBySide(workspace, input.preferences().explorer.preferredWidth, 16, 24).secondBounds();
+        if (!input.preferences().sidebar.visible) return workspace;
+        return SplitPane.sideBySide(workspace, input.preferences().sidebar.preferredWidth, 16, 24).secondBounds();
     }
 
     static Prepared prepare(Input input, SearchBarView searchBar) {
@@ -134,7 +134,7 @@ final class WindowChrome {
         var workspace = window.child(new Rect(0, 1, input.cols(), Math.max(0, input.rows() - 1)));
         Rect body = new Rect(0, 1, input.cols(), Math.max(0, input.rows() - (windowPrompt ? 2 : 1)
             - (windowPrompt ? prompt.height() + notification.height() : 0)));
-        var explorerSplit = input.preferences().explorer.prepareLayout(body);
+        var explorerSplit = input.preferences().sidebar.prepareLayout(body);
         Rect allocated = explorerSplit == null ? body : explorerSplit.secondBounds();
         Rect documentPane = new Rect(allocated.x(), 1, allocated.width(), Math.max(0, input.rows() - 1));
         PathBar.Placement pathBar = null;
@@ -146,7 +146,7 @@ final class WindowChrome {
                 + (pathExternal == null ? 0 : pathExternal.preferredHeight(documentPane.width()));
         if (input.preferences().showDocumentPathSetting && documentPane.width() > 0
             && input.rows() - 1 - top - prompt.height() - notification.height() - pathNoticeRows >= 2) {
-            pathBar = host.documentPaths.component(host, input.context(), input.preferences().explorer.root())
+            pathBar = host.documentPaths.component(host, input.context(), input.preferences().sidebar.root())
                 .layout(new Rect(documentPane.x(), top, documentPane.width(), 1));
             top++;
         }
@@ -210,7 +210,7 @@ final class WindowChrome {
             focus.confirmPromptState = null; focus.confirmScopeId = null;
         }
         if (activeSearch != null && saveAs == null && confirm == null) {
-            placedSearch = activeSearch.place(TerminalEditorApp.SEARCH_SCOPE_ID, promptSurface.bounds(), clip);
+            placedSearch = activeSearch.place(TerminalEditorApp.SEARCH_SCOPE_ID, promptSurface.bounds(), clip, document.bounds());
             placedSearch.activate(tab.searchFocusManager);
             if (tab.pendingSearchFocus != null) {
                 tab.searchFocusManager.focus(placedSearch.focusScope(), tab.pendingSearchFocus);
@@ -236,7 +236,7 @@ final class WindowChrome {
         input.menu().adopt(menuPlacement.state());
         var topBar = menu.topBar(selected.file(), selected.dirty(), input.cols(), content.surface().reading());
         var picker = picker(prepared);
-        var explorer = input.preferences().explorer.place(prepared.explorerSplit(),
+        var explorer = input.preferences().sidebar.place(prepared.explorerSplit(),
             new Rect(0, 0, input.cols(), input.rows()), input.modal().isNone() && !tab.openFileMode && !input.menu().state().isOpen());
         var page = host.activeHelpPage(input.modal().isHelpHints(), input.modal().isHelpLicenses(), input.modal().isHelpAuthor());
         var help = host.helpOverlayPlacement(input.rows(), input.cols(), page, prepared.dialogViewport().y());
@@ -245,9 +245,12 @@ final class WindowChrome {
                 DocumentFormatPolicy.apply(tab.formatDialog.purpose, content.surface()).allowed()) : null;
         var fileDialog = input.modal().isExplorerFiles() && focus.explorerDialog != null
             ? ExplorerFileDialogView.place(focus.explorerDialog, prepared.dialogViewport()) : null;
+        var searchSettings = input.modal().isProjectSearchSettings() && input.preferences().searchSettingsDialog != null
+            ? ProjectSearchSettingsDialog.place(input.preferences().searchSettingsDialog, prepared.dialogViewport()) : null;
         Rect blocking = FrameComposition.Layers.prepareBlockingBounds(input.rows(), input.cols(),
             prepared.contentTopRow(), prepared.prompt().height(), prepared.saveAs() != null || prepared.confirm() != null,
             picker, help, format, fileDialog, prepared.textLayout().prompt().clip());
+        if (searchSettings != null) blocking = searchSettings.bounds();
         if (focus.blockingContentFocused) {
             boolean available = DialogCommandPolicy.mode(TerminalEditorApp.modalInputKind(input.modal(), tab.openFileMode)).permitsContentFocus()
                 && content.bounds().width() > 0 && content.bounds().height() > 0 && !blocking.contains(content.bounds());
@@ -265,9 +268,17 @@ final class WindowChrome {
                 } else if (help != null) DialogFocusTraversal.focusFirst(focus.helpFocusManager, help.focusScope());
             }
         }
-        return new Result(new FrameComposition.Surface(topBar, content.status(), prepared.prompt(), prepared.notification(), prepared.textLayout(), prepared.deletedNotice(), prepared.externalNotice(), prepared.pathBar()),
+        String status = content.status();
+        var sidebar = input.preferences().sidebar;
+        if (explorer != null && explorer.focused() && !explorer.headerFocused() && sidebar.content == SidebarState.Content.SEARCH
+            && sidebar.search.focus.focused().orElse(null) == ProjectSearchPanel.Target.RESULTS
+            && input.modal().isNone() && !tab.openFileMode && !input.menu().state().isOpen()) {
+            String detail = ProjectSearchPresentation.selectionStatus(sidebar.search);
+            if (!detail.isEmpty()) status = detail;
+        }
+        return new Result(new FrameComposition.Surface(topBar, status, prepared.prompt(), prepared.notification(), prepared.textLayout(), prepared.deletedNotice(), prepared.externalNotice(), prepared.pathBar()),
             new FrameComposition.Layers(tabs, menuPlacement, prepared.saveAs() != null, prepared.saveAs(), prepared.confirm(),
-                picker, help, format, focus.modalAttention.highlighted(), focus.blockingContentFocused, blocking, explorer, fileDialog), prepared.search());
+                picker, help, format, focus.modalAttention.highlighted(), focus.blockingContentFocused, blocking, explorer, fileDialog, searchSettings), prepared.search());
     }
 
     private static ConfirmBarView confirmation(Input input, int rows, int cols) {

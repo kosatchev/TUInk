@@ -282,7 +282,8 @@ final class ExplorerFileDialogView {
                     CellText.drawClipped(canvas, x, bounds().y() + 4,
                         "Open document text is kept; use Save As to save it again.", body, width);
                 } else CellText.drawClipped(canvas, x, bounds().y() + (state.tree == null ? 3 : 2),
-                    state.tree == null ? "Name:" : "Path:", body, 6);
+                    state.tree == null ? "Name:" : "Path:", state.busy
+                        ? dev.tuiframe.widget.ControlStyles.ink(body, dev.tuiframe.style.CellColor.GRAY_128) : body, 6);
                 String message = state.busy ? "Working; wait for the operation to finish" : state.error;
                 if (message == null && state.tree != null) message = "To: " + state.display(state.destinationFolder());
                 if (message != null) CellText.drawClipped(canvas, x, bounds().bottomExclusive() - 3,

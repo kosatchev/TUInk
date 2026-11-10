@@ -87,8 +87,8 @@ class ExplorerRenameIntegrationTest {
     void theSelectedRootCannotBeRenamed() throws Exception {
         try (var window = new EditorWindowFixture(directory, false, List.of("original"))) {
             window.controller.openFolder(directory);
-            window.await(() -> !window.ui.explorer.tree.loading());
-            assertTrue(window.ui.explorer.selectedRoot());
+            window.await(() -> !window.ui.sidebar.tree.loading());
+            assertTrue(window.ui.sidebar.selectedRoot());
 
             window.command(TuinkCommand.EXPLORER_RENAME);
 
@@ -117,10 +117,10 @@ class ExplorerRenameIntegrationTest {
 
     private void beginRename(EditorWindowFixture window, Path selected) throws Exception {
         window.controller.openFolder(directory);
-        window.await(() -> !window.ui.explorer.tree.loading());
-        window.ui.explorer.tree.reveal(selected);
-        window.await(() -> !window.ui.explorer.tree.loading() && window.ui.explorer.tree.selectedEntry() != null
-            && selected.equals(window.ui.explorer.tree.selectedEntry().path()));
+        window.await(() -> !window.ui.sidebar.tree.loading());
+        window.ui.sidebar.tree.reveal(selected);
+        window.await(() -> !window.ui.sidebar.tree.loading() && window.ui.sidebar.tree.selectedEntry() != null
+            && selected.equals(window.ui.sidebar.tree.selectedEntry().path()));
         window.command(TuinkCommand.EXPLORER_RENAME);
         window.await(() -> window.controller.explorerFileDialog() != null
             && window.controller.explorerFileDialog().inspected != null && !window.documentIo.busy());

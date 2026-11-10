@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 
 class ReadOnlySearchBarViewTest {
     private static final List<SearchFocus> FIND_ONLY = List.of(SearchFocus.FIND, SearchFocus.CASE,
-        SearchFocus.WORD, SearchFocus.WILDCARD, SearchFocus.NEXT_BUTTON, SearchFocus.PREV_BUTTON);
+        SearchFocus.WORD, SearchFocus.MODE, SearchFocus.NEXT_BUTTON, SearchFocus.PREV_BUTTON);
 
     @Test
     void findOnlyCompositionHasNoReplacementOrAllTabsTargets() {
@@ -33,9 +33,9 @@ class ReadOnlySearchBarViewTest {
     @Test
     void fieldsAndButtonsUseTheirParentPaneCoordinates() {
         var field = new TextField();
-        var view = SearchBarView.buildReadOnly(field, 49, false, SearchOptions.MatchMode.WHOLE_WORD);
-        var bounds = new Rect(31, 21, 49, 1);
-        var placement = view.place(new Object(), bounds, new Rect(0, 0, 80, 24));
+        var view = SearchBarView.buildReadOnly(field, 53, false, SearchOptions.MatchMode.SUBSTRING, true);
+        var bounds = new Rect(31, 21, 53, 1);
+        var placement = view.place(new Object(), bounds, new Rect(0, 0, 90, 24));
         var focus = new FocusManager<SearchFocus>();
         placement.activate(focus);
         assertEquals(37, placement.targetBounds(SearchFocus.FIND).x());

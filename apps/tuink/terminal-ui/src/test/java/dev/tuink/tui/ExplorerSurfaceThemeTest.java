@@ -38,7 +38,7 @@ class ExplorerSurfaceThemeTest {
 
     @ParameterizedTest
     @MethodSource("themesAndColorModes")
-    void sameTreeInheritsPickerOrEditorSurface(UiStyles.Theme selectedTheme, boolean colorEnabled) {
+    void sameTreeInheritsPickerOrPaletteSurface(UiStyles.Theme selectedTheme, boolean colorEnabled) {
         var app = app(selectedTheme);
         var styles = app.styles.windows();
         var sidebar = app.explorerWidgetTheme(colorEnabled);
@@ -49,8 +49,8 @@ class ExplorerSurfaceThemeTest {
         var dark = paint(tree, sidebar, false);
         var light = paint(tree, picker, false);
 
-        assertEquals(styles.renderBody(), styles.sidebarBody(),
-            "Sidebar follows the editor's resolved foreground and background");
+        assertEquals(CellColor.GRAY_188, styles.sidebarBody().fg());
+        assertEquals(CellColor.BLACK, styles.sidebarBody().bg());
         assertEquals(CellColor.BLACK, styles.dialog().fg());
         assertEquals(CellColor.BRIGHT_WHITE, styles.dialog().bg());
         assertNotEquals(styles.dialog(), styles.sidebarBody());
@@ -76,6 +76,7 @@ class ExplorerSurfaceThemeTest {
         var inactiveStyle = inactive.get(1, 3).style();
         var activeStyle = active.get(1, 3).style();
 
+        assertEquals(app.styles.windows().sidebarSelected(), inactiveStyle);
         assertEquals(theme.resolveStyle(WidgetThemeKeys.LIST_ITEM_SELECTED), inactiveStyle);
         assertEquals(theme.resolveStyle(WidgetThemeKeys.LIST_ITEM_SELECTED_FOCUSED), activeStyle);
         assertNotEquals(app.styles.windows().sidebarBody(), inactiveStyle);
@@ -96,11 +97,13 @@ class ExplorerSurfaceThemeTest {
         boolean colorEnabled) {
         var app = app(selectedTheme);
         var theme = app.explorerWidgetTheme(colorEnabled);
-        var body = app.styles.windows().renderBody();
-        for (var role : List.of(WidgetThemeKeys.BUTTON, WidgetThemeKeys.BUTTON_DISABLED,
-            WidgetThemeKeys.TEXT_FIELD, WidgetThemeKeys.TEXT_FIELD_FOCUSED, WidgetThemeKeys.TEXT_FIELD_DISABLED)) {
+        var body = app.styles.windows().sidebarBody();
+        for (var role : List.of(WidgetThemeKeys.BUTTON, WidgetThemeKeys.BUTTON_DISABLED)) {
             assertEquals(body, theme.resolveStyle(role));
         }
+        for (var role : List.of(WidgetThemeKeys.TEXT_FIELD, WidgetThemeKeys.TEXT_FIELD_DISABLED))
+            assertEquals(app.styles.windows().inputField().bg(), theme.resolveStyle(role).bg());
+        assertEquals(theme.resolveStyle(WidgetThemeKeys.ACCENT).emphasis(true, true), theme.resolveStyle(WidgetThemeKeys.TEXT_FIELD_FOCUSED));
         assertNotEquals(body, theme.resolveStyle(WidgetThemeKeys.BUTTON_FOCUSED));
         assertNotEquals(body, theme.resolveStyle(WidgetThemeKeys.TEXT_FIELD_SELECTION));
         assertEquals(body.bg(), theme.resolveStyle(WidgetThemeKeys.MODAL_TITLE).bg());
@@ -111,7 +114,7 @@ class ExplorerSurfaceThemeTest {
     void sidebarHeaderDividerAndEmptyAreaUseTheEditorSurface(UiStyles.Theme selectedTheme,
         boolean colorEnabled) {
         var app = app(selectedTheme);
-        try (var explorer = new ExplorerState()) {
+        try (var explorer = new SidebarState()) {
             explorer.visible = true;
             var bounds = new Rect(0, 1, 80, 8);
             var placement = explorer.place(explorer.prepareLayout(bounds), new Rect(0, 0, 80, 10), true);
@@ -127,6 +130,30 @@ class ExplorerSurfaceThemeTest {
         }
     }
 
+    @ParameterizedTest
+    @MethodSource("themesAndColorModes")
+    void ordinaryPaletteTextUsesOneLightGrayOnBlackPairAcrossThemes(UiStyles.Theme selectedTheme, boolean colorEnabled) {
+        var theme = app(selectedTheme).explorerWidgetTheme(colorEnabled);
+        for (var role : List.of(WidgetThemeKeys.MODAL_BODY, WidgetThemeKeys.MODAL_TITLE,
+                WidgetThemeKeys.TEXT_MUTED, WidgetThemeKeys.SEARCH_FILE)) {
+            var style = theme.resolveStyle(role);
+            assertEquals(CellColor.GRAY_188, style.fg(), role.toString()); assertEquals(CellColor.BLACK, style.bg(), role.toString());
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("themesAndColorModes")
+    void headersAndSearchNoticesUseTheirOwnThemedColors(UiStyles.Theme selectedTheme, boolean colorEnabled) {
+        var app = app(selectedTheme); var theme = app.explorerWidgetTheme(colorEnabled); var windows = app.styles.windows();
+        assertEquals(windows.paletteHeader(), theme.resolveStyle(WidgetThemeKeys.PALETTE_HEADER));
+        assertEquals(windows.notifyInfo(), theme.resolveStyle(WidgetThemeKeys.NOTICE_INFO));
+        assertEquals(windows.notifySuccess(), theme.resolveStyle(WidgetThemeKeys.NOTICE_SUCCESS));
+        assertEquals(windows.notifyWarning(), theme.resolveStyle(WidgetThemeKeys.NOTICE_WARNING));
+        assertEquals(windows.notifyError(), theme.resolveStyle(WidgetThemeKeys.NOTICE_ERROR));
+        if (selectedTheme != UiStyles.Theme.MONOCHROME)
+            assertNotEquals(windows.sidebarBody().fg(), windows.paletteHeader().fg());
+    }
+
     private static TerminalEditorApp app(UiStyles.Theme theme) {
         var app = new TerminalEditorApp();
         app.theme = theme;
@@ -136,18 +163,14 @@ class ExplorerSurfaceThemeTest {
 
     @ParameterizedTest
     @MethodSource("themesAndColorModes")
-    void dividerUsesTheThemeAccentWithoutBoldForEitherFocusState(UiStyles.Theme selectedTheme,
+    void dividerUsesTheCommonPaletteColorsForEitherFocusState(UiStyles.Theme selectedTheme,
         boolean colorEnabled) {
         var app = app(selectedTheme);
         var expected = app.styles.windows().sidebarBorder();
-        assertEquals(switch (selectedTheme) {
-            case CYAN -> CellColor.CYAN;
-            case BLUE -> CellColor.BLUE;
-            case MONOCHROME -> CellColor.GRAY_188;
-        }, expected.fg());
-        assertEquals(app.styles.windows().renderBody().bg(), expected.bg());
+        assertEquals(CellColor.GRAY_188, expected.fg());
+        assertEquals(CellColor.BLACK, expected.bg());
         assertFalse(expected.bold(), "The border color is independent of terminal bold colors");
-        try (var explorer = new ExplorerState()) {
+        try (var explorer = new SidebarState()) {
             explorer.visible = true;
             for (boolean focused : new boolean[] {false, true}) {
                 explorer.focused = focused;

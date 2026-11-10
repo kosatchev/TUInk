@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.tuiframe.input.TextInput;
+import dev.tuiframe.input.KeyStroke;
 import dev.tuink.core.Position;
 import dev.tuink.tui.command.TuinkCommand;
 import dev.tuink.tui.flow.SearchFocus;
@@ -27,8 +28,9 @@ class ActiveSearchMarkerBudgetIntegrationTest {
             window.context.addAll(List.of(inactive));
             window.frame();
             window.command(TuinkCommand.SEARCH_OPEN);
-            window.focusSearch(SearchFocus.WILDCARD);
+            window.focusSearch(SearchFocus.MODE);
             window.event(new TextInput(" "));
+            window.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN)); window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             window.focusSearch(SearchFocus.FIND);
 
             window.event(new TextInput(query));

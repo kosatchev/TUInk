@@ -103,7 +103,7 @@ class ExplorerCopyIntegrationTest {
             var binding = subject.binding();
             openTree(window, root);
             select(window, root);
-            assertTrue(window.ui.explorer.selectedRoot());
+            assertTrue(window.ui.sidebar.selectedRoot());
             window.command(TuinkCommand.EXPLORER_COPY);
             inspected(window);
             assertEquals(root, window.controller.explorerFileDialog().tree.root());
@@ -111,7 +111,7 @@ class ExplorerCopyIntegrationTest {
             chooseDestination(window, destination);
             chooseApply(window);
             completed(window);
-            assertEquals(root, window.ui.explorer.root());
+            assertEquals(root, window.ui.sidebar.root());
             assertEquals("original", Files.readString(root.resolve("document.txt")));
             assertEquals("original", Files.readString(destination.resolve("root/document.txt")));
             assertEquals(binding, subject.binding());
@@ -151,7 +151,7 @@ class ExplorerCopyIntegrationTest {
             assertEquals(directory, dialog.tree.root());
             assertEquals(destination, dialog.destinationFolder());
             assertTrue(dialog.destinationAllowed());
-            assertEquals(directory, window.ui.explorer.root());
+            assertEquals(directory, window.ui.sidebar.root());
             chooseApply(window);
             completed(window);
             assertEquals("original", Files.readString(window.document));
@@ -170,7 +170,7 @@ class ExplorerCopyIntegrationTest {
             var binding = subject.binding();
             openTree(window, directory);
             select(window, window.document);
-            long history = window.ui.explorer.tree.operations().historyVersion();
+            long history = window.ui.sidebar.tree.operations().historyVersion();
             window.command(TuinkCommand.EXPLORER_COPY);
             inspected(window);
             var dialog = window.controller.explorerFileDialog();
@@ -184,8 +184,8 @@ class ExplorerCopyIntegrationTest {
             assertEquals(binding, subject.binding());
             assertEquals(List.of("draft original"), window.active().tabSession().model().snapshotLines());
             assertTrue(window.active().state().isDirty());
-            assertEquals(history, window.ui.explorer.tree.operations().historyVersion());
-            assertFalse(window.ui.explorer.canUndo());
+            assertEquals(history, window.ui.sidebar.tree.operations().historyVersion());
+            assertFalse(window.ui.sidebar.canUndo());
             chooseDestination(window, destination);
             chooseApply(window);
             completed(window);
@@ -278,13 +278,13 @@ class ExplorerCopyIntegrationTest {
 
     private static void openTree(EditorWindowFixture window, Path root) throws Exception {
         window.controller.openFolder(root);
-        window.await(() -> !window.ui.explorer.tree.loading());
+        window.await(() -> !window.ui.sidebar.tree.loading());
     }
 
     private static void select(EditorWindowFixture window, Path source) throws Exception {
-        assertTrue(window.ui.explorer.tree.reveal(source));
-        window.await(() -> !window.ui.explorer.tree.loading() && window.ui.explorer.selectedEntry() != null
-            && source.equals(window.ui.explorer.selectedEntry().path()));
+        assertTrue(window.ui.sidebar.tree.reveal(source));
+        window.await(() -> !window.ui.sidebar.tree.loading() && window.ui.sidebar.selectedEntry() != null
+            && source.equals(window.ui.sidebar.selectedEntry().path()));
     }
 
     private static void inspected(EditorWindowFixture window) throws Exception {

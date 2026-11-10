@@ -20,16 +20,18 @@ class DeletedDocumentBannerIntegrationTest {
     void persistentWarningHasItsOwnDocumentFooterBesideTheFullHeightExplorer() throws Exception {
         try (var window = new EditorWindowFixture(directory, false, List.of("original text"))) {
             window.controller.openFolder(directory);
-            window.await(() -> !window.ui.explorer.tree.loading());
+            window.await(() -> !window.ui.sidebar.tree.loading());
             var document = TerminalEditorApp.documentId(window.selected());
             window.host.deletedNotices.show(document, window.document, "File deleted");
             window.frame();
-            int sidebarHeight = window.ui.explorer.placement.bounds().height();
+            int sidebarHeight = window.ui.sidebar.placement.bounds().height();
             int row = row(window, "File deleted");
-            int left = window.ui.explorer.placement.documentBounds().x();
+            int left = window.ui.sidebar.placement.documentBounds().x();
             assertEquals(left, window.screenRow(row).indexOf("File deleted"));
             assertEquals(window.host.styles.windows().notifyWarning(), window.screenStyle(row, left));
-            assertEquals(window.host.styles.windows().renderBody().bg(), window.screenStyle(row, 2).bg());
+            var hints = window.ui.sidebar.placement.filesBody().hintBounds();
+            var expected = hints.contains(2, row) ? window.host.styles.windows().notifyInfo() : window.host.styles.windows().sidebarBody();
+            assertEquals(expected.bg(), window.screenStyle(row, 2).bg());
 
             window.notification.info("temporary message");
             window.command(TuinkCommand.SEARCH_OPEN);
@@ -37,7 +39,7 @@ class DeletedDocumentBannerIntegrationTest {
             window.frame();
             assertTrue(row(window, "temporary message") > row(window, "File deleted"));
             assertTrue(row(window, "Find:") > row(window, "File deleted"));
-            assertEquals(sidebarHeight, window.ui.explorer.placement.bounds().height());
+            assertEquals(sidebarHeight, window.ui.sidebar.placement.bounds().height());
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
             window.event(new TextInput("draft "));
             assertTrue(window.host.deletedNotices.visible(document));

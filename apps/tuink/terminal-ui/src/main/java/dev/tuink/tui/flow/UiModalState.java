@@ -136,6 +136,8 @@ public record UiModalState(
 
     public static UiModalState explorerFiles() { return state(UiModalMode.EXPLORER_FILES, null, -1, SaveContinuation.NONE); }
     public boolean isExplorerFiles() { return mode == UiModalMode.EXPLORER_FILES; }
+    public static UiModalState projectSearchSettings() { return state(UiModalMode.PROJECT_SEARCH_SETTINGS, null, -1, SaveContinuation.NONE); }
+    public boolean isProjectSearchSettings() { return mode == UiModalMode.PROJECT_SEARCH_SETTINGS; }
 
     public boolean isSaveAs() {
         return mode == UiModalMode.SAVE_AS;

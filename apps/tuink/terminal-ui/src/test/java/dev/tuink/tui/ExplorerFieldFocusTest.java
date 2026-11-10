@@ -26,13 +26,13 @@ class ExplorerFieldFocusTest {
             window.command(TuinkCommand.SEARCH_OPEN);
             window.event(new TextInput("needle"));
             window.controller.openFolder(directory);
-            window.await(() -> !window.ui.explorer.tree.loading());
-            assertTrue(window.ui.explorer.focused);
+            window.await(() -> !window.ui.sidebar.tree.loading());
+            assertTrue(window.ui.sidebar.focused);
 
             String label = target == SearchFocus.FIND ? "Find: " : "Replace: ";
             int row = -1;
             int column = -1;
-            int documentLeft = window.ui.explorer.placement.documentBounds().x();
+            int documentLeft = window.ui.sidebar.placement.documentBounds().x();
             for (int candidate = 0; candidate < window.height; candidate++) {
                 int found = window.screenRow(candidate).indexOf(label, documentLeft);
                 if (found >= 0) { row = candidate; column = found + label.length(); break; }
@@ -45,7 +45,7 @@ class ExplorerFieldFocusTest {
 
             assertEquals(target == SearchFocus.FIND ? "Xneedle" : "X",
                 target == SearchFocus.FIND ? window.query.text() : window.replacement.text());
-            assertFalse(window.ui.explorer.focused,
+            assertFalse(window.ui.sidebar.focused,
                 "A clicked search field must replace the explorer as keyboard owner");
             assertEquals(ActiveSurface.Focus.EDITABLE_TEXT, window.controller.activeSurface().focus());
 
@@ -56,8 +56,8 @@ class ExplorerFieldFocusTest {
                 target == SearchFocus.FIND ? window.query.text() : window.replacement.text(),
                 "Cursor movement and pasted text must continue to reach the clicked field");
             assertEquals(List.of("needle original"), window.active().tabSession().model().snapshotLines());
-            assertTrue(window.ui.explorer.visible);
-            assertFalse(window.ui.explorer.focused);
+            assertTrue(window.ui.sidebar.visible);
+            assertFalse(window.ui.sidebar.focused);
         }
     }
 }

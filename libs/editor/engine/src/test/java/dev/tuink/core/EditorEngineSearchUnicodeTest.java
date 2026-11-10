@@ -52,7 +52,7 @@ class EditorEngineSearchUnicodeTest {
     void wholeWordReplaceDoesNotSplitACombiningSequence() {
         TextModel model = model("e\u0301 e");
         EditorEngine engine = engine(model, new EditorState());
-        SearchOptions wholeWord = new SearchOptions(false, SearchOptions.MatchMode.WHOLE_WORD);
+        SearchOptions wholeWord = new SearchOptions(false, SearchOptions.MatchMode.SUBSTRING, true);
 
         assertEquals(1, engine.replaceAll("e", "!", wholeWord));
         assertEquals("e\u0301 !", model.getLine(0));
@@ -65,7 +65,7 @@ class EditorEngineSearchUnicodeTest {
         state.setSelectionAnchor(new Position(0, 2));
         state.setCursor(new Position(0, 3));
         EditorEngine engine = engine(model, state);
-        SearchOptions wholeWord = new SearchOptions(false, SearchOptions.MatchMode.WHOLE_WORD);
+        SearchOptions wholeWord = new SearchOptions(false, SearchOptions.MatchMode.SUBSTRING, true);
 
         assertTrue(engine.replaceCurrentOrNext("x", "!", wholeWord));
         assertEquals("𝔸x !", model.getLine(0));

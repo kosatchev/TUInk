@@ -28,17 +28,17 @@ class ExternalChangeIntegrationTest {
             var id = subject.documentId();
             var cursor = window.active().state().getCursor();
             window.controller.openFolder(directory);
-            window.await(() -> !window.ui.explorer.tree.loading());
-            int sidebarHeight = window.ui.explorer.placement.bounds().height();
+            window.await(() -> !window.ui.sidebar.tree.loading());
+            int sidebarHeight = window.ui.sidebar.placement.bounds().height();
             window.ui.showFileHistoryNotificationsSetting = false;
             Files.writeString(window.document, "external version one");
             awaitNotice(window, id);
             var first = window.host.externalNotices.notice(id);
             int row = row(window, "File changed on disk:");
-            int left = window.ui.explorer.placement.documentBounds().x();
+            int left = window.ui.sidebar.placement.documentBounds().x();
             assertEquals(left, window.screenRow(row).indexOf("File changed on disk:"));
             assertEquals(window.host.styles.windows().notifyWarning(), window.screenStyle(row, left));
-            assertEquals(sidebarHeight, window.ui.explorer.placement.bounds().height());
+            assertEquals(sidebarHeight, window.ui.sidebar.placement.bounds().height());
             assertEquals(List.of("local original"), lines(window));
             assertTrue(window.active().state().isDirty());
 

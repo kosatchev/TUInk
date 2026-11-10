@@ -178,10 +178,11 @@ License:
 Source:
 - https://github.com/lemire/javaewah
 
-## 5) SLF4J API
+## 5) SLF4J API and NOP binding
 
 Artifact:
 - `org.slf4j:slf4j-api:1.7.36`
+- `org.slf4j:slf4j-nop:1.7.36`
 
 License:
 - MIT License

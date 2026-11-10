@@ -38,7 +38,7 @@ class ExplorerEncodingContinuationTest {
             assertTrue(origin.uiState().modalState.isNone());
             assertFalse(origin.uiState().openFileMode,
                 "Cancelling an explorer read must not open an unrelated file picker");
-            assertTrue(window.ui.explorer.visible);
+            assertTrue(window.ui.sidebar.visible);
             assertEquals(1, window.tabs.size());
             assertEquals(List.of("original"), source.tabSession().model().snapshotLines());
             assertFalse(source.state().isDirty());
@@ -61,7 +61,7 @@ class ExplorerEncodingContinuationTest {
             assertTrue(origin.uiState().modalState.isNone());
             assertFalse(origin.uiState().openFileMode,
                 "The explorer origin must survive the explicit encoding read and its I/O error");
-            assertTrue(window.ui.explorer.visible);
+            assertTrue(window.ui.sidebar.visible);
             assertEquals(1, window.tabs.size());
             assertEquals(List.of("original"), source.tabSession().model().snapshotLines());
             assertFalse(source.state().isDirty());
@@ -84,7 +84,7 @@ class ExplorerEncodingContinuationTest {
             assertEquals(target, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
             assertEquals(List.of("\0A\0"), window.active().tabSession().model().snapshotLines());
             assertEquals(StandardCharsets.UTF_16LE, window.active().state().getFileEncoding());
-            assertFalse(window.ui.explorer.focused);
+            assertFalse(window.ui.sidebar.focused);
             assertEquals(ActiveSurface.Focus.CONTENT, window.controller.activeSurface().focus());
             assertTrue(origin.uiState().modalState.isNone());
             assertFalse(origin.uiState().openFileMode);
@@ -127,9 +127,9 @@ class ExplorerEncodingContinuationTest {
         try (var window = window(preview, pending::add)) {
             var origin = window.selected();
             window.controller.openFolder(directory);
-            window.await(() -> !window.ui.explorer.tree.loading());
+            window.await(() -> !window.ui.sidebar.tree.loading());
             window.event(KeyStroke.of(KeyStroke.Key.END));
-            assertEquals(target, window.ui.explorer.placement.tree().selectedEntry().orElseThrow().path());
+            assertEquals(target, window.ui.sidebar.placement.tree().selectedEntry().orElseThrow().path());
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             assertEquals(1, pending.size());
             pending.removeFirst().run();
@@ -184,9 +184,9 @@ class ExplorerEncodingContinuationTest {
 
     private void openFromExplorer(EditorWindowFixture window, Path target) throws Exception {
         window.controller.openFolder(directory);
-        window.await(() -> !window.ui.explorer.tree.loading());
+        window.await(() -> !window.ui.sidebar.tree.loading());
         window.event(KeyStroke.of(KeyStroke.Key.END));
-        assertEquals(target, window.ui.explorer.placement.tree().selectedEntry().orElseThrow().path());
+        assertEquals(target, window.ui.sidebar.placement.tree().selectedEntry().orElseThrow().path());
         window.event(KeyStroke.of(KeyStroke.Key.ENTER));
         assertTrue(window.selected().uiState().modalState.isOpenUtf16Confirm(),
             "The fixture must reach the actual ambiguous encoding confirmation");

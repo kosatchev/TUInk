@@ -189,14 +189,15 @@ def scrollbar_controls(args, output):
                  native_executable=args.binary, timeout=60) as session:
         session.send(b'\x10')
         expect_preview(session, 'headerless preview with both scrollbars')
-        session.expect(lambda: session.screen.lines[2].startswith('Scrollbar smoke'),
-                       'content begins immediately below the tabs')
+        session.expect(lambda: any(line.startswith('Scrollbar smoke') for line in session.screen.lines),
+                       'preview content below the shared window chrome')
+        content_top = next(row for row, line in enumerate(session.screen.lines) if line.startswith('Scrollbar smoke'))
 
         def mouse(button, x, y, down=True):
             session.send(f'\x1b[<{button};{x + 1};{y + 1}{"M" if down else "m"}'.encode())
 
         def vertical_thumb():
-            cells = [y for y in range(2, len(session.screen.lines) - 2)
+            cells = [y for y in range(content_top, len(session.screen.lines) - 2)
                      if session.screen.lines[y][-1] == '█']
             if len(cells) < 2:
                 raise AssertionError('Preview must paint a proportional editor-style vertical thumb')
@@ -698,7 +699,7 @@ def preview_find_workflow(args, output):
             session.expect(lambda: 'Find 1/50' in session.screen.lines[-1], 'Enter selects the first match')
             session.send(b'\x06')
             session.expect(lambda: 'Find 2/50' in session.screen.lines[-1], 'repeated Find selects the next match')
-            session.send(b'\t' * 6)  # Find, Case, word, wildcard, Next, Prev, then body.
+            session.send(b'\t' * 6)  # Find, Case, Word, mode, Next, Prev, then body.
             session.expect(lambda: session.screen.row < find_row(session), 'the full toolbar traversal reaches the body caret')
             session.send(b'\r')
             session.expect(lambda: 'Find 3/50' in session.screen.lines[-1], 'Enter advances Find from the body')
@@ -707,7 +708,7 @@ def preview_find_workflow(args, output):
             session.resize(24, 24)
             session.expect(lambda: any(re.search(r'row-\d{3} Alpha', line) for line in session.screen.lines)
                            and any(line.startswith('Find:') for line in session.screen.lines)
-                           and all(label in session.screen.text for label in ('word:', 'Next', 'Prev')),
+                           and all(label in session.screen.text for label in ('Aa', 'Word', '[Strict ▾]', '[Next]', '[Prev]')),
                            'narrow Find retains its field and every supported action')
             if 'Replace' in session.screen.text or 'All tabs' in session.screen.text:
                 raise AssertionError('Readonly Preview exposed document-changing search controls')

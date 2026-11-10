@@ -350,6 +350,19 @@ writer records its value explicitly. It controls the passive path row in Source
 and Preview; temporarily hiding the row in a short terminal does not change the
 preference. Existing format 2 profiles remain readable without conversion.
 
+Project search adds optional current-format `search.*` preferences. Omitted
+fields use the [documented defaults](project-search.md#defaults-and-limits).
+The writer records all seven values. Boolean and enum spellings remain strict;
+resource limits use canonical bounded integers. Unknown keys, malformed values
+and invalid limits reject the profile without rewriting it. Query text, results,
+panel focus and transient filter overrides are not persisted.
+
+Palette help adds optional format 2 Booleans `palettes.filesHints` and
+`palettes.searchHints`. Each defaults to `true` when absent, and the writer
+records both values explicitly. Their values are independent of palette
+expansion, focus and layout. Invalid Boolean spellings reject the profile
+without rewriting it; unknown-key rejection remains strict.
+
 Readable, bounded settings with unsupported schema, values, or properties
 syntax open **Fix / Delete / Later**, initially focused on Later. The question
 is **Unsupported settings. Replace invalid values with defaults?**. The hint

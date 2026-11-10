@@ -165,7 +165,7 @@ local meaning in text fields, without application-specific event conversion.
 sidebar uses `MANAGE_FILES`; Open, folder-selection and move/copy-destination popup
 trees use `READ_ONLY`. Read-only trees permit navigation, selection and scrollbar
 capture, but cannot start file dragging or mutate files through their operations
-object. A writable tree distinguishes a completed click from a 1 second hold with
+object. A writable tree distinguishes a completed click from a stationary 500 ms hold before
 movement. It paints a drag label and destination highlight, expands hovered
 folders after 700 ms and scrolls at the viewport edges. Only release over a valid
 destination emits one move intent. Escape, root/surface changes and geometry

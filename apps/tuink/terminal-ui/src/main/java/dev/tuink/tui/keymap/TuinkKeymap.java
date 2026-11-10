@@ -87,6 +87,7 @@ public final class TuinkKeymap {
         bind(result, key(KeyStroke.Key.DELETE), EDIT_DELETE_FORWARD);
 
         bind(result, key(KeyStroke.Key.F, KeyStroke.Modifier.CTRL), SEARCH_OPEN);
+        bind(result, key(KeyStroke.Key.F, KeyStroke.Modifier.CTRL, KeyStroke.Modifier.SHIFT), TuinkCommand.PROJECT_SEARCH_OPEN);
         bind(result, key(KeyStroke.Key.G, KeyStroke.Modifier.CTRL), SEARCH_PREVIOUS);
         bind(result, key(KeyStroke.Key.R, KeyStroke.Modifier.CTRL), SEARCH_REPLACE);
         bind(result, key(KeyStroke.Key.H, KeyStroke.Modifier.CTRL), FILE_BROWSER_TOGGLE_HIDDEN);

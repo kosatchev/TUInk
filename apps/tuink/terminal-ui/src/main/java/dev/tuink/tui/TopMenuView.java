@@ -373,6 +373,9 @@ final class TopMenuView {
             ? GutterDiffMode.MYERS : ui.gutterDiffModeSetting;
         return List.of(
             item(TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW, surface.preview() ? "MD Source" : "MD Preview"),
+            item(TuinkCommand.EXPLORER_FOCUS, "Files", 'l'),
+            item(TuinkCommand.PROJECT_SEARCH_OPEN, "Project search", 'j'),
+            item(TuinkCommand.EXPLORER_TOGGLE, checked(ui.sidebar.visible) + " Show sidebar", 'o'),
             item(SETTINGS_TOGGLE_READING_MODE, checked(ui.readingModeSetting) + " Reading mode"),
             separator(),
             item(VIEW_TOGGLE_LINE_WRAP, checked(wrapLines) + " Wrap Lines"),
@@ -395,7 +398,7 @@ final class TopMenuView {
     }
 
     private static List<EntrySpec> explorerEntries(UiSessionState ui, ActiveSurface surface) {
-        var explorer = ui.explorer;
+        var explorer = ui.sidebar;
         boolean open = explorer.root() != null;
         boolean idle = !explorer.mutating && !surface.windowIoBusy();
         var selection = explorer.selectedEntry();
@@ -412,6 +415,7 @@ final class TopMenuView {
         return List.of(
             item(TuinkCommand.FOLDER_OPEN, "Open folder...", !explorer.mutating),
             item(TuinkCommand.FOLDER_CLOSE, "Close folder", open && !explorer.mutating),
+            item(TuinkCommand.PROJECT_SEARCH_IN_FOLDER, "Find in this folder", open && selection != null && selection.directory(), 'n'),
             separator(),
             item(TuinkCommand.EXPLORER_NEW_FILE, "Create file...", create),
             item(TuinkCommand.EXPLORER_NEW_DIRECTORY, "Create folder...", create),
@@ -425,7 +429,7 @@ final class TopMenuView {
             item(TuinkCommand.EXPLORER_REDO, explorer.redoLabel(), idle && explorer.canRedo()),
             separator(),
             item(TuinkCommand.EXPLORER_REFRESH, "Refresh explorer", open && idle),
-            item(TuinkCommand.EXPLORER_TOGGLE, checked(explorer.visible) + " Show explorer"),
+            item(TuinkCommand.EXPLORER_TOGGLE, checked(explorer.visible) + " Show sidebar"),
             item(TuinkCommand.EXPLORER_FOCUS, "Focus explorer"),
             item(TuinkCommand.EXPLORER_CYCLE_WIDTH, "[>] Width: " + width)
         );
@@ -452,7 +456,8 @@ final class TopMenuView {
                 commandRouter.tabActivationInvocation(index),
                 marker + title,
                 true,
-                false
+                false,
+                0
             ));
         }
         return List.copyOf(entries);
@@ -462,6 +467,7 @@ final class TopMenuView {
         TabInsertMode insertMode = ui.tabInsertModeSetting == null ? TabInsertMode.AUTO : ui.tabInsertModeSetting;
         return List.of(
             item(SETTINGS_TOGGLE_CONFIRM_ON_CLOSE, checked(ui.confirmOnCloseSetting) + " Confirm on close"),
+            item(TuinkCommand.PROJECT_SEARCH_SETTINGS, "Project search...", 'j'),
             separator(),
             item(SETTINGS_TOGGLE_MOUSE, checked(ui.mouseModeSetting && surface.mouseAvailable()) + " Mouse mode"),
             item(SETTINGS_TOGGLE_RIGHT_CLICK_CLIPBOARD, checked(ui.rightClickClipboardSetting) + " Right-click: copy/paste"),
@@ -495,11 +501,19 @@ final class TopMenuView {
     }
 
     private static EntrySpec item(TuinkCommand command, String label, boolean enabled) {
-        return new EntrySpec(CommandInvocation.of(command.id()), label, enabled, false);
+        return item(command, label, enabled, 0);
+    }
+
+    private static EntrySpec item(TuinkCommand command, String label, int preferredMnemonic) {
+        return item(command, label, true, preferredMnemonic);
+    }
+
+    private static EntrySpec item(TuinkCommand command, String label, boolean enabled, int preferredMnemonic) {
+        return new EntrySpec(CommandInvocation.of(command.id()), label, enabled, false, preferredMnemonic);
     }
 
     private static EntrySpec separator() {
-        return new EntrySpec(null, SEPARATOR, false, true);
+        return new EntrySpec(null, SEPARATOR, false, true, 0);
     }
 
     private static String checked(boolean checked) {
@@ -516,7 +530,7 @@ final class TopMenuView {
             }
             boolean enabled = spec.enabled() && TuinkCommand.fromId(spec.value().id()).map(surface::allows).orElse(true);
             int mnemonic = enabled
-                ? mnemonicGraphemeIndex(spec.label(), usedMnemonics)
+                ? mnemonicGraphemeIndex(spec.label(), usedMnemonics, spec.preferredMnemonic())
                 : -1;
             result.add(new MenuBar.Item<>(spec.value(), spec.label(), mnemonic, enabled,
                 PathPresentation.LABEL_POLICY, commandRouter.shortcutFor(spec.value())));
@@ -524,7 +538,7 @@ final class TopMenuView {
         return List.copyOf(result);
     }
 
-    private static int mnemonicGraphemeIndex(String label, Set<Integer> used) {
+    private static int mnemonicGraphemeIndex(String label, Set<Integer> used, int preferred) {
         List<TerminalText.Grapheme> graphemes = TerminalText.graphemes(label);
         int textStart = textStartOffset(label);
         ArrayList<MnemonicCandidate> candidates = new ArrayList<>();
@@ -541,6 +555,10 @@ final class TopMenuView {
             boolean wordStart = letterOffset == textStart
                 || !Character.isLetter(label.codePointBefore(letterOffset));
             candidates.add(new MnemonicCandidate(index, Character.toLowerCase(codePoint), wordStart));
+        }
+        // Sidebar commands use free letters so they do not take document-menu mnemonics.
+        for (MnemonicCandidate candidate : candidates) {
+            if (candidate.key() == preferred && used.add(candidate.key())) return candidate.graphemeIndex();
         }
         for (MnemonicCandidate candidate : candidates) {
             if (candidate.wordStart() && used.add(candidate.key())) {
@@ -578,7 +596,8 @@ final class TopMenuView {
         CommandInvocation value,
         String label,
         boolean enabled,
-        boolean separator
+        boolean separator,
+        int preferredMnemonic
     ) {
         private EntrySpec {
             Objects.requireNonNull(label, "label");

@@ -24,9 +24,9 @@ class ExplorerGeometryIntegrationTest {
     @Test
     void dividerDragTracksSeveralFramesAndReleaseOutsideStopsResizingWithoutMovingSourceCursor() throws Exception {
         try (var window = new EditorWindowFixture(directory, false, List.of("source text"))) {
-            window.ui.explorer.visible = true;
+            window.ui.sidebar.visible = true;
             window.frame();
-            var explorer = window.ui.explorer;
+            var explorer = window.ui.sidebar;
             var divider = explorer.placement.divider().bounds();
             var cursor = window.active().state().getCursor();
             int row = divider.y() + 2;
@@ -54,9 +54,9 @@ class ExplorerGeometryIntegrationTest {
     @Test
     void hidingOrNarrowingDuringDividerDragCancelsCaptureBeforeRemovingThePane() throws Exception {
         try (var window = new EditorWindowFixture(directory, false, List.of("source text"))) {
-            window.ui.explorer.visible = true;
+            window.ui.sidebar.visible = true;
             window.frame();
-            var explorer = window.ui.explorer;
+            var explorer = window.ui.sidebar;
             var divider = explorer.placement.divider().bounds();
             window.pointer(PointerEvent.Kind.PRESS, divider.y() + 2, divider.x());
             assertTrue(explorer.splitterState.dragging());
@@ -93,7 +93,7 @@ class ExplorerGeometryIntegrationTest {
         try (var window = new EditorWindowFixture(directory, false, List.of("source text"))) {
             window.resize(3, 80);
             window.notification.clear();
-            var explorer = window.ui.explorer;
+            var explorer = window.ui.sidebar;
             explorer.visible = true;
             explorer.focused = true;
             window.frame();
@@ -128,7 +128,7 @@ class ExplorerGeometryIntegrationTest {
     @Test
     void narrowTerminalRetainsDesiredWidthAndRestoresPaneWithoutStealingDocumentFocus() throws Exception {
         try (var window = new EditorWindowFixture(directory, false, List.of("source text"))) {
-            var explorer = window.ui.explorer;
+            var explorer = window.ui.sidebar;
             explorer.preferredWidth = 38;
             window.command(TuinkCommand.EXPLORER_FOCUS);
             assertTrue(explorer.focused);
@@ -161,11 +161,11 @@ class ExplorerGeometryIntegrationTest {
         try (var window = new EditorWindowFixture(directory, "document.md", false, List.of("alpha beta gamma"))) {
             var sourceCursor = window.active().state().getCursor();
             var source = window.active();
-            window.ui.explorer.visible = true;
+            window.ui.sidebar.visible = true;
             window.frame();
             window.command(TuinkCommand.VIEW_TOGGLE_MARKDOWN_PREVIEW);
             window.await(() -> window.preview().ready());
-            var explorer = window.ui.explorer;
+            var explorer = window.ui.sidebar;
             var preview = window.preview();
             assertEquals(explorer.placement.documentBounds().x(), preview.bounds.x());
             assertTrue(preview.bounds.x() > 0);
@@ -209,7 +209,7 @@ class ExplorerGeometryIntegrationTest {
     @Test
     void clickingSidebarBehindSaveAsDoesNotFocusOrSelectTheDocument() throws Exception {
         try (var window = new EditorWindowFixture(directory, false, List.of("source text"))) {
-            window.ui.explorer.visible = true;
+            window.ui.sidebar.visible = true;
             window.frame();
             var before = window.active().state().getCursor();
             window.command(TuinkCommand.DOCUMENT_SAVE_AS);
@@ -239,11 +239,11 @@ class ExplorerGeometryIntegrationTest {
             for (int index = 0; index < 12; index++) window.event(new PointerEvent(1, 5,
                 PointerEvent.Kind.SCROLL_UP, PointerEvent.Button.NONE, Set.of()));
             assertFalse(window.screenRow(1).contains("active-last.txt"));
-            window.ui.explorer.visible = true;
+            window.ui.sidebar.visible = true;
             window.frame();
 
             assertTrue(window.screenRow(1).contains("active-last.txt"));
-            assertTrue(window.screenRow(1).startsWith(" Explorer"));
+            assertTrue(window.screenRow(1).startsWith("▾ Files"));
         }
     }
 

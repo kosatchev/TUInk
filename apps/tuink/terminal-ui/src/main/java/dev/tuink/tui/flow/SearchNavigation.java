@@ -6,7 +6,7 @@ import java.util.Objects;
 /** Logical search rows shared by focus scopes and semantic navigation. */
 public final class SearchNavigation {
     private static final List<List<SearchFocus>> ROWS = List.of(
-        List.of(SearchFocus.FIND, SearchFocus.CASE, SearchFocus.WORD, SearchFocus.WILDCARD, SearchFocus.ALL),
+        List.of(SearchFocus.FIND, SearchFocus.CASE, SearchFocus.WORD, SearchFocus.MODE, SearchFocus.ALL),
         List.of(
             SearchFocus.REPLACE,
             SearchFocus.NEXT_BUTTON,

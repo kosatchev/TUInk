@@ -20,7 +20,7 @@ class DocumentFooterIntegrationTest {
     void searchAndDocumentNoticeStayUnderTheEditorWhileTheTreeKeepsItsHeight() throws Exception {
         try (var window = new EditorWindowFixture(directory, false, List.of("needle original"))) {
             openTree(window);
-            int sidebarHeight = window.ui.explorer.placement.bounds().height();
+            int sidebarHeight = window.ui.sidebar.placement.bounds().height();
             int left = documentLeft(window);
             window.command(TuinkCommand.SEARCH_OPEN);
             window.event(new TextInput("needle"));
@@ -29,7 +29,7 @@ class DocumentFooterIntegrationTest {
             int replace = rowContaining(window, "Replace: ");
             assertEquals(left, window.screenRow(find).indexOf("Find: "));
             assertEquals(left, window.screenRow(replace).indexOf("Replace: "));
-            assertEquals(sidebarHeight, window.ui.explorer.placement.bounds().height());
+            assertEquals(sidebarHeight, window.ui.sidebar.placement.bounds().height());
             assertEditorBackgroundOnLeft(window, find);
             assertEditorBackgroundOnLeft(window, replace);
 
@@ -43,7 +43,7 @@ class DocumentFooterIntegrationTest {
             window.frame();
             int notice = rowContaining(window, "TAB_ONLY_NOTICE");
             assertEquals(left, window.screenRow(notice).indexOf("TAB_ONLY_NOTICE"));
-            assertEquals(sidebarHeight, window.ui.explorer.placement.bounds().height());
+            assertEquals(sidebarHeight, window.ui.sidebar.placement.bounds().height());
             assertEditorBackgroundOnLeft(window, notice);
             assertTrue(window.screenRow(window.height - 1).indexOf("Ln ") >= left,
                 "The document status belongs to the same footer surface");
@@ -54,14 +54,14 @@ class DocumentFooterIntegrationTest {
     void saveAsFieldUsesTheDocumentPaneForPaintAndMouseInput() throws Exception {
         try (var window = new EditorWindowFixture(directory, false, List.of("original"))) {
             openTree(window);
-            int sidebarHeight = window.ui.explorer.placement.bounds().height();
+            int sidebarHeight = window.ui.sidebar.placement.bounds().height();
             int left = documentLeft(window);
             window.command(TuinkCommand.DOCUMENT_SAVE_AS);
 
             int row = rowContaining(window, "Save As: ");
             assertEquals(left, window.screenRow(row).indexOf("Save As: "));
             assertEditorBackgroundOnLeft(window, row);
-            assertEquals(sidebarHeight, window.ui.explorer.placement.bounds().height());
+            assertEquals(sidebarHeight, window.ui.sidebar.placement.bounds().height());
             window.pointer(PointerEvent.Kind.PRESS, row, left + "Save As: ".length());
             window.pointer(PointerEvent.Kind.RELEASE, row, left + "Save As: ".length());
             window.event(new TextInput("X"));
@@ -79,7 +79,7 @@ class DocumentFooterIntegrationTest {
             window.ui.confirmOnCloseSetting = true;
             window.event(new TextInput("draft "));
             openTree(window);
-            int sidebarHeight = window.ui.explorer.placement.bounds().height();
+            int sidebarHeight = window.ui.sidebar.placement.bounds().height();
             int left = documentLeft(window);
             window.command(quit ? TuinkCommand.APP_QUIT : TuinkCommand.TAB_CLOSE);
 
@@ -91,7 +91,7 @@ class DocumentFooterIntegrationTest {
             if (quit) assertEquals(alert.bg(), window.screenStyle(row, 2).bg(),
                 "Quit confirmation intentionally spans the entire window");
             else assertEditorBackgroundOnLeft(window, row);
-            if (!quit) assertEquals(sidebarHeight, window.ui.explorer.placement.bounds().height());
+            if (!quit) assertEquals(sidebarHeight, window.ui.sidebar.placement.bounds().height());
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
         }
     }
@@ -106,12 +106,12 @@ class DocumentFooterIntegrationTest {
             assertEquals(left, window.screenRow(rowContaining(window, "Find: ")).indexOf("Find: "));
 
             window.resize(24, 40);
-            assertNull(window.ui.explorer.placement);
+            assertNull(window.ui.sidebar.placement);
             assertEquals(0, window.screenRow(rowContaining(window, "Find: ")).indexOf("Find: "));
             assertEquals("needle", window.query.text());
 
             window.resize(24, 80);
-            assertNotNull(window.ui.explorer.placement);
+            assertNotNull(window.ui.sidebar.placement);
             assertEquals(left, window.screenRow(rowContaining(window, "Find: ")).indexOf("Find: "));
             assertEquals("needle", window.query.text());
         }
@@ -119,17 +119,19 @@ class DocumentFooterIntegrationTest {
 
     private static void openTree(EditorWindowFixture window) throws Exception {
         window.controller.openFolder(window.document.getParent());
-        window.await(() -> !window.ui.explorer.tree.loading());
+        window.await(() -> !window.ui.sidebar.tree.loading());
         window.notification.clear();
         window.frame();
     }
 
     private static int documentLeft(EditorWindowFixture window) {
-        return window.ui.explorer.placement.documentBounds().x();
+        return window.ui.sidebar.placement.documentBounds().x();
     }
 
     private static void assertEditorBackgroundOnLeft(EditorWindowFixture window, int row) {
-        assertEquals(window.host.styles.windows().renderBody().bg(), window.screenStyle(row, 2).bg(),
+        var hints = window.ui.sidebar.placement.filesBody().hintBounds();
+        var expected = hints.contains(2, row) ? window.host.styles.windows().notifyInfo() : window.host.styles.windows().sidebarBody();
+        assertEquals(expected.bg(), window.screenStyle(row, 2).bg(),
             "A document footer must not paint over the explorer");
     }
 

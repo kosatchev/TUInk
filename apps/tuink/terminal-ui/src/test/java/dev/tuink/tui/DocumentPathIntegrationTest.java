@@ -166,17 +166,17 @@ class DocumentPathIntegrationTest {
     }
 
     private static String text(EditorWindowFixture window) {
-        return window.host.documentPaths.component(window.host, window.context, window.ui.explorer.root()).text();
+        return window.host.documentPaths.component(window.host, window.context, window.ui.sidebar.root()).text();
     }
     private void openFromExplorer(EditorWindowFixture window, Path target) throws Exception {
         openFromExplorer(window, target, directory);
     }
     private static void openFromExplorer(EditorWindowFixture window, Path target, Path root) throws Exception {
         window.controller.openFolder(root); window.frame();
-        window.await(() -> !window.ui.explorer.tree.loading());
-        assertTrue(window.ui.explorer.tree.reveal(target));
-        window.await(() -> !window.ui.explorer.tree.loading() && window.ui.explorer.selectedEntry() != null
-            && target.equals(window.ui.explorer.selectedEntry().path()));
+        window.await(() -> !window.ui.sidebar.tree.loading());
+        assertTrue(window.ui.sidebar.tree.reveal(target));
+        window.await(() -> !window.ui.sidebar.tree.loading() && window.ui.sidebar.selectedEntry() != null
+            && target.equals(window.ui.sidebar.selectedEntry().path()));
         window.event(KeyStroke.of(KeyStroke.Key.ENTER));
         window.await(() -> !window.documentIo.busy() && window.tabs.size() == 2);
     }
@@ -189,10 +189,10 @@ class DocumentPathIntegrationTest {
     }
     private static void selectForAction(EditorWindowFixture window, Path path) throws Exception {
         window.command(TuinkCommand.EXPLORER_FOCUS);
-        window.await(() -> !window.ui.explorer.tree.loading());
-        window.ui.explorer.tree.reveal(path);
-        window.await(() -> !window.ui.explorer.tree.loading() && window.ui.explorer.selectedEntry() != null
-            && path.equals(window.ui.explorer.selectedEntry().path()));
+        window.await(() -> !window.ui.sidebar.tree.loading());
+        window.ui.sidebar.tree.reveal(path);
+        window.await(() -> !window.ui.sidebar.tree.loading() && window.ui.sidebar.selectedEntry() != null
+            && path.equals(window.ui.sidebar.selectedEntry().path()));
     }
     private static void awaitInspected(EditorWindowFixture window) throws Exception {
         window.await(() -> !window.documentIo.busy() && window.controller.explorerFileDialog() != null

@@ -16,6 +16,8 @@ The scenarios protect the following user behavior:
 
 | Scenario | Invariant |
 |---|---|
+| `search-interface` | The compact picker and wide direct mode buttons preserve semantics; regex errors, empty matches and no results are visible; full result locations and explained file filters work after resizing |
+| `tool-palettes` | Files and Search stay open together; collapse preserves results; captured header/divider drags reorder and resize; the keyboard menu maximizes/restores; a fresh process restores saved layout |
 | `reading` | Rejected edits preserve manual horizontal/vertical viewing position; actual cursor navigation resumes following |
 | `focus` | Opening Find ends document selection capture; a later drag cannot steal focus |
 | `field` | Copy and a menu roundtrip preserve the long field's viewport in color and monochrome |
@@ -23,6 +25,8 @@ The scenarios protect the following user behavior:
 | `large-wrap` | A 2 MB document with 400,000 short lines survives wrapping and repeated resizes on a 192 MiB JVM heap |
 | `tabs` | Save, Copy, and returning to a tab preserve its independent viewport |
 | `folder-explorer` | A CLI directory opens the left tree; Ctrl+E and Right/Enter open its child file, Ctrl+B and narrow resize preserve the expanded tree, and Escape returns to editing before Save writes the exact expected bytes |
+| `project-search` | The menu and Ctrl+Shift+F search closed files and live Source buffers, respect ignore rules, include hidden files, open the exact match, and preserve query/results across Folders and sidebar toggles; only an explicit Save changes the selected file |
+| `regex-search` | Strict/Wildcard/Regex use the common matcher; invalid regex leaves the document intact, and a zero-width anchor navigates to an empty line |
 | `picker-navigation` | After moving to the parent with `..`, single clicks select, disclosure clicks and Left/Right expand or collapse, and a label double-click or Enter makes the directory the root without editing any files |
 | `history` | Undo/Redo through the real keymap preserve Unicode text and grouping |
 | `grapheme-edit-caret` | Typing after replacing part of a combining cluster or joining lines continues after the complete grapheme |

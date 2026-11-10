@@ -34,7 +34,7 @@ final class SearchNavigation {
     SearchMatcher configure(String query, SearchOptions options, SearchOperationContext context) {
         Objects.requireNonNull(context, "context");
         SearchOptions safe = options == null ? SearchOptions.DEFAULT : options;
-        if (safe.matchMode() == null) safe = new SearchOptions(safe.caseInsensitive(), SearchOptions.MatchMode.SUBSTRING);
+        if (safe.matchMode() == null) safe = new SearchOptions(safe.caseInsensitive(), SearchOptions.MatchMode.SUBSTRING, safe.wholeWord());
         if (matcher == null || !query.equals(this.query) || !safe.equals(this.options)) {
             SearchMatcher compiled = SearchMatcher.compile(query, safe, context);
             discardLine();
@@ -182,7 +182,7 @@ final class SearchNavigation {
 
         private void append(int start, int end) {
             if (size == RESULT_CAPACITY) {
-                coveredFrom = ends[head];
+                coveredFrom = ends[head] + (starts[head] == ends[head] ? 1 : 0);
                 head = (head + 1) % RESULT_CAPACITY;
                 size--;
             }
@@ -218,7 +218,8 @@ final class SearchNavigation {
             head = 0;
             size = 0;
             exhausted = false;
-            cursor = matcher.cursor(source, coveredFrom);
+            cursor = matcher.cursor(source, coveredFrom,
+                checkpoint >= 0 && checkpointStarts[checkpoint] == checkpointEnds[checkpoint]);
             if (checkpoint >= 0) append(checkpointStarts[checkpoint], checkpointEnds[checkpoint]);
         }
 

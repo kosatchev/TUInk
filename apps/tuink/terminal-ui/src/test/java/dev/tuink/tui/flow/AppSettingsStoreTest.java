@@ -234,6 +234,7 @@ class AppSettingsStoreTest {
             classpathLocation(AppSettingsStoreTest.class),
             classpathLocation(AppSettingsStore.class),
             classpathLocation(AppSettings.class),
+            classpathLocation(dev.tuink.project.search.SearchPreferences.class),
             classpathLocation(GutterDiffMode.class),
             classpathLocation(dev.tuink.storage.jvm.JvmDocumentStorage.class),
             classpathLocation(dev.tuink.editor.document.DocumentId.class)

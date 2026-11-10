@@ -8,31 +8,24 @@ final class SearchController {
     private SearchController() {
     }
 
-    record SearchUiOptions(boolean caseSensitive, SearchOptions.MatchMode matchMode, boolean allTabs) {
+    record SearchUiOptions(boolean caseSensitive, SearchOptions.MatchMode matchMode, boolean allTabs, boolean wholeWord) {
+        SearchUiOptions(boolean caseSensitive, SearchOptions.MatchMode matchMode, boolean allTabs) {
+            this(caseSensitive, matchMode, allTabs, false);
+        }
         static final SearchUiOptions DEFAULT = new SearchUiOptions(false, SearchOptions.MatchMode.SUBSTRING, false);
     }
 
     static SearchUiOptions toggleFocusedSearchOption(SearchUiOptions options, SearchFocus focus) {
         return switch (focus) {
-            case CASE -> new SearchUiOptions(!options.caseSensitive(), options.matchMode(), options.allTabs());
+            case CASE -> new SearchUiOptions(!options.caseSensitive(), options.matchMode(), options.allTabs(), options.wholeWord());
             case WORD -> new SearchUiOptions(
                 options.caseSensitive(),
-                options.matchMode() == SearchOptions.MatchMode.WHOLE_WORD
-                    ? SearchOptions.MatchMode.SUBSTRING
-                    : SearchOptions.MatchMode.WHOLE_WORD,
-                options.allTabs()
-            );
-            case WILDCARD -> new SearchUiOptions(
-                options.caseSensitive(),
-                options.matchMode() == SearchOptions.MatchMode.WILDCARD
-                    ? SearchOptions.MatchMode.SUBSTRING
-                    : SearchOptions.MatchMode.WILDCARD,
-                options.allTabs()
+                options.matchMode(), options.allTabs(), !options.wholeWord()
             );
             case ALL -> new SearchUiOptions(
                 options.caseSensitive(),
                 options.matchMode(),
-                !options.allTabs()
+                !options.allTabs(), options.wholeWord()
             );
             default -> options;
         };
@@ -40,12 +33,15 @@ final class SearchController {
 
     static SearchOptions toSearchOptions(SearchUiOptions ui) {
         SearchUiOptions safe = ui == null ? SearchUiOptions.DEFAULT : ui;
-        return new SearchOptions(!safe.caseSensitive(), safe.matchMode());
+        return new SearchOptions(!safe.caseSensitive(), safe.matchMode(), safe.wholeWord());
+    }
+    static SearchUiOptions withMode(SearchUiOptions options, SearchOptions.MatchMode mode) {
+        return new SearchUiOptions(options.caseSensitive(), mode, options.allTabs(), options.wholeWord());
     }
 
     static boolean isToggleFocus(SearchFocus focus) {
         return focus == SearchFocus.CASE || focus == SearchFocus.WORD
-            || focus == SearchFocus.WILDCARD || focus == SearchFocus.ALL;
+            || focus == SearchFocus.ALL;
     }
 
     static boolean isSearchActionFocus(SearchFocus focus) {

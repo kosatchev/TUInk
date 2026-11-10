@@ -38,8 +38,8 @@ class ExplorerHistoryIntegrationTest {
             Path relocated = rename ? directory.resolve("renamed.txt") : destination.resolve(window.document.getFileName());
             relocate(window, rename, destination, "renamed.txt");
             assertEquals(relocated, JvmDocumentStorage.pathOf(subject.binding().resource()));
-            assertTrue(window.ui.explorer.canUndo());
-            assertTrue(window.ui.explorer.focused);
+            assertTrue(window.ui.sidebar.canUndo());
+            assertTrue(window.ui.sidebar.focused);
 
             window.event(ctrl(KeyStroke.Key.Z));
             completed(window);
@@ -50,14 +50,14 @@ class ExplorerHistoryIntegrationTest {
             assertEquals(revision, window.active().tabSession().model().revision());
             assertEquals(List.of("draft original"), window.active().tabSession().model().snapshotLines());
             assertTrue(window.active().state().isDirty());
-            assertTrue(window.ui.explorer.canRedo());
+            assertTrue(window.ui.sidebar.canRedo());
 
             window.event(ctrl(KeyStroke.Key.Y));
             completed(window);
             assertEquals(relocated, JvmDocumentStorage.pathOf(subject.binding().resource()));
             assertFalse(Files.exists(window.document));
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
-            assertFalse(window.ui.explorer.focused);
+            assertFalse(window.ui.sidebar.focused);
             window.event(ctrl(KeyStroke.Key.Z));
             assertEquals(List.of("original"), window.active().tabSession().model().snapshotLines());
             assertTrue(Files.exists(relocated), "Text Undo must not traverse filesystem history");
@@ -137,7 +137,7 @@ class ExplorerHistoryIntegrationTest {
             for (int index = 0; index < 4; index++) {
                 window.command(TuinkCommand.EXPLORER_UNDO);
                 completed(window);
-                assertFalse(window.ui.explorer.tree.noticeIsError());
+                assertFalse(window.ui.sidebar.tree.noticeIsError());
             }
             assertFalse(Files.exists(created));
             assertEquals(window.document, JvmDocumentStorage.pathOf(subject.binding().resource()));
@@ -150,17 +150,17 @@ class ExplorerHistoryIntegrationTest {
             window.command(TuinkCommand.EXPLORER_REDO);
             completed(window);
             if (save) {
-                assertTrue(window.ui.explorer.tree.noticeIsError(), "Changed disk contents must refuse the old copy's Redo");
-                assertTrue(window.ui.explorer.canRedo());
+                assertTrue(window.ui.sidebar.tree.noticeIsError(), "Changed disk contents must refuse the old copy's Redo");
+                assertTrue(window.ui.sidebar.canRedo());
                 assertFalse(Files.exists(created.resolve("document.md")));
                 assertEquals(draft, Files.readString(window.document));
             } else {
-                assertFalse(window.ui.explorer.tree.noticeIsError());
+                assertFalse(window.ui.sidebar.tree.noticeIsError());
                 assertEquals(diskBefore, Files.readString(created.resolve("document.md")));
                 for (int index = 0; index < 2; index++) {
                     window.command(TuinkCommand.EXPLORER_REDO);
                     completed(window);
-                    assertFalse(window.ui.explorer.tree.noticeIsError());
+                    assertFalse(window.ui.sidebar.tree.noticeIsError());
                 }
                 assertEquals(created.resolve("renamed.md"), JvmDocumentStorage.pathOf(subject.binding().resource()));
                 assertEquals(diskBefore, Files.readString(created.resolve("renamed.md")));
@@ -184,7 +184,7 @@ class ExplorerHistoryIntegrationTest {
                 window.await(() -> window.preview().ready());
                 assertInstanceOf(PreviewTab.class, window.selected());
             }
-            assertFalse(window.ui.explorer.focused);
+            assertFalse(window.ui.sidebar.focused);
             var presentation = window.selected().presentationId();
             window.command(TuinkCommand.EXPLORER_UNDO);
             completed(window);
@@ -206,14 +206,14 @@ class ExplorerHistoryIntegrationTest {
             open(window);
             relocate(window, true, directory, "renamed.txt");
             Path renamed = directory.resolve("renamed.txt");
-            long history = window.ui.explorer.tree.operations().historyVersion();
+            long history = window.ui.sidebar.tree.operations().historyVersion();
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
             window.command(TuinkCommand.SEARCH_OPEN);
             window.event(new TextInput("query"));
             window.event(ctrl(KeyStroke.Key.Z));
             assertTrue(Files.exists(renamed));
             assertFalse(Files.exists(window.document));
-            assertEquals(history, window.ui.explorer.tree.operations().historyVersion());
+            assertEquals(history, window.ui.sidebar.tree.operations().historyVersion());
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
             window.command(TuinkCommand.DOCUMENT_OPEN);
             window.event(ctrl(KeyStroke.Key.L));
@@ -223,7 +223,7 @@ class ExplorerHistoryIntegrationTest {
             assertEquals(Explorer.Access.READ_ONLY, window.selected().uiState().openFileTree.access());
             assertTrue(Files.exists(renamed));
             assertFalse(Files.exists(window.document));
-            assertEquals(history, window.ui.explorer.tree.operations().historyVersion());
+            assertEquals(history, window.ui.sidebar.tree.operations().historyVersion());
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
         }
     }
@@ -243,7 +243,7 @@ class ExplorerHistoryIntegrationTest {
             window.command(TuinkCommand.DOCUMENT_SAVE);
             window.await(() -> !window.documentIo.busy() && !window.active().state().isDirty());
             assertEquals("saved content", Files.readString(created));
-            var operations = window.ui.explorer.tree.operations();
+            var operations = window.ui.sidebar.tree.operations();
             long version = operations.historyVersion();
             window.command(TuinkCommand.EXPLORER_FOCUS);
             window.event(ctrl(KeyStroke.Key.Z));
@@ -251,7 +251,7 @@ class ExplorerHistoryIntegrationTest {
             assertEquals("saved content", Files.readString(created));
             assertEquals(version, operations.historyVersion());
             assertTrue(operations.canUndo(), "A failed inverse operation keeps its history entry");
-            assertTrue(window.ui.explorer.tree.noticeIsError());
+            assertTrue(window.ui.sidebar.tree.noticeIsError());
             assertEquals(created, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
 
             select(window, created);
@@ -280,11 +280,11 @@ class ExplorerHistoryIntegrationTest {
             window.frame();
             window.event(ctrl(KeyStroke.Key.Z));
             completed(window);
-            var explorer = window.ui.explorer.tree;
+            var explorer = window.ui.sidebar.tree;
             assertEquals("Undo Rename", explorer.noticeText());
-            int left = window.ui.explorer.placement.documentBounds().x();
+            int left = window.ui.sidebar.placement.documentBounds().x();
             int row = rowContaining(window, "Undo", 0, left);
-            assertEquals(window.host.styles.windows().notifyWarning(), window.screenStyle(row, 0));
+            assertEquals(window.host.explorerWidgetTheme(true).resolveStyle(dev.tuiframe.explorer.ExplorerStyleKeys.WARNING), window.screenStyle(row, 0));
             int documentNotice = rowContaining(window, "DOCUMENT_NOTICE", left, window.width);
             assertEquals(left, window.screenRow(documentNotice).indexOf("DOCUMENT_NOTICE"));
             assertEquals("DOCUMENT_NOTICE", window.notification.message);
@@ -306,11 +306,11 @@ class ExplorerHistoryIntegrationTest {
         try (var window = new EditorWindowFixture(directory, false, List.of("original"))) {
             window.event(new TextInput("draft "));
             open(window);
-            window.ui.explorer.tree.close();
-            window.ui.explorer.tree = new Explorer(directory, false, false, Explorer.Access.MANAGE_FILES,
+            window.ui.sidebar.tree.close();
+            window.ui.sidebar.tree = new Explorer(directory, false, false, Explorer.Access.MANAGE_FILES,
                 new ExplorerFileService(new LinuxTrashProvider(data, uid)));
-            window.ui.explorer.placement = null;
-            window.await(() -> !window.ui.explorer.tree.loading());
+            window.ui.sidebar.placement = null;
+            window.await(() -> !window.ui.sidebar.tree.loading());
             select(window, window.document);
             window.command(TuinkCommand.EXPLORER_TRASH);
             inspected(window);
@@ -327,7 +327,7 @@ class ExplorerHistoryIntegrationTest {
             assertEquals(List.of("draft original"), window.active().tabSession().model().snapshotLines());
             var document = window.active().documentSession().document().documentId();
             assertTrue(window.host.deletedNotices.visible(document));
-            assertFalse(window.ui.explorer.canUndo());
+            assertFalse(window.ui.sidebar.canUndo());
             window.event(ctrl(KeyStroke.Key.Z));
             assertFalse(Files.exists(window.document));
             assertEquals(List.of("draft original"), window.active().tabSession().model().snapshotLines());
@@ -337,11 +337,11 @@ class ExplorerHistoryIntegrationTest {
     private static KeyStroke ctrl(KeyStroke.Key key) { return KeyStroke.of(key, KeyStroke.Modifier.CTRL); }
     private static void open(EditorWindowFixture window) throws Exception {
         window.controller.openFolder(window.document.getParent());
-        window.await(() -> !window.ui.explorer.tree.loading());
+        window.await(() -> !window.ui.sidebar.tree.loading());
     }
     private static void select(EditorWindowFixture window, Path path) throws Exception {
-        window.await(() -> !window.ui.explorer.tree.loading());
-        assertTrue(window.ui.explorer.tree.select(path));
+        window.await(() -> !window.ui.sidebar.tree.loading());
+        assertTrue(window.ui.sidebar.tree.select(path));
         window.frame();
     }
     private static void relocate(EditorWindowFixture window, boolean rename, Path destination, String name) throws Exception {

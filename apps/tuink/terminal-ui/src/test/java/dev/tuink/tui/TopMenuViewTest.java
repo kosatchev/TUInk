@@ -231,6 +231,9 @@ class TopMenuViewTest {
         assertEquals(
             List.of(
                 "tuink.view.toggle-markdown-preview",
+                "tuink.explorer.focus",
+                "tuink.project-search.open",
+                "tuink.explorer.toggle",
                 "tuink.settings.toggle-reading-mode",
                 "tuink.view.toggle-line-wrap",
                 "tuink.view.toggle-word-wrap",
@@ -263,6 +266,7 @@ class TopMenuViewTest {
         assertEquals(
             List.of(
                 "tuink.settings.toggle-confirm-on-close",
+                "tuink.project-search.settings",
                 "tuink.settings.toggle-mouse",
                 "tuink.settings.toggle-right-click-clipboard",
                 "tuink.settings.toggle-file-history-notifications",

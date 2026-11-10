@@ -6,6 +6,13 @@ import dev.tuiframe.cell.CellText;
 import dev.tuiframe.geometry.Point;
 import dev.tuiframe.geometry.Rect;
 import dev.tuiframe.widget.Button;
+import dev.tuiframe.widget.CheckButton;
+import dev.tuiframe.widget.DropDown;
+import dev.tuiframe.widget.InteractiveWidget;
+import dev.tuiframe.widget.InteractionResult;
+import dev.tuiframe.widget.WidgetState;
+import dev.tuiframe.geometry.Size;
+import dev.tuiframe.input.TuiInputEvent;
 import dev.tuiframe.widget.FocusContext;
 import dev.tuiframe.widget.FocusManager;
 import dev.tuiframe.widget.FocusResetPolicy;
@@ -32,6 +39,7 @@ public final class SearchBarView {
     // A two-cell glyph and its insertion cursor must fit side by side.
     private static final int MIN_FIELD_WIDTH = 3;
 
+    private final DropDown<SearchOptions.MatchMode> modeControl;
     private final TextField queryField;
     private final TextField replacementField;
     private final int columns;
@@ -52,7 +60,8 @@ public final class SearchBarView {
         boolean caseSensitive,
         SearchOptions.MatchMode matchMode,
         boolean allTabs,
-        boolean readOnly
+        boolean readOnly,
+        boolean wholeWord, DropDown<SearchOptions.MatchMode> modeControl
     ) {
         this.queryField = Objects.requireNonNull(queryField, "queryField");
         this.replacementField = readOnly ? null : Objects.requireNonNull(replacementField, "replacementField");
@@ -63,14 +72,11 @@ public final class SearchBarView {
             ? SearchOptions.MatchMode.SUBSTRING
             : matchMode;
 
-        Button caseToggle = new Button("Аа:" + (caseSensitive ? "x" : " "));
-        Button wordToggle = new Button(
-            "word:" + (safeMatchMode == SearchOptions.MatchMode.WHOLE_WORD ? "x" : " ")
-        );
-        Button wildcardToggle = new Button(
-            "*:" + (safeMatchMode == SearchOptions.MatchMode.WILDCARD ? "x" : " ")
-        );
-        Button allToggle = new Button("All tabs:" + (allTabs ? "x" : " "));
+        this.modeControl = modeControl == null ? SearchControls.modes(safeMatchMode) : modeControl;
+        this.modeControl.setValue(safeMatchMode);
+        CheckButton caseToggle = new CheckButton("Aa", caseSensitive);
+        CheckButton wordToggle = new CheckButton("Word", wholeWord);
+        CheckButton allToggle = new CheckButton("All tabs", allTabs);
         Button next = new Button("Next");
         Button previous = new Button("Prev");
         Button replace = new Button("Replace");
@@ -79,13 +85,13 @@ public final class SearchBarView {
         List<ButtonTarget> optionTargets = readOnly ? List.of(
             new ButtonTarget(SearchFocus.CASE, caseToggle, Action.TOGGLE_CASE),
             new ButtonTarget(SearchFocus.WORD, wordToggle, Action.TOGGLE_WORD),
-            new ButtonTarget(SearchFocus.WILDCARD, wildcardToggle, Action.TOGGLE_WILDCARD),
+            new ButtonTarget(SearchFocus.MODE, this.modeControl, Action.MODE_CHANGED),
             new ButtonTarget(SearchFocus.NEXT_BUTTON, next, Action.FIND_NEXT),
             new ButtonTarget(SearchFocus.PREV_BUTTON, previous, Action.FIND_PREVIOUS)
         ) : List.of(
             new ButtonTarget(SearchFocus.CASE, caseToggle, Action.TOGGLE_CASE),
             new ButtonTarget(SearchFocus.WORD, wordToggle, Action.TOGGLE_WORD),
-            new ButtonTarget(SearchFocus.WILDCARD, wildcardToggle, Action.TOGGLE_WILDCARD),
+            new ButtonTarget(SearchFocus.MODE, this.modeControl, Action.MODE_CHANGED),
             new ButtonTarget(SearchFocus.ALL, allToggle, Action.TOGGLE_ALL_TABS)
         );
         List<ButtonTarget> actionTargets = readOnly ? List.of() : List.of(
@@ -141,6 +147,11 @@ public final class SearchBarView {
         SearchOptions.MatchMode matchMode,
         boolean allTabs
     ) {
+        return build(queryField, replacementField, columns, caseSensitive, matchMode, allTabs, false);
+    }
+
+    public static SearchBarView build(TextField queryField, TextField replacementField, int columns,
+        boolean caseSensitive, SearchOptions.MatchMode matchMode, boolean allTabs, boolean wholeWord) {
         return new SearchBarView(
             queryField,
             replacementField,
@@ -148,14 +159,29 @@ public final class SearchBarView {
             caseSensitive,
             matchMode,
             allTabs,
-            false
+            false,
+            wholeWord, null
         );
+    }
+
+    public static SearchBarView build(TextField query, TextField replacement, int columns, boolean caseSensitive,
+        SearchOptions.MatchMode mode, boolean allTabs, boolean wholeWord, DropDown<SearchOptions.MatchMode> selector) {
+        return new SearchBarView(query, replacement, columns, caseSensitive, mode, allTabs, false, wholeWord, selector);
+    }
+    public static SearchBarView buildReadOnly(TextField query, int columns, boolean caseSensitive,
+        SearchOptions.MatchMode mode, boolean wholeWord, DropDown<SearchOptions.MatchMode> selector) {
+        return new SearchBarView(query, null, columns, caseSensitive, mode, false, true, wholeWord, selector);
     }
 
     /** Find-only controls for presentations which cannot modify document text. */
     public static SearchBarView buildReadOnly(TextField queryField, int columns,
         boolean caseSensitive, SearchOptions.MatchMode matchMode) {
-        return new SearchBarView(queryField, null, columns, caseSensitive, matchMode, false, true);
+        return buildReadOnly(queryField, columns, caseSensitive, matchMode, false);
+    }
+
+    public static SearchBarView buildReadOnly(TextField queryField, int columns,
+        boolean caseSensitive, SearchOptions.MatchMode matchMode, boolean wholeWord) {
+        return new SearchBarView(queryField, null, columns, caseSensitive, matchMode, false, true, wholeWord, null);
     }
 
     /** Raster content contains labels/background only; controls paint themselves. */
@@ -178,6 +204,9 @@ public final class SearchBarView {
 
     /** Places children inside a parent-owned rectangle without recalculating window coordinates. */
     public Placement place(Object scopeId, Rect bounds, Rect interactionClip) {
+        return place(scopeId, bounds, interactionClip, interactionClip);
+    }
+    public Placement place(Object scopeId, Rect bounds, Rect interactionClip, Rect popupViewport) {
         Objects.requireNonNull(scopeId, "scopeId");
         Rect area = Objects.requireNonNull(bounds, "bounds");
         Rect safeClip = Objects.requireNonNull(interactionClip, "interactionClip").intersection(area);
@@ -201,21 +230,21 @@ public final class SearchBarView {
             && replacementPlacement.bounds().width() >= MIN_FIELD_WIDTH
             && InteractionVisibility.FULL_BOUNDS.allows(queryPlacement.bounds(), safeClip)
             && InteractionVisibility.FULL_BOUNDS.allows(replacementPlacement.bounds(), safeClip);
+        DropDown<SearchOptions.MatchMode>.Placement modePlacement = null;
         for (ButtonSpec spec : buttons) {
-            PlacedInteractiveWidget<Button.Action> placedButton = spec.button().layout(
-                new Rect(area.x() + spec.column(), topRow + spec.row(), spec.visible() ? spec.button().width() : 0, 1)
-            );
-            addTarget(
-                targets,
-                spec.target(),
-                placedButton.mapOutput(ignored -> spec.action()),
-                safeClip,
-                replacementContextVisible || (spec.action() != Action.REPLACE && spec.action() != Action.REPLACE_ALL)
-            );
+            Rect controlBounds = new Rect(area.x() + spec.column(), topRow + spec.row(), spec.visible() ? controlWidth(spec.button()) : 0, 1);
+            PlacedInteractiveWidget<Action> placed;
+            if (spec.target() == SearchFocus.MODE) {
+                modePlacement = modeControl.layout(controlBounds, popupViewport);
+                if (!spec.visible() || !InteractionVisibility.FULL_BOUNDS.allows(controlBounds, safeClip)) modeControl.dismissPopup();
+                placed = modePlacement.mapOutput(SearchBarView::modeAction);
+            } else placed = spec.button().layout(controlBounds).mapOutput(ignored -> spec.action());
+            addTarget(targets, spec.target(), placed, safeClip,
+                replacementContextVisible || (spec.action() != Action.REPLACE && spec.action() != Action.REPLACE_ALL));
         }
 
         List<SearchFocus> order = readOnly ? List.of(SearchFocus.FIND, SearchFocus.CASE, SearchFocus.WORD,
-            SearchFocus.WILDCARD, SearchFocus.NEXT_BUTTON, SearchFocus.PREV_BUTTON) : SearchNavigation.order();
+            SearchFocus.MODE, SearchFocus.NEXT_BUTTON, SearchFocus.PREV_BUTTON) : SearchNavigation.order();
         FocusScope<SearchFocus, Action> scope = new FocusScope<>(
             scopeId,
             FocusResetPolicy.FIRST_FOCUSABLE,
@@ -224,7 +253,7 @@ public final class SearchBarView {
             order
         );
         return new Placement(row1, row2, text, scope, queryField, replacementField, queryPlacement,
-            replacementPlacement, replacementContextVisible, readOnly);
+            replacementPlacement, replacementContextVisible, readOnly, modeControl, modePlacement);
     }
 
     /** Typed application intents emitted by the composed reusable controls. */
@@ -238,7 +267,8 @@ public final class SearchBarView {
         REPLACE_ALL,
         TOGGLE_CASE,
         TOGGLE_WORD,
-        TOGGLE_WILDCARD,
+        MODE_CHANGED,
+        MODE_MENU_CHANGED,
         TOGGLE_ALL_TABS,
         CLOSE_REQUESTED
     }
@@ -255,6 +285,8 @@ public final class SearchBarView {
         private final TextField.Placement replacementPlacement;
         private final boolean replacementContextVisible;
         private final boolean readOnly;
+        private final DropDown<SearchOptions.MatchMode> modeControl;
+        private final DropDown<SearchOptions.MatchMode>.Placement modePlacement;
 
         private Placement(
             String row1,
@@ -266,7 +298,8 @@ public final class SearchBarView {
             TextField.Placement queryPlacement,
             TextField.Placement replacementPlacement,
             boolean replacementContextVisible,
-            boolean readOnly
+            boolean readOnly, DropDown<SearchOptions.MatchMode> modeControl,
+            DropDown<SearchOptions.MatchMode>.Placement modePlacement
         ) {
             this.row1 = Objects.requireNonNull(row1, "row1");
             this.row2 = Objects.requireNonNull(row2, "row2");
@@ -278,6 +311,20 @@ public final class SearchBarView {
             this.replacementPlacement = replacementPlacement;
             this.replacementContextVisible = replacementContextVisible;
             this.readOnly = readOnly;
+            this.modeControl = modeControl; this.modePlacement = modePlacement;
+        }
+
+        public SearchOptions.MatchMode modeValue() { return modeControl.value(); }
+        public boolean popupOpen() { return modePlacement != null && modePlacement.popupOpen(); }
+        public void dismissPopup() { modeControl.dismissPopup(); }
+        public InteractionResult<Action> handlePopup(TuiInputEvent event) {
+            if (!popupOpen()) return InteractionResult.ignored();
+            return modePlacement.handle(event, new FocusContext(true, true,
+                FocusSpace.root(modePlacement.popupBounds()))).mapOutput(SearchBarView::modeAction);
+        }
+        public void paintPopup(Canvas canvas, Theme theme) {
+            boolean enabled = focusScope.target(SearchFocus.MODE).map(RoutedTarget::interactive).orElse(false);
+            if (modePlacement != null) modePlacement.paintPopup(canvas, theme, new WidgetState(popupOpen() && enabled, enabled));
         }
 
         public String text() {
@@ -371,6 +418,7 @@ public final class SearchBarView {
         /** Maps the focused field's parent-local cursor intent to terminal coordinates. */
         public Optional<Point> cursorPosition(FocusManager<SearchFocus> focusManager) {
             Objects.requireNonNull(focusManager, "focusManager");
+            if (popupOpen()) return Optional.empty();
             SearchFocus focused = focusManager.focused().orElse(null);
             if (focused == null) {
                 return Optional.empty();
@@ -401,7 +449,7 @@ public final class SearchBarView {
             if (index > 0) {
                 result++;
             }
-            result += targets.get(index).button().width();
+            result += controlWidth(targets.get(index).button());
         }
         return result;
     }
@@ -423,7 +471,7 @@ public final class SearchBarView {
                 column,
                 visible
             ));
-            column += target.button().width() + 1;
+            column += controlWidth(target.button()) + 1;
         }
     }
 
@@ -433,13 +481,13 @@ public final class SearchBarView {
         int column = 0;
         boolean unavailable = false;
         for (ButtonTarget target : targets) {
-            Button button = target.button();
-            if (button.width() > columns && target.target() == SearchFocus.ALL_BUTTON) button = new Button("Rpl all");
-            if (button.width() > columns && target.target() == SearchFocus.ALL) button = new Button("All");
-            boolean visible = button.width() <= columns;
-            if (column == 0 || column + button.width() > columns) { rows.add(" ".repeat(columns)); column = 0; }
+            InteractiveWidget<?> button = target.button();
+            if (controlWidth(button) > columns && target.target() == SearchFocus.ALL_BUTTON) button = new Button("Rpl all");
+            if (controlWidth(button) > columns && target.target() == SearchFocus.ALL) button = new CheckButton("All", button instanceof CheckButton check && check.checked());
+            boolean visible = controlWidth(button) <= columns;
+            if (column == 0 || column + controlWidth(button) > columns) { rows.add(" ".repeat(columns)); column = 0; }
             destination.add(new ButtonSpec(target.target(), button, target.action(), rows.size() - 1, column, visible));
-            column += button.width() + 1;
+            column += controlWidth(button) + 1;
             unavailable |= !visible;
         }
         if (unavailable) rows.add(CellText.fit("Enlarge window", columns));
@@ -478,7 +526,12 @@ public final class SearchBarView {
         };
     }
 
-    private record ButtonTarget(SearchFocus target, Button button, Action action) {
+    private static int controlWidth(InteractiveWidget<?> control) { return control.measure(new Size(Integer.MAX_VALUE, 1)).width(); }
+    private static Action modeAction(DropDown.Action action) {
+        return action == DropDown.Action.VALUE_CHANGED ? Action.MODE_CHANGED : Action.MODE_MENU_CHANGED;
+    }
+
+    private record ButtonTarget(SearchFocus target, InteractiveWidget<?> button, Action action) {
         private ButtonTarget {
             Objects.requireNonNull(target, "target");
             Objects.requireNonNull(button, "button");
@@ -488,7 +541,7 @@ public final class SearchBarView {
 
     private record ButtonSpec(
         SearchFocus target,
-        Button button,
+        InteractiveWidget<?> button,
         Action action,
         int row,
         int column,

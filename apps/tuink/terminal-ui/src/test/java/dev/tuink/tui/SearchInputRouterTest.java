@@ -25,7 +25,7 @@ class SearchInputRouterTest {
         SearchFocus.FIND,
         SearchFocus.CASE,
         SearchFocus.WORD,
-        SearchFocus.WILDCARD,
+        SearchFocus.MODE,
         SearchFocus.ALL,
         SearchFocus.REPLACE,
         SearchFocus.NEXT_BUTTON,
@@ -88,7 +88,6 @@ class SearchInputRouterTest {
         SearchFocus[][] pairs = {
             {SearchFocus.CASE, SearchFocus.NEXT_BUTTON},
             {SearchFocus.WORD, SearchFocus.PREV_BUTTON},
-            {SearchFocus.WILDCARD, SearchFocus.REPLACE_BUTTON},
             {SearchFocus.ALL, SearchFocus.ALL_BUTTON}
         };
 
@@ -143,7 +142,7 @@ class SearchInputRouterTest {
         assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.ARROW_DOWN)));
         assertEquals(SearchFocus.FIND, fixture.focus.focused().orElseThrow());
         for (SearchFocus expected : List.of(
-            SearchFocus.CASE, SearchFocus.WORD, SearchFocus.WILDCARD, SearchFocus.ALL, SearchFocus.FIND
+            SearchFocus.CASE, SearchFocus.WORD, SearchFocus.MODE, SearchFocus.ALL, SearchFocus.FIND
         )) {
             assertCaptured(fixture.route(KeyStroke.of(KeyStroke.Key.TAB)));
             assertEquals(expected, fixture.focus.focused().orElseThrow());
@@ -279,13 +278,13 @@ class SearchInputRouterTest {
             fixture.route(KeyStroke.of(KeyStroke.Key.ENTER))
         );
         List<SearchFocus> buttons = List.of(
-            SearchFocus.CASE, SearchFocus.WORD, SearchFocus.WILDCARD, SearchFocus.ALL,
+            SearchFocus.CASE, SearchFocus.WORD, SearchFocus.MODE, SearchFocus.ALL,
             SearchFocus.NEXT_BUTTON, SearchFocus.PREV_BUTTON,
             SearchFocus.REPLACE_BUTTON, SearchFocus.ALL_BUTTON
         );
         List<SearchBarView.Action> actions = List.of(
             SearchBarView.Action.TOGGLE_CASE, SearchBarView.Action.TOGGLE_WORD,
-            SearchBarView.Action.TOGGLE_WILDCARD, SearchBarView.Action.TOGGLE_ALL_TABS,
+            SearchBarView.Action.MODE_MENU_CHANGED, SearchBarView.Action.TOGGLE_ALL_TABS,
             SearchBarView.Action.FIND_NEXT, SearchBarView.Action.FIND_PREVIOUS,
             SearchBarView.Action.REPLACE, SearchBarView.Action.REPLACE_ALL
         );
@@ -297,6 +296,7 @@ class SearchInputRouterTest {
                 new TextInput(" ")
             )) {
                 assertAction(actions.get(index), fixture.route(event));
+                if (buttons.get(index) == SearchFocus.MODE) fixture.route(KeyStroke.of(KeyStroke.Key.ESCAPE));
             }
             assertCaptured(fixture.route(new TextInput("not a button key")));
         }

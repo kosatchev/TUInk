@@ -24,23 +24,23 @@ class PreviewExplorerFocusIntegrationTest {
         try (var window = previewWithFind()) {
             var preview = window.preview();
             window.controller.openFolder(directory);
-            window.await(() -> !window.ui.explorer.tree.loading());
-            assertEquals(directory, window.ui.explorer.selectedEntry().path());
+            window.await(() -> !window.ui.sidebar.tree.loading());
+            assertEquals(directory, window.ui.sidebar.selectedEntry().path());
             window.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
-            var selected = window.ui.explorer.placement.tree().selectedEntry().orElseThrow();
+            var selected = window.ui.sidebar.placement.tree().selectedEntry().orElseThrow();
             assertEquals(folder, selected.path());
             assertFalse(selected.expanded());
 
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
-            window.await(() -> !window.ui.explorer.tree.loading());
-            assertTrue(window.ui.explorer.placement.tree().selectedEntry().orElseThrow().expanded(),
+            window.await(() -> !window.ui.sidebar.tree.loading());
+            assertTrue(window.ui.sidebar.placement.tree().selectedEntry().orElseThrow().expanded(),
                 "Enter belongs to the focused explorer even while Preview Find is retained");
             window.event(KeyStroke.of(KeyStroke.Key.ARROW_RIGHT));
-            assertEquals(child, window.ui.explorer.placement.tree().selectedEntry().orElseThrow().path());
+            assertEquals(child, window.ui.sidebar.placement.tree().selectedEntry().orElseThrow().path());
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
 
             assertEquals(child, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
-            assertFalse(window.ui.explorer.focused);
+            assertFalse(window.ui.sidebar.focused);
             assertEquals("alpha", preview.searchQuery);
             assertEquals("child text", Files.readString(child));
         }
@@ -56,12 +56,12 @@ class PreviewExplorerFocusIntegrationTest {
             window.frame();
             assertEquals(ActiveSurface.Focus.CONTENT, window.controller.activeSurface().focus());
             window.controller.openFolder(directory);
-            window.await(() -> !window.ui.explorer.tree.loading());
-            assertTrue(window.ui.explorer.focused);
+            window.await(() -> !window.ui.sidebar.tree.loading());
+            assertTrue(window.ui.sidebar.focused);
 
             window.event(KeyStroke.of(KeyStroke.Key.F, KeyStroke.Modifier.CTRL));
 
-            assertFalse(window.ui.explorer.focused);
+            assertFalse(window.ui.sidebar.focused);
             assertTrue(preview.searchVisible);
             assertFalse(window.selected().uiState().searchEditorFocused);
             assertEquals(ActiveSurface.Focus.EDITABLE_TEXT, window.controller.activeSurface().focus());

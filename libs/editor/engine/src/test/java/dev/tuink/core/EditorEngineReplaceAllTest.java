@@ -83,7 +83,7 @@ class EditorEngineReplaceAllTest {
     void wholeWordReplacementLeavesCombiningSequencesAndLongerWordsIntact() {
         EditorEngine engine = engine(List.of("a aa a\u0301 a"), DocumentFileMetadata.newDocument(1));
 
-        assertEquals(2, engine.replaceAll("a", "!", new SearchOptions(false, SearchOptions.MatchMode.WHOLE_WORD)));
+        assertEquals(2, engine.replaceAll("a", "!", new SearchOptions(false, SearchOptions.MatchMode.SUBSTRING, true)));
 
         assertEquals("! aa a\u0301 !", engine.model().getLine(0));
         assertTrue(engine.undo());

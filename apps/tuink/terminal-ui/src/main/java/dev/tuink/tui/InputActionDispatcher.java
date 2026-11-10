@@ -135,7 +135,7 @@ final class InputActionDispatcher {
             }
             case SETTINGS_TOGGLE_FILE_HISTORY_NOTIFICATIONS -> {
                 ui.showFileHistoryNotificationsSetting = !ui.showFileHistoryNotificationsSetting;
-                if (!ui.showFileHistoryNotificationsSetting && ui.explorer.tree != null) ui.explorer.tree.clearHistoryNotice();
+                if (!ui.showFileHistoryNotificationsSetting && ui.sidebar.tree != null) ui.sidebar.tree.clearHistoryNotice();
                 return DispatchResult.handled(ui.showFileHistoryNotificationsSetting
                     ? "File Undo/Redo notifications enabled" : "File Undo/Redo notifications disabled");
             }

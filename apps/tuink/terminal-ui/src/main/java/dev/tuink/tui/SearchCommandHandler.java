@@ -4,7 +4,7 @@ import dev.tuink.editor.command.DocumentCommand;
 import dev.tuink.editor.document.TextPosition;
 import dev.tuink.core.DocumentEditLimitException;
 import dev.tuink.editor.search.SearchOptions;
-import dev.tuink.core.SearchLimitException;
+import dev.tuink.core.SearchException;
 import dev.tuink.core.SearchWorkBudget;
 import dev.tuink.core.TabSession;
 import dev.tuink.core.TabSearch;
@@ -34,9 +34,9 @@ final class SearchCommandHandler {
 
     static Result execute(TuinkCommand command, Context context, BooleanSupplier revealCurrentSelection) {
         try {
-            return SearchWorkBudget.run(SearchPresentation.INTERACTIVE_WILDCARD_WORK_LIMIT,
+            return SearchWorkBudget.run(SearchPresentation.INTERACTIVE_SEARCH_WORK_LIMIT,
                 () -> executeSearch(command, context, revealCurrentSelection));
-        } catch (DocumentEditLimitException | SearchLimitException limit) {
+        } catch (DocumentEditLimitException | SearchException limit) {
             return new Result(context.activeTabIndex(), 0, false, CursorPolicy.PRESERVE,
                 limit.getMessage(), InputActionDispatcher.StatusLevel.ERROR);
         }

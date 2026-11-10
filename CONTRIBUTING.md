@@ -62,6 +62,8 @@ Use the [repository layout](README.md#repository-layout) to place new code:
 - `libs/editor/` owns the shared editor API, engine, session, and concrete
   adapters. Keep terminal and filesystem dependencies out of the portable
   API, engine, and session modules.
+- `libs/project/` owns project-level services. Project search has a portable
+  coordinator and a JVM filesystem adapter; windows own its lifecycle and UI.
 - `libs/tuiframe/` owns reusable terminal runtime, widgets and the filesystem
   explorer without editor or application policy. `tuiframe-explorer` owns file
   operations and history; TUInk adapts receipts to document bindings.

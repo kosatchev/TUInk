@@ -54,6 +54,23 @@ class ScreenTest(unittest.TestCase):
         self.assertEqual((0, 0, 0, 0), (screen.row, screen.col, screen.top, screen.bottom))
         self.assertFalse(screen.unknown)
 
+    def test_cursor_visibility_handles_fragmented_modes_and_survives_resize(self):
+        screen = Screen()
+        self.assertTrue(screen.cursor_visible)
+        screen.feed(b"\x1b[?25")
+        self.assertTrue(screen.cursor_visible)
+        screen.feed(b"l")
+        self.assertFalse(screen.cursor_visible)
+        screen.resize(10, 40)
+        self.assertFalse(screen.cursor_visible)
+        screen.feed(b"\x1b[?7;25h")
+        self.assertTrue(screen.cursor_visible)
+        self.assertTrue(screen.autowrap)
+        screen.feed(b"\x1b[?25;7l")
+        self.assertFalse(screen.cursor_visible)
+        self.assertFalse(screen.autowrap)
+        self.assertFalse(screen.unknown)
+
     def test_unknown_sequences_are_reported(self):
         screen = Screen()
         screen.feed(b"\x1b[42z\x1b[?9999h")

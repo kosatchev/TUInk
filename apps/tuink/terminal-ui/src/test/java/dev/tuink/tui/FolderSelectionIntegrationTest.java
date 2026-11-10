@@ -32,7 +32,7 @@ class FolderSelectionIntegrationTest {
             assertEquals(OpenFileInputRouter.Focus.OK, owner.openFileFocusState.focus());
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             window.await(() -> !owner.openFileMode);
-            assertEquals(selected, window.ui.explorer.root());
+            assertEquals(selected, window.ui.sidebar.root());
         }
     }
 
@@ -51,7 +51,7 @@ class FolderSelectionIntegrationTest {
             assertEquals(OpenFileInputRouter.Focus.OK, owner.openFileFocusState.focus());
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             window.await(() -> !owner.openFileMode);
-            assertEquals(selected, window.ui.explorer.root());
+            assertEquals(selected, window.ui.sidebar.root());
         }
     }
 

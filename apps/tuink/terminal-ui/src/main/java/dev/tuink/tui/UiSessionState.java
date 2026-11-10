@@ -4,9 +4,12 @@ import dev.tuink.core.GutterDiffMode;
 import dev.tuink.core.TabInsertMode;
 import dev.tuink.tui.flow.AppSettings;
 import dev.tuink.tui.style.UiStyles;
+import dev.tuink.project.search.SearchPreferences;
 
 final class UiSessionState {
-    final ExplorerState explorer = new ExplorerState();
+    final SidebarState sidebar = new SidebarState();
+    SearchPreferences searchPreferences = SearchPreferences.defaults();
+    ProjectSearchSettingsDialog.State searchSettingsDialog;
     boolean showTabBarSetting;
     boolean showDocumentPathSetting = true;
     boolean wrapLinesSetting;
@@ -42,7 +45,7 @@ final class UiSessionState {
             markdownCodeHighlightingSetting,
             gutterDiffModeSetting, tabWidthSetting,
             tabInsertModeSetting, theme, rightClickClipboardSetting, markdownVisualCopySetting,
-            showFileHistoryNotificationsSetting, showDocumentPathSetting);
+            showFileHistoryNotificationsSetting, showDocumentPathSetting, searchPreferences, sidebar.preferences());
     }
 
     static UiSessionState from(AppSettings settings) {
@@ -52,6 +55,9 @@ final class UiSessionState {
     }
 
     void apply(AppSettings settings) {
+        sidebar.defaults(settings.palettes());
+        searchPreferences = settings.projectSearch();
+        sidebar.search.defaults(searchPreferences);
         showTabBarSetting = settings.showTabBar();
         showDocumentPathSetting = settings.showDocumentPath();
         wrapLinesSetting = settings.wrapLines();

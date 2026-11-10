@@ -21,7 +21,7 @@ final class PreviewPresentationView {
         var preview = input.tab().uiState().preview;
         var options = window.tab().searchUi;
         var searchBar = preview.searchVisible ? SearchBarView.buildReadOnly(preview.searchField,
-            WindowChrome.documentPane(window).width(), options.caseSensitive(), options.matchMode()) : null;
+            WindowChrome.documentPane(window).width(), options.caseSensitive(), options.matchMode(), options.wholeWord(), window.tab().searchModes) : null;
         var prepared = WindowChrome.prepare(window, searchBar);
         var surface = window.surface();
         var bounds = prepared.contentBounds(true);

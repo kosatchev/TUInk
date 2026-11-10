@@ -132,11 +132,9 @@ public final class UiStyles {
         CellStyle dialogBorder,
         CellStyle dialogTitle,
         CellStyle dialogSelectedMono,
-        CellStyle dialogField,
-        CellStyle dialogFieldFocused,
-        CellStyle dialogFieldDisabled,
-        CellStyle dialogFieldSelection,
+        CellStyle inputField,
         CellStyle sidebarBody,
+        CellStyle paletteHeader,
         CellStyle sidebarBorder,
         CellStyle sidebarSelected,
         CellStyle sidebarSelectedFocused,
@@ -244,13 +242,11 @@ public final class UiStyles {
             cellStyle(CellColor.BLACK, CellColor.BRIGHT_WHITE, true, false), // dialogBorder
             cellStyle(CellColor.BRIGHT_WHITE, CellColor.CYAN, true, false), // dialogTitle
             cellStyle(CellColor.DEFAULT, CellColor.DEFAULT),                // dialogSelectedMono
-            cellStyle(CellColor.GRAY_218, CellColor.GRAY_028),               // dialogField
-            cellStyle(CellColor.GRAY_238, CellColor.GRAY_028, true, false),  // dialogFieldFocused
-            cellStyle(CellColor.GRAY_158, CellColor.GRAY_028),               // dialogFieldDisabled
-            cellStyle(CellColor.GRAY_028, CellColor.GRAY_218, true, true),   // dialogFieldSelection
-            CellStyle.DEFAULT,                                            // sidebarBody
-            cellStyle(CellColor.CYAN, CellColor.DEFAULT),                   // sidebarBorder
-            cellStyle(CellColor.GRAY_218, CellColor.DARK_GRAY, false, true), // sidebarSelected
+            cellStyle(CellColor.GRAY_028, CellColor.GRAY_188),              // inputField: fixed neutral contrast
+            cellStyle(CellColor.GRAY_188, CellColor.BLACK),                 // sidebarBody
+            cellStyle(CellColor.CYAN, CellColor.BLACK, true, false),          // paletteHeader
+            cellStyle(CellColor.GRAY_188, CellColor.BLACK),                 // sidebarBorder
+            cellStyle(CellColor.BLACK, CellColor.GRAY_188),                 // sidebarSelected
             cellStyle(CellColor.BRIGHT_WHITE, CellColor.CYAN, true, false), // sidebarSelectedFocused
             cellStyle(CellColor.BRIGHT_WHITE, CellColor.CYAN),              // searchBar
             cellStyle(CellColor.BLACK, CellColor.BRIGHT_GREEN),             // notifySuccess
@@ -294,13 +290,11 @@ public final class UiStyles {
             cellStyle(CellColor.BLACK, CellColor.BRIGHT_WHITE, true, false), // dialogBorder
             cellStyle(CellColor.BRIGHT_WHITE, CellColor.BLUE, true, false), // dialogTitle
             cellStyle(CellColor.DEFAULT, CellColor.DEFAULT),                // dialogSelectedMono
-            cellStyle(CellColor.GRAY_218, CellColor.GRAY_028),               // dialogField
-            cellStyle(CellColor.GRAY_238, CellColor.GRAY_028, true, false),  // dialogFieldFocused
-            cellStyle(CellColor.GRAY_158, CellColor.GRAY_028),               // dialogFieldDisabled
-            cellStyle(CellColor.GRAY_028, CellColor.GRAY_218, true, true),   // dialogFieldSelection
-            CellStyle.DEFAULT,                                            // sidebarBody
-            cellStyle(CellColor.BLUE, CellColor.DEFAULT),                   // sidebarBorder
-            cellStyle(CellColor.GRAY_218, CellColor.DARK_GRAY, false, true), // sidebarSelected
+            cellStyle(CellColor.GRAY_028, CellColor.GRAY_188),              // inputField: fixed neutral contrast
+            cellStyle(CellColor.GRAY_188, CellColor.BLACK),                 // sidebarBody
+            cellStyle(CellColor.BLUE, CellColor.BLACK, true, false),          // paletteHeader
+            cellStyle(CellColor.GRAY_188, CellColor.BLACK),                 // sidebarBorder
+            cellStyle(CellColor.BLACK, CellColor.GRAY_188),                 // sidebarSelected
             cellStyle(CellColor.BRIGHT_WHITE, CellColor.BLUE, true, false), // sidebarSelectedFocused
             cellStyle(CellColor.BRIGHT_WHITE, CellColor.BLUE),              // searchBar
             cellStyle(CellColor.BLACK, CellColor.BRIGHT_GREEN),             // notifySuccess
@@ -345,14 +339,12 @@ public final class UiStyles {
             cellStyle(CellColor.BLACK, CellColor.BRIGHT_WHITE, true, false), // dialogBorder
             cellStyle(CellColor.BLACK, CellColor.BRIGHT_WHITE, true, false), // dialogTitle
             cellStyle(CellColor.GRAY_218, CellColor.DEFAULT, true, true),     // dialogSelectedMono
-            cellStyle(CellColor.GRAY_218, CellColor.GRAY_028),                // dialogField
-            cellStyle(CellColor.GRAY_238, CellColor.GRAY_028, true, false),   // dialogFieldFocused
-            cellStyle(CellColor.GRAY_158, CellColor.GRAY_028),                // dialogFieldDisabled
-            cellStyle(CellColor.GRAY_028, CellColor.GRAY_218, true, true),    // dialogFieldSelection
-            cellStyle(CellColor.GRAY_188, CellColor.GRAY_028),               // sidebarBody
-            cellStyle(CellColor.GRAY_188, CellColor.GRAY_028),               // sidebarBorder
-            cellStyle(CellColor.GRAY_218, CellColor.DARK_GRAY, false, true),  // sidebarSelected
-            cellStyle(CellColor.BRIGHT_WHITE, CellColor.DARK_GRAY, true, true), // sidebarSelectedFocused
+            cellStyle(CellColor.GRAY_028, CellColor.GRAY_188),              // inputField: fixed neutral contrast
+            cellStyle(CellColor.GRAY_188, CellColor.BLACK),                 // sidebarBody
+            cellStyle(CellColor.GRAY_188, CellColor.BLACK, true, false),          // paletteHeader
+            cellStyle(CellColor.GRAY_188, CellColor.BLACK),                 // sidebarBorder
+            cellStyle(CellColor.BLACK, CellColor.GRAY_188),                  // sidebarSelected
+            cellStyle(CellColor.BLACK, CellColor.BRIGHT_WHITE),              // sidebarSelectedFocused
             cellStyle(CellColor.BLACK, CellColor.BRIGHT_WHITE),              // searchBar
             cellStyle(CellColor.BLACK, CellColor.BRIGHT_WHITE, true, false), // notifySuccess
             cellStyle(CellColor.BLACK, CellColor.BRIGHT_WHITE),              // notifyInfo

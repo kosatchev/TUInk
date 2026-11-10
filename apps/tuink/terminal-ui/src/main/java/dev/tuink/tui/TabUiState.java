@@ -21,6 +21,8 @@ final class TabUiState implements AutoCloseable {
     TextField searchReplaceInput;
     TextField saveAsInput;
     SearchController.SearchUiOptions searchUi = SearchController.SearchUiOptions.DEFAULT;
+    final dev.tuiframe.widget.DropDown<dev.tuink.editor.search.SearchOptions.MatchMode> searchModes =
+        dev.tuink.tui.ui.SearchControls.modes(dev.tuink.editor.search.SearchOptions.MatchMode.SUBSTRING);
     boolean searchMode;
     boolean searchEditorFocused;
     SearchFocus pendingSearchFocus;

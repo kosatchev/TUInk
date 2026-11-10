@@ -28,12 +28,12 @@ class ExplorerResponsiveLayoutTest {
             window.command(TuinkCommand.EXPLORER_FOCUS);
             window.await(() -> window.preview().ready());
             assertEquals(40, window.preview().bounds.width());
-            assertTrue(window.ui.explorer.focused);
+            assertTrue(window.ui.sidebar.focused);
 
             window.resize(24, 40);
 
-            assertNull(window.ui.explorer.placement);
-            assertFalse(window.ui.explorer.focused);
+            assertNull(window.ui.sidebar.placement);
+            assertFalse(window.ui.sidebar.focused);
             assertTrue(window.preview().ready(), "The existing 40-column layout remains usable");
             assertEquals(ActiveSurface.Focus.CONTENT, window.controller.activeSurface().focus());
             assertTrue(window.controller.previewFrame().cursor().visible(),
@@ -53,13 +53,13 @@ class ExplorerResponsiveLayoutTest {
             window.command(TuinkCommand.EXPLORER_FOCUS);
             window.await(() -> window.preview().ready());
             assertEquals(40, window.preview().bounds.width());
-            assertTrue(window.ui.explorer.focused);
+            assertTrue(window.ui.sidebar.focused);
             assertFalse(window.controller.previewFrame().cursor().visible());
 
             window.resize(24, 40);
 
-            assertNull(window.ui.explorer.placement);
-            assertFalse(window.ui.explorer.focused);
+            assertNull(window.ui.sidebar.placement);
+            assertFalse(window.ui.sidebar.focused);
             assertTrue(window.preview().ready());
             assertTrue(window.preview().searchVisible);
             assertEquals(ActiveSurface.Focus.EDITABLE_TEXT, window.controller.activeSurface().focus());
@@ -73,17 +73,17 @@ class ExplorerResponsiveLayoutTest {
         try (var window = new EditorWindowFixture(directory, false, List.of("source"))) {
             window.ui.showTabBarSetting = true;
             window.command(TuinkCommand.TAB_NEW);
-            window.ui.explorer.visible = true;
+            window.ui.sidebar.visible = true;
             window.resize(3, 80);
             window.notification.info("Background notification");
             window.frame();
 
-            assertNotNull(window.ui.explorer.placement,
+            assertNotNull(window.ui.sidebar.placement,
                 "A document notification must not remove space from the sibling sidebar");
-            assertEquals(2, window.ui.explorer.placement.bounds().height());
+            assertEquals(2, window.ui.sidebar.placement.bounds().height());
             int firstTabColumn = window.screenRow(1).indexOf("document.txt");
             assertTrue(firstTabColumn >= 0, window.screenRow(1));
-            assertTrue(firstTabColumn >= window.ui.explorer.placement.documentBounds().x(),
+            assertTrue(firstTabColumn >= window.ui.sidebar.placement.documentBounds().x(),
                 "Tabs remain in the document container: " + window.screenRow(1));
         }
     }

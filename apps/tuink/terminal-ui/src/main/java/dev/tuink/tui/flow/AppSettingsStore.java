@@ -5,6 +5,8 @@ import dev.tuink.storage.jvm.FileSaveGuard;
 import dev.tuink.storage.jvm.JvmFilePaths;
 import dev.tuink.core.TabInsertMode;
 import dev.tuink.tui.style.UiStyles;
+import dev.tuink.project.search.SearchPreferences;
+import dev.tuink.editor.storage.DocumentOpenMode;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -61,6 +63,12 @@ public final class AppSettingsStore {
     private static final String KEY_TAB_WIDTH = "ui.tabWidth";
     private static final String KEY_TAB_INSERT_MODE = "ui.tabInsertMode";
     private static final String KEY_THEME = "ui.theme";
+    private static final String SEARCH = "search.";
+    private static final String PALETTES = "palettes.";
+    private static final Set<String> PALETTE_KEYS = Set.of("width", "filesHeight", "searchHeight", "filesExpanded",
+        "searchExpanded", "searchFirst", "maximized", "visible", "filesHints", "searchHints");
+    private static final Set<String> SEARCH_KEYS = Set.of("automatic", "respectIgnore", "hidden", "exclusions",
+        "encoding", "maximumFileMiB", "maximumMatches");
     private static final Set<String> KEYS = Set.of(
         KEY_FORMAT,
         KEY_SHOW_TAB_BAR,
@@ -185,7 +193,9 @@ public final class AppSettingsStore {
             setting(repair, defaults.rightClickClipboard(), () -> parseOptionalBoolean(p, KEY_RIGHT_CLICK_CLIPBOARD, false, path)),
             setting(repair, defaults.markdownVisualCopy(), () -> parseOptionalBoolean(p, KEY_MARKDOWN_VISUAL_COPY, false, path)),
             setting(repair, defaults.showFileHistoryNotifications(), () -> parseOptionalBoolean(p, KEY_FILE_HISTORY_NOTIFICATIONS, true, path)),
-            setting(repair, defaults.showDocumentPath(), () -> parseOptionalBoolean(p, KEY_DOCUMENT_PATH, true, path))
+            setting(repair, defaults.showDocumentPath(), () -> parseOptionalBoolean(p, KEY_DOCUMENT_PATH, true, path)),
+            setting(repair, defaults.projectSearch(), () -> parseSearch(p, path)),
+            setting(repair, defaults.palettes(), () -> parsePalettes(p, path))
         );
     }
 
@@ -296,6 +306,25 @@ public final class AppSettingsStore {
         p.setProperty(KEY_TAB_WIDTH, Integer.toString(settings.tabWidth()));
         p.setProperty(KEY_TAB_INSERT_MODE, canonical(settings.tabInsertMode()));
         p.setProperty(KEY_THEME, canonical(settings.theme()));
+        SearchPreferences search = settings.projectSearch();
+        p.setProperty(SEARCH + "automatic", Boolean.toString(search.automatic()));
+        p.setProperty(SEARCH + "respectIgnore", Boolean.toString(search.respectIgnore()));
+        p.setProperty(SEARCH + "hidden", Boolean.toString(search.hidden()));
+        p.setProperty(SEARCH + "exclusions", search.exclusions());
+        p.setProperty(SEARCH + "encoding", canonical(search.encoding()));
+        p.setProperty(SEARCH + "maximumFileMiB", Integer.toString(search.maximumFileMiB()));
+        p.setProperty(SEARCH + "maximumMatches", Integer.toString(search.maximumMatches()));
+        PalettePreferences palettes = settings.palettes();
+        p.setProperty(PALETTES + "width", Integer.toString(palettes.width()));
+        p.setProperty(PALETTES + "filesHeight", Integer.toString(palettes.filesHeight()));
+        p.setProperty(PALETTES + "searchHeight", Integer.toString(palettes.searchHeight()));
+        p.setProperty(PALETTES + "filesExpanded", Boolean.toString(palettes.filesExpanded()));
+        p.setProperty(PALETTES + "searchExpanded", Boolean.toString(palettes.searchExpanded()));
+        p.setProperty(PALETTES + "searchFirst", Boolean.toString(palettes.searchFirst()));
+        p.setProperty(PALETTES + "maximized", canonical(palettes.maximized()));
+        p.setProperty(PALETTES + "visible", Boolean.toString(palettes.visible()));
+        p.setProperty(PALETTES + "filesHints", Boolean.toString(palettes.filesHints()));
+        p.setProperty(PALETTES + "searchHints", Boolean.toString(palettes.searchHints()));
 
         byte[] encoded;
         try (var output = new ByteArrayOutputStream()) {
@@ -561,6 +590,8 @@ public final class AppSettingsStore {
         unknown.remove(KEY_MARKDOWN_VISUAL_COPY);
         unknown.remove(KEY_FILE_HISTORY_NOTIFICATIONS);
         unknown.remove(KEY_DOCUMENT_PATH);
+        for (String key : SEARCH_KEYS) unknown.remove(SEARCH + key);
+        for (String key : PALETTE_KEYS) unknown.remove(PALETTES + key);
         if (!missing.isEmpty() || !unknown.isEmpty()) {
             throw invalid(path, "schema mismatch; missing=" + missing + ", unknown=" + unknown);
         }
@@ -569,6 +600,48 @@ public final class AppSettingsStore {
     /** Optional current-schema preferences preserve their documented default when omitted. */
     private static boolean parseOptionalBoolean(Properties p, String key, boolean defaultValue, Path path) throws IOException {
         return p.containsKey(key) ? parseBoolean(p, key, path) : defaultValue;
+    }
+
+    private static PalettePreferences parsePalettes(Properties p, Path path) throws IOException {
+        var defaults = PalettePreferences.defaults();
+        try {
+            return new PalettePreferences(optionalPaletteInt(p, "width", defaults.width()),
+                optionalPaletteInt(p, "filesHeight", defaults.filesHeight()), optionalPaletteInt(p, "searchHeight", defaults.searchHeight()),
+                parseOptionalBoolean(p, PALETTES + "filesExpanded", defaults.filesExpanded(), path),
+                parseOptionalBoolean(p, PALETTES + "searchExpanded", defaults.searchExpanded(), path),
+                parseOptionalBoolean(p, PALETTES + "searchFirst", defaults.searchFirst(), path),
+                p.containsKey(PALETTES + "maximized") ? parseEnum(p, PALETTES + "maximized", PalettePreferences.Maximized.class, path) : defaults.maximized(),
+                parseOptionalBoolean(p, PALETTES + "visible", defaults.visible(), path),
+                parseOptionalBoolean(p, PALETTES + "filesHints", defaults.filesHints(), path),
+                parseOptionalBoolean(p, PALETTES + "searchHints", defaults.searchHints(), path));
+        } catch (IllegalArgumentException invalid) { throw invalid(path, "invalid palette preferences: " + invalid.getMessage()); }
+    }
+    private static int optionalPaletteInt(Properties p, String key, int fallback) {
+        String value = p.getProperty(PALETTES + key);
+        if (value == null) return fallback;
+        int parsed = Integer.parseInt(value);
+        if (!Integer.toString(parsed).equals(value)) throw new IllegalArgumentException("non-canonical " + key);
+        return parsed;
+    }
+    private static SearchPreferences parseSearch(Properties p, Path path) throws IOException {
+        SearchPreferences defaults = SearchPreferences.defaults();
+        try {
+            return new SearchPreferences(
+                parseOptionalBoolean(p, SEARCH + "automatic", defaults.automatic(), path),
+                parseOptionalBoolean(p, SEARCH + "respectIgnore", defaults.respectIgnore(), path),
+                parseOptionalBoolean(p, SEARCH + "hidden", defaults.hidden(), path),
+                p.getProperty(SEARCH + "exclusions", defaults.exclusions()),
+                p.containsKey(SEARCH + "encoding") ? parseEnum(p, SEARCH + "encoding", DocumentOpenMode.class, path) : defaults.encoding(),
+                optionalSearchInt(p, "maximumFileMiB", defaults.maximumFileMiB()),
+                optionalSearchInt(p, "maximumMatches", defaults.maximumMatches()));
+        } catch (IllegalArgumentException invalid) { throw invalid(path, "invalid project search preferences: " + invalid.getMessage()); }
+    }
+    private static int optionalSearchInt(Properties p, String key, int fallback) {
+        String value = p.getProperty(SEARCH + key);
+        if (value == null) return fallback;
+        int parsed = Integer.parseInt(value);
+        if (!Integer.toString(parsed).equals(value)) throw new IllegalArgumentException("non-canonical " + key);
+        return parsed;
     }
 
     private static boolean parseBoolean(Properties p, String key, Path path) throws IOException {

@@ -204,11 +204,11 @@ class SearchReplaceFeedbackIntegrationTest {
             window.event(new TextInput("alpha alpha"));
             search(window, "alpha", "beta");
 
-            assertTrue(window.screenRow(window.height - 3).contains("[All tabs: ]"));
+            assertTrue(window.screenRow(window.height - 3).contains("[  All tabs]"));
             assertTrue(window.screenRow(window.height - 2).contains("[Replace all]"));
             window.focusSearch(SearchFocus.ALL);
             window.event(new TextInput(" "));
-            assertTrue(window.screenRow(window.height - 3).contains("[All tabs:x]"));
+            assertTrue(window.screenRow(window.height - 3).contains("[✓ All tabs]"));
             assertTrue(window.screenRow(window.height - 1).contains("Find 3 in 2 tabs"));
 
             replace(window, SearchFocus.ALL_BUTTON);

@@ -50,9 +50,11 @@ class SearchNavigationTest {
         for (String source : sources) {
             for (String query : queries) {
                 for (SearchOptions.MatchMode mode : SearchOptions.MatchMode.values()) {
+                    String pattern = mode == SearchOptions.MatchMode.REGEX
+                        ? query.replace("*", ".*").replace("?", ".") : query;
                     SearchOptions options = new SearchOptions(true, mode);
-                    SearchNavigation navigation = navigation(source, query, options);
-                    List<SearchMatcher.Match> expected = SearchMatcher.compile(query, options).findAll(source);
+                    SearchNavigation navigation = navigation(source, pattern, options);
+                    List<SearchMatcher.Match> expected = SearchMatcher.compile(pattern, options).findAll(source);
                     for (int offset = source.length() + 1; offset >= -1; offset--) {
                         assertNavigation(expected, navigation, offset);
                         assertNavigation(expected, navigation, source.length() - offset);

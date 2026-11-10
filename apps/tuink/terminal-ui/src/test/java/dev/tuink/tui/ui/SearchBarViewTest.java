@@ -34,7 +34,7 @@ class SearchBarViewTest {
         SearchFocus.FIND,
         SearchFocus.CASE,
         SearchFocus.WORD,
-        SearchFocus.WILDCARD,
+        SearchFocus.MODE,
         SearchFocus.ALL,
         SearchFocus.REPLACE,
         SearchFocus.NEXT_BUTTON,
@@ -77,11 +77,11 @@ class SearchBarViewTest {
 
         assertEquals(TARGET_ORDER, placement.focusScope().tabOrder());
         assertEquals(TARGET_ORDER, placement.focusScope().pointerTopmostFirst());
-        assertEquals(new Rect(6, topRow, 39, 1), placement.targetBounds(SearchFocus.FIND));
+        assertEquals(new Rect(6, topRow, 34, 1), placement.targetBounds(SearchFocus.FIND));
         assertEquals(new Rect(9, topRow + 1, 33, 1), placement.targetBounds(SearchFocus.REPLACE));
-        assertEquals(new Rect(45, topRow, 6, 1), placement.targetBounds(SearchFocus.CASE));
-        assertEquals(new Rect(52, topRow, 8, 1), placement.targetBounds(SearchFocus.WORD));
-        assertEquals(new Rect(61, topRow, 5, 1), placement.targetBounds(SearchFocus.WILDCARD));
+        assertEquals(new Rect(40, topRow, 6, 1), placement.targetBounds(SearchFocus.CASE));
+        assertEquals(new Rect(47, topRow, 8, 1), placement.targetBounds(SearchFocus.WORD));
+        assertEquals(new Rect(56, topRow, 10, 1), placement.targetBounds(SearchFocus.MODE));
         assertEquals(new Rect(67, topRow, 12, 1), placement.targetBounds(SearchFocus.ALL));
         assertEquals(new Rect(42, topRow + 1, 6, 1), placement.targetBounds(SearchFocus.NEXT_BUTTON));
         assertEquals(new Rect(49, topRow + 1, 6, 1), placement.targetBounds(SearchFocus.PREV_BUTTON));
@@ -171,8 +171,8 @@ class SearchBarViewTest {
 
         String expectedRow1 = "Find: "
             + "needle"
-            + " ".repeat(33)
-            + "[Аа:x] [word: ] [*: ] [All tabs:x] ";
+            + " ".repeat(28)
+            + "[✓ Aa] [  Word] [Strict ▾] [✓ All tabs] ";
         String expectedRow2 = "Replace: "
             + "swap"
             + " ".repeat(29)

@@ -104,7 +104,7 @@ class PreviewFindWorkflowIntegrationTest {
             window.selected().uiState().searchUi = new SearchController.SearchUiOptions(true, SearchOptions.MatchMode.SUBSTRING, false);
             window.frame();
             assertEquals(3, preview.searchMatches.size());
-            window.selected().uiState().searchUi = new SearchController.SearchUiOptions(false, SearchOptions.MatchMode.WHOLE_WORD, false);
+            window.selected().uiState().searchUi = new SearchController.SearchUiOptions(false, SearchOptions.MatchMode.SUBSTRING, false, true);
             window.frame();
             assertEquals(2, preview.searchMatches.size());
             window.selected().uiState().searchUi = new SearchController.SearchUiOptions(false, SearchOptions.MatchMode.WILDCARD, false);

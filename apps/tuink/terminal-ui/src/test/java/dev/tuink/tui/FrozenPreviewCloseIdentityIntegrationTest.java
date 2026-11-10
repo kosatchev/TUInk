@@ -147,7 +147,7 @@ class FrozenPreviewCloseIdentityIntegrationTest {
 
     private Pair deletedPreviews(EditorWindowFixture window) throws Exception {
         window.controller.openFolder(directory);
-        window.await(() -> window.ui.explorer.tree != null && !window.ui.explorer.tree.loading());
+        window.await(() -> window.ui.sidebar.tree != null && !window.ui.sidebar.tree.loading());
         PreviewTab first = freezeSelectedSource(window);
         Path secondPath = Files.writeString(directory.resolve("second.md"), String.join("\n", SECOND));
         var secondSource = window.host.newEditorTab();

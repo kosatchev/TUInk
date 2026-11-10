@@ -78,7 +78,7 @@ class ExplorerFileActionsIntegrationTest {
             window.await(() -> window.controller.explorerFileDialog() == null && !window.documentIo.busy());
             assertTrue(Files.isDirectory(directory.resolve("created-folder")));
 
-            window.await(() -> !window.ui.explorer.tree.loading());
+            window.await(() -> !window.ui.sidebar.tree.loading());
             select(window, directory);
             window.command(TuinkCommand.EXPLORER_NEW_FILE);
             window.event(new TextInput("created.txt"));
@@ -91,7 +91,7 @@ class ExplorerFileActionsIntegrationTest {
             assertEquals(created, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
             assertEquals(List.of(""), window.active().tabSession().model().snapshotLines());
             assertEquals("original", Files.readString(window.document));
-            assertEquals(directory, window.ui.explorer.root());
+            assertEquals(directory, window.ui.sidebar.root());
         }
     }
 
@@ -129,7 +129,7 @@ class ExplorerFileActionsIntegrationTest {
             assertEquals(directory, dialog.tree.root());
             assertEquals(destination, dialog.destinationFolder());
             assertEquals("destination", dialog.field.text());
-            assertEquals(directory, window.ui.explorer.root());
+            assertEquals(directory, window.ui.sidebar.root());
             chooseApply(window);
             window.await(() -> window.controller.explorerFileDialog() == null && !window.documentIo.busy());
 
@@ -137,7 +137,7 @@ class ExplorerFileActionsIntegrationTest {
             assertFalse(Files.exists(window.document));
             assertEquals("original", Files.readString(moved));
             assertEquals(moved, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
-            assertEquals(directory, window.ui.explorer.root());
+            assertEquals(directory, window.ui.sidebar.root());
         }
     }
 
@@ -153,12 +153,12 @@ class ExplorerFileActionsIntegrationTest {
             var cursor = window.active().state().getCursor();
             long revision = window.active().tabSession().model().revision();
             window.controller.openFolder(directory);
-            window.await(() -> !window.ui.explorer.tree.loading());
+            window.await(() -> !window.ui.sidebar.tree.loading());
             if (!moveFolder) {
-                window.ui.explorer.tree.reveal(window.document);
-                window.await(() -> !window.ui.explorer.tree.loading()
-                    && window.ui.explorer.tree.selectedEntry() != null
-                    && window.document.equals(window.ui.explorer.tree.selectedEntry().path()));
+                window.ui.sidebar.tree.reveal(window.document);
+                window.await(() -> !window.ui.sidebar.tree.loading()
+                    && window.ui.sidebar.tree.selectedEntry() != null
+                    && window.document.equals(window.ui.sidebar.tree.selectedEntry().path()));
             } else select(window, sourceFolder);
             window.command(TuinkCommand.EXPLORER_MOVE);
             awaitDialog(window);
@@ -240,7 +240,7 @@ class ExplorerFileActionsIntegrationTest {
             assertFalse(window.documentIo.busy());
             assertEquals("original", Files.readString(window.document));
             window.resize(24, 80);
-            assertEquals(directory, window.ui.explorer.root());
+            assertEquals(directory, window.ui.sidebar.root());
             assertEquals(List.of("original"), window.active().tabSession().model().snapshotLines());
         }
     }
@@ -284,11 +284,11 @@ class ExplorerFileActionsIntegrationTest {
 
     private static void openTree(EditorWindowFixture window) throws Exception {
         window.controller.openFolder(window.document.getParent());
-        window.await(() -> !window.ui.explorer.tree.loading());
+        window.await(() -> !window.ui.sidebar.tree.loading());
     }
 
     private static void select(EditorWindowFixture window, Path path) {
-        assertTrue(window.ui.explorer.tree.select(path));
+        assertTrue(window.ui.sidebar.tree.select(path));
         window.frame();
     }
 

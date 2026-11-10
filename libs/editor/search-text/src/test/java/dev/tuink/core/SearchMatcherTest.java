@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
+/** Shared matching semantics used by both documents and project search. */
 class SearchMatcherTest {
     private static final SearchOptions CASE_INSENSITIVE = new SearchOptions(
         true,
@@ -66,13 +67,11 @@ class SearchMatcherTest {
         assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
             String query = "a".repeat(200_000);
             for (boolean insensitive : List.of(false, true)) {
-                for (SearchOptions.MatchMode mode : List.of(
-                    SearchOptions.MatchMode.SUBSTRING, SearchOptions.MatchMode.WHOLE_WORD
-                )) {
-                    SearchMatcher matcher = SearchMatcher.compile(query, new SearchOptions(insensitive, mode));
+                for (boolean word : List.of(false, true)) {
+                    SearchMatcher matcher = SearchMatcher.compile(query, new SearchOptions(insensitive, SearchOptions.MatchMode.SUBSTRING, word));
                     assertEquals(List.of(new SearchMatcher.Match(0, query.length())), matcher.findAll(query));
                     assertEquals(List.of(), matcher.findAll("a".repeat(199_999)));
-                    assertEquals(List.of(), SearchMatcher.compile(query + "b", new SearchOptions(insensitive, mode))
+                    assertEquals(List.of(), SearchMatcher.compile(query + "b", new SearchOptions(insensitive, SearchOptions.MatchMode.SUBSTRING, word))
                         .findAll(query + "c"));
                 }
             }
@@ -326,11 +325,11 @@ class SearchMatcherTest {
         String source = "𝔸x x e\u0301 e";
         SearchMatcher wholeWordX = SearchMatcher.compile(
             "x",
-            new SearchOptions(false, SearchOptions.MatchMode.WHOLE_WORD)
+            new SearchOptions(false, SearchOptions.MatchMode.SUBSTRING, true)
         );
         SearchMatcher wholeWordE = SearchMatcher.compile(
             "e",
-            new SearchOptions(false, SearchOptions.MatchMode.WHOLE_WORD)
+            new SearchOptions(false, SearchOptions.MatchMode.SUBSTRING, true)
         );
 
         assertEquals(List.of(new SearchMatcher.Match(4, 5)), wholeWordX.findAll(source));
@@ -340,7 +339,7 @@ class SearchMatcherTest {
     @Test
     void wholeWordSearchRetriesOverlappingCandidatesAfterRejectedBoundaries() {
         for (boolean insensitive : List.of(false, true)) {
-            SearchOptions options = new SearchOptions(insensitive, SearchOptions.MatchMode.WHOLE_WORD);
+            SearchOptions options = new SearchOptions(insensitive, SearchOptions.MatchMode.SUBSTRING, true);
             for (String separator : List.of("-", " ")) {
                 String query = "a" + separator + "a";
                 String source = "ba" + separator + "a" + separator + "a";
@@ -367,7 +366,7 @@ class SearchMatcherTest {
     @Test
     void wholeWordSearchStillKeepsAcceptedMatchesNonOverlapping() {
         SearchMatcher matcher = SearchMatcher.compile(
-            "a-a", new SearchOptions(false, SearchOptions.MatchMode.WHOLE_WORD)
+            "a-a", new SearchOptions(false, SearchOptions.MatchMode.SUBSTRING, true)
         );
 
         assertEquals(
@@ -383,7 +382,7 @@ class SearchMatcherTest {
         List<SearchOptions> options = List.of(
             SearchOptions.DEFAULT,
             CASE_INSENSITIVE,
-            new SearchOptions(true, SearchOptions.MatchMode.WHOLE_WORD),
+            new SearchOptions(true, SearchOptions.MatchMode.SUBSTRING, true),
             new SearchOptions(true, SearchOptions.MatchMode.WILDCARD)
         );
 
@@ -411,7 +410,7 @@ class SearchMatcherTest {
         List<SearchOptions> options = List.of(
             SearchOptions.DEFAULT,
             CASE_INSENSITIVE,
-            new SearchOptions(true, SearchOptions.MatchMode.WHOLE_WORD),
+            new SearchOptions(true, SearchOptions.MatchMode.SUBSTRING, true),
             new SearchOptions(true, SearchOptions.MatchMode.WILDCARD)
         );
         for (String source : sources) {
@@ -470,7 +469,7 @@ class SearchMatcherTest {
     @Test
     void visibleMatchesAgreeWithFilteringCompleteUnicodeAndWildcardResults() {
         String source = "𝔸x e\u0301 aa a1b a2b";
-        for (SearchOptions.MatchMode mode : SearchOptions.MatchMode.values()) {
+        for (SearchOptions.MatchMode mode : List.of(SearchOptions.MatchMode.SUBSTRING, SearchOptions.MatchMode.WILDCARD)) {
             for (String query : List.of("x", "e", "aa", "?", "a*b")) {
                 SearchMatcher matcher = SearchMatcher.compile(query, new SearchOptions(true, mode));
                 List<SearchMatcher.Match> all = matcher.findAll(source);

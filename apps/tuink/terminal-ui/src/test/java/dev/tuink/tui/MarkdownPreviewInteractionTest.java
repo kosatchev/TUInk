@@ -178,7 +178,7 @@ class MarkdownPreviewInteractionTest {
     }
 
     private static MarkdownPreviewState ready(MarkdownLayout.Result result, Rect bounds) {
-        return ready(result, bounds, SearchPresentation.INTERACTIVE_WILDCARD_WORK_LIMIT);
+        return ready(result, bounds, SearchPresentation.INTERACTIVE_SEARCH_WORK_LIMIT);
     }
     private static MarkdownPreviewState ready(MarkdownLayout.Result result, Rect bounds, long maximumWork) {
         var state = new MarkdownPreviewState(maximumWork);

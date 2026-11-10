@@ -84,10 +84,10 @@ class ExplorerDestinationViewTest {
         for (int index = 0; index < 30; index++) Files.createDirectory(directory.resolve("d%02d".formatted(index)));
         try (var window = new EditorWindowFixture(directory, false, List.of("original"))) {
             window.controller.openFolder(directory);
-            window.await(() -> !window.ui.explorer.tree.loading());
-            window.ui.explorer.tree.reveal(window.document);
-            window.await(() -> !window.ui.explorer.tree.loading()
-                && window.ui.explorer.selectedEntry() != null && window.document.equals(window.ui.explorer.selectedEntry().path()));
+            window.await(() -> !window.ui.sidebar.tree.loading());
+            window.ui.sidebar.tree.reveal(window.document);
+            window.await(() -> !window.ui.sidebar.tree.loading()
+                && window.ui.sidebar.selectedEntry() != null && window.document.equals(window.ui.sidebar.selectedEntry().path()));
             window.command(command);
             window.await(() -> !window.documentIo.busy() && window.controller.explorerFileDialog() != null
                 && window.controller.explorerFileDialog().inspected != null && !window.controller.explorerFileDialog().tree.loading());

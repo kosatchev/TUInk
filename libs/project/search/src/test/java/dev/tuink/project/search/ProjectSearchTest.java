@@ -52,6 +52,16 @@ class ProjectSearchTest {
         assertTrue(finished.matches() > 0 && finished.matches() < 100_000);
     }
 
+    @Test void cancellationWhileDeliveringAnInvalidQueryFailureDoesNotEscapeTheWorker() {
+        var request = new ProjectSearch.Request("[", new SearchOptions(false, SearchOptions.MatchMode.REGEX), 100);
+        assertDoesNotThrow(() -> ProjectSearch.run(request, (control, visitor) -> {}, () -> false, event -> {
+            if (event instanceof ProjectSearch.Finished finished) {
+                assertEquals(ProjectSearch.Outcome.FAILED, finished.outcome());
+                throw new CancellationException("superseded while publishing the error");
+            }
+        }));
+    }
+
     @Test void cancellationWhileDeliveringALimitCompletionDoesNotEscapeTheWorker() {
         var request = new ProjectSearch.Request("needle", SearchOptions.DEFAULT, 1);
         assertDoesNotThrow(() -> ProjectSearch.run(request,

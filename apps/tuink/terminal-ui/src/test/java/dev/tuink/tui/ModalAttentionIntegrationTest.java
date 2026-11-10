@@ -47,7 +47,7 @@ class ModalAttentionIntegrationTest {
     private static final HelpPage HELP = new HelpPage("Help 中🦀", List.of("Document shortcuts", "Wide text 中🦀", "Close with Escape"));
 
     @Test
-    void saveAsAndConfirmationHighlightTheWholePromptAndKeepDocumentAndWideTextIntact() {
+    void messageAttentionHighlightsTheWholeRowAndPreservesDocumentAndWideText() {
         for (boolean saveAs : List.of(true, false)) {
             TerminalEditorApp app = new TerminalEditorApp();
             FrameComposition composition = promptFrame(12, 60, saveAs, true);
@@ -195,7 +195,7 @@ class ModalAttentionIntegrationTest {
         var prompt = InlinePromptBar.of(text, Style.DEFAULT, 1);
         return composition(rows, cols, prompt,
             new FrameComposition.Layers(null, null, saveAs, field, confirm, FrameComposition.OpenFile.hidden(), null, null, attention, false,
-                new Rect(0, rows - 1 - prompt.height(), cols, prompt.height()), null, null));
+                new Rect(0, rows - 1 - prompt.height(), cols, prompt.height()), null, null, null));
     }
 
     private static FrameComposition dialogFrame(int rows, int cols, boolean help, boolean attention) {
@@ -214,7 +214,7 @@ class ModalAttentionIntegrationTest {
         var helpPlacement = help ? new TerminalEditorApp().helpOverlayPlacement(rows, cols, HELP) : null;
         return composition(rows, cols, InlinePromptBar.hidden(),
             new FrameComposition.Layers(null, null, false, null, null, open, helpPlacement, null, attention, false,
-                help ? helpPlacement.frame().bounds() : open.dialog().frame().bounds(), null, null));
+                help ? helpPlacement.frame().bounds() : open.dialog().frame().bounds(), null, null, null));
     }
 
     private static FrameComposition composition(int rows, int cols, InlinePromptBar prompt, FrameComposition.Layers layers) {

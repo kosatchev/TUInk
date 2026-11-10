@@ -1877,9 +1877,10 @@ public class EditorEngine {
         breakCoalescing();
 
         Position from = model.clamp(state.getCursor());
-        SelectionRange selected = currentSelection();
+        SelectionRange selected = currentSearchSelection(navigation, context);
         if (selected != null && matchesSelectedText(navigation, selected, context)) {
             from = selected.end();
+            if (selected.start().equals(selected.end())) from = new Position(from.line(), from.col() + 1);
         }
 
         SearchMatch found = findForward(from, navigation, true, context);
@@ -1908,7 +1909,7 @@ public class EditorEngine {
         breakCoalescing();
 
         Position from = model.clamp(state.getCursor());
-        SelectionRange selected = currentSelection();
+        SelectionRange selected = currentSearchSelection(navigation, context);
         if (selected != null && matchesSelectedText(navigation, selected, context)) {
             from = selected.start();
         }
@@ -1939,7 +1940,7 @@ public class EditorEngine {
         SearchNavigation navigation = searchNavigation(needle, options, context);
         ReplacementText replacementText = new ReplacementText(replacement);
 
-        SelectionRange selected = currentSelection();
+        SelectionRange selected = currentSearchSelection(navigation, context);
         ViewState before = captureViewState();
         if (selected == null || !matchesSelectedText(navigation, selected, context)) {
             // Locate the match without publishing a selection: a refused replacement
@@ -1960,7 +1961,8 @@ public class EditorEngine {
             // repeated Replace commands still make progress. Resolve that move
             // before publishing a selection or breaking a pending typing group:
             // even a no-op replacement can exhaust the shared search budget.
-            SearchMatch next = findForward(rangeEnd, navigation, true, context);
+            Position after = rangeStart.equals(rangeEnd) ? new Position(rangeEnd.line(), rangeEnd.col() + 1) : rangeEnd;
+            SearchMatch next = findForward(after, navigation, true, context);
             breakCoalescing();
             if (next == null) {
                 selectMatch(rangeStart, rangeEnd.col() - rangeStart.col());
@@ -3180,7 +3182,7 @@ public class EditorEngine {
         int lineCount = model.lineCount();
         for (int line = from.line(); line < lineCount; line++) {
             LineText text = model.lineText(line);
-            int startCol = line == from.line() ? Math.min(from.col(), text.length()) : 0;
+            int startCol = line == from.line() ? from.col() : 0;
             SearchMatch match = findInLineForward(line, navigation, startCol, context);
             if (match != null) {
                 return match;
@@ -3191,7 +3193,7 @@ public class EditorEngine {
         }
         for (int line = 0; line <= from.line(); line++) {
             LineText text = model.lineText(line);
-            int limit = line == from.line() ? Math.min(from.col(), text.length()) : text.length();
+            int limit = line == from.line() ? from.col() : text.length() + 1;
             SearchMatch match = findInLineForward(line, navigation, 0, context);
             if (match != null && match.start().col() < limit) {
                 return match;
@@ -3204,7 +3206,7 @@ public class EditorEngine {
                                      SearchOperationContext context) {
         for (int line = from.line(); line >= 0; line--) {
             LineText text = model.lineText(line);
-            int endExclusive = line == from.line() ? Math.min(from.col(), text.length()) : text.length();
+            int endExclusive = line == from.line() ? Math.min(from.col(), text.length() + 1) : text.length() + 1;
             SearchMatch match = findInLineBackward(line, navigation, endExclusive, context);
             if (match != null) {
                 return match;
@@ -3216,7 +3218,7 @@ public class EditorEngine {
         for (int line = model.lineCount() - 1; line >= from.line(); line--) {
             LineText text = model.lineText(line);
             int startInclusive = line == from.line() ? Math.min(from.col(), text.length()) : 0;
-            SearchMatch match = findInLineBackward(line, navigation, text.length(), context);
+            SearchMatch match = findInLineBackward(line, navigation, text.length() + 1, context);
             if (match != null && match.start().col() >= startInclusive) {
                 return match;
             }
@@ -3232,6 +3234,15 @@ public class EditorEngine {
         state.setSelectionAnchor(safeStart);
         state.setCursor(end);
         state.invalidateNavigation();
+    }
+
+    private SelectionRange currentSearchSelection(SearchNavigation navigation, SearchOperationContext context) {
+        SelectionRange range = currentSelection();
+        Position cursor = model.clamp(state.getCursor());
+        if (range == null && cursor.equals(state.getSelectionAnchor())
+            && navigation.matchesRange(cursor.line(), cursor.col(), cursor.col(), context))
+            return new SelectionRange(cursor, cursor);
+        return range;
     }
 
     private boolean matchesSelectedText(SearchNavigation navigation, SelectionRange selected,

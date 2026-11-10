@@ -127,6 +127,7 @@ Run only a specific module's tests when iterating:
 ./gradlew :tuiframe-widgets:test
 ./gradlew :tuiframe-explorer:test
 ./gradlew :editor-contract:test
+./gradlew :editor-search-text:test :project-search:test :project-search-jvm:test
 ./gradlew :core:test
 ./gradlew :editor-session:test
 ./gradlew :render:test
@@ -585,6 +586,7 @@ task inputs need inspection:
 - `apps/tuink/launcher/build.gradle`: application entrypoint and dependencies.
 - `gradle/scripts/build-variants.gradle`: shared libc and PGO selection.
 - `gradle/scripts/native.gradle`: regular GraalVM binaries.
+- `gradle/scripts/jgit-runtime.gradle`: one unsigned JGit artifact shared by the diff and filesystem-search adapters.
 - `gradle/scripts/pgo.gradle`: optional PGO binaries and tasks.
 - `gradle/scripts/distributions.gradle`: staging and JVM/native archives.
 - `gradle/scripts/debian.gradle`: Debian filesystem layout and package task.

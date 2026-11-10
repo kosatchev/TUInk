@@ -15,11 +15,15 @@ dependencies {
     implementation project(':tuiframe-explorer')
     implementation project(':editor-contract')
     implementation project(':core')
+    implementation project(':project-search')
+    implementation project(':project-search-jvm')
     implementation project(':editor-session')
     implementation project(':render')
     implementation project(':highlight-regex')
     implementation project(':editor-diff-jgit')
     implementation project(':editor-storage-jvm')
+    // Libraries must not write a missing-binding warning over the terminal UI.
+    runtimeOnly 'org.slf4j:slf4j-nop:1.7.36'
     testImplementation project(':unicode-text')
 }
 

@@ -38,10 +38,10 @@ class PopupSurfaceThemeTest {
         assertEquals(windows.dialogBorder(), popup.resolveStyle(WidgetThemeKeys.MODAL_BORDER));
         assertEquals(windows.dialogTitle(), popup.resolveStyle(WidgetThemeKeys.MODAL_TITLE));
         assertEquals(windows.notifyError(), popup.resolveStyle(WidgetThemeKeys.MODAL_ERROR));
-        assertEquals(windows.dialogField(), popup.resolveStyle(WidgetThemeKeys.TEXT_FIELD));
-        assertEquals(windows.dialogFieldFocused(), popup.resolveStyle(WidgetThemeKeys.TEXT_FIELD_FOCUSED));
-        assertEquals(windows.dialogFieldDisabled(), popup.resolveStyle(WidgetThemeKeys.TEXT_FIELD_DISABLED));
-        assertEquals(windows.dialogFieldSelection(), popup.resolveStyle(WidgetThemeKeys.TEXT_FIELD_SELECTION));
+        assertEquals(windows.inputField(), popup.resolveStyle(WidgetThemeKeys.TEXT_FIELD));
+        assertEquals(popup.resolveStyle(WidgetThemeKeys.ACCENT).emphasis(true, true), popup.resolveStyle(WidgetThemeKeys.TEXT_FIELD_FOCUSED));
+        assertEquals(dev.tuiframe.widget.ControlStyles.ink(windows.inputField(), dev.tuiframe.style.CellColor.GRAY_128).emphasis(false, false), popup.resolveStyle(WidgetThemeKeys.TEXT_FIELD_DISABLED));
+        assertEquals(popup.resolveStyle(WidgetThemeKeys.ACCENT).inverted().emphasis(true, true), popup.resolveStyle(WidgetThemeKeys.TEXT_FIELD_SELECTION));
         assertNotEquals(app.explorerWidgetTheme(colorEnabled).resolveStyle(WidgetThemeKeys.MODAL_BODY),
             popup.resolveStyle(WidgetThemeKeys.MODAL_BODY));
         for (var role : List.of(WidgetThemeKeys.MODAL_BODY, WidgetThemeKeys.MODAL_BORDER,
@@ -59,12 +59,10 @@ class PopupSurfaceThemeTest {
         assertTrue(popup.resolveStyle(WidgetThemeKeys.TREE_BRANCH).bold());
         for (var role : List.of(WidgetThemeKeys.TEXT_FIELD, WidgetThemeKeys.TEXT_FIELD_FOCUSED,
             WidgetThemeKeys.TEXT_FIELD_DISABLED)) {
-            assertEquals(windows.searchBar(), app.resolveSearchWidgetStyle(role),
-                "Document search retains its own toolbar surface");
-            assertEquals(windows.promptAlert(), app.resolveSaveAsWidgetStyle(role),
-                "Inline Save As retains its own prompt surface");
-            assertNotEquals(popup.resolveStyle(role), app.resolveSearchWidgetStyle(role));
-            assertNotEquals(popup.resolveStyle(role), app.resolveSaveAsWidgetStyle(role));
+            assertEquals(windows.searchBar().bg(), app.resolveSearchWidgetStyle(role).bg());
+            assertEquals(windows.promptAlert().bg(), app.resolveSaveAsWidgetStyle(role).bg());
+            assertEquals(role.equals(WidgetThemeKeys.TEXT_FIELD_FOCUSED), app.resolveSearchWidgetStyle(role).inverse());
+            assertEquals(role.equals(WidgetThemeKeys.TEXT_FIELD_FOCUSED), app.resolveSaveAsWidgetStyle(role).inverse());
         }
     }
 
@@ -83,11 +81,12 @@ class PopupSurfaceThemeTest {
             var bounds = view.bounds();
             var body = app.styles.windows().dialog();
             assertEquals(body, cells.get(bounds.y() + 2, bounds.x() + 2).style());
-            assertEquals(app.styles.windows().dialogFieldFocused(),
+            assertEquals(theme.resolveStyle(WidgetThemeKeys.ACCENT).emphasis(true, true),
                 cells.get(bounds.y() + 3, bounds.x() + 8).style());
-            assertEquals(app.styles.windows().dialogFieldFocused(),
+            assertEquals(theme.resolveStyle(WidgetThemeKeys.ACCENT).emphasis(true, true),
                 cells.get(bounds.y() + 3, bounds.x() + 28).style(), "Empty input padding has the field surface");
-            assertNotEquals(body.bg(), cells.get(bounds.y() + 3, bounds.x() + 28).style().bg());
+            var input = cells.get(bounds.y() + 3, bounds.x() + 28).style();
+            assertNotEquals(body.bg(), input.inverse() ? input.fg() : input.bg());
             assertEquals(body, cells.get(bounds.bottomExclusive() - 2, bounds.x() + 3).style());
             assertEquals(CellStyle.DEFAULT, cells.get(0, 0).style(), "The popup paints only its allocation");
 
@@ -96,8 +95,8 @@ class PopupSurfaceThemeTest {
             view.paint(new Canvas(focused), theme, theme.resolveStyle(WidgetThemeKeys.MODAL_ERROR));
             assertEquals(theme.resolveStyle(WidgetThemeKeys.BUTTON_FOCUSED),
                 focused.get(bounds.bottomExclusive() - 2, bounds.x() + 3).style());
-            assertEquals(app.styles.windows().dialogField(), focused.get(bounds.y() + 3, bounds.x() + 8).style());
-            assertEquals(app.styles.windows().dialogField(), focused.get(bounds.y() + 3, bounds.x() + 28).style());
+            assertEquals(app.styles.windows().inputField(), focused.get(bounds.y() + 3, bounds.x() + 8).style());
+            assertEquals(app.styles.windows().inputField(), focused.get(bounds.y() + 3, bounds.x() + 28).style());
         }
     }
 
@@ -115,23 +114,23 @@ class PopupSurfaceThemeTest {
             view.paint(new Canvas(cells), theme, theme.resolveStyle(WidgetThemeKeys.MODAL_ERROR));
             var selected = cells.get(bounds.y() + 3, bounds.x() + 8).style();
             var padding = cells.get(bounds.y() + 3, bounds.x() + 28).style();
-            assertEquals(app.styles.windows().dialogFieldSelection(), selected);
-            assertEquals(app.styles.windows().dialogFieldFocused(), padding);
+            assertEquals(theme.resolveStyle(WidgetThemeKeys.ACCENT).inverted().emphasis(true, true), selected);
+            assertEquals(theme.resolveStyle(WidgetThemeKeys.ACCENT).emphasis(true, true), padding);
             assertNotEquals(selected.fg(), selected.bg());
             assertNotEquals(padding.fg(), padding.bg());
-            assertNotEquals(padding.bg(), selected.bg(), "Selected text contrasts with the dark input");
-            assertNotEquals(padding.underline(), selected.underline(),
+            assertNotEquals(padding.inverse(), selected.inverse(), "Selected text contrasts with the input");
+            assertNotEquals(padding.inverse(), selected.inverse(),
                 "Selection remains distinct when color capabilities are absent");
 
             state.busy = true;
             var busy = ExplorerFileDialogView.place(state, new Rect(0, 0, 80, 24));
             var disabled = new CellBuffer(24, 80);
             busy.paint(new Canvas(disabled), theme, theme.resolveStyle(WidgetThemeKeys.MODAL_ERROR));
-            var field = app.styles.windows().dialogFieldDisabled();
+            var field = theme.resolveStyle(WidgetThemeKeys.TEXT_FIELD_DISABLED);
             assertEquals(field, disabled.get(bounds.y() + 3, bounds.x() + 8).style(),
                 "A busy field replaces the selection with its disabled style");
             assertEquals(field, disabled.get(bounds.y() + 3, bounds.x() + 28).style());
-            assertEquals(padding.bg(), field.bg(), "Disabled inputs retain the dark field surface");
+            assertEquals(theme.resolveStyle(WidgetThemeKeys.TEXT_FIELD).bg(), field.bg(), "Disabled inputs use the ordinary inverse field surface");
             assertNotEquals(field.fg(), field.bg());
             assertEquals(app.styles.windows().dialog(), disabled.get(bounds.y() + 2, bounds.x() + 2).style());
         }

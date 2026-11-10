@@ -189,7 +189,8 @@ public final class TabSearch {
     private static Position forwardOrigin(TabSession tab, SearchNavigation navigation, SearchOperationContext context) {
         Selection selection = selection(tab.state());
         if (selection != null && matches(navigation, selection, context)) {
-            return selection.end();
+            return selection.start().equals(selection.end())
+                ? new Position(selection.end().line(), selection.end().col() + 1) : selection.end();
         }
         return tab.model().clamp(tab.state().getCursor());
     }
@@ -204,7 +205,7 @@ public final class TabSearch {
 
     private static Selection selection(EditorState state) {
         Position anchor = state.getSelectionAnchor();
-        if (anchor == null || anchor.equals(state.getCursor())) {
+        if (anchor == null) {
             return null;
         }
         Position cursor = state.getCursor();
@@ -243,7 +244,7 @@ public final class TabSearch {
         SearchNavigation navigation = tab.engine().searchNavigation(query);
         for (int line = model.lineCount() - 1; line >= 0; line--) {
             LineText text = model.lineText(line);
-            SearchMatcher.Match match = navigation.lastBefore(line, text.length(), context);
+            SearchMatcher.Match match = navigation.lastBefore(line, text.length() + 1, context);
             if (match != null) {
                 return new MatchPosition(line, match.startUtf16(), match.endUtf16());
             }
@@ -297,7 +298,7 @@ public final class TabSearch {
         for (int line = limit.line(); line >= 0; line--) {
             LineText text = model.lineText(line);
             SearchMatcher.Match match = navigation.lastBefore(
-                line, line == limit.line() ? limit.col() : text.length(), context
+                line, line == limit.line() ? limit.col() : text.length() + 1, context
             );
             if (match != null) {
                 return new MatchPosition(line, match.startUtf16(), match.endUtf16());
@@ -316,7 +317,7 @@ public final class TabSearch {
         SearchNavigation navigation = tab.engine().searchNavigation(query);
         for (int line = model.lineCount() - 1; line >= limit.line(); line--) {
             LineText text = model.lineText(line);
-            SearchMatcher.Match match = navigation.lastBefore(line, text.length(), context);
+            SearchMatcher.Match match = navigation.lastBefore(line, text.length() + 1, context);
             if (match != null && (line > limit.line() || match.startUtf16() >= limit.col())) {
                 return new MatchPosition(line, match.startUtf16(), match.endUtf16());
             }

@@ -64,7 +64,7 @@ class FolderInspectionLifecycleTest {
             assertFalse(window.documentIo.busy());
             assertTrue(window.selected().uiState().openFileMode);
             assertEquals(nextFolder, window.selected().uiState().openFileTree.root());
-            assertFalse(window.ui.explorer.visible, "A cancelled inspection must not open its old folder");
+            assertFalse(window.ui.sidebar.visible, "A cancelled inspection must not open its old folder");
         }
     }
 

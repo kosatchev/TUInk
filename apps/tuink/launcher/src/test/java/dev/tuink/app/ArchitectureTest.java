@@ -139,6 +139,16 @@ class ArchitectureTest {
         .that().resideInAPackage("dev.tuink.tui..")
         .should().dependOnClassesThat().resideInAPackage("dev.tuink.app..");
 
+    static final ArchRule PROJECT_SEARCH_STAYS_PORTABLE = classes()
+        .that().resideInAPackage("dev.tuink.project.search..")
+        .and().resideOutsideOfPackage("dev.tuink.project.search.jvm..")
+        .should().onlyDependOnClassesThat(
+            JavaClass.Predicates.resideInAnyPackage("java..", "dev.tuink.editor..")
+                .or(JavaClass.Predicates.resideInAPackage("dev.tuink.project.search..")
+                    .and(JavaClass.Predicates.resideOutsideOfPackage("dev.tuink.project.search.jvm..")))
+                .or(com.tngtech.archunit.core.domain.properties.HasName.Predicates.nameMatching(
+                    "dev\\.tuink\\.core\\.(?:SearchMatcher|SearchOperationContext)(?:\\$.*)?")));
+
     static final ArchRule FILE_TREE_MODEL_STAYS_TERMINAL_INDEPENDENT = classes()
         .that().haveNameMatching("dev\\.tuiframe\\.explorer\\.file\\.(?:FileTreeModel|FileTreeLoadBudget|FileFailureReason)(?:\\$.*)?")
         .should().onlyDependOnClassesThat().resideInAnyPackage(
@@ -427,6 +437,12 @@ class ArchitectureTest {
             String packageName = javaClass.getPackageName();
             if (!packageName.startsWith(prefix)) return SliceIdentifier.ignore();
             String relative = packageName.substring(prefix.length());
+            if (relative.equals("project.search.jvm") || relative.startsWith("project.search.jvm."))
+                return SliceIdentifier.of("project-search-jvm");
+            if (relative.equals("project.search") || relative.startsWith("project.search."))
+                return SliceIdentifier.of("project-search");
+            if (javaClass.getName().matches("dev\\.tuink\\.core\\.(?:SearchMatcher|SearchOperationContext|SearchWorkBudget|SearchMemoryBudget|SearchException|SearchLimitException|SearchPatternException|RegexSearchPattern)(?:\\$.*)?"))
+                return SliceIdentifier.of("editor-search-text");
             if (relative.equals("editor.session") || relative.startsWith("editor.session.")) {
                 return SliceIdentifier.of("editor-session");
             }
@@ -478,6 +494,7 @@ class ArchitectureTest {
         SHARED_ENGINE_DOES_NOT_ACCESS_FILESYSTEM.check(PRODUCTION_CLASSES);
         STORAGE_CONTRACT_STAYS_PORTABLE.check(PRODUCTION_CLASSES);
         TUI_DOES_NOT_DEPEND_ON_APPLICATION_ENTRYPOINT.check(PRODUCTION_CLASSES);
+        PROJECT_SEARCH_STAYS_PORTABLE.check(PRODUCTION_CLASSES);
         FILE_TREE_MODEL_STAYS_TERMINAL_INDEPENDENT.check(PRODUCTION_CLASSES);
         APP_USES_ONLY_THE_TUI_FACADE.check(PRODUCTION_CLASSES);
         FRONTENDS_DO_NOT_WRITE_RAW_DIAGNOSTICS.check(PRODUCTION_CLASSES);

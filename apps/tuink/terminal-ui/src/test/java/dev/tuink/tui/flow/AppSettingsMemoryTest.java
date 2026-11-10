@@ -38,7 +38,7 @@ class AppSettingsMemoryTest {
 
     private void runProbe(String mode) throws Exception {
         String classpath = String.join(File.pathSeparator,
-            location(AppSettingsMemoryTest.class), location(AppSettingsStore.class), location(GutterDiffMode.class), location(dev.tuink.storage.jvm.JvmDocumentStorage.class), location(dev.tuink.editor.document.DocumentId.class));
+            location(AppSettingsMemoryTest.class), location(AppSettingsStore.class), location(GutterDiffMode.class), location(dev.tuink.project.search.SearchPreferences.class), location(dev.tuink.storage.jvm.JvmDocumentStorage.class), location(dev.tuink.editor.document.DocumentId.class));
         Process process = new ProcessBuilder(
             Path.of(System.getProperty("java.home"), "bin", "java").toString(),
             "-Xmx64m", "-cp", classpath, MemoryProbe.class.getName(),

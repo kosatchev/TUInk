@@ -55,7 +55,7 @@ class ReadOnlySearchInputRouterTest {
             .place(new Object(), 22, new Rect(0, 0, 80, 24));
         var focus = new FocusManager<SearchFocus>();
         placement.activate(focus);
-        for (var expected : List.of(SearchFocus.CASE, SearchFocus.WORD, SearchFocus.WILDCARD,
+        for (var expected : List.of(SearchFocus.CASE, SearchFocus.WORD, SearchFocus.MODE,
                 SearchFocus.NEXT_BUTTON, SearchFocus.PREV_BUTTON, SearchFocus.FIND)) {
             assertTrue(SearchInputRouter.route(focus, placement, KeyStroke.of(KeyStroke.Key.TAB)).consumed());
             assertEquals(expected, focus.focused().orElseThrow());

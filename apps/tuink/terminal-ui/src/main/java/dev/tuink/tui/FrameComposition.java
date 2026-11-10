@@ -118,14 +118,15 @@ record FrameComposition(
         boolean blockedInputHighlight,
         boolean contentFocused,
         Rect blockingBounds,
-        ExplorerState.Placement explorer,
-        ExplorerFileDialogView.Placement explorerDialog
+        SidebarState.Placement explorer,
+        ExplorerFileDialogView.Placement explorerDialog,
+        ProjectSearchSettingsDialog.Placement searchSettings
     ) {
         HelpPage helpPage() { return help == null ? null : help.page(); }
 
         /** The picker may supply its own surface; every other blocking layer invalidates content reuse. */
         boolean allowsScrollHints() {
-            return !blockedInputHighlight && help == null && format == null && explorerDialog == null && confirm == null && !saveAsMode
+            return !blockedInputHighlight && help == null && format == null && explorerDialog == null && searchSettings == null && confirm == null && !saveAsMode
                 && (topMenu == null || !topMenu.state().isOpen())
                 && !(contentFocused && openFile.visible());
         }
@@ -133,7 +134,7 @@ record FrameComposition(
         void validatePromptOwner(boolean searchOwnsPrompt) {
             int owners = (saveAsMode ? 1 : 0) + (searchOwnsPrompt ? 1 : 0)
                 + (confirm != null ? 1 : 0) + (openFile.visible() ? 1 : 0)
-                + (help != null ? 1 : 0) + (format != null ? 1 : 0) + (explorerDialog != null ? 1 : 0);
+                + (help != null ? 1 : 0) + (format != null ? 1 : 0) + (explorerDialog != null ? 1 : 0) + (searchSettings != null ? 1 : 0);
             if (owners > 1) throw new IllegalArgumentException("Only one prompt or modal frame owner is allowed");
         }
 
@@ -155,6 +156,7 @@ record FrameComposition(
         void validateGeometry(int rows, int cols, int contentTop, int promptHeight, WindowTextPainter.Layout textLayout) {
             Rect expected = prepareBlockingBounds(rows, cols, contentTop, promptHeight,
                 saveAsMode || confirm != null, openFile, help, format, explorerDialog, textLayout.prompt().clip());
+            if (searchSettings != null) expected = searchSettings.bounds();
             if (!blockingBounds.equals(expected))
                 throw new IllegalArgumentException("Modal input, paint and cursor must share the prepared window bounds");
         }

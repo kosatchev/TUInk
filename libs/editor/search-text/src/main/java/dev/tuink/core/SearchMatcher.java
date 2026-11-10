@@ -19,6 +19,8 @@ public final class SearchMatcher {
     private final SearchOptions.MatchMode matchMode;
     private final LiteralPattern literal;
     private final WildcardPattern wildcard;
+    private final RegexSearchPattern regex;
+    private final boolean wholeWord;
 
     private SearchMatcher(String query, SearchOptions options, int codePoints) {
         String safeQuery = query == null ? "" : query;
@@ -26,10 +28,13 @@ public final class SearchMatcher {
         this.matchMode = safeOptions.matchMode() == null
             ? SearchOptions.MatchMode.SUBSTRING
             : safeOptions.matchMode();
+        this.wholeWord = safeOptions.wholeWord();
+        this.regex = !safeQuery.isEmpty() && matchMode == SearchOptions.MatchMode.REGEX
+            ? new RegexSearchPattern(safeQuery, safeOptions.caseInsensitive()) : null;
         this.wildcard = !safeQuery.isEmpty() && matchMode == SearchOptions.MatchMode.WILDCARD
             ? new WildcardPattern(safeQuery, safeOptions.caseInsensitive(), codePoints)
             : null;
-        this.literal = safeQuery.isEmpty() || wildcard != null
+        this.literal = safeQuery.isEmpty() || wildcard != null || regex != null
             ? null
             : new LiteralPattern(safeQuery, safeOptions.caseInsensitive(), codePoints);
     }
@@ -61,6 +66,11 @@ public final class SearchMatcher {
      * set suffices to count an upper bound on masks and map keys across segments.
      */
     private static long compilationBytes(String query, SearchOptions options, int codePoints) {
+        if (options.matchMode() == SearchOptions.MatchMode.REGEX) {
+            if (query.length() > RegexSearchPattern.MAX_QUERY_LENGTH)
+                throw new SearchPatternException("Regular expressions are limited to 4096 UTF-16 units");
+            return SearchMemoryBudget.FIXED_OVERHEAD + 256L * codePoints;
+        }
         if (options.matchMode() != SearchOptions.MatchMode.WILDCARD) {
             // Tokens, prefix table and original-source offset ring.
             return SearchMemoryBudget.FIXED_OVERHEAD + 12L * codePoints;
@@ -287,7 +297,7 @@ public final class SearchMatcher {
             || startUtf16 < 0
             || endUtf16 < startUtf16
             || endUtf16 > source.length()
-            || (literal == null && wildcard == null)) {
+            || (literal == null && wildcard == null && regex == null)) {
             return false;
         }
         Match match = findFirstAtOrAfter(source, startUtf16, context);
@@ -302,15 +312,20 @@ public final class SearchMatcher {
     public void scanMatches(CharSequence source, MatchVisitor visitor, SearchOperationContext context) {
         Objects.requireNonNull(context, "context");
         context.checkpoint();
-        if (source == null || source.length() == 0 || (literal == null && wildcard == null)) {
+        if (source == null || source.length() == 0 && regex == null || (literal == null && wildcard == null && regex == null)) {
             return;
         }
         try {
+            if (regex != null || wholeWord && wildcard != null) {
+                Cursor cursor = cursor(source, 0, false, context);
+                while (cursor.moveNext(context)) if (!visitor.visit(cursor.startUtf16, cursor.endUtf16)) return;
+                return;
+            }
             if (wildcard != null) {
                 wildcard.scanMatches(source, visitor, context);
                 return;
             }
-            literal.scanMatches(source, visitor, matchMode == SearchOptions.MatchMode.WHOLE_WORD, context);
+            literal.scanMatches(source, visitor, wholeWord, context);
         } catch (OutOfMemoryError exhausted) {
             throw MEMORY_LIMIT;
         }
@@ -328,19 +343,29 @@ public final class SearchMatcher {
      * would change the canonical non-overlapping sequence.
      */
     Cursor cursor(CharSequence source, int acceptedEnd) {
+        return cursor(source, acceptedEnd, false, SearchWorkBudget.current());
+    }
+
+    Cursor cursor(CharSequence source, int acceptedEnd, boolean afterEmpty) {
+        return cursor(source, acceptedEnd, afterEmpty, SearchWorkBudget.current());
+    }
+
+    private Cursor cursor(CharSequence source, int acceptedEnd, boolean afterEmpty, SearchOperationContext context) {
+        context.checkpoint();
         try {
-            if (source == null || source.length() == 0 || (literal == null && wildcard == null)) {
+            if (source == null || source.length() == 0 && regex == null || (literal == null && wildcard == null && regex == null)) {
                 return new Cursor() { @Override boolean advance(SearchOperationContext context) { return false; } };
             }
             if (literal != null) {
-                return literal.cursor(source, acceptedEnd, matchMode == SearchOptions.MatchMode.WHOLE_WORD);
+                return literal.cursor(source, acceptedEnd, wholeWord);
             }
+            if (regex != null) return filterWords(source, regex.cursor(source, acceptedEnd, afterEmpty, context));
             if (!wildcard.hasStar) {
-                return wildcard.segments.get(0).cursor(source, acceptedEnd, true, wildcard.caseInsensitive, SearchWorkBudget.current());
+                return filterWords(source, wildcard.segments.get(0).cursor(source, acceptedEnd, true, wildcard.caseInsensitive, context));
             }
             // A starred pattern has at most one result on a line. Its greedy
             // suffix needs the complete line, so retain the existing scan.
-            return new Cursor() {
+            return filterWords(source, new Cursor() {
                 private boolean done = acceptedEnd != 0;
 
                 @Override boolean advance(SearchOperationContext context) {
@@ -354,10 +379,25 @@ public final class SearchMatcher {
                     }, context);
                     return result[0] >= 0 && found(result[0], result[1]);
                 }
-            };
+            });
         } catch (OutOfMemoryError exhausted) {
             throw MEMORY_LIMIT;
         }
+    }
+
+    private Cursor filterWords(CharSequence source, Cursor delegate) {
+        if (!wholeWord) return delegate;
+        return new Cursor() {
+            @Override boolean advance(SearchOperationContext context) {
+                while (delegate.moveNext(context)) {
+                    scannedCodePoints = delegate.scannedCodePoints;
+                    if (isWholeWord(source, delegate.startUtf16, delegate.endUtf16))
+                        return found(delegate.startUtf16, delegate.endUtf16);
+                }
+                scannedCodePoints = delegate.scannedCodePoints;
+                return false;
+            }
+        };
     }
 
     abstract static class Cursor {

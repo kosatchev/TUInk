@@ -47,7 +47,7 @@ class NarrowSearchIntegrationTest {
         try (EditorWindowFixture window = searchWindow()) {
             window.resize(24, columns);
 
-            assertTrue(screen(window).contains("[All tabs: ]"));
+            assertTrue(screen(window).contains("[  All tabs]"));
             assertTrue(screen(window).contains("[Replace all]"));
             assertEquals("alpha", window.query.text());
             assertEquals("beta", window.replacement.text());

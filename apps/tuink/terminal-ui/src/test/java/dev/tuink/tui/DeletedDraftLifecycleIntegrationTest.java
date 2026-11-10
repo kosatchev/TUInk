@@ -213,7 +213,7 @@ class DeletedDraftLifecycleIntegrationTest {
 
     private static void openExplorer(EditorWindowFixture window) throws Exception {
         window.controller.openFolder(window.document.getParent());
-        window.await(() -> window.ui.explorer.tree != null && !window.ui.explorer.tree.loading());
+        window.await(() -> window.ui.sidebar.tree != null && !window.ui.sidebar.tree.loading());
     }
 
     private static PreviewTab frozenDeleted(EditorWindowFixture window) throws Exception {

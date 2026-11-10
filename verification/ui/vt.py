@@ -15,6 +15,7 @@ class Screen:
         self.pending = ""
         self.unknown = set()
         self.autowrap = True
+        self.cursor_visible = True
         self.resize(rows, cols)
 
     def resize(self, rows, cols):
@@ -124,6 +125,8 @@ class Screen:
             if command in "hl":
                 if "7" in values:
                     self.autowrap = command == "h"
+                if "25" in values:
+                    self.cursor_visible = command == "h"
                 if "1049" in values and command == "h":
                     self.resize(self.rows, self.cols)
                 if set(values) <= {"1", "7", "12", "25", "1000", "1002", "1003", "1006", "1049", "2004"}:

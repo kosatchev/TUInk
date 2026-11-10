@@ -28,8 +28,8 @@ without learning an editor command language.
   extended grapheme clusters, including emoji, combining characters, and wide
   CJK text.
 - **Find and navigate quickly.** Work in multiple tabs, browse a folder beside the document,
-  search across every tab, and replace matches in the active tab. Case,
-  whole-word, and wildcard options help narrow the result.
+  search across every tab or the working folder, and replace matches in the active tab. Case,
+  whole-word options and Strict/Wildcard/Regex modes help narrow the result.
 - **Edit code comfortably.** TUInk provides syntax highlighting, line and word
   wrapping, auto-indent, autopairs, automatic lists, visible whitespace,
   rainbow brackets, and line-comment toggling.
@@ -229,6 +229,32 @@ packages install them under `/usr/share/doc/tuink/examples/`.
 See the [Markdown preview guide (Russian)](docs/markdown-preview.md) for controls,
 supported Mermaid/TeX subsets, snapshot behavior and resource limits.
 
+### Project search
+
+Use **View → Project search** or a distinct `Ctrl+Shift+F` to search the working
+folder, including files without open tabs. The sidebar's **Files / Search**
+[tool palettes](docs/tool-palettes.md) can stay open together and retain independent state.
+`Ctrl+E` expands Files; `Ctrl+B` hides or restores the whole dock. In Explorer, **Find in this folder** limits the
+search to the selected directory.
+
+Search reads unsaved Source buffers in preference to their files on disk.
+Results arrive in file groups with emphasized names and highlighted source fragments. Enter or
+double-click opens a match with a checked selection. Editing a captured buffer
+marks results outdated; Refresh updates them. Collapsing palettes or hiding the sidebar
+keeps the search running; Stop cancels it.
+
+Filters provide include/exclude masks, nested `.gitignore`, hidden files and
+encoding. **Settings → Project search...** edits defaults and limits. Search
+uses the same Strict/Wildcard/Regex matcher and independent whole-word option as local Find; skipped files and
+limited results are explicit. See the [project search guide](docs/project-search.md).
+
+The global mode selector shows explanations and becomes three direct buttons in
+a wide palette. **Include files / Exclude files** display mask examples and the
+Filters header counts active restrictions. One action changes between
+**Search / Stop / Refresh**. Error, pending, empty and outdated states have
+separate messages; selecting a result shows its full path and exact position in
+the window status. Match highlighting and zero-width markers also work without color.
+
 ### File safety
 
 Opening a file is limited to 64 MiB and may have a lower limit when available
@@ -343,8 +369,9 @@ a long rescan. These cases do not have a constant-time responsiveness guarantee.
 | Input | Action |
 |---|---|
 | `Ctrl+O` | Open the tree-based file picker |
-| `Ctrl+B` | Show / hide the folder explorer |
+| `Ctrl+B` | Show / hide the palette dock |
 | `Ctrl+E` | Show and focus the folder explorer |
+| `Ctrl+Shift+F` | Show project search and focus Find, when the terminal sends a distinct sequence |
 | `Ctrl+S` | Save the current file |
 | `Ctrl+K` / `Ctrl+Shift+S` / `Ctrl+Shift+F4` | Save As |
 | `Ctrl+X` / `Ctrl+C` / `Ctrl+V` | Cut / copy / paste using the system clipboard when available |
@@ -547,11 +574,14 @@ The chosen directory becomes the explorer root. Enter on a directory navigates
 inside the chooser. You can also
 start with `tuink .` or `tuink path/to/folder`.
 
-The explorer stays on the left while Source or Markdown Preview occupies the
-right. It belongs to the window and keeps its selected entry, expanded folders
+The **Files** tool palette stays on the left while Source or Markdown Preview occupies the
+right. It shares a resizable dock with Search. It belongs to the window and keeps its selected entry, expanded folders
 and scroll position while you switch tabs. Opening another root or choosing
 **Explorer → Close folder** leaves open documents and unsaved edits intact.
-**Ctrl+B** toggles panel visibility; **Ctrl+E** shows it and moves focus into it.
+**Ctrl+B** toggles the palette dock; **Ctrl+E** expands Files and moves focus into it.
+Use the header arrow to collapse, drag its title to reorder, or open **⋮** for
+Maximize/Restore and keyboard-accessible size and move operations. The preferred
+layout is saved on exit; see [Tool palettes](docs/tool-palettes.md).
 An empty panel offers an **Open folder...** action. With the tree focused:
 
 - Up/Down, Page Up/Page Down and Home/End move the selection.
@@ -563,7 +593,7 @@ An empty panel offers an **Open folder...** action. With the tree focused:
 
 File trees inherit their containing surface. The sidebar uses the editor's
 background; unselected directory names are bold, including the selectable root
-row. Floating
+row. Selected directories use the same row style as search groups. Floating
 file-action windows share the light Help/Open popup surface and button styles.
 Their input fields use a dark background with light text, with distinct focus,
 selection and disabled states. The divider uses the active theme's border color
@@ -607,7 +637,7 @@ preserving its extension where space permits. Deleted drafts retain their origin
 path with a **(Draft)** suffix; unnamed documents show **Untitled**. Very short
 windows temporarily hide the path row to leave room for document content.
 
-To move with the mouse, hold an entry for 1 second and drag it onto a folder.
+To move with the mouse, hold an entry without moving for 500 ms and drag it onto a folder.
 A label follows the pointer and the destination is highlighted. Hover over a
 collapsed folder to expand it; the tree scrolls near its upper and lower edges.
 Only releasing over a valid destination starts one move. Escape cancels the
@@ -815,6 +845,8 @@ the original Unix filename bytes. This also conservatively rejects a literal
 directory to start; no other profile is selected automatically. The `--read`,
 `--no-mouse`, and `--theme` options apply only to the current session. Explicit
 changes through the menus or their key bindings are saved as preferences.
+Project-search defaults use optional `search.*` properties in this same file;
+their values and limits are documented in the [project search guide](docs/project-search.md#defaults-and-limits).
 Readable unsupported settings open a **Fix / Delete / Later** confirmation,
 initially focused on **Later**. **Fix** keeps valid fields of the current
 format and replaces invalid or missing values with defaults; an unsupported
@@ -936,6 +968,8 @@ TUIframe is split into `tuiframe-core`, `tuiframe-jline`, `tuiframe-widgets` and
 file operations, guarded session history and the Trash provider. Each instance
 has read-only or file-management access; TUInk enables management only in its
 sidebar. TUInk retains document bindings, editor commands and application policy.
+Reusable [controls](docs/controls.md) include inverse text fields, check buttons,
+typed dropdowns and tool palettes; their behavior and default styles live in TUIframe.
 
 ## Repository layout
 
@@ -954,10 +988,14 @@ libs/
   editor/
     api/                    # :editor-contract
     engine/                 # :core
+    search-text/            # :editor-search-text — shared matcher and budgets
     session/                # :editor-session
     storage-jvm/            # :editor-storage-jvm
     diff-jgit/              # :editor-diff-jgit
     highlight-regex/        # :highlight-regex
+  project/
+    search/                 # :project-search — portable search over text sources
+    search-jvm/             # :project-search-jvm — filesystem and ignore adapter
   markdown/
     preview/                # :markdown-preview — portable models and contracts
     commonmark/             # :markdown-commonmark — Markdown parser adapter

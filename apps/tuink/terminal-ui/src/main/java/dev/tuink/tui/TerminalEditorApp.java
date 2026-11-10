@@ -83,6 +83,7 @@ import dev.tuiframe.widget.WidgetState;
 import dev.tuiframe.widget.TextField;
 import dev.tuiframe.widget.Theme;
 import dev.tuiframe.widget.WidgetThemeKeys;
+import dev.tuink.tui.render.EditorStyleAdapter;
 import dev.tuink.tui.ui.ConfirmBarView;
 import dev.tuink.tui.ui.ConfirmPromptText;
 import dev.tuink.tui.ui.DirtyTabSummary;
@@ -668,7 +669,6 @@ public class TerminalEditorApp {
         return switch (action) {
             case TOGGLE_CASE -> SearchFocus.CASE;
             case TOGGLE_WORD -> SearchFocus.WORD;
-            case TOGGLE_WILDCARD -> SearchFocus.WILDCARD;
             case TOGGLE_ALL_TABS -> SearchFocus.ALL;
             default -> null;
         };
@@ -764,7 +764,7 @@ public class TerminalEditorApp {
         if (modal.isSaveAs()) {
             return ModalInputPolicy.Kind.SAVE_AS;
         }
-        if (modal.isDocumentFormat() || modal.isExplorerFiles()) return ModalInputPolicy.Kind.FORMAT;
+        if (modal.isDocumentFormat() || modal.isExplorerFiles() || modal.isProjectSearchSettings()) return ModalInputPolicy.Kind.FORMAT;
         if (modal.isHelpHints() || modal.isHelpLicenses() || modal.isHelpAuthor()) {
             return ModalInputPolicy.Kind.HELP;
         }
@@ -1098,18 +1098,9 @@ public class TerminalEditorApp {
         if (WidgetThemeKeys.MODAL_BODY.equals(key) || WidgetThemeKeys.BUTTON.equals(key)) {
             return styles.windows().dialog();
         }
-        if (WidgetThemeKeys.TEXT_FIELD.equals(key)) {
-            return styles.windows().dialogField();
-        }
-        if (WidgetThemeKeys.TEXT_FIELD_FOCUSED.equals(key)) {
-            return styles.windows().dialogFieldFocused();
-        }
-        if (WidgetThemeKeys.TEXT_FIELD_DISABLED.equals(key)) {
-            return styles.windows().dialogFieldDisabled();
-        }
-        if (WidgetThemeKeys.TEXT_FIELD_SELECTION.equals(key)) {
-            return styles.windows().dialogFieldSelection();
-        }
+        var control = resolveControlWidgetStyle(key, styles.windows().dialog(), colorEnabled ? styles.windows().menuSelected()
+            : styles.windows().dialog().inverted().emphasis(true, true));
+        if (control != null) return control;
         if (WidgetThemeKeys.MODAL_BORDER.equals(key)) {
             return styles.windows().dialogBorder();
         }
@@ -1133,43 +1124,36 @@ public class TerminalEditorApp {
         return null;
     }
 
-    CellStyle resolveConfirmWidgetStyle(WidgetStyleRole key) {
-        if (WidgetThemeKeys.BUTTON_FOCUSED.equals(key)) {
-            return focusedButtonStyle(styles.windows().promptAlert());
-        }
-        if (WidgetThemeKeys.BUTTON.equals(key) || WidgetThemeKeys.BUTTON_DISABLED.equals(key)) {
-            return styles.windows().promptAlert();
-        }
+    CellStyle resolveConfirmWidgetStyle(WidgetStyleRole key) { return resolveInlineWidgetStyle(key, styles.windows().promptAlert()); }
+
+    private CellStyle resolveInlineWidgetStyle(WidgetStyleRole key, CellStyle body) {
+        if (WidgetThemeKeys.TEXT_FIELD.equals(key) || WidgetThemeKeys.TEXT_FIELD_DISABLED.equals(key)) return body;
+        if (WidgetThemeKeys.TEXT_FIELD_FOCUSED.equals(key)) return body.inverted().emphasis(true, false);
+        if (WidgetThemeKeys.TEXT_FIELD_SELECTION.equals(key)) return body.emphasis(true, true);
+        if (WidgetThemeKeys.BUTTON_FOCUSED.equals(key)) return focusedButtonStyle(body);
+        if (WidgetThemeKeys.BUTTON.equals(key) || WidgetThemeKeys.BUTTON_DISABLED.equals(key) || WidgetThemeKeys.MODAL_BODY.equals(key)) return body;
         return null;
     }
 
-    CellStyle resolveSaveAsWidgetStyle(WidgetStyleRole key) {
-        if (WidgetThemeKeys.BUTTON_FOCUSED.equals(key) || WidgetThemeKeys.TEXT_FIELD_SELECTION.equals(key)) {
-            return focusedButtonStyle(styles.windows().promptAlert());
-        }
-        if (WidgetThemeKeys.TEXT_FIELD.equals(key)
-            || WidgetThemeKeys.TEXT_FIELD_FOCUSED.equals(key)
-            || WidgetThemeKeys.TEXT_FIELD_DISABLED.equals(key)
-            || WidgetThemeKeys.BUTTON.equals(key)
-            || WidgetThemeKeys.BUTTON_DISABLED.equals(key)) {
-            return styles.windows().promptAlert();
-        }
+    /** Application palettes specialize the common interaction roles, independently of each search form. */
+    private CellStyle resolveControlWidgetStyle(WidgetStyleRole key, CellStyle body, CellStyle accent) {
+        var input = styles.windows().inputField();
+        if (WidgetThemeKeys.TEXT_FIELD.equals(key)) return input;
+        if (WidgetThemeKeys.TEXT_FIELD_DISABLED.equals(key)) return dev.tuiframe.widget.ControlStyles.ink(input, CellColor.GRAY_128).emphasis(false, false);
+        if (WidgetThemeKeys.TEXT_FIELD_PLACEHOLDER.equals(key)) return dev.tuiframe.widget.ControlStyles.ink(input, CellColor.DARK_GRAY);
+        if (WidgetThemeKeys.TEXT_FIELD_PLACEHOLDER_FOCUSED.equals(key)) return dev.tuiframe.widget.ControlStyles.ink(accent, CellColor.GRAY_218);
+        if (WidgetThemeKeys.TEXT_FIELD_PLACEHOLDER_DISABLED.equals(key)) return dev.tuiframe.widget.ControlStyles.ink(input, CellColor.GRAY_128);
+        if (WidgetThemeKeys.ACCENT.equals(key)) return accent;
+        if (WidgetThemeKeys.TEXT_FIELD_FOCUSED.equals(key)) return accent.emphasis(true, true);
+        if (WidgetThemeKeys.TEXT_FIELD_SELECTION.equals(key)) return accent.inverted().emphasis(true, true);
+        if (WidgetThemeKeys.POPUP_BODY.equals(key)) return body.inverted();
+        if (WidgetThemeKeys.POPUP_SELECTED.equals(key)) return accent.emphasis(true, true);
         return null;
     }
 
-    CellStyle resolveSearchWidgetStyle(WidgetStyleRole key) {
-        if (WidgetThemeKeys.BUTTON_FOCUSED.equals(key) || WidgetThemeKeys.TEXT_FIELD_SELECTION.equals(key)) {
-            return focusedButtonStyle(styles.windows().searchBar());
-        }
-        if (WidgetThemeKeys.BUTTON.equals(key)
-            || WidgetThemeKeys.BUTTON_DISABLED.equals(key)
-            || WidgetThemeKeys.TEXT_FIELD.equals(key)
-            || WidgetThemeKeys.TEXT_FIELD_FOCUSED.equals(key)
-            || WidgetThemeKeys.TEXT_FIELD_DISABLED.equals(key)) {
-            return styles.windows().searchBar();
-        }
-        return null;
-    }
+    CellStyle resolveSaveAsWidgetStyle(WidgetStyleRole key) { return resolveInlineWidgetStyle(key, styles.windows().promptAlert()); }
+
+    CellStyle resolveSearchWidgetStyle(WidgetStyleRole key) { return resolveInlineWidgetStyle(key, styles.windows().searchBar()); }
 
     CellStyle resolveTabBarWidgetStyle(WidgetStyleRole key, boolean colorEnabled) {
         if (WidgetThemeKeys.TAB_ITEM_ACTIVE.equals(key)) {
@@ -1211,35 +1195,48 @@ public class TerminalEditorApp {
     /** A container supplies its surface; ordinary tree rows inherit it. */
     Theme explorerWidgetTheme(boolean colorEnabled) {
         var windows = styles.windows();
-        var body = windows.renderBody();
-        var borderRole = windows.sidebarBorder();
-        var border = new CellStyle(borderRole.fg(), body.bg(), borderRole.bold(), borderRole.underline());
+        var body = windows.sidebarBody();
+        var border = body;
         Theme roles = key -> {
-            if (dev.tuiframe.explorer.ExplorerStyleKeys.WARNING.equals(key)) return windows.notifyWarning();
-            if (dev.tuiframe.explorer.ExplorerStyleKeys.ERROR.equals(key)) return windows.notifyError();
+            if (dev.tuiframe.explorer.ExplorerStyleKeys.WARNING.equals(key)) return body.emphasis(true, true);
+            if (dev.tuiframe.explorer.ExplorerStyleKeys.ERROR.equals(key)) return body.emphasis(true, true);
             if (dev.tuiframe.explorer.ExplorerStyleKeys.DROP_TARGET.equals(key)) return windows.sidebarSelectedFocused();
             if (dev.tuiframe.explorer.ExplorerStyleKeys.DRAG_LABEL.equals(key)) return windows.dialogTitle();
-            if (WidgetThemeKeys.MODAL_TITLE.equals(key)) {
-                return new CellStyle(border.fg(), border.bg(), true, border.underline());
-            }
+            if (WidgetThemeKeys.MODAL_TITLE.equals(key)) return body.emphasis(true, false);
+            if (WidgetThemeKeys.PALETTE_HEADER.equals(key)) return windows.paletteHeader();
+            if (WidgetThemeKeys.PALETTE_HEADER_FOCUSED.equals(key)) return colorEnabled ? windows.sidebarSelectedFocused()
+                : windows.paletteHeader().inverted().emphasis(true, true);
             if (WidgetThemeKeys.PATH_BAR.equals(key)) return windows.renderGutter();
-            if (WidgetThemeKeys.BUTTON.equals(key) || WidgetThemeKeys.BUTTON_DISABLED.equals(key)
-                || WidgetThemeKeys.TEXT_FIELD.equals(key) || WidgetThemeKeys.TEXT_FIELD_FOCUSED.equals(key)
-                || WidgetThemeKeys.TEXT_FIELD_DISABLED.equals(key)) return body;
-            if (WidgetThemeKeys.BUTTON_FOCUSED.equals(key) || WidgetThemeKeys.TEXT_FIELD_SELECTION.equals(key)) {
+            if (WidgetThemeKeys.TEXT_MUTED.equals(key)) return body;
+            if (WidgetThemeKeys.NOTICE_INFO.equals(key)) return windows.notifyInfo();
+            if (WidgetThemeKeys.NOTICE_SUCCESS.equals(key)) return windows.notifySuccess();
+            if (WidgetThemeKeys.NOTICE_WARNING.equals(key)) return windows.notifyWarning();
+            if (WidgetThemeKeys.NOTICE_ERROR.equals(key)) return windows.notifyError();
+            if (WidgetThemeKeys.BUTTON_PRIMARY.equals(key)) return windows.paletteHeader();
+            if (WidgetThemeKeys.BUTTON_WARNING.equals(key)) return new CellStyle(windows.notifyWarning().bg(), body.bg(), true, false);
+            if (WidgetThemeKeys.SEARCH_FILE.equals(key)) return new CellStyle(border.fg(), body.bg(), true, false);
+            if (WidgetThemeKeys.SEARCH_MATCH.equals(key)) return colorEnabled ? EditorStyleAdapter.toCell(windows.renderSearchMatch())
+                : new CellStyle(body.fg(), body.bg(), true, false);
+            if (WidgetThemeKeys.SEARCH_CURRENT_MATCH.equals(key)) return colorEnabled ? EditorStyleAdapter.toCell(windows.renderCurrentSearchMatch())
+                : new CellStyle(body.fg(), body.bg(), true, true);
+            var control = resolveControlWidgetStyle(key, body, colorEnabled ? windows.sidebarSelectedFocused() : body.inverted().emphasis(true, true));
+            if (control != null) return control;
+            if (WidgetThemeKeys.BUTTON.equals(key) || WidgetThemeKeys.BUTTON_DISABLED.equals(key)) return body;
+            if (WidgetThemeKeys.BUTTON_FOCUSED.equals(key)) {
                 if (colorEnabled) return windows.sidebarSelectedFocused();
-                var selected = windows.sidebarSelected();
-                return new CellStyle(selected.fg(), selected.bg(), true, true);
+                return body.inverted().emphasis(true, true);
             }
             if (WidgetThemeKeys.TREE_BRANCH.equals(key)) {
                 return new CellStyle(dev.tuiframe.style.CellColor.DEFAULT,
                     dev.tuiframe.style.CellColor.DEFAULT, true, false);
             }
+            if (WidgetThemeKeys.LIST_ITEM_DISABLED.equals(key)) {
+                return new CellStyle(CellColor.GRAY_128, CellColor.GRAY_188, false, false);
+            }
             if (WidgetThemeKeys.LIST_ITEM_SELECTED.equals(key)) return windows.sidebarSelected();
             if (WidgetThemeKeys.LIST_ITEM_SELECTED_FOCUSED.equals(key)) {
                 if (colorEnabled) return windows.sidebarSelectedFocused();
-                var selected = windows.sidebarSelected();
-                return new CellStyle(selected.fg(), selected.bg(), true, true);
+                return UiStyles.forTheme(UiStyles.Theme.MONOCHROME).windows().sidebarSelectedFocused().emphasis(false, true);
             }
             if (WidgetThemeKeys.SPLITTER_FOCUSED.equals(key)) {
                 return border;
@@ -1355,6 +1352,8 @@ public class TerminalEditorApp {
             paintConfirmButtons(canvas, layers.confirm(), controlsTheme);
             paintSearchBar(canvas, search, controlsTheme);
         } finally { canvas.restore(controlsMark); }
+        if (search != null) search.paintPopup(canvas, controlsTheme);
+        if (layers.explorer() != null) layers.explorer().paintMenus(canvas, explorerWidgetTheme(colorEnabled));
         if (layers.tabBar() != null) layers.tabBar().paint(canvas,
             colorEnabled ? colorTabBarWidgetTheme : monoTabBarWidgetTheme);
         if (layers.topMenu() != null) layers.topMenu().paint(canvas,
@@ -1367,15 +1366,20 @@ public class TerminalEditorApp {
             popupWidgetTheme(colorEnabled));
         if (layers.explorerDialog() != null) layers.explorerDialog().paint(canvas,
             popupWidgetTheme(colorEnabled), popupWidgetTheme(colorEnabled).resolveStyle(WidgetThemeKeys.MODAL_ERROR));
+        if (layers.searchSettings() != null) layers.searchSettings().paint(canvas, popupWidgetTheme(colorEnabled));
         paintBlockingAttention(current, layers, colorEnabled);
     }
 
     /** Shared overlay ownership; the underlying content supplies only a completed cursor intent. */
-    private ScreenCursor frameCursor(int rows, int cols,
+    private ResolvedCursor frameCursor(int rows, int cols,
         FrameComposition.Layers layers, SearchBarView.Placement search, boolean searchEditorFocused,
         ScreenCursor contentCursor) {
+        if (layers.searchSettings() != null) return layers.searchSettings().cursor()
+            .map(point -> new ResolvedCursor(new ScreenCursor(point, true), false))
+            .orElseGet(() -> new ResolvedCursor(ScreenCursor.hidden(), false));
         if (layers.explorerDialog() != null) return layers.explorerDialog().cursor()
-            .map(point -> new ScreenCursor(point, true)).orElseGet(ScreenCursor::hidden);
+            .map(point -> new ResolvedCursor(new ScreenCursor(point, true), false))
+            .orElseGet(() -> new ResolvedCursor(ScreenCursor.hidden(), false));
         Point point = contentCursor.position();
         Point searchCursor = search == null ? null : search.cursorPosition(searchFocusManager()).orElse(null);
         boolean searchOwnsCursor = search != null && !searchEditorFocused;
@@ -1385,15 +1389,20 @@ public class TerminalEditorApp {
         boolean help = layers.help() != null;
         if (layers.explorer() != null && layers.explorer().focused() && !menuOpen && !openFile
             && !help && layers.format() == null && !layers.saveAsMode() && layers.confirm() == null) {
-            var tree = layers.explorer().tree();
-            return tree == null ? ScreenCursor.hidden() : tree.cursorPosition()
-                .map(position -> new ScreenCursor(position, true)).orElseGet(ScreenCursor::hidden);
+            if (layers.explorer().headerFocused()) return new ResolvedCursor(ScreenCursor.hidden(), false);
+            if (layers.explorer().content() == SidebarState.Content.SEARCH && layers.explorer().search() != null) return layers.explorer().search().cursor()
+                .map(position -> new ResolvedCursor(new ScreenCursor(position, true), false))
+                .orElseGet(() -> new ResolvedCursor(ScreenCursor.hidden(), false));
+            // Palette lists show focus through their selection; a terminal cursor
+            // would invert only the folder disclosure mark or first filename cell.
+            return new ResolvedCursor(ScreenCursor.hidden(), false);
         }
         boolean visible = CursorPolicy.shouldShowCursor(layers.saveAsMode() && !contentFocused,
             searchOwnsCursor, searchCursor != null, layers.confirm() != null && !contentFocused,
             menuOpen, openFile && !contentFocused, help && !contentFocused);
         boolean contentOwnsCursor = contentFocused || !layers.saveAsMode() && !searchOwnsCursor
             && layers.confirm() == null && !menuOpen && !openFile && !help && layers.format() == null;
+        boolean contentOwned = contentOwnsCursor;
         if (contentOwnsCursor) visible = contentCursor.visible();
         if (layers.format() != null) visible = false;
         if (contentFocused && layers.blockingBounds().contains(point.x(), point.y())) visible = false;
@@ -1401,24 +1410,33 @@ public class TerminalEditorApp {
             Point field = layers.saveAs() == null ? null : layers.saveAs().cursorPosition(saveAsFocusManager()).orElse(null);
             if (field == null) visible = false;
             else point = field;
+            contentOwned = false;
         } else if (openFile && !contentFocused) {
             Point location = layers.openFile().dialog().cursorPosition(layers.openFile().focus()).orElse(null);
             visible = location != null;
             if (location != null) point = location;
+            contentOwned = false;
         } else if (searchOwnsCursor) {
             if (searchCursor == null) visible = false;
             else point = searchCursor;
+            contentOwned = false;
         } else if (menuOpen) {
             Point menu = layers.topMenu().cursorPosition().orElse(null);
             if (menu == null) visible = false;
             else point = menu;
+            contentOwned = false;
         } else if (help && !contentFocused) {
             Button close = layers.help().close();
             point = new Point(Math.min(cols - 1, close.cursorCol()), Math.min(rows - 1, close.row()));
+            contentOwned = false;
         }
-        return new ScreenCursor(new Point(Math.max(0, Math.min(cols - 1, point.x())),
-            Math.max(0, Math.min(rows - 1, point.y()))), visible);
+        return new ResolvedCursor(new ScreenCursor(new Point(Math.max(0, Math.min(cols - 1, point.x())),
+            Math.max(0, Math.min(rows - 1, point.y()))), visible), contentOwned);
     }
+
+    private record ResolvedCursor(ScreenCursor cursor, boolean contentOwned) {}
+
+
 
     private Frame renderPreviewFrame(PreviewFrameComposition composition, RenderFrameController services) {
         int rows = composition.rows(), cols = composition.cols();
@@ -1462,7 +1480,7 @@ public class TerminalEditorApp {
         }
         return services.present(current, frameCursor(rows, cols, layers,
             composition.search(), composition.preview().focus() == MarkdownPreviewState.Placement.Focus.CONTENT,
-            contentCursor), viewport, layers, composition.fullRedraw());
+            contentCursor).cursor(), viewport, layers, composition.fullRedraw());
     }
 
     private RenderFrameResult renderFrame(
@@ -1572,7 +1590,7 @@ public class TerminalEditorApp {
         EditorView.CursorPosition editorCursor = editorView.cursorFromPlan(plan, contentTopRow);
         ScreenCursor contentCursor = new ScreenCursor(new Point(editorCursor.col() - 1, editorCursor.row() - 1), plan.cursorInViewport());
         ScreenCursor cursor = frameCursor(rows, cols, layers, searchBarPlacement,
-            search.editorFocused(), contentCursor);
+            search.editorFocused(), contentCursor).cursor();
 
         Rect body = plan.scrollLayout().contentBounds();
         long generation = (plan.wrapLines() ? 1L : 0L) | (plan.wrapByWords() ? 2L : 0L);

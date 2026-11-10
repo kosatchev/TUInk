@@ -57,6 +57,9 @@ public enum TuinkCommand {
     CURSOR_SELECT_DOCUMENT_END("tuink.cursor.select-document-end", "Select to document end"),
 
     SEARCH_OPEN("tuink.search.open", "Open search"),
+    PROJECT_SEARCH_OPEN("tuink.project-search.open", "Search in working folder"),
+    PROJECT_SEARCH_IN_FOLDER("tuink.project-search.folder", "Search in selected folder"),
+    PROJECT_SEARCH_SETTINGS("tuink.project-search.settings", "Project search settings"),
     SEARCH_NEXT("tuink.search.next", "Find next"),
     SEARCH_PREVIOUS("tuink.search.previous", "Previous match"),
     SEARCH_REPLACE("tuink.search.replace", "Replace"),
@@ -123,8 +126,8 @@ public enum TuinkCommand {
 
     FOLDER_OPEN("tuink.folder.open", "Open folder"),
     FOLDER_CLOSE("tuink.folder.close", "Close folder"),
-    EXPLORER_TOGGLE("tuink.explorer.toggle", "Toggle explorer"),
-    EXPLORER_FOCUS("tuink.explorer.focus", "Focus explorer"),
+    EXPLORER_TOGGLE("tuink.explorer.toggle", "Toggle sidebar"),
+    EXPLORER_FOCUS("tuink.explorer.focus", "Focus folders"),
     EXPLORER_REFRESH("tuink.explorer.refresh", "Refresh explorer"),
     EXPLORER_NEW_FILE("tuink.explorer.new-file", "Create file"),
     EXPLORER_NEW_DIRECTORY("tuink.explorer.new-directory", "Create directory"),

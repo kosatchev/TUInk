@@ -29,7 +29,8 @@ class TopMenuGroupingTest {
     @Test void viewContainsDocumentModesAppearanceAndMarkdownNavigationWhileSettingsContainsPreferences() {
         var ui = UiSessionState.from(AppSettings.defaults());
         assertEquals(List.of(
-            List.of(VIEW_TOGGLE_MARKDOWN_PREVIEW, SETTINGS_TOGGLE_READING_MODE),
+            List.of(VIEW_TOGGLE_MARKDOWN_PREVIEW, EXPLORER_FOCUS, PROJECT_SEARCH_OPEN, EXPLORER_TOGGLE,
+                SETTINGS_TOGGLE_READING_MODE),
             List.of(VIEW_TOGGLE_LINE_WRAP, VIEW_TOGGLE_WORD_WRAP),
             List.of(VIEW_TOGGLE_TAB_BAR, VIEW_TOGGLE_DOCUMENT_PATH, VIEW_TOGGLE_ACTIVE_GUTTER, VIEW_TOGGLE_WHITESPACE,
                 VIEW_TOGGLE_SYNTAX, VIEW_TOGGLE_RAINBOW_BRACKETS, VIEW_TOGGLE_SELECTION_HIGHLIGHT,
@@ -37,7 +38,7 @@ class TopMenuGroupingTest {
             List.of(VIEW_PREVIEW_FOLLOW_LINK,
                 VIEW_PREVIEW_NEXT_HEADING, VIEW_PREVIEW_PREVIOUS_HEADING)), groups(ui, TopMenuController.VIEW_INDEX));
         assertEquals(List.of(
-            List.of(SETTINGS_TOGGLE_CONFIRM_ON_CLOSE),
+            List.of(SETTINGS_TOGGLE_CONFIRM_ON_CLOSE, PROJECT_SEARCH_SETTINGS),
             List.of(SETTINGS_TOGGLE_MOUSE, SETTINGS_TOGGLE_RIGHT_CLICK_CLIPBOARD,
                 SETTINGS_TOGGLE_FILE_HISTORY_NOTIFICATIONS),
             List.of(SETTINGS_TOGGLE_SMART_HOME_END, SETTINGS_TOGGLE_AUTO_INDENT, SETTINGS_TOGGLE_AUTO_PAIRS,
@@ -45,6 +46,19 @@ class TopMenuGroupingTest {
             List.of(SETTINGS_TOGGLE_MARKDOWN_OPEN_BOTH_TABS, SETTINGS_TOGGLE_MARKDOWN_OPEN_IN_PREVIEW,
                 SETTINGS_TOGGLE_MARKDOWN_CODE_SYNTAX, SETTINGS_TOGGLE_MARKDOWN_VISUAL_COPY)),
             groups(ui, TopMenuController.SETTINGS_INDEX));
+    }
+
+    @Test void sidebarItemsKeepDocumentMenuMnemonicsAvailable() {
+        var ui = UiSessionState.from(AppSettings.defaults());
+        var expected = java.util.Map.of(VIEW_TOGGLE_TAB_BAR, 's', VIEW_TOGGLE_LINE_WRAP, 'w',
+            SETTINGS_TOGGLE_READING_MODE, 'r');
+        for (var kind : ActiveSurface.Kind.values()) {
+            var view = menu(ui, TopMenuController.VIEW_INDEX, TestSurfaces.source(ui).withKind(kind));
+            for (var entry : expected.entrySet()) {
+                var item = item(view, entry.getKey());
+                assertEquals(entry.getValue().charValue(), Character.toLowerCase(item.label().charAt(item.mnemonicGraphemeIndex())));
+            }
+        }
     }
 
     @Test void unavailableActionsKeepTheirShortLabelsAndUseTheirEnabledState() {

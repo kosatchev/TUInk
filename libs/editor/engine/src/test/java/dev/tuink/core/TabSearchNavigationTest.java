@@ -125,7 +125,7 @@ class TabSearchNavigationTest {
 
     @Test
     void wholeWordCountsNavigationAndReplacementIncludeOverlapsOfRejectedCandidates() {
-        SearchOptions options = new SearchOptions(false, SearchOptions.MatchMode.WHOLE_WORD);
+        SearchOptions options = new SearchOptions(false, SearchOptions.MatchMode.SUBSTRING, true);
         TabSession absent = tab("nothing here");
         TabSession found = tab("ba-a-a");
         List<TabSession> tabs = List.of(absent, found);

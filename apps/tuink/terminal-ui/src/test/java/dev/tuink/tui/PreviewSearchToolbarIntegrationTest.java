@@ -69,7 +69,7 @@ class PreviewSearchToolbarIntegrationTest {
             // The controller API only invalidates chrome; publish its new pane
             // before asking whether the old-width Markdown layout is ready.
             window.frame();
-            window.await(() -> !window.ui.explorer.tree.loading() && window.preview().ready());
+            window.await(() -> !window.ui.sidebar.tree.loading() && window.preview().ready());
             window.command(TuinkCommand.SEARCH_OPEN);
             window.event(new TextInput("needle"));
             var preview = window.preview();
@@ -81,7 +81,7 @@ class PreviewSearchToolbarIntegrationTest {
             var query = bar.targetBounds(SearchFocus.FIND);
             assertTrue(query.y() >= preview.bounds.bottomExclusive());
             assertTrue(query.x() >= preview.bounds.x());
-            assertTrue(window.ui.explorer.placement.bounds().bottomExclusive() > query.y(),
+            assertTrue(window.ui.sidebar.placement.bounds().bottomExclusive() > query.y(),
                 "The document footer must not shorten the neighbouring tree");
             assertEquals(sourceStyle, window.screenStyle(query.y(), query.x()));
             assertFalse(window.screenRow(query.y()).contains("Replace"));

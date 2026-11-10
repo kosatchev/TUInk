@@ -22,7 +22,7 @@ class ExplorerMenuTest {
         var ui = UiSessionState.from(AppSettings.defaults());
         var router = new CommandRouter();
         var menu = menu(ui);
-        assertEquals(List.of(FOLDER_OPEN, FOLDER_CLOSE, EXPLORER_NEW_FILE, EXPLORER_NEW_DIRECTORY,
+        assertEquals(List.of(FOLDER_OPEN, FOLDER_CLOSE, PROJECT_SEARCH_IN_FOLDER, EXPLORER_NEW_FILE, EXPLORER_NEW_DIRECTORY,
             EXPLORER_RENAME, EXPLORER_COPY, EXPLORER_MOVE, EXPLORER_TRASH, EXPLORER_DELETE, EXPLORER_UNDO,
             EXPLORER_REDO, EXPLORER_REFRESH, EXPLORER_TOGGLE, EXPLORER_FOCUS,
             EXPLORER_CYCLE_WIDTH), commands(menu, TopMenuController.EXPLORER_INDEX));
@@ -40,7 +40,7 @@ class ExplorerMenuTest {
     void rootAllowsCreationAndCopyWhileOnlyChildrenCanBeRenamedMovedOrDeleted() throws Exception {
         Path file = Files.writeString(directory.resolve("file.txt"), "text");
         var ui = UiSessionState.from(AppSettings.defaults());
-        try (var explorer = ui.explorer) {
+        try (var explorer = ui.sidebar) {
             explorer.open(directory);
             awaitTree(explorer);
             assertTrue(explorer.tree.select(directory));
@@ -83,13 +83,13 @@ class ExplorerMenuTest {
             assertFalse(item(empty, command).enabled(), command.title());
         }
         for (var expected : List.of("Narrow (24)", "Normal (30)", "Wide (40)", "Custom (37)")) {
-            ui.explorer.preferredWidth = Integer.parseInt(expected.substring(expected.indexOf('(') + 1,
+            ui.sidebar.preferredWidth = Integer.parseInt(expected.substring(expected.indexOf('(') + 1,
                 expected.indexOf(')')));
             assertEquals("[>] Width: " + expected, item(menu(ui), EXPLORER_CYCLE_WIDTH).label());
         }
     }
 
-    private static void awaitTree(ExplorerState explorer) throws InterruptedException {
+    private static void awaitTree(SidebarState explorer) throws InterruptedException {
         long deadline = System.nanoTime() + 5_000_000_000L;
         while (explorer.tree.loading() && System.nanoTime() < deadline) Thread.sleep(5);
         assertFalse(explorer.tree.loading(), "The small fixture directory must finish loading");

@@ -1,7 +1,7 @@
 package dev.tuink.tui;
 
 import dev.tuink.editor.search.SearchOptions;
-import dev.tuink.core.SearchLimitException;
+import dev.tuink.core.SearchException;
 import dev.tuink.core.SearchWorkBudget;
 import dev.tuink.core.TabSearch;
 import dev.tuink.core.TabSession;
@@ -11,7 +11,7 @@ import java.util.function.Supplier;
 
 /** Derived search count and tab markers; the controls remain the owners of query values. */
 final class SearchPresentation {
-    static final long INTERACTIVE_WILDCARD_WORK_LIMIT = 8_000_000L;
+    static final long INTERACTIVE_SEARCH_WORK_LIMIT = 8_000_000L;
     private final SearchMatchCountCache matchCountCache = new SearchMatchCountCache();
     private final TabMatchCache tabMatchCache = new TabMatchCache();
     private final long maximumWork;
@@ -19,7 +19,7 @@ final class SearchPresentation {
     private Snapshot failedSnapshot;
 
     SearchPresentation() {
-        this(INTERACTIVE_WILDCARD_WORK_LIMIT);
+        this(INTERACTIVE_SEARCH_WORK_LIMIT);
     }
 
     SearchPresentation(long maximumWork) {
@@ -60,7 +60,7 @@ final class SearchPresentation {
             count = SearchWorkBudget.run(maximumWork,
                 () -> resolveCount(query, options, tabs, model, allTabs, identity, revision));
             failedKey = null;
-        } catch (SearchLimitException limit) {
+        } catch (SearchException limit) {
             failedKey = key;
             // The input owns the original query. An empty render query prevents
             // another expensive scan and -1 never masquerades as zero matches.
@@ -135,7 +135,7 @@ final class SearchPresentation {
                 try {
                     flags = SearchWorkBudget.run(maximumWork, compute);
                     failed = false;
-                } catch (SearchLimitException limit) {
+                } catch (SearchException limit) {
                     // Cache the failed scan as well: cursor-only frames must not
                     // repeatedly traverse a costly inactive document.
                     flags = new boolean[tabCount];

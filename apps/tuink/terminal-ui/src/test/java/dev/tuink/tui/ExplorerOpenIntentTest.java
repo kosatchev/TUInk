@@ -35,7 +35,7 @@ class ExplorerOpenIntentTest {
             assertEquals(2, window.tabs.size());
             assertNotSame(original, window.active());
             assertEquals(target, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
-            assertFalse(window.ui.explorer.focused);
+            assertFalse(window.ui.sidebar.focused);
             assertEquals(ActiveSurface.Focus.CONTENT, window.controller.activeSurface().focus());
             window.event(new TextInput("new "));
             assertEquals(List.of("new loaded document"), window.active().tabSession().model().snapshotLines());
@@ -51,13 +51,13 @@ class ExplorerOpenIntentTest {
             var original = window.selected();
             startOpen(window, target);
             window.event(ctrl(KeyStroke.Key.E));
-            assertTrue(window.ui.explorer.focused);
+            assertTrue(window.ui.sidebar.focused);
 
             complete(window, pending);
 
             assertEquals(2, window.tabs.size(), "The earlier read may finish in a background tab");
             assertSame(original, window.selected());
-            assertTrue(window.ui.explorer.focused,
+            assertTrue(window.ui.sidebar.focused,
                 "An earlier read must not override a later explicit Ctrl+E focus request");
             assertEquals(ActiveSurface.Focus.CONTROL, window.controller.activeSurface().focus());
         }
@@ -80,7 +80,7 @@ class ExplorerOpenIntentTest {
 
             assertEquals(2, window.tabs.size());
             assertSame(original, window.selected());
-            assertFalse(window.ui.explorer.focused);
+            assertFalse(window.ui.sidebar.focused);
             assertFalse(original.uiState().searchEditorFocused);
             assertEquals(ActiveSurface.Focus.EDITABLE_TEXT, window.controller.activeSurface().focus());
             window.event(new TextInput(" query"));
@@ -99,7 +99,7 @@ class ExplorerOpenIntentTest {
             var original = window.selected();
             startOpen(window, target);
             window.event(ctrl(KeyStroke.Key.E));
-            assertTrue(window.ui.explorer.focused);
+            assertTrue(window.ui.sidebar.focused);
 
             complete(window, pending);
 
@@ -107,7 +107,7 @@ class ExplorerOpenIntentTest {
             assertEquals(1, window.tabs.size());
             assertTrue(original.uiState().modalState.isNone(),
                 "An encoding question from an older read must not interrupt a newer focus request");
-            assertTrue(window.ui.explorer.focused);
+            assertTrue(window.ui.sidebar.focused);
             assertEquals(ActiveSurface.Focus.CONTROL, window.controller.activeSurface().focus());
 
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
@@ -321,12 +321,12 @@ class ExplorerOpenIntentTest {
 
     private void startOpen(EditorWindowFixture window, Path target) throws Exception {
         window.controller.openFolder(directory);
-        window.await(() -> !window.ui.explorer.tree.loading());
+        window.await(() -> !window.ui.sidebar.tree.loading());
         window.event(KeyStroke.of(KeyStroke.Key.END));
-        assertEquals(target, window.ui.explorer.placement.tree().selectedEntry().orElseThrow().path());
+        assertEquals(target, window.ui.sidebar.placement.tree().selectedEntry().orElseThrow().path());
         window.event(KeyStroke.of(KeyStroke.Key.ENTER));
         assertTrue(window.documentIo.busy());
-        assertFalse(window.ui.explorer.focused);
+        assertFalse(window.ui.sidebar.focused);
     }
 
     private static void complete(EditorWindowFixture window, ArrayDeque<Runnable> pending) throws Exception {

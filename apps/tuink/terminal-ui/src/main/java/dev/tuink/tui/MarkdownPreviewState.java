@@ -1,6 +1,6 @@
 package dev.tuink.tui;
 
-import dev.tuink.core.SearchLimitException;
+import dev.tuink.core.SearchException;
 import dev.tuink.core.SearchMatcher;
 import dev.tuink.core.SearchOperationContext;
 import dev.tuink.editor.search.SearchOptions;
@@ -77,7 +77,7 @@ final class MarkdownPreviewState implements AutoCloseable {
     private long pendingLifecycleGeneration;
     private final TextSurfacePointer<Integer> pointer = new TextSurfacePointer<>((first, second) -> first.equals(second));
 
-    MarkdownPreviewState() { this(SearchPresentation.INTERACTIVE_WILDCARD_WORK_LIMIT); }
+    MarkdownPreviewState() { this(SearchPresentation.INTERACTIVE_SEARCH_WORK_LIMIT); }
     MarkdownPreviewState(long searchWorkLimit) {
         if (searchWorkLimit < 0) throw new IllegalArgumentException("Search work limit must not be negative");
         this.searchWorkLimit = searchWorkLimit;
@@ -407,7 +407,7 @@ final class MarkdownPreviewState implements AutoCloseable {
             // The shared matcher searches one logical line, just as it does in
             // Source. A CharBuffer exposes a bounded view without copying the
             // projection or letting wildcard stars consume line separators.
-            for (int start = 0; start < text.length() && matches.size() < SEARCH_MATCH_LIMIT;) {
+            for (int start = 0; start <= text.length() && matches.size() < SEARCH_MATCH_LIMIT;) {
                 int end = text.indexOf('\n', start);
                 if (end < 0) end = text.length();
                 for (var match : matcher.findAll(CharBuffer.wrap(text, start, end),
@@ -418,7 +418,7 @@ final class MarkdownPreviewState implements AutoCloseable {
             }
             searchMatches = List.copyOf(matches);
             activeMatch = activeMatch >= matches.size() ? -1 : activeMatch;
-        } catch (SearchLimitException limit) {
+        } catch (SearchException limit) {
             // A failed search never turns into an incomplete match count or a
             // layout error. Query, accepted document, selection and viewport
             // remain available; the failure is cached until a search input changes.
@@ -459,7 +459,7 @@ final class MarkdownPreviewState implements AutoCloseable {
     TextField.Placement searchPlacement() {
         if (preparedSearch != null) return preparedSearch.fieldPlacement(SearchFocus.FIND).orElseThrow();
         // Standalone state fixtures use the same footer composition as the window.
-        var bar = SearchBarView.buildReadOnly(searchField, bounds.width(), !searchOptions.caseInsensitive(), searchOptions.matchMode());
+        var bar = SearchBarView.buildReadOnly(searchField, bounds.width(), !searchOptions.caseInsensitive(), searchOptions.matchMode(), searchOptions.wholeWord());
         int rows = bar.text().split("\n", -1).length;
         Rect footer = new Rect(bounds.x(), bounds.bottomExclusive(), bounds.width(), rows);
         return bar.place(this, footer, footer).fieldPlacement(SearchFocus.FIND).orElseThrow();

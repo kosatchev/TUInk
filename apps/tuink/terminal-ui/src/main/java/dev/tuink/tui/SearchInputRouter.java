@@ -44,6 +44,9 @@ final class SearchInputRouter {
         Objects.requireNonNull(placement, "placement");
         Objects.requireNonNull(command, "command");
         placement.activate(focusManager);
+        if (placement.popupOpen()) {
+            return ControlCommandRouter.eventFor(command).map(event -> route(focusManager, placement, event)).orElse(Result.CAPTURED);
+        }
         SearchFocus focused = focusManager.focused().orElse(null);
         var editing = FieldInputDispatcher.command(command, placement.field(focused).orElse(null),
             clipboard, queryLimit(placement));
@@ -95,6 +98,11 @@ final class SearchInputRouter {
         Objects.requireNonNull(event, "event");
         placement.activate(focusManager);
 
+        if (placement.popupOpen()) {
+            var result = placement.handlePopup(event);
+            return result.output().map(Result::action).orElse(Result.CAPTURED);
+        }
+
         if (event instanceof KeyStroke stroke) {
             if (isExactShiftTab(stroke)) {
                 return routeTab(focusManager, placement, event);
@@ -104,6 +112,8 @@ final class SearchInputRouter {
                     && stroke.has(KeyStroke.Modifier.SHIFT)) {
                     return Result.CAPTURED;
                 }
+                if (focusManager.focused().orElse(null) == SearchFocus.MODE && stroke.key() == KeyStroke.Key.ARROW_DOWN
+                    && stroke.modifiers().equals(Set.of(KeyStroke.Modifier.ALT))) return routeFocused(focusManager, placement, event, true);
                 return TextField.ownsEditingKey(stroke)
                     ? isField(focusManager.focused().orElse(null))
                         ? routeFocused(focusManager, placement, event, true) : Result.CAPTURED
@@ -117,6 +127,8 @@ final class SearchInputRouter {
             }
             if (stroke.key() == KeyStroke.Key.ARROW_UP
                 || stroke.key() == KeyStroke.Key.ARROW_DOWN) {
+                if (stroke.key() == KeyStroke.Key.ARROW_DOWN && focusManager.focused().orElse(null) == SearchFocus.MODE)
+                    return routeFocused(focusManager, placement, event, true);
                 return routeVertical(focusManager, placement, stroke.key());
             }
             if (stroke.key() == KeyStroke.Key.ARROW_LEFT

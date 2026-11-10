@@ -145,9 +145,8 @@ class Regressions:
         document.write_text(original, encoding="utf-8")
         with self.session("folder-explorer", directory, max_heap_mb=128) as session:
             def sidebar_visible():
-                # The selectable expanded root is beside the tabs, independently
-                # of a document's full path in the top menu or its tab title.
-                return session.screen.lines[1].startswith("▼ " + directory.name + "/")
+                return ("▾ Files" in session.screen.lines[1][:30]
+                        and session.screen.lines[2].startswith("▼ " + directory.name + "/"))
 
             session.expect(lambda: sidebar_visible() and any("src" in line[:30]
                            for line in session.screen.lines[2:]), "CLI directory explorer with its first folder")
@@ -156,7 +155,8 @@ class Regressions:
                            "the asynchronously loaded child file")
             session.send(b"\x1b[C\r")  # Right enters the expanded folder's first child; Enter opens it.
             session.expect(lambda: original in session.screen.text and sidebar_visible()
-                           and session.screen.col >= 31, "the selected file beside the explorer with document focus")
+                           and session.screen.cursor_visible and session.screen.col >= 31,
+                           "the selected file beside the explorer with document focus")
             assert document.read_text(encoding="utf-8") == original
             session.snapshot("opened-from-tree")
 
@@ -174,13 +174,338 @@ class Regressions:
                            "the explorer returning after widening the terminal")
 
             session.send(b"\x05")
-            session.expect(lambda: session.screen.col < 30, "Ctrl+E moving the caret into the tree")
+            session.expect(lambda: not session.screen.cursor_visible, "Ctrl+E focusing the tree without a caret")
             session.send(b"\x1b", 0.7)  # Allow the standalone Escape/key-sequence distinction.
-            session.expect(lambda: session.screen.col >= 31, "Escape returning the caret to the document")
+            session.expect(lambda: session.screen.cursor_visible and session.screen.col >= 31,
+                           "Escape returning the caret to the document")
             session.send(b"edited ")
             session.save(document, "edited " + original, "editing and saving only the selected file after Escape")
             session.finish()
         assert document.read_text(encoding="utf-8") == "edited " + original
+
+    def project_search(self):
+        directory = self.root / "search-project"
+        directory.mkdir()
+        (directory / ".git").mkdir()  # Isolate ignore rules from the harness's enclosing repository.
+        document = directory / "note.txt"
+        original = "before\n🙂 needle after\n"
+        document.write_text(original, encoding="utf-8")
+        hidden = directory / ".env"
+        hidden.write_text("needle", encoding="utf-8")
+        ignored = directory / "ignored.txt"
+        ignored.write_text("needle", encoding="utf-8")
+        (directory / ".gitignore").write_text("ignored.txt\n", encoding="utf-8")
+        with self.session("project-search", directory, max_heap_mb=128) as session:
+            def click_label(label, *, sidebar=False):
+                def positions():
+                    return [(row, line.index(label)) for row, line in enumerate(session.screen.lines)
+                            if label in (line[:30] if sidebar else line)]
+                session.expect(lambda: bool(positions()), "visible " + label)
+                row, column = positions()[0]
+                session.mouse(0, row, column)
+                session.mouse(0, row, column, release=True)
+
+            # A visible menu command works even without enhanced terminal keys.
+            session.send(b"\x1bv")
+            click_label("Project search")
+            session.expect(lambda: any("Find:" in line[:30] for line in session.screen.lines), "project query field")
+            session.send(b"needle\r")
+            session.expect(lambda: "2 matches in 2 files" in session.screen.text, "disk and hidden-file matches")
+            search_header = next(row for row, line in enumerate(session.screen.lines) if line.startswith("▾ Search"))
+            assert "ignored.txt" not in "\n".join(line[:30] for line in session.screen.lines[search_header + 1:])
+            session.snapshot("closed-file-results")
+            session.expect(lambda: any("note.txt (1)" in line[:30] for line in session.screen.lines), "note result group")
+            row = next(row for row, line in enumerate(session.screen.lines) if "note.txt (1)" in line[:30]) + 1
+            session.mouse(0, row, 8)
+            session.mouse(0, row, 8, release=True)
+            session.send(b"\r")
+            session.expect(lambda: "Ln 2/3" in status(session) and session.screen.col >= 31,
+                           "closed file opened at its second-line match with document focus")
+            assert document.read_text(encoding="utf-8") == original
+
+            session.send(b"DRAFT")  # Replace the selected match only in the live Source.
+            session.send(b"\x1b[102;6u")  # Distinct Ctrl+Shift+F.
+            session.send(b"\x01DRAFT\r")
+            session.expect(lambda: "1 match in 1 file" in session.screen.text
+                           and any("note.txt (1) *" in line[:30] for line in session.screen.lines),
+                           "unsaved Source overriding its on-disk text")
+            assert document.read_text(encoding="utf-8") == original
+            session.send(b"\x05")
+            session.expect(lambda: session.screen.lines[2].startswith("▼ " + directory.name), "Files palette")
+            click_label("Search", sidebar=True)
+            session.expect(lambda: "▸ Search" in session.screen.text and "Find: DRAFT" not in session.screen.text,
+                           "single title click collapsing Search")
+            click_label("Search", sidebar=True)
+            session.expect(lambda: "Find: DRAFT" in session.screen.text and "1 match in 1 file" in session.screen.text,
+                           "Search palette retaining query and results")
+            session.send(b"\x02")
+            session.expect(lambda: "Find: DRAFT" not in session.screen.text, "hidden Search sidebar")
+            session.send(b"\x02")
+            session.expect(lambda: "Find: DRAFT" in session.screen.text, "restored Search sidebar")
+            session.snapshot("buffer-results-restored")
+            session.send(b"\x1b", 0.7)
+            session.save(document, original.replace("needle", "DRAFT"), "saving only the chosen document")
+            session.send(b"\x1b[102;6u")
+            click_label("[Strict ▾]", sidebar=True)
+            click_label("Wildcard", sidebar=True)
+            session.send(b"\x1b[102;6u\x01D?AFT\r")
+            session.expect(lambda: "1 match in 1 file" in session.screen.text and "[Wildcard ▾]" in session.screen.text,
+                           "wildcard project search")
+            click_label("[Wildcard ▾]", sidebar=True)
+            click_label("Regex", sidebar=True)
+            session.send(b"\x1b[102;6u\x01D[A-Z]{3}T\r")
+            session.expect(lambda: "1 match in 1 file" in session.screen.text and "[Regex ▾]" in session.screen.text,
+                           "regex project search")
+            session.send(b"\x01[\r")
+            session.expect(lambda: "Invalid regular expression" in session.screen.text, "visible invalid project regex")
+            session.send(b"\x01D[A-Z]{3}T\r")
+            session.expect(lambda: "1 match in 1 file" in session.screen.text, "project regex recovering after correction")
+            session.send(b"\x1b", 0.7)
+            session.finish()
+        assert hidden.read_text(encoding="utf-8") == "needle"
+        assert ignored.read_text(encoding="utf-8") == "needle"
+
+    def tool_palettes(self):
+        directory = self.root / "palette-project"
+        directory.mkdir()
+        (directory / ".git").mkdir()
+        document = directory / "note.txt"
+        original = "palette needle\n"
+        document.write_text(original, encoding="utf-8")
+        with self.session("tool-palettes", directory, timeout=60) as session:
+            session.resize(32, 100)
+
+            def header(name):
+                return next(row for row, line in enumerate(session.screen.lines)
+                            if line.startswith(("▾ " + name, "▸ " + name)))
+
+            def click_arrow(name):
+                row = header(name)
+                session.mouse(0, row, 0)
+                session.mouse(0, row, 0, release=True)
+
+            session.send(b"\x1b[102;6uneedle\r")
+            session.expect(lambda: "1 match in 1 file" in session.screen.text, "palette search result")
+            session.expect(lambda: session.screen.cursor_visible, "search query caret")
+            session.send(b"\x1b[B")
+            session.expect(lambda: not session.screen.cursor_visible, "search results focus without a caret")
+            session.send(b"\x1b[D\x1b[C")
+            session.expect(lambda: not session.screen.cursor_visible, "search disclosure keeps the caret hidden")
+            session.send(b"\x1b[102;6u")
+            session.expect(lambda: session.screen.cursor_visible, "returning to the query restores its caret")
+            assert header("Files") < header("Search")
+            session.snapshot("both-palettes")
+
+            def toggle_hints(name, operation):
+                row = header(name)
+                dots = session.screen.lines[row].index("⋮")
+                session.mouse(0, row, dots); session.mouse(0, row, dots, release=True)
+                session.expect(lambda: operation in session.screen.text, "palette hint menu: " + operation)
+                menu_row, line = next((i, line) for i, line in enumerate(session.screen.lines) if operation in line)
+                column = line.index(operation)
+                session.mouse(0, menu_row, column); session.mouse(0, menu_row, column, release=True)
+                session.expect(lambda: operation not in session.screen.text, "closed palette hint menu")
+
+            assert "↑↓ Move" in session.screen.text, session.screen.text
+            assert "Strict: literal text" in session.screen.text, session.screen.text
+            toggle_hints("Files", "Hide hints")
+            session.expect(lambda: "↑↓ Move" not in session.screen.text and "Strict: literal text" in session.screen.text,
+                           "independently hidden Files help")
+            toggle_hints("Search", "Hide hints")
+            session.expect(lambda: "Strict: literal text" not in session.screen.text and "1 match in 1 file" in session.screen.text,
+                           "hidden Search help with results retained")
+            toggle_hints("Search", "Show hints")
+            session.expect(lambda: "Strict: literal text" in session.screen.text, "restored Search help")
+            toggle_hints("Search", "Hide hints")
+            session.snapshot("hidden-palette-hints")
+            row = header("Search")
+            session.mouse(0, row, 5); session.mouse(0, row, 5, release=True)
+            session.expect(lambda: "Find: needle" not in session.screen.text
+                           and "▸ Search" in session.screen.text, "collapsed search with retained results")
+            row = header("Search")
+            session.mouse(0, row, 5); session.mouse(0, row, 5, release=True)
+            session.expect(lambda: "Find: needle" in session.screen.text
+                           and "1 match in 1 file" in session.screen.text, "restored search results")
+
+            target, source = header("Files"), header("Search")
+            session.mouse(0, source, 5)
+            session.mouse(32, target, 5)
+            session.send(b"", 0.55)
+            assert not any(line.startswith("━") for line in session.screen.lines), "early motion must cancel this press permanently"
+            session.mouse(0, target, 5, release=True)
+            session.expect(lambda: header("Files") < header("Search"), "early motion and waiting leave palette order unchanged")
+            session.mouse(0, source, 5)
+            session.send(b"", 0.55)
+            assert not any(line.startswith("━") for line in session.screen.lines), "stationary holding prepares the drag without moving"
+            session.mouse(32, target, 5)
+            session.expect(lambda: any(line.startswith("━") for line in session.screen.lines), "palette drop marker after stationary 500 ms hold and motion")
+            session.mouse(0, target, 5, release=True)
+            session.expect(lambda: header("Search") < header("Files"), "drag reordered palettes")
+
+            divider = header("Files") - 1
+            assert session.screen.lines[divider].startswith("─" * 30)
+            session.mouse(0, divider, 5)
+            session.mouse(32, divider - 2, 5)
+            session.mouse(0, divider - 2, 5, release=True)
+            session.expect(lambda: header("Files") == divider - 1, "palette height divider tracking the pointer")
+            row = header("Search") + 2
+            session.mouse(0, row, 30)
+            session.mouse(32, row, 34)
+            session.mouse(0, row, 34, release=True)
+            session.expect(lambda: session.screen.lines[header("Search")][34] == "│", "resized palette dock")
+
+            row = header("Search")
+            dots = session.screen.lines[row].index("⋮")
+            session.mouse(0, row, dots); session.mouse(0, row, dots, release=True)
+            session.expect(lambda: "Collapse" in session.screen.text and "Maximize" in session.screen.text,
+                           "palette menu at its dots control")
+            menu_row, menu_line = next((i, line) for i, line in enumerate(session.screen.lines) if "Maximize" in line)
+            column = menu_line.index("Maximize")
+            assert 0 <= column <= dots
+            assert session.screen.lines[row][dots] == "⋮", "the open menu covers its header"
+            session.mouse(0, menu_row, column); session.mouse(0, menu_row, column, release=True)
+            session.expect(lambda: "Search [full]" in session.screen.text
+                           and not any(line.startswith(("▾ Files", "▸ Files")) for line in session.screen.lines),
+                           "keyboard palette menu maximizing Search")
+            session.snapshot("maximized-search")
+            session.send(b" \x1b[B\r")
+            session.expect(lambda: "[full]" not in session.screen.text and header("Search") < header("Files"),
+                           "restored palette layout")
+            click_arrow("Files")
+            session.expect(lambda: "▸ Files" in session.screen.text, "collapsed Files palette")
+            session.snapshot("saved-layout")
+            home = session.home
+            config = session.config_home / "tuink" / "tuink.properties"
+            session.finish()
+            settings = config.read_text(encoding="ascii")
+            for value in ("palettes.width=34", "palettes.searchFirst=true", "palettes.filesExpanded=false",
+                          "palettes.searchExpanded=true", "palettes.maximized=none", "palettes.visible=true",
+                          "palettes.filesHints=false", "palettes.searchHints=false"):
+                assert value in settings, (value, settings)
+            assert b"Exception in thread" not in session.log
+        assert document.read_text(encoding="utf-8") == original
+        with self.session("tool-palettes-reopened", document, home=home) as session:
+            session.expect(lambda: "▸ Files" in session.screen.text and "Open folder..." in session.screen.text,
+                           "saved expansion restored at startup")
+            search = next(row for row, line in enumerate(session.screen.lines) if line.startswith("▾ Search"))
+            files = next(row for row, line in enumerate(session.screen.lines) if line.startswith("▸ Files"))
+            assert search < files
+            assert session.screen.lines[search][34] == "│"
+            session.send(b"\x02")
+            session.expect(lambda: not any(line.startswith(("▾ Search", "▸ Files")) for line in session.screen.lines),
+                           "hiding the restored dock")
+            session.finish()
+        assert "palettes.visible=false" in config.read_text(encoding="ascii")
+        with self.session("tool-palettes-hidden-reopened", document, home=home) as session:
+            assert not any(line.startswith(("▾ Search", "▸ Files")) for line in session.screen.lines)
+            session.finish()
+        assert document.read_text(encoding="utf-8") == original
+
+    def search_interface(self):
+        directory = self.root / "search-interface-project"
+        directory.mkdir()
+        (directory / ".git").mkdir()
+        document = directory / "note.txt"
+        original = "prefix needle suffix\n\nNEEDLE n42"
+        document.write_text(original, encoding="utf-8")
+        with self.session("search-interface", directory, timeout=60) as session:
+            session.resize(36, 220)
+
+            def click(label):
+                def positions():
+                    return [(row, line.index(label)) for row, line in enumerate(session.screen.lines) if label in line[:60]]
+                session.expect(lambda: bool(positions()), "visible " + label)
+                row, col = positions()[0]
+                session.mouse(0, row, col); session.mouse(0, row, col, release=True)
+
+            def query(value):
+                session.send(b"\x1b[102;6u\x01" + value.encode("utf-8") + b"\r")
+
+            def field(label, value):
+                row, line = next((row, line) for row, line in enumerate(session.screen.lines) if label in line[:60])
+                column = line.index(label) + len(label)
+                session.mouse(0, row, column); session.mouse(0, row, column, release=True)
+                session.send(b"\x01" + value.encode("utf-8") + b"\r")
+
+            query("needle")
+            session.expect(lambda: "2 matches in 1 file" in session.screen.text, "initial global matches")
+            click("[Strict ▾]")
+            session.expect(lambda: all(label in session.screen.text for label in ("literal text", "* and ?", "expressions")),
+                           "explicit search-mode choices and descriptions")
+            session.send(b"\x1b", 0.7)
+            session.expect(lambda: "[Strict ▾]" in session.screen.text and "expressions" not in session.screen.text,
+                           "Escape cancelling the mode picker")
+            search_row = next(row for row, line in enumerate(session.screen.lines) if line.startswith("▾ Search"))
+            session.mouse(0, search_row + 2, 30); session.mouse(32, search_row + 2, 60)
+            session.mouse(0, search_row + 2, 60, release=True)
+            session.expect(lambda: "[✓ Strict]" in session.screen.text and "[  Regex]" in session.screen.text,
+                           "three direct mode buttons in a wide palette")
+            click("[  Regex]")
+            query("^$")
+            session.expect(lambda: "1 match in 1 file" in session.screen.text and "▏" in session.screen.text,
+                           "visible zero-width global match")
+            query("[")
+            session.expect(lambda: "Invalid regular expression" in session.screen.text, "distinct regex error")
+            session.snapshot("invalid-regex")
+            query("needle")
+            session.expect(lambda: "2 matches in 1 file" in session.screen.text, "regex recovering after correction")
+            group = next(row for row, line in enumerate(session.screen.lines) if "note.txt (2)" in line[:60])
+            session.mouse(0, group + 1, 10); session.mouse(0, group + 1, 10, release=True)
+            session.expect(lambda: "Col 8" in session.screen.lines[-1] and str(document) in session.screen.lines[-1],
+                           "full path and exact column in the window status")
+            click("Filters")
+            session.expect(lambda: "Include:" in session.screen.text and "Exclude:" in session.screen.text,
+                           "clear file filter labels")
+            field("Include: ", "*.txt")
+            field("Exclude: ", "*.log")
+            query("needle")
+            session.expect(lambda: "2 matches in 1 file" in session.screen.text and "Filters · 3 active" in session.screen.text,
+                           "active filter count with regex mode")
+            session.snapshot("wide-search-and-filters")
+            query("missing-text")
+            session.expect(lambda: "No matches" in session.screen.text, "distinct empty search state")
+            session.snapshot("no-matches")
+            search_row = next(row for row, line in enumerate(session.screen.lines) if line.startswith("▾ Search"))
+            session.mouse(0, search_row + 2, 60); session.mouse(32, search_row + 2, 30)
+            session.mouse(0, search_row + 2, 30, release=True)
+            session.expect(lambda: "[Regex ▾]" in session.screen.text, "compact mode selector after narrowing")
+            session.snapshot("compact-search")
+            assert b"Exception in thread" not in session.log
+            session.finish()
+        assert document.read_text(encoding="utf-8") == original
+
+    def regex_search(self):
+        original = "abc123\n\nABC45"
+        document = self.fixture("regex-search", original)
+        with self.session("regex-search", document, max_heap_mb=128) as session:
+            session.send(b"\x06")
+
+            def click(label):
+                session.expect(lambda: label in session.screen.text, "visible " + label)
+                row, column = next((row, line.index(label)) for row, line in enumerate(session.screen.lines) if label in line)
+                session.mouse(0, row, column)
+                session.mouse(0, row, column, release=True)
+
+            def query(value):
+                row, _ = expect_field_line(session, "Find: ", "Source query field")
+                session.mouse(0, row, 7)
+                session.mouse(0, row, 7, release=True)
+                session.send(b"\x01" + value.encode("utf-8"))
+
+            query(r"\d+")
+            session.expect(lambda: "Find 0" in session.screen.text, "literal interpretation in Strict mode")
+            click("[Strict ▾]"); session.send(b"\x1b[F\r")
+            session.expect(lambda: "Find 2" in session.screen.text and "[Regex ▾]" in session.screen.text,
+                           "regex character class and quantifier")
+            query("[")
+            session.expect(lambda: "Invalid regular expression" in session.screen.text, "visible Source regex error")
+            query("^$")
+            session.send(b"\r")
+            session.expect(lambda: "Ln 2/3" in status(session), "navigation to an empty line")
+            session.snapshot("zero-width-regex-result")
+            session.send(b"\x1b", 0.7)
+            session.finish()
+        assert document.read_text(encoding="utf-8") == original
 
     def picker_navigation(self):
         project = self.root / "picker-navigation" / "project"
@@ -285,7 +610,7 @@ class Regressions:
             session.expect(lambda: any("Path:" in line and "docs" in line for line in session.screen.lines),
                            "mouse selection updating the folder Path field")
             click("[Open folder]")
-            session.expect(lambda: session.screen.lines[1].startswith("▼ docs/"), "selected folder as workspace root")
+            session.expect(lambda: session.screen.lines[2].startswith("▼ docs/"), "selected folder as workspace root")
             session.send(b"\x05\x1b[F\r")  # Last entry is note.md; open it from Explorer.
             session.expect(lambda: "PATH_DOCUMENT" in session.screen.text
                            and session.screen.lines[2][31:].strip() == "note.md", "relative document path")
@@ -648,7 +973,9 @@ class Regressions:
         document = self.fixture("identical-replace-budget", original)
         with self.session("identical-replace-budget", document) as session:
             session.send(b"\x06\x1b[200~" + b"a" * 64 + b"?a\x1b[201~")
-            session.send(b"\t" * 3 + b" " + b"\t" * 2 + b"\x1b[200~" + b"a" * 66 + b"\x1b[201~")
+            session.send(b"\t" * 3 + b" \x1b[B\r")
+            session.expect(lambda: "[Wildcard ▾]" in session.screen.text, "wildcard search enabled")
+            session.send(b"\t" * 2 + b"\x1b[200~" + b"a" * 66 + b"\x1b[201~")
             session.expect(lambda: "Replace: aaaaa" in session.screen.text, "identical replacement text", timeout=10)
             session.expect(lambda: "Find 1" in session.screen.text, "the wildcard count")
             before = status(session)
@@ -844,7 +1171,7 @@ class Regressions:
         original = "word\n" * 400_000
         document = self.fixture("large-wrap", original)
         with self.session("large-wrap", document) as session:
-            session.send(b"\x1bOR\x1b[B\r")
+            activate_menu_item(session, b"\x1bOR", "Wrap Lines", b"w")
             session.expect(lambda: "Wrap lines enabled" in session.screen.text, "enabled wrapping")
             for columns in (81, 82, 83, 84):
                 session.resize(24, columns)
@@ -1293,7 +1620,7 @@ class Regressions:
         # Generate the current complete schema through an ordinary menu change.
         # This also verifies that saving unchanged-on-disk preferences still works.
         with self.session("settings-conflict-seed", document, home=home, options=()) as session:
-            session.send(b"\x1bOR\x1b[B\r")  # F3, Wrap Lines
+            activate_menu_item(session, b"\x1bOR", "Wrap Lines", b"w")
             session.expect(lambda: "Wrap lines enabled" in session.screen.text, "changed initial preferences")
             session.finish()
         seeded = path.read_bytes()
@@ -1310,7 +1637,7 @@ class Regressions:
             session.expect(lambda: "Unsupported settings." in session.screen.text, "unsupported settings confirmation")
             session.send(b"n", 0.7)
             session.expect(lambda: temporary in session.screen.text, "visible settings-load failure")
-            session.send(b"\x1bOR\x1b[B\r")
+            activate_menu_item(session, b"\x1bOR", "Wrap Lines", b"w")
             session.expect(lambda: temporary in session.screen.text and "Wrap lines enabled" not in session.screen.text,
                            "a preference change explains its temporary lifetime")
             session.snapshot("temporary-preferences")
@@ -1387,7 +1714,7 @@ class Regressions:
                 session.send(b"\x01\x1b[200~" + manual + b"\x1b[201~")
                 assert target.read_bytes() == baseline, "editing settings saved the document before Ctrl+S"
 
-                session.send(b"\x1bOR\x1b[B\r")
+                activate_menu_item(session, b"\x1bOR", "Wrap Lines", b"w")
                 session.expect(lambda: "Wrap lines disabled" in session.screen.text, "changed in-memory preferences")
                 session.send(b"\x13")
                 session.expect(lambda: "Saved " in session.screen.text, "saved document during settings conflict")
@@ -1658,7 +1985,8 @@ class Regressions:
             session.send(b"?")
             session.send(b"\t\t\t")
             session.send(b" ")
-            session.expect(lambda: "*:x" in session.screen.text, "wildcard search enabled")
+            session.send(b"\x1b[B\r")
+            session.expect(lambda: "[Wildcard ▾]" in session.screen.text, "wildcard search enabled")
             session.send(b"\x06")
             session.expect(lambda: "Col 5/" in status(session), "wildcard match in a long Unicode line")
             session.send(b"\x1b", 0.7)
@@ -1962,7 +2290,7 @@ class Regressions:
             session.expect(lambda: recovery_snapshot_present(recovery, "draft original"),
                            "recovery uses the selected XDG profile", timeout=5)
             session.save(document, "draft original", "saving the draft")
-            session.send(b"\x1bOR\r")  # Explicitly change Show Tab Bar so preferences are saved.
+            activate_menu_item(session, b"\x1bOR", "Show Tab Bar", b"s")
             session.finish()
         assert (config / "tuink/tuink.properties").is_file()
         assert not (home / ".config").exists(), "the default profile was touched"
@@ -1993,7 +2321,7 @@ class Regressions:
         assert document.read_text(encoding="utf-8") == original
 
 
-SCENARIOS = ("reading", "focus", "field", "resize", "large-wrap", "tabs", "folder-explorer", "picker-navigation", "path-dialogs", "tab-scoped-ui", "history", "grapheme-edit-caret", "selection-autoscroll", "long-copy-name", "navigation", "fragmented-keys", "quit-confirmation", "gutter-idle", "paste", "settings", "settings-conflict", "recovery", "recovery-format5", "recovery-memory", "linux-keys", "enhanced-text", "long-unicode-edit", "save-as-workspace", "settings-memory", "syntax-memory", "unix-path-recovery", "literal-indentation", "field-memory", "document-caption", "save-name-suggestion", "replacement-memory", "paste-memory", "recovery-lock-cleanup", "xdg-profile", "cli-path-identity", "save-as-retarget", "legacy-encoding", "document-format", "format-errors", "format-reopen", "field-edit-caret", "field-memory-growth", "identical-replace-budget", "clipboard-memory", "cpp-raw-indentation", "terminal-diagnostics", "terminal-attributes", "startup-dependencies")
+SCENARIOS = ("reading", "focus", "field", "resize", "large-wrap", "tabs", "folder-explorer", "project-search", "regex-search", "tool-palettes", "search-interface", "picker-navigation", "path-dialogs", "tab-scoped-ui", "history", "grapheme-edit-caret", "selection-autoscroll", "long-copy-name", "navigation", "fragmented-keys", "quit-confirmation", "gutter-idle", "paste", "settings", "settings-conflict", "recovery", "recovery-format5", "recovery-memory", "linux-keys", "enhanced-text", "long-unicode-edit", "save-as-workspace", "settings-memory", "syntax-memory", "unix-path-recovery", "literal-indentation", "field-memory", "document-caption", "save-name-suggestion", "replacement-memory", "paste-memory", "recovery-lock-cleanup", "xdg-profile", "cli-path-identity", "save-as-retarget", "legacy-encoding", "document-format", "format-errors", "format-reopen", "field-edit-caret", "field-memory-growth", "identical-replace-budget", "clipboard-memory", "cpp-raw-indentation", "terminal-diagnostics", "terminal-attributes", "startup-dependencies")
 
 
 def classpath_manifest(classpath):

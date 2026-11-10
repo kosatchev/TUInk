@@ -8,7 +8,8 @@ import java.util.Set;
 final class ProjectSearchProbeClasspath {
     private ProjectSearchProbeClasspath() {}
     static void addTo(Set<String> locations) throws Exception {
-        for (Class<?> type : List.of(dev.tuink.core.SearchMatcher.class))
+        for (Class<?> type : List.of(dev.tuink.core.SearchMatcher.class,
+            dev.tuink.project.search.ProjectSearch.class, dev.tuink.project.search.jvm.JvmSearchSources.class))
             locations.add(Path.of(type.getProtectionDomain().getCodeSource().getLocation().toURI()).toString());
     }
 }

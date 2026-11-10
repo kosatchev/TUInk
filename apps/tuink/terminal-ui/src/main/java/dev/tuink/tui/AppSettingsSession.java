@@ -133,6 +133,6 @@ final class AppSettingsSession {
             base.markdownCodeHighlighting(),
             base.gutterDiffMode(), base.tabWidth(),
             base.tabInsertMode(), theme, base.rightClickClipboard(), base.markdownVisualCopy(),
-            base.showFileHistoryNotifications(), base.showDocumentPath());
+            base.showFileHistoryNotifications(), base.showDocumentPath(), base.projectSearch(), base.palettes());
     }
 }

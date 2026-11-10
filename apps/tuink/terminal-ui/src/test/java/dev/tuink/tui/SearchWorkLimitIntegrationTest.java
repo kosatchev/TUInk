@@ -20,8 +20,9 @@ class SearchWorkLimitIntegrationTest {
         try (EditorWindowFixture window = new EditorWindowFixture(directory, false, List.of(original))) {
             window.ui.wrapLinesSetting = false;
             window.command(TuinkCommand.SEARCH_OPEN);
-            window.focusSearch(SearchFocus.WILDCARD);
+            window.focusSearch(SearchFocus.MODE);
             window.event(new TextInput(" "));
+            window.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN)); window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             window.focusSearch(SearchFocus.FIND);
             String costly = "a".repeat(4096) + "?a";
             window.event(new TextInput(costly));

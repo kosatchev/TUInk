@@ -22,8 +22,9 @@ class KeyboardCompactSearchTest {
             tab(window); space(window);
             assertTrue(window.active().uiState().searchUi.caseSensitive());
             tab(window); space(window);
-            assertEquals(SearchOptions.MatchMode.WHOLE_WORD, window.active().uiState().searchUi.matchMode());
+            assertTrue(window.active().uiState().searchUi.wholeWord());
             tab(window); space(window);
+            window.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN)); window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             assertEquals(SearchOptions.MatchMode.WILDCARD, window.active().uiState().searchUi.matchMode());
             tab(window); space(window);
             assertTrue(window.active().uiState().searchUi.allTabs());

@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
+/** Bounded matching must also hold when used without an editor engine. */
 class SearchMatcherMemoryTest {
     @Test
     void wildcardSearchDoesNotExpandALongUnicodeLineIntoSourceSizedIndexes() throws Exception {
@@ -76,7 +77,7 @@ class SearchMatcherMemoryTest {
                 String literal = "a".repeat(length);
                 requireRefusal(() -> SearchMatcher.compile(literal, SearchOptions.DEFAULT));
                 requireRefusal(() -> SearchMatcher.compile(literal,
-                    new SearchOptions(true, SearchOptions.MatchMode.WHOLE_WORD)));
+                    new SearchOptions(true, SearchOptions.MatchMode.SUBSTRING, true)));
                 requireRefusal(() -> SearchMatcher.compile(literal, WILDCARD));
                 requireRefusal(() -> SearchMatcher.compile("?".repeat(length), WILDCARD));
                 requireRefusal(() -> SearchMatcher.compile("*a".repeat(524_288), WILDCARD));

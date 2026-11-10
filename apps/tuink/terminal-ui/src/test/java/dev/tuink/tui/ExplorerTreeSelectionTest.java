@@ -18,14 +18,18 @@ class ExplorerTreeSelectionTest {
     @TempDir Path root;
 
     @Test
-    void rootAndChildShareTheSameSelectionAndTheTreeUsesTheFullPane() throws Exception {
+    void rootAndChildShareTheSameSelectionAndTheTreeLeavesSpaceForOptionalPaletteHelp() throws Exception {
         Path child = Files.createFile(root.resolve("child.txt"));
-        try (var explorer = new ExplorerState()) {
+        try (var explorer = new SidebarState()) {
             explorer.open(root);
             awaitLoaded(explorer.tree);
             var body = new Rect(0, 1, 80, 12);
             var placement = explorer.place(explorer.prepareLayout(body), body, true);
-            assertEquals(body.y(), placement.tree().bounds().y());
+            assertEquals(body.y() + 1, placement.tree().bounds().y());
+            assertEquals(body.height() - 3, placement.tree().bounds().height());
+            assertEquals(placement.filesBody().contentBounds(), placement.tree().bounds());
+            assertEquals(1, placement.filesBody().hintBounds().height());
+            assertEquals(1, placement.dock().slot(SidebarState.Content.SEARCH).bounds().height());
             assertEquals(root, explorer.selectedEntry().path());
             assertTrue(explorer.selectedRoot());
             assertTrue(explorer.selectedDirectory());
@@ -35,6 +39,10 @@ class ExplorerTreeSelectionTest {
             assertEquals(child, explorer.selectedEntry().path());
             assertFalse(explorer.selectedRoot());
             assertFalse(explorer.selectedDirectory());
+            explorer.filesHints = false;
+            placement = explorer.place(explorer.prepareLayout(body), body, true);
+            assertEquals(placement.dock().slot(SidebarState.Content.FOLDERS).body(), placement.tree().bounds());
+            assertEquals(child, explorer.selectedEntry().path());
         }
     }
 

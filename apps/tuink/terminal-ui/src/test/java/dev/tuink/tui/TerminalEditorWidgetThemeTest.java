@@ -50,7 +50,7 @@ class TerminalEditorWidgetThemeTest {
         CellStyle prompt = UiStyles.forTheme(UiStyles.Theme.CYAN).windows().promptAlert();
 
         assertEquals(prompt, app.resolveSaveAsWidgetStyle(WidgetThemeKeys.TEXT_FIELD));
-        assertEquals(prompt, app.resolveSaveAsWidgetStyle(WidgetThemeKeys.TEXT_FIELD_FOCUSED));
+        assertEquals(prompt.inverted().emphasis(true, false), app.resolveSaveAsWidgetStyle(WidgetThemeKeys.TEXT_FIELD_FOCUSED));
         assertEquals(prompt, app.resolveSaveAsWidgetStyle(WidgetThemeKeys.TEXT_FIELD_DISABLED));
         assertEquals(prompt, app.resolveSaveAsWidgetStyle(WidgetThemeKeys.BUTTON));
         assertEquals(prompt, app.resolveSaveAsWidgetStyle(WidgetThemeKeys.BUTTON_DISABLED));
@@ -62,14 +62,14 @@ class TerminalEditorWidgetThemeTest {
     }
 
     @Test
-    void searchAdapterUsesOneBarStyleAndFocusedButtonVariant() {
+    void searchAdapterSeparatesInvertedInputsFromButtonsAndDropdowns() {
         TerminalEditorApp app = new TerminalEditorApp();
         CellStyle search = UiStyles.forTheme(UiStyles.Theme.CYAN).windows().searchBar();
 
         assertEquals(search, app.resolveSearchWidgetStyle(WidgetThemeKeys.BUTTON));
         assertEquals(search, app.resolveSearchWidgetStyle(WidgetThemeKeys.BUTTON_DISABLED));
         assertEquals(search, app.resolveSearchWidgetStyle(WidgetThemeKeys.TEXT_FIELD));
-        assertEquals(search, app.resolveSearchWidgetStyle(WidgetThemeKeys.TEXT_FIELD_FOCUSED));
+        assertEquals(search.inverted().emphasis(true, false), app.resolveSearchWidgetStyle(WidgetThemeKeys.TEXT_FIELD_FOCUSED));
         assertEquals(search, app.resolveSearchWidgetStyle(WidgetThemeKeys.TEXT_FIELD_DISABLED));
         assertEquals(
             new CellStyle(search.bg(), search.fg(), true, search.underline()),

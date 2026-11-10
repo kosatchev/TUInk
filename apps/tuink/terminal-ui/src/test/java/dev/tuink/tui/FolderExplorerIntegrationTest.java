@@ -36,7 +36,7 @@ class FolderExplorerIntegrationTest {
             long revision = window.active().tabSession().model().revision();
 
             window.event(KeyStroke.of(KeyStroke.Key.E, KeyStroke.Modifier.CTRL));
-            assertTrue(window.ui.explorer.focused);
+            assertTrue(window.ui.sidebar.focused);
             assertTrue(window.active().uiState().searchMode);
             window.event(KeyStroke.of(KeyStroke.Key.R, KeyStroke.Modifier.CTRL));
             window.command(TuinkCommand.SEARCH_REPLACE_ALL);
@@ -45,7 +45,7 @@ class FolderExplorerIntegrationTest {
             assertFalse(window.active().state().isDirty());
 
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
-            assertFalse(window.ui.explorer.focused);
+            assertFalse(window.ui.sidebar.focused);
             assertTrue(window.active().uiState().searchMode);
             assertTrue(window.active().uiState().searchEditorFocused);
             window.event(new TextInput("inserted"));
@@ -60,7 +60,7 @@ class FolderExplorerIntegrationTest {
     void rightClickOnAnEmptySidebarDoesNotOpenTheFolderPicker() throws Exception {
         try (var window = new EditorWindowFixture(directory, false, List.of("original"))) {
             window.event(KeyStroke.of(KeyStroke.Key.E, KeyStroke.Modifier.CTRL));
-            var explorer = window.ui.explorer;
+            var explorer = window.ui.sidebar;
             assertTrue(explorer.visible);
             assertNull(explorer.tree);
             var bounds = explorer.placement.bounds();
@@ -79,7 +79,7 @@ class FolderExplorerIntegrationTest {
         Path target = folder.resolve("new-document.txt");
         try (var window = new EditorWindowFixture(directory, false, List.of("original"))) {
             open(window, directory);
-            var tree = window.ui.explorer.tree;
+            var tree = window.ui.sidebar.tree;
             select(window, folder);
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             window.await(() -> !tree.loading());
@@ -92,7 +92,7 @@ class FolderExplorerIntegrationTest {
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             window.await(() -> !window.documentIo.busy() && !tree.loading());
             assertEquals("draft original", Files.readString(target));
-            assertSame(tree, window.ui.explorer.tree);
+            assertSame(tree, window.ui.sidebar.tree);
             assertEquals(selected, tree.state().selectedId());
             window.event(KeyStroke.of(KeyStroke.Key.E, KeyStroke.Modifier.CTRL));
             select(window, target);
@@ -126,7 +126,7 @@ class FolderExplorerIntegrationTest {
             assertEquals(OpenFileInputRouter.Focus.LIST, owner.uiState().openFileFocusState.focus());
             assertSame(active, window.active());
             assertFalse(active.uiState().openFileMode);
-            assertNull(window.ui.explorer.root());
+            assertNull(window.ui.sidebar.root());
         }
     }
 
@@ -183,13 +183,13 @@ class FolderExplorerIntegrationTest {
             window.command(TuinkCommand.TAB_NEW);
             var active = window.active();
             window.command(TuinkCommand.FOLDER_CLOSE);
-            assertNull(window.ui.explorer.root());
+            assertNull(window.ui.sidebar.root());
             assertFalse(window.documentIo.busy());
 
             tasks.removeFirst().run();
             window.frame();
-            assertNull(window.ui.explorer.root());
-            assertFalse(window.ui.explorer.visible);
+            assertNull(window.ui.sidebar.root());
+            assertFalse(window.ui.sidebar.visible);
             assertSame(active, window.active());
             assertEquals(2, window.tabs.size());
         }
@@ -204,7 +204,7 @@ class FolderExplorerIntegrationTest {
         try (var window = new EditorWindowFixture(directory, false, List.of("original"))) {
             var original = window.active();
             open(window, directory);
-            var explorer = window.ui.explorer;
+            var explorer = window.ui.sidebar;
             var tree = explorer.tree;
             select(window, folder);
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
@@ -255,17 +255,17 @@ class FolderExplorerIntegrationTest {
             assertEquals(revision, original.tabSession().model().revision());
             assertEquals(cursor, original.state().getCursor());
             assertTrue(original.state().isDirty());
-            assertTrue(window.ui.explorer.focused);
+            assertTrue(window.ui.sidebar.focused);
 
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
-            assertFalse(window.ui.explorer.focused);
-            assertTrue(window.ui.explorer.visible);
+            assertFalse(window.ui.sidebar.focused);
+            assertTrue(window.ui.sidebar.visible);
             window.event(new TextInput("after "));
             assertEquals(List.of("draft after original"), original.tabSession().model().snapshotLines());
             window.event(KeyStroke.of(KeyStroke.Key.E, KeyStroke.Modifier.CTRL));
-            assertTrue(window.ui.explorer.focused);
+            assertTrue(window.ui.sidebar.focused);
             window.event(KeyStroke.of(KeyStroke.Key.E, KeyStroke.Modifier.CTRL));
-            assertTrue(window.ui.explorer.focused);
+            assertTrue(window.ui.sidebar.focused);
         }
     }
 
@@ -280,8 +280,8 @@ class FolderExplorerIntegrationTest {
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
             assertEquals(2, window.tabs.size());
             assertEquals(other, JvmDocumentStorage.pathOf(window.active().state().getCurrentResource()));
-            assertFalse(window.ui.explorer.focused);
-            assertTrue(window.ui.explorer.visible);
+            assertFalse(window.ui.sidebar.focused);
+            assertTrue(window.ui.sidebar.visible);
             assertEquals(List.of("draft original"), original.tabSession().model().snapshotLines());
             var otherTab = window.active();
             window.event(new TextInput("modified "));
@@ -300,8 +300,8 @@ class FolderExplorerIntegrationTest {
             assertEquals(2, window.tabs.size());
             assertEquals(List.of("modified other"), otherTab.tabSession().model().snapshotLines());
             window.command(TuinkCommand.FOLDER_CLOSE);
-            assertNull(window.ui.explorer.root());
-            assertFalse(window.ui.explorer.visible);
+            assertNull(window.ui.sidebar.root());
+            assertFalse(window.ui.sidebar.visible);
             assertEquals(2, window.tabs.size());
             assertSame(otherTab, window.active());
             assertTrue(otherTab.state().isDirty());
@@ -328,19 +328,19 @@ class FolderExplorerIntegrationTest {
             window.event(KeyStroke.of(KeyStroke.Key.TAB));
             assertEquals(OpenFileInputRouter.Focus.OK, original.uiState().openFileFocusState.focus());
             window.event(KeyStroke.of(KeyStroke.Key.ENTER));
-            window.await(() -> window.ui.explorer.tree != null && !window.ui.explorer.tree.loading());
+            window.await(() -> window.ui.sidebar.tree != null && !window.ui.sidebar.tree.loading());
             assertFalse(original.uiState().openFileMode);
-            assertEquals(empty, window.ui.explorer.root());
-            assertTrue(window.ui.explorer.visible);
+            assertEquals(empty, window.ui.sidebar.root());
+            assertTrue(window.ui.sidebar.visible);
             assertEquals(1, window.tabs.size());
             assertSame(original, window.active());
 
-            var tree = window.ui.explorer.tree;
+            var tree = window.ui.sidebar.tree;
             window.command(TuinkCommand.FOLDER_OPEN);
             window.event(KeyStroke.of(KeyStroke.Key.ESCAPE));
             assertFalse(original.uiState().openFileMode);
-            assertSame(tree, window.ui.explorer.tree);
-            assertEquals(empty, window.ui.explorer.root());
+            assertSame(tree, window.ui.sidebar.tree);
+            assertEquals(empty, window.ui.sidebar.root());
             assertEquals(List.of("original"), original.tabSession().model().snapshotLines());
         }
     }
@@ -358,8 +358,8 @@ class FolderExplorerIntegrationTest {
             assertFalse(original.uiState().openFileMode);
             assertSame(original, window.active());
             assertEquals(1, window.tabs.size());
-            assertTrue(window.ui.explorer.visible);
-            assertEquals(directory, window.ui.explorer.root());
+            assertTrue(window.ui.sidebar.visible);
+            assertEquals(directory, window.ui.sidebar.root());
             assertEquals(List.of("draft original"), original.tabSession().model().snapshotLines());
             assertTrue(original.state().isDirty());
         }
@@ -380,7 +380,7 @@ class FolderExplorerIntegrationTest {
             assertTrue(original.uiState().pickerNotice != null);
             assertSame(original, window.active());
             assertEquals(1, window.tabs.size());
-            assertNull(window.ui.explorer.root());
+            assertNull(window.ui.sidebar.root());
             assertEquals(directory, window.tree.root());
             assertEquals(List.of("original"), original.tabSession().model().snapshotLines());
         }
@@ -388,15 +388,15 @@ class FolderExplorerIntegrationTest {
 
     private static void open(EditorWindowFixture window, Path root) throws Exception {
         window.controller.openFolder(root);
-        window.await(() -> window.ui.explorer.tree != null && !window.ui.explorer.tree.loading());
-        assertTrue(window.ui.explorer.visible);
-        assertTrue(window.ui.explorer.focused);
+        window.await(() -> window.ui.sidebar.tree != null && !window.ui.sidebar.tree.loading());
+        assertTrue(window.ui.sidebar.visible);
+        assertTrue(window.ui.sidebar.focused);
     }
 
     private static void select(EditorWindowFixture window, Path path) {
         window.event(KeyStroke.of(KeyStroke.Key.HOME));
         for (int attempt = 0; attempt < 100; attempt++) {
-            var selected = window.ui.explorer.placement.tree().selectedEntry();
+            var selected = window.ui.sidebar.placement.tree().selectedEntry();
             if (selected.isPresent() && selected.orElseThrow().path().equals(path)) return;
             window.event(KeyStroke.of(KeyStroke.Key.ARROW_DOWN));
         }

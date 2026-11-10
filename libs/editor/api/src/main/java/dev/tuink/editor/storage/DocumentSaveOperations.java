@@ -12,6 +12,10 @@ public interface DocumentSaveOperations {
     SavePreparation prepareSaveAsInput(DocumentResource resource, SaveDisposition disposition, boolean utf8)
         throws IOException;
     PreparedSave approveSaveAs(SaveTargetInspection inspection) throws IOException;
+    default PreparedSave approveSaveAs(SaveTargetInspection inspection, boolean replaceExternalChanges) throws IOException {
+        if (replaceExternalChanges) throw new IOException("This save subject cannot approve replacing an external version");
+        return approveSaveAs(inspection);
+    }
     void completeSaved(PreparedSave prepared, SavedDocument saved);
 
     interface PreparedSave {

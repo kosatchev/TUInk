@@ -218,7 +218,8 @@ public final class JvmDocumentStorage implements DocumentStorage {
             }
             approved = target;
         }
-        boolean checkBaseline = approved == null || approved.currentTarget();
+        boolean replaceExternal = authorization instanceof SaveAuthorization.Approved approval && approval.replaceExternalChanges();
+        boolean checkBaseline = approved == null || approved.currentTarget() && !replaceExternal;
         // Cross-provider Save As can carry an unrelated source baseline. Only an
         // owned-target write may use it, and then the provider must recognize it.
         FileBaseline baseline = checkBaseline ? fileBaseline(request.baseline()) : null;

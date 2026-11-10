@@ -468,10 +468,16 @@ public final class EditorDocumentSession implements DocumentSaveSubject {
         }
         @Override public EditorDocumentSession.PreparedSave approveSaveAs(DocumentSaveOperations.SaveTargetInspection inspection)
             throws IOException {
+            return approveSaveAs(inspection, false);
+        }
+        @Override public EditorDocumentSession.PreparedSave approveSaveAs(DocumentSaveOperations.SaveTargetInspection inspection,
+            boolean replaceExternalChanges) throws IOException {
+            requireCoordinator(io);
             if (!(inspection instanceof EditorDocumentSession.SaveTargetInspection captured)) {
                 throw new IllegalArgumentException("Save inspection belongs to another subject");
             }
-            return approveCoordinatedSaveAs(io, captured);
+            if (captured.owner != EditorDocumentSession.this) throw new IllegalArgumentException("Save inspection belongs to another session");
+            return new EditorDocumentSession.PreparedSave(EditorDocumentSession.this, backend.approveSaveAs(captured.inspection, replaceExternalChanges));
         }
         @Override public void completeSaved(DocumentSaveOperations.PreparedSave prepared, SavedDocument saved) {
             if (!(prepared instanceof EditorDocumentSession.PreparedSave captured)) {

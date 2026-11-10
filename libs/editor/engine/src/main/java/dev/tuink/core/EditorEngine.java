@@ -935,12 +935,16 @@ public class EditorEngine {
 
     /** Binds the inspected observation to its unchanged owner; performs no provider operation. */
     public PreparedSave approveSaveAs(SaveTargetInspection inspection) throws IOException {
+        return approveSaveAs(inspection, false);
+    }
+
+    public PreparedSave approveSaveAs(SaveTargetInspection inspection, boolean replaceExternalChanges) throws IOException {
         Objects.requireNonNull(inspection, "inspection");
         SavePreparation preparation = inspection.preparation;
         if (!preparation.belongsToUnchanged(this)) {
             throw new IOException("Document changed while inspecting the Save As target. Choose the target again.");
         }
-        return new PreparedSave(preparation, new SaveAuthorization.Approved(inspection.target));
+        return new PreparedSave(preparation, new SaveAuthorization.Approved(inspection.target, replaceExternalChanges));
     }
 
     /** Caller keeps document edits locked until the detached write completes. */

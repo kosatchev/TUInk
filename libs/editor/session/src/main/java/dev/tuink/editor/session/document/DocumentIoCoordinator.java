@@ -137,6 +137,11 @@ public final class DocumentIoCoordinator {
 
     /** Approves the exact observation; overwrite confirmation is a host decision. */
     public Transition approve(Confirmation confirmation) {
+        return approve(confirmation, false);
+    }
+
+    /** The host sets replaceExternalChanges only after explicit approval of the inspected disk version. */
+    public Transition approve(Confirmation confirmation, boolean replaceExternalChanges) {
         requireOwner();
         Objects.requireNonNull(confirmation, "confirmation");
         if (confirmation.owner != this) throw new IllegalArgumentException("Approval belongs to another coordinator");
@@ -145,7 +150,7 @@ public final class DocumentIoCoordinator {
             return new Ignored(subject.documentId(), confirmation.operation.id);
         }
         try {
-            var prepared = operations.approveSaveAs(confirmation.inspection);
+            var prepared = operations.approveSaveAs(confirmation.inspection, replaceExternalChanges);
             Work work = new Work(this, active, prepared, confirmation.requestedResource());
             Ready ready = new Ready(work);
             active.work = work;

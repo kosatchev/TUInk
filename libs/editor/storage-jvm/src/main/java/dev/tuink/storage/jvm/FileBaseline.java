@@ -70,7 +70,7 @@ public record FileBaseline(Path target, String sha256, long byteSize) implements
             }
             long expectedSize = byteSize < 0 ? attributes.size() : byteSize;
             if (attributes.size() != expectedSize) {
-                throw new IOException("File size changed since it was loaded or saved");
+                throw new dev.tuink.editor.storage.ExternalFileChangedException(conflictMessage(candidate));
             }
             boolean sameTarget = target.equals(physicalTarget);
             if (!sameTarget && target.equals(target.toRealPath())) {
@@ -88,13 +88,13 @@ public record FileBaseline(Path target, String sha256, long byteSize) implements
                     while (remaining > 0) {
                         operation.checkCancelled();
                         int read = input.read(buffer, 0, (int) Math.min(buffer.length, remaining));
-                        if (read < 0) throw new IOException("File shrank during verification");
+                        if (read < 0) throw new dev.tuink.editor.storage.ExternalFileChangedException(conflictMessage(candidate));
                         current.update(buffer, 0, read);
                         remaining -= read;
                         operation.progress(StorageOperation.Phase.VERIFYING, expectedSize - remaining, expectedSize);
                     }
                     operation.checkCancelled();
-                    if (input.read() != -1) throw new IOException("File grew during verification");
+                    if (input.read() != -1) throw new dev.tuink.editor.storage.ExternalFileChangedException(conflictMessage(candidate));
                     operation.checkCancelled();
                 }
                 if (sha256.equals(HexFormat.of().formatHex(current.digest()))) {
@@ -103,15 +103,17 @@ public record FileBaseline(Path target, String sha256, long byteSize) implements
             }
         } catch (InterruptedIOException cancelled) {
             throw cancelled;
+        } catch (dev.tuink.editor.storage.ExternalFileChangedException changed) {
+            throw changed;
         } catch (IOException failure) {
             throw new IOException(conflictMessage(candidate), failure);
         }
-        throw new IOException(conflictMessage(candidate));
+        throw new dev.tuink.editor.storage.ExternalFileChangedException(conflictMessage(candidate));
     }
 
     static String conflictMessage(Path path) {
         return "File changed outside TUInk or is no longer accessible: " + path
-            + ". Use Save As with a different name, or reopen the file.";
+            + ". Update from disk, or save again and confirm replacing external changes.";
     }
 
     static MessageDigest digest() {

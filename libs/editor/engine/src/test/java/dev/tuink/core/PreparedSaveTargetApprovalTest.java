@@ -24,6 +24,72 @@ import org.junit.jupiter.api.io.TempDir;
 class PreparedSaveTargetApprovalTest {
     @TempDir Path directory;
 
+    @Test void replacingExternalBytesRequiresExplicitApprovalAndKeepsTicketVersionChecks() throws Exception {
+        for (boolean race : List.of(false, true)) {
+            Path target = Files.writeString(directory.resolve("external-" + race + ".txt"), "original");
+            EditorEngine engine = engine(); engine.open(JvmDocumentStorage.resource(target)); engine.insertInput("local ");
+            Files.writeString(target, "external");
+            assertThrows(dev.tuink.editor.storage.ExternalFileChangedException.class, () -> engine.prepareSave().write());
+            var inspection = engine.prepareSaveAsInput(JvmDocumentStorage.resource(target), SaveDisposition.REPLACE_EXISTING, false).inspectTarget();
+            var approved = engine.approveSaveAs(inspection, true);
+            if (race) {
+                Files.writeString(target, "newer disk contents");
+                assertThrows(IOException.class, approved::write);
+                assertEquals("newer disk contents", Files.readString(target));
+                assertTrue(engine.state().isDirty());
+            } else {
+                engine.completeSaved(approved, approved.write());
+                assertEquals("local original", Files.readString(target));
+                assertFalse(engine.state().isDirty());
+            }
+        }
+    }
+
+    @Test void ordinarySaveAsApprovalCannotBypassTheLoadedBaseline() throws Exception {
+        Path target = Files.writeString(directory.resolve("external.txt"), "original");
+        EditorEngine engine = engine(); engine.open(JvmDocumentStorage.resource(target)); engine.insertInput("draft ");
+        Files.writeString(target, "external");
+        var inspection = engine.prepareSaveAsInput(JvmDocumentStorage.resource(target), SaveDisposition.REPLACE_EXISTING, false).inspectTarget();
+        assertThrows(dev.tuink.editor.storage.ExternalFileChangedException.class, () -> engine.approveSaveAs(inspection).write());
+        assertEquals("external", Files.readString(target)); assertTrue(engine.state().isDirty());
+    }
+
+    @Test void confirmedOverwriteThroughARetargetedAliasKeepsTheInspectedAddress() throws Exception {
+        for (boolean race : List.of(false, true)) for (String otherText : List.of("first", "other", "other longer")) {
+            Path folder = Files.createDirectory(directory.resolve("alias-" + race + "-" + otherText.replace(' ', '-')));
+            Path first = Files.writeString(folder.resolve("first.txt"), "first");
+            Path second = Files.writeString(folder.resolve("second.txt"), otherText);
+            Path third = Files.writeString(folder.resolve("third.txt"), "third original");
+            Path alias = Files.createSymbolicLink(folder.resolve("alias.txt"), first);
+            EditorEngine engine = engine();
+            engine.open(JvmDocumentStorage.resource(alias));
+            engine.insertInput("draft ");
+            Files.delete(alias);
+            Files.createSymbolicLink(alias, second);
+
+            assertThrows(dev.tuink.editor.storage.ExternalFileChangedException.class, () -> engine.prepareSave().write());
+            var inspection = engine.prepareSaveAsInput(JvmDocumentStorage.resource(alias),
+                SaveDisposition.REPLACE_EXISTING, false).inspectTarget();
+            var approved = engine.approveSaveAs(inspection, true);
+            assertEquals("first", Files.readString(first));
+            assertEquals(otherText, Files.readString(second));
+            assertTrue(engine.state().isDirty());
+            if (race) {
+                Files.delete(alias);
+                Files.createSymbolicLink(alias, third);
+                assertThrows(IOException.class, approved::write);
+                assertEquals(otherText, Files.readString(second));
+                assertTrue(engine.state().isDirty());
+            } else {
+                engine.completeSaved(approved, approved.write());
+                assertEquals("draft first", Files.readString(second));
+                assertFalse(engine.state().isDirty());
+            }
+            assertEquals("first", Files.readString(first));
+            assertEquals("third original", Files.readString(third));
+        }
+    }
+
     @Test
     void ownerCaptureDoesNotResolveTheFilesystemAndInspectionNeverReadsTheLiveModel() throws Exception {
         EditorEngine engine = engine();

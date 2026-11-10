@@ -8,7 +8,8 @@ public sealed interface SaveAuthorization {
     record Current() implements SaveAuthorization {}
 
     /** Writes only the approved observation, retains its owned-target checks, and returns its requested identity. */
-    record Approved(SaveTarget target) implements SaveAuthorization {
+    record Approved(SaveTarget target, boolean replaceExternalChanges) implements SaveAuthorization {
+        public Approved(SaveTarget target) { this(target, false); }
         public Approved { Objects.requireNonNull(target, "target"); }
     }
 }

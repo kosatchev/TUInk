@@ -288,11 +288,16 @@ public final class CoreDocumentBackend implements DocumentBackend {
 
     @Override
     public PreparedSave approveSaveAs(SaveTargetInspection inspection) throws IOException {
+        return approveSaveAs(inspection, false);
+    }
+
+    @Override
+    public PreparedSave approveSaveAs(SaveTargetInspection inspection, boolean replaceExternalChanges) throws IOException {
         requireOwnerThread();
         if (!(inspection instanceof Inspection captured) || captured.owner != this) {
             throw new IllegalArgumentException("Save inspection belongs to another document backend");
         }
-        return new Save(captured.engine, captured.engine.approveSaveAs(captured.inspection));
+        return new Save(captured.engine, captured.engine.approveSaveAs(captured.inspection, replaceExternalChanges));
     }
 
     @Override

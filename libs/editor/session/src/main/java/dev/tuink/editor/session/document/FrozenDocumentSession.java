@@ -231,11 +231,16 @@ public final class FrozenDocumentSession implements DocumentSaveSubject, AutoClo
         }
 
         @Override public FrozenDocumentSession.Write approveSaveAs(DocumentSaveOperations.SaveTargetInspection inspection) {
+            return approveSaveAs(inspection, false);
+        }
+
+        @Override public FrozenDocumentSession.Write approveSaveAs(DocumentSaveOperations.SaveTargetInspection inspection,
+            boolean replaceExternalChanges) {
             if (!(inspection instanceof Inspection observed)) {
                 throw new IllegalArgumentException("Inspection belongs to another save subject");
             }
             requireUnchanged(observed.capture);
-            return new Write(observed.capture, new SaveAuthorization.Approved(observed.target));
+            return new Write(observed.capture, new SaveAuthorization.Approved(observed.target, replaceExternalChanges));
         }
 
         @Override public void completeSaved(DocumentSaveOperations.PreparedSave prepared, SavedDocument receipt) {

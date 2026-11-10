@@ -1436,7 +1436,22 @@ public class TerminalEditorApp {
 
     private record ResolvedCursor(ScreenCursor cursor, boolean contentOwned) {}
 
-
+    /** Terminals commonly derive the block cursor color from the cell's visible foreground. */
+    private ScreenCursor selectionCursor(CellBuffer cells, ResolvedCursor resolved, boolean selected, boolean colorEnabled) {
+        var cursor = resolved.cursor();
+        if (!selected || !resolved.contentOwned() || !cursor.visible()) return cursor;
+        int row = cursor.position().y(), column = cursor.position().x();
+        if (row < 0 || row >= cells.rows() || column < 0 || column >= cells.cols()) return cursor;
+        if (cells.get(row, column).continuation() && column > 0) column--;
+        var cell = cells.get(row, column);
+        var before = cell.style();
+        CellStyle light = !colorEnabled || theme == UiStyles.Theme.MONOCHROME
+            ? new CellStyle(CellColor.BRIGHT_WHITE, CellColor.BLACK, before.bold(), before.underline())
+            : before.inverse() ? new CellStyle(before.fg(), CellColor.BRIGHT_WHITE, before.bold(), before.underline(), true)
+            : new CellStyle(CellColor.BRIGHT_WHITE, before.bg(), before.bold(), before.underline());
+        if (!light.equals(before)) cells.set(row, column, cell.grapheme(), light);
+        return cursor;
+    }
 
     private Frame renderPreviewFrame(PreviewFrameComposition composition, RenderFrameController services) {
         int rows = composition.rows(), cols = composition.cols();
@@ -1478,9 +1493,9 @@ public class TerminalEditorApp {
                 geometry.visualMetricsBuilds() + geometry.semanticMetricsBuilds(),
                 geometry.preparedRowsMisses(), geometry.preparedRowsHits(), geometry.retainedBytes());
         }
-        return services.present(current, frameCursor(rows, cols, layers,
+        return services.present(current, selectionCursor(current, frameCursor(rows, cols, layers,
             composition.search(), composition.preview().focus() == MarkdownPreviewState.Placement.Focus.CONTENT,
-            contentCursor).cursor(), viewport, layers, composition.fullRedraw());
+            contentCursor), composition.preview().selection().selected(), services.colorEnabled), viewport, layers, composition.fullRedraw());
     }
 
     private RenderFrameResult renderFrame(
@@ -1589,8 +1604,8 @@ public class TerminalEditorApp {
 
         EditorView.CursorPosition editorCursor = editorView.cursorFromPlan(plan, contentTopRow);
         ScreenCursor contentCursor = new ScreenCursor(new Point(editorCursor.col() - 1, editorCursor.row() - 1), plan.cursorInViewport());
-        ScreenCursor cursor = frameCursor(rows, cols, layers, searchBarPlacement,
-            search.editorFocused(), contentCursor).cursor();
+        ScreenCursor cursor = selectionCursor(current, frameCursor(rows, cols, layers, searchBarPlacement,
+            search.editorFocused(), contentCursor), state.hasSelection(), colorEnabled);
 
         Rect body = plan.scrollLayout().contentBounds();
         long generation = (plan.wrapLines() ? 1L : 0L) | (plan.wrapByWords() ? 2L : 0L);

@@ -59,6 +59,7 @@ public final class AppSettingsStore {
     private static final String KEY_MARKDOWN_CODE_HIGHLIGHTING = "ui.markdownCodeHighlighting";
     private static final String KEY_MARKDOWN_VISUAL_COPY = "ui.markdownVisualCopy";
     private static final String KEY_AUTO_RELOAD_UNMODIFIED = "ui.autoReloadUnmodifiedFiles";
+    private static final String KEY_DRAG_SELECTED_TEXT = "ui.dragSelectedText";
     private static final String KEY_FILE_HISTORY_NOTIFICATIONS = "ui.fileHistoryNotifications";
     private static final String KEY_GUTTER_DIFF_MODE = "ui.gutterDiffMode";
     private static final String KEY_TAB_WIDTH = "ui.tabWidth";
@@ -197,7 +198,8 @@ public final class AppSettingsStore {
             setting(repair, defaults.showDocumentPath(), () -> parseOptionalBoolean(p, KEY_DOCUMENT_PATH, true, path)),
             setting(repair, defaults.projectSearch(), () -> parseSearch(p, path)),
             setting(repair, defaults.palettes(), () -> parsePalettes(p, path)),
-            setting(repair, defaults.autoReloadUnmodifiedFiles(), () -> parseOptionalBoolean(p, KEY_AUTO_RELOAD_UNMODIFIED, true, path))
+            setting(repair, defaults.autoReloadUnmodifiedFiles(), () -> parseOptionalBoolean(p, KEY_AUTO_RELOAD_UNMODIFIED, true, path)),
+            setting(repair, defaults.dragSelectedText(), () -> parseOptionalBoolean(p, KEY_DRAG_SELECTED_TEXT, false, path))
         );
     }
 
@@ -304,6 +306,7 @@ public final class AppSettingsStore {
         }
         if (settings.markdownVisualCopy()) p.setProperty(KEY_MARKDOWN_VISUAL_COPY, "true");
         p.setProperty(KEY_AUTO_RELOAD_UNMODIFIED, Boolean.toString(settings.autoReloadUnmodifiedFiles()));
+        p.setProperty(KEY_DRAG_SELECTED_TEXT, Boolean.toString(settings.dragSelectedText()));
         p.setProperty(KEY_FILE_HISTORY_NOTIFICATIONS, Boolean.toString(settings.showFileHistoryNotifications()));
         p.setProperty(KEY_GUTTER_DIFF_MODE, canonical(settings.gutterDiffMode()));
         p.setProperty(KEY_TAB_WIDTH, Integer.toString(settings.tabWidth()));
@@ -593,6 +596,7 @@ public final class AppSettingsStore {
         unknown.remove(KEY_MARKDOWN_VISUAL_COPY);
         unknown.remove(KEY_FILE_HISTORY_NOTIFICATIONS);
         unknown.remove(KEY_AUTO_RELOAD_UNMODIFIED);
+        unknown.remove(KEY_DRAG_SELECTED_TEXT);
         unknown.remove(KEY_DOCUMENT_PATH);
         for (String key : SEARCH_KEYS) unknown.remove(SEARCH + key);
         for (String key : PALETTE_KEYS) unknown.remove(PALETTES + key);

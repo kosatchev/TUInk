@@ -268,6 +268,7 @@ class TopMenuViewTest {
                 "tuink.project-search.settings",
                 "tuink.settings.toggle-auto-reload-unmodified",
                 "tuink.settings.toggle-mouse",
+                "tuink.settings.toggle-drag-selected-text",
                 "tuink.settings.toggle-right-click-clipboard",
                 "tuink.settings.toggle-file-history-notifications",
                 "tuink.settings.toggle-smart-home-end",

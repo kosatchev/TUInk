@@ -149,7 +149,11 @@ final class InputActionDispatcher {
                 return DispatchResult.handled(ui.autoReloadUnmodifiedFilesSetting
                     ? "Automatic reload of unmodified files enabled" : "Automatic reload of unmodified files disabled");
             }
-
+            case SETTINGS_TOGGLE_DRAG_SELECTED_TEXT -> {
+                ui.dragSelectedTextSetting = !ui.dragSelectedTextSetting;
+                return DispatchResult.handled(ui.dragSelectedTextSetting
+                    ? "Moving selected text with the mouse enabled" : "Moving selected text with the mouse disabled");
+            }
             case SETTINGS_TOGGLE_MOUSE -> {
                 if (!surface.mouseAvailable()) {
                     return DispatchResult.handled(

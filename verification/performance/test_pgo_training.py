@@ -64,7 +64,8 @@ class PgoTrainingTest(unittest.TestCase):
             self.assertEqual(str(wrap).lower(), values["ui.wrapLines"])
             self.assertEqual("true", values["ui.confirmOnClose"])
             self.assertEqual("true", values["ui.autoReloadUnmodifiedFiles"])
-            for key in ("ui.markdownCodeHighlighting", "ui.rightClickClipboard", "ui.markdownVisualCopy", "ui.showDocumentPath"):
+            for key in ("ui.markdownCodeHighlighting", "ui.rightClickClipboard", "ui.markdownVisualCopy", "ui.showDocumentPath",
+                        "ui.dragSelectedText"):
                 self.assertEqual("false", values[key], f"Baseline PGO training must keep {key} disabled")
 
     def test_input_protocol_preserves_unicode_and_mouse_coordinates(self):

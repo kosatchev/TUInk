@@ -94,3 +94,25 @@ header, another palette or the document leaves an inverse selected row.
 Primary search buttons use `BUTTON_PRIMARY` or `BUTTON_WARNING` for colored
 text on the containing body. Their focused variant inverts that button surface;
 Search, Stop and Refresh do not keep a filled background while unfocused.
+
+## Moving objects with the mouse
+
+`PointerDragPolicy` defines a shared stationary 500 ms hold for object drag and
+drop. The file explorer, palette headers and optional selected-text moves all use
+its immutable `Gesture`. Movement before the deadline permanently cancels that
+press. Returning to the starting cell or waiting longer cannot rearm it; releasing
+and pressing again starts a fresh gesture. Holding alone only prepares the move;
+subsequent motion starts dragging. Each terminal cell of movement counts.
+
+Owners schedule `Gesture.nanosUntilWakeup(now)` / `ToolPalette.State.nanosUntilWakeup(now)`
+and call their tick method to prepare a stationary hold. The same transition also
+works on the first motion event after the deadline, without a preceding timer tick.
+Cancellation clears pending and active drags. Ordinary clicks, text selection,
+disclosure clicks, scrollbars and resize handles keep their immediate interaction.
+
+Selected-text moves require holding inside the existing range before motion.
+A quick drag starts ordinary selection immediately. Source owns a captured
+revision/range, renders a separate insertion cursor and cancels stale captures.
+The editor engine composes original text ranges and separators without publishing
+to the clipboard, committing one undoable command. Dropping inside that range,
+outside content, or after cancellation leaves the document unchanged.

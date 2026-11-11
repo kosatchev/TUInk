@@ -27,6 +27,73 @@ class EditorViewTest {
     private static final int GUTTER_WIDTH = 3;
     private static final int DEFAULT_COLUMNS = 40;
 
+    @Test void holdingInsideSelectionMovesTextAndShowsAnInsertionCursor() {
+        var fixture = fixture("one TWO three");
+        fixture.view().setDragSelectedTextEnabled(true);
+        fixture.engine().restoreSelection(new Position(0, 7), new Position(0, 4));
+        fixture.pointer(PointerEvent.Kind.PRESS, 0, 5);
+        assertEquals(500_000_000L, fixture.view().nanosUntilSelectionScroll(fixture.clock().get()));
+        assertFalse(fixture.tick(499_999_999L)); assertTrue(fixture.tick(1L));
+        fixture.pointer(PointerEvent.Kind.DRAG, 0, 13);
+        assertEquals(new dev.tuiframe.geometry.Point(GUTTER_WIDTH + 13, CONTENT_TOP_ROW),
+            fixture.view().textMoveCursor(fixture.model(), fixture.state(), fixture.textLayout(), fixture.plan()).orElseThrow());
+        assertSelection(fixture, new Position(0, 4), new Position(0, 7), "TWO");
+        fixture.pointer(PointerEvent.Kind.RELEASE, 0, 13);
+        assertEquals("one  threeTWO", fixture.model().getLine(0));
+        assertTrue(fixture.engine().undo()); assertEquals("one TWO three", fixture.model().getLine(0));
+        assertFalse(fixture.engine().undo()); assertFalse(fixture.view().pointerCaptureActive());
+    }
+
+    @Test void quickDragImmediatelyStartsOrdinarySelectionAndDisabledMoveNeverCapturesTheBlock() {
+        for (boolean enabled : List.of(false, true)) {
+            var fixture = fixture("abcdefgh"); fixture.view().setDragSelectedTextEnabled(enabled);
+            fixture.engine().restoreSelection(new Position(0, 6), new Position(0, 1));
+            fixture.pointer(PointerEvent.Kind.PRESS, 0, 3);
+            fixture.clock().addAndGet(100_000_000L);
+            fixture.pointer(PointerEvent.Kind.DRAG, 0, 8);
+            assertSelection(fixture, new Position(0, 3), new Position(0, 8), "defgh");
+            fixture.clock().addAndGet(600_000_000L);
+            fixture.pointer(PointerEvent.Kind.DRAG, 0, 7);
+            assertSelection(fixture, new Position(0, 3), new Position(0, 7), "defg");
+            fixture.pointer(PointerEvent.Kind.RELEASE, 0, 7);
+            assertEquals("abcdefgh", fixture.model().getLine(0)); assertFalse(fixture.engine().undo());
+            assertFalse(fixture.view().movingSelectedText());
+        }
+    }
+
+    @Test void dropInsideSelectionOrOutsideDocumentAndCancelledCaptureAreNoOps() {
+        for (int column : List.of(4, 6, 7, -2)) {
+            var fixture = fixture("one TWO three"); fixture.view().setDragSelectedTextEnabled(true);
+            fixture.engine().restoreSelection(new Position(0, 7), new Position(0, 4));
+            fixture.pointer(PointerEvent.Kind.PRESS, 0, 5); fixture.tick(1_000_000_000L);
+            fixture.pointer(PointerEvent.Kind.DRAG, 0, column);
+            assertTrue(fixture.view().textMoveCursor(fixture.model(), fixture.state(), fixture.textLayout(), fixture.plan()).isEmpty());
+            fixture.pointer(PointerEvent.Kind.RELEASE, 0, column);
+            assertEquals("one TWO three", fixture.model().getLine(0)); assertFalse(fixture.engine().undo());
+        }
+        var fixture = fixture("one TWO three"); fixture.view().setDragSelectedTextEnabled(true);
+        fixture.engine().restoreSelection(new Position(0, 7), new Position(0, 4));
+        fixture.pointer(PointerEvent.Kind.PRESS, 0, 5); fixture.tick(1_000_000_000L);
+        fixture.pointer(PointerEvent.Kind.DRAG, 0, 13); fixture.view().cancelMouseSelection();
+        fixture.pointer(PointerEvent.Kind.RELEASE, 0, 13);
+        assertEquals("one TWO three", fixture.model().getLine(0)); assertFalse(fixture.engine().undo());
+    }
+
+    @Test void staleSelectionCannotBeMovedAndEdgeScrollPreservesTheOriginalRange() {
+        var fixture = fixture(java.util.stream.IntStream.range(0, 30).mapToObj(i -> "line" + i).toArray(String[]::new));
+        fixture.view().setDragSelectedTextEnabled(true);
+        fixture.engine().restoreSelection(new Position(0, 4), new Position(0, 0));
+        fixture.pointer(PointerEvent.Kind.PRESS, 0, 1); fixture.tick(1_000_000_000L);
+        fixture.pointer(PointerEvent.Kind.DRAG, 2, 3);
+        assertTrue(fixture.tick(80_000_000L)); assertEquals(1, fixture.state().getTopLine());
+        assertSelection(fixture, new Position(0, 0), new Position(0, 4), "line");
+        fixture.engine().insertInput("changed");
+        fixture.pointer(PointerEvent.Kind.RELEASE, 1, 3);
+        assertEquals("changed0", fixture.model().getLine(0));
+        assertFalse(fixture.view().movingSelectedText()); assertTrue(fixture.engine().undo());
+        assertEquals("line0", fixture.model().getLine(0)); assertFalse(fixture.engine().undo());
+    }
+
     @Test
     void shiftClickExtendsFromPreviousClickWithoutTriggeringAdjacentDoubleClick() {
         Fixture fixture = fixture("word");
@@ -252,6 +319,11 @@ class EditorViewTest {
         int columns,
         AtomicLong clock
     ) {
+        private void pointer(PointerEvent.Kind kind, int viewportRow, int viewportColumn) {
+            view.handlePointer(new PointerEvent(CONTENT_TOP_ROW + viewportRow, GUTTER_WIDTH + viewportColumn,
+                kind, PointerEvent.Button.LEFT, Set.of()), engine, plan(), CONTENT_TOP_ROW + CONTENT_ROWS + 2,
+                columns, CONTENT_ROWS, CONTENT_TOP_ROW, false);
+        }
         private boolean press(int viewportRow, int viewportColumn, boolean extendSelection) {
             PointerEvent press = new PointerEvent(
                 CONTENT_TOP_ROW + viewportRow,

@@ -110,6 +110,7 @@ public enum TuinkCommand {
 
     SETTINGS_TOGGLE_READING_MODE("tuink.settings.toggle-reading-mode", "Toggle reading mode"),
     SETTINGS_TOGGLE_AUTO_RELOAD_UNMODIFIED("tuink.settings.toggle-auto-reload-unmodified", "Toggle automatic reload of unmodified files"),
+    SETTINGS_TOGGLE_DRAG_SELECTED_TEXT("tuink.settings.toggle-drag-selected-text", "Toggle moving selected text with the mouse"),
     SETTINGS_TOGGLE_MOUSE("tuink.settings.toggle-mouse", "Toggle mouse input"),
     SETTINGS_TOGGLE_RIGHT_CLICK_CLIPBOARD("tuink.settings.toggle-right-click-clipboard", "Toggle right-click copy and paste"),
     SETTINGS_TOGGLE_CONFIRM_ON_CLOSE("tuink.settings.toggle-confirm-on-close", "Toggle close confirmation"),

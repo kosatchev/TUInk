@@ -470,6 +470,7 @@ final class TopMenuView {
             separator(),
             item(TuinkCommand.SETTINGS_TOGGLE_AUTO_RELOAD_UNMODIFIED, checked(ui.autoReloadUnmodifiedFilesSetting) + " Auto reload unmodified files"),
             item(SETTINGS_TOGGLE_MOUSE, checked(ui.mouseModeSetting && surface.mouseAvailable()) + " Mouse mode"),
+            item(TuinkCommand.SETTINGS_TOGGLE_DRAG_SELECTED_TEXT, checked(ui.dragSelectedTextSetting) + " Drag selected text"),
             item(SETTINGS_TOGGLE_RIGHT_CLICK_CLIPBOARD, checked(ui.rightClickClipboardSetting) + " Right-click: copy/paste"),
             item(TuinkCommand.SETTINGS_TOGGLE_FILE_HISTORY_NOTIFICATIONS,
                 checked(ui.showFileHistoryNotificationsSetting) + " File Undo/Redo notifications"),

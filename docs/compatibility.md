@@ -292,6 +292,8 @@ ui.mouseMode=true
 # Optional; omission means true.
 ui.autoReloadUnmodifiedFiles=true
 # Optional; omission means false.
+ui.dragSelectedText=false
+# Optional; omission means false.
 ui.rightClickClipboard=false
 # Optional; omission means true.
 ui.fileHistoryNotifications=true
@@ -354,8 +356,9 @@ preference. Existing format 2 profiles remain readable without conversion.
 
 The optional Boolean `ui.autoReloadUnmodifiedFiles` defaults to `true`; clean
 bound files reload on external changes while preserving bounded cursor/viewport.
-Dirty files retain their drafts and warning. The value round-trips in format 2;
-malformed values follow the incompatible-profile rules.
+Dirty files retain their drafts and warning. `ui.dragSelectedText` defaults to
+`false` and enables stationary 500 ms selection moves within Source. Both values
+round-trip in format 2; malformed values follow the incompatible-profile rules.
 
 Project search adds optional current-format `search.*` preferences. Omitted
 fields use the [documented defaults](project-search.md#defaults-and-limits).

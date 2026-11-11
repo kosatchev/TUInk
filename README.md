@@ -417,6 +417,15 @@ shortcuts, are handled immediately.
 Mouse controls include click-to-position, drag selection, Shift+Click
 selection from the previous cursor position, wheel scrolling, tab and menu
 activation, scrollbar interaction, and file-picker navigation.
+**Settings → Drag selected text** is off by default. When enabled, hold the left
+mouse button inside an existing selection without moving for 500 ms, then drag to an insertion
+cursor and release. Multiline moves preserve line endings and use one Undo step;
+a drop inside the selection changes nothing. If a move leaves an empty line
+between CR and LF endings, the LF becomes CRLF so that reopening preserves the
+empty line. Moving before the hold expires
+starts ordinary selection immediately. Both this preference and automatic
+reload are saved between launches.
+
 Holding a dragged pointer at an editor edge continues scrolling the selection
 until the button is released or the gesture is cancelled.
 

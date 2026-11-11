@@ -17,6 +17,8 @@ import dev.tuiframe.scroll.ScrollLayout;
 import dev.tuink.render.RenderPlan;
 import dev.tuiframe.geometry.Point;
 import dev.tuiframe.input.PointerEvent;
+import dev.tuiframe.input.PointerDragPolicy;
+import java.util.Optional;
 import dev.tuiframe.scroll.Scrollbar;
 import java.util.Objects;
 import java.util.function.LongSupplier;
@@ -38,6 +40,16 @@ public final class EditorView {
     private final TextSurfacePointer<Position> pointer = new TextSurfacePointer<>((first, second) ->
         first.line() == second.line() && Math.abs((long) first.col() - second.col()) <= 1);
     private int tabWidth = 4;
+    private boolean dragSelectedText;
+    private record TextMove(TextModel model, long revision, Position start, Position end, PointerEvent press,
+                            PointerEvent last, PointerDragPolicy.Gesture hold, Position target) {
+        TextMove at(PointerEvent next, PointerDragPolicy.Gesture hold, Position target) {
+            return new TextMove(model, revision, start, end, press, next, hold, target);
+        }
+    }
+    private TextMove textMove;
+    private long moveScrollAt;
+    private static final long MOVE_SCROLL_NANOS = 80_000_000L;
 
     public EditorView() {
         this(System::nanoTime);
@@ -65,7 +77,14 @@ public final class EditorView {
 
     public void cancelMouseSelection() {
         pointer.cancel();
+        textMove = null; moveScrollAt = 0L;
     }
+
+    public void setDragSelectedTextEnabled(boolean enabled) {
+        dragSelectedText = enabled;
+        if (!enabled) { textMove = null; moveScrollAt = 0L; }
+    }
+    public boolean movingSelectedText() { return textMove != null; }
 
     public void setTabWidth(int tabWidth) {
         this.tabWidth = tabWidth <= 2 ? 2 : 4;
@@ -96,12 +115,40 @@ public final class EditorView {
         dragSelection(mouse, state, plan, contentRows, engine, contentTopRow, nanoClock.getAsLong());
     }
 
-    public long nanosUntilSelectionScroll(long nowNanos) { return pointer.nanosUntilRepeat(nowNanos); }
+    public long nanosUntilSelectionScroll(long nowNanos) {
+        if (textMove == null) return pointer.nanosUntilRepeat(nowNanos);
+        if (textMove.hold().waiting()) return textMove.hold().nanosUntilWakeup(nowNanos);
+        return moveScrollAt == 0L ? -1L : Math.max(0L, moveScrollAt - nowNanos);
+    }
 
     public boolean scrollSelectionIfDue(
         TextModel model, EditorState state, RenderPlan plan, int contentRows,
         EditorEngine engine, int contentTopRow, long nowNanos
     ) {
+        if (textMove != null) {
+            if (!validMove(engine)) { textMove = null; moveScrollAt = 0L; return true; }
+            var hold = textMove.hold().tick(nowNanos);
+            if (hold != textMove.hold()) {
+                textMove = textMove.at(textMove.last(), hold, textMove.target());
+                return true;
+            }
+            if (textMove.hold().dragging() && moveScrollAt != 0L && nowNanos - moveScrollAt >= 0L) {
+                var bounds = plan.scrollLayout().contentBounds();
+                int rows = textMove.last().row() == bounds.y() ? -1
+                    : textMove.last().row() == bounds.bottomExclusive() - 1 ? 1 : 0;
+                int columns = plan.wrapLines() ? 0 : textMove.last().column() == bounds.x() ? -3
+                    : textMove.last().column() == bounds.rightExclusive() - 1 ? 3 : 0;
+                var geometry = coordinates(engine.textLayout(), plan, bounds.width());
+                var before = geometry.viewport(state, bounds.height(), bounds.width());
+                geometry.scrollBy(state, bounds.height(), bounds.width(), rows, columns, plan.totalColumns());
+                Position target = hitMove(textMove.last(), engine, plan, contentRows);
+                textMove = textMove.at(textMove.last(), textMove.hold(), target);
+                boolean changed = !before.equals(geometry.viewport(state, bounds.height(), bounds.width()));
+                moveScrollAt = changed ? nowNanos + MOVE_SCROLL_NANOS : 0L;
+                return changed;
+            }
+            return false;
+        }
         PointerEvent repeat = pointer.repeatIfDue(nowNanos);
         return repeat != null && dragSelection(repeat, state, plan, contentRows, engine, contentTopRow, nowNanos);
     }
@@ -150,9 +197,56 @@ public final class EditorView {
             bars.layout(), bars.vertical(), bars.horizontal(), geometry,
             geometry.viewport(state, bars.layout().contentBounds().height(), bars.layout().contentBounds().width()),
             plan.totalLines(), plan.totalColumns(), TextSurfacePointer.Policy.source(plan.wrapLines()));
+        long now = nanoClock.getAsLong();
+        if (textMove != null) {
+            if (!validMove(engine)) { textMove = null; moveScrollAt = 0L; return moveResult(false); }
+            var captured = textMove;
+            Position target = hitMove(mouse, engine, plan, contentRows);
+            var hold = captured.hold().move(mouse.row(), mouse.column(), now);
+            boolean ready = hold.armed();
+            if (mouse.kind() == PointerEvent.Kind.RELEASE) {
+                textMove = null; moveScrollAt = 0L;
+                boolean moved = mouse.row() != captured.press().row() || mouse.column() != captured.press().column();
+                if (ready && moved && target != null) {
+                    var result = commands.apply(new DocumentCommand.MoveSelection(captured.revision(),
+                        textPosition(captured.start()), textPosition(captured.end()), textPosition(target)));
+                    return moveResult(result.performed());
+                }
+                if (!ready && target != null) {
+                    var start = hitMove(captured.press(), engine, plan, contentRows);
+                    select(DocumentCommand.SelectionAction.BEGIN, start);
+                    if (moved) select(DocumentCommand.SelectionAction.EXTEND, target);
+                    select(DocumentCommand.SelectionAction.FINISH, null);
+                    return moveResult(true);
+                }
+                return moveResult(false);
+            }
+            if ((mouse.kind() == PointerEvent.Kind.DRAG || mouse.kind() == PointerEvent.Kind.MOVE) && mouse.button() == PointerEvent.Button.LEFT) {
+                if (hold.cancelled()) {
+                    // A quick drag starts an ordinary selection immediately; moving a block requires holding first.
+                    textMove = null; moveScrollAt = 0L;
+                    applyPointer(pointer.handle(placement, captured.press(), false, captured.hold().pressedAt()), state, engine, plan, contentRows);
+                } else {
+                    textMove = captured.at(mouse, hold, target);
+                    updateMoveScroll(plan, now);
+                    return moveResult(false);
+                }
+            } else return moveResult(false);
+        }
+        if (dragSelectedText && !extendSelection && state.hasSelection() && mouse.kind() == PointerEvent.Kind.PRESS
+            && mouse.button() == PointerEvent.Button.LEFT && mouse.modifiers().isEmpty()) {
+            Position target = hitMove(mouse, engine, plan, contentRows);
+            Position first = state.getSelectionAnchor(), last = state.getCursor();
+            if (compare(first, last) > 0) { var swap = first; first = last; last = swap; }
+            if (target != null && compare(target, first) >= 0 && compare(target, last) < 0) {
+                pointer.cancel(); moveScrollAt = 0L;
+                textMove = new TextMove(engine.model(), engine.model().revision(), first, last, mouse, mouse,
+                    PointerDragPolicy.Gesture.begin(mouse.row(), mouse.column(), now), target);
+                return new PointerResult(true, false, true, false, new ScrollPointerResult(false, ScrollAxis.NONE, 0));
+            }
+        }
         Position cursorBefore = state.getCursor();
         int topBefore = state.getTopLine(), segmentBefore = state.getTopWrapSegment(), leftBefore = state.getLeftVisualColumn();
-        long now = nanoClock.getAsLong();
         var gesture = pointer.handle(placement, mouse, extendSelection, now);
         boolean word = applyPointer(gesture, state, engine, plan, contentRows);
         boolean textInteraction = gesture.action() == TextSurfacePointer.Action.BEGIN
@@ -172,7 +266,46 @@ public final class EditorView {
             textInteraction && mouse.kind() == PointerEvent.Kind.PRESS, word, scrollResult);
     }
 
-    public boolean pointerCaptureActive() { return pointer.capturing(); }
+    public boolean pointerCaptureActive() { return textMove != null || pointer.capturing(); }
+
+    private boolean validMove(EditorEngine engine) {
+        return validMove(engine.model(), engine.state());
+    }
+    private boolean validMove(TextModel model, EditorState state) {
+        if (textMove.model() != model || textMove.revision() != model.revision() || !state.hasSelection()) return false;
+        Position first = state.getSelectionAnchor(), last = state.getCursor();
+        if (compare(first, last) > 0) { var swap = first; first = last; last = swap; }
+        return textMove.start().equals(first) && textMove.end().equals(last);
+    }
+    private Position hitMove(PointerEvent mouse, EditorEngine engine, RenderPlan plan, int contentRows) {
+        var bounds = plan.scrollLayout().contentBounds();
+        if (!bounds.contains(mouse.column(), mouse.row())) return null;
+        return coordinates(engine.textLayout(), plan, bounds.width()).positionInViewport(engine.state(), contentRows,
+            mouse.row() - bounds.y(), mouse.column() - bounds.x());
+    }
+    private void updateMoveScroll(RenderPlan plan, long now) {
+        var bounds = plan.scrollLayout().contentBounds();
+        boolean edge = textMove.hold().dragging() && textMove.target() != null
+            && (textMove.last().row() == bounds.y() || textMove.last().row() == bounds.bottomExclusive() - 1
+                || !plan.wrapLines() && (textMove.last().column() == bounds.x() || textMove.last().column() == bounds.rightExclusive() - 1));
+        moveScrollAt = edge ? moveScrollAt == 0L ? now + MOVE_SCROLL_NANOS : moveScrollAt : 0L;
+    }
+    public Optional<Point> textMoveCursor(TextModel model, EditorState state, EditorTextLayout layout, RenderPlan plan) {
+        if (textMove == null || !validMove(model, state) || !textMove.hold().dragging() || textMove.target() == null
+            || compare(textMove.target(), textMove.start()) >= 0 && compare(textMove.target(), textMove.end()) <= 0) return Optional.empty();
+        var bounds = plan.scrollLayout().contentBounds();
+        var visual = coordinates(layout, plan, bounds.width()).inViewport(textMove.target(), state);
+        var point = new Point(bounds.x() + visual.column(), bounds.y() + visual.row());
+        return bounds.contains(point) ? Optional.of(point) : Optional.empty();
+    }
+    private static PointerResult moveResult(boolean changed) {
+        return new PointerResult(true, changed, false, false, new ScrollPointerResult(false, ScrollAxis.NONE, 0));
+    }
+    private static TextPosition textPosition(Position position) { return new TextPosition(position.line(), position.col()); }
+    private static int compare(Position first, Position last) {
+        int line = Integer.compare(first.line(), last.line());
+        return line == 0 ? Integer.compare(first.col(), last.col()) : line;
+    }
 
     public record PointerResult(boolean consumed, boolean textInteraction, boolean focusDocument,
                                 boolean selectedWord, ScrollPointerResult scroll) {}

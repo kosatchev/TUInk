@@ -1006,7 +1006,8 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
             if (editorView.scrollSelectionIfDue(
                 model, state, plan, contentRows, engine, contentTopRow, System.nanoTime()
             )) {
-                viewportController.onEditorTextInteraction();
+                if (editorView.movingSelectedText()) viewportController.onManualVerticalPan();
+                else viewportController.onEditorTextInteraction();
                 eventLoop.invalidate();
             }
         });
@@ -1324,6 +1325,7 @@ final class EditorWindowController implements TuiApplicationRunner.Frontend<TuiI
         );
         renderPlanBuilder.setGutterDiffResolver(engine.gutterDiffMarkers());
         editorView.setTabWidth(uiSessionState.tabWidthSetting);
+        editorView.setDragSelectedTextEnabled(uiSessionState.dragSelectedTextSetting && activeSurface().documentEditable());
         engine.setTabInsertMode(uiSessionState.tabInsertModeSetting);
         engine.setAutoIndentEnabled(uiSessionState.autoIndentSetting);
         engine.setAutoPairsEnabled(uiSessionState.autoPairsSetting);

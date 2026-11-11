@@ -1601,6 +1601,8 @@ public class TerminalEditorApp {
 
         EditorView.CursorPosition editorCursor = editorView.cursorFromPlan(plan, contentTopRow);
         ScreenCursor contentCursor = new ScreenCursor(new Point(editorCursor.col() - 1, editorCursor.row() - 1), plan.cursorInViewport());
+        var dropCursor = editorView.textMoveCursor(model, state, renderPlanBuilder.textLayout(), plan);
+        if (dropCursor.isPresent()) contentCursor = new ScreenCursor(dropCursor.get(), true);
         ScreenCursor cursor = selectionCursor(current, frameCursor(rows, cols, layers, searchBarPlacement,
             search.editorFocused(), contentCursor), state.hasSelection(), colorEnabled);
 

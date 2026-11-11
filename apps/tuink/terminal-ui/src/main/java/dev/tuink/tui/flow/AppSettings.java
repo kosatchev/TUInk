@@ -34,7 +34,8 @@ public record AppSettings(
     boolean showDocumentPath,
     SearchPreferences projectSearch,
     PalettePreferences palettes,
-    boolean autoReloadUnmodifiedFiles
+    boolean autoReloadUnmodifiedFiles,
+    boolean dragSelectedText
 ) {
     public AppSettings {
         java.util.Objects.requireNonNull(projectSearch, "projectSearch");
@@ -53,7 +54,7 @@ public record AppSettings(
             smartHomeEnd, autoIndent, autoPairs, autoList, visibleWhitespace, syntaxHighlighting, rainbowBrackets,
             autoSelectionHighlight, markdownOpenBothTabs, markdownOpenInPreview, markdownCodeHighlighting,
             gutterDiffMode, tabWidth, tabInsertMode, theme, rightClickClipboard, markdownVisualCopy,
-            showFileHistoryNotifications, showDocumentPath, SearchPreferences.defaults(), PalettePreferences.defaults(), true);
+            showFileHistoryNotifications, showDocumentPath, SearchPreferences.defaults(), PalettePreferences.defaults(), true, false);
     }
     public AppSettings(boolean showTabBar, boolean wrapLines, boolean wrapWords, boolean readingMode,
         boolean confirmOnClose, boolean mouseMode, boolean highlightActiveGutter, boolean smartHomeEnd,

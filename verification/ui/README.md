@@ -19,6 +19,7 @@ The scenarios protect the following user behavior:
 | `search-interface` | The compact picker and wide direct mode buttons preserve semantics; regex errors, empty matches and no results are visible; full result locations and explained file filters work after resizing |
 | `tool-palettes` | Files and Search stay open together; collapse preserves results; captured header/divider drags reorder and resize; the keyboard menu maximizes/restores; a fresh process restores saved layout |
 | `external-file-changes` | Clean automatic reload, dirty-file instructions, confirmed overwrite/cancel, F1 → U and manual preference across launches |
+| `selected-text-move` | Opt-in stationary 500 ms multiline move, visible drop cursor, one Undo, immediate ordinary selection and persisted setting |
 | `reading` | Rejected edits preserve manual horizontal/vertical viewing position; actual cursor navigation resumes following |
 | `focus` | Opening Find ends document selection capture; a later drag cannot steal focus |
 | `field` | Copy and a menu roundtrip preserve the long field's viewport in color and monochrome |

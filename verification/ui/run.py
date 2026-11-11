@@ -230,6 +230,37 @@ class Regressions:
                            "manual update in a new process")
             session.finish()
 
+    def selected_text_move(self):
+        original = "before ONE\nTWO after\ntail"
+        document = self.fixture("selected-text-move", original)
+        with self.session("selected-text-move", document, timeout=60) as session:
+            session.send(b"\x1b[15~")
+            session.expect(lambda: "Drag selected text" in session.screen.text, "selected-text drag setting")
+            row, line = next((row, line) for row, line in enumerate(session.screen.lines) if "Drag selected text" in line)
+            column = line.index("Drag selected text")
+            session.mouse(0, row, column); session.mouse(0, row, column, release=True)
+
+            def location(text):
+                return next((row, line.index(text)) for row, line in enumerate(session.screen.lines) if text in line)
+
+            first, left = location("before ONE"); second, middle = location("TWO after"); last, tail = location("tail")
+            session.mouse(0, first, left + 7); session.mouse(32, second, middle + 3)
+            session.mouse(0, second, middle + 3, release=True)
+            session.mouse(0, first, left + 8); session.send(b"", 0.55)
+            session.mouse(32, last, tail + 4)
+            session.expect(lambda: session.screen.row == last and session.screen.col == tail + 4,
+                           "visible independent insertion cursor")
+            session.snapshot("insertion-cursor")
+            session.mouse(0, last, tail + 4, release=True)
+            session.save(document, "before  after\ntailONE\nTWO", "one multiline mouse move")
+            session.send(b"\x1a"); session.save(document, original, "one Undo restores the whole move")
+            first, left = location("before ONE"); last, tail = location("tail")
+            session.mouse(0, first, left + 8); session.mouse(32, last, tail + 4)
+            session.mouse(0, last, tail + 4, release=True)
+            session.save(document, original, "a quick drag selects immediately without editing")
+            session.finish()
+            assert "ui.dragSelectedText=true" in (session.home / ".config/tuink/tuink.properties").read_text(encoding="ascii")
+
     def project_search(self):
         directory = self.root / "search-project"
         directory.mkdir()
@@ -2379,7 +2410,7 @@ class Regressions:
         assert document.read_text(encoding="utf-8") == original
 
 
-SCENARIOS = ("reading", "focus", "external-file-changes", "field", "resize", "large-wrap", "tabs", "folder-explorer", "project-search", "regex-search", "tool-palettes", "search-interface", "picker-navigation", "path-dialogs", "tab-scoped-ui", "history", "grapheme-edit-caret", "selection-autoscroll", "long-copy-name", "navigation", "fragmented-keys", "quit-confirmation", "gutter-idle", "paste", "settings", "settings-conflict", "recovery", "recovery-format5", "recovery-memory", "linux-keys", "enhanced-text", "long-unicode-edit", "save-as-workspace", "settings-memory", "syntax-memory", "unix-path-recovery", "literal-indentation", "field-memory", "document-caption", "save-name-suggestion", "replacement-memory", "paste-memory", "recovery-lock-cleanup", "xdg-profile", "cli-path-identity", "save-as-retarget", "legacy-encoding", "document-format", "format-errors", "format-reopen", "field-edit-caret", "field-memory-growth", "identical-replace-budget", "clipboard-memory", "cpp-raw-indentation", "terminal-diagnostics", "terminal-attributes", "startup-dependencies")
+SCENARIOS = ("reading", "focus", "external-file-changes", "selected-text-move", "field", "resize", "large-wrap", "tabs", "folder-explorer", "project-search", "regex-search", "tool-palettes", "search-interface", "picker-navigation", "path-dialogs", "tab-scoped-ui", "history", "grapheme-edit-caret", "selection-autoscroll", "long-copy-name", "navigation", "fragmented-keys", "quit-confirmation", "gutter-idle", "paste", "settings", "settings-conflict", "recovery", "recovery-format5", "recovery-memory", "linux-keys", "enhanced-text", "long-unicode-edit", "save-as-workspace", "settings-memory", "syntax-memory", "unix-path-recovery", "literal-indentation", "field-memory", "document-caption", "save-name-suggestion", "replacement-memory", "paste-memory", "recovery-lock-cleanup", "xdg-profile", "cli-path-identity", "save-as-retarget", "legacy-encoding", "document-format", "format-errors", "format-reopen", "field-edit-caret", "field-memory-growth", "identical-replace-budget", "clipboard-memory", "cpp-raw-indentation", "terminal-diagnostics", "terminal-attributes", "startup-dependencies")
 
 
 def classpath_manifest(classpath):

@@ -12,11 +12,11 @@ without learning an editor command language.
 
 ### Tabs and Markdown preview
 
-![README, Markdown Source, and Preview tabs with diagrams and formulas](docs/assets/tuink-tabs.gif)
+![README, Markdown Source and Preview](docs/assets/tuink-tabs.gif)
 
-### Folder explorer and menus
+### Project explorer and search
 
-![TUInk with the project folder open, followed by each editor menu](docs/assets/tuink-menus.gif)
+![Project explorer and project search](docs/assets/tuink-menus.gif)
 
 ## Why TUInk?
 
@@ -1044,6 +1044,8 @@ diagnostic material. These local directories are outside the source layout.
 - [Перенос на другой компьютер, сборка и запуск (русский)](docs/setup-ru.md)
 - [Build, test, and native targets](docs/building.md)
 - [Release archives and Debian packaging](docs/packaging.md)
+- [README GIF recording instructions](docs/gif-recording.md)
+- [TUInk 0.20.0 release notes](docs/releases/0.20.0.md)
 - [TUInk 0.19.0 release notes](docs/releases/0.19.0.md)
 - [TUInk 0.18.0 release notes](docs/releases/0.18.0.md)
 - [Markdown preview (русский)](docs/markdown-preview.md)

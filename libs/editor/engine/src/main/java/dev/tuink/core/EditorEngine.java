@@ -237,6 +237,9 @@ public class EditorEngine {
             navigateTo(position(move.position()), move.selecting());
             return null;
         }
+        if (command instanceof DocumentCommand.MoveSelection move) {
+            return moveSelectionTo(position(move.destination()), move.revision(), position(move.start()), position(move.end()));
+        }
         if (command instanceof DocumentCommand.Edit edit) {
             return switch (edit.action()) {
                 case INSERT_TAB -> { insertTab(); yield null; }
@@ -503,6 +506,54 @@ public class EditorEngine {
      */
     public boolean applyTextReplacements(List<TextReplacement> replacements) {
         return applyTextReplacements(replacements, Boolean::valueOf);
+    }
+
+    /** Reorders original ranges without clipboard writes or newline conversion. */
+    public boolean moveSelectionTo(Position destination, long revision, Position start, Position end) {
+        var selected = currentSelection();
+        if (revision != model.revision() || selected == null || !selected.start().equals(start) || !selected.end().equals(end)) return false;
+        Position target = clampCursorBoundary(destination);
+        if (compare(target, start) >= 0 && compare(target, end) <= 0) return false;
+        var metadata = model.fileMetadata();
+        var admission = ReplacementBuilder.counting(model.lineCount());
+        composeMove(admission, start, end, target, metadata);
+        var builder = admission.materializer();
+        var moved = composeMove(builder, start, end, target, metadata);
+        return commitSnapshotEdit(() -> {
+            model.replaceLines(builder.lines, metadata.withLineSeparators(builder.separators));
+            state.setSelectionAnchor(moved.start());
+            state.setCursor(moved.end());
+        }, Boolean::valueOf);
+    }
+
+    private SelectionRange composeMove(ReplacementBuilder builder, Position start, Position end, Position target,
+                                       DocumentFileMetadata metadata) {
+        var origin = new Position(0, 0);
+        int last = model.lineCount() - 1;
+        var eof = new Position(last, model.lineLength(last));
+        Position movedStart, movedEnd;
+        if (compare(target, start) < 0) {
+            appendOriginalRange(builder, origin, target, metadata);
+            movedStart = builder.position();
+            appendOriginalRange(builder, start, end, metadata);
+            movedEnd = builder.position();
+            appendOriginalRange(builder, target, start, metadata);
+            appendOriginalRange(builder, end, eof, metadata);
+        } else {
+            appendOriginalRange(builder, origin, start, metadata);
+            appendOriginalRange(builder, end, target, metadata);
+            movedStart = builder.position();
+            appendOriginalRange(builder, start, end, metadata);
+            movedEnd = builder.position();
+            appendOriginalRange(builder, target, eof, metadata);
+        }
+        builder.finishLine();
+        return new SelectionRange(movedStart, movedEnd);
+    }
+
+    private static int compare(Position a, Position b) {
+        int line = Integer.compare(a.line(), b.line());
+        return line == 0 ? Integer.compare(a.col(), b.col()) : line;
     }
 
     /**

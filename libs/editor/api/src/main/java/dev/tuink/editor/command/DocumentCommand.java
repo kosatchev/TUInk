@@ -32,6 +32,13 @@ public sealed interface DocumentCommand {
     record MoveTo(TextPosition position, boolean selecting) implements DocumentCommand {
         public MoveTo { Objects.requireNonNull(position, "position"); }
     }
+    /** Moves the captured selection within its unchanged document as one undoable edit. */
+    record MoveSelection(long revision, TextPosition start, TextPosition end, TextPosition destination) implements DocumentCommand {
+        public MoveSelection {
+            if (revision < 0) throw new IllegalArgumentException("negative document revision");
+            Objects.requireNonNull(start); Objects.requireNonNull(end); Objects.requireNonNull(destination);
+        }
+    }
     record Select(SelectionAction action, TextPosition cursor, TextPosition anchor) implements DocumentCommand {
         public Select {
             Objects.requireNonNull(action, "action");
